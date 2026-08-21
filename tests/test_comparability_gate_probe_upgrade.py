@@ -449,3 +449,159 @@ def test_gate_bare_lang_c_vs_gnu11_waived_when_compiler_sha256_absent_on_one_sid
         ast_toolchain={"compiler_sha256": "a" * 64},
     )
     check_contracts_comparable(old, new)  # must not raise
+
+
+def test_gate_waives_content_driven_language_mode_divergence_when_toolchain_matches():
+    """Real CI failure (Codex review, fresh evidence):
+    examples/case66_language_linkage_changed and
+    examples/case69_trivial_to_nontrivial each remove/add a C++-only
+    construct (an ``extern "C"`` wrapper, a user-defined destructor) between
+    old and new headers with no explicit ``--lang`` given on either side --
+    ``_resolve_force_cpp`` auto-detects old as C++ and new as C (or vice
+    versa) purely from that content. Under an identical, corroborated
+    compiler this must not raise: it is real signal about the library's own
+    headers, not evidence the two snapshots were extracted under a
+    different environment.
+
+    ``comparability._language_standard_content_divergence_corroborated`` is
+    the carve-out closing this gap -- deliberately unconditional (unlike
+    the sibling upgrade-only carve-out above) once corroborated by
+    toolchain identity, since here there is no "upgrade artifact vs. real
+    change" ambiguity to resolve: blocking the comparison is the wrong
+    outcome either way. ``resolved_lang_mode`` differs (``"c++"`` vs.
+    ``"c"``) -- a genuine mode switch, not merely a differing edition
+    within the same mode (see the sibling test below for that narrower
+    case, which must still raise)."""
+    old = _snap(
+        compute_extraction_contract(
+            l2_frontend_ran=True,
+            compiler_family="clang",
+            compiler_version="18.1.3",
+            language_standard="probed:__cplusplus=201703L",
+        ),
+        ast_toolchain={"resolved_lang_mode": "c++"},
+    )
+    new = _snap(
+        compute_extraction_contract(
+            l2_frontend_ran=True,
+            compiler_family="clang",
+            compiler_version="18.1.3",
+            language_standard="gnu11",
+        ),
+        ast_toolchain={"resolved_lang_mode": "c"},
+    )
+    check_contracts_comparable(old, new)  # must not raise
+
+
+def test_gate_content_driven_language_mode_divergence_still_raises_when_compiler_family_differs():
+    """The new carve-out must not blindly waive every non-empty
+    language_standard pair -- only when the resolved compiler itself is
+    independently confirmed unchanged."""
+    old = _snap(
+        compute_extraction_contract(
+            l2_frontend_ran=True,
+            compiler_family="clang",
+            compiler_version="18.1.3",
+            language_standard="probed:__cplusplus=201703L",
+        ),
+        ast_toolchain={"resolved_lang_mode": "c++"},
+    )
+    new = _snap(
+        compute_extraction_contract(
+            l2_frontend_ran=True,
+            compiler_family="gnu",
+            compiler_version="11.4.0",
+            language_standard="gnu11",
+        ),
+        ast_toolchain={"resolved_lang_mode": "c"},
+    )
+    with pytest.raises(ProfileMismatchError):
+        check_contracts_comparable(old, new)
+
+
+def test_gate_content_driven_language_mode_divergence_not_waived_when_lang_pinned():
+    """An explicit, user-pinned ``--lang`` that still disagrees between old
+    and new is a genuine extraction-configuration difference -- the new
+    carve-out only applies when neither side's language_standard reflects
+    an explicit ``--lang``."""
+    old = _snap(
+        compute_extraction_contract(
+            l2_frontend_ran=True,
+            compiler_family="clang",
+            compiler_version="18.1.3",
+            language_standard="c++:probed:__cplusplus=201703L",
+        ),
+        ast_toolchain={"resolved_lang_mode": "c++"},
+    )
+    new = _snap(
+        compute_extraction_contract(
+            l2_frontend_ran=True,
+            compiler_family="clang",
+            compiler_version="18.1.3",
+            language_standard="c:gnu11",
+        ),
+        ast_toolchain={"resolved_lang_mode": "c"},
+    )
+    with pytest.raises(ProfileMismatchError):
+        check_contracts_comparable(old, new)
+
+
+def test_gate_content_driven_language_mode_divergence_still_raises_when_compiler_sha256_differs():
+    """A different compiler_sha256 (a wrapper swapped at the same path)
+    overrides an otherwise-matching family/version, mirroring the sibling
+    upgrade carve-out's own sha256 check."""
+    old = _snap(
+        compute_extraction_contract(
+            l2_frontend_ran=True,
+            compiler_family="clang",
+            compiler_version="18.1.3",
+            language_standard="probed:__cplusplus=201703L",
+        ),
+        ast_toolchain={"compiler_sha256": "a" * 64, "resolved_lang_mode": "c++"},
+    )
+    new = _snap(
+        compute_extraction_contract(
+            l2_frontend_ran=True,
+            compiler_family="clang",
+            compiler_version="18.1.3",
+            language_standard="gnu11",
+        ),
+        ast_toolchain={"compiler_sha256": "b" * 64, "resolved_lang_mode": "c"},
+    )
+    with pytest.raises(ProfileMismatchError):
+        check_contracts_comparable(old, new)
+
+
+def test_gate_same_mode_differing_edition_still_raises_even_with_compiler_unchanged():
+    """Regression pin for a real CI failure caught while adding the carve-out
+    above: two header sets that both parse as C++ but resolve to a
+    *different edition* purely because one side's content trips the
+    ``force_cpp20`` requires-clause heuristic (mirrors
+    ``test_dumper_contract_wiring.py::
+    test_cpp20_heuristic_forced_standard_flows_into_profile_fingerprint``)
+    must still raise -- this is the divergence
+    ``_probe_default_language_standard``/``force_cpp20`` exist to catch,
+    and it is materially different from a genuine ``c``<->``c++`` mode
+    switch: the *same* declarations would be parsed under two different
+    C++ dialects, which can itself produce different recorded facts for
+    code that didn't change at all."""
+    old = _snap(
+        compute_extraction_contract(
+            l2_frontend_ran=True,
+            compiler_family="gnu",
+            compiler_version="11.4.0",
+            language_standard="probed:__cplusplus=201703L",
+        ),
+        ast_toolchain={"resolved_lang_mode": "c++"},
+    )
+    new = _snap(
+        compute_extraction_contract(
+            l2_frontend_ran=True,
+            compiler_family="gnu",
+            compiler_version="11.4.0",
+            language_standard="gnu++20",
+        ),
+        ast_toolchain={"resolved_lang_mode": "c++"},
+    )
+    with pytest.raises(ProfileMismatchError):
+        check_contracts_comparable(old, new)

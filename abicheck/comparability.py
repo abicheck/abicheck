@@ -902,6 +902,125 @@ def _language_standard_probe_upgrade_corroborated(
     return True
 
 
+def _language_standard_is_lang_pinned(std: str) -> bool:
+    """Whether *std* (a ``language_standard`` profile-field value) reflects
+    an explicit ``--lang`` given by the caller, as opposed to pure
+    content-based auto-detection (:func:`dumper_toolchain._resolve_force_cpp`).
+
+    ``language_standard_field`` only ever prefixes the resolved standard
+    with a lang tag (``"c:"``/``"c++:"``/``"cpp:"``) -- or returns the bare
+    tag alone, pre-probe -- when ``lang`` was actually passed; a pure
+    auto-detected value (whether the bare :data:`_FORCED_C_STANDARD`
+    literal, a ``"probed:..."`` value, or the ``force_cpp20`` literal
+    ``"gnu++20"``) never carries one. See that function's own docstring.
+    """
+    return std in _UNRESOLVED_STANDARD_SPELLINGS or std.startswith(
+        tuple(f"{tag}:" for tag in _UNRESOLVED_STANDARD_SPELLINGS)
+    )
+
+
+def _language_standard_content_divergence_corroborated(
+    old: AbiSnapshot,
+    new: AbiSnapshot,
+    old_fields: dict[str, str],
+    new_fields: dict[str, str],
+) -> bool:
+    """Whether a differing, purely content-driven ``language_standard`` is
+    safe to waive -- distinct from
+    :func:`_language_standard_probe_upgrade_corroborated`'s narrower
+    "an abicheck upgrade added the probe" case (Codex review, fresh
+    evidence, real CI failure: examples/case66_language_linkage_changed and
+    examples/case69_trivial_to_nontrivial).
+
+    When neither side was given an explicit ``--lang``,
+    :func:`dumper_toolchain._resolve_force_cpp` decides the parse language
+    purely from each side's own header *content* -- and a public header
+    losing its ``extern "C"`` wrapper (case66) or gaining a C++-only
+    trivially-copyable-affecting construct (case69) is exactly the kind of
+    real, ABI-relevant edit these two example cases exist to prove abicheck
+    still catches. Under the identical toolchain, a resulting
+    ``language_standard`` divergence (e.g. a probed ``__cplusplus`` value
+    on one side against the forced ``gnu11`` literal on the other) is
+    therefore not evidence the two snapshots were extracted under a
+    different *environment* -- the one thing this comparability gate exists
+    to guard against (ADR-050 D1/D2) -- it is evidence the *library's own
+    headers* changed, which is real signal for the dedicated detectors that
+    already operate independently of header language mode (e.g.
+    ``diff_symbols.py``'s mangled/unmangled reconciliation, the source of
+    case66's own ``func_language_linkage_changed`` finding) to report, not
+    a reason to refuse the comparison outright.
+
+    **Scoped to a genuine mode switch (``c`` <-> ``c++``), not merely a
+    differing edition within the same mode** (Codex review, fresh evidence,
+    real CI failure:
+    ``test_dumper_contract_wiring.py::
+    test_cpp20_heuristic_forced_standard_flows_into_profile_fingerprint``,
+    a pre-existing regression test for exactly the *narrower* case this
+    carve-out must NOT also waive). Two header sets that both parse as C++
+    but resolve to a different *edition* purely because one side's content
+    happens to trip the ``force_cpp20`` requires-clause heuristic is a
+    materially different risk from case66/case69: the same shared
+    declarations are then parsed under genuinely different C++ dialects,
+    which can itself produce different recorded facts for code that didn't
+    change at all -- exactly the divergence
+    ``_probe_default_language_standard``/``force_cpp20`` were added to
+    catch, and still must. Checked via each side's own
+    ``AbiSnapshot.ast_toolchain["resolved_lang_mode"]`` (``"c"``/``"c++"``,
+    set by :func:`dumper_toolchain._stamp_ast_parser`) rather than via the
+    ``language_standard`` string shape alone, since only that field records
+    the actual real/virtual language *mode* the parse settled on,
+    independent of which edition within that mode it resolved to.
+
+    This is deliberately unconditional (given a genuine mode switch)
+    once corroborated by toolchain identity -- unlike the sibling upgrade
+    carve-out, which narrowly requires the *same lang tag* on both sides
+    plus a newly-resolved remainder to avoid conflating an upgrade artifact
+    with a real language-mode change. Here that ambiguity does not need
+    resolving: a real content-driven language-*mode* change under an
+    identical, corroborated toolchain must not make the whole comparison
+    ``NOT_COMPARABLE`` either way -- whether it turns out to be an upgrade
+    artifact or a genuine edit, blocking the comparison is the wrong
+    outcome for both.
+
+    Waived only when neither side's ``language_standard`` reflects an
+    explicit ``--lang`` (:func:`_language_standard_is_lang_pinned`) --  an
+    explicit, user-pinned language mode that still disagrees between old
+    and new *is* a genuine extraction-configuration difference this gate
+    should keep catching -- and only when independently corroborated by an
+    exact, non-empty ``compiler_family``/``compiler_version`` match (plus
+    ``compiler_sha256`` when both sides carry one), mirroring the sibling
+    carve-out's own toolchain-identity check.
+    """
+    old_std = old_fields.get("language_standard", "")
+    new_std = new_fields.get("language_standard", "")
+    if not old_std or not new_std or old_std == new_std:
+        return False
+    if _language_standard_is_lang_pinned(old_std) or _language_standard_is_lang_pinned(
+        new_std
+    ):
+        return False
+    old_mode = old.ast_toolchain.get("resolved_lang_mode", "")
+    new_mode = new.ast_toolchain.get("resolved_lang_mode", "")
+    if (
+        not old_mode
+        or not new_mode
+        or old_mode == new_mode
+        or old_mode not in ("c", "c++")
+        or new_mode not in ("c", "c++")
+    ):
+        return False
+    for key in ("compiler_family", "compiler_version"):
+        old_v = old_fields.get(key, "")
+        new_v = new_fields.get(key, "")
+        if not old_v or not new_v or old_v != new_v:
+            return False
+    old_sha = old.ast_toolchain.get("compiler_sha256", "")
+    new_sha = new.ast_toolchain.get("compiler_sha256", "")
+    if old_sha and new_sha and old_sha != new_sha:
+        return False
+    return True
+
+
 @dataclass(frozen=True)
 class ComparabilityMismatch:
     """Returned by :func:`check_contracts_comparable` in ``diagnostic=True``
@@ -1230,18 +1349,20 @@ def _unexplained_profile_fields(
     (Codex review, PR #641 follow-up, fourth round): a release combining two
     independently-sanctioned deltas (e.g. a header addition AND a corroborated
     C++-standard raise) must not raise just because neither carve-out's static
-    field-set covers ``differing`` in full on its own. Four of the five
+    field-set covers ``differing`` in full on its own. Four of the six
     carve-outs' field-sets (:data:`_PLATFORM_IDENTITY_FIELDS`/
     :data:`_BUILD_CONTEXT_FIELDS`/:data:`_HEADER_SEQUENCE_FIELDS`/
     :data:`_INCLUDE_SEQUENCE_FIELDS`) are mutually disjoint, so their relative
     order never matters -- each only ever narrows the working set, never
-    re-adds to it. The fifth,
-    :func:`_language_standard_probe_upgrade_corroborated`, is a narrower,
-    single-field carve-out over ``language_standard`` -- a field the
-    build-context carve-out's own set already covers -- so it is checked
+    re-adds to it. The remaining two,
+    :func:`_language_standard_probe_upgrade_corroborated` and
+    :func:`_language_standard_content_divergence_corroborated`, are narrower,
+    single-field carve-outs over ``language_standard`` -- a field the
+    build-context carve-out's own set already covers -- so both are checked
     *after* the build-context one specifically (its broader waiver, when it
-    applies, already subsumes this one; when it doesn't, this one still gets
-    its own independent chance).
+    applies, already subsumes either; when it doesn't, each still gets its
+    own independent chance, checked in that order since the upgrade carve-out
+    is the more specific of the two).
     """
     old_fields = old_contract.profile_fields
     new_fields = new_contract.profile_fields
@@ -1279,6 +1400,22 @@ def _unexplained_profile_fields(
     if (
         "language_standard" in unexplained
         and _language_standard_probe_upgrade_corroborated(
+            old, new, old_fields, new_fields
+        )
+    ):
+        unexplained.discard("language_standard")
+
+    # Real CI failure (Codex review, fresh evidence:
+    # examples/case66_language_linkage_changed,
+    # examples/case69_trivial_to_nontrivial): a purely content-driven
+    # language_standard divergence under an identical, corroborated
+    # toolchain -- see _language_standard_content_divergence_corroborated's
+    # own docstring for why this must never be treated as a blocking
+    # extraction-environment mismatch, unlike the narrower upgrade-only
+    # carve-out just above.
+    if (
+        "language_standard" in unexplained
+        and _language_standard_content_divergence_corroborated(
             old, new, old_fields, new_fields
         )
     ):
@@ -1598,7 +1735,7 @@ def check_contracts_comparable(
     header-sequence carve-out above.
 
     **Opaque profile-fingerprint mismatches are rejected, not silently
-    waived (Codex review, PR #641 follow-up, P1):** the five carve-outs
+    waived (Codex review, PR #641 follow-up, P1):** the six carve-outs
     above narrow an ``unexplained`` working set that starts as ``differing``
     — the set of :data:`PROFILE_FIELD_KEYS` that actually differ between
     ``old_fields``/``new_fields``. If ``profile_fingerprint`` differs but
@@ -1645,15 +1782,16 @@ def check_contracts_comparable(
     ``differing`` it understands, narrowing an ``unexplained`` working set;
     the pair is comparable once nothing remains unexplained, not only when
     one carve-out's field-set covers the whole mismatch by itself. Four of
-    the five carve-outs' field-sets (:data:`_PLATFORM_IDENTITY_FIELDS`/
+    the six carve-outs' field-sets (:data:`_PLATFORM_IDENTITY_FIELDS`/
     :data:`_BUILD_CONTEXT_FIELDS`/:data:`_HEADER_SEQUENCE_FIELDS`/
     :data:`_INCLUDE_SEQUENCE_FIELDS`) are mutually disjoint, so their
-    relative order never matters among themselves. The fifth,
-    :func:`_language_standard_probe_upgrade_corroborated`, is a narrower,
-    single-field carve-out over ``language_standard`` -- a field the
-    build-context carve-out's own set already covers -- and is checked
-    *after* the build-context one specifically, since it can still only
-    narrow (never re-add to) the working set, so its position relative to
+    relative order never matters among themselves. The remaining two,
+    :func:`_language_standard_probe_upgrade_corroborated` and
+    :func:`_language_standard_content_divergence_corroborated`, are
+    narrower, single-field carve-outs over ``language_standard`` -- a field
+    the build-context carve-out's own set already covers -- and are checked
+    *after* the build-context one specifically, since either can still only
+    narrow (never re-add to) the working set, so their position relative to
     the other four still never changes the outcome (see
     :func:`_unexplained_profile_fields`'s own docstring for the ordering
     itself).
