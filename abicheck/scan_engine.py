@@ -337,17 +337,32 @@ def _build_new_snapshot(
             changed_paths=changed_paths,
             build_config=build_config,
             allow_build_query=allow_build_query,
+            # `build_config`'s own *query* field is independently, correctly
+            # gated downstream (`collect_inline_pack`'s presence-based
+            # `build_config_trusted_for_query`, computed by both
+            # `l2_seed._resolve_l2_seed_pack_args` and `cli_buildsource.
+            # embed_build_source` regardless of this flag) -- `allow_build_
+            # query` itself only ever answers whether `resolve_effective_
+            # allow_query` (ADR-037 D4) authorized the config's executable
+            # `build.query`, never whether the config may be read at all.
+            # Without this, `_resolve_side_snapshot_impl`'s own local gate
+            # (`_gated_build_query_inputs`, meant for `dump`/`compare`'s typed
+            # API, which has no equivalent CLI-side consent step of its own)
+            # would blanket-null `build_config` -- silently dropping an
+            # ordinary `scan --config <path>`'s *passive* settings
+            # (`build.compile_db`, `build.internal_namespaces`, ...) whenever
+            # the config declares no `build.query` at all, the common case
+            # (Codex review, fresh evidence -- a real regression this
+            # migration introduced, not a hypothetical). See
+            # `_gated_build_query_inputs`'s own docstring for the full
+            # reasoning.
+            build_config_locally_trusted=True,
             baseline_reuse_hint=baseline_reuse_hint,
             # --- scan's own preserved behaviour (PR 3A) ---------------------
             # Its real collect mode, not the Tier-2 pin: `scan` may run the
             # zero-config inferred build query in its seed, which is how a
             # source tree with no compile database gets build-derived include
-            # dirs at all. `build_config`'s mere presence already encodes the
-            # trust decision (`cli_scan_helpers.resolve_effective_allow_query`
-            # only ever hands this function an explicit `--config`), so it is
-            # passed ungated -- re-gating on `allow_build_query` would
-            # suppress an already-vetted `--config`'s `build.query` whenever
-            # `collect_mode == "off"` for unrelated reasons.
+            # dirs at all.
             seed_collect_mode=collect_mode,
             # `lang` defaults to "c++" (scan's own Click default), so it can't
             # distinguish a genuinely explicit request from the default the

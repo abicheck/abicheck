@@ -262,6 +262,7 @@ def _gated_build_query_inputs(
     build_query: str | None,
     *,
     allow_build_query: bool,
+    build_config_locally_trusted: bool = False,
 ) -> tuple[Path | None, str | None]:
     """The real trust gate on *build_config*/*build_query* -- shared by both
     the L2 seed and the L3-L5 embed step so a caller's permission decision is
@@ -271,13 +272,17 @@ def _gated_build_query_inputs(
     ``build_query`` is a trusted **executable command** (``build.query`` in
     ``.abicheck.yml``, or ``--build-query`` on the CLI); ``build_config`` is a
     path to a ``.abicheck.yml`` that may itself carry a ``build.query`` key,
-    so it carries the identical execution risk by proxy -- both are forced to
-    ``None`` unless *allow_build_query* is exactly ``True``, regardless of
-    what the caller passed. **``build_compile_db`` is deliberately not
-    gated by this function** (see its own call sites) -- it is a bare path/
-    glob naming an *existing* ``compile_commands.json``, a pure data read
-    with "no such restriction" (matching this repo's own established
-    ``dump --build-compile-db`` vs. ``--build-query`` distinction, and
+    so it carries the identical execution risk *by proxy of that one key* --
+    it is forced to ``None`` unless *allow_build_query* is exactly ``True``,
+    regardless of what the caller passed, UNLESS *build_config_locally_
+    trusted* says otherwise (see below). ``build_query`` itself is always
+    gated the same way regardless of that flag -- it is a bare, always-
+    executable string with no downstream consumer that separately checks its
+    provenance. **``build_compile_db`` is deliberately not gated by this
+    function** (see its own call sites) -- it is a bare path/glob naming an
+    *existing* ``compile_commands.json``, a pure data read with "no such
+    restriction" (matching this repo's own established ``dump
+    --build-compile-db`` vs. ``--build-query`` distinction, and
     ``embed_build_source``'s own pre-existing behavior). Gating it the same
     way as the executable inputs would silently degrade a caller's real
     include paths/defines/dialect for supplying data that was never a
@@ -288,10 +293,41 @@ def _gated_build_query_inputs(
     parameter would be wrong here -- it is a documented, deprecated no-op
     (``buildsource/inline.py``'s ``collect_inline_pack`` docstring). This
     function is the one place that decision is actually enforced.
+
+    *build_config_locally_trusted* (PR 3A, scan resolver convergence; Codex
+    review -- a real regression, not a hypothetical): ``build_config``'s own
+    *query* field is independently, correctly enforced downstream, at the
+    actual point of execution -- ``collect_inline_pack``'s
+    ``build_config_trusted_for_query`` parameter, computed presence-based
+    (``build_config is not None or build_query is not None``) by both of
+    this function's callers (``l2_seed._resolve_l2_seed_pack_args``,
+    ``cli_buildsource.embed_build_source``) before this gate here was ever
+    introduced. That downstream check is what actually decides whether
+    ``build.query`` may run; blanket-nulling ``build_config`` *here* as well
+    is a second, blunter gate keyed on a different signal
+    (*allow_build_query*) that also silently drops every *passive*,
+    non-executable setting the config carries (``build.compile_db``,
+    ``build.internal_namespaces``, ...) whenever that signal is not exactly
+    ``True`` -- which, for ``scan``, is the common case: ``cli_scan_helpers.
+    resolve_effective_allow_query`` (ADR-037 D4 "level-implies-query") only
+    ever answers ``True`` when the config *itself* declares a ``build.query``
+    key AND an explicitly-pinned deep evidence level, so an ordinary
+    ``scan --config <path>`` whose config only sets ``build.compile_db``
+    lost that config entirely once this function started gating
+    ``build_config``'s bare presence for ``scan`` too. Passing this flag
+    restores ``scan``'s pre-migration behavior (``build_config`` always
+    forwarded ungated to both the seed and the embed step, trusting exactly
+    the downstream, presence-based gate) without weakening the default this
+    function already gives ``dump``/``compare``'s typed-API callers, which
+    have no equivalent CLI-side consent gate of their own and stay fully
+    gated (default ``False``, unchanged).
     """
-    if allow_build_query is not True:
-        return None, None
-    return build_config, build_query
+    gated_query = build_query if allow_build_query is True else None
+    if allow_build_query is True or build_config_locally_trusted:
+        gated_config = build_config
+    else:
+        gated_config = None
+    return gated_config, gated_query
 
 
 def _seeded_includes_and_compile_context(
@@ -304,6 +340,7 @@ def _seeded_includes_and_compile_context(
     build_query: str | None = None,
     build_compile_db: str | None = None,
     allow_build_query: bool = False,
+    build_config_locally_trusted: bool = False,
     collect_mode: str | None = None,
 ) -> tuple[list[Path], CompileContext | None, bool, list[Callable[[], None]]]:
     """This input's L2 include-dir seed *and* its P0.3 L3->L2 compile-context
@@ -426,7 +463,10 @@ def _seeded_includes_and_compile_context(
     # See _gated_build_query_inputs's own docstring: build_compile_db is a
     # data path, not gated -- only the two potentially-executable inputs are.
     build_config, build_query = _gated_build_query_inputs(
-        build_config, build_query, allow_build_query=allow_build_query
+        build_config,
+        build_query,
+        allow_build_query=allow_build_query,
+        build_config_locally_trusted=build_config_locally_trusted,
     )
 
     ctx = evidence.compile
@@ -562,6 +602,7 @@ def _resolve_side_snapshot_impl(
     build_compile_db: str | None = None,
     changed_paths: tuple[str, ...] = (),
     allow_build_query: bool | None = None,
+    build_config_locally_trusted: bool = False,
     baseline_reuse_hint: BaselineReuseContext | None = None,
     seed_collect_mode: str | None = None,
     seed_lang_explicit: bool | None = None,
@@ -611,6 +652,16 @@ def _resolve_side_snapshot_impl(
       c`` is never its Click default and so is always a genuine request — it
       therefore guards the seed with ``lang == "c"`` while leaving the parse's
       own auto-detection alone, exactly as it did before this migration.
+
+    *build_config_locally_trusted* -- ``False`` keeps ``build_config``'s
+    presence fully gated by *allow_build_query* (unchanged for ``dump``/
+    ``compare``'s typed pipelines). ``scan`` passes ``True``: its own CLI-side
+    consent gate (``cli_scan_helpers.resolve_effective_allow_query``, ADR-037
+    D4) only ever authorizes a config's *executable* ``build.query`` field,
+    never its bare presence, and blanket-nulling ``build_config`` here for
+    every other case would drop an ordinary ``--config`` file's *passive*
+    settings too -- see :func:`_gated_build_query_inputs`'s own docstring for
+    the full reasoning and the pre-migration behavior this restores.
     """
     from . import service
     from .api_types import required_path
@@ -639,7 +690,10 @@ def _resolve_side_snapshot_impl(
     # build_compile_db is deliberately not part of this gate (a data path,
     # not an executable command) and is forwarded to both call sites as-is.
     _gated_build_config, _gated_build_query = _gated_build_query_inputs(
-        build_config, build_query, allow_build_query=bool(allow_build_query)
+        build_config,
+        build_query,
+        allow_build_query=bool(allow_build_query),
+        build_config_locally_trusted=build_config_locally_trusted,
     )
     cleanups: list[Callable[[], None]] = []
     try:
@@ -655,6 +709,7 @@ def _resolve_side_snapshot_impl(
                 build_query=_gated_build_query,
                 build_compile_db=build_compile_db,
                 allow_build_query=bool(allow_build_query),
+                build_config_locally_trusted=build_config_locally_trusted,
                 collect_mode=seed_collect_mode,
             )
         )

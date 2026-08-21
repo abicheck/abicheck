@@ -4803,6 +4803,44 @@ Once a root command genuinely clears the bar above, pick the right home:
   while able to exercise only the non-default backend is not a verified change.
   PR 3C stays blocked, per the plan's own ordering rule.
 
+  **A real regression the scan-migration paragraph above introduced, found
+  by Codex review and fixed the same session (2026-08-21): `scan --config
+  <path>` silently lost the config's own *passive* settings whenever the
+  config declared no `build.query` — the common case, not an edge one.**
+  `_resolve_side_snapshot_impl`'s shared `build_config`/`build_query` gate
+  (`_gated_build_query_inputs`) blanket-nulls `build_config` unless
+  `allow_build_query` is exactly `True`, a default sized for `dump`/
+  `compare`'s typed API (no CLI-side consent step of its own, so mere
+  presence cannot be trusted). Migrating `scan`'s candidate resolution onto
+  this same primitive routed it through that gate too — but `scan`'s own
+  consent gate, `cli_scan_helpers.resolve_effective_allow_query` (ADR-037
+  D4 "level-implies-query"), only ever answers `True` when the config
+  *itself* declares an executable `build.query` key AND an explicitly-pinned
+  deep evidence level; it was never meant to answer whether the config may
+  be *read* at all. `build_config`'s own query field is already, correctly,
+  gated downstream regardless of this local gate — `collect_inline_pack`'s
+  presence-based `build_config_trusted_for_query`, computed independently by
+  both of this gate's callers (`l2_seed._resolve_l2_seed_pack_args`,
+  `cli_buildsource.embed_build_source`) since before this migration existed.
+  Confirmed against scan's own pre-migration source (commit `c3f6add`):
+  `build_config` was always forwarded ungated to both
+  `seed_includes_and_fold_compile_context` and `embed_build_source`,
+  trusting exactly that downstream gate; `allow_build_query` was a separate,
+  already-documented-dead-in-the-`True`-direction parameter that never
+  gated `build_config`'s presence at all. Fixed with a new opt-in parameter,
+  `build_config_locally_trusted` (threaded through `_gated_build_query_
+  inputs`, `_seeded_includes_and_compile_context`, and
+  `_resolve_side_snapshot_impl`), defaulting `False` so `dump`/`compare`'s
+  typed-API contract is completely unchanged; `scan_engine.
+  _build_new_snapshot` passes `True`, restoring its exact pre-migration
+  behavior. `build_query` — the bare, always-executable command string, with
+  no downstream gate of its own — stays fully gated by `allow_build_query`
+  regardless of this flag either way. Regression coverage:
+  `tests/test_gated_build_query_inputs.py` (primitive-level tests on the
+  gate itself, plus one end-to-end test on `scan_engine._build_new_snapshot`
+  proving `build_config` survives even when `allow_build_query` is falsy;
+  5 of 8 cases confirmed to fail against the pre-fix gate).
+
 - Don't hand-edit `CHANGELOG.md`'s `## [Unreleased]` section directly — add a `changelog.d/` fragment instead (see Conventions above); CI enforces this
 - Don't modify `examples/` test cases without understanding the ground truth they encode
 - Don't add dependencies without strong justification (this is a lightweight tool)
