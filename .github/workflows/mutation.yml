@@ -171,7 +171,10 @@ jobs:
     needs: resolve
     if: needs.resolve.outputs.run == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    # A diff-scoped run still has to measure every mutant in a touched module.
+    # `serialization.py` alone has more than 1,300 candidates, so the former
+    # two-hour cap cancelled a valid run before it produced a receipt.
+    timeout-minutes: 240
     steps:
       - uses: actions/checkout@v6
         with:
