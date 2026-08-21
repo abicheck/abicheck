@@ -1,0 +1,31 @@
+{
+  "affects": [
+    "check-abi-compatibility"
+  ],
+  "architectures": [],
+  "category": "A",
+  "digest": "sha256:ef0a85dd49b97dad0e562213b06940b6585af8317080452a8be66f4fb636f285",
+  "expected": {
+    "kinds": [
+      "func_removed"
+    ],
+    "min_evidence": "L0",
+    "resolved_from": "examples/ground_truth.json",
+    "verdict": "BREAKING"
+  },
+  "inputs": "examples/case01_symbol_removal",
+  "invocation": {},
+  "platforms": [
+    "linux",
+    "macos",
+    "windows"
+  ],
+  "prompt": "Review this change to our shared library for binary compatibility with applications already built against it.",
+  "roots": [
+    "agent-evals/skills/scenarios.yaml",
+    "examples/case01_symbol_removal",
+    "examples/ground_truth.json"
+  ],
+  "skill": "check-abi-compatibility",
+  "status": "ready"
+}

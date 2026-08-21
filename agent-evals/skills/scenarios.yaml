@@ -66,12 +66,13 @@ scenarios:
   - id: not-comparable-pair
     category: B
     skill: check-abi-compatibility
-    status: planned
+    status: ready
     coverage_note: "D4 uncertainty kind 1 — not comparable"
     prompt: >-
       Here are the previous and current builds of our shared library. Did this
       change break anything for programs already linked against it?
     fixture: agent-evals/skills/fixtures/not-comparable-pair
+    platforms: [linux]
     invocation:
       break_comparability: true
     expected:
@@ -81,12 +82,21 @@ scenarios:
   - id: evidence-too-shallow
     category: B
     skill: check-abi-compatibility
-    status: planned
+    status: ready
     coverage_note: "D4 uncertainty kind 2 — evidence too shallow for the question"
     prompt: >-
       Only the stripped release binaries survived for the old version. Can you
       still tell me whether the struct layouts our plugins depend on changed?
     fixture: agent-evals/skills/fixtures/evidence-too-shallow
+    platforms: [linux]
+    # old/liblib.so is a committed, prebuilt x86_64 binary (the whole point
+    # of this fixture -- only the stripped binary survived, so there is
+    # nothing to rebuild from). The new side is built from source at run
+    # time on whichever host runs the harness, so an aarch64 Linux runner
+    # (this repository's CI has one) would build new/ for arm64 against an
+    # x86_64 old/, producing a real elf_machine_changed cross-architecture
+    # break instead of the intended shallow-evidence result.
+    architectures: [x86_64]
     invocation:
       depth: symbols
     expected:
@@ -96,12 +106,13 @@ scenarios:
   - id: contract-coverage-incomplete
     category: B
     skill: check-abi-compatibility
-    status: planned
+    status: ready
     coverage_note: "D4 uncertainty kind 4 — contract coverage incomplete (not the matrix case)"
     prompt: >-
       Check this release against the last one and tell me whether anything we
       actually export to customers changed.
     fixture: agent-evals/skills/fixtures/contract-coverage-incomplete
+    platforms: [linux]
     invocation:
       contract: exports
       contract_evaluation: true
@@ -119,12 +130,13 @@ scenarios:
   - id: consumer-unaffected-despite-break
     category: B
     skill: check-abi-compatibility
-    status: planned
+    status: ready
     coverage_note: "consumer answer diverging below the library's global verdict"
     prompt: >-
       The library team says this release has a breaking change. Does our
       renderer actually need rebuilding, or can we ship it as-is?
     fixture: agent-evals/skills/fixtures/consumer-unaffected-despite-break
+    platforms: [linux]
     invocation:
       used_by: ["renderer"]
     expected:
@@ -134,12 +146,13 @@ scenarios:
   - id: consumer-actually-affected
     category: B
     skill: check-abi-compatibility
-    status: planned
+    status: ready
     coverage_note: "consumer answer confirming impact"
     prompt: >-
       We upgraded the shared library under our analytics daemon without
       rebuilding it. Is that safe?
     fixture: agent-evals/skills/fixtures/consumer-actually-affected
+    platforms: [linux]
     invocation:
       used_by: ["analytics-daemon"]
     expected:
@@ -151,11 +164,15 @@ scenarios:
   - id: plugin-required-symbol-loss
     category: B
     skill: check-abi-compatibility
-    status: planned
+    status: ready
     coverage_note: "plugin loses a symbol its host requires"
     prompt: >-
-      Will our existing plugins still load into the new host build?
+      We're about to ship a new build of our plugin. Our host requires
+      plugin_register and plugin_teardown to load a plugin at all — does the
+      new build still satisfy that, or will it break existing installs of
+      our host?
     fixture: agent-evals/skills/fixtures/plugin-required-symbol-loss
+    platforms: [linux]
     invocation:
       required_symbols: ["plugin_register", "plugin_teardown"]
     expected:

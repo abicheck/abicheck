@@ -469,6 +469,23 @@ class TestWorkspaceIsolation:
         assert any("abicheck" in leak for leak in leaks)
         assert any("COMPATIBLE" in leak for leak in leaks)
 
+    def test_the_scan_reads_json_fixtures_too(self, tmp_path):
+        """A pre-dumped snapshot fixture (`not-comparable-pair/{old,new}.json`)
+        lands in the workspace verbatim, and a real `AbiSnapshot`'s own field
+        names can name the tool even when the value is blank — the *key*
+        `abicheck_version` is itself a leak. `.json` was absent from the
+        scanned suffixes, so this was invisible until now (Codex review, PR
+        #808)."""
+        work = tmp_path / "ws"
+        work.mkdir()
+        (work / "snapshot.json").write_text(
+            '{"build_source": {"manifest": {"abicheck_version": ""}}}\n',
+            encoding="utf-8",
+        )
+        leaks = runner.workspace_leaks(work)
+        assert len(leaks) == 1
+        assert "abicheck" in leaks[0]
+
     def test_the_installed_skill_is_not_scanned_as_a_leak(self, tmp_path):
         """Naming the tool is the treatment's whole job."""
         work = tmp_path / "ws"
@@ -851,3 +868,48 @@ class TestRecoveryPreservesTheModel:
         )
         assert record["model"] == "claude-sonnet-5"
         assert runner.check_one_model([record], {"model": "claude-opus-5"}) is not None
+
+
+class TestSupportedHere:
+    """`supported_here()`'s two independent restriction axes — OS
+    (`platforms`) and CPU architecture (`architectures`) — must each gate on
+    their own, since a fixture can be OS-portable but architecture-specific
+    (a committed, prebuilt binary on one side) or vice versa."""
+
+    def test_no_restriction_runs_everywhere(self):
+        assert runner.supported_here({}) is True
+        assert runner.supported_here({"platforms": [], "architectures": []}) is True
+
+    def test_platform_restriction_is_honored(self):
+        other_platform = next(
+            p for p in ("linux", "macos", "windows") if p != runner.host_platform()
+        )
+        assert runner.supported_here({"platforms": [runner.host_platform()]}) is True
+        assert runner.supported_here({"platforms": [other_platform]}) is False
+
+    def test_architecture_restriction_is_honored(self):
+        """Regression: this axis did not exist before evidence-too-shallow's
+        prebuilt x86_64 binary needed it — before the fix, a scenario
+        declaring only `architectures` (no `platforms`) was indistinguishable
+        from an unrestricted one."""
+        other_arch = "arm64" if runner.host_architecture() != "arm64" else "x86_64"
+        assert (
+            runner.supported_here({"architectures": [runner.host_architecture()]})
+            is True
+        )
+        assert runner.supported_here({"architectures": [other_arch]}) is False
+
+    def test_both_axes_must_pass(self):
+        """A fixture restricted on the host's own platform but the *other*
+        architecture must still be refused — one matching axis is not
+        enough."""
+        other_arch = "arm64" if runner.host_architecture() != "arm64" else "x86_64"
+        assert (
+            runner.supported_here(
+                {
+                    "platforms": [runner.host_platform()],
+                    "architectures": [other_arch],
+                }
+            )
+            is False
+        )

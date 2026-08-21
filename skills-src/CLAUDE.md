@@ -132,15 +132,18 @@ place:**
 
 **Still open, unattempted by PR 2** (the ADR amendment above is the fuller
 account): `native-release-compatibility`'s whole-release-matrix-qualification
-concern remains explicitly *not* folded in; PR 3 (a complete G37 evaluation
-corpus and an actual behavioral run) is in progress; PR 4 (actually building
-an external-distribution package) is fully open. A same-day "PR 3.5"
-amendment renamed the skill again, to the current `check-abi-compatibility`
-— a user-outcome name rather than a mechanism name — and recorded, as
-design intent only, that PR 4's deliverable should be an npm/npx-installable
+concern remains explicitly *not* folded in. A same-day "PR 3.5" amendment
+renamed the skill again, to the current `check-abi-compatibility` — a
+user-outcome name rather than a mechanism name — and recorded, as design
+intent only, that PR 4's deliverable should be an npm/npx-installable
 package published from this repository rather than a separate distribution
-repo; see the ADR amendment for the full reasoning and what remains
-unbuilt.
+repo. **PR 3 landed** under that new name (a complete G37 evaluation
+corpus, 12 scenarios, plus a real 48-run pilot) — see the ADR's "PR 3"
+amendment and `agent-evals/skills/pilot-results/README.md`; its dominant
+finding is a harness turn-budget confound, not a skill-quality result, so
+the skill is still not behaviorally validated. PR 4 (an npm/npx-installable
+package published from this repository, removing the internal-candidate
+marker) remains fully open.
 
 `native-api-evolution`, `native-consumer-compatibility`, and
 `native-release-compatibility` are no longer published — their source is

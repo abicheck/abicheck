@@ -74,6 +74,22 @@ jobs:
       # rather than in a lane of their own.
       - name: Skill-eval pack + evidence freshness gates (G37 D6)
         run: python scripts/verify.py --profile pr --only skill-eval-pack,skill-eval-freshness
+      - name: Harbor task battery freshness (ADR-058 Harbor migration)
+        run: python scripts/verify.py --profile pr --only harbor-tasks
+      # The freshness check above only re-derives the tree structurally
+      # (gen_harbor_tasks.py --check) -- it never asks whether a generated
+      # task.toml/environment/tests/solution layout is actually valid per
+      # Harbor's own schema. `harbor` needs Python >=3.12 (this job's own
+      # pin) and is not a repository dependency (it exists to validate
+      # output *for* Harbor, not to be one), so it's installed here as its
+      # own dedicated step rather than folded into `[dev]` -- the check
+      # itself (`harbor-schema`) is still routed through verify.py's step
+      # catalog like every other gate here (CLAUDE.md "M0-3"), just run
+      # under `--profile full` since it's FULL-only there.
+      - name: Harbor schema validation (real harbor package, agent-evals/skills/harbor/CLAUDE.md)
+        run: |
+          pip install harbor
+          python scripts/verify.py --profile full --only harbor-schema
       - name: Per-tier accuracy matrix (step-summary artifact)
         if: always()
         run: python scripts/check_tier_accuracy.py --markdown >> "$GITHUB_STEP_SUMMARY"

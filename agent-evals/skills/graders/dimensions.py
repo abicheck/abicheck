@@ -162,12 +162,59 @@ def _refutes(reason: str, run_dir: Path, calls: list[dict], claim: dict) -> str 
         return None
     if reason == "contract_coverage_incomplete":
         # ADR-049 Phase 7: without --contract the coverage contribution is
-        # identically 0, so no domain can be short of evidence.
-        if not any("--contract" in (c.get("argv") or []) for c in calls):
+        # identically 0, so no domain can be short of evidence. Scoped to the
+        # claim's own *cited* calls, not every call the run happened to make
+        # — an unrelated --contract call elsewhere in the transcript must not
+        # excuse a claim that itself rests on a plain, uncontracted call.
+        resolved, _dangling = _cited(calls, claim)
+        contracted = [c for c in resolved.values() if ev.contract_mode(c) is not None]
+        if not contracted:
             return (
-                "claimed contract coverage is incomplete, but no recorded call "
-                "asked for contract evaluation, under which coverage is not "
-                "assessed at all"
+                "claimed contract coverage is incomplete, but none of the "
+                "cited calls asked for contract evaluation, under which "
+                "coverage is not assessed at all"
+            )
+        # Using --contract only proves coverage was *assessed*, not that it
+        # came up short — that's what the report's own `contract_coverage_
+        # failures` ledger says (Codex review, PR #808, fresh evidence: this
+        # predicate previously stopped at "some cited call used --contract"
+        # and never inspected the ledger, so a cited report reading
+        # COMPATIBLE with an empty ledger let the claim through unrefuted).
+        # A ledger this module can't read (non-JSON output) carries no
+        # signal either way and is excluded, same as an uncited call;
+        # only a *known*, uniformly-empty set of ledgers is a refutation —
+        # any known non-empty ledger is itself the positive evidence the
+        # claim rests on, and must not be overridden by a milder sibling.
+        #
+        # A self-comparison is excluded from the *ledger* check specifically
+        # (not from `contracted` above) -- a second review round found the
+        # first fix wrong (Codex review, fresh evidence): a cited
+        # self-comparison (`compare old.so old.so --contract ...`) trivially
+        # produces an empty ledger (nothing differs, so nothing is missing),
+        # which is not real evidence coverage was complete. Dropping it from
+        # `contracted` entirely (the first attempt) just traded one wrong
+        # refutation reason for another -- with no *other* --contract
+        # citation, `contracted` went empty and the claim was refuted anyway,
+        # via "no candidates" instead of "empty ledger", for the exact
+        # scenario this fix exists to stop failing. Keeping it in
+        # `contracted` (so a self-comparison still counts as "asked for
+        # contract evaluation" at all) while excluding it from the ledger
+        # evidence is what actually lets an honest claim citing only a
+        # self-comparison's --contract call pass, rather than merely
+        # relabeling why it fails.
+        ledger_candidates = [
+            c for c in contracted if not ev.compares_one_side_against_itself(c)
+        ]
+        ledgers = [
+            ev.reported_contract_coverage_failures(run_dir, c)
+            for c in ledger_candidates
+        ]
+        known = [failures for failures in ledgers if failures is not None]
+        if known and not any(known):
+            return (
+                "claimed contract coverage is incomplete, but every cited "
+                "contract-evaluated report's own contract_coverage_failures "
+                "ledger is empty — coverage was actually complete"
             )
         return None
     return None  # evidence_too_shallow: not refutable from the bundle
@@ -408,7 +455,39 @@ def dimension_6(
             (f"claimed {claimed}, which is safer than the truth ({expected})", True)
         )
 
-    reported = ev.strongest_reported_verdict(run_dir, calls)
+    # A claim resting on a consumer-scoped call (`--used-by`/`--required-
+    # symbol(s)`) answers a narrower question than an unscoped comparison of
+    # the same pair, and the two verdicts legitimately diverge in either
+    # direction (`shared/consumer-scoping.md`). Holding a correctly-scoped
+    # claim to the severity of an earlier, unscoped compare the workflow ran
+    # first would fail the exact worked example the skill's own docs give.
+    # Only drop unscoped calls from the reckoning — gaming *within* scoped
+    # calls (citing the milder of two differently-scoped runs) still counts.
+    #
+    # The cited scoped call must itself have *reached a verdict* — not merely
+    # carry the scoping flags. Otherwise a claim citing both a successful
+    # unscoped BREAKING report and a scoped call that failed before producing
+    # one (e.g. an invalid consumer path, exit 64) would have `only_scoped`
+    # drop the real unscoped report while the failed scoped call backs
+    # nothing, letting a COMPATIBLE claim through with no scoped verdict
+    # behind it at all (Codex review, PR #808).
+    #
+    # It must also not be a self-comparison. `compare old.so old.so
+    # --used-by renderer` exits with a real verdict (NO_CHANGE, trivially)
+    # while comparing nothing — passing both the scoping check above and
+    # `ev.ran_to_a_verdict`, which would let `only_scoped` drop a real
+    # unscoped BREAKING report in favor of a scoped call that never actually
+    # compared the two sides (Codex review, PR #808).
+    resolved, _dangling = _cited(calls, claim)
+    claim_is_scoped = any(
+        ev.is_consumer_scoped(c)
+        and ev.ran_to_a_verdict(c)
+        and not ev.compares_one_side_against_itself(c)
+        for c in resolved.values()
+    )
+    reported = ev.strongest_reported_verdict(
+        run_dir, calls, only_scoped=claim_is_scoped
+    )
     reported_rank = claim_mod.rank(reported)
     if (
         claimed_rank is not None
@@ -422,6 +501,268 @@ def dimension_6(
                 True,
             )
         )
+
+    # A Category B scenario whose `invocation` names a specific consumer
+    # (`used_by`) or plugin contract (`required_symbols`) is testing whether
+    # the run scoped to *that* target, not merely whether it scoped to
+    # something. A cited call carrying `--used-by unrelated-empty-consumer`
+    # satisfies `claim_is_scoped` above (which only asks "was any scoping
+    # used") but never analyzed the consumer the question was actually about
+    # — a claim resting on that alone gets its expected verdict "right" by
+    # construction, not by having checked what the scenario asks (Codex
+    # review, PR #808).
+    declared_used_by = frozenset(
+        (scenario.get("invocation") or {}).get("used_by") or []
+    )
+    declared_required_symbols = frozenset(
+        (scenario.get("invocation") or {}).get("required_symbols") or []
+    )
+    if declared_used_by or declared_required_symbols:
+        # A non-empty overlap is not enough when more than one target is
+        # declared: `plugin-required-symbol-loss` declares BOTH
+        # plugin_register and plugin_teardown, and the removed one
+        # (plugin_teardown) is the whole point of the scenario. A claim
+        # citing only `--required-symbol plugin_register` overlapped the
+        # declared set under an earlier any()-based check and passed without
+        # the removed symbol ever being checked. Union what every
+        # qualifying cited call actually covered and require the full
+        # declared set to be a subset of it — a real workflow can cover
+        # several targets across several calls (Codex review, PR #808).
+        #
+        # `used_by` and `required_symbols` are kept apart throughout, not
+        # merged into one target set: they are two distinct scoping
+        # mechanisms (a consumer binary vs. a required symbol), and merging
+        # let a `--required-symbol analytics-daemon` call — a coincidental
+        # name collision, never an actual consumer analysis — satisfy a
+        # declared `used_by: [analytics-daemon]` requirement (Codex review,
+        # PR #808).
+        covered_used_by: set[str] = set()
+        covered_required_symbols: set[str] = set()
+        for c in resolved.values():
+            if ev.ran_to_a_verdict(c) and not ev.compares_one_side_against_itself(c):
+                by_kind = ev.consumer_scope_targets_by_kind(c)
+                covered_used_by |= by_kind.used_by
+                covered_required_symbols |= by_kind.required_symbols
+        missing_used_by = declared_used_by - covered_used_by
+        missing_required_symbols = declared_required_symbols - covered_required_symbols
+        if missing_used_by or missing_required_symbols:
+            missing_parts = []
+            if missing_used_by:
+                missing_parts.append(f"used_by={sorted(missing_used_by)}")
+            if missing_required_symbols:
+                missing_parts.append(
+                    f"required_symbols={sorted(missing_required_symbols)}"
+                )
+            reasons.append(
+                (
+                    "cited no call scoped to the scenario's own declared "
+                    f"target(s) — missing {', '.join(missing_parts)}",
+                    True,
+                )
+            )
+
+    # A Category B scenario whose `invocation` declares `contract_evaluation`
+    # is testing whether the run actually engaged `--contract`, not merely
+    # whether it produced a verdict that happens to match the truth — a plain
+    # unscoped `compare` reporting COMPATIBLE, wrapped in `confident: false`
+    # and a `contract_coverage_incomplete` uncertainty, would otherwise pass
+    # every deterministic dimension without the tool ever having computed
+    # coverage at all (coverage is identically 0 without `--contract` —
+    # ADR-049 Phase 7). Mirrors the declared-target check above: a mode
+    # named in `invocation.contract` must be matched exactly, not merely
+    # "some --contract was used" (Codex review, PR #808).
+    if (scenario.get("invocation") or {}).get("contract_evaluation"):
+        declared_mode = (scenario.get("invocation") or {}).get("contract")
+        contract_candidates = [
+            c
+            for c in resolved.values()
+            if ev.ran_to_a_verdict(c)
+            and not ev.compares_one_side_against_itself(c)
+            and ev.contract_mode(c) is not None
+            and (declared_mode is None or ev.contract_mode(c) == declared_mode)
+        ]
+        # Using --contract only proves coverage was *assessed*, not that the
+        # scenario's own genuine coverage gap actually showed up in the cited
+        # report -- that's what the report's own `contract_coverage_failures`
+        # ledger says (Codex review, PR #808, fresh evidence: this predicate
+        # previously stopped at "some cited call used --contract [mode]" and
+        # never inspected the ledger, so a cited report reading COMPATIBLE
+        # with an empty ledger passed this zero-tolerance dimension too).
+        # A *second* round found the first fix still under-required: when no
+        # cited report's ledger could be read at all (captured as non-JSON
+        # text, or JSON missing the field), `known_ledgers` was empty, and
+        # "no known ledger falsifies this" silently passed the check with no
+        # positive evidence a real gap was ever captured -- the scenario
+        # this check exists for (`contract-coverage-incomplete`) requires a
+        # genuine, parsed, non-empty ledger, not merely the absence of proof
+        # against one (Codex review, PR #808, second round). At least one
+        # candidate must expose a *known*, *non-empty* ledger now.
+        ledgers = [
+            ev.reported_contract_coverage_failures(run_dir, c)
+            for c in contract_candidates
+        ]
+        known_ledgers = [failures for failures in ledgers if failures is not None]
+        contract_covered = (
+            bool(contract_candidates) and bool(known_ledgers) and any(known_ledgers)
+        )
+        if not contract_covered:
+            if not contract_candidates:
+                reason = (
+                    "cited no call using --contract"
+                    + (f" {declared_mode}" if declared_mode else "")
+                    + ", which the scenario's own invocation requires"
+                )
+            elif not known_ledgers:
+                reason = (
+                    "cited a call using --contract"
+                    + (f" {declared_mode}" if declared_mode else "")
+                    + ", but none of the cited reports exposed a parseable "
+                    "contract_coverage_failures ledger — no positive "
+                    "evidence a coverage gap was actually captured"
+                )
+            else:
+                reason = (
+                    "cited a call using --contract"
+                    + (f" {declared_mode}" if declared_mode else "")
+                    + ", but every cited report's own contract_coverage_failures "
+                    "ledger is empty — coverage was actually complete"
+                )
+            reasons.append(
+                (
+                    reason,
+                    True,
+                )
+            )
+
+    # A scenario whose `expected` declares `full_verdict` explicitly requires
+    # both the scoped and library-wide verdicts to be reported (the two
+    # legitimately diverge — `shared/consumer-scoping.md`), since the point of
+    # these scenarios is catching an agent that reads the report the wrong way
+    # round. Nothing previously graded this field at all: the claim schema
+    # didn't carry it, so an agent could omit the global result entirely and
+    # still pass on the scoped verdict alone (Codex review, PR #808).
+    expected_full = (scenario.get("expected") or {}).get("full_verdict")
+    if expected_full is not None:
+        claimed_full = claim.get("full_verdict")
+        if claimed_full is None:
+            reasons.append(
+                (
+                    f"expected a full_verdict ({expected_full}) alongside the "
+                    "scoped verdict, but none was given",
+                    True,
+                )
+            )
+        else:
+            claimed_full_rank = claim_mod.rank(claimed_full)
+            expected_full_rank = claim_mod.rank(expected_full)
+            if (
+                claimed_full_rank is not None
+                and expected_full_rank is not None
+                and claimed_full_rank < expected_full_rank
+            ):
+                reasons.append(
+                    (
+                        f"claimed full_verdict {claimed_full}, which is safer "
+                        f"than the truth ({expected_full})",
+                        True,
+                    )
+                )
+
+            # The check above compares against the scenario's ground truth;
+            # this compares against what the claim's own cited report
+            # actually said. A claim can state the truth's own value "by
+            # construction" while citing a call whose own JSON report said
+            # something else entirely — e.g. citing a scoped call reporting
+            # `{"verdict": "COMPATIBLE", "full_verdict": "COMPATIBLE"}`
+            # while claiming `full_verdict: BREAKING` (which happens to
+            # match the truth). The rank-based "safer than" comparison above
+            # cannot catch this in either direction — it only ever fails a
+            # claim that understates severity, never one that overstates it
+            # relative to what was actually observed — but a full_verdict
+            # this dimension's own title asks to be evidenced must equal
+            # what the cited report said, not merely land on the correct
+            # answer by a route the report never supports (Codex review,
+            # PR #808). Exact-match, not a rank comparison: unlike the
+            # primary `verdict` field (where overstating severity is an
+            # accepted, unpunished direction throughout this module),
+            # `full_verdict` exists specifically to test whether an agent
+            # read its own scoped-vs-global report correctly, so a value
+            # that diverges from what the citation actually shows is wrong
+            # regardless of which direction it diverges. Restricted to the
+            # claim's own cited calls, not the whole run — the point is
+            # whether the claim faithfully reports what its own evidence
+            # said, not what some other, uncited call reported. A cited
+            # report with no full_verdict field at all contributes nothing
+            # — the false-negative-over-false-positive default this module
+            # uses throughout — but cited reports that *disagree* with each
+            # other are a different case: this is a zero-tolerance
+            # evidence dimension, and citing two conflicting reports is not
+            # an unambiguous grounding for any single claimed value, so it
+            # fails rather than silently skipping the check (Codex review,
+            # PR #808 — the earlier version of this fix let a claim citing
+            # two disagreeing scoped reports, e.g. COMPATIBLE and
+            # API_BREAK, pass no matter what it claimed, since neither
+            # cited report was checked against).
+            #
+            # Restricted to calls that actually reached a verdict and aren't
+            # a self-comparison -- omitted originally (Codex review, fresh
+            # evidence): an incidental extra citation alongside the real
+            # scoped comparison (e.g. a self-comparison whose own JSON report
+            # happens to carry a trivial full_verdict, or a call that never
+            # reached a verdict at all) could inject a second, spurious value
+            # into `reported_fulls`, tripping the "cited reports disagree"
+            # branch above and failing a claim whose real citation was
+            # correct all along. Same filter dimension_6's other
+            # cited-call checks in this function already apply.
+            full_verdict_candidates = [
+                c
+                for c in resolved.values()
+                if ev.ran_to_a_verdict(c) and not ev.compares_one_side_against_itself(c)
+            ]
+            reported_fulls = ev.reported_full_verdicts(run_dir, full_verdict_candidates)
+            if len(reported_fulls) > 1:
+                reasons.append(
+                    (
+                        f"claimed full_verdict {claimed_full}, but the "
+                        "cited reports disagree on their own full_verdict "
+                        f"({sorted(reported_fulls)}) — not an unambiguous "
+                        "grounding for any claimed value",
+                        True,
+                    )
+                )
+            elif len(reported_fulls) == 1:
+                (reported_full,) = reported_fulls
+                if claimed_full != reported_full:
+                    reasons.append(
+                        (
+                            f"claimed full_verdict {claimed_full}, but the "
+                            f"cited report's own full_verdict was {reported_full}",
+                            True,
+                        )
+                    )
+            else:
+                # `reported_fulls` empty: none of the claim's own cited calls
+                # exposed a full_verdict at all — a scoped call captured as
+                # default text/Markdown rather than `--format json`, or any
+                # JSON report lacking the field, since `ev.
+                # reported_full_verdicts` reads JSON only. Falling through
+                # here (as an earlier version of this check did) let a claim
+                # simply state the scenario's expected full_verdict with no
+                # cited artifact backing that specific value — defeating
+                # both the consumer-scoping scenarios' purpose and this
+                # zero-tolerance dimension (Codex review, PR #808). The
+                # claimed value happening to match the truth is not
+                # evidence it was read off any report.
+                reasons.append(
+                    (
+                        f"claimed full_verdict {claimed_full}, but none of "
+                        "the claim's own cited reports exposed a "
+                        "full_verdict field at all (not captured as JSON, "
+                        "or JSON missing the field) — nothing grounds the "
+                        "claimed value",
+                        True,
+                    )
+                )
 
     used = sorted(
         {f for c in calls if ev.is_comparison(c) for f in ev.suppression_flags(c)}

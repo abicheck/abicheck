@@ -9,14 +9,28 @@ Sibling of `agent-evals/`'s existing task harness, not a replacement: that one
 scores an agent **modifying abicheck**, this one scores an agent **equipped
 with a skill**. Same mechanism, different subject.
 
-## What exists today (Phase 0, plus the first slice of Phases 1–2)
+## What exists today (Phase 0 through Phase 3)
 
 Phase 0's contracts and deterministic checks are complete. On top of them sit a
 recording shim, a headless two-arm runner, and the four deterministic graders
 with the bad-run corpus that exercises them — enough to produce a transcript
-*and* score it. **Still missing: the judged dimensions (4 and 5), the trigger
-corpus runner, and any committed evidence.** Nothing here has been run at scale
-yet, so there are no numbers to cite.
+*and* score it. Phase 3 landed a full 12-scenario corpus and a real 48-run
+pilot against it — see `pilot-results/README.md` for the numbers and, just as
+important, the harness confound (`--max-turns`) that limits how much weight
+they can bear today. **Still missing: the judged dimensions (4 and 5), the
+trigger corpus runner, and any committed evidence.**
+
+**`harbor/` is now the canonical evaluation surface** (ADR-058's
+Harbor-migration amendment, decided 2026-08-21) — a real, schema-validated
+[Harbor](https://www.harborframework.com) task per scenario, generated
+from the same `scenarios.yaml`/`skill-eval-pack.json` and sharing the same
+deterministic graders unmodified. The two-arm runner above
+(`runners/claude_code.py`) is now historical/frozen: kept because it is
+what produced the one pilot that exists, not maintained for new work. See
+`harbor/CLAUDE.md` for what has and has not actually been verified (no
+Docker in this environment, so no real Harbor trial has run yet — being
+canonical is a decision about where new work goes, not a claim that
+Harbor execution itself is already proven end to end).
 
 | Path | Role |
 |------|------|
@@ -41,6 +55,74 @@ python agent-evals/skills/runners/claude_code.py --out /tmp/skill-eval --repetit
 # 2. grade them
 python agent-evals/skills/run_skill_eval.py --runs /tmp/skill-eval --json /tmp/grades.json
 ```
+
+## Environment prerequisites for a real run
+
+Two environment gaps block every skill-arm run before it reaches the
+scenario at all, found and closed while producing this directory's first
+real evidence (G37 Phase 3 pilot). Neither is a defect in the skill or the
+harness — both are "the sandbox lacks what a real deployment already has,"
+and a run against an unfixed sandbox produces a *contaminated* comparison,
+not a low score: the skill-arm dead-ends at its own preflight while the
+baseline arm proceeds normally, which reads as "the skill hurts," when the
+actual cause is that neither arm had a workable toolchain.
+
+1. **`abicheck --version` must report a version inside every ready skill's
+   declared `abicheck-version-range`.** A fresh editable install
+   (`pip install -e .`) stamps `importlib.metadata` from `pyproject.toml`'s
+   own `version` field — which, per this repo's own convention
+   (`skills-src/CLAUDE.md` rule 7), stays at the *last cut* release number
+   between releases even though the working tree's actual CLI surface is
+   already ahead of it. `check-abi-compatibility` declares
+   `>=0.6.0,<0.7.0`; a checkout still reporting an earlier version (e.g.
+   `0.5.0`) makes the skill's own preflight step — correctly, per its own
+   stated contract — refuse to proceed on every single skill-arm run. This
+   surfaced as a real run's own `not_comparable` misfire: see "A `null`
+   verdict is a claim too" below, which was originally written from exactly
+   this failure mode without yet naming the cause. **Do not "fix" this by
+   loosening the skill's declared range** — the range is a real fact about
+   which release contains which CLI surface, not a knob to tune per
+   environment. Instead, for an evaluation environment only, make
+   `abicheck --version` report truthfully what the checkout can already do.
+   **Two independent metadata sources can both answer this, and
+   `importlib.metadata` (what the CLI's own `--version` reads) picks
+   whichever it finds first — patching only one is not enough on a plain
+   editable install (`pip install -e .`), confirmed by patching each in
+   turn and re-checking `abicheck --version` after each:**
+   ```bash
+   # 1. the editable install's own egg-info (this repo's checkout root) —
+   #    found to take precedence over (2) on a plain `pip install -e .`
+   sed -i 's/^Version: 0\.5\.0/Version: 0.6.0/' abicheck.egg-info/PKG-INFO
+   # 2. the site-packages dist-info the editable install also registers —
+   #    patch this too so a resolution order that prefers it still works
+   D=$(python3 -c "import importlib.metadata as m; print(next(str(d._path) for d in m.distributions() if d.metadata['Name']=='abicheck'))")
+   sed -i 's/^Version: 0\.5\.0/Version: 0.6.0/' "$D/METADATA"
+   ```
+   Verify with `python3 -c "from importlib.metadata import version;
+   print(version('abicheck'))"` and `abicheck --version` — both must report
+   `0.6.0` before a skill-arm run's preflight will pass. Both edits are
+   local, ephemeral (a fresh container/checkout reverts them), outside
+   version control, and must never be treated as evidence the version was
+   actually released; never edit `pyproject.toml`'s own `version` field to
+   do this, since that is a real release decision, not an evaluation
+   convenience.
+2. **`abicheck compare --depth headers`/`dump` need a header-AST frontend
+   this host can satisfy.** `abicheck`'s default is CastXML, policy-gated to
+   `>=0.6.11,<0.8.0` (`castxml_policy.py`); a plain `apt install castxml` on
+   a recent Ubuntu base commonly resolves an older build (observed:
+   `0.6.3-1build2`) that abicheck correctly refuses as unsupported rather
+   than silently trusting. Either install a real conda-forge CastXML in the
+   supported range, or set `ABICHECK_ALLOW_AST_FALLBACK=1` in the runner's
+   environment (inherited by every nested `abicheck` invocation both arms
+   make) so a rejected CastXML degrades to the direct-Clang backend instead
+   of hard-erroring — `clang`/`clang++` are commonly already present.
+   `--ast-frontend clang` forced explicitly is the alternative if the
+   fallback's own warning noise is unwanted; either is a legitimate,
+   disclosed environment choice, not a change to what is being measured.
+
+Record both facts (and the resolution actually used) alongside any
+evaluation results this directory produces — a scorecard is not
+interpretable without knowing whether these were fixed for that run.
 
 ## The workspace must not contain the answer
 
