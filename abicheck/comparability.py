@@ -716,7 +716,10 @@ _FORCED_CPP20_STANDARD = "gnu++20"
 #: ``_language_standard_is_lang_pinned`` only recognizes an explicit *lang
 #: tag*, not an explicit *standard* given without one). Any other bare
 #: literal can only have come from an explicit pin.
-_KNOWN_AUTO_RESOLVED_BARE_STANDARDS = {"c": _FORCED_C_STANDARD, "c++": _FORCED_CPP20_STANDARD}
+_KNOWN_AUTO_RESOLVED_BARE_STANDARDS = {
+    "c": _FORCED_C_STANDARD,
+    "c++": _FORCED_CPP20_STANDARD,
+}
 
 #: Every ``language_standard_field`` spelling an *unpinned, no-resolved-
 #: standard* dump could have produced before either the probe or the
@@ -733,9 +736,7 @@ _KNOWN_AUTO_RESOLVED_BARE_STANDARDS = {"c": _FORCED_C_STANDARD, "c++": _FORCED_C
 _UNRESOLVED_STANDARD_SPELLINGS = ("c", "c++", "cpp")
 
 
-def _newly_resolved_standard_remainder(
-    old_std: str, new_std: str
-) -> str | None:
+def _newly_resolved_standard_remainder(old_std: str, new_std: str) -> str | None:
     """If *old_std* is one of :data:`_UNRESOLVED_STANDARD_SPELLINGS` and
     *new_std* carries the identical lang tag plus something newly resolved,
     return that "something" (the part after the tag); otherwise ``None``.
@@ -883,8 +884,10 @@ def _language_standard_probe_upgrade_corroborated(
     old_std = old_fields.get("language_standard", "")
     new_std = new_fields.get("language_standard", "")
     forward = _newly_resolved_standard_remainder(old_std, new_std)
-    tag, remainder = (old_std, forward) if forward is not None else (
-        new_std, _newly_resolved_standard_remainder(new_std, old_std)
+    tag, remainder = (
+        (old_std, forward)
+        if forward is not None
+        else (new_std, _newly_resolved_standard_remainder(new_std, old_std))
     )
     if remainder is None:
         return False
@@ -1089,7 +1092,9 @@ def _language_standard_content_divergence_corroborated(
         or new_mode not in ("c", "c++")
     ):
         return False
-    if old_std and not _language_standard_is_known_auto_resolved_form(old_std, old_mode):
+    if old_std and not _language_standard_is_known_auto_resolved_form(
+        old_std, old_mode
+    ):
         # Codex review, fresh evidence: a bare literal that isn't one of the
         # forms the unpinned path can actually produce for its own mode can
         # only have come from an explicit -std=/--std=/std: pin given
@@ -1097,7 +1102,9 @@ def _language_standard_content_divergence_corroborated(
         # see that (it only recognizes an explicit lang tag), so this is a
         # separate, necessary guard, not a redundant one.
         return False
-    if new_std and not _language_standard_is_known_auto_resolved_form(new_std, new_mode):
+    if new_std and not _language_standard_is_known_auto_resolved_form(
+        new_std, new_mode
+    ):
         return False
     # Codex review, fresh evidence (second round): the check above still
     # cannot tell apart the exact-collision pair -- an explicit
@@ -1147,31 +1154,22 @@ def _language_standard_content_divergence_corroborated(
     if old_host_version != new_host_version and _compiler_version_sans_driver_name(
         old_host_version
     ) != _compiler_version_sans_driver_name(new_host_version):
-        # Codex review, fresh evidence (real CI failure): castxml resolves
-        # a SEPARATE, mode-specific host-compiler binary per side -- "gcc"
-        # for a C-mode parse, "g++" for C++ (dumper_ast_config._resolve_
-        # compiler_binary) -- so a genuine C<->C++ mode switch legitimately
-        # changes which binary gets probed even under one, completely
-        # unchanged toolchain installation. Their --version banners then
-        # differ ONLY in that leading driver-name word (e.g. "gcc (Ubuntu
-        # 13.3.0-...) 13.3.0..." vs "g++ (Ubuntu 13.3.0-...) 13.3.0...") --
-        # comparing the raw banner (as the sibling upgrade carve-out
-        # correctly does, where the driver name never changes) would treat
-        # this legitimate, same-toolchain pairing as a real version skew
-        # and block exactly the case66/case69 shape this carve-out exists
-        # for, but only under castxml (the direct-clang backend invokes
-        # the identical binary either way and reports byte-identical
-        # banners, so this never applies there). Not a weaker check for
-        # a genuine cross-version skew: two different GCC installations
-        # produce different remainders (real differing version numbers),
-        # which still fails this comparison correctly.
+        # castxml resolves a separate, mode-specific host-compiler binary
+        # per side ("gcc" for C, "g++" for C++), so their --version banners
+        # differ only in that leading driver word under one unchanged
+        # toolchain (direct-clang invokes the identical binary either way,
+        # so this never applies there). A genuine cross-version skew still
+        # differs in the remainder and still fails here correctly.
         return False
-    # Deliberately no compiler_sha256 check here (unlike the sibling
-    # upgrade carve-out): "gcc" and "g++" are two distinct files on disk
-    # even from the identical package/version, so their content hashes
-    # always differ for exactly the legitimate pairing this carve-out
-    # exists to corroborate -- requiring sha256 equality would defeat the
-    # normalization above entirely.
+    # sha256 is skipped only for the confirmed driver-split case above --
+    # "gcc"/"g++" always hash differently even for the identical package.
+    # When banners are already identical, a differing sha256 is real drift
+    # and must still raise (Codex review: this was unconditional before).
+    if old_host_version == new_host_version:
+        old_sha = old.ast_toolchain.get("compiler_sha256", "")
+        new_sha = new.ast_toolchain.get("compiler_sha256", "")
+        if old_sha and new_sha and old_sha != new_sha:
+            return False
     return True
 
 
@@ -1576,8 +1574,11 @@ def _unexplained_profile_fields(
     # identical toolchain -- so once that corroboration succeeds,
     # compiler_version's raw-field divergence is explained by the exact
     # same fact language_standard's was, not a second, independent one.
-    if "language_standard" in unexplained and _language_standard_content_divergence_corroborated(
-        old, new, old_fields, new_fields
+    if (
+        "language_standard" in unexplained
+        and _language_standard_content_divergence_corroborated(
+            old, new, old_fields, new_fields
+        )
     ):
         unexplained.discard("language_standard")
         unexplained.discard("compiler_version")

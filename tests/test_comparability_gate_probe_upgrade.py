@@ -606,6 +606,82 @@ def test_gate_content_driven_still_raises_when_gnu_driver_version_number_genuine
         check_contracts_comparable(old, new)
 
 
+def test_gate_waives_gnu_driver_pair_even_when_compiler_sha256_differs():
+    """The positive counterpart to the sha256 regression test below: `gcc`
+    and `g++` are two distinct files on disk even from the identical
+    package/version, so their content hashes always differ for exactly the
+    legitimate driver-split pairing this carve-out exists to corroborate --
+    requiring sha256 equality *there* would defeat the driver-name
+    normalization entirely and reintroduce the original CI failure."""
+    old = _snap(
+        compute_extraction_contract(
+            l2_frontend_ran=True,
+            compiler_family="gnu",
+            compiler_version="13.3.0",
+            language_standard="probed:__cplusplus=201703L",
+        ),
+        ast_toolchain=_content_ast_toolchain(
+            "c++",
+            producer="castxml",
+            frontend_version="0.6.11",
+            host_version="g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0\nCopyright ...",
+            compiler_sha256="a" * 64,
+        ),
+    )
+    new = _snap(
+        compute_extraction_contract(
+            l2_frontend_ran=True,
+            compiler_family="gnu",
+            compiler_version="13.3.0",
+            language_standard="gnu11",
+        ),
+        ast_toolchain=_content_ast_toolchain(
+            "c",
+            producer="castxml",
+            frontend_version="0.6.11",
+            host_version="gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0\nCopyright ...",
+            compiler_sha256="b" * 64,
+        ),
+    )
+    check_contracts_comparable(old, new)  # must not raise
+
+
+def test_gate_content_driven_still_raises_when_identical_banner_but_sha256_differs():
+    """Codex review, fresh evidence: the driver-name-skip above must not
+    become "never check compiler_sha256 in this carve-out" -- when the raw
+    `compiler_version` banners are already byte-identical (e.g. the direct-
+    clang backend, which resolves the same binary regardless of mode), a
+    differing `compiler_sha256` despite that identical banner is real
+    signal of a genuinely different resolved binary (an in-place rebuild/
+    vendor swap that didn't change the reported version string), and must
+    still raise -- the driver-split reasoning that justifies skipping the
+    hash check only applies when the banners themselves diverged."""
+    old = _snap(
+        compute_extraction_contract(
+            l2_frontend_ran=True,
+            compiler_family="clang",
+            compiler_version="18.1.3",
+            language_standard="probed:__cplusplus=201703L",
+        ),
+        ast_toolchain=_content_ast_toolchain(
+            "c++", host_version="18.1.3", compiler_sha256="a" * 64
+        ),
+    )
+    new = _snap(
+        compute_extraction_contract(
+            l2_frontend_ran=True,
+            compiler_family="clang",
+            compiler_version="18.1.3",
+            language_standard="gnu11",
+        ),
+        ast_toolchain=_content_ast_toolchain(
+            "c", host_version="18.1.3", compiler_sha256="b" * 64
+        ),
+    )
+    with pytest.raises(ProfileMismatchError):
+        check_contracts_comparable(old, new)
+
+
 def test_gate_content_driven_still_raises_when_producer_differs():
     """A castxml-produced snapshot compared against a direct-clang-produced
     one is a genuinely different extraction mechanism, not merely a
@@ -630,7 +706,9 @@ def test_gate_content_driven_still_raises_when_producer_differs():
             compiler_version="13.3.0",
             language_standard="gnu11",
         ),
-        ast_toolchain=_content_ast_toolchain("c", producer="clang", frontend_version="18.1.3"),
+        ast_toolchain=_content_ast_toolchain(
+            "c", producer="clang", frontend_version="18.1.3"
+        ),
     )
     with pytest.raises(ProfileMismatchError):
         check_contracts_comparable(old, new)
@@ -856,7 +934,9 @@ def test_gate_content_driven_divergence_still_raises_for_explicit_std_without_la
             compiler_version="11.4.0",
             language_standard="gnu++17",  # -std=gnu++17, no --lang
         ),
-        ast_toolchain=_content_ast_toolchain("c++", explicit="1", host_version="11.4.0"),
+        ast_toolchain=_content_ast_toolchain(
+            "c++", explicit="1", host_version="11.4.0"
+        ),
     )
     with pytest.raises(ProfileMismatchError):
         check_contracts_comparable(old, new)
@@ -921,7 +1001,9 @@ def test_gate_content_driven_divergence_still_raises_for_the_exact_literal_colli
             compiler_version="11.4.0",
             language_standard="gnu++20",  # -std=gnu++20, no --lang
         ),
-        ast_toolchain=_content_ast_toolchain("c++", explicit="1", host_version="11.4.0"),
+        ast_toolchain=_content_ast_toolchain(
+            "c++", explicit="1", host_version="11.4.0"
+        ),
     )
     with pytest.raises(ProfileMismatchError):
         check_contracts_comparable(old, new)
