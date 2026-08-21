@@ -487,6 +487,28 @@ def merge_fragments(
     # same toolchain by construction. `ordered[0]` (not `fragments[0]`) so
     # the choice is itself order-independent.
     representative = ordered[0]
+    # resolved_lang_mode (Codex review, fresh evidence) is NOT one of the
+    # toolchain-identity facts the comment above guarantees uniform -- a
+    # perfectly ordinary mixed-language manifest (some .c TUs, some .cpp
+    # TUs, one shared compiler) legitimately resolves it differently per
+    # TU, unlike ast_producer/frontend_context_kind above, which really
+    # should never diverge and are rejected outright when they do. Blindly
+    # copying one representative TU's resolved_lang_mode would silently
+    # mislabel the whole merged snapshot's language_standard for every
+    # other TU. Strip it when it's not unanimous, falling back to
+    # _resolve_standard_provenance's own static re-derivation over the
+    # manifest's combined headers -- the same quality of answer this field
+    # didn't exist to improve on before this PR, not a new failure mode.
+    lang_modes = {
+        f.ast_toolchain["resolved_lang_mode"]
+        for f in ordered
+        if "resolved_lang_mode" in f.ast_toolchain
+    }
+    merged_ast_toolchain = representative.ast_toolchain
+    if len(lang_modes) > 1:
+        merged_ast_toolchain = {
+            k: v for k, v in representative.ast_toolchain.items() if k != "resolved_lang_mode"
+        }
     return MergedTuFragments(
         functions=functions,
         variables=variables,
@@ -496,7 +518,7 @@ def merge_fragments(
         typedefs_qualified=typedefs_qualified,
         constants=constants,
         ast_producer=representative.ast_producer,
-        ast_toolchain=representative.ast_toolchain,
+        ast_toolchain=merged_ast_toolchain,
         ast_fallback_reason=representative.ast_fallback_reason,
         ast_toolchain_supported=representative.ast_toolchain_supported,
         ast_toolchain_unsupported_reasons=representative.ast_toolchain_unsupported_reasons,

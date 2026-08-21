@@ -139,6 +139,47 @@ def test_merge_fragments_allows_uniform_frontend_context_kind():
     assert merged.frontend_context_kind == "device"
 
 
+def test_merge_fragments_drops_resolved_lang_mode_when_tus_disagree():
+    """Codex review, fresh evidence: unlike ast_producer/frontend_context_kind
+    above, resolved_lang_mode is NOT guaranteed uniform across TUs -- an
+    ordinary mixed-language manifest (some .c TUs, some .cpp TUs, one
+    shared compiler) legitimately resolves it differently per TU. Blindly
+    copying one representative TU's resolved_lang_mode would silently
+    mislabel the whole merged snapshot's language_standard for every other
+    TU, so a genuine mismatch must drop the field (not raise -- this is an
+    expected, common shape, unlike the producer/context mismatches above)."""
+    a = TuFragment(
+        tu_name="a.c",
+        ast_producer="clang",
+        ast_toolchain={"compiler_selected": "/usr/bin/clang", "resolved_lang_mode": "c"},
+    )
+    b = TuFragment(
+        tu_name="b.cpp",
+        ast_producer="clang",
+        ast_toolchain={"compiler_selected": "/usr/bin/clang", "resolved_lang_mode": "c++"},
+    )
+    merged = merge_fragments([a, b])
+    assert "resolved_lang_mode" not in merged.ast_toolchain
+    # The rest of the representative fragment's ast_toolchain survives --
+    # only the per-TU-varying field is stripped.
+    assert merged.ast_toolchain["compiler_selected"] == "/usr/bin/clang"
+
+
+def test_merge_fragments_keeps_resolved_lang_mode_when_tus_agree():
+    a = TuFragment(
+        tu_name="a.cpp",
+        ast_producer="clang",
+        ast_toolchain={"compiler_selected": "/usr/bin/clang", "resolved_lang_mode": "c++"},
+    )
+    b = TuFragment(
+        tu_name="b.cpp",
+        ast_producer="clang",
+        ast_toolchain={"compiler_selected": "/usr/bin/clang", "resolved_lang_mode": "c++"},
+    )
+    merged = merge_fragments([a, b])
+    assert merged.ast_toolchain["resolved_lang_mode"] == "c++"
+
+
 # ---------------------------------------------------------------------------
 # Determinism: merge is independent of fragment processing order
 # ---------------------------------------------------------------------------

@@ -111,6 +111,17 @@
   names `__STDC_VERSION__`, never `__cplusplus`), while still waiving a
   genuine unpinned-C transition (the forced `gnu11` literal, or an
   MSVC-dialect probe naming `__STDC_VERSION__`).
+- **`tu_merge.merge_fragments` (`--dump-manifest`) could silently mislabel
+  a mixed-language manifest's `language_standard`**: the new
+  `resolved_lang_mode` field (unlike `ast_producer`/`frontend_context_kind`,
+  which really are uniform across every TU by construction) legitimately
+  differs per TU in an ordinary mixed C/.c and C++/.cpp manifest under one
+  shared compiler — blindly copying one representative TU's value would
+  stamp the whole merged snapshot's `language_standard` from whichever TU
+  happened to sort first, silently wrong for every other TU. Now dropped
+  from the merged `ast_toolchain` (falling back to the pre-existing static
+  re-derivation over the manifest's combined headers) whenever the
+  contributing TUs disagree, rather than picked arbitrarily.
 - Known, narrower residuals, documented rather than fixed:
   - A cache/memo *hit* for a header that previously self-healed C→C++
     still reports the pre-retry language mode, since neither backend's AST
