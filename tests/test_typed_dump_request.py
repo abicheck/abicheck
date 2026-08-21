@@ -1326,7 +1326,7 @@ def test_resolve_side_snapshot_impl_forwards_gated_build_inputs_to_embed(
     snapshot's own evidence layers could silently describe two different
     builds. _resolve_side_snapshot_impl computes the allow_build_query gate
     once and forwards the identical (gated) values to both."""
-    from abicheck import service, service_input_resolution as sir
+    from abicheck import header_conditionals as _hc, service, service_input_resolution as sir
     from abicheck.model import AbiSnapshot
     from abicheck.service_compare_evidence import SideEvidence
 
@@ -1426,7 +1426,7 @@ class TestSharedPipelineReachesADR039BuildContextCollector:
     def test_collector_populates_defines_and_conditional_fields(
         self, monkeypatch, tmp_path: Path
     ) -> None:
-        from abicheck import service, service_input_resolution as sir
+        from abicheck import header_conditionals as _hc, service, service_input_resolution as sir
         from abicheck.service_compare_evidence import SideEvidence
 
         hdr = tmp_path / "widget.h"
@@ -1483,7 +1483,7 @@ class TestSharedPipelineReachesADR039BuildContextCollector:
         here by passing `fmt=None` (what the caller would have computed
         for the raw linker-script text) while the resolved snapshot is a
         real ELF one."""
-        from abicheck import service, service_input_resolution as sir
+        from abicheck import header_conditionals as _hc, service, service_input_resolution as sir
         from abicheck.service_compare_evidence import SideEvidence
 
         hdr = tmp_path / "widget.h"
@@ -1534,7 +1534,7 @@ class TestSharedPipelineReachesADR039BuildContextCollector:
         (``Path(dir).read_text()`` raises ``OSError``, silently caught and
         skipped by ``collect_build_context``, leaving ``conditional_fields``
         empty for the common directory-``-H`` case)."""
-        from abicheck import service, service_input_resolution as sir
+        from abicheck import header_conditionals as _hc, service, service_input_resolution as sir
         from abicheck.service_compare_evidence import SideEvidence
 
         include_dir = tmp_path / "include"
@@ -1590,7 +1590,7 @@ class TestSharedPipelineReachesADR039BuildContextCollector:
         P0.3 L3->L2-folded ``CompileContext`` this function also resolves
         internally -- else a build-derived define would be unioned
         snapshot-wide (the ninth finding in AGENTS.md's L3->L2-fold entry)."""
-        from abicheck import service, service_input_resolution as sir
+        from abicheck import header_conditionals as _hc, service, service_input_resolution as sir
         from abicheck.service_compare_evidence import SideEvidence
 
         hdr = tmp_path / "widget.h"
@@ -1620,13 +1620,13 @@ class TestSharedPipelineReachesADR039BuildContextCollector:
         )
 
         captured: dict[str, object] = {}
-        real_attach = sir.attach_build_context
+        real_attach = _hc.attach_build_context
 
         def _spy_attach(snap, compile_db_arg, headers, extra_flags, **kw):
             captured["extra_flags"] = list(extra_flags)
             return real_attach(snap, compile_db_arg, headers, extra_flags, **kw)
 
-        monkeypatch.setattr(sir, "attach_build_context", _spy_attach)
+        monkeypatch.setattr(_hc, "attach_build_context", _spy_attach)
 
         side = InputSpec(
             path=tmp_path / "lib.so",
@@ -1654,7 +1654,7 @@ class TestSharedPipelineReachesADR039BuildContextCollector:
     ) -> None:
         """No ``build_info`` at all: the collector must not run (and must not
         raise) -- a plain context-free dump is still the common case."""
-        from abicheck import service, service_input_resolution as sir
+        from abicheck import header_conditionals as _hc, service, service_input_resolution as sir
         from abicheck.service_compare_evidence import SideEvidence
 
         hdr = tmp_path / "widget.h"
@@ -1672,7 +1672,7 @@ class TestSharedPipelineReachesADR039BuildContextCollector:
         def _spy_attach(*a, **k):
             called["attach"] = True
 
-        monkeypatch.setattr(sir, "attach_build_context", _spy_attach)
+        monkeypatch.setattr(_hc, "attach_build_context", _spy_attach)
 
         side = InputSpec(path=tmp_path / "lib.so", headers=(hdr,))
         evidence = SideEvidence(
@@ -1698,7 +1698,7 @@ class TestSharedPipelineReachesADR039BuildContextCollector:
         shared pipeline must not attach build-context evidence to a PE/
         Mach-O snapshot, or it would silently disagree with the native
         PE/Mach-O dump path."""
-        from abicheck import service, service_input_resolution as sir
+        from abicheck import header_conditionals as _hc, service, service_input_resolution as sir
         from abicheck.service_compare_evidence import SideEvidence
 
         hdr = tmp_path / "widget.h"
@@ -1717,7 +1717,7 @@ class TestSharedPipelineReachesADR039BuildContextCollector:
         def _spy_attach(*a, **k):
             called["attach"] = True
 
-        monkeypatch.setattr(sir, "attach_build_context", _spy_attach)
+        monkeypatch.setattr(_hc, "attach_build_context", _spy_attach)
 
         side = InputSpec(path=tmp_path / "lib.dll", headers=(hdr,), build_info=db)
         evidence = SideEvidence(
@@ -1746,7 +1746,7 @@ class TestSharedPipelineReachesADR039BuildContextCollector:
         pipeline always calls the ADR-039 collector with the default,
         unfiltered ``source_filter=None`` for a real compile database +
         headers, rather than raising or narrowing."""
-        from abicheck import service, service_input_resolution as sir
+        from abicheck import header_conditionals as _hc, service, service_input_resolution as sir
         from abicheck.service_compare_evidence import SideEvidence
 
         hdr = tmp_path / "widget.h"
@@ -1764,13 +1764,13 @@ class TestSharedPipelineReachesADR039BuildContextCollector:
         )
 
         captured: dict[str, object] = {}
-        real_attach = sir.attach_build_context
+        real_attach = _hc.attach_build_context
 
         def _spy_attach(snap, compile_db_arg, headers, extra_flags, **kw):
             captured["source_filter"] = kw.get("source_filter")
             return real_attach(snap, compile_db_arg, headers, extra_flags, **kw)
 
-        monkeypatch.setattr(sir, "attach_build_context", _spy_attach)
+        monkeypatch.setattr(_hc, "attach_build_context", _spy_attach)
 
         side = InputSpec(path=tmp_path / "lib.so", headers=(hdr,), build_info=db)
         evidence = SideEvidence(
@@ -1800,7 +1800,7 @@ class TestSharedPipelineReachesADR039BuildContextCollector:
         loaded snapshot's own recorded build-context evidence with
         unrelated data -- ``side.path`` here is a JSON file, not an ELF
         binary or a followed linker script, so the collector must not run."""
-        from abicheck import service, service_input_resolution as sir
+        from abicheck import header_conditionals as _hc, service, service_input_resolution as sir
         from abicheck.service_compare_evidence import SideEvidence
 
         hdr = tmp_path / "widget.h"
@@ -1824,7 +1824,7 @@ class TestSharedPipelineReachesADR039BuildContextCollector:
         def _spy_attach(*a, **k):
             called["attach"] = True
 
-        monkeypatch.setattr(sir, "attach_build_context", _spy_attach)
+        monkeypatch.setattr(_hc, "attach_build_context", _spy_attach)
 
         side = InputSpec(path=snapshot_path, headers=(hdr,), build_info=db)
         evidence = SideEvidence(
@@ -1841,3 +1841,120 @@ class TestSharedPipelineReachesADR039BuildContextCollector:
         )
         assert called["attach"] is False
         assert resolution.snapshot.build_context_defines == set()
+
+
+class TestSeedCleanupsDrainBeforeTheEmbedStep:
+    """PR 3A (CLI cleanup phase two, dump/scan resolver convergence).
+
+    ``_resolve_side_snapshot_impl`` used to drain the L2 seed's own cleanups
+    only at the very end of the function -- after ``embed_side_build_source``.
+    An inferred build query holds its deterministic per-source-tree build dir
+    under an exclusive ``flock`` until its cleanup runs, and the embed step
+    runs its *own* inferred query in the same call, so that ordering makes the
+    second query contend, in the same process, on a lock the first still holds
+    -- blocking for up to ``INFERRED_QUERY_TIMEOUT_S`` (600s) before falling
+    back to a throwaway dir. That is the identical self-contention shape
+    ``scan_engine._build_new_snapshot`` already fixed (the fifth finding on the
+    root ``AGENTS.md``'s L3->L2-fold entry); this pins the same ordering here.
+
+    Latent rather than live for the callers that exist today (the seed's own
+    ``collect_mode`` is pinned ``"off"``, so no caller can currently run an
+    inferred query in the seed at all and the cleanup list is always empty) --
+    which is exactly why it needs a test rather than a bug report: the trap
+    springs on whichever future PR relaxes that pin.
+    """
+
+    def test_cleanups_run_after_the_parse_and_before_the_embed(
+        self, monkeypatch, tmp_path: Path
+    ) -> None:
+        from abicheck import service, service_input_resolution as sir
+        from abicheck.service_compare_evidence import SideEvidence
+
+        hdr = tmp_path / "widget.h"
+        hdr.write_text("struct Widget { int x; };\n", encoding="utf-8")
+        sources = tmp_path / "src"
+        sources.mkdir()
+
+        events: list[str] = []
+
+        def _fake_seed(*_a, **_k):
+            events.append("seed")
+            return [], None, False, [lambda: events.append("cleanup")]
+
+        monkeypatch.setattr(
+            sir, "_seeded_includes_and_compile_context", _fake_seed
+        )
+
+        def _fake_resolve(*_a, **_k):
+            events.append("parse")
+            return AbiSnapshot(library="lib", version="1", from_headers=True)
+
+        monkeypatch.setattr(service, "resolve_input", _fake_resolve)
+        monkeypatch.setattr(
+            sir,
+            "embed_side_build_source",
+            lambda *_a, **_k: events.append("embed"),
+        )
+
+        side = InputSpec(path=tmp_path / "lib.so", headers=(hdr,), sources=sources)
+        evidence = SideEvidence(
+            headers=[hdr],
+            compile=None,
+            collect_mode="source-target",
+            dump_manifest=None,
+        )
+        sir._resolve_side_snapshot_impl(
+            side,
+            evidence,
+            lang="c++",
+            header_backend="auto",
+            fmt="elf",
+            public_headers=[hdr],
+            public_header_dirs=[],
+        )
+
+        assert events == ["seed", "parse", "cleanup", "embed"]
+        assert events.index("cleanup") < events.index("embed")
+
+    def test_cleanups_still_run_exactly_once_when_the_parse_raises(
+        self, monkeypatch, tmp_path: Path
+    ) -> None:
+        """The drain moved into a nested ``finally``; the outer one is kept as a
+        backstop. Neither may run the same already-handed-off thunk twice."""
+        import pytest
+
+        from abicheck import service, service_input_resolution as sir
+        from abicheck.errors import SnapshotError
+        from abicheck.service_compare_evidence import SideEvidence
+
+        hdr = tmp_path / "widget.h"
+        hdr.write_text("struct Widget { int x; };\n", encoding="utf-8")
+
+        runs: list[str] = []
+        monkeypatch.setattr(
+            sir,
+            "_seeded_includes_and_compile_context",
+            lambda *_a, **_k: ([], None, False, [lambda: runs.append("cleanup")]),
+        )
+
+        def _boom(*_a, **_k):
+            raise SnapshotError("nope")
+
+        monkeypatch.setattr(service, "resolve_input", _boom)
+
+        side = InputSpec(path=tmp_path / "lib.so", headers=(hdr,))
+        evidence = SideEvidence(
+            headers=[hdr], compile=None, collect_mode="off", dump_manifest=None
+        )
+        with pytest.raises(SnapshotError):
+            sir._resolve_side_snapshot_impl(
+                side,
+                evidence,
+                lang="c++",
+                header_backend="auto",
+                fmt="elf",
+                public_headers=[hdr],
+                public_header_dirs=[],
+            )
+
+        assert runs == ["cleanup"]

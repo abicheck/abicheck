@@ -241,7 +241,8 @@ def test_perform_elf_dump_keeps_l3_derived_flags_out_of_build_context_collector(
         captured["extra_flags"] = extra_flags
 
     monkeypatch.setattr(
-        "abicheck.cli_dump_helpers._attach_build_context", _fake_attach_build_context
+        "abicheck.header_conditionals.attach_build_context",
+        _fake_attach_build_context,
     )
 
     perform_elf_dump(

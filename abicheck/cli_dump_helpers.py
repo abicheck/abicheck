@@ -28,15 +28,12 @@ from .dumper import dump
 from .dumper_scoping import dump_manifest_header_roots as _dump_manifest_header_roots
 from .errors import AbicheckError
 
-# `_attach_build_context`/`_user_define_flags` are called directly below by
-# `perform_elf_dump` (not just re-exported for a caller elsewhere), so this
-# static edge to `header_conditionals` is structurally required regardless of
-# re-export strategy -- unlike the two names in the lazy `__getattr__` shim
-# further down, which `perform_elf_dump` never calls itself.
-from .header_conditionals import (
-    attach_build_context as _attach_build_context,
-    user_define_flags as _user_define_flags,
-)
+# `attach_build_context_for_parsed_headers` is called directly below by
+# `perform_elf_dump`, so this static edge to `header_conditionals` (a verified
+# leaf module) is structurally required regardless of re-export strategy --
+# unlike the four names in the lazy `__getattr__` shim further down, which
+# nothing in this module calls itself.
+from .header_conditionals import attach_build_context_for_parsed_headers
 
 if TYPE_CHECKING:
     from .buildsource.pack import BuildSourcePack
@@ -93,35 +90,36 @@ class _WriteSnapshotOutput(Protocol):
     ) -> None: ...
 
 
-# `_user_define_flags`/`_attach_build_context` (used below by `perform_elf_dump`)
-# are now `header_conditionals.user_define_flags`/`attach_build_context`,
-# imported above under their original private names — see that module for the
-# ADR-039 collection logic and why it moved (PR C, CLI cleanup phase two).
-
 # ── Back-compat re-export shim (lazy, per AGENTS.md's moved-helper
 #    convention) ────────────────────────────────────────────────────────────
-# `compile_db_from_build_info`/`compile_db_filter_scope_error` moved to
-# `header_conditionals.py` alongside `_attach_build_context`/
-# `_user_define_flags` above -- but unlike those two, nothing in this module
-# calls either of these itself (confirmed by grep: no `compile_db_from_
-# build_info(`/`compile_db_filter_scope_error(` call site here). They exist
-# only so `from .cli_dump_helpers import compile_db_from_build_info,
-# compile_db_filter_scope_error` (cli.py) and existing tests keep working
-# unchanged. A static re-export here would be an eager dependency edge this
-# module has no other reason to carry for these two names, so this
-# module-level `__getattr__` (PEP 562) resolves them lazily via
-# `importlib.import_module` instead -- mirroring the identical shim at the
-# tail of `cli_buildsource.py` (Codex review, PR #809).
-_HEADER_CONDITIONALS_REEXPORTS = frozenset(
-    {"compile_db_from_build_info", "compile_db_filter_scope_error"}
-)
+# All four of these live in `header_conditionals.py` (see that module for the
+# ADR-039 collection logic and why it moved -- PR C, CLI cleanup phase two) and
+# nothing in this module calls any of them itself. `attach_build_context`/
+# `user_define_flags` joined this shim in PR 3A: `perform_elf_dump` used to
+# call both directly (a structurally required static edge), but now reaches
+# them only through `attach_build_context_for_parsed_headers` -- the one shared
+# ADR-039 gate this call site, the typed pipeline's
+# `_resolve_side_snapshot_impl`, and `scan_engine._build_new_snapshot` all use.
+# They stay reachable under their original private names purely so
+# `from .cli_dump_helpers import ...` (cli.py) and existing tests keep working
+# unchanged. A static re-export would be an eager dependency edge this module
+# has no other reason to carry for these names, so this module-level
+# `__getattr__` (PEP 562) resolves them lazily via `importlib.import_module`
+# instead -- mirroring the identical shim at the tail of `cli_buildsource.py`
+# (Codex review, PR #809).
+_HEADER_CONDITIONALS_REEXPORTS: dict[str, str] = {
+    "compile_db_from_build_info": "compile_db_from_build_info",
+    "compile_db_filter_scope_error": "compile_db_filter_scope_error",
+    "_attach_build_context": "attach_build_context",
+    "_user_define_flags": "user_define_flags",
+}
 
 
 def __getattr__(name: str) -> Any:
-    if name in _HEADER_CONDITIONALS_REEXPORTS:
+    if (target := _HEADER_CONDITIONALS_REEXPORTS.get(name)) is not None:
         import importlib
 
-        return getattr(importlib.import_module("abicheck.header_conditionals"), name)
+        return getattr(importlib.import_module("abicheck.header_conditionals"), target)
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
@@ -1709,26 +1707,54 @@ def perform_elf_dump(
         # record fields, so the reconciler can clear a context-free header-parse false
         # positive (a guarded field the context-free castxml parse pruned). Best-effort
         # and additive: absent/empty on a plain context-free dump.
-        if effective_compile_db and resolved_headers:
-            # Augment the sound per-command compile-DB intersection with the user's
-            # *global* flags only: the repeatable ``--compiler-option`` tokens and the
-            # ``-D``/``-U`` in the ``--gcc-options`` string (``user_gcc_options``).
-            # A user ``--gcc-options=-UKEEP`` must override a DB ``-DKEEP`` (Codex
-            # review #498). We deliberately do NOT feed ``effective_gcc_options``,
-            # which also carries the *first* resolved header's auto-derived build
-            # context — unioning that snapshot-wide would mark one TU's ``-DKEEP``
-            # active for every scanned header. The P0.3 L3->L2 fold's own derived
-            # flags are excluded for the identical reason: ``_user_gcc_option_tokens``
-            # is captured before the fold's ``l3_context_applied`` reassignment, so a
-            # per-header-matched compile unit's own ``-D``/``-U`` never leaks into this
-            # snapshot-wide harvest either (Codex review).
-            _attach_build_context(
-                snap,
-                effective_compile_db,
-                resolved_headers,
-                _user_define_flags(_user_gcc_option_tokens, user_gcc_options),
-                source_filter=compile_db_filter,
-            )
+        #
+        # Routed through the one shared gate every resolver now uses (CLI
+        # cleanup phase two, PR 3A -- dump/scan resolver convergence): this
+        # call site, the typed pipeline's ``_resolve_side_snapshot_impl``, and
+        # ``scan_engine._build_new_snapshot`` each hand-wrote their own version
+        # of "does this input have build context", which is how ``scan`` ended
+        # up never collecting any. See
+        # :func:`~abicheck.header_conditionals.attach_build_context_for_parsed_headers`
+        # for each gate and its reason. One of them is new *here*, and it
+        # matches what this same function already does one stanza above for the
+        # sibling ``parsed_with_build_context`` stamp: ``snap.from_headers``. A
+        # ``--dwarf-only`` run explicitly ignores ``-H`` (``dumper.
+        # _try_dwarf_snapshot`` warns "ignoring provided headers" and leaves
+        # ``from_headers`` False), so a database matching the *requested*
+        # headers is not evidence about a snapshot that never parsed them --
+        # exactly the reasoning already recorded for the stamp above, and the
+        # way ``handle_non_elf_dump`` gates its own.
+        #
+        # ``_user_gcc_option_tokens``/``user_gcc_options`` are the user's own
+        # *global* flags only: the repeatable ``--compiler-option`` tokens and
+        # the ``-D``/``-U`` in the ``--gcc-options`` string. A user
+        # ``--gcc-options=-UKEEP`` must override a DB ``-DKEEP`` (Codex review
+        # #498). We deliberately do NOT feed ``effective_gcc_options``, which
+        # also carries the *first* resolved header's auto-derived build context
+        # — unioning that snapshot-wide would mark one TU's ``-DKEEP`` active
+        # for every scanned header. The P0.3 L3->L2 fold's own derived flags
+        # are excluded for the identical reason: ``_user_gcc_option_tokens`` is
+        # captured before the fold's ``l3_context_applied`` reassignment, so a
+        # per-header-matched compile unit's own ``-D``/``-U`` never leaks into
+        # this snapshot-wide harvest either (Codex review).
+        #
+        # ``live_elf_parse=True`` unconditionally, and ``effective_compile_db``
+        # passed rather than re-resolved: ``dump_cmd`` reached this function
+        # only after ``_normalize_binary_input`` classified ``so_path`` as a
+        # real ELF binary (never a loaded JSON snapshot, the other half that
+        # gate excludes), and it already resolved the compile database from
+        # ``--build-info`` through the very same
+        # ``compile_db_from_build_info`` -- so re-deriving it here would only
+        # risk the two disagreeing.
+        attach_build_context_for_parsed_headers(
+            snap,
+            resolved_headers,
+            compile_db=effective_compile_db,
+            live_elf_parse=True,
+            user_gcc_option_tokens=_user_gcc_option_tokens,
+            user_gcc_options=user_gcc_options,
+            source_filter=compile_db_filter,
+        )
 
         # G14: recognise a CPython extension module and attach its metadata so the
         # written snapshot carries the abi3 / imported-C-API surface. The ELF `dump`

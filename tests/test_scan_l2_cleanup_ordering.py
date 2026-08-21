@@ -25,6 +25,19 @@ from __future__ import annotations
 
 from abicheck.cli_scan import _build_new_snapshot
 from abicheck.compile_context import CompileContext
+from abicheck.model import AbiSnapshot
+
+
+def _stub_snapshot() -> AbiSnapshot:
+    """A stand-in for what ``service.resolve_input`` really returns.
+
+    Deliberately a real :class:`AbiSnapshot` rather than a bare ``object()``:
+    ``_build_new_snapshot`` reads several of its fields after the call (the
+    ``parsed_with_build_context`` stamp, the ADR-039 collector's own gate), so
+    a stub that answers none of them only passes as long as every one of those
+    reads happens to be short-circuited by something else first.
+    """
+    return AbiSnapshot(library="lib.so", version="1.0")
 
 #: Keyword names shared verbatim between seed_includes_and_fold_compile_context's
 #: own signature and CompileContext's fields -- one place to update if either
@@ -58,7 +71,7 @@ def test_scan_l2_seed_cleanup_runs_before_embed(monkeypatch, tmp_path):
 
     def fake_resolve(*args, **kwargs):
         events.append("resolve")
-        return object()
+        return _stub_snapshot()
 
     def fake_embed(*args, **kwargs):
         events.append("embed")
@@ -105,7 +118,7 @@ def test_scan_candidate_filters_dependency_scope_by_default(monkeypatch, tmp_pat
 
     def fake_resolve(*args, **kwargs):
         resolve_kwargs.update(kwargs)
-        return object()
+        return _stub_snapshot()
 
     monkeypatch.setattr("abicheck.service.resolve_input", fake_resolve)
 
@@ -248,7 +261,9 @@ def test_scan_returns_seeded_includes_for_baseline(monkeypatch, tmp_path):
         "abicheck.buildsource.l2_seed.seed_includes_and_fold_compile_context",
         fake_seed_and_fold,
     )
-    monkeypatch.setattr("abicheck.service.resolve_input", lambda *a, **k: object())
+    monkeypatch.setattr(
+        "abicheck.service.resolve_input", lambda *a, **k: _stub_snapshot()
+    )
     monkeypatch.setattr(
         "abicheck.cli_buildsource.embed_build_source", lambda *a, **k: None
     )
@@ -296,7 +311,9 @@ def test_scan_candidate_expands_public_header_dirs_before_embed(monkeypatch, tmp
     pub_file = tmp_path / "standalone.h"
     pub_file.write_text("void standalone(void);\n", encoding="utf-8")
 
-    monkeypatch.setattr("abicheck.service.resolve_input", lambda *a, **k: object())
+    monkeypatch.setattr(
+        "abicheck.service.resolve_input", lambda *a, **k: _stub_snapshot()
+    )
 
     embed_kwargs: dict = {}
 

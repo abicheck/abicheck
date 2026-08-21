@@ -247,7 +247,18 @@ def _build_new_snapshot(
     """
     from .buildsource.l2_seed import seed_includes_and_fold_compile_context
     from .errors import AbicheckError
-    from .service import resolve_input
+    from .header_conditionals import attach_build_context_for_parsed_headers
+    from .service import resolve_input, sniff_text_format
+
+    # Captured *before* the P0.3 L3->L2 fold below reassigns `compile_context`:
+    # the ADR-039 collector must see only the caller's own explicit, global
+    # flags, never the fold's per-header-matched derived ones, or one TU's -D
+    # is marked active for every scanned header (`user_define_flags`' own
+    # docstring; the ninth finding on the root AGENTS.md's L3->L2-fold entry).
+    _user_gcc_option_tokens = (
+        compile_context.gcc_option_tokens if compile_context else ()
+    )
+    _user_gcc_options = compile_context.gcc_options if compile_context else None
 
     # L2 include fallback + P0.3 L3->L2 fold, combined into one L3 collection
     # (Codex review, PR #782 -- see seed_includes_and_fold_compile_context's own
@@ -362,6 +373,29 @@ def _build_new_snapshot(
     # doesn't claim their parse used real build context.
     if l3_context_applied and snap.from_headers:
         snap.parsed_with_build_context = True
+    # ADR-039 build-context collection (CLI cleanup phase two, PR 3A -- dump/
+    # scan resolver convergence). `scan` was the one candidate resolver that
+    # never ran this: the ELF `dump` CLI has always called it, and the typed
+    # pipeline (`compare`'s implicit-dump operand, `dump`'s `run_dump_request`)
+    # gained it in PR #809 -- so `scan --against` a `dump`-produced baseline
+    # compared a candidate carrying no `build_context_defines`/
+    # `conditional_fields` against a baseline that carried both, and the
+    # reconciler could not clear a context-free header-parse false positive on
+    # the candidate side the way it already did on the baseline's.
+    #
+    # Shared implementation, not a fourth hand-written gate: every condition
+    # (a resolvable compile database, a real ELF snapshot that actually parsed
+    # headers, a live parse rather than a loaded JSON snapshot) lives in
+    # `attach_build_context_for_parsed_headers`, so the three resolvers cannot
+    # drift on what "this input has build context" means again.
+    attach_build_context_for_parsed_headers(
+        snap,
+        headers,
+        build_info=build_info,
+        live_elf_parse=snap.elf is not None and sniff_text_format(binary) != "json",
+        user_gcc_option_tokens=_user_gcc_option_tokens,
+        user_gcc_options=_user_gcc_options,
+    )
     # Collect evidence when there is something to collect from — a source tree OR
     # an out-of-tree build-info input — at a non-"off" level.
     if (sources is not None or build_info is not None) and collect_mode != "off":
