@@ -460,23 +460,35 @@ def is_consumer_scoped(call: dict) -> bool:
 _BINARY_SUFFIX_RE = re.compile(r"\.(so(\.\d+)*|dll|dylib|exe)$", re.IGNORECASE)
 
 
-def _stripped_binary_name(name: str) -> str | None:
-    """`name` with one trailing compiled-artifact suffix removed, if any.
+def _stripped_binary_names(name: str) -> set[str]:
+    """`name` with a trailing compiled-artifact suffix and/or a leading
+    conventional `lib` prefix removed, every combination that applies.
 
     `--used-by` names a real path to the *built* consumer
     (`references/abicheck-adapter.md`'s own worked example: `--used-by
-    path/to/consumer-binary`), and a real build almost always gives that
-    path a platform suffix (`renderer.so`, `renderer.so.2`, `renderer.dll`)
-    — while a scenario's `invocation.used_by` declares the bare logical name
+    path/to/consumer-binary`), and a real Unix shared-library build
+    conventionally gives that path both a platform suffix (`renderer.so`,
+    `renderer.so.2`, `renderer.dll`) and, for the plain-`.so` case
+    specifically, a leading `lib` prefix (`librenderer.so`) — while a
+    scenario's `invocation.used_by` declares the bare logical name
     (`renderer`) the fixture calls it. The plain-basename match already
     handles a literal, suffix-free operand; this closes the far more common
-    case of an actual compiled artifact. Returns `None` when nothing
-    matched, so a caller adds only a genuinely new candidate.
+    case of an actual compiled artifact, in either shape. `lib` is stripped
+    only when a recognized suffix was also present — `libwidget` (a real,
+    unrelated consumer literally named that) must not lose its `lib` on the
+    strength of a prefix alone. Returns an empty set when nothing matched,
+    so a caller adds only genuinely new candidates.
     """
     match = _BINARY_SUFFIX_RE.search(name)
     if not match:
-        return None
-    return name[: match.start()] or None
+        return set()
+    suffix_stripped = name[: match.start()]
+    if not suffix_stripped:
+        return set()
+    candidates = {suffix_stripped}
+    if suffix_stripped.startswith("lib") and len(suffix_stripped) > len("lib"):
+        candidates.add(suffix_stripped[len("lib") :])
+    return candidates
 
 
 def _required_symbols_file_targets(call: dict, value: str) -> list[str]:
@@ -519,10 +531,11 @@ def consumer_scope_targets(call: dict) -> frozenset[str]:
     name — while a scenario's `invocation.used_by` declares the logical name
     (`renderer`) the fixture calls it. Matching the literal operand alone
     would hard-fail every correctly-scoped run, so each raw value
-    contributes itself, its path basename, and (see `_stripped_binary_name`)
-    that basename with one compiled-artifact suffix stripped —
-    `--required-symbol`'s operand is already a bare symbol name with no path
-    structure or suffix, so both transforms are no-ops there.
+    contributes itself, its path basename, and (see `_stripped_binary_names`)
+    that basename with its compiled-artifact suffix and/or conventional
+    `lib` prefix stripped — `--required-symbol`'s operand is already a bare
+    symbol name with no path structure, suffix, or prefix, so all of these
+    transforms are no-ops there.
     """
     argv = call.get("argv", [])
     targets: set[str] = set()
@@ -531,9 +544,7 @@ def consumer_scope_targets(call: dict) -> frozenset[str]:
         targets.add(value)
         basename = Path(value).name
         targets.add(basename)
-        stripped = _stripped_binary_name(basename)
-        if stripped:
-            targets.add(stripped)
+        targets.update(_stripped_binary_names(basename))
 
     def _add_required_symbols_file(value: str) -> None:
         for symbol in _required_symbols_file_targets(call, value):

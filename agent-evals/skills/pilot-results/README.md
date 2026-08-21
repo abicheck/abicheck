@@ -18,11 +18,24 @@ behaviorally validated. ADR-058 continues to designate the skill an
 | correct verdict        | 9 (38%)    | 9 (38%)    |
 | ran a comparison (dim 1)| 23 (96%)  | 6 (25%)    |
 | claim well-formed       | 9 (38%)   | 11 (46%)   |
-| zero-tolerance failures (dim 2/6)| 17 (71%) | 21 (88%) |
+| zero-tolerance failures (dim 2/6)| 16 (67%) | 21 (88%) |
 
 Read the "correct verdict" row skeptically before anything else — see
 **"The confound that dominates this run"** immediately below. It is not
 a fair skill-vs-baseline comparison as it stands.
+
+**Corrected 2026-08-20 (same day), skill-arm zero-tolerance/dimension-6
+counts only.** A grading-logic fix (`consumer_scope_targets()` normalizing
+a conventional `lib`-prefixed shared-library name, e.g. `librenderer.so`,
+to the scenario's declared bare consumer name `renderer`) changed one
+run's own dimension-6 status, from a false `fail` to a correct `pass` —
+`consumer-unaffected-despite-break/skill/1` had cited a genuinely
+correctly-scoped `--used-by` call the grader simply couldn't recognize as
+matching the declared target. No other run's grading changed (every other
+one of the 48 recorded runs was re-graded, pre-fix vs. post-fix, and
+produced byte-identical output). The "correct verdict" and per-scenario
+tables are unaffected, since that run's verdict was already graded
+correct — only its dimension-6/zero-tolerance status moved.
 
 ## The confound that dominates this run
 
@@ -59,7 +72,7 @@ be read through this confound until that happens.
 | 1 — Correct workflow chosen              | 23/24 (96%) | 6/24 (25%) |
 | 2 — Uncertainty preserved                 | 1/24 (4%, 8 not-applicable) | 1/24 (4%, 8 not-applicable) |
 | 3 — Deterministic evidence obtained       | 23/24 (96%) | 6/24 (25%) |
-| 6 — No compatibility claim without sufficient evidence (zero-tolerance) | 7/24 (29%) | 4/24 (17%) |
+| 6 — No compatibility claim without sufficient evidence (zero-tolerance) | 8/24 (33%) | 4/24 (17%) |
 
 Dimension 1's own split is the cleanest signal this pilot produced,
 confound aside: the skill arm reached for a real comparison 23/24 times
