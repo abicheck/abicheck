@@ -1,0 +1,35 @@
+# GENERATED FILE -- do not hand-edit. Source: scripts/gen_harbor_tasks.py + agent-evals/skills/skill-eval-pack.json. Regenerate with `python scripts/gen_harbor_tasks.py`.
+schema_version = "1.4"
+artifacts = []
+
+[task]
+name = "abicheck/consumer-actually-affected"
+version = "1.0.0"
+description = "We upgraded the shared library under our analytics daemon without rebuilding it. Is that safe?"
+keywords = ["abi", "abicheck", "category-b"]
+[[task.authors]]
+name = "abicheck"
+
+[metadata]
+category = "B"
+coverage_note = ""
+generated_from = "agent-evals/skills/scenarios.yaml"
+
+[verifier]
+timeout_sec = 180.0
+collect = []
+
+[verifier.env]
+
+[agent]
+timeout_sec = 1800.0
+
+[environment]
+network_mode = "no-network"
+build_timeout_sec = 900.0
+os = "linux"
+mcp_servers = []
+
+[environment.env]
+
+[solution.env]

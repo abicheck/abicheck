@@ -20,6 +20,14 @@ important, the harness confound (`--max-turns`) that limits how much weight
 they can bear today. **Still missing: the judged dimensions (4 and 5), the
 trigger corpus runner, and any committed evidence.**
 
+`harbor/` (ADR-058's Harbor-migration amendment) is a second, *additive*
+evaluation surface generated from the same `scenarios.yaml`/`skill-eval-
+pack.json` — a real, schema-validated [Harbor](https://www.harborframework.com)
+task per scenario, sharing the same deterministic graders unmodified. It does
+not replace anything above; see `harbor/CLAUDE.md` for what has and has not
+actually been verified (no Docker in this environment, so no real Harbor
+trial has run yet).
+
 | Path | Role |
 |------|------|
 | `scenarios.yaml` | The behavioral (L2) corpus. Category A names an `examples/` case and derives its expected outcome from `ground_truth.json`; Category B carries invocation parameters the catalog structurally cannot express and states its own outcome. |

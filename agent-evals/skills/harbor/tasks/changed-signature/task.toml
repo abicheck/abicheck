@@ -1,0 +1,35 @@
+# GENERATED FILE -- do not hand-edit. Source: scripts/gen_harbor_tasks.py + agent-evals/skills/skill-eval-pack.json. Regenerate with `python scripts/gen_harbor_tasks.py`.
+schema_version = "1.4"
+artifacts = []
+
+[task]
+name = "abicheck/changed-signature"
+version = "1.0.0"
+description = "Does this change break existing consumers of the library, or only require a recompile?"
+keywords = ["abi", "abicheck", "category-a"]
+[[task.authors]]
+name = "abicheck"
+
+[metadata]
+category = "A"
+coverage_note = "examples/ground_truth.json"
+generated_from = "agent-evals/skills/scenarios.yaml"
+
+[verifier]
+timeout_sec = 180.0
+collect = []
+
+[verifier.env]
+
+[agent]
+timeout_sec = 1800.0
+
+[environment]
+network_mode = "no-network"
+build_timeout_sec = 900.0
+os = "linux"
+mcp_servers = []
+
+[environment.env]
+
+[solution.env]

@@ -1073,6 +1073,18 @@ does not advance Phases 4-6 below; those remain fully open, and the
 pilot's own "Recommended next steps" (raise `--max-turns` and re-run, first)
 is the actual next action here, not a fresh Phase-3 pass.
 
+**2026-08-21, additive Harbor task battery (user-requested, not a phase
+advance).** `agent-evals/skills/harbor/tasks/` now carries a generated,
+schema-validated [Harbor](https://www.harborframework.com) task per
+scenario, alongside the unchanged existing harness — real (validated
+against the actual `harbor` package's schema; every Category A reference
+solution runs end to end through the real graders), but never run through
+an actual Harbor trial (no Docker in this environment). See
+`agent-evals/skills/harbor/CLAUDE.md` and ADR-058's matching amendment for
+the full account. Does not advance Phase 3's own done-ness or any later
+phase — it is a second surface over the same corpus, not new corpus or a
+new result.
+
 ### Phase 4 — Cross-agent *(M)*
 
 Codex and Gemini CLI runners emitting the same bundle schema, run against the
@@ -1081,6 +1093,14 @@ table in `skills-src/CLAUDE.md` is then populated from generated results for
 the scriptable targets rather than hand-maintained — one row
 (`native-binary-compatibility-review`) per target until a prototype skill is
 promoted, not all four.
+
+Harbor's own agent registry already includes Codex CLI and Gemini CLI
+adapters (confirmed by reading its source, not assumed) — the task battery
+above could in principle serve this phase directly instead of a hand-built
+second/third runner, once a real Harbor trial has actually been run at all
+(still zero, per the note above). **Not decided**: whether Phase 4 adopts
+Harbor for this or keeps the hand-built-runner design this phase already
+describes.
 
 ### Phase 5 — agent-benchmark integration, L3 *(M, separate repo)*
 

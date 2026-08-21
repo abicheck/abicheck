@@ -1,0 +1,481 @@
+#!/usr/bin/env python3
+# Copyright 2026 Nikolay Petrov
+# SPDX-License-Identifier: Apache-2.0
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""Generate Harbor-format task directories from the G37 scenario pack.
+
+ADR-058's Harbor-migration amendment is the design record for *why* this
+exists; this docstring covers only what the generator itself does.
+
+**One task per scenario, not per (scenario, arm).** Whether the skill is
+installed is not a property of the *question* — it is a property of which
+agent configuration answers it. Harbor's own `claude-code` agent adapter
+already models this split (`[environment].skills_dir`, copied into the
+agent's own skills directory at trial start, confirmed by reading
+`harbor.agents.installed.claude_code`'s source directly, not guessed from
+docs) — so the generated task never bakes a skill in. A baseline trial is
+`harbor run -a claude-code ...`; a skill trial is the same command with
+`--ak skills_dir=/opt/skills`. See `agent-evals/skills/harbor/CLAUDE.md`.
+
+**Reuses, never re-derives, three things this repo already has right:**
+
+1. `skill-eval-pack.json["scenarios"]` — the resolved prompt/expected/
+   fixture-path triple, exactly as `runners/claude_code.py`'s own harness
+   consumes it. A task's ground truth is one JSON blob copied into
+   `tests/scenario.json`, not re-typed.
+2. `runners.claude_code.strip_comments`/`demo_app_sources`/
+   `EXPLANATORY_FILES` — the exact fixture-to-workspace transform the
+   existing harness already applies (answer-bearing comments stripped, the
+   case's own demo consumer excluded), imported directly so a future change
+   to that transform is not something this file can silently drift from.
+3. `runners.claude_code.ANSWER_CONTRACT` — the same claim-envelope contract,
+   with one addendum appended (see `_FILE_ADDENDUM` below) telling the agent
+   to persist its answer to a file, since a Harbor verifier reads the
+   trial's filesystem, not its chat transcript.
+
+**What is NOT reused, and why.** `dimension_1`'s skill-activation check
+(`arm` parameter) has no Harbor equivalent yet — see `verify_run.py`'s own
+docstring for why `arm=None` is correct here, not a gap silently dropped.
+
+Run `python scripts/gen_harbor_tasks.py --check` to verify the committed
+tree matches (same contract as `gen_skill_eval_pack.py --check`).
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import subprocess
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+EVAL_DIR = ROOT / "agent-evals" / "skills"
+sys.path.insert(0, str(EVAL_DIR))
+
+from runners.claude_code import (  # noqa: E402
+    ANSWER_CONTRACT,
+    EXPLANATORY_FILES,
+    demo_app_sources,
+    strip_comments,
+)
+
+PACK = EVAL_DIR / "skill-eval-pack.json"
+TASKS_DIR = EVAL_DIR / "harbor" / "tasks"
+
+#: Marker every generated file carries — `check_ai_readiness.py`'s
+#: `generated-file-ownership` check requires one on every file a generator
+#: owns. `.toml`/`.sh`/`.md` all accept a `#`-comment first line.
+_MARKER = (
+    "# GENERATED FILE -- do not hand-edit. Source: scripts/gen_harbor_tasks.py "
+    "+ agent-evals/skills/skill-eval-pack.json. Regenerate with "
+    "`python scripts/gen_harbor_tasks.py`.\n"
+)
+
+#: Appended to the shared `ANSWER_CONTRACT` -- the one behavioral difference
+#: this migration requires of the agent, and the only reason a Harbor task's
+#: instruction.md is not byte-identical to the existing harness's prompt.
+_FILE_ADDENDUM = """
+This trial is graded from files, not from chat: before you finish, write
+your reply's fenced ```json block above verbatim to the file
+`/workspace/final.md` as your last action (a heredoc or your file-write tool
+both work) -- nothing you only say in the conversation is checked.
+"""
+
+#: `[environment].network_mode` for the agent phase. The image build (which
+#: needs network for `apt`/`git`/`pip`) is a separate phase Harbor times and
+#: gates independently (`build_timeout_sec`) -- this only restricts the
+#: *agent's* runtime network, which the compiled-in toolchain never needs.
+_AGENT_NETWORK_MODE = "no-network"
+
+
+def _abicheck_ref() -> str:
+    """The commit this task pack was generated from -- pinned, not floating.
+
+    A generated task frozen at a stale ref is a known, visible staleness
+    (this generator's own `--check` catches it, same contract as
+    `skill-eval-pack.json`'s content digests); a Dockerfile that always
+    clones `HEAD` of a branch would silently drift the moment abicheck's own
+    graders change underneath an already-published task.
+    """
+    return subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+
+
+def _dockerfile(ref: str) -> str:
+    return f"""{_MARKER}FROM python:3.13-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \\
+        build-essential gcc g++ castxml git ca-certificates \\
+    && rm -rf /var/lib/apt/lists/*
+
+# Pinned to the commit this task pack was generated from -- see
+# `_abicheck_ref()` in scripts/gen_harbor_tasks.py.
+ARG ABICHECK_REF={ref}
+RUN git clone https://github.com/abicheck/abicheck.git /opt/abicheck-src \\
+    && cd /opt/abicheck-src && git checkout "$ABICHECK_REF" \\
+    && pip install --no-cache-dir -e ".[dev]"
+
+# Recording shim (agent-evals/skills/shim/abicheck): every `abicheck ...`
+# call an agent makes is transparently recorded to $SKILL_EVAL_CALLS, then
+# forwarded to the real binary. Present in every trial, skill-arm or not --
+# both arms of the existing harness always have abicheck on PATH; only
+# whether the skill points the agent at it differs.
+RUN real="$(command -v abicheck)" \\
+    && mv "$real" "$real-real" \\
+    && cp /opt/abicheck-src/agent-evals/skills/shim/abicheck "$real" \\
+    && chmod +x "$real" "$real-real"
+ENV SKILL_EVAL_REAL_ABICHECK=/usr/local/bin/abicheck-real
+ENV SKILL_EVAL_CALLS=/workspace/calls.jsonl
+
+# This sandbox's own castxml is routinely below abicheck's policy floor
+# (agent-evals/skills/CLAUDE.md's "Environment prerequisites" section);
+# degrade to direct-clang rather than hard-erroring, matching the existing
+# harness's own documented workaround.
+ENV ABICHECK_ALLOW_AST_FALLBACK=1
+
+# Opt-in only -- see this file's own module docstring. A skill-arm trial
+# requests it explicitly: `harbor run ... --ak skills_dir=/opt/skills`.
+RUN mkdir -p /opt/skills \\
+    && cp -r /opt/abicheck-src/.claude/skills/check-abi-compatibility /opt/skills/
+
+WORKDIR /workspace
+COPY workspace/ /workspace/
+"""
+
+
+def _task_toml(scenario_id: str, scenario: dict) -> str:
+    category = scenario.get("category", "?")
+    note = (scenario.get("expected") or {}).get("resolved_from") or scenario.get(
+        "coverage_note", ""
+    )
+    description = scenario["prompt"].strip().splitlines()[0][:200]
+    keywords = ["abi", "abicheck", f"category-{category.lower()}"]
+    keywords_toml = ", ".join(json.dumps(k) for k in keywords)
+    return f"""{_MARKER}schema_version = "1.4"
+artifacts = []
+
+[task]
+name = "abicheck/{scenario_id}"
+version = "1.0.0"
+description = {json.dumps(description)}
+keywords = [{keywords_toml}]
+[[task.authors]]
+name = "abicheck"
+
+[metadata]
+category = {json.dumps(category)}
+coverage_note = {json.dumps(note)}
+generated_from = "agent-evals/skills/scenarios.yaml"
+
+[verifier]
+timeout_sec = 180.0
+collect = []
+
+[verifier.env]
+
+[agent]
+timeout_sec = 1800.0
+
+[environment]
+network_mode = {json.dumps(_AGENT_NETWORK_MODE)}
+build_timeout_sec = 900.0
+os = "linux"
+mcp_servers = []
+
+[environment.env]
+
+[solution.env]
+"""
+
+
+def _instruction_md(scenario: dict) -> str:
+    return scenario["prompt"].strip() + "\n" + ANSWER_CONTRACT + _FILE_ADDENDUM
+
+
+def _readme(scenario_id: str, scenario: dict) -> str:
+    return (
+        f"{_MARKER}\n# abicheck/{scenario_id}\n\n"
+        f"Category {scenario.get('category', '?')} scenario from the G37 evaluation "
+        f"corpus (`agent-evals/skills/scenarios.yaml`). Generated, not hand-authored "
+        "-- see `scripts/gen_harbor_tasks.py`.\n"
+    )
+
+
+def _test_sh() -> str:
+    return f"""#!/bin/bash
+{_MARKER}
+set -euo pipefail
+
+mkdir -p /logs/verifier
+python3 /opt/abicheck-src/agent-evals/skills/harbor/verify_run.py \\
+    --workspace /workspace \\
+    --scenario /tests/scenario.json \\
+    --reward-txt /logs/verifier/reward.txt \\
+    --reward-json /logs/verifier/reward.json
+"""
+
+
+def _readme_abicheck_command(fixture: Path) -> tuple[str, str, str] | None:
+    """The case README's own build+compare recipe, split for reuse.
+
+    Category A scenarios are drawn straight from `examples/case*/`, whose
+    README is the *validated* source of the case's own ground truth
+    (`ground_truth.json` is checked against exactly this command, per
+    `tests/validate_examples.py`) -- reusing it verbatim is strictly more
+    trustworthy than this generator re-deriving a compile/compare
+    invocation from the fixture's file names.
+
+    Returns `(full_block, old_operand, new_operand)` -- the two operands
+    parsed out of the block's own `abicheck compare <old> <new>` line so
+    `solve.sh` can re-run that exact comparison with `--format json`
+    appended, rather than re-parsing prose inside the generated shell
+    script itself. `None` when the block is missing or carries no bare
+    `abicheck compare` line (e.g. a case documented only via `abicheck
+    scan`), in which case `_solve_sh` falls back to its unimplemented stub
+    rather than guessing.
+    """
+    import re
+
+    readme = fixture / "README.md"
+    if not readme.is_file():
+        return None
+    text = readme.read_text(encoding="utf-8")
+    section = text.split("## abicheck command", 1)
+    if len(section) != 2:
+        return None
+    match = re.search(r"```bash\n(.*?)```", section[1], re.DOTALL)
+    if not match:
+        return None
+    block = match.group(1).strip()
+    compare_match = re.search(
+        r"^abicheck compare\s+(\S+)\s+(\S+)\s*$", block, re.MULTILINE
+    )
+    if not compare_match:
+        return None
+    return block, compare_match.group(1), compare_match.group(2)
+
+
+def _solve_sh(scenario_id: str, scenario: dict) -> str:
+    """A best-effort reference solution.
+
+    Real for Category A: the exact, already-validated compile+compare
+    command from the case's own README (`_readme_abicheck_command`), run
+    from the workspace and its real verdict captured into `final.md` --
+    not a heuristic re-derivation that could silently diverge from what
+    actually produced `ground_truth.json`.
+
+    Not attempted for Category B: each fixture's correct invocation was
+    verified by hand when its scenario was promoted to `ready` (see the
+    PR history for `agent-evals/skills/fixtures/`), but that command isn't
+    recorded anywhere this generator can read it back from -- a stub
+    explaining why beats silently guessing one for a corpus dominated by
+    scoped/uncertain-outcome scenarios, where a wrong guess reads as a
+    confidently wrong reference answer instead of an honest gap.
+    """
+    if scenario.get("category") == "A":
+        parsed = _readme_abicheck_command(ROOT / scenario["inputs"])
+        if parsed is not None:
+            block, old, new = parsed
+            # Only the build lines -- the block's own bare `abicheck compare`
+            # line is skipped here and re-run below with --format json
+            # instead of run twice; a BREAKING case's plain-text run also
+            # exits non-zero (exit 4), which `set -e` would otherwise treat
+            # as this script failing before it ever reaches the JSON rerun.
+            build_lines = "\n".join(
+                line
+                for line in block.splitlines()
+                if not line.strip().startswith("abicheck compare")
+            )
+            return f"""#!/bin/bash
+{_MARKER}
+set -euo pipefail
+cd /workspace/library
+
+# The case's own documented build recipe, verbatim:
+{build_lines}
+
+# The case's own documented comparison, re-run with --format json so the
+# verdict can be read back programmatically. `compare`'s own exit code
+# encodes the verdict (e.g. 4 = BREAKING) -- non-zero is a real result,
+# not a failure, and `set -e` must not treat it as one; the report file
+# on disk is what this script actually reads.
+abicheck compare {old} {new} --format json -o /tmp/report.json || true
+verdict=$(python3 -c "import json; print(json.load(open('/tmp/report.json'))['verdict'])")
+cat > /workspace/final.md <<EOF
+Reference solution -- the documented command for this case:
+
+\\`\\`\\`
+{block}
+\\`\\`\\`
+
+reported $verdict.
+
+\\`\\`\\`json
+{{"verdict": "$verdict", "evidence": [0], "confident": true}}
+\\`\\`\\`
+EOF
+"""
+    return f"""#!/bin/bash
+{_MARKER}
+set -euo pipefail
+# No generic reference solution for {scenario_id}: this Category B
+# fixture's correct invocation (a specific --used-by/--required-symbol/
+# --contract choice, per tests/scenario.json's own "invocation" block) was
+# verified by hand when the scenario was promoted to `ready` but is not
+# recorded anywhere this generator can read it back from. Left
+# unimplemented rather than guessing a command that could silently produce
+# a confidently wrong reference answer.
+exit 1
+"""
+
+
+def _prepared_library(fixture: Path, dest: Path) -> None:
+    """The same fixture -> workspace transform `_prepare_workspace` applies.
+
+    Duplicated in shape only because the destination differs (a task
+    directory on disk here, a disposable run directory there) -- the actual
+    transform (which files are excluded, which have comments stripped) is
+    the imported functions, not a re-implementation of them.
+    """
+    import shutil
+
+    apps = [Path(name).name for name in demo_app_sources(fixture)]
+    excluded = (*EXPLANATORY_FILES, *apps)
+    shutil.copytree(fixture, dest, ignore=shutil.ignore_patterns(*excluded))
+    for path in sorted(dest.rglob("*")):
+        if not path.is_file() or path.suffix.lower() not in (
+            ".c",
+            ".h",
+            ".cc",
+            ".cpp",
+            ".cxx",
+            ".hpp",
+            ".hh",
+        ):
+            continue
+        stripped = strip_comments(path.read_text(encoding="utf-8"))
+        if stripped is not None:
+            path.write_text(stripped, encoding="utf-8")
+
+
+def generate(check: bool = False) -> bool:
+    """Write every ready scenario's Harbor task. Returns whether anything changed."""
+    import shutil
+    import tempfile
+
+    pack = json.loads(PACK.read_text(encoding="utf-8"))
+    scenarios = {
+        sid: s for sid, s in pack["scenarios"].items() if s.get("status") == "ready"
+    }
+    ref = _abicheck_ref()
+
+    with tempfile.TemporaryDirectory() as tmp:
+        staging = Path(tmp) / "tasks"
+        staging.mkdir()
+        for scenario_id, scenario in sorted(scenarios.items()):
+            task_dir = staging / scenario_id
+            (task_dir / "environment").mkdir(parents=True)
+            (task_dir / "tests").mkdir()
+            (task_dir / "solution").mkdir()
+
+            (task_dir / "task.toml").write_text(
+                _task_toml(scenario_id, scenario), encoding="utf-8"
+            )
+            (task_dir / "instruction.md").write_text(
+                _instruction_md(scenario), encoding="utf-8"
+            )
+            (task_dir / "README.md").write_text(
+                _readme(scenario_id, scenario), encoding="utf-8"
+            )
+            (task_dir / "environment" / "Dockerfile").write_text(
+                _dockerfile(ref), encoding="utf-8"
+            )
+            _prepared_library(
+                ROOT / scenario["inputs"],
+                task_dir / "environment" / "workspace" / "library",
+            )
+            (task_dir / "tests" / "test.sh").write_text(_test_sh(), encoding="utf-8")
+            (task_dir / "tests" / "scenario.json").write_text(
+                json.dumps(scenario, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+            )
+            solve = task_dir / "solution" / "solve.sh"
+            solve.write_text(_solve_sh(scenario_id, scenario), encoding="utf-8")
+            solve.chmod(0o755)
+            (task_dir / "tests" / "test.sh").chmod(0o755)
+
+        if check:
+            if not TASKS_DIR.is_dir():
+                print(
+                    f"ERROR: {TASKS_DIR} does not exist -- run without --check first."
+                )
+                return False
+            changed = _diff_trees(TASKS_DIR, staging)
+            if changed:
+                print("ERROR: agent-evals/skills/harbor/tasks/ is out of date.")
+                print(
+                    "       Run `python scripts/gen_harbor_tasks.py` and commit the result."
+                )
+                for line in changed:
+                    print(f"       {line}")
+                return False
+            print("agent-evals/skills/harbor/tasks/ is up to date")
+            return True
+
+        if TASKS_DIR.exists():
+            shutil.rmtree(TASKS_DIR)
+        TASKS_DIR.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copytree(staging, TASKS_DIR)
+        print(f"wrote {len(scenarios)} task(s) to {TASKS_DIR}")
+        return True
+
+
+def _diff_trees(committed: Path, generated: Path) -> list[str]:
+    committed_files = {
+        p.relative_to(committed) for p in committed.rglob("*") if p.is_file()
+    }
+    generated_files = {
+        p.relative_to(generated) for p in generated.rglob("*") if p.is_file()
+    }
+    diffs = []
+    for rel in sorted(committed_files - generated_files):
+        diffs.append(f"only in committed tree: {rel}")
+    for rel in sorted(generated_files - committed_files):
+        diffs.append(f"only in generated tree: {rel}")
+    for rel in sorted(committed_files & generated_files):
+        a = (committed / rel).read_bytes()
+        b = (generated / rel).read_bytes()
+        if a != b:
+            diffs.append(f"content differs: {rel}")
+    return diffs
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--check", action="store_true", help="verify without writing; exit 1 on drift"
+    )
+    args = parser.parse_args(argv)
+    ok = generate(check=args.check)
+    return 0 if ok else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -1,0 +1,29 @@
+{
+  "affects": [
+    "check-abi-compatibility"
+  ],
+  "architectures": [],
+  "category": "A",
+  "digest": "sha256:b3a411931d9ac85031890464883bfbda6f3cb0af0c09e9be923b17ad5a1f1c5a",
+  "expected": {
+    "kinds": [
+      "type_vtable_changed"
+    ],
+    "min_evidence": "L1",
+    "resolved_from": "examples/ground_truth.json",
+    "verdict": "BREAKING"
+  },
+  "inputs": "examples/case09_cpp_vtable",
+  "invocation": {},
+  "platforms": [
+    "linux"
+  ],
+  "prompt": "A virtual function was added to a class our users derive from. Review this for compatibility.",
+  "roots": [
+    "agent-evals/skills/scenarios.yaml",
+    "examples/case09_cpp_vtable",
+    "examples/ground_truth.json"
+  ],
+  "skill": "check-abi-compatibility",
+  "status": "ready"
+}

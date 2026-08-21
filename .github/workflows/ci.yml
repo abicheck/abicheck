@@ -74,6 +74,8 @@ jobs:
       # rather than in a lane of their own.
       - name: Skill-eval pack + evidence freshness gates (G37 D6)
         run: python scripts/verify.py --profile pr --only skill-eval-pack,skill-eval-freshness
+      - name: Harbor task battery freshness (ADR-058 Harbor migration)
+        run: python scripts/verify.py --profile pr --only harbor-tasks
       - name: Per-tier accuracy matrix (step-summary artifact)
         if: always()
         run: python scripts/check_tier_accuracy.py --markdown >> "$GITHUB_STEP_SUMMARY"

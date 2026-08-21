@@ -418,6 +418,16 @@ STEPS: tuple[Step, ...] = (
         description="Skill-eval evidence is fresh, every hash maps to a skill, every observed input is hashed (G37 D6)",
     ),
     Step(
+        # Same generated-artifact contract as skill-eval-pack above, for the
+        # Harbor task battery it derives from: a scenario/fixture change that
+        # doesn't also regenerate agent-evals/skills/harbor/tasks/ leaves the
+        # committed tasks describing a stale corpus.
+        "harbor-tasks",
+        _pyscript("scripts/gen_harbor_tasks.py", "--check"),
+        frozenset({PR, FULL}),
+        description="agent-evals/skills/harbor/tasks/ matches its generator",
+    ),
+    Step(
         # FULL only, NOT PR: this step's precondition depends on origin/main
         # being locally resolvable, which is a checkout-topology fact (shallow
         # clone, detached HEAD, a fresh CI checkout without an explicit

@@ -1,0 +1,31 @@
+{
+  "affects": [
+    "check-abi-compatibility"
+  ],
+  "architectures": [],
+  "category": "A",
+  "digest": "sha256:a3859746c6570c0d3f3f18788cf731160379fd811061ca6c2890e4285959aa80",
+  "expected": {
+    "kinds": [
+      "func_added"
+    ],
+    "min_evidence": "L0",
+    "resolved_from": "examples/ground_truth.json",
+    "verdict": "COMPATIBLE"
+  },
+  "inputs": "examples/case03_compat_addition",
+  "invocation": {},
+  "platforms": [
+    "linux",
+    "macos",
+    "windows"
+  ],
+  "prompt": "We only added a new function this release. Confirm nothing else changed for existing consumers.",
+  "roots": [
+    "agent-evals/skills/scenarios.yaml",
+    "examples/case03_compat_addition",
+    "examples/ground_truth.json"
+  ],
+  "skill": "check-abi-compatibility",
+  "status": "ready"
+}
