@@ -753,3 +753,138 @@ class TestScopeGuardCoversSourcesOnlyAutoDiscovery:
         )
         resolved = resolve_dump_request(request)
         assert resolved.collect_mode == "build"
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(
+    not sys.platform.startswith("linux"),
+    reason="ELF/Linux-scoped repro (real g++-compiled .so + compile_commands.json)",
+)
+@pytest.mark.skipif(
+    not (_HAVE_GXX and _HAVE_CLANG), reason="needs a real g++ and clang toolchain"
+)
+class TestScopeGuardCoversNestedBuildInfoDatabases:
+    """Codex review, P1 (a fourth finding on the same slice): the scope
+    guard's ``build_info`` resolution (``compile_db_from_build_info``) only
+    ever checks ``<build_info>/compile_commands.json`` directly -- it has
+    no notion of a conventional out-of-tree build directory. The real
+    fold's own ``--build-info`` resolution
+    (``buildsource.inline._compile_db_at``, for a directory delegating to
+    ``_find_compile_db_in_dir``) searches immediate subdirectories too
+    (``build/``, ``cmake-build-debug/``, ...) -- explicitly documented as
+    matching ``--sources`` auto-discovery's own contract. So
+    ``--build-info <project-root>`` whose database actually lives at
+    ``<project-root>/build/compile_commands.json`` resolved for the fold
+    but not for the scope guard, reproducing the identical filtered-L2/
+    unfiltered-L3 mismatch. Fixed by having
+    ``compile_db_for_filter_scope_check`` search the same immediate-
+    subdirectory strategy for a directory ``build_info`` before falling
+    back to ``sources`` auto-discovery.
+    """
+
+    @staticmethod
+    def _project_with_nested_build_info(tmp_path: Path) -> tuple[Path, Path, Path]:
+        so_path, header, compile_db = TestDumpCliHonorsTheFilterInTheFold._project(
+            tmp_path
+        )
+        build_dir = tmp_path / "build"
+        build_dir.mkdir()
+        compile_db.rename(build_dir / "compile_commands.json")
+        return so_path, header, tmp_path  # build_info = the project root
+
+    def test_cli_rejects_a_nested_build_info_scope_mismatch(
+        self, tmp_path: Path
+    ) -> None:
+        from click.testing import CliRunner
+
+        from abicheck.cli import main
+
+        so_path, header, build_info = self._project_with_nested_build_info(tmp_path)
+        result = CliRunner().invoke(
+            main,
+            [
+                "dump",
+                str(so_path),
+                "-H",
+                str(header),
+                "--build-info",
+                str(build_info),
+                "--depth",
+                "build",
+                "--ast-frontend",
+                "clang",
+                "--compile-db-filter",
+                "a.cpp",
+                "-o",
+                str(tmp_path / "out.json"),
+            ],
+        )
+        assert result.exit_code == 64, result.output
+        assert "L2 header parse only" in result.output
+
+    def test_dump_request_rejects_a_nested_build_info_scope_mismatch(
+        self, tmp_path: Path
+    ) -> None:
+        from abicheck.api_types import DumpRequest, InputSpec
+        from abicheck.errors import ValidationError
+        from abicheck.service_dump_pipeline import resolve_dump_request
+
+        so_path, header, build_info = self._project_with_nested_build_info(tmp_path)
+        request = DumpRequest(
+            input=InputSpec(
+                path=so_path,
+                headers=(header,),
+                build_info=build_info,
+                compile_db_filter="a.cpp",
+            ),
+            frontend="clang",
+            depth="build",
+        )
+        with pytest.raises(ValidationError, match="input: .*L2 header parse only"):
+            resolve_dump_request(request)
+
+    def test_compare_request_rejects_a_nested_build_info_scope_mismatch(
+        self, tmp_path: Path
+    ) -> None:
+        from abicheck.api_types import CompareRequest, InputSpec
+        from abicheck.errors import ValidationError
+        from abicheck.service_compare_pipeline import resolve_compare_request
+
+        so_path, header, build_info = self._project_with_nested_build_info(tmp_path)
+        side = InputSpec(
+            path=so_path,
+            headers=(header,),
+            build_info=build_info,
+            compile_db_filter="a.cpp",
+        )
+        request = CompareRequest(old=side, new=side, frontend="clang", depth="build")
+        with pytest.raises(ValidationError, match="old: .*L2 header parse only"):
+            resolve_compare_request(request)
+
+    def test_the_nested_database_still_narrows_the_header_parse(
+        self, tmp_path: Path
+    ) -> None:
+        """Positive control: the nested database really is what the fold
+        resolves and filters by -- not merely a guard-level assumption."""
+        from abicheck.api_types import DumpRequest, InputSpec
+        from abicheck.service_dump_pipeline import (
+            execute_dump_request,
+            resolve_dump_request,
+        )
+
+        so_path, header, build_info = self._project_with_nested_build_info(tmp_path)
+        request = DumpRequest(
+            input=InputSpec(
+                path=so_path,
+                headers=(header,),
+                build_info=build_info,
+                compile_db_filter="a.cpp",
+            ),
+            frontend="clang",
+            depth="headers",  # collect_mode "off" -- the guard doesn't fire
+        )
+        result = execute_dump_request(resolve_dump_request(request))
+        fields = [
+            f.name for t in result.snapshot.types if t.name == "S" for f in t.fields
+        ]
+        assert "b" in fields, fields  # a.cpp's -DWIDE field, confirms narrowing

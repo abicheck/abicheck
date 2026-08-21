@@ -1027,20 +1027,48 @@ def compile_db_for_filter_scope_check(
     ``build_info``) and a filter narrowing the L2 parse to one TU still
     embedded both TUs' compile units as L3 evidence.
 
+    A second, distinct under-coverage (Codex review, fresh evidence): even
+    with an explicit ``--build-info <dir>`` given, ``compile_db_from_
+    build_info`` only ever checks ``<build_info>/compile_commands.json``
+    directly -- it has no notion of a conventional out-of-tree build
+    directory (``<build_info>/build/compile_commands.json``,
+    ``<build_info>/cmake-build-debug/compile_commands.json``, ...). The
+    real fold's own ``--build-info`` resolution
+    (``buildsource.inline._compile_db_at``, for a directory delegating to
+    ``_find_compile_db_in_dir``) searches those conventional hint
+    subdirectories -- explicitly "so ``--build-info <dir>`` honours the
+    same contract as ``--sources`` auto-discovery" per that function's own
+    docstring -- so a ``--build-info`` naming a project root whose database
+    lives one level down resolves for the fold but not for this scope
+    check. Reproduced directly: a real two-TU project with its
+    ``compile_commands.json`` moved into a ``build/`` subdirectory,
+    ``--build-info`` pointed at the project root -- the fold correctly
+    found and filtered by the nested database (L3 compile units: 2, L2
+    narrowed to the filtered TU), and the guard never fired.
+
     Deliberately **not** folded into ``compile_db_from_build_info`` itself
     -- that function's result also drives ``dump``'s own legacy ``-p``
     auto-match (``cli.py``'s ``effective_compile_db``), which is
-    intentionally ``--build-info``-only, and widening it here would widen
-    that unrelated mechanism too.
+    intentionally ``--build-info``-only (direct child only, no subdirectory
+    search) and widening it here would widen that unrelated, separately
+    reviewed mechanism too.
 
     ``None`` when neither source names a usable compile database, or when
     *headers* is empty (mirrors ``compile_db_from_build_info``: no L2
     header parse to narrow means nothing for the filter to be inconsistent
     with).
     """
+    if not headers:
+        return None
     explicit = compile_db_from_build_info(build_info, headers)
-    if explicit is not None or not headers:
+    if explicit is not None:
         return explicit
+    if build_info is not None and build_info.is_dir():
+        from .buildsource.inline import _find_compile_db_in_dir
+
+        nested = _find_compile_db_in_dir(build_info)
+        if nested is not None:
+            return nested
     from .buildsource.inline import _autodiscover_compile_db
 
     return _autodiscover_compile_db(sources)

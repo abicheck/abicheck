@@ -15,3 +15,13 @@
   already did with an explicit `--build-info`. Also closes the identical gap
   on the typed `DumpRequest`/`CompareRequest` API surfaces added in this same
   release.
+- **`dump --compile-db-filter --build-info <dir>` now also catches a
+  compile database in a conventional out-of-tree subdirectory** (e.g.
+  `<dir>/build/compile_commands.json`), not only `<dir>/compile_commands.json`
+  directly. The scope check's `--build-info` resolution previously only
+  checked the immediate child, while the real header-AST fold already
+  searches the same conventional build-directory hints `--sources`
+  auto-discovery uses — so `--build-info` naming a project root whose
+  database lives one level down resolved for the fold but not for the guard,
+  reproducing the identical filtered-L2/unfiltered-L3 mismatch. Fixed on the
+  CLI and the typed `DumpRequest`/`CompareRequest` API alike.
