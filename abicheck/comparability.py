@@ -137,6 +137,17 @@ from .comparability_fields import (
     _sha256_of as _sha256_of,
 )
 from .comparability_json import _SCOPE_SINGLE_ENTRY_SENTINELS, _json_load_str_list
+from .comparability_language_mode import (
+    _PROBED_STANDARD_PREFIX as _PROBED_STANDARD_PREFIX,
+    # `_is_gcc_gxx_driver_pair`/`_PROBED_STANDARD_PREFIX` are re-exported
+    # (`X as X`) for the same import-path-stability reason as the
+    # comparability_fields aliases above --
+    # tests/test_comparability_gate_probe_upgrade.py imports both directly
+    # from this module, predating this split.
+    _is_gcc_gxx_driver_pair as _is_gcc_gxx_driver_pair,
+    language_standard_content_divergence_corroborated,
+    language_standard_probe_upgrade_corroborated,
+)
 from .comparability_sequences import (
     _HEADER_SEQUENCE_FIELDS,
     _INCLUDE_SEQUENCE_FIELDS,
@@ -689,219 +700,6 @@ def _build_context_corroborated(old: AbiSnapshot, new: AbiSnapshot) -> bool:
     return old.parsed_with_build_context and new.parsed_with_build_context
 
 
-#: The literal ``language_standard`` prefix a probed (never explicitly
-#: pinned) default carries -- see ``dumper_toolchain._probe_default_
-#: language_standard``'s own docstring. Mirrored here (not imported) since
-#: this module has no other reason to depend on ``dumper_toolchain``.
-_PROBED_STANDARD_PREFIX = "probed:"
-
-#: The literal standard both header-AST command builders unconditionally
-#: force for an unpinned C/gnu-dialect parse -- mirrors
-#: ``dumper_toolchain._FORCED_C_STANDARD`` (not imported, same reasoning as
-#: ``_PROBED_STANDARD_PREFIX`` above).
-_FORCED_C_STANDARD = "gnu11"
-
-#: Every ``language_standard_field`` spelling an *unpinned, no-resolved-
-#: standard* dump could have produced before either the probe or the
-#: forced-``gnu11`` report existed, that this carve-out can still safely
-#: corroborate: an explicit ``--lang`` with nothing else resolved (bare
-#: ``"c"``/``"c++"``/``"cpp"`` -- ``"cpp"`` is a second, still-supported
-#: spelling for C++ alongside ``"c++"``, per :func:`_resolve_force_cpp`'s
-#: own ``lang.upper() in ("C++", "CPP")`` check; ``language_standard_field``
-#: lowercases but does not otherwise canonicalize the tag, so the two
-#: spellings persist as distinct strings, not merely distinct casings —
-#: Codex review, fresh evidence). Deliberately excludes the bare empty
-#: string (no ``--lang`` given at all, pure content-based auto-detection)
-#: -- see :func:`_newly_resolved_standard_remainder`'s own docstring for why.
-_UNRESOLVED_STANDARD_SPELLINGS = ("c", "c++", "cpp")
-
-
-def _newly_resolved_standard_remainder(
-    old_std: str, new_std: str
-) -> str | None:
-    """If *old_std* is one of :data:`_UNRESOLVED_STANDARD_SPELLINGS` and
-    *new_std* carries the identical lang tag plus something newly resolved,
-    return that "something" (the part after the tag); otherwise ``None``.
-
-    Split out of :func:`_language_standard_probe_upgrade_corroborated` so
-    the "same lang tag, newly populated" structural check has one
-    definition, checked in both directions there (Codex review, fresh
-    evidence: an explicit-``--lang`` baseline moves from a bare ``"c"``/
-    ``"c++"`` to ``"c:gnu11"``/``"c++:probed:..."``, not from an empty
-    string, which an earlier version of this check could not recognize).
-
-    Deliberately does **not** accept a bare empty *old_std* (no ``--lang``
-    given at all) the way an earlier version of this function did (Codex
-    review, fresh evidence): an empty ``language_standard`` carries *no*
-    signal about which language mode a pre-upgrade, pure-auto-detection
-    dump actually resolved to (:func:`_resolve_force_cpp`'s decision is a
-    function of the header *content*, which this carve-out has no access
-    to) -- so a header that later gains enough C++-only syntax to flip
-    ``_resolve_force_cpp``'s decision (a real language-mode change, not an
-    upgrade artifact) would otherwise be indistinguishable from the
-    upgrade-only case this carve-out exists to waive, and a matching
-    ``compiler_family``/``compiler_version``/``compiler_sha256`` says
-    nothing about which mode either side's *headers* actually resolved to.
-    An explicit ``--lang c++``/``"cpp"`` has no such ambiguity:
-    :func:`_resolve_force_cpp` returns C++ mode unconditionally for those,
-    with no retry that could revise it downward, so the lang-tag-equality
-    check above is sufficient corroboration on its own. An explicit
-    ``--lang c`` is a narrower exception this function's own signature
-    cannot see: ``dumper.py``'s C->C++ self-heal retry can still override
-    it mid-parse when a header turns out to need a C++ stdlib header, so a
-    ``"c"`` tag alone does not prove the *actual* parse stayed C --
-    :func:`_language_standard_probe_upgrade_corroborated` checks the
-    resolved remainder's own content for that case specifically (Codex
-    review, fresh evidence).
-    """
-    if old_std not in _UNRESOLVED_STANDARD_SPELLINGS:
-        return None
-    prefix = f"{old_std}:"
-    if not new_std.startswith(prefix):
-        return None
-    return new_std[len(prefix) :]
-
-
-def _language_standard_probe_upgrade_corroborated(
-    old: AbiSnapshot,
-    new: AbiSnapshot,
-    old_fields: dict[str, str],
-    new_fields: dict[str, str],
-) -> bool:
-    """Whether a differing ``language_standard`` is fully explained by this
-    probe (or the sibling forced-``gnu11`` report) having been *added* by an
-    abicheck upgrade, not by a genuine toolchain difference (Codex review,
-    fresh evidence).
-
-    A baseline persisted before ``dumper_toolchain._probe_default_language_
-    standard``/the forced-C-standard report existed recorded a bare
-    ``"c"``/``"c++"`` (:data:`_UNRESOLVED_STANDARD_SPELLINGS`) for an
-    unpinned (no explicit ``-std=``, no forced-C++20-heuristic) dump given
-    an explicit ``--lang`` -- that was the only value this field could ever
-    take for that shape of input. A freshly re-dumped snapshot of the
-    identical input under the identical toolchain now records a real,
-    newly-resolved value there instead (:data:`_FORCED_C_STANDARD` for an
-    unpinned C/gnu parse, or a ``"probed:..."`` value for an unpinned C++
-    parse or an MSVC-dialect C parse), purely because the tool was upgraded
-    -- comparing the two would otherwise raise ``ProfileMismatchError`` on
-    every such baseline, solely from the upgrade itself, not from anything
-    about the library changing. :func:`_newly_resolved_standard_remainder`
-    checks both directions share the same lang tag and isolates the
-    newly-resolved remainder for the check below -- see that function's own
-    docstring for why a bare *empty* ``language_standard`` (no ``--lang`` at
-    all) is deliberately **not** eligible here, unlike an earlier version of
-    this carve-out.
-
-    Waived only when independently corroborated by an EXACT, non-empty
-    ``compiler_family``/``compiler_version`` match on both sides: the
-    probed default is a deterministic function of the exact resolved
-    compiler binary, so an unchanged ``compiler_version`` is strong,
-    specific evidence the unpinned default did not actually change either
-    -- mirroring the platform carve-out's own "verify each specific
-    differing field, not just some other field on the same axis" discipline
-    (:func:`_platform_identity_confirmed`). A *changed* ``compiler_version``
-    already raises today (no carve-out exists for it, and none is added
-    here), which is correct: upgrading the compiler between the baseline
-    and the comparison is a real profile change this gate should still
-    catch.
-
-    When both sides' ``AbiSnapshot.ast_toolchain`` carry a non-empty
-    ``compiler_sha256`` (Codex review, fresh evidence), that content-address
-    is also required to match: a compiler *wrapper* replaced at the same
-    path can report an identical ``compiler_family``/``compiler_version``
-    string while actually selecting a different default dialect --
-    ``compiler_version`` is text a wrapper's own ``--version`` output
-    chooses to emit, not a fact this tool independently verifies, whereas
-    ``compiler_sha256`` is the resolved binary's own content hash
-    (``dumper_toolchain._tool_identity_metadata``) and cannot lie the same
-    way. Checked only when available on *both* sides -- an older/legacy
-    snapshot predating this field, or a side whose compiler resolution
-    itself failed (``ast_toolchain["compiler_error"]``, no ``compiler_*``
-    keys at all), falls back to the family/version check above rather than
-    failing closed on missing evidence it was never in a position to carry.
-
-    The ``"probed:"`` marker is checked by *containment*, not
-    ``str.startswith`` (Codex review, fresh evidence): when a dump also
-    pins an explicit ``--lang``, ``language_standard_field`` prefixes the
-    probed value with ``"c++:"``/``"c:"`` (e.g.
-    ``"c++:probed:__cplusplus=201703L"``), so the marker does not
-    necessarily sit at position 0 -- mirroring
-    ``dumper_toolchain._cplusplus_macro_for_standard``'s identical fix.
-
-    **Known, narrower residual (Codex review, fresh evidence), not fixed
-    here**: the ``compiler_family``/``compiler_version`` corroboration
-    above reads ``dumper_toolchain._stamp_ast_parser``'s ``compiler_*``
-    stamping, which this same PR also fixed to resolve against the
-    header-AST parse's *actual* post-retry compiler (``resolved_compiler``)
-    rather than the caller's original, unresolved request -- see that
-    function's own docstring. For a castxml dump where those two diverge
-    (a force_cpp self-heal/remap changed which binary was actually
-    invoked), a **legacy baseline persisted by pre-fix abicheck** recorded
-    ``compiler_selected``/``compiler_family``/``compiler_version`` from the
-    *wrong*, unresolved binary -- so comparing it against a freshly
-    re-dumped snapshot of the identical input under the identical
-    toolchain installation can now see a *changed* ``compiler_family``/
-    ``compiler_version`` purely because this PR's own stamping fix
-    corrected which binary's identity gets recorded, not because the
-    installation changed. That is the same "an abicheck upgrade must not
-    by itself make an unchanged baseline ``NOT_COMPARABLE``" problem this
-    whole carve-out exists to solve, just on the corroboration axis rather
-    than the ``language_standard`` axis it corroborates -- and it
-    compounds: a real, waivable ``language_standard`` transition on such a
-    baseline now also fails this function's own compiler-identity check,
-    so the corroboration this carve-out depends on is unavailable exactly
-    when the legacy stamping bug applies. Deliberately not addressed with
-    a further carve-out: there is no sound way, from either snapshot's
-    persisted content alone, to distinguish "this compiler_family/version
-    difference is purely the stamping fix correcting a mis-recorded legacy
-    baseline" from "the installation's compiler genuinely changed between
-    the two dumps" -- the old baseline recorded only the (wrong) binary it
-    picked, never what the corrected resolution *would* have produced, so
-    there is no fact to corroborate against. Affected users should
-    re-``dump`` their baseline once after upgrading past this fix rather
-    than rely on the carve-out to bridge it, the same guidance any
-    ``ProfileMismatchError`` from an unrelated real toolchain change
-    already implies.
-    """
-    old_std = old_fields.get("language_standard", "")
-    new_std = new_fields.get("language_standard", "")
-    forward = _newly_resolved_standard_remainder(old_std, new_std)
-    tag, remainder = (old_std, forward) if forward is not None else (
-        new_std, _newly_resolved_standard_remainder(new_std, old_std)
-    )
-    if remainder is None:
-        return False
-    is_newly_resolved = (
-        remainder == _FORCED_C_STANDARD or _PROBED_STANDARD_PREFIX in remainder
-    )
-    if not is_newly_resolved:
-        return False
-    # Codex review, fresh evidence: an explicit "c" tag does not pin the
-    # mode unconditionally the way this function's docstring above assumes
-    # -- both header-AST backends self-heal an explicit --lang c request
-    # into C++ when the header turns out to need a C++ stdlib header
-    # (dumper.py's C->C++ retry applies regardless of whether C mode was
-    # auto-detected or explicitly requested). A self-healed parse's probed
-    # value always names __cplusplus (never __STDC_VERSION__, and never the
-    # bare _FORCED_C_STANDARD literal, which _resolve_standard_provenance
-    # only ever returns for a genuinely-C final mode) -- so a "c"-tagged
-    # remainder containing it is real evidence the *new* side's actual
-    # parse mode diverged from its own explicit tag, not merely newly
-    # discovered upgrade evidence, and must not be waived.
-    if tag == "c" and "__cplusplus" in remainder:
-        return False
-    for key in ("compiler_family", "compiler_version"):
-        old_v = old_fields.get(key, "")
-        new_v = new_fields.get(key, "")
-        if not old_v or not new_v or old_v != new_v:
-            return False
-    old_sha = old.ast_toolchain.get("compiler_sha256", "")
-    new_sha = new.ast_toolchain.get("compiler_sha256", "")
-    if old_sha and new_sha and old_sha != new_sha:
-        return False
-    return True
-
-
 @dataclass(frozen=True)
 class ComparabilityMismatch:
     """Returned by :func:`check_contracts_comparable` in ``diagnostic=True``
@@ -1230,18 +1028,20 @@ def _unexplained_profile_fields(
     (Codex review, PR #641 follow-up, fourth round): a release combining two
     independently-sanctioned deltas (e.g. a header addition AND a corroborated
     C++-standard raise) must not raise just because neither carve-out's static
-    field-set covers ``differing`` in full on its own. Four of the five
+    field-set covers ``differing`` in full on its own. Four of the six
     carve-outs' field-sets (:data:`_PLATFORM_IDENTITY_FIELDS`/
     :data:`_BUILD_CONTEXT_FIELDS`/:data:`_HEADER_SEQUENCE_FIELDS`/
     :data:`_INCLUDE_SEQUENCE_FIELDS`) are mutually disjoint, so their relative
     order never matters -- each only ever narrows the working set, never
-    re-adds to it. The fifth,
-    :func:`_language_standard_probe_upgrade_corroborated`, is a narrower,
-    single-field carve-out over ``language_standard`` -- a field the
-    build-context carve-out's own set already covers -- so it is checked
+    re-adds to it. The remaining two,
+    :func:`language_standard_probe_upgrade_corroborated` and
+    :func:`language_standard_content_divergence_corroborated`, are narrower,
+    single-field carve-outs over ``language_standard`` -- a field the
+    build-context carve-out's own set already covers -- so both are checked
     *after* the build-context one specifically (its broader waiver, when it
-    applies, already subsumes this one; when it doesn't, this one still gets
-    its own independent chance).
+    applies, already subsumes either; when it doesn't, each still gets its
+    own independent chance, checked in that order since the upgrade carve-out
+    is the more specific of the two).
     """
     old_fields = old_contract.profile_fields
     new_fields = new_contract.profile_fields
@@ -1271,18 +1071,44 @@ def _unexplained_profile_fields(
     # abicheck-internal-bugs finding 2 follow-up (Codex review): waive a
     # language_standard-only mismatch that is fully explained by this PR's
     # own probe having been added by an upgrade -- see
-    # _language_standard_probe_upgrade_corroborated's own docstring. Checked
+    # language_standard_probe_upgrade_corroborated's own docstring. Checked
     # after the build-context carve-out (whose broader waiver already
     # subsumes this one when both sides carry real build evidence) and
     # narrowly scoped to this single field so it can never mask a genuine
     # compiler_family/compiler_version difference riding alongside it.
     if (
         "language_standard" in unexplained
-        and _language_standard_probe_upgrade_corroborated(
+        and language_standard_probe_upgrade_corroborated(
             old, new, old_fields, new_fields
         )
     ):
         unexplained.discard("language_standard")
+
+    # Real CI failure (Codex review, fresh evidence:
+    # examples/case66_language_linkage_changed,
+    # examples/case69_trivial_to_nontrivial): a purely content-driven
+    # language_standard divergence under an identical, corroborated
+    # toolchain -- see language_standard_content_divergence_corroborated's
+    # own docstring for why this must never be treated as a blocking
+    # extraction-environment mismatch, unlike the narrower upgrade-only
+    # carve-out just above. Also discards "compiler_version" when present
+    # (real CI failure, second round): under castxml specifically, the
+    # mode switch this carve-out corroborates changes which host-compiler
+    # binary gets resolved ("gcc" vs "g++"), which by itself makes the
+    # *raw* compiler_version profile field differ even though
+    # language_standard_content_divergence_corroborated's own,
+    # driver-name-normalized comparison already confirmed it's the
+    # identical toolchain -- so once that corroboration succeeds,
+    # compiler_version's raw-field divergence is explained by the exact
+    # same fact language_standard's was, not a second, independent one.
+    if (
+        "language_standard" in unexplained
+        and language_standard_content_divergence_corroborated(
+            old, new, old_fields, new_fields
+        )
+    ):
+        unexplained.discard("language_standard")
+        unexplained.discard("compiler_version")
 
     # Both sequence carve-outs below additionally require
     # _scope_growth_corroborated (Codex review, PR #641 follow-up, P1):
@@ -1598,7 +1424,7 @@ def check_contracts_comparable(
     header-sequence carve-out above.
 
     **Opaque profile-fingerprint mismatches are rejected, not silently
-    waived (Codex review, PR #641 follow-up, P1):** the five carve-outs
+    waived (Codex review, PR #641 follow-up, P1):** the six carve-outs
     above narrow an ``unexplained`` working set that starts as ``differing``
     — the set of :data:`PROFILE_FIELD_KEYS` that actually differ between
     ``old_fields``/``new_fields``. If ``profile_fingerprint`` differs but
@@ -1645,15 +1471,16 @@ def check_contracts_comparable(
     ``differing`` it understands, narrowing an ``unexplained`` working set;
     the pair is comparable once nothing remains unexplained, not only when
     one carve-out's field-set covers the whole mismatch by itself. Four of
-    the five carve-outs' field-sets (:data:`_PLATFORM_IDENTITY_FIELDS`/
+    the six carve-outs' field-sets (:data:`_PLATFORM_IDENTITY_FIELDS`/
     :data:`_BUILD_CONTEXT_FIELDS`/:data:`_HEADER_SEQUENCE_FIELDS`/
     :data:`_INCLUDE_SEQUENCE_FIELDS`) are mutually disjoint, so their
-    relative order never matters among themselves. The fifth,
-    :func:`_language_standard_probe_upgrade_corroborated`, is a narrower,
-    single-field carve-out over ``language_standard`` -- a field the
-    build-context carve-out's own set already covers -- and is checked
-    *after* the build-context one specifically, since it can still only
-    narrow (never re-add to) the working set, so its position relative to
+    relative order never matters among themselves. The remaining two,
+    :func:`language_standard_probe_upgrade_corroborated` and
+    :func:`language_standard_content_divergence_corroborated`, are
+    narrower, single-field carve-outs over ``language_standard`` -- a field
+    the build-context carve-out's own set already covers -- and are checked
+    *after* the build-context one specifically, since either can still only
+    narrow (never re-add to) the working set, so their position relative to
     the other four still never changes the outcome (see
     :func:`_unexplained_profile_fields`'s own docstring for the ordering
     itself).
