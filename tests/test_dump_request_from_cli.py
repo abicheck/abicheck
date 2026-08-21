@@ -164,6 +164,18 @@ class TestResolvedRequestAgreesWithTheCliLocals:
         "depth", [None, "binary", "headers", "build", "source"]
     )
     def test_collect_mode_matches(self, tmp_path: Path, depth: str | None) -> None:
+        """`resolve_dump_collect_context` is itself SO_PATH-blind -- it only
+        ever reads ``depth``/``sources``/``build_info``/``headers`` -- so the
+        parity check holds regardless of whether the request is source-only.
+
+        ``--depth binary`` is the one exception: it needs a real SO_PATH, not
+        because this resolver cares, but because `DumpRequest.validation_errors()`
+        now rejects a source-only ``depth="binary"`` request outright (the CLI
+        already did, via `dump_cmd`'s own `so_path is None and depth ==
+        "binary"` `UsageError`, raised before a request is ever built) --
+        Codex review on #814, confirming the source-only `_request()` default
+        can't represent that one shape.
+        """
         from abicheck.cli_buildsource import (
             resolve_dump_request_for_cli,
         )
@@ -173,8 +185,15 @@ class TestResolvedRequestAgreesWithTheCliLocals:
         cli_mode, cli_headers = resolve_dump_collect_context(
             depth, None, sources, compile_db, (header,)
         )
+        so_path = _binary(tmp_path) if depth == "binary" else None
         resolved = resolve_dump_request_for_cli(
-            _request(header=header, sources=sources, build_info=compile_db, depth=depth)
+            _request(
+                header=header,
+                sources=sources,
+                build_info=compile_db,
+                depth=depth,
+                so_path=so_path,
+            )
         )
         assert resolved.collect_mode == cli_mode, depth
         assert resolved.headers == tuple(cli_headers), depth
@@ -213,6 +232,12 @@ class TestResolvedRequestAgreesWithTheCliLocals:
         resolvers each clear the header list independently
         (`resolve_dump_collect_context` vs. `service_compare_evidence._headers`)
         — the case most likely to drift apart unnoticed.
+
+        Needs a real SO_PATH: `--depth binary` is meaningless for a
+        source-only request (no native artifact to report binary evidence
+        from), and `DumpRequest.validation_errors()` rejects that combination
+        the same way `dump_cmd` itself already refuses it before a request is
+        ever built (Codex review on #814).
         """
         from abicheck.cli_buildsource import resolve_dump_request_for_cli
         from abicheck.cli_dump_helpers import resolve_dump_collect_context
@@ -223,11 +248,22 @@ class TestResolvedRequestAgreesWithTheCliLocals:
         )
         resolved = resolve_dump_request_for_cli(
             _request(
-                header=header, sources=sources, build_info=compile_db, depth="binary"
+                header=header,
+                sources=sources,
+                build_info=compile_db,
+                depth="binary",
+                so_path=_binary(tmp_path),
             )
         )
         assert tuple(cli_headers) == ()
         assert resolved.headers == ()
+
+
+def _binary(tmp_path: Path) -> Path:
+    """A dummy SO_PATH -- `--dry-run` never reads its contents."""
+    so_path = tmp_path / "libfoo.so"
+    so_path.write_bytes(b"")
+    return so_path
 
 
 def _request(
@@ -237,18 +273,21 @@ def _request(
     build_info: Path,
     depth: str | None,
     frontend: str = "auto",
+    so_path: Path | None = None,
 ) -> Any:
     """A `DumpRequest` shaped the way `dump_cmd` builds one.
 
     Uses the real builder rather than a hand-written `DumpRequest(...)`, so a
     change to what `dump_cmd` passes is reflected here instead of quietly
-    leaving these assertions checking a shape nothing produces.
+    leaving these assertions checking a shape nothing produces. Source-only
+    (``so_path=None``) by default, matching every existing caller; pass a
+    real path for a shape (``--depth binary``) that needs a native artifact.
     """
     from abicheck.cli_dump_request import build_dump_request
     from abicheck.compile_context import CompileContext
 
     return build_dump_request(
-        so_path=None,
+        so_path=so_path,
         headers=(header,),
         includes=(),
         version="unknown",
