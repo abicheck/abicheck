@@ -734,7 +734,10 @@ def _newly_resolved_standard_remainder(
 
 
 def _language_standard_probe_upgrade_corroborated(
-    old_fields: dict[str, str], new_fields: dict[str, str]
+    old: AbiSnapshot,
+    new: AbiSnapshot,
+    old_fields: dict[str, str],
+    new_fields: dict[str, str],
 ) -> bool:
     """Whether a differing ``language_standard`` is fully explained by this
     probe (or the sibling forced-``gnu11`` report) having been *added* by an
@@ -770,6 +773,21 @@ def _language_standard_probe_upgrade_corroborated(
     and the comparison is a real profile change this gate should still
     catch.
 
+    When both sides' ``AbiSnapshot.ast_toolchain`` carry a non-empty
+    ``compiler_sha256`` (Codex review, fresh evidence), that content-address
+    is also required to match: a compiler *wrapper* replaced at the same
+    path can report an identical ``compiler_family``/``compiler_version``
+    string while actually selecting a different default dialect --
+    ``compiler_version`` is text a wrapper's own ``--version`` output
+    chooses to emit, not a fact this tool independently verifies, whereas
+    ``compiler_sha256`` is the resolved binary's own content hash
+    (``dumper_toolchain._tool_identity_metadata``) and cannot lie the same
+    way. Checked only when available on *both* sides -- an older/legacy
+    snapshot predating this field, or a side whose compiler resolution
+    itself failed (``ast_toolchain["compiler_error"]``, no ``compiler_*``
+    keys at all), falls back to the family/version check above rather than
+    failing closed on missing evidence it was never in a position to carry.
+
     The ``"probed:"`` marker is checked by *containment*, not
     ``str.startswith`` (Codex review, fresh evidence): when a dump also
     pins an explicit ``--lang``, ``language_standard_field`` prefixes the
@@ -795,6 +813,10 @@ def _language_standard_probe_upgrade_corroborated(
         new_v = new_fields.get(key, "")
         if not old_v or not new_v or old_v != new_v:
             return False
+    old_sha = old.ast_toolchain.get("compiler_sha256", "")
+    new_sha = new.ast_toolchain.get("compiler_sha256", "")
+    if old_sha and new_sha and old_sha != new_sha:
+        return False
     return True
 
 
@@ -1174,7 +1196,9 @@ def _unexplained_profile_fields(
     # compiler_family/compiler_version difference riding alongside it.
     if (
         "language_standard" in unexplained
-        and _language_standard_probe_upgrade_corroborated(old_fields, new_fields)
+        and _language_standard_probe_upgrade_corroborated(
+            old, new, old_fields, new_fields
+        )
     ):
         unexplained.discard("language_standard")
 

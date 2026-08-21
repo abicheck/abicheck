@@ -78,7 +78,15 @@
   the carve-out (`_newly_resolved_standard_remainder`) to recognize every
   pre-upgrade "nothing resolved yet" spelling (`""`, `"c"`, `"c++"`) against
   a same-lang-tagged, newly-populated successor (the forced literal or a
-  probed value), in either comparison direction.
+  probed value), in either comparison direction. The carve-out's own
+  `compiler_family`/`compiler_version` corroboration also now checks
+  `AbiSnapshot.ast_toolchain`'s `compiler_sha256` (the resolved compiler
+  binary's own content hash) when both sides carry one: a compiler wrapper
+  replaced at the same path can report an identical family/version string
+  — text a wrapper's own `--version` output controls — while actually
+  selecting a different default dialect. Falls back to the family/version-only
+  check when either side lacks the hash (an older snapshot, or a side whose
+  compiler resolution itself failed).
 - Known, narrower residual, documented rather than fixed: a cache/memo
   *hit* for a header that previously self-healed C→C++ still reports the
   pre-retry language mode, since neither backend's AST cache persists that

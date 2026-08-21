@@ -40,8 +40,17 @@ from abicheck.errors import ProfileMismatchError
 from abicheck.model import AbiSnapshot, ExtractionContract
 
 
-def _snap(contract: ExtractionContract | None) -> AbiSnapshot:
-    return AbiSnapshot(library="libfoo.so", version="1.0", contract=contract)
+def _snap(
+    contract: ExtractionContract | None,
+    *,
+    ast_toolchain: dict[str, str] | None = None,
+) -> AbiSnapshot:
+    return AbiSnapshot(
+        library="libfoo.so",
+        version="1.0",
+        contract=contract,
+        ast_toolchain=ast_toolchain or {},
+    )
 
 
 def test_probed_standard_prefix_constants_stay_in_sync():
@@ -265,3 +274,82 @@ def test_gate_bare_lang_c_vs_different_lang_still_raises():
     )
     with pytest.raises(ProfileMismatchError):
         check_contracts_comparable(old, new)
+
+
+def test_gate_empty_vs_gnu11_still_raises_when_compiler_sha256_differs():
+    """Codex review, fresh evidence: a compiler wrapper replaced at the same
+    path can report an identical compiler_family/compiler_version string
+    while actually selecting a different default dialect --
+    compiler_sha256 (the resolved binary's own content hash), when present
+    on both sides, must be checked too, not just the two text fields a
+    wrapper's own --version output controls."""
+    old = _snap(
+        compute_extraction_contract(
+            l2_frontend_ran=True,
+            compiler_family="gnu",
+            compiler_version="11.4.0",
+            language_standard="",
+        ),
+        ast_toolchain={"compiler_sha256": "a" * 64},
+    )
+    new = _snap(
+        compute_extraction_contract(
+            l2_frontend_ran=True,
+            compiler_family="gnu",
+            compiler_version="11.4.0",
+            language_standard="gnu11",
+        ),
+        ast_toolchain={"compiler_sha256": "b" * 64},
+    )
+    with pytest.raises(ProfileMismatchError):
+        check_contracts_comparable(old, new)
+
+
+def test_gate_empty_vs_gnu11_waived_when_compiler_sha256_matches():
+    """The positive counterpart: an unchanged compiler_sha256 on both sides
+    (alongside the existing family/version match) still waives, same as
+    before this corroboration was added."""
+    old = _snap(
+        compute_extraction_contract(
+            l2_frontend_ran=True,
+            compiler_family="gnu",
+            compiler_version="11.4.0",
+            language_standard="",
+        ),
+        ast_toolchain={"compiler_sha256": "a" * 64},
+    )
+    new = _snap(
+        compute_extraction_contract(
+            l2_frontend_ran=True,
+            compiler_family="gnu",
+            compiler_version="11.4.0",
+            language_standard="gnu11",
+        ),
+        ast_toolchain={"compiler_sha256": "a" * 64},
+    )
+    check_contracts_comparable(old, new)  # must not raise
+
+
+def test_gate_empty_vs_gnu11_waived_when_compiler_sha256_absent_on_one_side():
+    """A legacy/older snapshot on one side (no compiler_sha256 recorded at
+    all) must fall back to the family/version check rather than fail closed
+    on evidence it was never in a position to carry."""
+    old = _snap(
+        compute_extraction_contract(
+            l2_frontend_ran=True,
+            compiler_family="gnu",
+            compiler_version="11.4.0",
+            language_standard="",
+        ),
+        ast_toolchain={},
+    )
+    new = _snap(
+        compute_extraction_contract(
+            l2_frontend_ran=True,
+            compiler_family="gnu",
+            compiler_version="11.4.0",
+            language_standard="gnu11",
+        ),
+        ast_toolchain={"compiler_sha256": "a" * 64},
+    )
+    check_contracts_comparable(old, new)  # must not raise
