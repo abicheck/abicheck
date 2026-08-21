@@ -650,9 +650,21 @@ cd /workspace/library
 # verdict can be read back programmatically. `compare`'s own exit code
 # encodes the verdict (e.g. 4 = BREAKING) -- non-zero is a real result,
 # not a failure, and `set -e` must not treat it as one; the report file
-# on disk is what this script actually reads.
-abicheck compare {old} {new} --format json -o /tmp/report.json || true
-verdict=$(python3 -c "import json; print(json.load(open('/tmp/report.json'))['verdict'])")
+# on disk is what this script actually reads. A fresh `mktemp` path, not a
+# fixed name: a real trial's own container is isolated, so a shared name
+# would be harmless there, but this exact script is also executed directly
+# (not through a container) by tests/test_gen_harbor_tasks.py's
+# TestSolveScriptsEndToEnd, once per scenario -- a fixed `/tmp/report.json`
+# is one shared file across every one of those invocations, and pytest-xdist
+# is free to schedule two of them onto different workers at the same time,
+# so one scenario's write can race another's read of the identical path
+# (reproduced as a real, host/scheduling-dependent CI failure, not a
+# hypothetical). `mktemp` gives every invocation -- test or real trial --
+# its own path, closing the race at its actual cause instead of only in the
+# test harness that happened to expose it.
+report_json="$(mktemp)"
+abicheck compare {old} {new} --format json -o "$report_json" || true
+verdict=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['verdict'])" "$report_json")
 cat > /workspace/final.md <<EOF
 Reference solution -- the documented command for this case:
 
@@ -931,12 +943,28 @@ def _runtime_relevant_digest(root: Path = ROOT) -> str:
     the files on disk right now, so it produces the identical answer
     whether the pinned commit is three commits back, unreachable after a
     squash-merge, or this is a shallow clone with no history beyond `HEAD`.
+
+    Each file's bytes are read with `\\r\\n` collapsed to `\\n` before
+    hashing. Without this, the digest is not actually a pure function of
+    content: these paths carry no `.gitattributes` entry, so a checkout on
+    a platform whose git defaults to CRLF translation (GitHub's own
+    windows-latest runners, confirmed reproducible in CI) hands
+    `_runtime_relevant_files`' real source bytes back with every `\\n`
+    already turned into `\\r\\n` -- an artifact of *how the file reached
+    disk*, not a change to what it says. Recomputing on such a checkout
+    then embeds a digest that can never match the one already committed
+    (computed on an LF checkout), so `--check` reports every task stale
+    with no real drift behind it. Normalizing is one-directional and safe:
+    an intentional embedded `\\r\\n` inside source content would collapse
+    the same way regardless of checkout platform, so this can only make
+    the digest less sensitive to a checkout artifact, never blind to a
+    real change.
     """
     hasher = hashlib.sha256()
     for path in _runtime_relevant_files(root):
         hasher.update(str(path.relative_to(root)).encode())
         hasher.update(b"\0")
-        hasher.update(path.read_bytes())
+        hasher.update(path.read_bytes().replace(b"\r\n", b"\n"))
         hasher.update(b"\0")
     return hasher.hexdigest()
 

@@ -40,6 +40,7 @@ from pathlib import Path
 
 import pytest
 import tomllib
+from _workflow_exec import bash_executable
 
 ROOT = Path(__file__).resolve().parents[1]
 EVAL_DIR = ROOT / "agent-evals" / "skills"
@@ -645,7 +646,7 @@ class TestPythonInterposer:
         script = shell_body.replace("/usr/local/bin", str(fakebin))
         env = {**os.environ, "PATH": f"{fakebin}{os.pathsep}{os.environ['PATH']}"}
         proc = subprocess.run(  # noqa: S603
-            ["bash", "-c", script],
+            [bash_executable(), "-c", script],
             env=env,
             capture_output=True,
             text=True,
@@ -706,7 +707,7 @@ class TestArchitectureGuard:
 
         env = {**os.environ, "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}"}
         proc = subprocess.run(  # noqa: S603
-            ["bash", str(script)],
+            [bash_executable(), str(script)],
             env=env,
             capture_output=True,
             text=True,
@@ -811,7 +812,7 @@ class TestSolveScriptsEndToEnd:
             "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
         }
         proc = subprocess.run(  # noqa: S603
-            ["bash", str(local_solve)],
+            [bash_executable(), str(local_solve)],
             env=env,
             capture_output=True,
             text=True,
