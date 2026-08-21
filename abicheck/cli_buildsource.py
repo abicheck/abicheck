@@ -581,6 +581,8 @@ def _write_snapshot_output(
     header_roots: tuple[Path, ...] = (),
     clang_bin: str = "clang",
     snapshot_compression: str = "auto",
+    public_headers: tuple[Path, ...] = (),
+    public_header_dirs: tuple[Path, ...] = (),
 ) -> None:
     """Serialize snapshot and write to file or stdout.
 
@@ -609,6 +611,22 @@ def _write_snapshot_output(
     those roots (or lives under one) is never treated as a dependency just because it
     happens to sit under a system prefix (e.g. an installed library dumped via its real
     ``/usr/include`` path).
+
+    *public_headers*/*public_header_dirs* are this dump's own public-header
+    roots, forwarded to ``embed_build_source`` as ``public_header_roots`` --
+    what L4 source-ABI replay classifies a declaration's declaring header as
+    public or private against. Without them the replay runs with an *empty*
+    root set, so every declaration classifies private and the linked surface
+    reaches nothing: measured on a real ``dump lib.so -H api.h --sources .
+    --build-info db.json --depth source``, the written snapshot recorded ``0/2
+    symbols matched``, ``reachable_declarations=0`` and ``fact_family_states:
+    empty-confirmed`` where the identical inputs through ``compare``'s
+    implicit-dump operand or the typed ``DumpRequest`` API record ``1/2``
+    matched and a real ``source_decl_to_binary_symbol`` mapping. The layer was
+    present and honestly reported "partial", but every L4-derived finding was
+    silently inert for a ``dump``-produced baseline. Found while measuring
+    whole-snapshot parity between this write path and ``execute_dump_request``
+    for CLI cleanup phase two's PR 3A -- see the plan's own note.
     """
     from .cli_dump_helpers import (
         check_requested_depth_satisfied,
@@ -632,6 +650,8 @@ def _write_snapshot_output(
             build_query=build_query, build_compile_db=build_compile_db,
             build_targets=build_targets,
             extractor=extractor, clang_bin=clang_bin,
+            public_headers=tuple(str(p) for p in public_headers),
+            public_header_dirs=tuple(str(p) for p in public_header_dirs),
         )
         # G21.7: fail loud — if a requested evidence layer came back empty, say so
         # prominently instead of leaving it buried in the coverage rows. Permissive

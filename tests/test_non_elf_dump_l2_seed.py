@@ -603,3 +603,55 @@ def test_perform_elf_dump_still_applies_legacy_flags_when_no_fold_ran(
         tmp_path, monkeypatch, legacy_flags=()
     )
     assert kwargs["gcc_options"] == "-DUSER=1"
+
+
+def test_perform_elf_dump_forwards_public_roots_to_the_write_time_embed(
+    tmp_path, monkeypatch
+):
+    """The caller half of the write-time L4 public-root fix.
+
+    `_write_snapshot_output` forwards `public_headers`/`public_header_dirs` to
+    `embed_build_source` (pinned in `tests/test_dump_embed_idempotence.py`);
+    this pins that `perform_elf_dump` actually hands them over rather than
+    letting them default to empty, which is what made a real `dump -H api.h
+    --depth source` link nothing at L4.
+    """
+    so = tmp_path / "lib.so"
+    hdr = tmp_path / "widget.h"
+    hdr.write_text("struct Widget { int x; };\n", encoding="utf-8")
+    incdir = tmp_path / "include"
+    incdir.mkdir()
+    captured: dict = {}
+
+    monkeypatch.setattr(
+        "abicheck.cli_dump_helpers.dump",
+        lambda **_kw: AbiSnapshot(library="lib.so", version="1.0", from_headers=True),
+    )
+    monkeypatch.setattr(
+        "abicheck.service._attach_header_graph", lambda snap, *_a, **_k: snap
+    )
+    monkeypatch.setattr(
+        "abicheck.header_conditionals.attach_build_context", lambda *_a, **_k: None
+    )
+
+    def _capture_write(*_a, **kw):
+        captured.update(kw)
+
+    perform_elf_dump(
+        so, (hdr,), (), "1.0", "c++", None, None, None,
+        (),
+        None, False,
+        False, None,
+        (hdr,), (incdir,),  # public_headers, public_header_dirs
+        None,
+        False, (), "", None, None, False, None,
+        None, None, None, False,
+        "source-target",
+        lambda inputs: list(inputs),
+        lambda *a, **k: None,
+        lambda *a, **k: None,
+        _capture_write,
+    )
+
+    assert captured.get("public_headers") == (hdr,)
+    assert captured.get("public_header_dirs") == (incdir,)
