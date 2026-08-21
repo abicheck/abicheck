@@ -57,10 +57,10 @@ different inputs.
 ### A model independent of any one tool
 
 Before the abicheck-specific vocabulary: any compatibility checker — this one
-or another — draws its evidence from some subset of six generic categories,
+or another — draws its evidence from some subset of seven generic categories,
 each answering a genuinely different question about the library. This split
 matters because it is what lets you reason about a tool you've never used:
-ask which of these six categories it actually consumes, and you already know
+ask which of these seven categories it actually consumes, and you already know
 its blind spots.
 
 | Generic evidence category | Question it answers |
@@ -92,7 +92,7 @@ of five of these — runtime evidence is structurally out of reach for any
 The rest of this page, and every other page that cites "`L0`–`L5`," is
 using abicheck's own vocabulary for this generic model — worth keeping
 distinct in your head from the model itself, since a different tool
-realizes the same six categories with different names, different
+realizes the same seven categories with different names, different
 granularity, or gaps in different places.
 
 ### abicheck's five inputs
