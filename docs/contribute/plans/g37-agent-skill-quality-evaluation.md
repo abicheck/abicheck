@@ -1052,6 +1052,39 @@ themselves generic across all four skills, so this is a scope cut (one
 skill's worth), not a redesign. A prototype skill's corpus is out of scope
 for this phase; see the scope note for when it re-enters.
 
+**Status: corpus buildout done, at the low end of target (12 scenarios: 6
+Category A + 6 Category B), and a real 48-run A/B pilot has completed
+against it.** Two real environment prerequisites the harness had never had
+to satisfy (an `abicheck --version` inside the flagship's declared floor; a
+CastXML build inside abicheck's own supported policy range) were found and
+documented in the same pass — see `agent-evals/skills/CLAUDE.md`'s
+"Environment prerequisites for a real run". Full results, per-dimension and
+per-scenario tables, and next steps are in
+`agent-evals/skills/pilot-results/README.md`; the matching ADR-058 "PR 3"
+amendment records the same. **Read the pilot honestly, not as a validation
+result**: its own dominant finding is a harness confound — a 12-turn
+runner ceiling (`--max-turns 12`) cut off 31% of all 48 runs before they
+produced any answer, and did so asymmetrically by arm (46% of skill runs
+vs. 17% of baseline runs), so the headline correct-verdict numbers are not
+a fair skill-vs-baseline comparison as they stand. The one confound-clean
+signal — dimension 1 (correct workflow chosen) passing 96% on the skill
+arm vs. 25% on baseline — is real. Phase 3's corpus and pilot being done
+does not advance Phases 4-6 below; those remain fully open, and the
+pilot's own "Recommended next steps" (raise `--max-turns` and re-run, first)
+is the actual next action here, not a fresh Phase-3 pass.
+
+**2026-08-21, additive Harbor task battery (user-requested, not a phase
+advance).** `agent-evals/skills/harbor/tasks/` now carries a generated,
+schema-validated [Harbor](https://www.harborframework.com) task per
+scenario, alongside the unchanged existing harness — real (validated
+against the actual `harbor` package's schema; every Category A reference
+solution runs end to end through the real graders), but never run through
+an actual Harbor trial (no Docker in this environment). See
+`agent-evals/skills/harbor/CLAUDE.md` and ADR-058's matching amendment for
+the full account. Does not advance Phase 3's own done-ness or any later
+phase — it is a second surface over the same corpus, not new corpus or a
+new result.
+
 ### Phase 4 — Cross-agent *(M)*
 
 Codex and Gemini CLI runners emitting the same bundle schema, run against the
@@ -1060,6 +1093,20 @@ table in `skills-src/CLAUDE.md` is then populated from generated results for
 the scriptable targets rather than hand-maintained — one row
 (`native-binary-compatibility-review`) per target until a prototype skill is
 promoted, not all four.
+
+**2026-08-21: decided, not merely possible.** Harbor was made the canonical
+evaluation surface (ADR-058's "Harbor made canonical" amendment) — this
+phase's own "Codex and Gemini CLI runners" line above is superseded by
+that decision, not a parallel option. Harbor's own agent registry already
+includes Codex CLI and Gemini CLI adapters (confirmed by reading its
+source, not assumed), so this phase's real content shrinks to running the
+existing `agent-evals/skills/harbor/tasks/` battery with `--agent codex`/
+`--agent gemini-cli` instead of building a second/third hand-written
+runner — once a real Harbor trial has been run at all (still zero; see
+`agent-evals/skills/harbor/CLAUDE.md`'s own "What executing this decision
+still needs"). Building a bespoke Codex/Gemini runner from here is now
+out of scope; extending the Harbor generator to a still-open corpus gap
+is in scope.
 
 ### Phase 5 — agent-benchmark integration, L3 *(M, separate repo)*
 

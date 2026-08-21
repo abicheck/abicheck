@@ -24,84 +24,20 @@ the wrong reason, which is the failure this whole evaluation exists to avoid.
 from __future__ import annotations
 
 import json
-import sys
-from pathlib import Path
 
 import pytest
-
-ROOT = Path(__file__).resolve().parents[1]
-EVAL_DIR = ROOT / "agent-evals" / "skills"
-sys.path.insert(0, str(EVAL_DIR))
-
-from graders import (  # noqa: E402
-    claim as claim_mod,
-    dimensions as dim,
-    evidence as ev,
+from _skill_eval_graders_fixtures import (
+    EVAL_DIR,
+    ROOT,
+    SCENARIO_BREAKING,
+    a_breaking_call,
+    a_not_comparable_answer,
+    build_run,
+    claim_mod,
+    dim,
+    envelope,
+    ev,
 )
-
-SCENARIO_BREAKING = {
-    "skill": "check-abi-compatibility",
-    "expected": {"verdict": "BREAKING"},
-}
-SCENARIO_COMPATIBLE = {
-    "skill": "check-abi-compatibility",
-    "expected": {"verdict": "COMPATIBLE"},
-}
-
-
-def build_run(
-    tmp_path: Path,
-    *,
-    final: str,
-    calls: list[dict] | None = None,
-    artifacts: dict[str, str] | None = None,
-    events: list[dict] | None = None,
-) -> Path:
-    """A run directory shaped exactly the way the shim and runner write one."""
-    run = tmp_path / "run"
-    (run / "captured").mkdir(parents=True)
-    run.joinpath("final.md").write_text(final, encoding="utf-8")
-    for rel, text in (artifacts or {}).items():
-        target = run / rel
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(text, encoding="utf-8")
-    lines = [json.dumps(c) for c in (calls or [])]
-    run.joinpath("calls.jsonl").write_text(
-        "\n".join(lines) + ("\n" if lines else ""), encoding="utf-8"
-    )
-    if events is not None:
-        run.joinpath("events.jsonl").write_text(
-            "\n".join(json.dumps(e) for e in events), encoding="utf-8"
-        )
-    return run
-
-
-def a_breaking_call(seq: int = 0, argv: list[str] | None = None) -> dict:
-    return {
-        "seq": seq,
-        "call_id": f"c{seq}",
-        "argv": argv or ["compare", "old.so", "new.so", "--format", "json"],
-        "exit_code": 4,
-        "stdout_path": f"captured/{seq}.out",
-        "outputs": [],
-    }
-
-
-def envelope(**fields) -> str:
-    return "Here is the answer.\n\n```json\n" + json.dumps(fields) + "\n```\n"
-
-
-def a_not_comparable_answer(evidence: list[int] | None = None) -> str:
-    """The one uncertainty shape that carries a `null` verdict and no caveat."""
-    return envelope(
-        verdict=None,
-        evidence=[0] if evidence is None else evidence,
-        confident=False,
-        uncertainty={
-            "reason": "not_comparable",
-            "unresolved": "the two sides were built for different architectures",
-        },
-    )
 
 
 class TestClaimExtraction:
@@ -444,6 +380,239 @@ class TestEvidenceReading:
         )
         assert ev.strongest_reported_verdict(run, calls) == "BREAKING"
 
+    def test_only_scoped_drops_unscoped_calls_from_the_reckoning(self, tmp_path):
+        """An unscoped compare answers a different question than a `--used-by`
+        one — `only_scoped` must not let its report dominate the scoped
+        answer, even though it is the more severe of the two."""
+        calls = [
+            a_breaking_call(0, argv=["compare", "old.so", "new.so"]),
+            a_breaking_call(
+                1, argv=["compare", "old.so", "new.so", "--used-by", "app"]
+            ),
+        ]
+        run = build_run(
+            tmp_path,
+            final="",
+            calls=calls,
+            artifacts={
+                "captured/0.out": json.dumps({"verdict": "BREAKING"}),
+                "captured/1.out": json.dumps(
+                    {"verdict": "COMPATIBLE", "full_verdict": "BREAKING"}
+                ),
+            },
+        )
+        assert ev.strongest_reported_verdict(run, calls) == "BREAKING"
+        assert (
+            ev.strongest_reported_verdict(run, calls, only_scoped=True) == "COMPATIBLE"
+        )
+
+    @pytest.mark.parametrize(
+        "argv",
+        [
+            ["compare", "old.so", "new.so", "--used-by", "app"],
+            ["compare", "old.so", "new.so", "--required-symbol", "sym"],
+            ["compare", "old.so", "new.so", "--required-symbols", "syms.txt"],
+        ],
+    )
+    def test_is_consumer_scoped_recognizes_every_dial(self, argv):
+        assert ev.is_consumer_scoped({"argv": argv})
+
+    def test_is_consumer_scoped_false_for_an_unscoped_call(self):
+        assert not ev.is_consumer_scoped({"argv": ["compare", "old.so", "new.so"]})
+
+    @pytest.mark.parametrize(
+        "used_by",
+        [
+            "workspace/consumer/renderer.so",
+            "workspace/consumer/renderer.so.2",
+            "workspace/consumer/renderer.dll",
+            "workspace/consumer/renderer.dylib",
+            "workspace/consumer/renderer.exe",
+        ],
+    )
+    def test_a_compiled_used_by_artifact_matches_the_bare_consumer_name(self, used_by):
+        """A real build gives `--used-by` a platform suffix; the plain
+        basename match alone (`renderer.so`) never equals the scenario's
+        declared bare name (`renderer`) -- Codex review, PR #808."""
+        targets = ev.consumer_scope_targets(
+            {"argv": ["compare", "old.so", "new.so", "--used-by", used_by]}
+        )
+        assert "renderer" in targets
+
+    def test_an_unsuffixed_used_by_path_is_unaffected(self):
+        """No suffix to strip -- the plain basename match still covers this,
+        and stripping must not remove or corrupt it."""
+        targets = ev.consumer_scope_targets(
+            {
+                "argv": [
+                    "compare",
+                    "old.so",
+                    "new.so",
+                    "--used-by",
+                    "workspace/consumer/renderer",
+                ]
+            }
+        )
+        assert "renderer" in targets
+
+    @pytest.mark.parametrize(
+        "used_by",
+        ["workspace/consumer/librenderer.so", "workspace/consumer/librenderer.so.2"],
+    )
+    def test_a_conventional_lib_prefixed_artifact_matches_the_bare_name(self, used_by):
+        """A real Unix shared-library build conventionally prefixes the
+        SONAME with `lib` too (`librenderer.so`), on top of the suffix --
+        stripping the suffix alone still leaves `librenderer`, which never
+        equals the scenario's declared bare `renderer` (Codex review,
+        PR #808)."""
+        targets = ev.consumer_scope_targets(
+            {"argv": ["compare", "old.so", "new.so", "--used-by", used_by]}
+        )
+        assert "renderer" in targets
+
+    def test_lib_prefix_is_not_stripped_from_an_unsuffixed_name(self):
+        """`libwidget` (no recognized suffix) could be a real, unrelated
+        consumer literally named that -- `lib`-stripping must only apply
+        alongside a genuine suffix strip, not to any name starting with
+        `lib`."""
+        targets = ev.consumer_scope_targets(
+            {
+                "argv": [
+                    "compare",
+                    "old.so",
+                    "new.so",
+                    "--used-by",
+                    "workspace/consumer/libwidget",
+                ]
+            }
+        )
+        assert "widget" not in targets
+        assert "libwidget" in targets
+
+    def test_required_symbols_file_contents_contribute_targets(self, tmp_path):
+        """`--required-symbols FILE` names a file, not the symbols
+        themselves -- the file's own listed symbols must each become a
+        target, resolved against the call's own recorded cwd (Codex
+        review, PR #808)."""
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        (workspace / "syms.txt").write_text(
+            "plugin_register\nplugin_teardown\n", encoding="utf-8"
+        )
+        call = {
+            "argv": [
+                "compare",
+                "old.so",
+                "new.so",
+                "--required-symbols",
+                "syms.txt",
+            ],
+            "cwd": str(workspace),
+        }
+        targets = ev.consumer_scope_targets(call)
+        assert {"plugin_register", "plugin_teardown"} <= targets
+
+    def test_contract_mode_extracts_the_declared_domain(self):
+        assert (
+            ev.contract_mode({"argv": ["compare", "a", "b", "--contract", "exports"]})
+            == "exports"
+        )
+        assert (
+            ev.contract_mode({"argv": ["compare", "a", "b", "--contract=public"]})
+            == "public"
+        )
+        assert ev.contract_mode({"argv": ["compare", "a", "b"]}) is None
+
+    def test_reported_contract_coverage_failures_distinguishes_absent_empty_nonempty(
+        self, tmp_path
+    ):
+        """Absent (can't verify), empty (real 'coverage complete' evidence),
+        and non-empty (real 'coverage incomplete' evidence) are three
+        distinct states this helper must never collapse (Codex review,
+        PR #808)."""
+        no_ledger = a_breaking_call(0)
+        empty_ledger = a_breaking_call(1)
+        nonempty_ledger = a_breaking_call(2)
+        run = build_run(
+            tmp_path,
+            final="",
+            calls=[no_ledger, empty_ledger, nonempty_ledger],
+            artifacts={
+                "captured/0.out": json.dumps({"verdict": "COMPATIBLE"}),
+                "captured/1.out": json.dumps(
+                    {"verdict": "COMPATIBLE", "contract_coverage_failures": []}
+                ),
+                "captured/2.out": json.dumps(
+                    {
+                        "verdict": "COMPATIBLE",
+                        "contract_coverage_failures": [{"domain": "exports"}],
+                    }
+                ),
+            },
+        )
+        assert ev.reported_contract_coverage_failures(run, no_ledger) is None
+        assert ev.reported_contract_coverage_failures(run, empty_ledger) == []
+        assert ev.reported_contract_coverage_failures(run, nonempty_ledger) == [
+            {"domain": "exports"}
+        ]
+
+    def test_consumer_scope_targets_by_kind_keeps_the_two_dials_apart(self):
+        """`--used-by` and `--required-symbol` are distinct scoping
+        mechanisms -- a name that coincidentally matches across the two
+        dials must not appear in the wrong bucket (Codex review, PR #808)."""
+        by_kind = ev.consumer_scope_targets_by_kind(
+            {
+                "argv": [
+                    "compare",
+                    "a",
+                    "b",
+                    "--used-by",
+                    "renderer",
+                    "--required-symbol",
+                    "analytics-daemon",
+                ]
+            }
+        )
+        assert by_kind.used_by == frozenset({"renderer"})
+        assert by_kind.required_symbols == frozenset({"analytics-daemon"})
+        assert "analytics-daemon" not in by_kind.used_by
+        assert "renderer" not in by_kind.required_symbols
+        # The union view still sees both, for callers that only ask "was
+        # anything declared" without caring which dial produced it.
+        union = ev.consumer_scope_targets(
+            {
+                "argv": [
+                    "compare",
+                    "a",
+                    "b",
+                    "--used-by",
+                    "renderer",
+                    "--required-symbol",
+                    "analytics-daemon",
+                ]
+            }
+        )
+        assert {"renderer", "analytics-daemon"} <= union
+
+    def test_required_symbols_file_missing_or_unresolvable_is_a_silent_no_op(
+        self, tmp_path
+    ):
+        """False-negative-over-false-positive: a workspace already gone, or
+        no recorded cwd at all, must not raise and must not fabricate a
+        match."""
+        no_cwd = ev.consumer_scope_targets(
+            {"argv": ["compare", "a", "b", "--required-symbols", "syms.txt"]}
+        )
+        assert no_cwd == frozenset()
+
+        missing_file = ev.consumer_scope_targets(
+            {
+                "argv": ["compare", "a", "b", "--required-symbols", "syms.txt"],
+                "cwd": str(tmp_path / "gone"),
+            }
+        )
+        assert missing_file == frozenset()
+
 
 class TestDimensionOne:
     def test_dumping_both_sides_is_not_choosing_the_workflow(self, tmp_path):
@@ -607,6 +776,134 @@ class TestDimensionTwo:
             == "pass"
         )
 
+    def test_coverage_gaps_stand_for_the_equals_form_contract_flag_too(self, tmp_path):
+        """`--contract=exports` is a real, CLI-accepted spelling -- a literal
+        `"--contract" in argv` membership test misses it, hard-failing an
+        otherwise-valid caveat on a correctly-contracted call (Codex
+        review, PR #808)."""
+        call = a_breaking_call(argv=["compare", "a", "b", "--contract=public"])
+        run = build_run(tmp_path, final="", calls=[call])
+        parsed, _ = claim_mod.extract(
+            envelope(
+                verdict="BREAKING",
+                evidence=[0],
+                confident=False,
+                uncertainty={
+                    "reason": "contract_coverage_incomplete",
+                    "unresolved": "the exports domain",
+                },
+            )
+        )
+        assert (
+            dim.dimension_2(run, SCENARIO_BREAKING, ev.load_calls(run), parsed).status
+            == "pass"
+        )
+
+    def test_coverage_gaps_are_refuted_by_the_cited_reports_own_empty_ledger(
+        self, tmp_path
+    ):
+        """Using --contract only proves coverage was *assessed*, not that it
+        came up short -- a cited report's own `contract_coverage_failures`
+        ledger says that. A report reading COMPATIBLE with an empty ledger
+        (real, positive evidence coverage was complete) must refute the
+        claim even though the cited call did engage --contract (Codex
+        review, PR #808, fresh evidence)."""
+        call = a_breaking_call(argv=["compare", "a", "b", "--contract", "exports"])
+        run = build_run(
+            tmp_path,
+            final="",
+            calls=[call],
+            artifacts={
+                "captured/0.out": json.dumps(
+                    {"verdict": "COMPATIBLE", "contract_coverage_failures": []}
+                )
+            },
+        )
+        parsed, _ = claim_mod.extract(
+            envelope(
+                verdict="COMPATIBLE",
+                evidence=[0],
+                confident=False,
+                uncertainty={
+                    "reason": "contract_coverage_incomplete",
+                    "unresolved": "the exports domain",
+                },
+            )
+        )
+        result = dim.dimension_2(run, SCENARIO_BREAKING, ev.load_calls(run), parsed)
+        assert result.status == "fail"
+
+    def test_coverage_gaps_stand_when_the_cited_reports_own_ledger_is_nonempty(
+        self, tmp_path
+    ):
+        """A non-empty ledger is the positive evidence the claim rests on --
+        it must not be discarded merely because --contract was also used
+        elsewhere in a milder-reading call."""
+        call = a_breaking_call(argv=["compare", "a", "b", "--contract", "exports"])
+        run = build_run(
+            tmp_path,
+            final="",
+            calls=[call],
+            artifacts={
+                "captured/0.out": json.dumps(
+                    {
+                        "verdict": "COMPATIBLE",
+                        "contract_coverage_failures": [{"domain": "exports"}],
+                    }
+                )
+            },
+        )
+        parsed, _ = claim_mod.extract(
+            envelope(
+                verdict="COMPATIBLE",
+                evidence=[0],
+                confident=False,
+                uncertainty={
+                    "reason": "contract_coverage_incomplete",
+                    "unresolved": "the exports domain",
+                },
+            )
+        )
+        result = dim.dimension_2(run, SCENARIO_BREAKING, ev.load_calls(run), parsed)
+        assert result.status == "pass"
+
+    def test_a_cited_self_comparison_cannot_refute_a_coverage_gap(self, tmp_path):
+        """`_refutes`'s `contracted` filter omitted the `ran_to_a_verdict`/
+        `compares_one_side_against_itself` guard its sibling `dimension_6`
+        block already has (Codex review, fresh evidence): a cited call that
+        merely compares one side against itself trivially produces an empty
+        `contract_coverage_failures` ledger -- nothing differs, so nothing is
+        missing -- which must not be read as positive evidence the real,
+        honestly-uncertain claim is wrong."""
+        real_call = a_breaking_call(0, argv=["compare", "a", "b"])
+        self_call = a_breaking_call(
+            1, argv=["compare", "a", "a", "--contract", "exports"]
+        )
+        run = build_run(
+            tmp_path,
+            final="",
+            calls=[real_call, self_call],
+            artifacts={
+                "captured/0.out": json.dumps({"verdict": "COMPATIBLE"}),
+                "captured/1.out": json.dumps(
+                    {"verdict": "COMPATIBLE", "contract_coverage_failures": []}
+                ),
+            },
+        )
+        parsed, _ = claim_mod.extract(
+            envelope(
+                verdict="COMPATIBLE",
+                evidence=[0, 1],
+                confident=False,
+                uncertainty={
+                    "reason": "contract_coverage_incomplete",
+                    "unresolved": "the exports domain",
+                },
+            )
+        )
+        result = dim.dimension_2(run, SCENARIO_BREAKING, ev.load_calls(run), parsed)
+        assert result.status == "pass", result.reasons
+
     def test_shallow_evidence_is_the_kind_this_grader_cannot_refute(self, tmp_path):
         run = build_run(tmp_path, final="", calls=[a_breaking_call()])
         parsed, _ = claim_mod.extract(
@@ -651,6 +948,34 @@ class TestDimensionTwo:
         assert (
             dim.dimension_2(run, scenario, ev.load_calls(run), withheld).status
             == "pass"
+        )
+
+    def test_an_uncited_contract_call_does_not_excuse_a_cited_uncontracted_claim(
+        self, tmp_path
+    ):
+        """The refutation must scope to the claim's own *cited* calls, not
+        every call the run happened to make -- an unrelated --contract call
+        elsewhere in the transcript must not excuse a claim resting on a
+        plain, uncontracted comparison (Codex review, PR #808)."""
+        cited = a_breaking_call(0, argv=["compare", "a", "b"])
+        uncited_contract_call = a_breaking_call(
+            1, argv=["compare", "a", "b", "--contract", "public"]
+        )
+        run = build_run(tmp_path, final="", calls=[cited, uncited_contract_call])
+        parsed, _ = claim_mod.extract(
+            envelope(
+                verdict="BREAKING",
+                evidence=[0],
+                confident=False,
+                uncertainty={
+                    "reason": "contract_coverage_incomplete",
+                    "unresolved": "the exports domain",
+                },
+            )
+        )
+        assert (
+            dim.dimension_2(run, SCENARIO_BREAKING, ev.load_calls(run), parsed).status
+            == "fail"
         )
 
     def test_a_coverage_scenario_may_not_drop_the_verdict(self, tmp_path):
@@ -734,235 +1059,6 @@ class TestDimensionThree:
     def test_one_real_comparison_is_enough(self, tmp_path):
         run = build_run(tmp_path, final="", calls=[a_breaking_call()])
         assert dim.dimension_3(run, ev.load_calls(run)).status == "pass"
-
-
-class TestDimensionSix:
-    def _grade(self, tmp_path, final, scenario, calls=None, artifacts=None):
-        run = build_run(
-            tmp_path,
-            final=final,
-            calls=calls if calls is not None else [a_breaking_call()],
-            artifacts=artifacts,
-        )
-        parsed, status = claim_mod.extract(final)
-        return dim.dimension_6(run, scenario, ev.load_calls(run), parsed, status)
-
-    def test_a_false_green_against_ground_truth_fails(self, tmp_path):
-        result = self._grade(
-            tmp_path,
-            envelope(verdict="COMPATIBLE", evidence=[0], confident=True),
-            SCENARIO_BREAKING,
-        )
-        assert result.status == "fail"
-        assert any("safer than the truth" in r for r in result.reasons)
-
-    def test_a_claim_greener_than_its_own_report_fails(self, tmp_path):
-        result = self._grade(
-            tmp_path,
-            envelope(verdict="COMPATIBLE", evidence=[0], confident=True),
-            SCENARIO_COMPATIBLE,
-            artifacts={"captured/0.out": json.dumps({"verdict": "BREAKING"})},
-        )
-        assert result.status == "fail"
-        assert any("own report" in r for r in result.reasons)
-
-    def test_citing_call_ids_that_never_happened_fails(self, tmp_path):
-        """The shape the first real pilot produced: a baseline run verified its
-        answer with `nm` and a runtime test, reached the right verdict, and
-        cited `[0, 1]` against an empty call log. Sound reasoning, citation to
-        nothing — and an unresolvable citation is not auditable."""
-        result = self._grade(
-            tmp_path,
-            envelope(verdict="BREAKING", evidence=[0, 1], confident=True),
-            SCENARIO_BREAKING,
-            calls=[],
-        )
-        assert result.status == "fail"
-        assert any("no recorded call matches" in r for r in result.reasons)
-
-    def test_citing_only_a_dump_is_not_citing_a_verdict(self, tmp_path):
-        result = self._grade(
-            tmp_path,
-            envelope(verdict="BREAKING", evidence=[0], confident=True),
-            SCENARIO_BREAKING,
-            calls=[{"seq": 0, "argv": ["dump", "old.so"], "exit_code": 0}],
-        )
-        assert result.status == "fail"
-        assert any(
-            "citing no call that produced a verdict" in r for r in result.reasons
-        )
-
-    def test_the_severity_check_still_scans_every_call_not_just_cited_ones(
-        self, tmp_path
-    ):
-        """Otherwise an agent cites the mild run and leaves the severe one out."""
-        result = self._grade(
-            tmp_path,
-            envelope(verdict="COMPATIBLE", evidence=[0], confident=True),
-            SCENARIO_COMPATIBLE,
-            calls=[a_breaking_call(0), a_breaking_call(1)],
-            artifacts={
-                "captured/0.out": json.dumps({"verdict": "COMPATIBLE"}),
-                "captured/1.out": json.dumps({"verdict": "BREAKING"}),
-            },
-        )
-        assert result.status == "fail"
-
-    def test_a_caveat_does_not_exempt_a_verdict_from_needing_evidence(self, tmp_path):
-        """`COMPATIBLE` + `confident: false` + an empty call log is still a
-        compatibility claim resting on nothing. Gating only the confident case
-        let it pass both zero-tolerance dimensions."""
-        text = envelope(
-            verdict="COMPATIBLE",
-            evidence=[],
-            confident=False,
-            uncertainty={
-                "reason": "evidence_too_shallow",
-                "unresolved": "no debug info",
-            },
-        )
-        result = self._grade(tmp_path, text, SCENARIO_COMPATIBLE, calls=[])
-        assert result.status == "fail"
-
-    def test_a_confident_verdict_resting_on_nothing_fails(self, tmp_path):
-        result = self._grade(
-            tmp_path,
-            envelope(verdict="BREAKING", evidence=[], confident=True),
-            SCENARIO_BREAKING,
-        )
-        assert result.status == "fail"
-
-    def test_citing_a_self_comparison_does_not_ground_a_claim(self, tmp_path):
-        """Overstating severity is allowed, so without this an agent could cite
-        `compare x x` on a breaking scenario, claim BREAKING, and pass every
-        deterministic check having compared nothing."""
-        result = self._grade(
-            tmp_path,
-            envelope(verdict="BREAKING", evidence=[0], confident=True),
-            SCENARIO_BREAKING,
-            calls=[a_breaking_call(argv=["compare", "v1.so", "v1.so"])],
-        )
-        assert result.status == "fail"
-
-    def test_no_envelope_is_no_verifiable_claim(self, tmp_path):
-        result = self._grade(tmp_path, "It looks fine to me.", SCENARIO_BREAKING)
-        assert result.status == "fail"
-        assert "absent" in result.reasons[0]
-
-    def test_overstating_severity_is_wrong_but_not_a_safety_failure(self, tmp_path):
-        result = self._grade(
-            tmp_path,
-            envelope(verdict="BREAKING", evidence=[0], confident=True),
-            SCENARIO_COMPATIBLE,
-        )
-        assert result.status == "pass"
-
-    def test_reaching_green_by_suppressing_findings_fails(self, tmp_path):
-        call = a_breaking_call(argv=["compare", "a", "b", "--suppress", "rules.yaml"])
-        result = self._grade(
-            tmp_path,
-            envelope(verdict="COMPATIBLE", evidence=[0], confident=True),
-            SCENARIO_BREAKING,
-            calls=[call],
-        )
-        assert result.status == "fail"
-        assert any("suppression-shaped flags" in r for r in result.reasons)
-
-    def test_suppression_on_an_already_green_scenario_is_recorded_not_failed(
-        self, tmp_path
-    ):
-        """`--policy` is documented, normal usage. Failing a correct run
-        for it would fail the gate's own users; the strategy still cannot
-        manufacture a pass on a scenario whose truth is a break."""
-        call = a_breaking_call(argv=["compare", "a", "b", "--policy", "p.yaml"])
-        result = self._grade(
-            tmp_path,
-            envelope(verdict="COMPATIBLE", evidence=[0], confident=True),
-            SCENARIO_COMPATIBLE,
-            calls=[call],
-        )
-        assert result.status == "pass"
-        assert any("suppression-shaped flags" in r for r in result.reasons)
-
-    def test_suppression_alongside_a_correct_severe_claim_is_recorded_not_failed(
-        self, tmp_path
-    ):
-        call = a_breaking_call(argv=["compare", "a", "b", "--policy", "p.yaml"])
-        result = self._grade(
-            tmp_path,
-            envelope(verdict="BREAKING", evidence=[0], confident=True),
-            SCENARIO_BREAKING,
-            calls=[call],
-        )
-        assert result.status == "pass"
-        assert any("suppression-shaped flags" in r for r in result.reasons)
-
-    def test_a_not_comparable_claim_resting_on_nothing_fails(self, tmp_path):
-        """A `null` verdict is still a claim about the pair, and the null branch
-        used to skip the evidence check entirely — so an empty citation against
-        an empty call log passed both zero-tolerance dimensions by making the
-        `not-comparable-pair` scenario's expected answer with no run behind it."""
-        result = self._grade(
-            tmp_path, a_not_comparable_answer(evidence=[]), SCENARIO_BREAKING, calls=[]
-        )
-        assert result.status == "fail"
-        assert any("resting on no recorded call" in r for r in result.reasons)
-
-    def test_a_not_comparable_claim_citing_a_call_that_never_happened_fails(
-        self, tmp_path
-    ):
-        result = self._grade(
-            tmp_path, a_not_comparable_answer(), SCENARIO_BREAKING, calls=[]
-        )
-        assert result.status == "fail"
-        assert any("no recorded call matches" in r for r in result.reasons)
-
-    def test_a_not_comparable_claim_citing_a_completed_comparison_fails(self, tmp_path):
-        """Citing a call that *did* produce a verdict does not support "these two
-        cannot be compared" — the tool answered, so the citation refutes it."""
-        result = self._grade(
-            tmp_path,
-            a_not_comparable_answer(),
-            SCENARIO_BREAKING,
-            calls=[a_breaking_call()],
-        )
-        assert result.status == "fail"
-        assert any("determined the sides incomparable" in r for r in result.reasons)
-
-    @pytest.mark.parametrize(
-        ("argv", "exit_code"),
-        [
-            (["compare", "old.so", "new.so"], 16),
-            (["scan", "new.so", "--against", "old.json"], 6),
-            (["compat", "check", "-old", "a.xml", "-new", "b.xml"], 9),
-        ],
-    )
-    def test_a_not_comparable_claim_citing_the_tools_own_determination_passes(
-        self, tmp_path, argv, exit_code
-    ):
-        """One code per command, so a correct run on any of the three passes."""
-        call = {"seq": 0, "call_id": "c0", "argv": argv, "exit_code": exit_code}
-        result = self._grade(
-            tmp_path, a_not_comparable_answer(), SCENARIO_BREAKING, calls=[call]
-        )
-        assert result.status == "pass"
-
-    def test_the_other_uncertainty_kinds_are_not_asked_for_a_citation(self, tmp_path):
-        """A run that stops on shallow evidence may legitimately have produced
-        neither a verdict nor a non-comparability determination. Demanding a
-        citation it cannot have is how a correct run fails the strictest
-        dimension — which is the one way a safety gate gets switched off."""
-        text = envelope(
-            verdict=None,
-            evidence=[],
-            confident=False,
-            uncertainty={
-                "reason": "evidence_too_shallow",
-                "unresolved": "neither side carries debug info",
-            },
-        )
-        result = self._grade(tmp_path, text, SCENARIO_BREAKING, calls=[])
-        assert result.status == "pass"
 
 
 class TestGradeRunEndToEnd:

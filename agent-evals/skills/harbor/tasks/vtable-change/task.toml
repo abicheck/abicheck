@@ -1,0 +1,46 @@
+# GENERATED FILE -- do not hand-edit. Source: scripts/gen_harbor_tasks.py + agent-evals/skills/skill-eval-pack.json. Regenerate with `python scripts/gen_harbor_tasks.py`.
+schema_version = "1.4"
+artifacts = []
+
+[task]
+name = "abicheck/vtable-change"
+version = "1.0.0"
+description = "A virtual function was added to a class our users derive from. Review this for compatibility."
+keywords = ["abi", "abicheck", "category-a"]
+[[task.authors]]
+name = "abicheck"
+
+[metadata]
+category = "A"
+coverage_note = "examples/ground_truth.json"
+generated_from = "agent-evals/skills/scenarios.yaml"
+
+[verifier]
+timeout_sec = 180.0
+collect = []
+# The verifier runs in its own container, built from `tests/Dockerfile`
+# (`_verifier_dockerfile()`), never the agent's -- confirmed against the
+# real `harbor` package: `resolve_effective_verifier_env_config` (`harbor.
+# models.task.verifier_mode`) treats a `None` `[verifier.environment]` under
+# `environment_mode = "separate"` as "use a fresh copy of the top-level
+# [environment]", so no explicit `[verifier.environment]` block is needed
+# here. This is the actual fix for the ground-truth leak documented in
+# `_dockerfile()`'s own comments: the agent process never has filesystem
+# access to this container, so the graders it builds no longer need to be
+# hidden from the agent by naming or omission.
+environment_mode = "separate"
+
+[verifier.env]
+
+[agent]
+timeout_sec = 1800.0
+
+[environment]
+network_mode = "no-network"
+build_timeout_sec = 900.0
+os = "linux"
+mcp_servers = []
+
+[environment.env]
+
+[solution.env]

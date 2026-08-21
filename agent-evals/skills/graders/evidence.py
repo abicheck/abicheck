@@ -30,8 +30,9 @@ from __future__ import annotations
 import functools
 import json
 import re
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 from .claim import VERDICT_ORDER
 
@@ -436,6 +437,180 @@ def suppression_flags(call: dict) -> list[str]:
     return sorted(set(used))
 
 
+#: The dials `shared/consumer-scoping.md` documents. A call carrying any of
+#: these answers a *different* question from an unscoped comparison of the
+#: same pair — "does it break this consumer", not "does it break someone" —
+#: and per that doc the two verdicts "legitimately diverge in both
+#: directions", so neither is a filtered view of the other.
+CONSUMER_SCOPE_FLAGS = ("--used-by", "--required-symbol", "--required-symbols")
+
+
+def is_consumer_scoped(call: dict) -> bool:
+    """Whether this call named a consumer/host, narrowing the question asked."""
+    for token in call.get("argv", []):
+        for flag in CONSUMER_SCOPE_FLAGS:
+            if token == flag or token.startswith(f"{flag}="):
+                return True
+    return False
+
+
+#: Compiled-artifact suffixes stripped from a `--used-by` operand's basename,
+#: on top of the plain basename match — a versioned SONAME (`renderer.so.2`)
+#: strips every trailing `.N` segment along with the leading `.so`.
+_BINARY_SUFFIX_RE = re.compile(r"\.(so(\.\d+)*|dll|dylib|exe)$", re.IGNORECASE)
+
+
+def _stripped_binary_names(name: str) -> set[str]:
+    """`name` with a trailing compiled-artifact suffix and/or a leading
+    conventional `lib` prefix removed, every combination that applies.
+
+    `--used-by` names a real path to the *built* consumer
+    (`references/abicheck-adapter.md`'s own worked example: `--used-by
+    path/to/consumer-binary`), and a real Unix shared-library build
+    conventionally gives that path both a platform suffix (`renderer.so`,
+    `renderer.so.2`, `renderer.dll`) and, for the plain-`.so` case
+    specifically, a leading `lib` prefix (`librenderer.so`) — while a
+    scenario's `invocation.used_by` declares the bare logical name
+    (`renderer`) the fixture calls it. The plain-basename match already
+    handles a literal, suffix-free operand; this closes the far more common
+    case of an actual compiled artifact, in either shape. `lib` is stripped
+    only when a recognized suffix was also present — `libwidget` (a real,
+    unrelated consumer literally named that) must not lose its `lib` on the
+    strength of a prefix alone. Returns an empty set when nothing matched,
+    so a caller adds only genuinely new candidates.
+    """
+    match = _BINARY_SUFFIX_RE.search(name)
+    if not match:
+        return set()
+    suffix_stripped = name[: match.start()]
+    if not suffix_stripped:
+        return set()
+    candidates = {suffix_stripped}
+    if suffix_stripped.startswith("lib") and len(suffix_stripped) > len("lib"):
+        candidates.add(suffix_stripped[len("lib") :])
+    return candidates
+
+
+def _required_symbols_file_targets(call: dict, value: str) -> list[str]:
+    """The symbol names listed in a `--required-symbols FILE` argument.
+
+    Best-effort, silently empty on any failure — matching the
+    false-negative-over-false-positive default this module uses throughout.
+    `value` is resolved against the call's own recorded `cwd` (the shim
+    stamps this from `Path.cwd()` at call time — the workspace directory
+    under the run directory, which persists on disk after the run, unlike
+    the process's own transient cwd), not against the run directory itself:
+    a relative `--required-symbols` operand is relative to where the agent
+    ran the command, which need not be the workspace root.
+    """
+    cwd = call.get("cwd")
+    if not cwd:
+        return []
+    path = (Path(cwd) / value).resolve()
+    if not path.is_file():
+        return []
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return []
+    return [line.strip() for line in text.splitlines() if line.strip()]
+
+
+class ScopeTargets(NamedTuple):
+    """Targets this call declared, kept apart by which dial produced them.
+
+    `--used-by` and `--required-symbol(s)` are two distinct scoping
+    mechanisms with different meanings (`abicheck compare --help`:
+    "narrow the compatibility question to a specific consumer" vs. "...to
+    a specific required symbol") — a call scoped to a *consumer* answers a
+    different question from one scoped to a *symbol*, even when the two
+    happen to share a spelling. Merging them into one set let a
+    `--required-symbol analytics-daemon` call (a coincidental name
+    collision, not an actual consumer analysis) satisfy a scenario's
+    declared `used_by: [analytics-daemon]` requirement (Codex review,
+    PR #808).
+    """
+
+    used_by: frozenset[str]
+    required_symbols: frozenset[str]
+
+
+def consumer_scope_targets_by_kind(call: dict) -> ScopeTargets:
+    """The consumer/symbol identities this call passed, split by dial.
+
+    `--used-by`/`--required-symbol`, each repeatable and each carrying its
+    value as a plain string operand, are recovered directly from argv.
+    `--required-symbols FILE` names a *file*, not the symbols themselves —
+    its contents are read (see `_required_symbols_file_targets`) and each
+    listed symbol contributes as its own `required_symbols` target; a file
+    that can't be read (workspace already gone, unreadable path)
+    contributes nothing rather than fabricating a match.
+
+    `--used-by` takes a real path to the consumer binary, not a bare logical
+    name — while a scenario's `invocation.used_by` declares the logical name
+    (`renderer`) the fixture calls it. Matching the literal operand alone
+    would hard-fail every correctly-scoped run, so each raw value
+    contributes itself, its path basename, and (see `_stripped_binary_names`)
+    that basename with its compiled-artifact suffix and/or conventional
+    `lib` prefix stripped — `--required-symbol`'s operand is already a bare
+    symbol name with no path structure, suffix, or prefix, so all of these
+    transforms are no-ops there.
+    """
+    argv = call.get("argv", [])
+    used_by: set[str] = set()
+    required_symbols: set[str] = set()
+
+    def _add(bucket: set[str], value: str) -> None:
+        bucket.add(value)
+        basename = Path(value).name
+        bucket.add(basename)
+        bucket.update(_stripped_binary_names(basename))
+
+    def _add_required_symbols_file(value: str) -> None:
+        for symbol in _required_symbols_file_targets(call, value):
+            _add(required_symbols, symbol)
+
+    i = 0
+    while i < len(argv):
+        token = argv[i]
+        if token == "--used-by" and i + 1 < len(argv):
+            _add(used_by, argv[i + 1])
+            i += 2
+            continue
+        if token == "--required-symbol" and i + 1 < len(argv):
+            _add(required_symbols, argv[i + 1])
+            i += 2
+            continue
+        if token == "--required-symbols" and i + 1 < len(argv):
+            _add_required_symbols_file(argv[i + 1])
+            i += 2
+            continue
+        if token.startswith("--used-by="):
+            _add(used_by, token[len("--used-by=") :])
+        elif token.startswith("--required-symbol="):
+            _add(required_symbols, token[len("--required-symbol=") :])
+        elif token.startswith("--required-symbols="):
+            _add_required_symbols_file(token[len("--required-symbols=") :])
+        i += 1
+    return ScopeTargets(frozenset(used_by), frozenset(required_symbols))
+
+
+def consumer_scope_targets(call: dict) -> frozenset[str]:
+    """The union of `consumer_scope_targets_by_kind(call)`'s two buckets.
+
+    Kept for callers that only need "was any declared target touched at
+    all" and don't need to distinguish which scoping mechanism produced
+    it — `is_consumer_scoped`-adjacent checks, and this module's own
+    tests. A check that must honor a *specific* declared `used_by` or
+    `required_symbols` target should call `consumer_scope_targets_by_kind`
+    directly instead, the way `dimensions.py`'s declared-target check
+    does — merging back into one set here is exactly the collapse that
+    let a same-spelled symbol satisfy an unrelated consumer requirement.
+    """
+    by_kind = consumer_scope_targets_by_kind(call)
+    return by_kind.used_by | by_kind.required_symbols
+
+
 def _artifact_texts(run_dir: Path, call: dict) -> list[str]:
     """Everything this call produced that could carry a verdict."""
     texts: list[str] = []
@@ -477,11 +652,47 @@ def reported_verdict(run_dir: Path, call: dict) -> str | None:
     return None if severest is None else VERDICT_ORDER[severest]
 
 
-def strongest_reported_verdict(run_dir: Path, calls: list[dict]) -> str | None:
-    """The most severe verdict any real comparison in this run produced."""
+def contract_mode(call: dict) -> str | None:
+    """The `--contract` value this call passed, if any.
+
+    Distinct from `is_consumer_scoped`/`CONSUMER_SCOPE_FLAGS`: a contract
+    domain (`public`/`exports`/`all`/`auto`) narrows *which evidence the
+    tool consults*, not which consumer the question is about, and a
+    scenario can declare one (`invocation.contract`) without also declaring
+    a consumer. `--contract` alone (bare boolean-shaped, no value) never
+    happens on the real CLI — it always takes a mode — so a bare flag with
+    nothing following it is not matched, matching the false-negative
+    default this module uses throughout.
+    """
+    argv = call.get("argv", [])
+    for index, token in enumerate(argv):
+        if token == "--contract" and index + 1 < len(argv):
+            return argv[index + 1]
+        if token.startswith("--contract="):
+            return token[len("--contract=") :]
+    return None
+
+
+def strongest_reported_verdict(
+    run_dir: Path, calls: list[dict], *, only_scoped: bool = False
+) -> str | None:
+    """The most severe verdict any real comparison in this run produced.
+
+    `only_scoped` restricts the reckoning to consumer-scoped calls
+    (`is_consumer_scoped`) — for a claim that answers a scoped question, an
+    earlier *unscoped* comparison of the same pair is not a milder report of
+    the same fact to be held against it, it is the answer to a different
+    question (`shared/consumer-scoping.md`: "Neither direction is a filtered
+    view of the other"). Suppression-style gaming *within* the scoped calls
+    themselves — running two differently-scoped calls and citing the milder
+    one — is unaffected: this only drops unscoped calls from consideration,
+    never a scoped one.
+    """
     severest: int | None = None
     for call in calls:
         if not ran_to_a_verdict(call):
+            continue
+        if only_scoped and not is_consumer_scoped(call):
             continue
         verdict = reported_verdict(run_dir, call)
         if verdict is None:
@@ -489,3 +700,69 @@ def strongest_reported_verdict(run_dir: Path, calls: list[dict]) -> str | None:
         index = VERDICT_ORDER.index(verdict)
         severest = index if severest is None else max(severest, index)
     return None if severest is None else VERDICT_ORDER[severest]
+
+
+def reported_full_verdict(run_dir: Path, call: dict) -> str | None:
+    """The library-wide `full_verdict` this call's own JSON report stated.
+
+    JSON only, unlike `reported_verdict` — `full_verdict` has no established
+    Markdown "field" text this module already scans for, and inventing a
+    regex for one on the strength of a single report shape risks a false
+    match on unrelated prose. A JSON-only cited call that carries the field
+    is still checked; a Markdown-only one degrades to "nothing to check
+    against" rather than guessing — the same false-negative-over-false-
+    positive default this module uses throughout.
+    """
+    for text in _artifact_texts(run_dir, call):
+        try:
+            parsed: Any = json.loads(text)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(parsed, dict) and parsed.get("full_verdict") in VERDICT_ORDER:
+            value: str = parsed["full_verdict"]
+            return value
+    return None
+
+
+def reported_full_verdicts(run_dir: Path, calls: Iterable[dict]) -> frozenset[str]:
+    """Every distinct `full_verdict` these calls' own reports stated.
+
+    Deliberately takes whatever iterable of calls the caller already
+    resolved as *cited* (`_cited(calls, claim)`'s `resolved.values()`) —
+    `full_verdict` is being checked against the specific report(s) a claim
+    rested its own `full_verdict` on, not against every report the run
+    happened to produce. A caller wanting an *unambiguous* grounding check
+    treats more than one distinct value as "can't tell which one the claim
+    should match" rather than picking one — the same false-negative-over-
+    false-positive default this module uses throughout.
+    """
+    return frozenset(
+        v for c in calls if (v := reported_full_verdict(run_dir, c)) is not None
+    )
+
+
+def reported_contract_coverage_failures(run_dir: Path, call: dict) -> list[Any] | None:
+    """This call's own `contract_coverage_failures` ledger, if its report has one.
+
+    JSON only (per ADR-049 Phase 7 / `contract_coverage_exit.py`, only
+    `--format json` carries this field at all — markdown/text output never
+    does even when `--contract` was genuinely engaged), and distinguishes
+    three states a caller must not collapse: the key absent (`None` — this
+    report can't be used to verify the claim either way, e.g. because it
+    wasn't emitted as JSON), the key present and empty (`[]` — real,
+    positive evidence that the selected domain's coverage was actually
+    complete), and the key present and non-empty (real, positive evidence
+    of a genuine coverage gap). A `--contract` call's own use of the flag
+    (`contract_mode`) is not this: that only proves contract evaluation ran,
+    not what its coverage ledger actually says.
+    """
+    for text in _artifact_texts(run_dir, call):
+        try:
+            parsed: Any = json.loads(text)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(parsed, dict) and "contract_coverage_failures" in parsed:
+            failures = parsed["contract_coverage_failures"]
+            if isinstance(failures, list):
+                return failures
+    return None

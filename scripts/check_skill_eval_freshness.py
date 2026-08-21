@@ -82,8 +82,11 @@ EVIDENCE = ROOT / "agent-evals" / "skills" / "evidence"
 
 #: The pack shape this checker understands. A pack written by a newer
 #: generator fails loudly rather than being read field-by-field against
-#: assumptions that may no longer hold.
-SUPPORTED_PACK_VERSION = 1
+#: assumptions that may no longer hold. Kept in lockstep with
+#: `gen_skill_eval_pack.PACK_VERSION` — see that constant's own comment for
+#: why version 2 (the `architectures` restriction field) needed a bump
+#: rather than a silent field addition (Codex review, PR #808).
+SUPPORTED_PACK_VERSION = 2
 
 #: The bundle shape this checker understands, for the same fail-closed reason:
 #: a bundle written by a newer runner would otherwise be read field-by-field
