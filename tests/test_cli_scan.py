@@ -942,7 +942,7 @@ def _fake_candidate_resolution(sentinel_folded_ctx, effective_includes=()):
     )
 
     def _fake(*args, **kw):
-        headers = list(args[1]) if len(args) > 1 else []
+        headers = list(args[1]) if len(args) > 1 else list(kw.get("headers") or ())
         return SideResolution(
             snapshot=AbiSnapshot(library="l", version="2.0"),
             effective_includes=tuple(effective_includes),
