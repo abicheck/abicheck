@@ -19,7 +19,7 @@ of the catalog. Each fixture-only case's own README says so explicitly;
 check `ground_truth.json`/the per-case README before assuming a `v1`/`v2`
 source pair exists.
 
-The catalog drives abicheck's benchmark and serves as an encyclopedia of ABI pitfalls. For conceptual background on what ABI stability means and how to reason about it, see [ABI/API Handling & Recommendations](../docs/learn/abi-api-handling.md).
+The catalog drives abicheck's benchmark and serves as an encyclopedia of ABI pitfalls. For conceptual background on what ABI stability means and how to reason about it, see [ABI/API Compatibility](../docs/learn/abi-api-handling.md).
 
 > **Authoritative expected verdicts for benchmarking** live in [`ground_truth.json`](ground_truth.json).
 > If a per-case README and `ground_truth.json` disagree, `ground_truth.json` is the source of truth.
@@ -498,6 +498,6 @@ cmake --build build
 
 - **Pinned 74-case cross-tool accuracy table** (all configurations, FP/FN): [`../README.md#validation-snapshot`](../README.md#validation-snapshot)
 - **Per-case accuracy matrix and methodology:** [Tool Comparison & Benchmarks](../docs/reference/tool-comparison.md)
-- **What counts as an ABI break (with code):** [ABI/API Handling & Recommendations](../docs/learn/abi-api-handling.md)
+- **What counts as an ABI break (with code):** [ABI/API Compatibility](../docs/learn/abi-api-handling.md)
 - **Dependency ABI leaks** (case 18 background): [`case18_dependency_leak/README.md`](case18_dependency_leak/README.md)
 - **Local build & snapshot workflow:** [Local Compare](../docs/user-guide/local-compare.md)
