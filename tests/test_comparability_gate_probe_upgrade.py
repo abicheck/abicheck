@@ -567,6 +567,62 @@ def test_gate_waives_content_driven_divergence_for_a_hybrid_snapshot():
     check_contracts_comparable(old, new)  # must not raise
 
 
+def test_gate_content_driven_still_raises_for_hybrid_clang_leg_drift():
+    """Codex review, fresh evidence (P2, eighth round): the hybrid fallback
+    above only ever consulted the castxml leg. A real hybrid snapshot
+    carries both ``castxml_*`` and ``clang_*`` provenance -- if the clang
+    frontend/compiler genuinely changes between two snapshots while
+    castxml's own leg stays identical, the castxml-only check saw nothing
+    wrong and the carve-out discarded the combined ``compiler_version``
+    mismatch (the only profile field carrying the changed clang identity),
+    reporting the pair comparable despite a real toolchain difference on
+    the clang leg. Every castxml_-prefixed key is identical between old
+    and new; only the clang_ leg's ``version``/``sha256`` differ -- and
+    that alone must still block the waiver."""
+    old = _snap(
+        compute_extraction_contract(
+            l2_frontend_ran=True,
+            compiler_family="gnu",
+            compiler_version="13.3.0",
+            language_standard="probed:__cplusplus=201703L",
+        ),
+        ast_toolchain={
+            "castxml_resolved_lang_mode": "c++",
+            "castxml_producer": "castxml",
+            "castxml_version": "0.6.11",
+            "castxml_sha256": "c" * 64,
+            "castxml_compiler_version": "gcc (Ubuntu 13.3.0) 13.3.0",
+            "castxml_language_standard_explicit": "0",
+            "clang_producer": "clang",
+            "clang_version": "18.1.3",
+            "clang_sha256": "a" * 64,
+            "clang_language_standard_explicit": "0",
+        },
+    )
+    new = _snap(
+        compute_extraction_contract(
+            l2_frontend_ran=True,
+            compiler_family="gnu",
+            compiler_version="13.3.0",
+            language_standard="gnu11",
+        ),
+        ast_toolchain={
+            "castxml_resolved_lang_mode": "c",
+            "castxml_producer": "castxml",
+            "castxml_version": "0.6.11",
+            "castxml_sha256": "c" * 64,
+            "castxml_compiler_version": "gcc (Ubuntu 13.3.0) 13.3.0",
+            "castxml_language_standard_explicit": "0",
+            "clang_producer": "clang",
+            "clang_version": "19.0.0",  # genuinely different clang build
+            "clang_sha256": "b" * 64,
+            "clang_language_standard_explicit": "0",
+        },
+    )
+    with pytest.raises(ProfileMismatchError):
+        check_contracts_comparable(old, new)
+
+
 def test_gate_waives_when_castxml_resolves_a_mode_specific_gnu_driver_name():
     """Real CI failure, second round (Codex review + a real castxml/gcc
     repro against examples/case66_language_linkage_changed): castxml
