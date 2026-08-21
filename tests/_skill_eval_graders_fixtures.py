@@ -43,11 +43,11 @@ from graders import (  # noqa: E402
 )
 
 SCENARIO_BREAKING = {
-    "skill": "review-native-library-change",
+    "skill": "check-abi-compatibility",
     "expected": {"verdict": "BREAKING"},
 }
 SCENARIO_COMPATIBLE = {
-    "skill": "review-native-library-change",
+    "skill": "check-abi-compatibility",
     "expected": {"verdict": "COMPATIBLE"},
 }
 

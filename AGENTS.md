@@ -508,11 +508,12 @@ Core pipeline (in order of data flow):
 
 10. **Published Agent Skills (ADR-058)** — `skills-src/` is the one
    hand-authored source (one `SKILL.md` in Layer A — the portfolio was
-   reset to a single internal candidate, `review-native-library-change`,
-   see `skills-src/CLAUDE.md`'s portfolio-status table and ADR-058's
-   2026-08-20 amendment — plus one `shared/` tree of Layer-B domain
-   fragments); `scripts/gen_agent_skills.py` publishes it into three
-   committed, self-contained trees (`.agents/skills/`, `.claude/skills/`,
+   reset to a single internal candidate, `check-abi-compatibility`
+   (renamed from `review-native-library-change`), see `skills-src/
+   CLAUDE.md`'s portfolio-status table and ADR-058's 2026-08-20
+   amendments — plus one `shared/` tree of Layer-B domain fragments);
+   `scripts/gen_agent_skills.py` publishes it into three committed,
+   self-contained trees (`.agents/skills/`, `.claude/skills/`,
    `.gemini/skills/`). Never hand-edit the generated trees. See
    `skills-src/CLAUDE.md`.
 
@@ -625,6 +626,7 @@ CI runs `mypy abicheck/` as a required gate. The baseline is currently **0 error
 | `changekind-docs` | WARN | Every `ChangeKind` is mentioned in `docs/` |
 | `doc-count-sync` | ERROR on drift, WARN if anchor moved | Headline counts in docs (ChangeKind count, example-catalog size) match their source of truth (`len(ChangeKind)`, `ground_truth.json`) — this file (`AGENTS.md`) is included in the generic sweep, same as `README.md`/`CLAUDE.md` |
 | `cli-contract` | ERROR | No front-end `cli*.py` module calls Tier-1 `checker.compare` directly — it must route through the Tier-2 service (`service.run_compare`/`compare_snapshots`); ADR-037 D10.1 |
+| `engine-cli-boundary` | ERROR | No engine-layer module (`scan_engine.py`, `service*.py`, `artifact_*.py`, `buildsource/**/*.py`) imports `click` or a `cli_*` sibling — the CLI is a frontend adapter over the engine, not the reverse. `ENGINE_CLI_BOUNDARY_ALLOWLIST` records today's pre-existing inversions (`scan_engine.py`'s own `click.ClickException`/lazy `cli_scan_baseline`/`cli_scan_helpers` imports, three `service*.py` modules' lazy `cli_*` imports, `buildsource/evidence_policy.py`'s `click`) the same allowlist-and-shrink way `IMPORT_CYCLE_ALLOWLIST` does — a new site outside the allowlist fails outright; closing a listed one is Phase 1 of `docs/contribute/plans/duplication-and-convergence-assessment.md` |
 | `import-cycle-growth` | ERROR | No *unapproved* strongly-connected-component growth within `abicheck/` — not literally "no import cycles": a large, deliberately-baselined CLI-registration SCC already exists and is allowed (`IMPORT_CYCLE_ALLOWLIST`). The invariant is that no *new* module joins it and no *new* separate SCC forms; extending the allowlist to unblock a fresh cycle needs an ADR or explicit architectural sign-off, not a routine edit (CLAUDE.md "M1-3") |
 | `mypy-baseline` | ERROR if drifted up | mypy error count ≤ documented baseline |
 | `examples-ground-truth` | ERROR | Every `examples/case*/` has a `README.md` and an entry in `ground_truth.json` |
@@ -1983,6 +1985,101 @@ Once a root command genuinely clears the bar above, pick the right home:
   includes` is empty; `scan`'s candidate carries the identical `-I <dir>`
   via `declared_includes` instead — same effective compiler argv, still a
   real `profile_fingerprint`/`include_sequence` disagreement.
+
+  **Re-verified end to end (2026-08-20) against the literal bug report this
+  whole entry was originally opened from** (a `dump --sources --build-info
+  --depth source` baseline compared against an unchanged codebase via
+  `scan --against`, reported carrying empty `ast_resolved_standard`/
+  `ast_compile_args` and failing as `NOT_COMPARABLE`): the reported
+  symptom does **not** reproduce on current `main` for a plain,
+  single-compilation-unit `compile_commands.json` (real `g++ -std=c++17`
+  build, real `clang` L2 frontend, no `-p`/`--compile-db` involved) — the
+  `dump` baseline's `ast_resolved_standard`/`ast_compile_args` are
+  correctly populated and the follow-up `scan --against` resolves
+  `NO_CHANGE`, not `NOT_COMPARABLE`. This confirms the accumulated fixes
+  above (the L3->L2 fold itself, the include-dir dedup fixes, the
+  class-sensitive dedup fix) already close the reported case for real —
+  the pinned commit the report was filed against
+  (`abicheck/abicheck@891bd9d7`) predates essentially all of them. Added
+  as a real, non-mocked end-to-end regression:
+  `tests/test_dump_scan_l3_comparability.py` (a real `g++`-compiled
+  library + `compile_commands.json`, driven through the actual `dump`/
+  `scan` CLI commands via `CliRunner`, not a stubbed `dump()` call the way
+  the existing unit coverage in `tests/test_cli_dump_helpers_coverage.py`
+  is) — closing the gap this entry's own earlier text noted between "the
+  mechanism is unit-tested" and "the reported end-to-end symptom is
+  verified gone." **The residual, narrower gap immediately above this
+  note — the legacy `-p`/`--compile-db` auto-match (`dump`-only) landing a
+  matched directory through a structurally different channel than the
+  P0.3 fold's own seeded `declared_includes`, reproduced against real
+  Bazel `aquery`/`cquery` evidence in `napetrov/abicheck-bazel-lab`'s own
+  PR #14 — is unaffected by this re-verification and remains genuinely
+  open** for a `--build-info` combined with an explicit `-p`/
+  `--compile-db`, or for real multi-target Bazel `aquery` graphs this
+  environment cannot reproduce (no live Bazel/castxml toolchain
+  available). A user hitting `NOT_COMPARABLE` after this date should
+  check first whether their invocation combines `-p`/`--compile-db` with
+  `--build-info`, or is a genuine multi-TU Bazel build — the plain,
+  single-compile-unit case this note re-verifies is not the culprit.
+
+  **Narrower still: the residual gap also reproduces without any Bazel
+  toolchain or `-p`/`--compile-db` at all — the minimal trigger is just
+  "the matched compile unit's own flags include an `-I<dir>` that is not
+  already in the caller's explicit `includes`" (2026-08-20, found while
+  adding generalized parity testing for this bug class, prompted by a
+  direct question — "how did we end up with two different behaviours,
+  and can this be caught generically?" — rather than by a new field
+  report).** A real `g++ -std=c++17 -I<dep-dir>` build, `--build-info` a
+  matching `compile_commands.json`, no `-p`/`--compile-db` anywhere:
+  `dump`'s own baseline JSON correctly carries `-I <dep-dir>` in
+  `ast_compile_args`, but its `contract.profile_fields.include_sequence`
+  reads `"[]"` — confirmed directly by inspecting the emitted JSON, not
+  inferred. Root cause, read from the code rather than guessed:
+  `dumper_contract._attach_extraction_contract` builds `declared_includes`
+  (the source `include_sequence` tokenizes) **exclusively** from
+  `extra_includes`, and for this shape the `-I<dep-dir>` reaches the
+  parse only through `gcc_option_tokens` (the L3->L2 fold's own derived
+  compile-unit include dirs), never through `extra_includes` — while
+  `scan_engine._build_new_snapshot`'s own candidate resolution (which
+  calls `service.resolve_input` directly, per this same entry's "PR C"
+  paragraphs below, rather than through the shared `resolve_side_snapshot`
+  primitive `compare`'s implicit-dump path and the typed `DumpRequest`
+  API both already use) seeds `eff_includes`/`declared_includes` for the
+  identical directory instead — two structurally different channels for
+  the same fact, exactly the shape this entry's own "third, deeper
+  mechanism" paragraph already names for the Bazel case, just reproduced
+  here without Bazel. Confirms `compare`'s implicit-dump path is
+  genuinely unaffected: comparing the same `dump` baseline against the
+  same live binary via `compare` (not `scan --against`) resolves cleanly
+  for this exact shape — the divergence is specifically between `dump`'s
+  CLI path and `scan`'s own candidate-resolution path, narrower than
+  "any comparison against a `dump` baseline." **Not fixed here** — same
+  reasoning as the Bazel-specific case above (a real design decision on
+  which of two established include-seeding channels should win, not a
+  drive-by patch) — but now has permanent, generalized regression
+  coverage rather than depending on a Bazel CI lab to notice it again:
+  `tests/test_dump_cli_typed_api_parity.py`'s
+  `test_scan_against_real_dump_baseline_is_comparable` parametrizes over
+  several real build-evidence shapes (plain, an added macro, this
+  extra-include-dir shape). Rather than a bare `xfail(strict=True)` (three
+  Codex review rounds on this test found real gaps in cruder versions of
+  this idea — see the test module's own comments for the full history),
+  the known-divergent shape is checked against the *exact* diagnosed
+  failure signature (`NOT_COMPARABLE` naming `include_sequence`) before
+  being treated as expected via a conditional `pytest.xfail()`; anything
+  else for that shape — including the gap closing entirely — fails the
+  test outright, forcing this note and `_SCAN_KNOWN_DIVERGENT_SHAPES` to
+  be updated deliberately rather than the test quietly going green. A
+  future regression that widens the gap to a *previously-passing* shape
+  fails immediately too, since only the shape explicitly listed gets any
+  tolerance at all. The sibling
+  `test_dump_cli_and_typed_api_agree_on_resolved_compile_context` in the
+  same module separately pins the narrower invariant that *does* already
+  hold across all three shapes today (`dump`'s CLI path and the typed
+  `DumpRequest` API path agree on `ast_resolved_standard`/
+  `ast_compile_args`) — so a regression in *that* invariant, which is
+  what #810's original literal symptom was about, is caught independently
+  of the `include_sequence` gap this note documents.
 
 - **`dump --lang c++` is silently discarded on the primary clang header-AST
   pass for a language-ambiguous header, diverging from `_attach_header_graph`'s

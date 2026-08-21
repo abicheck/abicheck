@@ -96,7 +96,7 @@ ARMS = ("skill", "baseline")
 #: what re-scopes a future second skill's scenarios out of a
 #: still-flagship-only run the moment one is added, without needing this
 #: filter re-introduced from scratch.
-FLAGSHIP_SKILL = "review-native-library-change"
+FLAGSHIP_SKILL = "check-abi-compatibility"
 
 #: Identical for both arms — the treatment must be the skill, nothing else.
 #: `Skill` is included so the skill arm can actually invoke what it finds;
@@ -527,6 +527,7 @@ def _prepare_workspace(work: Path, scenario: dict, arm: str) -> None:
 _RETIRED_SKILL_NAMES = frozenset(
     {
         "native-binary-compatibility-review",  # renamed -> review-native-library-change
+        "review-native-library-change",  # renamed -> check-abi-compatibility
         "native-api-evolution",
         "native-consumer-compatibility",
         "native-release-compatibility",
@@ -537,7 +538,7 @@ _RETIRED_SKILL_NAMES = frozenset(
 def _published_skill_names() -> set[str]:
     """The abicheck skill directories currently published, per `SKILLS_SRC`.
 
-    Not a `native-`-prefix heuristic: `review-native-library-change`
+    Not a `native-`-prefix heuristic: `check-abi-compatibility`
     (renamed from `native-binary-compatibility-review` by ADR-058's
     2026-08-20 portfolio-reset amendment) does not start with `native-`, and
     a prefix check silently dropped it from every visibility read — the

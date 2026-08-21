@@ -1270,6 +1270,110 @@ pipelines a fourth time.
   > "must not be unioned snapshot-wide" invariant (AGENTS.md's L3→L2-fold
   > entry, ninth finding) that any new call site would have to re-verify
   > against. Not attempted here. Blockers 5 and 6 are unchanged.
+  >
+  > **Blocker 4 closed for the shared pipeline (2026-08-20).** The "new
+  > typed-API surface" this note called for is now real: a call to the
+  > ADR-039 collector inside `_resolve_side_snapshot_impl`, gated exactly the
+  > way `perform_elf_dump` gates its own call (a compile-DB path resolvable
+  > from `side.build_info`, real headers, `snap.from_headers`).
+  > `InputSpec` deliberately does **not** gain a `compile_db_filter` field
+  > mirroring `--compile-db-filter` — an earlier revision of this change
+  > added one, and Codex review found it had no successful execution path
+  > where it narrowed anything (this shared pipeline's own L2 header-AST
+  > context always resolves from the whole, unfiltered compile database
+  > regardless of collect mode, so the field could only ever be combined
+  > with a resolvable database by raising, never by actually narrowing the
+  > collector's scan); removed rather than half-implemented — see the field's
+  > replacement comment in `api_types.py` for why threading the filter
+  > through is a separate, larger feature.
+  > `attach_build_context`/`user_define_flags`/`compile_db_from_build_info`
+  > moved from `cli_dump_helpers.py` (CLI-presentation layer, not importable
+  > from a service module) to `header_conditionals.py` — already a
+  > dependency-free leaf module and the collector's own home — with
+  > `cli_dump_helpers.py` keeping the original private names as thin
+  > re-exports, so `perform_elf_dump` and every existing test are unchanged.
+  > The "must not be unioned snapshot-wide" invariant is preserved the same
+  > way `perform_elf_dump` preserves it: only `side.compile` (this side's
+  > pre-fold, caller-supplied `CompileContext`) feeds the collector's
+  > `extra_flags`, never `compile_ctx` (the P0.3-folded result also computed
+  > in this function). `perform_elf_dump` itself is **not** migrated to call
+  > through this shared path — it keeps its own direct call — so this closes
+  > the *capability* gap (compare's implicit-dump operand and `dump`'s typed
+  > `run_dump_request` API can now reach the collector too), not blocker 5
+  > (making `dump_cmd` build a real `DumpRequest` in the first place, which
+  > is what would let the real ELF `dump` CLI path route through here).
+  > Verified with direct tests on `_resolve_side_snapshot_impl`
+  > (`tests/test_typed_dump_request.py::
+  > TestSharedPipelineReachesADR039BuildContextCollector`) — collector fires
+  > and populates `build_context_defines`/`conditional_fields`; folded/
+  > derived tokens never reach `extra_flags`; the collector is skipped (not
+  > raised) with no `build_info` at all — each confirmed to fail against the
+  > pre-fix code (no `attach_build_context` attribute on the module). Full
+  > fast unit suite green, `mypy abicheck/` clean, `ruff check` clean.
+  >
+  > **Three more Codex-review rounds on this same change (2026-08-20),
+  > each confirmed and fixed, none requiring a design change.** (1) A PE/
+  > Mach-O typed dump/compare with headers + a compile-database `build_info`
+  > silently attached ELF-only ADR-039 evidence — gated the whole block on
+  > `fmt == "elf"` too. (2) A followed GNU ld linker script (`fmt` reads
+  > `None` pre-resolution, `resolve_input`'s own `follow_linker_scripts`
+  > default follows it to a real ELF target) silently skipped the collector
+  > — regated on `snap.elf is not None`, the model's own post-resolution
+  > signal, instead of the stale pre-resolution `fmt`. (3) `snap.elf is not
+  > None` alone proved insufficient on its own: a *loaded* JSON snapshot
+  > (`resolve_input`'s `fmt == "json"` branch, `load_snapshot(path)`
+  > verbatim, no live parse) round-trips its original `elf`/`from_headers`
+  > fields exactly as saved, so the identical signal fires for a side that
+  > never touched the header parser at all — running the collector there
+  > would scan the *current* filesystem's headers/compile-db and overwrite
+  > the loaded snapshot's own recorded build-context evidence with
+  > unrelated data. Fixed by also requiring
+  > `service.sniff_text_format(side.path) != "json"` (the exact predicate
+  > `resolve_input` itself uses to take that branch, so the two can't
+  > disagree). Each of the three confirmed to fail against the pre-fix code
+  > via a dedicated regression test in the same test class.
+  >
+  > **A separate, unrelated Codex finding on `cli_dump_helpers.py`'s own
+  > re-export of the moved helpers, also fixed the same round.**
+  > `compile_db_from_build_info`/`compile_db_filter_scope_error` (re-exported
+  > only for `cli.py`/test back-compat, never called internally by this
+  > module) now go through the lazy module-level `__getattr__` shim this
+  > repo's own moved-helper convention requires, mirroring
+  > `cli_buildsource.py`'s identical shim.  `_attach_build_context`/
+  > `_user_define_flags` stay a normal static import, since `perform_elf_dump`
+  > calls them directly — that edge to `header_conditionals.py` (a verified
+  > true leaf module) is structurally required either way, so it isn't the
+  > pattern the convention targets.
+  >
+  > **The `scan_engine._build_new_snapshot` `allow_build_query` gating
+  > "unreconciled" framing (this section's own opening paragraph, and PR
+  > 3A's summary in "Ordering") is investigated and found to be a
+  > non-issue, not left open.** Tracing `build_config`'s origin
+  > (`run_scan_core` → `cli_scan_helpers.resolve_effective_allow_query`)
+  > shows its docstring already states the trust rule: *"Trusted = an
+  > explicit --config path (build_config is not None here; an
+  > auto-discovered source-tree config is resolved later in
+  > embed_build_source and never reaches this gate)"* — by the time
+  > `build_config` reaches `_build_new_snapshot`, its mere presence already
+  > encodes the trust decision, matching `_resolve_l2_seed_pack_args`'s own
+  > internal rule (`build_config_trusted_for_query=(build_config is not
+  > None or build_query is not None)`). Passing it ungated to the seed call
+  > is therefore correct, not drift; applying `_gated_build_query_inputs`-
+  > style re-gating on top would be a **regression** — `effective_allow_
+  > query` can be `False` for reasons unrelated to trust (e.g.
+  > `collect_mode == "off"`), which would wrongly suppress an
+  > already-vetted `--config`'s `build.query` from reaching the seed.
+  > `build_query`/`build_compile_db` being hardcoded `None`/`None` in the
+  > same call is confirmed fully dead code today (`scan` has no
+  > `--build-query`/`--build-compile-db` CLI flags, `run_scan_core` has no
+  > such parameters, and `_build_new_snapshot`'s one call site never passes
+  > non-default values) — adding live parameters/gating for a capability
+  > nothing can reach yet would be speculative, untested plumbing, not a
+  > fix for an observed defect. Not implemented; recorded as investigated
+  > and closed rather than left as an open reconciliation item. A future
+  > `scan --build-query` flag, if ever added, needs its own trust-gate
+  > design at that point (mirroring `dump`'s), not a preemptive parameter
+  > added now.
   Two #782 follow-ups that change the *parsed public surface*, not just
   performance, so they belong before the model is called finished: (1)
   compile-unit matching — the L2 include-dir seed is still gathered from

@@ -61,7 +61,7 @@ actual cause is that neither arm had a workable toolchain.
    own `version` field — which, per this repo's own convention
    (`skills-src/CLAUDE.md` rule 7), stays at the *last cut* release number
    between releases even though the working tree's actual CLI surface is
-   already ahead of it. `review-native-library-change` declares
+   already ahead of it. `check-abi-compatibility` declares
    `>=0.6.0,<0.7.0`; a checkout still reporting an earlier version (e.g.
    `0.5.0`) makes the skill's own preflight step — correctly, per its own
    stated contract — refuse to proceed on every single skill-arm run. This

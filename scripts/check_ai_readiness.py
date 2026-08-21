@@ -78,6 +78,7 @@ from adr_status_sync import (  # noqa: E402
     _adr_status_text,
     check_adr_status_sync,
 )
+from engine_cli_boundary import check_engine_cli_boundary  # noqa: E402
 from findings_report import Findings as _SharedFindings  # noqa: E402
 
 # The generated-skill publication trees' own generator (ADR-058 / G36 P0.3).
@@ -2370,6 +2371,17 @@ def check_cli_contract(f: Findings) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Check: engine/CLI dependency direction (Phase 0 of
+# docs/contribute/plans/duplication-and-convergence-assessment.md)
+# ---------------------------------------------------------------------------
+#
+# Implementation lives in the sibling leaf module `engine_cli_boundary.py`
+# (mirroring `adr_status_sync.py`'s own extraction) -- this file is already
+# past the 2000-line hard cap and only stays green through
+# `LARGE_FILE_ALLOWLIST`, which is not a license to keep growing it.
+
+
+# ---------------------------------------------------------------------------
 # Check: test assertion density (coverage-honesty guard)
 # ---------------------------------------------------------------------------
 
@@ -2533,6 +2545,7 @@ CHECKS: dict[str, Callable[[Findings], None]] = {
     "adr-status-sync": check_adr_status_sync,
     "banned-imports": check_banned_imports,
     "cli-contract": check_cli_contract,
+    "engine-cli-boundary": check_engine_cli_boundary,
     "license-header": check_license_header,
     "test-assertion-density": check_test_assertion_density,
 }

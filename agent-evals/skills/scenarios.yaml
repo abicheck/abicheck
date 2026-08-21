@@ -49,7 +49,7 @@
 # own workflow explicitly directs `--used-by`/`--required-symbol` for a
 # named application, plugin, or host (Step 3 of `SKILL.md`, citing
 # `shared/consumer-scoping.md`) — that capability was *absorbed*, not
-# dropped, by the reset. Reassigned to `review-native-library-change` rather
+# dropped, by the reset. Reassigned to `check-abi-compatibility` rather
 # than removed, so the inversion this corpus exists to catch (an agent that
 # always reports the library-wide `full_verdict` instead of the scoped
 # `verdict`) still has coverage.
@@ -65,7 +65,7 @@ scenarios:
 
   - id: not-comparable-pair
     category: B
-    skill: review-native-library-change
+    skill: check-abi-compatibility
     status: ready
     coverage_note: "D4 uncertainty kind 1 — not comparable"
     prompt: >-
@@ -81,7 +81,7 @@ scenarios:
 
   - id: evidence-too-shallow
     category: B
-    skill: review-native-library-change
+    skill: check-abi-compatibility
     status: ready
     coverage_note: "D4 uncertainty kind 2 — evidence too shallow for the question"
     prompt: >-
@@ -105,7 +105,7 @@ scenarios:
 
   - id: contract-coverage-incomplete
     category: B
-    skill: review-native-library-change
+    skill: check-abi-compatibility
     status: ready
     coverage_note: "D4 uncertainty kind 4 — contract coverage incomplete (not the matrix case)"
     prompt: >-
@@ -129,7 +129,7 @@ scenarios:
 
   - id: consumer-unaffected-despite-break
     category: B
-    skill: review-native-library-change
+    skill: check-abi-compatibility
     status: ready
     coverage_note: "consumer answer diverging below the library's global verdict"
     prompt: >-
@@ -145,7 +145,7 @@ scenarios:
 
   - id: consumer-actually-affected
     category: B
-    skill: review-native-library-change
+    skill: check-abi-compatibility
     status: ready
     coverage_note: "consumer answer confirming impact"
     prompt: >-
@@ -163,7 +163,7 @@ scenarios:
 
   - id: plugin-required-symbol-loss
     category: B
-    skill: review-native-library-change
+    skill: check-abi-compatibility
     status: ready
     coverage_note: "plugin loses a symbol its host requires"
     prompt: >-
@@ -186,7 +186,7 @@ scenarios:
 
   - id: removed-export
     category: A
-    skill: review-native-library-change
+    skill: check-abi-compatibility
     status: ready
     coverage_note: "removed export"
     case: case01_symbol_removal
@@ -196,7 +196,7 @@ scenarios:
 
   - id: changed-signature
     category: A
-    skill: review-native-library-change
+    skill: check-abi-compatibility
     status: ready
     coverage_note: "changed function signature"
     case: case02_param_type_change
@@ -206,7 +206,7 @@ scenarios:
 
   - id: struct-layout-drift
     category: A
-    skill: review-native-library-change
+    skill: check-abi-compatibility
     status: ready
     coverage_note: "struct layout drift"
     case: case07_struct_layout
@@ -216,7 +216,7 @@ scenarios:
 
   - id: enum-value-change
     category: A
-    skill: review-native-library-change
+    skill: check-abi-compatibility
     status: ready
     coverage_note: "enum value change"
     case: case08_enum_value_change
@@ -226,7 +226,7 @@ scenarios:
 
   - id: vtable-change
     category: A
-    skill: review-native-library-change
+    skill: check-abi-compatibility
     status: ready
     coverage_note: "vtable change"
     case: case09_cpp_vtable
@@ -236,7 +236,7 @@ scenarios:
 
   - id: compatible-addition
     category: A
-    skill: review-native-library-change
+    skill: check-abi-compatibility
     status: ready
     coverage_note: "compatible addition — false-green-without-evidence floor"
     case: case03_compat_addition

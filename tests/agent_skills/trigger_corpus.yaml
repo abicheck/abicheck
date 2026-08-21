@@ -21,7 +21,7 @@ schema_version: 1
 
 positive:
   - prompt: "Review this PR for binary compatibility."
-    expected_skill: review-native-library-change
+    expected_skill: check-abi-compatibility
     description_keywords:
       - pull request
       - binary
@@ -48,18 +48,18 @@ positive:
   - prompt: "Will this old application work with the new library?"
     # Previously claimed by `native-consumer-compatibility`, removed from the
     # published portfolio by ADR-058's 2026-08-20 portfolio-reset amendment.
-    # Named-consumer scoping was absorbed by review-native-library-change
+    # Named-consumer scoping was absorbed by check-abi-compatibility
     # (Step 3, `--used-by`/`--required-symbol`, citing shared/
     # consumer-scoping.md) rather than dropped, so this prompt is claimed by
     # the surviving skill, not left unclaimed.
-    expected_skill: review-native-library-change
+    expected_skill: check-abi-compatibility
     description_keywords:
       - already-compiled applications
 
   - prompt: "Why did this compatibility check suddenly report dozens of breaks?"
     # ADR-058 folds this into the review skill's root-cause step rather than
     # admitting a separate "compatibility debugging" skill.
-    expected_skill: review-native-library-change
+    expected_skill: check-abi-compatibility
     description_keywords:
       - suddenly reported dozens of breaks
 

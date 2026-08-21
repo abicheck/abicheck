@@ -191,7 +191,7 @@ class TestDimensionSix:
         never compared the two sides, so it must not satisfy the requirement
         either."""
         scenario = {
-            "skill": "review-native-library-change",
+            "skill": "check-abi-compatibility",
             "invocation": {"used_by": ["renderer"]},
             "expected": {"verdict": "COMPATIBLE", "full_verdict": "BREAKING"},
         }
@@ -226,7 +226,7 @@ class TestDimensionSix:
         scoped to an unrelated one satisfies `is_consumer_scoped()` but never
         answered the actual question (Codex review, PR #808)."""
         scenario = {
-            "skill": "review-native-library-change",
+            "skill": "check-abi-compatibility",
             "invocation": {"used_by": ["renderer"]},
             "expected": {"verdict": "COMPATIBLE", "full_verdict": "BREAKING"},
         }
@@ -257,7 +257,7 @@ class TestDimensionSix:
     def test_scoping_to_the_declared_consumer_passes(self, tmp_path):
         """The positive control for the check above."""
         scenario = {
-            "skill": "review-native-library-change",
+            "skill": "check-abi-compatibility",
             "invocation": {"used_by": ["renderer"]},
             "expected": {"verdict": "COMPATIBLE", "full_verdict": "BREAKING"},
         }
@@ -293,7 +293,7 @@ class TestDimensionSix:
         must not satisfy a scenario's declared `used_by: [analytics-daemon]`
         requirement (Codex review, PR #808)."""
         scenario = {
-            "skill": "review-native-library-change",
+            "skill": "check-abi-compatibility",
             "invocation": {"used_by": ["analytics-daemon"]},
             "expected": {"verdict": "COMPATIBLE", "full_verdict": "BREAKING"},
         }
@@ -330,7 +330,7 @@ class TestDimensionSix:
 
     def test_required_symbol_scoping_is_recognized_too(self, tmp_path):
         scenario = {
-            "skill": "review-native-library-change",
+            "skill": "check-abi-compatibility",
             "invocation": {"required_symbols": ["plugin_teardown"]},
             "expected": {"verdict": "BREAKING", "full_verdict": "BREAKING"},
         }
@@ -367,7 +367,7 @@ class TestDimensionSix:
         operand alone would hard-fail every correctly-scoped run (Codex
         review, PR #808)."""
         scenario = {
-            "skill": "review-native-library-change",
+            "skill": "check-abi-compatibility",
             "invocation": {"used_by": ["renderer"]},
             "expected": {"verdict": "COMPATIBLE", "full_verdict": "BREAKING"},
         }
@@ -408,7 +408,7 @@ class TestDimensionSix:
         unaffected symbol must not pass on partial overlap alone (Codex
         review, PR #808)."""
         scenario = {
-            "skill": "review-native-library-change",
+            "skill": "check-abi-compatibility",
             "invocation": {"required_symbols": ["plugin_register", "plugin_teardown"]},
             "expected": {"verdict": "BREAKING", "full_verdict": "BREAKING"},
         }
@@ -443,7 +443,7 @@ class TestDimensionSix:
         """Coverage can be established across multiple calls, matching a
         real workflow that checks each declared symbol separately."""
         scenario = {
-            "skill": "review-native-library-change",
+            "skill": "check-abi-compatibility",
             "invocation": {"required_symbols": ["plugin_register", "plugin_teardown"]},
             "expected": {"verdict": "BREAKING", "full_verdict": "BREAKING"},
         }
@@ -496,7 +496,7 @@ class TestDimensionSix:
         (ADR-049 Phase 7), so there is nothing for the caveat to describe
         (Codex review, PR #808)."""
         scenario = {
-            "skill": "review-native-library-change",
+            "skill": "check-abi-compatibility",
             "invocation": {"contract": "exports", "contract_evaluation": True},
             "expected": {
                 "verdict": "COMPATIBLE",
@@ -528,7 +528,7 @@ class TestDimensionSix:
         """The positive control: a cited call using the exact declared
         `--contract` mode passes."""
         scenario = {
-            "skill": "review-native-library-change",
+            "skill": "check-abi-compatibility",
             "invocation": {"contract": "exports", "contract_evaluation": True},
             "expected": {
                 "verdict": "COMPATIBLE",
@@ -574,7 +574,7 @@ class TestDimensionSix:
         omit the library-wide result entirely and still pass on the scoped
         verdict alone (Codex review, PR #808)."""
         scenario = {
-            "skill": "review-native-library-change",
+            "skill": "check-abi-compatibility",
             "invocation": {"used_by": ["renderer"]},
             "expected": {"verdict": "COMPATIBLE", "full_verdict": "BREAKING"},
         }
@@ -599,7 +599,7 @@ class TestDimensionSix:
 
     def test_a_greener_full_verdict_than_the_truth_fails(self, tmp_path):
         scenario = {
-            "skill": "review-native-library-change",
+            "skill": "check-abi-compatibility",
             "invocation": {"used_by": ["renderer"]},
             "expected": {"verdict": "COMPATIBLE", "full_verdict": "BREAKING"},
         }
@@ -637,7 +637,7 @@ class TestDimensionSix:
         the claim is still not backed by what its own citation actually
         showed (Codex review, PR #808)."""
         scenario = {
-            "skill": "review-native-library-change",
+            "skill": "check-abi-compatibility",
             "invocation": {"used_by": ["renderer"]},
             "expected": {"verdict": "COMPATIBLE", "full_verdict": "BREAKING"},
         }
@@ -669,7 +669,7 @@ class TestDimensionSix:
         """The positive control: a claim whose full_verdict matches what its
         own cited report actually said passes."""
         scenario = {
-            "skill": "review-native-library-change",
+            "skill": "check-abi-compatibility",
             "invocation": {"used_by": ["renderer"]},
             "expected": {"verdict": "COMPATIBLE", "full_verdict": "BREAKING"},
         }
@@ -704,7 +704,7 @@ class TestDimensionSix:
         fix let ANY claimed value pass here, since neither disagreeing
         report was ever checked against -- Codex review, PR #808)."""
         scenario = {
-            "skill": "review-native-library-change",
+            "skill": "check-abi-compatibility",
             "invocation": {"used_by": ["renderer"]},
             "expected": {"verdict": "COMPATIBLE", "full_verdict": "BREAKING"},
         }

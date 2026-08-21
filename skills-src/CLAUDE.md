@@ -99,7 +99,7 @@ implied is reset → rewrite → evaluate → publish, and this is step two.
 
 | Skill | Status | Meaning |
 |---|---|---|
-| `review-native-library-change` (formerly `native-binary-compatibility-review`) | **Internal candidate — not yet validated, not for external publication.** | The sole published skill and the sole subject of any future G37 behavioral/comparative-lift evaluation. Not to be cited as validated in any user-facing claim until that evidence exists. |
+| `check-abi-compatibility` (formerly `review-native-library-change`, formerly `native-binary-compatibility-review`) | **Internal candidate — not yet validated, not for external publication.** | The sole published skill and the sole subject of any future G37 behavioral/comparative-lift evaluation. Not to be cited as validated in any user-facing claim until that evidence exists. |
 
 **What "PR 2" integrated, over the bare rename the reset amendment left in
 place:**
@@ -132,11 +132,16 @@ place:**
 
 **Still open, unattempted by PR 2** (the ADR amendment above is the fuller
 account): `native-release-compatibility`'s whole-release-matrix-qualification
-concern remains explicitly *not* folded in. **PR 3 landed** (a complete G37
-evaluation corpus, 12 scenarios, plus a real 48-run pilot) — see the ADR's
-"PR 3" amendment and `agent-evals/skills/pilot-results/README.md`; its
-dominant finding is a harness turn-budget confound, not a skill-quality
-result, so the skill is still not behaviorally validated. PR 4 (a thin
+concern remains explicitly *not* folded in. A same-day "PR 3.5" amendment
+renamed the skill again, to the current `check-abi-compatibility` — a
+user-outcome name rather than a mechanism name — and recorded, as design
+intent only, that PR 4's deliverable should be an npm/npx-installable
+package published from this repository rather than a separate distribution
+repo. **PR 3 landed** under that new name (a complete G37 evaluation
+corpus, 12 scenarios, plus a real 48-run pilot) — see the ADR's "PR 3"
+amendment and `agent-evals/skills/pilot-results/README.md`; its dominant
+finding is a harness turn-budget confound, not a skill-quality result, so
+the skill is still not behaviorally validated. PR 4 (a thin
 external-distribution repository, removing the internal-candidate marker)
 remains fully open.
 
@@ -159,7 +164,7 @@ scope. See the ADR amendment for the full accounting of what was deferred.
   its own pass through ADR-058's five-criteria admission bar, informed by
   whatever this one candidate's evaluation actually finds — not a
   restoration from git history.
-- Don't cite `review-native-library-change` as validated in any user-facing
+- Don't cite `check-abi-compatibility` as validated in any user-facing
   claim; no behavioral evidence exists yet.
 - This reset does not reopen ADR-058's five-criteria admission bar for a
   *new* skill on its own — see "Adding a public skill" below, unchanged.

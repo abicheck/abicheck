@@ -46,6 +46,11 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from .errors import SnapshotError, ValidationError
+from .header_conditionals import (
+    attach_build_context,
+    compile_db_from_build_info,
+    user_define_flags as _user_define_flags,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -531,6 +536,146 @@ def _resolve_side_snapshot_impl(
         # ignored them) must not claim their parse used real build context.
         if context_applied and snap.from_headers:
             snap.parsed_with_build_context = True
+        # PR C (typed dump/scan convergence): the ADR-039 build-context
+        # collector, previously reachable only from the ELF `dump` CLI's own
+        # `perform_elf_dump` (one call site) -- now available to every caller
+        # of this shared primitive (compare's implicit-dump operand, dump's
+        # typed `run_dump_request` API). Gated exactly the way
+        # `perform_elf_dump` gates its own call: a compile-DB path must be
+        # resolvable from `side.build_info`, real headers were actually
+        # parsed (`evidence.headers`), and the parse reached them
+        # (`snap.from_headers` -- e.g. not a `--dwarf-only` run that ignored
+        # them). **`fmt == "elf"` too (Codex review, PR #809)**: the ADR-039
+        # collector is an established ELF-only mechanism -- `handle_non_elf_dump`
+        # (PE/Mach-O) never calls it (see the root AGENTS.md's tenth finding
+        # on the L3->L2-fold entry) -- so this shared pipeline must not attach
+        # build-context evidence to a PE/Mach-O snapshot a typed dump/compare
+        # produces, or it would silently disagree with the native PE/Mach-O
+        # dump path and let build-context reconciliation suppress a real,
+        # non-ELF finding. `side.compile` is this side's *pre-fold*,
+        # caller-supplied `CompileContext` (the ADR-055 D1 per-side override
+        # resolved before `_seeded_includes_and_compile_context`'s L3->L2
+        # fold ran above) -- only its own explicit `gcc_options`/
+        # `gcc_option_tokens` are passed to the collector, never `compile_ctx`
+        # (the folded/derived result), preserving the "must not be unioned
+        # snapshot-wide" invariant `user_define_flags`'s own docstring states
+        # (see the ninth finding in the root AGENTS.md's L3->L2-fold entry for
+        # why).
+        # `snap.elf is not None` -- not the pre-resolution `fmt` parameter
+        # (Codex review, PR #809, fresh evidence): `fmt` is computed by the
+        # caller from `service.detect_binary_format(side.path)` *before*
+        # `service.resolve_input()` runs, and a GNU ld linker script (the
+        # conventional development `libfoo.so` symlink, e.g. `INPUT(libfoo.
+        # so.1)`) reads as `None` there -- but `resolve_input`'s own
+        # `follow_linker_scripts=True` default (unset by this pipeline)
+        # follows the script to its real ELF target and returns a genuine
+        # ELF snapshot (`snap.elf` populated, `snap.from_headers=True`) with
+        # `fmt` never updated to reflect it. Gating on the stale `fmt` would
+        # silently skip the collector for this common ELF input form.
+        # `snap.elf` is the model's own post-resolution signal (populated by
+        # `dumper.dump()` for every real ELF parse, regardless of whether the
+        # original path was a direct `.so` or a followed linker script), so
+        # it can't go stale the way a pre-computed `fmt` string can.
+        #
+        # `snap.elf is not None` alone is *not* sufficient, though (Codex
+        # review, PR #809, fresh evidence): the identical post-resolution
+        # signal is also populated on a *loaded* JSON snapshot whose original
+        # library happened to be ELF (`resolve_input`'s own `fmt == "json"`
+        # branch returns `load_snapshot(path)` verbatim -- no live parse at
+        # all -- and a real, previously-captured `AbiSnapshot` round-trips
+        # its `elf`/`from_headers` fields exactly as they were when saved).
+        # Running the collector there would scan `evidence.headers`/
+        # `side.build_info` off the *current* filesystem and overwrite the
+        # loaded snapshot's own recorded `build_context_defines`/
+        # `conditional_fields` with evidence unrelated to what was actually
+        # captured -- silently corrupting a loaded baseline rather than
+        # reconciling a live parse. `service.sniff_text_format` is the exact
+        # predicate `resolve_input` itself uses to take that branch (handles
+        # a compressed `.json.gz`/`.zst` snapshot too, per ADR-059), so
+        # re-running it here on `side.path` distinguishes "genuinely no live
+        # ELF parse happened" from "parse happened, only `fmt` went stale"
+        # without needing a new return value threaded out of `resolve_input`.
+        if snap.elf is not None and service.sniff_text_format(side.path) != "json":
+            # `evidence.headers` may still contain a directory entry -- exactly
+            # what `service.resolve_input`/`_dump_elf` expands internally (via
+            # `service_scan.expand_header_inputs`) before parsing, for the
+            # native-binary dispatch. The collector scans each entry with
+            # `Path(path).read_text(...)`, which raises `OSError` for a
+            # directory and is silently skipped -- passing the raw, unexpanded
+            # list here would leave `conditional_fields` empty for the common
+            # directory-header-input case even though headers were genuinely
+            # parsed (Codex review, PR #809).
+            #
+            # `expand_header_inputs` itself is the *wrong* tool to reuse here,
+            # unlike `perform_elf_dump`'s identically-shaped
+            # `resolved_headers = expand_header_inputs(...)` call: that call
+            # sees the ELF `dump` CLI's own headers, always meant for a live
+            # header-AST parse. `resolve_input`'s dispatch is *not* always the
+            # native-binary path this reasoning assumes -- a saved-JSON-
+            # snapshot side (loaded straight from disk, `side.headers` carried
+            # only for provenance tagging and never touching disk) never calls
+            # `expand_header_inputs` internally at all, so re-deriving
+            # "resolve_input already proved every path is valid" is false in
+            # general. Calling the strict (raising) expander unconditionally
+            # here regressed exactly that case (confirmed: `ValidationError`
+            # reproduced against a real snapshot-file compare with header
+            # entries that never exist on disk). Use a local, best-effort
+            # expansion instead -- never raises, mirroring
+            # `collect_build_context`'s own "an unreadable header is skipped,
+            # never abort the dump" contract -- so a side whose headers were
+            # never meant to be read from disk degrades to "nothing to
+            # collect" rather than aborting the whole comparison.
+            from .buildsource.build_query import PRUNED_HEADER_DIR_SEGMENTS
+            from .header_utils import iter_directory_headers
+
+            collector_headers: list[Path] = []
+            for _h in evidence.headers:
+                if _h.is_file():
+                    collector_headers.append(_h)
+                elif _h.is_dir():
+                    collector_headers.extend(
+                        iter_directory_headers(_h, PRUNED_HEADER_DIR_SEGMENTS)
+                    )
+                # else: neither a file nor a directory on this filesystem
+                # (e.g. a saved-snapshot side's headers, carried for
+                # provenance only) -- skipped, not raised.
+
+            compile_db_path = compile_db_from_build_info(
+                side.build_info, tuple(collector_headers)
+            )
+            # No `compile_db_filter` field is threaded through here (and
+            # `InputSpec` deliberately doesn't carry one -- see its own
+            # comment): this shared pipeline's own L2 header-AST context
+            # (`_seeded_includes_and_compile_context`, the P0.3 L3->L2 fold,
+            # already run above) always resolves from the *whole*, unfiltered
+            # compile database, unlike the native `dump` CLI, which threads
+            # its `--compile-db-filter` into its own, structurally different
+            # L2 mechanism too (`cli_helpers_compare._resolve_build_context_
+            # flags`). Exposing a filter here that could only ever disagree
+            # with the unfiltered L2 parse -- or, if rejected outright
+            # whenever combined with a resolvable database, never actually
+            # narrow anything -- would be worse than not exposing one at all
+            # (Codex review, PR #809, fresh evidence: an earlier version of
+            # this pipeline added exactly such a field, and it had no
+            # successful execution path where it narrowed anything). A real
+            # implementation needs the filter threaded into the shared L2
+            # fold itself, a separate feature addition to
+            # `buildsource/l2_seed.py`/`header_compile_context.py` -- see the
+            # plan doc's PR C status notes.
+            if (
+                compile_db_path is not None
+                and collector_headers
+                and snap.from_headers
+            ):
+                attach_build_context(
+                    snap,
+                    compile_db_path,
+                    collector_headers,
+                    _user_define_flags(
+                        side.compile.gcc_option_tokens if side.compile else (),
+                        side.compile.gcc_options if side.compile else None,
+                    ),
+                )
         if side.sources or side.build_info:
             # Known, accepted limitation (Codex review, fresh evidence, not
             # fixed here): when a trusted build_query was authorized and
