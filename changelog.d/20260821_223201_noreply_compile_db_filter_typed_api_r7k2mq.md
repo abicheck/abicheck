@@ -16,4 +16,9 @@
   `None` (the default) is a no-op for every existing caller. `dump_cmd`
   forwards its own `--compile-db-filter` value into the `DumpRequest` it
   builds for `--dry-run`, so a dry run now reports the identical refusal
-  the real CLI already raised directly.
+  the real CLI already raised directly. The refusal is shared
+  (`service_compare_evidence.reject_compile_db_filter_scope_mismatch`) with
+  `CompareRequest`, whose `old`/`new` sides can set `compile_db_filter` too —
+  the same L2-filtered/L3-unfiltered mismatch is now rejected there as well,
+  not only on the single-input `dump` path. `InputSpec.of(...)` (the loose
+  convenience factory) also accepts and forwards `compile_db_filter`.

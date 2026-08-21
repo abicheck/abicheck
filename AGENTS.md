@@ -4892,6 +4892,33 @@ Once a root command genuinely clears the bar above, pick the right home:
   This slice narrows what item (2) alone is blocking, nothing more — it does
   not migrate the real run, and does not claim to.
 
+  **Two Codex review findings on the same slice, both real, both fixed
+  before merge.** (P2) `InputSpec.of()` — the documented loose-value
+  convenience factory every front end other than a direct dataclass
+  construction uses — never gained a `compile_db_filter` parameter, so
+  `InputSpec.of(..., compile_db_filter=...)` raised `TypeError` for an
+  unrecognized keyword: the field was reachable only by constructing
+  `InputSpec` directly, despite being advertised as public typed-API
+  surface. Fixed by adding the parameter and forwarding it through
+  unchanged. (P1) The scope-error guard above was wired into
+  `resolve_dump_request` only — but `InputSpec.compile_db_filter` is shared
+  by `CompareRequest.old`/`.new` too, and `resolve_compare_request` reaches
+  the identical `resolve_side_snapshot` primitive (the P0.3 fold narrows,
+  `embed_side_build_source` still collects L3 unfiltered), so a typed
+  `CompareRequest` side could reach the exact L2-filtered/L3-unfiltered
+  snapshot shape the guard exists to reject, with no check catching it. Fixed
+  by extracting the guard into a shared function,
+  `service_compare_evidence.reject_compile_db_filter_scope_mismatch` (mirrors
+  `reject_debug_format_for_binaries`'s existing `(label, ...)` per-side
+  shape), called from both `resolve_dump_request` (`input`) and
+  `resolve_compare_request` (`old`/`new`) — one guard, not two independently
+  drifting copies. Regression coverage: `tests/test_compile_db_filter_scope.py`'s
+  `test_input_spec_of_forwards_compile_db_filter` and
+  `TestCompareRequestAppliesTheSameScopeGuard` (the latter, like its
+  `DumpRequest` sibling, verified against the identical real `g++`+clang
+  project), plus a re-run of every pre-existing test in this area to confirm
+  the extraction changed no behavior.
+
   **A real regression the scan-migration paragraph above introduced, found
   by Codex review and fixed the same session (2026-08-21): `scan --config
   <path>` silently lost the config's own *passive* settings whenever the

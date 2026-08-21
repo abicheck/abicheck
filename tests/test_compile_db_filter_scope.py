@@ -513,7 +513,8 @@ class TestTypedApiHonorsTheFilterInTheFold:
         request = self._request(so_path, header, compile_db, compile_db_filter=None)
         # No filter -> the scope-error guard never fires, regardless of depth;
         # unchanged behavior for every pre-existing caller.
-        resolve_dump_request(request.replace(depth="build"))
+        resolved = resolve_dump_request(request.replace(depth="build"))
+        assert resolved.collect_mode == "build"
 
     @pytest.mark.parametrize(
         ("pick", "expects_wide_field"), [("a.cpp", True), ("b.cpp", False)]
@@ -536,3 +537,89 @@ class TestTypedApiHonorsTheFilterInTheFold:
         ]
         assert fields, result.snapshot.types
         assert ("b" in fields) is expects_wide_field, (pick, fields)
+
+
+def test_input_spec_of_forwards_compile_db_filter() -> None:
+    """Codex review, P2: the documented convenience factory
+    (``InputSpec.of``) silently dropped ``compile_db_filter`` -- constructing
+    through it (rather than the dataclass directly) raised ``TypeError`` for
+    an unrecognized keyword, so the field was reachable only via the
+    dataclass constructor despite being advertised on the public type."""
+    from abicheck.api_types import InputSpec
+
+    spec = InputSpec.of(path="lib.so", compile_db_filter="src/**")
+    assert spec.compile_db_filter == "src/**"
+    # And the default is unaffected -- every existing `InputSpec.of(...)`
+    # call site stays a no-op for this field.
+    assert InputSpec.of(path="lib.so").compile_db_filter is None
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(
+    not sys.platform.startswith("linux"),
+    reason="ELF/Linux-scoped repro (real g++-compiled .so + compile_commands.json)",
+)
+@pytest.mark.skipif(
+    not (_HAVE_GXX and _HAVE_CLANG), reason="needs a real g++ and clang toolchain"
+)
+class TestCompareRequestAppliesTheSameScopeGuard:
+    """Codex review, P1: the L2-filtered/L3-unfiltered scope guard was wired
+    into ``resolve_dump_request`` only -- a typed ``CompareRequest`` side
+    reaches the identical ``_seeded_includes_and_compile_context`` fold /
+    ``embed_side_build_source`` split (``resolve_side_snapshot`` is the one
+    primitive both pipelines share), so the same refusal must fire there
+    too. Both pipelines now call the shared
+    ``service_compare_evidence.reject_compile_db_filter_scope_mismatch``.
+    """
+
+    def test_a_side_with_the_scope_mismatch_is_refused(self, tmp_path: Path) -> None:
+        from abicheck.api_types import CompareRequest, InputSpec
+        from abicheck.errors import ValidationError
+        from abicheck.service_compare_pipeline import resolve_compare_request
+
+        so_path, header, compile_db = TestDumpCliHonorsTheFilterInTheFold._project(
+            tmp_path
+        )
+        side = InputSpec(
+            path=so_path,
+            headers=(header,),
+            sources=header.parent,
+            build_info=compile_db,
+            compile_db_filter="a.cpp",
+        )
+        request = CompareRequest(old=side, new=side, frontend="clang", depth="build")
+        with pytest.raises(ValidationError, match="old: .*L2 header parse only"):
+            resolve_compare_request(request)
+
+    def test_a_scope_matched_filter_is_unaffected_by_the_guard(
+        self, tmp_path: Path
+    ) -> None:
+        """Not "no filter" -- a bare, unfiltered compare of this exact project
+        would still fail closed on the real ambiguity
+        (`TestDumpCliHonorsTheFilterInTheFold.
+        test_unfiltered_still_fails_closed_on_the_real_ambiguity`), which
+        would make a `resolve_compare_request` call here indistinguishable
+        from the guard actually firing. Isolating the guard itself needs a
+        filter that resolves that ambiguity (as it does on the CLI/`dump`
+        paths) *and* a collect mode (`"headers"` -> `"off"`) the guard
+        permits regardless of the filter -- so this pins "the guard doesn't
+        misfire on a legitimate filtered compare", not "no filter changes
+        nothing"."""
+        from abicheck.api_types import CompareRequest, InputSpec
+        from abicheck.service_compare_pipeline import resolve_compare_request
+
+        so_path, header, compile_db = TestDumpCliHonorsTheFilterInTheFold._project(
+            tmp_path
+        )
+        side = InputSpec(
+            path=so_path,
+            headers=(header,),
+            sources=header.parent,
+            build_info=compile_db,
+            compile_db_filter="a.cpp",
+        )
+        request = CompareRequest(
+            old=side, new=side, frontend="clang", depth="headers"
+        )
+        pair = resolve_compare_request(request)
+        assert pair.old is not None and pair.new is not None

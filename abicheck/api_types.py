@@ -220,6 +220,7 @@ class InputSpec:
         compile: CompileContext | None = None,
         public_header_dirs: Iterable[Path | str] | None = None,
         follow_linker_scripts: bool = True,
+        compile_db_filter: str | None = None,
     ) -> InputSpec:
         """Build an :class:`InputSpec`, coercing loose front-end values."""
         return cls(
@@ -237,6 +238,7 @@ class InputSpec:
             compile=compile,
             public_header_dirs=_path_tuple(public_header_dirs),
             follow_linker_scripts=follow_linker_scripts,
+            compile_db_filter=compile_db_filter,
         )
 
 
