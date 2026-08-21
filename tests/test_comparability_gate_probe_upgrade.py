@@ -605,3 +605,69 @@ def test_gate_same_mode_differing_edition_still_raises_even_with_compiler_unchan
     )
     with pytest.raises(ProfileMismatchError):
         check_contracts_comparable(old, new)
+
+
+def test_gate_content_driven_divergence_still_raises_for_explicit_std_without_lang():
+    """Codex review finding, PR #816: an explicit ``-std=gnu11``/
+    ``-std=gnu++17`` given *without* ``--lang`` is invisible to
+    ``_language_standard_is_lang_pinned`` (which only recognizes an
+    explicit lang *tag*), and ``dumper_toolchain._extract_explicit_std_value``
+    returns such a value completely verbatim -- an explicit ``-std=gnu11``
+    produces the identical bare literal the unpinned forced-default path
+    also produces. Without a second, independent guard, this reads as a
+    genuine ``c``<->``c++`` mode switch under a matching toolchain and gets
+    incorrectly waived, even though the divergence came from explicit
+    extraction configuration, not header content -- exactly the kind of
+    toolchain-profile mismatch this whole gate exists to catch."""
+    old = _snap(
+        compute_extraction_contract(
+            l2_frontend_ran=True,
+            compiler_family="gnu",
+            compiler_version="11.4.0",
+            language_standard="gnu11",  # -std=gnu11, no --lang
+        ),
+        ast_toolchain={"resolved_lang_mode": "c"},
+    )
+    new = _snap(
+        compute_extraction_contract(
+            l2_frontend_ran=True,
+            compiler_family="gnu",
+            compiler_version="11.4.0",
+            language_standard="gnu++17",  # -std=gnu++17, no --lang
+        ),
+        ast_toolchain={"resolved_lang_mode": "c++"},
+    )
+    with pytest.raises(ProfileMismatchError):
+        check_contracts_comparable(old, new)
+
+
+def test_gate_content_driven_divergence_still_raises_when_bare_forced_literal_is_actually_explicit():
+    """The narrower collision case: an explicit ``-std=gnu11`` (no
+    ``--lang``) produces the *exact same* bare literal
+    (:data:`comparability._FORCED_C_STANDARD`) the unpinned forced-default
+    path also produces for genuine C-mode content -- so this divergence
+    cannot be told apart from case66/case69's own shape by the mode switch
+    alone. Since the new side's bare ``"gnu++17"`` is not one of the two
+    forms an unpinned parse can actually produce for C++ mode
+    (only ``"gnu++20"`` -- the force_cpp20 literal -- or a ``"probed:..."``
+    value are), the guard must still reject the pair."""
+    old = _snap(
+        compute_extraction_contract(
+            l2_frontend_ran=True,
+            compiler_family="clang",
+            compiler_version="18.1.3",
+            language_standard="gnu11",  # ambiguous: forced default OR -std=gnu11
+        ),
+        ast_toolchain={"resolved_lang_mode": "c"},
+    )
+    new = _snap(
+        compute_extraction_contract(
+            l2_frontend_ran=True,
+            compiler_family="clang",
+            compiler_version="18.1.3",
+            language_standard="gnu++17",  # never producible unpinned
+        ),
+        ast_toolchain={"resolved_lang_mode": "c++"},
+    )
+    with pytest.raises(ProfileMismatchError):
+        check_contracts_comparable(old, new)

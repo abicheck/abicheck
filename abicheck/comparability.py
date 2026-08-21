@@ -701,6 +701,30 @@ _PROBED_STANDARD_PREFIX = "probed:"
 #: ``_PROBED_STANDARD_PREFIX`` above).
 _FORCED_C_STANDARD = "gnu11"
 
+#: The literal standard :func:`dumper_toolchain._resolve_standard_provenance`
+#: records for an unpinned parse whose headers trip the ``force_cpp20``
+#: requires-clause heuristic -- mirrors that function's own ``"gnu++20"``
+#: literal (not imported, same reasoning as ``_PROBED_STANDARD_PREFIX``
+#: above).
+_FORCED_CPP20_STANDARD = "gnu++20"
+
+#: Per resolved language *mode*, the one bare (non-``"probed:"``-prefixed)
+#: ``language_standard`` literal an *unpinned* parse can ever actually
+#: produce -- used by
+#: :func:`_language_standard_content_divergence_corroborated` to reject a
+#: bare value that merely happens to collide with one of these (Codex
+#: review, fresh evidence: ``-std=gnu11``/``-std=gnu++17`` given explicitly,
+#: with no ``--lang``, produces the identical bare literal
+#: :func:`dumper_toolchain._extract_explicit_std_value` would have returned
+#: for a genuinely explicit pin -- ``_language_standard_is_lang_pinned``
+#: only recognizes an explicit *lang tag*, not an explicit *standard* given
+#: without one, so that carve-out alone cannot tell the two apart). Any
+#: other bare literal (``"c11"``, ``"c++17"``, ``"gnu++17"``, ...) can only
+#: have come from an explicit ``-std=``/``/std:`` pin, since neither the
+#: forced-default path nor the ``force_cpp20`` heuristic can ever produce
+#: it -- so it is never eligible for this carve-out.
+_KNOWN_AUTO_RESOLVED_BARE_STANDARDS = {"c": _FORCED_C_STANDARD, "c++": _FORCED_CPP20_STANDARD}
+
 #: Every ``language_standard_field`` spelling an *unpinned, no-resolved-
 #: standard* dump could have produced before either the probe or the
 #: forced-``gnu11`` report existed, that this carve-out can still safely
@@ -919,6 +943,39 @@ def _language_standard_is_lang_pinned(std: str) -> bool:
     )
 
 
+def _language_standard_is_known_auto_resolved_form(std: str, mode: str) -> bool:
+    """Whether *std* (an un-lang-pinned ``language_standard`` value) is a
+    form :func:`dumper_toolchain._resolve_standard_provenance` can actually
+    produce for an *unpinned* parse resolved to language *mode* (``"c"``/
+    ``"c++"``) -- as opposed to a bare literal that merely happens to look
+    like one (Codex review, fresh evidence, real finding on this PR).
+
+    An explicit ``-std=gnu11``/``-std=gnu++17``, given with no ``--lang`` at
+    all, is not caught by :func:`_language_standard_is_lang_pinned` (which
+    only recognizes an explicit *lang tag*) -- and
+    :func:`dumper_toolchain._extract_explicit_std_value` returns that value
+    completely verbatim, with no marker distinguishing it from an
+    auto-resolved one. For most explicit standards this is harmless (a
+    genuinely different literal, e.g. ``"c++17"``, is never something the
+    unpinned path can produce either), but ``-std=gnu11`` collides exactly
+    with :data:`_FORCED_C_STANDARD` and ``-std=gnu++20`` collides exactly
+    with :data:`_FORCED_CPP20_STANDARD` -- an explicit, toolchain-config-
+    driven divergence between those two literals would otherwise read as
+    "purely content-driven" and be wrongly waived.
+
+    A ``"probed:..."``-prefixed value is always genuine (only
+    :func:`dumper_toolchain._probe_default_language_standard` ever produces
+    it, and no real ``-std=`` spelling starts with this marker); a bare
+    literal is only trusted when it is *exactly* the one form the unpinned
+    path can produce for *this* mode (:data:`_KNOWN_AUTO_RESOLVED_BARE_STANDARDS`)
+    -- any other bare literal can only have come from an explicit pin and is
+    never eligible here.
+    """
+    if std.startswith(_PROBED_STANDARD_PREFIX):
+        return True
+    return std == _KNOWN_AUTO_RESOLVED_BARE_STANDARDS.get(mode)
+
+
 def _language_standard_content_divergence_corroborated(
     old: AbiSnapshot,
     new: AbiSnapshot,
@@ -971,25 +1028,29 @@ def _language_standard_content_divergence_corroborated(
     the actual real/virtual language *mode* the parse settled on,
     independent of which edition within that mode it resolved to.
 
-    This is deliberately unconditional (given a genuine mode switch)
-    once corroborated by toolchain identity -- unlike the sibling upgrade
-    carve-out, which narrowly requires the *same lang tag* on both sides
-    plus a newly-resolved remainder to avoid conflating an upgrade artifact
-    with a real language-mode change. Here that ambiguity does not need
-    resolving: a real content-driven language-*mode* change under an
+    Given a genuine mode switch, this does not need the sibling upgrade
+    carve-out's narrower "same lang tag plus a newly-resolved remainder"
+    structure to distinguish an upgrade artifact from a real language-mode
+    change -- a real content-driven language-*mode* change under an
     identical, corroborated toolchain must not make the whole comparison
-    ``NOT_COMPARABLE`` either way -- whether it turns out to be an upgrade
-    artifact or a genuine edit, blocking the comparison is the wrong
-    outcome for both.
+    ``NOT_COMPARABLE`` either way, whether it turns out to be an upgrade
+    artifact or a genuine edit.
 
-    Waived only when neither side's ``language_standard`` reflects an
-    explicit ``--lang`` (:func:`_language_standard_is_lang_pinned`) --  an
+    Waived only when: (1) neither side's ``language_standard`` reflects an
+    explicit ``--lang`` (:func:`_language_standard_is_lang_pinned`) -- an
     explicit, user-pinned language mode that still disagrees between old
     and new *is* a genuine extraction-configuration difference this gate
-    should keep catching -- and only when independently corroborated by an
-    exact, non-empty ``compiler_family``/``compiler_version`` match (plus
-    ``compiler_sha256`` when both sides carry one), mirroring the sibling
-    carve-out's own toolchain-identity check.
+    should keep catching; (2) each side's value is a form the *unpinned*
+    path can actually produce for its own resolved mode
+    (:func:`_language_standard_is_known_auto_resolved_form` -- Codex
+    review, fresh evidence: an explicit ``-std=gnu11``/``-std=gnu++17``
+    given without ``--lang`` is invisible to check (1) and can collide
+    exactly with the bare literal the unpinned path produces, so this is a
+    second, independent guard, not a redundant one); and (3) independently
+    corroborated by an exact, non-empty ``compiler_family``/
+    ``compiler_version`` match (plus ``compiler_sha256`` when both sides
+    carry one), mirroring the sibling carve-out's own toolchain-identity
+    check.
     """
     old_std = old_fields.get("language_standard", "")
     new_std = new_fields.get("language_standard", "")
@@ -1008,6 +1069,16 @@ def _language_standard_content_divergence_corroborated(
         or old_mode not in ("c", "c++")
         or new_mode not in ("c", "c++")
     ):
+        return False
+    if not _language_standard_is_known_auto_resolved_form(
+        old_std, old_mode
+    ) or not _language_standard_is_known_auto_resolved_form(new_std, new_mode):
+        # Codex review, fresh evidence: a bare literal that isn't one of the
+        # forms the unpinned path can actually produce for its own mode can
+        # only have come from an explicit -std=/--std=/std: pin given
+        # without --lang -- _language_standard_is_lang_pinned above cannot
+        # see that (it only recognizes an explicit lang tag), so this is a
+        # separate, necessary guard, not a redundant one.
         return False
     for key in ("compiler_family", "compiler_version"):
         old_v = old_fields.get(key, "")
