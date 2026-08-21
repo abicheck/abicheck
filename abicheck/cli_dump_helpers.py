@@ -1179,10 +1179,19 @@ def handle_non_elf_dump(
     # could otherwise contend on the same inferred-build-query lock and wait
     # up to its 600s timeout (Codex review; see that function's own
     # docstring).
-    from .buildsource.inline import _run_cleanups
+    # Phase 1 (dedup-and-convergence plan) Milestone A follow-up: mirrors
+    # perform_elf_dump's identical migration from a hand-rolled
+    # `_l2_pending_cleanups: list[...] = []` + manual
+    # `if _l2_pending_cleanups: _run_cleanups(...)` finally block to the
+    # shared, independently-tested `ResolvedArtifactPlan` primitive
+    # (`artifact_plan.py`) -- this was the one call site the plan's own
+    # Phase 1 text named as still using the old pattern. Behavior-preserving
+    # only: identical cleanup thunks, identical single-drain timing (the
+    # `finally` below, the only place this function's original code drained
+    # cleanups).
     from .buildsource.l2_seed import seed_includes_and_fold_compile_context
 
-    _l2_pending_cleanups: list[Callable[[], None]] = []
+    _artifact_plan = ResolvedArtifactPlan()
     try:
         (
             eff_includes,
@@ -1208,7 +1217,7 @@ def handle_non_elf_dump(
             frontend_context=getattr(compile_context, "frontend_context", "host"),
             lang=lang,
             lang_explicit=lang_explicit,
-            pending_cleanups=_l2_pending_cleanups,
+            pending_cleanups=_artifact_plan.pending_cleanups,
         )
         # _l3_include_dirs is unused by design, not omission: `compile=
         # l3_effective_ctx` below hands the merged L3 context to service_
@@ -1235,8 +1244,7 @@ def handle_non_elf_dump(
     except (AbicheckError, RuntimeError, OSError, ValueError) as exc:
         raise click.ClickException(str(exc)) from exc
     finally:
-        if _l2_pending_cleanups:
-            _run_cleanups(_l2_pending_cleanups)
+        _artifact_plan.run_cleanups()
     # Record that the header AST was parsed with the real build context
     # (mirrors perform_elf_dump's identical stamp) -- gated on
     # compile_db_context_matched, not just headers' presence, for the same
@@ -1590,9 +1598,11 @@ def perform_elf_dump(
     # block's `finally` is therefore safe on the shared-block path where
     # only one of the two ever actually has anything to drain) regardless of
     # which of the two blocks below raises or both complete normally.
-    # Behavior-preserving only -- no change to resolution order, dry-run, or
-    # `handle_non_elf_dump` (which keeps its own separate, untouched
-    # `_l2_pending_cleanups`).
+    # Behavior-preserving only -- no change to resolution order or dry-run.
+    # `handle_non_elf_dump` now shares this same primitive too (its own,
+    # separate `ResolvedArtifactPlan` instance -- the two functions don't
+    # share a plan, since they're two independent dump paths never invoked
+    # together).
     _artifact_plan = ResolvedArtifactPlan()
     try:
         (

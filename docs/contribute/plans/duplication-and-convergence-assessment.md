@@ -1087,16 +1087,25 @@ sign-off, not a routine PR).
    a new resolve/execute split. Existing `perform_elf_dump` coverage
    (`tests/test_cli_dump_helpers_coverage.py`, including
    `test_perform_elf_dump_wraps_dump_errors_still_cleans_up_seeded_dirs`)
-   passed unmodified against the migration. **Not yet done, and deliberately
-   out of scope for this slice**: this is not yet "resolve_artifact_request()
-   onward" as item 1's own text above describes — there is no
-   `resolve_artifact_request()`/`execute_artifact_plan()` split yet, `dump
-   --dry-run` still doesn't build from or render a `ResolvedArtifactPlan`
-   (`render_dump_dry_run()` is still its own independent resolution, per the
-   "PR C" entry in AGENTS.md's "Known gaps"), `handle_non_elf_dump`'s
-   identical `_l2_pending_cleanups` pattern is untouched, and none of items
-   2–10 below have been attempted. See item 1's own original text (kept
-   below) for the shape a full implementation still needs to reach.
+   passed unmodified against the migration. **Milestone A follow-up.**
+   `handle_non_elf_dump`'s identical `_l2_pending_cleanups` accumulator (the
+   PE/Mach-O dump path) is now migrated the same way — its own, separate
+   `ResolvedArtifactPlan` instance (the two functions are independent dump
+   paths never invoked together, so nothing here makes them share a
+   session), identical single-drain timing (the one `finally` this
+   function's cleanup ever ran from). Existing coverage
+   (`tests/test_non_elf_dump_l2_seed.py`,
+   `tests/test_cli_dump_helpers_coverage.py`) passed unmodified. **Not yet
+   done, and deliberately out of scope for this slice**: this is not yet
+   "resolve_artifact_request() onward" as item 1's own text above describes
+   — there is no `resolve_artifact_request()`/`execute_artifact_plan()`
+   split yet, `dump --dry-run` still doesn't build from or render a
+   `ResolvedArtifactPlan` (`render_dump_dry_run()` is still its own
+   independent resolution, per the "PR C" entry in AGENTS.md's "Known
+   gaps"), `service_input_resolution._resolve_side_snapshot_impl`'s own
+   accumulator is untouched, and none of items 2–10 below have been
+   attempted. See item 1's own original text (kept below) for the shape a
+   full implementation still needs to reach.
 
 1. (Full shape, not yet reached) Introduce `ResolvedArtifactPlan` as a
    context-managed session that owns any resource resolution itself

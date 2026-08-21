@@ -26,11 +26,16 @@ allocates such a resource (``service_input_resolution._resolve_side_snapshot_imp
 plain ``list[Callable[[], None]]`` accumulator by hand and drains it in its
 own ``finally``, strictly before returning anything to its caller — there is
 no reusable, tested primitive. This module is that primitive, generalized
-just enough to replace one such hand-rolled accumulator
-(``cli_dump_helpers.perform_elf_dump``'s own ``_l2_pending_cleanups``) with a
-single, reviewed implementation; migrating every other call site named in
-the plan is deliberately out of scope for this first slice — see the plan
-doc's own Phase 1 section for the full, still-open list.
+just enough to replace two such hand-rolled accumulators
+(``cli_dump_helpers.perform_elf_dump`` and ``handle_non_elf_dump``, each
+still their own separate ``ResolvedArtifactPlan`` instance — the two
+functions are independent dump paths never invoked together, so nothing
+here makes them share a session) with a single, reviewed implementation;
+migrating the remaining call sites named in the plan
+(``service_input_resolution._resolve_side_snapshot_impl``, and everything
+downstream of a real resolve/execute split) is deliberately out of scope
+for this slice — see the plan doc's own Phase 1 section for the full,
+still-open list.
 
 Deliberately a leaf, engine-layer module: no ``click``/``cli_*`` import (the
 ``engine-cli-boundary`` AI-readiness gate would reject one), no dependency on
