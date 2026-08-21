@@ -146,9 +146,9 @@ class TestFilterUnitsBySourceContract:
         assert list(
             filter_units_by_source([coincidence, other], "build/build/a.cpp")
         ) == [coincidence]
-        assert list(
-            filter_units_by_source([coincidence, other], "*/build/a.cpp")
-        ) == [coincidence]
+        assert list(filter_units_by_source([coincidence, other], "*/build/a.cpp")) == [
+            coincidence
+        ]
         # The un-joined spelling still matches too (both readings are
         # tested, since neither can be ruled out from the strings alone --
         # see source_matches_filter's own docstring).
@@ -173,6 +173,24 @@ class TestFilterUnitsBySourceContract:
         absolute_filter = f"{home}/proj/a.cpp"
         assert list(filter_units_by_source([redacted, other], absolute_filter)) == [
             redacted
+        ]
+
+    def test_a_relative_directory_still_matches_an_absolute_filter(self) -> None:
+        """Codex review, P1, fresh evidence: a relative ``directory`` (real
+        ``compile_commands.json`` entries always give it absolute per the
+        Clang compilation-database spec, but this scan doesn't enforce
+        that) left the joined candidate relative too, so it could never
+        match an absolute ``--compile-db-filter`` -- the spelling a user
+        would naturally type, and the one ``CompileEntry.from_dict()``
+        itself resolves to before this raw scan runs. Closed by also
+        testing the CWD-resolved absolute form of a relative candidate.
+        """
+        cwd = Path.cwd()
+        target = _cu("src/a.cpp", directory="build")
+        other = _cu("src/b.cpp", directory="build")
+        absolute_filter = str(cwd / "build" / "src" / "a.cpp")
+        assert list(filter_units_by_source([target, other], absolute_filter)) == [
+            target
         ]
 
 

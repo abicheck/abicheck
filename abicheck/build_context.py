@@ -812,6 +812,18 @@ def source_matches_filter(
     necessarily redaction-derived) still matches an unredacted unit. Only a
     literal leading ``~`` expands; an ordinary relative name (``a.cpp``,
     ``src/a.cpp``) or absolute path is untouched.
+
+    A **relative *directory*** (Codex review, P1, fresh evidence): real
+    ``compile_commands.json`` entries always give ``directory`` absolute
+    (mandatory per the Clang compilation-database spec), but this function
+    does not enforce that, and a caller can hand it a relative one. The
+    joined candidate above then stays relative too, so it can never match
+    an absolute ``--compile-db-filter`` — the spelling a user would
+    naturally supply, and the one ``CompileEntry.from_dict()`` itself
+    resolves to before this scan runs. Closed the same way as every other
+    candidate-shape gap here: the CWD-resolved absolute form of any
+    relative candidate is tested as one more reading, never in place of the
+    relative ones.
     """
 
     def _expand_leading_tilde(value: str) -> str:
@@ -830,6 +842,27 @@ def source_matches_filter(
         # check that cannot distinguish a redaction artifact from an
         # ordinary directory/file naming coincidence.
         candidates.append(Path(directory) / path)
+
+    for candidate in list(candidates):
+        # A *relative* candidate resolved against the CWD (Codex review, P1,
+        # fresh evidence): when `directory` itself is relative (real
+        # compile_commands.json entries always give it absolute per the
+        # Clang compilation-database spec, but this function does not
+        # enforce that — nothing rejects a non-conformant relative one), the
+        # joined candidate above stays relative too, so it can never match
+        # an absolute `--compile-db-filter` (the spelling a user would
+        # naturally supply, and the one `CompileEntry.from_dict()` itself
+        # resolves to before the L2/legacy layers inspect it — those layers
+        # therefore select only the requested TU while this raw scan falls
+        # back to "every entry matches", exactly the over-broad failure mode
+        # every earlier fix in this function's history closed for a
+        # different candidate shape). Adding the CWD-resolved absolute form
+        # as one more candidate is the same "test another interpretation,
+        # never remove one" widening this function's docstring already
+        # commits to — it can only let an absolute filter additionally
+        # match, never suppress an existing match.
+        if not candidate.is_absolute():
+            candidates.append(Path.cwd() / candidate)
 
     for candidate in candidates:
         if fnmatch(str(candidate), pattern):
