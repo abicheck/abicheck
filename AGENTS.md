@@ -4612,6 +4612,108 @@ Once a root command genuinely clears the bar above, pick the right home:
   that config independently is the exact failure the three-way split exists
   to prevent.
 
+  **Both real-run migrations attempted and stopped (2026-08-21, later
+  session) — and the reason is now measured rather than reasoned about,
+  which changes what "still open" means here.** The paragraph above says the
+  two resolvers are structurally separate. Comparing the written `dump` CLI
+  snapshot against `execute_dump_request`'s, field by field, over a real
+  `g++` build and a real clang L2 parse, shows they *already produce
+  non-comparable snapshots* for the same library from the same evidence:
+  everything agrees except the extraction contract, where the CLI records
+  `macro_ops` as `[["D","FOO=1"],["D","FOO=1"]]` against the typed path's
+  one entry, and `include_sequence` as `[]` against the typed path's one
+  slot. `scope_fingerprint` agrees; `profile_fingerprint` therefore differs
+  in exactly those two shapes. Both trace to one mechanism — the
+  `dump` CLI runs the legacy `-p`/`--compile-db` auto-match
+  (`cli_helpers_compare._resolve_build_context_flags`, merged into
+  `effective_gcc_options`) *in addition to* the P0.3 L3→L2 fold whenever
+  both are fed by the same `--build-info` compile database. The duplicate
+  `-D` is that overlap recorded twice; the empty `include_sequence` is the
+  legacy match supplying `-I<dep>` as explicit context *before* the L2 seed
+  runs, so `seed_l2_includes` correctly declines to seed it and the
+  directory reaches the parse through `gcc_option_tokens`, which contributes
+  no `declared_includes` slot — the sole source `include_sequence`
+  tokenizes. This is the `dump`-vs-typed-API half of the same "third,
+  deeper mechanism" the L3→L2-fold entry above already records for
+  `dump`-vs-`scan`.
+
+  **Why that stops the migration rather than motivating it.** Routing the
+  real run through `execute_dump_request` drops the legacy match, so the
+  migration does not merely need the two prerequisites named above — it
+  *forces* the design decision the L3→L2-fold entry says is open. Dropping
+  the legacy match is arguably right (the fold is strictly richer:
+  per-header matching, ambiguity checking, include paths, forced includes),
+  but it makes `dump --compile-db-filter` inert, and `InputSpec`
+  deliberately carries no `compile_db_filter` field — one was added and
+  removed in the same review round for having no successful execution path
+  (see that field's replacement comment in `api_types.py`). Making a
+  documented flag silently inert is worse than the gap. The ordering is
+  therefore three slices, not one: thread `--compile-db-filter` into the
+  shared fold (`buildsource/l2_seed.py`/`header_compile_context.py`), decide
+  and ship the legacy-match removal, then migrate the real run. **The first
+  of those three landed in the same session** — and it turned out to be a
+  user-facing bug in its own right, not merely migration plumbing:
+  `resolve_header_compile_context`'s fail-closed ambiguity message names
+  `--compile-db-filter` as a way to narrow the input, but the filter reached
+  only the legacy match, so a user who followed that advice got the identical
+  error back. Reproduced end to end (`dump --depth headers -H api.h
+  --build-info db.json --compile-db-filter a.cpp` over two TUs disagreeing on
+  an ABI-relevant `-D`) and fixed by threading `source_filter` through
+  `resolve_header_compile_context`/`l2_seed`/`perform_elf_dump`, with the
+  matching rules consolidated into one shared
+  `build_context.source_matches_filter` so the fold, the legacy match and the
+  ADR-039 collector cannot select different translation units for the same
+  filter. A filter matching nothing keeps every unit — the conservative
+  fallback the other two layers already applied. Tests:
+  `tests/test_compile_db_filter_scope.py` (the primitive's contract as
+  invariants, the three layers agreeing, the resolver, and a real
+  `g++`+clang `dump` proving the guarded field is parsed in or out according
+  to which TU the filter names; the end-to-end cases confirmed to fail
+  pre-fix). Still open in that first slice: the *typed* half —
+  `InputSpec.compile_db_filter` plus the CLI's own
+  L2-filtered/L3-unfiltered refusal mirrored into
+  `resolve_dump_request`, which is where the resolved collect mode is known
+  (see that field's replacement comment in `api_types.py`). One
+  environmental fact independently rules out attempting the *migration
+  itself* in that session, whatever order the three slices land in: the
+  *default* header backend is castxml, and no working castxml was
+  obtainable — a hand-assembled conda-forge 0.7.0 build segfaults inside
+  `clang::ParseAST` on any input — so every measurement above is
+  clang-backend only, and migrating the real `dump` run while able to
+  exercise only the non-default backend is not a verified change.
+
+  **The `scan` side is four items, not the two named above, and three of
+  them are behaviour changes rather than missing plumbing** (read against
+  `_resolve_side_snapshot_impl` line by line): (1) the L4 extractor default,
+  unchanged and still castxml-blocked; (2) the `public_headers` expansion
+  shape, where the shared wrapper's raw pass-through is the one already
+  reverted for regressing `clang_public_roots._equivalent_public_roots_for_
+  unit`; (3) the seed's collect mode — `_seeded_includes_and_compile_
+  context` pins `collect_mode="off"` so a Tier-2 primitive never executes a
+  build system as a side effect, while `_build_new_snapshot` passes scan's
+  real one, so routing through the shared primitive silently removes scan's
+  ability to run the zero-config inferred build query in its seed; and (4)
+  `defer_cleanup`, which `embed_side_build_source` has no parameter for —
+  the only purely additive item of the four. Each of (1)–(3) could become an
+  opt-in parameter the way `symbols_only`/`allow_build_query`/
+  `changed_paths` already are, which is what a future slice should do;
+  reproducing a dozen parameter behaviours exactly on the hot path of every
+  `scan`, with the integration lane only partly executable, is the rewrite
+  shape this area's review history keeps punishing.
+
+  **What landed instead:** `tests/test_dump_cli_typed_api_parity.py::
+  test_dump_cli_and_typed_api_agree_on_extraction_contract`. Its sibling
+  compares `ast_compile_args` through `split_compile_args`'
+  semantics-preserving normalization, which is the right lens for "did both
+  paths reach the same compile" and structurally blind to both divergences
+  above — `profile_fingerprint` hashes the recorded fields *as recorded*, so
+  a difference normalization hides is still a comparability failure. The two
+  known-divergent (shape, field) pairs are encoded the same conditional-xfail
+  way `_SCAN_KNOWN_DIVERGENT_SHAPES` already is: the exact diagnosed
+  signature reproduces, or the test fails outright, so "the gap closed"
+  fails as loudly as "a new field diverged" and the mapping cannot go stale
+  silently. Verified in both directions.
+
 - Don't hand-edit `CHANGELOG.md`'s `## [Unreleased]` section directly — add a `changelog.d/` fragment instead (see Conventions above); CI enforces this
 - Don't modify `examples/` test cases without understanding the ground truth they encode
 - Don't add dependencies without strong justification (this is a lightweight tool)

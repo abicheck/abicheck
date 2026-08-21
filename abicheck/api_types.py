@@ -196,6 +196,22 @@ class InputSpec:
     # threaded into the shared L2 fold itself, a separate feature addition to
     # `buildsource/l2_seed.py`/`header_compile_context.py` (Codex review,
     # PR #809).
+    #
+    # **That feature addition has since landed** (PR 3A investigation,
+    # 2026-08-21): `resolve_header_compile_context` takes a `source_filter`,
+    # `l2_seed` forwards it, and the ELF `dump` CLI threads its own
+    # `--compile-db-filter` through -- so a filter now genuinely narrows the
+    # fold rather than only the legacy match. The field is still deliberately
+    # absent here, for a *different*, remaining reason: adding it would let a
+    # typed caller reach the L2-filtered/L3-unfiltered snapshot shape the CLI
+    # refuses outright (`header_conditionals.compile_db_filter_scope_error`,
+    # which fires only when the resolved collect mode also *embeds* L3
+    # evidence). Closing that needs the same refusal mirrored into the typed
+    # request's own resolution -- `service_dump_pipeline.resolve_dump_request`
+    # is the right place, since only it knows the resolved collect mode --
+    # plus forwarding through `_seeded_includes_and_compile_context` and into
+    # `attach_build_context_for_parsed_headers`. One clearly-specified step,
+    # not an open-ended one.
 
     @classmethod
     def of(

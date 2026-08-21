@@ -1613,6 +1613,19 @@ def perform_elf_dump(
             lang=lang,
             lang_explicit=lang_explicit,
             pending_cleanups=_l2_pending_cleanups,
+            # `--compile-db-filter`'s own glob: the caller's explicit answer
+            # to "which translation unit's context does this header belong
+            # to". Until this was threaded, the filter reached only the
+            # legacy `-p` auto-match, so the P0.3 fold still saw every
+            # compile unit -- and a header compiled under two ABI-relevant
+            # contexts raised HeaderCompileContextAmbiguousError whose own
+            # message names `--compile-db-filter` as the way to narrow the
+            # input, which the user had already done. Reproduced end to end
+            # before the fix; see `resolve_header_compile_context`'s own
+            # `source_filter` docstring. `handle_non_elf_dump` (PE/Mach-O)
+            # gets no equivalent: `dump_cmd` never threads the filter there,
+            # so there is nothing to forward.
+            source_filter=compile_db_filter,
         )
         if l3_context_applied:
             gcc_path = l3_effective_ctx.gcc_path
