@@ -30,11 +30,23 @@ maps every mechanism to its Windows and macOS peer.
 
 ## The second contract
 
-Above the source-level ABI sits a contract enforced by the dynamic linker:
-SONAME, visibility bits, version nodes, calling-convention attributes, and the
-TLS access model — all recorded *in the `.so`* and consulted at load time.
-You can satisfy every source-level rule from the previous pages and still break
-consumers here.
+Above the source-level ABI sits a contract enforced by the dynamic linker —
+and it's a **generic contract every platform's loader enforces in some
+form**, not an ELF-specific one: library identity, symbol visibility,
+version/interface nodes, calling-convention attributes, security-relevant
+load metadata, and the thread-local-storage access model are all facts
+*recorded in the binary itself* and consulted at load time, independent of
+which object format encodes them. You can satisfy every source-level rule
+from the previous pages and still break consumers here.
+
+This page teaches that generic contract through **ELF**, the concrete
+system with the richest tooling and the deepest abicheck coverage — SONAME,
+visibility bits, version nodes, calling-convention attributes, and the TLS
+access model, all recorded *in the `.so`* and consulted at load time. Each
+section below names its cross-platform peer inline, and the
+[PE/COFF and Mach-O parallels](#pecoff-and-mach-o-parallels) table near the
+end maps the whole set at a glance — read this page for the *mechanism*,
+that table for *"what's this called on Windows/macOS."*
 
 ---
 

@@ -268,7 +268,7 @@ Per-case matrix, methodology, full-catalog notes, and the pinned cross-tool comp
 
 - **Start here:** [Getting Started](https://abicheck.github.io/abicheck/getting-started/)
 - **User guide:** [CLI Usage](https://abicheck.github.io/abicheck/user-guide/cli-usage/) · [Application compatibility](https://abicheck.github.io/abicheck/user-guide/appcompat/) · [Output formats](https://abicheck.github.io/abicheck/user-guide/output-formats/) · [GitHub Action](https://abicheck.github.io/abicheck/user-guide/github-action/)
-- **Concepts:** [Verdicts](https://abicheck.github.io/abicheck/concepts/verdicts/) · [Architecture](https://abicheck.github.io/abicheck/concepts/architecture/) · [ABI/API Handling & Recommendations](https://abicheck.github.io/abicheck/concepts/abi-api-handling/) · [Limitations](https://abicheck.github.io/abicheck/concepts/limitations/)
+- **Concepts:** [Verdicts](https://abicheck.github.io/abicheck/concepts/verdicts/) · [Architecture](https://abicheck.github.io/abicheck/concepts/architecture/) · [ABI/API Compatibility](https://abicheck.github.io/abicheck/concepts/abi-api-handling/) · [Limitations](https://abicheck.github.io/abicheck/concepts/limitations/)
 - **Reference:** [Change Kinds](https://abicheck.github.io/abicheck/reference/change-kinds/) · [Exit Codes](https://abicheck.github.io/abicheck/reference/exit-codes/) · [Platforms](https://abicheck.github.io/abicheck/reference/platforms/) · [Tool Comparison](https://abicheck.github.io/abicheck/reference/tool-comparison/)
 - **Troubleshooting:** [Troubleshooting guide](https://abicheck.github.io/abicheck/troubleshooting/)
 

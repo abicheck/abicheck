@@ -2,7 +2,7 @@
 
 Quick-reference card for shared-library maintainers. Scannable in 2 minutes.
 
-For deeper explanations see [ABI/API Handling & Recommendations](abi-api-handling.md) and [Verdicts](verdicts.md). To see *which evidence level* proves each row below (symbols → debug → headers → build → sources), see [What Each Level Sees](what-each-level-sees.md).
+For deeper explanations see [ABI/API Compatibility](abi-api-handling.md) and [Verdicts](verdicts.md). To see *which evidence level* proves each row below (symbols → debug → headers → build → sources), see [What Each Level Sees](what-each-level-sees.md).
 
 ---
 
@@ -73,7 +73,7 @@ These cause crashes, wrong results, or link failures in pre-compiled consumers.
 | Remove a symbol version node | Dynamic linker refuses to load; `version 'FOO_1.0' not found` | [case139](../reference/examples/case139_symbol_version_node_removed.md) |
 | Kernel struct field added (BTF) | In-tree/out-of-tree modules baked the old layout; field offsets shift | [case121](../reference/examples/case121_kernel_btf_struct_field_added.md) |
 
-See the full breaking catalog in [ABI/API Handling & Recommendations](abi-api-handling.md).
+See the full breaking catalog in [ABI/API Compatibility](abi-api-handling.md).
 
 ---
 

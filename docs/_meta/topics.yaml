@@ -59,6 +59,7 @@ topics:
       - use/tool-modes.md
       - learn/architecture.md
       - skills-src/shared/evidence-and-depth.md
+      - learn/assurance-methods.md
 
   verdicts:
     canonical_page: learn/verdicts.md
@@ -423,12 +424,14 @@ topics:
     allowed_summaries:
       - learn/abi-series/00-product-contract.md
       - learn/abi-api-handling.md
+      - learn/assurance-methods.md
 
   data-wire-compatibility:
     canonical_page: learn/data-wire-compatibility.md
     allowed_summaries:
       - learn/abi-series/00-product-contract.md
       - learn/abi-api-handling.md
+      - learn/assurance-methods.md
 
   ownership-and-lifetime:
     canonical_page: learn/ownership-and-lifetime.md
@@ -436,6 +439,7 @@ topics:
       - learn/abi-series/00-product-contract.md
       - learn/abi-series/07-designing-for-stability.md
       - learn/abi-api-handling.md
+      - learn/assurance-methods.md
 
   compatibility-direction:
     canonical_page: learn/compatibility-direction.md
@@ -456,6 +460,7 @@ topics:
     allowed_summaries:
       - learn/abi-series/00-product-contract.md
       - learn/abi-api-handling.md
+      - learn/assurance-methods.md
 
   # Split out of Part 4 — C++ ABI Specifics (docs/AGENTS.md criterion 5: the
   # page had grown to answer more than one primary question). Part 4 keeps

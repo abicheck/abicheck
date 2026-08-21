@@ -54,7 +54,50 @@ different inputs.
 > the same model tailored to their context and link back here — when the model
 > changes, update this table first.
 
-A release engineer can hand a compatibility checker up to **five different
+### A model independent of any one tool
+
+Before the abicheck-specific vocabulary: any compatibility checker — this one
+or another — draws its evidence from some subset of seven generic categories,
+each answering a genuinely different question about the library. This split
+matters because it is what lets you reason about a tool you've never used:
+ask which of these seven categories it actually consumes, and you already know
+its blind spots.
+
+| Generic evidence category | Question it answers |
+|---|---|
+| **Artifact evidence** | What did the compiler actually emit — symbols, loader metadata? |
+| **Debug/type evidence** | What layout facts did the compiler record about emitted types? |
+| **Declared-interface evidence** | What does the source *say* the interface is (headers, an AST)? |
+| **Build evidence** | Under what compiler, flags, and environment was this built? |
+| **Source evidence** | What do macros, inline bodies, and templates actually contain? |
+| **Consumer evidence** | What does one real, specific consumer actually use? |
+| **Runtime evidence** | What actually happens when the code runs? |
+
+abicheck's own `L0`–`L5` layer codes are **one tool's concrete realization**
+of five of these — runtime evidence is structurally out of reach for any
+*static* checker, which is exactly the gap
+[Assurance Beyond Static Checking](assurance-methods.md) covers instead:
+
+| Generic category | abicheck layer |
+|---|:---:|
+| Artifact evidence | `L0` |
+| Debug/type evidence | `L1` |
+| Declared-interface evidence | `L2` |
+| Build evidence | `L3` |
+| Source evidence | `L4` |
+| *(derived from L3/L4, not itself provided)* | `L5` |
+| Consumer evidence | *(named contract only — see [`--used-by`/`--required-symbol`](../use/appcompat.md))* |
+| Runtime evidence | *(not modeled — see [Assurance Beyond Static Checking](assurance-methods.md))* |
+
+The rest of this page, and every other page that cites "`L0`–`L5`," is
+using abicheck's own vocabulary for this generic model — worth keeping
+distinct in your head from the model itself, since a different tool
+realizes the same seven categories with different names, different
+granularity, or gaps in different places.
+
+### abicheck's five inputs
+
+A release engineer can hand abicheck up to **five different
 sources of information** about a library, ordered from the least to the most.
 Each one *adds* facts the previous cannot see; none of them is complete on its
 own. abicheck names them with the layer codes `L0`–`L4`. A **sixth** layer,
@@ -79,45 +122,65 @@ L0–L5 presence/absence without writing a snapshot); the build/source layers
 | 4 | **+ Build system data & options** | **L3** | `-p build/` (compile DB, CMake/Ninja/Bazel/Make) | The **flags the library was actually built with**: `-std`, `_GLIBCXX_USE_CXX11_ABI`, `-fvisibility`, `-fabi-version`, toolchain/sysroot, target graph, export maps | Corroborating |
 | 5 | **+ Sources** | **L4** | a build/source pack (per-TU source ABI replay, ADR-030) | Facts that never reach the binary: macro constants, `constexpr` values, default-argument *values*, inline/template **bodies**, uninstantiated templates | Corroborating (→ `API_BREAK`/risk) |
 
-Read this as a staircase: **each step up the table can both *find* breaks the
-step below is blind to and *prevent false positives* the step below would
-raise.** A struct-field insertion is invisible at L0 but obvious at L1
-([case07](../reference/examples/case07_struct_layout.md)); an internal-struct change that
-*looks* like a break at L1 is correctly dismissed once L2 headers reveal the
-struct is non-public ([case118](../reference/examples/case118_internal_struct_field_added_scoped.md)).
+Read this staircase-shaped **for the common case**: each step up the table
+*usually* both finds breaks the step below is blind to and prevents false
+positives the step below would raise. A struct-field insertion is invisible
+at L0 but obvious at L1 ([case07](../reference/examples/case07_struct_layout.md));
+an internal-struct change that *looks* like a break at L1 is correctly
+dismissed once L2 headers reveal the struct is non-public
+([case118](../reference/examples/case118_internal_struct_field_added_scoped.md)).
+
+**But it is not a strict ranking where every higher layer is more
+authoritative than every lower one for every question** — the table's own
+rightmost column already says why: L0-L2 are marked **Authoritative**, L3/L4
+only **Corroborating**. A higher layer adds *scope* (what's public, what
+flags applied) that can correctly overrule a lower layer's naive reading —
+but for the one fact a lower artifact layer directly observed (a symbol is
+present, a struct is this many bytes), a higher layer's absence of evidence
+is never grounds to override it. That asymmetry is the
+[*authority rule*](build-source-data.md) below in full, and it is why the
+next section's own false-positive/false-negative table is not monotonic on
+both axes at every step (L1 alone *adds* false positives L0 was too blind to
+raise) even though the false-negative axis is. Read "staircase" as *more
+evidence, generally fewer misses* — not as *every layer strictly dominates
+the one below it on every question*.
 
 ### What each layer buys: fewer false negatives *and* fewer false positives
 
-Current scan-depth status is measured on the comparable v1/v2 shared-library
-targets: **141/141 targets scanned at every pinned depth**. FP/FN math uses the
-**141 targets** in that scope: `NO_CHANGE` sentinel cases are checked as
-compatible/no-change outcomes. Bundle-component results are structural
-diagnostics only; the catalog keeps one canonical case-level verdict.
+**Fact owner for current numbers.** A per-depth accuracy count (`binary` /
+`headers` / `build` / `source`, each with its own eval-target count, correct-
+verdict coverage, false positives, and false negatives) is exactly the kind
+of volatile, machine-checkable fact this repo's docs contract says must have
+one owner — [Tool Comparison's "Current scan-quality
+snapshot"](../reference/tool-comparison.md#current-scan-quality-snapshot)
+(the "Scan-depth matrix" row) is that owner; see that page for the run
+status and target count. Do not re-add a specific eval-target count,
+run-freshness claim, or per-depth percentage table to *this* page — a second
+copy is exactly how this page and that one disagreed before (this page
+previously claimed measured `100.0%` correct-verdict coverage at `source`
+depth after the catalog it was measured against had already grown past the
+pinned target count).
 
-> **Freshness note.** This 141-target pin predates the catalog's growth to
-> 193 cases (159 of them compilable `.so`-pair lanes today — see [Tool
-> Comparison's "Which denominator is which"](../reference/tool-comparison.md)
-> for how that split is derived and kept in sync). The table below has not
-> been re-run against the current catalog; treat the percentages as
-> directionally representative of each depth's value, not as current exact
-> counts. Regenerating it against all current `.so`-pair targets is a
-> tracked follow-up, matching the same caveat on the [scan-depth matrix
-> row](../reference/tool-comparison.md#current-scan-quality-snapshot) in
-> Tool Comparison.
-
-| Pinned scan depth | Eval targets | Correct verdicts | Correct verdict coverage | False positives | False negatives | What this says about the layer today |
-|---|---:|---:|---:|---:|---:|---|
-| `binary` | 141 | 79 | 56.0% | 1 | 61 | Cheap artifact floor; many API/header/source-only breaks are invisible. |
-| `headers` | 141 | 115 | 81.6% | 0 | 26 | Best low-cost gate: public-header evidence removes many misses without FP. |
-| `build` | 141 | 115 | 81.6% | 0 | 26 | Adds build context; no advisory-crosscheck false positives after policy fix. |
-| `source` | 141 | 141 | 100.0% | 0 | 0 | Highest recall; source-smoke proofs cover consumer-only API hazards. |
-
-The full example catalog is covered by multiple proof lanes. This table is only
-the compare-style scan-depth lane, so its compare-style scope is complete at 141/141.
-(An earlier `full` rung — whole-library replay, as opposed to `source`'s
-changed-TU replay — scored identically on this comparable-target set, which is
-why the two were collapsed into one public `source` rung; see the appendix
-below.)
+Qualitatively — and this part doesn't drift, because it follows from what
+each layer can and cannot observe, not from a specific run's numbers — the
+shape holds regardless of the exact counts: `binary` (L0 alone) is the cheap
+floor with many invisible API/header/source-only breaks; `headers` (L0+L2)
+is the best low-cost gate for two distinct reasons, not one — the declared
+header AST itself recovers misses L0/L1 are structurally blind to
+(source-only signature/access/`noexcept` changes), *and*, separately, the
+public/private boundary that same AST supplies removes false positives an
+L1-only run would over-call on internal churn; `build` (+L3) adds
+build-context corroboration on top; `source` (+L4) has the highest recall,
+since source-smoke proofs additionally cover consumer-only API hazards no
+artifact tier can see. (Whether a given layer introduces zero *new* false
+positives is itself a measured, catalog- and run-specific result — see the
+fact owner above for the current number, not a guarantee this qualitative
+description makes on its own.) An earlier `full` rung —
+whole-library replay, as opposed to `source`'s changed-TU replay — scored
+identically to `source` on the comparable-target set the matrix was last
+measured against, which is why the two were collapsed into one public
+`source` rung; see the appendix
+below.
 
 Across the full staircase, adding evidence drives **both** error axes down — it
 is not a trade-off where you must choose between missing breaks and crying wolf.
@@ -607,7 +670,11 @@ this as a guard against *over-trusting* any ABI tool (see
 The takeaway is the same one [Part 0](abi-series/00-product-contract.md) opens
 with: **a stable ABI is necessary but not sufficient for a compatible release.**
 ABI tools prove the binary contract held; behavioral compatibility still needs
-your tests and your specification.
+your tests and your specification. See
+[Assurance Beyond Static Checking](assurance-methods.md) for what to run
+*alongside* it — consumer rebuild tests, binary-swap tests, golden/differential
+tests, ASan/TSan lifecycle and concurrency tests — and what each one actually
+proves.
 
 ---
 

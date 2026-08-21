@@ -1,4 +1,4 @@
-# ABI/API Handling — A Learning Series
+# ABI/API Compatibility — A Learning Series
 
 This is the **conceptual hub** for understanding ABI/API compatibility — written
 to *teach* the subject, not just catalog it. It is the front door to a nine-part
@@ -104,6 +104,7 @@ here for a specific problem, jump straight to the relevant part.
 | **6** | [Transitive Breaks](abi-series/06-transitive-breaks.md) | Dependency leaks, anonymous structs, type-kind swaps, reserved fields | …the symbol table looks identical but consumers still break |
 | **7** | [Designing for Stability](abi-series/07-designing-for-stability.md) | Opaque handles, Pimpl, version scripts, CI gating — with full code | …you're designing an API to evolve safely |
 | **Capstone** | [Detecting Breaks](abi-series/08-detection.md) — grouped under **Verification & Assurance**, not the numbered series | Tracking approaches, evidence each break family needs, why single-method checkers miss whole families | …you're deciding *how* to catch all of the above in CI |
+| **Capstone companion** | [Assurance Beyond Static Checking](assurance-methods.md) — same **Verification & Assurance** group as the capstone above | What to run for the part no static tool (abicheck included) can reach: consumer rebuild, binary-swap, golden/differential, wire-format, ASan/TSan tests | …a change touches behaviour, lifetime, concurrency, or a wire/storage format — anything past the static ABI/API boundary |
 
 ```mermaid
 flowchart LR
@@ -271,33 +272,18 @@ page: [Evidence & Detectability](evidence-and-detectability.md).
 
 ### Which input proves which family — and what each level actually sees
 
-The three artifact tiers above (L0–L2) are only half the picture, and *which*
-input first reveals a given change is worth seeing concretely rather than in the
-abstract. That entire story — the summary matrices (artifact **L0–L2** and
-source-scan **L3–L5**) **and** a single tiny library walked up every evidence
-level so you can watch each change appear or stay invisible — now lives on its own
-digestible, diagram-driven page:
+*Which* input first reveals a given change is worth seeing concretely, not
+just in the abstract — a single tiny library walked up every evidence level,
+watching each change appear or stay invisible, plus the full L0–L5 summary
+matrices, live on their own digestible, diagram-driven page:
 
 ➡️ **[What Each Level Sees — a level-by-level walk-through](what-each-level-sees.md)**
 
-The short version, if you only remember one row per level:
-
-| Level | Newly reveals | Blind to |
-|:-----:|---------------|----------|
-| **L0** symbols | symbol add/remove/rename, SONAME, versioning, visibility | anything that keeps the symbol name |
-| **L1** debug | struct/enum layout, offsets, vtables, calling convention | source intent, macros, public-vs-internal |
-| **L2** headers | signatures, access, `noexcept`, default-arg & `constexpr` values, public scoping | `#define` macros, inline/template **bodies** |
-| **L3** build | ABI-relevant flags & toolchain (`-std`, `_GLIBCXX_USE_CXX11_ABI`) | anything *inside* the source |
-| **L4** sources | macro / `constexpr` values, inline/template/uninstantiated bodies | the layout actually *emitted* (L1's job) |
-| **L5** graph | reachability / impact ranking | proves nothing on its own — it prioritizes |
-
-Two rules the walk-through makes concrete: **no single level sees every change**
-(a stripped-binary L0 compare calls a genuinely breaking release "clean"), and
-the **authority rule** — the artifact tiers (L0–L2) set any `BREAKING` gate, while
-the build/source tiers (L3–L5) add findings and explanation but never manufacture
-or delete a proven binary break. abicheck tracks each layer's FP/FN contribution
-as a CI gate — see
-[Evidence & Detectability → What each layer buys](evidence-and-detectability.md#what-each-layer-buys-fewer-false-negatives-and-fewer-false-positives).
+Two rules that page makes concrete: **no single level sees every change** (a
+stripped-binary L0 compare calls a genuinely breaking release "clean"), and
+the **authority rule** — the artifact tiers (L0–L2) set any `BREAKING` gate,
+while the build/source tiers (L3–L5) add findings and explanation but never
+manufacture or delete a proven binary break.
 
 ## Going deeper than artifacts: the source scan
 
@@ -329,43 +315,24 @@ depth it *actually reached*
 
 ### The L5 graph: reachability, not just structure
 
-L0–L4 answer *what changed*: a struct grew a field, a function's signature
-changed, a macro's value differs. None of them answer a different question
-that turns out to matter just as much: **can anything outside this library
-actually observe that change?** A change buried in a namespace called
-`detail`/`impl`/`internal` (by convention, never part of the documented API)
-is usually safe to ship without a version bump — *unless* some public,
-consumer-facing declaration depends on it, in which case the "internal"
-label is a fiction and the change is exactly as breaking as if it were
-public. Telling these two cases apart requires *reachability*: a graph walk
-from the public surface, not a flat list of what's public and what isn't —
-including through the easy-to-miss case where a **public inline function's
-own body calls an "internal" helper**. For any consumer that actually calls
-or otherwise ODR-uses that inline function — a consumer that never does
-emits neither the body nor its reference to the helper, so it's simply
-unaffected — the inline function's own body is what's compiled directly
-into that consumer's binary; whether a change to the "internal" helper it
-calls is breaking for such a consumer depends on what the compiler did with
-that call: if the helper stays a real out-of-line symbol the consumer links
-against, a breaking change to it is exactly as breaking as if the helper
-were public itself. If the compiler fully inlined the helper too, an
-*already-built* consumer has no runtime dependency on it at all — it keeps
-running the code that was generated at its own build time, unaffected by
-anything the library does afterward; the risk there is a *source/behavioral*
-one on the consumer's next rebuild, not a binary dependency.
+L0–L4 answer *what changed*. None of them answer a question that matters
+just as much: **can anything outside this library actually observe that
+change?** A change inside a `detail`/`impl`/`internal` namespace is usually
+safe to ship without a version bump — *unless* some public, consumer-facing
+declaration depends on it (directly, or transitively through a public inline
+function's own body calling it), in which case the "internal" label is a
+fiction and the change is exactly as breaking as a public one. Telling these
+two cases apart needs *reachability* — a graph walk from the public surface,
+not a flat public/private list.
 
-That graph is **L5**, built from structural edges (a public type embedding,
-inheriting from, or holding a field/base of an internal one) and behavioral
-edges (one declaration's body calling or referencing another) — populated
-either from header-only evidence alone (built automatically for `--depth
-headers` and above, no `--sources`/`--build-info` needed, capturing
-in-header inline/template bodies) or from a build-integrated L4 source-fact
-surface when one is supplied, with the latter adding coverage the former
-can't reach (out-of-line bodies). The full mechanics — the edge kinds, how
-nodes and edges degrade gracefully when no build/graph evidence is
-available, the `reachability_state`/`public_reachable` fields a finding
-carries, and the ADR-044 dispatcher scenario worked end to end — are on
-their own page, not restated here:
+That graph is **L5**, built from structural edges (a public type embedding
+or inheriting an internal one) and behavioral edges (one declaration's body
+calling or referencing another) — populated from header-only evidence alone
+(`--depth headers` and above) or, with more coverage, from a build-integrated
+L4 source-fact surface. The full mechanics — edge kinds, graceful
+degradation under partial evidence, the `reachability_state`/
+`public_reachable` finding fields, and a worked dispatcher scenario — are on
+their own pages, not restated here:
 
 ➡️ **[Unified Impact Assessment](impact-analysis.md)** — what reachability
 means, the finding shape, and worked examples.

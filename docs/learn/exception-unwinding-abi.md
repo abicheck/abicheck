@@ -9,6 +9,7 @@ depends_on:
   - abicheck/diff_symbols.py
   - abicheck/diff_platform.py
   - abicheck/buildsource/build_diff.py
+  - abicheck/elf_metadata.py
 lifecycle: active
 generated: false
 ---
@@ -152,7 +153,7 @@ remains.) We do not repeat that analysis here.
       (`_ZTI…`/`_ZTS…`) and vtables (`_ZTV…`) at the ELF level. Read these
       as *risk*, not as a proven catch failure. What abicheck observes is
       the **export table**, and a hidden/internal symbol is excluded from it
-      (`elf_metadata`'s `.dynsym` parse drops `STV_HIDDEN`/`STV_INTERNAL`),
+      (the `.dynsym` parse drops `STV_HIDDEN`/`STV_INTERNAL` entries),
       so a default→hidden visibility flip presents identically to a genuine
       removal — while the local RTTI object and its type-name string are
       still there, and GNU libstdc++'s name fallback still matches. A

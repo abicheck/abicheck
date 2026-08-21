@@ -1,3 +1,14 @@
+---
+doc_type: tutorial
+audience:
+  - library-maintainer
+level: intermediate
+depends_on:
+  - abicheck/diff_types_abicc_parity.py
+lifecycle: active
+generated: false
+---
+
 # Part 6 — Subtle & Transitive Breaks
 
 > **Series navigation:** [0. Product Contract](00-product-contract.md) ·
@@ -139,7 +150,7 @@ pattern: v1 ships `__reserved1` and `__reserved2` at defined offsets; v2 renames
 them to `priority` and `max_retries` with the *same types and offsets*.
 
 !!! note "How abicheck sees it"
-    `_diff_reserved_fields` recognizes the naming convention (`__reserved`,
+    abicheck recognizes the naming convention (`__reserved`,
     `_reserved`, `__pad`, `_unused`) and classifies the rename → 🟢
     **COMPATIBLE**. The catch the tool *cannot* verify: there is no way to
     prove no consumer ever wrote to the slot — the pattern's safety rests on a

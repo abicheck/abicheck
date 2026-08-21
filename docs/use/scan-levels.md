@@ -137,25 +137,32 @@ cheap tier for a fast CI gate.
 
 ### Example-catalog status
 
-The scan-depth table is scoped to the comparable v1/v2 shared-library targets.
-That scope is complete: **141/141 targets scanned at every pinned depth**. The
-full catalog is larger, but audit, cross-source, bundle, BTF, and snapshot
-cases run through their dedicated proof lanes rather than this compare-style
-scan matrix. `Eval targets` now covers that whole comparable-target scope: the
-`NO_CHANGE` sentinel cases are checked as compatible/no-change outcomes. Bundle
-component results are structural diagnostics, never separate ground truths.
-
-| `--depth` | Comparable targets | Eval targets | Correct verdicts | Correct verdict coverage | False positives | False negatives | Status |
-|---|---:|---:|---:|---:|---:|---:|---|
-| `binary` | 141 | 141 | 79 | 56.0% | 1 | 61 | Fast artifact gate; intentionally misses header/source-only breaks. |
-| `headers` | 141 | 141 | 115 | 81.6% | 0 | 26 | Best low-cost CI gate when public headers are available. |
-| `build` | 141 | 141 | 115 | 81.6% | 0 | 26 | Adds build context; no false positives in this matrix after advisory-crosscheck fix. |
-| `source` | 141 | 141 | 141 | 100.0% | 0 | 0 | Highest recall in this matrix; source-smoke proofs cover consumer-only API hazards. Figures are for the diff-seeded rung; an unseeded whole-library replay reaches the same verdict signal at higher cost. |
-
-False positives and false negatives are listed directly. Bundle-component rows
-remain structural diagnostics in the 141-target matrix; only the dedicated
-bundle lane scores the single canonical case-level verdict and proves findings
-such as dangling intra-bundle imports and provider drift.
+The per-`--depth` eval-target count, correct-verdict coverage, and FP/FN
+counts are a volatile, machine-checkable fact with one owner: [Tool
+Comparison's "Current scan-quality
+snapshot"](../reference/tool-comparison.md#current-scan-quality-snapshot)
+(the "Scan-depth matrix" row). Don't re-add a specific target count or
+per-depth percentage table here — that page already records whether the
+matrix has been re-run against the current catalog, and a second copy here
+is exactly how this page's own numbers previously went stale (fixed
+targets/percentages pinned to an older, smaller catalog, silently
+presented as current). Qualitatively, the shape is stable across catalog
+growth: `binary` is the fast artifact gate that intentionally misses
+header/source-only breaks; `headers` is the best low-cost CI gate once
+public headers are available, since it can see the public/private
+boundary; `build` adds build-context corroboration on top; `source` has
+the highest recall, since source-smoke proofs cover consumer-only API
+hazards the artifact tiers can't see. (The measured matrix at the fact
+owner above found zero extra false positives at `headers`/`build` depth —
+a real, but catalog- and run-specific, result, not a guarantee this
+qualitative description promises on its own.) `source` here is the
+diff-seeded rung; [Evidence &
+Detectability](../learn/evidence-and-detectability.md#what-each-layer-buys-fewer-false-negatives-and-fewer-false-positives)
+explains why an unseeded whole-library replay (the former `full` rung) is
+treated as reaching the same verdict signal at higher cost. Bundle-component
+results are structural diagnostics only in that matrix; only the dedicated
+bundle lane scores the single canonical case-level verdict and proves
+findings such as dangling intra-bundle imports and provider drift.
 
 ## What input each depth needs — and how to get it
 

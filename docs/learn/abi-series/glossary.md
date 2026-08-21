@@ -1,7 +1,7 @@
 # Glossary
 
 Quick definitions for the recurring terms in the
-[ABI/API Handling series](../abi-api-handling.md). Each entry links to where the
+[ABI/API Compatibility series](../abi-api-handling.md). Each entry links to where the
 concept is developed in full.
 
 | Term | Meaning |

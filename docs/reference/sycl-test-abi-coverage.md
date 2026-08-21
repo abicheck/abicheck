@@ -54,7 +54,7 @@ encodes several layout facts in the *sizes* of the objects it emits into
 |--------|--------|-----------------|------|
 | Exported-symbol set | `.dynsym` names | Added/removed/renamed functions & objects (the `.dump`-equivalent) | `func_removed`, `func_removed_elf_only`, … |
 | Object symbol size | `st_size` of data symbols | `sizeof` of exported global objects | `symbol_size_changed` |
-| **Vtable group size** | `st_size` of `_ZTV<class>` (`slots ≈ size/ptr - 2`) | Vtable entries were net added or removed, *or* the inheritance shape changed. Not a pure reorder, which keeps the size identical — see [Class Layout ABI](../learn/class-layout-abi.md#3-binary-only-c-layout-diff_elf_layoutpy-l0) | `vtable_slot_count_changed` |
+| **Vtable group size** | `st_size` of `_ZTV<class>` (`slots ≈ size/ptr - 2`) | Vtable entries were net added or removed, *or* the inheritance shape changed. Not a pure reorder, which keeps the size identical — see [Class Layout ABI](../learn/class-layout-abi.md#3-binary-only-c-layout-l0) | `vtable_slot_count_changed` |
 | **Inheritance shape** | `st_size` of `_ZTI<class>` (2 words = no base, 3 = single base, ≥4 = multiple/virtual) | Base-class set changed *by enough to resize the typeinfo object* | `rtti_inheritance_changed` |
 | Mangled-name signature | demangled `.dynsym` entries | Parameter/return types & the owning class of each method | feeds the symbol diff |
 

@@ -1,3 +1,20 @@
+---
+doc_type: explanation
+audience:
+  - library-maintainer
+level: advanced
+depends_on:
+  - abicheck/diff_types.py
+  - abicheck/diff_platform.py
+  - abicheck/diff_layout.py
+  - abicheck/diff_elf_layout.py
+  - abicheck/dumper_clang.py
+  - tests/test_diff_layout.py
+  - tests/test_diff_elf_layout.py
+lifecycle: active
+generated: false
+---
+
 # Class Layout ABI & API: Problems and Detection
 
 This guide is the single place that explains **what a C++ class-layout change
@@ -17,7 +34,7 @@ It complements two neighbouring pages:
 
 ## ABI vs API, and where "layout" sits
 
-> **Full definitions:** [ABI/API Handling](abi-api-handling.md) is the
+> **Full definitions:** [ABI/API Compatibility](abi-api-handling.md) is the
 > canonical page for what these terms mean generally; the two bullets below
 > are the *layout-specific* restatement this page needs to talk about class
 > objects specifically.
@@ -86,13 +103,13 @@ verdict bucket follows the [policy partition](../reference/change-kinds.md):
 | Change alignment or packing | BREAKING | `type_alignment_changed`, `struct_packing_changed` | L1 | [case42](../reference/examples/case42_type_alignment_changed.md), [case56](../reference/examples/case56_struct_packing_changed.md) |
 | Reorder bases / insert a base / change virtual inheritance | BREAKING | `type_base_changed`, `base_class_position_changed`, `base_class_virtual_changed` | L1 | [case37](../reference/examples/case37_base_class.md), [case60](../reference/examples/case60_base_class_position_changed.md) |
 | **A base subobject *moves* (e.g. EBO lost)** | BREAKING | **`base_class_offset_changed`** | L1 | **[case140](../reference/examples/case140_empty_base_optimization_lost.md)** |
-| Non-polymorphic class gains its first virtual → vptr prepended | BREAKING | `vptr_introduced` | L1 (DWARF) / L2 *(descriptor)* | unit-tested (`test_diff_layout.py`) |
+| Non-polymorphic class gains its first virtual → vptr prepended | BREAKING | `vptr_introduced` | L1 (DWARF) / L2 *(descriptor)* | unit-tested, no public example case yet |
 | Add / remove / reorder a virtual function | BREAKING | `virtual_method_added`, `func_virtual_added`/`func_virtual_removed`, `type_vtable_changed` | L1 | [case38](../reference/examples/case38_virtual_methods.md), [case68](../reference/examples/case68_virtual_method_added.md) |
 | **Vtable slot count changes — from a *stripped* binary** | BREAKING | **`vtable_slot_count_changed`** | **L0 (ELF symbol size)** | **[case142](../reference/examples/case142_vtable_slot_count_binary_only.md)** |
-| Inheritance *shape* changes *by enough to resize `_ZTI`* — from a stripped binary | BREAKING | `rtti_inheritance_changed` | L0 (`_ZTI` size) | unit-tested (`test_diff_elf_layout.py`) |
+| Inheritance *shape* changes *by enough to resize `_ZTI`* — from a stripped binary | BREAKING | `rtti_inheritance_changed` | L0 (`_ZTI` size) | unit-tested, no public example case yet |
 | Type stops being trivially-copyable → by-value calling conv. flips | BREAKING | `trivially_copyable_lost`, `value_abi_trait_changed` | L2 *(descriptor)* / L1 | [case69](../reference/examples/case69_trivial_to_nontrivial.md) |
-| Type stops being standard-layout (`offsetof`/C-interop lost) | COMPATIBLE_WITH_RISK | `standard_layout_lost` | L2 *(descriptor)* | unit-tested (`test_diff_layout.py`) |
-| `dsize` changes at stable `sizeof` (tail-padding reuse) | COMPATIBLE_WITH_RISK | `tail_padding_reuse_changed` | L2 *(descriptor)* | unit-tested (`test_diff_layout.py`) |
+| Type stops being standard-layout (`offsetof`/C-interop lost) | COMPATIBLE_WITH_RISK | `standard_layout_lost` | L2 *(descriptor)* | unit-tested, no public example case yet |
+| `dsize` changes at stable `sizeof` (tail-padding reuse) | COMPATIBLE_WITH_RISK | `tail_padding_reuse_changed` | L2 *(descriptor)* | unit-tested, no public example case yet |
 | Change a field's / method's access specifier | API_BREAK | `field_access_changed`, `method_access_changed` | L2 (headers) | [case34](../reference/examples/case34_access_level.md) |
 | RTTI / vtable visibility changes across DSOs | BREAKING | `type_visibility_changed` | L1 (DWARF attrs) | — |
 | `[[no_unique_address]]` overlap gained/lost | BREAKING | *(no dedicated kind — see below)* `type_size_changed` / `type_field_offset_changed` | L1 | [case117](../reference/examples/case117_no_unique_address.md) |
@@ -113,7 +130,15 @@ verdict bucket follows the [policy partition](../reference/change-kinds.md):
 
 ## How abicheck reads layout: the three detector tiers
 
-### 1. Coarse type/struct diff — `diff_types.py`, `diff_platform.py` (L1/L2)
+> Each tier below is a distinct comparison pass over a distinct slice of the
+> layout evidence — worth knowing as *tiers*, since which one applies is what
+> decides whether a given change is detectable at all with the evidence you
+> supplied. The exact modules that implement each tier are named in this
+> page's own front matter (`depends_on`) rather than inline here, so a
+> reader learning *what's detectable* isn't also asked to track Python file
+> names.
+
+### 1. Coarse type/struct diff (L1/L2)
 
 Compares `sizeof`, `alignof`, the field list (name, type, offset, bit-field
 width), the base list, and the vtable list between the two snapshots. This is
@@ -121,14 +146,14 @@ the workhorse for the common breaks: `type_size_changed`,
 `type_field_offset_changed`, `type_field_type_changed`, `type_base_changed`,
 `type_vtable_changed`, `struct_packing_changed`, `type_alignment_changed`.
 
-### 2. Fine-grained layout descriptor — `diff_layout.py` (L1/L2)
+### 2. Fine-grained layout descriptor (L1/L2)
 
 A class has moving parts the coarse `sizeof` diff under-represents. The
 `RecordType` model carries an optional **layout descriptor**:
 
 | Field | Meaning | Populated by |
 |-------|---------|--------------|
-| `base_offsets` | each base subobject's bit offset | DWARF and castxml directly; **direct-clang only with** the optional `ABICHECK_CLANG_LAYOUT_TOOL` pass (`dumper_clang.py` never populates it on its own) |
+| `base_offsets` | each base subobject's bit offset | DWARF and castxml directly; **direct-clang only with** the optional `ABICHECK_CLANG_LAYOUT_TOOL` pass — the direct-clang AST backend does not populate it on its own |
 | `vptr_offset_bits` | vtable-pointer offset | **DWARF: measured** — read from the artificial vptr member's own `DW_AT_data_member_location`, with inherited offsets propagated, and `0` used only as a last-resort fallback. **Both header backends: derived**, `0` whenever the class has a vtable — a polymorphism witness, not a measured offset |
 | `data_size_bits` | `dsize` — bytes the members occupy, excl. tail padding | only the optional `ABICHECK_CLANG_LAYOUT_TOOL` companion pass |
 | `is_standard_layout` | standard-layout trait | direct-clang AST only |
@@ -148,7 +173,7 @@ counterpart of the triviality question is a *separate* finding on a separate
 path: `value_abi_trait_changed`, inferred from DIE structure rather than read
 from a trait (see [Part 4 §6](abi-series/04-cpp-abi.md#6-trivial-non-trivial-the-invisible-calling-convention-flip)).
 
-From these `diff_layout.py` emits `base_class_offset_changed` (a base moved),
+From these, abicheck emits `base_class_offset_changed` (a base moved),
 `vptr_introduced` (became polymorphic), `trivially_copyable_lost`,
 `standard_layout_lost`, and `tail_padding_reuse_changed`.
 
@@ -159,7 +184,7 @@ dump, or an older snapshot whose schema predates these fields) therefore never
 has no layout evidence at all, abicheck emits the calm, non-escalating
 `layout_unverifiable` instead of guessing.
 
-### 3. Binary-only C++ layout — `diff_elf_layout.py` (L0)
+### 3. Binary-only C++ layout (L0)
 
 The biggest *narrowing* of the symbol-only blind spot — narrowing, not closing;
 see the limits below. The Itanium ABI fixes the on-disk size of two emitted

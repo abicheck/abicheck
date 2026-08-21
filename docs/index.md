@@ -34,7 +34,7 @@ introductory to expert — the "Where to go next" list below routes by task/
 persona instead, for whichever track (or both) a given question actually
 needs:
 
-1. **Learn the problem** — [ABI/API Handling & Recommendations](learn/abi-api-handling.md)
+1. **Learn the problem** — [ABI/API Compatibility](learn/abi-api-handling.md)
    is educational material that needs no abicheck knowledge: what ABI/API
    compatibility is, why libraries break their consumers, and how to design
    against it. Start with the [learning series](learn/abi-series/00-product-contract.md)
@@ -59,7 +59,7 @@ needs:
 
 **New to the ABI/API problem itself?**
 
-- [ABI/API Handling & Recommendations](learn/abi-api-handling.md) — the consolidated guide.
+- [ABI/API Compatibility](learn/abi-api-handling.md) — the consolidated guide.
 - [Learning series, part 0](learn/abi-series/00-product-contract.md) — compatibility as a product contract, from first principles.
 - [ABI Cheat Sheet](learn/abi-cheat-sheet.md) — which changes are safe, risky, or breaking, at a glance.
 
@@ -67,7 +67,7 @@ needs:
 
 - [Tool Comparison & Benchmarks](reference/tool-comparison.md) — abicheck vs `abidiff` vs ABICC on a pinned 74-case benchmark subset.
 - [Examples & Case Encyclopedia](reference/examples/index.md) — generated pages for the single-library cases; bundle cases live under `examples/`.
-- [ABI/API Handling & Recommendations](learn/abi-api-handling.md) — real-world scenarios with code, plus design patterns that prevent each break.
+- [ABI/API Compatibility](learn/abi-api-handling.md) — real-world scenarios with code, plus design patterns that prevent each break.
 - [Limitations](learn/limitations.md) — what abicheck does *not* catch.
 
 **Integrating into a release pipeline?**

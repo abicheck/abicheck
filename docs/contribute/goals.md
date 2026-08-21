@@ -84,7 +84,7 @@ For each break type: what it is, how it appears in the real world, and which too
 - Comparison table: `abicheck` vs `abicc` vs `libabigail` vs `nm`-only
 - Coverage matrix showing evidence tier required (ELF-only / DWARF / Header / Runtime)
 
-**Done:** 143 example cases with per-case `README.md`; the original 74-case subset remains the release-pinned cross-tool benchmark; gap report with coverage matrix (abicheck vs ABICC vs libabigail vs `nm`); the consolidated [ABI/API Handling & Recommendations](../learn/abi-api-handling.md) guide plus the generated [Examples Encyclopedia](../reference/examples/index.md); cross-platform CMake build support for all single-library example cases.
+**Done:** 143 example cases with per-case `README.md`; the original 74-case subset remains the release-pinned cross-tool benchmark; gap report with coverage matrix (abicheck vs ABICC vs libabigail vs `nm`); the consolidated [ABI/API Compatibility](../learn/abi-api-handling.md) guide plus the generated [Examples Encyclopedia](../reference/examples/index.md); cross-platform CMake build support for all single-library example cases.
 
 ---
 
