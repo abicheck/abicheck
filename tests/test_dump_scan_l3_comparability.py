@@ -42,11 +42,22 @@ on the current fold, rather than trusting the mocked unit coverage alone.
 
 Marked ``integration`` (real compiler-backed, so it must stay out of the
 default fast lane -- CLAUDE.md's "Default fast command excludes all
-external-tool markers"). ``--ast-frontend clang`` is used explicitly
-rather than the default castxml backend purely so this module's own
-development/verification didn't require a castxml install; the Linux
-``integration`` CI lane installs both clang and castxml/gcc/g++
-(``.github/workflows/ci.yml``), so this runs there regardless.
+external-tool markers").
+
+Parametrized over ``--ast-frontend`` (``clang`` and ``castxml``, the
+default header backend): the original bug report was reproduced against
+castxml specifically, and the underlying fix (the P0.3 L3->L2 fold, the
+legacy-match-overlap removal, ``scan``'s candidate resolver sharing
+``dump``'s own primitive) operates purely on ``CompileContext``/token
+data below where the two header backends diverge, so it is expected to
+hold for both -- but until this module actually exercised castxml, that
+was only an untested assumption, not a verified fact, and the Linux
+``integration`` CI lane installs both toolchains
+(``.github/workflows/ci.yml``) without either ever being exercised by
+this module. ``clang`` was used exclusively in earlier revisions purely
+because this module's own local development/verification environment
+had no castxml install; that is no longer a reason to leave the
+default backend unverified in CI, which does have one.
 """
 
 from __future__ import annotations
@@ -72,6 +83,17 @@ pytestmark = [
 
 _HAVE_GXX = shutil.which("g++") is not None
 _HAVE_CLANG = shutil.which("clang") is not None
+_HAVE_CASTXML = shutil.which("castxml") is not None
+
+# Both header backends are exercised: the fix operates on shared
+# CompileContext/token data below the point where the two backends
+# diverge, so a regression specific to one of them must not hide behind
+# only ever testing the other.
+_AST_FRONTENDS = pytest.mark.parametrize("ast_frontend", ["clang", "castxml"])
+
+
+def _have_frontend(ast_frontend: str) -> bool:
+    return _HAVE_CASTXML if ast_frontend == "castxml" else _HAVE_CLANG
 
 
 def _build_library(
@@ -171,16 +193,18 @@ def _build_library(
     return so_path, header, compile_db
 
 
-@pytest.mark.skipif(
-    not (_HAVE_GXX and _HAVE_CLANG), reason="needs a real g++ and clang toolchain"
-)
-def test_dump_folds_real_l3_evidence_into_ast_compile_context(tmp_path: Path) -> None:
+@_AST_FRONTENDS
+def test_dump_folds_real_l3_evidence_into_ast_compile_context(
+    tmp_path: Path, ast_frontend: str
+) -> None:
     """A real ``dump --build-info`` baseline carries the real ``-std=``.
 
     Direct assertion on the reported symptom: ``ast_resolved_standard``/
     ``ast_compile_args`` must not be empty when real L3 build evidence
     (a compile database recording ``-std=c++17``) was supplied.
     """
+    if not (_HAVE_GXX and _have_frontend(ast_frontend)):
+        pytest.skip(f"needs a real g++ and {ast_frontend} toolchain")
     so_path, header, compile_db = _build_library(tmp_path)
     baseline = tmp_path / "baseline.json"
 
@@ -198,7 +222,7 @@ def test_dump_folds_real_l3_evidence_into_ast_compile_context(tmp_path: Path) ->
             "--depth",
             "source",
             "--ast-frontend",
-            "clang",
+            ast_frontend,
             "-o",
             str(baseline),
         ],
@@ -213,15 +237,15 @@ def test_dump_folds_real_l3_evidence_into_ast_compile_context(tmp_path: Path) ->
     assert snap.get("parsed_with_build_context") is True
 
 
-@pytest.mark.skipif(
-    not (_HAVE_GXX and _HAVE_CLANG), reason="needs a real g++ and clang toolchain"
-)
+@_AST_FRONTENDS
 def test_scan_against_real_dump_baseline_is_comparable_on_unchanged_source(
-    tmp_path: Path,
+    tmp_path: Path, ast_frontend: str
 ) -> None:
     """The full repro from the bug report: dump a baseline, then ``scan
     --against`` it on the identical, unchanged codebase. Must resolve as
     comparable (``NO_CHANGE``/exit 0), never ``NOT_COMPARABLE`` (exit 6)."""
+    if not (_HAVE_GXX and _have_frontend(ast_frontend)):
+        pytest.skip(f"needs a real g++ and {ast_frontend} toolchain")
     so_path, header, compile_db = _build_library(tmp_path)
     baseline = tmp_path / "baseline.json"
 
@@ -239,7 +263,7 @@ def test_scan_against_real_dump_baseline_is_comparable_on_unchanged_source(
             "--depth",
             "source",
             "--ast-frontend",
-            "clang",
+            ast_frontend,
             "-o",
             str(baseline),
         ],
@@ -260,7 +284,7 @@ def test_scan_against_real_dump_baseline_is_comparable_on_unchanged_source(
             "--depth",
             "source",
             "--ast-frontend",
-            "clang",
+            ast_frontend,
             "--against",
             str(baseline),
         ],
@@ -271,11 +295,9 @@ def test_scan_against_real_dump_baseline_is_comparable_on_unchanged_source(
     assert "Verdict: NO_CHANGE" in scan_result.output, scan_result.output
 
 
-@pytest.mark.skipif(
-    not (_HAVE_GXX and _HAVE_CLANG), reason="needs a real g++ and clang toolchain"
-)
+@_AST_FRONTENDS
 def test_scan_against_real_dump_baseline_matches_reported_cli_invocation(
-    tmp_path: Path,
+    tmp_path: Path, ast_frontend: str
 ) -> None:
     """The exact CLI invocation shape from the bug report: a side-prefixed
     ``-H new=PATH`` header, an explicit ``--lang c++``, an explicit
@@ -296,6 +318,8 @@ def test_scan_against_real_dump_baseline_matches_reported_cli_invocation(
     same invocation as ``NO_CHANGE`` even *without* the fix when no extra
     ``-I`` is involved. See ``_build_library``'s own docstring.
     """
+    if not (_HAVE_GXX and _have_frontend(ast_frontend)):
+        pytest.skip(f"needs a real g++ and {ast_frontend} toolchain")
     so_path, header, compile_db = _build_library(tmp_path, extra_include_dir="dep")
     baseline = tmp_path / "baseline.json"
 
@@ -313,7 +337,7 @@ def test_scan_against_real_dump_baseline_matches_reported_cli_invocation(
             "--depth",
             "source",
             "--ast-frontend",
-            "clang",
+            ast_frontend,
             "-o",
             str(baseline),
         ],
@@ -339,7 +363,7 @@ def test_scan_against_real_dump_baseline_matches_reported_cli_invocation(
             "--depth",
             "source",
             "--ast-frontend",
-            "clang",
+            ast_frontend,
             "--policy",
             "strict_abi",
             "--format",
