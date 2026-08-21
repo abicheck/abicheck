@@ -988,8 +988,7 @@ def _compiler_version_sans_driver_name(version: str) -> str:
 def _compiler_install_dir(ast_toolchain: dict[str, str]) -> str:
     """The resolved host compiler's own directory (``compiler_realpath``,
     falling back to ``compiler_selected``) -- proof of one toolchain install.
-    ``PureWindowsPath`` (accepts ``/``/``\\``), not the platform-dependent
-    ``Path``: a persisted path was captured on whichever OS produced it."""
+    ``PureWindowsPath``, not ``Path``: a persisted path may be from another OS."""
     path = ast_toolchain.get("compiler_realpath") or ast_toolchain.get(
         "compiler_selected", ""
     )
@@ -1007,15 +1006,19 @@ def _driver_prefix(word: str, bare: str, suffix: str) -> str | None:
 def _is_gcc_gxx_driver_pair(old_version: str, new_version: str) -> bool:
     """Whether each banner's leading token is genuinely a C vs. C++ driver
     from the *same* toolchain -- not just two words separately matching
-    ``gcc``/``g++`` by suffix (Codex review, fresh evidence, fourth round):
-    ``vendor-a-g++``/``vendor-b-gcc`` both end in a recognized suffix but
-    are two unrelated builds, so the two sides' cross-compile *prefixes*
-    (``""`` for a bare ``gcc``/``g++``) must also match."""
+    ``gcc``/``g++`` by suffix: ``vendor-a-g++``/``vendor-b-gcc`` both end
+    in a recognized suffix but are unrelated builds, so the two sides'
+    cross-compile *prefixes* (``""`` for a bare ``gcc``/``g++``) must
+    also match."""
     if not old_version or not new_version:
         return False
-    # MinGW banners lead with "gcc.exe"/"g++.exe" -- strip the suffix first.
-    old_word = old_version.split(None, 1)[0].lower().removesuffix(".exe")
-    new_word = new_version.split(None, 1)[0].lower().removesuffix(".exe")
+    # A whitespace-only (truthy) banner's .split() is empty -- guard before
+    # indexing [0] (CodeRabbit review). MinGW leads with "gcc.exe"/"g++.exe".
+    old_tokens, new_tokens = old_version.split(), new_version.split()
+    if not old_tokens or not new_tokens:
+        return False
+    old_word = old_tokens[0].lower().removesuffix(".exe")
+    new_word = new_tokens[0].lower().removesuffix(".exe")
     dp = _driver_prefix
     old_c, old_cxx = dp(old_word, "cc", "gcc"), dp(old_word, "c++", "g++")
     new_c, new_cxx = dp(new_word, "cc", "gcc"), dp(new_word, "c++", "g++")
@@ -1034,8 +1037,7 @@ def _language_standard_content_divergence_corroborated(
     safe to waive -- distinct from
     :func:`_language_standard_probe_upgrade_corroborated`'s narrower
     "an abicheck upgrade added the probe" case (real CI failure:
-    examples/case66_language_linkage_changed and
-    examples/case69_trivial_to_nontrivial).
+    examples/case66_language_linkage_changed, case69_trivial_to_nontrivial).
 
     When neither side was given an explicit ``--lang``,
     :func:`dumper_toolchain._resolve_force_cpp` decides the parse language
@@ -1043,16 +1045,14 @@ def _language_standard_content_divergence_corroborated(
     "C"`` wrapper (case66) or gaining a C++-only construct (case69) is a
     real, ABI-relevant edit, not evidence of a different extraction
     *environment* (ADR-050 D1/D2) under an identical, corroborated
-    toolchain -- real signal for the dedicated detectors to report, not a
-    reason to refuse the comparison outright.
+    toolchain -- real signal for the dedicated detectors to report.
 
-    **Scoped to a genuine mode switch (``c`` <-> ``c++``), not merely a
-    differing edition within the same mode** (pinned by
-    ``test_dumper_contract_wiring.py::
-    test_cpp20_heuristic_forced_standard_flows_into_profile_fingerprint``):
-    two header sets both parsed as C++ but resolving to a different
-    *edition* purely because ``force_cpp20`` fires on only one side are
-    still genuinely different dialects. Checked via
+    **Scoped to a genuine mode switch (``c`` <-> ``c++``), not a differing
+    edition within the same mode** (pinned by ``test_dumper_contract_
+    wiring.py::test_cpp20_heuristic_forced_standard_flows_into_profile_
+    fingerprint``): two header sets both parsed as C++ but resolving to a
+    different *edition* purely because ``force_cpp20`` fires on only one
+    side are still genuinely different dialects. Checked via
     ``AbiSnapshot.ast_toolchain["resolved_lang_mode"]``
     (:func:`dumper_toolchain._stamp_ast_parser`), not the
     ``language_standard`` string shape.

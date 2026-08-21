@@ -41,6 +41,7 @@ import pytest
 
 from abicheck import comparability, dumper_toolchain
 from abicheck.comparability import (
+    _is_gcc_gxx_driver_pair,
     check_contracts_comparable,
     compute_extraction_contract,
 )
@@ -759,6 +760,7 @@ def test_gate_content_driven_still_raises_for_real_driver_names_in_different_dir
             compiler_sha256="a" * 64,
             compiler_selected="/opt/toolchain-a/bin/g++",
             compiler_realpath="/opt/toolchain-a/bin/g++",
+            compiler_target_triple="x86_64-linux-gnu",
         ),
     )
     new = _snap(
@@ -776,8 +778,12 @@ def test_gate_content_driven_still_raises_for_real_driver_names_in_different_dir
             compiler_sha256="b" * 64,
             compiler_selected="/opt/toolchain-b/bin/gcc",
             compiler_realpath="/opt/toolchain-b/bin/gcc",
+            compiler_target_triple="x86_64-linux-gnu",
         ),
     )
+    # Same target triple on both sides (CodeRabbit review): isolates the
+    # install-directory leg as the actual reason this still raises, rather
+    # than passing vacuously because compiler_target_triple was empty.
     with pytest.raises(ProfileMismatchError):
         check_contracts_comparable(old, new)
 
@@ -926,6 +932,18 @@ def test_gate_content_driven_still_raises_for_mismatched_driver_vendor_prefixes(
     )
     with pytest.raises(ProfileMismatchError):
         check_contracts_comparable(old, new)
+
+
+def test_is_gcc_gxx_driver_pair_never_raises_on_whitespace_only_banner():
+    """CodeRabbit review, fresh evidence: a whitespace-only banner is a
+    truthy string, so the leading not-empty guard doesn't catch it -- and
+    `" ".split(None, 1)` returns `[]`, so indexing `[0]` used to raise
+    `IndexError` instead of returning `False`. A whitespace-only
+    ast_toolchain["compiler_version"] is reachable in practice from a
+    corrupt/hand-edited legacy snapshot, not just a synthetic test input."""
+    assert _is_gcc_gxx_driver_pair(" ", "gcc (Ubuntu 13.3.0) 13.3.0") is False
+    assert _is_gcc_gxx_driver_pair("g++ (Ubuntu 13.3.0) 13.3.0", "\t\n") is False
+    assert _is_gcc_gxx_driver_pair("   ", "   ") is False
 
 
 def test_gate_content_driven_still_raises_when_producer_differs():

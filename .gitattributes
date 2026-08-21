@@ -10,8 +10,8 @@
 # _runtime_relevant_digest() docstring for the full history: an earlier
 # revision normalized CRLF->LF at hash time instead, which also silently
 # hid a genuine CRLF-introducing edit to a runtime-relevant file).
-agent-evals/skills/graders/*.py text eol=lf
-agent-evals/skills/shim/abicheck text eol=lf
+agent-evals/skills/graders/**/*.py text eol=lf
+agent-evals/skills/shim/** text eol=lf
 agent-evals/skills/harbor/verify_run.py text eol=lf
 agent-evals/skills/harbor/tasks/**/*.md text eol=lf
 agent-evals/skills/harbor/tasks/**/*.toml text eol=lf
@@ -32,6 +32,11 @@ agent-evals/skills/harbor/tasks/**/*.so binary
 # the already-committed generated tree regardless of checkout platform.
 agent-evals/skills/fixtures/**/*.c text eol=lf
 agent-evals/skills/fixtures/**/*.h text eol=lf
+agent-evals/skills/fixtures/**/*.cc text eol=lf
+agent-evals/skills/fixtures/**/*.cpp text eol=lf
+agent-evals/skills/fixtures/**/*.cxx text eol=lf
+agent-evals/skills/fixtures/**/*.hpp text eol=lf
+agent-evals/skills/fixtures/**/*.hh text eol=lf
 agent-evals/skills/fixtures/**/*.json text eol=lf
 agent-evals/skills/fixtures/**/*.md text eol=lf
 agent-evals/skills/fixtures/**/*.so binary
