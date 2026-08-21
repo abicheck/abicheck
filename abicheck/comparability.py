@@ -988,10 +988,9 @@ def _compiler_version_sans_driver_name(version: str) -> str:
 def _compiler_install_dir(ast_toolchain: dict[str, str]) -> str:
     """The resolved host compiler's own directory (``compiler_realpath``,
     falling back to ``compiler_selected``) -- proof of one toolchain
-    installation, not just a similar version string. ``PureWindowsPath``
-    (accepts ``/`` and ``\\``), not the platform-dependent ``Path``: a
-    persisted path was captured on whichever OS produced it, and ``Path``
-    mis-parses backslashes as literal characters when compared on POSIX."""
+    install, not just a similar version string. ``PureWindowsPath`` (accepts
+    ``/`` and ``\\``), not the platform-dependent ``Path``: a persisted path
+    was captured on whichever OS produced it and may be compared elsewhere."""
     path = ast_toolchain.get("compiler_realpath") or ast_toolchain.get(
         "compiler_selected", ""
     )
@@ -1042,16 +1041,13 @@ def _language_standard_content_divergence_corroborated(
     **Scoped to a genuine mode switch (``c`` <-> ``c++``), not merely a
     differing edition within the same mode** (pinned by
     ``test_dumper_contract_wiring.py::
-    test_cpp20_heuristic_forced_standard_flows_into_profile_fingerprint``).
-    Two header sets that both parse as C++ but resolve to a different
+    test_cpp20_heuristic_forced_standard_flows_into_profile_fingerprint``):
+    two header sets that both parse as C++ but resolve to a different
     *edition* purely because ``force_cpp20`` fires on only one side are
-    parsed under genuinely different dialects -- exactly what that
-    heuristic exists to catch, and still must. Checked via
+    still genuinely different dialects. Checked via
     ``AbiSnapshot.ast_toolchain["resolved_lang_mode"]``
     (:func:`dumper_toolchain._stamp_ast_parser`), not the
-    ``language_standard`` string shape, since only that field records the
-    actual mode. A real content-driven mode change under an identical,
-    corroborated toolchain must not raise ``NOT_COMPARABLE`` either way.
+    ``language_standard`` string shape.
 
     Waived only when: (1) neither side's non-empty ``language_standard``
     reflects an explicit ``--lang`` (:func:`_language_standard_is_lang_pinned`)
@@ -1065,7 +1061,8 @@ def _language_standard_content_divergence_corroborated(
     for why); and (3) corroborated by matching ``compiler_family``/
     ``producer``/frontend ``version``, a driver-name-normalized
     ``compiler_version``, and ``compiler_sha256`` -- skipped only for the
-    corroborated castxml gcc/g++ pair (see the code's own comment).
+    corroborated castxml gcc/g++ pair sharing one install directory and one
+    ``compiler_target_triple`` (see the code's own comment).
     """
     old_std = old_fields.get("language_standard", "")
     new_std = new_fields.get("language_standard", "")
@@ -1102,22 +1099,15 @@ def _language_standard_content_divergence_corroborated(
         new_std, new_mode
     ):
         return False
-    # Codex review, fresh evidence (second round): the check above still
-    # cannot tell apart the exact-collision pair -- an explicit
-    # -std=gnu11/-std=gnu++20 given without --lang produces literals that
-    # equal :data:`_KNOWN_AUTO_RESOLVED_BARE_STANDARDS`' own entries, since
-    # those are exactly the forms the unpinned path independently produces
-    # for the same two modes. No string-shape check can resolve that
-    # collision -- it needs real provenance:
+    # The check above still can't tell apart the exact-collision pair --
+    # an explicit -std=gnu11/-std=gnu++20 given without --lang produces the
+    # identical literal :data:`_KNOWN_AUTO_RESOLVED_BARE_STANDARDS` uses for
+    # the unpinned path. Needs real provenance instead:
     # AbiSnapshot.ast_toolchain["language_standard_explicit"]
-    # (dumper_toolchain._stamp_ast_parser, PR #816 follow-up) records
-    # whether the caller actually gave an explicit -std=/--std=/std:,
-    # independent of what the resulting value happens to look like. Missing
-    # on either side (a legacy snapshot dumped before this provenance
-    # existed) fails closed -- rather than a bare literal being trusted by
-    # default, an unconfirmed pair simply doesn't get this carve-out until
-    # re-dumped, the same "safe workaround: re-dump once" degradation this
-    # codebase's toolchain-provenance carve-outs already use elsewhere.
+    # (dumper_toolchain._stamp_ast_parser) records whether the caller
+    # actually gave an explicit pin, independent of the resulting literal.
+    # Missing on either side (a legacy pre-provenance snapshot) fails
+    # closed -- re-dump once rather than trusting an unconfirmed pair.
     if (
         old.ast_toolchain.get("language_standard_explicit") != "0"
         or new.ast_toolchain.get("language_standard_explicit") != "0"
@@ -1156,16 +1146,25 @@ def _language_standard_content_divergence_corroborated(
         # unchanged toolchain (direct-clang invokes the same binary either
         # way). A real cross-version skew still differs in the remainder.
         return False
-    # sha256 skipped only for: castxml, gnu, a real gcc/g++ pair, AND both
-    # resolved from the same install dir (a version/name match alone
-    # isn't proof of one toolchain).
+    # sha256 skipped only for: castxml, gnu, a real gcc/g++ pair, same
+    # install dir, AND (Codex review, third round) the same
+    # compiler_target_triple -- an install dir alone still accepts two
+    # unrelated cross-compilers side by side (aarch64-linux-gnu-g++ vs.
+    # x86_64-linux-gnu-gcc) that can share a version-suffix banner while
+    # targeting genuinely different architectures. Missing on either side
+    # (a best-effort probe -- see _tool_target_triple) fails this leg
+    # closed, not "unknown treated as same".
     old_dir = _compiler_install_dir(old.ast_toolchain)
     new_dir = _compiler_install_dir(new.ast_toolchain)
+    old_triple = old.ast_toolchain.get("compiler_target_triple", "")
+    new_triple = new.ast_toolchain.get("compiler_target_triple", "")
     if not (
         banners_differ
         and old_producer == "castxml"
         and old_family == "gnu"
         and _is_gcc_gxx_driver_pair(old_host_version, new_host_version)
+        and old_triple
+        and old_triple == new_triple
         and old_dir
         and old_dir == new_dir
     ):

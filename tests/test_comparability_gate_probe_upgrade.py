@@ -628,6 +628,7 @@ def test_gate_waives_gnu_driver_pair_even_when_compiler_sha256_differs():
             compiler_sha256="a" * 64,
             compiler_selected="/usr/bin/g++",
             compiler_realpath="/usr/bin/g++",
+            compiler_target_triple="x86_64-linux-gnu",
         ),
     )
     new = _snap(
@@ -645,6 +646,7 @@ def test_gate_waives_gnu_driver_pair_even_when_compiler_sha256_differs():
             compiler_sha256="b" * 64,
             compiler_selected="/usr/bin/gcc",
             compiler_realpath="/usr/bin/gcc",
+            compiler_target_triple="x86_64-linux-gnu",
         ),
     )
     check_contracts_comparable(old, new)  # must not raise
@@ -804,6 +806,7 @@ def test_gate_waives_mingw_exe_suffixed_driver_pair_even_when_sha256_differs():
             compiler_sha256="a" * 64,
             compiler_selected=r"C:\mingw64\bin\g++.exe",
             compiler_realpath=r"C:\mingw64\bin\g++.exe",
+            compiler_target_triple="x86_64-w64-mingw32",
         ),
     )
     new = _snap(
@@ -821,9 +824,60 @@ def test_gate_waives_mingw_exe_suffixed_driver_pair_even_when_sha256_differs():
             compiler_sha256="b" * 64,
             compiler_selected=r"C:\mingw64\bin\gcc.exe",
             compiler_realpath=r"C:\mingw64\bin\gcc.exe",
+            compiler_target_triple="x86_64-w64-mingw32",
         ),
     )
     check_contracts_comparable(old, new)  # must not raise
+
+
+def test_gate_content_driven_still_raises_for_mismatched_cross_compiler_targets():
+    """Codex review, fresh evidence (P2, fourth round): the install-dir
+    check alone still accepts two unrelated cross-compilers installed side
+    by side in the same directory (e.g. `/usr/bin/aarch64-linux-gnu-g++`
+    and `/usr/bin/x86_64-linux-gnu-gcc`), which can share an identical
+    version-suffix banner while `_tool_identity_metadata` already records
+    genuinely different `compiler_target_triple` values. Must not be waived
+    just because the driver names, version suffix, and directory all
+    happen to match -- the target triple disagreeing is real signal that
+    the two sides parsed for different architectures."""
+    old = _snap(
+        compute_extraction_contract(
+            l2_frontend_ran=True,
+            compiler_family="gnu",
+            compiler_version="13.3.0",
+            language_standard="probed:__cplusplus=201703L",
+        ),
+        ast_toolchain=_content_ast_toolchain(
+            "c++",
+            producer="castxml",
+            frontend_version="0.6.11",
+            host_version="aarch64-linux-gnu-g++ (Ubuntu 13.3.0) 13.3.0",
+            compiler_sha256="a" * 64,
+            compiler_selected="/usr/bin/aarch64-linux-gnu-g++",
+            compiler_realpath="/usr/bin/aarch64-linux-gnu-g++",
+            compiler_target_triple="aarch64-linux-gnu",
+        ),
+    )
+    new = _snap(
+        compute_extraction_contract(
+            l2_frontend_ran=True,
+            compiler_family="gnu",
+            compiler_version="13.3.0",
+            language_standard="gnu11",
+        ),
+        ast_toolchain=_content_ast_toolchain(
+            "c",
+            producer="castxml",
+            frontend_version="0.6.11",
+            host_version="x86_64-linux-gnu-gcc (Ubuntu 13.3.0) 13.3.0",
+            compiler_sha256="b" * 64,
+            compiler_selected="/usr/bin/x86_64-linux-gnu-gcc",
+            compiler_realpath="/usr/bin/x86_64-linux-gnu-gcc",
+            compiler_target_triple="x86_64-linux-gnu",
+        ),
+    )
+    with pytest.raises(ProfileMismatchError):
+        check_contracts_comparable(old, new)
 
 
 def test_gate_content_driven_still_raises_when_producer_differs():
