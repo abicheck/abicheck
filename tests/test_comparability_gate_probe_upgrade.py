@@ -1651,6 +1651,56 @@ def test_gate_waives_real_ubuntu_versioned_symlink_driver_pair():
     check_contracts_comparable(old, new)  # must not raise
 
 
+def test_gate_waives_windows_install_dir_containing_a_space():
+    """CodeRabbit review, fresh evidence: the resolved-binary-path check
+    added above originally passed the two sides' *full* resolved paths
+    directly to ``_is_gcc_gxx_driver_pair``, which tokenizes its input on
+    whitespace -- a real Windows install directory containing a space
+    (``C:\\Program Files\\mingw64\\bin\\g++.exe``, a real, common MinGW
+    install location) would then read its first "word" as
+    ``C:\\Program``, not the executable at all, silently defeating the
+    whole check and making this genuine gcc/g++ pair raise
+    ``ProfileMismatchError``. Basenames only, not full paths, must reach
+    that check."""
+    old = _snap(
+        compute_extraction_contract(
+            l2_frontend_ran=True,
+            compiler_family="gnu",
+            compiler_version="13.2.0",
+            language_standard="probed:__cplusplus=201703L",
+        ),
+        ast_toolchain=_content_ast_toolchain(
+            "c++",
+            producer="castxml",
+            frontend_version="0.6.11",
+            host_version="g++.exe (MinGW-W64) 13.2.0",
+            compiler_sha256="a" * 64,
+            compiler_selected=r"C:\Program Files\mingw64\bin\g++.exe",
+            compiler_realpath=r"C:\Program Files\mingw64\bin\g++.exe",
+            compiler_target_triple="x86_64-w64-mingw32",
+        ),
+    )
+    new = _snap(
+        compute_extraction_contract(
+            l2_frontend_ran=True,
+            compiler_family="gnu",
+            compiler_version="13.2.0",
+            language_standard="gnu11",
+        ),
+        ast_toolchain=_content_ast_toolchain(
+            "c",
+            producer="castxml",
+            frontend_version="0.6.11",
+            host_version="gcc.exe (MinGW-W64) 13.2.0",
+            compiler_sha256="b" * 64,
+            compiler_selected=r"C:\Program Files\mingw64\bin\gcc.exe",
+            compiler_realpath=r"C:\Program Files\mingw64\bin\gcc.exe",
+            compiler_target_triple="x86_64-w64-mingw32",
+        ),
+    )
+    check_contracts_comparable(old, new)  # must not raise
+
+
 def test_gate_content_driven_divergence_still_raises_for_the_exact_literal_collision_pair():
     """Codex review finding, PR #816 (second round): an explicit
     ``-std=gnu11``/``-std=gnu++20`` given without ``--lang`` produces

@@ -567,17 +567,20 @@ def language_standard_content_divergence_corroborated(
     # underneath -- passing the banner-pair check, the shared directory,
     # and a shared target triple -- while still being genuinely different
     # tools (different injected flags) with genuinely different
-    # `compiler_sha256`. `_is_gcc_gxx_driver_pair` reused directly against
-    # the two full resolved paths (not just their basenames): since the
-    # directory is already required to match, the leading path segment is
-    # identical on both sides, leaving exactly the vendor-specific
-    # basename prefix (`vendor-a-`/`vendor-b-`) as what must also agree --
-    # which correctly rejects this pair even though every other signal
-    # above already passed.
+    # `compiler_sha256`. `_is_gcc_gxx_driver_pair` reused against the two
+    # resolved paths' own *basenames* (CodeRabbit review, fresh evidence:
+    # the full path was passed originally, and `_is_gcc_gxx_driver_pair`
+    # tokenizes on whitespace -- a real Windows install directory
+    # containing a space, e.g. ``C:\Program Files\mingw64\bin\g++.exe``,
+    # would then read its first "word" as ``C:\Program``, not the
+    # executable at all, silently defeating the whole check). Since the
+    # directory is already required to match separately (`old_dir ==
+    # new_dir`), only the basename's own vendor-specific prefix
+    # (`vendor-a-`/`vendor-b-`) needs comparing here.
     old_dir = _compiler_install_dir(old.ast_toolchain)
     new_dir = _compiler_install_dir(new.ast_toolchain)
-    old_bin = _compiler_binary_path(old.ast_toolchain)
-    new_bin = _compiler_binary_path(new.ast_toolchain)
+    old_bin = PureWindowsPath(_compiler_binary_path(old.ast_toolchain)).name
+    new_bin = PureWindowsPath(_compiler_binary_path(new.ast_toolchain)).name
     old_triple = _tc(old.ast_toolchain, "compiler_target_triple")
     new_triple = _tc(new.ast_toolchain, "compiler_target_triple")
     if not (
