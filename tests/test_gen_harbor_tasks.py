@@ -103,6 +103,31 @@ def _bash_path(path: Path) -> str:
     return path.as_posix()
 
 
+def _write_lf_text(path: Path, content: str) -> None:
+    """``path.write_text(content, encoding="utf-8", newline="\\n")`` -- the
+    same LF-forcing shape as the generator's own ``gen._write_lf`` helper,
+    reused here for tests that mutate-then-restore a *real, git-tracked*
+    file under ``TASKS_DIR`` (not a throwaway ``tmp_path`` copy).
+
+    Real Windows CI evidence (PR #816): plain ``write_text(content,
+    encoding="utf-8")`` defaults to ``newline=None``, which on Windows
+    translates every ``\\n`` in *content* to ``\\r\\n`` on write -- not just
+    for the test's own mutation, but for its ``finally:`` "restore" step
+    too, since that restore is exactly as unguarded. The very first such
+    test to run therefore leaves the real working tree's Dockerfile/
+    task.toml permanently CRLF-corrupted for the rest of the test session
+    (each restore re-corrupts what it just "fixed"), which every later
+    test that reads those same on-disk files -- generator output is always
+    LF, via ``gen._write_lf`` -- then reads as "content differs", even
+    though nothing about the generator or the committed tree was ever
+    actually wrong. Confirmed via real `windows-latest` CI logs: *every*
+    generated Dockerfile failed `--check` uniformly, and `removed-export/
+    task.toml` (the one file `test_check_fails_on_drift` mutates) failed
+    too -- exactly the set of files these unguarded-write tests touch, not
+    a symptom any `.gitattributes`/digest-computation bug could produce."""
+    path.write_text(content, encoding="utf-8", newline="\n")
+
+
 class TestGeneratorCheck:
     def test_check_passes_against_the_committed_tree(self):
         assert gen.generate(check=True) is True
@@ -111,10 +136,10 @@ class TestGeneratorCheck:
         stray = TASKS_DIR / "removed-export" / "task.toml"
         original = stray.read_text(encoding="utf-8")
         try:
-            stray.write_text(original + "\n# hand-edited\n", encoding="utf-8")
+            _write_lf_text(stray, original + "\n# hand-edited\n")
             assert gen.generate(check=True) is False
         finally:
-            stray.write_text(original, encoding="utf-8")
+            _write_lf_text(stray, original)
 
     def test_check_survives_the_pinned_ref_moving(self, monkeypatch):
         """A commit boundary always moves `git rev-parse HEAD` past whatever
@@ -489,7 +514,8 @@ class TestGeneratorCheck:
         originals = {p: p.read_text(encoding="utf-8") for p in dockerfiles}
         try:
             for p, text in originals.items():
-                p.write_text(
+                _write_lf_text(
+                    p,
                     _re.sub(
                         r"ARG ABICHECK_REF=[0-9a-f]{40}",
                         # A ref this checkout's local git history has never
@@ -497,12 +523,11 @@ class TestGeneratorCheck:
                         "ARG ABICHECK_REF=" + "e" * 40,
                         text,
                     ),
-                    encoding="utf-8",
                 )
             assert gen.generate(check=True) is True
         finally:
             for p, text in originals.items():
-                p.write_text(text, encoding="utf-8")
+                _write_lf_text(p, text)
 
     def test_check_catches_a_stale_digest_with_real_grader_drift_behind_it(self):
         """End-to-end proof that a real, un-regenerated change under
@@ -515,18 +540,18 @@ class TestGeneratorCheck:
         originals = {p: p.read_text(encoding="utf-8") for p in dockerfiles}
         try:
             for p, text in originals.items():
-                p.write_text(
+                _write_lf_text(
+                    p,
                     _re.sub(
                         r"# ABICHECK_RUNTIME_DIGEST=[0-9a-f]{64}",
                         "# ABICHECK_RUNTIME_DIGEST=" + "0" * 64,
                         text,
                     ),
-                    encoding="utf-8",
                 )
             assert gen.generate(check=True) is False
         finally:
             for p, text in originals.items():
-                p.write_text(text, encoding="utf-8")
+                _write_lf_text(p, text)
 
     def test_check_still_catches_a_real_dockerfile_edit(self):
         """The normalization above must not swallow a genuine content
@@ -534,12 +559,10 @@ class TestGeneratorCheck:
         stray = TASKS_DIR / "removed-export" / "environment" / "Dockerfile"
         original = stray.read_text(encoding="utf-8")
         try:
-            stray.write_text(
-                original.replace("castxml", "castxml-evil"), encoding="utf-8"
-            )
+            _write_lf_text(stray, original.replace("castxml", "castxml-evil"))
             assert gen.generate(check=True) is False
         finally:
-            stray.write_text(original, encoding="utf-8")
+            _write_lf_text(stray, original)
 
     def test_check_catches_a_lost_executable_bit(self):
         """A byte-identical `tests/test.sh` that lost its executable bit
