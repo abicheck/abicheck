@@ -445,8 +445,15 @@ def _source_only_binary_depth_errors(side: InputSpec, depth: str | None) -> list
     with nothing to report at all. Only fires for a genuinely path-less
     side -- a binary dump with ``depth="binary"`` is the ordinary, valid
     case this must not touch.
+
+    Compared case-insensitively (Codex review, fresh evidence): ``depth`` is
+    accepted case-insensitively everywhere else (``_depth_errors`` above,
+    ``resolve_dump_request_evidence``'s own ``.lower()``), so a caller
+    spelling ``depth="BINARY"`` previously slipped past this exact-string
+    comparison even though it resolves to the identical, still-illegal
+    source-only-binary shape once normalized.
     """
-    if side.path is not None or depth != "binary":
+    if side.path is not None or (depth or "").lower() != "binary":
         return []
     return [
         "--depth binary requires a native artifact (SO_PATH); a "

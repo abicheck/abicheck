@@ -172,6 +172,22 @@ class TestCollectModeParity:
         errors = DumpRequest(input=spec, depth="binary").validation_errors()
         assert any("--depth binary requires a native artifact" in e for e in errors), errors
 
+    def test_source_only_binary_depth_is_rejected_case_insensitively(
+        self, tmp_path: Path
+    ) -> None:
+        """Codex review, fresh evidence: `depth` is accepted case-insensitively
+        everywhere else (`_depth_errors`, `resolve_dump_request_evidence`'s own
+        `.lower()`), so `depth="BINARY"` must trip the same source-only
+        rejection as `depth="binary"` rather than slipping past an exact-string
+        comparison.
+        """
+        spec = InputSpec.of(path=None, sources=tmp_path)
+        for spelling in ("BINARY", "Binary", "bInArY"):
+            errors = DumpRequest(input=spec, depth=spelling).validation_errors()
+            assert any(
+                "--depth binary requires a native artifact" in e for e in errors
+            ), (spelling, errors)
+
     def test_source_only_non_binary_depth_is_unaffected(self, tmp_path: Path) -> None:
         spec = InputSpec.of(path=None, sources=tmp_path)
         for depth in ("headers", "build", "source"):
