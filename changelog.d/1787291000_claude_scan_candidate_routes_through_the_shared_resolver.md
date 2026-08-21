@@ -28,3 +28,10 @@
   count for three real build shapes at three collect modes before and after,
   and diffing: identical apart from wall-clock timestamps and the
   build-source pack's own content hash.
+
+  One user-visible difference, on an error path only: an L3/L4/L5 collection
+  failure during `scan` (a malformed pack, an unparseable `--config`) now
+  reports through the same `Failed to load --binary <path>: …` wrapper the
+  rest of that input's resolution already used, rather than surfacing the
+  collector's message on its own. Same exit code, same underlying text, one
+  added prefix naming the input being resolved.
