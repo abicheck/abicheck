@@ -770,7 +770,33 @@ def source_matches_filter(
     *file* is a real relative name (``a.cpp`` is never relative to an
     unrelated ``directory``, so the ordinary join path is unaffected) or an
     already-directory-anchored redacted spelling.
+
+    A **redacted unit matched against an unredacted (real, absolute) filter**
+    is the sibling gap the segment-comparison fix above doesn't reach (Codex
+    review, P1, fresh evidence beyond the relative-filter case): a caller
+    running ``--compile-db-filter /home/u/proj/a.cpp`` against a redacted
+    compile database never matches, since ``~/proj/a.cpp`` and
+    ``/home/u/proj/a.cpp`` share no path segments to compare at all — the
+    ``is_relative_to`` check above can't help here, because *nothing* is a
+    relative prefix of the other; they're both anchors. Closed by expanding a
+    literal leading ``~``/``~user`` component (:func:`os.path.expanduser`,
+    the exact inverse of ``RedactionPolicy``'s default placeholder) on *file*,
+    *directory*, **and** *pattern* before anything else — so a real,
+    unredacted filter matches a redacted unit, and a filter a user
+    deliberately spells with ``~`` (their own shorthand for home, not
+    necessarily redaction-derived) still matches an unredacted unit. Only a
+    literal leading ``~`` expands; an ordinary relative name (``a.cpp``,
+    ``src/a.cpp``) or absolute path is untouched.
     """
+
+    def _expand_leading_tilde(value: str) -> str:
+        return os.path.expanduser(value) if value.startswith("~") else value
+
+    file = _expand_leading_tilde(str(file))
+    if directory is not None:
+        directory = _expand_leading_tilde(str(directory))
+    pattern = _expand_leading_tilde(pattern)
+
     path = Path(file)
     if not path.is_absolute() and directory is not None:
         directory_path = Path(directory)

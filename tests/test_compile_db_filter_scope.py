@@ -126,6 +126,25 @@ class TestFilterUnitsBySourceContract:
             redacted
         ]
 
+    def test_a_redacted_unit_matches_an_unredacted_absolute_filter(self) -> None:
+        """Codex review, P1 (fresh evidence beyond the relative-filter case):
+        an absolute ``--compile-db-filter`` (what a user would actually type
+        -- their own real home path, never the redaction placeholder) shares
+        no path segments with a redacted unit at all, so the
+        ``is_relative_to`` fix above can't help -- both are anchors, neither
+        a prefix of the other. Closed by expanding a leading ``~`` on *both*
+        sides before comparing.
+        """
+        import os
+
+        home = os.path.expanduser("~")
+        redacted = _cu("~/proj/a.cpp", directory="~/proj")
+        other = _cu("~/proj/b.cpp", directory="~/proj")
+        absolute_filter = f"{home}/proj/a.cpp"
+        assert list(filter_units_by_source([redacted, other], absolute_filter)) == [
+            redacted
+        ]
+
 
 class TestOneSharedDefinition:
     """The three layers must select the same units for the same filter.
