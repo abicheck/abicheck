@@ -23,7 +23,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # real fix (vendoring the runtime sources directly, or a published
 # release tag) is a bigger, cross-cutting change than this generator's
 # own scope; see agent-evals/skills/harbor/CLAUDE.md.
-ARG ABICHECK_REF=45d89b36db1c4ab9e3107767964658a71b686671
+ARG ABICHECK_REF=cf30f28b0687161d4766620f6ae8e17844d6c6c5
 # ABICHECK_RUNTIME_DIGEST=69bb57a4965c8cee8d1986604e5912a7020bb8fedc7b8f143e6a97fd6703ac35
 # ^ content digest of `_RUNTIME_RELEVANT_PATHS` at generation time -- what
 # `--check` (scripts/gen_harbor_tasks.py) actually compares to detect real
@@ -114,45 +114,47 @@ RUN mkdir -p /opt/skills \
     && cp -r /opt/abicheck-src/.claude/skills/check-abi-compatibility /opt/skills/
 
 # The agent has ordinary shell access to this whole clone for the entire
-# trial -- the agent and verifier phases share one container/filesystem,
-# not two isolated ones -- so anything answer-bearing left under
-# `/opt/abicheck-src` is readable by the very agent being evaluated on it
-# (Codex review, fresh evidence). `git clone` above pulls the *whole*
-# repository -- source, history, and every test file -- and this repo's
-# ground truth for these 12 scenarios turns out not to live in one place:
-# `agent-evals/skills/scenarios.yaml`/`skill-eval-pack.json` and every
-# sibling task's own generated `harbor/tasks/<id>/tests/scenario.json`
-# carry it directly, `examples/ground_truth.json` derives a Category A
-# scenario's outcome, the raw `fixtures/` sources are sometimes
-# comment-annotated with the answer -- and, found only after a first pass
-# already removed all four of those, `tests/test_skill_eval_graders_
-# consumer_scoping.py`'s own hand-written unit-test fixtures independently
-# restate the same real scenario data (a real consumer name, its real
-# verdict/full_verdict pair) as example input for testing the *grader*,
-# with no reason anyone would have flagged it as "the corpus" (Codex
-# review, fresh evidence, second round).
+# agent phase -- so anything answer-bearing left under `/opt/abicheck-src`
+# is readable by the very agent being evaluated on it (Codex review, fresh
+# evidence). `git clone` above pulls the *whole* repository -- source,
+# history, and every test file -- and this repo's ground truth for these
+# 12 scenarios turns out not to live in one place: `agent-evals/skills/
+# scenarios.yaml`/`skill-eval-pack.json` and every sibling task's own
+# generated `harbor/tasks/<id>/tests/scenario.json` carry it directly,
+# `examples/ground_truth.json` derives a Category A scenario's outcome,
+# the raw `fixtures/` sources are sometimes comment-annotated with the
+# answer, `agent-evals/skills/graders/` (`dimensions.py`/`evidence.py`)
+# itself contains scenario-identifying comments naming specific
+# fixtures/consumers, and `tests/test_skill_eval_graders_consumer_
+# scoping.py`'s own hand-written unit-test fixtures independently restate
+# real scenario data (a real consumer name, its real verdict/full_verdict
+# pair) as example input for testing the grader.
 #
-# A first version of this step named every one of those paths explicitly
-# -- a denylist -- reasoning that an allowlist "would silently stop
-# covering a new answer-bearing file added to this tree later." That
-# reasoning had it backwards, and the `tests/` finding above is the direct
-# proof: a denylist's failure mode is silent under-coverage (a file
-# nobody thought to list stays exposed, exactly what happened here),
-# while an allowlist's failure mode is loud (an unlisted file the build
-# actually needs is simply gone, and the image fails to build or the
-# task's own solve/verify steps fail immediately -- there is no way for a
-# genuinely-needed file to go silently missing). Replaced with the
-# allowlist Codex's own fix proposal (and the "PR B" pattern to expect
-# more of these, not fewer, matching the same corpus in a form nobody
-# anticipated) asked for directly: everything the built image still needs
-# after this point -- `abicheck/` itself (the installed package is
-# editable, so its source must stay on disk at this exact path for
-# imports to keep resolving), `agent-evals/skills/graders/` (imported by
-# `verify_run.py`), and `verify_run.py` itself -- is moved into a staging
-# directory, the entire original clone (`.git` included -- see below) is
-# discarded, and the staging directory takes its place. Nothing outside
-# that allowlist can survive this step by construction, regardless of
-# what it's named or which future PR adds it.
+# The graders and `verify_run.py` are therefore no longer part of this
+# allowlist at all -- an earlier version of this fix staged them here
+# reasoning "the agent's shell access is unavoidable, so just don't name
+# the paths that reveal the answer," which is exactly backwards: no
+# in-container obfuscation (a denylist of named paths, a different
+# location, restrictive permissions) stops a process with ordinary shell
+# access to its own filesystem from reading a file that is present on it
+# -- `graders/dimensions.py`'s own scenario-identifying comments make this
+# concrete, not hypothetical (Codex review, fresh evidence). The verifier
+# now runs in a genuinely separate container the agent never has
+# filesystem access to at all, built from `tests/Dockerfile`
+# (`_verifier_dockerfile()`) via Harbor's native
+# `[verifier].environment_mode = "separate"` (confirmed against the real,
+# installed `harbor` package: `Task._validate_tests`/
+# `resolve_effective_verifier_env_config` in `harbor.models.task.
+# verifier_mode`, and `Trial._verifier_env_build_context()` in
+# `harbor.trial.trial`, which builds the separate verifier's image from
+# the task's own `tests/` directory, not `environment/`). This allowlist
+# now keeps only what the *agent's* image still needs after this point --
+# `abicheck/` itself (the installed package is editable, so its source
+# must stay on disk at this exact path for imports to keep resolving) --
+# moved into a staging directory, with the entire original clone (`.git`
+# included -- see below) discarded and the staging directory taking its
+# place. Nothing outside that allowlist can survive this step by
+# construction, regardless of what it's named or which future PR adds it.
 #
 # `.git` needs the identical treatment for a distinct reason: deleting a
 # tracked file's working-tree copy does not remove it from history, and
@@ -169,10 +171,8 @@ RUN mkdir -p /opt/skills \
 # versioning in this repo), and no later step runs a `git` command.
 RUN set -eux; \
     cd /opt/abicheck-src; \
-    mkdir -p /tmp/rt-keep/agent-evals/skills/harbor; \
+    mkdir -p /tmp/rt-keep; \
     mv abicheck /tmp/rt-keep/abicheck; \
-    mv agent-evals/skills/graders /tmp/rt-keep/agent-evals/skills/graders; \
-    mv agent-evals/skills/harbor/verify_run.py /tmp/rt-keep/agent-evals/skills/harbor/verify_run.py; \
     cd /; \
     rm -rf /opt/abicheck-src; \
     mv /tmp/rt-keep /opt/abicheck-src

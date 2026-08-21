@@ -256,45 +256,47 @@ RUN mkdir -p /opt/skills \\
     && cp -r /opt/abicheck-src/.claude/skills/check-abi-compatibility /opt/skills/
 
 # The agent has ordinary shell access to this whole clone for the entire
-# trial -- the agent and verifier phases share one container/filesystem,
-# not two isolated ones -- so anything answer-bearing left under
-# `/opt/abicheck-src` is readable by the very agent being evaluated on it
-# (Codex review, fresh evidence). `git clone` above pulls the *whole*
-# repository -- source, history, and every test file -- and this repo's
-# ground truth for these 12 scenarios turns out not to live in one place:
-# `agent-evals/skills/scenarios.yaml`/`skill-eval-pack.json` and every
-# sibling task's own generated `harbor/tasks/<id>/tests/scenario.json`
-# carry it directly, `examples/ground_truth.json` derives a Category A
-# scenario's outcome, the raw `fixtures/` sources are sometimes
-# comment-annotated with the answer -- and, found only after a first pass
-# already removed all four of those, `tests/test_skill_eval_graders_
-# consumer_scoping.py`'s own hand-written unit-test fixtures independently
-# restate the same real scenario data (a real consumer name, its real
-# verdict/full_verdict pair) as example input for testing the *grader*,
-# with no reason anyone would have flagged it as "the corpus" (Codex
-# review, fresh evidence, second round).
+# agent phase -- so anything answer-bearing left under `/opt/abicheck-src`
+# is readable by the very agent being evaluated on it (Codex review, fresh
+# evidence). `git clone` above pulls the *whole* repository -- source,
+# history, and every test file -- and this repo's ground truth for these
+# 12 scenarios turns out not to live in one place: `agent-evals/skills/
+# scenarios.yaml`/`skill-eval-pack.json` and every sibling task's own
+# generated `harbor/tasks/<id>/tests/scenario.json` carry it directly,
+# `examples/ground_truth.json` derives a Category A scenario's outcome,
+# the raw `fixtures/` sources are sometimes comment-annotated with the
+# answer, `agent-evals/skills/graders/` (`dimensions.py`/`evidence.py`)
+# itself contains scenario-identifying comments naming specific
+# fixtures/consumers, and `tests/test_skill_eval_graders_consumer_
+# scoping.py`'s own hand-written unit-test fixtures independently restate
+# real scenario data (a real consumer name, its real verdict/full_verdict
+# pair) as example input for testing the grader.
 #
-# A first version of this step named every one of those paths explicitly
-# -- a denylist -- reasoning that an allowlist "would silently stop
-# covering a new answer-bearing file added to this tree later." That
-# reasoning had it backwards, and the `tests/` finding above is the direct
-# proof: a denylist's failure mode is silent under-coverage (a file
-# nobody thought to list stays exposed, exactly what happened here),
-# while an allowlist's failure mode is loud (an unlisted file the build
-# actually needs is simply gone, and the image fails to build or the
-# task's own solve/verify steps fail immediately -- there is no way for a
-# genuinely-needed file to go silently missing). Replaced with the
-# allowlist Codex's own fix proposal (and the "PR B" pattern to expect
-# more of these, not fewer, matching the same corpus in a form nobody
-# anticipated) asked for directly: everything the built image still needs
-# after this point -- `abicheck/` itself (the installed package is
-# editable, so its source must stay on disk at this exact path for
-# imports to keep resolving), `agent-evals/skills/graders/` (imported by
-# `verify_run.py`), and `verify_run.py` itself -- is moved into a staging
-# directory, the entire original clone (`.git` included -- see below) is
-# discarded, and the staging directory takes its place. Nothing outside
-# that allowlist can survive this step by construction, regardless of
-# what it's named or which future PR adds it.
+# The graders and `verify_run.py` are therefore no longer part of this
+# allowlist at all -- an earlier version of this fix staged them here
+# reasoning "the agent's shell access is unavoidable, so just don't name
+# the paths that reveal the answer," which is exactly backwards: no
+# in-container obfuscation (a denylist of named paths, a different
+# location, restrictive permissions) stops a process with ordinary shell
+# access to its own filesystem from reading a file that is present on it
+# -- `graders/dimensions.py`'s own scenario-identifying comments make this
+# concrete, not hypothetical (Codex review, fresh evidence). The verifier
+# now runs in a genuinely separate container the agent never has
+# filesystem access to at all, built from `tests/Dockerfile`
+# (`_verifier_dockerfile()`) via Harbor's native
+# `[verifier].environment_mode = "separate"` (confirmed against the real,
+# installed `harbor` package: `Task._validate_tests`/
+# `resolve_effective_verifier_env_config` in `harbor.models.task.
+# verifier_mode`, and `Trial._verifier_env_build_context()` in
+# `harbor.trial.trial`, which builds the separate verifier's image from
+# the task's own `tests/` directory, not `environment/`). This allowlist
+# now keeps only what the *agent's* image still needs after this point --
+# `abicheck/` itself (the installed package is editable, so its source
+# must stay on disk at this exact path for imports to keep resolving) --
+# moved into a staging directory, with the entire original clone (`.git`
+# included -- see below) discarded and the staging directory taking its
+# place. Nothing outside that allowlist can survive this step by
+# construction, regardless of what it's named or which future PR adds it.
 #
 # `.git` needs the identical treatment for a distinct reason: deleting a
 # tracked file's working-tree copy does not remove it from history, and
@@ -311,16 +313,75 @@ RUN mkdir -p /opt/skills \\
 # versioning in this repo), and no later step runs a `git` command.
 RUN set -eux; \\
     cd /opt/abicheck-src; \\
-    mkdir -p /tmp/rt-keep/agent-evals/skills/harbor; \\
+    mkdir -p /tmp/rt-keep; \\
     mv abicheck /tmp/rt-keep/abicheck; \\
-    mv agent-evals/skills/graders /tmp/rt-keep/agent-evals/skills/graders; \\
-    mv agent-evals/skills/harbor/verify_run.py /tmp/rt-keep/agent-evals/skills/harbor/verify_run.py; \\
     cd /; \\
     rm -rf /opt/abicheck-src; \\
     mv /tmp/rt-keep /opt/abicheck-src
 
 WORKDIR /workspace
 COPY workspace/ /workspace/
+"""
+
+
+def _verifier_dockerfile(ref: str, runtime_digest: str) -> str:
+    """`tests/Dockerfile` -- the separate verifier's own image (Codex review).
+
+    Harbor builds a `[verifier].environment_mode = "separate"` verifier's
+    image from the task's own `tests/` directory, not `environment/`
+    (confirmed against the real, installed `harbor` package: `Trial.
+    _verifier_env_build_context()` in `harbor.trial.trial`) -- so this is a
+    genuinely distinct container from `_dockerfile()`'s agent image, sharing
+    no filesystem with it. That separation is the actual fix for the
+    ground-truth leak `_dockerfile()`'s own comment above describes: the
+    agent process never has shell access to this container at all, so the
+    answer-bearing `agent-evals/skills/graders/` and `verify_run.py` no
+    longer need to be hidden from it by naming, obfuscation, or omission --
+    they simply aren't reachable.
+    Deliberately minimal relative to the agent image: `verify_run.py`
+    imports only the standard library plus `graders/` (confirmed by reading
+    both directly -- no `abicheck` import anywhere in that call chain), so
+    this image needs neither the compiler toolchain nor an editable
+    `abicheck` install; only `git`, to fetch the pinned source, and
+    `ca-certificates`, for that clone's TLS.
+    """
+    return f"""{_MARKER}FROM python:3.13-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \\
+        git ca-certificates \\
+    && rm -rf /var/lib/apt/lists/*
+
+# Same pin, same fallback-to-main rationale, and the same runtime digest as
+# `_dockerfile()`'s agent image -- see that function's own comments for why
+# each exists. `_normalize_pinned_ref`/`_DIGEST_LINE` in this generator are
+# file-path-agnostic, so the identical two-line convention here is picked up
+# by `--check` without any further changes to that comparison machinery.
+ARG ABICHECK_REF={ref}
+# ABICHECK_RUNTIME_DIGEST={runtime_digest}
+RUN git clone https://github.com/abicheck/abicheck.git /opt/abicheck-src \\
+    && cd /opt/abicheck-src \\
+    && (git checkout "$ABICHECK_REF" 2>/dev/null \\
+        || (echo "WARNING: pinned ref $ABICHECK_REF unreachable (likely pruned after a squash-merge) -- falling back to main" >&2 \\
+            && git checkout main))
+
+# The verifier's own allowlist: only what `verify_run.py` actually needs at
+# runtime -- itself, and the `graders/` package it imports -- survives.
+# Everything else (including `.git`, for the identical history-leak reason
+# `_dockerfile()`'s own comment gives -- though there is no agent in this
+# container to read it from, keeping the discipline identical avoids this
+# image quietly becoming the one place that reasoning doesn't hold) is
+# discarded. This container is never agent-visible, but the allowlist
+# convention is kept anyway rather than trusted-by-isolation-alone: a
+# correct architecture and a minimal attack surface are not substitutes for
+# each other.
+RUN set -eux; \\
+    cd /opt/abicheck-src; \\
+    mkdir -p /tmp/rt-keep/agent-evals/skills/harbor; \\
+    mv agent-evals/skills/graders /tmp/rt-keep/agent-evals/skills/graders; \\
+    mv agent-evals/skills/harbor/verify_run.py /tmp/rt-keep/agent-evals/skills/harbor/verify_run.py; \\
+    cd /; \\
+    rm -rf /opt/abicheck-src; \\
+    mv /tmp/rt-keep /opt/abicheck-src
 """
 
 
@@ -351,6 +412,17 @@ generated_from = "agent-evals/skills/scenarios.yaml"
 [verifier]
 timeout_sec = 180.0
 collect = []
+# The verifier runs in its own container, built from `tests/Dockerfile`
+# (`_verifier_dockerfile()`), never the agent's -- confirmed against the
+# real `harbor` package: `resolve_effective_verifier_env_config` (`harbor.
+# models.task.verifier_mode`) treats a `None` `[verifier.environment]` under
+# `environment_mode = "separate"` as "use a fresh copy of the top-level
+# [environment]", so no explicit `[verifier.environment]` block is needed
+# here. This is the actual fix for the ground-truth leak documented in
+# `_dockerfile()`'s own comments: the agent process never has filesystem
+# access to this container, so the graders it builds no longer need to be
+# hidden from the agent by naming or omission.
+environment_mode = "separate"
 
 [verifier.env]
 
@@ -622,6 +694,9 @@ def generate(check: bool = False) -> bool:
             _prepared_library(
                 ROOT / scenario["inputs"],
                 task_dir / "environment" / "workspace" / "library",
+            )
+            (task_dir / "tests" / "Dockerfile").write_text(
+                _verifier_dockerfile(ref, runtime_digest), encoding="utf-8"
             )
             (task_dir / "tests" / "test.sh").write_text(
                 _test_sh(scenario), encoding="utf-8"

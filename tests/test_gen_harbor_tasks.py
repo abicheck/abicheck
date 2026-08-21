@@ -199,27 +199,27 @@ class TestGeneratorCheck:
         assert before != after
 
     def test_dockerfile_reduces_the_agent_visible_clone_to_an_allowlist(self):
-        """The agent and verifier phases share one container/filesystem for
-        the whole trial -- a full `git clone` of this repository (what
-        `_dockerfile()` does to obtain `abicheck` itself) hands the agent
-        being evaluated ordinary shell access to every other task's own
-        ground truth. A first version of this fix named each answer-bearing
-        path explicitly (a denylist) -- `scenarios.yaml`, `skill-eval-
-        pack.json`, `harbor/tasks/`, `fixtures/`, `examples/ground_truth.
-        json`, `.git` (recoverable history, not just the working tree) --
-        and a follow-up review found the denylist's own structural failure
-        mode: `tests/test_skill_eval_graders_consumer_scoping.py`'s
-        hand-written unit-test fixtures independently restate real scenario
-        data (a real consumer name, its real verdict/full_verdict pair) as
-        example input for testing the grader, and nobody had thought to
-        list it (Codex review, fresh evidence, second round). Replaced with
-        an allowlist: everything the built image still needs is moved into
-        a staging directory, the entire original clone (`.git` included) is
-        discarded, and staging takes its place -- so nothing not explicitly
-        named can survive, regardless of what it's called or which future
-        PR adds it. Pinned as a content assertion on the generated
-        Dockerfile rather than an actual Docker build (no Docker in this
-        sandbox -- see `agent-evals/skills/harbor/CLAUDE.md`)."""
+        """The agent has ordinary shell access to its own container's
+        filesystem for the whole agent phase -- a full `git clone` of this
+        repository (what `_dockerfile()` does to obtain `abicheck` itself)
+        would hand the agent being evaluated ordinary shell access to every
+        other task's own ground truth. Two earlier fixes narrowed what
+        survives this clone (a denylist, then an allowlist keeping
+        `graders/`/`verify_run.py` alongside `abicheck/`) but neither closed
+        the actual problem: `graders/dimensions.py`'s own scenario-
+        identifying comments mean *any* in-container copy of it is
+        answer-bearing, so no naming scheme applied to this same container
+        can hide it from a process with shell access to that container
+        (Codex review, fresh evidence). The real fix is architectural, not
+        this allowlist: the graders now live only in the separate verifier
+        container built from `tests/Dockerfile`
+        (`test_verifier_dockerfile_keeps_only_the_grader_allowlist` below),
+        which the agent never has filesystem access to at all -- so this
+        allowlist only needs to keep what the *agent's* image itself still
+        needs, which is `abicheck/` alone. Pinned as a content assertion on
+        the generated Dockerfile rather than an actual Docker build (no
+        Docker in this sandbox -- see `agent-evals/skills/harbor/
+        CLAUDE.md`)."""
         dockerfile = (
             TASKS_DIR / "removed-export" / "environment" / "Dockerfile"
         ).read_text(encoding="utf-8")
@@ -239,9 +239,50 @@ class TestGeneratorCheck:
         assert "mv /tmp/rt-keep /opt/abicheck-src" in cleanup_block
         # And exactly the allowlist -- nothing more -- must be staged
         # before that wholesale discard: `abicheck/` (the editable install
-        # needs its source to persist at this exact path), the graders
-        # `verify_run.py` imports, and `verify_run.py` itself.
+        # needs its source to persist at this exact path) alone.
         assert "mv abicheck /tmp/rt-keep/abicheck" in cleanup_block
+        # The graders and `verify_run.py` must NOT be staged into the
+        # agent's own image at all any more -- they now live only in the
+        # separate verifier container.
+        assert "graders" not in cleanup_block
+        assert "verify_run.py" not in cleanup_block
+        # No other `mv ... /tmp/rt-keep/...` line may exist -- a second
+        # staged path would silently widen the allowlist without this test
+        # noticing unless it's counted explicitly.
+        assert cleanup_block.count("/tmp/rt-keep/") == 1  # the one mv target
+        # And no `RUN`/`COPY`/`ENV` instruction anywhere in the agent
+        # Dockerfile may reference either path -- only this file's own
+        # explanatory comments (checked separately, above) are allowed to
+        # name them. Isolate the instruction lines (anything not starting
+        # with `#` after stripping leading whitespace) rather than banning
+        # the words outright, since the surrounding prose legitimately
+        # explains *why* they were removed.
+        instruction_lines = "\n".join(
+            line
+            for line in dockerfile.splitlines()
+            if line.strip() and not line.strip().startswith("#")
+        )
+        assert "graders" not in instruction_lines
+        assert "verify_run.py" not in instruction_lines
+
+    def test_verifier_dockerfile_keeps_only_the_grader_allowlist(self):
+        """`tests/Dockerfile` -- the separate verifier's own image -- must
+        clone the same pinned ref and keep exactly `agent-evals/skills/
+        graders/` and `verify_run.py`, discarding everything else
+        (`abicheck/` included: `verify_run.py` imports only the standard
+        library plus `graders/`, confirmed by reading both directly, so the
+        editable-install package this container's agent-image sibling needs
+        has no reason to exist here)."""
+        dockerfile = (TASKS_DIR / "removed-export" / "tests" / "Dockerfile").read_text(
+            encoding="utf-8"
+        )
+        start = dockerfile.index("RUN set -eux; \\\n    cd /opt/abicheck-src;")
+        end = dockerfile.rindex("mv /tmp/rt-keep /opt/abicheck-src") + len(
+            "mv /tmp/rt-keep /opt/abicheck-src"
+        )
+        cleanup_block = dockerfile[start:end]
+        assert "rm -rf /opt/abicheck-src" in cleanup_block
+        assert "mv /tmp/rt-keep /opt/abicheck-src" in cleanup_block
         assert (
             "mv agent-evals/skills/graders /tmp/rt-keep/agent-evals/skills/graders"
             in cleanup_block
@@ -250,10 +291,13 @@ class TestGeneratorCheck:
             "mv agent-evals/skills/harbor/verify_run.py "
             "/tmp/rt-keep/agent-evals/skills/harbor/verify_run.py" in cleanup_block
         )
-        # No other `mv ... /tmp/rt-keep/...` line may exist -- a fourth
-        # staged path would silently widen the allowlist without this test
-        # noticing unless it's counted explicitly.
-        assert cleanup_block.count("/tmp/rt-keep/") == 4  # mkdir -p + 3 mv targets
+        assert "mv abicheck" not in cleanup_block
+        assert cleanup_block.count("/tmp/rt-keep/") == 3  # mkdir -p + 2 mv targets
+        # No compiler toolchain and no editable install -- this image never
+        # runs abicheck itself.
+        assert "build-essential" not in dockerfile
+        assert "pip install" not in dockerfile
+        assert "abicheck.egg-info" not in dockerfile
 
     def test_old_reachability_design_crashed_on_a_genuinely_unresolvable_ref(self):
         """Pins the actual failure the digest redesign replaced -- not
@@ -311,7 +355,7 @@ class TestGeneratorCheck:
         immediately above)."""
         import re as _re
 
-        dockerfiles = sorted(TASKS_DIR.rglob("environment/Dockerfile"))
+        dockerfiles = sorted(TASKS_DIR.rglob("Dockerfile"))
         originals = {p: p.read_text(encoding="utf-8") for p in dockerfiles}
         try:
             for p, text in originals.items():
@@ -337,7 +381,7 @@ class TestGeneratorCheck:
         one -- a stale digest on any single one must still be caught."""
         import re as _re
 
-        dockerfiles = sorted(TASKS_DIR.rglob("environment/Dockerfile"))
+        dockerfiles = sorted(TASKS_DIR.rglob("Dockerfile"))
         originals = {p: p.read_text(encoding="utf-8") for p in dockerfiles}
         try:
             for p, text in originals.items():
@@ -430,6 +474,17 @@ class TestTaskStructure:
         assert (task_dir / "solution" / "solve.sh").is_file()
 
     @pytest.mark.parametrize("task_dir", _task_dirs(), ids=lambda p: p.name)
+    def test_every_task_has_a_separate_verifier_dockerfile(self, task_dir):
+        """The verifier's own image -- built from `tests/`, not
+        `environment/` (confirmed against the real `harbor` package's
+        `Trial._verifier_env_build_context()`) -- must exist alongside
+        `task.toml`'s `[verifier].environment_mode = "separate"` declaration,
+        or Harbor has nothing to build the separate container from."""
+        assert (task_dir / "tests" / "Dockerfile").is_file()
+        parsed = tomllib.loads((task_dir / "task.toml").read_text(encoding="utf-8"))
+        assert parsed["verifier"]["environment_mode"] == "separate"
+
+    @pytest.mark.parametrize("task_dir", _task_dirs(), ids=lambda p: p.name)
     def test_task_toml_parses_and_names_the_task(self, task_dir):
         parsed = tomllib.loads((task_dir / "task.toml").read_text(encoding="utf-8"))
         assert parsed["task"]["name"] == f"abicheck/{task_dir.name}"
@@ -451,6 +506,12 @@ class TestTaskStructure:
         assert (
             "GENERATED FILE"
             in (task_dir / "environment" / "Dockerfile")
+            .read_text(encoding="utf-8")
+            .splitlines()[0]
+        )
+        assert (
+            "GENERATED FILE"
+            in (task_dir / "tests" / "Dockerfile")
             .read_text(encoding="utf-8")
             .splitlines()[0]
         )
