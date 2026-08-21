@@ -473,6 +473,35 @@ def test_cli_resolve_exemption_ignores_nested_lambda_bypass_sharing_a_line(
     assert "cli_resolve.py:3" in errors[0]
 
 
+def test_cli_resolve_exemption_ignores_default_argument_bypass(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A bypass inside a default-argument *expression* on the wrapper's own
+    signature executes once, in the *enclosing* (module) scope at
+    def-time — not inside the wrapper's own runtime scope — so it must
+    still be flagged, not silently inherit the exemption merely because it
+    lexically sits inside the `FunctionDef` node (Codex review)."""
+    import scripts.check_ai_readiness as gate
+
+    pkg = tmp_path / "abicheck"
+    pkg.mkdir()
+    (pkg / "cli_resolve.py").write_text(
+        "from . import service\n"
+        "\n"
+        "\n"
+        'def _resolve_input(a=service.resolve_input("bypass")):\n'
+        "    return a\n"
+    )
+    monkeypatch.setattr(gate, "PKG", pkg)
+    monkeypatch.setattr(gate, "ROOT", tmp_path)
+
+    findings = gate.Findings()
+    gate.check_cli_contract(findings)
+    errors = [m for c, m in findings.errors if c == "cli-contract"]
+    assert len(errors) == 1
+    assert "cli_resolve.py:4" in errors[0]
+
+
 def test_allowlist_does_not_cover_a_second_call_to_the_same_target_on_one_line(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

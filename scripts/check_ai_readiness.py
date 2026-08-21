@@ -2340,8 +2340,27 @@ def _iter_calls_in_own_scope(node: ast.AST) -> Iterable[ast.Call]:
     not be silently swept in as if it were (Codex review: a bypass placed
     inside a nested ``def`` within the sanctioned wrapper previously
     inherited the wrapper's own exemption via a full ``ast.walk``).
+
+    For a ``FunctionDef``/``AsyncFunctionDef`` passed directly (the only
+    shape a caller passes at the top level), only ``node.body`` is this
+    scope — ``node.args`` (whose default-argument expressions execute once
+    in the *enclosing* scope at def-time) and ``node.decorator_list``
+    (likewise enclosing-scope) are deliberately excluded (Codex review: a
+    call in a default expression was swept in as exempt). Applying that
+    special case *inside* this function, not by having a caller pass
+    ``node.body`` statements one at a time, matters: the pruning check
+    above only fires when a scope-defining node is discovered as a
+    *child* during recursion — calling this function directly on a
+    *nested* ``def`` (as one of ``node.body``'s own statements can be)
+    would bypass that check entirely, since it is never itself examined
+    as a child.
     """
-    for child in ast.iter_child_nodes(node):
+    children: Iterable[ast.AST] = (
+        node.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        else ast.iter_child_nodes(node)
+    )
+    for child in children:
         if isinstance(child, ast.Call):
             yield child
         if isinstance(
@@ -2372,6 +2391,11 @@ def _resolve_input_wrapper_call_sites(tree: ast.Module) -> frozenset[tuple[int, 
     the outer call's own line number was still recorded, and a line-only
     membership check let the inner call inherit that exemption purely from
     sharing a line, not from being the reviewed site).
+
+    :func:`_iter_calls_in_own_scope` itself excludes a default-argument
+    expression (``def _resolve_input(a=service.resolve_input(path)):``),
+    which executes once in the *enclosing* scope at def-time, not inside
+    the wrapper's own runtime scope (Codex review) — see its docstring.
     """
     sites: set[tuple[int, int]] = set()
     for node in tree.body:
