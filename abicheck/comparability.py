@@ -705,11 +705,15 @@ _FORCED_C_STANDARD = "gnu11"
 #: standard* dump could have produced before either the probe or the
 #: forced-``gnu11`` report existed, that this carve-out can still safely
 #: corroborate: an explicit ``--lang`` with nothing else resolved (bare
-#: ``"c"``/``"c++"``). Deliberately excludes the bare empty string (no
-#: ``--lang`` given at all, pure content-based auto-detection) -- see
-#: :func:`_newly_resolved_standard_remainder`'s own docstring for why
-#: (Codex review, fresh evidence).
-_UNRESOLVED_STANDARD_SPELLINGS = ("c", "c++")
+#: ``"c"``/``"c++"``/``"cpp"`` -- ``"cpp"`` is a second, still-supported
+#: spelling for C++ alongside ``"c++"``, per :func:`_resolve_force_cpp`'s
+#: own ``lang.upper() in ("C++", "CPP")`` check; ``language_standard_field``
+#: lowercases but does not otherwise canonicalize the tag, so the two
+#: spellings persist as distinct strings, not merely distinct casings —
+#: Codex review, fresh evidence). Deliberately excludes the bare empty
+#: string (no ``--lang`` given at all, pure content-based auto-detection)
+#: -- see :func:`_newly_resolved_standard_remainder`'s own docstring for why.
+_UNRESOLVED_STANDARD_SPELLINGS = ("c", "c++", "cpp")
 
 
 def _newly_resolved_standard_remainder(

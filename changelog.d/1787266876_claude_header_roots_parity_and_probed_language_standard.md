@@ -93,7 +93,11 @@
   language-mode change, not an upgrade artifact — would otherwise be
   indistinguishable from the case this carve-out exists to waive, and a
   matching compiler says nothing about which mode either side's headers
-  actually resolved to.
+  actually resolved to. The carve-out also now recognizes `"cpp"` (a
+  second, still-supported spelling for C++ `_resolve_force_cpp` accepts
+  alongside `"c++"`) as a bare pre-upgrade tag, not just `"c"`/`"c++"` —
+  a Python API baseline built with `lang="cpp"` previously raised
+  `ProfileMismatchError` on an upgrade with no real profile change.
 - Known, narrower residuals, documented rather than fixed:
   - A cache/memo *hit* for a header that previously self-healed C→C++
     still reports the pre-retry language mode, since neither backend's AST

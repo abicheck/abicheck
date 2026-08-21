@@ -243,6 +243,32 @@ def test_gate_bare_lang_c_vs_lang_qualified_gnu11_waived():
     check_contracts_comparable(old, new)  # must not raise
 
 
+def test_gate_bare_lang_cpp_alias_vs_lang_qualified_probed_waived():
+    """Codex review, fresh evidence: ``"cpp"`` is a second, still-supported
+    spelling for C++ alongside ``"c++"`` (``_resolve_force_cpp`` accepts
+    both) -- a Python API baseline built with ``lang="cpp"`` records the
+    bare tag verbatim (``language_standard_field`` lowercases but does not
+    otherwise canonicalize it), so the carve-out must recognize this
+    spelling too, not just ``"c++"``."""
+    old = _snap(
+        compute_extraction_contract(
+            l2_frontend_ran=True,
+            compiler_family="gnu",
+            compiler_version="11.4.0",
+            language_standard="cpp",
+        )
+    )
+    new = _snap(
+        compute_extraction_contract(
+            l2_frontend_ran=True,
+            compiler_family="gnu",
+            compiler_version="11.4.0",
+            language_standard="cpp:probed:__cplusplus=201703L",
+        )
+    )
+    check_contracts_comparable(old, new)  # must not raise
+
+
 def test_gate_bare_lang_cpp_vs_lang_qualified_probed_waived():
     """The ``--lang c++`` counterpart of the above: a bare ``"c++"``
     pre-upgrade baseline against a lang-qualified probed value."""
