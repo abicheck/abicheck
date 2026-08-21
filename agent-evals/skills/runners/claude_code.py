@@ -163,6 +163,12 @@ If you scoped a comparison to a named consumer or plugin host (e.g. with
 `"full_verdict"` with that same run's library-wide verdict (the same
 vocabulary as `verdict`) — the two answer different questions and can
 legitimately differ. Omit `full_verdict` entirely for an unscoped comparison.
+
+Optionally, also add `"decision"` — one of `VERIFIED_COMPATIBLE`,
+`COMPATIBLE_WITH_DEPLOYMENT_RISK`, `SOURCE_BREAK`, `BINARY_BREAK`, or
+`NOT_VERIFIED` — the customer-facing outcome, if you are reporting one (this
+is the vocabulary a compatibility-review skill's own final decision uses; it
+must agree with `verdict`/`confident`, not merely restate the raw verdict).
 """
 
 #: `python -m abicheck ...` is a documented, supported entry point
@@ -1370,10 +1376,14 @@ def main(argv: list[str] | None = None) -> int:
                     # them unconverted (verified against a real timeout).
                     timeout_stdout = exc.stdout
                     if isinstance(timeout_stdout, bytes):
-                        timeout_stdout = timeout_stdout.decode("utf-8", errors="replace")
+                        timeout_stdout = timeout_stdout.decode(
+                            "utf-8", errors="replace"
+                        )
                     timeout_stderr = exc.stderr
                     if isinstance(timeout_stderr, bytes):
-                        timeout_stderr = timeout_stderr.decode("utf-8", errors="replace")
+                        timeout_stderr = timeout_stderr.decode(
+                            "utf-8", errors="replace"
+                        )
                     events = _parse_events(timeout_stdout)
                     if events:
                         (out_dir / "events.jsonl").write_text(
@@ -1435,7 +1445,9 @@ def main(argv: list[str] | None = None) -> int:
                         (out_dir / "requested_model.txt").write_text(
                             args.model, encoding="utf-8"
                         )
-                    (out_dir / "final.md").write_text(_final_text(events), encoding="utf-8")
+                    (out_dir / "final.md").write_text(
+                        _final_text(events), encoding="utf-8"
+                    )
                 mixed = check_one_model(_in_scope_index(), record)
                 if mixed:
                     raise RuntimeError(f"{sid}/{arm}/{rep}: {mixed}")

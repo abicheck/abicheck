@@ -1,0 +1,29 @@
+{
+  "affects": [
+    "check-abi-compatibility"
+  ],
+  "architectures": [],
+  "category": "A",
+  "digest": "sha256:f8e02c4347cba855225cc6e8710400493d2859866747e7d8e365ec64ca91d1dc",
+  "expected": {
+    "kinds": [
+      "runtime_floor_raised"
+    ],
+    "min_evidence": "L0",
+    "resolved_from": "examples/ground_truth.json",
+    "verdict": "COMPATIBLE_WITH_RISK"
+  },
+  "inputs": "examples/case15_noexcept_change",
+  "invocation": {},
+  "platforms": [
+    "linux"
+  ],
+  "prompt": "We removed the noexcept guarantee from a function that now throws internally. The symbol itself didn't change. Is this release still safe to deploy for people already running the old library?",
+  "roots": [
+    "agent-evals/skills/scenarios.yaml",
+    "examples/case15_noexcept_change",
+    "examples/ground_truth.json"
+  ],
+  "skill": "check-abi-compatibility",
+  "status": "ready"
+}

@@ -792,6 +792,18 @@ def dimension_6(
                 ("and the resulting claim is not at least as severe as the truth", True)
             )
 
+    # Optional, additive check (schema/claim.schema.json's `decision` field):
+    # a claim that states the customer-facing outcome alongside the raw tool
+    # verdict must not contradict its own `verdict`/`confident` pair — e.g.
+    # `VERIFIED_COMPATIBLE` resting on a `COMPATIBLE_WITH_RISK` verdict, or
+    # `NOT_VERIFIED` alongside a stated, confident verdict. Never fires for a
+    # claim that simply omits `decision`: no scenario or existing recorded
+    # run declares one yet, and this dimension must not fail a well-formed
+    # claim for a field it never promised.
+    decision_problem = claim_mod.decision_inconsistency(claim)
+    if decision_problem is not None:
+        reasons.append((decision_problem, True))
+
     hard = any(is_hard for _, is_hard in reasons)
     return Result(6, name, "fail" if hard else "pass", [m for m, _ in reasons])
 

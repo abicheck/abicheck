@@ -143,6 +143,32 @@ def _abicheck_ref() -> str:
     `skill-eval-pack.json`'s content digests); a Dockerfile that always
     clones `HEAD` of a branch would silently drift the moment abicheck's own
     graders change underneath an already-published task.
+
+    **This reads `git rev-parse HEAD`, i.e. the current commit — never the
+    working tree.** A regeneration run before the commit that carries its
+    own output (the ordinary flow: edit, regenerate, `git add -A`, commit)
+    necessarily pins the *parent* commit, one behind the one the generated
+    files end up committed into (Codex review, PR #819, fresh evidence: an
+    open PR's Harbor images built from its own HEAD would clone one commit
+    older than that HEAD, so a real trial run against the exact tip of an
+    open branch — not yet the squash-merged `main` case the paragraph above
+    already covers — could silently evaluate stale skill/grader content
+    with no fallback firing, since the stale-but-reachable parent commit
+    checks out cleanly). This is a genuine fixed point, not an oversight to
+    patch here: the ref cannot name "the commit this file is part of"
+    before that commit exists, and re-deriving it (regenerate, commit,
+    regenerate again, commit again, ...) never converges — each pass is
+    still one commit behind the one it lands in. The mitigation is
+    procedural, not code: run this generator as the *last* step before a
+    push, so the residual lag is the smallest an SHA-pinned scheme can
+    have, and rely on `--check` (which compares generated *content*, not
+    the embedded ref) to still catch every other kind of staleness. Once a
+    branch merges this residual gap doesn't linger: the pinned parent
+    commit is normally still reachable from `main` right after merge (it's
+    an ancestor of the squash commit), so the fallback below won't even be
+    the mechanism that saves it — the *content* is simply one ordinary
+    commit's worth of eventual drift, the same as any other generated
+    artifact's `--check` gate exists to catch on the next regeneration.
     """
     return subprocess.run(
         ["git", "rev-parse", "HEAD"],
@@ -595,7 +621,7 @@ python3 /opt/abicheck-src/agent-evals/skills/harbor/verify_run.py \\
 """
 
 
-def _readme_abicheck_command(fixture: Path) -> tuple[str, str, str] | None:
+def _readme_abicheck_command(fixture: Path) -> tuple[str, str] | None:
     """The case README's own build+compare recipe, split for reuse.
 
     Category A scenarios are drawn straight from `examples/case*/`, whose
@@ -605,14 +631,20 @@ def _readme_abicheck_command(fixture: Path) -> tuple[str, str, str] | None:
     trustworthy than this generator re-deriving a compile/compare
     invocation from the fixture's file names.
 
-    Returns `(full_block, old_operand, new_operand)` -- the two operands
-    parsed out of the block's own `abicheck compare <old> <new>` line so
-    `solve.sh` can re-run that exact comparison with `--format json`
-    appended, rather than re-parsing prose inside the generated shell
-    script itself. `None` when the block is missing or carries no bare
-    `abicheck compare` line (e.g. a case documented only via `abicheck
-    scan`), in which case `_solve_sh` falls back to its unimplemented stub
-    rather than guessing.
+    Returns `(full_block, run_line)`. `run_line` is the compare invocation
+    reconstructed as one logical shell line -- a leading env-var prefix
+    (e.g. `ABICHECK_AST_FRONTEND=clang `), `abicheck compare <old> <new>`,
+    and any trailing flags the case's own documented command needs
+    (`--header old=... --header new=...`, `--contract ...`) -- collapsed
+    from however many physical, backslash-continued lines the README
+    itself wraps it across. A case's own extra flags are not optional
+    decoration: `case124`'s constant-value comparison is genuinely
+    `NO_CHANGE` at binary depth and only `API_BREAK` with `--header`
+    evidence, so a reference solution that dropped them would silently
+    reproduce the wrong verdict rather than the documented one. `None`
+    when the block is missing or carries no `abicheck compare` line (e.g.
+    a case documented only via `abicheck scan`), in which case `_solve_sh`
+    falls back to its unimplemented stub rather than guessing.
     """
     readme = fixture / "README.md"
     if not readme.is_file():
@@ -625,12 +657,20 @@ def _readme_abicheck_command(fixture: Path) -> tuple[str, str, str] | None:
     if not match:
         return None
     block = match.group(1).strip()
+    # Collapse a `\`-continued command across physical lines into one
+    # logical line before matching -- the README wraps a long invocation
+    # (env prefix + compare + several `--header`/`--contract` flags) for
+    # readability, but the shell (and this parser) must see it as one
+    # statement.
+    joined = re.sub(r"[ \t]*\\\n[ \t]*", " ", block)
     compare_match = re.search(
-        r"^abicheck compare\s+(\S+)\s+(\S+)\s*$", block, re.MULTILINE
+        r"^((?:\w+=\S+\s+)*abicheck compare\s+\S+\s+\S+(?:\s+\S+)*)\s*$",
+        joined,
+        re.MULTILINE,
     )
     if not compare_match:
         return None
-    return block, compare_match.group(1), compare_match.group(2)
+    return block, compare_match.group(1)
 
 
 def _solve_sh(scenario_id: str, scenario: dict) -> str:
@@ -653,17 +693,27 @@ def _solve_sh(scenario_id: str, scenario: dict) -> str:
     if scenario.get("category") == "A":
         parsed = _readme_abicheck_command(ROOT / scenario["inputs"])
         if parsed is not None:
-            block, old, new = parsed
-            # Only the build lines -- the block's own bare `abicheck compare`
-            # line is skipped here and re-run below with --format json
-            # instead of run twice; a BREAKING case's plain-text run also
-            # exits non-zero (exit 4), which `set -e` would otherwise treat
-            # as this script failing before it ever reaches the JSON rerun.
-            build_lines = "\n".join(
-                line
-                for line in block.splitlines()
-                if not line.strip().startswith("abicheck compare")
-            )
+            block, run_line = parsed
+            # Only the build lines -- the block's own compare invocation
+            # (its `abicheck compare ...` line, plus any backslash-continued
+            # follow-on lines carrying its trailing flags) is skipped here
+            # and re-run below with --format json instead of run twice; a
+            # BREAKING case's plain-text run also exits non-zero (exit 4),
+            # which `set -e` would otherwise treat as this script failing
+            # before it ever reaches the JSON rerun.
+            build_lines_list: list[str] = []
+            in_compare_stmt = False
+            compare_start_re = re.compile(r"^(?:\w+=\S+\s+)*abicheck compare\b")
+            for line in block.splitlines():
+                stripped = line.strip()
+                if not in_compare_stmt and compare_start_re.match(stripped):
+                    in_compare_stmt = True
+                if in_compare_stmt:
+                    if not stripped.endswith("\\"):
+                        in_compare_stmt = False
+                    continue
+                build_lines_list.append(line)
+            build_lines = "\n".join(build_lines_list)
             return f"""#!/bin/bash
 {_MARKER}
 set -euo pipefail
@@ -676,20 +726,23 @@ cd /workspace/library
 # verdict can be read back programmatically. `compare`'s own exit code
 # encodes the verdict (e.g. 4 = BREAKING) -- non-zero is a real result,
 # not a failure, and `set -e` must not treat it as one; the report file
-# on disk is what this script actually reads. A fresh `mktemp` path, not a
-# fixed name: a real trial's own container is isolated, so a shared name
-# would be harmless there, but this exact script is also executed directly
-# (not through a container) by tests/test_gen_harbor_tasks.py's
-# TestSolveScriptsEndToEnd, once per scenario -- a fixed `/tmp/report.json`
-# is one shared file across every one of those invocations, and pytest-xdist
-# is free to schedule two of them onto different workers at the same time,
-# so one scenario's write can race another's read of the identical path
-# (reproduced as a real, host/scheduling-dependent CI failure, not a
-# hypothetical). `mktemp` gives every invocation -- test or real trial --
-# its own path, closing the race at its actual cause instead of only in the
-# test harness that happened to expose it.
+# on disk is what this script actually reads. Any env-var prefix and
+# trailing flags (--header, --contract, ...) the README's own command
+# carries are preserved -- some cases (e.g. a header-only-visible source
+# break) only produce their documented verdict with those flags present.
+# A fresh `mktemp` path, not a fixed name: a real trial's own container is
+# isolated, so a shared name would be harmless there, but this exact script
+# is also executed directly (not through a container) by tests/
+# test_gen_harbor_tasks.py's TestSolveScriptsEndToEnd, once per scenario --
+# a fixed `/tmp/report.json` is one shared file across every one of those
+# invocations, and pytest-xdist is free to schedule two of them onto
+# different workers at the same time, so one scenario's write can race
+# another's read of the identical path (reproduced as a real, host/
+# scheduling-dependent CI failure, not a hypothetical). `mktemp` gives every
+# invocation -- test or real trial -- its own path, closing the race at its
+# actual cause instead of only in the test harness that happened to expose it.
 report_json="$(mktemp)"
-abicheck compare {old} {new} --format json -o "$report_json" || true
+{run_line} --format json -o "$report_json" || true
 verdict=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['verdict'])" "$report_json")
 cat > /workspace/final.md <<EOF
 Reference solution -- the documented command for this case:

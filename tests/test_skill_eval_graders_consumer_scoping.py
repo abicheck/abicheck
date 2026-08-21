@@ -1017,6 +1017,37 @@ class TestDimensionSix:
         )
         assert result.status == "pass"
 
+    def test_a_consistent_decision_field_does_not_fail_dimension_6(self, tmp_path):
+        result = self._grade(
+            tmp_path,
+            envelope(
+                verdict="BREAKING",
+                evidence=[0],
+                confident=True,
+                decision="BINARY_BREAK",
+            ),
+            SCENARIO_BREAKING,
+        )
+        assert result.status == "pass"
+
+    def test_a_decision_field_contradicting_its_own_verdict_fails(self, tmp_path):
+        """A claim can state the correct raw `verdict` and still fail this
+        zero-tolerance dimension by reporting a `decision` that contradicts
+        it — schema/claim.schema.json's `decision` is optional, but stating
+        one wrong is not exempt from this dimension's own name."""
+        result = self._grade(
+            tmp_path,
+            envelope(
+                verdict="BREAKING",
+                evidence=[0],
+                confident=True,
+                decision="VERIFIED_COMPATIBLE",
+            ),
+            SCENARIO_BREAKING,
+        )
+        assert result.status == "fail"
+        assert any("VERIFIED_COMPATIBLE" in r for r in result.reasons)
+
     def test_reaching_green_by_suppressing_findings_fails(self, tmp_path):
         call = a_breaking_call(argv=["compare", "a", "b", "--suppress", "rules.yaml"])
         result = self._grade(
