@@ -411,7 +411,6 @@ def derive_l2_compile_context(
     explicit: CompileContext | None = None,
     lang: str | None = None,
     lang_explicit: bool = False,
-    source_filter: str | None = None,
 ) -> tuple[CompileContext | None, list[Callable[[], None]]]:
     """Best-effort L2 :class:`CompileContext` derived from the build's L3
     ``CompileUnit`` facts (P0.3).
@@ -505,7 +504,6 @@ def derive_l2_compile_context(
             explicit=explicit,
             lang=lang,
             lang_explicit=lang_explicit,
-            source_filter=source_filter,
         )
         if resolution.context is None:
             _run_cleanups(cleanups)
@@ -813,11 +811,22 @@ def seed_includes_and_fold_compile_context(
     consumed both the seeded include dirs and the derived compile context's
     own directories.
 
+    *source_filter* is ``dump --compile-db-filter``'s glob, narrowing the
+    compile units both halves consider -- the fold's own matching *and* the
+    include-dir seed's fallback set, so a filtered run cannot fold one
+    translation unit's context while seeding another's include dirs. See
+    :func:`~abicheck.buildsource.header_compile_context.filter_units_by_source`
+    for the matching rules and the deliberate "a filter matching nothing keeps
+    every unit" fallback. ``None`` (every caller but the ELF ``dump`` CLI) is
+    a no-op.
+
     May raise :class:`~abicheck.errors.HeaderCompileContextAmbiguousError`
     when the matched compile units genuinely disagree on an unpinned
     ABI-relevant dimension -- callers should run this inside the same
     ``try`` block that converts the main header-AST parse's own errors to a
-    ``click.ClickException``.
+    ``click.ClickException``. A *source_filter* that selects a single unit is
+    one of the documented ways to resolve exactly that -- and, before it was
+    threaded here, the one the error message named without it working.
     """
     from ..errors import HeaderCompileContextAmbiguousError
     from ..header_utils import _context_tokens, _has_include_build_context
