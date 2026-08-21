@@ -209,8 +209,11 @@ account and its own "what this pilot does not claim" section. PR 4
 > each backed by a real, individually-verified fixture under
 > `agent-evals/skills/fixtures/`. The corpus now stands at 12 scenarios (6
 > Category A, drawn from `examples/ground_truth.json`; 6 Category B, with
-> their own stated expected outcome), covering all four of dimension 2's
-> uncertainty kinds and the named-consumer scoping behavior
+> their own stated expected outcome), covering all three of dimension 2's
+> live uncertainty kinds (`not_comparable`, `evidence_too_shallow`,
+> `contract_coverage_incomplete` — `matrix_target_unrun` was narrowed out
+> of the rubric with the release-matrix skill, per this same ADR's own
+> earlier amendment) and the named-consumer scoping behavior
 > `shared/consumer-scoping.md` documents. The runner (`runners/
 > claude_code.py`), the deterministic graders (`graders/dimensions.py`,
 > `graders/evidence.py`, `graders/claim.py`), and the claim contract

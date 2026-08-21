@@ -696,10 +696,13 @@ class TestDimensionSix:
         )
         assert result.status == "pass", result.reasons
 
-    def test_disagreeing_cited_reports_do_not_fabricate_a_mismatch(self, tmp_path):
+    def test_disagreeing_cited_reports_fail_rather_than_being_skipped(self, tmp_path):
         """Two cited calls whose own reports disagree on full_verdict leave
-        no single value to check the claim against -- degrades to no check
-        rather than guessing which one is authoritative."""
+        no unambiguous value to ground the claim in -- this is a zero-
+        tolerance evidence dimension, so ambiguous cited evidence fails
+        rather than silently skipping the check (a first version of this
+        fix let ANY claimed value pass here, since neither disagreeing
+        report was ever checked against -- Codex review, PR #808)."""
         scenario = {
             "skill": "review-native-library-change",
             "invocation": {"used_by": ["renderer"]},
@@ -732,7 +735,8 @@ class TestDimensionSix:
                 ),
             },
         )
-        assert result.status == "pass", result.reasons
+        assert result.status == "fail"
+        assert any("disagree" in r for r in result.reasons)
 
     def test_citing_call_ids_that_never_happened_fails(self, tmp_path):
         """The shape the first real pilot produced: a baseline run verified its

@@ -605,12 +605,29 @@ def dimension_6(
             # claim's own cited calls, not the whole run — the point is
             # whether the claim faithfully reports what its own evidence
             # said, not what some other, uncited call reported. A cited
-            # report with no full_verdict field at all, or cited reports
-            # that disagree with each other (which one would the claim be
-            # measured against?), contribute nothing — the false-negative-
-            # over-false-positive default this module uses throughout.
+            # report with no full_verdict field at all contributes nothing
+            # — the false-negative-over-false-positive default this module
+            # uses throughout — but cited reports that *disagree* with each
+            # other are a different case: this is a zero-tolerance
+            # evidence dimension, and citing two conflicting reports is not
+            # an unambiguous grounding for any single claimed value, so it
+            # fails rather than silently skipping the check (Codex review,
+            # PR #808 — the earlier version of this fix let a claim citing
+            # two disagreeing scoped reports, e.g. COMPATIBLE and
+            # API_BREAK, pass no matter what it claimed, since neither
+            # cited report was checked against).
             reported_fulls = ev.reported_full_verdicts(run_dir, resolved.values())
-            if len(reported_fulls) == 1:
+            if len(reported_fulls) > 1:
+                reasons.append(
+                    (
+                        f"claimed full_verdict {claimed_full}, but the "
+                        "cited reports disagree on their own full_verdict "
+                        f"({sorted(reported_fulls)}) — not an unambiguous "
+                        "grounding for any claimed value",
+                        True,
+                    )
+                )
+            elif len(reported_fulls) == 1:
                 (reported_full,) = reported_fulls
                 if claimed_full != reported_full:
                     reasons.append(
