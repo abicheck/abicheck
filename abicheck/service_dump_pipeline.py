@@ -44,9 +44,10 @@ import cycle.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+from .artifact_plan import ResolvedArtifactPlan
 from .errors import AstContextMissingError, ValidationError
 from .service_input_resolution import (
     _resolve_side_snapshot_impl,
@@ -106,6 +107,29 @@ class ResolvedDumpRequest:
     that contract, not merely an additive one — it stays inside
     :func:`execute_dump_request`, unchanged from where :func:`run_dump_request`
     already runs it today (via :func:`~abicheck.service_input_resolution.resolve_side_snapshot`).
+
+    ``artifact_plan`` (dedup-and-convergence plan, Phase 1 item 1
+    "Milestone B"): the same facts this object already carries, also
+    attached to a :class:`~abicheck.artifact_plan.ResolvedArtifactPlan` --
+    the general, cross-consumer shape the plan's target architecture names.
+    Built with an empty ``pending_cleanups`` (this function allocates no
+    resource -- see :mod:`abicheck.artifact_plan`'s own module docstring for
+    why the two fields that *would* require one, effective include search
+    and effective compile context, stay excluded here too), so it is
+    additive, inert data today: nothing yet reads it. It exists so a future
+    consumer of the general shape (e.g. a migrated ``render_dump_dry_run``)
+    has one object to build from instead of this dump-specific one, without
+    this dataclass's own field surface changing again when that lands.
+
+    Excluded from this dataclass's generated ``__eq__``/``__hash__``
+    (``compare=False``, Codex review): ``ResolvedArtifactPlan`` is a plain
+    class, not a dataclass, so it compares by identity. Two structurally
+    identical ``DumpRequest``s resolved independently would otherwise
+    produce two ``ResolvedDumpRequest``s that compare unequal purely
+    because each carries its own, distinct ``ResolvedArtifactPlan``
+    instance -- silently breaking equality-based comparison or caching for
+    every existing and future caller of this frozen dataclass, over a field
+    that is itself inert today.
     """
 
     request: DumpRequest
@@ -142,6 +166,7 @@ class ResolvedDumpRequest:
     evidence: SideEvidence
     public_headers: tuple[Path, ...]
     public_header_dirs: tuple[Path, ...]
+    artifact_plan: ResolvedArtifactPlan | None = field(default=None, compare=False)
 
     @property
     def collect_mode(self) -> str:
@@ -372,6 +397,16 @@ def resolve_dump_request(request: DumpRequest) -> ResolvedDumpRequest:
     if request.depth is not None and request.depth.lower() == "binary":
         public_headers, public_header_dirs = [], []
 
+    artifact_plan = ResolvedArtifactPlan(
+        binary_format=fmt,
+        lang=lang,
+        header_backend=header_backend,
+        effective_header_backend=effective_header_backend,
+        requested_depth=request.depth,
+        collect_mode=evidence.collect_mode,
+        public_headers=tuple(public_headers),
+        public_header_dirs=tuple(public_header_dirs),
+    )
     return ResolvedDumpRequest(
         request=request,
         lang=lang,
@@ -384,6 +419,7 @@ def resolve_dump_request(request: DumpRequest) -> ResolvedDumpRequest:
         evidence=evidence,
         public_headers=tuple(public_headers),
         public_header_dirs=tuple(public_header_dirs),
+        artifact_plan=artifact_plan,
     )
 
 

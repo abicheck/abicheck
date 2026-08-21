@@ -4100,6 +4100,47 @@ Once a root command genuinely clears the bar above, pick the right home:
   abicheck version/pinned together, enforced or documented at the tooling
   level) — out of scope for a schema-shape fix and not attempted here.
 
+- **`scan --config <path>` can execute an untrusted `build.query` even when
+  `resolve_effective_allow_query` (ADR-037 D4 "level-implies-query") denies
+  authorization — confirmed real and confirmed pre-existing (CodeRabbit
+  review on #817, fresh evidence, traced through git history rather than
+  assumed).** `cli_buildsource.embed_build_source()`'s own
+  `cfg_trusted_for_query = build_config is not None or build_query is not
+  None` computation treats a merely-non-`None` `build_config` path as
+  sufficient authorization to run that config's `build.query` key
+  (`buildsource/inline.py`'s `collect_inline_pack`, gated on
+  `build_config_trusted_for_query`) — it has no way to distinguish "a config
+  path was supplied" from "querying was actually authorized." That trust
+  model is intentional for `dump`/`compare` (an explicit, operator-supplied
+  `--config` is deliberately trusted to execute its own `build.query` —
+  see `embed_build_source`'s own inline comment), but `scan` layers a
+  stricter, independently-designed rule on top
+  (`cli_scan_helpers.resolve_effective_allow_query`: the config must both
+  declare `build.query` *and* have an explicitly-pinned deep evidence level)
+  that this shared function's own trust check never consults. Confirmed
+  pre-existing, not introduced by PR #817 or by #814's "PR 3A convergence"
+  it merged: at commit `551725e` (immediately before #814),
+  `scan_engine._build_new_snapshot` already called
+  `embed_build_source(build_config=build_config, allow_build_query=
+  allow_build_query, ...)` directly, passing the raw `--config` path
+  unconditionally, independent of `allow_build_query`'s value — the
+  identical bypass already reachable there. `service_input_resolution.
+  _gated_build_query_inputs`'s `build_config_locally_trusted` parameter
+  (added by #814) was built explicitly to preserve that pre-migration
+  behavior for `scan` (see its own docstring), not to introduce it. **Not
+  fixed here**: a correct fix needs `embed_build_source`/
+  `collect_inline_pack` to accept an authorization signal genuinely
+  distinct from "was a config path given" — threaded through two
+  independent call sites (the L2 seed's own pack-arg resolution in
+  `l2_seed._resolve_l2_seed_pack_args`, and the L3-L5 embed step in
+  `embed_build_source` itself) — verified against real `scan --config`
+  scenarios where the config sets `build.query` but no deep evidence level
+  is pinned. That is a real, cross-cutting change to a shared trust
+  primitive `dump`/`compare` also depend on, not a one-line change to
+  `_gated_build_query_inputs`'s gate. Filed here per this file's own
+  "known gaps over risky reactive patches" convention rather than attempted
+  under review pressure on an unrelated PR.
+
 - **Bundle-level (cross-library) findings on a directory/package `compare`
   never respect any policy override -- not `--policy`, not `--policy-file`,
   not `--pack`, and this predates CLI cleanup phase two's "PR B" pack-parity

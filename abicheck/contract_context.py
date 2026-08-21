@@ -469,6 +469,8 @@ def with_resolved_gate(
                     preset=config.gate.preset,
                     packs=config.gate.packs,
                     severity=severity,
+                    require_complete_analysis=config.gate.require_complete_analysis,
+                    scope=config.gate.scope,
                 ),
                 provenance=provenance,
             ),

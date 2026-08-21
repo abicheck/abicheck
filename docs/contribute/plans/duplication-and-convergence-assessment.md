@@ -1087,16 +1087,110 @@ sign-off, not a routine PR).
    a new resolve/execute split. Existing `perform_elf_dump` coverage
    (`tests/test_cli_dump_helpers_coverage.py`, including
    `test_perform_elf_dump_wraps_dump_errors_still_cleans_up_seeded_dirs`)
-   passed unmodified against the migration. **Not yet done, and deliberately
-   out of scope for this slice**: this is not yet "resolve_artifact_request()
-   onward" as item 1's own text above describes — there is no
-   `resolve_artifact_request()`/`execute_artifact_plan()` split yet, `dump
-   --dry-run` still doesn't build from or render a `ResolvedArtifactPlan`
-   (`render_dump_dry_run()` is still its own independent resolution, per the
-   "PR C" entry in AGENTS.md's "Known gaps"), `handle_non_elf_dump`'s
-   identical `_l2_pending_cleanups` pattern is untouched, and none of items
-   2–10 below have been attempted. See item 1's own original text (kept
-   below) for the shape a full implementation still needs to reach.
+   passed unmodified against the migration. **Milestone A follow-up.**
+   `handle_non_elf_dump`'s identical `_l2_pending_cleanups` accumulator (the
+   PE/Mach-O dump path) is now migrated the same way — its own, separate
+   `ResolvedArtifactPlan` instance (the two functions are independent dump
+   paths never invoked together, so nothing here makes them share a
+   session), identical single-drain timing (the one `finally` this
+   function's cleanup ever ran from). Existing coverage
+   (`tests/test_non_elf_dump_l2_seed.py`,
+   `tests/test_cli_dump_helpers_coverage.py`) passed unmodified.
+   **Milestone A completion.**
+   `service_input_resolution._resolve_side_snapshot_impl`'s own hand-rolled
+   `cleanups: list[...] = []`
+   + manual `if cleanups: _run_cleanups(cleanups)` finally block — the third
+   and, per this item's own earlier audit, last known call site with this
+   exact pattern — is migrated the same way: its own `ResolvedArtifactPlan`
+   instance, `_seeded_includes_and_compile_context`'s returned cleanups list
+   extended onto `_artifact_plan.pending_cleanups` (that helper's own return
+   contract is unchanged — only what the caller does with the returned list
+   changes), drained via `run_cleanups()` at the identical point the old
+   code called `_run_cleanups()`. This is the shared primitive `compare`'s
+   implicit-dump operand and `dump`'s typed `execute_dump_request` both
+   already route through (`resolve_side_snapshot`), so this migration reaches
+   both without touching either of their own call sites. Existing coverage
+   (`tests/test_header_compile_context.py`,
+   `tests/test_bazel_root_targets_l2_seed.py`,
+   `tests/test_bazel_root_targets.py`,
+   `tests/test_scan_l2_cleanup_ordering.py`,
+   `tests/test_typed_dump_request.py`,
+   `tests/test_dump_cli_typed_api_parity.py`,
+   `tests/test_header_compile_context_gcc_path.py`,
+   `tests/test_header_compile_context_merge.py`,
+   `tests/test_clang_public_roots_coverage.py`)
+   passed unmodified. All three call sites the plan's own earlier audit
+   named now share this one primitive.
+
+   **Milestone B (this slice): investigated item 1's "full shape" against
+   the real code before writing anything, and found a real conflict with an
+   already-documented, deliberate design decision — not an oversight to
+   fix.** Item 1's own text (kept below) asks `ResolvedArtifactPlan` to own
+   any resource resolution allocates "from `resolve_artifact_request()`
+   onward," and to carry the resolved-fact fields the target-architecture
+   section lists. Two of those fields — *effective include search* and
+   *effective compile context* — are only known once the L3→L2
+   compile-context fold runs
+   (`buildsource.l2_seed.seed_includes_and_fold_compile_context`), and that fold is the one step
+   in this whole pipeline that can allocate the inferred-build temp
+   directory this session type exists to own. `service_dump_pipeline.py`'s
+   own `resolve_dump_request()`/`execute_dump_request()` split (G33 Phase 5,
+   already landed, independent of this plan) already answers where that
+   fold runs today: deliberately inside `execute_dump_request`, never
+   `resolve_dump_request` — `ResolvedDumpRequest`'s own docstring states why
+   verbatim: `dump --dry-run`'s existing contract is to never raise on
+   anything but a usage error, and the fold can raise
+   `HeaderCompileContextAmbiguousError` on genuinely ambiguous build
+   evidence. Moving the fold into resolution to satisfy item 1's literal
+   text would mean either breaking that already-reasoned dry-run guarantee,
+   or redesigning it to tolerate a raise — a real behavior change to
+   already-shipped, already-reviewed code, not a clean generalization.
+
+   **What was safe to land, and did:** the fields item 1's target shape
+   names that genuinely *are* knowable without the fold — normalized
+   binary format, language, requested/effective header-AST backend,
+   requested depth, effective collect mode, public-header scope — are
+   exactly the facts `resolve_dump_request()` already computes for
+   `ResolvedDumpRequest`. `abicheck/artifact_plan.py`'s `ResolvedArtifactPlan`
+   (Milestone A's cleanup-owning session type) now also carries these as
+   optional, keyword-only fields, all defaulting to `None`/`()` so the three
+   existing Milestone A call sites' bare `ResolvedArtifactPlan()`
+   construction is completely unaffected. `resolve_dump_request()` attaches
+   one, populated verbatim from the same values it already returns on
+   `ResolvedDumpRequest` — a new, additive `artifact_plan` field on that
+   dataclass (defaulted, so no existing caller breaks), built with an empty
+   `pending_cleanups` (resolution allocates nothing today, so that is an
+   honest report, not a placeholder). This is genuinely inert data today —
+   nothing yet reads `resolved.artifact_plan` — but it means a future
+   consumer of the general shape (the eventual `render_dump_dry_run()`
+   migration named in AGENTS.md's "PR C" entry, most concretely) has one
+   object to build from instead of `ResolvedDumpRequest`'s own dump-specific
+   one, without this dataclass's field surface changing again when that
+   lands. Regression coverage: `tests/test_artifact_plan.py` (default
+   construction unaffected; resolved facts stored verbatim; a plan carrying
+   resolved facts is still a fully functional cleanup session) and
+   `tests/test_typed_dump_request.py::TestResolveExecuteDumpRequestSplit::test_resolve_attaches_a_matching_artifact_plan`
+   (the attached plan's
+   fields never independently drift from `ResolvedDumpRequest`'s own —
+   confirmed to fail against the pre-change code).
+
+   **Still not done, and now understood to be blocked on a real design
+   decision rather than merely unattempted**: there is still no
+   `resolve_artifact_request()`/`execute_artifact_plan()` *function* pair
+   (only `resolve_dump_request()`/`execute_dump_request()`, dump-specific);
+   `dump --dry-run` still doesn't build from or render a
+   `ResolvedArtifactPlan`; and none of items 2–10 below have been
+   attempted. Closing the resource-lifetime half of item 1 for real needs
+   one of: (a) redesigning dry-run's own contract to tolerate the fold's
+   possible raise (a considered, documented behavior change, not a
+   generalization); or (b) accepting that the fold's resource lifetime
+   stays scoped to execution only, and treating item 1's own "from
+   resolve_artifact_request() onward" language as applying to the
+   resolved-*fact* fields (now done) rather than to every resource a
+   pipeline might ever allocate. Neither was decided here — recorded as an
+   open design question for whoever picks up item 1's remaining resource-
+   lifetime half, rather than guessed at under continued session pressure,
+   per this plan's own "known gaps over risky reactive patches" convention.
 
 1. (Full shape, not yet reached) Introduce `ResolvedArtifactPlan` as a
    context-managed session that owns any resource resolution itself
@@ -1141,7 +1235,169 @@ performance duplication (redundant inferred build queries).
 
 ### Phase 2 — Make resolved configuration the runtime contract
 
-1. Introduce `EffectiveEvaluationConfig`.
+1. **Started.** Item 1's own target shape needed re-scoping before any code
+   could land — recorded below rather than guessed at, per this plan's own
+   "known gaps over risky reactive patches" convention (AGENTS.md), and the
+   first slice of the corrected scope has since landed.
+   Investigating item 1 (introduce `EffectiveEvaluationConfig`) against the
+   actual codebase — not just this document's own sketch — found the
+   target shape overlaps far more with an *already-existing* object than
+   this section's original text accounted for:
+   `abicheck/compatibility_evaluation_config.py`'s
+   `CompatibilityEvaluationConfig`
+   (ADR-049 D7) already composes `policy` (`CompatibilityPolicyConfig`),
+   `gate` (`GateConfig` — `exit_code_scheme`, `severity: SeverityConfig`,
+   `preset`, `packs`), `contract` (`ContractConfig`), `assurance`
+   (`AssuranceConfig`), `surface` (`SurfaceConfig`), `evidence`
+   (`EvidenceConfig`), and `suppressions` (`SuppressionConfig | None`) —
+   essentially every sub-object this section's own `EffectiveEvaluationConfig`
+   sketch names, under different but directly corresponding field names,
+   plus real per-field `ValueProvenance` (D7's precedence-tier record) this
+   section's sketch only gestures at via a single
+   `provenance: ConfigProvenance` field. The "Relationship to in-flight work"
+   section
+   below already says as much at the plan level ("Public contract default
+   (ADR-049) is the compatibility-configuration resolver Phase 2 makes the
+   sole runtime contract... this plan does not change ADR-049's own D7/D8
+   precedence rules, only how uniformly the result of applying them reaches
+   every operation") — but item 1's own code sketch, written before this
+   closer look, reads as "introduce a new, separate dataclass," which would
+   recreate exactly the kind of duplication this whole plan exists to
+   eliminate, and directly contradicts the file it sits in a few lines
+   below its own sketch.
+
+   **What was genuinely missing from `CompatibilityEvaluationConfig`,
+   confirmed by grep rather than assumed:** (a) `GateConfig` had no
+   `require_complete_analysis` field — that flag is threaded as a raw
+   `bool` through a long, independent chain of function signatures
+   (`cli.py`, `cli_compare_helpers.py`, `cli_compare_options.py`, ~15+ call
+   sites) with no typed home at all; (b) no `scope`
+   field for ADR-043's `--used-by`/`--required-symbol` scoped-gate
+   selection either, and there was no existing `ScopedGateSelection`-shaped
+   type anywhere in the codebase to reuse — representing that scope
+   correctly (a real union of "no scope" / "used-by consumer" /
+   "required-symbol entrypoint", each carrying its own resolved target
+   list) needed its own small design pass, not a one-line addition; (c) no
+   whole-object `digest` field or method — `effective_config_digest.py`
+   already computes one, but as an external function over a *two-tier*
+   input (`DiffResult`'s own fields, only reading a
+   `CompatibilityEvaluationConfig` when one happens to be attached under
+   `--contract`/`--pack`), not a method on this object; and (d) — the
+   deepest gap, still open — `CompatibilityEvaluationConfig` is
+   deliberately *opt-in* today (built only when `--contract`/`--pack`
+   selected something, documented as an explicit ADR-049 Phase 1-6 design
+   choice in both that module's docstring and `effective_config_digest.py`'s
+   own "two tiers" docstring), while this phase's whole point is a runtime
+   contract resolved for *every* comparison unconditionally.
+
+   **First slice landed: (a) and (b), additively.** `GateConfig` gained
+   `require_complete_analysis: bool = False` and
+   `scope: ScopedGateSelection | None = None`, both defaulting to "no
+   effect" so every existing zero/keyword-arg `GateConfig(...)` constructor
+   (`compatibility_evaluation_frontend.py`, `contract_context.py`,
+   `contract_context_io.py`) keeps working unchanged — confirmed by the
+   full existing test suite for this module passing unmodified (153 tests)
+   plus the broader compatibility-evaluation/digest/pack/contract-context
+   suites (1224 tests). `ScopedGateSelection` is a new frozen dataclass in
+   the same module (`kind: str` validated against
+   `{"used_by", "required_symbol"}`, `targets: tuple[str, ...]`), typed to
+   match the
+   encoding `effective_config_digest._gate_scope_str` had already
+   established informally (reading `DiffResult.gate_scope`/`used_by`/
+   `required_symbols` and JSON-encoding `{"kind": ..., "targets": ...}`) —
+   this new type doesn't invent a shape, it names one that already existed
+   as an untyped convention in one function. New test classes
+   (`TestGateConfigRequireCompleteAnalysisAndScope`,
+   `TestScopedGateSelection`) in
+   `tests/test_compatibility_evaluation_config.py` cover both fields'
+   defaults, validation, and (for `ScopedGateSelection`)
+   frozen/equality/order-preservation semantics.
+
+   **Deliberately not yet done, in this slice:** neither field is wired to
+   anything yet — no resolver reads the raw `require_complete_analysis`
+   bool or the raw `used_by_apps`/`required_symbols` tuples
+   (`cli_compare_helpers._apply_scoped_gating`) and constructs a
+   `ScopedGateSelection`/populates `GateConfig.scope` from them; the ~15+
+   raw-bool call sites are untouched. That wiring is real, separate work —
+   it's exactly what items 2-6 below need to do anyway (`compare`/`scan`
+   *resolving* this object, not merely consuming one that happens to
+   exist), so doing it here piecemeal, ahead of a real resolver, would mean
+   redoing it once that resolver lands. (c) (the `digest` computation) and
+   (d) (making resolution unconditional) remain fully open — the latter is
+   the deepest and largest remaining piece, described next.
+
+   **A round of review on this slice's JSON round-trip (`contract_context_io.py`)
+   converged through four increasingly narrow findings before surfacing a
+   fifth that is real but not yet reachable — worth recording rather than
+   chasing with a fifth patch.** The first four (both new `GateConfig`
+   fields omitted from the round-trip entirely; a present JSON `null`
+   silently defaulting instead of being rejected; a `schema_version >= 2`
+   payload silently defaulting an *absent* key instead of rejecting it;
+   the identical absence gap one level down in a present `gate.scope`
+   object's own `targets` key) were all fixed, each with regression tests
+   confirmed to fail pre-fix — see the four `fix:` commits on PR #817 for
+   the detail. The fifth: `evaluation_context_to_dict()` writes a block's
+   `schema_version` verbatim (by design — see the module's own "version
+   fields survive verbatim" docstring), so a hypothetical caller that
+   decoded a genuinely legacy (`schema_version == 1`) persisted context
+   and then attached real, non-default `require_complete_analysis`/`scope`
+   values to its `resolved_config.gate` before re-serializing would
+   produce a payload that mislabels itself — a real, genuinely-populated
+   v2 gate field under a v1 stamp, which a hypothetical old reader
+   (predating this PR) would silently ignore regardless of the label,
+   since it has no code path for the field's *existence* at all, not just
+   its absence. **Confirmed unreachable by any current production code
+   path**: the one call site that reconstructs a `GateConfig` post-decode
+   (`with_resolved_gate`, `cli_compare_receipt.py`) always operates on a
+   freshly-built `PersistedContractContext` from a live `compare()` run
+   (via `build_persisted_context`/`with_resolved_config`), never on one
+   decoded from an old persisted payload — and, per this same slice's own
+   "Deliberately not yet done" note two paragraphs up, *nothing* in the
+   current codebase constructs a non-default `require_complete_analysis`
+   or a real `scope` from real input yet, so the specific combination this
+   finding describes cannot occur today regardless of which context a
+   caller starts from. A correct fix also can't simply auto-upgrade the
+   label on write (silently re-stamping `schema_version` to 2 the moment a
+   v2 field is populated) without contradicting this module's own
+   documented "version fields survive verbatim" invariant one paragraph
+   above the `evaluation_context_to_dict` this finding is about — the
+   right fix is a write-side *rejection* of the mismatched combination,
+   which is a real design decision (where the check lives, what error type
+   it raises, whether it belongs in this leaf serializer at all versus a
+   caller-side invariant) rather than a mechanical extension of the
+   absent-key pattern the first four rounds established. Left for the
+   resolver work items 2-6 below to pick up once a real caller populates
+   these fields from real input — the point at which this combination
+   first becomes reachable and a concrete design has real call sites to be
+   verified against, rather than being designed against a hypothetical one
+   now.
+
+   **The right further scoping for item 1** is additive to the existing
+   object rather than a parallel one: add a `digest` computation onto
+   `CompatibilityEvaluationConfig` itself (folding in
+   `effective_config_digest.py`'s existing hashing logic rather than
+   duplicating it), and make resolving one *unconditional* for every
+   comparison — collapsing `effective_config_digest.py`'s two-tier
+   "rich or baseline" split into the rich tier always, once every
+   comparison path actually populates the object it currently only
+   populates opportunistically. That last part is the real work items 2-6
+   below already describe (`compare`, `scan`, the release fan-out, and the
+   four comparison call sites item 5 names all need to *resolve* this
+   object, not just consume one that happens to exist) — so this
+   re-scoping doesn't shrink the phase, it corrects what object items 2-6
+   are migrating *onto*. `docs/contribute/plans/public-contract-default.md`
+   (ADR-049's own plan doc) is the right place to check for whether "make
+   `CompatibilityEvaluationConfig` universal" is already an open item
+   there — a keyword sweep of it (`universal`/`opt-in`/`unconditional`)
+   found no existing item phrased that way; its own phases (through
+   Phase 7's "default flip") are about whether *contract evaluation*
+   defaults on, a related but distinct axis from whether the
+   *configuration object itself* always resolves regardless of
+   `--contract`/`--pack` — so this looks like a genuinely new item for
+   that plan or this one to own, not a duplicate of an existing one, but
+   the sweep was keyword-based over a 4000+-line document, not a full
+   read, so treat that as a strong lead rather than a settled fact before
+   committing to it.
 2. Move `compare` to consuming it directly.
 3. Move `scan` to the same object.
 4. Move the release fan-out off its six raw gate/severity strings.

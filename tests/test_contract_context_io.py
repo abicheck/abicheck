@@ -21,6 +21,7 @@ re-evaluation procedures are in ``test_contract_replay.py``.
 
 from __future__ import annotations
 
+import dataclasses
 import json
 
 import pytest
@@ -36,6 +37,7 @@ from abicheck.compatibility_evaluation_config import (
     EvidenceProviderRequirement,
     GateConfig,
     ImmutableIdentity,
+    ScopedGateSelection,
     SelectedByEntry,
     SuppressionConfig,
     SurfaceConfig,
@@ -206,6 +208,10 @@ class TestResolvedConfigRoundTrip:
                     quality_issues=SeverityLevel.INFO,
                     addition=SeverityLevel.WARNING,
                 ),
+                require_complete_analysis=True,
+                scope=ScopedGateSelection(
+                    kind="used_by", targets=("/opt/app1", "/opt/app2")
+                ),
             ),
             suppressions=SuppressionConfig(sha256="9" * 8, rules=("rule-a",)),
             provenance={
@@ -228,6 +234,30 @@ class TestResolvedConfigRoundTrip:
             resolved_config_to_dict(config), config.provenance
         )
         assert decoded == config
+
+    def test_gate_require_complete_analysis_and_scope_round_trip(self) -> None:
+        # Codex review: these two GateConfig fields were previously omitted
+        # from resolved_config_to_dict/from_dict entirely, so a JSON
+        # round-trip silently dropped them back to their defaults.
+        config = self._full_config()
+        decoded = resolved_config_from_dict(resolved_config_to_dict(config))
+        assert decoded.gate.require_complete_analysis is True
+        assert decoded.gate.scope == ScopedGateSelection(
+            kind="used_by", targets=("/opt/app1", "/opt/app2")
+        )
+
+    def test_gate_scope_none_round_trips_to_none(self) -> None:
+        config = dataclasses.replace(
+            self._full_config(),
+            gate=dataclasses.replace(
+                self._full_config().gate,
+                require_complete_analysis=False,
+                scope=None,
+            ),
+        )
+        decoded = resolved_config_from_dict(resolved_config_to_dict(config))
+        assert decoded.gate.require_complete_analysis is False
+        assert decoded.gate.scope is None
 
     def test_provenance_round_trips_through_the_context_block(self) -> None:
         from abicheck.contract_context_io import (
@@ -265,6 +295,206 @@ class TestResolvedConfigRoundTrip:
     def test_malformed_payload_is_rejected(self) -> None:
         with pytest.raises(TypeError):
             resolved_config_from_dict(["not", "a", "mapping"])
+
+    def test_gate_require_complete_analysis_rejects_truthy_non_bool(self) -> None:
+        # Codex review: a bare ``bool(...)`` coercion accepted any truthy
+        # JSON value -- including the string "false", which is truthy in
+        # Python despite spelling the opposite of what it decodes to --
+        # silently turning it into True instead of rejecting the malformed
+        # payload the way every other decoder in this module already does.
+        config = self._full_config()
+        raw = resolved_config_to_dict(config)
+        raw["gate"]["require_complete_analysis"] = "false"
+        with pytest.raises(TypeError, match="require_complete_analysis"):
+            resolved_config_from_dict(raw)
+
+    def test_gate_require_complete_analysis_absent_key_defaults_false(self) -> None:
+        config = dataclasses.replace(
+            self._full_config(),
+            gate=dataclasses.replace(
+                self._full_config().gate,
+                require_complete_analysis=False,
+                scope=None,
+            ),
+        )
+        raw = resolved_config_to_dict(config)
+        del raw["gate"]["require_complete_analysis"]
+        decoded = resolved_config_from_dict(raw)
+        assert decoded.gate.require_complete_analysis is False
+
+    def test_gate_require_complete_analysis_rejects_explicit_null(self) -> None:
+        # Codex review, fresh evidence (second round): the first decoder cut
+        # took a pre-fetched ``gate.get(key)`` value, which collapses a
+        # genuinely *absent* key (a legacy payload -- degrade to the default)
+        # and a *present* JSON ``null`` (a malformed "no value" that must be
+        # rejected, same as any other wrong-typed value) to the identical
+        # Python ``None``. A present ``null`` must raise, not silently
+        # default.
+        config = self._full_config()
+        raw = resolved_config_to_dict(config)
+        raw["gate"]["require_complete_analysis"] = None
+        with pytest.raises(TypeError, match="require_complete_analysis"):
+            resolved_config_from_dict(raw)
+
+    def test_bare_call_with_no_gate_schema_version_stays_lenient_on_absence(
+        self,
+    ) -> None:
+        # A caller with no enclosing evaluation_context (gate_schema_version
+        # omitted -- e.g. a standalone resolved_config document) still
+        # degrades an absent key to the default, regardless of what a
+        # current writer would have emitted -- only a caller that *knows*
+        # the enclosing schema_version can distinguish "legitimately never
+        # had this field" from "this version-2 payload lost the key".
+        config = self._full_config()
+        raw = resolved_config_to_dict(config)
+        del raw["gate"]["scope"]
+        decoded = resolved_config_from_dict(raw)
+        assert decoded.gate.scope is None
+
+
+class TestEvaluationContextGateSchemaVersionGating:
+    """Codex review, fresh evidence (third round): an ``evaluation_context``
+    payload that *declares* ``schema_version >= 2`` (this build's own value)
+    is expected to always carry ``gate.require_complete_analysis``/
+    ``gate.scope`` -- this build's own writer always emits both. A version-2
+    payload missing either key is truncated or hand-crafted, not a
+    legitimate older-writer omission, and must be rejected rather than
+    silently defaulted.
+    """
+
+    def _config(self) -> CompatibilityEvaluationConfig:
+        return CompatibilityEvaluationConfig(
+            contract=ContractConfig(mode=ContractMode.PUBLIC),
+            evidence=EvidenceConfig(),
+            surface=SurfaceConfig(),
+            assurance=AssuranceConfig(),
+            policy=CompatibilityPolicyConfig(
+                base=ImmutableIdentity(id="strict_abi", version=1, sha256="a" * 8)
+            ),
+            gate=GateConfig(),
+        )
+
+    def _block(self) -> EvaluationContextBlock:
+        return EvaluationContextBlock(resolved_config=self._config())
+
+    def test_current_schema_version_missing_scope_key_raises(self) -> None:
+        from abicheck.contract_context_io import (
+            evaluation_context_from_dict,
+            evaluation_context_to_dict,
+        )
+
+        raw = evaluation_context_to_dict(self._block())
+        del raw["resolved_config"]["gate"]["scope"]
+        with pytest.raises(TypeError, match="gate.scope"):
+            evaluation_context_from_dict(raw)
+
+    def test_current_schema_version_missing_require_complete_analysis_key_raises(
+        self,
+    ) -> None:
+        from abicheck.contract_context_io import (
+            evaluation_context_from_dict,
+            evaluation_context_to_dict,
+        )
+
+        raw = evaluation_context_to_dict(self._block())
+        del raw["resolved_config"]["gate"]["require_complete_analysis"]
+        with pytest.raises(TypeError, match="require_complete_analysis"):
+            evaluation_context_from_dict(raw)
+
+    def test_legacy_schema_version_missing_both_keys_degrades_to_defaults(
+        self,
+    ) -> None:
+        # A genuinely older writer (schema_version 1, predating this PR's
+        # two new gate keys entirely) never emitted them -- this is the
+        # documented, legitimate forward-compat degrade, not the malformed
+        # case above.
+        from abicheck.contract_context_io import (
+            evaluation_context_from_dict,
+            evaluation_context_to_dict,
+        )
+
+        raw = evaluation_context_to_dict(self._block())
+        raw["schema_version"] = 1
+        del raw["resolved_config"]["gate"]["scope"]
+        del raw["resolved_config"]["gate"]["require_complete_analysis"]
+        decoded = evaluation_context_from_dict(raw)
+        assert decoded.resolved_config.gate.scope is None
+        assert decoded.resolved_config.gate.require_complete_analysis is False
+
+    def test_current_schema_version_with_both_keys_present_round_trips(self) -> None:
+        from abicheck.contract_context_io import (
+            evaluation_context_from_dict,
+            evaluation_context_to_dict,
+        )
+
+        decoded = evaluation_context_from_dict(
+            evaluation_context_to_dict(self._block())
+        )
+        assert decoded == self._block()
+
+    def _block_with_scope(self) -> EvaluationContextBlock:
+        return dataclasses.replace(
+            self._block(),
+            resolved_config=dataclasses.replace(
+                self._config(),
+                gate=dataclasses.replace(
+                    self._config().gate,
+                    scope=ScopedGateSelection(kind="used_by", targets=("/opt/app1",)),
+                ),
+            ),
+        )
+
+    def test_current_schema_version_scope_missing_targets_key_raises(self) -> None:
+        # Codex review, fresh evidence (fourth round): a present, non-null
+        # gate.scope object's own targets key hits the identical
+        # legitimate-default-vs-truncated-payload ambiguity the outer keys
+        # were fixed for -- this build's writer always emits targets (a
+        # real, possibly-empty array) whenever it emits a scope at all.
+        from abicheck.contract_context_io import (
+            evaluation_context_from_dict,
+            evaluation_context_to_dict,
+        )
+
+        raw = evaluation_context_to_dict(self._block_with_scope())
+        del raw["resolved_config"]["gate"]["scope"]["targets"]
+        with pytest.raises(TypeError, match="gate.scope.targets"):
+            evaluation_context_from_dict(raw)
+
+    def test_current_schema_version_scope_targets_explicit_null_raises(self) -> None:
+        from abicheck.contract_context_io import (
+            evaluation_context_from_dict,
+            evaluation_context_to_dict,
+        )
+
+        raw = evaluation_context_to_dict(self._block_with_scope())
+        raw["resolved_config"]["gate"]["scope"]["targets"] = None
+        with pytest.raises(TypeError, match="gate.scope.targets"):
+            evaluation_context_from_dict(raw)
+
+    def test_legacy_schema_version_scope_missing_targets_key_defaults_empty(
+        self,
+    ) -> None:
+        from abicheck.contract_context_io import (
+            evaluation_context_from_dict,
+            evaluation_context_to_dict,
+        )
+
+        raw = evaluation_context_to_dict(self._block_with_scope())
+        raw["schema_version"] = 1
+        del raw["resolved_config"]["gate"]["scope"]["targets"]
+        decoded = evaluation_context_from_dict(raw)
+        assert decoded.resolved_config.gate.scope is not None
+        assert decoded.resolved_config.gate.scope.targets == ()
+
+    def test_current_schema_version_scope_with_targets_round_trips(self) -> None:
+        from abicheck.contract_context_io import (
+            evaluation_context_from_dict,
+            evaluation_context_to_dict,
+        )
+
+        block = self._block_with_scope()
+        decoded = evaluation_context_from_dict(evaluation_context_to_dict(block))
+        assert decoded == block
 
 
 class TestResolvedContextContent:

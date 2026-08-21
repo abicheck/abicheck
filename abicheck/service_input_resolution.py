@@ -45,6 +45,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from .artifact_plan import ResolvedArtifactPlan
 from .errors import SnapshotError, ValidationError
 from .header_conditionals import attach_build_context_for_parsed_headers
 
@@ -683,11 +684,11 @@ def _resolve_side_snapshot_impl(
     # collection, by _seeded_includes_and_compile_context -- see that
     # function's own docstring for why two independent collections here was
     # a latent self-deadlock risk, not just duplicated work.
-    # Pre-seeded (rather than left unbound) so the `finally` below is safe
-    # even if _seeded_includes_and_compile_context itself raises before
-    # returning -- it drains its own cleanups internally on
-    # HeaderCompileContextAmbiguousError (see its docstring), so an empty
-    # list here is correct, not a leak.
+    # The `_artifact_plan` constructed below (rather than left unbound) makes
+    # the `finally` below safe even if _seeded_includes_and_compile_context
+    # itself raises before returning -- it drains its own cleanups internally
+    # on HeaderCompileContextAmbiguousError (see its docstring), so an empty
+    # `pending_cleanups` here is correct, not a leak.
     # Computed once, shared by the seed below and the embed step further
     # down, so both apply the identical permission decision (Codex review,
     # fresh evidence) rather than each independently gating build_config/
@@ -700,9 +701,19 @@ def _resolve_side_snapshot_impl(
         allow_build_query=bool(allow_build_query),
         build_config_locally_trusted=build_config_locally_trusted,
     )
-    cleanups: list[Callable[[], None]] = []
+    # Phase 1 (dedup-and-convergence plan) Milestone A follow-up: the third
+    # and (per the plan doc's own Phase 1 item list) last known hand-rolled
+    # `pending_cleanups: list[...] = []` + manual drain-in-finally pattern,
+    # after `perform_elf_dump` and `handle_non_elf_dump`. Same primitive,
+    # same behavior: `_seeded_includes_and_compile_context` still *returns*
+    # its own cleanups list (its return contract is unchanged, and shared
+    # with other reasoning in its docstring) -- only what the caller does
+    # with that list changes, from a bare local to
+    # `_artifact_plan.pending_cleanups`, drained once via `run_cleanups()`
+    # at the identical point the old code called `_run_cleanups()`.
+    _artifact_plan = ResolvedArtifactPlan()
     try:
-        includes, compile_ctx, context_applied, cleanups = (
+        includes, compile_ctx, context_applied, _seed_cleanups = (
             _seeded_includes_and_compile_context(
                 side,
                 evidence,
@@ -718,6 +729,7 @@ def _resolve_side_snapshot_impl(
                 collect_mode=seed_collect_mode,
             )
         )
+        _artifact_plan.pending_cleanups.extend(_seed_cleanups)
         # Drained as soon as the L2 parse below has consumed the seeded dirs --
         # *before* the embed step further down, not after it (PR 3A, dump/scan
         # resolver convergence; the ordering `scan_engine._build_new_snapshot`
@@ -734,17 +746,21 @@ def _resolve_side_snapshot_impl(
         # Latent rather than live for every caller that exists today, which is
         # why the old ordering never showed up: `_seeded_includes_and_compile_
         # context` pins the seed's own `collect_mode="off"`, so no caller can
-        # currently run an inferred query in the seed at all and `cleanups` is
-        # always empty here. It stops being latent the moment that pin is
-        # relaxed for the CLI resolvers PR 3A still has to migrate -- fixing it
-        # now costs nothing and removes a trap from that migration's path.
+        # currently run an inferred query in the seed at all and
+        # `_artifact_plan.pending_cleanups` is always empty here. It stops
+        # being latent the moment that pin is relaxed for the CLI resolvers
+        # PR 3A still has to migrate -- fixing it now costs nothing and
+        # removes a trap from that migration's path.
         #
         # Draining here is safe for everything downstream: an inferred build
         # dir can hold the *generated headers* the seeded include dirs point
         # at, which is why the drain must not happen before the parse -- but
         # neither the ADR-039 collector (it scans the caller's own header list)
         # nor `embed_side_build_source` (it collects its own evidence from
-        # scratch) reads through those seeded dirs.
+        # scratch) reads through those seeded dirs. `run_cleanups()` is
+        # idempotent (drains only what's new since the last drain), so this
+        # early call and the outer `finally`'s backstop call below never
+        # double-run the same cleanup.
         try:
             snap = service.resolve_input(
                 side_path,
@@ -773,14 +789,7 @@ def _resolve_side_snapshot_impl(
                 notify=notify,
             )
         finally:
-            if cleanups:
-                from .buildsource.inline import _run_cleanups
-
-                _run_cleanups(cleanups)
-                # Emptied so the outer `finally` below -- kept as the backstop
-                # for anything that raises before the seed even returns -- does
-                # not run the same already-handed-off thunks a second time.
-                cleanups = []
+            _artifact_plan.run_cleanups()
         # P0.3: a genuine L3 CompileUnit context was resolved and folded into
         # this side's L2 header-AST invocation above -- record that so the
         # existing header_parse_context_drift/header_build_context_mismatch
@@ -876,13 +885,12 @@ def _resolve_side_snapshot_impl(
         # Backstop only. The real drain happens in the nested `finally` around
         # `service.resolve_input` above, as soon as the L2 parse has consumed
         # the seeded dirs and before the embed step can contend on the same
-        # inferred-build-dir lock -- see that comment for why. This one covers
-        # the narrow window where the seed itself raised after handing back
-        # cleanups; it is a no-op on every path the nested drain already ran.
-        if cleanups:
-            from .buildsource.inline import _run_cleanups
-
-            _run_cleanups(cleanups)
+        # inferred-build-dir lock -- see that comment for why. `run_cleanups()`
+        # is idempotent (drains only what's new since the last drain), so this
+        # call is a no-op on every path the nested drain already ran, and
+        # covers only the narrow window where the seed itself raised after
+        # handing back cleanups but before the nested `try` was reached.
+        _artifact_plan.run_cleanups()
     return SideResolution(
         snapshot=snap,
         effective_includes=tuple(includes),

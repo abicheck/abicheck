@@ -904,9 +904,7 @@ class TestBuildDerivedIncludeSeeding:
         monkeypatch.setattr(service, "resolve_input", _spy)
         service.run_dump_request(
             DumpRequest(
-                input=InputSpec(
-                    path=snap_path, headers=(header,), build_info=tmp_path
-                )
+                input=InputSpec(path=snap_path, headers=(header,), build_info=tmp_path)
             )
         )
         assert captured["includes"] == [seeded]
@@ -921,8 +919,7 @@ class TestBuildDerivedIncludeSeeding:
 
         def _boom(**kwargs):  # pragma: no cover - must never run
             raise AssertionError(
-                "seed_includes_and_fold_compile_context reached without "
-                "build evidence"
+                "seed_includes_and_fold_compile_context reached without build evidence"
             )
 
         monkeypatch.setattr(
@@ -960,9 +957,7 @@ class TestBuildDerivedIncludeSeeding:
         monkeypatch.setattr(service, "resolve_input", _spy)
         service.run_dump_request(
             DumpRequest(
-                input=InputSpec(
-                    path=snap_path, headers=(header,), build_info=tmp_path
-                )
+                input=InputSpec(path=snap_path, headers=(header,), build_info=tmp_path)
             )
         )
         assert order == ["resolve", "cleanup"]
@@ -1346,7 +1341,9 @@ def test_resolve_side_snapshot_impl_forwards_gated_build_inputs_to_embed(
     trusted_config = tmp_path / "trusted.abicheck.yml"
 
     monkeypatch.setattr(
-        sir, "_seeded_includes_and_compile_context", lambda *a, **k: ([], None, False, [])
+        sir,
+        "_seeded_includes_and_compile_context",
+        lambda *a, **k: ([], None, False, []),
     )
     monkeypatch.setattr(
         service, "resolve_input", lambda *a, **k: AbiSnapshot(library="x", version="1")
@@ -1441,12 +1438,7 @@ class TestSharedPipelineReachesADR039BuildContextCollector:
 
         hdr = tmp_path / "widget.h"
         hdr.write_text(
-            "struct Widget {\n"
-            "  int x;\n"
-            "#ifdef GUARD\n"
-            "  int guarded;\n"
-            "#endif\n"
-            "};\n",
+            "struct Widget {\n  int x;\n#ifdef GUARD\n  int guarded;\n#endif\n};\n",
             encoding="utf-8",
         )
         src = tmp_path / "widget.cpp"
@@ -1501,12 +1493,7 @@ class TestSharedPipelineReachesADR039BuildContextCollector:
 
         hdr = tmp_path / "widget.h"
         hdr.write_text(
-            "struct Widget {\n"
-            "  int x;\n"
-            "#ifdef GUARD\n"
-            "  int guarded;\n"
-            "#endif\n"
-            "};\n",
+            "struct Widget {\n  int x;\n#ifdef GUARD\n  int guarded;\n#endif\n};\n",
             encoding="utf-8",
         )
         src = tmp_path / "widget.cpp"
@@ -1557,12 +1544,7 @@ class TestSharedPipelineReachesADR039BuildContextCollector:
         include_dir.mkdir()
         hdr = include_dir / "widget.h"
         hdr.write_text(
-            "struct Widget {\n"
-            "  int x;\n"
-            "#ifdef GUARD\n"
-            "  int guarded;\n"
-            "#endif\n"
-            "};\n",
+            "struct Widget {\n  int x;\n#ifdef GUARD\n  int guarded;\n#endif\n};\n",
             encoding="utf-8",
         )
         src = tmp_path / "widget.cpp"

@@ -66,6 +66,7 @@ from .compatibility_evaluation_config import (
     EvidenceProviderRequirement,
     GateConfig,
     ImmutableIdentity,
+    ScopedGateSelection,
     SelectedByEntry,
     SuppressionConfig,
     SurfaceConfig,
@@ -120,9 +121,144 @@ def _sequence(value: object, *, what: str) -> Sequence[Any]:
     return value
 
 
+def _sequence_field(
+    m: Mapping[str, Any], key: str, *, what: str, required: bool = False
+) -> Sequence[Any]:
+    """Decode an optional JSON array field, honoring the same absent-vs-
+    required distinction :func:`_bool` draws (Codex review, fresh evidence,
+    fourth round: a version-2 ``gate.scope`` object with its own ``targets``
+    key absent hit the identical "legitimate default vs. truncated payload"
+    ambiguity :func:`_bool` was fixed for, one level down).
+
+    Unlike :func:`_sequence`, which most call sites in this module use for a
+    genuinely optional collection with no version-conditional strictness,
+    this variant takes the mapping and key so *required* can reject absence
+    -- and, when required, a present ``null`` too (this build's writer never
+    emits ``null`` for a list field, only a real, possibly-empty array;
+    accepting ``null`` as "empty" here would reopen the same gap
+    :func:`_bool`'s ``required`` mode closes for a present ``null``).
+    """
+    if key not in m:
+        if required:
+            raise TypeError(f"{what} is missing the required key {key!r}.")
+        return ()
+    value: object = m[key]
+    if value is None:
+        if required:
+            raise TypeError(f"{what} must be a JSON array, not None.")
+        return ()
+    if isinstance(value, (str, bytes)) or not isinstance(value, Sequence):
+        raise TypeError(f"{what} must be a JSON array, not {value!r}.")
+    return value
+
+
+_GATE_SCOPE_FIELDS_SCHEMA_VERSION = 2
+"""The ``evaluation_context.schema_version`` at which ``gate.require_complete_
+analysis``/``gate.scope`` were introduced (dedup-and-convergence plan, Phase 2
+item 1) -- matches ``contract_relevance_types.EVALUATION_CONTEXT_SCHEMA_
+VERSION``'s own bump for the same change, but is its own constant rather than
+a reference to that live ceiling: the ceiling moves on any future,
+unrelated bump to that block's shape, while this one names a fixed
+historical fact (the version these two specific keys started being
+unconditionally emitted) and must not drift with it.
+
+Every writer at or above this version (this build's ``resolved_config_to_
+dict`` included) always emits both keys, so a payload declaring
+``schema_version >= _GATE_SCOPE_FIELDS_SCHEMA_VERSION`` with either key
+missing is not a legitimate older-writer omission -- it is truncated or
+hand-crafted, and ``resolved_config_from_dict`` rejects it outright rather
+than silently defaulting (Codex review, fresh evidence, third round: the
+first two rounds closed "wrong type" and "explicit null", but neither
+covered a version-2-labeled payload simply missing the key). A payload
+declaring an older ``schema_version`` degrades to the field's documented
+default, per this module's own "no lossy defaults on read" rule -- that
+degrade is the *legitimate* forward-compatibility case, not the malformed
+one this constant exists to catch."""
+
+
+def _bool(
+    m: Mapping[str, Any], key: str, *, what: str, default: bool, required: bool = False
+) -> bool:
+    """Decode an optional JSON boolean field, rejecting anything merely truthy.
+
+    A bare ``bool(value)`` accepts any JSON value at all -- including the
+    string ``"false"``, a non-empty string that is truthy in Python despite
+    spelling the opposite of what it decodes to -- silently coercing it to
+    ``True`` rather than rejecting the malformed payload the way every other
+    strict decoder in this module does (Codex review, PR #817: this is
+    exactly the check ``GateConfig.__post_init__`` itself already performs
+    on construction, which a loose coercion here would bypass).
+
+    Takes the mapping and key, not a pre-fetched ``m.get(key)`` value, so it
+    can tell a genuinely *absent* key (a legacy payload written before this
+    field existed -- degrades to *default*, unless *required*) apart from a
+    *present* JSON ``null`` (an explicit, malformed "no value" that must
+    always be rejected -- ``bool`` has no legitimate null encoding, unlike
+    an ``Optional`` field): a pre-fetched value collapses both to Python
+    ``None``, which is exactly the gap a second round of review found in
+    this decoder's first cut (Codex review, fresh evidence).
+
+    *required* rejects absence too, for a payload whose own declared
+    ``evaluation_context.schema_version`` is new enough that this build's
+    own writer always emits the key -- see
+    :data:`_GATE_SCOPE_FIELDS_SCHEMA_VERSION`'s docstring for why a
+    version-gated caller, not a blanket default, decides this (third round
+    of review, fresh evidence).
+    """
+    if key not in m:
+        if required:
+            raise TypeError(f"{what} is missing the required key {key!r}.")
+        return default
+    value = m[key]
+    if not isinstance(value, bool):
+        raise TypeError(f"{what} must be a JSON boolean, not {value!r}.")
+    return value
+
+
 # --------------------------------------------------------------------------
 # Small value types.
 # --------------------------------------------------------------------------
+
+
+def _gate_scope_from_dict(
+    m: Mapping[str, Any], key: str, *, what: str, required: bool = False
+) -> ScopedGateSelection | None:
+    """Inverse of :func:`resolved_config_to_dict`'s ``gate.scope`` encoding.
+
+    ``None`` when the resolved config carried no ADR-043 scoped-gate
+    selection at all (the common case) -- distinct from a present-but-empty
+    ``targets`` list, which round-trips as a real, zero-target selection. A
+    present JSON ``null`` is the correct, unambiguous encoding of that
+    common case (``resolved_config_to_dict`` writes exactly that), so unlike
+    :func:`_bool` a present ``null`` is never rejected here -- only the
+    *key itself* being absent is conditionally rejected, via *required* (see
+    :data:`_GATE_SCOPE_FIELDS_SCHEMA_VERSION`).
+
+    Takes the mapping and key rather than a pre-fetched value, mirroring
+    :func:`_bool`, so *required* can distinguish "key absent" from "key
+    present with value ``null``" the same way.
+
+    *required* also propagates one level down to a present, non-``None``
+    scope object's own ``targets`` key (via :func:`_sequence_field`): this
+    build's writer always emits ``targets`` (a real, possibly-empty array)
+    whenever it emits a scope object at all, so a required scope missing
+    its own ``targets`` key is the same truncated-payload signal as the
+    outer key being absent (Codex review, fresh evidence, fourth round).
+    """
+    if key not in m:
+        if required:
+            raise TypeError(f"{what} is missing the required key {key!r}.")
+        return None
+    d = m[key]
+    if d is None:
+        return None
+    m2 = _require_mapping(d, what="gate.scope")
+    return ScopedGateSelection(
+        kind=_required(m2, "kind", what="gate.scope"),
+        targets=tuple(
+            _sequence_field(m2, "targets", what="gate.scope.targets", required=required)
+        ),
+    )
 
 
 def _identity_to_dict(identity: ImmutableIdentity) -> dict[str, Any]:
@@ -288,6 +424,15 @@ def resolved_config_to_dict(config: CompatibilityEvaluationConfig) -> dict[str, 
                 "quality_issues": config.gate.severity.quality_issues.value,
                 "addition": config.gate.severity.addition.value,
             },
+            "require_complete_analysis": config.gate.require_complete_analysis,
+            "scope": (
+                {
+                    "kind": config.gate.scope.kind,
+                    "targets": list(config.gate.scope.targets),
+                }
+                if config.gate.scope is not None
+                else None
+            ),
         },
         "suppressions": (
             {
@@ -301,7 +446,10 @@ def resolved_config_to_dict(config: CompatibilityEvaluationConfig) -> dict[str, 
 
 
 def resolved_config_from_dict(
-    d: object, provenance: Mapping[str, ValueProvenance] | None = None
+    d: object,
+    provenance: Mapping[str, ValueProvenance] | None = None,
+    *,
+    gate_schema_version: int | None = None,
 ) -> CompatibilityEvaluationConfig:
     """Inverse of :func:`resolved_config_to_dict`.
 
@@ -310,7 +458,20 @@ def resolved_config_from_dict(
     it (:class:`~abicheck.contract_evidence.EvaluationContextBlock` documents
     the same asymmetry) -- so the caller that decoded the outer block owns
     reassembling the two halves.
+
+    *gate_schema_version* is the enclosing ``evaluation_context.schema_
+    version`` this ``resolved_config`` was persisted under, when the caller
+    has one (:func:`evaluation_context_from_dict` always does) -- ``None``
+    (the default, for a caller with no enclosing context to be strict
+    against, e.g. a bare unit test) means "unknown version", which degrades
+    to this function's original, lenient behavior: an absent ``gate.require_
+    complete_analysis``/``gate.scope`` key defaults rather than raising. See
+    :data:`_GATE_SCOPE_FIELDS_SCHEMA_VERSION`.
     """
+    _require_gate_scope_fields = (
+        gate_schema_version is not None
+        and gate_schema_version >= _GATE_SCOPE_FIELDS_SCHEMA_VERSION
+    )
     m = _require_mapping(d, what="resolved_config")
     contract = _require_mapping(
         _required(m, "contract", what="resolved_config"),
@@ -412,6 +573,19 @@ def resolved_config_from_dict(
                 ),
                 quality_issues=SeverityLevel(severity.get("quality_issues", "warning")),
                 addition=SeverityLevel(severity.get("addition", "info")),
+            ),
+            require_complete_analysis=_bool(
+                gate,
+                "require_complete_analysis",
+                what="gate.require_complete_analysis",
+                default=False,
+                required=_require_gate_scope_fields,
+            ),
+            scope=_gate_scope_from_dict(
+                gate,
+                "scope",
+                what="gate.scope",
+                required=_require_gate_scope_fields,
             ),
         ),
         suppressions=(
@@ -587,11 +761,14 @@ def evaluation_context_from_dict(d: object) -> EvaluationContextBlock:
             m.get("field_provenance") or {}, what="field_provenance"
         ).items()
     }
+    schema_version = int(m.get("schema_version", 1))
     return EvaluationContextBlock(
         resolved_config=resolved_config_from_dict(
-            _required(m, "resolved_config", what="evaluation_context"), provenance
+            _required(m, "resolved_config", what="evaluation_context"),
+            provenance,
+            gate_schema_version=schema_version,
         ),
-        schema_version=int(m.get("schema_version", 1)),
+        schema_version=schema_version,
         evaluator_version=int(m.get("evaluator_version", 1)),
         identity_algorithm_version=int(m.get("identity_algorithm_version", 1)),
     )

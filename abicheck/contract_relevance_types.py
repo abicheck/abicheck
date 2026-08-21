@@ -320,9 +320,17 @@ CONTRACT_EVIDENCE_SCHEMA_VERSION: int = 1
 """Version of the persisted, policy-independent ``contract_evidence`` block
 (observed provider records, declarations, manifests, raw type graph)."""
 
-EVALUATION_CONTEXT_SCHEMA_VERSION: int = 1
+EVALUATION_CONTEXT_SCHEMA_VERSION: int = 2
 """Version of the persisted ``evaluation_context`` block (the resolved
-``CompatibilityEvaluationConfig`` plus field-level provenance)."""
+``CompatibilityEvaluationConfig`` plus field-level provenance).
+
+Bumped to 2 when ``GateConfig`` gained ``require_complete_analysis``/
+``scope`` (dedup-and-convergence plan, Phase 2 item 1) and
+``contract_context_io.py``'s ``gate`` dict grew the two matching keys: an
+older reader's ``resolved_config_from_dict`` has no code path that
+preserves those keys, so a context persisted under version 2 read by a
+version-1 build would silently drop gate-affecting input rather than fail
+closed the way ADR-049 D6 requires (Codex review, PR #817)."""
 
 DECISION_RECEIPT_SCHEMA_VERSION: int = 1
 """Version of the persisted ``decision_receipt`` block (evaluated roots,
