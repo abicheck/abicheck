@@ -105,6 +105,21 @@ FLAGSHIP_SKILL = "check-abi-compatibility"
 #: workspace contents.
 ALLOWED_TOOLS = ("Bash", "Read", "Glob", "Grep", "Skill")
 
+#: `claude -p`'s own turn ceiling for one run. The G37 Phase 3 pilot found
+#: this was the dominant confound in its own results at the previous value
+#: of 12: 15/48 runs (31%) hit the ceiling with no final answer at all
+#: (`error_max_turns`), and the two arms hit it at very different rates —
+#: 46% of skill runs vs. 17% of baseline runs — because the skill's own
+#: ten-step decision procedure (preflight, compile both sides, `abicheck
+#: compare`, interpret, report) is more turn-hungry than the baseline's
+#: ad-hoc `nm`/`readelf` approach. That asymmetry silently favored
+#: whichever arm finishes faster, not whichever arm answers better — see
+#: `pilot-results/README.md`'s "The confound that dominates this run".
+#: Raised to give real headroom over the pilot's own observed maximum (17,
+#: on both arms) rather than another value close enough to keep truncating
+#: the slower arm; not itself validated against a second pilot yet.
+MAX_TURNS = 40
+
 #: Appended verbatim to every scenario prompt, in both arms.
 #:
 #: G37 D3: the zero-tolerance dimensions grade the *claim*, and a regex over
@@ -811,7 +826,7 @@ def _run_once(
             "-p",
             prompt,
             "--max-turns",
-            "12",
+            str(MAX_TURNS),
             # stream-json, not text: the event stream is what carries which
             # skill activated and which tools ran, so dimension 1 grades an
             # observation rather than an inference from the final prose.

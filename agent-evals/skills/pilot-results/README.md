@@ -152,11 +152,15 @@ python agent-evals/skills/run_skill_eval.py --runs /tmp/skill-eval --json /tmp/g
 
 ## Recommended next steps, in priority order
 
-1. **Raise `--max-turns`** in `runners/claude_code.py` (currently `12`)
-   to a value that lets the actual workflow (compile, compare, report)
-   complete without truncation on both arms, and re-run. This is the
-   single change most likely to change every number above.
-2. Once (1) is done, re-run at a larger repetition count (the G37 plan's
+1. ~~**Raise `--max-turns`**~~ Done (2026-08-21): `runners/claude_code.py`'s
+   `MAX_TURNS` raised from 12 to 40 — real headroom over this pilot's own
+   observed maximum (17, on both arms), not merely a value close enough to
+   keep truncating the slower arm. **Not yet re-run** — every number in
+   this document still reflects the 12-turn pilot until a fresh run
+   confirms the confound is actually gone; don't read the raise itself as
+   having changed anything above.
+2. Re-run the pilot against the new ceiling, then re-run at a larger
+   repetition count (the G37 plan's
    own target range) before drawing any conclusion about skill lift.
 3. Wire dimensions 4/5 to a judge model so the full six-dimension rubric
    is actually scored, not four of six.
