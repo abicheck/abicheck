@@ -180,18 +180,20 @@ class TestResolveHeaderCompileContextHonorsTheFilter:
         with pytest.raises(HeaderCompileContextAmbiguousError):
             resolve_header_compile_context(evidence, [header])
 
+    @pytest.mark.parametrize(
+        ("pick", "macro"), [("a.cpp", "WIDE"), ("b.cpp", "NARROW")]
+    )
     def test_the_filter_resolves_the_ambiguity_to_the_named_unit(
-        self, tmp_path: Path
+        self, tmp_path: Path, pick: str, macro: str
     ) -> None:
         header, evidence = self._two_conflicting_units(tmp_path)
-        for pick, macro in (("a.cpp", "WIDE"), ("b.cpp", "NARROW")):
-            result = resolve_header_compile_context(
-                evidence, [header], source_filter=pick
-            )
-            assert result.context is not None, pick
-            tokens = " ".join(result.context.gcc_option_tokens)
-            assert f"-D{macro}=1" in tokens, (pick, tokens)
-            assert len(result.matched_units) == 1, pick
+        result = resolve_header_compile_context(evidence, [header], source_filter=pick)
+        assert result.context is not None, pick
+        tokens = " ".join(result.context.gcc_option_tokens)
+        # Not merely "one context was chosen" -- the derived flags must be
+        # the *named* unit's, which is the whole point of the filter.
+        assert f"-D{macro}=1" in tokens, (pick, tokens)
+        assert len(result.matched_units) == 1, pick
 
     def test_a_filter_matching_no_unit_leaves_the_resolution_unchanged(
         self, tmp_path: Path
