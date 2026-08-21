@@ -755,10 +755,27 @@ def source_matches_filter(
     CWD-relative path — so an absolute filter matches a relative-``file``
     entry and a relative ``src/libfoo/**`` filter matches an absolute-``file``
     entry.
+
+    A redacted ``CompileUnit`` (``buildsource.redaction.RedactionPolicy``,
+    ADR-032 D7) is a real, common caller shape this must not double-join:
+    both ``source`` and ``directory`` have their shared home prefix replaced
+    with the same placeholder (``~`` by default), so a redacted *file* like
+    ``~/proj/a.cpp`` is *not* :meth:`Path.is_absolute` — the placeholder
+    isn't a root — but it is already anchored under the identically-redacted
+    *directory* (``~/proj``), not a bare relative name that needs joining.
+    Joining it anyway produced ``~/proj/~/proj/a.cpp`` (Codex review, P1),
+    silently matching nothing and falling back to "every compile unit
+    matches". Checked with :meth:`Path.is_relative_to`, which compares path
+    *segments* rather than the filesystem, so it works identically whether
+    *file* is a real relative name (``a.cpp`` is never relative to an
+    unrelated ``directory``, so the ordinary join path is unaffected) or an
+    already-directory-anchored redacted spelling.
     """
     path = Path(file)
     if not path.is_absolute() and directory is not None:
-        path = Path(directory) / path
+        directory_path = Path(directory)
+        if not path.is_relative_to(directory_path):
+            path = directory_path / path
     if fnmatch(str(path), pattern):
         return True
     if directory is not None:

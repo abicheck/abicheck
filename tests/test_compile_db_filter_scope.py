@@ -109,6 +109,23 @@ class TestFilterUnitsBySourceContract:
         assert list(filter_units_by_source([unit], "/w/src/a.cpp")) == [unit]
         assert list(filter_units_by_source([unit], "a.cpp")) == [unit]
 
+    def test_a_redacted_unit_still_matches_its_own_filename(self) -> None:
+        """Codex review, P1: ``CompileDbAdapter`` (ADR-032 D7) redacts both
+        ``source`` and ``directory`` to the identical ``~/...`` placeholder
+        before either ever reaches this predicate. Treating the redacted
+        ``source`` as an ordinary relative name and joining it onto the
+        redacted ``directory`` produced ``~/proj/~/proj/a.cpp`` -- matching
+        nothing, so every unit fell back into the result instead of the
+        filter narrowing to the one named unit.
+        """
+        redacted = _cu("~/proj/a.cpp", directory="~/proj")
+        other = _cu("~/proj/b.cpp", directory="~/proj")
+        assert list(filter_units_by_source([redacted, other], "a.cpp")) == [redacted]
+        assert list(filter_units_by_source([redacted, other], "*/a.cpp")) == [redacted]
+        assert list(filter_units_by_source([redacted, other], "~/proj/a.cpp")) == [
+            redacted
+        ]
+
 
 class TestOneSharedDefinition:
     """The three layers must select the same units for the same filter.
@@ -126,6 +143,9 @@ class TestOneSharedDefinition:
             ("src/a.cpp", "/w", "/w/src/a.cpp", True),  # relative file, abs glob
             ("/w/src/a.cpp", "/w", "src/b.cpp", False),
             ("/w/src/a.cpp", None, "src/a.cpp", False),  # no dir to relativize
+            ("~/proj/a.cpp", "~/proj", "a.cpp", True),  # redacted (ADR-032 D7)
+            ("~/proj/a.cpp", "~/proj", "~/proj/a.cpp", True),  # redacted, full
+            ("~/proj/a.cpp", "~/proj", "b.cpp", False),  # redacted, no match
         ],
     )
     def test_compile_unit_layer_matches_the_shared_predicate(
