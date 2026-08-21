@@ -1056,29 +1056,48 @@ def _language_standard_content_divergence_corroborated(
     ``NOT_COMPARABLE`` either way, whether it turns out to be an upgrade
     artifact or a genuine edit.
 
-    Waived only when: (1) neither side's ``language_standard`` reflects an
-    explicit ``--lang`` (:func:`_language_standard_is_lang_pinned`) -- an
-    explicit, user-pinned language mode that still disagrees between old
-    and new *is* a genuine extraction-configuration difference this gate
-    should keep catching; (2) each side's value is a form the *unpinned*
-    path can actually produce for its own resolved mode
+    Waived only when: (1) neither side's non-empty ``language_standard``
+    reflects an explicit ``--lang`` (:func:`_language_standard_is_lang_pinned`)
+    -- an explicit, user-pinned language mode that still disagrees between
+    old and new *is* a genuine extraction-configuration difference this
+    gate should keep catching; (2) each side's non-empty value is a form
+    the *unpinned* path can actually produce for its own resolved mode
     (:func:`_language_standard_is_known_auto_resolved_form` -- Codex
     review, fresh evidence: an explicit ``-std=gnu11``/``-std=gnu++17``
     given without ``--lang`` is invisible to check (1) and can collide
     exactly with the bare literal the unpinned path produces, so this is a
-    second, independent guard, not a redundant one); and (3) independently
-    corroborated by an exact, non-empty ``compiler_family``/
-    ``compiler_version`` match (plus ``compiler_sha256`` when both sides
-    carry one), mirroring the sibling carve-out's own toolchain-identity
-    check.
+    second, independent guard, not a redundant one); a *bare-empty* value
+    on either side is not itself rejected -- see the code's own comment for
+    why a probe failure there is safe here, unlike for the sibling carve-out;
+    and (3) independently corroborated by an exact, non-empty
+    ``compiler_family``/``compiler_version`` match (plus ``compiler_sha256``
+    when both sides carry one), mirroring the sibling carve-out's own
+    toolchain-identity check.
     """
     old_std = old_fields.get("language_standard", "")
     new_std = new_fields.get("language_standard", "")
-    if not old_std or not new_std or old_std == new_std:
+    if old_std == new_std:
         return False
-    if _language_standard_is_lang_pinned(old_std) or _language_standard_is_lang_pinned(
-        new_std
-    ):
+    # A bare-empty side (real CI failure on a Windows runner: a real g++/
+    # clang++ found on PATH can still reject
+    # dumper_toolchain._probe_default_language_standard's `-E -dM -x <mode>
+    # -` invocation for reasons unrelated to language mode -- the same
+    # fail-open convention every other best-effort toolchain probe in this
+    # codebase already uses) is deliberately NOT excluded here, unlike the
+    # sibling upgrade carve-out's bare-empty-string exclusion just above.
+    # That exclusion exists because the sibling carve-out has no
+    # independent signal for which language mode a bare-empty side
+    # actually resolved to -- but this carve-out already requires
+    # `resolved_lang_mode` (below) to prove the mode switch, computed
+    # entirely independently of whether the probe itself succeeded, so an
+    # empty string here just means "no *edition* evidence for this side",
+    # not "no mode evidence." Each side's own `language_standard_
+    # explicit` provenance (checked further below) still independently
+    # confirms it wasn't a pin, regardless of whether the probe produced a
+    # value.
+    if old_std and _language_standard_is_lang_pinned(old_std):
+        return False
+    if new_std and _language_standard_is_lang_pinned(new_std):
         return False
     old_mode = old.ast_toolchain.get("resolved_lang_mode", "")
     new_mode = new.ast_toolchain.get("resolved_lang_mode", "")
@@ -1090,15 +1109,15 @@ def _language_standard_content_divergence_corroborated(
         or new_mode not in ("c", "c++")
     ):
         return False
-    if not _language_standard_is_known_auto_resolved_form(
-        old_std, old_mode
-    ) or not _language_standard_is_known_auto_resolved_form(new_std, new_mode):
+    if old_std and not _language_standard_is_known_auto_resolved_form(old_std, old_mode):
         # Codex review, fresh evidence: a bare literal that isn't one of the
         # forms the unpinned path can actually produce for its own mode can
         # only have come from an explicit -std=/--std=/std: pin given
         # without --lang -- _language_standard_is_lang_pinned above cannot
         # see that (it only recognizes an explicit lang tag), so this is a
         # separate, necessary guard, not a redundant one.
+        return False
+    if new_std and not _language_standard_is_known_auto_resolved_form(new_std, new_mode):
         return False
     # Codex review, fresh evidence (second round): the check above still
     # cannot tell apart the exact-collision pair -- an explicit

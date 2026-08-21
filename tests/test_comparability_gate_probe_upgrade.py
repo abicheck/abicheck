@@ -695,6 +695,51 @@ def test_gate_content_driven_language_mode_divergence_not_waived_when_provenance
         check_contracts_comparable(old, new)
 
 
+def test_gate_waives_when_probe_failed_on_one_side_but_resolved_lang_mode_still_proves_the_switch():
+    """Real CI failure (Windows integration-tests, PR #816): a real g++/
+    clang++ found on a Windows runner's PATH can still reject
+    dumper_toolchain._probe_default_language_standard's ``-E -dM -x <mode>
+    -`` invocation for reasons unrelated to language mode (confirmed via
+    tests/test_ast_compile_provenance.py::TestProbeDefaultLanguageStandard::
+    test_probes_real_host_compiler_cpp failing on that runner with the
+    probe genuinely returning None) -- ``_resolve_standard_provenance``
+    then records a bare-empty ``language_standard`` for the C++ side,
+    which differs from the C side's always-succeeding forced ``gnu11``
+    literal, and the pre-fix carve-out's own bare-empty exclusion (copied
+    from the sibling upgrade carve-out) declined to waive it, silently
+    reintroducing case66/case69's own ProfileMismatchError on any
+    toolchain where this probe fails.
+
+    Unlike the sibling carve-out, this one has an independent signal for
+    the mode switch (``resolved_lang_mode``, computed regardless of probe
+    success) -- so a bare-empty side here is safe to waive through,
+    provided the mode switch and toolchain identity are still both
+    corroborated normally."""
+    old = _snap(
+        compute_extraction_contract(
+            l2_frontend_ran=True,
+            compiler_family="gnu",
+            compiler_version="13.2.0",
+            language_standard="",  # probe failed for this real g++
+        ),
+        ast_toolchain=_content_ast_toolchain(
+            "c++", producer="castxml", frontend_version="0.6.11", host_version="13.2.0"
+        ),
+    )
+    new = _snap(
+        compute_extraction_contract(
+            l2_frontend_ran=True,
+            compiler_family="gnu",
+            compiler_version="13.2.0",
+            language_standard="gnu11",  # forced literal, never needs the probe
+        ),
+        ast_toolchain=_content_ast_toolchain(
+            "c", producer="castxml", frontend_version="0.6.11", host_version="13.2.0"
+        ),
+    )
+    check_contracts_comparable(old, new)  # must not raise
+
+
 def test_gate_content_driven_language_mode_divergence_still_raises_when_compiler_family_differs():
     """The new carve-out must not blindly waive every non-empty
     language_standard pair -- only when the resolved compiler itself is
