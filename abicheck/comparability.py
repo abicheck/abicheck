@@ -987,31 +987,41 @@ def _compiler_version_sans_driver_name(version: str) -> str:
 
 def _compiler_install_dir(ast_toolchain: dict[str, str]) -> str:
     """The resolved host compiler's own directory (``compiler_realpath``,
-    falling back to ``compiler_selected``) -- proof of one toolchain
-    install, not just a similar version string. ``PureWindowsPath`` (accepts
-    ``/`` and ``\\``), not the platform-dependent ``Path``: a persisted path
-    was captured on whichever OS produced it and may be compared elsewhere."""
+    falling back to ``compiler_selected``) -- proof of one toolchain install.
+    ``PureWindowsPath`` (accepts ``/``/``\\``), not the platform-dependent
+    ``Path``: a persisted path was captured on whichever OS produced it."""
     path = ast_toolchain.get("compiler_realpath") or ast_toolchain.get(
         "compiler_selected", ""
     )
     return str(PureWindowsPath(path).parent) if path else ""
 
 
+def _driver_prefix(word: str, bare: str, suffix: str) -> str | None:
+    """*word*'s cross-compile prefix if it's a ``bare``/``*-suffix`` driver
+    name (``""`` for the bare form), else ``None``."""
+    if word == bare:
+        return ""
+    return word[: -len(suffix)] if word.endswith(suffix) else None
+
+
 def _is_gcc_gxx_driver_pair(old_version: str, new_version: str) -> bool:
     """Whether each banner's leading token is genuinely a C vs. C++ driver
-    name (``gcc``/``cc`` vs. ``g++``/``c++``), not merely two words whose
-    stripped remainders coincidentally match (Codex review)."""
-
+    from the *same* toolchain -- not just two words separately matching
+    ``gcc``/``g++`` by suffix (Codex review, fresh evidence, fourth round):
+    ``vendor-a-g++``/``vendor-b-gcc`` both end in a recognized suffix but
+    are two unrelated builds, so the two sides' cross-compile *prefixes*
+    (``""`` for a bare ``gcc``/``g++``) must also match."""
     if not old_version or not new_version:
         return False
     # MinGW banners lead with "gcc.exe"/"g++.exe" -- strip the suffix first.
     old_word = old_version.split(None, 1)[0].lower().removesuffix(".exe")
     new_word = new_version.split(None, 1)[0].lower().removesuffix(".exe")
-    old_is_c = old_word == "cc" or old_word.endswith("gcc")
-    old_is_cxx = old_word == "c++" or old_word.endswith("g++")
-    new_is_c = new_word == "cc" or new_word.endswith("gcc")
-    new_is_cxx = new_word == "c++" or new_word.endswith("g++")
-    return (old_is_c and new_is_cxx) or (old_is_cxx and new_is_c)
+    dp = _driver_prefix
+    old_c, old_cxx = dp(old_word, "cc", "gcc"), dp(old_word, "c++", "g++")
+    new_c, new_cxx = dp(new_word, "cc", "gcc"), dp(new_word, "c++", "g++")
+    return (old_c is not None and old_c == new_cxx) or (
+        old_cxx is not None and old_cxx == new_c
+    )
 
 
 def _language_standard_content_divergence_corroborated(
@@ -1031,18 +1041,16 @@ def _language_standard_content_divergence_corroborated(
     :func:`dumper_toolchain._resolve_force_cpp` decides the parse language
     purely from each side's own header *content* -- losing an ``extern
     "C"`` wrapper (case66) or gaining a C++-only construct (case69) is a
-    real, ABI-relevant edit. Under an identical toolchain, the resulting
-    ``language_standard`` divergence is therefore not evidence of a
-    different extraction *environment* (ADR-050 D1/D2) -- it is evidence
-    the library's own headers changed, real signal for the dedicated
-    detectors that already operate independently of header language mode
-    to report, not a reason to refuse the comparison outright.
+    real, ABI-relevant edit, not evidence of a different extraction
+    *environment* (ADR-050 D1/D2) under an identical, corroborated
+    toolchain -- real signal for the dedicated detectors to report, not a
+    reason to refuse the comparison outright.
 
     **Scoped to a genuine mode switch (``c`` <-> ``c++``), not merely a
     differing edition within the same mode** (pinned by
     ``test_dumper_contract_wiring.py::
     test_cpp20_heuristic_forced_standard_flows_into_profile_fingerprint``):
-    two header sets that both parse as C++ but resolve to a different
+    two header sets both parsed as C++ but resolving to a different
     *edition* purely because ``force_cpp20`` fires on only one side are
     still genuinely different dialects. Checked via
     ``AbiSnapshot.ast_toolchain["resolved_lang_mode"]``
@@ -1050,30 +1058,26 @@ def _language_standard_content_divergence_corroborated(
     ``language_standard`` string shape.
 
     Waived only when: (1) neither side's non-empty ``language_standard``
-    reflects an explicit ``--lang`` (:func:`_language_standard_is_lang_pinned`)
-    -- a pinned mode that still disagrees *is* a genuine configuration
-    difference; (2) each side's non-empty value is a form the *unpinned*
-    path can actually produce for its own mode
+    reflects an explicit ``--lang`` (:func:`_language_standard_is_lang_pinned`);
+    (2) each side's non-empty value is a form the *unpinned* path can
+    actually produce for its own mode
     (:func:`_language_standard_is_known_auto_resolved_form` -- an explicit
-    ``-std=gnu11``/``-std=gnu++17`` given without ``--lang`` is invisible
-    to check (1) and can collide with the unpinned path's own literal); a
-    *bare-empty* value is not itself rejected (see the code's own comment
-    for why); and (3) corroborated by matching ``compiler_family``/
-    ``producer``/frontend ``version``, a driver-name-normalized
-    ``compiler_version``, and ``compiler_sha256`` -- skipped only for the
-    corroborated castxml gcc/g++ pair sharing one install directory and one
-    ``compiler_target_triple`` (see the code's own comment).
+    ``-std=gnu11``/``-std=gnu++17`` given without ``--lang`` collides with
+    the unpinned path's own literal, so check (1) alone can't see it); and
+    (3) corroborated by matching ``compiler_family``/``producer``/frontend
+    ``version``, a driver-name-normalized ``compiler_version``, and
+    ``compiler_sha256`` -- skipped only for a corroborated castxml gcc/g++
+    pair sharing one install dir and ``compiler_target_triple`` (see code).
     """
     old_std = old_fields.get("language_standard", "")
     new_std = new_fields.get("language_standard", "")
     if old_std == new_std:
         return False
-    # A bare-empty side (real CI failure on Windows: the probe can reject
-    # for reasons unrelated to language mode) is deliberately NOT excluded
-    # here, unlike the sibling carve-out: this one already requires
-    # `resolved_lang_mode` (below) to prove the mode switch regardless of
-    # probe success, and `language_standard_explicit` (checked below)
-    # still confirms it wasn't a pin either way.
+    # A bare-empty side (the probe can reject for reasons unrelated to
+    # language mode -- real Windows CI failure) is deliberately not
+    # excluded, unlike the sibling carve-out: `resolved_lang_mode` below
+    # already proves the mode switch regardless of probe success, and
+    # `language_standard_explicit` confirms it wasn't a pin either way.
     if old_std and _language_standard_is_lang_pinned(old_std):
         return False
     if new_std and _language_standard_is_lang_pinned(new_std):
@@ -1143,17 +1147,14 @@ def _language_standard_content_divergence_corroborated(
     ) != _compiler_version_sans_driver_name(new_host_version):
         # castxml resolves a separate host-compiler binary per side
         # ("gcc"/"g++"), differing only in that leading word under one
-        # unchanged toolchain (direct-clang invokes the same binary either
-        # way). A real cross-version skew still differs in the remainder.
+        # unchanged toolchain; a real cross-version skew still differs.
         return False
-    # sha256 skipped only for: castxml, gnu, a real gcc/g++ pair, same
-    # install dir, AND (Codex review, third round) the same
-    # compiler_target_triple -- an install dir alone still accepts two
-    # unrelated cross-compilers side by side (aarch64-linux-gnu-g++ vs.
-    # x86_64-linux-gnu-gcc) that can share a version-suffix banner while
-    # targeting genuinely different architectures. Missing on either side
-    # (a best-effort probe -- see _tool_target_triple) fails this leg
-    # closed, not "unknown treated as same".
+    # sha256 skipped only for: castxml, gnu, a real same-toolchain gcc/g++
+    # pair (_is_gcc_gxx_driver_pair), same install dir, AND the same
+    # compiler_target_triple -- dir and driver names alone still accept two
+    # unrelated cross-compilers side by side sharing a version-suffix
+    # banner but targeting different architectures. Missing on either side
+    # (a best-effort probe) fails this leg closed, not "unknown = same".
     old_dir = _compiler_install_dir(old.ast_toolchain)
     new_dir = _compiler_install_dir(new.ast_toolchain)
     old_triple = old.ast_toolchain.get("compiler_target_triple", "")

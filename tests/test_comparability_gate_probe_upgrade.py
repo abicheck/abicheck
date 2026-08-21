@@ -880,6 +880,54 @@ def test_gate_content_driven_still_raises_for_mismatched_cross_compiler_targets(
         check_contracts_comparable(old, new)
 
 
+def test_gate_content_driven_still_raises_for_mismatched_driver_vendor_prefixes():
+    """Codex review, fresh evidence (P2, fifth round): even a matching
+    install dir and target triple isn't sufficient -- two unrelated
+    GNU-compatible driver sets installed side by side for the *same*
+    target (`vendor-a-g++`/`vendor-b-gcc`) both end in a recognized
+    suffix, so the old endswith()-only check accepted them as a driver
+    pair despite being different builds. `_is_gcc_gxx_driver_pair` must
+    also require the two sides' cross-compile prefixes to match."""
+    old = _snap(
+        compute_extraction_contract(
+            l2_frontend_ran=True,
+            compiler_family="gnu",
+            compiler_version="13.3.0",
+            language_standard="probed:__cplusplus=201703L",
+        ),
+        ast_toolchain=_content_ast_toolchain(
+            "c++",
+            producer="castxml",
+            frontend_version="0.6.11",
+            host_version="vendor-a-g++ (Custom Build) 13.3.0",
+            compiler_sha256="a" * 64,
+            compiler_selected="/usr/bin/vendor-a-g++",
+            compiler_realpath="/usr/bin/vendor-a-g++",
+            compiler_target_triple="x86_64-linux-gnu",
+        ),
+    )
+    new = _snap(
+        compute_extraction_contract(
+            l2_frontend_ran=True,
+            compiler_family="gnu",
+            compiler_version="13.3.0",
+            language_standard="gnu11",
+        ),
+        ast_toolchain=_content_ast_toolchain(
+            "c",
+            producer="castxml",
+            frontend_version="0.6.11",
+            host_version="vendor-b-gcc (Custom Build) 13.3.0",
+            compiler_sha256="b" * 64,
+            compiler_selected="/usr/bin/vendor-b-gcc",
+            compiler_realpath="/usr/bin/vendor-b-gcc",
+            compiler_target_triple="x86_64-linux-gnu",
+        ),
+    )
+    with pytest.raises(ProfileMismatchError):
+        check_contracts_comparable(old, new)
+
+
 def test_gate_content_driven_still_raises_when_producer_differs():
     """A castxml-produced snapshot compared against a direct-clang-produced
     one is a genuinely different extraction mechanism, not merely a
