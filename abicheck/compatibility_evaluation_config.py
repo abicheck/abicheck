@@ -783,6 +783,51 @@ class CompatibilityPolicyConfig:
         object.__setattr__(self, "overrides", _frozen_mapping(self.overrides))
 
 
+#: Valid :attr:`ScopedGateSelection.kind` values -- the two ADR-043
+#: scoped-gate mechanisms, mutually exclusive per invocation (see
+#: ``cli_compare_helpers._apply_scoped_gating``'s own docstring).
+_VALID_GATE_SCOPE_KINDS = frozenset({"used_by", "required_symbol"})
+
+
+@dataclass(frozen=True)
+class ScopedGateSelection:
+    """ADR-043's scoped-gate selection (``--used-by``/``--required-symbol``),
+    typed to match the encoding :func:`~abicheck.effective_config_digest.
+    _gate_scope_str` already established informally (duplication-and-
+    convergence plan, Phase 2 item 1's scoping finding -- this is the
+    "genuinely new" type that finding identified as missing).
+
+    ``kind`` names which mechanism selected this scope; ``targets`` is the
+    resolved target identity list -- consumer app *paths* for
+    ``"used_by"`` (one per ``--used-by`` argument), required entrypoint
+    *symbol names* for ``"required_symbol"``. Order is preserved as given
+    (not canonicalized/sorted the way ``GateConfig.packs`` is), matching
+    ``_frozen_tuple``'s "order is itself part of what identity means" rule
+    -- a caller wanting a stable digest key sorts at digest-computation
+    time (see ``_gate_scope_str``'s own ``sorted(...)`` call), not here.
+
+    Carries the same known, deliberate limitation
+    :func:`~abicheck.effective_config_digest._gate_scope_str` already
+    documents: a ``used_by`` target identifies its consumer only by path,
+    not content, so a binary rebuilt in place between two runs can select
+    a genuinely different finding set while this object stays equal. Not
+    re-solved here -- see that function's own docstring for why.
+    """
+
+    kind: str
+    targets: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        if self.kind not in _VALID_GATE_SCOPE_KINDS:
+            raise ValueError(
+                f"ScopedGateSelection.kind must be one of "
+                f"{sorted(_VALID_GATE_SCOPE_KINDS)}, got {self.kind!r}"
+            )
+        object.__setattr__(
+            self, "targets", _frozen_tuple(self.targets, element_type=str)
+        )
+
+
 @dataclass(frozen=True)
 class GateConfig:
     """What blocks CI (ADR-049 D8) -- ``NOT_APPLICABLE`` to contract membership.
@@ -797,12 +842,28 @@ class GateConfig:
     reaches this *effective*, already-resolved configuration that choice
     must already be made (see ``cli.py``'s ``_announce_exit_scheme``: "auto
     already resolved to legacy or severity by the time we get here").
+
+    ``require_complete_analysis``/``scope`` (duplication-and-convergence
+    plan, Phase 2 item 1's scoping finding): two more gate-affecting inputs
+    that, before this, had no typed home at all -- ``require_complete_
+    analysis`` was threaded as a raw ``bool`` through ~15+ independent
+    function signatures (``cli.py``, ``cli_compare_helpers.py``,
+    ``cli_compare_options.py``), and a scoped-gate selection had none
+    (see :class:`ScopedGateSelection`). Added here, additively, so every
+    existing constructor of this frozen dataclass keeps working unchanged
+    (both new fields default to "no effect"). This is deliberately *not*
+    yet wired to those raw call sites or to a resolver that builds one of
+    these objects from real CLI/API input -- see this module's own
+    docstring ("no front end constructs one of these objects yet") and the
+    plan doc's Phase 2 item 1 for what's still open.
     """
 
     exit_code_scheme: str = "severity"
     preset: ImmutableIdentity | None = None
     packs: tuple[ImmutableIdentity, ...] = ()
     severity: SeverityConfig = field(default_factory=SeverityConfig)
+    require_complete_analysis: bool = False
+    scope: ScopedGateSelection | None = None
 
     def __post_init__(self) -> None:
         if self.exit_code_scheme not in _VALID_EXIT_CODE_SCHEMES:
@@ -826,6 +887,16 @@ class GateConfig:
                 "could otherwise pass a raw mapping/string through to a "
                 "config that downstream gate evaluation expects to call "
                 "level_for_kind()/has_errors() on."
+            )
+        if not isinstance(self.require_complete_analysis, bool):
+            raise TypeError(
+                "GateConfig.require_complete_analysis must be a bool, not "
+                f"{self.require_complete_analysis!r}"
+            )
+        if self.scope is not None and not isinstance(self.scope, ScopedGateSelection):
+            raise TypeError(
+                "GateConfig.scope must be a ScopedGateSelection or None, not "
+                f"{self.scope!r}"
             )
         object.__setattr__(
             self,

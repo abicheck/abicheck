@@ -1171,9 +1171,10 @@ performance duplication (redundant inferred build queries).
 
 ### Phase 2 — Make resolved configuration the runtime contract
 
-1. **Not yet started; item 1's own target shape needs re-scoping before any
-   code lands — recorded here rather than guessed at, per this plan's own
-   "known gaps over risky reactive patches" convention (AGENTS.md).**
+1. **Started.** Item 1's own target shape needed re-scoping before any code
+   could land — recorded below rather than guessed at, per this plan's own
+   "known gaps over risky reactive patches" convention (AGENTS.md), and the
+   first slice of the corrected scope has since landed.
    Investigating item 1 (introduce `EffectiveEvaluationConfig`) against the
    actual codebase — not just this document's own sketch — found the
    target shape overlaps far more with an *already-existing* object than
@@ -1199,34 +1200,66 @@ performance duplication (redundant inferred build queries).
    eliminate, and directly contradicts the file it sits in a few lines
    below its own sketch.
 
-   **What's genuinely missing from `CompatibilityEvaluationConfig` today,
-   confirmed by grep rather than assumed:** (a) `GateConfig` has no
+   **What was genuinely missing from `CompatibilityEvaluationConfig`,
+   confirmed by grep rather than assumed:** (a) `GateConfig` had no
    `require_complete_analysis` field — that flag is threaded as a raw
    `bool` through a long, independent chain of function signatures
    (`cli.py`, `cli_compare_helpers.py`, `cli_compare_options.py`, ~15+ call
    sites) with no typed home at all; (b) no `scope`
    field for ADR-043's `--used-by`/`--required-symbol` scoped-gate
-   selection either, and there is no existing `ScopedGateSelection`-shaped
+   selection either, and there was no existing `ScopedGateSelection`-shaped
    type anywhere in the codebase to reuse — representing that scope
    correctly (a real union of "no scope" / "used-by consumer" /
    "required-symbol entrypoint", each carrying its own resolved target
-   list) is its own small design question, not a one-line addition; (c) no
+   list) needed its own small design pass, not a one-line addition; (c) no
    whole-object `digest` field or method — `effective_config_digest.py`
    already computes one, but as an external function over a *two-tier*
    input (`DiffResult`'s own fields, only reading a
    `CompatibilityEvaluationConfig` when one happens to be attached under
    `--contract`/`--pack`), not a method on this object; and (d) — the
-   deepest gap — `CompatibilityEvaluationConfig` is deliberately *opt-in*
-   today (built only when `--contract`/`--pack` selected something,
-   documented as an explicit ADR-049 Phase 1-6 design choice in both that
-   module's docstring and `effective_config_digest.py`'s own "two tiers"
-   docstring), while this phase's whole point is a runtime contract
-   resolved for *every* comparison unconditionally.
+   deepest gap, still open — `CompatibilityEvaluationConfig` is
+   deliberately *opt-in* today (built only when `--contract`/`--pack`
+   selected something, documented as an explicit ADR-049 Phase 1-6 design
+   choice in both that module's docstring and `effective_config_digest.py`'s
+   own "two tiers" docstring), while this phase's whole point is a runtime
+   contract resolved for *every* comparison unconditionally.
 
-   **The right re-scoping for item 1** (not yet attempted) is additive to
-   the existing object rather than a parallel one: extend `GateConfig` with
-   `require_complete_analysis`/`scope` (needs the `ScopedGateSelection`
-   design question above resolved first), add a `digest` computation onto
+   **First slice landed: (a) and (b), additively.** `GateConfig` gained
+   `require_complete_analysis: bool = False` and
+   `scope: ScopedGateSelection | None = None`, both defaulting to "no
+   effect" so every existing zero/keyword-arg `GateConfig(...)` constructor
+   (`compatibility_evaluation_frontend.py`, `contract_context.py`,
+   `contract_context_io.py`) keeps working unchanged — confirmed by the
+   full existing test suite for this module passing unmodified (153 tests)
+   plus the broader compatibility-evaluation/digest/pack/contract-context
+   suites (1224 tests). `ScopedGateSelection` is a new frozen dataclass in
+   the same module (`kind: str` validated against `{"used_by",
+   "required_symbol"}`, `targets: tuple[str, ...]`), typed to match the
+   encoding `effective_config_digest._gate_scope_str` had already
+   established informally (reading `DiffResult.gate_scope`/`used_by`/
+   `required_symbols` and JSON-encoding `{"kind": ..., "targets": ...}`) —
+   this new type doesn't invent a shape, it names one that already existed
+   as an untyped convention in one function. New test classes
+   (`TestGateConfigRequireCompleteAnalysisAndScope`,
+   `TestScopedGateSelection`) in `tests/test_compatibility_evaluation_
+   config.py` cover both fields' defaults, validation, and (for
+   `ScopedGateSelection`) frozen/equality/order-preservation semantics.
+
+   **Deliberately not yet done, in this slice:** neither field is wired to
+   anything yet — no resolver reads the raw `require_complete_analysis`
+   bool or the raw `used_by_apps`/`required_symbols` tuples
+   (`cli_compare_helpers._apply_scoped_gating`) and constructs a
+   `ScopedGateSelection`/populates `GateConfig.scope` from them; the ~15+
+   raw-bool call sites are untouched. That wiring is real, separate work —
+   it's exactly what items 2-6 below need to do anyway (`compare`/`scan`
+   *resolving* this object, not merely consuming one that happens to
+   exist), so doing it here piecemeal, ahead of a real resolver, would mean
+   redoing it once that resolver lands. (c) (the `digest` computation) and
+   (d) (making resolution unconditional) remain fully open — the latter is
+   the deepest and largest remaining piece, described next.
+
+   **The right further scoping for item 1** is additive to the existing
+   object rather than a parallel one: add a `digest` computation onto
    `CompatibilityEvaluationConfig` itself (folding in
    `effective_config_digest.py`'s existing hashing logic rather than
    duplicating it), and make resolving one *unconditional* for every

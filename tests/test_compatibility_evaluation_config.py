@@ -33,6 +33,7 @@ from abicheck.compatibility_evaluation_config import (
     EvidenceProviderRequirement,
     GateConfig,
     ImmutableIdentity,
+    ScopedGateSelection,
     SelectedByEntry,
     SuppressionConfig,
     SurfaceConfig,
@@ -838,6 +839,90 @@ class TestGateConfigExitCodeScheme:
         # inside _pack_sort_key during canonicalization.
         with pytest.raises(TypeError, match="ImmutableIdentity"):
             GateConfig(packs=("strict_gate_pack",))
+
+
+class TestGateConfigRequireCompleteAnalysisAndScope:
+    # Phase 2 item 1's scoping finding (duplication-and-convergence plan):
+    # additive fields closing two gate-affecting inputs that previously had
+    # no typed home at all -- require_complete_analysis (a raw bool threaded
+    # through ~15+ function signatures) and scope (ADR-043's
+    # --used-by/--required-symbol selection, previously untyped anywhere).
+    def test_require_complete_analysis_defaults_false(self):
+        assert GateConfig().require_complete_analysis is False
+
+    def test_require_complete_analysis_is_settable(self):
+        assert GateConfig(require_complete_analysis=True).require_complete_analysis is True
+
+    def test_require_complete_analysis_rejects_non_bool(self):
+        with pytest.raises(TypeError, match="require_complete_analysis"):
+            GateConfig(require_complete_analysis="true")  # type: ignore[arg-type]
+
+    def test_scope_defaults_none(self):
+        assert GateConfig().scope is None
+
+    def test_scope_accepts_a_real_scoped_gate_selection(self):
+        scope = ScopedGateSelection(kind="used_by", targets=("/opt/app",))
+        assert GateConfig(scope=scope).scope == scope
+
+    def test_scope_rejects_a_raw_string(self):
+        with pytest.raises(TypeError, match=r"GateConfig\.scope"):
+            GateConfig(scope="used_by")  # type: ignore[arg-type]
+
+    def test_existing_zero_arg_construction_still_works(self):
+        # The additive-fields contract this class exists to prove: every
+        # pre-existing GateConfig() call site (compatibility_evaluation_
+        # frontend.py, contract_context.py, contract_context_io.py) keeps
+        # working unchanged.
+        gate = GateConfig()
+        assert gate.require_complete_analysis is False
+        assert gate.scope is None
+
+
+class TestScopedGateSelection:
+    def test_used_by_kind_is_accepted(self):
+        scope = ScopedGateSelection(kind="used_by", targets=("/opt/app1", "/opt/app2"))
+        assert scope.kind == "used_by"
+        assert scope.targets == ("/opt/app1", "/opt/app2")
+
+    def test_required_symbol_kind_is_accepted(self):
+        scope = ScopedGateSelection(kind="required_symbol", targets=("plugin_init",))
+        assert scope.kind == "required_symbol"
+
+    def test_default_targets_is_empty_tuple(self):
+        assert ScopedGateSelection(kind="used_by").targets == ()
+
+    def test_invalid_kind_is_rejected(self):
+        with pytest.raises(ValueError, match="ScopedGateSelection.kind"):
+            ScopedGateSelection(kind="everything")
+
+    def test_order_is_preserved_not_sorted(self):
+        # Unlike GateConfig.packs (a _canonical_tuple), targets keeps
+        # caller-given order -- a digest consumer sorts at digest time
+        # (effective_config_digest._gate_scope_str), not here.
+        scope = ScopedGateSelection(kind="used_by", targets=("/z", "/a"))
+        assert scope.targets == ("/z", "/a")
+
+    def test_non_string_target_is_rejected(self):
+        with pytest.raises(TypeError, match="str"):
+            ScopedGateSelection(kind="used_by", targets=(1, 2))  # type: ignore[arg-type]
+
+    def test_bare_string_targets_is_rejected(self):
+        # _frozen_tuple's own str/bytes guard: passing a bare path string
+        # would otherwise silently iterate into individual characters.
+        with pytest.raises(TypeError, match="bare"):
+            ScopedGateSelection(kind="used_by", targets="/opt/app")  # type: ignore[arg-type]
+
+    def test_is_frozen(self):
+        scope = ScopedGateSelection(kind="used_by", targets=("/opt/app",))
+        with pytest.raises(dataclasses.FrozenInstanceError):
+            scope.kind = "required_symbol"  # type: ignore[misc]
+
+    def test_equality(self):
+        a = ScopedGateSelection(kind="used_by", targets=("/opt/app",))
+        b = ScopedGateSelection(kind="used_by", targets=("/opt/app",))
+        c = ScopedGateSelection(kind="used_by", targets=("/opt/other",))
+        assert a == b
+        assert a != c
 
 
 class TestDigestedItems:
