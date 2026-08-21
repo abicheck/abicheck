@@ -43,8 +43,8 @@ from . import claim as claim_mod, evidence as ev
 #: key the agent CLI happens to carry it under. ADR-058's 2026-08-20
 #: portfolio-reset amendment reduced the portfolio from four skills to one
 #: (`native-binary-compatibility-review` renamed to
-#: `review-native-library-change`); the other three are no longer published.
-KNOWN_SKILLS = ("review-native-library-change",)
+#: `check-abi-compatibility`); the other three are no longer published.
+KNOWN_SKILLS = ("check-abi-compatibility",)
 
 
 @dataclass

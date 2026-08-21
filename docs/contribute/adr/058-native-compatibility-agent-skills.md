@@ -3,7 +3,7 @@
 **Date:** 2026-08-09
 **Status:** Accepted — partially implemented. G36 P0.1–P0.3 and P0.6–P0.9
 have landed: `skills-src/` with its `SKILL.md` file(s) — four originally,
-reduced to one (`review-native-library-change`) by the 2026-08-20 portfolio
+reduced to one (`check-abi-compatibility`) by the 2026-08-20 portfolio
 reset amendment below — and Layer-B
 fragments, `scripts/gen_agent_skills.py` generating the three publication
 trees (`.agents/skills/`, `.claude/skills/`, `.gemini/skills/`), AI-readiness
@@ -16,7 +16,8 @@ against the examples corpus, cross-agent validation, and public publication
 channels), none of which have run yet. See
 [G36](../plans/g36-native-compatibility-agent-skills.md) for phase-by-phase
 status. **The published portfolio was reset to one skill as of the
-2026-08-20 amendment below**: `review-native-library-change` (renamed from
+2026-08-20 amendment below**: `check-abi-compatibility` (renamed from
+`review-native-library-change`, itself renamed from
 `native-binary-compatibility-review`) is the sole published skill and an
 internal candidate, not yet validated and not for external publication; the
 other three skills the 2026-08-11 amendment had demoted to prototype status
@@ -27,8 +28,10 @@ integrated named-consumer branch, a narrowed v0.1 validated scope, and a
 structured decision-report contract mapped onto abicheck's real `Verdict`
 values. Still an unvalidated internal candidate — the rewrite changes what
 the skill claims to cover, not its evaluation status; PR 3 (a complete G37
-evaluation corpus and an actual run) and PR 4 (external publication) remain
-open.
+evaluation corpus and an actual run) is in progress, PR 3.5 (below) renamed
+the skill to its final, user-outcome-framed id and recorded the intended
+external-distribution shape, and PR 4 (actually building that distribution
+package) remains open.
 **Decision maker:** (pending — recorded per repository convention)
 
 > **Amendment (2026-08-20, portfolio reset to one internal candidate).**
@@ -190,6 +193,57 @@ open.
 > rewritten branch structure is PR 3's job, not this one's.
 > `skills-src/CLAUDE.md`'s portfolio-status section carries a matching
 > summary of what is now integrated versus still open.
+
+> **Amendment (2026-08-20, PR 3.5 — rename to `check-abi-compatibility`,
+> and the intended shape for PR 4).** Two findings, independent of each
+> other, prompted this amendment while PR 3 (the G37 evaluation corpus and
+> pilot run) was still in progress.
+> **Rename.** `review-native-library-change` names the mechanism (a diff
+> review) rather than the question a user actually has ("will this release
+> break the people already using my library, and is it safe to ship").
+> That mismatch matters for a *discoverable* skill specifically: activation
+> is by description, but a name that reads as an internal implementation
+> step rather than a restatement of the user's own problem is a worse
+> anchor for the reader (human or agent) deciding whether this skill
+> applies to what they are asking. **Decision:** rename the skill (again)
+> to `check-abi-compatibility` — directory, `name:` frontmatter, every
+> internal cross-reference, and every reference in `agent-evals/skills/`,
+> `tests/`, and this document. Purely a naming change: the `description:`
+> field, the workflow content the PR 2 amendment rewrote, and the v0.1
+> validated scope are all unchanged by this amendment. The full chain is
+> now `native-binary-compatibility-review` → `review-native-library-change`
+> (2026-08-20 portfolio reset) → `check-abi-compatibility` (this
+> amendment) — each historical amendment above keeps the name that was
+> actually in effect when it was written; only this amendment and the
+> **Status** block at the top of this document use the current name.
+> **The intended shape for PR 4.** Separately, a review of the still-open
+> "PR 4 (a thin external-distribution repository)" plan questioned whether
+> a *separate* repository is the right shape at all: this repository is
+> already the source of truth for `skills-src/` and the one skill that
+> exists, and forking that into a second repo purely for distribution adds
+> a second place for the skill's identity to drift from its source, with
+> no benefit over publishing directly from here. **Decision (design intent
+> only — not implemented by this amendment):** PR 4's actual deliverable
+> is an npm package published *from this repository* (a `package.json` +
+> installer script, likely under a new top-level directory rather than
+> inside `skills-src/` itself, so the hand-authored skill source and its
+> distribution packaging stay clearly separate concerns) that `npx
+> <package-name>` can run to install `check-abi-compatibility` into a
+> target project's own skill directory (`.claude/skills/`, or whichever
+> the invoking tool expects) — without requiring the target project to
+> clone this repository or vendor its generated trees. This does not by
+> itself decide whether `.agents/skills/`, `.claude/skills/`, and
+> `.gemini/skills/` stay committed in *this* repository once that path
+> exists: they currently serve this repository's own dogfooding (the eval
+> harness installs the skill arm from `.claude/skills/` today) and PR 4's
+> own design has not yet weighed removing them against keeping them as an
+> additional, git-clone-based distribution channel alongside the npm one —
+> that is PR 4's decision to make when it is actually built, not this
+> amendment's. **What this amendment does not claim:** no package.json,
+> installer script, or npm publish exists yet; PR 4 remains fully open;
+> and the skill remains the internal candidate the 2026-08-20 reset
+> designated — a rename and a design note change neither its evaluation
+> status nor its publication status.
 
 > **Amendment (2026-08-11, flagship-first portfolio freeze — superseded by
 > the 2026-08-20 amendment above).** A strategy
@@ -361,7 +415,7 @@ phrasings were written, 1–4 mapped directly onto the four P0 skills
 candidates (Decision → Skill admission criteria) — real jobs, not yet
 admitted for lack of validated usage evidence. **Since the 2026-08-20
 portfolio-reset amendment above**, phrasings 1, 4, and 5 are all claimed by
-the sole surviving skill, `review-native-library-change` (4's
+the sole surviving skill, `check-abi-compatibility` (4's
 named-consumer scoping was absorbed via `--used-by`/`--required-symbol`,
 not dropped — see that amendment); 2 and 3 are currently unclaimed, tracked
 as future scope for that same skill and for a distinct future second skill

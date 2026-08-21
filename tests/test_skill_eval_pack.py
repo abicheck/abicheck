@@ -172,7 +172,7 @@ def test_scenario_digest_covers_the_ground_truth_entry() -> None:
     scenario = {
         "id": "removed-export",
         "category": "A",
-        "skill": "review-native-library-change",
+        "skill": "check-abi-compatibility",
         "status": "ready",
         "case": "case01_symbol_removal",
     }
@@ -367,7 +367,7 @@ def test_every_hash_maps_to_a_skill(pack: dict[str, Any]) -> None:
 @pytest.mark.parametrize(
     "path",
     [
-        ".agents/skills/review-native-library-change/SKILL.md",
+        ".agents/skills/check-abi-compatibility/SKILL.md",
         "agent-evals/skills/scenarios.yaml",
         "examples/ground_truth.json",
         "examples/case01_symbol_removal/old.h",
@@ -390,7 +390,7 @@ def test_an_unrouted_input_is_reported(pack: dict[str, Any]) -> None:
 
 
 #: One file every synthetic bundle claims to have read.
-SKILL_READ = ".agents/skills/review-native-library-change/SKILL.md"
+SKILL_READ = ".agents/skills/check-abi-compatibility/SKILL.md"
 
 
 def _observed(rel_path: str) -> dict[str, str]:
@@ -410,7 +410,7 @@ def _observed(rel_path: str) -> dict[str, str]:
 
 
 def _bundle(pack: dict[str, Any], **overrides: Any) -> dict[str, Any]:
-    skill = "review-native-library-change"
+    skill = "check-abi-compatibility"
     scenario = "removed-export"
     hashes = {
         "skill_tree": pack["skills"][skill]["tree"],
@@ -440,7 +440,7 @@ def _bundle(pack: dict[str, Any], **overrides: Any) -> dict[str, Any]:
 def _write_bundle(tmp_path: Path, bundle: dict[str, Any]) -> Path:
     meta = (
         tmp_path
-        / "review-native-library-change"
+        / "check-abi-compatibility"
         / "removed-export"
         / "0"
         / "meta.json"
@@ -480,7 +480,7 @@ def test_a_stale_skill_tree_hash_fails(
     assert "stale" in out
     # The failure nominates what to re-run — a check that rejects evidence
     # without naming its replacement is the deadlock D6 states as an invariant.
-    assert "review-native-library-change" in out
+    assert "check-abi-compatibility" in out
 
 
 @pytest.mark.parametrize(

@@ -52,7 +52,7 @@ shim = _load_script(EVAL_DIR / "shim" / "abicheck", "skill_eval_shim")
 runner = _load_script(EVAL_DIR / "runners" / "claude_code.py", "skill_eval_runner")
 
 SCENARIO_BREAKING = {
-    "skill": "review-native-library-change",
+    "skill": "check-abi-compatibility",
     "expected": {"verdict": "BREAKING"},
 }
 
@@ -187,10 +187,10 @@ class TestRunnerTreatment:
             {
                 "type": "system",
                 "subtype": "init",
-                "skills": ["pdf", "review-native-library-change"],
+                "skills": ["pdf", "check-abi-compatibility"],
             }
         ]
-        assert runner.visible_native_skills(events) == ["review-native-library-change"]
+        assert runner.visible_native_skills(events) == ["check-abi-compatibility"]
         assert runner.visible_native_skills([]) is None
 
     def test_a_retired_skill_installed_at_user_scope_is_not_hidden(self):
@@ -222,6 +222,23 @@ class TestRunnerTreatment:
         ]
         assert runner.visible_native_skills(old_name_events) == [
             "native-binary-compatibility-review"
+        ]
+
+        # The intermediate name, not just the original and the current one:
+        # a host that installed the skill between the two renames (or never
+        # updated a user-scope checkout after the second) still has it
+        # visible under review-native-library-change specifically — Codex
+        # review, PR #811, caught this dropped from the retired-name set
+        # when the rename-to-check-abi-compatibility change first landed.
+        intermediate_name_events = [
+            {
+                "type": "system",
+                "subtype": "init",
+                "skills": ["review-native-library-change"],
+            }
+        ]
+        assert runner.visible_native_skills(intermediate_name_events) == [
+            "review-native-library-change"
         ]
 
     def test_an_unrelated_dev_skill_is_never_a_treatment_conflict(self):
