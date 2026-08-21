@@ -1326,7 +1326,10 @@ def test_resolve_side_snapshot_impl_forwards_gated_build_inputs_to_embed(
     snapshot's own evidence layers could silently describe two different
     builds. _resolve_side_snapshot_impl computes the allow_build_query gate
     once and forwards the identical (gated) values to both."""
-    from abicheck import header_conditionals as _hc, service, service_input_resolution as sir
+    from abicheck import (
+        service,
+        service_input_resolution as sir,
+    )
     from abicheck.model import AbiSnapshot
     from abicheck.service_compare_evidence import SideEvidence
 
@@ -1426,7 +1429,10 @@ class TestSharedPipelineReachesADR039BuildContextCollector:
     def test_collector_populates_defines_and_conditional_fields(
         self, monkeypatch, tmp_path: Path
     ) -> None:
-        from abicheck import header_conditionals as _hc, service, service_input_resolution as sir
+        from abicheck import (
+            service,
+            service_input_resolution as sir,
+        )
         from abicheck.service_compare_evidence import SideEvidence
 
         hdr = tmp_path / "widget.h"
@@ -1483,7 +1489,10 @@ class TestSharedPipelineReachesADR039BuildContextCollector:
         here by passing `fmt=None` (what the caller would have computed
         for the raw linker-script text) while the resolved snapshot is a
         real ELF one."""
-        from abicheck import header_conditionals as _hc, service, service_input_resolution as sir
+        from abicheck import (
+            service,
+            service_input_resolution as sir,
+        )
         from abicheck.service_compare_evidence import SideEvidence
 
         hdr = tmp_path / "widget.h"
@@ -1534,7 +1543,10 @@ class TestSharedPipelineReachesADR039BuildContextCollector:
         (``Path(dir).read_text()`` raises ``OSError``, silently caught and
         skipped by ``collect_build_context``, leaving ``conditional_fields``
         empty for the common directory-``-H`` case)."""
-        from abicheck import header_conditionals as _hc, service, service_input_resolution as sir
+        from abicheck import (
+            service,
+            service_input_resolution as sir,
+        )
         from abicheck.service_compare_evidence import SideEvidence
 
         include_dir = tmp_path / "include"
@@ -1590,7 +1602,11 @@ class TestSharedPipelineReachesADR039BuildContextCollector:
         P0.3 L3->L2-folded ``CompileContext`` this function also resolves
         internally -- else a build-derived define would be unioned
         snapshot-wide (the ninth finding in AGENTS.md's L3->L2-fold entry)."""
-        from abicheck import header_conditionals as _hc, service, service_input_resolution as sir
+        from abicheck import (
+            header_conditionals as _hc,
+            service,
+            service_input_resolution as sir,
+        )
         from abicheck.service_compare_evidence import SideEvidence
 
         hdr = tmp_path / "widget.h"
@@ -1654,7 +1670,11 @@ class TestSharedPipelineReachesADR039BuildContextCollector:
     ) -> None:
         """No ``build_info`` at all: the collector must not run (and must not
         raise) -- a plain context-free dump is still the common case."""
-        from abicheck import header_conditionals as _hc, service, service_input_resolution as sir
+        from abicheck import (
+            header_conditionals as _hc,
+            service,
+            service_input_resolution as sir,
+        )
         from abicheck.service_compare_evidence import SideEvidence
 
         hdr = tmp_path / "widget.h"
@@ -1698,7 +1718,11 @@ class TestSharedPipelineReachesADR039BuildContextCollector:
         shared pipeline must not attach build-context evidence to a PE/
         Mach-O snapshot, or it would silently disagree with the native
         PE/Mach-O dump path."""
-        from abicheck import header_conditionals as _hc, service, service_input_resolution as sir
+        from abicheck import (
+            header_conditionals as _hc,
+            service,
+            service_input_resolution as sir,
+        )
         from abicheck.service_compare_evidence import SideEvidence
 
         hdr = tmp_path / "widget.h"
@@ -1746,7 +1770,11 @@ class TestSharedPipelineReachesADR039BuildContextCollector:
         pipeline always calls the ADR-039 collector with the default,
         unfiltered ``source_filter=None`` for a real compile database +
         headers, rather than raising or narrowing."""
-        from abicheck import header_conditionals as _hc, service, service_input_resolution as sir
+        from abicheck import (
+            header_conditionals as _hc,
+            service,
+            service_input_resolution as sir,
+        )
         from abicheck.service_compare_evidence import SideEvidence
 
         hdr = tmp_path / "widget.h"
@@ -1800,7 +1828,11 @@ class TestSharedPipelineReachesADR039BuildContextCollector:
         loaded snapshot's own recorded build-context evidence with
         unrelated data -- ``side.path`` here is a JSON file, not an ELF
         binary or a followed linker script, so the collector must not run."""
-        from abicheck import header_conditionals as _hc, service, service_input_resolution as sir
+        from abicheck import (
+            header_conditionals as _hc,
+            service,
+            service_input_resolution as sir,
+        )
         from abicheck.service_compare_evidence import SideEvidence
 
         hdr = tmp_path / "widget.h"
