@@ -34,8 +34,22 @@ claude_code`), not assumed.
 **Real, and verified in this pass:**
 - `scripts/gen_harbor_tasks.py` produces all 12 tasks, validated against the
   real `harbor` package's own `Task`/`TaskConfig` Pydantic models
-  (`pip install harbor` into a throwaway venv, `harbor.models.task.task.
-  Task(task_dir)` — not a hand-guessed schema).
+  (`harbor.models.task.task.Task(task_dir)` — not a hand-guessed schema).
+  **Now a real, CI-gated check**, not only a one-off manual venv run:
+  `tests/test_gen_harbor_tasks.py::TestHarborSchemaValidation` runs this
+  against every generated task, self-skipping via `pytest.importorskip`
+  when `harbor` isn't installed (it needs Python >=3.12 and is not a
+  repository dependency — never added to `pyproject.toml`'s `[dev]`, since
+  it exists to validate output *for* Harbor, not to be one), and
+  `.github/workflows/ci.yml`'s `ai-readiness` job installs it and runs
+  this class as its own dedicated step, right after the structural
+  `harbor-tasks` freshness gate. `gen_harbor_tasks.py --check` (the
+  freshness gate) and this class answer two different questions and both
+  matter: the former asks "does the committed tree match what the
+  generator would produce right now," the latter asks "is what the
+  generator produces actually a valid Harbor task" — a generator bug that
+  produces self-consistent but schema-invalid output passes the former
+  and fails the latter.
 - Every Category A scenario's `solution/solve.sh` was run **end to end**
   (real `gcc` compile, real `abicheck compare`, through the real recording
   shim, through the real `verify_run.py` grading bridge) and produces
@@ -53,12 +67,14 @@ claude_code`), not assumed.
   Everything Docker-dependent (the `environment/Dockerfile` actually
   building, the agent actually running inside the container, the verifier
   actually reading `/logs/verifier/`) is unverified beyond static review.
-- **`harbor` is not a repository dependency.** It was installed into a
-  throwaway venv (`/tmp/harbor-venv`, not committed, not in
-  `pyproject.toml`) purely to validate this generator's output against the
-  real schema. Adding it as a real dev/CI dependency, wiring `harbor run`
-  into any CI job, or provisioning Docker-in-CI are all separate decisions
-  nobody has made yet.
+- **`harbor` is not a repository dependency.** CI installs it (`pip install
+  harbor`, no version pin) as its own dedicated step purely to run
+  `TestHarborSchemaValidation` above — it is not in `pyproject.toml`'s
+  `[dev]`, and nothing else in this repository imports it. Wiring an
+  actual `harbor run`/`harbor check` trial into CI, or provisioning
+  Docker-in-CI to make that possible at all, are both still separate
+  decisions nobody has made yet — the CI step this pass added validates
+  the *task shape*, not a real trial.
 - **The A/B (skill vs. baseline) mechanism is a documented design, not a
   proven one.** `[environment].skills_dir` and the `--ak skills_dir=...`
   override are real, confirmed-from-source Harbor mechanisms, but no trial

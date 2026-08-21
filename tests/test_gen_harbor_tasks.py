@@ -19,9 +19,15 @@ Real end-to-end grading (does `solve.sh` -> the shim -> `verify_run.py`
 actually produce reward=1 for a correct answer) is exercised directly, not
 mocked -- see `TestSolveScriptsEndToEnd`. Full trial execution (an actual
 Harbor `harbor run`, which needs Docker) is out of scope for the fast unit
-lane; see `agent-evals/skills/harbor/CLAUDE.md` for how that was validated
-manually against the real `harbor` package's own `Task`/`TaskConfig`
-Pydantic models.
+lane; see `agent-evals/skills/harbor/CLAUDE.md` for what that still leaves
+unverified.
+
+`TestHarborSchemaValidation` is the one class in this file that needs the
+real `harbor` package (`>=3.12`, not a repository dependency) -- it
+self-skips via `pytest.importorskip` rather than a new pytest marker
+(tests/CLAUDE.md: "don't change the marker scheme"), and CI installs
+`harbor` and runs it as a dedicated, best-effort step precisely because it
+is not otherwise reachable from any existing marker lane.
 """
 
 from __future__ import annotations
@@ -91,14 +97,24 @@ class TestGeneratorCheck:
             stray.write_text(original, encoding="utf-8")
 
     def test_regeneration_is_idempotent(self):
+        """Same normalization `--check` applies, and for the identical
+        reason: the tree on disk (a checkout of the *last* commit that ran
+        this generator) necessarily pins the SHA of *that commit's own
+        parent* -- the SHA is computed before the commit that carries it
+        exists -- while a live `generate()` call right now pins the
+        *current* `HEAD`, which is that later commit itself. Comparing raw
+        bytes therefore fails on every fresh checkout whose tip commit
+        touched the generator or its output, which is every commit that
+        ever regenerates this tree -- caught by actually running this test
+        immediately after a real commit, not by re-reading the assertion."""
         before = {
-            p.relative_to(TASKS_DIR): p.read_bytes()
+            p.relative_to(TASKS_DIR): gen._normalize_pinned_ref(p.read_bytes())
             for p in TASKS_DIR.rglob("*")
             if p.is_file()
         }
         gen.generate(check=False)
         after = {
-            p.relative_to(TASKS_DIR): p.read_bytes()
+            p.relative_to(TASKS_DIR): gen._normalize_pinned_ref(p.read_bytes())
             for p in TASKS_DIR.rglob("*")
             if p.is_file()
         }
@@ -371,3 +387,51 @@ class TestSolveScriptsEndToEnd:
         assert reward_txt.read_text(encoding="utf-8").strip() == "1", json.loads(
             reward_json.read_text(encoding="utf-8")
         )
+
+
+class TestHarborSchemaValidation:
+    """Every generated task validates against the real `harbor` package's
+    own `Task`/`TaskConfig` Pydantic models -- not a hand-guessed schema,
+    and not merely `task.toml` parsing as plain TOML (`TestTaskStructure`
+    above already covers that): `Task.__init__` additionally runs Harbor's
+    own `_validate_tests` (verifier/agent/solution shape, OS selection)
+    against `TaskConfig.model_validate_toml`'s parsed result.
+
+    `harbor` needs Python >=3.12 and is not a repository dependency (it
+    exists to validate output *for* Harbor, not to be one), so this
+    self-skips via `pytest.importorskip` when it isn't installed --
+    deliberately not a new pytest marker, per tests/CLAUDE.md's "don't
+    change the marker scheme". CI installs it and runs this class as one
+    dedicated, best-effort step (`.github/workflows/ci.yml`'s
+    `harbor-schema` step) rather than folding it into an existing marker
+    lane that assumes a different toolchain (castxml/gcc, not a PyPI
+    package) and a different Python floor (this repo's own canonical 3.13
+    happens to satisfy `harbor`'s floor, but nothing pins that relationship
+    -- an explicit, separate install keeps the two floors independent).
+    """
+
+    @pytest.fixture(autouse=True)
+    def _harbor(self):
+        # `agent-evals/skills/harbor/` (this repo's own generated-task tree)
+        # is itself an implicit PEP 420 namespace package named `harbor`,
+        # and this module's own `sys.path.insert(0, str(EVAL_DIR))` above
+        # puts it ahead of site-packages -- `pytest.importorskip("harbor")`
+        # alone resolves to *that* directory when the real package isn't
+        # installed (bare `import harbor` succeeds either way) and only
+        # fails later, as a genuine error rather than a clean skip, the
+        # first time something reaches for a real submodule. Importing the
+        # actual submodule this class needs sidesteps the ambiguity
+        # entirely: a namespace package has no `models` submodule, so this
+        # raises (and `importorskip` turns into a skip) exactly when the
+        # real package is absent, and resolves correctly to the real,
+        # installed `harbor` when it's present (PEP 420: a regular package
+        # -- one with `__init__.py`, which the real one has and the local
+        # shadow doesn't -- wins over a namespace package regardless of
+        # which comes first on `sys.path`, confirmed directly against a
+        # real installed `harbor`).
+        return pytest.importorskip("harbor.models.task.task")
+
+    @pytest.mark.parametrize("task_dir", _task_dirs(), ids=lambda p: p.name)
+    def test_task_validates_against_the_real_harbor_schema(self, task_dir, _harbor):
+        task = _harbor.Task(task_dir)
+        assert task.name == f"abicheck/{task_dir.name}"
