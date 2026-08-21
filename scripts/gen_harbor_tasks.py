@@ -232,17 +232,30 @@ ENV SKILL_EVAL_SHIM=/usr/local/bin/abicheck
 # metacharacters at all and needs nothing beyond `base64`, present in every
 # Debian-based image by default.
 #
-# No separate `cp .../python3 .../python` step: `python:3.13-slim` already
-# ships `/usr/local/bin/python` as a symlink to `python3`, so once `python3`
-# is replaced with the interposer, `python` resolves through to it
-# automatically -- a `cp` there would try to copy the interposer onto
-# itself (`cp` resolves the destination symlink first) and fail the whole
-# build with "are the same file" (Codex review, fresh evidence: confirmed
-# against the base image's real layout, not assumed).
-RUN mv /usr/local/bin/python3 /usr/local/bin/python3-real \\
-    && echo '{base64.b64encode(_PYTHON_INTERPOSER.encode()).decode()}' | base64 -d > /usr/local/bin/python3 \\
-    && chmod +x /usr/local/bin/python3
-ENV SKILL_EVAL_REAL_PYTHON=/usr/local/bin/python3-real
+# `python:3.13-slim` ships `/usr/local/bin/python3` and `/usr/local/bin/
+# python` as symlinks (`python -> python3 -> python3.13`) to the one real
+# interpreter binary, `/usr/local/bin/python3.13` -- confirmed via
+# `readlink -f`, not assumed. An earlier version of this step renamed only
+# the `python3` symlink itself (leaving the real `python3.13` binary
+# untouched at its own path), which correctly intercepted `python3`/
+# `python` through the new interposer file it wrote, but left a direct
+# `python3.13 -m abicheck` invocation -- a real, unmodified CPython
+# spelling, not a hypothetical one -- reaching the untouched real binary
+# and going completely unrecorded (Codex review, fresh evidence). Fixed by
+# renaming and replacing the *real* binary file `python3`/`python` resolve
+# through, rather than either symlink: `python3` and `python` then
+# automatically resolve through to the same interposer with no separate
+# write, since neither symlink itself was touched. The
+# `[ "$resolved" = /usr/local/bin/python3.13 ]` guard fails the build
+# loudly instead of silently shipping an interposer nothing resolves
+# through, matching the identical guard style the abicheck shim install
+# above already uses.
+RUN resolved="$(readlink -f "$(command -v python3)")" \\
+    && [ "$resolved" = /usr/local/bin/python3.13 ] \\
+    && mv "$resolved" "$resolved-real" \\
+    && echo '{base64.b64encode(_PYTHON_INTERPOSER.encode()).decode()}' | base64 -d > "$resolved" \\
+    && chmod +x "$resolved"
+ENV SKILL_EVAL_REAL_PYTHON=/usr/local/bin/python3.13-real
 
 # This sandbox's own castxml is routinely below abicheck's policy floor
 # (agent-evals/skills/CLAUDE.md's "Environment prerequisites" section);

@@ -23,7 +23,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # real fix (vendoring the runtime sources directly, or a published
 # release tag) is a bigger, cross-cutting change than this generator's
 # own scope; see agent-evals/skills/harbor/CLAUDE.md.
-ARG ABICHECK_REF=cf30f28b0687161d4766620f6ae8e17844d6c6c5
+ARG ABICHECK_REF=05f0749628f5fa4a803a41d8b258da7cc2cf065f
 # ABICHECK_RUNTIME_DIGEST=69bb57a4965c8cee8d1986604e5912a7020bb8fedc7b8f143e6a97fd6703ac35
 # ^ content digest of `_RUNTIME_RELEVANT_PATHS` at generation time -- what
 # `--check` (scripts/gen_harbor_tasks.py) actually compares to detect real
@@ -90,17 +90,30 @@ ENV SKILL_EVAL_SHIM=/usr/local/bin/abicheck
 # metacharacters at all and needs nothing beyond `base64`, present in every
 # Debian-based image by default.
 #
-# No separate `cp .../python3 .../python` step: `python:3.13-slim` already
-# ships `/usr/local/bin/python` as a symlink to `python3`, so once `python3`
-# is replaced with the interposer, `python` resolves through to it
-# automatically -- a `cp` there would try to copy the interposer onto
-# itself (`cp` resolves the destination symlink first) and fail the whole
-# build with "are the same file" (Codex review, fresh evidence: confirmed
-# against the base image's real layout, not assumed).
-RUN mv /usr/local/bin/python3 /usr/local/bin/python3-real \
-    && echo 'IyEvYmluL3NoCnNraXA9MApzZWVuPTAKZm9yIGFyZyBpbiAiJEAiOyBkbwogIGlmIFsgIiRza2lwIiA9IDEgXTsgdGhlbiBza2lwPTA7IHNlZW49JCgoc2VlbisxKSk7IGNvbnRpbnVlOyBmaQogIGNhc2UgIiRhcmciIGluCiAgICAtbSkKICAgICAgaWYgWyAiJChldmFsIGVjaG8gXCJcJHskKChzZWVuKzIpKX1cIikiID0gImFiaWNoZWNrIiBdOyB0aGVuCiAgICAgICAgc2hpZnQgJCgoc2VlbisyKSkKICAgICAgICBleGVjICIkU0tJTExfRVZBTF9TSElNIiAiJEAiCiAgICAgIGZpCiAgICAgIGJyZWFrCiAgICAgIDs7CiAgICAtbWFiaWNoZWNrKQogICAgICBzaGlmdCAkKChzZWVuKzEpKQogICAgICBleGVjICIkU0tJTExfRVZBTF9TSElNIiAiJEAiCiAgICAgIDs7CiAgICAtWHwtV3wtLWNoZWNrLWhhc2gtYmFzZWQtcHljcykgc2tpcD0xIDs7CiAgICAtYykgYnJlYWsgOzsKICAgIC0qKSA7OwogICAgKikgYnJlYWsgOzsKICBlc2FjCiAgc2Vlbj0kKChzZWVuKzEpKQpkb25lCmV4ZWMgIiRTS0lMTF9FVkFMX1JFQUxfUFlUSE9OIiAiJEAiCg==' | base64 -d > /usr/local/bin/python3 \
-    && chmod +x /usr/local/bin/python3
-ENV SKILL_EVAL_REAL_PYTHON=/usr/local/bin/python3-real
+# `python:3.13-slim` ships `/usr/local/bin/python3` and `/usr/local/bin/
+# python` as symlinks (`python -> python3 -> python3.13`) to the one real
+# interpreter binary, `/usr/local/bin/python3.13` -- confirmed via
+# `readlink -f`, not assumed. An earlier version of this step renamed only
+# the `python3` symlink itself (leaving the real `python3.13` binary
+# untouched at its own path), which correctly intercepted `python3`/
+# `python` through the new interposer file it wrote, but left a direct
+# `python3.13 -m abicheck` invocation -- a real, unmodified CPython
+# spelling, not a hypothetical one -- reaching the untouched real binary
+# and going completely unrecorded (Codex review, fresh evidence). Fixed by
+# renaming and replacing the *real* binary file `python3`/`python` resolve
+# through, rather than either symlink: `python3` and `python` then
+# automatically resolve through to the same interposer with no separate
+# write, since neither symlink itself was touched. The
+# `[ "$resolved" = /usr/local/bin/python3.13 ]` guard fails the build
+# loudly instead of silently shipping an interposer nothing resolves
+# through, matching the identical guard style the abicheck shim install
+# above already uses.
+RUN resolved="$(readlink -f "$(command -v python3)")" \
+    && [ "$resolved" = /usr/local/bin/python3.13 ] \
+    && mv "$resolved" "$resolved-real" \
+    && echo 'IyEvYmluL3NoCnNraXA9MApzZWVuPTAKZm9yIGFyZyBpbiAiJEAiOyBkbwogIGlmIFsgIiRza2lwIiA9IDEgXTsgdGhlbiBza2lwPTA7IHNlZW49JCgoc2VlbisxKSk7IGNvbnRpbnVlOyBmaQogIGNhc2UgIiRhcmciIGluCiAgICAtbSkKICAgICAgaWYgWyAiJChldmFsIGVjaG8gXCJcJHskKChzZWVuKzIpKX1cIikiID0gImFiaWNoZWNrIiBdOyB0aGVuCiAgICAgICAgc2hpZnQgJCgoc2VlbisyKSkKICAgICAgICBleGVjICIkU0tJTExfRVZBTF9TSElNIiAiJEAiCiAgICAgIGZpCiAgICAgIGJyZWFrCiAgICAgIDs7CiAgICAtbWFiaWNoZWNrKQogICAgICBzaGlmdCAkKChzZWVuKzEpKQogICAgICBleGVjICIkU0tJTExfRVZBTF9TSElNIiAiJEAiCiAgICAgIDs7CiAgICAtWHwtV3wtLWNoZWNrLWhhc2gtYmFzZWQtcHljcykgc2tpcD0xIDs7CiAgICAtYykgYnJlYWsgOzsKICAgIC0qKSA7OwogICAgKikgYnJlYWsgOzsKICBlc2FjCiAgc2Vlbj0kKChzZWVuKzEpKQpkb25lCmV4ZWMgIiRTS0lMTF9FVkFMX1JFQUxfUFlUSE9OIiAiJEAiCg==' | base64 -d > "$resolved" \
+    && chmod +x "$resolved"
+ENV SKILL_EVAL_REAL_PYTHON=/usr/local/bin/python3.13-real
 
 # This sandbox's own castxml is routinely below abicheck's policy floor
 # (agent-evals/skills/CLAUDE.md's "Environment prerequisites" section);

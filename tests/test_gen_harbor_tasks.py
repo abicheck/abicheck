@@ -574,6 +574,71 @@ class TestReadmeCommandParsing:
         assert gen._readme_abicheck_command(case) is None
 
 
+class TestPythonInterposer:
+    """The agent Dockerfile's Python-interposer install step must intercept
+    every name the real interpreter is reachable under, not just `python`/
+    `python3` -- `python:3.13-slim` makes both of those symlinks through to
+    the one real binary, `python3.13`, and a `python3.13 -m abicheck`
+    invocation is a real, unmodified CPython spelling an agent can use.
+    Exercised by actually running the Dockerfile's own extracted RUN body
+    (only the literal `/usr/local/bin` prefix substituted for a synthetic
+    directory -- the shell logic itself is untouched) against a synthetic
+    directory reproducing the base image's exact symlink layout, not by
+    reading the Dockerfile text."""
+
+    def test_python_dot_version_invocation_is_also_intercepted(self, tmp_path):
+        import os
+
+        dockerfile = (
+            TASKS_DIR / "removed-export" / "environment" / "Dockerfile"
+        ).read_text(encoding="utf-8")
+        start = dockerfile.index('RUN resolved="$(readlink -f')
+        end = dockerfile.index("\nENV SKILL_EVAL_REAL_PYTHON", start)
+        run_block = dockerfile[start:end]
+        assert run_block.startswith("RUN ")
+        # Backslash-newline is valid bash line continuation as-is -- no
+        # rewriting needed, only the `RUN ` prefix stripped.
+        shell_body = run_block[len("RUN ") :]
+
+        fakebin = tmp_path / "usr" / "local" / "bin"
+        fakebin.mkdir(parents=True)
+        real = fakebin / "python3.13"
+        real.write_text("#!/bin/sh\necho REAL_PYTHON_RAN\n", encoding="utf-8")
+        real.chmod(0o755)
+        (fakebin / "python3").symlink_to("python3.13")
+        (fakebin / "python").symlink_to("python3")
+
+        script = shell_body.replace("/usr/local/bin", str(fakebin))
+        env = {**os.environ, "PATH": f"{fakebin}{os.pathsep}{os.environ['PATH']}"}
+        proc = subprocess.run(  # noqa: S603
+            ["bash", "-c", script],
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        assert proc.returncode == 0, proc.stderr
+
+        # Every name the real interpreter used to be reachable under --
+        # including the versioned one a previous version of this fix left
+        # unintercepted -- must now run the interposer instead.
+        for name in ("python3.13", "python3", "python"):
+            out = subprocess.run(  # noqa: S603
+                [str(fakebin / name)], capture_output=True, text=True, timeout=10
+            )
+            assert "REAL_PYTHON_RAN" not in out.stdout, name
+
+        # And the renamed original binary must still be the real interpreter
+        # -- the interposer's own `exec "$SKILL_EVAL_REAL_PYTHON"` fallback
+        # depends on it.
+        real_renamed = fakebin / "python3.13-real"
+        assert real_renamed.is_file()
+        out = subprocess.run(  # noqa: S603
+            [str(real_renamed)], capture_output=True, text=True, timeout=10
+        )
+        assert "REAL_PYTHON_RAN" in out.stdout
+
+
 class TestArchitectureGuard:
     """`_test_sh`'s runtime `uname -m` guard for a scenario declaring
     `architectures` (e.g. `evidence-too-shallow`, which embeds an x86_64
