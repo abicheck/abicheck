@@ -518,11 +518,12 @@ Core pipeline (in order of data flow):
 
 10. **Published Agent Skills (ADR-058)** — `skills-src/` is the one
    hand-authored source (one `SKILL.md` in Layer A — the portfolio was
-   reset to a single internal candidate, `review-native-library-change`,
-   see `skills-src/CLAUDE.md`'s portfolio-status table and ADR-058's
-   2026-08-20 amendment — plus one `shared/` tree of Layer-B domain
-   fragments); `scripts/gen_agent_skills.py` publishes it into three
-   committed, self-contained trees (`.agents/skills/`, `.claude/skills/`,
+   reset to a single internal candidate, `check-abi-compatibility`
+   (renamed from `review-native-library-change`), see `skills-src/
+   CLAUDE.md`'s portfolio-status table and ADR-058's 2026-08-20
+   amendments — plus one `shared/` tree of Layer-B domain fragments);
+   `scripts/gen_agent_skills.py` publishes it into three committed,
+   self-contained trees (`.agents/skills/`, `.claude/skills/`,
    `.gemini/skills/`). Never hand-edit the generated trees. See
    `skills-src/CLAUDE.md`.
 
@@ -634,7 +635,7 @@ CI runs `mypy abicheck/` as a required gate. The baseline is currently **0 error
 | `changekind-detector` | WARN | Every `ChangeKind` is produced somewhere (not orphaned) |
 | `changekind-docs` | WARN | Every `ChangeKind` is mentioned in `docs/` |
 | `doc-count-sync` | ERROR on drift, WARN if anchor moved | Headline counts in docs (ChangeKind count, example-catalog size) match their source of truth (`len(ChangeKind)`, `ground_truth.json`) — this file (`AGENTS.md`) is included in the generic sweep, same as `README.md`/`CLAUDE.md` |
-| `cli-contract` | ERROR | No front-end `cli*.py` module calls Tier-1 `checker.compare` directly — it must route through the Tier-2 service (`service.run_compare`/`compare_snapshots`); ADR-037 D10.1 |
+| `cli-contract` | ERROR | No front-end `cli*.py`/`appcompat.py`/`compat/cli.py` module calls a Tier-1 core entry point (`checker.compare`, `dumper.dump`, `service.resolve_input`) directly — it must route through the Tier-2 service (`service.run_compare`/`compare_snapshots`, `service.run_dump`/`service_dump_pipeline.run_dump_request`, `service_input_resolution.resolve_side_snapshot`); ADR-037 D10.1, extended to the latter two per Phase 0 item 2 of `docs/contribute/plans/duplication-and-convergence-assessment.md` |
 | `engine-cli-boundary` | ERROR | No engine-layer module (`scan_engine.py`, `service*.py`, `artifact_*.py`, `buildsource/**/*.py`) imports `click` or a `cli_*` sibling — the CLI is a frontend adapter over the engine, not the reverse. `ENGINE_CLI_BOUNDARY_ALLOWLIST` records today's pre-existing inversions (`scan_engine.py`'s own `click.ClickException`/lazy `cli_scan_baseline`/`cli_scan_helpers` imports, three `service*.py` modules' lazy `cli_*` imports, `buildsource/evidence_policy.py`'s `click`) the same allowlist-and-shrink way `IMPORT_CYCLE_ALLOWLIST` does — a new site outside the allowlist fails outright; closing a listed one is Phase 1 of `docs/contribute/plans/duplication-and-convergence-assessment.md` |
 | `import-cycle-growth` | ERROR | No *unapproved* strongly-connected-component growth within `abicheck/` — not literally "no import cycles": a large, deliberately-baselined CLI-registration SCC already exists and is allowed (`IMPORT_CYCLE_ALLOWLIST`). The invariant is that no *new* module joins it and no *new* separate SCC forms; extending the allowlist to unblock a fresh cycle needs an ADR or explicit architectural sign-off, not a routine edit (CLAUDE.md "M1-3") |
 | `mypy-baseline` | ERROR if drifted up | mypy error count ≤ documented baseline |

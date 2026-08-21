@@ -1065,7 +1065,7 @@ def _attach_header_graph(
         # declarations with host-only call/type/include edges, feeding
         # crosschecks/diff_source_graph_findings a graph incoherent with
         # what it's describing.
-        ast_root, _resolved_kind = _clang_header_dump(
+        ast_root, _resolved_kind, _resolved_force_cpp = _clang_header_dump(
             resolved_headers,
             eff_includes,
             compiler="cc" if _is_c else "c++",

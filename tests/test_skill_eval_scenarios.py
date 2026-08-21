@@ -188,10 +188,10 @@ def test_consumer_scoped_scenarios_state_both_verdicts(scenarios: list[dict]) ->
     the wrong way round — the inversion the skill explicitly warns against."""
     scoped = _scoped(scenarios)
     if not scoped:
-        # `review-native-library-change` still explicitly directs
+        # `check-abi-compatibility` still explicitly directs
         # `--used-by`/`--required-symbol` for a named consumer (its own
         # workflow, citing `shared/consumer-scoping.md`), so this should not
-        # be empty in practice — see the three `review-native-library-change`
+        # be empty in practice — see the three `check-abi-compatibility`
         # consumer scenarios in scenarios.yaml. Kept as a skip rather than a
         # hard failure only so a future edit that legitimately drops the last
         # scoped scenario degrades to "no coverage" instead of a collection

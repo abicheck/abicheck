@@ -46,8 +46,9 @@ flagship was scaling packaging ahead of any validated product value.
 `native-api-evolution`, `native-consumer-compatibility`, and
 `native-release-compatibility` — previously published at prototype status —
 are no longer published; their source is recoverable from git history for
-whenever a second skill is built. `review-native-library-change` (renamed
-from `native-binary-compatibility-review`) is the sole surviving skill and
+whenever a second skill is built. `check-abi-compatibility` (renamed from
+`review-native-library-change`, itself renamed from
+`native-binary-compatibility-review`) is the sole surviving skill and
 is an **internal candidate**: working, reviewed content, but not yet
 validated and not for external publication or citation as validated in any
 user-facing claim, pending
@@ -61,7 +62,7 @@ still-unrun behavioral evaluation. See
 
 | Skill | Status | The question it answers |
 |---|---|---|
-| [`review-native-library-change`](https://github.com/abicheck/abicheck/blob/main/.agents/skills/review-native-library-change/SKILL.md) | **Internal candidate** | "Will this change break existing consumers?" — review a diff, branch, commit, or PR, ending in a verdict plus a root-cause explanation. Also handles "why did this suddenly report dozens of breaks?" |
+| [`check-abi-compatibility`](https://github.com/abicheck/abicheck/blob/main/.agents/skills/check-abi-compatibility/SKILL.md) | **Internal candidate** | "Will this change break existing consumers?" — review a diff, branch, commit, or PR, ending in a verdict plus a root-cause explanation. Also handles "why did this suddenly report dozens of breaks?" |
 
 ## Installing them
 

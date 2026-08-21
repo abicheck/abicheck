@@ -108,7 +108,7 @@ def test_header_graph_attach_reuse_faster_than_disk_reparse(
     # Prime the disk cache with one real clang parse -- not timed (mirrors
     # the main snapshot pass that already ran before _attach_header_graph
     # follows it).
-    root0, _ = dumper._clang_header_dump(
+    root0, _, _ = dumper._clang_header_dump(
         [header], [], compiler="c", lang="c", memoize=False
     )
     assert cache_path.exists()
@@ -123,7 +123,7 @@ def test_header_graph_attach_reuse_faster_than_disk_reparse(
 
     # "No reuse": disk-cache hit, no in-process memo.
     t0 = time.perf_counter()
-    root1, _ = dumper._clang_header_dump(
+    root1, _, _ = dumper._clang_header_dump(
         [header], [], compiler="c", lang="c", memoize=False
     )
     no_reuse_elapsed = max(time.perf_counter() - t0, 1e-6)
@@ -135,7 +135,7 @@ def test_header_graph_attach_reuse_faster_than_disk_reparse(
     with dumper_cache.ast_memoize_scope():
         dumper._clang_header_dump([header], [], compiler="c", lang="c")
         t1 = time.perf_counter()
-        root2, _ = dumper._clang_header_dump(
+        root2, _, _ = dumper._clang_header_dump(
             [header], [], compiler="c", lang="c", memoize=False
         )
         reuse_elapsed = max(time.perf_counter() - t1, 1e-6)

@@ -89,7 +89,7 @@ def test_one_candidate_skill_is_present():
     """ADR-058's 2026-08-20 portfolio-reset amendment: the published surface
     is one internal candidate skill. A second public skill needs all five of
     ADR-058's admission criteria re-applied, not a drive-by directory."""
-    assert [d.name for d in SKILL_DIRS] == ["review-native-library-change"]
+    assert [d.name for d in SKILL_DIRS] == ["check-abi-compatibility"]
 
 
 @pytest.mark.parametrize("skill_dir", SKILL_DIRS, ids=lambda d: d.name)

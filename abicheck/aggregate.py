@@ -127,7 +127,12 @@ from .change_registry_types import Verdict
 #: ``main`` under the same version number for a different field -- bumped to
 #: ``1.6`` on rebase rather than reusing ``1.5`` for two distinct additive
 #: shapes, per this codebase's own schema-versioning discipline.
-AGGREGATE_SCHEMA_VERSION = "1.6"
+#:
+#: ``1.7`` (dedup plan Phase 0 item 6) adds an optional
+#: ``effective_config_digest`` per target -- that target's own
+#: already-computed digest (:func:`_effective_config_digest`), carried
+#: through rather than recomputed. Additive and inert like ``1.4``/``1.6``.
+AGGREGATE_SCHEMA_VERSION = "1.7"
 
 #: Matches a ``check_id``-shaped ``target_id`` — ADR-047 §7's
 #: ``target@profile#baseline_channel@requested_depth``, built verbatim by
@@ -464,6 +469,13 @@ class TargetReport:
     #: orthogonal exit-floor axis. Declared last for the same
     #: positional-construction-safety reason as that field.
     analysis_assurance_exit: int = 0
+    #: Phase 0 item 6 of docs/contribute/plans/duplication-and-convergence-
+    #: assessment.md: this target's own already-computed
+    #: ``effective_config_digest``, read straight off its report by
+    #: :func:`_load_report_file` -- never recomputed here. ``None`` for an
+    #: unavailable target or a report that carried none. Declared last for
+    #: the same positional-construction-safety reason as the fields above.
+    effective_config_digest: str | None = None
 
     @property
     def analyzed(self) -> bool:
@@ -507,7 +519,7 @@ class TargetReport:
         profile_id = self.profile_id
         if profile_id is not None:
             d["profile_id"] = profile_id
-        for key in ("report_path", "library", "reason"):
+        for key in ("report_path", "library", "reason", "effective_config_digest"):
             value = getattr(self, key)
             if value is not None:
                 d[key] = value
@@ -1368,6 +1380,12 @@ class _LoadedReport:
     #: a run without ``--require-complete-analysis`` never floors its exit
     #: on this axis, so ``0`` is the honest default rather than a fallback.
     analysis_assurance_exit: int = 0
+    #: Phase 0 item 6 ("every effective evaluation carries a digest"): read
+    #: straight off the per-target report's own ``effective_config_digest``
+    #: — never recomputed here. ``None`` for a report that carries none (a
+    #: pre-digest report, or one written with ``include_exit_decision=False``
+    #: — same fail-open default as the coverage/assurance fields above.
+    effective_config_digest: str | None = None
 
 
 def _contract_coverage_declared(data: Mapping[str, Any]) -> bool:
@@ -1465,6 +1483,30 @@ def _analysis_assurance_exit(data: Mapping[str, Any]) -> int:
         if _is_valid_contribution(raw):
             return raw
     return 0
+
+
+#: Same shape ``effective_config_digest()``/the aggregate schema's own
+#: pattern produce -- validated, not trusted, since this reads an on-disk
+#: report this module doesn't control the writer of.
+_EFFECTIVE_CONFIG_DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
+
+
+def _effective_config_digest(data: Mapping[str, Any]) -> str | None:
+    """The report's own ``effective_config_digest`` (Phase 0 item 6 of
+    docs/contribute/plans/duplication-and-convergence-assessment.md).
+
+    Reuses :func:`contract_coverage_blocks`'s shape-aware traversal (a
+    ``compare``/release report carries this at the document root; a
+    *scan* report nests it under ``diff``/``report.diff`` -- the same
+    distinction :func:`_analysis_assurance_exit` already accounts for)
+    rather than a second, root-only lookup. A value not matching
+    :data:`_EFFECTIVE_CONFIG_DIGEST_RE` reads as absent, not passed through.
+    """
+    for block in contract_coverage_blocks(data):
+        raw = block.get("effective_config_digest")
+        if isinstance(raw, str) and _EFFECTIVE_CONFIG_DIGEST_RE.match(raw):
+            return raw
+    return None
 
 
 def scan_severity_gate_paths(data: Mapping[str, Any]) -> list[tuple[str, ...]]:
@@ -1641,6 +1683,7 @@ def _load_report_file(path: Path, *, prefix: str) -> _LoadedReport:
     )
     head_sha_raw = data.get("head_sha")
     head_sha = str(head_sha_raw) if isinstance(head_sha_raw, str) else None
+    effective_config_digest = _effective_config_digest(data)
     # A compare-release *operational* failure carries top-level ``verdict:
     # "ERROR"`` (a library failed to dump/extract/compare) — the release path
     # ranks it above BREAKING and floors its exit to 4. "ERROR" is not a
@@ -1675,6 +1718,7 @@ def _load_report_file(path: Path, *, prefix: str) -> _LoadedReport:
             # everything, so these findings can convict their own profile and
             # clear no other.
             findings=_incomplete_findings(data),
+            effective_config_digest=effective_config_digest,
         )
     # ADR-050 D2: a native compare/compare-release not_comparable report
     # carries a real ``verdict: null`` (JSON null, not a missing key) plus a
@@ -1713,6 +1757,7 @@ def _load_report_file(path: Path, *, prefix: str) -> _LoadedReport:
                 contract_coverage_exit=_contract_coverage_exit(data),
                 contract_coverage_incomplete=_contract_coverage_incomplete(data),
                 analysis_assurance_exit=_analysis_assurance_exit(data),
+                effective_config_digest=effective_config_digest,
             )
     verdict = parse_report_verdict(data)
     gate: GateInfo | None = None
@@ -1763,6 +1808,12 @@ def _load_report_file(path: Path, *, prefix: str) -> _LoadedReport:
         # reading: a verdictless one is unavailable, and its `changes` array
         # (if any) describes a comparison that never reached a conclusion.
         findings=parse_report_findings(data) if verdict is not None else None,
+        # Same reasoning -- `analyzed` is `compatibility_verdict is not
+        # None` -- so a BOOTSTRAP/NEW_TARGET/malformed-verdict report must
+        # not carry a digest through either, even if one was stamped on it.
+        effective_config_digest=(
+            effective_config_digest if verdict is not None else None
+        ),
     )
 
 
@@ -1873,6 +1924,7 @@ def aggregate(
             contract_coverage_declared=report.contract_coverage_declared,
             analysis_assurance_exit=report.analysis_assurance_exit,
             findings=report.findings,
+            effective_config_digest=report.effective_config_digest,
         )
 
     targets = tuple(

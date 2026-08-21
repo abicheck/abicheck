@@ -259,7 +259,27 @@ def _split_gcc_options_windows(text: str) -> list[str]:
 def has_explicit_std(
     gcc_options: str | None, gcc_option_tokens: tuple[str, ...] = ()
 ) -> bool:
-    """Return whether forwarded options explicitly select any language standard."""
+    """Return whether forwarded options explicitly select any language standard.
+
+    Known, narrower residual gap (Codex review, fresh evidence, not fixed
+    here): recognizes only ``-std=``/``/std:``, not GCC's standard-selecting
+    *alias* ``-ansi`` (``-std=c90``/``-std=c++98`` depending on language mode
+    -- verified against a real compiler: ``g++ -ansi`` reports
+    ``__cplusplus=199711L``, not the default ``201703L``). A forwarded
+    ``-ansi`` therefore reads as "no explicit standard" everywhere this
+    function gates on it -- both ``dumper_ast_config.py``'s command builders
+    (which would then append their own ``-std=gnu11``/``-std=gnu++20``
+    *after* a user's ``-ansi``, silently overriding it via last-flag-wins)
+    and ``dumper_toolchain._resolve_standard_provenance`` (which would then
+    probe or report a forced standard that never actually parsed the
+    headers). A correct fix needs ``-ansi`` recognized here (its resolved
+    value depends on the caller's language mode, which this function does
+    not currently receive) *and* every one of this function's several
+    call sites across ``dumper_ast_config.py``/``dumper_toolchain.py``/
+    ``cli_helpers_compare.py``/``service_compare_evidence.py``/
+    ``service_scan.py`` re-verified against the new signature -- a genuine,
+    cross-cutting change, not a follow-up to one caller.
+    """
     if gcc_options and ("-std=" in gcc_options or "/std:" in gcc_options):
         return True
     return any(("-std=" in token or "/std:" in token) for token in gcc_option_tokens)

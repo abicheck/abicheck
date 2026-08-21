@@ -30,7 +30,13 @@ from typing import Any
 
 import pytest
 
-from abicheck import dumper, dumper_cache, dumper_clang, dumper_clang_errors
+from abicheck import (
+    dumper,
+    dumper_cache,
+    dumper_clang,
+    dumper_clang_errors,
+    dumper_toolchain,
+)
 from abicheck.dumper import (
     _auto_system_includes_enabled,
     _build_clang_header_command,
@@ -3295,7 +3301,7 @@ def test_clang_self_heal_explicit_c_warns(
     header = tmp_path / "umbrella.h"
     header.write_text("int foo(void);\n")
     with caplog.at_level(logging.DEBUG, logger="abicheck.dumper"):
-        root, _resolved_kind = _clang_header_dump([header], [], lang="c")
+        root, _resolved_kind, _ = _clang_header_dump([header], [], lang="c")
     assert root["kind"] == "TranslationUnitDecl"
     warns = [r for r in caplog.records if r.levelno == logging.WARNING]
     assert any("asked for C" in r.message for r in warns), [r.message for r in warns]
@@ -3312,7 +3318,7 @@ def test_clang_self_heal_auto_detected_is_debug(
     header = tmp_path / "umbrella.h"
     header.write_text("int foo(void);\n")
     with caplog.at_level(logging.DEBUG, logger="abicheck.dumper"):
-        root, _resolved_kind = _clang_header_dump(
+        root, _resolved_kind, _ = _clang_header_dump(
             [header], []
         )  # lang=None → auto-detect
     assert root["kind"] == "TranslationUnitDecl"
@@ -3704,7 +3710,7 @@ def test_header_ast_parser_clang_branch(monkeypatch: pytest.MonkeyPatch) -> None
             "type": {"qualType": "void ()"},
         }
     )
-    monkeypatch.setattr(dumper, "_clang_header_dump", lambda *a, **k: (ast, None))
+    monkeypatch.setattr(dumper, "_clang_header_dump", lambda *a, **k: (ast, None, False))
     parser = _header_ast_parser(
         [],
         [],
@@ -3725,6 +3731,34 @@ def test_header_ast_parser_clang_branch(monkeypatch: pytest.MonkeyPatch) -> None
     assert [f.name for f in parser.parse_functions()] == ["foo"]
 
 
+def test_header_ast_parser_clang_branch_records_resolved_lang_mode(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Codex review, fresh evidence: the third ``_clang_header_dump`` return
+    value (the actual, possibly post-self-heal language mode) must be
+    stamped onto ``ast_toolchain["resolved_lang_mode"]`` so the provenance
+    probe uses it instead of re-deriving a stale guess."""
+    ast = _tu({"kind": "TranslationUnitDecl", "inner": []})
+    monkeypatch.setattr(dumper, "_clang_header_dump", lambda *a, **k: (ast, None, True))
+    parser = _header_ast_parser(
+        [],
+        [],
+        backend="clang",
+        compiler="c++",
+        gcc_path=None,
+        gcc_prefix=None,
+        gcc_options=None,
+        sysroot=None,
+        nostdinc=False,
+        lang=None,
+        exported_dynamic=set(),
+        exported_static=set(),
+        public_header_paths=[],
+        public_dir_paths=[],
+    )
+    assert parser._abicheck_ast_toolchain["resolved_lang_mode"] == "c++"
+
+
 def test_header_ast_parser_passes_explicit_target_to_clang_parser(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -3735,7 +3769,7 @@ def test_header_ast_parser_passes_explicit_target_to_clang_parser(
             "type": {"qualType": "void () __attribute__((sysv_abi))"},
         }
     )
-    monkeypatch.setattr(dumper, "_clang_header_dump", lambda *a, **k: (ast, None))
+    monkeypatch.setattr(dumper, "_clang_header_dump", lambda *a, **k: (ast, None, False))
     parser = _header_ast_parser(
         [], [], backend="clang", compiler="c++", gcc_path=None, gcc_prefix=None,
         gcc_options="--target=x86_64-pc-linux-gnu", sysroot=None, nostdinc=False,
@@ -3760,7 +3794,7 @@ def test_header_ast_parser_clang_branch_records_abi_dialect(
             "type": {"qualType": "void ()"},
         }
     )
-    monkeypatch.setattr(dumper, "_clang_header_dump", lambda *a, **k: (ast, None))
+    monkeypatch.setattr(dumper, "_clang_header_dump", lambda *a, **k: (ast, None, False))
     parser = _header_ast_parser(
         [],
         [],
@@ -3792,7 +3826,7 @@ def test_header_ast_parser_clang_branch_records_msvc_abi_dialect(
             "type": {"qualType": "void ()"},
         }
     )
-    monkeypatch.setattr(dumper, "_clang_header_dump", lambda *a, **k: (ast, None))
+    monkeypatch.setattr(dumper, "_clang_header_dump", lambda *a, **k: (ast, None, False))
     monkeypatch.setattr(
         dumper, "_resolve_clang_bin", lambda *a, **k: "/opt/llvm/bin/cl.exe"
     )
@@ -3872,6 +3906,51 @@ def test_header_ast_parser_castxml_branch_records_abi_dialect(
     assert parser._abicheck_ast_toolchain["abi_dialect"] == "gnu"
 
 
+def test_header_ast_parser_castxml_branch_records_the_force_cpp_aware_compiler(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Codex review, fresh evidence: for a C-mode dump under the default
+    ``compiler="c++"``, ``_castxml_dump`` internally remaps to ``"cc"``
+    before resolving ``cc_bin`` -- ``ast_toolchain["compiler_selected"]``
+    must record *that* resolved identity, not a re-derivation from the
+    caller's original, unresolved ``"c++"`` (which would record g++'s
+    identity even though castxml actually ran gcc)."""
+    sentinel = object()
+    parser_cls = dumper._CastxmlParser
+    parser_sentinel = parser_cls.__new__(parser_cls)
+
+    def fake_castxml_dump(*a, **k):
+        # Mirrors _castxml_dump's own force_cpp=False remap: "c++" -> "cc".
+        out = k.get("_selected_meta_out")
+        if out is not None:
+            out.append(("cc", False))
+        return sentinel
+
+    monkeypatch.setattr(dumper, "_castxml_dump", fake_castxml_dump)
+    monkeypatch.setattr(dumper, "_CastxmlParser", lambda *a, **k: parser_sentinel)
+    parser = _header_ast_parser(
+        [],
+        [],
+        backend="castxml",
+        compiler="c++",
+        gcc_path=None,
+        gcc_prefix=None,
+        gcc_options=None,
+        sysroot=None,
+        nostdinc=False,
+        lang="c",
+        exported_dynamic=set(),
+        exported_static=set(),
+        public_header_paths=[],
+        public_dir_paths=[],
+    )
+    cc_selected = parser._abicheck_ast_toolchain["compiler_selected"]
+    gxx_selected = dumper._tool_identity_metadata("g++").get("selected")
+    # "cc" must have actually been resolved, and it must differ from what a
+    # re-derivation from the unresolved "c++" would have recorded.
+    assert cc_selected != gxx_selected
+
+
 def test_header_ast_parser_castxml_branch_records_msvc_abi_dialect(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -3908,7 +3987,7 @@ def test_header_ast_parser_stamps_castxml_supported(
     monkeypatch.setattr(dumper, "_castxml_dump", lambda *a, **k: sentinel)
     monkeypatch.setattr(dumper, "_CastxmlParser", lambda *a, **k: parser_sentinel)
     monkeypatch.setattr(
-        dumper,
+        dumper_toolchain,
         "_tool_identity_metadata",
         lambda _executable: {
             "selected": "/mock/castxml",
@@ -3943,7 +4022,7 @@ def test_header_ast_parser_stamps_castxml_unsupported(
     monkeypatch.setattr(dumper, "_castxml_dump", lambda *a, **k: object())
     monkeypatch.setattr(dumper, "_CastxmlParser", lambda *a, **k: parser_sentinel)
     monkeypatch.setattr(
-        dumper,
+        dumper_toolchain,
         "_tool_identity_metadata",
         lambda _executable: {
             "selected": "/mock/castxml",
@@ -3992,12 +4071,12 @@ def test_clang_header_dump_success_and_cache(
 
     monkeypatch.setattr(dumper.deadline, "run_bounded", _run)
 
-    root, resolved_kind = _clang_header_dump([header], [])
+    root, resolved_kind, _ = _clang_header_dump([header], [])
     assert root == {"kind": "TranslationUnitDecl", "inner": []}
     assert resolved_kind is None
     assert cache.exists()  # result was cached
     # Second call hits the cache — subprocess is not invoked again.
-    root2, resolved_kind2 = _clang_header_dump([header], [])
+    root2, resolved_kind2, _ = _clang_header_dump([header], [])
     assert root2 == root
     assert resolved_kind2 is None
     assert calls["n"] == 1
@@ -4319,7 +4398,7 @@ def test_clang_only_dump_does_not_require_gxx_identity(
         return _fake_proc()
 
     monkeypatch.setattr(dumper.deadline, "run_bounded", _run)
-    root, resolved_kind = _clang_header_dump([header], [])
+    root, resolved_kind, _ = _clang_header_dump([header], [])
     assert root == {"kind": "TranslationUnitDecl", "inner": []}
     assert resolved_kind is None
 
@@ -4627,11 +4706,16 @@ def test_clang_header_dump_retries_cpp_on_missing_cpp_stdlib_header(
         return _fake_proc(returncode=0)
 
     monkeypatch.setattr(dumper.deadline, "run_bounded", _run)
-    root, _resolved_kind = _clang_header_dump([header], [])
+    root, _resolved_kind, resolved_force_cpp = _clang_header_dump([header], [])
     assert root == {"kind": "TranslationUnitDecl", "inner": []}
     assert len(cmds) == 2  # one C attempt + one C++ retry
     assert "c" in cmds[0] and cmds[0][cmds[0].index("-x") + 1] == "c"
     assert cmds[1][cmds[1].index("-x") + 1] == "c++"
+    # Codex review, fresh evidence: the self-heal's real, post-retry language
+    # mode must be reported back, not the pre-retry "c" guess -- this is what
+    # the provenance probe (dumper_toolchain._ast_compile_provenance) relies
+    # on instead of silently re-deriving a stale answer.
+    assert resolved_force_cpp is True
 
 
 def test_clang_header_dump_no_retry_on_other_error(
@@ -4690,7 +4774,7 @@ def test_clang_header_dump_device_context_selects_real_fixture(
         return _fake_proc(stderr=stderr_text, returncode=0)
 
     monkeypatch.setattr(dumper.deadline, "run_bounded", _run)
-    root, resolved_kind = _clang_header_dump([header], [], frontend_context="device")
+    root, resolved_kind, _ = _clang_header_dump([header], [], frontend_context="device")
     assert resolved_kind == "device"
     assert root["kind"] == "TranslationUnitDecl"
 
@@ -4714,7 +4798,7 @@ def test_clang_header_dump_host_context_selects_real_fixture(
         return _fake_proc(stderr=stderr_text, returncode=0)
 
     monkeypatch.setattr(dumper.deadline, "run_bounded", _run)
-    root, resolved_kind = _clang_header_dump([header], [])
+    root, resolved_kind, _ = _clang_header_dump([header], [])
     assert resolved_kind == "host"
     assert root["kind"] == "TranslationUnitDecl"
 
@@ -4769,7 +4853,7 @@ def test_clang_header_dump_fno_sycl_skips_multi_context(
         return _fake_proc()
 
     monkeypatch.setattr(dumper.deadline, "run_bounded", _run)
-    root, resolved_kind = _clang_header_dump([header], [], gcc_options="-fno-sycl")
+    root, resolved_kind, _ = _clang_header_dump([header], [], gcc_options="-fno-sycl")
     assert resolved_kind is None
     assert root["kind"] == "TranslationUnitDecl"
     assert captured_cmds and all("-fsycl" not in cmd for cmd in captured_cmds)
@@ -5631,7 +5715,7 @@ def test_clang_header_dump_corrupt_cache_is_discarded(
 
     monkeypatch.setattr(dumper.deadline, "run_bounded", _run)
     # The corrupt cache is unlinked and the fresh clang run repopulates it.
-    root, _resolved_kind = _clang_header_dump([header], [])
+    root, _resolved_kind, _ = _clang_header_dump([header], [])
     assert root == {"kind": "TranslationUnitDecl", "inner": []}
 
 

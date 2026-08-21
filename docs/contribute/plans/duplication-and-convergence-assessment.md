@@ -812,9 +812,9 @@ CLI / Python facade / Action / compat adapters
 
 Engine modules may not import `click`; engine/service modules may not
 import `cli_*`; CLI modules may not call `dumper.dump`, `checker.compare`,
-or `service.resolve_input` directly (mirroring the existing `cli-contract`
-gate, which already enforces the last rule for `checker.compare` — the
-other two constraints are new); frontends only build requests, call
+or `service.resolve_input` directly (the `cli-contract` gate now enforces
+all three, allowlist-and-shrink over today's pre-existing call sites — see
+Phase 0 item 2 below); frontends only build requests, call
 application operations, render results, and translate exceptions;
 pack detection belongs under `buildsource`, not a CLI helper module;
 progress notification uses callbacks/events, not `click.echo`.
@@ -933,7 +933,28 @@ block-everything-immediately):
    than attempted as a drive-by widening of this check's first version.
 2. No CLI or `compat` module calls `checker.compare`, `dumper.dump`, or
    `service.resolve_input` directly (extends the existing `cli-contract`
-   gate, which today only covers `checker.compare`).
+   gate, which previously only covered `checker.compare`). **Implemented**:
+   `scripts/check_ai_readiness.py`'s `check_cli_contract` now walks a
+   generic `_TIER1_TARGETS` table (`checker.compare`, `dumper.dump`,
+   `service.resolve_input`) over every `cli*.py`, `appcompat.py`, and
+   `compat/cli.py` module (the last was previously outside this check's own
+   `_iter_cli_contract_sources()` scan entirely, despite being exactly the
+   "nested front end" this item names), allowlist-and-shrink
+   (`CLI_CONTRACT_ALLOWLIST`, pre-populated with the seven pre-existing,
+   already-documented call sites this same plan's P0/P1 sections name:
+   `cli_dump_helpers.perform_elf_dump`, `appcompat.check_appcompat`'s two
+   dump calls, `cli_scan_baseline`'s baseline resolution, and
+   `compat/cli.py`'s three direct calls). `cli_resolve.py`'s own
+   `_resolve_input()` — the CLI's designated, framework-aware wrapper over
+   `service.resolve_input` (see its module docstring) — is the one
+   exemption from the `service.resolve_input` rule, the same role
+   `service.py` itself already plays for `checker.compare`.
+   `tests/test_cli_contract.py` mirrors both the generalized detection (an
+   aliased-import and an aliased-module-call case per new target, plus a
+   not-flagged case for the sanctioned wrapper) and a
+   `test_cli_contract_allowlist_entries_are_real_violations` freshness
+   check so a fixed call site can't leave a stale allowlist entry behind
+   unnoticed.
 3. Every artifact extraction call site *for the seven user-facing
    operations and the two internal supplementary call sites named in
    Phase 1* routes through the future artifact application service.
@@ -1001,7 +1022,46 @@ block-everything-immediately):
    if it should eventually gain its own generic envelope, that is its own
    design question left to a `project`-specific follow-up, not solved by
    stretching `ReportEnvelope` to cover it.
-6. Every effective evaluation carries a digest (Phase 2).
+6. Every effective evaluation carries a digest (Phase 2). **True for its
+   natural scope** (`compare`, `scan`, `release`, `aggregate`) as of this
+   audit: `compare` (`service_render.py` → `reporter.to_json`/
+   `to_stat_json` → `add_effective_config_digest`,
+   `reporter_contract_blocks.py`), `scan` (`cli_scan_baseline.py` calls the
+   same helper directly on its own summary dict), and `release` (the
+   per-library fan-out's own persisted reports go through the same
+   `reporter.to_json`) already carried the digest before this audit.
+   `aggregate` did not — `AggregateResult.to_dict()`'s per-target roll-up
+   (`_LoadedReport` → `TargetReport`) silently dropped each target's own
+   already-computed digest rather than carrying it through. Closed: both
+   dataclasses gained an `effective_config_digest: str | None = None`
+   field (declared last, matching this file's own established
+   positional-construction-safety convention for `TargetReport`/
+   `_LoadedReport`), read straight off the loaded per-target report JSON in
+   `_load_report_file` — never recomputed, since `aggregate.py` holds none
+   of the `DiffResult`/`SeverityConfig` evidence
+   `effective_config_fields`/`add_effective_config_digest` are typed
+   against. Regression coverage:
+   `tests/test_aggregate_effective_config_digest.py` (a sibling of
+   `test_aggregate_analysis_assurance.py`'s own split, for the identical
+   file-size-cap reason — `test_aggregate.py` was already at 1982 lines).
+   **Two operations are deliberately excluded from this item's scope, not
+   silently unmentioned** (mirroring item 4's `dump`/`appcompat`
+   exclusions above): `compat check` doesn't get the digest by *design*,
+   not oversight — `compat/cli.py`'s `_generate_compat_report` calls
+   `to_json(r, include_exit_decision=False)` deliberately, since the
+   existing digest's `gate.exit_code_scheme`/`gate.severity.*` fields
+   describe only `compare`'s legacy/severity scheme and say nothing about
+   `compat`'s own `-strict`/`-source`/`-binary`/`-warn-newsym` transform
+   options — emitting the same digest for two behaviorally-different
+   `compat` runs would be actively misleading, not merely incomplete.
+   `deps compare` has no digest at all: it builds its report from a
+   `StackCheckResult` (`abicheck/stack_checker.py`/`stack_report.py`), not
+   a `DiffResult` — `effective_config_fields`/`add_effective_config_digest`
+   are typed against the latter, so closing this gap needs either
+   generalizing that machinery to accept `deps compare`'s own
+   policy/severity-equivalent knobs or a new stack-specific digest
+   function mirroring the existing one's shape, a moderate-to-large design
+   task left as a documented residual rather than attempted here.
 
 Each check starts with a reviewed allowlist of acknowledged pre-existing
 violations, the same pattern `IMPORT_CYCLE_ALLOWLIST` already uses — the
@@ -1011,9 +1071,37 @@ sign-off, not a routine PR).
 
 ### Phase 1 — Finish artifact-resolution convergence
 
-1. Introduce `ResolvedArtifactPlan` as a context-managed session that owns
-   any resource resolution itself allocates (e.g. an inferred-build
-   directory) from `resolve_artifact_request()` onward — not scoped to
+1. **Started (Milestone A).** `abicheck/artifact_plan.py` introduces
+   `ResolvedArtifactPlan` — a real, independently-tested context-managed
+   session (`tests/test_artifact_plan.py`) owning the
+   `list[Callable[[], None]]` cleanup accumulator every resolution call site
+   used to thread and drain by hand. Wired into exactly one already-isolated,
+   already-well-tested call site as proof: `cli_dump_helpers.
+   perform_elf_dump()`'s `_l2_pending_cleanups` accumulator is now a
+   `ResolvedArtifactPlan` instance, with identical cleanup thunks
+   (`seed_includes_and_fold_compile_context(..., pending_cleanups=
+   _artifact_plan.pending_cleanups)`) and identical timing (drained via
+   `run_cleanups()` at the exact two points the old code called
+   `_run_cleanups()` — immediately on a failed header parse, or after the
+   whole post-dump pipeline completes) — a behavior-preserving refactor, not
+   a new resolve/execute split. Existing `perform_elf_dump` coverage
+   (`tests/test_cli_dump_helpers_coverage.py`, including
+   `test_perform_elf_dump_wraps_dump_errors_still_cleans_up_seeded_dirs`)
+   passed unmodified against the migration. **Not yet done, and deliberately
+   out of scope for this slice**: this is not yet "resolve_artifact_request()
+   onward" as item 1's own text above describes — there is no
+   `resolve_artifact_request()`/`execute_artifact_plan()` split yet, `dump
+   --dry-run` still doesn't build from or render a `ResolvedArtifactPlan`
+   (`render_dump_dry_run()` is still its own independent resolution, per the
+   "PR C" entry in AGENTS.md's "Known gaps"), `handle_non_elf_dump`'s
+   identical `_l2_pending_cleanups` pattern is untouched, and none of items
+   2–10 below have been attempted. See item 1's own original text (kept
+   below) for the shape a full implementation still needs to reach.
+
+1. (Full shape, not yet reached) Introduce `ResolvedArtifactPlan` as a
+   context-managed session that owns any resource resolution itself
+   allocates (e.g. an inferred-build directory) from
+   `resolve_artifact_request()` onward — not scoped to
    `execute_artifact_plan()` alone, since dry-run resolves without ever
    executing and must still close the same session.
 2. Move `perform_elf_dump`'s remaining post-processing hooks (ADR-039

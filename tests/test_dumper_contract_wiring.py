@@ -193,15 +193,23 @@ def test_lang_mode_alone_flows_into_profile_fingerprint(
     """Codex review, PR #624 follow-up: the same clang executable, no
     explicit -std=, differing only by --lang c vs --lang c++, must not
     share a profile_fingerprint — the actual frontend commands parse
-    different languages (-x c vs. C++ default) regardless."""
+    different languages (-x c vs. C++ default) regardless.
+
+    abicheck-internal-bugs finding 2 follow-up: with no explicit -std=,
+    ``language_standard`` now also carries the resolved compiler's own
+    *probed* default standard (``dumper_toolchain._probe_default_language_
+    standard``), not just the bare lang mode — so the exact suffix is
+    host-compiler-version-dependent and only the ``"c:"``/``"c++:"`` prefix
+    is pinned here; the fingerprint-distinctness assertion (this test's
+    actual point) is unaffected either way."""
     so, header = built_lib
     snap_c = dump(so, [header], compiler="cc", header_backend="clang", lang="c")
     snap_cpp = dump(so, [header], compiler="cc", header_backend="clang", lang="c++")
 
     assert snap_c.contract is not None
     assert snap_cpp.contract is not None
-    assert snap_c.contract.profile_fields["language_standard"] == "c"
-    assert snap_cpp.contract.profile_fields["language_standard"] == "c++"
+    assert snap_c.contract.profile_fields["language_standard"].startswith("c:")
+    assert snap_cpp.contract.profile_fields["language_standard"].startswith("c++:")
     assert snap_c.contract.profile_fingerprint != snap_cpp.contract.profile_fingerprint
 
 
