@@ -106,14 +106,18 @@ Qualitatively — and this part doesn't drift, because it follows from what
 each layer can and cannot observe, not from a specific run's numbers — the
 shape holds regardless of the exact counts: `binary` (L0 alone) is the cheap
 floor with many invisible API/header/source-only breaks; `headers` (L0+L2)
-is the best low-cost gate, since public-header evidence removes most of
-those misses without introducing false positives; `build` (+L3) adds
-build-context corroboration on top; `source` (+L4) has the highest recall,
-since source-smoke proofs additionally cover consumer-only API hazards no
-artifact tier can see. An earlier `full` rung — whole-library replay, as
-opposed to `source`'s changed-TU replay — scored identically to `source` on
-the comparable-target set the matrix was last measured against, which is why
-the two were collapsed into one public `source` rung; see the appendix
+is the best low-cost gate, since public-header evidence adds the
+public/private boundary that removes most of those misses; `build` (+L3)
+adds build-context corroboration on top; `source` (+L4) has the highest
+recall, since source-smoke proofs additionally cover consumer-only API
+hazards no artifact tier can see. (Whether a given layer introduces zero
+*new* false positives is itself a measured, catalog- and run-specific
+result — see the fact owner above for the current number, not a guarantee
+this qualitative description makes on its own.) An earlier `full` rung —
+whole-library replay, as opposed to `source`'s changed-TU replay — scored
+identically to `source` on the comparable-target set the matrix was last
+measured against, which is why the two were collapsed into one public
+`source` rung; see the appendix
 below.
 
 Across the full staircase, adding evidence drives **both** error axes down — it
