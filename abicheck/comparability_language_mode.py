@@ -37,6 +37,7 @@ Two carve-outs live here, each answering a narrower question than the raw
 
 from __future__ import annotations
 
+import re
 from pathlib import PureWindowsPath
 
 from .model import AbiSnapshot
@@ -389,12 +390,32 @@ def _tc_match(old_tc: dict[str, str], new_tc: dict[str, str], key: str) -> bool:
     )
 
 
+#: A trailing GCC major-version suffix (Debian/Ubuntu's `update-alternatives`
+#: convention, e.g. `x86_64-linux-gnu-gcc-13`/`g++-14`) -- stripped before
+#: the `bare`/`*-suffix` check in :func:`_driver_prefix` so a resolved,
+#: version-suffixed *real path* (`compiler_realpath`, which
+#: `_compiler_binary_path` prefers -- Codex review, fresh evidence: a real
+#: Ubuntu toolchain resolves `/usr/bin/g++`/`/usr/bin/gcc` to exactly this
+#: shape) still recognizes as a genuine gcc/g++ pair, the same as the bare
+#: `--version` banner text (which never carries this suffix) already did.
+#: Matches only a trailing dash-digits run (optionally dotted, e.g. `-14.2`
+#: for a point release) -- never touches the target-triple prefix itself,
+#: which is exactly what the two sides must still agree on.
+_VERSION_SUFFIX = re.compile(r"-\d+(?:\.\d+)*$")
+
+
 def _driver_prefix(word: str, bare: str, suffix: str) -> str | None:
     """*word*'s prefix if it's a ``bare``/``*-suffix`` driver name (``""``
-    for the bare form), else ``None``."""
+    for the bare form), else ``None``. Tolerates a trailing GCC
+    major-version suffix on the ``*-suffix`` form (see
+    :data:`_VERSION_SUFFIX`) -- never on the bare form, which by
+    definition has nothing after ``bare`` to strip."""
     if word == bare:
         return ""
-    return word[: -len(suffix)] if word.endswith(suffix) else None
+    if word.endswith(suffix):
+        return word[: -len(suffix)]
+    stripped = _VERSION_SUFFIX.sub("", word)
+    return stripped[: -len(suffix)] if stripped.endswith(suffix) else None
 
 
 def _is_gcc_gxx_driver_pair(old_version: str, new_version: str) -> bool:

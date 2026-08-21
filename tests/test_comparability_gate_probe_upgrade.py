@@ -1602,6 +1602,55 @@ def test_gate_content_driven_still_raises_for_distinct_wrapper_scripts_sharing_a
         check_contracts_comparable(old, new)
 
 
+def test_gate_waives_real_ubuntu_versioned_symlink_driver_pair():
+    """Codex review, fresh evidence (follow-up to the wrapper-scripts
+    finding above): a real Ubuntu/Debian toolchain resolves
+    ``/usr/bin/g++``/``/usr/bin/gcc`` (`update-alternatives` symlinks) to
+    version-suffixed real paths -- ``compiler_realpath`` here reads
+    ``/usr/bin/x86_64-linux-gnu-g++-13``/``...-gcc-13``, neither of which
+    ends in a bare ``g++``/``gcc`` the way the resolved-binary-path check
+    added above requires. Without tolerating this suffix, the very common,
+    legitimate case that check exists to keep waiving would itself start
+    raising ``ProfileMismatchError`` -- this must still waive."""
+    old = _snap(
+        compute_extraction_contract(
+            l2_frontend_ran=True,
+            compiler_family="gnu",
+            compiler_version="13.3.0",
+            language_standard="probed:__cplusplus=201703L",
+        ),
+        ast_toolchain=_content_ast_toolchain(
+            "c++",
+            producer="castxml",
+            frontend_version="0.6.11",
+            host_version="g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+            compiler_sha256="a" * 64,
+            compiler_selected="/usr/bin/g++",
+            compiler_realpath="/usr/bin/x86_64-linux-gnu-g++-13",
+            compiler_target_triple="x86_64-linux-gnu",
+        ),
+    )
+    new = _snap(
+        compute_extraction_contract(
+            l2_frontend_ran=True,
+            compiler_family="gnu",
+            compiler_version="13.3.0",
+            language_standard="gnu11",
+        ),
+        ast_toolchain=_content_ast_toolchain(
+            "c",
+            producer="castxml",
+            frontend_version="0.6.11",
+            host_version="gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+            compiler_sha256="b" * 64,
+            compiler_selected="/usr/bin/gcc",
+            compiler_realpath="/usr/bin/x86_64-linux-gnu-gcc-13",
+            compiler_target_triple="x86_64-linux-gnu",
+        ),
+    )
+    check_contracts_comparable(old, new)  # must not raise
+
+
 def test_gate_content_driven_divergence_still_raises_for_the_exact_literal_collision_pair():
     """Codex review finding, PR #816 (second round): an explicit
     ``-std=gnu11``/``-std=gnu++20`` given without ``--lang`` produces
