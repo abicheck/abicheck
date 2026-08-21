@@ -259,9 +259,15 @@ class TestDumpCliHonorsTheFilterInTheFold:
         so_path = tmp_path / "libapi.so"
         subprocess.run(
             [
-                "g++", "-std=c++17", "-DWIDE=1", "-shared", "-fPIC",
-                "-o", str(so_path),
-                str(tmp_path / "a.cpp"), str(tmp_path / "b.cpp"),
+                "g++",
+                "-std=c++17",
+                "-DWIDE=1",
+                "-shared",
+                "-fPIC",
+                "-o",
+                str(so_path),
+                str(tmp_path / "a.cpp"),
+                str(tmp_path / "b.cpp"),
             ],
             check=True,
             capture_output=True,
@@ -273,8 +279,14 @@ class TestDumpCliHonorsTheFilterInTheFold:
                     {
                         "directory": str(tmp_path),
                         "arguments": [
-                            "g++", "-std=c++17", f"-D{macro}", "-fPIC", "-c",
-                            str(tmp_path / f"{name}.cpp"), "-o", f"{name}.o",
+                            "g++",
+                            "-std=c++17",
+                            f"-D{macro}",
+                            "-fPIC",
+                            "-c",
+                            str(tmp_path / f"{name}.cpp"),
+                            "-o",
+                            f"{name}.o",
                         ],
                         "file": str(tmp_path / f"{name}.cpp"),
                     }
@@ -294,17 +306,25 @@ class TestDumpCliHonorsTheFilterInTheFold:
         return CliRunner().invoke(
             main,
             [
-                "dump", str(so_path), "-H", str(header),
-                "--sources", str(header.parent),
-                "--build-info", str(compile_db),
+                "dump",
+                str(so_path),
+                "-H",
+                str(header),
+                "--sources",
+                str(header.parent),
+                "--build-info",
+                str(compile_db),
                 # `--depth headers` keeps `collect_mode` "off", which is the
                 # one depth at which `compile_db_filter_scope_error` permits
                 # the flag alongside `--build-info` at all: no L3 evidence is
                 # embedded, so there is no L2-filtered/L3-unfiltered snapshot
                 # to be inconsistent. That refusal is unchanged by this fix.
-                "--depth", "headers",
-                "--ast-frontend", "clang",
-                "-o", str(out),
+                "--depth",
+                "headers",
+                "--ast-frontend",
+                "clang",
+                "-o",
+                str(out),
                 *extra,
             ],
         )

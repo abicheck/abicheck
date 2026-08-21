@@ -228,7 +228,8 @@ def filter_units_by_source(
     matched = [
         cu
         for cu in compile_units
-        if cu.source and source_matches_filter(cu.source, cu.directory or None, source_filter)
+        if cu.source
+        and source_matches_filter(cu.source, cu.directory or None, source_filter)
     ]
     return matched or compile_units
 
