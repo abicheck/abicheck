@@ -1768,6 +1768,127 @@ pipelines a fourth time.
   > stale silently. Verified in both directions (a deliberately wrong
   > mapping fails).
 
+  > **Slice landed (2026-08-21, later session): the measured divergence above
+  > is closed, `scan`'s candidate resolver is migrated, and two further real
+  > bugs were found by the measurement itself. The `dump` real run is still
+  > NOT migrated — see "what still blocks it" at the end.**
+  >
+  > *The legacy-match overlap (the note immediately above this one).* The
+  > decision that note left open — which of the two mechanisms owns a matched
+  > compile database — is made: **when the P0.3 fold resolves a compile context
+  > for the headers being parsed, it is the sole source of
+  > compile-database-derived context, and the legacy `-p`/`--compile-db`
+  > auto-match's own derived flags are unfolded rather than stacked on top of
+  > it.** When the fold does not apply (no `--build-info`, or a header no
+  > compile unit matches) the legacy match still runs and still applies, so
+  > only the overlap is dropped. `--compile-db-filter` does **not** go inert
+  > with it — the concern that made this note rank the removal second: the
+  > filter reaches the shared fold too, since the previous slice threaded
+  > `source_filter` through `seed_includes_and_fold_compile_context`/
+  > `resolve_header_compile_context`, so the ordering that note called for was
+  > already satisfied by the time this landed.
+  >
+  > Mechanically it is one conditional, and where it goes matters: the legacy
+  > flags are already merged into `effective_gcc_options` by `dump_cmd` before
+  > `perform_elf_dump` is called, so `perform_elf_dump` now takes them
+  > separately (`legacy_build_context_flags`) and passes the caller's *own*
+  > `--gcc-options` string to the fold as its explicit context. Presenting the
+  > legacy result to the fold as though it were an explicit user choice is
+  > exactly what recorded the same `-D` twice and pushed a derived `-I` through
+  > `gcc_option_tokens` instead of `declared_includes`.
+  >
+  > Measured after: `macro_ops`, `include_sequence`, `scope_fingerprint` and
+  > `profile_fingerprint` agree across all three build shapes, and — the
+  > user-visible half — `scan --against` a real `dump` baseline for the
+  > `extra-include-dir` shape goes from **exit 6, `NOT_COMPARABLE ... differing
+  > fields: include_sequence`** to exit 0 for an unchanged library.
+  > `_CONTRACT_KNOWN_DIVERGENT_FIELDS` and `_SCAN_KNOWN_DIVERGENT_SHAPES` are
+  > both empty; the conditional-xfail mechanism stays for the next divergence.
+  >
+  > *`scan`'s candidate resolver is migrated.* `scan_engine._build_new_snapshot`
+  > builds an `InputSpec`/`SideEvidence` and calls
+  > `service_input_resolution._resolve_side_snapshot_impl`, returning its
+  > `SideResolution`; `run_scan_core` hands the `BaselineReuseContext` in at
+  > resolve time and *reads* `SideResolution.baseline_compile_context` instead
+  > of recomputing one from the values it got back. The L2 seed, the
+  > `parsed_with_build_context` stamp, the ADR-039 collector gate, the
+  > drain-before-embed ordering and the pair-aware baseline rule are now
+  > inherited from one implementation rather than hand-written twice.
+  >
+  > The four divergences this section enumerated are preserved as **opt-in
+  > parameters on the shared primitive**, which is what this note said a future
+  > slice should do: `seed_collect_mode` (scan's real collect mode, so the
+  > zero-config inferred query still seeds includes for a compile-DB-less
+  > tree — every other caller keeps the Tier-2 pin), `seed_lang_explicit`
+  > (scan's `lang == "c"` seed guard, which does not apply to the parse),
+  > `defer_cleanup`, `source_extractor` (`"auto"` → clang), and
+  > `expand_public_header_roots` + `source_frontend_compile`. The L4 extractor
+  > default therefore stays exactly as documented — closing it would newly
+  > require castxml for a `scan --depth source` that works with clang today,
+  > and castxml is still unavailable here.
+  >
+  > `expand_public_header_inputs` moved to `service_scan.py` so the engine-layer
+  > resolver can reach it without an engine-imports-CLI edge;
+  > `cli_scan_baseline._expand_public_headers` is a thin delegate. The migration
+  > *removed* an `ENGINE_CLI_BOUNDARY_ALLOWLIST` entry (`scan_engine.py`'s
+  > `cli_buildsource` import) and dropped `scan_engine.py` back below the
+  > 1500-line soft limit.
+  >
+  > Equivalence was measured rather than argued: the candidate snapshot, the
+  > effective includes, the effective compile context and the deferred-cleanup
+  > count, for three real build shapes × three collect modes, are identical
+  > before and after — apart from wall-clock timestamps and the build-source
+  > pack's own content hash. `test_scan_engine_calls_the_shared_resolver` was a
+  > source-text match on `run_scan_core`; it is replaced by two behavioural pins
+  > through a real `scan --against` (the hint carries the *resolved* old-side
+  > scopes; a sentinel answer from the resolution is what reaches the baseline
+  > parse, which nothing but forwarding can produce).
+  >
+  > *A second real bug, found by the item-1 verification bar rather than by a
+  > report.* Extending the parity measurement from the extraction contract to
+  > the *whole* snapshot showed the two paths disagreeing on the L3–L5 payload,
+  > and not cosmetically: the `dump` CLI recorded `0/2 symbols matched`,
+  > `reachable_declarations=0`, `fact_family_states: empty-confirmed` where the
+  > typed path recorded `1/2` matched and a real
+  > `source_decl_to_binary_symbol` mapping. Cause:
+  > `_write_snapshot_output`'s own `embed_build_source` call passed **no**
+  > `public_headers`/`public_header_dirs`, so L4 replay ran with an empty
+  > `public_header_roots` set — every declaration classifies private and nothing
+  > links. The layer is present and the coverage row honestly reports "partial",
+  > so nothing fails; every L4-derived source-ABI finding is simply inert for a
+  > `dump`-produced baseline. Fixed on both the ELF and PE/Mach-O paths. With
+  > that, the `dump` CLI's written snapshot and `execute_dump_request`'s agree
+  > on every field except wall-clock timings and the CLI's own provenance layer
+  > (`git_commit`, `version`).
+  >
+  > **What still blocks routing `dump_cmd`'s real run through
+  > `execute_dump_request` — narrowed to two items, both real.** Blocker 4 is
+  > closed on measurement, not just on reading: `service.run_dump`'s ELF branch
+  > already runs every post-processing pass `perform_elf_dump` does (SYCL,
+  > `python_ext`, `python_api`, `numpy_capi`, the G31 header graph, the G28
+  > clang-layout attach), the ADR-039 collector now runs inside
+  > `_resolve_side_snapshot_impl`, and the whole-snapshot comparison above shows
+  > no difference in any field those produce. What remains:
+  >
+  > 1. **`--compile-db-filter` would go inert.** `InputSpec` deliberately
+  >    carries no `compile_db_filter` (see its own replacement comment), so the
+  >    shared path cannot narrow the fold or the ADR-039 collector the way the
+  >    native `dump` CLI does. Making a documented flag silently do nothing is
+  >    worse than the gap. The step is clearly specified — add the field, thread
+  >    it into `_seeded_includes_and_compile_context` (whose primitive already
+  >    takes a `source_filter`) and into
+  >    `attach_build_context_for_parsed_headers`, and mirror the CLI's own
+  >    L2-filtered/L3-unfiltered refusal into `resolve_dump_request`, the only
+  >    place that knows the resolved collect mode — but it is its own slice.
+  > 2. **The default backend is still unexercisable here.** `--ast-frontend`
+  >    defaults to castxml and no working castxml is available in this
+  >    environment (re-checked), so every measurement above is clang-backend
+  >    only. Migrating the real `dump` run while able to exercise only the
+  >    non-default backend is not a verified change, and this section has said
+  >    so since the previous session.
+  >
+  > PR 3C therefore stays blocked, per this section's own ordering rule.
+
   Two #782 follow-ups that change the *parsed public surface*, not just
   performance, so they belong before the model is called finished: (1)
   compile-unit matching — the L2 include-dir seed is still gathered from

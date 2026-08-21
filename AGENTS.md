@@ -4715,6 +4715,94 @@ Once a root command genuinely clears the bar above, pick the right home:
   fails as loudly as "a new field diverged" and the mapping cannot go stale
   silently. Verified in both directions.
 
+  **The two divergences that test recorded are closed, `scan`'s candidate
+  resolver is migrated, and the measurement itself turned up a second, larger
+  bug (2026-08-21, later session). The `dump` real run is still not migrated —
+  the reason is now two items, not open-ended.**
+
+  *The legacy-match overlap.* The design decision the entry above left open is
+  made: **when the P0.3 fold resolves a compile context for the headers being
+  parsed, it is the sole source of compile-database-derived context**, and the
+  legacy `-p`/`--compile-db` auto-match's own derived flags are unfolded rather
+  than stacked on top of it. When the fold does not apply (no `--build-info`,
+  or a header no compile unit matches) the legacy match still runs and still
+  applies — only the overlap is dropped. The worry that ranked this second —
+  that dropping the legacy match makes `--compile-db-filter` inert — no longer
+  holds: the filter reaches the shared fold too, since the preceding slice
+  threaded `source_filter` through `seed_includes_and_fold_compile_context`/
+  `resolve_header_compile_context`. Where the conditional goes is the load-
+  bearing part: `dump_cmd` merges the legacy flags into `effective_gcc_options`
+  *before* calling `perform_elf_dump`, so that function now takes them
+  separately (`legacy_build_context_flags`) and hands the fold the caller's
+  *own* `--gcc-options` string as its explicit context. Presenting the legacy
+  result to the fold as though it were an explicit user choice is precisely
+  what recorded the same `-D` twice and routed a derived `-I` through
+  `gcc_option_tokens` instead of `declared_includes`. User-visible result, not
+  only a fingerprint tidy-up: `scan --against` a real `dump` baseline for the
+  extra-`-I` shape goes from **exit 6, `NOT_COMPARABLE ... differing fields:
+  include_sequence`** to exit 0 for an unchanged library.
+
+  *`scan`'s candidate resolver.* `scan_engine._build_new_snapshot` now builds
+  an `InputSpec`/`SideEvidence` and calls `_resolve_side_snapshot_impl`,
+  returning its `SideResolution`; `run_scan_core` hands the
+  `BaselineReuseContext` in at resolve time and reads
+  `SideResolution.baseline_compile_context` rather than recomputing it. The L2
+  seed, the `parsed_with_build_context` stamp, the ADR-039 collector gate, the
+  drain-before-embed ordering and the pair-aware baseline rule are inherited
+  from one implementation instead of written twice — each of which had already
+  needed its own separate correction on this path (findings 8/12/13/15 above,
+  and the round where `scan` turned out never to run the ADR-039 collector at
+  all). The four documented divergences are preserved as **opt-in parameters**
+  on the shared primitive, which is what the plan said a future slice should
+  do: `seed_collect_mode`, `seed_lang_explicit`, `defer_cleanup`,
+  `source_extractor`, `expand_public_header_roots`, `source_frontend_compile`.
+  The L4 extractor default therefore stays a documented gap — matching the
+  other resolvers would newly require castxml for a `scan --depth source` that
+  works with clang today, and castxml is still absent here. Equivalence was
+  measured, not argued: candidate snapshot, effective includes, effective
+  compile context and deferred-cleanup count, over three real build shapes ×
+  three collect modes, identical before and after apart from wall-clock
+  timestamps and the build-source pack's own content hash.
+  `test_scan_engine_calls_the_shared_resolver` was a source-text match on
+  `run_scan_core`; it is replaced by two behavioural pins through a real
+  `scan --against`.
+
+  *The second bug, found by the verification bar rather than by a report.*
+  Extending the parity measurement from the extraction contract to the *whole*
+  snapshot showed the two paths disagreeing on the L3–L5 payload, and not
+  cosmetically: the `dump` CLI recorded `0/2 symbols matched`,
+  `reachable_declarations=0`, `fact_family_states: empty-confirmed` where the
+  typed path recorded `1/2` matched and a real `source_decl_to_binary_symbol`
+  mapping. `cli_buildsource._write_snapshot_output`'s own `embed_build_source`
+  call passed **no** `public_headers`/`public_header_dirs`, so L4 replay ran
+  with an empty `public_header_roots` set — every declaration classifies
+  private and nothing links. Nothing fails: the layer is present and the
+  coverage row honestly says "partial", so every L4-derived source-ABI finding
+  was simply inert for a `dump`-produced baseline. Fixed on both the ELF and
+  PE/Mach-O paths. With it, the `dump` CLI's written snapshot and
+  `execute_dump_request`'s agree on every field except wall-clock timings and
+  the CLI's own provenance layer (`git_commit`, `version`).
+
+  **What still blocks the `dump` real-run migration — two items, both real.**
+  Blocker 4 (post-processing hooks) is closed on measurement, not just on
+  reading: `service.run_dump`'s ELF branch already runs every pass
+  `perform_elf_dump` does (SYCL, `python_ext`, `python_api`, `numpy_capi`, the
+  G31 header graph, the G28 clang-layout attach), the ADR-039 collector runs
+  inside `_resolve_side_snapshot_impl`, and the whole-snapshot comparison shows
+  no difference in any field those produce. What remains: (1)
+  **`--compile-db-filter` would go inert** — `InputSpec` deliberately carries
+  no `compile_db_filter`, so the shared path cannot narrow the fold or the
+  ADR-039 collector the way the native CLI does, and making a documented flag
+  silently do nothing is worse than the gap; the step is specified (add the
+  field, thread it into `_seeded_includes_and_compile_context` and
+  `attach_build_context_for_parsed_headers`, mirror the CLI's
+  L2-filtered/L3-unfiltered refusal into `resolve_dump_request`) but is its own
+  slice. (2) **The default backend is still unexercisable here** —
+  `--ast-frontend` defaults to castxml, none is available (re-checked), so
+  every measurement above is clang-only, and migrating the real `dump` run
+  while able to exercise only the non-default backend is not a verified change.
+  PR 3C stays blocked, per the plan's own ordering rule.
+
 - Don't hand-edit `CHANGELOG.md`'s `## [Unreleased]` section directly — add a `changelog.d/` fragment instead (see Conventions above); CI enforces this
 - Don't modify `examples/` test cases without understanding the ground truth they encode
 - Don't add dependencies without strong justification (this is a lightweight tool)
