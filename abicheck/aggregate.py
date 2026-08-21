@@ -464,6 +464,13 @@ class TargetReport:
     #: orthogonal exit-floor axis. Declared last for the same
     #: positional-construction-safety reason as that field.
     analysis_assurance_exit: int = 0
+    #: Phase 0 item 6 of docs/contribute/plans/duplication-and-convergence-
+    #: assessment.md: this target's own already-computed
+    #: ``effective_config_digest``, read straight off its report by
+    #: :func:`_load_report_file` -- never recomputed here. ``None`` for an
+    #: unavailable target or a report that carried none. Declared last for
+    #: the same positional-construction-safety reason as the fields above.
+    effective_config_digest: str | None = None
 
     @property
     def analyzed(self) -> bool:
@@ -507,7 +514,7 @@ class TargetReport:
         profile_id = self.profile_id
         if profile_id is not None:
             d["profile_id"] = profile_id
-        for key in ("report_path", "library", "reason"):
+        for key in ("report_path", "library", "reason", "effective_config_digest"):
             value = getattr(self, key)
             if value is not None:
                 d[key] = value
@@ -1368,6 +1375,18 @@ class _LoadedReport:
     #: a run without ``--require-complete-analysis`` never floors its exit
     #: on this axis, so ``0`` is the honest default rather than a fallback.
     analysis_assurance_exit: int = 0
+    #: Phase 0 item 6 of docs/contribute/plans/duplication-and-convergence-
+    #: assessment.md ("every effective evaluation carries a digest"): read
+    #: straight off the per-target report's own ``effective_config_digest``
+    #: (``add_effective_config_digest``, ``reporter_contract_blocks.py``) —
+    #: never recomputed here, since this aggregate holds none of the
+    #: ``DiffResult``/``SeverityConfig`` evidence that digest is derived
+    #: from, only the already-written report dict. ``None`` for every report
+    #: that carries none — a pre-digest report, or one written with
+    #: ``include_exit_decision=False`` (``compat check``'s own reports,
+    #: which intentionally omit the digest — see that call site's docstring)
+    #: — same fail-open default as the coverage/assurance fields above.
+    effective_config_digest: str | None = None
 
 
 def _contract_coverage_declared(data: Mapping[str, Any]) -> bool:
@@ -1641,6 +1660,8 @@ def _load_report_file(path: Path, *, prefix: str) -> _LoadedReport:
     )
     head_sha_raw = data.get("head_sha")
     head_sha = str(head_sha_raw) if isinstance(head_sha_raw, str) else None
+    digest_raw = data.get("effective_config_digest")
+    effective_config_digest = digest_raw if isinstance(digest_raw, str) else None
     # A compare-release *operational* failure carries top-level ``verdict:
     # "ERROR"`` (a library failed to dump/extract/compare) — the release path
     # ranks it above BREAKING and floors its exit to 4. "ERROR" is not a
@@ -1675,6 +1696,7 @@ def _load_report_file(path: Path, *, prefix: str) -> _LoadedReport:
             # everything, so these findings can convict their own profile and
             # clear no other.
             findings=_incomplete_findings(data),
+            effective_config_digest=effective_config_digest,
         )
     # ADR-050 D2: a native compare/compare-release not_comparable report
     # carries a real ``verdict: null`` (JSON null, not a missing key) plus a
@@ -1713,6 +1735,7 @@ def _load_report_file(path: Path, *, prefix: str) -> _LoadedReport:
                 contract_coverage_exit=_contract_coverage_exit(data),
                 contract_coverage_incomplete=_contract_coverage_incomplete(data),
                 analysis_assurance_exit=_analysis_assurance_exit(data),
+                effective_config_digest=effective_config_digest,
             )
     verdict = parse_report_verdict(data)
     gate: GateInfo | None = None
@@ -1763,6 +1786,7 @@ def _load_report_file(path: Path, *, prefix: str) -> _LoadedReport:
         # reading: a verdictless one is unavailable, and its `changes` array
         # (if any) describes a comparison that never reached a conclusion.
         findings=parse_report_findings(data) if verdict is not None else None,
+        effective_config_digest=effective_config_digest,
     )
 
 
@@ -1873,6 +1897,7 @@ def aggregate(
             contract_coverage_declared=report.contract_coverage_declared,
             analysis_assurance_exit=report.analysis_assurance_exit,
             findings=report.findings,
+            effective_config_digest=report.effective_config_digest,
         )
 
     targets = tuple(

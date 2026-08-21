@@ -1022,7 +1022,46 @@ block-everything-immediately):
    if it should eventually gain its own generic envelope, that is its own
    design question left to a `project`-specific follow-up, not solved by
    stretching `ReportEnvelope` to cover it.
-6. Every effective evaluation carries a digest (Phase 2).
+6. Every effective evaluation carries a digest (Phase 2). **True for its
+   natural scope** (`compare`, `scan`, `release`, `aggregate`) as of this
+   audit: `compare` (`service_render.py` → `reporter.to_json`/
+   `to_stat_json` → `add_effective_config_digest`,
+   `reporter_contract_blocks.py`), `scan` (`cli_scan_baseline.py` calls the
+   same helper directly on its own summary dict), and `release` (the
+   per-library fan-out's own persisted reports go through the same
+   `reporter.to_json`) already carried the digest before this audit.
+   `aggregate` did not — `AggregateResult.to_dict()`'s per-target roll-up
+   (`_LoadedReport` → `TargetReport`) silently dropped each target's own
+   already-computed digest rather than carrying it through. Closed: both
+   dataclasses gained an `effective_config_digest: str | None = None`
+   field (declared last, matching this file's own established
+   positional-construction-safety convention for `TargetReport`/
+   `_LoadedReport`), read straight off the loaded per-target report JSON in
+   `_load_report_file` — never recomputed, since `aggregate.py` holds none
+   of the `DiffResult`/`SeverityConfig` evidence
+   `effective_config_fields`/`add_effective_config_digest` are typed
+   against. Regression coverage:
+   `tests/test_aggregate_effective_config_digest.py` (a sibling of
+   `test_aggregate_analysis_assurance.py`'s own split, for the identical
+   file-size-cap reason — `test_aggregate.py` was already at 1982 lines).
+   **Two operations are deliberately excluded from this item's scope, not
+   silently unmentioned** (mirroring item 4's `dump`/`appcompat`
+   exclusions above): `compat check` doesn't get the digest by *design*,
+   not oversight — `compat/cli.py`'s `_generate_compat_report` calls
+   `to_json(r, include_exit_decision=False)` deliberately, since the
+   existing digest's `gate.exit_code_scheme`/`gate.severity.*` fields
+   describe only `compare`'s legacy/severity scheme and say nothing about
+   `compat`'s own `-strict`/`-source`/`-binary`/`-warn-newsym` transform
+   options — emitting the same digest for two behaviorally-different
+   `compat` runs would be actively misleading, not merely incomplete.
+   `deps compare` has no digest at all: it builds its report from a
+   `StackCheckResult` (`abicheck/stack_checker.py`/`stack_report.py`), not
+   a `DiffResult` — `effective_config_fields`/`add_effective_config_digest`
+   are typed against the latter, so closing this gap needs either
+   generalizing that machinery to accept `deps compare`'s own
+   policy/severity-equivalent knobs or a new stack-specific digest
+   function mirroring the existing one's shape, a moderate-to-large design
+   task left as a documented residual rather than attempted here.
 
 Each check starts with a reviewed allowlist of acknowledged pre-existing
 violations, the same pattern `IMPORT_CYCLE_ALLOWLIST` already uses — the
