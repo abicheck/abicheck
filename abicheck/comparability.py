@@ -701,11 +701,9 @@ _PROBED_STANDARD_PREFIX = "probed:"
 #: ``_PROBED_STANDARD_PREFIX`` above).
 _FORCED_C_STANDARD = "gnu11"
 
-#: The literal standard :func:`dumper_toolchain._resolve_standard_provenance`
-#: records for an unpinned parse whose headers trip the ``force_cpp20``
-#: requires-clause heuristic -- mirrors that function's own ``"gnu++20"``
-#: literal (not imported, same reasoning as ``_PROBED_STANDARD_PREFIX``
-#: above).
+#: Mirrors ``dumper_toolchain._resolve_standard_provenance``'s ``"gnu++20"``
+#: literal for a ``force_cpp20`` heuristic hit (not imported, same
+#: reasoning as ``_PROBED_STANDARD_PREFIX`` above).
 _FORCED_CPP20_STANDARD = "gnu++20"
 
 #: Per resolved language *mode*, the one bare (non-``"probed:"``-prefixed)
@@ -713,16 +711,11 @@ _FORCED_CPP20_STANDARD = "gnu++20"
 #: produce -- used by
 #: :func:`_language_standard_content_divergence_corroborated` to reject a
 #: bare value that merely happens to collide with one of these (Codex
-#: review, fresh evidence: ``-std=gnu11``/``-std=gnu++17`` given explicitly,
-#: with no ``--lang``, produces the identical bare literal
-#: :func:`dumper_toolchain._extract_explicit_std_value` would have returned
-#: for a genuinely explicit pin -- ``_language_standard_is_lang_pinned``
-#: only recognizes an explicit *lang tag*, not an explicit *standard* given
-#: without one, so that carve-out alone cannot tell the two apart). Any
-#: other bare literal (``"c11"``, ``"c++17"``, ``"gnu++17"``, ...) can only
-#: have come from an explicit ``-std=``/``/std:`` pin, since neither the
-#: forced-default path nor the ``force_cpp20`` heuristic can ever produce
-#: it -- so it is never eligible for this carve-out.
+#: review: ``-std=gnu11``/``-std=gnu++17`` given without ``--lang`` produces
+#: the identical bare literal an unpinned parse would, and
+#: ``_language_standard_is_lang_pinned`` only recognizes an explicit *lang
+#: tag*, not an explicit *standard* given without one). Any other bare
+#: literal can only have come from an explicit pin.
 _KNOWN_AUTO_RESOLVED_BARE_STANDARDS = {"c": _FORCED_C_STANDARD, "c++": _FORCED_CPP20_STANDARD}
 
 #: Every ``language_standard_field`` spelling an *unpinned, no-resolved-
@@ -948,28 +941,26 @@ def _language_standard_is_known_auto_resolved_form(std: str, mode: str) -> bool:
     form :func:`dumper_toolchain._resolve_standard_provenance` can actually
     produce for an *unpinned* parse resolved to language *mode* (``"c"``/
     ``"c++"``) -- as opposed to a bare literal that merely happens to look
-    like one (Codex review, fresh evidence, real finding on this PR).
+    like one (Codex review, real finding on this PR).
 
-    An explicit ``-std=gnu11``/``-std=gnu++17``, given with no ``--lang`` at
-    all, is not caught by :func:`_language_standard_is_lang_pinned` (which
-    only recognizes an explicit *lang tag*) -- and
+    An explicit ``-std=gnu11``/``-std=gnu++17`` given with no ``--lang`` at
+    all is not caught by :func:`_language_standard_is_lang_pinned` (which
+    only recognizes an explicit *lang tag*), and
     :func:`dumper_toolchain._extract_explicit_std_value` returns that value
-    completely verbatim, with no marker distinguishing it from an
-    auto-resolved one. For most explicit standards this is harmless (a
-    genuinely different literal, e.g. ``"c++17"``, is never something the
-    unpinned path can produce either), but ``-std=gnu11`` collides exactly
-    with :data:`_FORCED_C_STANDARD` and ``-std=gnu++20`` collides exactly
-    with :data:`_FORCED_CPP20_STANDARD` -- an explicit, toolchain-config-
-    driven divergence between those two literals would otherwise read as
-    "purely content-driven" and be wrongly waived.
+    verbatim with no marker distinguishing it from an auto-resolved one.
+    Most explicit standards are harmless here (a literal like ``"c++17"``
+    is never something the unpinned path can produce either), but
+    ``-std=gnu11``/``-std=gnu++20`` collide exactly with
+    :data:`_FORCED_C_STANDARD`/:data:`_FORCED_CPP20_STANDARD` -- an
+    explicit, toolchain-config-driven divergence between those two literals
+    would otherwise read as "purely content-driven" and be wrongly waived.
 
     A ``"probed:..."``-prefixed value is always genuine (only
     :func:`dumper_toolchain._probe_default_language_standard` ever produces
-    it, and no real ``-std=`` spelling starts with this marker); a bare
-    literal is only trusted when it is *exactly* the one form the unpinned
-    path can produce for *this* mode (:data:`_KNOWN_AUTO_RESOLVED_BARE_STANDARDS`)
-    -- any other bare literal can only have come from an explicit pin and is
-    never eligible here.
+    it); a bare literal is only trusted when it exactly matches the one
+    form the unpinned path can produce for *this* mode
+    (:data:`_KNOWN_AUTO_RESOLVED_BARE_STANDARDS`) -- any other bare literal
+    can only have come from an explicit pin.
     """
     if std.startswith(_PROBED_STANDARD_PREFIX):
         return True
@@ -978,19 +969,14 @@ def _language_standard_is_known_auto_resolved_form(std: str, mode: str) -> bool:
 
 def _compiler_version_sans_driver_name(version: str) -> str:
     """Strip a leading driver-name token from a raw ``--version`` banner
-    (real CI failure, Codex review): a castxml-resolved host compiler is
-    invoked as a language-mode-specific binary --
-    ``dumper_ast_config._resolve_compiler_binary`` maps C mode to
-    ``gcc``/``cc`` and C++ mode to ``g++``/``c++`` -- so a GNU host
+    (real CI failure, Codex review): castxml resolves a language-mode-
+    specific host compiler (``dumper_ast_config._resolve_compiler_binary``
+    maps C mode to ``gcc``/``cc``, C++ to ``g++``/``c++``), so a GNU
     compiler's banner differs *only* in that leading word between the two
-    modes, even for the exact same toolchain installation/version:
-    ``"gcc (Ubuntu 13.3.0-...) 13.3.0..."`` vs. ``"g++ (Ubuntu 13.3.0-...)
-    13.3.0..."``. Used by
-    :func:`_language_standard_content_divergence_corroborated` to compare
-    what's left after that leading word, rather than the raw banner text.
-    A no-op for clang (``clang``/``clang++`` report byte-identical banners
-    -- confirmed empirically) and effectively a no-op for two genuinely
-    different compiler versions too, since their remainders still differ.
+    modes for the identical toolchain: ``"gcc (Ubuntu 13.3.0-...)
+    13.3.0..."`` vs. ``"g++ (Ubuntu 13.3.0-...) 13.3.0..."``. A no-op for
+    clang (``clang``/``clang++`` report byte-identical banners) and for two
+    genuinely different compiler versions, whose remainders still differ.
     """
     parts = version.split(None, 1)
     return parts[1] if len(parts) == 2 else version
@@ -1028,25 +1014,22 @@ def _language_standard_content_divergence_corroborated(
     a reason to refuse the comparison outright.
 
     **Scoped to a genuine mode switch (``c`` <-> ``c++``), not merely a
-    differing edition within the same mode** (Codex review, fresh evidence,
-    real CI failure:
-    ``test_dumper_contract_wiring.py::
+    differing edition within the same mode** (Codex review, real CI
+    failure: ``test_dumper_contract_wiring.py::
     test_cpp20_heuristic_forced_standard_flows_into_profile_fingerprint``,
     a pre-existing regression test for exactly the *narrower* case this
     carve-out must NOT also waive). Two header sets that both parse as C++
-    but resolve to a different *edition* purely because one side's content
-    happens to trip the ``force_cpp20`` requires-clause heuristic is a
-    materially different risk from case66/case69: the same shared
-    declarations are then parsed under genuinely different C++ dialects,
-    which can itself produce different recorded facts for code that didn't
-    change at all -- exactly the divergence
+    but resolve to a different *edition* purely because one side trips the
+    ``force_cpp20`` requires-clause heuristic is materially different from
+    case66/case69: the same shared declarations are parsed under genuinely
+    different C++ dialects, which can itself produce different recorded
+    facts for unchanged code -- exactly what
     ``_probe_default_language_standard``/``force_cpp20`` were added to
     catch, and still must. Checked via each side's own
-    ``AbiSnapshot.ast_toolchain["resolved_lang_mode"]`` (``"c"``/``"c++"``,
-    set by :func:`dumper_toolchain._stamp_ast_parser`) rather than via the
+    ``AbiSnapshot.ast_toolchain["resolved_lang_mode"]`` (set by
+    :func:`dumper_toolchain._stamp_ast_parser`) rather than the
     ``language_standard`` string shape alone, since only that field records
-    the actual real/virtual language *mode* the parse settled on,
-    independent of which edition within that mode it resolved to.
+    the actual language *mode*, independent of edition.
 
     Given a genuine mode switch, this does not need the sibling upgrade
     carve-out's narrower "same lang tag plus a newly-resolved remainder"
@@ -1069,32 +1052,29 @@ def _language_standard_content_divergence_corroborated(
     second, independent guard, not a redundant one); a *bare-empty* value
     on either side is not itself rejected -- see the code's own comment for
     why a probe failure there is safe here, unlike for the sibling carve-out;
-    and (3) independently corroborated by an exact, non-empty
-    ``compiler_family``/``compiler_version`` match (plus ``compiler_sha256``
-    when both sides carry one), mirroring the sibling carve-out's own
-    toolchain-identity check.
+    and (3) independently corroborated by matching ``compiler_family``/
+    ``producer``/frontend ``version``, plus a driver-name-normalized
+    ``compiler_version`` (see :func:`_compiler_version_sans_driver_name`)
+    -- deliberately no ``compiler_sha256`` check here, unlike the sibling
+    carve-out: ``gcc``/``g++`` are different files on disk even from the
+    identical package, so hashing would defeat that normalization for
+    exactly the pairing this carve-out exists to support.
     """
     old_std = old_fields.get("language_standard", "")
     new_std = new_fields.get("language_standard", "")
     if old_std == new_std:
         return False
-    # A bare-empty side (real CI failure on a Windows runner: a real g++/
-    # clang++ found on PATH can still reject
-    # dumper_toolchain._probe_default_language_standard's `-E -dM -x <mode>
-    # -` invocation for reasons unrelated to language mode -- the same
-    # fail-open convention every other best-effort toolchain probe in this
-    # codebase already uses) is deliberately NOT excluded here, unlike the
-    # sibling upgrade carve-out's bare-empty-string exclusion just above.
-    # That exclusion exists because the sibling carve-out has no
-    # independent signal for which language mode a bare-empty side
-    # actually resolved to -- but this carve-out already requires
-    # `resolved_lang_mode` (below) to prove the mode switch, computed
-    # entirely independently of whether the probe itself succeeded, so an
-    # empty string here just means "no *edition* evidence for this side",
-    # not "no mode evidence." Each side's own `language_standard_
-    # explicit` provenance (checked further below) still independently
-    # confirms it wasn't a pin, regardless of whether the probe produced a
-    # value.
+    # A bare-empty side (real CI failure on Windows: a real g++/clang++
+    # found on PATH can still reject the `-E -dM -x <mode> -` probe for
+    # reasons unrelated to language mode -- the same fail-open convention
+    # every other best-effort toolchain probe here already uses) is
+    # deliberately NOT excluded, unlike the sibling carve-out's bare-empty
+    # exclusion just above: that exclusion exists because the sibling has
+    # no independent signal for which mode a bare-empty side resolved to,
+    # but this carve-out already requires `resolved_lang_mode` (below) to
+    # prove the mode switch regardless of probe success, and each side's
+    # `language_standard_explicit` provenance (checked below) still
+    # confirms it wasn't a pin either way.
     if old_std and _language_standard_is_lang_pinned(old_std):
         return False
     if new_std and _language_standard_is_lang_pinned(new_std):
