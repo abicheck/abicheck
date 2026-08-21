@@ -155,9 +155,11 @@ the highest recall, since source-smoke proofs cover consumer-only API
 hazards the artifact tiers can't see. (The measured matrix at the fact
 owner above found zero extra false positives at `headers`/`build` depth —
 a real, but catalog- and run-specific, result, not a guarantee this
-qualitative description promises on its own.) Figures are for the
-diff-seeded rung; an unseeded whole-library
-replay reaches the same verdict signal at higher cost). Bundle-component
+qualitative description promises on its own.) `source` here is the
+diff-seeded rung; [Evidence &
+Detectability](../learn/evidence-and-detectability.md#what-each-layer-buys-fewer-false-negatives-and-fewer-false-positives)
+explains why an unseeded whole-library replay (the former `full` rung) is
+treated as reaching the same verdict signal at higher cost. Bundle-component
 results are structural diagnostics only in that matrix; only the dedicated
 bundle lane scores the single canonical case-level verdict and proves
 findings such as dangling intra-bundle imports and provider drift.
