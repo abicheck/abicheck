@@ -2307,25 +2307,31 @@ def _tier1_module_bindings(
 ) -> set[str]:
     """Return every spelling *tree* could call ``<module>.<func>(...)``
     through: local names bound to *module* itself, plus the full dotted path
-    an *unaliased* ``import abicheck.<module>`` leaves reachable off every
-    name bound to the ``abicheck`` package itself (the bare ``abicheck``
-    name, and any ``import abicheck as X`` alias — see
-    ``_tier1_package_aliases``).
+    the submodule is reachable through off every name bound to the
+    ``abicheck`` package object itself (the bare ``abicheck`` name, and any
+    ``import abicheck as X`` alias — see ``_tier1_package_aliases``).
 
     Catches ``from . import <module> [as X]``, ``from abicheck import
     <module> [as X]``, and ``import abicheck.<module> [as X]`` alike, so an
-    aliased ``core.<func>(...)`` call is recognised — and, for the unaliased
-    import form, so is ``abicheck.<module>.<func>(...)`` *and*
-    ``<pkg_alias>.<module>.<func>(...)`` for any package alias — not
-    just a call through a name bound directly to *module*. *required_level*
-    is the source file's own relative-import depth (see
-    ``_relative_import_level_for_source``): a bare ``from . import
-    <module>`` only names the top-level abicheck module at exactly that
-    level, since a nested front end's single dot names a *sibling* within
-    its own subpackage instead.
+    aliased ``core.<func>(...)`` call is recognised — and so is
+    ``abicheck.<module>.<func>(...)`` *and* ``<pkg_alias>.<module>.<func>(...)``
+    for any package alias, regardless of *which* of the three import forms
+    actually loaded the submodule (Codex review: an earlier version only
+    granted this for the unaliased ``import abicheck.<module>`` spelling,
+    so ``import abicheck as abi`` combined with a separately-aliased
+    ``from abicheck import service`` still bypassed the gate — but Python
+    binds the submodule onto the package object as a side effect of *any*
+    of the three import forms, whether or not that statement's own local
+    binding is aliased, so every one of them must grant the same package-
+    alias reachability) — not just a call through a name bound directly to
+    *module*. *required_level* is the source file's own relative-import
+    depth (see ``_relative_import_level_for_source``): a bare ``from .
+    import <module>`` only names the top-level abicheck module at exactly
+    that level, since a nested front end's single dot names a *sibling*
+    within its own subpackage instead.
     """
     names: set[str] = set()
-    submodule_bound_unaliased = False
+    submodule_imported = False
     for node in ast.walk(tree):
         if isinstance(node, ast.ImportFrom):
             # ``from . import <module>`` (module is None, level must match
@@ -2340,10 +2346,17 @@ def _tier1_module_bindings(
             ):
                 for alias in node.names:
                     if alias.name == module:
+                        # This form loads `abicheck.<module>` and binds it
+                        # onto the package object regardless of whether the
+                        # *local* name is aliased (`as X`) -- so it grants
+                        # package-alias reachability the same as the
+                        # unaliased `import abicheck.<module>` form below.
                         names.add(alias.asname or alias.name)
+                        submodule_imported = True
         elif isinstance(node, ast.Import):
             for alias in node.names:
                 if _import_names_module(alias.name, module):
+                    submodule_imported = True
                     if alias.asname:
                         names.add(alias.asname)
                     else:
@@ -2351,8 +2364,7 @@ def _tier1_module_bindings(
                         # the module itself stays reachable as the full
                         # dotted path off it (``abicheck.<module>.<func>``).
                         names.add(alias.name)
-                        submodule_bound_unaliased = True
-    if submodule_bound_unaliased:
+    if submodule_imported:
         # The submodule attribute lives on the package *object* -- every
         # other name bound to that same object (a package-level alias)
         # reaches it too, not just the literal ``abicheck`` spelling.
