@@ -4841,6 +4841,44 @@ Once a root command genuinely clears the bar above, pick the right home:
   proving `build_config` survives even when `allow_build_query` is falsy;
   5 of 8 cases confirmed to fail against the pre-fix gate).
 
+  **A build-source pack's replay *scope* (`"changed"` vs `"target"`) is not
+  recorded anywhere, so the write-time idempotence guard cannot distinguish
+  them — investigated (CodeRabbit review), not fixed; currently unreachable
+  by any real caller, which is why this stayed a documented gap rather than
+  a same-session patch.** `_missing_requested_evidence_layers()` maps an
+  ADR-033 collect mode to its expected *layer set* (`CI_MODE_TO_LAYERS`) and
+  checks only whether each layer's embedded payload is non-empty — it never
+  reads `collection_for_ci_mode()`'s other return value, the replay scope.
+  `source-changed` (only affected TUs replayed) and `source-target` (the
+  full target) map to the *identical* layer set `("L3", "L4", "L5")`, so in
+  principle a pack built under `source-changed` — non-empty because *some*
+  TUs were affected — could read as satisfying a later `source-target`
+  request through `build_source_already_satisfies()`, the write-time
+  check-before-embed guard PR 3A blocker 5 sub-issue 3 added (see above).
+  Traced why this is not reachable today: that function has exactly one
+  caller (`_write_snapshot_output`'s guard), which runs on `snap.build_
+  source` *before* any embedding has happened for the current `dump`
+  invocation — the only other `snap.build_source = ...` assignment anywhere
+  in the codebase is `embed_build_source()`'s own, which this guard exists
+  to gate — so `snap.build_source` is always `None` entering the guard for
+  the one real caller, and the function is unconditionally a no-op today
+  exactly as its own docstring already states. It exists for the *future*
+  migration that routes `dump`'s real execution through
+  `execute_dump_request` (still blocked, see above); in that migration both
+  the resolve-time and write-time embeds would receive the *same* resolved
+  `collect_mode` for one invocation, not two different ones, so this
+  specific scope mismatch doesn't arise from that path either. The deeper
+  gap the finding surfaces is real independent of this predicate, though:
+  `BuildSourceManifest` has no field recording replay scope at all —
+  `pack.manifest.inputs` (`buildsource/inline.py`) only ever records
+  `{"sources", "build_info", "collected"}`, never `"changed"` vs `"target"`.
+  A correct fix needs a new manifest field threaded through every
+  pack-producing call site (`collect_inline_pack` and its Bazel/compile-DB
+  siblings) plus a scope-aware read in `_missing_requested_evidence_
+  layers`, with its own regression coverage for a genuine scope-narrowing
+  scenario — a real, if currently latent, data-model gap, not a one-line
+  fix to this one predicate.
+
 - Don't hand-edit `CHANGELOG.md`'s `## [Unreleased]` section directly — add a `changelog.d/` fragment instead (see Conventions above); CI enforces this
 - Don't modify `examples/` test cases without understanding the ground truth they encode
 - Don't add dependencies without strong justification (this is a lightweight tool)
