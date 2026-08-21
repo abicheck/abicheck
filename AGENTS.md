@@ -9,7 +9,15 @@ points back here instead of maintaining its own copy:
 | `AGENTS.md` (this file) | Canonical instructions — the source of truth |
 | `CLAUDE.md` | Claude Code bootstrap — imports this file via `@AGENTS.md` |
 | `.github/copilot-instructions.md` | GitHub Copilot adapter — points here |
-| `.cursor/rules/abicheck.mdc` | Cursor adapter — points here |
+
+A Cursor adapter (`.cursor/rules/abicheck.mdc`) previously existed here too;
+it was removed as part of this repository's repo-structure cleanup, along
+with the other tool-specific directories this repo had accumulated
+(`.agents/`, `.gemini/`, extra `.claude/` content) — see this file's own git
+history for that change. There is currently no Cursor-specific adapter in
+this repository; `AGENTS.md` remains the canonical, vendor-neutral source a
+Cursor user (or any other agent without its own adapter) should be pointed
+at directly.
 
 If you're editing repository-wide instructions, edit **this file**. Don't
 hand-duplicate a command or invariant into an adapter — adapters exist so
@@ -522,9 +530,12 @@ Core pipeline (in order of data flow):
    (renamed from `review-native-library-change`), see `skills-src/
    CLAUDE.md`'s portfolio-status table and ADR-058's 2026-08-20
    amendments — plus one `shared/` tree of Layer-B domain fragments);
-   `scripts/gen_agent_skills.py` publishes it into three committed,
-   self-contained trees (`.agents/skills/`, `.claude/skills/`,
-   `.gemini/skills/`). Never hand-edit the generated trees. See
+   `scripts/gen_agent_skills.py` publishes it into three self-contained
+   trees (`.agents/skills/`, `.claude/skills/`, `.gemini/skills/`) — build
+   output, not committed (2026-08-21 ADR-058 amendment): CI regenerates them
+   itself via `gen_agent_skills.py --check`/`gen_agent_skills.py`, and
+   `scripts/install_dev_skill.py` writes them locally on demand for
+   exercising an installed skill. Never hand-edit the generated trees. See
    `skills-src/CLAUDE.md`.
 
 Beyond the core package: `.github/AGENTS.md` (CI/workflow architecture),
@@ -4983,6 +4994,6 @@ Once a root command genuinely clears the bar above, pick the right home:
 - Don't change public API signatures without checking for breaking changes
 - Don't add platform-specific code without considering cross-platform compatibility
 - Don't extend `IMPORT_CYCLE_ALLOWLIST` in `scripts/check_ai_readiness.py` to make a new cycle pass, and never as a routine step to unblock CI. The existing large CLI/service entry documents an accepted, by-design registration pattern (Click sibling commands registering back on `cli.main`) — a *new* member outside that documented pattern is very likely a real dependency-direction problem, not another instance of it. Prefer a function-local import or moving the shared logic to a leaf module both sides can depend on. If the coupling really is intentional, extending the allowlist needs an ADR (or explicit maintainer sign-off) recorded in the PR, the same bar as any other architectural exception — not a comment justifying it inline and moving on.
-- Don't hand-duplicate a command, invariant, or count from this file into an adapter (`CLAUDE.md`, `.github/copilot-instructions.md`, `.cursor/rules/`) — point the adapter back here instead (see the table at the top of this file).
+- Don't hand-duplicate a command, invariant, or count from this file into an adapter (`CLAUDE.md`, `.github/copilot-instructions.md`) — point the adapter back here instead (see the table at the top of this file).
 - Don't let time/effort estimates ("this would take too long", "quicker to just patch") drive a technical implementation decision — see "Decision-making principles" above.
 - Don't ship a narrow, site-specific patch for a bug without first tracing it to its root cause and considering a generalized fix and generalized test — see "Decision-making principles" above.

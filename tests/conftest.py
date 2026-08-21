@@ -297,7 +297,57 @@ def pytest_addoption(parser: pytest.Parser) -> None:
     )
 
 
+def _materialize_generated_skill_trees() -> None:
+    """Regenerate `.agents/skills/`, `.claude/skills/`, `.gemini/skills/` from
+    `skills-src/` before the suite runs.
+
+    Those three trees are build output (2026-08-21 ADR-058 amendment — see
+    `scripts/gen_agent_skills.py`'s module docstring), no longer committed,
+    but several tests (`test_skill_eval_pack.py`, `test_ai_readiness.py`,
+    `test_gen_harbor_tasks.py`, ...) read them directly off disk at runtime
+    as the real installed artifact a consumer would see, not through a
+    render-to-tempdir fixture of their own. A clean checkout has none of
+    them, so without this hook every one of those tests fails on a plain
+    `pytest tests/` — not just in whichever CI job happens to run
+    `gen_agent_skills.py --check` first. Deterministic and reruns cheaply
+    (see that script's docstring: pure-Python, sub-second, no network), so
+    doing it unconditionally here rather than only when the trees are
+    missing keeps them from silently drifting stale mid-session too.
+
+    Under pytest-xdist every worker calls `pytest_configure` independently;
+    a file lock keyed on skills-src's own module serializes them so no two
+    workers race `write_trees()`'s own rm-then-rewrite against each other.
+    """
+    scripts_dir = Path(__file__).resolve().parent.parent / "scripts"
+    if str(scripts_dir) not in sys.path:
+        sys.path.insert(0, str(scripts_dir))
+    try:
+        import gen_agent_skills as gen
+    except Exception:  # pragma: no cover - defensive; let tests surface the real error
+        return
+
+    lock_path = scripts_dir.parent / ".pytest_cache" / "gen_agent_skills.lock"
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+
+    def _write() -> None:
+        try:
+            rendered = gen.render_all()
+        except gen.SkillGenerationError:
+            return  # a skills-src authoring error; let the real gen/AI-readiness checks report it
+        gen.write_trees(rendered)
+
+    if filelock is not None:
+        try:
+            with filelock.FileLock(str(lock_path), timeout=120):
+                _write()
+        except filelock.Timeout:
+            pass  # another worker is already materializing; proceed, it'll be done shortly
+    else:
+        _write()
+
+
 def pytest_configure(config: pytest.Config) -> None:
+    _materialize_generated_skill_trees()
     config.addinivalue_line(
         "markers",
         "integration: requires platform-specific compiler (gcc/g++ on Linux, clang on macOS, MinGW gcc on Windows)",

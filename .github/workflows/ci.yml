@@ -57,6 +57,16 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
+      # ADR-058's three publication trees (.agents/skills/, .claude/skills/,
+      # .gemini/skills/) are no longer committed (2026-08-21 amendment) --
+      # they're gitignored build output. `agent-skills-generated` below
+      # validates skills-src/'s own consistency without needing them on
+      # disk, but the skill-eval-pack/skill-eval-freshness/harbor-tasks
+      # steps further down still hash the *generated* tree's real content
+      # (deliberately, not skills-src/ -- see gen_skill_eval_pack.py's
+      # `_skill_tree_digest` docstring), so it must actually exist here.
+      - name: Materialize generated agent-skill trees (ADR-058, not committed)
+        run: python scripts/gen_agent_skills.py
       - name: AI-readiness checks (file size, CLAUDE.md coverage, ChangeKind invariants, mypy drift, import cycles)
         run: python scripts/verify.py --profile pr --only ai-readiness
       # Scoping FP-rate gate (ADR-024 §7), per-tier accuracy gate, the use-case
@@ -69,9 +79,11 @@ jobs:
       - name: Scoping / tier-accuracy / doc-sync / docs-contract / agent-skills / repo-facts gates
         run: python scripts/verify.py --profile pr --only fp-rate,tier-accuracy,usecase-docs-sync,docs-contract,agent-skills-generated,repo-facts
       # G37 Phase 0. Deliberately in this job and not a new one: both steps are
-      # deterministic re-derivations over committed content, no model is
-      # involved (G37 D2), so they belong beside the other structural gates
-      # rather than in a lane of their own.
+      # deterministic re-derivations over content this job already has on
+      # disk (committed repo content, plus the freshly-generated agent-skill
+      # trees materialized above), no model is involved (G37 D2), so they
+      # belong beside the other structural gates rather than in a lane of
+      # their own.
       - name: Skill-eval pack + evidence freshness gates (G37 D6)
         run: python scripts/verify.py --profile pr --only skill-eval-pack,skill-eval-freshness
       - name: Harbor task battery freshness (ADR-058 Harbor migration)

@@ -373,10 +373,21 @@ def test_surface_sources_are_the_generated_projections() -> None:
         assert (REPO / source).is_file(), source
 
 
-def test_every_hashed_input_is_tracked_by_git() -> None:
-    """A digest over a file git does not track is a pack that differs between
-    a clean checkout and a machine where something was built — `examples/**/*.so`
-    is gitignored and would otherwise land in a scenario's fixture closure."""
+def test_every_hashed_input_is_tracked_by_git_or_deterministically_generated() -> None:
+    """A digest over a file git does not track, and that isn't reproducible from
+    tracked content either, is a pack that differs between a clean checkout and
+    a machine where something was built — `examples/**/*.so` is gitignored and
+    would otherwise land in a scenario's fixture closure.
+
+    The published skill trees (`.agents/skills/`, per the 2026-08-21 ADR-058
+    amendment) are the one deliberate exception: they're no longer tracked by
+    git, but they're pure build output of `skills-src/`, which *is* tracked —
+    `gen_agent_skills.py --check` (exercised by
+    `test_committed_pack_matches_the_generator`/`test_pack_is_loadable_json`
+    above and by `tests/test_gen_agent_skills.py` directly) is what actually
+    guards their reproducibility, not git-tracking. Everything else this test
+    hashes (fixtures, harness sources, `abicheck/` itself) has no such
+    generator and must still be tracked outright."""
     import subprocess
 
     # -z, not plain output: git quotes paths with unusual characters and
@@ -391,9 +402,11 @@ def test_every_hashed_input_is_tracked_by_git() -> None:
             check=True,
         ).stdout.split("\0")
     )
-    hashed: list[Path] = []
+    published_skill_paths: list[Path] = []
     for name in gen._published_skill_names():
-        hashed += gen._tree_files(gen.PUBLISHED_SKILLS / name)
+        published_skill_paths += gen._tree_files(gen.PUBLISHED_SKILLS / name)
+
+    hashed: list[Path] = list(published_skill_paths)
     for scenario in gen._load_scenarios()["scenarios"]:
         hashed += gen._fixture_paths(scenario)
     hashed += gen._expand(surface.SURFACE_SOURCES) + gen._expand(gen.HARNESS_SOURCES)
@@ -402,10 +415,11 @@ def test_every_hashed_input_is_tracked_by_git() -> None:
     # that motivated this test.
     hashed += gen._expand(gen.BUILD_SOURCES)
 
+    exempt = {p.relative_to(REPO).as_posix() for p in published_skill_paths}
     untracked = sorted(
-        p.relative_to(REPO).as_posix()
+        rel
         for p in hashed
-        if p.relative_to(REPO).as_posix() not in tracked
+        if (rel := p.relative_to(REPO).as_posix()) not in tracked and rel not in exempt
     )
     assert not untracked, f"untracked files reached a pack digest: {untracked}"
 

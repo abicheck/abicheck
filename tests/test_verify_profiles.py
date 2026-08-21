@@ -449,16 +449,17 @@ def test_claude_md_is_a_thin_adapter_over_agents_md() -> None:
 
 
 def test_other_agent_adapters_point_at_agents_md() -> None:
-    """The Copilot and Cursor adapters must reference AGENTS.md AND must not
-    re-duplicate commands/invariants that belong solely in AGENTS.md — a bare
-    "AGENTS.md" mention alone doesn't prove the file stayed thin (it could
-    mention AGENTS.md once and then repeat a full command block anyway)."""
+    """The Copilot adapter must reference AGENTS.md AND must not re-duplicate
+    commands/invariants that belong solely in AGENTS.md — a bare "AGENTS.md"
+    mention alone doesn't prove the file stayed thin (it could mention
+    AGENTS.md once and then repeat a full command block anyway).
+
+    The Cursor adapter (`.cursor/rules/abicheck.mdc`) was removed from this
+    repository's repo-structure cleanup; there is no longer a second
+    tool-specific adapter to check here."""
     unit_fast = _step("unit-fast")
     marker_expr = _pytest_marker_expr(unit_fast)
-    for adapter_path in (
-        ".github/copilot-instructions.md",
-        ".cursor/rules/abicheck.mdc",
-    ):
+    for adapter_path in (".github/copilot-instructions.md",):
         text = _read(adapter_path)
         assert "AGENTS.md" in text, f"{adapter_path}: must reference AGENTS.md"
         assert "pip install" not in text, (

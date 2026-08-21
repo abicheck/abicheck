@@ -28,7 +28,6 @@ import argparse
 import json
 import sys
 from pathlib import Path
-from typing import Any
 
 EXPECTED_CASE_IDS = frozenset({
     "case01_symbol_removal",

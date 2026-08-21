@@ -43,9 +43,15 @@ published documentation site, whose host comes from ``mkdocs.yml``'s
 absent) — never a hardcoded literal, so the generator cannot silently emit
 broken links if either is ever changed.
 
+The three trees are **not committed** (2026-08-21 ADR-058 amendment) — they
+are reproducible build output, regenerated on demand by CI
+(`--check`, below) and locally by `scripts/install_dev_skill.py`. Only
+`skills-src/` itself is tracked.
+
 Usage:
     python scripts/gen_agent_skills.py            # write the trees
-    python scripts/gen_agent_skills.py --check    # verify in sync (CI)
+    python scripts/gen_agent_skills.py --check    # verify skills-src/ is
+                                                    # internally consistent (CI)
 """
 
 from __future__ import annotations
@@ -54,6 +60,7 @@ import argparse
 import re
 import shutil
 import sys
+import tempfile
 from collections.abc import Callable
 from pathlib import Path
 
@@ -63,8 +70,9 @@ SHARED_DIR = SRC_DIR / "shared"
 DOCS_DIR = REPO_DIR / "docs"
 MKDOCS_YML = REPO_DIR / "mkdocs.yml"
 
-#: Every committed publication tree. `.agents/skills` is authoritative; the
-#: other two exist because Claude Code and Gemini CLI do not scan it.
+#: Every publication tree this generator can write to (not committed — see
+#: the module docstring). `.agents/skills` is authoritative; the other two
+#: exist because Claude Code and Gemini CLI do not scan it.
 OUTPUT_ROOTS: tuple[Path, ...] = (
     REPO_DIR / ".agents" / "skills",
     REPO_DIR / ".claude" / "skills",
@@ -1096,12 +1104,107 @@ def check_trees(
     return problems
 
 
+def check_generation_consistency(rendered: dict[str, str]) -> list[str]:
+    """Validate `skills-src/`'s own internal consistency, independent of any
+    on-disk output tree.
+
+    The three publication trees are no longer committed (2026-08-21 ADR-058
+    amendment) — there is nothing on disk to diff `rendered` against in CI
+    any more, so this replaces `check_trees(rendered)`'s old disk-comparison
+    role as the thing `--check` runs. Most of what made that comparison
+    meaningful was never really about the *disk copy* — it was catching a
+    `skills-src/` edit that produces broken output — and `render_all()` above
+    already raises `SkillGenerationError` for every such case (a missing
+    fragment reference, an orphaned fragment, a link that escapes its skill's
+    own directory or targets something unpublished, an unrewritable link
+    syntax): by the time this function runs, `rendered` already reflects a
+    structurally sound render. What's left to check is the *write* path
+    itself and a couple of properties no single render can observe on its
+    own: determinism, and the three target roots genuinely agreeing byte for
+    byte rather than merely being written from the same dict in principle.
+    Writes into a throwaway temporary directory laid out exactly like the
+    three real output roots (never anywhere inside the repo checkout) so the
+    full `write_trees` path — not just `render_all` — is exercised.
+    """
+    problems: list[str] = []
+
+    second = render_all()
+    if second != rendered:
+        problems.append(
+            "render_all() is not deterministic: two renders of skills-src/ "
+            "produced different output"
+        )
+
+    with tempfile.TemporaryDirectory(prefix="abicheck-agent-skills-check-") as tmp:
+        roots = tuple(Path(tmp) / name for name in ("agents", "claude", "gemini"))
+        write_trees(rendered, roots=roots)
+
+        trees: list[dict[str, bytes]] = []
+        for root in roots:
+            tree: dict[str, bytes] = {}
+            for path in sorted(root.rglob("*")):
+                if path.is_symlink():
+                    problems.append(
+                        f"{root.name}/{path.relative_to(root)}: symlink in "
+                        "generated output (must be a real copy, per ADR-058 "
+                        '"Source-of-truth and publication model")'
+                    )
+                elif path.is_file():
+                    tree[path.relative_to(root).as_posix()] = path.read_bytes()
+            trees.append(tree)
+
+        for root, tree in zip(roots[1:], trees[1:]):
+            if tree != trees[0]:
+                problems.append(
+                    f"{root.name}/ is not byte-identical to {roots[0].name}/ "
+                    "— the three generated trees must carry the same content"
+                )
+
+        for root, tree in zip(roots, trees):
+            for rel, content in tree.items():
+                if not rel.endswith(".md"):
+                    continue
+                if GENERATED_MARKER_SUBSTRING not in content.decode("utf-8").lower():
+                    problems.append(
+                        f"{root.name}/{rel}: missing the generated-file "
+                        "ownership marker"
+                    )
+                for target in (
+                    m.group(2) for m in _MD_LINK_RE.finditer(content.decode("utf-8"))
+                ):
+                    if "://" in target or target.startswith(("#", "mailto:")):
+                        continue
+                    bare = target.split("#", 1)[0]
+                    if not bare:
+                        continue
+                    skill_root = root / rel.split("/", 1)[0]
+                    resolved = (root / rel).parent / bare
+                    resolved = resolved.resolve()
+                    try:
+                        resolved.relative_to(skill_root.resolve())
+                    except ValueError:
+                        problems.append(
+                            f"{root.name}/{rel}: link {target!r} escapes its "
+                            "own installed skill directory"
+                        )
+                        continue
+                    if not resolved.is_file():
+                        problems.append(
+                            f"{root.name}/{rel}: link {target!r} does not resolve"
+                        )
+
+    return problems
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--check",
         action="store_true",
-        help="verify the committed trees match skills-src/ instead of writing",
+        help=(
+            "verify skills-src/ renders cleanly and self-consistently "
+            "instead of writing the (no longer committed) output trees"
+        ),
     )
     args = parser.parse_args(argv)
 
@@ -1112,18 +1215,15 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     if args.check:
-        problems = check_trees(rendered)
+        problems = check_generation_consistency(rendered)
         if problems:
-            print("Generated agent-skill trees are out of sync:", file=sys.stderr)
+            print("skills-src/ generation is not self-consistent:", file=sys.stderr)
             for problem in problems:
                 print(f"  {problem}", file=sys.stderr)
-            print(
-                "\nRun `python scripts/gen_agent_skills.py` and commit the result.",
-                file=sys.stderr,
-            )
             return 1
         print(
-            f"agent skills in sync ({len(rendered)} files × {len(OUTPUT_ROOTS)} trees)"
+            f"agent skills render cleanly ({len(rendered)} files × "
+            f"{len(OUTPUT_ROOTS)} trees, deterministic, self-contained)"
         )
         return 0
 
