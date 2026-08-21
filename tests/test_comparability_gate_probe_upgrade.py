@@ -45,6 +45,9 @@ from abicheck.comparability import (
     check_contracts_comparable,
     compute_extraction_contract,
 )
+from abicheck.comparability_language_mode import (
+    language_standard_content_divergence_corroborated,
+)
 from abicheck.errors import ProfileMismatchError
 from abicheck.model import AbiSnapshot, ExtractionContract
 
@@ -1382,6 +1385,167 @@ def test_gate_content_driven_divergence_still_raises_when_bare_forced_literal_is
             language_standard="gnu++17",  # never producible unpinned
         ),
         ast_toolchain=_content_ast_toolchain("c++", explicit="1"),
+    )
+    with pytest.raises(ProfileMismatchError):
+        check_contracts_comparable(old, new)
+
+
+def test_gate_bare_lang_c_vs_explicit_c17_still_raises_without_lang_switch():
+    """Coverage: :func:`comparability_language_mode.language_standard_
+    probe_upgrade_corroborated`'s ``is_newly_resolved`` guard. A bare
+    ``"c"`` pre-probe baseline against ``"c:c17"`` on the new side shares
+    the identical lang tag (so :func:`_newly_resolved_standard_remainder`
+    finds a non-``None`` remainder, ``"c17"``) -- but ``"c17"`` is neither
+    :data:`comparability_language_mode._FORCED_C_STANDARD` (``"gnu11"``)
+    nor a ``"probed:..."`` value, so it cannot have come from the probe/
+    forced-default upgrade this carve-out exists to waive. It can only be a
+    real, explicit ``-std=c17`` pin -- a genuine profile difference, still
+    rejected."""
+    old = _snap(
+        compute_extraction_contract(
+            l2_frontend_ran=True,
+            compiler_family="gnu",
+            compiler_version="11.4.0",
+            language_standard="c",
+        )
+    )
+    new = _snap(
+        compute_extraction_contract(
+            l2_frontend_ran=True,
+            compiler_family="gnu",
+            compiler_version="11.4.0",
+            language_standard="c:c17",
+        )
+    )
+    with pytest.raises(ProfileMismatchError):
+        check_contracts_comparable(old, new)
+
+
+def test_gate_bare_lang_c_vs_gnu11_still_raises_when_compiler_family_differs():
+    """Coverage: the probe-upgrade carve-out's own ``compiler_family``/
+    ``compiler_version`` corroboration loop (distinct from the bare-empty
+    variants above, which never reach this loop at all since their
+    remainder is ``None`` before it). A genuinely newly-resolved remainder
+    (``"c"`` -> ``"c:gnu11"``) must still be rejected when the resolved
+    compiler_family itself differs between the two sides."""
+    old = _snap(
+        compute_extraction_contract(
+            l2_frontend_ran=True,
+            compiler_family="gnu",
+            compiler_version="11.4.0",
+            language_standard="c",
+        )
+    )
+    new = _snap(
+        compute_extraction_contract(
+            l2_frontend_ran=True,
+            compiler_family="clang",
+            compiler_version="11.4.0",
+            language_standard="c:gnu11",
+        )
+    )
+    with pytest.raises(ProfileMismatchError):
+        check_contracts_comparable(old, new)
+
+
+def test_is_gcc_gxx_driver_pair_recognizes_bare_cc_and_gxx_pair():
+    """Coverage: :func:`comparability_language_mode._driver_prefix`'s
+    bare-match branch (``word == bare``). A real toolchain can invoke the C
+    leg as the bare ``cc`` alias rather than ``gcc`` -- paired against a
+    bare ``g++`` banner, this is still a genuine, same-toolchain C/C++
+    driver pair (an empty cross-compile prefix on both legs), same as the
+    already-covered ``gcc``/``g++`` suffix-match shape."""
+    assert (
+        _is_gcc_gxx_driver_pair(
+            "cc (Ubuntu 11.4.0) 11.4.0", "g++ (Ubuntu 11.4.0) 11.4.0"
+        )
+        is True
+    )
+
+
+def test_is_gcc_gxx_driver_pair_false_when_either_banner_is_empty():
+    """Coverage: the leading empty-string guard, distinct from the
+    whitespace-only-banner regression test above (a *literal* empty string
+    short-circuits before ``.split()`` is even called)."""
+    assert _is_gcc_gxx_driver_pair("", "g++ (Ubuntu 13.3.0) 13.3.0") is False
+    assert _is_gcc_gxx_driver_pair("gcc (Ubuntu 13.3.0) 13.3.0", "") is False
+
+
+def test_content_divergence_corroborated_false_for_identical_language_standard():
+    """Coverage: :func:`language_standard_content_divergence_corroborated`'s
+    own leading guard -- called directly, since ``check_contracts_
+    comparable`` only ever reaches this carve-out when the two
+    ``language_standard`` values already differ (this branch is otherwise
+    unreachable through the gate). An identical value on both sides is not
+    a "divergence" to corroborate at all."""
+    old = _snap(
+        compute_extraction_contract(l2_frontend_ran=True, language_standard="gnu11")
+    )
+    new = _snap(
+        compute_extraction_contract(l2_frontend_ran=True, language_standard="gnu11")
+    )
+    assert (
+        language_standard_content_divergence_corroborated(
+            old, new, old.contract.profile_fields, new.contract.profile_fields
+        )
+        is False
+    )
+
+
+def test_gate_content_driven_divergence_still_raises_for_unresolvable_old_standard():
+    """Coverage: the content-divergence carve-out's *old*-side ``known-
+    auto-resolved-form`` guard (the new-side counterpart is already covered
+    by the exact-literal-collision test above, which fails on the *new*
+    side's ``"gnu++17"`` -- this pins the mirror case, where the *old* side
+    is the one carrying a literal no unpinned parse could have produced for
+    its own mode)."""
+    old = _snap(
+        compute_extraction_contract(
+            l2_frontend_ran=True,
+            compiler_family="gnu",
+            compiler_version="11.4.0",
+            language_standard="c17",  # never producible unpinned for C mode
+        ),
+        ast_toolchain=_content_ast_toolchain("c", explicit="0"),
+    )
+    new = _snap(
+        compute_extraction_contract(
+            l2_frontend_ran=True,
+            compiler_family="gnu",
+            compiler_version="11.4.0",
+            language_standard="gnu++20",
+        ),
+        ast_toolchain=_content_ast_toolchain("c++", explicit="0"),
+    )
+    with pytest.raises(ProfileMismatchError):
+        check_contracts_comparable(old, new)
+
+
+def test_gate_content_driven_still_raises_when_host_compiler_version_missing_on_one_side():
+    """Coverage: the content-divergence carve-out's final ``compiler_
+    version`` presence guard. Every other corroboration signal
+    (``compiler_family``, ``producer``, frontend ``version``/``sha256``)
+    matches, but one side's ``ast_toolchain["compiler_version"]`` is empty
+    (a legacy/degraded snapshot) -- there is nothing to compare the host
+    compiler identity against, so this must fail closed rather than treat
+    missing evidence as a pass."""
+    old = _snap(
+        compute_extraction_contract(
+            l2_frontend_ran=True,
+            compiler_family="gnu",
+            compiler_version="11.4.0",
+            language_standard="gnu11",
+        ),
+        ast_toolchain=_content_ast_toolchain("c", host_version=""),
+    )
+    new = _snap(
+        compute_extraction_contract(
+            l2_frontend_ran=True,
+            compiler_family="gnu",
+            compiler_version="11.4.0",
+            language_standard="probed:__cplusplus=201703L",
+        ),
+        ast_toolchain=_content_ast_toolchain("c++", host_version="11.4.0"),
     )
     with pytest.raises(ProfileMismatchError):
         check_contracts_comparable(old, new)
