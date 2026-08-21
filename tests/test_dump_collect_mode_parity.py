@@ -128,6 +128,35 @@ class TestCollectModeParity:
         )
         assert resolve_dump_request_evidence(request).collect_mode == "build"
 
+    def test_resolved_collect_mode_rejects_an_unrecognized_value(self) -> None:
+        """An out-of-vocabulary override must fail validation, not reach
+        `collection_for_ci_mode()`'s own silent ``.get(mode, ())`` fallback.
+
+        Codex review on #814: `resolved_collect_mode` is never user-typed --
+        it is always set by another resolver's own already-computed value --
+        but a typo or drift in a future caller must still be caught rather
+        than silently behaving as "off".
+        """
+        request = DumpRequest(
+            input=InputSpec.of(Path("libfoo.so")),
+            depth=None,
+            resolved_collect_mode="SOURCE-TARGET",
+        )
+        errors = request.validation_errors()
+        assert any("resolved_collect_mode" in e for e in errors), errors
+
+    def test_resolved_collect_mode_accepts_every_real_ci_mode(self) -> None:
+        from abicheck.buildsource.source_replay import CI_MODE_TO_SCOPE
+
+        for mode in CI_MODE_TO_SCOPE:
+            request = DumpRequest(
+                input=InputSpec.of(Path("libfoo.so")),
+                depth=None,
+                resolved_collect_mode=mode,
+            )
+            errors = [e for e in request.validation_errors() if "resolved_collect_mode" in e]
+            assert errors == [], (mode, errors)
+
     def test_compare_keeps_its_own_inference_rule(self, tmp_path: Path) -> None:
         """`compare`'s rule is deliberately NOT changed by the dump fix.
 

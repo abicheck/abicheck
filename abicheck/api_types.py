@@ -304,6 +304,37 @@ def _depth_errors(depth: str | None) -> list[str]:
     return [f"unsupported depth {depth!r}: choose from {allowed}"]
 
 
+def _resolved_collect_mode_errors(resolved_collect_mode: str | None) -> list[str]:
+    """Validate :attr:`DumpRequest.resolved_collect_mode` against the real
+    ADR-033 CI-mode vocabulary (Codex review).
+
+    Left unchecked, an unrecognized value (a typo, wrong casing, or an empty
+    string) would silently reach ``buildsource.source_replay.
+    collection_for_ci_mode``, whose own `.get(mode, ())` fallback treats *any*
+    unknown spelling as ``"off"`` -- omitting every requested build/source
+    evidence layer with no error at all, exactly the "reports invalid input
+    as if it were a deliberate no-op" failure mode this repo's own validation
+    convention (`_depth_errors`/`_debug_format_errors` above) exists to
+    prevent. Case-sensitive, deliberately unlike `_depth_errors`/
+    `_debug_format_errors`: this field is never user-typed on a command line
+    (it only ever carries a value another resolver already computed
+    verbatim, e.g. `service_compare_evidence.collect_mode_for`'s own return
+    value), so silently lowercasing it would paper over a real bug in the
+    caller rather than surface it.
+    """
+    if resolved_collect_mode is None:
+        return []
+    from .buildsource.source_replay import CI_MODE_TO_SCOPE
+
+    if resolved_collect_mode in CI_MODE_TO_SCOPE:
+        return []
+    allowed = ", ".join(sorted(CI_MODE_TO_SCOPE))
+    return [
+        f"unsupported resolved_collect_mode {resolved_collect_mode!r}: "
+        f"choose from {allowed}"
+    ]
+
+
 #: The two ``--frontend-context`` values (ADR-050 D3/D5). One tuple, so the
 #: request-level check and the per-side one below cannot drift -- and so a
 #: third caller inherits both the vocabulary and the message wording rather
@@ -857,6 +888,7 @@ class DumpRequest:
             errors.append(_ANDROID_NEEDS_SOURCES)
         errors += _debug_format_errors(self.debug_format)
         errors += _depth_errors(self.depth)
+        errors += _resolved_collect_mode_errors(self.resolved_collect_mode)
         errors += frontend_context_errors(self.frontend_context)
         errors += _path_required_errors("input", self.input, source_only_allowed=True)
         errors += _side_errors("input", self.input)
