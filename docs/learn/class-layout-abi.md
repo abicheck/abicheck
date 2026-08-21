@@ -101,13 +101,13 @@ verdict bucket follows the [policy partition](../reference/change-kinds.md):
 | Change alignment or packing | BREAKING | `type_alignment_changed`, `struct_packing_changed` | L1 | [case42](../reference/examples/case42_type_alignment_changed.md), [case56](../reference/examples/case56_struct_packing_changed.md) |
 | Reorder bases / insert a base / change virtual inheritance | BREAKING | `type_base_changed`, `base_class_position_changed`, `base_class_virtual_changed` | L1 | [case37](../reference/examples/case37_base_class.md), [case60](../reference/examples/case60_base_class_position_changed.md) |
 | **A base subobject *moves* (e.g. EBO lost)** | BREAKING | **`base_class_offset_changed`** | L1 | **[case140](../reference/examples/case140_empty_base_optimization_lost.md)** |
-| Non-polymorphic class gains its first virtual → vptr prepended | BREAKING | `vptr_introduced` | L1 (DWARF) / L2 *(descriptor)* | unit-tested (`test_diff_layout.py`) |
+| Non-polymorphic class gains its first virtual → vptr prepended | BREAKING | `vptr_introduced` | L1 (DWARF) / L2 *(descriptor)* | unit-tested, no public example case yet |
 | Add / remove / reorder a virtual function | BREAKING | `virtual_method_added`, `func_virtual_added`/`func_virtual_removed`, `type_vtable_changed` | L1 | [case38](../reference/examples/case38_virtual_methods.md), [case68](../reference/examples/case68_virtual_method_added.md) |
 | **Vtable slot count changes — from a *stripped* binary** | BREAKING | **`vtable_slot_count_changed`** | **L0 (ELF symbol size)** | **[case142](../reference/examples/case142_vtable_slot_count_binary_only.md)** |
-| Inheritance *shape* changes *by enough to resize `_ZTI`* — from a stripped binary | BREAKING | `rtti_inheritance_changed` | L0 (`_ZTI` size) | unit-tested (`test_diff_elf_layout.py`) |
+| Inheritance *shape* changes *by enough to resize `_ZTI`* — from a stripped binary | BREAKING | `rtti_inheritance_changed` | L0 (`_ZTI` size) | unit-tested, no public example case yet |
 | Type stops being trivially-copyable → by-value calling conv. flips | BREAKING | `trivially_copyable_lost`, `value_abi_trait_changed` | L2 *(descriptor)* / L1 | [case69](../reference/examples/case69_trivial_to_nontrivial.md) |
-| Type stops being standard-layout (`offsetof`/C-interop lost) | COMPATIBLE_WITH_RISK | `standard_layout_lost` | L2 *(descriptor)* | unit-tested (`test_diff_layout.py`) |
-| `dsize` changes at stable `sizeof` (tail-padding reuse) | COMPATIBLE_WITH_RISK | `tail_padding_reuse_changed` | L2 *(descriptor)* | unit-tested (`test_diff_layout.py`) |
+| Type stops being standard-layout (`offsetof`/C-interop lost) | COMPATIBLE_WITH_RISK | `standard_layout_lost` | L2 *(descriptor)* | unit-tested, no public example case yet |
+| `dsize` changes at stable `sizeof` (tail-padding reuse) | COMPATIBLE_WITH_RISK | `tail_padding_reuse_changed` | L2 *(descriptor)* | unit-tested, no public example case yet |
 | Change a field's / method's access specifier | API_BREAK | `field_access_changed`, `method_access_changed` | L2 (headers) | [case34](../reference/examples/case34_access_level.md) |
 | RTTI / vtable visibility changes across DSOs | BREAKING | `type_visibility_changed` | L1 (DWARF attrs) | — |
 | `[[no_unique_address]]` overlap gained/lost | BREAKING | *(no dedicated kind — see below)* `type_size_changed` / `type_field_offset_changed` | L1 | [case117](../reference/examples/case117_no_unique_address.md) |

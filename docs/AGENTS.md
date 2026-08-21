@@ -86,17 +86,16 @@ path, not the nav position.
   A page whose job is genuinely both — mapping a general ABI concept to the
   exact `ChangeKind`s/evidence tiers abicheck emits for it, e.g.
   `class-layout-abi.md`, `msvc-pe-abi-model.md` — stays on the educational
-  tab (that mapping *is* the pedagogical content), but should keep abicheck's
-  own internal module/function names out of its prose and headings; name
-  them in the page's own `depends_on` front matter instead, which exists
-  precisely for that traceability without cluttering the reader-facing
-  explanation. **Rollout status, same shape as the front-matter rollout
-  below**: this is the target for new/touched pages, not yet a swept,
-  repo-wide invariant — `build-profile-comparability.md` (among others) still
-  names internal functions inline and hasn't been migrated. Trim a page's
-  internal names to `depends_on` when you're already editing it for another
-  reason; don't treat an unmigrated page elsewhere as license to add new
-  internal-name prose to the one you're writing.
+  tab (that mapping *is* the pedagogical content), but keeps abicheck's own
+  internal module/function names out of its prose and headings; name them in
+  the page's own `depends_on` front matter instead, which exists precisely
+  for that traceability without cluttering the reader-facing explanation.
+  Every page under the **ABI/API Compatibility** tab has been swept to this
+  rule (including `build-profile-comparability.md`, the previous holdout) —
+  a new internal-name leak here is a real regression to fix, not an
+  unmigrated pre-existing page to tolerate. `ChangeKind`/`RecordType`/
+  `AbiSnapshot` and public JSON-report field values (e.g. `dwarf_aware`) are
+  documented public vocabulary, not internal names, and stay.
 
   The evidence model is deliberately a three-page trio with one role each —
   model (`learn/evidence-and-detectability.md`), worked example

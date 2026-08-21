@@ -73,7 +73,7 @@ addition" / "broken"), not folded into it:
    the resulting report is stamped `assurance: none` everywhere so nobody
    downstream mistakes it for an ordinary, trustworthy result. This
    opt-out is **not available for a directory/package (release) fan-out**
-   — `_reject_set_input_flags()` rejects it outright there — so a
+   — the release fan-out path rejects it outright — so a
    not-comparable library inside a release fan-out has no escape hatch;
    compare that one library on its own instead.
 
@@ -95,7 +95,7 @@ went through an L2 frontend at all (a symbols-only dump, or a pre-contract
 baseline) has no `profile_fingerprint` to disagree with, and the gate does
 not fail the comparison on that axis. When exactly one side is missing any
 one of the three, the report is stamped `contract_coverage: partial`
-(`checker._contract_coverage_status`) — an explicit signal that axis was
+— an explicit signal that axis was
 never actually checked, not silently treated as verified. When **both**
 sides are missing the same axis, there's nothing to mark: neither side
 asserted that fact in the first place, so there's no disagreement to
@@ -107,7 +107,7 @@ extractions*, not a guarantee that every comparison checked comparability.
 
 ## What actually gets fingerprinted
 
-abicheck's comparability gate (`comparability.py`, ADR-050 D1/D2) doesn't
+abicheck's comparability gate (ADR-050 D1/D2) doesn't
 guess at "did the build environment change" impressionistically — it hashes
 two separate, named fingerprints out of every dump that went through an L2
 header/AST frontend, and refuses to produce a verdict when they disagree
@@ -120,26 +120,27 @@ the snapshot:
 |-------|--------------|
 | `compiler_family` | GCC vs. Clang vs. MSVC — different name-mangling and layout corner cases |
 | `compiler_version` | Toolchain version — builtin macro sets, default flag behavior can shift release to release |
-| `abi_dialect` | The GNU vs. MSVC compiler-driver mode (`_stamp_ast_parser()`/`_resolve_compiler_binary()` set exactly `"gnu"` or `"msvc"`) — not the libstdc++ dual-ABI setting; two GCC extractions stay `abi_dialect="gnu"` regardless of `_GLIBCXX_USE_CXX11_ABI`, which is only pinned when that macro is explicitly passed and reaches the fingerprint through the `macro_ops` row below ([case104](../reference/examples/case104_glibcxx_dual_abi_flip.md)) |
+| `abi_dialect` | The GNU vs. MSVC compiler-driver mode (the compiler-mode resolver sets exactly `"gnu"` or `"msvc"`) — not the libstdc++ dual-ABI setting; two GCC extractions stay `abi_dialect="gnu"` regardless of `_GLIBCXX_USE_CXX11_ABI`, which is only pinned when that macro is explicitly passed and reaches the fingerprint through the `macro_ops` row below ([case104](../reference/examples/case104_glibcxx_dual_abi_flip.md)) |
 | `language_standard` | `-std=c++17` vs. `-std=c++20` — different implicit behavior, different library surface |
-| `target_triple` | Reserved for architecture/OS/environment. **Not populated by either production call site today** (`compute_extraction_contract()` defaults it to empty, and neither `dumper_contract.py`'s real-dump path nor the `--dump-manifest` dry-run path passes a value) — always empty on a real dump, so it never contributes a real mismatch on its own |
+| `target_triple` | Reserved for architecture/OS/environment. **Not populated by either production call site today** (the extraction-contract builder defaults it to empty, and neither the real-dump path nor the `--dump-manifest` dry-run path passes a value) — always empty on a real dump, so it never contributes a real mismatch on its own |
 | `pointer_width` | Reserved for 32-bit vs. 64-bit. Same unpopulated-today status as `target_triple` |
 | `endianness` | Reserved for byte order. Same unpopulated-today status as `target_triple` |
 | `macro_ops` | Which `-D`/`-U` macros were in effect — conditional compilation changes what's even declared |
-| `pass_through_flags` | ABI-relevant compiler flags forwarded as-is. Today `pass_through_flags_from_tokens()` recognizes only `-include <path>` — the one currently-known must-handle repeatable, order-sensitive frontend flag; other flags (e.g. `-fvisibility=`, `-fshort-enums`) are not yet classified into this field and are simply omitted rather than mis-hashed |
-| `include_sequence` / `header_sequence` | Order and *declared-slot* identity of the include directories/headers fed through the dedicated `extra_includes`/manifest `includes` mechanism (never absolute path shape for those, so a two-checkout compare's differently-nested old/new sides still fingerprint identically) — narrower than "every resolved `-I`/`-isystem`": a raw `-I`/`-isystem` token embedded in `gcc_options` rather than passed through the dedicated mechanism is not collected into this field today, so replacing what a raw compiler flag points at can leave it unchanged. A *labeled* or project-owned slot's identity is genuinely pinned (by its label, or by which declared header it owns); an unlabeled, non-project-owned ("external") slot is only pinned by content when `compute_extraction_contract()` is given `depfile_resolved_paths` — today's production call site, `dumper_contract._attach_extraction_contract()`, never passes that parameter, so `_external_slot_token()` hashes an empty file list there, and swapping one external include directory for another at the same position leaves the fingerprint unchanged |
+| `pass_through_flags` | ABI-relevant compiler flags forwarded as-is. Today only `-include <path>` is recognized — the one currently-known must-handle repeatable, order-sensitive frontend flag; other flags (e.g. `-fvisibility=`, `-fshort-enums`) are not yet classified into this field and are simply omitted rather than mis-hashed |
+| `include_sequence` / `header_sequence` | Order and *declared-slot* identity of the include directories/headers fed through the dedicated `extra_includes`/manifest `includes` mechanism (never absolute path shape for those, so a two-checkout compare's differently-nested old/new sides still fingerprint identically) — narrower than "every resolved `-I`/`-isystem`": a raw `-I`/`-isystem` token embedded in `gcc_options` rather than passed through the dedicated mechanism is not collected into this field today, so replacing what a raw compiler flag points at can leave it unchanged. A *labeled* or project-owned slot's identity is genuinely pinned (by its label, or by which declared header it owns); an unlabeled, non-project-owned ("external") slot is only pinned by content when the extraction-contract builder is given resolved dependency-file paths — today's production real-dump path never passes them, so an unlabeled external slot hashes an empty file list there, and swapping one external include directory for another at the same position leaves the fingerprint unchanged |
 | `frontend_context_kind` | Appended only for a DPC++-capable frontend (a SYCL host/device split); absent from the fingerprint on an ordinary clang/castxml dump |
 
 This table is a narrative summary, not the field list's fact owner — the
-exact, current set is `abicheck/comparability.py`'s `PROFILE_FIELD_KEYS`
-(plus the conditional `frontend_context_kind` addition); check there directly
+exact, current set is owned by abicheck's own comparability module (plus
+the conditional `frontend_context_kind` addition); see this page's
+`depends_on` front matter for exactly which file, and check it directly
 before relying on which flags are actually pinned today.
 
 **`scope_fingerprint`** — the *declared surface* being compared: which
 public headers and header directories were in scope, and — for a
 manifest-driven multi-TU extraction — which translation units contributed.
 One deliberate exception: when a side declares exactly *one* header or
-exactly one public-header directory, `_compute_scope_fields()` collapses
+exactly one public-header directory, the scope-fingerprint builder collapses
 its identity to a fixed `<single-header>`/`<single-header-dir>` sentinel
 rather than the real name — renaming `foo.h` to `bar.h` while staying a
 single-header dump leaves `scope_fingerprint` completely unchanged. The
@@ -161,7 +162,7 @@ pair read as not comparable.
 The split matters: two dumps can legitimately have different
 `scope_fingerprint`s (you scoped OLD to a smaller header set than NEW,
 deliberately) while still sharing a `profile_fingerprint` — that's a scoping
-decision, not an environment mismatch, and `comparability.py`'s own
+decision, not an environment mismatch, and the gate's own
 superset-growth check (§ below) treats a scope that only *grew* between OLD
 and NEW as legitimate rather than incomparable. A `profile_fingerprint`
 mismatch is the one that means "this isn't the same kind of build at all."
@@ -171,7 +172,7 @@ mismatch is the one that means "this isn't the same kind of build at all."
 Not every fingerprint mismatch is toolchain noise to be rejected — some are
 exactly the *finding* a check like this exists to surface. The gate
 distinguishes them from genuine incomparability with four narrow,
-evidence-gated carve-outs (`_unexplained_profile_fields()`), all deliberately
+evidence-gated carve-outs, all deliberately
 conservative and mutually disjoint — they widen the set of comparisons the
 gate allows, never the set it silently trusts, and they compose (a release
 combining two independently-sanctioned deltas at once, e.g. a header

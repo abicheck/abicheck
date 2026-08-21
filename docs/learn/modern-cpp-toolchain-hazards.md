@@ -50,7 +50,7 @@ vector-ABI flags, and CPU-dispatch/IFUNC selection
     up in the export table alone. Two are the exception: the `_GLIBCXX_USE_CXX11_ABI`
     flip and an ABI-tag change are both mangled straight into the exported
     symbol name (`glibcxx_dual_abi_flip_detected`/`abi_tag_changed`, both
-    `L0` per `scripts/evidence_tiers.py`), so they're visible from the
+    minimum evidence `L0`), so they're visible from the
     *mangled* export table alone — no DWARF/PDB/headers needed. A stripped
     binary that has been additionally **demangled** (its export names
     rewritten to human-readable form) can still hide them, since the
