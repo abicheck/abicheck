@@ -316,8 +316,8 @@ def resolve_dump_request(request: DumpRequest) -> ResolvedDumpRequest:
     side = request.input
     # `None` for a source-only dump (`InputSpec.path is None`, PR 3A blocker 5):
     # there is no native artifact to sniff a format from. `validate()` above
-    # already required real `sources`/`build_info` for that shape, so this is
-    # the binary-less request, not a missing-input mistake.
+    # already required real `sources`/`build_info`/`dump_manifest` for that
+    # shape, so this is the binary-less request, not a missing-input mistake.
     fmt = service.detect_binary_format(side.path) if side.path is not None else None
     debug_format = _sce.normalized_debug_format(request)
     _sce.reject_debug_format_for_binaries(debug_format, (("input", fmt),))
