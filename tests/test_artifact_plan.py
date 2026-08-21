@@ -110,3 +110,48 @@ def test_enter_returns_self():
     plan = ResolvedArtifactPlan()
     with plan as entered:
         assert entered is plan
+
+
+def test_cleanup_added_via_add_cleanup_after_drain_still_runs() -> None:
+    """Codex review: an earlier revision tracked closure as a single bool, so
+    every drain after the first was an unconditional no-op -- a cleanup
+    registered via add_cleanup() on an already-drained plan was silently
+    never run. The next run_cleanups() call (here, a second `with` re-entry)
+    must still pick it up."""
+    calls: list[str] = []
+    plan = ResolvedArtifactPlan()
+    plan.add_cleanup(lambda: calls.append("first"))
+    plan.run_cleanups()
+    assert calls == ["first"]
+
+    plan.add_cleanup(lambda: calls.append("late"))
+    with plan:
+        pass
+    assert calls == ["first", "late"]
+
+
+def test_cleanup_appended_to_pending_cleanups_after_drain_still_runs() -> None:
+    """Same invariant as above, via the other registration path (direct
+    `pending_cleanups.append(...)` rather than `add_cleanup()`) -- Codex
+    review asked for both to be covered."""
+    calls: list[str] = []
+    plan = ResolvedArtifactPlan()
+    plan.pending_cleanups.append(lambda: calls.append("first"))
+    plan.run_cleanups()
+    assert calls == ["first"]
+
+    plan.pending_cleanups.append(lambda: calls.append("late"))
+    plan.run_cleanups()
+    assert calls == ["first", "late"]
+
+
+def test_run_cleanups_with_nothing_new_after_a_drain_is_a_true_no_op() -> None:
+    """The idempotent case must still hold: calling run_cleanups() again with
+    no new registrations re-runs nothing."""
+    calls: list[str] = []
+    plan = ResolvedArtifactPlan()
+    plan.add_cleanup(lambda: calls.append("a"))
+    plan.run_cleanups()
+    plan.run_cleanups()
+    plan.run_cleanups()
+    assert calls == ["a"]

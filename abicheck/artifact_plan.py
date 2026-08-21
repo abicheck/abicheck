@@ -75,9 +75,18 @@ class ResolvedArtifactPlan:
     handed to a callee the same way an existing bare list is today) or via
     :meth:`add_cleanup` (for a cleanup only known after construction, e.g.
     one discovered during execution rather than resolution) is run on
-    ``__exit__``, in registration order, exactly once — a second
-    ``__exit__`` (or a caller that already drained the list by hand before
-    handing it to a plan) is a safe no-op, not a double-run.
+    ``__exit__``, in registration order, exactly once — a second ``__exit__``
+    (or an explicit :meth:`run_cleanups` call after nothing new was
+    registered) is a safe no-op, not a double-run. Registering a cleanup
+    *after* a drain already ran — a plan re-entered via a second ``with``
+    block, or ``add_cleanup()`` called on an already-closed plan — is not a
+    leak either (Codex review: an earlier revision used a single ``_closed``
+    flag that made every drain after the first a no-op unconditionally, so a
+    cleanup registered post-close was silently never run): draining tracks
+    how much of :attr:`pending_cleanups` has actually been run, not merely
+    whether a drain has ever happened, so the next :meth:`run_cleanups` call
+    (explicit, or via a later ``with`` exit) still picks up and runs exactly
+    the cleanups appended since the previous drain.
 
     **Partial-resolution failure.** The plan's own text calls out a failure
     mode this type must not reproduce: if the code building a
@@ -97,7 +106,7 @@ class ResolvedArtifactPlan:
     only at the end.
     """
 
-    __slots__ = ("pending_cleanups", "_closed")
+    __slots__ = ("pending_cleanups", "_drained_count")
 
     def __init__(self) -> None:
         #: Handed directly to a callee that expects the existing bare
@@ -106,30 +115,38 @@ class ResolvedArtifactPlan:
         #: ``defer_cleanup``) — appended to in place, the same contract those
         #: functions already document.
         self.pending_cleanups: list[Callable[[], None]] = []
-        self._closed = False
+        #: How many leading entries of ``pending_cleanups`` have already been
+        #: run. A count, not a bool -- so a cleanup appended after a drain
+        #: (post-close ``add_cleanup()``, or a second ``with`` re-entry) is
+        #: still reachable by the *next* drain instead of being silently
+        #: skipped by an unconditional "already closed" flag.
+        self._drained_count = 0
 
     def add_cleanup(self, cleanup: Callable[[], None]) -> None:
         """Register a cleanup discovered after construction (e.g. during
-        execution rather than resolution). Equivalent to
-        ``self.pending_cleanups.append(cleanup)`` — provided as a named
-        method so a caller need not reach into the list directly."""
+        execution rather than resolution, or after an earlier drain already
+        ran). Equivalent to ``self.pending_cleanups.append(cleanup)`` —
+        provided as a named method so a caller need not reach into the list
+        directly."""
         self.pending_cleanups.append(cleanup)
 
     def run_cleanups(self) -> None:
-        """Run every registered cleanup exactly once, in registration
-        order, never letting one failure skip the rest — the identical
-        contract ``buildsource.inline._run_cleanups`` already establishes
-        for the same class of thunk (a failure is logged, not raised, since
-        a temp tree already gone or a read-only mount must not abort an
-        otherwise-successful extraction). Idempotent: a second call is a
-        no-op, so an explicit call here followed by context-manager
-        ``__exit__`` (or two nested ``with`` exits on the same instance)
-        never double-runs a cleanup.
+        """Run every cleanup registered since the last drain exactly once,
+        in registration order, never letting one failure skip the rest —
+        the identical contract ``buildsource.inline._run_cleanups`` already
+        establishes for the same class of thunk (a failure is logged, not
+        raised, since a temp tree already gone or a read-only mount must not
+        abort an otherwise-successful extraction). Idempotent when nothing
+        new was registered: a second call with no new cleanups is a no-op,
+        so an explicit call here followed by context-manager ``__exit__``
+        (or two nested ``with`` exits on the same instance) never double-runs
+        a cleanup — but a cleanup registered *after* the previous drain
+        (post-close ``add_cleanup()``, or a plan re-entered via a second
+        ``with`` block) still runs on this call rather than being dropped.
         """
-        if self._closed:
-            return
-        self._closed = True
-        for cleanup in self.pending_cleanups:
+        pending = self.pending_cleanups[self._drained_count :]
+        self._drained_count = len(self.pending_cleanups)
+        for cleanup in pending:
             try:
                 cleanup()
             except Exception:  # noqa: BLE001 - see _run_cleanups' own rationale
