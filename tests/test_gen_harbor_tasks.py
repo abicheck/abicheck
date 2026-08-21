@@ -60,6 +60,23 @@ def _task_dirs() -> list[Path]:
     return sorted(p for p in TASKS_DIR.iterdir() if p.is_dir())
 
 
+def _bash_path(path: Path) -> str:
+    """*path* rendered for substitution into bash script *text* (not an
+    argv element -- those go through subprocess directly and need no
+    rewriting).
+
+    ``str(path)`` on Windows renders backslashes (``C:\\Users\\...``), and
+    bash's own unquoted-word parser treats a backslash as an escape
+    character: it silently strips it and keeps the following letter,
+    turning the substituted path into `C:UsersrunneradminAppDataLocal...`
+    with no separators at all -- a real Windows CI failure (`cd`/`python3
+    -c`/`readlink -f` all corrupted the same way), not a hypothetical.
+    Git Bash's own path translation understands a forward-slash Windows
+    path natively, so `.as_posix()` (a no-op on POSIX) is both correct and
+    doesn't require actually POSIX-translating the drive letter."""
+    return path.as_posix()
+
+
 class TestGeneratorCheck:
     def test_check_passes_against_the_committed_tree(self):
         assert gen.generate(check=True) is True
@@ -723,7 +740,7 @@ class TestPythonInterposer:
         (fakebin / "python3").symlink_to("python3.13")
         (fakebin / "python").symlink_to("python3")
 
-        script = shell_body.replace("/usr/local/bin", str(fakebin))
+        script = shell_body.replace("/usr/local/bin", _bash_path(fakebin))
         env = {**os.environ, "PATH": f"{fakebin}{os.pathsep}{os.environ['PATH']}"}
         proc = subprocess.run(  # noqa: S603
             [bash_executable(), "-c", script],
@@ -773,7 +790,7 @@ class TestArchitectureGuard:
         logs = tmp_path / "logs"
         script = tmp_path / "test.sh"
         script.write_text(
-            test_sh.replace("/logs/verifier", str(logs)), encoding="utf-8"
+            test_sh.replace("/logs/verifier", _bash_path(logs)), encoding="utf-8"
         )
         script.chmod(0o755)
 
@@ -909,8 +926,8 @@ class TestSolveScriptsEndToEnd:
         local_solve = tmp_path / "solve_local.sh"
         local_solve.write_text(
             solve_text.replace(
-                "/workspace/library", str(workspace / "library")
-            ).replace("/workspace/final.md", str(workspace / "final.md")),
+                "/workspace/library", _bash_path(workspace / "library")
+            ).replace("/workspace/final.md", _bash_path(workspace / "final.md")),
             encoding="utf-8",
         )
 
