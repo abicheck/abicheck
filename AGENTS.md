@@ -4919,6 +4919,64 @@ Once a root command genuinely clears the bar above, pick the right home:
   project), plus a re-run of every pre-existing test in this area to confirm
   the extraction changed no behavior.
 
+  **Three further Codex review findings on the same slice, each real, each
+  fixed, and each a pre-existing gap in the native CLI's own scope check
+  too (not introduced by this typed-API slice).** (P1) The guard's compile-
+  database resolution considered only an explicit `--build-info`/
+  `build_info` — a `--sources`/`sources` tree with no `build_info` at all
+  can still have its `compile_commands.json` auto-discovered
+  (`buildsource.inline._autodiscover_compile_db`, the identical P4 strategy
+  the fold and the L3 embed both already use to find one from `sources`
+  alone), so that combination reached the same filtered-L2/unfiltered-L3
+  mismatch uncaught. Reproduced directly: a real two-TU project resolved
+  with `sources` only, filtered to one TU at L2, still embedded both TUs'
+  compile units as L3 evidence (`BuildEvidence.compile_units` length 2).
+  (P1) Even with an explicit `--build-info <dir>` given, the resolution
+  checked only `<dir>/compile_commands.json` directly — not a conventional
+  out-of-tree build subdirectory (`<dir>/build/compile_commands.json`) the
+  real fold's own `--build-info` resolution
+  (`buildsource.inline._compile_db_at`, delegating to
+  `_find_compile_db_in_dir` for a directory) already searches, explicitly
+  documented as matching `--sources` auto-discovery's own contract.
+  Reproduced directly: the identical project with its database moved into
+  a `build/` subdirectory, `--build-info` pointed at the project root — the
+  fold correctly resolved and filtered by the nested database while the
+  guard never fired. Both fixed in one place,
+  `header_conditionals.compile_db_for_filter_scope_check` (deliberately
+  **not** folded into `compile_db_from_build_info` itself, which also
+  drives the CLI's unrelated legacy `-p` auto-match and must stay
+  `--build-info`-direct-child-only — see that function's own docstring),
+  consumed by both `cli.py`'s `dump_cmd` and the shared typed guard.
+  Regression coverage: `TestScopeGuardCoversSourcesOnlyAutoDiscovery` and
+  `TestScopeGuardCoversNestedBuildInfoDatabases` in
+  `tests/test_compile_db_filter_scope.py` (three entry points each — CLI,
+  `DumpRequest`, `CompareRequest` — plus a positive control for the nested
+  case confirming the database is genuinely what gets filtered).
+
+  **A fifth finding, investigated and deliberately left as a documented gap
+  rather than fixed reactively — the point at which these findings stopped
+  converging on real, reachable bugs.** `execute_dump_request()`/
+  `_resolve_side_snapshot_impl()` also accept a keyword-only
+  `build_compile_db` (a glob, mirroring `--build-compile-db`), forwarded
+  unfiltered to both the L2 fold and the L3 embed the same way
+  `build_info`/`sources` are — in principle the identical mismatch class.
+  But `build_compile_db` is not a field of `DumpRequest`/`InputSpec` at
+  all: it exists purely as scaffolding for the not-yet-landed PR 3A
+  real-run migration (this module's own docstring: "the real ELF/PE/
+  Mach-O run still executes through `perform_elf_dump`/
+  `handle_non_elf_dump`, not through `execute_dump_request`"), and
+  `execute_dump_request` has exactly one caller in the whole codebase —
+  `run_dump_request`, which never passes it. No CLI, no typed-API path, and
+  no test can reach this combination without bypassing the entire
+  `DumpRequest`-shaped public surface and hand-calling the semi-internal
+  `execute_dump_request` with a kwarg nothing in that surface can set —
+  a different reachability class from the four findings above, each
+  reproduced end-to-end through real, ordinary usage before being fixed.
+  Left for whichever change gives `build_compile_db` its first real caller
+  (i.e. the PR 3A real-run migration itself) to close alongside that
+  migration, rather than shipping validation code with no real path to
+  verify it against.
+
   **A real regression the scan-migration paragraph above introduced, found
   by Codex review and fixed the same session (2026-08-21): `scan --config
   <path>` silently lost the config's own *passive* settings whenever the
