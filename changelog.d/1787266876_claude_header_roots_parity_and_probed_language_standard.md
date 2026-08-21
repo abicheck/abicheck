@@ -97,7 +97,20 @@
   second, still-supported spelling for C++ `_resolve_force_cpp` accepts
   alongside `"c++"`) as a bare pre-upgrade tag, not just `"c"`/`"c++"` —
   a Python API baseline built with `lang="cpp"` previously raised
-  `ProfileMismatchError` on an upgrade with no real profile change.
+  `ProfileMismatchError` on an upgrade with no real profile change. An
+  explicit `--lang c` tag turned out not to pin the mode unconditionally
+  either: both header-AST backends self-heal an explicit C request into
+  C++ mid-parse when the header turns out to need a C++ stdlib header
+  (`dumper.py`'s C→C++ retry applies regardless of whether C mode was
+  auto-detected or explicitly requested), so a `"c"`-tagged baseline
+  comparing against a self-healed `"c:probed:__cplusplus=..."` new dump
+  was being incorrectly waived as an upgrade artifact even though the
+  actual parse mode genuinely changed. The carve-out now rejects a
+  `"c"`-tagged remainder that names `__cplusplus` (the unambiguous
+  self-heal signature — a genuinely-C parse's probed value only ever
+  names `__STDC_VERSION__`, never `__cplusplus`), while still waiving a
+  genuine unpinned-C transition (the forced `gnu11` literal, or an
+  MSVC-dialect probe naming `__STDC_VERSION__`).
 - Known, narrower residuals, documented rather than fixed:
   - A cache/memo *hit* for a header that previously self-healed C→C++
     still reports the pre-retry language mode, since neither backend's AST

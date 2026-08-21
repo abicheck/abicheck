@@ -742,9 +742,17 @@ def _newly_resolved_standard_remainder(
     upgrade-only case this carve-out exists to waive, and a matching
     ``compiler_family``/``compiler_version``/``compiler_sha256`` says
     nothing about which mode either side's *headers* actually resolved to.
-    An explicit ``--lang`` has no such ambiguity: :func:`_resolve_force_cpp`
-    returns that mode unconditionally regardless of header content, so the
-    lang-tag-equality check above is sufficient corroboration on its own.
+    An explicit ``--lang c++``/``"cpp"`` has no such ambiguity:
+    :func:`_resolve_force_cpp` returns C++ mode unconditionally for those,
+    with no retry that could revise it downward, so the lang-tag-equality
+    check above is sufficient corroboration on its own. An explicit
+    ``--lang c`` is a narrower exception this function's own signature
+    cannot see: ``dumper.py``'s C->C++ self-heal retry can still override
+    it mid-parse when a header turns out to need a C++ stdlib header, so a
+    ``"c"`` tag alone does not prove the *actual* parse stayed C --
+    :func:`_language_standard_probe_upgrade_corroborated` checks the
+    resolved remainder's own content for that case specifically (Codex
+    review, fresh evidence).
     """
     if old_std not in _UNRESOLVED_STANDARD_SPELLINGS:
         return None
@@ -822,15 +830,30 @@ def _language_standard_probe_upgrade_corroborated(
     """
     old_std = old_fields.get("language_standard", "")
     new_std = new_fields.get("language_standard", "")
-    remainder = _newly_resolved_standard_remainder(
-        old_std, new_std
-    ) or _newly_resolved_standard_remainder(new_std, old_std)
+    forward = _newly_resolved_standard_remainder(old_std, new_std)
+    tag, remainder = (old_std, forward) if forward is not None else (
+        new_std, _newly_resolved_standard_remainder(new_std, old_std)
+    )
     if remainder is None:
         return False
     is_newly_resolved = (
         remainder == _FORCED_C_STANDARD or _PROBED_STANDARD_PREFIX in remainder
     )
     if not is_newly_resolved:
+        return False
+    # Codex review, fresh evidence: an explicit "c" tag does not pin the
+    # mode unconditionally the way this function's docstring above assumes
+    # -- both header-AST backends self-heal an explicit --lang c request
+    # into C++ when the header turns out to need a C++ stdlib header
+    # (dumper.py's C->C++ retry applies regardless of whether C mode was
+    # auto-detected or explicitly requested). A self-healed parse's probed
+    # value always names __cplusplus (never __STDC_VERSION__, and never the
+    # bare _FORCED_C_STANDARD literal, which _resolve_standard_provenance
+    # only ever returns for a genuinely-C final mode) -- so a "c"-tagged
+    # remainder containing it is real evidence the *new* side's actual
+    # parse mode diverged from its own explicit tag, not merely newly
+    # discovered upgrade evidence, and must not be waived.
+    if tag == "c" and "__cplusplus" in remainder:
         return False
     for key in ("compiler_family", "compiler_version"):
         old_v = old_fields.get(key, "")

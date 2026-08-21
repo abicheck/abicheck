@@ -243,6 +243,59 @@ def test_gate_bare_lang_c_vs_lang_qualified_gnu11_waived():
     check_contracts_comparable(old, new)  # must not raise
 
 
+def test_gate_bare_lang_c_vs_self_healed_cpp_probe_still_raises():
+    """Codex review, fresh evidence: an explicit ``--lang c`` tag does not
+    pin the mode unconditionally -- both header-AST backends self-heal an
+    explicit C request into C++ when the header turns out to need a C++
+    stdlib header, regardless of whether C mode was auto-detected or
+    explicitly requested. A self-healed parse's probed value always names
+    ``__cplusplus`` -- a ``"c"``-tagged remainder containing it is real
+    evidence the actual parse mode diverged from its own tag, not merely
+    newly discovered upgrade evidence, so this must still raise."""
+    old = _snap(
+        compute_extraction_contract(
+            l2_frontend_ran=True,
+            compiler_family="gnu",
+            compiler_version="11.4.0",
+            language_standard="c",
+        )
+    )
+    new = _snap(
+        compute_extraction_contract(
+            l2_frontend_ran=True,
+            compiler_family="gnu",
+            compiler_version="11.4.0",
+            language_standard="c:probed:__cplusplus=201703L",
+        )
+    )
+    with pytest.raises(ProfileMismatchError):
+        check_contracts_comparable(old, new)
+
+
+def test_gate_bare_lang_c_vs_genuine_msvc_probe_still_waived():
+    """The negative counterpart: a genuinely-C, MSVC-dialect unpinned parse
+    (never gnu11-forced, so it's probed) reports ``__STDC_VERSION__``, never
+    ``__cplusplus`` -- this is not a self-heal artifact and must still
+    waive."""
+    old = _snap(
+        compute_extraction_contract(
+            l2_frontend_ran=True,
+            compiler_family="msvc",
+            compiler_version="19.38.0",
+            language_standard="c",
+        )
+    )
+    new = _snap(
+        compute_extraction_contract(
+            l2_frontend_ran=True,
+            compiler_family="msvc",
+            compiler_version="19.38.0",
+            language_standard="c:probed:__STDC_VERSION__=201710L",
+        )
+    )
+    check_contracts_comparable(old, new)  # must not raise
+
+
 def test_gate_bare_lang_cpp_alias_vs_lang_qualified_probed_waived():
     """Codex review, fresh evidence: ``"cpp"`` is a second, still-supported
     spelling for C++ alongside ``"c++"`` (``_resolve_force_cpp`` accepts
