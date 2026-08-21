@@ -1184,6 +1184,57 @@ class TestSelfComparisonDetection:
         reading that as a third operand would fail a correct run."""
         assert not ev.compares_one_side_against_itself({"argv": argv})
 
+    def test_differently_spelled_paths_to_the_same_file_are_still_caught(
+        self, tmp_path
+    ):
+        """`compare /abs/old/lib.so ./old/lib.so` names one file two different
+        ways -- a plain string comparison of the raw argv tokens sees two
+        distinct operands and misses it entirely (Codex review, fresh
+        evidence: reproduced against a real Category A grading run where such
+        a call reported `NO_CHANGE` while a `BREAKING` claim citing it still
+        passed dimensions 3 and 6). Canonicalizing against the call's own
+        recorded `cwd` before the duplicate check closes this without needing
+        the file to exist -- `library/old/lib.so` under `tmp_path` is real
+        here only so the intermediate `..` segment has something to resolve
+        through."""
+        (tmp_path / "library" / "old").mkdir(parents=True)
+        abs_path = str(tmp_path / "library" / "old" / "lib.so")
+        call = {
+            "argv": ["compare", abs_path, "./old/lib.so"],
+            "cwd": str(tmp_path / "library"),
+        }
+        assert ev.compares_one_side_against_itself(call)
+
+    def test_a_redundant_relative_segment_resolves_to_the_same_side(self, tmp_path):
+        """`../library/old/lib.so` from inside `library/` names the same file
+        as a bare `old/lib.so` -- syntactically different, semantically one
+        operand."""
+        (tmp_path / "library" / "old").mkdir(parents=True)
+        call = {
+            "argv": ["compare", "old/lib.so", "../library/old/lib.so"],
+            "cwd": str(tmp_path / "library"),
+        }
+        assert ev.compares_one_side_against_itself(call)
+
+    def test_genuinely_different_files_survive_canonicalization(self, tmp_path):
+        """The fix must not overcorrect: two real, distinct operands --
+        spelled through an absolute path and a relative one -- are still two
+        sides, not accidentally folded into a false self-comparison."""
+        (tmp_path / "library" / "old").mkdir(parents=True)
+        (tmp_path / "library" / "new").mkdir(parents=True)
+        abs_new = str(tmp_path / "library" / "new" / "lib.so")
+        call = {
+            "argv": ["compare", "./old/lib.so", abs_new],
+            "cwd": str(tmp_path / "library"),
+        }
+        assert not ev.compares_one_side_against_itself(call)
+
+    def test_canonicalization_is_a_no_op_without_a_recorded_cwd(self):
+        """A call with no `cwd` (an older record, or a hand-built test fixture)
+        falls back to the raw string comparison -- degrading, not crashing."""
+        call = {"argv": ["compare", "/abs/old/lib.so", "./old/lib.so"]}
+        assert not ev.compares_one_side_against_itself(call)
+
 
 class TestShortOptionClusters:
     """Click packs short options, and both readers of an argv must agree.
