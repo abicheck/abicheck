@@ -2285,18 +2285,38 @@ def _dotted_path(node: ast.expr) -> str | None:
     return None
 
 
+def _tier1_package_aliases(tree: ast.Module) -> set[str]:
+    """Every local name bound to the ``abicheck`` top-level package object
+    itself — ``import abicheck`` binds ``abicheck``, ``import abicheck as
+    abi`` binds ``abi``. Used to recognize a qualified Tier-1 call reached
+    through a package-level alias (``abi.service.resolve_input(...)``), not
+    just the literal ``abicheck`` spelling (Codex review: only the bare name
+    was tracked, so an aliased-package spelling silently bypassed the gate).
+    """
+    aliases: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name == "abicheck":
+                    aliases.add(alias.asname or alias.name)
+    return aliases
+
+
 def _tier1_module_bindings(
     tree: ast.Module, module: str, required_level: int
 ) -> set[str]:
     """Return every spelling *tree* could call ``<module>.<func>(...)``
     through: local names bound to *module* itself, plus the full dotted path
-    an *unaliased* ``import abicheck.<module>`` leaves reachable off the
-    implicitly-bound ``abicheck`` name.
+    an *unaliased* ``import abicheck.<module>`` leaves reachable off every
+    name bound to the ``abicheck`` package itself (the bare ``abicheck``
+    name, and any ``import abicheck as X`` alias — see
+    ``_tier1_package_aliases``).
 
     Catches ``from . import <module> [as X]``, ``from abicheck import
     <module> [as X]``, and ``import abicheck.<module> [as X]`` alike, so an
     aliased ``core.<func>(...)`` call is recognised — and, for the unaliased
-    import form, so is the literal ``abicheck.<module>.<func>(...)`` — not
+    import form, so is ``abicheck.<module>.<func>(...)`` *and*
+    ``<pkg_alias>.<module>.<func>(...)`` for any package alias — not
     just a call through a name bound directly to *module*. *required_level*
     is the source file's own relative-import depth (see
     ``_relative_import_level_for_source``): a bare ``from . import
@@ -2305,6 +2325,7 @@ def _tier1_module_bindings(
     its own subpackage instead.
     """
     names: set[str] = set()
+    submodule_bound_unaliased = False
     for node in ast.walk(tree):
         if isinstance(node, ast.ImportFrom):
             # ``from . import <module>`` (module is None, level must match
@@ -2330,6 +2351,14 @@ def _tier1_module_bindings(
                         # the module itself stays reachable as the full
                         # dotted path off it (``abicheck.<module>.<func>``).
                         names.add(alias.name)
+                        submodule_bound_unaliased = True
+    if submodule_bound_unaliased:
+        # The submodule attribute lives on the package *object* -- every
+        # other name bound to that same object (a package-level alias)
+        # reaches it too, not just the literal ``abicheck`` spelling.
+        names.update(
+            f"{pkg_alias}.{module}" for pkg_alias in _tier1_package_aliases(tree)
+        )
     return names
 
 

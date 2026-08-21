@@ -166,6 +166,12 @@ _EXTRA_TIER1_VIOLATION_CASES: list[pytest.ParameterSet] = [
         "import abicheck.service\ndef go(a):\n    return abicheck.service.resolve_input(a)\n",
         id="service-resolve-input-unaliased-qualified-call",
     ),
+    pytest.param(
+        "cli_resolves_package_alias.py",
+        "import abicheck as abi\nimport abicheck.service\n"
+        "def go(a):\n    return abi.service.resolve_input(a)\n",
+        id="service-resolve-input-package-alias-qualified-call",
+    ),
 ]
 
 
