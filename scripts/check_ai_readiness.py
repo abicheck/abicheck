@@ -2395,16 +2395,25 @@ _SCOPE_DEFINING_TYPES: tuple[type[ast.AST], ...] = (
 def _definition_head_parts(node: ast.AST) -> list[ast.AST]:
     """The parts of a scope-defining node that execute in its *enclosing*
     scope, right when the node itself is evaluated — decorators,
-    default-argument expressions, base-class/keyword expressions (class),
-    and — for a comprehension — only the *outermost* ``for`` clause's
-    iterable (the one Python expression a comprehension evaluates eagerly
-    in the enclosing scope; every other clause, condition, and the
-    result expression itself run inside the comprehension's own scope).
-    Never the node's own body/return-expression, which is the *new* scope
-    it introduces.
+    default-argument expressions, the return annotation, base-class/keyword
+    expressions (class), and — for a comprehension — only the *outermost*
+    ``for`` clause's iterable (the one Python expression a comprehension
+    evaluates eagerly in the enclosing scope; every other clause, condition,
+    and the result expression itself run inside the comprehension's own
+    scope). Never the node's own body/return-expression, which is the *new*
+    scope it introduces.
     """
     if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-        return [*node.decorator_list, node.args]
+        # `node.returns` (the `-> T` annotation) is, like a default-argument
+        # expression, evaluated in the enclosing scope at def-time, not the
+        # scope the definition introduces (Codex review: only `node.args`
+        # was included, so a nested definition's return annotation calling a
+        # Tier-1 target was wrongly flagged instead of recognized as running
+        # in the enclosing wrapper's own scope). `None` when unannotated.
+        parts: list[ast.AST] = [*node.decorator_list, node.args]
+        if node.returns is not None:
+            parts.append(node.returns)
+        return parts
     if isinstance(node, ast.ClassDef):
         return [*node.decorator_list, *node.bases, *node.keywords]
     if isinstance(node, ast.Lambda):

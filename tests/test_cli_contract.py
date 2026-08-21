@@ -544,6 +544,36 @@ def test_cli_resolve_exemption_covers_nested_definitions_own_head(
     assert errors == []
 
 
+def test_cli_resolve_exemption_covers_nested_definitions_return_annotation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Same principle as the default-argument case above, for the other
+    definition-head expression that runs eagerly in the enclosing scope: a
+    nested function's own `-> T` return annotation. It executes in the
+    *wrapper's* own scope at the point the nested `def` statement runs, not
+    inside the nested function's own body, so it must be exempt too (Codex
+    review: `_definition_head_parts` included `node.args` but not
+    `node.returns`, so this shape was wrongly flagged)."""
+    import scripts.check_ai_readiness as gate
+
+    pkg = tmp_path / "abicheck"
+    pkg.mkdir()
+    (pkg / "cli_resolve.py").write_text(
+        "def _resolve_input(a):\n"
+        "    from . import service\n"
+        "    def inner() -> service.resolve_input(a):\n"
+        "        return None\n"
+        "    return inner()\n"
+    )
+    monkeypatch.setattr(gate, "PKG", pkg)
+    monkeypatch.setattr(gate, "ROOT", tmp_path)
+
+    findings = gate.Findings()
+    gate.check_cli_contract(findings)
+    errors = [m for c, m in findings.errors if c == "cli-contract"]
+    assert errors == []
+
+
 def test_cli_resolve_exemption_ignores_comprehension_bypass(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
