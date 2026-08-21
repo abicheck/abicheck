@@ -66,6 +66,7 @@ from .compatibility_evaluation_config import (
     EvidenceProviderRequirement,
     GateConfig,
     ImmutableIdentity,
+    ScopedGateSelection,
     SelectedByEntry,
     SuppressionConfig,
     SurfaceConfig,
@@ -123,6 +124,22 @@ def _sequence(value: object, *, what: str) -> Sequence[Any]:
 # --------------------------------------------------------------------------
 # Small value types.
 # --------------------------------------------------------------------------
+
+
+def _gate_scope_from_dict(d: object) -> ScopedGateSelection | None:
+    """Inverse of :func:`resolved_config_to_dict`'s ``gate.scope`` encoding.
+
+    ``None`` when the resolved config carried no ADR-043 scoped-gate
+    selection at all (the common case) -- distinct from a present-but-empty
+    ``targets`` list, which round-trips as a real, zero-target selection.
+    """
+    if d is None:
+        return None
+    m = _require_mapping(d, what="gate.scope")
+    return ScopedGateSelection(
+        kind=_required(m, "kind", what="gate.scope"),
+        targets=tuple(_sequence(m.get("targets"), what="gate.scope.targets")),
+    )
 
 
 def _identity_to_dict(identity: ImmutableIdentity) -> dict[str, Any]:
@@ -288,6 +305,12 @@ def resolved_config_to_dict(config: CompatibilityEvaluationConfig) -> dict[str, 
                 "quality_issues": config.gate.severity.quality_issues.value,
                 "addition": config.gate.severity.addition.value,
             },
+            "require_complete_analysis": config.gate.require_complete_analysis,
+            "scope": (
+                {"kind": config.gate.scope.kind, "targets": list(config.gate.scope.targets)}
+                if config.gate.scope is not None
+                else None
+            ),
         },
         "suppressions": (
             {
@@ -413,6 +436,10 @@ def resolved_config_from_dict(
                 quality_issues=SeverityLevel(severity.get("quality_issues", "warning")),
                 addition=SeverityLevel(severity.get("addition", "info")),
             ),
+            require_complete_analysis=bool(
+                gate.get("require_complete_analysis", False)
+            ),
+            scope=_gate_scope_from_dict(gate.get("scope")),
         ),
         suppressions=(
             SuppressionConfig(

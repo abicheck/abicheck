@@ -21,6 +21,7 @@ re-evaluation procedures are in ``test_contract_replay.py``.
 
 from __future__ import annotations
 
+import dataclasses
 import json
 
 import pytest
@@ -36,6 +37,7 @@ from abicheck.compatibility_evaluation_config import (
     EvidenceProviderRequirement,
     GateConfig,
     ImmutableIdentity,
+    ScopedGateSelection,
     SelectedByEntry,
     SuppressionConfig,
     SurfaceConfig,
@@ -206,6 +208,10 @@ class TestResolvedConfigRoundTrip:
                     quality_issues=SeverityLevel.INFO,
                     addition=SeverityLevel.WARNING,
                 ),
+                require_complete_analysis=True,
+                scope=ScopedGateSelection(
+                    kind="used_by", targets=("/opt/app1", "/opt/app2")
+                ),
             ),
             suppressions=SuppressionConfig(sha256="9" * 8, rules=("rule-a",)),
             provenance={
@@ -228,6 +234,30 @@ class TestResolvedConfigRoundTrip:
             resolved_config_to_dict(config), config.provenance
         )
         assert decoded == config
+
+    def test_gate_require_complete_analysis_and_scope_round_trip(self) -> None:
+        # Codex review: these two GateConfig fields were previously omitted
+        # from resolved_config_to_dict/from_dict entirely, so a JSON
+        # round-trip silently dropped them back to their defaults.
+        config = self._full_config()
+        decoded = resolved_config_from_dict(resolved_config_to_dict(config))
+        assert decoded.gate.require_complete_analysis is True
+        assert decoded.gate.scope == ScopedGateSelection(
+            kind="used_by", targets=("/opt/app1", "/opt/app2")
+        )
+
+    def test_gate_scope_none_round_trips_to_none(self) -> None:
+        config = dataclasses.replace(
+            self._full_config(),
+            gate=dataclasses.replace(
+                self._full_config().gate,
+                require_complete_analysis=False,
+                scope=None,
+            ),
+        )
+        decoded = resolved_config_from_dict(resolved_config_to_dict(config))
+        assert decoded.gate.require_complete_analysis is False
+        assert decoded.gate.scope is None
 
     def test_provenance_round_trips_through_the_context_block(self) -> None:
         from abicheck.contract_context_io import (

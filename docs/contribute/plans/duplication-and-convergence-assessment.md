@@ -1096,8 +1096,9 @@ sign-off, not a routine PR).
    function's cleanup ever ran from). Existing coverage
    (`tests/test_non_elf_dump_l2_seed.py`,
    `tests/test_cli_dump_helpers_coverage.py`) passed unmodified.
-   **Milestone A completion.** `service_input_resolution.
-   _resolve_side_snapshot_impl`'s own hand-rolled `cleanups: list[...] = []`
+   **Milestone A completion.**
+   `service_input_resolution._resolve_side_snapshot_impl`'s own hand-rolled
+   `cleanups: list[...] = []`
    + manual `if cleanups: _run_cleanups(cleanups)` finally block — the third
    and, per this item's own earlier audit, last known call site with this
    exact pattern — is migrated the same way: its own `ResolvedArtifactPlan`
@@ -1109,12 +1110,15 @@ sign-off, not a routine PR).
    implicit-dump operand and `dump`'s typed `execute_dump_request` both
    already route through (`resolve_side_snapshot`), so this migration reaches
    both without touching either of their own call sites. Existing coverage
-   (`tests/test_header_compile_context.py`, `tests/test_bazel_root_targets_
-   l2_seed.py`, `tests/test_bazel_root_targets.py`,
-   `tests/test_scan_l2_cleanup_ordering.py`, `tests/test_typed_dump_
-   request.py`, `tests/test_dump_cli_typed_api_parity.py`,
-   `tests/test_header_compile_context_gcc_path.py`, `tests/test_header_
-   compile_context_merge.py`, `tests/test_clang_public_roots_coverage.py`)
+   (`tests/test_header_compile_context.py`,
+   `tests/test_bazel_root_targets_l2_seed.py`,
+   `tests/test_bazel_root_targets.py`,
+   `tests/test_scan_l2_cleanup_ordering.py`,
+   `tests/test_typed_dump_request.py`,
+   `tests/test_dump_cli_typed_api_parity.py`,
+   `tests/test_header_compile_context_gcc_path.py`,
+   `tests/test_header_compile_context_merge.py`,
+   `tests/test_clang_public_roots_coverage.py`)
    passed unmodified. All three call sites the plan's own earlier audit
    named now share this one primitive.
 
@@ -1178,8 +1182,9 @@ performance duplication (redundant inferred build queries).
    Investigating item 1 (introduce `EffectiveEvaluationConfig`) against the
    actual codebase — not just this document's own sketch — found the
    target shape overlaps far more with an *already-existing* object than
-   this section's original text accounted for: `abicheck/
-   compatibility_evaluation_config.py`'s `CompatibilityEvaluationConfig`
+   this section's original text accounted for:
+   `abicheck/compatibility_evaluation_config.py`'s
+   `CompatibilityEvaluationConfig`
    (ADR-049 D7) already composes `policy` (`CompatibilityPolicyConfig`),
    `gate` (`GateConfig` — `exit_code_scheme`, `severity: SeverityConfig`,
    `preset`, `packs`), `contract` (`ContractConfig`), `assurance`
@@ -1188,8 +1193,9 @@ performance duplication (redundant inferred build queries).
    essentially every sub-object this section's own `EffectiveEvaluationConfig`
    sketch names, under different but directly corresponding field names,
    plus real per-field `ValueProvenance` (D7's precedence-tier record) this
-   section's sketch only gestures at via a single `provenance:
-   ConfigProvenance` field. The "Relationship to in-flight work" section
+   section's sketch only gestures at via a single
+   `provenance: ConfigProvenance` field. The "Relationship to in-flight work"
+   section
    below already says as much at the plan level ("Public contract default
    (ADR-049) is the compatibility-configuration resolver Phase 2 makes the
    sole runtime contract... this plan does not change ADR-049's own D7/D8
@@ -1233,17 +1239,19 @@ performance duplication (redundant inferred build queries).
    full existing test suite for this module passing unmodified (153 tests)
    plus the broader compatibility-evaluation/digest/pack/contract-context
    suites (1224 tests). `ScopedGateSelection` is a new frozen dataclass in
-   the same module (`kind: str` validated against `{"used_by",
-   "required_symbol"}`, `targets: tuple[str, ...]`), typed to match the
+   the same module (`kind: str` validated against
+   `{"used_by", "required_symbol"}`, `targets: tuple[str, ...]`), typed to
+   match the
    encoding `effective_config_digest._gate_scope_str` had already
    established informally (reading `DiffResult.gate_scope`/`used_by`/
    `required_symbols` and JSON-encoding `{"kind": ..., "targets": ...}`) —
    this new type doesn't invent a shape, it names one that already existed
    as an untyped convention in one function. New test classes
    (`TestGateConfigRequireCompleteAnalysisAndScope`,
-   `TestScopedGateSelection`) in `tests/test_compatibility_evaluation_
-   config.py` cover both fields' defaults, validation, and (for
-   `ScopedGateSelection`) frozen/equality/order-preservation semantics.
+   `TestScopedGateSelection`) in
+   `tests/test_compatibility_evaluation_config.py` cover both fields'
+   defaults, validation, and (for `ScopedGateSelection`)
+   frozen/equality/order-preservation semantics.
 
    **Deliberately not yet done, in this slice:** neither field is wired to
    anything yet — no resolver reads the raw `require_complete_analysis`
