@@ -356,7 +356,15 @@ class TestDimensionSix:
             ),
             scenario,
             calls=calls,
-            artifacts={"captured/0.out": json.dumps({"verdict": "BREAKING"})},
+            # `full_verdict` present in the captured report too -- the claim
+            # must be grounded in what a cited report actually said, not
+            # merely match the scenario's own expected value (Codex review,
+            # PR #808).
+            artifacts={
+                "captured/0.out": json.dumps(
+                    {"verdict": "BREAKING", "full_verdict": "BREAKING"}
+                )
+            },
         )
         assert result.status == "pass", result.reasons
 
@@ -479,9 +487,17 @@ class TestDimensionSix:
             ),
             scenario,
             calls=calls,
+            # `full_verdict` present too (Codex review, PR #808) -- both
+            # scoped calls agree on the same real library-wide verdict, so
+            # the claim's own `full_verdict` is grounded rather than merely
+            # matching the scenario's expected value by construction.
             artifacts={
-                "captured/0.out": json.dumps({"verdict": "COMPATIBLE"}),
-                "captured/1.out": json.dumps({"verdict": "BREAKING"}),
+                "captured/0.out": json.dumps(
+                    {"verdict": "COMPATIBLE", "full_verdict": "BREAKING"}
+                ),
+                "captured/1.out": json.dumps(
+                    {"verdict": "BREAKING", "full_verdict": "BREAKING"}
+                ),
             },
         )
         assert result.status == "pass", result.reasons
@@ -526,7 +542,8 @@ class TestDimensionSix:
         self, tmp_path
     ):
         """The positive control: a cited call using the exact declared
-        `--contract` mode passes."""
+        `--contract` mode, whose own report carries a genuine non-empty
+        `contract_coverage_failures` ledger, passes."""
         scenario = {
             "skill": "check-abi-compatibility",
             "invocation": {"contract": "exports", "contract_evaluation": True},
@@ -553,7 +570,17 @@ class TestDimensionSix:
             ),
             scenario,
             calls=calls,
-            artifacts={"captured/0.out": json.dumps({"verdict": "COMPATIBLE"})},
+            # A real, non-empty ledger -- "the call used --contract" alone
+            # is not positive evidence of an actual gap; the ledger is
+            # (Codex review, PR #808, second round).
+            artifacts={
+                "captured/0.out": json.dumps(
+                    {
+                        "verdict": "COMPATIBLE",
+                        "contract_coverage_failures": ["unresolved: exports domain"],
+                    }
+                )
+            },
         )
         assert result.status == "pass", result.reasons
 
@@ -598,6 +625,47 @@ class TestDimensionSix:
         )
         assert result.status == "fail"
         assert any("ledger is empty" in r for r in result.reasons)
+
+    def test_a_matching_contract_call_with_no_readable_ledger_fails(self, tmp_path):
+        """The sibling gap to the empty-ledger case above, found in a second
+        review round: when *no* cited report's ledger can even be read (not
+        captured as JSON, or JSON missing the field entirely), the previous
+        version of this check let 'no known ledger falsifies this' pass with
+        zero positive evidence a real gap was ever captured. At least one
+        cited report must expose a genuine, non-empty ledger (Codex review,
+        PR #808, second round)."""
+        scenario = {
+            "skill": "check-abi-compatibility",
+            "invocation": {"contract": "exports", "contract_evaluation": True},
+            "expected": {
+                "verdict": "COMPATIBLE",
+                "uncertainty": "contract_coverage_incomplete",
+            },
+        }
+        calls = [
+            a_breaking_call(
+                0, argv=["compare", "old.so", "new.so", "--contract", "exports"]
+            )
+        ]
+        result = self._grade(
+            tmp_path,
+            envelope(
+                verdict="COMPATIBLE",
+                evidence=[0],
+                confident=False,
+                uncertainty={
+                    "reason": "contract_coverage_incomplete",
+                    "unresolved": "the exports domain",
+                },
+            ),
+            scenario,
+            calls=calls,
+            # A JSON report with no `contract_coverage_failures` field at
+            # all -- distinct from the empty-list case above.
+            artifacts={"captured/0.out": json.dumps({"verdict": "COMPATIBLE"})},
+        )
+        assert result.status == "fail"
+        assert any("no positive evidence" in r for r in result.reasons)
 
     def test_a_matching_contract_call_with_a_nonempty_ledger_still_passes(
         self, tmp_path
@@ -779,6 +847,42 @@ class TestDimensionSix:
             },
         )
         assert result.status == "pass", result.reasons
+
+    def test_a_full_verdict_grounded_by_nothing_fails(self, tmp_path):
+        """Fresh evidence after the mismatch check above: a cited call whose
+        captured report never exposes `full_verdict` at all (default
+        text/Markdown capture, or JSON missing the field) previously fell
+        through this check with no failure -- so a claim could simply state
+        the scenario's own expected full_verdict with no cited artifact
+        backing that specific value, defeating both the consumer-scoping
+        scenarios' purpose and this zero-tolerance dimension (Codex review,
+        PR #808, fresh evidence). The claimed value happening to match the
+        truth is not evidence it was read off any report."""
+        scenario = {
+            "skill": "check-abi-compatibility",
+            "invocation": {"used_by": ["renderer"]},
+            "expected": {"verdict": "COMPATIBLE", "full_verdict": "BREAKING"},
+        }
+        calls = [
+            a_breaking_call(
+                0, argv=["compare", "old.so", "new.so", "--used-by", "renderer"]
+            )
+        ]
+        result = self._grade(
+            tmp_path,
+            envelope(
+                verdict="COMPATIBLE",
+                full_verdict="BREAKING",
+                evidence=[0],
+                confident=True,
+            ),
+            scenario,
+            calls=calls,
+            # No `full_verdict` field in the captured report at all.
+            artifacts={"captured/0.out": json.dumps({"verdict": "COMPATIBLE"})},
+        )
+        assert result.status == "fail"
+        assert any("none of the claim's own cited reports" in r for r in result.reasons)
 
     def test_disagreeing_cited_reports_fail_rather_than_being_skipped(self, tmp_path):
         """Two cited calls whose own reports disagree on full_verdict leave

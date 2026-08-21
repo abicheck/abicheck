@@ -566,29 +566,46 @@ def dimension_6(
         # ledger says (Codex review, PR #808, fresh evidence: this predicate
         # previously stopped at "some cited call used --contract [mode]" and
         # never inspected the ledger, so a cited report reading COMPATIBLE
-        # with an empty ledger passed this zero-tolerance dimension too). A
-        # ledger this module can't read (non-JSON output) carries no signal
-        # either way; only a *known*, uniformly-empty set of ledgers across
-        # the otherwise-qualifying candidates is a failure.
+        # with an empty ledger passed this zero-tolerance dimension too).
+        # A *second* round found the first fix still under-required: when no
+        # cited report's ledger could be read at all (captured as non-JSON
+        # text, or JSON missing the field), `known_ledgers` was empty, and
+        # "no known ledger falsifies this" silently passed the check with no
+        # positive evidence a real gap was ever captured -- the scenario
+        # this check exists for (`contract-coverage-incomplete`) requires a
+        # genuine, parsed, non-empty ledger, not merely the absence of proof
+        # against one (Codex review, PR #808, second round). At least one
+        # candidate must expose a *known*, *non-empty* ledger now.
         ledgers = [
             ev.reported_contract_coverage_failures(run_dir, c)
             for c in contract_candidates
         ]
         known_ledgers = [failures for failures in ledgers if failures is not None]
-        contract_covered = bool(contract_candidates) and not (
-            known_ledgers and not any(known_ledgers)
+        contract_covered = (
+            bool(contract_candidates) and bool(known_ledgers) and any(known_ledgers)
         )
         if not contract_covered:
-            reason = (
-                "cited no call using --contract"
-                + (f" {declared_mode}" if declared_mode else "")
-                + ", which the scenario's own invocation requires"
-                if not contract_candidates
-                else "cited a call using --contract"
-                + (f" {declared_mode}" if declared_mode else "")
-                + ", but every cited report's own contract_coverage_failures "
-                "ledger is empty — coverage was actually complete"
-            )
+            if not contract_candidates:
+                reason = (
+                    "cited no call using --contract"
+                    + (f" {declared_mode}" if declared_mode else "")
+                    + ", which the scenario's own invocation requires"
+                )
+            elif not known_ledgers:
+                reason = (
+                    "cited a call using --contract"
+                    + (f" {declared_mode}" if declared_mode else "")
+                    + ", but none of the cited reports exposed a parseable "
+                    "contract_coverage_failures ledger — no positive "
+                    "evidence a coverage gap was actually captured"
+                )
+            else:
+                reason = (
+                    "cited a call using --contract"
+                    + (f" {declared_mode}" if declared_mode else "")
+                    + ", but every cited report's own contract_coverage_failures "
+                    "ledger is empty — coverage was actually complete"
+                )
             reasons.append(
                 (
                     reason,
@@ -686,6 +703,29 @@ def dimension_6(
                             True,
                         )
                     )
+            else:
+                # `reported_fulls` empty: none of the claim's own cited calls
+                # exposed a full_verdict at all — a scoped call captured as
+                # default text/Markdown rather than `--format json`, or any
+                # JSON report lacking the field, since `ev.
+                # reported_full_verdicts` reads JSON only. Falling through
+                # here (as an earlier version of this check did) let a claim
+                # simply state the scenario's expected full_verdict with no
+                # cited artifact backing that specific value — defeating
+                # both the consumer-scoping scenarios' purpose and this
+                # zero-tolerance dimension (Codex review, PR #808). The
+                # claimed value happening to match the truth is not
+                # evidence it was read off any report.
+                reasons.append(
+                    (
+                        f"claimed full_verdict {claimed_full}, but none of "
+                        "the claim's own cited reports exposed a "
+                        "full_verdict field at all (not captured as JSON, "
+                        "or JSON missing the field) — nothing grounds the "
+                        "claimed value",
+                        True,
+                    )
+                )
 
     used = sorted(
         {f for c in calls if ev.is_comparison(c) for f in ev.suppression_flags(c)}

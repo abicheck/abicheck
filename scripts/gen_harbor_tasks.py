@@ -56,6 +56,7 @@ tree matches (same contract as `gen_skill_eval_pack.py --check`).
 from __future__ import annotations
 
 import argparse
+import base64
 import json
 import re
 import subprocess
@@ -67,6 +68,7 @@ EVAL_DIR = ROOT / "agent-evals" / "skills"
 sys.path.insert(0, str(EVAL_DIR))
 
 from runners.claude_code import (  # noqa: E402
+    _PYTHON_INTERPOSER,
     ANSWER_CONTRACT,
     EXPLANATORY_FILES,
     demo_app_sources,
@@ -120,7 +122,23 @@ def _abicheck_ref() -> str:
     ).stdout.strip()
 
 
-def _dockerfile(ref: str) -> str:
+def _skill_version_floor() -> str:
+    """Lower bound of the published skill's own declared `abicheck-version-range`.
+
+    Read once at generation time, from the skill's real checked-in
+    declaration, so the Dockerfile's evaluation-only metadata patch below
+    can never hand-drift from it the next time the range changes.
+    """
+    skill_md = ROOT / ".claude" / "skills" / "check-abi-compatibility" / "SKILL.md"
+    match = re.search(
+        r'abicheck-version-range:\s*">=([0-9.]+)', skill_md.read_text(encoding="utf-8")
+    )
+    if not match:
+        raise RuntimeError(f"could not parse abicheck-version-range from {skill_md}")
+    return match.group(1)
+
+
+def _dockerfile(ref: str, version_floor: str) -> str:
     return f"""{_MARKER}FROM python:3.13-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \\
@@ -134,6 +152,24 @@ RUN git clone https://github.com/abicheck/abicheck.git /opt/abicheck-src \\
     && cd /opt/abicheck-src && git checkout "$ABICHECK_REF" \\
     && pip install --no-cache-dir -e ".[dev]"
 
+# Evaluation-only version-metadata patch (mirrors
+# agent-evals/skills/CLAUDE.md's "Environment prerequisites for a real run"
+# section, never a real release decision): `pyproject.toml`'s own `version`
+# field lags the working tree's actual CLI surface between releases
+# (skills-src/CLAUDE.md rule 7), and the published skill's own preflight
+# refuses to proceed on a version outside its declared
+# `abicheck-version-range` -- without this, every skill-arm trial would
+# dead-end at that preflight while the baseline arm proceeds normally,
+# which reads as "the skill hurts" when the actual cause is environment
+# metadata, not skill quality. Both metadata sources `importlib.metadata`
+# can resolve (the editable install's own egg-info, and the site-packages
+# dist-info it also registers) are patched, since which one wins is
+# resolution-order dependent.
+RUN set -eux; \\
+    EGG=/opt/abicheck-src/abicheck.egg-info/PKG-INFO; \\
+    DIST=$(python3 -c "import importlib.metadata as m; print(next(str(d._path) for d in m.distributions() if d.metadata['Name']=='abicheck'))")/METADATA; \\
+    sed -i "s/^Version: .*/Version: {version_floor}/" "$EGG" "$DIST"
+
 # Recording shim (agent-evals/skills/shim/abicheck): every `abicheck ...`
 # call an agent makes is transparently recorded to $SKILL_EVAL_CALLS, then
 # forwarded to the real binary. Present in every trial, skill-arm or not --
@@ -145,6 +181,25 @@ RUN real="$(command -v abicheck)" \\
     && chmod +x "$real" "$real-real"
 ENV SKILL_EVAL_REAL_ABICHECK=/usr/local/bin/abicheck-real
 ENV SKILL_EVAL_CALLS=/workspace/calls.jsonl
+ENV SKILL_EVAL_SHIM=/usr/local/bin/abicheck
+
+# `python -m abicheck ...` is a documented, supported entry point that does
+# not go through the PATH shim above -- an agent using it would record no
+# calls at all, biasing the baseline arm in particular (it is not handed
+# the skill's own spelling of the command). Same interposer the existing
+# harness installs (`runners.claude_code._PYTHON_INTERPOSER`), reused
+# verbatim rather than re-derived, so a fix to its module-selector parsing
+# there is not something this image can silently drift from. base64-encoded
+# rather than a heredoc: a heredoc body inside a single `RUN` needs
+# BuildKit's Dockerfile 1.4+ heredoc support (undeclared here) to survive
+# the classic line-oriented parser intact, while base64 has no shell
+# metacharacters at all and needs nothing beyond `base64`, present in every
+# Debian-based image by default.
+RUN mv /usr/local/bin/python3 /usr/local/bin/python3-real \\
+    && echo '{base64.b64encode(_PYTHON_INTERPOSER.encode()).decode()}' | base64 -d > /usr/local/bin/python3 \\
+    && cp /usr/local/bin/python3 /usr/local/bin/python \\
+    && chmod +x /usr/local/bin/python3 /usr/local/bin/python
+ENV SKILL_EVAL_REAL_PYTHON=/usr/local/bin/python3-real
 
 # This sandbox's own castxml is routinely below abicheck's policy floor
 # (agent-evals/skills/CLAUDE.md's "Environment prerequisites" section);
@@ -220,11 +275,48 @@ def _readme(scenario_id: str, scenario: dict) -> str:
     )
 
 
-def _test_sh() -> str:
+def _test_sh(scenario: dict) -> str:
+    architectures = scenario.get("architectures") or []
+    arch_guard = ""
+    if architectures:
+        # Mirrors `runners.claude_code.host_architecture()`'s canonicalization
+        # (`aarch64`/`arm64` are the same architecture under two spellings) --
+        # a fixture declaring `architectures` embeds an architecture-specific
+        # prebuilt artifact (Codex review), so running it unguarded on a
+        # mismatched host would silently grade a cross-architecture-break
+        # artifact as if it were the intended shallow-evidence result. This
+        # host and Docker's own build platform are the same one Harbor
+        # scheduled the trial on -- no cross-platform Docker emulation is
+        # assumed or handled here.
+        allowed_shell = " ".join(architectures)  # plain identifiers, no quoting needed
+        # A Python list literal built with `repr()`, not `json.dumps()`: the
+        # latter's double-quoted strings would prematurely close the outer
+        # bash double-quoted `python3 -c "..."` argument the instant an
+        # unescaped `"` appears inside it (reproduced directly: the closing
+        # `"` of `["x86_64"]` ended the shell string early, leaving a bare
+        # `x86_64` token concatenated back in as literal Python source and
+        # raising `NameError: name 'x86_64' is not defined`). `repr()`'s
+        # single-quoted strings never collide with the outer double quotes.
+        allowed_py_list = "[" + ", ".join(repr(a) for a in architectures) + "]"
+        arch_guard = f"""
+host_arch="$(uname -m)"
+case "$host_arch" in
+    aarch64) host_arch=arm64 ;;
+esac
+case " {allowed_shell} " in
+    *" $host_arch "*) ;;
+    *)
+        mkdir -p /logs/verifier
+        echo 0 > /logs/verifier/reward.txt
+        python3 -c "import json; json.dump({{'reward': 0, 'error': 'architecture_mismatch', 'host_architecture': '$host_arch', 'required_architectures': {allowed_py_list}}}, open('/logs/verifier/reward.json', 'w'))"
+        exit 0
+        ;;
+esac
+"""
     return f"""#!/bin/bash
 {_MARKER}
 set -euo pipefail
-
+{arch_guard}
 mkdir -p /logs/verifier
 python3 /opt/abicheck-src/agent-evals/skills/harbor/verify_run.py \\
     --workspace /workspace \\
@@ -385,6 +477,7 @@ def generate(check: bool = False) -> bool:
         sid: s for sid, s in pack["scenarios"].items() if s.get("status") == "ready"
     }
     ref = _abicheck_ref()
+    version_floor = _skill_version_floor()
 
     with tempfile.TemporaryDirectory() as tmp:
         staging = Path(tmp) / "tasks"
@@ -405,13 +498,15 @@ def generate(check: bool = False) -> bool:
                 _readme(scenario_id, scenario), encoding="utf-8"
             )
             (task_dir / "environment" / "Dockerfile").write_text(
-                _dockerfile(ref), encoding="utf-8"
+                _dockerfile(ref, version_floor), encoding="utf-8"
             )
             _prepared_library(
                 ROOT / scenario["inputs"],
                 task_dir / "environment" / "workspace" / "library",
             )
-            (task_dir / "tests" / "test.sh").write_text(_test_sh(), encoding="utf-8")
+            (task_dir / "tests" / "test.sh").write_text(
+                _test_sh(scenario), encoding="utf-8"
+            )
             (task_dir / "tests" / "scenario.json").write_text(
                 json.dumps(scenario, indent=2, sort_keys=True) + "\n", encoding="utf-8"
             )

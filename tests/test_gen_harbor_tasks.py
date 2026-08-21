@@ -198,6 +198,78 @@ class TestReadmeCommandParsing:
         assert gen._readme_abicheck_command(case) is None
 
 
+class TestArchitectureGuard:
+    """`_test_sh`'s runtime `uname -m` guard for a scenario declaring
+    `architectures` (e.g. `evidence-too-shallow`, which embeds an x86_64
+    prebuilt artifact) -- exercised for real, not mocked, since a first
+    version of this guard built its `python3 -c` payload with
+    `json.dumps()` (double-quoted strings) inside an outer bash
+    double-quoted string, which silently truncated the argument at the
+    first unescaped `"` and fed the shell interpreter's own bareword back
+    in as literal (unquoted) Python source -- `NameError: name 'x86_64' is
+    not defined`, reproducible only by actually running the generated
+    script, never by reading it.
+    """
+
+    def _run_with_fake_uname(self, tmp_path, task_id, reported_arch):
+        task_dir = TASKS_DIR / task_id
+        test_sh = (task_dir / "tests" / "test.sh").read_text(encoding="utf-8")
+        logs = tmp_path / "logs"
+        script = tmp_path / "test.sh"
+        script.write_text(
+            test_sh.replace("/logs/verifier", str(logs)), encoding="utf-8"
+        )
+        script.chmod(0o755)
+
+        bin_dir = tmp_path / "bin"
+        bin_dir.mkdir()
+        fake_uname = bin_dir / "uname"
+        fake_uname.write_text(f"#!/bin/sh\necho {reported_arch}\n", encoding="utf-8")
+        fake_uname.chmod(0o755)
+
+        import os
+
+        env = {**os.environ, "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}"}
+        proc = subprocess.run(  # noqa: S603
+            ["bash", str(script)],
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        return proc, logs
+
+    def test_mismatched_architecture_short_circuits_with_reward_zero(self, tmp_path):
+        proc, logs = self._run_with_fake_uname(
+            tmp_path, "evidence-too-shallow", "aarch64"
+        )
+        assert proc.returncode == 0, proc.stderr
+        assert (logs / "reward.txt").read_text(encoding="utf-8").strip() == "0"
+        payload = json.loads((logs / "reward.json").read_text(encoding="utf-8"))
+        assert payload == {
+            "reward": 0,
+            "error": "architecture_mismatch",
+            "host_architecture": "arm64",
+            "required_architectures": ["x86_64"],
+        }
+
+    def test_matching_architecture_falls_through_to_the_real_verifier(self, tmp_path):
+        # Falls through past the guard and fails only because
+        # /opt/abicheck-src doesn't exist on this bare host -- confirming
+        # the guard did NOT short-circuit, not that the full verifier ran.
+        proc, logs = self._run_with_fake_uname(
+            tmp_path, "evidence-too-shallow", "x86_64"
+        )
+        assert not (logs / "reward.json").is_file()
+        assert "verify_run.py" in proc.stderr
+
+    def test_a_scenario_with_no_declared_architectures_has_no_guard(self):
+        test_sh = (TASKS_DIR / "removed-export" / "tests" / "test.sh").read_text(
+            encoding="utf-8"
+        )
+        assert "architecture_mismatch" not in test_sh
+
+
 class TestSolveScriptsEndToEnd:
     """Real execution: `solve.sh` -> the recording shim -> `verify_run.py`.
 

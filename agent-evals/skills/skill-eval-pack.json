@@ -421,7 +421,7 @@
       "affects": [
         "check-abi-compatibility"
       ],
-      "digest": "sha256:6e051d6affa7701a600ef2fd68e2c25df6e78954d16b1f8672fcae5fd7a1c8c3",
+      "digest": "sha256:83feb5aa9ec93ffb03097dd3ced34f8bb59322af8ab5f80d7f211c50fb36c038",
       "roots": [
         "agent-evals/skills/grade_bundle.py",
         "agent-evals/skills/graders",
