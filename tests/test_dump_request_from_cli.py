@@ -164,10 +164,10 @@ class TestResolvedRequestAgreesWithTheCliLocals:
         "depth", [None, "binary", "headers", "build", "source"]
     )
     def test_collect_mode_matches(self, tmp_path: Path, depth: str | None) -> None:
-        from abicheck.cli_dump_helpers import resolve_dump_collect_context
         from abicheck.cli_buildsource import (
             resolve_dump_request_for_cli,
         )
+        from abicheck.cli_dump_helpers import resolve_dump_collect_context
 
         header, sources, compile_db = _project(tmp_path)
         cli_mode, cli_headers = resolve_dump_collect_context(

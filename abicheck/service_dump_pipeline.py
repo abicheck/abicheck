@@ -418,7 +418,9 @@ def execute_dump_request(
 
     Raises:
         ValidationError: If *resolved* requests a ``depth`` the resolved
-            snapshot did not reach.
+            snapshot did not reach, or if its input carries no ``path`` (a
+            source-only request — see
+            :func:`~abicheck.cli_buildsource.dump_source_only`).
         SnapshotError: If the input cannot be loaded.
     """
     from .cli_dump_helpers import _gated_source_label
