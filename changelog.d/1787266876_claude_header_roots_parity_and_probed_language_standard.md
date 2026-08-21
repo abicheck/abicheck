@@ -87,9 +87,17 @@
   selecting a different default dialect. Falls back to the family/version-only
   check when either side lacks the hash (an older snapshot, or a side whose
   compiler resolution itself failed).
-- Known, narrower residual, documented rather than fixed: a cache/memo
-  *hit* for a header that previously self-healed C→C++ still reports the
-  pre-retry language mode, since neither backend's AST cache persists that
-  fact alongside the cached document — see `_clang_header_dump`'s own
-  docstring for why a correct fix needs a cache-format change on both
-  backends, not a follow-up to this PR.
+- Known, narrower residuals, documented rather than fixed:
+  - A cache/memo *hit* for a header that previously self-healed C→C++
+    still reports the pre-retry language mode, since neither backend's AST
+    cache persists that fact alongside the cached document — see
+    `_clang_header_dump`'s own docstring for why a correct fix needs a
+    cache-format change on both backends, not a follow-up to this PR.
+  - `_compiler_options.has_explicit_std` recognizes only `-std=`/`/std:`,
+    not GCC's standard-selecting alias `-ansi` (`-std=c90`/`-std=c++98`
+    depending on language mode) — a pre-existing gap, not introduced by
+    this PR, but one this PR's new probe/forced-standard logic now also
+    depends on. A forwarded `-ansi` reads as "no explicit standard"
+    everywhere this function gates on it; see its own docstring for why a
+    correct fix needs a signature change re-verified across all of its
+    several call sites, not a scoped one-off.
