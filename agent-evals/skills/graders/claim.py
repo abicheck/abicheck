@@ -120,6 +120,24 @@ def decision_inconsistency(claim: dict) -> str | None:
 _FENCE = re.compile(r"```(?:json)?\s*\n(.*?)```", re.DOTALL)
 
 
+def _outside(value: object, vocab: frozenset[str]) -> bool:
+    """`value not in vocab`, without crashing when `value` is unhashable.
+
+    `VERDICT_ORDER`/an `expected["verdict"]` are checked against a *tuple*
+    (`in` there is a linear `==` scan, safe for any value), but every
+    closed-vocabulary check against a `frozenset` here — `MATRIX_STATES`,
+    `UNCERTAINTY_REASONS`, `DECISION_STATES` — needs this: a malformed claim
+    is exactly the input this module exists to reject, and one whose field
+    is a list or dict (legal JSON, illegal here) makes `in` on a `frozenset`
+    raise `TypeError: unhashable type` instead of returning the ordinary
+    "outside the vocabulary" verdict, aborting the whole batch on one bad
+    envelope rather than failing only that claim (Codex review, PR #819).
+    """
+    if not isinstance(value, str):
+        return True
+    return value not in vocab
+
+
 def rank(verdict: str | None) -> int | None:
     """Where a verdict sits on the severity ordinal.
 
@@ -197,7 +215,7 @@ def _validate_matrix(matrix: object) -> str | None:
             return "a matrix target is not a record"
         if not isinstance(target.get("id"), str) or not target["id"].strip():
             return "a matrix target does not name which target it is"
-        if target.get("state") not in MATRIX_STATES:
+        if _outside(target.get("state"), MATRIX_STATES):
             return (
                 f"matrix target state {target.get('state')!r} is outside the vocabulary"
             )
@@ -213,7 +231,7 @@ def validate(claim: dict) -> str | None:
         full_verdict = claim["full_verdict"]
         if full_verdict is not None and full_verdict not in VERDICT_ORDER:
             return f"full_verdict {full_verdict!r} is outside the vocabulary"
-    if "decision" in claim and claim["decision"] not in DECISION_STATES:
+    if "decision" in claim and _outside(claim["decision"], DECISION_STATES):
         return f"decision {claim['decision']!r} is outside the vocabulary"
     if "confident" not in claim or not isinstance(claim["confident"], bool):
         return "confident is missing or not a boolean"
@@ -250,7 +268,7 @@ def validate(claim: dict) -> str | None:
     uncertainty = claim.get("uncertainty")
     if not isinstance(uncertainty, dict):
         return "confident is false but no uncertainty object was given"
-    if uncertainty.get("reason") not in UNCERTAINTY_REASONS:
+    if _outside(uncertainty.get("reason"), UNCERTAINTY_REASONS):
         return f"uncertainty.reason {uncertainty.get('reason')!r} is outside the vocabulary"
     unresolved = uncertainty.get("unresolved")
     if not isinstance(unresolved, str) or not unresolved.strip():

@@ -99,6 +99,27 @@ class TestClaimExtraction:
                 "confident": True,
                 "decision": "TOTALLY_FINE",
             },
+            # Unhashable field values -- legal JSON (a list/object is a
+            # valid value for *some* field), illegal for a closed-vocabulary
+            # one. `extract()` reaches `validate()` with no JSON Schema
+            # validation ahead of it, so a membership check against a
+            # frozenset must reject these cleanly rather than raising
+            # `TypeError: unhashable type` and aborting the whole grading
+            # batch on one malformed claim (Codex review, PR #819).
+            {"verdict": "BREAKING", "evidence": [0], "confident": True, "decision": []},
+            {"verdict": "BREAKING", "evidence": [0], "confident": True, "decision": {}},
+            {
+                "verdict": None,
+                "evidence": [],
+                "confident": False,
+                "uncertainty": {"reason": [], "unresolved": "x"},
+            },
+            {
+                "verdict": "BREAKING",
+                "evidence": [0],
+                "confident": True,
+                "matrix": {"targets": [{"id": "x", "state": []}]},
+            },
         ],
     )
     def test_malformed_envelopes_are_rejected(self, fields):
