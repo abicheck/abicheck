@@ -201,6 +201,25 @@ class TestCollectModeParity:
         request = DumpRequest(input=InputSpec.of(so_path), depth="binary")
         assert request.validation_errors() == []
 
+    def test_resolve_dump_collect_context_clears_headers_case_insensitively(
+        self, tmp_path: Path
+    ) -> None:
+        """CodeRabbit review: `resolve_dump_collect_context` itself compared
+        `depth == "binary"` exactly. The real `dump` CLI always hands it an
+        already-lowercased `depth` (Click's `DepthParam.convert()`), but the
+        function is also callable directly -- as this test does -- bypassing
+        that normalization, so a differently-cased spelling must still
+        suppress headers the same way `resolve_dump_request_evidence`'s own
+        `.lower()`-based check already does for the typed API.
+        """
+        from abicheck.cli_dump_helpers import resolve_dump_collect_context
+
+        header = tmp_path / "api.h"
+        _mode, headers = resolve_dump_collect_context(
+            "BINARY", None, None, None, (header,)
+        )
+        assert headers == ()
+
     def test_compare_keeps_its_own_inference_rule(self, tmp_path: Path) -> None:
         """`compare`'s rule is deliberately NOT changed by the dump fix.
 

@@ -183,7 +183,15 @@ def resolve_dump_depth(
 
     if depth is None:
         return default_mode
-    evidence_depth = EvidenceDepth(depth)
+    # Lowercased before the EvidenceDepth lookup (CodeRabbit review): the real
+    # `dump` CLI always hands this an already-lowercased value (Click's own
+    # `DepthParam.convert()`), but this function is also called directly
+    # (tests, other typed-API callers) bypassing that normalization -- an
+    # un-lowercased value raised a bare ValueError instead of resolving, and
+    # this function's own deliberately-duplicated leaf mirror,
+    # `service_compare_evidence._resolve_depth_collect_mode`, already
+    # lowercases here.
+    evidence_depth = EvidenceDepth(depth.lower())
     method = depth_to_method(evidence_depth)
     if method is None:
         # headers/binary depth reaches no source method (L2 is intrinsic) --
@@ -1315,8 +1323,14 @@ def resolve_dump_collect_context(
         collect_mode = resolve_dump_depth(depth, "source-target")
     # --depth binary suppresses the L2 header AST (symbols-only dump, ADR-037 D5).
     # A compile DB only feeds the header parse, and the caller derives it from
-    # these headers, so dropping them drops it too.
-    if depth == "binary":
+    # these headers, so dropping them drops it too. Compared case-insensitively
+    # (CodeRabbit review): the real `dump` CLI always hands this function an
+    # already-lowercased `depth` (Click's own `DepthParam.convert()`), but this
+    # function is also called directly (tests, and any other typed-API caller)
+    # bypassing that normalization -- an exact-case comparison there could
+    # silently disagree with `resolve_dump_request_evidence`'s own `.lower()`
+    # and report headers a real `--depth BINARY` invocation would suppress.
+    if depth is not None and depth.lower() == "binary":
         headers = ()
 
     # An *explicitly* requested deep evidence depth (--depth) collects nothing

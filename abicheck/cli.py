@@ -646,8 +646,12 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
     # build, or source facts at all -- a baseline/CI consumer would read
     # that success as proof the requested rung is genuinely present. Checked
     # unconditionally, before the --dry-run branch, so both paths reject the
-    # same way (external review).
-    if so_path is None and depth == "binary":
+    # same way (external review). Compared case-insensitively (CodeRabbit
+    # review): `depth` here is already Click-normalized for a real CLI
+    # invocation, but this check's own logic is what `DumpRequest.
+    # validation_errors()`'s `_source_only_binary_depth_errors()` mirrors --
+    # keeping both case-insensitive avoids the two independently drifting.
+    if so_path is None and (depth or "").lower() == "binary":
         raise click.UsageError(
             "--depth binary requires a native artifact (SO_PATH); a "
             "source-only dump (--sources/--build-info with no SO_PATH) has "
