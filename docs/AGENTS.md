@@ -53,15 +53,47 @@ path, not the nav position.
   `first-check.md`, and `first-report.md` — one question each (install, run
   a check, read the result) — plus the worked real-world example
   (`start/real-world-example.md`). New user, first five minutes.
-- `learn/` — the narrative/conceptual track: verdicts, the evidence model,
-  architecture, and `abi-api-handling.md` (the consolidated ABI/API handling
-  guide). `abi-cheat-sheet.md`, `abi-api-handling.md`, and the deep-dive
-  pages (`abi-surface.md`, `class-layout-abi.md`, `dependency-floors.md`)
-  are navigated under the educational **ABI/API Handling & Recommendations**
-  tab (the deep-dives under its **Deep Dives** group), not under a generic
-  "Learn" nav label. The evidence model is deliberately a three-page trio
-  with one role each — model (`learn/evidence-and-detectability.md`), worked
-  example (`learn/what-each-level-sees.md`), and flag reference
+- `learn/` — physically one directory, but split across two *nav* tracks by
+  what kind of question a page answers (docs/AGENTS.md's own "Fact owner /
+  Narrative owner / Task owner / View owner" split, applied at the
+  tab level):
+  - The **educational track** — general ABI/API compatibility knowledge that
+    holds regardless of which tool you use — is navigated under the
+    **ABI/API Compatibility** tab, grouped by the question a page answers
+    rather than by page *kind* (a numbered Learning-Series Part, a
+    framing page, and a split-out deep-dive page covering the same question
+    sit in the same group): **Start** (the hub, five-minute overview, cheat
+    sheet) → **Define Your Contract** (Part 0, direction, consumer models,
+    build-profile comparability, public surface) → **ABI Mechanics** (Parts
+    1-2-3-4-5-6, plus `class-layout-abi.md`) → **Beyond ABI** (behavioral,
+    data/wire, ownership, static/header-only, concurrency) → **Platforms &
+    Toolchains** (exception unwinding, modern-toolchain hazards, runtime
+    floors, `msvc-pe-abi-model.md`) → **Designing Stable Interfaces** (Part
+    7) → **Verification & Assurance** (`abi-series/08-detection.md` +
+    `assurance-methods.md`) → **Quick Reference** (glossary). This is a
+    nav-only regroup of what was once a flat "Deep Dives" list plus a
+    separately-numbered "Learning Series" — a Part's own numbered "Series
+    navigation" breadcrumb (top of each `abi-series/0N-*.md` page) still
+    carries the sequential 0-7 reading order.
+  - The **tool track** — how abicheck itself models and reports compatibility
+    — is navigated under the **Concepts** tab: verdicts,
+    `evidence-and-detectability.md`, `architecture.md`, build/source data,
+    graph coverage, impact assessment, environment drift,
+    `elf-symbol-filtering.md` (a specific abicheck scan-mode behavior, not
+    general ABI knowledge — kept out of the educational tab even though its
+    file lives in the same directory), and `limitations.md`.
+
+  A page whose job is genuinely both — mapping a general ABI concept to the
+  exact `ChangeKind`s/evidence tiers abicheck emits for it, e.g.
+  `class-layout-abi.md`, `msvc-pe-abi-model.md` — stays on the educational
+  tab (that mapping *is* the pedagogical content), but keeps abicheck's own
+  internal module/function names out of its prose and headings; name them in
+  the page's own `depends_on` front matter instead, which exists precisely
+  for that traceability without cluttering the reader-facing explanation.
+
+  The evidence model is deliberately a three-page trio with one role each —
+  model (`learn/evidence-and-detectability.md`), worked example
+  (`learn/what-each-level-sees.md`), and flag reference
   (`use/scan-levels.md`) — don't add a fourth page to that topic. Verdict
   semantics live on one page (`learn/verdicts.md`, including the
   verdict→exit-code chain); `reference/exit-codes.md` stays the exhaustive

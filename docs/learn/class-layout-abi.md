@@ -1,3 +1,18 @@
+---
+doc_type: explanation
+audience:
+  - library-maintainer
+level: advanced
+depends_on:
+  - abicheck/diff_types.py
+  - abicheck/diff_platform.py
+  - abicheck/diff_layout.py
+  - abicheck/diff_elf_layout.py
+  - abicheck/dumper_clang.py
+lifecycle: active
+generated: false
+---
+
 # Class Layout ABI & API: Problems and Detection
 
 This guide is the single place that explains **what a C++ class-layout change
@@ -113,7 +128,15 @@ verdict bucket follows the [policy partition](../reference/change-kinds.md):
 
 ## How abicheck reads layout: the three detector tiers
 
-### 1. Coarse type/struct diff — `diff_types.py`, `diff_platform.py` (L1/L2)
+> Each tier below is a distinct comparison pass over a distinct slice of the
+> layout evidence — worth knowing as *tiers*, since which one applies is what
+> decides whether a given change is detectable at all with the evidence you
+> supplied. The exact modules that implement each tier are named in this
+> page's own front matter (`depends_on`) rather than inline here, so a
+> reader learning *what's detectable* isn't also asked to track Python file
+> names.
+
+### 1. Coarse type/struct diff (L1/L2)
 
 Compares `sizeof`, `alignof`, the field list (name, type, offset, bit-field
 width), the base list, and the vtable list between the two snapshots. This is
@@ -121,14 +144,14 @@ the workhorse for the common breaks: `type_size_changed`,
 `type_field_offset_changed`, `type_field_type_changed`, `type_base_changed`,
 `type_vtable_changed`, `struct_packing_changed`, `type_alignment_changed`.
 
-### 2. Fine-grained layout descriptor — `diff_layout.py` (L1/L2)
+### 2. Fine-grained layout descriptor (L1/L2)
 
 A class has moving parts the coarse `sizeof` diff under-represents. The
 `RecordType` model carries an optional **layout descriptor**:
 
 | Field | Meaning | Populated by |
 |-------|---------|--------------|
-| `base_offsets` | each base subobject's bit offset | DWARF and castxml directly; **direct-clang only with** the optional `ABICHECK_CLANG_LAYOUT_TOOL` pass (`dumper_clang.py` never populates it on its own) |
+| `base_offsets` | each base subobject's bit offset | DWARF and castxml directly; **direct-clang only with** the optional `ABICHECK_CLANG_LAYOUT_TOOL` pass — the direct-clang AST backend does not populate it on its own |
 | `vptr_offset_bits` | vtable-pointer offset | **DWARF: measured** — read from the artificial vptr member's own `DW_AT_data_member_location`, with inherited offsets propagated, and `0` used only as a last-resort fallback. **Both header backends: derived**, `0` whenever the class has a vtable — a polymorphism witness, not a measured offset |
 | `data_size_bits` | `dsize` — bytes the members occupy, excl. tail padding | only the optional `ABICHECK_CLANG_LAYOUT_TOOL` companion pass |
 | `is_standard_layout` | standard-layout trait | direct-clang AST only |
@@ -148,7 +171,7 @@ counterpart of the triviality question is a *separate* finding on a separate
 path: `value_abi_trait_changed`, inferred from DIE structure rather than read
 from a trait (see [Part 4 §6](abi-series/04-cpp-abi.md#6-trivial-non-trivial-the-invisible-calling-convention-flip)).
 
-From these `diff_layout.py` emits `base_class_offset_changed` (a base moved),
+From these, abicheck emits `base_class_offset_changed` (a base moved),
 `vptr_introduced` (became polymorphic), `trivially_copyable_lost`,
 `standard_layout_lost`, and `tail_padding_reuse_changed`.
 
@@ -159,7 +182,7 @@ dump, or an older snapshot whose schema predates these fields) therefore never
 has no layout evidence at all, abicheck emits the calm, non-escalating
 `layout_unverifiable` instead of guessing.
 
-### 3. Binary-only C++ layout — `diff_elf_layout.py` (L0)
+### 3. Binary-only C++ layout (L0)
 
 The biggest *narrowing* of the symbol-only blind spot — narrowing, not closing;
 see the limits below. The Itanium ABI fixes the on-disk size of two emitted

@@ -608,7 +608,11 @@ this as a guard against *over-trusting* any ABI tool (see
 The takeaway is the same one [Part 0](abi-series/00-product-contract.md) opens
 with: **a stable ABI is necessary but not sufficient for a compatible release.**
 ABI tools prove the binary contract held; behavioral compatibility still needs
-your tests and your specification.
+your tests and your specification. See
+[Assurance Beyond Static Checking](assurance-methods.md) for what to run
+*instead* — consumer rebuild tests, binary-swap tests, golden/differential
+tests, ASan/TSan lifecycle and concurrency tests — and what each one actually
+proves.
 
 ---
 

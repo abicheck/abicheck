@@ -200,7 +200,8 @@ The honest boundary is documented in
 [Limitations](../limitations.md) and
 [What ABI tools cannot prove](../evidence-and-detectability.md#5-what-abi-tools-cannot-prove);
 treat static ABI checking as the part of release safety you can automate
-*exhaustively*, not as all of it.
+*exhaustively*, not as all of it. [Assurance Beyond Static Checking](../assurance-methods.md)
+names, method by method, what to run for the rest.
 
 ---
 
@@ -227,6 +228,10 @@ verdict and minimum evidence tier:
 ## Where to go next
 
 - Back to the [series hub](../abi-api-handling.md) for the other parts.
+- [Assurance Beyond Static Checking](../assurance-methods.md) — this page's
+  direct sibling in the Verification & Assurance group: what to run for the
+  part §3 says no static tool (abicheck included) can reach — behaviour,
+  wire/storage compatibility, lifetime, and concurrency contracts.
 - [Evidence & Detectability](../evidence-and-detectability.md) — the full
   per-source capability matrix this page summarizes.
 - [Choose Your Workflow](../../start/choose-your-workflow.md) — turn the

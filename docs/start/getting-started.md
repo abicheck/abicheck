@@ -72,5 +72,5 @@ Jump straight to your persona:
 
 Background reading:
 
-- [ABI/API Handling & Recommendations](../learn/abi-api-handling.md) — real-world ABI/API break scenarios and how to prevent them
+- [ABI/API Compatibility](../learn/abi-api-handling.md) — real-world ABI/API break scenarios and how to prevent them
 - [Limitations](../learn/limitations.md) — what abicheck does *not* catch

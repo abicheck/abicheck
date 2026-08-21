@@ -1,4 +1,4 @@
-# ABI/API Handling — A Learning Series
+# ABI/API Compatibility — A Learning Series
 
 This is the **conceptual hub** for understanding ABI/API compatibility — written
 to *teach* the subject, not just catalog it. It is the front door to a nine-part
@@ -104,6 +104,7 @@ here for a specific problem, jump straight to the relevant part.
 | **6** | [Transitive Breaks](abi-series/06-transitive-breaks.md) | Dependency leaks, anonymous structs, type-kind swaps, reserved fields | …the symbol table looks identical but consumers still break |
 | **7** | [Designing for Stability](abi-series/07-designing-for-stability.md) | Opaque handles, Pimpl, version scripts, CI gating — with full code | …you're designing an API to evolve safely |
 | **Capstone** | [Detecting Breaks](abi-series/08-detection.md) — grouped under **Verification & Assurance**, not the numbered series | Tracking approaches, evidence each break family needs, why single-method checkers miss whole families | …you're deciding *how* to catch all of the above in CI |
+| **Capstone** | [Assurance Beyond Static Checking](assurance-methods.md) — same **Verification & Assurance** group | What to run for the part no static tool (abicheck included) can reach: consumer rebuild, binary-swap, golden/differential, wire-format, ASan/TSan tests | …a change touches behaviour, lifetime, concurrency, or a wire/storage format — anything past the static ABI/API boundary |
 
 ```mermaid
 flowchart LR

@@ -1,0 +1,92 @@
+---
+doc_type: explanation
+audience:
+  - library-maintainer
+  - ci-owner
+level: intermediate
+lifecycle: active
+generated: false
+---
+
+# Assurance Beyond Static Checking: What Each Verification Method Actually Proves
+
+> **Series navigation:** [Detecting Breaks](abi-series/08-detection.md) covers
+> *why* one static method is never enough and what evidence each break family
+> needs. This page picks up exactly where that one stops: **static artifact
+> comparison — abicheck included — cannot prove behaviour.** So what do you
+> run instead, or alongside it, for the parts it structurally cannot reach?
+
+[Evidence & Detectability §5](evidence-and-detectability.md#5-what-abi-tools-cannot-prove)
+and [Limitations](limitations.md) both name the boundary: macro-only changes,
+inline/template bodies, `constexpr` semantics, and — the big one — anything
+that is *behavioral* rather than structural (same signature and layout,
+different meaning) are out of scope for any artifact diff. That boundary is
+not a gap to be embarrassed about; it is a reason to run a **second kind of
+check**, deliberately chosen for what it *can* prove, next to static checking
+rather than instead of it.
+
+## The assurance methods, and what each one actually proves
+
+No single method below is a superset of the others — each observes a
+genuinely different thing, the same way [the evidence layers](evidence-and-detectability.md#0-the-five-sources-of-information)
+do for static checking. Pick the ones that match the promises your release
+actually makes (see [Part 0 §2](abi-series/00-product-contract.md#2-compatibility-is-not-one-question-name-which-kind-you-mean)
+for naming which kind of compatibility you're promising in the first place).
+
+| Method | What it proves | What it does *not* prove |
+|---|---|---|
+| **Static artifact/header diff** (abicheck itself) | The shipped ABI facts and the declared source API held — everything [Detecting Breaks](abi-series/08-detection.md) covers | Anything about how a consumer actually uses the library, or what the code *does* at runtime |
+| **Consumer rebuild test** | Source compatibility for the specific consumer(s) rebuilt — their code still compiles and links against the new headers | Binary compatibility for a consumer that doesn't rebuild; code paths the consumer's own build doesn't exercise |
+| **Binary-swap test** (an old, already-built consumer run against the new library) | Backward *binary* compatibility for that consumer's actual, exercised usage — the promise a prebuilt-consumer release most needs to keep | Code paths the consumer binary doesn't call; says nothing about a *different* consumer's usage |
+| **Reverse swap** (a new consumer built and run against the *old* library) | Forward/downgrade compatibility — relevant when an older library build is still shipped or pinned longer than the newest consumer | Same exercised-paths limit as binary-swap, in the other direction |
+| **Host × plugin version matrix** | The two-sided contract a plugin/host relationship depends on, across the version combinations you actually support ([Plugin Systems](../use/plugin-systems.md), [Consumer Models](consumer-models.md)) | Any combination outside the matrix — an unlisted host/plugin pair is unverified, not verified-compatible |
+| **Oldest-supported-OS/runtime load test** | The deployment floor: does the binary even load and link on the oldest target you claim to support ([Dependency & Runtime Floors](dependency-floors.md)) | Correctness beyond "it loaded" — a clean load is necessary, not sufficient |
+| **Golden / differential output tests** | Behavioral compatibility for the specific scenarios the fixtures cover — the only method here that observes *behaviour* at all | Any scenario the fixture set doesn't exercise; a passing suite is a statement about coverage, not universal correctness |
+| **Old-reader/new-writer and new-reader/old-writer fixture tests** | Wire, storage, and serialization-format compatibility — the [data/wire dimension](data-wire-compatibility.md) static ABI/API checking cannot see at all | Schema paths or field combinations the fixtures don't exercise |
+| **ASan-instrumented lifecycle tests** | [Ownership/lifetime contract](ownership-and-lifetime.md) violations across the library boundary — double-free, use-after-free, cross-allocator frees | Only what the exercised lifecycle actually triggers; an untested destruction order stays unverified |
+| **TSan / stress / reentrancy tests** | [Concurrency and initialization contract](concurrency-and-initialization.md) violations — data races, unsafe reentrancy, ordering assumptions | Requires a workload that actually contends; a single-threaded run through the same suite proves nothing about the concurrency contract |
+
+## Reading the table as a decision, not a checklist
+
+Three practical rules follow directly from "each method proves something
+different":
+
+1. **Match the method to the promise, not the other way around.** A release
+   that only promises source compatibility (consumers always rebuild) gets
+   most of its value from consumer rebuild tests plus static header diffing;
+   binary-swap testing is spending effort on a promise nobody made. A release
+   shipping prebuilt binaries to consumers that don't rebuild needs the
+   binary-swap test to be the release gate, not an afterthought — that is
+   exactly the promise static ABI checking alone cannot fully stand in for,
+   since it proves the *binary contract* held, not that the specific,
+   already-compiled consumer you ship to still works.
+2. **A method's "what it does not prove" column is not a defect in the
+   method — it's the reason the *other* rows exist.** No single row is meant
+   to close every gap; the set is meant to be composed. A CI pipeline that
+   runs static checking plus one behavioral method (golden tests) plus one
+   contract-specific method (ASan or TSan, chosen by what the change touches)
+   covers structurally different failure classes with each addition, not
+   diminishing returns on the same one.
+3. **None of this replaces static checking — it's additive.** Static
+   artifact/header diffing is the only method in this table that is
+   *exhaustive* over the shipped ABI/API surface without needing a
+   hand-written test to exercise the right path first. The other methods are
+   necessarily sampling — a golden test proves the scenarios it encodes, an
+   ASan run proves the lifecycle it exercises. Losing the exhaustive layer to
+   "we have behavioral tests" reopens exactly the blind spot
+   [Detecting Breaks §3](abi-series/08-detection.md#3-why-an-abidiff-or-abicc-class-checker-is-not-sufficient)
+   describes for single-method static checkers, just moved to a different
+   axis: sampled coverage instead of missing evidence tiers.
+
+## Where to go next
+
+- [Detecting Breaks](abi-series/08-detection.md) — the static-checking side
+  of this same question: which evidence tier catches which break family, and
+  why no single static tool is enough on its own.
+- [Limitations](limitations.md) and
+  [Evidence & Detectability §5](evidence-and-detectability.md#5-what-abi-tools-cannot-prove)
+  — the exact, itemized boundary of what static checking cannot see, which is
+  what motivates every row in the table above.
+- [CI Gating Pipeline](../use/ci-gating.md) — wiring abicheck's own static
+  check into a release pipeline; the assurance methods above are the
+  complementary jobs that sit alongside it, not inside it.

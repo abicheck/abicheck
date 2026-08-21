@@ -44,16 +44,15 @@ MSVC counterpart, not a cosmetically renamed one:
   scheme is unrelated to Itanium's: a leading `?`, scope components in
   **innermost-first** order (the reverse of Itanium's outermost-first),
   `@`-separated, terminated by the first `@@`, with a name-backreference
-  table for repeated components. abicheck parses this directly —
-  `diff_cxx_rules.msvc_scope_components()`/`msvc_qualified_name()` recover
-  scope for owner-class seeding and stdlib-namespace checks the same way
-  `itanium_scope_components()` does for Itanium — but the parser is
-  deliberately conservative: special member functions/operators (`??0`
-  ctor, `??1`/`??_D` dtor, `??4` `operator=`, …), template instantiations
-  (`?$Name@Args@`), and the anonymous-namespace marker (`?A`) are all
-  rejected rather than guessed at, since a wrong guess there is worse than
-  the pre-existing gap (see `msvc_scope_components()`'s own docstring for
-  the full unmodelled list).
+  table for repeated components. abicheck parses this directly, recovering
+  scope for owner-class seeding and stdlib-namespace checks the same way it
+  does for Itanium-mangled symbols — but the parser is deliberately
+  conservative: special member functions/operators (`??0` ctor, `??1`/`??_D`
+  dtor, `??4` `operator=`, …), template instantiations (`?$Name@Args@`), and
+  the anonymous-namespace marker (`?A`) are all rejected rather than guessed
+  at, since a wrong guess there is worse than the pre-existing gap (this
+  page's `depends_on` front matter names the exact module for a contributor
+  who needs the full unmodelled list).
 - **Vtable/RTTI layout is a different structure, not a relocated Itanium
   one.** Multiple and virtual inheritance under MSVC introduce **vbtables**
   (virtual base tables), and virtual-base access goes through a vbtable
@@ -99,10 +98,9 @@ MSVC counterpart, not a cosmetically renamed one:
 The [PDB vs. DWARF capability table](../reference/platforms.md#what-no-headers-actually-means)
 is the exact, fact-owning source for this — read it before relying on a
 specific claim — but the shape worth internalizing here is: **PDB's TPI
-stream is not a drop-in replacement for DWARF.** `pdb_metadata.py`'s
-`_extract_method_calling_conventions()` populates
-`AdvancedDwarfMetadata.calling_conventions` keyed `Class::method` — **class
-methods only**. A PDB-only (no `-H`/castxml) scan recovers struct/class
+stream is not a drop-in replacement for DWARF.** Method-level calling
+convention recovered from a PDB is keyed by owning class and method name —
+**class methods only**. A PDB-only (no `-H`/castxml) scan recovers struct/class
 layout, field offsets, and enum values the same way an ELF DWARF scan does,
 but does **not** reconstruct free-function signatures or vtable slots at
 all — those need the header-AST path (`castxml` + `cl.exe`, or `clang-cl`).
