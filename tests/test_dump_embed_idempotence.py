@@ -293,3 +293,80 @@ def test_cli_dump_depth_source_embeds_exactly_once(
     )
     assert result.exit_code == 0, result.output
     assert len(calls) == 1, (calls, result.output)
+
+
+class TestWriteTimeEmbedCarriesThePublicHeaderRoots:
+    """The write-time embed must hand L4 replay this dump's public-header roots.
+
+    Found by measuring whole-snapshot parity between the `dump` CLI's written
+    snapshot and `execute_dump_request`'s over the same real `g++` build and
+    real clang header parse (CLI cleanup phase two, PR 3A -- the item-1
+    verification bar). Everything agreed except the L3-L5 payload, and the
+    difference was not cosmetic: the CLI's snapshot recorded ``0/2 symbols
+    matched``, ``reachable_declarations=0`` and ``fact_family_states:
+    empty-confirmed`` where the typed path recorded ``1/2`` matched and a real
+    ``source_decl_to_binary_symbol`` mapping.
+
+    The cause is here: `_write_snapshot_output`'s own `embed_build_source` call
+    passed no `public_headers`/`public_header_dirs` at all, so
+    `collect_inline_pack` ran L4 replay with an *empty* `public_header_roots`
+    set -- every declaration classifies private, nothing links, and every
+    L4-derived source-ABI finding is silently inert for a `dump`-produced
+    baseline while the coverage row honestly (but opaquely) reports "partial".
+    `compare`'s implicit dump, `scan`'s candidate and the typed API all pass
+    their roots and link correctly.
+
+    Pinned at the embed boundary (fast lane) rather than only end to end: the
+    real-toolchain sibling in `tests/test_dump_cli_typed_api_parity.py` is
+    `integration`-marked and skips without castxml, so it cannot gate this.
+    """
+
+    def _spy(self, monkeypatch: pytest.MonkeyPatch) -> list[Any]:
+        calls: list[Any] = []
+        from abicheck import cli_buildsource
+
+        def _fake_embed(snap: Any, *args: Any, **kwargs: Any) -> None:
+            calls.append(kwargs)
+
+        monkeypatch.setattr(cli_buildsource, "embed_build_source", _fake_embed)
+        return calls
+
+    def test_public_roots_reach_the_embed(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from abicheck.cli_buildsource import _write_snapshot_output
+
+        calls = self._spy(monkeypatch)
+        hdr = tmp_path / "api.h"
+        hdr.write_text("int f(void);\n", encoding="utf-8")
+        incdir = tmp_path / "include"
+        incdir.mkdir()
+
+        _write_snapshot_output(
+            AbiSnapshot(library="libfoo.so", version="1.0"),
+            tmp_path / "out.json",
+            sources=tmp_path,
+            collect_mode="source-target",
+            public_headers=(hdr,),
+            public_header_dirs=(incdir,),
+        )
+        assert len(calls) == 1
+        assert calls[0]["public_headers"] == (str(hdr),)
+        assert calls[0]["public_header_dirs"] == (str(incdir),)
+
+    def test_no_roots_still_embeds_with_empty_roots(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The other direction: a headerless dump is unchanged, not broken."""
+        from abicheck.cli_buildsource import _write_snapshot_output
+
+        calls = self._spy(monkeypatch)
+        _write_snapshot_output(
+            AbiSnapshot(library="libfoo.so", version="1.0"),
+            tmp_path / "out.json",
+            sources=tmp_path,
+            collect_mode="source-target",
+        )
+        assert len(calls) == 1
+        assert calls[0]["public_headers"] == ()
+        assert calls[0]["public_header_dirs"] == ()

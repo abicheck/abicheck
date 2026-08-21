@@ -88,6 +88,8 @@ class _WriteSnapshotOutput(Protocol):
         header_roots: tuple[Path, ...] = ...,
         clang_bin: str = ...,
         snapshot_compression: str = ...,
+        public_headers: tuple[Path, ...] = ...,
+        public_header_dirs: tuple[Path, ...] = ...,
     ) -> None: ...
 
 
@@ -1290,6 +1292,11 @@ def handle_non_elf_dump(
             exclude_cl_style=False,
         ),
         snapshot_compression=snapshot_compression,
+        # L4 replay classifies declarations against these roots; with none it
+        # classifies everything private and links nothing (measurement in
+        # `_write_snapshot_output`'s own docstring).
+        public_headers=tuple(public_headers),
+        public_header_dirs=tuple(public_header_dirs),
     )
 
 
@@ -1454,6 +1461,7 @@ def perform_elf_dump(
     include_dependencies: bool = False,
     snapshot_compression: str = "auto",
     lang_explicit: bool = False,
+    legacy_build_context_flags: tuple[str, ...] = (),
 ) -> None:
     """Run the ELF dump pipeline and write output.
 
@@ -1500,6 +1508,31 @@ def perform_elf_dump(
     from whether any castxml flags were derived (a genuinely matched TU with
     no ABI-relevant flags to forward is still real build-context evidence,
     not an absent one — Codex review, second finding on this signal).
+
+    ``legacy_build_context_flags`` (CLI cleanup phase two, PR 3A): the *first*
+    element of that same ``_resolve_build_context_flags`` call -- the castxml
+    flags the legacy ``-p``/``--compile-db`` auto-match derived, which
+    ``dump_cmd`` has already folded into ``effective_gcc_options`` via
+    ``_merge_gcc_options``. Passed here (rather than only their merged
+    result) so this function can *unfold* them for the one case where they
+    are not merely redundant but actively wrong: the legacy match and the
+    P0.3 L3->L2 fold below are fed by the **same** ``--build-info`` compile
+    database, so when the fold resolves a context for these headers, the
+    legacy match's own derivation is a second, unwanted copy of the same
+    evidence. Measured, not assumed (see the plan's PR 3A section for the
+    full account): the duplicate showed up as ``macro_ops`` recording the
+    same ``-D`` twice where every other resolver records it once, and as an
+    empty ``include_sequence`` where every other resolver records a real
+    slot -- the legacy match supplies ``-I<dep>`` as *explicit* context
+    before the L2 seed runs, so ``seed_l2_includes`` (correctly) declines to
+    seed a directory explicit context already provides, and the directory
+    reaches the parse through ``gcc_option_tokens``, which contributes no
+    ``declared_includes`` slot. Both make a ``dump``-written snapshot's
+    ``profile_fingerprint`` differ from the one every other path produces
+    from the identical evidence, which a ``scan --against`` correctly
+    refuses. When the fold does **not** apply (no ``--build-info``, or a
+    header the fold could not match), the legacy match still runs and still
+    applies, exactly as before -- only the overlap is dropped.
 
     ``include_dependencies`` (``dump --include-system-declarations``): by default,
     ``write_snapshot_output`` excludes toolchain/system-header declarations
@@ -1591,6 +1624,17 @@ def perform_elf_dump(
     # that reassignment folds the derived flags in before this variable is
     # read again. Captured here, before any L3 reassignment.
     _user_gcc_option_tokens = gcc_option_tokens
+    # CLI cleanup phase two, PR 3A: the explicit context the P0.3 fold below
+    # merges over is the caller's OWN --gcc-options string, never the legacy
+    # -p/--compile-db auto-match's derived flags already folded into
+    # effective_gcc_options -- both read the same --build-info database, so
+    # presenting the legacy result to the fold as an explicit user choice is
+    # what recorded the same evidence twice (see the `legacy_build_context_
+    # flags` docstring paragraph above). Identical to effective_gcc_options
+    # whenever the legacy match derived nothing.
+    _fold_explicit_gcc_options = (
+        user_gcc_options if legacy_build_context_flags else effective_gcc_options
+    )
     # Phase 1 (dedup-and-convergence plan) Milestone A: the two try blocks
     # below share one `ResolvedArtifactPlan` session spanning from the L2
     # seed's own resource allocation through the whole post-dump pipeline --
@@ -1628,7 +1672,7 @@ def perform_elf_dump(
             # is kept. `deferred` excluded (Codex review): already implied
             # by these tokens when non-empty, and including it would wrongly
             # rank it ahead of L3-derived includes -- appended back below.
-            gcc_options=effective_gcc_options,
+            gcc_options=_fold_explicit_gcc_options,
             gcc_option_tokens=tuple(gcc_option_tokens),
             sysroot=sysroot,
             nostdinc=nostdinc,
@@ -1960,4 +2004,9 @@ def perform_elf_dump(
             gcc_path, gcc_prefix, exclude_cl_style=False
         ),
         snapshot_compression=snapshot_compression,
+        # L4 replay classifies declarations against these roots; with none it
+        # classifies everything private and links nothing (measurement in
+        # `_write_snapshot_output`'s own docstring).
+        public_headers=tuple(public_headers),
+        public_header_dirs=tuple(public_header_dirs),
     )

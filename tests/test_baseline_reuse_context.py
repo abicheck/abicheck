@@ -162,18 +162,108 @@ class TestBaselineReuseContract:
 
 
 class TestScanRoutesThroughTheSharedRule:
-    """`run_scan_core` must not keep a second copy of the decision."""
+    """`run_scan_core` must not keep a second copy of the decision.
 
-    def test_scan_engine_calls_the_shared_resolver(self) -> None:
-        import inspect
+    Pinned behaviourally, not by matching `run_scan_core`'s source text (which
+    an earlier revision of this class did, and which says nothing about what
+    actually reaches the baseline parse): since CLI cleanup phase two's PR 3A,
+    `_build_new_snapshot` routes through the shared resolver and the answer
+    arrives already computed on `SideResolution.baseline_compile_context`. So
+    `run_scan_core`'s remaining responsibilities are exactly two, and both are
+    checked here through a real `scan --against` invocation:
 
-        from abicheck import scan_engine
+    1. it hands the *resolved* old-side header/include scopes in as the
+       `baseline_reuse_hint` (so the shared rule decides against the real
+       scopes, not against the raw CLI values), and
+    2. it forwards the resolution's own answer to `_run_baseline_compare`
+       rather than deriving a second one from the values it got back.
 
-        source = inspect.getsource(scan_engine.run_scan_core)
-        assert "resolve_baseline_compile_context(" in source
-        # And no longer hand-rolls the header/include equality it replaced --
-        # the exact expression the three review rounds kept correcting.
-        assert "list(baseline_headers) == list(headers)" not in source
+    A sentinel object is used for the answer precisely so a re-derivation
+    cannot accidentally reproduce it: nothing but forwarding can return it.
+    """
+
+    def _run(self, tmp_path: Path, monkeypatch, extra_args: list[str]) -> dict:
+        import json
+
+        from click.testing import CliRunner
+
+        from abicheck import scan_engine as cs
+        from abicheck.cli import main
+        from abicheck.elf_metadata import ElfMetadata, ElfSymbol
+        from abicheck.model import AbiSnapshot, Function
+        from abicheck.serialization import snapshot_to_dict
+        from abicheck.service_input_resolution import SideResolution
+
+        def _snap(version: str) -> AbiSnapshot:
+            return AbiSnapshot(
+                library="libfoo.so",
+                version=version,
+                from_headers=True,
+                functions=[Function(name="foo", mangled="_Z3foov", return_type="void")],
+                elf=ElfMetadata(symbols=[ElfSymbol(name="_Z3foov")]),
+            )
+
+        old = tmp_path / "old.abi.json"
+        old.write_text(json.dumps(snapshot_to_dict(_snap("1.0"))), encoding="utf-8")
+        new = tmp_path / "new.abi.json"
+        new.write_text(json.dumps(snapshot_to_dict(_snap("2.0"))), encoding="utf-8")
+
+        sentinel = object()
+        seen: dict = {}
+
+        def _fake_build_new_snapshot(*_a, **kw):
+            seen["hint"] = kw.get("baseline_reuse_hint")
+            return SideResolution(
+                snapshot=_snap("2.0"),
+                effective_includes=(),
+                effective_compile_context=CompileContext(gcc_options="-DCANDIDATE=1"),
+                baseline_compile_context=sentinel,
+            )
+
+        def _fake_baseline_compare(*_a, **kw):
+            seen["forwarded"] = kw.get("compile_context")
+            return (
+                "compatible",
+                0,
+                {"breaking": 0, "api_break": 0, "risk": 0, "compatible": 0},
+            )
+
+        monkeypatch.setattr(cs, "_build_new_snapshot", _fake_build_new_snapshot)
+        monkeypatch.setattr(cs, "_run_baseline_compare", _fake_baseline_compare)
+
+        result = CliRunner().invoke(
+            main, ["scan", str(new), "--against", str(old), *extra_args]
+        )
+        assert result.exit_code == 0, result.output
+        seen["sentinel"] = sentinel
+        return seen
+
+    def test_the_resolutions_own_answer_is_what_reaches_the_baseline_parse(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        seen = self._run(tmp_path, monkeypatch, [])
+        assert seen["forwarded"] is seen["sentinel"], (
+            "run_scan_core derived its own baseline compile context instead of "
+            "forwarding the one the shared resolver already decided"
+        )
+
+    def test_the_hint_carries_the_resolved_old_side_scopes(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        old_hdr = tmp_path / "old.h"
+        old_hdr.write_text("int f(void);\n", encoding="utf-8")
+        old_inc = tmp_path / "oldinc"
+        old_inc.mkdir()
+
+        seen = self._run(
+            tmp_path,
+            monkeypatch,
+            ["-H", f"old={old_hdr}", "-I", f"old={old_inc}"],
+        )
+        hint = seen["hint"]
+        assert isinstance(hint, BaselineReuseContext)
+        assert old_hdr in hint.baseline_headers
+        assert old_inc in hint.baseline_includes
 
 
 class TestSharedPrimitiveAcceptsTheHint:

@@ -177,7 +177,7 @@ def test_scan_candidate_folds_l3_compile_context_into_header_parse(
         "abicheck.cli_buildsource.embed_build_source", lambda *a, **k: None
     )
 
-    snap, _eff_includes, _eff_ctx = _build_new_snapshot(
+    _res = _build_new_snapshot(
         binary=tmp_path / "lib.so",
         headers=[hdr],
         includes=[],
@@ -191,7 +191,7 @@ def test_scan_candidate_folds_l3_compile_context_into_header_parse(
     tokens = captured["compile"].gcc_option_tokens
     assert "-std=c++20" in tokens
     assert "-DFOO=1" in tokens
-    assert snap.parsed_with_build_context is True
+    assert _res.snapshot.parsed_with_build_context is True
 
 
 def test_scan_candidate_lang_c_omits_conflicting_derived_cxx_standard(
@@ -268,7 +268,7 @@ def test_scan_returns_seeded_includes_for_baseline(monkeypatch, tmp_path):
         "abicheck.cli_buildsource.embed_build_source", lambda *a, **k: None
     )
 
-    snap, eff_includes, _eff_ctx = _build_new_snapshot(
+    _res = _build_new_snapshot(
         binary=tmp_path / "lib.so",
         headers=[tmp_path / "h.h"],
         includes=[],
@@ -278,7 +278,8 @@ def test_scan_returns_seeded_includes_for_baseline(monkeypatch, tmp_path):
         allow_build_query=False,
         defer_cleanup=[],
     )
-    assert seeded in eff_includes  # effective includes carry the seed for the baseline
+    # effective includes carry the seed for the baseline
+    assert seeded in _res.effective_includes
 
 
 def test_scan_candidate_expands_public_header_dirs_before_embed(monkeypatch, tmp_path):

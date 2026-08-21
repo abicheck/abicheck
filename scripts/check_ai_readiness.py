@@ -2183,7 +2183,7 @@ CLI_CONTRACT_ALLOWLIST: frozenset[str] = frozenset(
         # Native ELF CLI dump (P0 item 2): calls `dumper.dump()` directly
         # rather than through `service_dump_pipeline.run_dump_request` —
         # tracked as Phase 1 item 1 of the convergence plan.
-        "abicheck/cli_dump_helpers.py:1680:19:dumper.dump",
+        "abicheck/cli_dump_helpers.py:1724:19:dumper.dump",
         # Standalone application-compatibility (P0 item 6): dumps both
         # sides directly rather than through any of the other paths.
         "abicheck/appcompat.py:1599:15:dumper.dump",
@@ -2191,7 +2191,7 @@ CLI_CONTRACT_ALLOWLIST: frozenset[str] = frozenset(
         # Scan baseline resolution (P0 item 4's baseline half): calls
         # `service.resolve_input()` directly rather than through
         # `service_input_resolution.resolve_side_snapshot`.
-        "abicheck/cli_scan_baseline.py:1119:19:service.resolve_input",
+        "abicheck/cli_scan_baseline.py:1122:19:service.resolve_input",
         # ABICC compatibility wrapper (P1 "ABICC compatibility is a parallel
         # frontend and engine path"): its own parallel engine path calls
         # both `dumper.dump()` and `checker.compare()` directly.

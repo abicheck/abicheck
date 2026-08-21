@@ -86,13 +86,16 @@ def _expand_public_headers(headers: list[Path]) -> list[str]:
     way); the S2 leak pass needs the individual header *files* so clang
     preprocesses each one, not a directory as a single bogus TU. Falls back to the
     raw paths if expansion fails (e.g. an empty dir) so the pass still runs.
-    """
-    from .service import expand_header_inputs
 
-    try:
-        return [str(p) for p in expand_header_inputs(headers)]
-    except Exception:  # noqa: BLE001 - expansion is best-effort for the advisory tier
-        return [str(h) for h in headers]
+    A thin delegate to :func:`abicheck.service_scan.expand_public_header_inputs`
+    since CLI cleanup phase two's PR 3A -- the shared, engine-layer resolver
+    ``scan``'s candidate now routes through needs the identical expansion, and
+    an engine module may not import a ``cli_*`` sibling. Kept under this name
+    so this module's own callers and tests are unchanged.
+    """
+    from .service_scan import expand_public_header_inputs
+
+    return expand_public_header_inputs(headers)
 
 
 def _emit_estimate(
