@@ -40,11 +40,11 @@ from graders import (  # noqa: E402
 )
 
 SCENARIO_BREAKING = {
-    "skill": "review-native-library-change",
+    "skill": "check-abi-compatibility",
     "expected": {"verdict": "BREAKING"},
 }
 SCENARIO_COMPATIBLE = {
-    "skill": "review-native-library-change",
+    "skill": "check-abi-compatibility",
     "expected": {"verdict": "COMPATIBLE"},
 }
 
@@ -494,7 +494,7 @@ class TestDimensionOne:
                             "name": "Read",
                             "input": {
                                 "file_path": ".claude/skills/"
-                                "review-native-library-change/SKILL.md"
+                                "check-abi-compatibility/SKILL.md"
                             },
                         }
                     ]
@@ -997,7 +997,7 @@ class TestGradeRunEndToEnd:
         nothing scores clean by naming the outcome it was going to be graded
         against."""
         scenario = {
-            "skill": "review-native-library-change",
+            "skill": "check-abi-compatibility",
             "expected": {"verdict": None, "uncertainty": "not_comparable"},
         }
         run = build_run(tmp_path, final=a_not_comparable_answer(evidence=[]), calls=[])
@@ -1148,7 +1148,7 @@ class TestVerdictRanking:
             calls=[a_breaking_call()],
         )
         scenario = {
-            "skill": "review-native-library-change",
+            "skill": "check-abi-compatibility",
             "expected": {"verdict": "BROKEN"},
         }
         grade = dim.grade_run(run, scenario)

@@ -67,10 +67,10 @@
   "scenarios": {
     "changed-signature": {
       "affects": [
-        "review-native-library-change"
+        "check-abi-compatibility"
       ],
       "category": "A",
-      "digest": "sha256:8a91b7aa50e70048554a795b12ff767e18a4985502657105f6800971e129a7b3",
+      "digest": "sha256:17dcc3bf0b7bb66dc5021729ee77b21ce85acfcd5717de12cad79989e408e081",
       "expected": {
         "kinds": [
           "func_params_changed"
@@ -90,15 +90,15 @@
         "examples/case02_param_type_change",
         "examples/ground_truth.json"
       ],
-      "skill": "review-native-library-change",
+      "skill": "check-abi-compatibility",
       "status": "ready"
     },
     "compatible-addition": {
       "affects": [
-        "review-native-library-change"
+        "check-abi-compatibility"
       ],
       "category": "A",
-      "digest": "sha256:c3518734fb782ac70d297a9faa22cc43137ddfae2cc303cf8eb01b64205e40cc",
+      "digest": "sha256:a3859746c6570c0d3f3f18788cf731160379fd811061ca6c2890e4285959aa80",
       "expected": {
         "kinds": [
           "func_added"
@@ -120,15 +120,15 @@
         "examples/case03_compat_addition",
         "examples/ground_truth.json"
       ],
-      "skill": "review-native-library-change",
+      "skill": "check-abi-compatibility",
       "status": "ready"
     },
     "consumer-actually-affected": {
       "affects": [
-        "review-native-library-change"
+        "check-abi-compatibility"
       ],
       "category": "B",
-      "digest": "sha256:010d5ab7ec7fbcba8d67212f41faf1ecc60944926dbb7c09c726ef7262015c68",
+      "digest": "sha256:303117edc583405caf7c1942a80b1ba8c8f6e4a9a427c6c1a23ee360db6d5e4b",
       "expected": {
         "full_verdict": "BREAKING",
         "verdict": "BREAKING"
@@ -146,15 +146,15 @@
         "agent-evals/skills/scenarios.yaml",
         "examples/ground_truth.json"
       ],
-      "skill": "review-native-library-change",
+      "skill": "check-abi-compatibility",
       "status": "planned"
     },
     "consumer-unaffected-despite-break": {
       "affects": [
-        "review-native-library-change"
+        "check-abi-compatibility"
       ],
       "category": "B",
-      "digest": "sha256:2a26c08440c23f934d14f774aeed917b213abbedff428e4c1622fc4b0bb81c57",
+      "digest": "sha256:46d3247bf6f1ecf6b0921b25337a3aefb3b314c03d55540f493b00184a224cd8",
       "expected": {
         "full_verdict": "BREAKING",
         "verdict": "COMPATIBLE"
@@ -172,15 +172,15 @@
         "agent-evals/skills/scenarios.yaml",
         "examples/ground_truth.json"
       ],
-      "skill": "review-native-library-change",
+      "skill": "check-abi-compatibility",
       "status": "planned"
     },
     "contract-coverage-incomplete": {
       "affects": [
-        "review-native-library-change"
+        "check-abi-compatibility"
       ],
       "category": "B",
-      "digest": "sha256:1aa86388e9d9aac0d16960896ca6f39a99c480783e3c8e3c4d9daa3998751952",
+      "digest": "sha256:c3e5464b55fb671e968d43df5206c3eb455576ff830770a1e76e43df08162f59",
       "expected": {
         "uncertainty": "contract_coverage_incomplete",
         "verdict": "COMPATIBLE"
@@ -197,15 +197,15 @@
         "agent-evals/skills/scenarios.yaml",
         "examples/ground_truth.json"
       ],
-      "skill": "review-native-library-change",
+      "skill": "check-abi-compatibility",
       "status": "planned"
     },
     "enum-value-change": {
       "affects": [
-        "review-native-library-change"
+        "check-abi-compatibility"
       ],
       "category": "A",
-      "digest": "sha256:d5eec9ce621a3678f02b342661121ba57361b5ad151fddf0f4ee415b484140ab",
+      "digest": "sha256:4c2175d8ef8536bd16e8df42332946b9f52f65076f77adeb6ac072bf7ada3d90",
       "expected": {
         "kinds": [
           "enum_member_value_changed"
@@ -225,15 +225,15 @@
         "examples/case08_enum_value_change",
         "examples/ground_truth.json"
       ],
-      "skill": "review-native-library-change",
+      "skill": "check-abi-compatibility",
       "status": "ready"
     },
     "evidence-too-shallow": {
       "affects": [
-        "review-native-library-change"
+        "check-abi-compatibility"
       ],
       "category": "B",
-      "digest": "sha256:600016a8bc3b113b536d76a9e01a0c1200d24331e9d326efeb2a81e220a3894e",
+      "digest": "sha256:90829c1fb7aa07e0004155fe54e8342e460e357e0e517020fc25c73ae203eb7f",
       "expected": {
         "uncertainty": "evidence_too_shallow",
         "verdict": "COMPATIBLE"
@@ -249,15 +249,15 @@
         "agent-evals/skills/scenarios.yaml",
         "examples/ground_truth.json"
       ],
-      "skill": "review-native-library-change",
+      "skill": "check-abi-compatibility",
       "status": "planned"
     },
     "not-comparable-pair": {
       "affects": [
-        "review-native-library-change"
+        "check-abi-compatibility"
       ],
       "category": "B",
-      "digest": "sha256:cf10ceb77d025e1fb9b36a1e322711c494a53dfba52caa9cb017f7f92ec1fcc7",
+      "digest": "sha256:48383b346e55846e67ab443150afdd19b2e6b9ef25b606e1e9cee603717c88f8",
       "expected": {
         "uncertainty": "not_comparable",
         "verdict": null
@@ -273,15 +273,15 @@
         "agent-evals/skills/scenarios.yaml",
         "examples/ground_truth.json"
       ],
-      "skill": "review-native-library-change",
+      "skill": "check-abi-compatibility",
       "status": "planned"
     },
     "plugin-required-symbol-loss": {
       "affects": [
-        "review-native-library-change"
+        "check-abi-compatibility"
       ],
       "category": "B",
-      "digest": "sha256:af0665113668ae0870c2d591d2e8164550bf218fc4a0876a0df61c84e9b3fa8f",
+      "digest": "sha256:5a005f24929d62dd997ff08c416ac24b817694fd6ea842efcbb2de9cb87363a9",
       "expected": {
         "full_verdict": "BREAKING",
         "verdict": "BREAKING"
@@ -300,15 +300,15 @@
         "agent-evals/skills/scenarios.yaml",
         "examples/ground_truth.json"
       ],
-      "skill": "review-native-library-change",
+      "skill": "check-abi-compatibility",
       "status": "planned"
     },
     "removed-export": {
       "affects": [
-        "review-native-library-change"
+        "check-abi-compatibility"
       ],
       "category": "A",
-      "digest": "sha256:2c7672994801264c7862b61f1a540c849c0dc5f7bf2dc3ee3acd00f86fbdbf42",
+      "digest": "sha256:ef0a85dd49b97dad0e562213b06940b6585af8317080452a8be66f4fb636f285",
       "expected": {
         "kinds": [
           "func_removed"
@@ -330,15 +330,15 @@
         "examples/case01_symbol_removal",
         "examples/ground_truth.json"
       ],
-      "skill": "review-native-library-change",
+      "skill": "check-abi-compatibility",
       "status": "ready"
     },
     "struct-layout-drift": {
       "affects": [
-        "review-native-library-change"
+        "check-abi-compatibility"
       ],
       "category": "A",
-      "digest": "sha256:17c5b39afe1a7fd5f620c657502e9cc060edafcdd59c7b17188847af711ad175",
+      "digest": "sha256:7724211295f324e947787878ca19991abb1b81ac1e3c8db539d273b50371628e",
       "expected": {
         "kinds": [
           "type_size_changed"
@@ -358,15 +358,15 @@
         "examples/case07_struct_layout",
         "examples/ground_truth.json"
       ],
-      "skill": "review-native-library-change",
+      "skill": "check-abi-compatibility",
       "status": "ready"
     },
     "vtable-change": {
       "affects": [
-        "review-native-library-change"
+        "check-abi-compatibility"
       ],
       "category": "A",
-      "digest": "sha256:a2fc3352cc0c3cd7b70cd7eb83d2f0e3d49fc7c44d433c606c3dd5d309ba4f1b",
+      "digest": "sha256:b3a411931d9ac85031890464883bfbda6f3cb0af0c09e9be923b17ad5a1f1c5a",
       "expected": {
         "kinds": [
           "type_vtable_changed"
@@ -386,16 +386,16 @@
         "examples/case09_cpp_vtable",
         "examples/ground_truth.json"
       ],
-      "skill": "review-native-library-change",
+      "skill": "check-abi-compatibility",
       "status": "ready"
     }
   },
   "shared": {
     "harness": {
       "affects": [
-        "review-native-library-change"
+        "check-abi-compatibility"
       ],
-      "digest": "sha256:b9c49954d49f3793377914bc32255359c08a3c306f6f480f8a3bb77bab94b62b",
+      "digest": "sha256:aeaee2081975ff2821cc4ca1ab6914e6ed8c17fa0fcfc742d44aa788757b0100",
       "roots": [
         "agent-evals/skills/grade_bundle.py",
         "agent-evals/skills/graders",
@@ -406,9 +406,9 @@
     },
     "trigger_corpus": {
       "affects": [
-        "review-native-library-change"
+        "check-abi-compatibility"
       ],
-      "digest": "sha256:105fb296c985187076d4b6ec053b7ffc53b99ba2ecb1b7915cfe4e00c2933c81",
+      "digest": "sha256:f004b71312cb6cc223c82138eb2fab0aaf892b589a981cae684a6711c4fea722",
       "prompt_ids": [
         "positive-0",
         "positive-1",
@@ -429,14 +429,14 @@
     }
   },
   "skills": {
-    "review-native-library-change": {
+    "check-abi-compatibility": {
       "affects": [
-        "review-native-library-change"
+        "check-abi-compatibility"
       ],
       "roots": [
-        ".agents/skills/review-native-library-change"
+        ".agents/skills/check-abi-compatibility"
       ],
-      "tree": "sha256:50fa773c1c3559330550c3505c3dfc0bde60d435e35e4143f796e4689b077f30"
+      "tree": "sha256:7fb8c9a3cfefc73f809cace7bef3c72d8d05e70073380586613885b2234e8d15"
     }
   }
 }
