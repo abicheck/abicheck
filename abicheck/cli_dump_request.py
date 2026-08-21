@@ -63,9 +63,8 @@ if TYPE_CHECKING:
 
     from .api_types import DumpRequest
     from .compile_context import CompileContext
-    from .service_dump_pipeline import ResolvedDumpRequest
 
-__all__ = ["build_dump_request", "resolve_dump_request_for_cli"]
+__all__ = ["build_dump_request"]
 
 
 def build_dump_request(
@@ -151,32 +150,20 @@ def build_dump_request(
     )
 
 
-def resolve_dump_request_for_cli(request: DumpRequest) -> ResolvedDumpRequest:
-    """:func:`~abicheck.service_dump_pipeline.resolve_dump_request`, with the
-    CLI's error contract.
-
-    The Tier-2 pipeline signals a bad request as
-    :class:`~abicheck.errors.ValidationError`; a Click front end owes the user
-    a ``UsageError`` (exit 64) instead. Translated here, at the boundary,
-    rather than inside the pipeline — the same Tier-1/Tier-2 separation
-    ``embed_side_build_source`` observes in the other direction.
-
-    Worth being explicit about what this can newly reject on the ``--dry-run``
-    path, since that path's own contract is "never raises on anything but a
-    usage error": :meth:`DumpRequest.validate` front-runs a check
-    ``dumper.dump()`` already performs at *runtime* — a ``--dump-manifest``
-    combined with ``-I``/``--include``, which declares two conflicting public
-    surfaces. That combination previously dry-ran as a clean report and then
-    failed during the real extraction. Reporting it as a usage error in both
-    places is a strictly better answer, and it stays inside the dry-run
-    contract because it is precisely a usage error.
-    """
-    import click
-
-    from .errors import ValidationError
-    from .service_dump_pipeline import resolve_dump_request
-
-    try:
-        return resolve_dump_request(request)
-    except ValidationError as exc:
-        raise click.UsageError(str(exc)) from exc
+# `resolve_dump_request_for_cli` deliberately does NOT live here: it is the
+# one place a Tier-1 CLI caller reaches into `service_dump_pipeline`
+# (`resolve_dump_request`), and this module is otherwise a pure leaf (its
+# only import is `.api_types`, function-local, for building the request
+# object). Adding that edge here would join this module into the
+# `cli`/`cli_buildsource`/`cli_dump_helpers`/`service_dump_pipeline`
+# by-design SCC (`scripts/check_ai_readiness.py`'s `IMPORT_CYCLE_ALLOWLIST`)
+# as a genuinely *new* member — real SCC growth, not a lateral join through
+# already-member modules, since nothing else in this file reaches back into
+# that cluster. It lives in `cli_buildsource.py` instead (already a member,
+# already imports `service_dump_pipeline`-adjacent machinery, and is where
+# `cli.py`'s `dump_cmd` already imports `_write_snapshot_output` from) — see
+# that module's own `resolve_dump_request_for_cli` for the CLI
+# error-contract translation. Found and fixed after a first attempt
+# allowlisted the cycle instead (Codex review, AGENTS.md's own stated bar:
+# a new allowlist entry needs an ADR or explicit maintainer sign-off, not an
+# inline comment) — breaking the edge is strictly better than accepting it.

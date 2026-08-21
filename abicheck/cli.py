@@ -490,8 +490,11 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
     # a module that re-exports them"). That shim only serves *attribute*
     # access on the module (`cli._write_snapshot_output`); a bare name inside
     # this module needs a real import.
-    from .cli_buildsource import _write_snapshot_output as _write_snapshot_output_fn
-    from .cli_dump_request import build_dump_request, resolve_dump_request_for_cli
+    from .cli_buildsource import (
+        _write_snapshot_output as _write_snapshot_output_fn,
+        resolve_dump_request_for_cli,
+    )
+    from .cli_dump_request import build_dump_request
     from .cli_options import warn_deprecated_header_graph_flags
     from .dry_run import emit_dry_run, reject_dry_run_with_output
 

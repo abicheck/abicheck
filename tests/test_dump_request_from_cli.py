@@ -165,7 +165,7 @@ class TestResolvedRequestAgreesWithTheCliLocals:
     )
     def test_collect_mode_matches(self, tmp_path: Path, depth: str | None) -> None:
         from abicheck.cli_dump_helpers import resolve_dump_collect_context
-        from abicheck.cli_dump_request import (
+        from abicheck.cli_buildsource import (
             resolve_dump_request_for_cli,
         )
 
@@ -189,7 +189,7 @@ class TestResolvedRequestAgreesWithTheCliLocals:
         config — so it must round-trip unchanged rather than being re-resolved
         to a concrete backend.
         """
-        from abicheck.cli_dump_request import (
+        from abicheck.cli_buildsource import (
             resolve_dump_request_for_cli,
         )
 
@@ -214,8 +214,8 @@ class TestResolvedRequestAgreesWithTheCliLocals:
         (`resolve_dump_collect_context` vs. `service_compare_evidence._headers`)
         — the case most likely to drift apart unnoticed.
         """
+        from abicheck.cli_buildsource import resolve_dump_request_for_cli
         from abicheck.cli_dump_helpers import resolve_dump_collect_context
-        from abicheck.cli_dump_request import resolve_dump_request_for_cli
 
         header, sources, compile_db = _project(tmp_path)
         _mode, cli_headers = resolve_dump_collect_context(

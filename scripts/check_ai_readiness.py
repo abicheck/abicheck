@@ -1220,22 +1220,6 @@ IMPORT_CYCLE_ALLOWLIST: frozenset[frozenset[str]] = frozenset(
         # effect on the graph is a *reduction*, since `cli_resolve` no longer
         # carries its own copy of the resolution this module now owns.
         #
-        # `cli_dump_request` joins the same SCC (CLI cleanup phase two, PR 3A
-        # blocker 5): `dump_cmd`'s one place a `DumpRequest` is built from CLI
-        # parameters. It reaches `service_dump_pipeline.resolve_dump_request`
-        # (module-load `TYPE_CHECKING` import of `ResolvedDumpRequest` for the
-        # return-type annotation, function-local for the real call) — both
-        # already-member modules — and `cli` reaches it back at module-load
-        # tail to call `build_dump_request`/`resolve_dump_request_for_cli`.
-        # Every edge closes through already-member modules (`cli`,
-        # `service_dump_pipeline`), not a new dependency direction, and the
-        # package still imports cleanly: no init deadlock. Without this entry
-        # the check is traversal-order-dependent for the same reason the
-        # comment above the big SCC frozenset already explains — this
-        # specific cycle happened not to surface on Linux's `rglob` order but
-        # did on Windows's, which is exactly the flakiness that block's
-        # subset-of-the-full-SCC matching exists to make irrelevant.
-        #
         # `service_dump_pipeline` and `service_input_resolution` join the same
         # SCC (G33 Phase 5), on exactly the terms `service_compare_pipeline`
         # above was signed off under — a *split* of an existing member, not a
@@ -1293,7 +1277,6 @@ IMPORT_CYCLE_ALLOWLIST: frozenset[frozenset[str]] = frozenset(
                 "cli_debian_symbols",
                 "cli_doctor",
                 "cli_dump_helpers",
-                "cli_dump_request",
                 "cli_graph",
                 "cli_helpers_compare",
                 "cli_inputs",
