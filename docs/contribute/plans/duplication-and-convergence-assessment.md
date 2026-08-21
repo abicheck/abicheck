@@ -1011,9 +1011,37 @@ sign-off, not a routine PR).
 
 ### Phase 1 — Finish artifact-resolution convergence
 
-1. Introduce `ResolvedArtifactPlan` as a context-managed session that owns
-   any resource resolution itself allocates (e.g. an inferred-build
-   directory) from `resolve_artifact_request()` onward — not scoped to
+1. **Started (Milestone A).** `abicheck/artifact_plan.py` introduces
+   `ResolvedArtifactPlan` — a real, independently-tested context-managed
+   session (`tests/test_artifact_plan.py`) owning the
+   `list[Callable[[], None]]` cleanup accumulator every resolution call site
+   used to thread and drain by hand. Wired into exactly one already-isolated,
+   already-well-tested call site as proof: `cli_dump_helpers.
+   perform_elf_dump()`'s `_l2_pending_cleanups` accumulator is now a
+   `ResolvedArtifactPlan` instance, with identical cleanup thunks
+   (`seed_includes_and_fold_compile_context(..., pending_cleanups=
+   _artifact_plan.pending_cleanups)`) and identical timing (drained via
+   `run_cleanups()` at the exact two points the old code called
+   `_run_cleanups()` — immediately on a failed header parse, or after the
+   whole post-dump pipeline completes) — a behavior-preserving refactor, not
+   a new resolve/execute split. Existing `perform_elf_dump` coverage
+   (`tests/test_cli_dump_helpers_coverage.py`, including
+   `test_perform_elf_dump_wraps_dump_errors_still_cleans_up_seeded_dirs`)
+   passed unmodified against the migration. **Not yet done, and deliberately
+   out of scope for this slice**: this is not yet "resolve_artifact_request()
+   onward" as item 1's own text above describes — there is no
+   `resolve_artifact_request()`/`execute_artifact_plan()` split yet, `dump
+   --dry-run` still doesn't build from or render a `ResolvedArtifactPlan`
+   (`render_dump_dry_run()` is still its own independent resolution, per the
+   "PR C" entry in AGENTS.md's "Known gaps"), `handle_non_elf_dump`'s
+   identical `_l2_pending_cleanups` pattern is untouched, and none of items
+   2–10 below have been attempted. See item 1's own original text (kept
+   below) for the shape a full implementation still needs to reach.
+
+1. (Full shape, not yet reached) Introduce `ResolvedArtifactPlan` as a
+   context-managed session that owns any resource resolution itself
+   allocates (e.g. an inferred-build directory) from
+   `resolve_artifact_request()` onward — not scoped to
    `execute_artifact_plan()` alone, since dry-run resolves without ever
    executing and must still close the same session.
 2. Move `perform_elf_dump`'s remaining post-processing hooks (ADR-039
