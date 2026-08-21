@@ -185,8 +185,29 @@ def _refutes(reason: str, run_dir: Path, calls: list[dict], claim: dict) -> str 
         # only a *known*, uniformly-empty set of ledgers is a refutation —
         # any known non-empty ledger is itself the positive evidence the
         # claim rests on, and must not be overridden by a milder sibling.
+        #
+        # A self-comparison is excluded from the *ledger* check specifically
+        # (not from `contracted` above) -- a second review round found the
+        # first fix wrong (Codex review, fresh evidence): a cited
+        # self-comparison (`compare old.so old.so --contract ...`) trivially
+        # produces an empty ledger (nothing differs, so nothing is missing),
+        # which is not real evidence coverage was complete. Dropping it from
+        # `contracted` entirely (the first attempt) just traded one wrong
+        # refutation reason for another -- with no *other* --contract
+        # citation, `contracted` went empty and the claim was refuted anyway,
+        # via "no candidates" instead of "empty ledger", for the exact
+        # scenario this fix exists to stop failing. Keeping it in
+        # `contracted` (so a self-comparison still counts as "asked for
+        # contract evaluation" at all) while excluding it from the ledger
+        # evidence is what actually lets an honest claim citing only a
+        # self-comparison's --contract call pass, rather than merely
+        # relabeling why it fails.
+        ledger_candidates = [
+            c for c in contracted if not ev.compares_one_side_against_itself(c)
+        ]
         ledgers = [
-            ev.reported_contract_coverage_failures(run_dir, c) for c in contracted
+            ev.reported_contract_coverage_failures(run_dir, c)
+            for c in ledger_candidates
         ]
         known = [failures for failures in ledgers if failures is not None]
         if known and not any(known):
@@ -682,7 +703,23 @@ def dimension_6(
             # two disagreeing scoped reports, e.g. COMPATIBLE and
             # API_BREAK, pass no matter what it claimed, since neither
             # cited report was checked against).
-            reported_fulls = ev.reported_full_verdicts(run_dir, resolved.values())
+            #
+            # Restricted to calls that actually reached a verdict and aren't
+            # a self-comparison -- omitted originally (Codex review, fresh
+            # evidence): an incidental extra citation alongside the real
+            # scoped comparison (e.g. a self-comparison whose own JSON report
+            # happens to carry a trivial full_verdict, or a call that never
+            # reached a verdict at all) could inject a second, spurious value
+            # into `reported_fulls`, tripping the "cited reports disagree"
+            # branch above and failing a claim whose real citation was
+            # correct all along. Same filter dimension_6's other
+            # cited-call checks in this function already apply.
+            full_verdict_candidates = [
+                c
+                for c in resolved.values()
+                if ev.ran_to_a_verdict(c) and not ev.compares_one_side_against_itself(c)
+            ]
+            reported_fulls = ev.reported_full_verdicts(run_dir, full_verdict_candidates)
             if len(reported_fulls) > 1:
                 reasons.append(
                     (

@@ -867,6 +867,43 @@ class TestDimensionTwo:
         result = dim.dimension_2(run, SCENARIO_BREAKING, ev.load_calls(run), parsed)
         assert result.status == "pass"
 
+    def test_a_cited_self_comparison_cannot_refute_a_coverage_gap(self, tmp_path):
+        """`_refutes`'s `contracted` filter omitted the `ran_to_a_verdict`/
+        `compares_one_side_against_itself` guard its sibling `dimension_6`
+        block already has (Codex review, fresh evidence): a cited call that
+        merely compares one side against itself trivially produces an empty
+        `contract_coverage_failures` ledger -- nothing differs, so nothing is
+        missing -- which must not be read as positive evidence the real,
+        honestly-uncertain claim is wrong."""
+        real_call = a_breaking_call(0, argv=["compare", "a", "b"])
+        self_call = a_breaking_call(
+            1, argv=["compare", "a", "a", "--contract", "exports"]
+        )
+        run = build_run(
+            tmp_path,
+            final="",
+            calls=[real_call, self_call],
+            artifacts={
+                "captured/0.out": json.dumps({"verdict": "COMPATIBLE"}),
+                "captured/1.out": json.dumps(
+                    {"verdict": "COMPATIBLE", "contract_coverage_failures": []}
+                ),
+            },
+        )
+        parsed, _ = claim_mod.extract(
+            envelope(
+                verdict="COMPATIBLE",
+                evidence=[0, 1],
+                confident=False,
+                uncertainty={
+                    "reason": "contract_coverage_incomplete",
+                    "unresolved": "the exports domain",
+                },
+            )
+        )
+        result = dim.dimension_2(run, SCENARIO_BREAKING, ev.load_calls(run), parsed)
+        assert result.status == "pass", result.reasons
+
     def test_shallow_evidence_is_the_kind_this_grader_cannot_refute(self, tmp_path):
         run = build_run(tmp_path, final="", calls=[a_breaking_call()])
         parsed, _ = claim_mod.extract(
