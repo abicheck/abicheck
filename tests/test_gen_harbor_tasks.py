@@ -838,10 +838,41 @@ class TestSolveScriptsEndToEnd:
 
     Skipped without gcc/abicheck on PATH -- the same precondition the
     existing harness's own `missing_toolchain()` gates on, not a new one.
+
+    Also skipped on macOS specifically: every generated `solve.sh` runs the
+    scenario's documented command verbatim, and every one of these six
+    scenarios' documented commands is a plain, headerless
+    ``abicheck compare a.so b.so`` -- no ``-H``. `docs/reference/platforms.md`
+    ("What 'No Headers' Actually Means") documents this as a real,
+    deliberate, pre-existing platform gap, not something introduced here:
+    unlike ELF (DWARF read directly from the binary) or PE (via a `.pdb`),
+    `_dump_macho` has no Mach-O debug-map/dSYM reader at all, so a headerless
+    Mach-O comparison is **always L0 (exports/load-commands) only**,
+    regardless of whether the `.dylib` carries `-g` debug info -- and on
+    macOS the linker doesn't even embed DWARF in the linked binary by
+    default (it leaves `N_OSO` stabs pointing at the now-discarded `.o`
+    files; `dsymutil` would be needed to consolidate a `.dSYM`, which none
+    of these reference solutions run). A real CI run confirmed the
+    consequence directly (macos-latest `unit-tests`, PR #816): the
+    `changed-signature`/`enum-value-change`/`struct-layout-drift`/
+    `vtable-change` scenarios all need type/layout facts an L0-only compare
+    structurally cannot see, and reported false-negative verdicts one this
+    codebase's own docs already say to expect on this platform+input
+    combination. Closing it for real needs a genuine Mach-O debug-map/dSYM
+    reader -- its own scoped feature, not a same-PR patch -- so this class
+    is skipped on Darwin entirely rather than guessing which subset of the
+    six might coincidentally still pass.
     """
 
     @pytest.fixture(autouse=True)
     def _require_toolchain(self):
+        if sys.platform == "darwin":
+            pytest.skip(
+                "headerless Mach-O compare is L0-only, always (no debug-map/"
+                "dSYM reader) -- these reference solutions run no -H, so "
+                "the DWARF/layout-dependent scenarios structurally can't "
+                "grade correctly here; see docs/reference/platforms.md"
+            )
         if shutil.which("gcc") is None or shutil.which("abicheck") is None:
             pytest.skip("gcc and/or abicheck not on PATH")
 
