@@ -93,6 +93,12 @@ class TestClaimExtraction:
                 "confident": False,
                 "uncertainty": {"reason": "not_comparable", "unresolved": "  "},
             },
+            {
+                "verdict": "BREAKING",
+                "evidence": [0],
+                "confident": True,
+                "decision": "TOTALLY_FINE",
+            },
         ],
     )
     def test_malformed_envelopes_are_rejected(self, fields):
@@ -183,6 +189,111 @@ class TestClaimExtraction:
         assert ranks == sorted(ranks)
         assert claim_mod.rank("COMPATIBLE") < claim_mod.rank("BREAKING")
         assert claim_mod.rank(None) is None
+
+
+class TestDecisionField:
+    """The optional customer-facing `decision` field (schema/claim.schema.json).
+
+    Additive: absent entirely on every existing scenario and recorded run, so
+    every case here states `decision` explicitly rather than relying on a
+    scenario fixture that doesn't carry one yet.
+    """
+
+    def test_absent_decision_is_not_an_inconsistency(self):
+        assert (
+            claim_mod.decision_inconsistency(
+                {"verdict": "BREAKING", "evidence": [0], "confident": True}
+            )
+            is None
+        )
+
+    @pytest.mark.parametrize(
+        "decision,verdict",
+        [
+            ("VERIFIED_COMPATIBLE", "NO_CHANGE"),
+            ("VERIFIED_COMPATIBLE", "COMPATIBLE"),
+            ("COMPATIBLE_WITH_DEPLOYMENT_RISK", "COMPATIBLE_WITH_RISK"),
+            ("SOURCE_BREAK", "API_BREAK"),
+            ("BINARY_BREAK", "BREAKING"),
+        ],
+    )
+    def test_a_decision_matching_its_own_verdict_is_consistent(self, decision, verdict):
+        claim = {
+            "verdict": verdict,
+            "evidence": [0],
+            "confident": True,
+            "decision": decision,
+        }
+        assert claim_mod.decision_inconsistency(claim) is None
+
+    @pytest.mark.parametrize(
+        "decision,verdict",
+        [
+            ("VERIFIED_COMPATIBLE", "COMPATIBLE_WITH_RISK"),
+            ("VERIFIED_COMPATIBLE", "BREAKING"),
+            ("COMPATIBLE_WITH_DEPLOYMENT_RISK", "COMPATIBLE"),
+            ("SOURCE_BREAK", "BREAKING"),
+            ("BINARY_BREAK", "API_BREAK"),
+        ],
+    )
+    def test_a_decision_contradicting_its_own_verdict_fails(self, decision, verdict):
+        claim = {
+            "verdict": verdict,
+            "evidence": [0],
+            "confident": True,
+            "decision": decision,
+        }
+        problem = claim_mod.decision_inconsistency(claim)
+        assert problem is not None
+        assert decision in problem
+
+    def test_not_verified_alongside_a_confident_stated_verdict_fails(self):
+        """`NOT_VERIFIED` means the question wasn't actually answered — a
+        confident, non-null verdict is exactly a claim that it was."""
+        claim = {
+            "verdict": "COMPATIBLE",
+            "evidence": [0],
+            "confident": True,
+            "decision": "NOT_VERIFIED",
+        }
+        problem = claim_mod.decision_inconsistency(claim)
+        assert problem is not None
+        assert "NOT_VERIFIED" in problem
+
+    def test_not_verified_alongside_a_null_verdict_is_consistent(self):
+        claim = {
+            "verdict": None,
+            "evidence": [],
+            "confident": False,
+            "uncertainty": {"reason": "not_comparable", "unresolved": "x"},
+            "decision": "NOT_VERIFIED",
+        }
+        assert claim_mod.decision_inconsistency(claim) is None
+
+    def test_not_verified_alongside_an_unconfident_verdict_is_consistent(self):
+        claim = {
+            "verdict": "COMPATIBLE",
+            "evidence": [0],
+            "confident": False,
+            "uncertainty": {"reason": "evidence_too_shallow", "unresolved": "x"},
+            "decision": "NOT_VERIFIED",
+        }
+        assert claim_mod.decision_inconsistency(claim) is None
+
+    def test_any_non_not_verified_decision_without_confidence_fails(self):
+        """An unconfident answer can only honestly be reported as NOT_VERIFIED
+        — a definite customer decision resting on an unconfident claim is the
+        same failure this schema's `confident` field exists to catch."""
+        claim = {
+            "verdict": "COMPATIBLE",
+            "evidence": [0],
+            "confident": False,
+            "uncertainty": {"reason": "evidence_too_shallow", "unresolved": "x"},
+            "decision": "VERIFIED_COMPATIBLE",
+        }
+        problem = claim_mod.decision_inconsistency(claim)
+        assert problem is not None
+        assert "confident" in problem
 
 
 class TestEvidenceReading:

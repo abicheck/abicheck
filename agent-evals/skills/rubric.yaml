@@ -90,3 +90,12 @@ dimensions:
     note: >-
       Claim vs. artifact vs. ground truth, plus suppression-flag inspection —
       reaching green by suppressing a finding is a failure here, not a pass.
+      Also checks the optional `decision` field (schema/claim.schema.json),
+      the customer-facing outcome check-abi-compatibility's own SKILL.md
+      reports, for internal consistency against `verdict`/`confident` when a
+      claim states one — e.g. `VERIFIED_COMPATIBLE` resting on a raw
+      `COMPATIBLE_WITH_RISK` verdict fails here. Never fires on a claim that
+      omits `decision`: no scenario's `expected` block declares one yet, so
+      this is groundwork for grading the customer-facing outcome directly
+      (rather than only the raw tool verdict) once scenarios start stating
+      it, not yet the primary accuracy metric.

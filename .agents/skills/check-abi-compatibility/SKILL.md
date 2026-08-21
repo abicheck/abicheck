@@ -24,21 +24,25 @@ Read [safety invariants](references/shared/safety-invariants.md)
 before reporting anything. The rule that governs this whole workflow: a
 category you could not check is unverified, never clean.
 
-## Validated scope (v0.1)
+## Candidate evaluation scope (v0.1)
 
-This workflow is validated for: **C and C++ shared libraries; Linux ELF;
-GCC and Clang; old and new built artifacts plus their public headers;
-matched compiler and target profiles; reviewing a PR, branch, or candidate
-build.** Work confidently within that scope.
+This workflow's evidence pipeline targets: **C and C++ shared libraries;
+Linux ELF; GCC and Clang; old and new built artifacts plus their public
+headers; matched compiler and target profiles; reviewing a PR, branch, or
+candidate build.** This is the scope the workflow is designed and scoped
+for, not a scope with completed behavioral validation behind it — this
+skill is an internal candidate (see `skills-src/CLAUDE.md`'s portfolio
+status) with no comparative-lift evidence yet. Work confidently within it
+on technical grounds; do not describe it to a user as "validated."
 
 Outside it — Mach-O or PE/COFF binaries, a DPC++/SYCL library, a migration
 across compiler vendors, or a binary with no headers available at all — the
 tool can still be pointed at the problem and will often produce a real,
 useful answer. But do not report that answer with the same confidence: state
-plainly that this combination is outside this workflow's validated scope,
-and let the [decision](#the-decision-you-report) read `NOT_VERIFIED` for the
-parts it could not stand behind, rather than silently dropping the attempt
-or silently promoting it to a validated verdict.
+plainly that this combination is outside this workflow's candidate
+evaluation scope, and let the [decision](#the-decision-you-report) read
+`NOT_VERIFIED` for the parts it could not stand behind, rather than
+silently dropping the attempt or silently promoting it to a scoped verdict.
 
 ## Preflight — abicheck availability and version range
 
@@ -266,7 +270,7 @@ End with this shape, not a command transcript:
 | `COMPATIBLE_WITH_DEPLOYMENT_RISK` | `COMPATIBLE_WITH_RISK` | no break, but a risk finding remains — most commonly a raised runtime/symbol-version floor |
 | `SOURCE_BREAK` | `API_BREAK` | consumers must recompile; no already-compiled binary is affected |
 | `BINARY_BREAK` | `BREAKING` | an already-compiled, already-linked consumer stops working without a rebuild |
-| `NOT_VERIFIED` | `verdict: null` (comparability refused), or an evidence tier short of what step 4 required, or a combination outside this skill's [validated v0.1 scope](#validated-scope-v01), or a runtime contract's dependency-graph-loadability half when no `deps tree`/`deps compare` was run | the question was not actually answered — state why, and what would answer it |
+| `NOT_VERIFIED` | `verdict: null` (comparability refused), or an evidence tier short of what step 4 required, or a combination outside this skill's [candidate evaluation v0.1 scope](#candidate-evaluation-scope-v01), or a runtime contract's dependency-graph-loadability half when no `deps tree`/`deps compare` was run | the question was not actually answered — state why, and what would answer it |
 
 A *raised symbol-version floor* is **not** a "remaining unknown": `compare`
 emits `runtime_floor_raised` as a risk and can promote it to a break against
@@ -288,7 +292,7 @@ The job is done when:
   remediation;
 - every claim traces to a finding and an evidence tier;
 - anything unverified is stated as unverified, including anything outside
-  this skill's validated v0.1 scope;
+  this skill's candidate evaluation v0.1 scope;
 - if a remediation was applied, the **same** comparison was re-run and the
   new result reported (step 9).
 

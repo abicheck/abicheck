@@ -53,6 +53,70 @@ UNCERTAINTY_REASONS = frozenset(
     }
 )
 
+#: The customer-facing outcome vocabulary from `check-abi-compatibility`'s own
+#: SKILL.md ("Step 10 — Report the decision..."), reused verbatim here rather
+#: than re-typed so the two cannot drift silently.
+DECISION_STATES = frozenset(
+    {
+        "VERIFIED_COMPATIBLE",
+        "COMPATIBLE_WITH_DEPLOYMENT_RISK",
+        "SOURCE_BREAK",
+        "BINARY_BREAK",
+        "NOT_VERIFIED",
+    }
+)
+
+#: `decision` -> the raw `verdict`s it may legitimately rest on, per the
+#: skill's own decision table. `NOT_VERIFIED` is deliberately not keyed by
+#: `verdict` at all: it is reached through `confident: false` or a `null`
+#: verdict, not through a particular raw ordinal (a `NOT_VERIFIED` answer can
+#: sit on top of any raw verdict the evidence fell short of confirming).
+_DECISION_VERDICTS: dict[str, frozenset[str | None]] = {
+    "VERIFIED_COMPATIBLE": frozenset({"NO_CHANGE", "COMPATIBLE"}),
+    "COMPATIBLE_WITH_DEPLOYMENT_RISK": frozenset({"COMPATIBLE_WITH_RISK"}),
+    "SOURCE_BREAK": frozenset({"API_BREAK"}),
+    "BINARY_BREAK": frozenset({"BREAKING"}),
+}
+
+
+def decision_inconsistency(claim: dict) -> str | None:
+    """Why `claim["decision"]` disagrees with its own `verdict`/`confident`, if it does.
+
+    Returns None when no `decision` was given (still optional — see the
+    schema) or when it is a legitimate reading of the raw verdict. Called
+    only after `validate()` has already accepted the envelope, so `verdict`
+    and `confident` are known well-formed here.
+    """
+    decision = claim.get("decision")
+    if decision is None:
+        return None
+    verdict = claim.get("verdict")
+    confident = claim.get("confident")
+    if decision == "NOT_VERIFIED":
+        # The one state that is reached through uncertainty rather than a
+        # specific raw ordinal — legitimate whenever the answer isn't a
+        # confident, verdict-bearing claim.
+        if confident and verdict is not None:
+            return (
+                "decision NOT_VERIFIED alongside a confident, non-null verdict "
+                f"({verdict}) — a confident verdict is a claim, not an "
+                "unverified one"
+            )
+        return None
+    if not confident:
+        return (
+            f"decision {decision} was reported without confidence "
+            "(confident: false) — an unconfident answer must be NOT_VERIFIED"
+        )
+    allowed = _DECISION_VERDICTS.get(decision)
+    if allowed is not None and verdict not in allowed:
+        return (
+            f"decision {decision} does not match the raw verdict ({verdict!r}) "
+            f"— {decision} only follows from {sorted(v for v in allowed if v)}"
+        )
+    return None
+
+
 _FENCE = re.compile(r"```(?:json)?\s*\n(.*?)```", re.DOTALL)
 
 
@@ -149,6 +213,8 @@ def validate(claim: dict) -> str | None:
         full_verdict = claim["full_verdict"]
         if full_verdict is not None and full_verdict not in VERDICT_ORDER:
             return f"full_verdict {full_verdict!r} is outside the vocabulary"
+    if "decision" in claim and claim["decision"] not in DECISION_STATES:
+        return f"decision {claim['decision']!r} is outside the vocabulary"
     if "confident" not in claim or not isinstance(claim["confident"], bool):
         return "confident is missing or not a boolean"
     if "evidence" not in claim:
