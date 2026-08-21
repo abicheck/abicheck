@@ -268,11 +268,17 @@ class TestGeneratorCheck:
     def test_verifier_dockerfile_keeps_only_the_grader_allowlist(self):
         """`tests/Dockerfile` -- the separate verifier's own image -- must
         clone the same pinned ref and keep exactly `agent-evals/skills/
-        graders/` and `verify_run.py`, discarding everything else
-        (`abicheck/` included: `verify_run.py` imports only the standard
-        library plus `graders/`, confirmed by reading both directly, so the
-        editable-install package this container's agent-image sibling needs
-        has no reason to exist here)."""
+        graders/`, `verify_run.py`, and `abicheck/` itself.
+
+        `abicheck/` is deliberately *not* excluded here, unlike an earlier
+        version of this test: `graders/evidence.py`'s own `_option_tables()`
+        has a lazy `import click; from abicheck.cli import main` used to
+        read the real Click command tree (which options are bare flags vs.
+        value-taking), and neither being importable degrades grading to a
+        conservative fallback that can hide a real self-comparison from
+        zero-tolerance dimensions (Codex review, fresh evidence) -- so the
+        editable install this container's agent-image sibling also carries
+        is needed here too, for a different consumer."""
         dockerfile = (TASKS_DIR / "removed-export" / "tests" / "Dockerfile").read_text(
             encoding="utf-8"
         )
@@ -283,6 +289,7 @@ class TestGeneratorCheck:
         cleanup_block = dockerfile[start:end]
         assert "rm -rf /opt/abicheck-src" in cleanup_block
         assert "mv /tmp/rt-keep /opt/abicheck-src" in cleanup_block
+        assert "mv abicheck /tmp/rt-keep/abicheck" in cleanup_block
         assert (
             "mv agent-evals/skills/graders /tmp/rt-keep/agent-evals/skills/graders"
             in cleanup_block
@@ -291,13 +298,11 @@ class TestGeneratorCheck:
             "mv agent-evals/skills/harbor/verify_run.py "
             "/tmp/rt-keep/agent-evals/skills/harbor/verify_run.py" in cleanup_block
         )
-        assert "mv abicheck" not in cleanup_block
-        assert cleanup_block.count("/tmp/rt-keep/") == 3  # mkdir -p + 2 mv targets
-        # No compiler toolchain and no editable install -- this image never
-        # runs abicheck itself.
+        assert cleanup_block.count("/tmp/rt-keep/") == 4  # mkdir -p + 3 mv targets
+        # No compiler toolchain needed -- click/rich-click/pyelftools are all
+        # pure-Python wheels -- but the editable install itself is required.
         assert "build-essential" not in dockerfile
-        assert "pip install" not in dockerfile
-        assert "abicheck.egg-info" not in dockerfile
+        assert 'pip install --no-cache-dir -e "."' in dockerfile
 
     def test_old_reachability_design_crashed_on_a_genuinely_unresolvable_ref(self):
         """Pins the actual failure the digest redesign replaced -- not

@@ -351,12 +351,24 @@ def _verifier_dockerfile(ref: str, runtime_digest: str) -> str:
     answer-bearing `agent-evals/skills/graders/` and `verify_run.py` no
     longer need to be hidden from it by naming, obfuscation, or omission --
     they simply aren't reachable.
-    Deliberately minimal relative to the agent image: `verify_run.py`
-    imports only the standard library plus `graders/` (confirmed by reading
-    both directly -- no `abicheck` import anywhere in that call chain), so
-    this image needs neither the compiler toolchain nor an editable
-    `abicheck` install; only `git`, to fetch the pinned source, and
-    `ca-certificates`, for that clone's TLS.
+    `verify_run.py` itself imports only the standard library plus `graders/`
+    -- but `graders/evidence.py`'s own `_option_tables()` has a lazy,
+    try/except-guarded `import click; from abicheck.cli import main` used to
+    read the *real* Click command tree (which options take a value, which
+    are bare flags) so a call like `compare old.so --verbose old.so` isn't
+    misread as a two-operand comparison. Neither `click` nor `abicheck`
+    being importable in this image was missed in an earlier version of this
+    function -- the caught `ImportError` silently degrades to the documented
+    conservative fallback ("every option takes a value"), which can hide a
+    real self-comparison from `dimension_2`/`dimension_6`'s zero-tolerance
+    checks (Codex review, fresh evidence: `--verbose old.so` then reads as
+    one operand consumed by the flag, not two identical ones). Fixed by
+    giving this image the same `pip install -e .` `abicheck` has in the
+    agent image -- deliberately the bare install, not `.[dev]`, since only
+    the real Click command tree is needed here, not the dev toolchain --
+    which needs no compiler (`click`/`rich-click`/`pyelftools` are all pure
+    Python wheels), so `git`/`ca-certificates` alone are still enough apt
+    packages.
     """
     return f"""{_MARKER}FROM python:3.13-slim
 
@@ -375,21 +387,26 @@ RUN git clone https://github.com/abicheck/abicheck.git /opt/abicheck-src \\
     && cd /opt/abicheck-src \\
     && (git checkout "$ABICHECK_REF" 2>/dev/null \\
         || (echo "WARNING: pinned ref $ABICHECK_REF unreachable (likely pruned after a squash-merge) -- falling back to main" >&2 \\
-            && git checkout main))
+            && git checkout main)) \\
+    && pip install --no-cache-dir -e "."
 
 # The verifier's own allowlist: only what `verify_run.py` actually needs at
-# runtime -- itself, and the `graders/` package it imports -- survives.
-# Everything else (including `.git`, for the identical history-leak reason
-# `_dockerfile()`'s own comment gives -- though there is no agent in this
-# container to read it from, keeping the discipline identical avoids this
-# image quietly becoming the one place that reasoning doesn't hold) is
-# discarded. This container is never agent-visible, but the allowlist
-# convention is kept anyway rather than trusted-by-isolation-alone: a
-# correct architecture and a minimal attack surface are not substitutes for
-# each other.
+# runtime -- itself, the `graders/` package it imports, and `abicheck/`
+# itself (the editable install above needs its source to persist at this
+# exact path for imports to keep resolving, same reason the agent image
+# keeps it -- `graders/evidence.py`'s own `_option_tables()` is the actual
+# consumer, see this function's own docstring) -- survives. Everything else
+# (including `.git`, for the identical history-leak reason `_dockerfile()`'s
+# own comment gives -- though there is no agent in this container to read it
+# from, keeping the discipline identical avoids this image quietly becoming
+# the one place that reasoning doesn't hold) is discarded. This container is
+# never agent-visible, but the allowlist convention is kept anyway rather
+# than trusted-by-isolation-alone: a correct architecture and a minimal
+# attack surface are not substitutes for each other.
 RUN set -eux; \\
     cd /opt/abicheck-src; \\
     mkdir -p /tmp/rt-keep/agent-evals/skills/harbor; \\
+    mv abicheck /tmp/rt-keep/abicheck; \\
     mv agent-evals/skills/graders /tmp/rt-keep/agent-evals/skills/graders; \\
     mv agent-evals/skills/harbor/verify_run.py /tmp/rt-keep/agent-evals/skills/harbor/verify_run.py; \\
     cd /; \\
