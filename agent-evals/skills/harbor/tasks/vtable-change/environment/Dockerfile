@@ -23,8 +23,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # real fix (vendoring the runtime sources directly, or a published
 # release tag) is a bigger, cross-cutting change than this generator's
 # own scope; see agent-evals/skills/harbor/CLAUDE.md.
-ARG ABICHECK_REF=851cdf4880361ddeb16e9bd3eac7cd1571f6531e
-# ABICHECK_RUNTIME_DIGEST=69bb57a4965c8cee8d1986604e5912a7020bb8fedc7b8f143e6a97fd6703ac35
+ARG ABICHECK_REF=083468dc650eca08c30ea5c0914fdde85b1967a6
+# ABICHECK_RUNTIME_DIGEST=718bf1305c7a8d896d04c5b58d7cb48b2a06981d24742bd920b5325ca15c0ec9
 # ^ content digest of `_RUNTIME_RELEVANT_PATHS` at generation time -- what
 # `--check` (scripts/gen_harbor_tasks.py) actually compares to detect real
 # staleness, independent of whether ABICHECK_REF above is still a
@@ -121,10 +121,27 @@ ENV SKILL_EVAL_REAL_PYTHON=/usr/local/bin/python3.13-real
 # harness's own documented workaround.
 ENV ABICHECK_ALLOW_AST_FALLBACK=1
 
-# Opt-in only -- see this file's own module docstring. A skill-arm trial
-# requests it explicitly: `harbor run ... --ak skills_dir=/opt/skills`.
-RUN mkdir -p /opt/skills \
-    && cp -r /opt/abicheck-src/.claude/skills/check-abi-compatibility /opt/skills/
+# The skill is deliberately never baked into this image -- an earlier
+# version of this step did (`cp -r .../check-abi-compatibility /opt/skills/`,
+# unconditionally, in every image regardless of arm), which a baseline
+# trial's own agent -- with the same ordinary shell access to this
+# container everything else in this file's comments already document --
+# could discover and manually follow, contaminating the one arm this whole
+# corpus exists to keep clean of the treatment (Codex review, fresh
+# evidence). Confirmed against the real, installed `harbor` package's own
+# source, not assumed: `Trial._upload_injected_skills()`
+# (`harbor.trial.trial`) uploads a `--skill owner/repo:path[@ref]`-resolved
+# skill directly into the *running* container, after the image has already
+# started, entirely outside the Docker build -- a complete no-op when
+# `--skill` isn't passed. A skill-arm trial therefore requests it via
+# `harbor run ... --skill abicheck/abicheck:.claude/skills/check-abi-
+# compatibility` (see `agent-evals/skills/harbor/CLAUDE.md`), which the
+# real `harbor` package's own `--ak skills_dir=...`-driven `claude_code`
+# adapter (`_build_register_skills_command`) then copies from
+# Harbor's own resolved skills directory into Claude's config at trial
+# start -- never from anything this Dockerfile wrote. A baseline trial
+# never receives that upload at all, and the image itself now carries no
+# skill content for a baseline agent to stumble onto.
 
 # The agent has ordinary shell access to this whole clone for the entire
 # agent phase -- so anything answer-bearing left under `/opt/abicheck-src`

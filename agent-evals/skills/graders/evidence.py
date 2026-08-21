@@ -402,6 +402,33 @@ def _named_sides(argv: list[str], command: str | None) -> list[str]:
     return sides
 
 
+def _canonicalize_side(value: str, cwd: str | None) -> str:
+    """Resolve one side operand to a form that's stable across spellings.
+
+    `compare /workspace/library/old/lib.so /workspace/library/old/lib.so` and
+    `compare /workspace/library/old/lib.so ./old/lib.so` name the same file
+    two different ways -- a plain string comparison catches the first, not
+    the second, and the second is exactly what an agent citing a
+    self-comparison to game the benchmark would produce (Codex review, fresh
+    evidence: reproduced against a real Category A grading run, where such a
+    call reported `NO_CHANGE` while a `BREAKING` claim citing it still passed
+    dimensions 3 and 6). Resolved the same way `_required_symbols_file_
+    targets` above already resolves a path-shaped operand -- against the
+    call's own recorded `cwd`, not the run directory -- since a relative
+    operand is relative to where the agent actually ran the command.
+    `Path.resolve()` is not `strict`, so a value naming nothing on disk (a
+    typo, or a snapshot path that never got produced) degrades to a
+    syntactic normalization (`.`/`..` collapsed) rather than raising --
+    still strictly more precise than the raw string, never less.
+    """
+    if not cwd or not value:
+        return value
+    try:
+        return str((Path(cwd) / value).resolve())
+    except OSError:
+        return value
+
+
 def compares_one_side_against_itself(call: dict) -> bool:
     """Whether this call names one operand twice (`compare x x`).
 
@@ -418,12 +445,22 @@ def compares_one_side_against_itself(call: dict) -> bool:
     check the plain one is caught by. Operand identification (above) closes
     that without needing the option table.
 
+    Sides are canonicalized (`_canonicalize_side`, against the call's own
+    `cwd`) before the duplicate check, so two different spellings of the same
+    file — an absolute path and a `./`-relative one, or a redundant `../x/../`
+    segment — are still recognized as one side, not two (Codex review, fresh
+    evidence: this used to be a bare `set()` over the raw argv tokens).
+
     Still narrow, and deliberately so: the general question — did this call
     compare the scenario's *own* two sides? — is not answerable from argv at
     all. Binding a call to its fixture needs the dump provenance Phase 4
     persists, not a cleverer read of the command line.
     """
-    sides = _named_sides(call.get("argv", []), subcommand(call))
+    cwd = call.get("cwd")
+    sides = [
+        _canonicalize_side(side, cwd)
+        for side in _named_sides(call.get("argv", []), subcommand(call))
+    ]
     return len(sides) != len(set(sides))
 
 

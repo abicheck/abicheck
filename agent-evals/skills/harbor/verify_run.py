@@ -32,10 +32,13 @@ repo's own AGENTS.md warns against ("one fact defined in exactly one place").
 **Why `arm=None`.** A Harbor task has no "skill" vs. "baseline" variant baked
 in -- see the ADR amendment this file's sibling `../CLAUDE.md` note points
 at: which arm a trial belongs to is an *agent-configuration* choice
-(`--ak skills_dir=...` on the CLI), not a task-directory choice, so this
-verifier cannot know which arm produced the transcript it is grading and
-must not guess. `dimension_1`'s own docstring already documents this
-degradation path precisely: "omitted, activation stays optional."
+(Harbor's own `--skill owner/repo:path[@ref]` flag on the CLI -- the
+generated image deliberately never bakes the skill in, so a trial that
+omits the flag is the baseline arm and one that supplies it is the skill
+arm), not a task-directory choice, so this verifier cannot know which arm
+produced the transcript it is grading and must not guess. `dimension_1`'s
+own docstring already documents this degradation path precisely:
+"omitted, activation stays optional."
 
 **Reward shape.** `reward.txt` (Harbor's minimum, guaranteed-read contract)
 is the single collapsed 0/1: correct verdict AND no zero-tolerance failure.
