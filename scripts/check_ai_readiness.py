@@ -2333,27 +2333,45 @@ def _tier1_module_bindings(
     return names
 
 
+def _definition_head_parts(node: ast.AST) -> list[ast.AST]:
+    """The parts of a scope-defining node that execute in its *enclosing*
+    scope, right when the definition statement itself runs — decorators,
+    default-argument expressions, and (for a class) base-class/keyword
+    expressions — never the node's own body/return-expression, which is
+    the *new* scope it introduces.
+    """
+    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        return [*node.decorator_list, node.args]
+    if isinstance(node, ast.ClassDef):
+        return [*node.decorator_list, *node.bases, *node.keywords]
+    if isinstance(node, ast.Lambda):
+        return [node.args]
+    return []
+
+
 def _iter_calls_in_own_scope(node: ast.AST) -> Iterable[ast.Call]:
     """Yield every ``Call`` lexically inside *node*'s own scope, without
     descending into a *nested* function/class/lambda definition's own body
     — a call there belongs to that nested scope, not to *node*'s, and must
     not be silently swept in as if it were (Codex review: a bypass placed
     inside a nested ``def`` within the sanctioned wrapper previously
-    inherited the wrapper's own exemption via a full ``ast.walk``).
+    inherited the wrapper's own exemption via a full ``ast.walk``). A
+    nested definition's *head* (:func:`_definition_head_parts`) is walked
+    though, not skipped wholesale — those expressions run immediately in
+    *this* scope (Codex review: ``def inner(x=service.resolve_input(a))``
+    nested inside the wrapper was wrongly flagged).
 
     For a ``FunctionDef``/``AsyncFunctionDef`` passed directly (the only
     shape a caller passes at the top level), only ``node.body`` is this
-    scope — ``node.args`` (whose default-argument expressions execute once
-    in the *enclosing* scope at def-time) and ``node.decorator_list``
-    (likewise enclosing-scope) are deliberately excluded (Codex review: a
-    call in a default expression was swept in as exempt). Applying that
-    special case *inside* this function, not by having a caller pass
-    ``node.body`` statements one at a time, matters: the pruning check
-    above only fires when a scope-defining node is discovered as a
-    *child* during recursion — calling this function directly on a
-    *nested* ``def`` (as one of ``node.body``'s own statements can be)
-    would bypass that check entirely, since it is never itself examined
-    as a child.
+    scope — its own head is the *enclosing* (module) scope, not this one,
+    and is deliberately excluded the same way a nested definition's own
+    head is *included* for the opposite reason (Codex review: a call in
+    the top-level wrapper's own default expression was swept in as
+    exempt). Applying that special case *inside* this function, not by
+    having a caller pass ``node.body`` statements one at a time, matters:
+    the pruning check below only fires when a scope-defining node is
+    discovered as a *child* during recursion — calling this function
+    directly on a *nested* ``def`` would bypass it entirely.
     """
     children: Iterable[ast.AST] = (
         node.body
@@ -2366,6 +2384,10 @@ def _iter_calls_in_own_scope(node: ast.AST) -> Iterable[ast.Call]:
         if isinstance(
             child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)
         ):
+            for head_part in _definition_head_parts(child):
+                if isinstance(head_part, ast.Call):
+                    yield head_part
+                yield from _iter_calls_in_own_scope(head_part)
             continue
         yield from _iter_calls_in_own_scope(child)
 

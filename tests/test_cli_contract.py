@@ -502,6 +502,36 @@ def test_cli_resolve_exemption_ignores_default_argument_bypass(
     assert "cli_resolve.py:4" in errors[0]
 
 
+def test_cli_resolve_exemption_covers_nested_definitions_own_head(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The opposite of the default-argument case above: a call inside a
+    default-argument expression on a function *nested* inside the wrapper
+    executes immediately in the *wrapper's own* scope (at the point the
+    nested `def` statement itself runs), not inside the nested function's
+    own body — so it must be exempt, not flagged, even though the nested
+    definition's *body* is still correctly pruned (Codex review: pruning
+    a nested definition wholesale wrongly flagged this as a violation)."""
+    import scripts.check_ai_readiness as gate
+
+    pkg = tmp_path / "abicheck"
+    pkg.mkdir()
+    (pkg / "cli_resolve.py").write_text(
+        "def _resolve_input(a):\n"
+        "    from . import service\n"
+        "    def inner(x=service.resolve_input(a)):\n"
+        "        return x\n"
+        "    return inner()\n"
+    )
+    monkeypatch.setattr(gate, "PKG", pkg)
+    monkeypatch.setattr(gate, "ROOT", tmp_path)
+
+    findings = gate.Findings()
+    gate.check_cli_contract(findings)
+    errors = [m for c, m in findings.errors if c == "cli-contract"]
+    assert errors == []
+
+
 def test_allowlist_does_not_cover_a_second_call_to_the_same_target_on_one_line(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
