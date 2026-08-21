@@ -46,4 +46,17 @@
   snapshot of the identical input under the identical resolved compiler
   (confirmed via an unchanged `compiler_family`/`compiler_version`) — an
   abicheck upgrade adding evidence must not by itself make an
-  otherwise-unchanged baseline `NOT_COMPARABLE`.
+  otherwise-unchanged baseline `NOT_COMPARABLE`. Two follow-up review
+  fixes, both real: the carve-out's transition check and
+  `_cplusplus_macro_for_standard` both matched the `"probed:"` marker with
+  `.startswith(...)`, but when `--lang` is given explicitly the recorded
+  value is language-mode-prefixed (`"c++:probed:__cplusplus=201703L"`),
+  so the marker no longer sits at position 0 and both silently failed to
+  recognize it — fixed to a containment check. And the probe's language
+  mode is now the header-AST parse's *actual, post-retry* mode rather than
+  a static re-derivation: a C-mode dump whose parse self-heals into C++
+  (`dumper.py`'s C→C++ retry) or a castxml C-mode dump (whose driver is
+  internally remapped from the caller's `"c++"` default to `"cc"`) now
+  threads that real, resolved language mode/compiler identity into
+  `AbiSnapshot.ast_toolchain`, so the provenance probe queries the
+  compiler that actually parsed the headers instead of a stale guess.

@@ -104,7 +104,7 @@ def test_clang_ast_does_not_assign_returned_callback_abi_to_factory(tmp_path: Pa
         "void (__attribute__((ms_abi)) *factory(void))(int);\n", encoding="utf-8"
     )
 
-    root, _ = _clang_header_dump([header], [], compiler="clang", lang="C")
+    root, _, _ = _clang_header_dump([header], [], compiler="clang", lang="C")
     (factory,) = _ClangAstParser(root, {"factory"}, set()).parse_functions()
 
     assert factory.contract_attributes == []

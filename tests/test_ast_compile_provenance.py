@@ -61,6 +61,20 @@ class TestCplusplusMacroForStandard:
         assert _cplusplus_macro_for_standard(None) is None
         assert _cplusplus_macro_for_standard("") is None
 
+    def test_probed_marker_recognized_regardless_of_position(self):
+        """CodeRabbit review, fresh evidence: when an explicit ``--lang`` is
+        also given, ``language_standard_field`` prefixes the probed value
+        with ``"c++:"``/``"c:"`` (e.g.
+        ``"c++:probed:__cplusplus=201703L"``), so the ``"probed:"`` marker
+        no longer sits at position 0 -- must still resolve, not silently
+        return ``None`` for a pinned-lang probed dump."""
+        assert (
+            _cplusplus_macro_for_standard("c++:probed:__cplusplus=201703L")
+            == "201703L"
+        )
+        assert _cplusplus_macro_for_standard("probed:__cplusplus=201703L") == "201703L"
+        assert _cplusplus_macro_for_standard("c:probed:__STDC_VERSION__=201710L") is None
+
 
 class TestExtractExplicitStdValue:
     def test_from_gcc_option_tokens(self):
@@ -196,6 +210,7 @@ class TestProbeDefaultLanguageStandard:
     def setup_method(self):
         _probe_default_language_standard.cache_clear()
 
+    @pytest.mark.integration
     def test_probes_real_host_compiler_cpp(self):
         import shutil
 
@@ -261,20 +276,34 @@ class TestProbeDefaultLanguageStandard:
     def test_result_is_cached_per_binary_and_mode(
         self, monkeypatch: pytest.MonkeyPatch
     ):
+        """Repeated identical calls are cached (one subprocess call) -- and
+        both ``compiler_bin`` and ``lang_mode`` are genuinely part of the
+        cache key, not just incidental ``lru_cache`` argument order: varying
+        either one must still probe (CodeRabbit review, fresh evidence --
+        the prior version of this test only proved the identical-call case,
+        which would also pass against a cache keyed on ``compiler_bin``
+        alone)."""
         import subprocess as subprocess_module
 
         calls = []
 
         def fake_run(argv, **kwargs):
             calls.append(tuple(argv))
+            macro = "__cplusplus" if argv[3] == "c++" else "__STDC_VERSION__"
             return subprocess_module.CompletedProcess(
-                argv, 0, stdout="#define __cplusplus 201703L\n", stderr=""
+                argv, 0, stdout=f"#define {macro} 201703L\n", stderr=""
             )
 
         monkeypatch.setattr(subprocess_module, "run", fake_run)
         _probe_default_language_standard("cached-cc", "c++")
-        _probe_default_language_standard("cached-cc", "c++")
+        _probe_default_language_standard("cached-cc", "c++")  # identical: cached
         assert len(calls) == 1
+        _probe_default_language_standard("cached-cc", "c")  # different mode: probes
+        assert len(calls) == 2
+        _probe_default_language_standard("other-cc", "c++")  # different binary: probes
+        assert len(calls) == 3
+        _probe_default_language_standard("cached-cc", "c")  # repeat of call 2: cached
+        assert len(calls) == 3
 
 
 class TestResolveStandardProvenanceProbing:
@@ -337,6 +366,36 @@ class TestResolveStandardProvenanceProbing:
         )
         assert seen_modes == ["c"]
 
+    def test_resolved_lang_mode_overrides_static_re_derivation(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        """Codex review, fresh evidence: a C->C++ self-heal retry settles on
+        a language mode a static re-derivation from *headers* alone cannot
+        reconstruct (the header itself still only contains C-compatible
+        syntax; the real signal was a missing C++ stdlib header at parse
+        time). *resolved_lang_mode*, when given, must win outright, not just
+        bias the auto-detection heuristic."""
+        seen_modes = []
+
+        def fake_probe(compiler_bin, lang_mode):
+            seen_modes.append(lang_mode)
+            return "probed:stub"
+
+        monkeypatch.setattr(
+            "abicheck.dumper_toolchain._probe_default_language_standard", fake_probe
+        )
+        c_header = tmp_path / "c.h"
+        c_header.write_text("int f(int x);\n", encoding="utf-8")
+        _resolve_standard_provenance(
+            [c_header],
+            None,
+            (),
+            probe_compiler_bin="clang",
+            lang=None,
+            resolved_lang_mode="c++",
+        )
+        assert seen_modes == ["c++"]
+
 
 class TestAstCompileProvenanceProbing:
     def setup_method(self):
@@ -372,6 +431,36 @@ class TestAstCompileProvenanceProbing:
         byte-for-byte identical to this function's pre-fix behavior."""
         prov = _ast_compile_provenance([], None, (), None)
         assert prov["ast_resolved_standard"] is None
+
+    def test_ast_toolchain_resolved_lang_mode_feeds_the_probe(
+        self, monkeypatch: pytest.MonkeyPatch
+    ):
+        """Codex review, fresh evidence: ``dumper.py``'s clang self-heal
+        stamps ``resolved_lang_mode`` onto ``ast_toolchain`` after a C->C++
+        retry -- this is the end-to-end wiring proving that value actually
+        reaches the probe, not just a re-derivation from ``lang``."""
+        seen = {}
+
+        def fake_probe(compiler_bin, lang_mode):
+            seen["lang_mode"] = lang_mode
+            return "probed:__cplusplus=201703L"
+
+        monkeypatch.setattr(
+            "abicheck.dumper_toolchain._probe_default_language_standard", fake_probe
+        )
+        prov = _ast_compile_provenance(
+            [],
+            None,
+            (),
+            None,
+            ast_toolchain={
+                "compiler_selected": "/usr/bin/clang",
+                "resolved_lang_mode": "c++",
+            },
+            lang=None,  # unspecified -- would auto-detect "c" without the override
+        )
+        assert seen == {"lang_mode": "c++"}
+        assert prov["ast_resolved_standard"] == "probed:__cplusplus=201703L"
 
     def test_two_different_resolved_compilers_probe_to_different_standards(
         self, monkeypatch: pytest.MonkeyPatch

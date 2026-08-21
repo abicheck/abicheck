@@ -251,8 +251,14 @@ def _clang_header_dump(
     extra_hash_dirs: tuple[Path, ...] = (),
     frontend_context: str = "host",
     memoize: bool | None = None,
-) -> tuple[dict[str, Any], str | None]:
-    """Run clang over *headers* and return ``(root, resolved_kind)``.
+) -> tuple[dict[str, Any], str | None, bool]:
+    """Run clang over *headers* and return ``(root, resolved_kind, resolved_force_cpp)``.
+
+    ``resolved_force_cpp`` is the language mode that actually produced *root*
+    -- ``force_cpp`` itself on a cache hit or when no self-heal fired, or the
+    post-retry ``True`` when the C-mode parse self-healed into C++ (Codex
+    review: the provenance probe below must not silently re-derive a stale
+    C-mode guess after this function already resolved the real answer).
 
     The clang-frontend counterpart of :func:`_castxml_dump`: aggregates the
     headers into one ``#include`` TU, runs ``clang -ast-dump=json``, returns
@@ -345,7 +351,7 @@ def _clang_header_dump(
         key, "clang", cached, memoize=_memoize
     )
     if _cached_result is not None:
-        return cast("dict[str, Any]", _cached_result), resolved_kind
+        return cast("dict[str, Any]", _cached_result), resolved_kind, force_cpp
 
     agg_ext = ".hpp" if force_cpp else ".h"
     with tempfile.NamedTemporaryFile(suffix=agg_ext, mode="w", delete=False) as agg:
@@ -437,7 +443,7 @@ def _clang_header_dump(
         )
         if identities_stable and _memoize:
             dumper_cache.store_cached_ast(key, "clang", root)
-        return root, resolved_kind
+        return root, resolved_kind, cur_fcpp
     finally:
         agg_path.unlink(missing_ok=True)
         for _p in _ast_paths:
@@ -488,13 +494,18 @@ def _stamp_ast_parser(
     gcc_path: str | None,
     gcc_prefix: str | None,
     fallback_reason: str | None = None,
+    resolved_compiler: str | None = None,
 ) -> _CastxmlParser | _ClangAstParser:
     """Attach the frontend/compiler provenance attributes to a built parser.
 
     Module-level (rather than a closure over :func:`_header_ast_parser`) so the
     stamping rules are readable on their own; *compiler*/*gcc_path*/*gcc_prefix*
     are the enclosing call's toolchain selection, needed only to probe the host
-    compiler behind a castxml dump.
+    compiler behind a castxml dump. *resolved_compiler*, when given, overrides
+    *compiler* for that resolution -- the force_cpp-aware spelling
+    :func:`_castxml_dump` actually invoked (e.g. ``"cc"``), not the caller's
+    original, unresolved request (Codex review; see that function's own
+    ``_selected_compiler_out`` docstring).
     """
     executable_meta = _tool_identity_metadata(executable)
     metadata = {"producer": producer, **executable_meta}
@@ -509,7 +520,9 @@ def _stamp_ast_parser(
         dialect = "msvc" if Path(executable).name.lower() in ("cl", "cl.exe") else "gnu"
     else:
         try:
-            host_cc, dialect = _resolve_compiler_binary(compiler, gcc_path, gcc_prefix)
+            host_cc, dialect = _resolve_compiler_binary(
+                resolved_compiler or compiler, gcc_path, gcc_prefix
+            )
             compiler_meta = _tool_identity_metadata(host_cc)
         except SnapshotError as exc:
             metadata["compiler_error"] = str(exc)
@@ -658,6 +671,7 @@ def _header_ast_parser(
         producer: str,
         executable: str,
         fallback_reason: str | None = None,
+        resolved_compiler: str | None = None,
     ) -> _CastxmlParser | _ClangAstParser:
         return _stamp_ast_parser(
             parser,
@@ -667,11 +681,12 @@ def _header_ast_parser(
             gcc_path=gcc_path,
             gcc_prefix=gcc_prefix,
             fallback_reason=fallback_reason,
+            resolved_compiler=resolved_compiler,
         )
 
     def _run_clang(*, fallback_reason: str | None = None) -> _ClangAstParser:
         clang_bin = _resolve_clang_bin(compiler, gcc_path, gcc_prefix)
-        ast_root, resolved_kind = _clang_header_dump(
+        ast_root, resolved_kind, resolved_force_cpp = _clang_header_dump(
             headers,
             extra_includes,
             compiler=compiler,
@@ -707,6 +722,13 @@ def _header_ast_parser(
         # ADR-050 D5: resolved SYCL kind, None for a plain clang dump --
         # read by dumper_contract._attach_extraction_contract.
         setattr(stamped, "_abicheck_frontend_context_kind", resolved_kind)
+        # Codex review: the C->C++ self-heal retry can settle on a language
+        # mode different from what a static re-derivation would guess --
+        # record the real one so the provenance probe below doesn't recompute
+        # a stale answer.
+        getattr(stamped, "_abicheck_ast_toolchain")["resolved_lang_mode"] = (
+            "c++" if resolved_force_cpp else "c"
+        )
         return stamped
 
     if resolved == "clang" or frontend_context != "host":
@@ -716,6 +738,7 @@ def _header_ast_parser(
     # direct-inclusion failures. Explicit CastXML remains fail-closed.
     auto_selected = _auto_ast_fallback_eligible(backend)
     selected_castxml: list[str] = []
+    selected_compiler: list[str] = []
     try:
         xml_root = _castxml_dump(
             headers,
@@ -730,6 +753,7 @@ def _header_ast_parser(
             lang=lang,
             extra_hash_dirs=extra_hash_dirs,
             _selected_tool_out=selected_castxml,
+            _selected_compiler_out=selected_compiler,
         )
     except SnapshotError as exc:
         fallback_reason = _castxml_fallback_reason(
@@ -755,6 +779,7 @@ def _header_ast_parser(
             parser,
             producer="castxml",
             executable=selected_castxml[0] if selected_castxml else "castxml",
+            resolved_compiler=selected_compiler[0] if selected_compiler else None,
         ),
     )
 
@@ -876,6 +901,7 @@ def _castxml_dump(
     extra_hash_dirs: tuple[Path, ...] = (),
     castxml_bin: str | None = None,
     _selected_tool_out: list[str] | None = None,
+    _selected_compiler_out: list[str] | None = None,
 ) -> Element:
     """Run castxml on headers and return parsed XML root.
 
@@ -887,6 +913,13 @@ def _castxml_dump(
         sysroot: Alternative system root directory.
         nostdinc: If True, do not search standard system include paths.
         lang: Force language ("C" or "C++").  If "C", aggregated header uses .h extension.
+        _selected_compiler_out: when given, appended with the force_cpp-aware
+            *resolved_compiler* spelling (e.g. ``"cc"``, not the caller's
+            original ``"c++"``) actually used to pick ``cc_bin`` below -- so a
+            caller stamping provenance records the compiler castxml really
+            invoked, not a re-derivation from the unresolved request (Codex
+            review: a C-mode dump under the default ``compiler="c++"``
+            otherwise recorded ``g++``'s identity while castxml ran ``gcc``).
     """
     castxml_bin = _resolve_gated_castxml_bin(castxml_bin)
     if _selected_tool_out is not None:
@@ -909,6 +942,8 @@ def _castxml_dump(
             "clang++": "clang",
         }.get(compiler, compiler)
     cc_bin, cc_id = _resolve_compiler_binary(resolved_compiler, gcc_path, gcc_prefix)
+    if _selected_compiler_out is not None:
+        _selected_compiler_out.append(resolved_compiler)
     # Freeze PATH selection for the actual CastXML invocation. Keep an explicit
     # unresolved path/name intact so CastXML can provide its native diagnostic.
     cc_bin = shutil.which(cc_bin) or cc_bin

@@ -31,16 +31,30 @@ from __future__ import annotations
 
 import pytest
 
+from abicheck import comparability, dumper_toolchain
 from abicheck.comparability import (
     check_contracts_comparable,
     compute_extraction_contract,
 )
 from abicheck.errors import ProfileMismatchError
-from abicheck.model import AbiSnapshot
+from abicheck.model import AbiSnapshot, ExtractionContract
 
 
-def _snap(contract) -> AbiSnapshot:  # noqa: ANN001
+def _snap(contract: ExtractionContract | None) -> AbiSnapshot:
     return AbiSnapshot(library="libfoo.so", version="1.0", contract=contract)
+
+
+def test_probed_standard_prefix_constants_stay_in_sync():
+    """CodeRabbit review: ``comparability.py`` deliberately mirrors (rather
+    than imports) ``dumper_toolchain._PROBED_STANDARD_PREFIX`` -- see that
+    module's own comment for why (avoiding a new cross-module dependency for
+    one string literal). A mirrored constant can silently drift, so pin the
+    two equal directly rather than relying on this file's own scenario tests
+    to notice a drift indirectly."""
+    assert (
+        comparability._PROBED_STANDARD_PREFIX
+        == dumper_toolchain._PROBED_STANDARD_PREFIX
+    )
 
 
 def test_gate_empty_vs_probed_language_standard_waived_when_compiler_unchanged():
@@ -127,3 +141,29 @@ def test_gate_empty_vs_probed_language_standard_not_waived_without_compiler_evid
     )
     with pytest.raises(ProfileMismatchError):
         check_contracts_comparable(old, new)
+
+
+def test_gate_empty_vs_probed_language_standard_waived_when_lang_qualified():
+    """CodeRabbit review, fresh evidence: when an explicit ``--lang`` was
+    given, ``language_standard_field`` prefixes the probed value with the
+    resolved mode (``"c++:probed:..."``/``"c:probed:..."``), not the bare
+    ``"probed:..."`` form the other tests above use -- the carve-out must
+    still recognize the transition and waive it, not treat the lang prefix
+    as an unrelated profile difference."""
+    old = _snap(
+        compute_extraction_contract(
+            l2_frontend_ran=True,
+            compiler_family="gnu",
+            compiler_version="11.4.0",
+            language_standard="",
+        )
+    )
+    new = _snap(
+        compute_extraction_contract(
+            l2_frontend_ran=True,
+            compiler_family="gnu",
+            compiler_version="11.4.0",
+            language_standard="c++:probed:__cplusplus=201703L",
+        )
+    )
+    check_contracts_comparable(old, new)  # must not raise

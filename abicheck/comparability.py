@@ -726,12 +726,20 @@ def _language_standard_probe_upgrade_corroborated(
     here), which is correct: upgrading the compiler between the baseline
     and the comparison is a real profile change this gate should still
     catch.
+
+    The ``"probed:"`` marker is checked by *containment*, not
+    ``str.startswith`` (Codex review, fresh evidence): when a dump also
+    pins an explicit ``--lang``, ``language_standard_field`` prefixes the
+    probed value with ``"c++:"``/``"c:"`` (e.g.
+    ``"c++:probed:__cplusplus=201703L"``), so the marker does not
+    necessarily sit at position 0 -- mirroring
+    ``dumper_toolchain._cplusplus_macro_for_standard``'s identical fix.
     """
     old_std = old_fields.get("language_standard", "")
     new_std = new_fields.get("language_standard", "")
     is_upgrade_transition = (
-        old_std == "" and new_std.startswith(_PROBED_STANDARD_PREFIX)
-    ) or (new_std == "" and old_std.startswith(_PROBED_STANDARD_PREFIX))
+        old_std == "" and _PROBED_STANDARD_PREFIX in new_std
+    ) or (new_std == "" and _PROBED_STANDARD_PREFIX in old_std)
     if not is_upgrade_transition:
         return False
     for key in ("compiler_family", "compiler_version"):
@@ -1436,7 +1444,7 @@ def check_contracts_comparable(
     header-sequence carve-out above.
 
     **Opaque profile-fingerprint mismatches are rejected, not silently
-    waived (Codex review, PR #641 follow-up, P1):** the four carve-outs
+    waived (Codex review, PR #641 follow-up, P1):** the five carve-outs
     above narrow an ``unexplained`` working set that starts as ``differing``
     — the set of :data:`PROFILE_FIELD_KEYS` that actually differ between
     ``old_fields``/``new_fields``. If ``profile_fingerprint`` differs but
@@ -1482,9 +1490,19 @@ def check_contracts_comparable(
     alone). Each carve-out therefore claims and verifies only the subset of
     ``differing`` it understands, narrowing an ``unexplained`` working set;
     the pair is comparable once nothing remains unexplained, not only when
-    one carve-out's field-set covers the whole mismatch by itself. The four
-    carve-outs' field-sets are mutually disjoint, so application order
-    never matters.
+    one carve-out's field-set covers the whole mismatch by itself. Four of
+    the five carve-outs' field-sets (:data:`_PLATFORM_IDENTITY_FIELDS`/
+    :data:`_BUILD_CONTEXT_FIELDS`/:data:`_HEADER_SEQUENCE_FIELDS`/
+    :data:`_INCLUDE_SEQUENCE_FIELDS`) are mutually disjoint, so their
+    relative order never matters among themselves. The fifth,
+    :func:`_language_standard_probe_upgrade_corroborated`, is a narrower,
+    single-field carve-out over ``language_standard`` -- a field the
+    build-context carve-out's own set already covers -- and is checked
+    *after* the build-context one specifically, since it can still only
+    narrow (never re-add to) the working set, so its position relative to
+    the other four still never changes the outcome (see
+    :func:`_unexplained_profile_fields`'s own docstring for the ordering
+    itself).
 
     **Known, accepted limitation, not a correctness bug (PR #641
     follow-up, fourth round):** a header added *outside* the old side's

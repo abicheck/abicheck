@@ -335,15 +335,20 @@ def _cplusplus_macro_for_standard(standard: str | None) -> str | None:
     ``__cplusplus`` literal, or ``None`` when unrecognized (snapshot
     provenance, schema v15).
 
-    A *probed* default (``standard`` starting with the ``"probed:"`` prefix
+    A *probed* default (``standard`` carrying the ``"probed:"`` marker
     :func:`_probe_default_language_standard` produces — see its own
     docstring) already carries the literal macro assignment it observed, so
     it is read straight out of that string rather than looked up in
     :data:`_CPLUSPLUS_MACRO_BY_EDITION`, which only maps a real ``-std=``
-    edition spelling."""
+    edition spelling. The marker is checked by *containment*, not
+    ``str.startswith`` (Codex review, fresh evidence): when ``lang`` is
+    also given, :func:`abicheck._compiler_options.language_standard_field`
+    prefixes the probed value with ``"c++:"``/``"c:"``
+    (``"c++:probed:__cplusplus=201703L"``), so the marker no longer sits at
+    position 0."""
     if not standard:
         return None
-    if standard.startswith(_PROBED_STANDARD_PREFIX):
+    if _PROBED_STANDARD_PREFIX in standard:
         _, _, assignment = standard.partition(_PROBED_STANDARD_PREFIX)
         macro, _, value = assignment.partition("=")
         return value or None if macro == "__cplusplus" else None
@@ -516,6 +521,7 @@ def _resolve_standard_provenance(
     *,
     probe_compiler_bin: str | None = None,
     lang: str | None = None,
+    resolved_lang_mode: str | None = None,
 ) -> str | None:
     """Best-effort resolved C/C++ standard for snapshot provenance (schema
     v15, P1 toolchain-profile audit).
@@ -536,14 +542,18 @@ def _resolve_standard_provenance(
     alone, Codex review): an unspecified *lang* can still auto-detect as
     either C or C++ depending on *headers*' own content, and probing the
     wrong language mode would record a dialect the real parse never
-    actually used.
+    actually used. *resolved_lang_mode* (``"c"``/``"c++"``), when given,
+    overrides that re-derivation entirely -- it is the language mode the
+    header-AST parse actually settled on (e.g. after a C->C++ self-heal
+    retry), which a static re-derivation from *lang*/*headers* alone cannot
+    reconstruct (Codex review, fresh evidence).
     """
     if has_explicit_std(gcc_options, gcc_option_tokens):
         return _extract_explicit_std_value(gcc_options, gcc_option_tokens)
     if headers and _detect_cpp20_headers(headers):
         return "gnu++20"
     if probe_compiler_bin:
-        probe_lang_mode = (
+        probe_lang_mode = resolved_lang_mode or (
             "c++"
             if _resolve_force_cpp(lang, headers, gcc_options, gcc_option_tokens)
             else "c"
@@ -603,6 +613,7 @@ def _ast_compile_provenance(
             or (ast_toolchain or {}).get("selected")
         ),
         lang=lang,
+        resolved_lang_mode=(ast_toolchain or {}).get("resolved_lang_mode"),
     )
     args = _combined_option_tokens(gcc_options, gcc_option_tokens)
     return {
