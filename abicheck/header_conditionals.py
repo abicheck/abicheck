@@ -1046,14 +1046,44 @@ def compile_db_for_filter_scope_check(
     found and filtered by the nested database (L3 compile units: 2, L2
     narrowed to the filtered TU), and the guard never fired.
 
+    A third under-coverage (Codex review, fresh evidence): the fold's own
+    ``resolve_header_compile_context``/``filter_units_by_source`` narrows
+    *whatever* ``BuildEvidence.compile_units`` a ``--build-info`` resolves
+    to -- it is not specific to a literal ``compile_commands.json``. A
+    ``--build-info`` naming a pre-captured ``collect`` pack directory
+    (``is_pack_dir``) or a Bazel ``aquery``/``cquery`` jsonproto (both
+    routed through their own adapters in
+    ``buildsource.inline._maybe_collect_bazel_build_info``/pack loading, not
+    ``load_compile_db()``) resolves compile units the identical way a
+    literal compile database does, and the L3 embed collects that same
+    ``BuildEvidence`` with no filter either way -- so the mismatch this
+    guard exists to reject reproduces for those two shapes too, just never
+    detected because neither is a ``compile_commands.json`` file
+    ``compile_db_from_build_info`` recognizes. ``sniff_build_info_format``
+    is the same cheap, execution-free classifier ``compile_db_from_
+    build_info`` already uses to tell these shapes apart -- checking it here
+    costs nothing and cannot disagree with what dispatch itself does with
+    the same path.
+
     Deliberately **not** folded into ``compile_db_from_build_info`` itself
     -- that function's result also drives ``dump``'s own legacy ``-p``
     auto-match (``cli.py``'s ``effective_compile_db``), which is
     intentionally ``--build-info``-only (direct child only, no subdirectory
-    search) and widening it here would widen that unrelated, separately
-    reviewed mechanism too.
+    search, and only ever a real ``compile_commands.json`` -- a pack/Bazel
+    jsonproto was never a valid ``-p`` operand) and widening it here would
+    widen that unrelated, separately reviewed mechanism too.
 
-    ``None`` when neither source names a usable compile database, or when
+    Still not covered, and not attempted here: a ``--sources`` tree with no
+    discoverable ``compile_commands.json`` at all, resolved instead through
+    the zero-config *inferred* build-system query (cmake/make/bazel). Unlike
+    every case above, telling whether that combination would actually
+    resolve multiple compile units means running the build system's own
+    query -- the exact side effect this cheap, read-only scope check is
+    built to avoid paying twice per invocation. See this repository's
+    ``AGENTS.md`` "Known gaps" for that residual, documented rather than
+    guessed at.
+
+    ``None`` when neither source names usable build evidence, or when
     *headers* is empty (mirrors ``compile_db_from_build_info``: no L2
     header parse to narrow means nothing for the filter to be inconsistent
     with).
@@ -1063,12 +1093,22 @@ def compile_db_for_filter_scope_check(
     explicit = compile_db_from_build_info(build_info, headers)
     if explicit is not None:
         return explicit
-    if build_info is not None and build_info.is_dir():
-        from .buildsource.inline import _find_compile_db_in_dir
+    if build_info is not None:
+        from .buildsource.inline import sniff_build_info_format
 
-        nested = _find_compile_db_in_dir(build_info)
-        if nested is not None:
-            return nested
+        if build_info.is_dir():
+            from .buildsource.inline import _find_compile_db_in_dir, is_pack_dir
+
+            nested = _find_compile_db_in_dir(build_info)
+            if nested is not None:
+                return nested
+            if is_pack_dir(build_info):
+                return build_info
+        elif build_info.is_file() and sniff_build_info_format(build_info) in (
+            "bazel_aquery",
+            "bazel_cquery",
+        ):
+            return build_info
     from .buildsource.inline import _autodiscover_compile_db
 
     return _autodiscover_compile_db(sources)
@@ -1101,17 +1141,22 @@ def compile_db_filter_scope_error(
     change to ``buildsource/`` with its own evidence gates, not something to
     infer from one review round.
 
-    ``None`` when the combination cannot arise: no filter, a ``--build-info``
-    that is not a compile database (a pack or Bazel jsonproto routes through
-    a different adapter), or ``collect_mode == "off"``, where no build
-    evidence is embedded for the filter to be inconsistent with.
+    ``None`` when the combination cannot arise: no filter, no resolvable
+    build evidence for *compile_db_path* to name (see
+    ``compile_db_for_filter_scope_check``, this function's real caller --
+    since ADR/Codex review it resolves a pack directory and a Bazel
+    aquery/cquery jsonproto here too, not only a literal
+    ``compile_commands.json``, so this parameter no longer names a compile
+    database specifically despite its name), or ``collect_mode == "off"``,
+    where no build evidence is embedded for the filter to be inconsistent
+    with.
     """
     if not compile_db_filter or compile_db_path is None or collect_mode == "off":
         return None
     return (
         "--compile-db-filter scopes the L2 header parse only; the L3 build "
-        "evidence embedded from the same --build-info compilation database is "
-        "collected unfiltered, so the snapshot would carry build facts for "
+        "evidence embedded from the same --build-info source is collected "
+        "unfiltered, so the snapshot would carry build facts for "
         "translation units the filter excludes. Pass a pre-filtered "
         "compile_commands.json as --build-info (then --compile-db-filter is "
         "unnecessary), or drop --compile-db-filter to accept the whole "

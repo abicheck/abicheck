@@ -25,3 +25,13 @@
   database lives one level down resolved for the fold but not for the guard,
   reproducing the identical filtered-L2/unfiltered-L3 mismatch. Fixed on the
   CLI and the typed `DumpRequest`/`CompareRequest` API alike.
+- **`dump --compile-db-filter --build-info <path>` now also catches a
+  pre-captured `collect` pack directory and a Bazel `aquery`/`cquery`
+  jsonproto**, not only a literal `compile_commands.json`. The L3→L2 fold
+  narrows *whatever* build evidence a `--build-info` resolves to, regardless
+  of its shape — but the scope guard only ever recognized a literal compile
+  database, so a pack or Bazel jsonproto silently reproduced the identical
+  filtered-L2/unfiltered-L3 mismatch with no error. Fixed on the CLI and the
+  typed `DumpRequest`/`CompareRequest` API alike; a `--sources` tree with no
+  discoverable compile database, resolved only through the zero-config
+  inferred build-system query, remains a documented gap (see `AGENTS.md`).

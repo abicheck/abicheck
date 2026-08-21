@@ -4977,6 +4977,46 @@ Once a root command genuinely clears the bar above, pick the right home:
   migration, rather than shipping validation code with no real path to
   verify it against.
 
+  **A sixth finding (Codex review, fresh evidence) reopened convergence:
+  the guard's original `compile_db_from_build_info`-only check covered a
+  literal compile database and nothing else, but the fold it guards
+  (`resolve_header_compile_context`/`filter_units_by_source`) narrows
+  *whatever* `BuildEvidence.compile_units` a `--build-info` resolves to,
+  regardless of shape.** A `--build-info` naming a pre-captured `collect`
+  pack directory (`is_pack_dir`) or a Bazel `aquery`/`cquery` jsonproto
+  resolves compile units the identical way a literal compile database does
+  — both are routed through their own adapters
+  (`buildsource.inline._maybe_collect_bazel_build_info`/pack loading), not
+  `load_compile_db()` — and the L3 embed collects that same `BuildEvidence`
+  unfiltered either way, so the mismatch reproduced for both shapes with no
+  error, purely because neither is a `compile_commands.json` file
+  `compile_db_from_build_info` recognizes. Fixed: `compile_db_for_filter_
+  scope_check` now also recognizes a `--build-info` that `sniff_build_info_
+  format` (the same cheap, execution-free classifier `compile_db_from_
+  build_info` already uses, so the two cannot disagree) reports as `"pack"`
+  or `"bazel_aquery"`/`"bazel_cquery"`, returning the `--build-info` path
+  itself as the guard's non-`None` signal (the guard only ever checks
+  `is None`, so this needs no literal compile-database content).
+  `compile_db_filter_scope_error`'s docstring, which had explicitly claimed
+  the opposite ("a pack or Bazel jsonproto routes through a different
+  adapter" → `None`, i.e. by design out of scope), was corrected alongside
+  the fix — that claim was the bug's own design rationale, not a separate
+  error. **Still not covered, and not attempted here**: a `--sources` tree
+  with no discoverable `compile_commands.json` at all, resolved instead
+  through the zero-config *inferred* build-system query (cmake/make/bazel).
+  Unlike the pack/Bazel-jsonproto case, telling whether that combination
+  would actually resolve multiple compile units means running the build
+  system's own query — the exact side effect this cheap, read-only scope
+  check exists to avoid paying twice per invocation (once to check, once for
+  real) — so this residual is documented rather than guessed at, per this
+  file's own "known gaps over risky reactive patches" convention. Regression
+  coverage: `TestScopeGuardCoversPackAndBazelBuildInfo` in
+  `tests/test_compile_db_filter_scope.py` (the predicate directly — pack
+  directory, both Bazel jsonproto shapes, both positive and negative
+  controls, plus a plain non-pack directory and a non-Bazel JSON-object file
+  confirmed to still resolve `None`; five of nine cases confirmed to fail
+  against the pre-fix guard).
+
   **A real regression the scan-migration paragraph above introduced, found
   by Codex review and fixed the same session (2026-08-21): `scan --config
   <path>` silently lost the config's own *passive* settings whenever the

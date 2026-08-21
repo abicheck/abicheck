@@ -888,3 +888,143 @@ class TestScopeGuardCoversNestedBuildInfoDatabases:
             f.name for t in result.snapshot.types if t.name == "S" for f in t.fields
         ]
         assert "b" in fields, fields  # a.cpp's -DWIDE field, confirms narrowing
+
+
+class TestScopeGuardCoversPackAndBazelBuildInfo:
+    """Codex review, P1 (a sixth finding on the same guard): the fold's own
+    ``resolve_header_compile_context``/``filter_units_by_source`` narrows
+    *whatever* ``BuildEvidence.compile_units`` a ``--build-info`` resolves
+    to -- not only a literal ``compile_commands.json``. A ``--build-info``
+    naming a pre-captured ``collect`` pack directory, or a Bazel
+    ``aquery``/``cquery`` jsonproto, resolves compile units the identical
+    way and is embedded at L3 with no filter either way -- so the guard's
+    original ``compile_db_from_build_info``-only check (which deliberately
+    returns ``None`` for both, since neither is a literal compile database)
+    silently let the exact filtered-L2/unfiltered-L3 mismatch through for
+    both shapes. These tests exercise the pure predicate directly -- no
+    compiler needed, since the guard is a read-only classification over
+    ``--build-info``'s own path shape.
+    """
+
+    @staticmethod
+    def _pack_dir(tmp_path: Path) -> Path:
+        pack = tmp_path / "pack"
+        pack.mkdir()
+        (pack / "manifest.json").write_text(
+            json.dumps({"build_source_pack_version": 1}), encoding="utf-8"
+        )
+        return pack
+
+    @staticmethod
+    def _bazel_aquery_file(tmp_path: Path) -> Path:
+        path = tmp_path / "aquery.json"
+        path.write_text(json.dumps({"actions": [], "artifacts": []}), encoding="utf-8")
+        return path
+
+    @staticmethod
+    def _bazel_cquery_file(tmp_path: Path) -> Path:
+        path = tmp_path / "cquery.json"
+        path.write_text(json.dumps({"results": []}), encoding="utf-8")
+        return path
+
+    def test_pack_directory_is_recognized(self, tmp_path: Path) -> None:
+        from abicheck.header_conditionals import compile_db_for_filter_scope_check
+
+        pack = self._pack_dir(tmp_path)
+        resolved = compile_db_for_filter_scope_check(pack, None, (tmp_path / "api.h",))
+        assert resolved == pack
+
+    def test_bazel_aquery_file_is_recognized(self, tmp_path: Path) -> None:
+        from abicheck.header_conditionals import compile_db_for_filter_scope_check
+
+        aquery = self._bazel_aquery_file(tmp_path)
+        resolved = compile_db_for_filter_scope_check(
+            aquery, None, (tmp_path / "api.h",)
+        )
+        assert resolved == aquery
+
+    def test_bazel_cquery_file_is_recognized(self, tmp_path: Path) -> None:
+        from abicheck.header_conditionals import compile_db_for_filter_scope_check
+
+        cquery = self._bazel_cquery_file(tmp_path)
+        resolved = compile_db_for_filter_scope_check(
+            cquery, None, (tmp_path / "api.h",)
+        )
+        assert resolved == cquery
+
+    def test_pack_directory_triggers_the_scope_error(self, tmp_path: Path) -> None:
+        from abicheck.header_conditionals import (
+            compile_db_filter_scope_error,
+            compile_db_for_filter_scope_check,
+        )
+
+        pack = self._pack_dir(tmp_path)
+        resolved = compile_db_for_filter_scope_check(pack, None, (tmp_path / "api.h",))
+        error = compile_db_filter_scope_error("foo.cpp", resolved, "build")
+        assert error is not None
+        assert "--compile-db-filter" in error
+
+    def test_bazel_jsonproto_triggers_the_scope_error(self, tmp_path: Path) -> None:
+        from abicheck.header_conditionals import (
+            compile_db_filter_scope_error,
+            compile_db_for_filter_scope_check,
+        )
+
+        aquery = self._bazel_aquery_file(tmp_path)
+        resolved = compile_db_for_filter_scope_check(
+            aquery, None, (tmp_path / "api.h",)
+        )
+        error = compile_db_filter_scope_error("foo.cpp", resolved, "build")
+        assert error is not None
+
+    def test_no_filter_pack_directory_is_unaffected(self, tmp_path: Path) -> None:
+        """Control: the guard only fires when a filter is actually set."""
+        from abicheck.header_conditionals import (
+            compile_db_filter_scope_error,
+            compile_db_for_filter_scope_check,
+        )
+
+        pack = self._pack_dir(tmp_path)
+        resolved = compile_db_for_filter_scope_check(pack, None, (tmp_path / "api.h",))
+        assert compile_db_filter_scope_error(None, resolved, "build") is None
+
+    def test_collect_mode_off_pack_directory_is_unaffected(
+        self, tmp_path: Path
+    ) -> None:
+        """Control: no L3 embed at ``collect_mode == "off"``, nothing to
+        mismatch against."""
+        from abicheck.header_conditionals import (
+            compile_db_filter_scope_error,
+            compile_db_for_filter_scope_check,
+        )
+
+        pack = self._pack_dir(tmp_path)
+        resolved = compile_db_for_filter_scope_check(pack, None, (tmp_path / "api.h",))
+        assert compile_db_filter_scope_error("foo.cpp", resolved, "off") is None
+
+    def test_a_plain_non_pack_directory_is_still_a_build_dir_search(
+        self, tmp_path: Path
+    ) -> None:
+        """A directory that is not a pack (no manifest.json, or one lacking
+        the BuildSourcePack marker) must still fall through to the ordinary
+        nested-compile-db search / sources auto-discovery, not be
+        misclassified as a pack."""
+        from abicheck.header_conditionals import compile_db_for_filter_scope_check
+
+        plain_dir = tmp_path / "not_a_pack"
+        plain_dir.mkdir()
+        resolved = compile_db_for_filter_scope_check(
+            plain_dir, None, (tmp_path / "api.h",)
+        )
+        assert resolved is None
+
+    def test_a_non_bazel_json_object_file_is_unrecognized(self, tmp_path: Path) -> None:
+        """An ordinary JSON-object build-info file (neither a compile-DB
+        array nor a Bazel aquery/cquery shape) must not be mistaken for
+        filterable build evidence."""
+        from abicheck.header_conditionals import compile_db_for_filter_scope_check
+
+        odd = tmp_path / "odd.json"
+        odd.write_text(json.dumps({"hello": "world"}), encoding="utf-8")
+        resolved = compile_db_for_filter_scope_check(odd, None, (tmp_path / "api.h",))
+        assert resolved is None
