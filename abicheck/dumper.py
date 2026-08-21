@@ -647,6 +647,8 @@ def _header_ast_parser(
                 fallback_reason=fallback_reason,
                 resolved_compiler=resolved_compiler,
                 resolved_force_cpp=resolved_force_cpp,
+                gcc_options=gcc_options,
+                gcc_option_tokens=gcc_option_tokens,
             ),
         )
 

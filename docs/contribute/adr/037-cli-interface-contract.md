@@ -32,7 +32,7 @@ aliases, e.g. `--depth symbols`/`--collect-mode`) is also implemented and does
 warn on stderr (see `cli_params.py`), but per that section it remains
 **advisory, not mandatory, until the 1.0 switch-on criteria are met** — old
 flags still work and nothing errors on their use yet.
-**Verified:** main@891bd9d7 on 2026-08-14
+**Verified:** main@76431d0 on 2026-08-21
 **Decision maker:** (pending)
 
 ---

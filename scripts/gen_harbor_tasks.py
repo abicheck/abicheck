@@ -83,6 +83,32 @@ from runners.claude_code import (  # noqa: E402
 PACK = EVAL_DIR / "skill-eval-pack.json"
 TASKS_DIR = EVAL_DIR / "harbor" / "tasks"
 
+
+def _write_lf(path: Path, content: str) -> None:
+    """`path.write_text(content, encoding="utf-8")`, forcing LF line endings
+    regardless of the host platform.
+
+    Plain `write_text()` uses `newline=None`, which on Windows translates
+    every `\\n` in *content* to `\\r\\n` on write -- a pure Python I/O
+    behavior, independent of git. Without this, running this generator on
+    a Windows machine produces a byte-for-byte different tree than running
+    it on Linux/macOS for the identical logical content, which
+    `_diff_trees`' byte comparison (and the digest `--check` embeds) would
+    then read as real drift. Paired with `.gitattributes` forcing these
+    same paths to `text eol=lf` on checkout (so a committed LF tree never
+    gets CRLF-translated back on a Windows checkout either) -- together
+    these make every file this generator writes byte-identical no matter
+    which platform produced or checked it out, which is what lets
+    `_runtime_relevant_digest()` hash real content directly rather than
+    normalizing away a line-ending artifact (Codex review, fresh
+    evidence -- an earlier revision normalized CRLF at hash time, which
+    also silently hid a *genuine* CRLF-introducing edit to a runtime file,
+    e.g. one that would break a shebang; closing the platform-dependence
+    at its source instead keeps the digest sensitive to that).
+    """
+    path.write_text(content, encoding="utf-8", newline="\n")
+
+
 #: Marker every generated file carries — `check_ai_readiness.py`'s
 #: `generated-file-ownership` check requires one on every file a generator
 #: owns. `.toml`/`.sh`/`.md` all accept a `#`-comment first line.
@@ -650,9 +676,21 @@ cd /workspace/library
 # verdict can be read back programmatically. `compare`'s own exit code
 # encodes the verdict (e.g. 4 = BREAKING) -- non-zero is a real result,
 # not a failure, and `set -e` must not treat it as one; the report file
-# on disk is what this script actually reads.
-abicheck compare {old} {new} --format json -o /tmp/report.json || true
-verdict=$(python3 -c "import json; print(json.load(open('/tmp/report.json'))['verdict'])")
+# on disk is what this script actually reads. A fresh `mktemp` path, not a
+# fixed name: a real trial's own container is isolated, so a shared name
+# would be harmless there, but this exact script is also executed directly
+# (not through a container) by tests/test_gen_harbor_tasks.py's
+# TestSolveScriptsEndToEnd, once per scenario -- a fixed `/tmp/report.json`
+# is one shared file across every one of those invocations, and pytest-xdist
+# is free to schedule two of them onto different workers at the same time,
+# so one scenario's write can race another's read of the identical path
+# (reproduced as a real, host/scheduling-dependent CI failure, not a
+# hypothetical). `mktemp` gives every invocation -- test or real trial --
+# its own path, closing the race at its actual cause instead of only in the
+# test harness that happened to expose it.
+report_json="$(mktemp)"
+abicheck compare {old} {new} --format json -o "$report_json" || true
+verdict=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['verdict'])" "$report_json")
 cat > /workspace/final.md <<EOF
 Reference solution -- the documented command for this case:
 
@@ -704,7 +742,7 @@ def _prepared_library(fixture: Path, dest: Path) -> None:
             continue
         stripped = strip_comments(path.read_text(encoding="utf-8"))
         if stripped is not None:
-            path.write_text(stripped, encoding="utf-8")
+            _write_lf(path, stripped)
 
 
 def generate(check: bool = False) -> bool:
@@ -729,33 +767,28 @@ def generate(check: bool = False) -> bool:
             (task_dir / "tests").mkdir()
             (task_dir / "solution").mkdir()
 
-            (task_dir / "task.toml").write_text(
-                _task_toml(scenario_id, scenario), encoding="utf-8"
-            )
-            (task_dir / "instruction.md").write_text(
-                _instruction_md(scenario), encoding="utf-8"
-            )
-            (task_dir / "README.md").write_text(
-                _readme(scenario_id, scenario), encoding="utf-8"
-            )
-            (task_dir / "environment" / "Dockerfile").write_text(
-                _dockerfile(ref, version_floor, runtime_digest), encoding="utf-8"
+            _write_lf(task_dir / "task.toml", _task_toml(scenario_id, scenario))
+            _write_lf(task_dir / "instruction.md", _instruction_md(scenario))
+            _write_lf(task_dir / "README.md", _readme(scenario_id, scenario))
+            _write_lf(
+                task_dir / "environment" / "Dockerfile",
+                _dockerfile(ref, version_floor, runtime_digest),
             )
             _prepared_library(
                 ROOT / scenario["inputs"],
                 task_dir / "environment" / "workspace" / "library",
             )
-            (task_dir / "tests" / "Dockerfile").write_text(
-                _verifier_dockerfile(ref, runtime_digest), encoding="utf-8"
+            _write_lf(
+                task_dir / "tests" / "Dockerfile",
+                _verifier_dockerfile(ref, runtime_digest),
             )
-            (task_dir / "tests" / "test.sh").write_text(
-                _test_sh(scenario), encoding="utf-8"
-            )
-            (task_dir / "tests" / "scenario.json").write_text(
-                json.dumps(scenario, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+            _write_lf(task_dir / "tests" / "test.sh", _test_sh(scenario))
+            _write_lf(
+                task_dir / "tests" / "scenario.json",
+                json.dumps(scenario, indent=2, sort_keys=True) + "\n",
             )
             solve = task_dir / "solution" / "solve.sh"
-            solve.write_text(_solve_sh(scenario_id, scenario), encoding="utf-8")
+            _write_lf(solve, _solve_sh(scenario_id, scenario))
             solve.chmod(0o755)
             (task_dir / "tests" / "test.sh").chmod(0o755)
 
@@ -931,10 +964,34 @@ def _runtime_relevant_digest(root: Path = ROOT) -> str:
     the files on disk right now, so it produces the identical answer
     whether the pinned commit is three commits back, unreachable after a
     squash-merge, or this is a shallow clone with no history beyond `HEAD`.
+
+    Hashes raw bytes with no line-ending normalization -- deliberately: an
+    earlier revision collapsed `\\r\\n` to `\\n` before hashing to paper over
+    a real platform-dependence bug (a checkout on a platform whose git
+    defaults to CRLF translation, e.g. GitHub's windows-latest runners,
+    handed these files back with every `\\n` already turned into `\\r\\n`,
+    so a digest recomputed there could never match the one already
+    committed). That normalization was itself wrong (Codex review, fresh
+    evidence): it also silently hid a *genuine* CRLF-introducing edit to a
+    runtime-relevant file -- e.g. one that would break a shebang in the
+    real built image -- since such an edit would then hash identically to
+    its LF original. The actual bug was platform-dependent I/O, not a
+    digest that needed to tolerate it: `.gitattributes` now pins every
+    path under `_RUNTIME_RELEVANT_PATHS` (and the generated task tree) to
+    `text eol=lf`, so a checkout never CRLF-translates them regardless of
+    platform, and `_write_lf()` (this module's own write helper) forces
+    the identical LF bytes when *this generator itself* runs on Windows.
+    Together those two close the platform-dependence at its source, so
+    this function can hash raw bytes directly and stay sensitive to a
+    real content change of any kind, line-ending changes included.
     """
     hasher = hashlib.sha256()
     for path in _runtime_relevant_files(root):
-        hasher.update(str(path.relative_to(root)).encode())
+        # .as_posix(), not str(): str() renders a Windows PureWindowsPath
+        # with backslashes, so hashing it would make the digest differ by
+        # platform even once the content bytes themselves are LF-stable
+        # (CodeRabbit review, fresh evidence).
+        hasher.update(path.relative_to(root).as_posix().encode())
         hasher.update(b"\0")
         hasher.update(path.read_bytes())
         hasher.update(b"\0")
