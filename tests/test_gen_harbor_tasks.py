@@ -83,36 +83,101 @@ class TestGeneratorCheck:
         monkeypatch.setattr(gen, "_abicheck_ref", lambda: "f" * 40)
         assert gen.generate(check=True) is True
 
-    def test_ref_drift_tolerance_requires_no_runtime_relevant_change(self):
-        """`_ref_drift_is_tolerable` must answer from a real `git diff`, not
-        blindly trust any ref difference -- the gap a first version of the
-        `--check` normalization had (Codex review, fresh evidence, second
-        round): a real change to `graders/`/the shim/`verify_run.py` with
-        no accompanying regeneration would otherwise pass `--check` while
-        every committed task kept cloning the stale revision. The repo's
-        own root commit (verified above to predate `graders/` entirely)
-        is real, reachable history, not a synthetic fixture."""
-        root_commit = "af2f40acaee9a28fa55b058e65b01d9999fddb2c"
-        assert gen._ref_drift_is_tolerable(root_commit) is False
-        # The tolerable case, from the same real function: diffing a ref
-        # against itself is always empty.
-        head = subprocess.run(
-            ["git", "rev-parse", "HEAD"],
-            cwd=ROOT,
-            capture_output=True,
-            text=True,
-            check=True,
-        ).stdout.strip()
-        assert gen._ref_drift_is_tolerable(head) is True
-        assert gen._ref_drift_is_tolerable(None) is True
+    def test_runtime_relevant_digest_is_deterministic_and_content_sensitive(
+        self, tmp_path
+    ):
+        """`_runtime_relevant_digest` must answer from real file content, not
+        a commit reference resolved through git history -- that's the whole
+        point of replacing the old `git rev-parse --verify`/`git diff
+        --name-only`-based check, which stopped working the instant the
+        pinned commit became unreachable (this repo's PRs squash-merge, so
+        a source branch's own commits do not outlive its merge). Built
+        against a synthetic tree mirroring `_RUNTIME_RELEVANT_PATHS`, not
+        this repo's real `graders/`, so the test doesn't depend on their
+        current content."""
+        root_a = tmp_path / "a"
+        root_b = tmp_path / "b"
+        for root in (root_a, root_b):
+            (root / "agent-evals" / "skills" / "graders").mkdir(parents=True)
+            (root / "agent-evals" / "skills" / "shim").mkdir(parents=True)
+            (root / "agent-evals" / "skills" / "harbor").mkdir(parents=True)
+            (root / "agent-evals" / "skills" / "graders" / "dimensions.py").write_text(
+                "x = 1\n", encoding="utf-8"
+            )
+            (root / "agent-evals" / "skills" / "shim" / "abicheck").write_text(
+                "#!/bin/sh\n", encoding="utf-8"
+            )
+            (root / "agent-evals" / "skills" / "harbor" / "verify_run.py").write_text(
+                "pass\n", encoding="utf-8"
+            )
+        # Identical content, two different roots -- the digest must agree.
+        assert gen._runtime_relevant_digest(root_a) == gen._runtime_relevant_digest(
+            root_b
+        )
+        # A real change to a runtime-relevant file must move the digest --
+        # this is the signal that replaces "is the pinned ref reachable and
+        # does `git diff` against it show anything under these paths".
+        (root_b / "agent-evals" / "skills" / "graders" / "dimensions.py").write_text(
+            "x = 2\n", encoding="utf-8"
+        )
+        assert gen._runtime_relevant_digest(root_a) != gen._runtime_relevant_digest(
+            root_b
+        )
 
-    def test_check_catches_a_stale_ref_with_real_grader_drift_behind_it(self):
-        """End-to-end proof, not just the unit-level check above: pinning
-        every committed Dockerfile to a real, historical ref that predates
-        `graders/` makes `--check` fail rather than silently normalizing
-        the difference away. Every Dockerfile, not just one -- `_extract_
-        committed_ref` reads whichever sorts first, so patching a single
-        file the scan doesn't happen to pick would leave it invisible."""
+    def test_old_reachability_design_crashed_on_a_genuinely_unresolvable_ref(self):
+        """Pins the actual failure the digest redesign replaced -- not
+        merely a wrong answer, an unhandled crash. Replays the old
+        function's exact body (removed from the module) against a
+        fabricated 40-hex-char string that is not any real object in this
+        repository: `git rev-parse --verify -q` does not reliably fail for
+        a syntactically valid SHA-shaped string (confirmed directly --
+        it can report success without the object existing), so the
+        subsequent `git diff --name-only <ref>..HEAD` call, run with
+        `check=True`, raised `CalledProcessError` instead of the intended
+        graceful "not tolerable" answer (Codex review, third round)."""
+        import subprocess as _subprocess
+
+        def _old_ref_drift_is_tolerable(committed_ref):
+            if committed_ref is None:
+                return True
+            verify = _subprocess.run(
+                ["git", "rev-parse", "--verify", "-q", committed_ref],
+                cwd=ROOT,
+                capture_output=True,
+                text=True,
+            )
+            if verify.returncode != 0:
+                return False
+            diff = _subprocess.run(
+                [
+                    "git",
+                    "diff",
+                    "--name-only",
+                    f"{committed_ref}..HEAD",
+                    "--",
+                    *gen._RUNTIME_RELEVANT_PATHS,
+                ],
+                cwd=ROOT,
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            return not diff.stdout.strip()
+
+        fabricated_ref = "e" * 40
+        with pytest.raises(_subprocess.CalledProcessError):
+            _old_ref_drift_is_tolerable(fabricated_ref)
+
+    def test_check_survives_an_unreachable_pinned_ref_with_unchanged_content(self):
+        """The exact scenario the digest redesign exists for: after a
+        squash-merge, the commit pinned in an already-committed Dockerfile
+        is not reachable from this checkout's history at all (its source
+        branch's own commits don't survive the merge) -- but nothing under
+        `_RUNTIME_RELEVANT_PATHS` actually changed, so `--check` must still
+        pass without ever asking git to resolve the pinned ref (the
+        previous design crashed outright on exactly this input -- see
+        `test_old_reachability_design_crashed_on_a_genuinely_unresolvable_ref`
+        immediately above)."""
         import re as _re
 
         dockerfiles = sorted(TASKS_DIR.rglob("environment/Dockerfile"))
@@ -122,7 +187,33 @@ class TestGeneratorCheck:
                 p.write_text(
                     _re.sub(
                         r"ARG ABICHECK_REF=[0-9a-f]{40}",
-                        "ARG ABICHECK_REF=af2f40acaee9a28fa55b058e65b01d9999fddb2c",
+                        # A ref this checkout's local git history has never
+                        # heard of -- not a real commit anywhere.
+                        "ARG ABICHECK_REF=" + "e" * 40,
+                        text,
+                    ),
+                    encoding="utf-8",
+                )
+            assert gen.generate(check=True) is True
+        finally:
+            for p, text in originals.items():
+                p.write_text(text, encoding="utf-8")
+
+    def test_check_catches_a_stale_digest_with_real_grader_drift_behind_it(self):
+        """End-to-end proof that a real, un-regenerated change under
+        `_RUNTIME_RELEVANT_PATHS` still fails `--check`, now signaled via the
+        embedded digest rather than git history. Every Dockerfile, not just
+        one -- a stale digest on any single one must still be caught."""
+        import re as _re
+
+        dockerfiles = sorted(TASKS_DIR.rglob("environment/Dockerfile"))
+        originals = {p: p.read_text(encoding="utf-8") for p in dockerfiles}
+        try:
+            for p, text in originals.items():
+                p.write_text(
+                    _re.sub(
+                        r"# ABICHECK_RUNTIME_DIGEST=[0-9a-f]{64}",
+                        "# ABICHECK_RUNTIME_DIGEST=" + "0" * 64,
                         text,
                     ),
                     encoding="utf-8",
