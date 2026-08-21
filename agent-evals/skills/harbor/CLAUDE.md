@@ -120,9 +120,18 @@ harbor run -a claude-code -m claude-sonnet-5 \
 # *running* container after the image has already started, entirely outside
 # the Docker build -- a complete no-op for a baseline trial that never
 # passes `--skill` at all. Still untested against a real trial in this
-# repository -- see the caveats above:
+# repository -- see the caveats above.
+#
+# ALWAYS pin `@ref` to the exact commit the task's own environment image is
+# pinned to (Codex review, fresh evidence): omitting it lets Harbor resolve
+# the skill against the coordinate's default branch, which can drift between
+# runs and, more importantly, need not be the revision the task's own
+# `environment/Dockerfile` cloned `abicheck` from -- silently comparing the
+# treatment from one commit against the harness from another and invalidating
+# the A/B result. Read the matching ref straight off the generated task:
+#   grep '^ARG ABICHECK_REF=' agent-evals/skills/harbor/tasks/removed-export/environment/Dockerfile
 harbor run -a claude-code -m claude-sonnet-5 \
-  --skill abicheck/abicheck:.claude/skills/check-abi-compatibility \
+  --skill abicheck/abicheck:.claude/skills/check-abi-compatibility@<ABICHECK_REF from above> \
   -c agent-evals/skills/harbor/tasks/removed-export
 ```
 
