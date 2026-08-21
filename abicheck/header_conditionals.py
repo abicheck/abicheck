@@ -1127,6 +1127,19 @@ def compile_db_for_filter_scope_check(
             "bazel_cquery",
         ):
             return build_info
+        # Codex review, fresh evidence (an eighth finding): an explicit
+        # --build-info that resolves to none of the above must NOT fall
+        # through to sources auto-discovery. buildsource.inline.
+        # _resolve_compile_db's own `explicit_input_missed` logic returns
+        # None as soon as a given --build-info misses -- deliberately,
+        # per its own comment, "surface that miss rather than masking it
+        # with a stale auto-discovered DB ... checked BEFORE
+        # auto-discovery" -- so neither the real L2 fold nor the L3 embed
+        # ever falls back to a sources-discovered database in this case.
+        # Falling back here (the pre-fix behavior) produced a false
+        # positive: rejecting a --compile-db-filter combination the real
+        # resolvers wouldn't actually apply it to either side of.
+        return None
     # Codex review, fresh evidence: a --sources pack (classic BuildSourcePack or
     # Flow-2 abicheck_inputs/) carries its own normalized BuildEvidence, which
     # buildsource.l2_seed._l2_seed_pack_inputs folds into L2 seeding exactly

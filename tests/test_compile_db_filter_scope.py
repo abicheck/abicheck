@@ -1129,3 +1129,72 @@ class TestScopeGuardCoversSourcesPacks:
             None, plain_tree, (tmp_path / "api.h",)
         )
         assert resolved is None
+
+
+class TestScopeGuardDoesNotFallBackToSourcesWhenBuildInfoMisses:
+    """Codex review, P2 (an eighth finding): the seventh finding's fix made
+    every branch fall through unconditionally to the sources-based checks
+    once none of the ``build_info`` branches matched -- but
+    ``buildsource.inline._resolve_compile_db``'s own ``explicit_input_
+    missed`` logic (the real function every one of these seeded resolvers
+    ultimately calls) returns ``None`` as soon as a *given* ``build_info``
+    misses, deliberately, per its own comment: "surface that miss rather
+    than masking it with a stale auto-discovered DB ... checked BEFORE
+    auto-discovery". So an explicit ``--build-info`` that doesn't resolve
+    to anything recognizable means neither the real L2 fold nor the L3
+    embed ever falls back to a ``sources``-discovered database -- falling
+    back in the guard produced a false positive, rejecting a
+    ``--compile-db-filter`` combination the real resolvers wouldn't
+    actually apply to either side of. Pure predicate tests, no compiler
+    needed for the unrecognized-build_info half; the auto-discoverable-
+    sources half reuses the real g++/clang project fixture to prove the
+    combination the guard now permits is genuinely one the real fold
+    ignores ``sources`` for.
+    """
+
+    def test_unresolvable_build_info_does_not_fall_back_to_sources_auto_discovery(
+        self, tmp_path: Path
+    ) -> None:
+        from abicheck.header_conditionals import compile_db_for_filter_scope_check
+
+        unrelated_build_info = tmp_path / "not_a_pack_or_db"
+        unrelated_build_info.mkdir()
+        sources = tmp_path / "sources"
+        sources.mkdir()
+        (sources / "compile_commands.json").write_text("[]", encoding="utf-8")
+        resolved = compile_db_for_filter_scope_check(
+            unrelated_build_info, sources, (tmp_path / "api.h",)
+        )
+        assert resolved is None
+
+    @pytest.mark.integration
+    @pytest.mark.skipif(
+        not sys.platform.startswith("linux"),
+        reason="ELF/Linux-scoped repro (real g++-compiled .so + compile_commands.json)",
+    )
+    @pytest.mark.skipif(
+        not (_HAVE_GXX and _HAVE_CLANG), reason="needs a real g++ and clang toolchain"
+    )
+    def test_an_unresolvable_build_info_alongside_a_real_sources_db_is_unaffected(
+        self, tmp_path: Path
+    ) -> None:
+        """Positive control against the real g++/clang project: with a
+        genuinely unresolvable ``--build-info`` alongside a ``--sources``
+        tree that *does* auto-discover a real compile database, the guard
+        must not reject the request -- confirming the fix isn't merely
+        unit-testing the predicate in isolation."""
+        from abicheck.header_conditionals import (
+            compile_db_filter_scope_error,
+            compile_db_for_filter_scope_check,
+        )
+
+        _so_path, header, _compile_db = TestDumpCliHonorsTheFilterInTheFold._project(
+            tmp_path
+        )
+        unrelated_build_info = tmp_path / "not_a_pack_or_db"
+        unrelated_build_info.mkdir()
+        resolved = compile_db_for_filter_scope_check(
+            unrelated_build_info, header.parent, (header,)
+        )
+        assert resolved is None
+        assert compile_db_filter_scope_error("a.cpp", resolved, "build") is None

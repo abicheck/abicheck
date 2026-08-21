@@ -5045,6 +5045,36 @@ Once a root command genuinely clears the bar above, pick the right home:
   auto-discovery; three of six cases confirmed to fail against the pre-fix
   guard).
 
+  **An eighth finding (Codex review, fresh evidence) — not a missing case
+  this time, but a genuine false positive the seventh finding's fix
+  introduced.** That fix restructured the function so every branch fell
+  through unconditionally to the `sources`-based checks once none of the
+  `build_info` branches matched — including the case where `build_info`
+  was genuinely given but resolved to nothing recognizable. That is wrong:
+  `buildsource.inline._resolve_compile_db` — the real function every one
+  of these seeded resolvers (`collect_inline_pack`, in turn called by
+  `seed_includes_and_fold_compile_context`/`embed_build_source` alike)
+  ultimately calls — tracks `explicit_input_missed` and returns `None` as
+  soon as a *given* `--build-info` misses, deliberately, per its own
+  comment: "surface that miss rather than masking it with a stale
+  auto-discovered DB ... checked BEFORE auto-discovery." So an explicit
+  `--build-info` that doesn't resolve means neither the real L2 fold nor
+  the L3 embed ever falls back to a `sources`-discovered database — falling
+  back in the guard (the post-seventh-finding behavior) produced a false
+  positive: rejecting a `--compile-db-filter` combination the real
+  resolvers wouldn't actually apply to either side of, a usage error for a
+  perfectly safe invocation. Fixed by returning `None` immediately once the
+  `build_info is not None` branch exhausts its own checks, before ever
+  reaching the `sources`-based fallbacks — matching `_resolve_compile_db`'s
+  own precedence exactly. Regression
+  coverage: `TestScopeGuardDoesNotFallBackToSourcesWhenBuildInfoMisses` in
+  `tests/test_compile_db_filter_scope.py` — a pure-predicate case (an
+  unresolvable `build_info` alongside a `sources` tree carrying a real,
+  auto-discoverable `compile_commands.json`, confirmed to fail against the
+  post-seventh-finding code) plus a positive control against the real
+  g++/clang project fixture, confirming the guard doesn't reject a genuinely
+  safe combination.
+
   **A real regression the scan-migration paragraph above introduced, found
   by Codex review and fixed the same session (2026-08-21): `scan --config
   <path>` silently lost the config's own *passive* settings whenever the

@@ -45,3 +45,13 @@
   pack directory doesn't carry at its root, so the mismatch reproduced with
   no error. Fixed on the CLI and the typed `DumpRequest`/`CompareRequest`
   API alike.
+- **`dump --compile-db-filter --build-info <path>` combined with a
+  `--sources` tree no longer raises a false-positive scope-mismatch error
+  when `--build-info` itself doesn't resolve to anything.** A fix earlier in
+  this same release made the scope check fall back to `--sources` whenever
+  none of the `--build-info` checks matched — including when `--build-info`
+  was genuinely given but unresolvable, which is wrong: the real L2 fold and
+  L3 embed both surface that miss rather than silently falling back to a
+  `--sources`-discovered database instead. Fixed by returning cleanly (no
+  usage error) once an explicit, given `--build-info` resolves to nothing,
+  matching the real resolver's own precedence.
