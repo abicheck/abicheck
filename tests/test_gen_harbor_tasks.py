@@ -83,6 +83,55 @@ class TestGeneratorCheck:
         monkeypatch.setattr(gen, "_abicheck_ref", lambda: "f" * 40)
         assert gen.generate(check=True) is True
 
+    def test_ref_drift_tolerance_requires_no_runtime_relevant_change(self):
+        """`_ref_drift_is_tolerable` must answer from a real `git diff`, not
+        blindly trust any ref difference -- the gap a first version of the
+        `--check` normalization had (Codex review, fresh evidence, second
+        round): a real change to `graders/`/the shim/`verify_run.py` with
+        no accompanying regeneration would otherwise pass `--check` while
+        every committed task kept cloning the stale revision. The repo's
+        own root commit (verified above to predate `graders/` entirely)
+        is real, reachable history, not a synthetic fixture."""
+        root_commit = "af2f40acaee9a28fa55b058e65b01d9999fddb2c"
+        assert gen._ref_drift_is_tolerable(root_commit) is False
+        # The tolerable case, from the same real function: diffing a ref
+        # against itself is always empty.
+        head = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+        assert gen._ref_drift_is_tolerable(head) is True
+        assert gen._ref_drift_is_tolerable(None) is True
+
+    def test_check_catches_a_stale_ref_with_real_grader_drift_behind_it(self):
+        """End-to-end proof, not just the unit-level check above: pinning
+        every committed Dockerfile to a real, historical ref that predates
+        `graders/` makes `--check` fail rather than silently normalizing
+        the difference away. Every Dockerfile, not just one -- `_extract_
+        committed_ref` reads whichever sorts first, so patching a single
+        file the scan doesn't happen to pick would leave it invisible."""
+        import re as _re
+
+        dockerfiles = sorted(TASKS_DIR.rglob("environment/Dockerfile"))
+        originals = {p: p.read_text(encoding="utf-8") for p in dockerfiles}
+        try:
+            for p, text in originals.items():
+                p.write_text(
+                    _re.sub(
+                        r"ARG ABICHECK_REF=[0-9a-f]{40}",
+                        "ARG ABICHECK_REF=af2f40acaee9a28fa55b058e65b01d9999fddb2c",
+                        text,
+                    ),
+                    encoding="utf-8",
+                )
+            assert gen.generate(check=True) is False
+        finally:
+            for p, text in originals.items():
+                p.write_text(text, encoding="utf-8")
+
     def test_check_still_catches_a_real_dockerfile_edit(self):
         """The normalization above must not swallow a genuine content
         change -- only the one line it's scoped to."""
@@ -255,19 +304,26 @@ class TestArchitectureGuard:
         )
         return proc, logs
 
-    def test_mismatched_architecture_short_circuits_with_reward_zero(self, tmp_path):
+    def test_mismatched_architecture_exits_nonzero_without_writing_a_reward(
+        self, tmp_path
+    ):
+        """No reward file at all -- verified against the real `harbor`
+        package's own `Verifier.verify()` (not guessed): with neither
+        `reward.txt` nor `reward.json` present, it raises
+        `RewardFileNotFoundError`, which `TrialResult` records as
+        `exception_info` on a trial whose `verifier_result` stays `None` --
+        structurally distinct from a real, scored 0. A written `reward=0`
+        (the guard's first version) would count an environment mismatch as
+        a failed agent trial in every arm on a non-x86_64 host, depressing
+        aggregate scores (Codex review, fresh evidence, second round)."""
         proc, logs = self._run_with_fake_uname(
             tmp_path, "evidence-too-shallow", "aarch64"
         )
-        assert proc.returncode == 0, proc.stderr
-        assert (logs / "reward.txt").read_text(encoding="utf-8").strip() == "0"
-        payload = json.loads((logs / "reward.json").read_text(encoding="utf-8"))
-        assert payload == {
-            "reward": 0,
-            "error": "architecture_mismatch",
-            "host_architecture": "arm64",
-            "required_architectures": ["x86_64"],
-        }
+        assert proc.returncode == 1
+        assert not logs.exists() or not any(logs.iterdir())
+        assert "architecture_mismatch" in proc.stderr
+        assert "arm64" in proc.stderr
+        assert "x86_64" in proc.stderr
 
     def test_matching_architecture_falls_through_to_the_real_verifier(self, tmp_path):
         # Falls through past the guard and fails only because

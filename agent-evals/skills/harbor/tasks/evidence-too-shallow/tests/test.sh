@@ -10,10 +10,9 @@ esac
 case " x86_64 " in
     *" $host_arch "*) ;;
     *)
-        mkdir -p /logs/verifier
-        echo 0 > /logs/verifier/reward.txt
-        python3 -c "import json; json.dump({'reward': 0, 'error': 'architecture_mismatch', 'host_architecture': '$host_arch', 'required_architectures': ['x86_64']}, open('/logs/verifier/reward.json', 'w'))"
-        exit 0
+        python3 -c "import json,sys; print('architecture_mismatch: host is ' + sys.argv[1] + ', task requires one of ' + repr(json.loads(sys.argv[2])), file=sys.stderr)" \
+            "$host_arch" '["x86_64"]'
+        exit 1
         ;;
 esac
 

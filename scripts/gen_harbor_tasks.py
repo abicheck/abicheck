@@ -289,15 +289,30 @@ def _test_sh(scenario: dict) -> str:
         # scheduled the trial on -- no cross-platform Docker emulation is
         # assumed or handled here.
         allowed_shell = " ".join(architectures)  # plain identifiers, no quoting needed
-        # A Python list literal built with `repr()`, not `json.dumps()`: the
-        # latter's double-quoted strings would prematurely close the outer
-        # bash double-quoted `python3 -c "..."` argument the instant an
-        # unescaped `"` appears inside it (reproduced directly: the closing
-        # `"` of `["x86_64"]` ended the shell string early, leaving a bare
-        # `x86_64` token concatenated back in as literal Python source and
-        # raising `NameError: name 'x86_64' is not defined`). `repr()`'s
-        # single-quoted strings never collide with the outer double quotes.
-        allowed_py_list = "[" + ", ".join(repr(a) for a in architectures) + "]"
+        # The JSON list is passed as its own argv token (single-quoted on
+        # the bash side, `json.loads()`'d on the python side), never spliced
+        # into the double-quoted `python3 -c "..."` string itself -- an
+        # earlier version of this guard did the latter and reproducibly
+        # broke: the embedded list's own `"` characters prematurely closed
+        # the outer bash double-quoted argument, leaving a bare `x86_64`
+        # token concatenated back in as literal Python source
+        # (`NameError: name 'x86_64' is not defined`).
+        #
+        # Deliberately writes NO reward file at all on a mismatch, rather
+        # than a scored `reward=0` -- verified directly against the real
+        # `harbor` package's own `Verifier.verify()`: when neither
+        # `reward.txt` nor `reward.json` exists it raises
+        # `RewardFileNotFoundError`, which `TrialResult`/`StepResult`
+        # record as `exception_info` on a trial whose `verifier_result`
+        # stays `None` -- structurally distinct from a real, scored 0. A
+        # written `reward=0` (the first version of this guard) would have
+        # counted an environment mismatch as a failed agent trial in every
+        # arm on a non-x86_64 Harbor host, depressing aggregate scores and
+        # eliminating this scenario's own intended measurement (Codex
+        # review, fresh evidence, second round). `set -euo pipefail` above
+        # means the plain `exit 1` here is enough on its own; the
+        # diagnostic before it is for a human reading the trial's own
+        # stdout, not for Harbor's own scoring.
         arch_guard = f"""
 host_arch="$(uname -m)"
 case "$host_arch" in
@@ -306,10 +321,9 @@ esac
 case " {allowed_shell} " in
     *" $host_arch "*) ;;
     *)
-        mkdir -p /logs/verifier
-        echo 0 > /logs/verifier/reward.txt
-        python3 -c "import json; json.dump({{'reward': 0, 'error': 'architecture_mismatch', 'host_architecture': '$host_arch', 'required_architectures': {allowed_py_list}}}, open('/logs/verifier/reward.json', 'w'))"
-        exit 0
+        python3 -c "import json,sys; print('architecture_mismatch: host is ' + sys.argv[1] + ', task requires one of ' + repr(json.loads(sys.argv[2])), file=sys.stderr)" \\
+            "$host_arch" '{json.dumps(architectures)}'
+        exit 1
         ;;
 esac
 """
@@ -541,7 +555,22 @@ def generate(check: bool = False) -> bool:
         return True
 
 
-_REF_LINE = re.compile(rb"^ARG ABICHECK_REF=[0-9a-f]{40}$", re.MULTILINE)
+_REF_LINE = re.compile(rb"^ARG ABICHECK_REF=([0-9a-f]{40})$", re.MULTILINE)
+
+#: Files the built Docker image actually depends on *at runtime* --
+#: cloned fresh from git at `ARG ABICHECK_REF`, never copied into the
+#: static template text `_diff_trees` otherwise compares byte-for-byte.
+#: Scoped narrowly: `abicheck/` itself is deliberately excluded (the ref
+#: exists precisely to pin *which abicheck version* gets built, so that
+#: axis drifting is the whole point, not something to flag), and
+#: `scripts/gen_harbor_tasks.py`'s own logic changing is already caught by
+#: the ordinary byte comparison (it changes what task.toml/instruction.md/
+#: etc. actually contain).
+_RUNTIME_RELEVANT_PATHS = (
+    "agent-evals/skills/graders",
+    "agent-evals/skills/shim",
+    "agent-evals/skills/harbor/verify_run.py",
+)
 
 
 def _normalize_pinned_ref(data: bytes) -> bytes:
@@ -557,8 +586,75 @@ def _normalize_pinned_ref(data: bytes) -> bytes:
     `--check` could never pass on any commit after the one that generated
     the tree -- a real bug found by actually re-running `--check` after
     editing an unrelated file, not a hypothetical.
+
+    Only ever applied when :func:`_ref_drift_is_tolerable` says the drift
+    is the benign, self-referential kind -- see that function's docstring
+    for the real correctness gap a blanket application of this one opened
+    (Codex review, second round).
     """
     return _REF_LINE.sub(b"ARG ABICHECK_REF=<normalized-for-diff>", data)
+
+
+def _extract_committed_ref(committed: Path) -> str | None:
+    """The `ABICHECK_REF` pinned in an already-committed task tree.
+
+    Read from the first Dockerfile found -- every task in one generation
+    run shares the identical ref (one `_abicheck_ref()` call per
+    `generate()`), so any one is representative. `None` for a tree with no
+    Dockerfile yet (nothing to compare against).
+    """
+    for dockerfile in sorted(committed.rglob("environment/Dockerfile")):
+        match = _REF_LINE.search(dockerfile.read_bytes())
+        if match:
+            return match.group(1).decode()
+    return None
+
+
+def _ref_drift_is_tolerable(committed_ref: str | None) -> bool:
+    """Whether the committed ref differing from a fresh regeneration's ref
+    is the benign, self-referential kind -- HEAD moving is unavoidable and
+    expected -- rather than real staleness.
+
+    The distinction that matters: HEAD moving *at all* is not itself a
+    problem (that's the self-referential drift `_normalize_pinned_ref`
+    exists to tolerate) -- what *is* a problem is HEAD moving because
+    something the running container actually depends on changed
+    underneath the pinned ref without anyone regenerating. A first version
+    of this check normalized away *any* ref difference unconditionally,
+    which meant a real change to `graders/`/the shim/`verify_run.py` with
+    no accompanying regeneration would pass `--check` while every
+    committed task kept cloning the stale revision and grading trials with
+    outdated logic (Codex review, fresh evidence, second round). Checked
+    with a real `git diff --name-only`, not assumed.
+    """
+    if committed_ref is None:
+        return True
+    verify = subprocess.run(
+        ["git", "rev-parse", "--verify", "-q", committed_ref],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+    )
+    if verify.returncode != 0:
+        # An unresolvable ref (e.g. a hand-edited/corrupted line) can't be
+        # reasoned about -- treat as real drift rather than silently
+        # trusting it.
+        return False
+    diff = subprocess.run(
+        [
+            "git",
+            "diff",
+            "--name-only",
+            f"{committed_ref}..HEAD",
+            "--",
+            *_RUNTIME_RELEVANT_PATHS,
+        ],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return not diff.stdout.strip()
 
 
 def _diff_trees(committed: Path, generated: Path) -> list[str]:
@@ -573,9 +669,13 @@ def _diff_trees(committed: Path, generated: Path) -> list[str]:
         diffs.append(f"only in committed tree: {rel}")
     for rel in sorted(generated_files - committed_files):
         diffs.append(f"only in generated tree: {rel}")
+    tolerate_ref_drift = _ref_drift_is_tolerable(_extract_committed_ref(committed))
     for rel in sorted(committed_files & generated_files):
-        a = _normalize_pinned_ref((committed / rel).read_bytes())
-        b = _normalize_pinned_ref((generated / rel).read_bytes())
+        a = (committed / rel).read_bytes()
+        b = (generated / rel).read_bytes()
+        if tolerate_ref_drift:
+            a = _normalize_pinned_ref(a)
+            b = _normalize_pinned_ref(b)
         if a != b:
             diffs.append(f"content differs: {rel}")
     return diffs
