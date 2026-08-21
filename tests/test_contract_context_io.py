@@ -322,6 +322,20 @@ class TestResolvedConfigRoundTrip:
         decoded = resolved_config_from_dict(raw)
         assert decoded.gate.require_complete_analysis is False
 
+    def test_gate_require_complete_analysis_rejects_explicit_null(self) -> None:
+        # Codex review, fresh evidence (second round): the first decoder cut
+        # took a pre-fetched ``gate.get(key)`` value, which collapses a
+        # genuinely *absent* key (a legacy payload -- degrade to the default)
+        # and a *present* JSON ``null`` (a malformed "no value" that must be
+        # rejected, same as any other wrong-typed value) to the identical
+        # Python ``None``. A present ``null`` must raise, not silently
+        # default.
+        config = self._full_config()
+        raw = resolved_config_to_dict(config)
+        raw["gate"]["require_complete_analysis"] = None
+        with pytest.raises(TypeError, match="require_complete_analysis"):
+            resolved_config_from_dict(raw)
+
 
 class TestResolvedContextContent:
     """What the persisted context says about the run that produced it."""

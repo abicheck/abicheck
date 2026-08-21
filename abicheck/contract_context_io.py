@@ -121,8 +121,8 @@ def _sequence(value: object, *, what: str) -> Sequence[Any]:
     return value
 
 
-def _bool(value: object, *, what: str, default: bool) -> bool:
-    """Decode a JSON boolean, rejecting anything merely truthy.
+def _bool(m: Mapping[str, Any], key: str, *, what: str, default: bool) -> bool:
+    """Decode an optional JSON boolean field, rejecting anything merely truthy.
 
     A bare ``bool(value)`` accepts any JSON value at all -- including the
     string ``"false"``, a non-empty string that is truthy in Python despite
@@ -131,9 +131,18 @@ def _bool(value: object, *, what: str, default: bool) -> bool:
     strict decoder in this module does (Codex review, PR #817: this is
     exactly the check ``GateConfig.__post_init__`` itself already performs
     on construction, which a loose coercion here would bypass).
+
+    Takes the mapping and key, not a pre-fetched ``m.get(key)`` value, so it
+    can tell a genuinely *absent* key (a legacy payload written before this
+    field existed -- degrades to *default*) apart from a *present* JSON
+    ``null`` (an explicit, malformed "no value" that must be rejected the
+    same as any other wrong-typed value): a pre-fetched value collapses both
+    to Python ``None``, which is exactly the gap a second round of review
+    found in this decoder's first cut (Codex review, fresh evidence).
     """
-    if value is None:
+    if key not in m:
         return default
+    value = m[key]
     if not isinstance(value, bool):
         raise TypeError(f"{what} must be a JSON boolean, not {value!r}.")
     return value
@@ -458,7 +467,8 @@ def resolved_config_from_dict(
                 addition=SeverityLevel(severity.get("addition", "info")),
             ),
             require_complete_analysis=_bool(
-                gate.get("require_complete_analysis"),
+                gate,
+                "require_complete_analysis",
                 what="gate.require_complete_analysis",
                 default=False,
             ),
