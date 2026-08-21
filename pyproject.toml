@@ -432,6 +432,10 @@ pytest_add_cli_args = [
     # This runs once explicitly before the mutation pass. Its nested real
     # mutmut invocation cannot run inside mutmut's own copied worktree.
     "--ignore=tests/test_mutation_results.py",
+    # `mutation_scope.py` narrows only_mutate for bounded PR runs. This
+    # structural contract intentionally asserts the full configured set, so it
+    # must run in ordinary CI but cannot run after that in-place narrowing.
+    "--ignore=tests/test_mutation_workflow_contract.py",
     "--ignore=tests/test_reusable_workflows.py",
     "--ignore=tests/test_skill_eval_pack.py",
     "--ignore=tests/test_skill_eval_scenarios.py",
