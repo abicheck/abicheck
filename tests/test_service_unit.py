@@ -3812,7 +3812,7 @@ class TestRunDumpHeaderGraph:
         with (
             patch("abicheck.service._dump_pe", return_value=snap),
             patch(
-                "abicheck.dumper._clang_header_dump", return_value=(ast, None)
+                "abicheck.dumper._clang_header_dump", return_value=(ast, None, False)
             ) as mock_ast,
         ):
             result = run_dump(p, "pe", [header], [], "1.0", "c++")
@@ -3863,7 +3863,7 @@ class TestRunDumpHeaderGraph:
         with (
             patch("abicheck.service._dump_pe", return_value=snap),
             patch(
-                "abicheck.dumper._clang_header_dump", return_value=(ast, None)
+                "abicheck.dumper._clang_header_dump", return_value=(ast, None, False)
             ) as mock_ast,
         ):
             run_dump(p, "pe", [header], [], "1.0", "c++", compile=cc)
@@ -3909,7 +3909,7 @@ class TestRunDumpHeaderGraph:
         with (
             patch("abicheck.service._dump_pe", return_value=snap),
             patch(
-                "abicheck.dumper._clang_header_dump", return_value=(ast, None)
+                "abicheck.dumper._clang_header_dump", return_value=(ast, None, False)
             ) as mock_ast,
         ):
             result = run_dump(p, "pe", [hdr_dir], [], "1.0", "c++")
@@ -3936,7 +3936,7 @@ class TestRunDumpHeaderGraph:
 
         with (
             patch("abicheck.service._dump_pe", return_value=snap),
-            patch("abicheck.dumper._clang_header_dump", return_value=(ast, None)),
+            patch("abicheck.dumper._clang_header_dump", return_value=(ast, None, False)),
             patch(
                 "abicheck.buildsource.include_graph.shutil.which",
                 lambda _b: "/usr/bin/clang++",
@@ -3980,7 +3980,7 @@ class TestRunDumpHeaderGraph:
 
         with (
             patch("abicheck.service._dump_pe", return_value=snap),
-            patch("abicheck.dumper._clang_header_dump", return_value=(ast, None)),
+            patch("abicheck.dumper._clang_header_dump", return_value=(ast, None, False)),
             patch(
                 "abicheck.buildsource.include_graph.shutil.which",
                 lambda _b: "/usr/bin/clang++",
@@ -4038,7 +4038,7 @@ class TestRunDumpHeaderGraph:
 
         with (
             patch("abicheck.service._dump_pe", return_value=snap),
-            patch("abicheck.dumper._clang_header_dump", return_value=(ast, None)),
+            patch("abicheck.dumper._clang_header_dump", return_value=(ast, None, False)),
             patch(
                 "abicheck.buildsource.include_graph.shutil.which",
                 lambda _b: "/usr/bin/clang++",
@@ -4355,7 +4355,7 @@ class TestAttachHeaderGraphCompilerSelection:
         snap = AbiSnapshot(library="lib", version="1.0")
         ast = {"kind": "TranslationUnitDecl", "inner": []}
         with patch(
-            "abicheck.dumper._clang_header_dump", return_value=(ast, None)
+            "abicheck.dumper._clang_header_dump", return_value=(ast, None, False)
         ) as mock_ast:
             _attach_header_graph(
                 snap,
@@ -4378,7 +4378,7 @@ class TestAttachHeaderGraphCompilerSelection:
         snap = AbiSnapshot(library="lib", version="1.0")
         ast = {"kind": "TranslationUnitDecl", "inner": []}
         with patch(
-            "abicheck.dumper._clang_header_dump", return_value=(ast, None)
+            "abicheck.dumper._clang_header_dump", return_value=(ast, None, False)
         ) as mock_ast:
             _attach_header_graph(
                 snap,
@@ -4409,7 +4409,7 @@ class TestAttachHeaderGraphCompilerSelection:
         snap = AbiSnapshot(library="lib", version="1.0")
         ast = {"kind": "TranslationUnitDecl", "inner": []}
         with (
-            patch("abicheck.dumper._clang_header_dump", return_value=(ast, None)),
+            patch("abicheck.dumper._clang_header_dump", return_value=(ast, None, False)),
             patch(
                 "abicheck.dumper._resolve_clang_bin", return_value="/opt/llvm/clang"
             ) as mock_resolve,
@@ -4457,7 +4457,7 @@ class TestAttachHeaderGraphHashesIncludeSearchTokens:
         snap = AbiSnapshot(library="lib", version="1.0")
         ast = {"kind": "TranslationUnitDecl", "inner": []}
         with patch(
-            "abicheck.dumper._clang_header_dump", return_value=(ast, None)
+            "abicheck.dumper._clang_header_dump", return_value=(ast, None, False)
         ) as mock_ast:
             _attach_header_graph(
                 snap,
@@ -4482,7 +4482,7 @@ class TestAttachHeaderGraphHashesIncludeSearchTokens:
         snap = AbiSnapshot(library="lib", version="1.0")
         ast = {"kind": "TranslationUnitDecl", "inner": []}
         with patch(
-            "abicheck.dumper._clang_header_dump", return_value=(ast, None)
+            "abicheck.dumper._clang_header_dump", return_value=(ast, None, False)
         ) as mock_ast:
             _attach_header_graph(
                 snap,

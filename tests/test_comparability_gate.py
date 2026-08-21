@@ -1933,3 +1933,56 @@ def test_gate_rejects_profile_mismatch_unverified_fingerprint_in_diagnostic_mode
     result = check_contracts_comparable(old, new, diagnostic=True)
     assert isinstance(result, ComparabilityMismatch)
     assert result.kind == "profile"
+
+
+# ---------------------------------------------------------------------------
+# abicheck-internal-bugs finding 2: "the cross-profile comparability guard
+# doesn't fire without L3 build evidence" -- two header-AST dumps under
+# genuinely different, unpinned toolchain defaults (no explicit -std= on
+# either side) must not silently compare as though nothing differed just
+# because neither side ever asserted a language_standard.
+# ---------------------------------------------------------------------------
+
+
+def test_gate_two_unpinned_toolchains_with_differing_probed_defaults_raise_profile_mismatch():
+    """Before the fix: both sides recorded language_standard="" (nothing
+    to distinguish an unpinned GCC-17 default from an unpinned Clang-20
+    default), so this compared as a false COMPATIBLE_WITH_RISK instead of
+    refusing. `compute_extraction_contract` now receives the resolved
+    compiler's own probed default standard (dumper_toolchain
+    ._probe_default_language_standard) as `language_standard` whenever no
+    explicit one was given -- this test exercises the gate directly against
+    two such contracts."""
+    old = _snap(
+        compute_extraction_contract(
+            l2_frontend_ran=True,
+            language_standard="probed:__cplusplus=201703L",  # unpinned GCC 9 default
+        )
+    )
+    new = _snap(
+        compute_extraction_contract(
+            l2_frontend_ran=True,
+            language_standard="probed:__cplusplus=202002L",  # unpinned Clang 18 default
+        )
+    )
+    with pytest.raises(ProfileMismatchError):
+        check_contracts_comparable(old, new)
+
+
+def test_gate_two_unpinned_toolchains_with_the_same_probed_default_stay_comparable():
+    """The common, overwhelmingly frequent workflow -- two dumps of the same
+    project under the SAME unpinned toolchain -- must not regress into a
+    spurious refusal just because probing now fills in a value."""
+    old = _snap(
+        compute_extraction_contract(
+            l2_frontend_ran=True,
+            language_standard="probed:__cplusplus=201703L",
+        )
+    )
+    new = _snap(
+        compute_extraction_contract(
+            l2_frontend_ran=True,
+            language_standard="probed:__cplusplus=201703L",
+        )
+    )
+    check_contracts_comparable(old, new)  # must not raise

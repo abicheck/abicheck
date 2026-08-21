@@ -155,12 +155,23 @@ def test_pvxs_error_requires_guard_does_not_force_cxx20(tmp_path: Path) -> None:
     # assertions below would ever fail even with the detection bug
     # reintroduced (CodeRabbit review: the original version of this test
     # only checked those indirect, dialect-insensitive signals).
+    #
+    # abicheck-internal-bugs finding 2 follow-up: with no explicit -std=,
+    # this no longer resolves to bare None -- dumper_toolchain._probe_
+    # default_language_standard now fills in the resolved compiler's own
+    # *probed* default dialect (host-clang-version-dependent), so "not
+    # forced to gnu++20" is asserted directly instead of "stayed None".
     old_snap = _dump_snapshot(old_so, old_dir / "pvxs.h", tmp_path / "old.abi.json")
     new_snap = _dump_snapshot(new_so, new_dir / "pvxs.h", tmp_path / "new.abi.json")
-    assert old_snap.get("ast_resolved_standard") is None, old_snap.get(
+    assert old_snap.get("ast_resolved_standard") != "gnu++20", old_snap.get(
         "ast_resolved_standard"
     )
-    assert new_snap.get("ast_resolved_standard") is None, new_snap.get(
+    assert new_snap.get("ast_resolved_standard") != "gnu++20", new_snap.get(
+        "ast_resolved_standard"
+    )
+    # Both sides were built identically and dumped under the identical
+    # resolved clang -- their (possibly probed) dialects must still agree.
+    assert old_snap.get("ast_resolved_standard") == new_snap.get(
         "ast_resolved_standard"
     )
 
