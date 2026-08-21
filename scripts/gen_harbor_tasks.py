@@ -255,6 +255,42 @@ ENV ABICHECK_ALLOW_AST_FALLBACK=1
 RUN mkdir -p /opt/skills \\
     && cp -r /opt/abicheck-src/.claude/skills/check-abi-compatibility /opt/skills/
 
+# The agent has ordinary shell access to this whole clone for the entire
+# trial -- the agent and verifier phases share one container/filesystem,
+# not two isolated ones -- so anything answer-bearing left under
+# `/opt/abicheck-src` is readable by the very agent being evaluated on it
+# (Codex review, fresh evidence). `git clone` above pulls the *whole*
+# repository, which includes `agent-evals/skills/scenarios.yaml` and
+# `skill-eval-pack.json` (both carry every scenario's exact expected
+# verdict/uncertainty/full_verdict), every other task's own generated
+# `harbor/tasks/<id>/tests/scenario.json` (the identical ground truth this
+# very task's own `/tests/scenario.json` mount carries, just for every
+# sibling task too), the raw `fixtures/` sources some of which are
+# deliberately comment-annotated with the answer (see `agent-evals/skills/
+# CLAUDE.md`'s "The workspace must not contain the answer" section -- the
+# exact discipline this leaves undone for the Harbor path), and
+# `examples/ground_truth.json` (a Category A scenario's expected outcome is
+# *derived* from this file, so it's an equally direct leak for that
+# category). None of these are needed once the package is installed and the
+# shim/skill copies above have run -- only `agent-evals/skills/graders/`
+# (imported by `verify_run.py`) and `verify_run.py` itself are read again,
+# at verification time. Removed here, after every step that still needed
+# the full clone and before the workspace is populated, rather than by a
+# narrower `git sparse-checkout`: an allowlist of paths *not* to leak would
+# silently stop covering a new answer-bearing file added to this tree later
+# (a repeat of exactly this bug), where a denylist naming known-sensitive
+# paths degrades safely -- worst case it under-covers a genuinely new
+# category of leak, not silently re-opens this one.
+RUN rm -rf /opt/abicheck-src/examples \\
+    /opt/abicheck-src/agent-evals/skills/scenarios.yaml \\
+    /opt/abicheck-src/agent-evals/skills/skill-eval-pack.json \\
+    /opt/abicheck-src/agent-evals/skills/harbor/tasks \\
+    /opt/abicheck-src/agent-evals/skills/fixtures \\
+    /opt/abicheck-src/agent-evals/skills/pilot-results \\
+    /opt/abicheck-src/agent-evals/skills/runners \\
+    /opt/abicheck-src/agent-evals/skills/run_skill_eval.py \\
+    /opt/abicheck-src/agent-evals/skills/grade_bundle.py
+
 WORKDIR /workspace
 COPY workspace/ /workspace/
 """
@@ -672,13 +708,41 @@ def _normalize_pinned_ref(data: bytes) -> bytes:
     return _REF_LINE.sub(b"ARG ABICHECK_REF=<normalized-for-diff>", data)
 
 
+#: Generated, environment-dependent noise that can appear under
+#: `_RUNTIME_RELEVANT_PATHS` without any real source change -- excluded from
+#: the digest so its presence/absence/content (all three vary by interpreter
+#: version, import order, and whether anything has imported these modules
+#: yet in this process) can never move the answer. Confirmed reproducible,
+#: not hypothetical: running this repo's own test suite before regenerating
+#: leaves `graders/__pycache__/*.pyc` and `shim/__pycache__/*.pyc` on disk,
+#: and computing the digest with vs. without them present produces two
+#: different hex strings for the identical source tree (Codex review, fresh
+#: evidence) -- `--check` would then fail on a perfectly fresh checkout
+#: purely because CI happened to import `graders.claim` (e.g. from an
+#: earlier pytest step in the same job) before running this generator.
+_DIGEST_IGNORED_DIR_NAMES = frozenset({"__pycache__"})
+_DIGEST_IGNORED_SUFFIXES = frozenset({".pyc", ".pyo"})
+
+
 def _runtime_relevant_files(root: Path = ROOT) -> list[Path]:
-    """Every file under `_RUNTIME_RELEVANT_PATHS`, sorted for determinism."""
+    """Every file under `_RUNTIME_RELEVANT_PATHS`, sorted for determinism.
+
+    Skips `__pycache__` directories and `.pyc`/`.pyo` files -- see
+    `_DIGEST_IGNORED_DIR_NAMES`'s own comment for why these must never
+    reach `_runtime_relevant_digest`.
+    """
     files: list[Path] = []
     for rel in _RUNTIME_RELEVANT_PATHS:
         path = root / rel
         if path.is_dir():
-            files.extend(p for p in path.rglob("*") if p.is_file())
+            for p in path.rglob("*"):
+                if not p.is_file():
+                    continue
+                if _DIGEST_IGNORED_DIR_NAMES & set(p.relative_to(path).parts[:-1]):
+                    continue
+                if p.suffix in _DIGEST_IGNORED_SUFFIXES:
+                    continue
+                files.append(p)
         elif path.is_file():
             files.append(path)
     return sorted(files)

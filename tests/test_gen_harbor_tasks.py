@@ -124,6 +124,91 @@ class TestGeneratorCheck:
             root_b
         )
 
+    def test_runtime_relevant_digest_ignores_pycache_and_bytecode(self, tmp_path):
+        """`__pycache__`/`.pyc`/`.pyo` are generated, environment-dependent
+        noise, not source -- confirmed reproducible against this repo's real
+        `graders/` directory: running the test suite before regenerating
+        leaves `graders/__pycache__/*.pyc` on disk, and computing the digest
+        with vs. without those files present produced two different hex
+        strings for the identical source tree, which would fail `--check`
+        on a perfectly fresh checkout purely because CI happened to import
+        a graders module in an earlier step of the same job (Codex review,
+        fresh evidence). Built against a synthetic tree so this doesn't
+        depend on whether this repo's own `graders/` happens to have a
+        pycache directory at test time."""
+        root = tmp_path / "src"
+        graders = root / "agent-evals" / "skills" / "graders"
+        graders.mkdir(parents=True)
+        (root / "agent-evals" / "skills" / "shim").mkdir(parents=True)
+        (root / "agent-evals" / "skills" / "harbor").mkdir(parents=True)
+        (graders / "dimensions.py").write_text("x = 1\n", encoding="utf-8")
+        (root / "agent-evals" / "skills" / "shim" / "abicheck").write_text(
+            "#!/bin/sh\n", encoding="utf-8"
+        )
+        (root / "agent-evals" / "skills" / "harbor" / "verify_run.py").write_text(
+            "pass\n", encoding="utf-8"
+        )
+        before = gen._runtime_relevant_digest(root)
+
+        pycache = graders / "__pycache__"
+        pycache.mkdir()
+        (pycache / "dimensions.cpython-313.pyc").write_bytes(b"\x00\x01fake bytecode")
+        (graders / "dimensions.pyc").write_bytes(b"\x00\x01another fake")
+        after = gen._runtime_relevant_digest(root)
+
+        assert before == after
+
+    def test_dockerfile_removes_answer_bearing_paths_from_the_agent_visible_clone(
+        self,
+    ):
+        """The agent and verifier phases share one container/filesystem for
+        the whole trial -- a full `git clone` of this repository (what
+        `_dockerfile()` does to obtain `abicheck` itself) hands the agent
+        being evaluated ordinary shell access to every other task's own
+        ground truth (`scenarios.yaml`, `skill-eval-pack.json`, every
+        generated `harbor/tasks/<id>/tests/scenario.json`), the raw
+        (comment-annotated) `fixtures/` sources, and `examples/
+        ground_truth.json` (a Category A scenario's expected outcome is
+        *derived* from this file) unless those paths are explicitly removed
+        before the agent phase (Codex review, fresh evidence). Pinned as a
+        content assertion on the generated Dockerfile rather than an actual
+        Docker build (no Docker in this sandbox -- see `agent-evals/skills/
+        harbor/CLAUDE.md`)."""
+        dockerfile = (
+            TASKS_DIR / "removed-export" / "environment" / "Dockerfile"
+        ).read_text(encoding="utf-8")
+        # The `RUN rm -rf ...` statement is a single backslash-continued
+        # shell command -- isolate exactly its argument list, not the whole
+        # file, so this test can tell "removed" from "merely mentioned in a
+        # comment elsewhere".
+        start = dockerfile.index("RUN rm -rf ")
+        end = dockerfile.index("\n\n", start)
+        removal_block = dockerfile[start:end]
+        for answer_bearing_path in (
+            "/opt/abicheck-src/examples",
+            "/opt/abicheck-src/agent-evals/skills/scenarios.yaml",
+            "/opt/abicheck-src/agent-evals/skills/skill-eval-pack.json",
+            "/opt/abicheck-src/agent-evals/skills/harbor/tasks",
+            "/opt/abicheck-src/agent-evals/skills/fixtures",
+            "/opt/abicheck-src/agent-evals/skills/pilot-results",
+        ):
+            assert answer_bearing_path in removal_block, (
+                f"{answer_bearing_path} is not removed from the agent-visible "
+                "clone -- this is a real ground-truth leak, not a style nit"
+            )
+        # And the removal must not also delete what `verify_run.py` still
+        # needs at grading time -- this fix must not break its own
+        # dependency in the process of closing the leak. Neither path is
+        # ever explicitly copied out of the clone, so the only way this
+        # invariant can be violated is by naming either of them (or an
+        # ancestor directory of either) in the removal block.
+        assert "/opt/abicheck-src/agent-evals/skills/graders" not in removal_block
+        assert "/opt/abicheck-src/agent-evals/skills/harbor/verify_run.py" not in (
+            removal_block
+        )
+        assert "/opt/abicheck-src/agent-evals\\" not in removal_block
+        assert "/opt/abicheck-src/agent-evals/skills\\" not in removal_block
+
     def test_old_reachability_design_crashed_on_a_genuinely_unresolvable_ref(self):
         """Pins the actual failure the digest redesign replaced -- not
         merely a wrong answer, an unhandled crash. Replays the old
