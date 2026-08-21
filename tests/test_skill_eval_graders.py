@@ -523,6 +523,39 @@ class TestEvidenceReading:
         )
         assert ev.contract_mode({"argv": ["compare", "a", "b"]}) is None
 
+    def test_reported_contract_coverage_failures_distinguishes_absent_empty_nonempty(
+        self, tmp_path
+    ):
+        """Absent (can't verify), empty (real 'coverage complete' evidence),
+        and non-empty (real 'coverage incomplete' evidence) are three
+        distinct states this helper must never collapse (Codex review,
+        PR #808)."""
+        no_ledger = a_breaking_call(0)
+        empty_ledger = a_breaking_call(1)
+        nonempty_ledger = a_breaking_call(2)
+        run = build_run(
+            tmp_path,
+            final="",
+            calls=[no_ledger, empty_ledger, nonempty_ledger],
+            artifacts={
+                "captured/0.out": json.dumps({"verdict": "COMPATIBLE"}),
+                "captured/1.out": json.dumps(
+                    {"verdict": "COMPATIBLE", "contract_coverage_failures": []}
+                ),
+                "captured/2.out": json.dumps(
+                    {
+                        "verdict": "COMPATIBLE",
+                        "contract_coverage_failures": [{"domain": "exports"}],
+                    }
+                ),
+            },
+        )
+        assert ev.reported_contract_coverage_failures(run, no_ledger) is None
+        assert ev.reported_contract_coverage_failures(run, empty_ledger) == []
+        assert ev.reported_contract_coverage_failures(run, nonempty_ledger) == [
+            {"domain": "exports"}
+        ]
+
     def test_consumer_scope_targets_by_kind_keeps_the_two_dials_apart(self):
         """`--used-by` and `--required-symbol` are distinct scoping
         mechanisms -- a name that coincidentally matches across the two
@@ -765,6 +798,74 @@ class TestDimensionTwo:
             dim.dimension_2(run, SCENARIO_BREAKING, ev.load_calls(run), parsed).status
             == "pass"
         )
+
+    def test_coverage_gaps_are_refuted_by_the_cited_reports_own_empty_ledger(
+        self, tmp_path
+    ):
+        """Using --contract only proves coverage was *assessed*, not that it
+        came up short -- a cited report's own `contract_coverage_failures`
+        ledger says that. A report reading COMPATIBLE with an empty ledger
+        (real, positive evidence coverage was complete) must refute the
+        claim even though the cited call did engage --contract (Codex
+        review, PR #808, fresh evidence)."""
+        call = a_breaking_call(argv=["compare", "a", "b", "--contract", "exports"])
+        run = build_run(
+            tmp_path,
+            final="",
+            calls=[call],
+            artifacts={
+                "captured/0.out": json.dumps(
+                    {"verdict": "COMPATIBLE", "contract_coverage_failures": []}
+                )
+            },
+        )
+        parsed, _ = claim_mod.extract(
+            envelope(
+                verdict="COMPATIBLE",
+                evidence=[0],
+                confident=False,
+                uncertainty={
+                    "reason": "contract_coverage_incomplete",
+                    "unresolved": "the exports domain",
+                },
+            )
+        )
+        result = dim.dimension_2(run, SCENARIO_BREAKING, ev.load_calls(run), parsed)
+        assert result.status == "fail"
+
+    def test_coverage_gaps_stand_when_the_cited_reports_own_ledger_is_nonempty(
+        self, tmp_path
+    ):
+        """A non-empty ledger is the positive evidence the claim rests on --
+        it must not be discarded merely because --contract was also used
+        elsewhere in a milder-reading call."""
+        call = a_breaking_call(argv=["compare", "a", "b", "--contract", "exports"])
+        run = build_run(
+            tmp_path,
+            final="",
+            calls=[call],
+            artifacts={
+                "captured/0.out": json.dumps(
+                    {
+                        "verdict": "COMPATIBLE",
+                        "contract_coverage_failures": [{"domain": "exports"}],
+                    }
+                )
+            },
+        )
+        parsed, _ = claim_mod.extract(
+            envelope(
+                verdict="COMPATIBLE",
+                evidence=[0],
+                confident=False,
+                uncertainty={
+                    "reason": "contract_coverage_incomplete",
+                    "unresolved": "the exports domain",
+                },
+            )
+        )
+        result = dim.dimension_2(run, SCENARIO_BREAKING, ev.load_calls(run), parsed)
+        assert result.status == "pass"
 
     def test_shallow_evidence_is_the_kind_this_grader_cannot_refute(self, tmp_path):
         run = build_run(tmp_path, final="", calls=[a_breaking_call()])

@@ -739,3 +739,30 @@ def reported_full_verdicts(run_dir: Path, calls: Iterable[dict]) -> frozenset[st
     return frozenset(
         v for c in calls if (v := reported_full_verdict(run_dir, c)) is not None
     )
+
+
+def reported_contract_coverage_failures(run_dir: Path, call: dict) -> list[Any] | None:
+    """This call's own `contract_coverage_failures` ledger, if its report has one.
+
+    JSON only (per ADR-049 Phase 7 / `contract_coverage_exit.py`, only
+    `--format json` carries this field at all — markdown/text output never
+    does even when `--contract` was genuinely engaged), and distinguishes
+    three states a caller must not collapse: the key absent (`None` — this
+    report can't be used to verify the claim either way, e.g. because it
+    wasn't emitted as JSON), the key present and empty (`[]` — real,
+    positive evidence that the selected domain's coverage was actually
+    complete), and the key present and non-empty (real, positive evidence
+    of a genuine coverage gap). A `--contract` call's own use of the flag
+    (`contract_mode`) is not this: that only proves contract evaluation ran,
+    not what its coverage ledger actually says.
+    """
+    for text in _artifact_texts(run_dir, call):
+        try:
+            parsed: Any = json.loads(text)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(parsed, dict) and "contract_coverage_failures" in parsed:
+            failures = parsed["contract_coverage_failures"]
+            if isinstance(failures, list):
+                return failures
+    return None

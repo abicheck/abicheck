@@ -43,8 +43,8 @@ from . import claim as claim_mod, evidence as ev
 #: key the agent CLI happens to carry it under. ADR-058's 2026-08-20
 #: portfolio-reset amendment reduced the portfolio from four skills to one
 #: (`native-binary-compatibility-review` renamed to
-#: `review-native-library-change`); the other three are no longer published.
-KNOWN_SKILLS = ("review-native-library-change",)
+#: `check-abi-compatibility`); the other three are no longer published.
+KNOWN_SKILLS = ("check-abi-compatibility",)
 
 
 @dataclass
@@ -167,11 +167,33 @@ def _refutes(reason: str, run_dir: Path, calls: list[dict], claim: dict) -> str 
         # — an unrelated --contract call elsewhere in the transcript must not
         # excuse a claim that itself rests on a plain, uncontracted call.
         resolved, _dangling = _cited(calls, claim)
-        if not any(ev.contract_mode(c) is not None for c in resolved.values()):
+        contracted = [c for c in resolved.values() if ev.contract_mode(c) is not None]
+        if not contracted:
             return (
                 "claimed contract coverage is incomplete, but none of the "
                 "cited calls asked for contract evaluation, under which "
                 "coverage is not assessed at all"
+            )
+        # Using --contract only proves coverage was *assessed*, not that it
+        # came up short — that's what the report's own `contract_coverage_
+        # failures` ledger says (Codex review, PR #808, fresh evidence: this
+        # predicate previously stopped at "some cited call used --contract"
+        # and never inspected the ledger, so a cited report reading
+        # COMPATIBLE with an empty ledger let the claim through unrefuted).
+        # A ledger this module can't read (non-JSON output) carries no
+        # signal either way and is excluded, same as an uncited call;
+        # only a *known*, uniformly-empty set of ledgers is a refutation —
+        # any known non-empty ledger is itself the positive evidence the
+        # claim rests on, and must not be overridden by a milder sibling.
+        ledgers = [
+            ev.reported_contract_coverage_failures(run_dir, c) for c in contracted
+        ]
+        known = [failures for failures in ledgers if failures is not None]
+        if known and not any(known):
+            return (
+                "claimed contract coverage is incomplete, but every cited "
+                "contract-evaluated report's own contract_coverage_failures "
+                "ledger is empty — coverage was actually complete"
             )
         return None
     return None  # evidence_too_shallow: not refutable from the bundle
