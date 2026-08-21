@@ -531,6 +531,42 @@ def test_gate_waives_content_driven_language_mode_divergence_when_toolchain_matc
     check_contracts_comparable(old, new)  # must not raise
 
 
+def test_gate_waives_content_driven_divergence_for_a_hybrid_snapshot():
+    """Codex review, fresh evidence (P2, seventh round): a
+    ``--ast-frontend hybrid`` dump's merged ``ast_toolchain`` has no bare
+    keys at all -- ``dumper_hybrid._merge_snapshots`` prefixes every one
+    ``castxml_``/``clang_`` -- so every plain ``.get("resolved_lang_mode")``/
+    ``.get("producer")``/etc. in this carve-out used to read empty and
+    never corroborate a hybrid dump, silently leaving the exact
+    ProfileMismatchError regression this whole carve-out exists to fix
+    unfixed for that one frontend. Reuses the same identical-toolchain
+    positive fixture above, but with every ``ast_toolchain`` key rendered
+    under the ``castxml_`` prefix a real hybrid merge would produce."""
+
+    def _as_hybrid(mode: str) -> dict[str, str]:
+        return {f"castxml_{k}": v for k, v in _content_ast_toolchain(mode).items()}
+
+    old = _snap(
+        compute_extraction_contract(
+            l2_frontend_ran=True,
+            compiler_family="clang",
+            compiler_version="18.1.3",
+            language_standard="probed:__cplusplus=201703L",
+        ),
+        ast_toolchain=_as_hybrid("c++"),
+    )
+    new = _snap(
+        compute_extraction_contract(
+            l2_frontend_ran=True,
+            compiler_family="clang",
+            compiler_version="18.1.3",
+            language_standard="gnu11",
+        ),
+        ast_toolchain=_as_hybrid("c"),
+    )
+    check_contracts_comparable(old, new)  # must not raise
+
+
 def test_gate_waives_when_castxml_resolves_a_mode_specific_gnu_driver_name():
     """Real CI failure, second round (Codex review + a real castxml/gcc
     repro against examples/case66_language_linkage_changed): castxml

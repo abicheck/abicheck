@@ -915,8 +915,8 @@ def _language_standard_probe_upgrade_corroborated(
         new_v = new_fields.get(key, "")
         if not old_v or not new_v or old_v != new_v:
             return False
-    old_sha = old.ast_toolchain.get("compiler_sha256", "")
-    new_sha = new.ast_toolchain.get("compiler_sha256", "")
+    old_sha = _tc(old.ast_toolchain, "compiler_sha256")
+    new_sha = _tc(new.ast_toolchain, "compiler_sha256")
     if old_sha and new_sha and old_sha != new_sha:
         return False
     return True
@@ -983,19 +983,27 @@ def _compiler_version_sans_driver_name(version: str) -> str:
     return parts[1] if len(parts) == 2 else version
 
 
+def _tc(ast_toolchain: dict[str, str], key: str) -> str:
+    """*key* from *ast_toolchain*, falling back to the castxml leg's own
+    value for a hybrid-merged snapshot: ``dumper_hybrid._merge_snapshots``
+    prefixes every key ``castxml_``/``clang_`` there, leaving no bare key
+    at all, so a plain ``.get(key)`` never corroborated a hybrid dump.
+    castxml is that module's own documented "base" leg."""
+    return ast_toolchain.get(key) or ast_toolchain.get(f"castxml_{key}", "")
+
+
 def _compiler_install_dir(ast_toolchain: dict[str, str]) -> str:
     """The resolved host compiler's own directory (``compiler_realpath``,
     falling back to ``compiler_selected``) -- proof of one toolchain install.
     ``PureWindowsPath``, not ``Path``: a persisted path may be from another OS."""
-    path = ast_toolchain.get("compiler_realpath") or ast_toolchain.get(
-        "compiler_selected", ""
+    path = _tc(ast_toolchain, "compiler_realpath") or _tc(
+        ast_toolchain, "compiler_selected"
     )
     return str(PureWindowsPath(path).parent) if path else ""
 
 
 def _nonempty_match(old_value: str, new_value: str) -> bool:
-    """Both sides carry the identical, non-empty value -- real
-    corroborating evidence, not merely "absent on both sides"."""
+    """Both sides carry the identical, non-empty value."""
     return bool(old_value) and bool(new_value) and old_value == new_value
 
 
@@ -1042,22 +1050,18 @@ def _language_standard_content_divergence_corroborated(
     :func:`_language_standard_probe_upgrade_corroborated`'s narrower
     "an abicheck upgrade added the probe" case (real CI failure:
     examples/case66_language_linkage_changed, case69_trivial_to_nontrivial).
-
-    When neither side was given an explicit ``--lang``,
-    :func:`dumper_toolchain._resolve_force_cpp` decides the parse language
-    purely from each side's own header *content* -- losing an ``extern
-    "C"`` wrapper (case66) or gaining a C++-only construct (case69) is a
-    real, ABI-relevant edit, not evidence of a different extraction
-    *environment* (ADR-050 D1/D2) under an identical, corroborated
-    toolchain -- real signal for the dedicated detectors to report.
+    Losing an ``extern "C"`` wrapper or gaining a C++-only construct with
+    no explicit ``--lang`` on either side is a real, ABI-relevant edit, not
+    evidence of a different extraction *environment* (ADR-050 D1/D2) under
+    an identical, corroborated toolchain -- real signal for the dedicated
+    detectors to report.
 
     **Scoped to a genuine mode switch (``c`` <-> ``c++``), not a differing
     edition within the same mode** (pinned by ``test_dumper_contract_
     wiring.py::test_cpp20_heuristic_forced_standard_flows_into_profile_
     fingerprint``): two header sets both parsed as C++ but resolving to a
     different *edition* only because ``force_cpp20`` fires on one side are
-    still genuinely different dialects. Checked via ``AbiSnapshot.
-    ast_toolchain["resolved_lang_mode"]``, not the string shape.
+    still genuinely different dialects. Checked via ``resolved_lang_mode``.
 
     Waived only when: (1) neither side's non-empty ``language_standard``
     reflects an explicit ``--lang`` (:func:`_language_standard_is_lang_pinned`);
@@ -1065,12 +1069,11 @@ def _language_standard_content_divergence_corroborated(
     actually produce for its own mode
     (:func:`_language_standard_is_known_auto_resolved_form` -- an explicit
     ``-std=gnu11``/``-std=gnu++17`` given without ``--lang`` collides with
-    the unpinned path's own literal, so check (1) alone can't see it); and
-    (3) corroborated by matching ``compiler_family``/``producer``/frontend
-    ``version``, a driver-name-normalized ``compiler_version``, and
-    ``compiler_sha256`` -- skipped only for a corroborated castxml gcc/g++
-    pair sharing one install dir and ``compiler_target_triple`` (see code).
-    """
+    the unpinned literal, invisible to check (1)); and (3) corroborated by
+    matching ``compiler_family``/``producer``/frontend ``version``, a
+    driver-normalized ``compiler_version``, and ``compiler_sha256`` --
+    skipped only for a castxml gcc/g++ pair sharing an install dir and
+    ``compiler_target_triple`` (see code)."""
     old_std = old_fields.get("language_standard", "")
     new_std = new_fields.get("language_standard", "")
     if old_std == new_std:
@@ -1083,8 +1086,8 @@ def _language_standard_content_divergence_corroborated(
         return False
     if new_std and _language_standard_is_lang_pinned(new_std):
         return False
-    old_mode = old.ast_toolchain.get("resolved_lang_mode", "")
-    new_mode = new.ast_toolchain.get("resolved_lang_mode", "")
+    old_mode = _tc(old.ast_toolchain, "resolved_lang_mode")
+    new_mode = _tc(new.ast_toolchain, "resolved_lang_mode")
     if (
         not old_mode
         or not new_mode
@@ -1112,32 +1115,31 @@ def _language_standard_content_divergence_corroborated(
     # records whether the caller gave an explicit pin. Missing on either
     # side (a legacy pre-provenance snapshot) fails closed.
     if (
-        old.ast_toolchain.get("language_standard_explicit") != "0"
-        or new.ast_toolchain.get("language_standard_explicit") != "0"
+        _tc(old.ast_toolchain, "language_standard_explicit") != "0"
+        or _tc(new.ast_toolchain, "language_standard_explicit") != "0"
     ):
         return False
     old_family = old_fields.get("compiler_family", "")
     new_family = new_fields.get("compiler_family", "")
     if not _nonempty_match(old_family, new_family):
         return False
-    old_producer = old.ast_toolchain.get("producer", "")
-    new_producer = new.ast_toolchain.get("producer", "")
+    old_producer = _tc(old.ast_toolchain, "producer")
+    new_producer = _tc(new.ast_toolchain, "producer")
     if not _nonempty_match(old_producer, new_producer):
         return False
-    # The frontend's OWN version AND content hash (castxml's, or clang's for
-    # the direct-clang backend) must match, unconditionally -- confirms the
-    # same build parsed both sides, not just an equivalent host toolchain.
-    # Unlike the host compiler's sha256 (skipped for a real gcc/g++ split),
-    # the frontend is the *same* binary invoked twice, so a vendor-patched
-    # rebuild reporting an unchanged --version string is still caught here.
+    # The frontend's OWN version AND content hash must match, unconditionally
+    # -- confirms the same build parsed both sides. Unlike the host
+    # compiler's sha256 (skipped for a real gcc/g++ split), the frontend is
+    # the *same* binary invoked twice, so a vendor-patched rebuild reporting
+    # an unchanged --version string is still caught here.
     if not _nonempty_match(
-        old.ast_toolchain.get("version", ""), new.ast_toolchain.get("version", "")
+        _tc(old.ast_toolchain, "version"), _tc(new.ast_toolchain, "version")
     ) or not _nonempty_match(
-        old.ast_toolchain.get("sha256", ""), new.ast_toolchain.get("sha256", "")
+        _tc(old.ast_toolchain, "sha256"), _tc(new.ast_toolchain, "sha256")
     ):
         return False
-    old_host_version = old.ast_toolchain.get("compiler_version", "")
-    new_host_version = new.ast_toolchain.get("compiler_version", "")
+    old_host_version = _tc(old.ast_toolchain, "compiler_version")
+    new_host_version = _tc(new.ast_toolchain, "compiler_version")
     if not old_host_version or not new_host_version:
         return False
     banners_differ = old_host_version != new_host_version
@@ -1148,16 +1150,15 @@ def _language_standard_content_divergence_corroborated(
         # ("gcc"/"g++"), differing only in that leading word under one
         # unchanged toolchain; a real cross-version skew still differs.
         return False
-    # sha256 skipped only for: castxml, gnu, a real same-toolchain gcc/g++
-    # pair (_is_gcc_gxx_driver_pair), same install dir, AND the same
-    # compiler_target_triple -- dir and driver names alone still accept two
-    # unrelated cross-compilers side by side sharing a version-suffix
-    # banner but targeting different architectures. Missing on either side
-    # (a best-effort probe) fails this leg closed, not "unknown = same".
+    # sha256 skipped only for: castxml, gnu, a real gcc/g++ pair
+    # (_is_gcc_gxx_driver_pair), same install dir, AND compiler_target_triple
+    # -- dir/names alone still accept two cross-compilers side by side with
+    # a shared banner but different architectures. Missing either side
+    # (a best-effort probe) fails closed, not "unknown = same".
     old_dir = _compiler_install_dir(old.ast_toolchain)
     new_dir = _compiler_install_dir(new.ast_toolchain)
-    old_triple = old.ast_toolchain.get("compiler_target_triple", "")
-    new_triple = new.ast_toolchain.get("compiler_target_triple", "")
+    old_triple = _tc(old.ast_toolchain, "compiler_target_triple")
+    new_triple = _tc(new.ast_toolchain, "compiler_target_triple")
     if not (
         banners_differ
         and old_producer == "castxml"
@@ -1168,8 +1169,8 @@ def _language_standard_content_divergence_corroborated(
         and old_dir
         and old_dir == new_dir
     ):
-        old_sha = old.ast_toolchain.get("compiler_sha256", "")
-        new_sha = new.ast_toolchain.get("compiler_sha256", "")
+        old_sha = _tc(old.ast_toolchain, "compiler_sha256")
+        new_sha = _tc(new.ast_toolchain, "compiler_sha256")
         if old_sha and new_sha and old_sha != new_sha:
             return False
     return True
