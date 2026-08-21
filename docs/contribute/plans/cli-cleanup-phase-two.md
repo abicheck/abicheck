@@ -1505,6 +1505,7 @@ pipelines a fourth time.
   > availability fallback), so it is a real behavior change for real users,
   > and it cannot be verified in an environment without castxml. It needs
   > its own slice with a castxml-capable lane, not a same-pass patch.
+
   > **Slice landed (2026-08-21, later the same day): blocker 5's three
   > sub-issues closed, `dump_cmd` now builds one real `DumpRequest`, and
   > blocker 6 has its narrow extension point. The real ELF/PE/Mach-O run is
