@@ -168,19 +168,34 @@ class TestGeneratorCheck:
         bytes therefore fails on every fresh checkout whose tip commit
         touched the generator or its output, which is every commit that
         ever regenerates this tree -- caught by actually running this test
-        immediately after a real commit, not by re-reading the assertion."""
-        before = {
-            p.relative_to(TASKS_DIR): gen._normalize_pinned_ref(p.read_bytes())
+        immediately after a real commit, not by re-reading the assertion.
+
+        `generate(check=False)` writes straight into the real, tracked
+        `TASKS_DIR` (this test's whole point is exercising that exact call,
+        not a copy of it) -- a `finally` restores every file's original
+        bytes afterward, so running this test locally doesn't leave the
+        real pinned-ref rewrite (correct, but noise) sitting in the
+        working tree for a human to notice and have to discard (Codex
+        review)."""
+        raw_before = {
+            p.relative_to(TASKS_DIR): p.read_bytes()
             for p in TASKS_DIR.rglob("*")
             if p.is_file()
         }
-        gen.generate(check=False)
-        after = {
-            p.relative_to(TASKS_DIR): gen._normalize_pinned_ref(p.read_bytes())
-            for p in TASKS_DIR.rglob("*")
-            if p.is_file()
-        }
-        assert before == after
+        try:
+            before = {
+                rel: gen._normalize_pinned_ref(data) for rel, data in raw_before.items()
+            }
+            gen.generate(check=False)
+            after = {
+                p.relative_to(TASKS_DIR): gen._normalize_pinned_ref(p.read_bytes())
+                for p in TASKS_DIR.rglob("*")
+                if p.is_file()
+            }
+            assert before == after
+        finally:
+            for rel, data in raw_before.items():
+                (TASKS_DIR / rel).write_bytes(data)
 
 
 class TestTaskStructure:
