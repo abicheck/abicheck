@@ -40,7 +40,14 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from abicheck.aggregate import ExpectedTargets, aggregate_reports_dir
+
+try:
+    import jsonschema
+except ImportError:  # pragma: no cover - exercised only when jsonschema absent
+    jsonschema = None
 
 LINUX = "linux-x86_64"
 
@@ -94,3 +101,40 @@ class TestEffectiveConfigDigestPassthrough:
         r = aggregate_reports_dir(tmp_path, expected=_expect(LINUX))
         target = next(t for t in r.targets if t.target_id == LINUX)
         assert target.effective_config_digest is None
+
+    def test_scan_reports_nest_the_digest_under_diff(self, tmp_path: Path) -> None:
+        """A `scan --against` report nests its whole baseline summary
+        (`add_effective_config_digest`'s own write target) under `diff`,
+        not the document root — the same document-shape distinction
+        `_analysis_assurance_exit`/`_contract_coverage_exit` already
+        account for (Codex review: reading only the root produced `None`
+        for every scan target)."""
+        _write_report(
+            tmp_path,
+            LINUX,
+            "NO_CHANGE",
+            scan_schema_version="1.8",
+            exit_code=0,
+            diff={
+                "verdict": "NO_CHANGE",
+                "effective_config_digest": "sha256:scandigest",
+            },
+        )
+        r = aggregate_reports_dir(tmp_path, expected=_expect(LINUX))
+        target = next(t for t in r.targets if t.target_id == LINUX)
+        assert target.effective_config_digest == "sha256:scandigest"
+
+
+@pytest.mark.skipif(jsonschema is None, reason="jsonschema not installed")
+def test_digest_bearing_report_validates_against_the_schema(tmp_path: Path) -> None:
+    from abicheck.schemas import load_aggregate_report_schema
+
+    _write_report(
+        tmp_path,
+        LINUX,
+        "COMPATIBLE",
+        effective_config_digest="sha256:" + "ab" * 32,
+    )
+    d = aggregate_reports_dir(tmp_path, expected=_expect(LINUX)).to_dict()
+    jsonschema.validate(d, load_aggregate_report_schema())
+    assert d["targets"][0]["effective_config_digest"] == "sha256:" + "ab" * 32

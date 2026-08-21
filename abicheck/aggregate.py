@@ -127,7 +127,12 @@ from .change_registry_types import Verdict
 #: ``main`` under the same version number for a different field -- bumped to
 #: ``1.6`` on rebase rather than reusing ``1.5`` for two distinct additive
 #: shapes, per this codebase's own schema-versioning discipline.
-AGGREGATE_SCHEMA_VERSION = "1.6"
+#:
+#: ``1.7`` (dedup plan Phase 0 item 6) adds an optional
+#: ``effective_config_digest`` per target -- that target's own
+#: already-computed digest (:func:`_effective_config_digest`), carried
+#: through rather than recomputed. Additive and inert like ``1.4``/``1.6``.
+AGGREGATE_SCHEMA_VERSION = "1.7"
 
 #: Matches a ``check_id``-shaped ``target_id`` — ADR-047 §7's
 #: ``target@profile#baseline_channel@requested_depth``, built verbatim by
@@ -1486,6 +1491,26 @@ def _analysis_assurance_exit(data: Mapping[str, Any]) -> int:
     return 0
 
 
+def _effective_config_digest(data: Mapping[str, Any]) -> str | None:
+    """The report's own ``effective_config_digest`` (Phase 0 item 6 of
+    docs/contribute/plans/duplication-and-convergence-assessment.md).
+
+    A ``compare``/release report carries this at the document root, but a
+    *scan* report nests its whole baseline summary under ``diff`` (or
+    ``report.diff``) -- the exact same document-shape distinction
+    :func:`_analysis_assurance_exit` above already has to account for, so
+    this reuses the identical :func:`contract_coverage_blocks` traversal
+    rather than a second, independently-written nested lookup (Codex
+    review: reading only the document root produced ``None`` for every
+    scan report).
+    """
+    for block in contract_coverage_blocks(data):
+        raw = block.get("effective_config_digest")
+        if isinstance(raw, str):
+            return raw
+    return None
+
+
 def scan_severity_gate_paths(data: Mapping[str, Any]) -> list[tuple[str, ...]]:
     """Key paths within a *scan* report that may carry a ``severity`` gate block.
 
@@ -1660,8 +1685,7 @@ def _load_report_file(path: Path, *, prefix: str) -> _LoadedReport:
     )
     head_sha_raw = data.get("head_sha")
     head_sha = str(head_sha_raw) if isinstance(head_sha_raw, str) else None
-    digest_raw = data.get("effective_config_digest")
-    effective_config_digest = digest_raw if isinstance(digest_raw, str) else None
+    effective_config_digest = _effective_config_digest(data)
     # A compare-release *operational* failure carries top-level ``verdict:
     # "ERROR"`` (a library failed to dump/extract/compare) — the release path
     # ranks it above BREAKING and floors its exit to 4. "ERROR" is not a

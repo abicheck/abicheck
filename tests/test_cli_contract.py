@@ -417,6 +417,34 @@ def test_cli_resolve_exemption_ignores_same_named_class_method(
     assert "cli_resolve.py:8" in errors[0]
 
 
+def test_cli_resolve_exemption_ignores_nested_function_bypass(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A bypass placed inside a *nested* function defined within the
+    module-level `_resolve_input()` wrapper is not part of the wrapper's
+    own scope — it must still be flagged, not silently inherit the
+    exemption via a full `ast.walk` into the nested `def`."""
+    import scripts.check_ai_readiness as gate
+
+    pkg = tmp_path / "abicheck"
+    pkg.mkdir()
+    (pkg / "cli_resolve.py").write_text(
+        "def _resolve_input(a):\n"
+        "    from . import service\n"
+        "    def bypass():\n"
+        "        return service.resolve_input(a)\n"
+        "    return bypass()\n"
+    )
+    monkeypatch.setattr(gate, "PKG", pkg)
+    monkeypatch.setattr(gate, "ROOT", tmp_path)
+
+    findings = gate.Findings()
+    gate.check_cli_contract(findings)
+    errors = [m for c, m in findings.errors if c == "cli-contract"]
+    assert len(errors) == 1
+    assert "cli_resolve.py:4" in errors[0]
+
+
 def test_allowlist_does_not_cover_a_second_call_to_the_same_target_on_one_line(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

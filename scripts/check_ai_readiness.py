@@ -2333,23 +2333,42 @@ def _tier1_module_bindings(
     return names
 
 
+def _iter_calls_in_own_scope(node: ast.AST) -> Iterable[ast.Call]:
+    """Yield every ``Call`` lexically inside *node*'s own scope, without
+    descending into a *nested* function/class/lambda definition's own body
+    — a call there belongs to that nested scope, not to *node*'s, and must
+    not be silently swept in as if it were (Codex review: a bypass placed
+    inside a nested ``def`` within the sanctioned wrapper previously
+    inherited the wrapper's own exemption via a full ``ast.walk``).
+    """
+    for child in ast.iter_child_nodes(node):
+        if isinstance(child, ast.Call):
+            yield child
+        if isinstance(
+            child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)
+        ):
+            continue
+        yield from _iter_calls_in_own_scope(child)
+
+
 def _resolve_input_wrapper_call_lines(tree: ast.Module) -> frozenset[int]:
     """Line numbers of every ``Call`` inside the *module-level*
-    ``_resolve_input()``'s own body — the only lines the
+    ``_resolve_input()``'s own scope — the only lines the
     ``service.resolve_input`` rule may exempt in a module listed in
     ``_RESOLVE_INPUT_WRAPPER_MODULES``.
 
-    Looks only at ``tree.body`` (top-level statements), not a full
-    ``ast.walk`` — a same-named method on a class, or a same-named function
+    Looks only at ``tree.body`` (top-level statements) to find the wrapper
+    itself — a same-named method on a class, or a same-named function
     nested inside a different one, is not the reviewed, documented wrapper
-    and must not silently inherit its exemption.
+    — and, once found, walks only its own lexical scope
+    (:func:`_iter_calls_in_own_scope`), not a full ``ast.walk``, so a call
+    inside a *nested* function or class defined within the wrapper does not
+    silently inherit its exemption either.
     """
     lines: set[int] = set()
     for node in tree.body:
         if isinstance(node, ast.FunctionDef) and node.name == "_resolve_input":
-            for call in ast.walk(node):
-                if isinstance(call, ast.Call):
-                    lines.add(call.lineno)
+            lines.update(call.lineno for call in _iter_calls_in_own_scope(node))
     return frozenset(lines)
 
 
