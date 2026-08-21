@@ -30,7 +30,13 @@ from typing import Any
 
 import pytest
 
-from abicheck import dumper, dumper_cache, dumper_clang, dumper_clang_errors
+from abicheck import (
+    dumper,
+    dumper_cache,
+    dumper_clang,
+    dumper_clang_errors,
+    dumper_toolchain,
+)
 from abicheck.dumper import (
     _auto_system_includes_enabled,
     _build_clang_header_command,
@@ -3915,9 +3921,9 @@ def test_header_ast_parser_castxml_branch_records_the_force_cpp_aware_compiler(
 
     def fake_castxml_dump(*a, **k):
         # Mirrors _castxml_dump's own force_cpp=False remap: "c++" -> "cc".
-        out = k.get("_selected_compiler_out")
+        out = k.get("_selected_meta_out")
         if out is not None:
-            out.append("cc")
+            out.append(("cc", False))
         return sentinel
 
     monkeypatch.setattr(dumper, "_castxml_dump", fake_castxml_dump)
@@ -3981,7 +3987,7 @@ def test_header_ast_parser_stamps_castxml_supported(
     monkeypatch.setattr(dumper, "_castxml_dump", lambda *a, **k: sentinel)
     monkeypatch.setattr(dumper, "_CastxmlParser", lambda *a, **k: parser_sentinel)
     monkeypatch.setattr(
-        dumper,
+        dumper_toolchain,
         "_tool_identity_metadata",
         lambda _executable: {
             "selected": "/mock/castxml",
@@ -4016,7 +4022,7 @@ def test_header_ast_parser_stamps_castxml_unsupported(
     monkeypatch.setattr(dumper, "_castxml_dump", lambda *a, **k: object())
     monkeypatch.setattr(dumper, "_CastxmlParser", lambda *a, **k: parser_sentinel)
     monkeypatch.setattr(
-        dumper,
+        dumper_toolchain,
         "_tool_identity_metadata",
         lambda _executable: {
             "selected": "/mock/castxml",

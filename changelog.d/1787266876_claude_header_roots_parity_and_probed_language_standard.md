@@ -52,11 +52,20 @@
   `.startswith(...)`, but when `--lang` is given explicitly the recorded
   value is language-mode-prefixed (`"c++:probed:__cplusplus=201703L"`),
   so the marker no longer sits at position 0 and both silently failed to
-  recognize it — fixed to a containment check. And the probe's language
-  mode is now the header-AST parse's *actual, post-retry* mode rather than
-  a static re-derivation: a C-mode dump whose parse self-heals into C++
-  (`dumper.py`'s C→C++ retry) or a castxml C-mode dump (whose driver is
-  internally remapped from the caller's `"c++"` default to `"cc"`) now
-  threads that real, resolved language mode/compiler identity into
-  `AbiSnapshot.ast_toolchain`, so the provenance probe queries the
+  recognize it — fixed to a containment check. The probe's language mode
+  is now the header-AST parse's *actual, post-retry* mode rather than a
+  static re-derivation: a C-mode dump whose parse self-heals into C++
+  (either backend's own C→C++ retry) or a castxml C-mode dump (whose
+  driver is internally remapped from the caller's `"c++"` default to
+  `"cc"`) now threads that real, resolved language mode/compiler identity
+  into `AbiSnapshot.ast_toolchain`, so the provenance probe queries the
   compiler that actually parsed the headers instead of a stale guess.
+  And an unpinned C/gnu-dialect parse is no longer probed at all: both
+  header-AST command builders unconditionally force `-std=gnu11` for that
+  case (`dumper_ast_config.py`), a fact the probe previously ignored —
+  querying the resolved compiler's own naked default instead (e.g. GCC's
+  C17) and recording a dialect that never actually parsed the headers.
+  `dumper_toolchain._resolve_standard_provenance` now reports that forced
+  standard directly for a gnu-dialect C parse, and only probes the
+  remaining genuinely-unpinned cases (C++ with no C++20 heuristic, or any
+  MSVC-dialect parse, neither of which either command builder pins).

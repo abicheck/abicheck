@@ -343,13 +343,37 @@ class TestResolveStandardProvenanceProbing:
         )
         assert result == "probed:__cplusplus=STUBBED:my-clang"
 
-    def test_probe_lang_mode_follows_real_auto_detection(
+    def test_unpinned_c_gnu_mode_is_never_probed_forced_standard_reported_directly(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ):
-        """abicheck-internal-bugs finding 2 follow-up (Codex review): with
-        no explicit ``lang``, the probe must use whatever
-        ``_resolve_force_cpp`` (the real parse's own decision) resolves to
-        for these headers -- not unconditionally "c++"."""
+        """Codex review, fresh evidence: both header-AST command builders
+        (``dumper_ast_config._build_castxml_command``/
+        ``_build_clang_header_command``) unconditionally force ``-std=gnu11``
+        for an unpinned C/gnu-dialect parse -- so this must report that
+        forced standard directly, never probe the resolved compiler's own
+        naked default (which is a genuinely different value, e.g. GCC's C17
+        default), since that default was never what actually parsed the
+        headers."""
+
+        def fail_probe(*a, **k):
+            raise AssertionError("must not probe a forced-standard C/gnu parse")
+
+        monkeypatch.setattr(
+            "abicheck.dumper_toolchain._probe_default_language_standard", fail_probe
+        )
+        c_header = tmp_path / "c.h"
+        c_header.write_text("int f(int x);\n", encoding="utf-8")
+        result = _resolve_standard_provenance(
+            [c_header], None, (), probe_compiler_bin="cc", lang=None
+        )
+        assert result == "gnu11"
+
+    def test_unpinned_c_msvc_dialect_is_still_probed(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        """The gnu11 force above is gated on ``cc_id == "gnu"`` in the real
+        command builder -- an MSVC-dialect C parse stays genuinely unpinned
+        to the resolved compiler's own default, so it must still probe."""
         seen_modes = []
 
         def fake_probe(compiler_bin, lang_mode):
@@ -361,10 +385,11 @@ class TestResolveStandardProvenanceProbing:
         )
         c_header = tmp_path / "c.h"
         c_header.write_text("int f(int x);\n", encoding="utf-8")
-        _resolve_standard_provenance(
-            [c_header], None, (), probe_compiler_bin="cc", lang=None
+        result = _resolve_standard_provenance(
+            [c_header], None, (), probe_compiler_bin="cl.exe", lang=None, abi_dialect="msvc"
         )
         assert seen_modes == ["c"]
+        assert result == "probed:stub"
 
     def test_resolved_lang_mode_overrides_static_re_derivation(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

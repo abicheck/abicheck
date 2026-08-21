@@ -225,6 +225,79 @@ def _tool_identity_metadata(executable: str) -> dict[str, str]:
     return metadata
 
 
+def _stamp_ast_parser(
+    parser: Any,
+    *,
+    producer: str,
+    executable: str,
+    compiler: str,
+    gcc_path: str | None,
+    gcc_prefix: str | None,
+    fallback_reason: str | None = None,
+    resolved_compiler: str | None = None,
+    resolved_force_cpp: bool | None = None,
+) -> Any:
+    """Attach the frontend/compiler provenance attributes to a built parser.
+
+    Module-level (rather than a closure over ``dumper._header_ast_parser``) so
+    the stamping rules are readable on their own; *compiler*/*gcc_path*/
+    *gcc_prefix* are the enclosing call's toolchain selection, needed only to
+    probe the host compiler behind a castxml dump. *resolved_compiler*, when
+    given, overrides *compiler* for that resolution -- the force_cpp-aware
+    spelling ``dumper._castxml_dump`` actually invoked (e.g. ``"cc"``), not
+    the caller's original, unresolved request (Codex review; see that
+    function's own ``_selected_meta_out`` docstring). *resolved_force_cpp*,
+    when given, records either backend's real, post-retry C->C++ self-heal
+    as ``metadata["resolved_lang_mode"]``.
+
+    Moved here from ``dumper.py`` (unchanged logic) purely to stay under that
+    module's AI-readiness file-size hard cap -- ``parser`` is typed ``Any``
+    rather than ``_CastxmlParser | _ClangAstParser`` to avoid importing those
+    two dumper.py-local classes here just for a type hint.
+    """
+    from .castxml_policy import evaluate_castxml_version
+    from .dumper_ast_config import _resolve_compiler_binary
+    from .errors import SnapshotError
+
+    executable_meta = _tool_identity_metadata(executable)
+    metadata = {"producer": producer, **executable_meta}
+    dialect: str | None
+    if producer == "clang":
+        # clang is both frontend and compiler here (mirrors
+        # _resolve_clang_langmode's own cc_id derivation for the same
+        # binary); same dialect test used there -- and since it is the same
+        # binary, reuse the probe above rather than re-hashing and
+        # re-running --version on it (CodeRabbit review).
+        compiler_meta = executable_meta
+        dialect = "msvc" if Path(executable).name.lower() in ("cl", "cl.exe") else "gnu"
+    else:
+        try:
+            host_cc, dialect = _resolve_compiler_binary(
+                resolved_compiler or compiler, gcc_path, gcc_prefix
+            )
+            compiler_meta = _tool_identity_metadata(host_cc)
+        except SnapshotError as exc:
+            metadata["compiler_error"] = str(exc)
+            compiler_meta = {}
+            dialect = None
+    metadata.update({f"compiler_{key}": value for key, value in compiler_meta.items()})
+    # ADR-050 D1: surface the ABI dialect (gnu/msvc) instead of
+    # discarding it -- compute_extraction_contract's abi_dialect field
+    # reads this key (Codex review, PR #624 follow-up).
+    if dialect is not None:
+        metadata["abi_dialect"] = dialect
+    if resolved_force_cpp is not None:
+        metadata["resolved_lang_mode"] = "c++" if resolved_force_cpp else "c"
+    setattr(parser, "_abicheck_ast_toolchain", metadata)
+    setattr(parser, "_abicheck_ast_fallback_reason", fallback_reason)
+    if producer == "castxml":
+        check = evaluate_castxml_version(metadata.get("version", ""))
+        setattr(parser, "_abicheck_ast_supported", check.supported)
+        setattr(parser, "_abicheck_ast_unsupported_reasons", check.reasons)
+        metadata.update(check.provenance_fields())
+    return parser
+
+
 def _compiler_family_from_toolchain(ast_toolchain: dict[str, str]) -> str | None:
     """Best-effort ADR-050 ``compiler_family`` label from the resolved host
     compiler binary (low-stakes: used for ``profile_fingerprint`` stability,
@@ -514,6 +587,15 @@ def _probe_default_language_standard(compiler_bin: str, lang_mode: str) -> str |
     return None
 
 
+#: Both ``dumper_ast_config._build_castxml_command`` (gated on ``cc_id ==
+#: "gnu"``) and ``_build_clang_header_command`` (unconditional)
+#: unconditionally force this standard for an unpinned C/gnu-dialect parse --
+#: so the real, parsed dialect is this fixed value, never the resolved
+#: compiler's own naked default (Codex review, fresh evidence: GCC's naked
+#: default is typically C17, but the AST is always generated as gnu11).
+_FORCED_C_STANDARD = "gnu11"
+
+
 def _resolve_standard_provenance(
     headers: list[Path],
     gcc_options: str | None,
@@ -522,6 +604,7 @@ def _resolve_standard_provenance(
     probe_compiler_bin: str | None = None,
     lang: str | None = None,
     resolved_lang_mode: str | None = None,
+    abi_dialect: str | None = None,
 ) -> str | None:
     """Best-effort resolved C/C++ standard for snapshot provenance (schema
     v15, P1 toolchain-profile audit).
@@ -532,10 +615,15 @@ def _resolve_standard_provenance(
     a pure function of the same inputs: an explicit ``-std=``/``--std=``/
     ``/std:`` value is recorded verbatim; otherwise, if
     ``_detect_cpp20_headers`` would force C++20, ``"gnu++20"`` is recorded
-    (the exact flag ``force_cpp20`` adds); otherwise, when *probe_compiler_bin*
-    is given, :func:`_probe_default_language_standard` is asked what that
-    resolved compiler's own unpinned default actually is (best-effort, never
-    guessed at from nothing); otherwise ``None``.
+    (the exact flag ``force_cpp20`` adds); otherwise, for an unpinned
+    C/gnu-dialect parse, :data:`_FORCED_C_STANDARD` is recorded directly --
+    *never probed* -- since both header-AST command builders force it
+    unconditionally, regardless of what the resolved compiler's own naked
+    default actually is; otherwise, when *probe_compiler_bin* is given,
+    :func:`_probe_default_language_standard` is asked what the resolved
+    compiler's own unpinned default actually is (the remaining case: an
+    unpinned C++ parse with no C++20 heuristic, or any MSVC-dialect parse,
+    neither of which either command builder pins); otherwise ``None``.
 
     *lang* is resolved through :func:`_resolve_force_cpp` (the identical
     decision the real header-AST parse makes — never derived from *lang*
@@ -552,16 +640,21 @@ def _resolve_standard_provenance(
         return _extract_explicit_std_value(gcc_options, gcc_option_tokens)
     if headers and _detect_cpp20_headers(headers):
         return "gnu++20"
-    if probe_compiler_bin:
-        probe_lang_mode = resolved_lang_mode or (
-            "c++"
-            if _resolve_force_cpp(lang, headers, gcc_options, gcc_option_tokens)
-            else "c"
-        )
-        probed = _probe_default_language_standard(probe_compiler_bin, probe_lang_mode)
-        if probed is not None:
-            return probed
-    return None
+    if probe_compiler_bin is None:
+        # No resolved-compiler identity to probe *or* to report a forced
+        # standard against (the dialect check below needs it too) --
+        # preserves this function's exact prior no-``ast_toolchain`` behavior.
+        return None
+    final_is_cpp = (
+        resolved_lang_mode == "c++"
+        if resolved_lang_mode is not None
+        else _resolve_force_cpp(lang, headers, gcc_options, gcc_option_tokens)
+    )
+    if not final_is_cpp and abi_dialect != "msvc":
+        return _FORCED_C_STANDARD
+    return _probe_default_language_standard(
+        probe_compiler_bin, "c++" if final_is_cpp else "c"
+    )
 
 
 class _AstCompileProvenance(TypedDict):
@@ -614,6 +707,7 @@ def _ast_compile_provenance(
         ),
         lang=lang,
         resolved_lang_mode=(ast_toolchain or {}).get("resolved_lang_mode"),
+        abi_dialect=(ast_toolchain or {}).get("abi_dialect"),
     )
     args = _combined_option_tokens(gcc_options, gcc_option_tokens)
     return {
