@@ -1485,11 +1485,9 @@ def _analysis_assurance_exit(data: Mapping[str, Any]) -> int:
     return 0
 
 
-#: Same shape ``effective_config_digest()`` always produces, and the
-#: aggregate schema's own pattern -- validated, not trusted, since this
-#: reads an on-disk report this module doesn't control the writer of
-#: (Codex review: a malformed value passed through could make `aggregate
-#: --format json` fail its own published schema).
+#: Same shape ``effective_config_digest()``/the aggregate schema's own
+#: pattern produce -- validated, not trusted, since this reads an on-disk
+#: report this module doesn't control the writer of.
 _EFFECTIVE_CONFIG_DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 
 
@@ -1810,7 +1808,12 @@ def _load_report_file(path: Path, *, prefix: str) -> _LoadedReport:
         # reading: a verdictless one is unavailable, and its `changes` array
         # (if any) describes a comparison that never reached a conclusion.
         findings=parse_report_findings(data) if verdict is not None else None,
-        effective_config_digest=effective_config_digest,
+        # Same reasoning -- `analyzed` is `compatibility_verdict is not
+        # None` -- so a BOOTSTRAP/NEW_TARGET/malformed-verdict report must
+        # not carry a digest through either, even if one was stamped on it.
+        effective_config_digest=(
+            effective_config_digest if verdict is not None else None
+        ),
     )
 
 

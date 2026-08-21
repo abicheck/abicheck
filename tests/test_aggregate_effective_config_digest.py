@@ -114,6 +114,27 @@ class TestEffectiveConfigDigestPassthrough:
         target = next(t for t in r.targets if t.target_id == LINUX)
         assert target.effective_config_digest is None
 
+    def test_bootstrap_report_digest_is_dropped(self, tmp_path: Path) -> None:
+        """`TargetReport.analyzed` is `compatibility_verdict is not None` —
+        a BOOTSTRAP report (no baseline published yet, so it carries a real
+        `verdict: "NO_BASELINE"` that never resolves to a `Verdict` member)
+        is unanalyzed, even though the report writer may still have
+        stamped a real digest onto it. The digest must not carry through
+        for an unanalyzed target (Codex review: it was emitted
+        unconditionally, contradicting the documented "absent for an
+        unavailable target" contract)."""
+        _write_report(
+            tmp_path,
+            LINUX,
+            "NO_BASELINE",
+            effective_config_digest=_VALID_DIGEST,
+        )
+        r = aggregate_reports_dir(tmp_path, expected=_expect(LINUX))
+        target = next(t for t in r.targets if t.target_id == LINUX)
+        assert not target.analyzed
+        assert target.effective_config_digest is None
+        assert "effective_config_digest" not in r.to_dict()["targets"][0]
+
     def test_scan_reports_nest_the_digest_under_diff(self, tmp_path: Path) -> None:
         """A `scan --against` report nests its whole baseline summary
         (`add_effective_config_digest`'s own write target) under `diff`,
