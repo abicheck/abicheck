@@ -417,13 +417,43 @@ def test_cli_resolve_exemption_ignores_same_named_class_method(
     assert "cli_resolve.py:8" in errors[0]
 
 
+def test_allowlist_does_not_cover_a_second_call_to_the_same_target_on_one_line(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Two calls to the same Tier-1 target on one line (`(dump(a), dump(b))`)
+    must each need their own reviewed allowlist entry — allowlisting the
+    first must not silently exempt the second."""
+    import scripts.check_ai_readiness as gate
+
+    pkg = tmp_path / "abicheck"
+    pkg.mkdir()
+    (pkg / "cli_dup.py").write_text(
+        "from .dumper import dump\ndef go(a, b):\n    return (dump(a), dump(b))\n"
+    )
+    monkeypatch.setattr(gate, "PKG", pkg)
+    monkeypatch.setattr(gate, "ROOT", tmp_path)
+    # Only the first call's exact site is allowlisted.
+    monkeypatch.setattr(
+        gate,
+        "CLI_CONTRACT_ALLOWLIST",
+        frozenset({"abicheck/cli_dup.py:3:12:dumper.dump"}),
+    )
+
+    findings = gate.Findings()
+    gate.check_cli_contract(findings)
+    errors = [m for c, m in findings.errors if c == "cli-contract"]
+    assert len(errors) == 1
+    assert "cli_dup.py:3:21" in errors[0]
+
+
 def test_cli_contract_allowlist_entries_are_real_violations() -> None:
     """Every `CLI_CONTRACT_ALLOWLIST` entry must still name a genuine Tier-1
     call site *for its own recorded target* in the real tree — otherwise the
     allowlist rots into a rubber stamp for a call that was already fixed or
-    removed, or silently starts covering a *different* Tier-1 violation that
-    happens to land on the same line (the key includes the module/function
-    identity specifically so this can be verified, not just that some
+    removed, silently starts covering a *different* Tier-1 violation that
+    happens to land on the same line, or silently starts covering a
+    *second* call to the same target on that line (the key includes the
+    column offset specifically so this can be verified, not just that some
     finding exists at that `path:lineno`)."""
     import re
 
@@ -436,7 +466,7 @@ def test_cli_contract_allowlist_entries_are_real_violations() -> None:
         gate.check_cli_contract(findings)
     finally:
         gate.CLI_CONTRACT_ALLOWLIST = original
-    pattern = re.compile(r"^([^:]+:\d+): front-end calls Tier-1 `([^`]+)` ")
+    pattern = re.compile(r"^([^:]+:\d+:\d+): front-end calls Tier-1 `([^`]+)` ")
     flagged_sites: set[str] = set()
     for c, m in findings.errors:
         if c != "cli-contract":
