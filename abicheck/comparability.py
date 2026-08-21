@@ -987,14 +987,16 @@ def _compiler_version_sans_driver_name(version: str) -> str:
 
 def _is_gcc_gxx_driver_pair(old_version: str, new_version: str) -> bool:
     """Whether each banner's leading token is genuinely a C vs. C++ driver
-    name (``gcc``/``cc`` vs. ``g++``/``c++``, cross-compile prefix
-    included) -- not merely two words whose stripped remainders happen to
-    match, which a coincidental same-version vendor pair could also
-    produce (Codex review, second round)."""
-    old_word = old_version.split(None, 1)[0].lower() if old_version else ""
-    new_word = new_version.split(None, 1)[0].lower() if new_version else ""
-    if not old_word or not new_word:
+    name (``gcc``/``cc`` vs. ``g++``/``c++``), not merely two words whose
+    stripped remainders coincidentally match (Codex review)."""
+
+    if not old_version or not new_version:
         return False
+    # MinGW banners lead with "gcc.exe"/"g++.exe" -- strip the suffix, or
+    # neither endswith() below matches (Codex review, P1: the Windows case
+    # this carve-out exists for).
+    old_word = old_version.split(None, 1)[0].lower().removesuffix(".exe")
+    new_word = new_version.split(None, 1)[0].lower().removesuffix(".exe")
     old_is_c = old_word == "cc" or old_word.endswith("gcc")
     old_is_cxx = old_word == "c++" or old_word.endswith("g++")
     new_is_c = new_word == "cc" or new_word.endswith("gcc")

@@ -727,6 +727,48 @@ def test_gate_content_driven_still_raises_for_a_coincidental_vendor_banner_match
         check_contracts_comparable(old, new)
 
 
+def test_gate_waives_mingw_exe_suffixed_driver_pair_even_when_sha256_differs():
+    """Codex review, fresh evidence (P1): MinGW/Windows GCC banners commonly
+    lead with `gcc.exe`/`g++.exe` rather than the bare `gcc`/`g++`
+    `_is_gcc_gxx_driver_pair` otherwise recognizes -- without stripping that
+    suffix first, neither `endswith()` check matches, and a genuine
+    castxml gcc.exe/g++.exe mode-switch pairing on Windows falls through to
+    requiring a real sha256 match it can never satisfy (two distinct
+    binaries), reintroducing exactly the Windows case this carve-out
+    exists to restore. Must still waive."""
+    old = _snap(
+        compute_extraction_contract(
+            l2_frontend_ran=True,
+            compiler_family="gnu",
+            compiler_version="13.3.0",
+            language_standard="probed:__cplusplus=201703L",
+        ),
+        ast_toolchain=_content_ast_toolchain(
+            "c++",
+            producer="castxml",
+            frontend_version="0.6.11",
+            host_version="g++.exe (MinGW-W64) 13.3.0",
+            compiler_sha256="a" * 64,
+        ),
+    )
+    new = _snap(
+        compute_extraction_contract(
+            l2_frontend_ran=True,
+            compiler_family="gnu",
+            compiler_version="13.3.0",
+            language_standard="gnu11",
+        ),
+        ast_toolchain=_content_ast_toolchain(
+            "c",
+            producer="castxml",
+            frontend_version="0.6.11",
+            host_version="gcc.exe (MinGW-W64) 13.3.0",
+            compiler_sha256="b" * 64,
+        ),
+    )
+    check_contracts_comparable(old, new)  # must not raise
+
+
 def test_gate_content_driven_still_raises_when_producer_differs():
     """A castxml-produced snapshot compared against a direct-clang-produced
     one is a genuinely different extraction mechanism, not merely a
