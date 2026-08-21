@@ -915,6 +915,50 @@ def test_budget_checked_during_baseline_compare_not_only_at_end(
     assert elapsed < 2.0
 
 
+def _fake_candidate_resolution(sentinel_folded_ctx, effective_includes=()):
+    """A stand-in ``_build_new_snapshot`` returning a real ``SideResolution``.
+
+    Since CLI cleanup phase two's PR 3A, ``_build_new_snapshot`` routes through
+    the shared ``_resolve_side_snapshot_impl`` and returns its
+    :class:`SideResolution` -- including ``baseline_compile_context``, the
+    pair-aware "may the baseline reuse the candidate's folded context" answer,
+    computed at resolve time from the ``baseline_reuse_hint`` ``run_scan_core``
+    hands in. So a stub for this function has to answer that question the way
+    the real one does, or the four tests below would only be asserting against
+    their own stub.
+
+    It computes it through the *real*
+    :func:`~abicheck.service_input_resolution.resolve_baseline_compile_context`,
+    exactly as ``_resolve_side_snapshot_impl`` does -- so what each test still
+    pins is the two things ``run_scan_core`` itself is responsible for: that it
+    hands in the correct hint (built from the *resolved* old-side header and
+    include scopes), and that it forwards the resulting answer to
+    ``_run_baseline_compare`` rather than re-deriving one.
+    """
+    from abicheck.model import AbiSnapshot
+    from abicheck.service_input_resolution import (
+        SideResolution,
+        resolve_baseline_compile_context,
+    )
+
+    def _fake(*args, **kw):
+        headers = list(args[1]) if len(args) > 1 else []
+        return SideResolution(
+            snapshot=AbiSnapshot(library="l", version="2.0"),
+            effective_includes=tuple(effective_includes),
+            effective_compile_context=sentinel_folded_ctx,
+            baseline_compile_context=resolve_baseline_compile_context(
+                kw.get("baseline_reuse_hint"),
+                folded=sentinel_folded_ctx,
+                unfolded=kw.get("compile_context"),
+                headers=headers,
+                effective_includes=list(effective_includes),
+            ),
+        )
+
+    return _fake
+
+
 def test_baseline_compare_receives_l3_folded_compile_context(
     monkeypatch, runner, new_snap_compatible, baseline_snap
 ):
@@ -932,12 +976,7 @@ def test_baseline_compare_receives_l3_folded_compile_context(
     sentinel_folded_ctx = object()
     captured: dict = {}
 
-    def _fake_build_new_snapshot(*_a, **_kw):
-        # Mirrors the real function's 3-tuple return -- the third element is
-        # the effective (fold-applied) compile_context.
-        from abicheck.model import AbiSnapshot
-
-        return AbiSnapshot(library="l", version="2.0"), [], sentinel_folded_ctx
+    _fake_build_new_snapshot = _fake_candidate_resolution(sentinel_folded_ctx)
 
     def _fake_baseline_compare(*_a, **kw):
         captured["compile_context"] = kw.get("compile_context")
@@ -982,10 +1021,7 @@ def test_baseline_compare_with_side_aware_headers_keeps_unfolded_context(
     sentinel_folded_ctx = object()
     captured: dict = {}
 
-    def _fake_build_new_snapshot(*_a, **_kw):
-        from abicheck.model import AbiSnapshot
-
-        return AbiSnapshot(library="l", version="2.0"), [], sentinel_folded_ctx
+    _fake_build_new_snapshot = _fake_candidate_resolution(sentinel_folded_ctx)
 
     def _fake_baseline_compare(*_a, **kw):
         captured["compile_context"] = kw.get("compile_context")
@@ -1035,10 +1071,7 @@ def test_baseline_compare_with_shared_bare_header_still_gets_folded_context(
     sentinel_folded_ctx = object()
     captured: dict = {}
 
-    def _fake_build_new_snapshot(*_a, **_kw):
-        from abicheck.model import AbiSnapshot
-
-        return AbiSnapshot(library="l", version="2.0"), [], sentinel_folded_ctx
+    _fake_build_new_snapshot = _fake_candidate_resolution(sentinel_folded_ctx)
 
     def _fake_baseline_compare(*_a, **kw):
         captured["compile_context"] = kw.get("compile_context")
@@ -1087,17 +1120,12 @@ def test_baseline_compare_with_side_aware_includes_keeps_unfolded_context(
     sentinel_folded_ctx = object()
     captured: dict = {}
 
-    def _fake_build_new_snapshot(*_a, **_kw):
-        from abicheck.model import AbiSnapshot
-
-        # eff_includes intentionally differs from the old-side -I below, so
-        # the candidate's and baseline's resolved include scopes diverge
-        # even though both sides share the same -H.
-        return (
-            AbiSnapshot(library="l", version="2.0"),
-            [tmp_path / "new_inc"],
-            sentinel_folded_ctx,
-        )
+    # eff_includes intentionally differs from the old-side -I below, so the
+    # candidate's and baseline's resolved include scopes diverge even though
+    # both sides share the same -H.
+    _fake_build_new_snapshot = _fake_candidate_resolution(
+        sentinel_folded_ctx, effective_includes=[tmp_path / "new_inc"]
+    )
 
     def _fake_baseline_compare(*_a, **kw):
         captured["compile_context"] = kw.get("compile_context")

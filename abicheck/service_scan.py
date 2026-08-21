@@ -99,6 +99,36 @@ def expand_header_inputs(inputs: list[Path]) -> list[Path]:
     return deduped
 
 
+def expand_public_header_inputs(headers: Iterable[Path]) -> list[str]:
+    """Best-effort :func:`expand_header_inputs`, as ``str`` paths.
+
+    The public-header-root variant: a ``-H``/``--public-header-dir`` entry may
+    name a directory, and two consumers need the individual header *files* out
+    of it rather than the directory as one entry -- the S2 leak pass (so clang
+    preprocesses each header instead of a directory as one bogus TU) and L4
+    replay's install-tree-vs-build-tree mirror detection
+    (``clang_public_roots._equivalent_public_roots_for_unit``, whose promotion
+    rule needs two sampled matches for a directory root but only one for a file
+    root, so an un-expanded directory silently loses a real mirror).
+
+    Unlike :func:`expand_header_inputs` this never raises: an empty or missing
+    directory degrades to the raw paths, because both consumers are advisory
+    enrichment on top of a snapshot that has already been built.
+
+    Lives here, in the engine layer, rather than in ``cli_scan_baseline`` where
+    it started, so ``service_input_resolution.embed_side_build_source`` can
+    reach it without an engine-imports-CLI edge (CLI cleanup phase two, PR 3A --
+    the migration that routed ``scan``'s candidate resolution through that
+    shared primitive). ``cli_scan_baseline._expand_public_headers`` is now a
+    thin delegate, so there is one implementation rather than two.
+    """
+    hdrs = list(headers)
+    try:
+        return [str(p) for p in expand_header_inputs(hdrs)]
+    except Exception:  # noqa: BLE001 - expansion is best-effort for these tiers
+        return [str(h) for h in hdrs]
+
+
 # ── Scan service: typed request/result + per-project cost estimate ───────────
 #
 # ADR-035 D10 / G19.7 (Phase 3b). One typed contract — :class:`ScanRequest` →

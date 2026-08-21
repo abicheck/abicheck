@@ -304,6 +304,7 @@ def _seeded_includes_and_compile_context(
     build_query: str | None = None,
     build_compile_db: str | None = None,
     allow_build_query: bool = False,
+    collect_mode: str | None = None,
 ) -> tuple[list[Path], CompileContext | None, bool, list[Callable[[], None]]]:
     """This input's L2 include-dir seed *and* its P0.3 L3->L2 compile-context
     fold, resolved together in one L3 collection (PR C, typed dump/scan
@@ -345,12 +346,16 @@ def _seeded_includes_and_compile_context(
     model; see the ``AGENTS.md`` entry for the full accounting of what
     remains open.
 
-    ``allow_inferred_build_query=False`` (``collect_mode="off"``), unlike the
-    CLI's ``collect_mode != "off"``: passive discovery of an existing compile
-    database still applies, but a Tier-2 API call must never *execute* a
-    build system (cmake/make/bazel) as a side effect of resolving an input.
-    That is a surprise a library caller cannot see coming, and the CLI only
-    permits it because the user typed a command that says so.
+    ``allow_inferred_build_query=False`` (``collect_mode="off"``) by default,
+    unlike the CLI's ``collect_mode != "off"``: passive discovery of an
+    existing compile database still applies, but a Tier-2 API call must never
+    *execute* a build system (cmake/make/bazel) as a side effect of resolving
+    an input. That is a surprise a library caller cannot see coming, and the
+    CLI only permits it because the user typed a command that says so — which
+    is exactly what the optional *collect_mode* parameter is for: ``scan``'s
+    candidate resolution, migrated onto this primitive by PR 3A, passes its
+    own real collect mode so it keeps the inferred-query seeding it has always
+    had. ``None`` (every other caller) keeps the pin.
 
     A no-op (``(list(side.includes), evidence.compile, False, [])``) when
     there is no L3 evidence or no headers to match — the exact same behavior
@@ -437,7 +442,7 @@ def _seeded_includes_and_compile_context(
             build_query=build_query,
             build_compile_db=build_compile_db,
             build_targets=side.build_targets,
-            collect_mode="off",
+            collect_mode=collect_mode if collect_mode is not None else "off",
             gcc_path=ctx.gcc_path if ctx is not None else None,
             gcc_prefix=ctx.gcc_prefix if ctx is not None else None,
             gcc_options=ctx.gcc_options if ctx is not None else None,
@@ -558,6 +563,12 @@ def _resolve_side_snapshot_impl(
     changed_paths: tuple[str, ...] = (),
     allow_build_query: bool | None = None,
     baseline_reuse_hint: BaselineReuseContext | None = None,
+    seed_collect_mode: str | None = None,
+    seed_lang_explicit: bool | None = None,
+    defer_cleanup: list[Callable[[], None]] | None = None,
+    source_extractor: str | None = None,
+    expand_public_header_roots: bool = False,
+    source_frontend_from_folded_context: bool = False,
 ) -> SideResolution:
     """The real implementation behind :func:`resolve_side_snapshot`.
 
@@ -578,6 +589,28 @@ def _resolve_side_snapshot_impl(
     matching every pre-existing caller) — only a caller that explicitly
     passes ``True`` (the CLI, once its own trust gate has already decided
     the query is authorized) opts into running one.
+
+    Six further parameters exist so ``scan``'s candidate resolution could be
+    migrated onto this one primitive *without changing any of its own
+    behaviour* (PR 3A). Each defaults to what this function did before, so
+    ``compare``/``dump``'s typed pipelines are bit-for-bit unaffected; four are
+    forwarded straight to :func:`embed_side_build_source`, whose docstring
+    explains each. The two that are this function's own:
+
+    * *seed_collect_mode* — the collect mode handed to the L2 include/compile
+      seed. ``None`` keeps the pinned ``"off"``: a Tier-2 API call must never
+      *execute* a build system as a side effect of resolving an input (see
+      :func:`_seeded_includes_and_compile_context`). ``scan`` passes its real
+      collect mode, because the user typed a command that says so, and
+      dropping that would silently remove its zero-config inferred-build-query
+      include seeding for a source tree with no compile database.
+    * *seed_lang_explicit* — the seed's own ``lang_explicit``, when it differs
+      from the one the *parse* gets. ``None`` (the default) uses
+      *lang_explicit* for both, which is what every request-shaped caller
+      wants. ``scan`` has no ``lang_explicit`` on its CLI at all, but ``--lang
+      c`` is never its Click default and so is always a genuine request — it
+      therefore guards the seed with ``lang == "c"`` while leaving the parse's
+      own auto-detection alone, exactly as it did before this migration.
     """
     from . import service
     from .api_types import required_path
@@ -615,11 +648,14 @@ def _resolve_side_snapshot_impl(
                 side,
                 evidence,
                 lang=lang,
-                lang_explicit=lang_explicit,
+                lang_explicit=(
+                    lang_explicit if seed_lang_explicit is None else seed_lang_explicit
+                ),
                 build_config=_gated_build_config,
                 build_query=_gated_build_query,
                 build_compile_db=build_compile_db,
                 allow_build_query=bool(allow_build_query),
+                collect_mode=seed_collect_mode,
             )
         )
         # Drained as soon as the L2 parse below has consumed the seeded dirs --
@@ -768,6 +804,12 @@ def _resolve_side_snapshot_impl(
                 build_config=_gated_build_config,
                 build_query=_gated_build_query,
                 build_compile_db=build_compile_db,
+                defer_cleanup=defer_cleanup,
+                source_extractor=source_extractor,
+                source_frontend_compile=(
+                    compile_ctx if source_frontend_from_folded_context else None
+                ),
+                expand_public_header_roots=expand_public_header_roots,
             )
     finally:
         # Backstop only. The real drain happens in the nested `finally` around
@@ -811,6 +853,10 @@ def embed_side_build_source(
     build_config: Path | None = None,
     build_query: str | None = None,
     build_compile_db: str | None = None,
+    defer_cleanup: list[Callable[[], None]] | None = None,
+    source_extractor: str | None = None,
+    source_frontend_compile: CompileContext | None = None,
+    expand_public_header_roots: bool = False,
 ) -> None:
     """Embed one side's inline L3-L5 build/source evidence into *snap*.
 
@@ -843,6 +889,40 @@ def embed_side_build_source(
     describe two different builds, and an explicitly requested depth could
     fail to be satisfied despite the caller having supplied exactly what it
     needed.
+
+    The last four parameters exist so ``scan``'s candidate resolution can route
+    through this one primitive without any of its own long-standing behaviour
+    changing underneath it (CLI cleanup phase two, PR 3A). Each defaults to
+    exactly what this function did before, so every pre-existing caller
+    (``compare``, ``dump``'s typed pipeline) is bit-for-bit unaffected:
+
+    * *defer_cleanup* — ``scan`` owns the command-lifetime cleanup list its
+      collection's temp build dirs are drained from; ``compare``/``dump`` let
+      ``embed_build_source`` drain its own.
+    * *source_extractor* — the L4 replay frontend. ``None`` keeps this
+      function's own :func:`service_compare_evidence.effective_frontend`
+      resolution. ``scan`` passes ``"auto"``, which
+      ``buildsource.inline._make_source_extractor`` reads as clang, because
+      that is what ``scan`` has always done — making it match the other
+      resolvers would newly *require* castxml for a ``scan --depth source``
+      that works with clang today, a real behaviour change for real users
+      that cannot be verified without a castxml-capable lane (recorded as an
+      open divergence in the plan's PR 3A section, deliberately not closed by
+      the migration that added this parameter).
+    * *source_frontend_compile* — the context whose ``gcc_path``/
+      ``gcc_prefix`` selects the L4 replay compiler, when it is not
+      ``evidence.compile``. ``scan`` passes the *folded* (post-P0.3) context,
+      i.e. the one its L2 header AST was actually pointed at, which is what
+      this function's own ``clang_bin`` comment below says the intent is; the
+      two differ only when the caller set neither selector and the matched
+      compile unit named an MSVC/clang-cl driver.
+    * *expand_public_header_roots* — expand a public-header *directory* into
+      its individual files before handing the list to ``embed_build_source``.
+      ``scan`` does; the raw pass-through this function otherwise uses loses
+      ``clang_public_roots._equivalent_public_roots_for_unit``'s
+      single-sample mirror promotion for a directory root (a change switching
+      ``scan`` to the raw shape was landed and reverted for exactly that
+      regression — see the plan's 2026-08-20 note).
     """
     import click
 
@@ -850,8 +930,21 @@ def embed_side_build_source(
     from .cli_buildsource import embed_build_source
     from .dumper_clang import resolve_source_frontend_clang_bin
     from .dumper_scoping import dump_manifest_public_roots
+    from .service_scan import expand_public_header_inputs
 
     ctx = evidence.compile
+    frontend_ctx = (
+        source_frontend_compile if source_frontend_compile is not None else ctx
+    )
+    manifest_roots = dump_manifest_public_roots(evidence.dump_manifest)
+    if expand_public_header_roots:
+        embedded_public_headers: tuple[str, ...] = tuple(
+            expand_public_header_inputs(
+                [*public_headers, *public_header_dirs, *manifest_roots]
+            )
+        )
+    else:
+        embedded_public_headers = tuple(str(p) for p in public_headers)
     try:
         embed_build_source(
             snap,
@@ -864,7 +957,11 @@ def embed_side_build_source(
             collect_mode=evidence.collect_mode,
             changed_paths=changed_paths,
             allow_build_query=allow_build_query,
-            extractor=_sce.effective_frontend(evidence.compile, header_backend),
+            extractor=(
+                source_extractor
+                if source_extractor is not None
+                else _sce.effective_frontend(evidence.compile, header_backend)
+            ),
             # L4 source-ABI replay must invoke the compiler this input's own L2
             # header AST was pointed at (`gcc_path`/`gcc_prefix`), not
             # `embed_build_source`'s bare "clang" default -- the same fix
@@ -877,13 +974,14 @@ def embed_side_build_source(
             # with `--driver-mode=cl` itself; only the S2 pre-scan needs the
             # exclusion.
             clang_bin=resolve_source_frontend_clang_bin(
-                ctx.gcc_path if ctx else None,
-                ctx.gcc_prefix if ctx else None,
+                frontend_ctx.gcc_path if frontend_ctx else None,
+                frontend_ctx.gcc_prefix if frontend_ctx else None,
                 exclude_cl_style=False,
             ),
-            public_headers=tuple(str(p) for p in public_headers),
+            public_headers=embedded_public_headers,
             public_header_dirs=tuple(str(p) for p in public_header_dirs)
-            + tuple(str(p) for p in dump_manifest_public_roots(evidence.dump_manifest)),
+            + tuple(str(p) for p in manifest_roots),
+            defer_cleanup=defer_cleanup,
             quiet=True,
         )
     except click.ClickException as exc:
