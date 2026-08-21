@@ -94,6 +94,7 @@ def build_dump_request(
     search_paths: tuple[Path, ...],
     ld_library_path: str,
     include_labels: dict[Path, str] | None,
+    resolved_collect_mode: str | None = None,
 ) -> DumpRequest:
     """One :class:`DumpRequest` describing this ``abicheck dump`` invocation.
 
@@ -116,6 +117,15 @@ def build_dump_request(
     value also rides on *compile_context*, which is where
     ``service_compare_evidence.effective_frontend`` reads an explicit override
     from.
+
+    *resolved_collect_mode* is the CLI's private ``_resolved_collect_mode``
+    hook verbatim (Codex review) — set only when this invocation was itself
+    driven by another already-resolved decision (``compare``'s implicit-dump
+    path resolves collect mode from the *pair*, a materially different rule
+    from a lone ``dump``'s own ``depth``-only default; see
+    ``api_types.DumpRequest.resolved_collect_mode``'s own docstring). ``None``
+    for an ordinary ``dump`` invocation, which lets
+    ``resolve_dump_request()`` derive it from *depth* as usual.
     """
     from .api_types import DumpRequest, InputSpec
 
@@ -147,6 +157,7 @@ def build_dump_request(
         ld_library_path=ld_library_path,
         frontend_context=frontend_context,
         lang_explicit=lang_explicit,
+        resolved_collect_mode=resolved_collect_mode,
     )
 
 

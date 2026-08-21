@@ -319,11 +319,20 @@ def resolve_dump_request_evidence(request: DumpRequest) -> SideEvidence:
     nothing to disagree with, and ``dumper.py``'s own per-input C++20 heuristic
     already runs — so forcing a pair-wide decision here would change what a
     single ``dump`` produces relative to today for no benefit.
+
+    ``request.resolved_collect_mode``, when set, wins over the ``depth``-only
+    derivation (Codex review) — see that field's own docstring in
+    ``api_types.py`` for why re-deriving it here would disagree with what
+    ``compare``'s implicit-dump path already resolved.
     """
     return resolve_side_evidence(
         request.input,
         depth=request.depth,
-        collect_mode=dump_collect_mode_for(request.depth),
+        collect_mode=(
+            request.resolved_collect_mode
+            if request.resolved_collect_mode is not None
+            else dump_collect_mode_for(request.depth)
+        ),
         pair_compile=None,
         frontend_context=request.frontend_context.lower(),
     )

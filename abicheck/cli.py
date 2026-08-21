@@ -707,6 +707,7 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
         follow_deps=follow_deps, search_paths=search_paths,
         ld_library_path=ld_library_path,
         include_labels=_resolved_include_labels,
+        resolved_collect_mode=_resolved_collect_mode,
     )
 
     if dry_run:

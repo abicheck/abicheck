@@ -100,6 +100,34 @@ class TestCollectModeParity:
             == "source-target"
         )
 
+    def test_resolved_collect_mode_wins_over_the_depth_derivation(
+        self, tmp_path: Path
+    ) -> None:
+        """`compare`'s implicit-dump path forwards an already-resolved mode.
+
+        Codex review on #814: ``cli_compare_helpers._embed_inline_source_side``
+        calls ``ctx.invoke(dump_cmd, ..., _resolved_collect_mode=collect_mode)``
+        with no ``depth=`` kwarg at all (Click's own default, ``None``, wins)
+        -- the real run's collect mode comes entirely from the pair-resolved
+        override, not from ``depth``. A ``DumpRequest`` built for that same
+        invocation (e.g. by ``--dry-run``) must record that override rather
+        than let ``resolve_dump_request_evidence`` re-derive a *different*
+        mode from the absent ``depth`` -- exactly the "preview describes a
+        run that never happened" hazard this whole request object exists to
+        foreclose.
+        """
+        from abicheck.service_compare_evidence import resolve_dump_request_evidence
+
+        # depth=None alone would resolve to "source-target" (the test above
+        # pins this) -- a value distinct from "build" is what proves the
+        # override, not the derivation, decided the outcome.
+        request = DumpRequest(
+            input=InputSpec.of(Path("libfoo.so")),
+            depth=None,
+            resolved_collect_mode="build",
+        )
+        assert resolve_dump_request_evidence(request).collect_mode == "build"
+
     def test_compare_keeps_its_own_inference_rule(self, tmp_path: Path) -> None:
         """`compare`'s rule is deliberately NOT changed by the dump fix.
 
