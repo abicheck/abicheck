@@ -7,7 +7,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Pinned to the commit this task pack was generated from -- see
 # `_abicheck_ref()` in scripts/gen_harbor_tasks.py.
-ARG ABICHECK_REF=99ee3942af63eeca2ad9428a6d203e68f8c83cd3
+ARG ABICHECK_REF=00a02799cd5d9e382bde4ef097af8bd304c1a34b
 RUN git clone https://github.com/abicheck/abicheck.git /opt/abicheck-src \
     && cd /opt/abicheck-src && git checkout "$ABICHECK_REF" \
     && pip install --no-cache-dir -e ".[dev]"
@@ -55,10 +55,17 @@ ENV SKILL_EVAL_SHIM=/usr/local/bin/abicheck
 # the classic line-oriented parser intact, while base64 has no shell
 # metacharacters at all and needs nothing beyond `base64`, present in every
 # Debian-based image by default.
+#
+# No separate `cp .../python3 .../python` step: `python:3.13-slim` already
+# ships `/usr/local/bin/python` as a symlink to `python3`, so once `python3`
+# is replaced with the interposer, `python` resolves through to it
+# automatically -- a `cp` there would try to copy the interposer onto
+# itself (`cp` resolves the destination symlink first) and fail the whole
+# build with "are the same file" (Codex review, fresh evidence: confirmed
+# against the base image's real layout, not assumed).
 RUN mv /usr/local/bin/python3 /usr/local/bin/python3-real \
     && echo 'IyEvYmluL3NoCnNraXA9MApzZWVuPTAKZm9yIGFyZyBpbiAiJEAiOyBkbwogIGlmIFsgIiRza2lwIiA9IDEgXTsgdGhlbiBza2lwPTA7IHNlZW49JCgoc2VlbisxKSk7IGNvbnRpbnVlOyBmaQogIGNhc2UgIiRhcmciIGluCiAgICAtbSkKICAgICAgaWYgWyAiJChldmFsIGVjaG8gXCJcJHskKChzZWVuKzIpKX1cIikiID0gImFiaWNoZWNrIiBdOyB0aGVuCiAgICAgICAgc2hpZnQgJCgoc2VlbisyKSkKICAgICAgICBleGVjICIkU0tJTExfRVZBTF9TSElNIiAiJEAiCiAgICAgIGZpCiAgICAgIGJyZWFrCiAgICAgIDs7CiAgICAtbWFiaWNoZWNrKQogICAgICBzaGlmdCAkKChzZWVuKzEpKQogICAgICBleGVjICIkU0tJTExfRVZBTF9TSElNIiAiJEAiCiAgICAgIDs7CiAgICAtWHwtV3wtLWNoZWNrLWhhc2gtYmFzZWQtcHljcykgc2tpcD0xIDs7CiAgICAtYykgYnJlYWsgOzsKICAgIC0qKSA7OwogICAgKikgYnJlYWsgOzsKICBlc2FjCiAgc2Vlbj0kKChzZWVuKzEpKQpkb25lCmV4ZWMgIiRTS0lMTF9FVkFMX1JFQUxfUFlUSE9OIiAiJEAiCg==' | base64 -d > /usr/local/bin/python3 \
-    && cp /usr/local/bin/python3 /usr/local/bin/python \
-    && chmod +x /usr/local/bin/python3 /usr/local/bin/python
+    && chmod +x /usr/local/bin/python3
 ENV SKILL_EVAL_REAL_PYTHON=/usr/local/bin/python3-real
 
 # This sandbox's own castxml is routinely below abicheck's policy floor

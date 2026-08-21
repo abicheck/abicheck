@@ -195,10 +195,17 @@ ENV SKILL_EVAL_SHIM=/usr/local/bin/abicheck
 # the classic line-oriented parser intact, while base64 has no shell
 # metacharacters at all and needs nothing beyond `base64`, present in every
 # Debian-based image by default.
+#
+# No separate `cp .../python3 .../python` step: `python:3.13-slim` already
+# ships `/usr/local/bin/python` as a symlink to `python3`, so once `python3`
+# is replaced with the interposer, `python` resolves through to it
+# automatically -- a `cp` there would try to copy the interposer onto
+# itself (`cp` resolves the destination symlink first) and fail the whole
+# build with "are the same file" (Codex review, fresh evidence: confirmed
+# against the base image's real layout, not assumed).
 RUN mv /usr/local/bin/python3 /usr/local/bin/python3-real \\
     && echo '{base64.b64encode(_PYTHON_INTERPOSER.encode()).decode()}' | base64 -d > /usr/local/bin/python3 \\
-    && cp /usr/local/bin/python3 /usr/local/bin/python \\
-    && chmod +x /usr/local/bin/python3 /usr/local/bin/python
+    && chmod +x /usr/local/bin/python3
 ENV SKILL_EVAL_REAL_PYTHON=/usr/local/bin/python3-real
 
 # This sandbox's own castxml is routinely below abicheck's policy floor
