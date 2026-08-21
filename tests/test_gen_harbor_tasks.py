@@ -878,8 +878,22 @@ class TestArchitectureGuard:
         assert "architecture_mismatch" not in test_sh
 
 
+@pytest.mark.integration
 class TestSolveScriptsEndToEnd:
     """Real execution: `solve.sh` -> the recording shim -> `verify_run.py`.
+
+    Marked `integration` (CodeRabbit review, PR #816): this class shells out
+    to bash/gcc/abicheck via `subprocess` for real, same as any other
+    `integration`-marked test in this repo (tests/CLAUDE.md: "Mark tests
+    that shell out ... with the matching marker so default runs stay
+    fast"). It previously had only a `skipif`, which does gate a *missing*
+    toolchain but does not exclude the class from the default fast lane on
+    a host that happens to have gcc/abicheck on PATH already (e.g. plain
+    ubuntu-latest CI runners, or a contributor's own dev machine) --
+    `.github/workflows/ci.yml`'s `integration-tests` job already runs
+    `pytest -m integration` with castxml/gcc installed explicitly, so this
+    class now runs there instead of silently riding along in the
+    unit-tests job's `-m "not integration and ..."` fast lane.
 
     Skipped without gcc/abicheck on PATH -- the same precondition the
     existing harness's own `missing_toolchain()` gates on, not a new one.
