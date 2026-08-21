@@ -4674,7 +4674,8 @@ Once a root command genuinely clears the bar above, pick the right home:
   L2-filtered/L3-unfiltered refusal mirrored into
   `resolve_dump_request`, which is where the resolved collect mode is known
   (see that field's replacement comment in `api_types.py`). One
-  environmental fact independently rules out doing it in that session: the
+  environmental fact independently rules out attempting the *migration
+  itself* in that session, whatever order the three slices land in: the
   *default* header backend is castxml, and no working castxml was
   obtainable — a hand-assembled conda-forge 0.7.0 build segfaults inside
   `clang::ParseAST` on any input — so every measurement above is
