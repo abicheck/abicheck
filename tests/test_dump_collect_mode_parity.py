@@ -157,6 +157,34 @@ class TestCollectModeParity:
             errors = [e for e in request.validation_errors() if "resolved_collect_mode" in e]
             assert errors == [], (mode, errors)
 
+    def test_source_only_binary_depth_is_rejected(self, tmp_path: Path) -> None:
+        """Mirror `dump_cmd`'s own `so_path is None and depth == "binary"` check.
+
+        Codex review on #814: a source-only request (`InputSpec.path is
+        None`, allowed since PR 3A blocker 5) has no native artifact to
+        report `--depth binary` evidence from -- the CLI already raises a
+        `UsageError` for this exact shape, but the typed preflight silently
+        approved it (a resolved, empty, `collect_mode="off"` request) before
+        this fix. Lives here rather than in `test_typed_dump_request.py`,
+        which is at the AI-readiness 2000-line hard cap.
+        """
+        spec = InputSpec.of(path=None, sources=tmp_path)
+        errors = DumpRequest(input=spec, depth="binary").validation_errors()
+        assert any("--depth binary requires a native artifact" in e for e in errors), errors
+
+    def test_source_only_non_binary_depth_is_unaffected(self, tmp_path: Path) -> None:
+        spec = InputSpec.of(path=None, sources=tmp_path)
+        for depth in ("headers", "build", "source"):
+            errors = DumpRequest(input=spec, depth=depth).validation_errors()
+            assert not any("--depth binary" in e for e in errors), (depth, errors)
+
+    def test_binary_depth_with_a_real_path_is_unaffected(self, tmp_path: Path) -> None:
+        # The ordinary, valid case this check must never touch.
+        so_path = tmp_path / "libfoo.so"
+        so_path.write_bytes(b"")
+        request = DumpRequest(input=InputSpec.of(so_path), depth="binary")
+        assert request.validation_errors() == []
+
     def test_compare_keeps_its_own_inference_rule(self, tmp_path: Path) -> None:
         """`compare`'s rule is deliberately NOT changed by the dump fix.
 

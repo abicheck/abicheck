@@ -429,6 +429,33 @@ def _path_required_errors(
     return []
 
 
+def _source_only_binary_depth_errors(side: InputSpec, depth: str | None) -> list[str]:
+    """Mirror ``dump_cmd``'s own source-only + ``--depth binary`` rejection.
+
+    Codex review on #814: a source-only :class:`DumpRequest` (``path is
+    None``, allowed by ``_path_required_errors`` above) has no binary at all,
+    so ``--depth binary`` -- rank 0, the floor every other depth exceeds --
+    would be trivially "satisfied" for a completely empty snapshot
+    (``--depth binary`` resolves ``collect_mode`` to ``"off"``, skipping
+    L3-L5 embedding too). The CLI (``cli.py``'s ``so_path is None and depth
+    == "binary"`` check, right before its own ``--dry-run`` branch) already
+    raises a ``UsageError`` for this shape; without this check the typed
+    preflight silently approved an invocation the CLI treats as a hard
+    error, and ``resolve_dump_request()`` would go on to build a request
+    with nothing to report at all. Only fires for a genuinely path-less
+    side -- a binary dump with ``depth="binary"`` is the ordinary, valid
+    case this must not touch.
+    """
+    if side.path is not None or depth != "binary":
+        return []
+    return [
+        "--depth binary requires a native artifact (SO_PATH); a "
+        "source-only dump (--sources/--build-info with no SO_PATH) has "
+        "no binary to report and needs at least --depth build or "
+        "--depth source to produce any evidence."
+    ]
+
+
 def _side_errors(label: str, side: InputSpec) -> list[str]:
     """The per-:class:`InputSpec` rules both request types apply.
 
@@ -891,6 +918,7 @@ class DumpRequest:
         errors += _resolved_collect_mode_errors(self.resolved_collect_mode)
         errors += frontend_context_errors(self.frontend_context)
         errors += _path_required_errors("input", self.input, source_only_allowed=True)
+        errors += _source_only_binary_depth_errors(self.input, self.depth)
         errors += _side_errors("input", self.input)
         return errors
 
