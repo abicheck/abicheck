@@ -53,6 +53,16 @@ paths resolve to the same ``ast_resolved_standard``/``ast_compile_args``/
 what ``profile_fingerprint`` comparability checks on, and what made
 `scan --against` refuse a real, unchanged comparison as ``NOT_COMPARABLE``.
 
+Two lenses, deliberately: ``test_dump_cli_and_typed_api_agree_on_resolved_
+compile_context`` compares the *effective* compiler invocation through
+``split_compile_args``' semantics-preserving normalization ("did both paths
+reach the same compile"), while ``test_dump_cli_and_typed_api_agree_on_
+extraction_contract`` compares the extraction contract's profile fields
+*as recorded* ("are the two snapshots comparable to each other"). The
+second is strictly stricter, and it is where the currently-open
+legacy-compile-DB-match overlap shows up -- see
+``_CONTRACT_KNOWN_DIVERGENT_FIELDS``' own comment.
+
 A future change to either path's own L2-seeding wiring (not just the
 shared ``seed_includes_and_fold_compile_context`` primitive itself) that
 reintroduces a disagreement should fail here, on at least one of the
@@ -243,6 +253,45 @@ def _dump_via_typed_api(
     }
 
 
+def _contract_profile_fields_via_typed_api(
+    so_path: Path, header: Path, tmp_path: Path, compile_db: Path
+) -> dict:
+    """The typed path's own ``ExtractionContract`` profile fields.
+
+    Deliberately a second helper rather than a widening of
+    :func:`_dump_via_typed_api` above: that one returns three hand-picked
+    scalar fields and its callers compare them through
+    ``split_compile_args``' semantics-preserving normalization, which is
+    exactly the wrong lens for this question -- ``profile_fingerprint`` is
+    computed from the *raw* recorded fields, so a divergence normalization
+    hides is still a real comparability failure downstream.
+
+    ``include_dependencies=False`` matches the ``dump`` CLI's own default
+    (``--include-system-declarations`` is opt-in), so the two paths are
+    compared under the same dependency scope rather than at two different
+    ones.
+    """
+    from abicheck.serialization import snapshot_to_dict
+
+    request = DumpRequest(
+        input=InputSpec(
+            path=so_path,
+            headers=(header,),
+            sources=tmp_path,
+            build_info=compile_db,
+            include_dependencies=False,
+            compile=CompileContext(frontend="clang"),
+        ),
+        frontend="clang",
+        depth="source",
+    )
+    snap = run_dump_request(request)
+    contract = snapshot_to_dict(snap).get("contract") or {}
+    fields: dict = dict(contract.get("profile_fields") or {})
+    fields["__scope_fingerprint__"] = contract.get("scope_fingerprint")
+    return fields
+
+
 _BUILD_SHAPES: dict[str, dict[str, object]] = {
     "plain-c++17": {"std": "c++17"},
     "c++20-with-macro": {"std": "c++20", "macros": ("FOO=1",)},
@@ -330,6 +379,111 @@ def test_dump_cli_and_typed_api_agree_on_resolved_compile_context(
     # stream: see `split_compile_args`'s own docstring for why this must
     # be one sequence rather than several independently-compared ones.
     assert cli_stream == typed_stream, (shape_name, cli_stream, typed_stream)
+
+
+# The *raw* extraction-contract counterpart of the test above, and the
+# reason it is a separate test rather than three more assertions inside it:
+# that test compares `ast_compile_args` through `split_compile_args`'
+# semantics-preserving normalization (duplicates collapsed, last-wins
+# resolved, presence flags set-compared), which is the right lens for "did
+# both paths reach the same effective compiler invocation". It is the
+# *wrong* lens for comparability. `ExtractionContract.profile_fingerprint`
+# is a hash over the recorded profile fields as-recorded, so a difference
+# normalization deliberately hides -- the same macro recorded twice, an
+# include dir recorded through a different channel -- still makes two
+# snapshots of the identical library, from the identical evidence,
+# `NOT_COMPARABLE`.
+#
+# Measured, not assumed (2026-08-21, CLI cleanup phase two PR 3A
+# investigation): both entries below were reproduced field-by-field against
+# a real g++ build + clang L2 parse, and both trace to ONE root cause --
+# the `dump` CLI runs the legacy `-p`/`--compile-db` auto-match
+# (`cli_helpers_compare._resolve_build_context_flags`, folded into
+# `effective_gcc_options`) *in addition to* the P0.3 L3->L2 fold, when both
+# are fed by the same `--build-info` compile database, while every other
+# resolver runs the fold alone:
+#
+#   * `macro_ops` -- the CLI records `[["D","FOO=1"],["D","FOO=1"]]` where
+#     the typed path records one entry: the same `-D` arrives twice, once
+#     derived by the fold and once by the legacy match.
+#   * `include_sequence` -- the CLI records `[]` where the typed path
+#     records one slot: the legacy match puts `-I<dep>` into
+#     `effective_gcc_options` *before* the L2 seed runs, and
+#     `seed_l2_includes` then (correctly) declines to seed a directory
+#     explicit context already supplies -- so the dir reaches the parse via
+#     `gcc_option_tokens` and never becomes a `declared_includes` slot,
+#     which is the sole source `include_sequence` tokenizes.
+#
+# Both are the `dump`-side half of the divergence AGENTS.md's L3->L2-fold
+# "Known gaps" entry already records for `scan` (its "third, deeper
+# mechanism" note), reached here between `dump` and the *typed* pipeline.
+# Closing them means choosing which of the two mechanisms owns a matched
+# directory -- and dropping the legacy match would make `dump
+# --compile-db-filter` inert, since the shared fold has no filter concept
+# (see `InputSpec`'s own comment on why a `compile_db_filter` field was
+# added and then removed). That ordering -- filter into the shared fold
+# first, migration second -- is what the plan's PR 3A section records.
+#
+# Encoded the same way `_SCAN_KNOWN_DIVERGENT_SHAPES` below is, and for the
+# same reason: a listed (shape, field) pair has exactly two acceptable
+# outcomes -- the exact known signature reproduces (expected `xfail`), or
+# the test fails outright. "The gap closed" fails just as loudly as "a new
+# field diverged", so this note and the mapping must be updated
+# deliberately rather than going quietly stale.
+_CONTRACT_KNOWN_DIVERGENT_FIELDS: dict[str, str] = {
+    "c++20-with-macro": "macro_ops",
+    "extra-include-dir": "include_sequence",
+}
+
+
+@pytest.mark.skipif(not (_HAVE_GXX and _HAVE_CLANG), reason=_SKIP_REASON)
+@pytest.mark.parametrize("shape_name", sorted(_BUILD_SHAPES))
+def test_dump_cli_and_typed_api_agree_on_extraction_contract(
+    tmp_path: Path, shape_name: str
+) -> None:
+    """A ``dump``-CLI snapshot and a typed-API snapshot of the same library,
+    from the same evidence, must record the same extraction contract --
+    otherwise they are not comparable to each other, nor to a ``compare``
+    implicit dump or a ``scan`` candidate."""
+    shape = _BUILD_SHAPES[shape_name]
+    so_path, header, compile_db = _build_library(tmp_path, **shape)  # type: ignore[arg-type]
+
+    cli_contract = _dump_via_cli(so_path, header, tmp_path, compile_db)
+    # `_dump_via_cli` returns the whole written snapshot dict; re-read the
+    # contract block out of it rather than dumping a second time.
+    cli_block = cli_contract.get("contract") or {}
+    cli_fields: dict = dict(cli_block.get("profile_fields") or {})
+    cli_fields["__scope_fingerprint__"] = cli_block.get("scope_fingerprint")
+    typed_fields = _contract_profile_fields_via_typed_api(
+        so_path, header, tmp_path, compile_db
+    )
+
+    assert cli_fields, f"{shape_name}: the CLI dump recorded no extraction contract"
+    assert typed_fields, f"{shape_name}: the typed dump recorded no extraction contract"
+
+    differing = sorted(
+        key
+        for key in set(cli_fields) | set(typed_fields)
+        if cli_fields.get(key) != typed_fields.get(key)
+    )
+    known = _CONTRACT_KNOWN_DIVERGENT_FIELDS.get(shape_name)
+    if known is not None:
+        if differing == [known]:
+            pytest.xfail(
+                f"{shape_name}: known-open legacy-compile-DB-match overlap on "
+                f"{known!r} (see this module's own comment above this test)"
+            )
+        pytest.fail(
+            f"{shape_name} is listed in _CONTRACT_KNOWN_DIVERGENT_FIELDS as "
+            f"diverging on exactly {known!r}, but the differing fields were "
+            f"{differing!r}. Either the underlying gap closed -- remove this "
+            "shape from _CONTRACT_KNOWN_DIVERGENT_FIELDS and update the plan's "
+            "PR 3A section and AGENTS.md's PR C entry -- or a different field "
+            "started diverging and needs its own investigation. "
+            f"cli={cli_fields!r} typed={typed_fields!r}"
+        )
+
+    assert not differing, (shape_name, differing, cli_fields, typed_fields)
 
 
 def _dump_via_cli_to_file(
