@@ -5017,6 +5017,34 @@ Once a root command genuinely clears the bar above, pick the right home:
   confirmed to still resolve `None`; five of nine cases confirmed to fail
   against the pre-fix guard).
 
+  **A seventh finding (Codex review, fresh evidence) on the same guard:
+  the sixth finding's fix only recognized a pack named by `--build-info`,
+  but `buildsource.l2_seed._l2_seed_pack_inputs` folds a `--sources` pack
+  (a classic `BuildSourcePack` or a Flow-2 `abicheck_inputs/` directory)
+  into L2 seeding the identical way — carrying its own normalized
+  `BuildEvidence` in — whenever no `--build-info` was given at all (an
+  explicit `--build-info` always wins L3, matching that function's own
+  `if build_info is None:` gate on the assignment).** A `--sources` naming
+  such a pack, with no `--build-info`, reproduced the identical mismatch:
+  the guard's fallback resolution (`compile_db_from_build_info` then
+  `_autodiscover_compile_db`) only ever looks for a literal
+  `compile_commands.json` inside *sources*, which a pack directory does not
+  carry at its root — so it silently resolved `None` and let the mismatch
+  through. Fixed by recognizing a `sources` pack the identical way
+  `_l2_seed_pack_inputs` does (`is_pack_dir` / `inputs_pack.is_inputs_pack`),
+  gated on `build_info is None` to match that function's own precedence
+  exactly — an explicit `--build-info` (even one that itself resolves to
+  nothing recognizable) still means the sources pack's evidence is never
+  folded into `base_build`, so the guard must not treat it as filterable
+  evidence in that combination either (pinned by its own regression test).
+  Regression coverage: `TestScopeGuardCoversSourcesPacks` in
+  `tests/test_compile_db_filter_scope.py` (a classic pack and a Flow-2
+  inputs pack named by `sources`, the scope error firing, the
+  `build_info`-takes-precedence control, a no-filter control, and a plain
+  non-pack `sources` directory still falling through to ordinary
+  auto-discovery; three of six cases confirmed to fail against the pre-fix
+  guard).
+
   **A real regression the scan-migration paragraph above introduced, found
   by Codex review and fixed the same session (2026-08-21): `scan --config
   <path>` silently lost the config's own *passive* settings whenever the

@@ -1028,3 +1028,104 @@ class TestScopeGuardCoversPackAndBazelBuildInfo:
         odd.write_text(json.dumps({"hello": "world"}), encoding="utf-8")
         resolved = compile_db_for_filter_scope_check(odd, None, (tmp_path / "api.h",))
         assert resolved is None
+
+
+class TestScopeGuardCoversSourcesPacks:
+    """Codex review, P1 (a seventh finding on the same guard): the sixth
+    finding's fix only recognized a pack named by ``--build-info``, but
+    ``buildsource.l2_seed._l2_seed_pack_inputs`` folds a ``--sources`` pack
+    (a classic ``BuildSourcePack`` or a Flow-2 ``abicheck_inputs/``
+    directory) into L2 seeding the identical way -- whenever no
+    ``--build-info`` was given at all -- so a ``--sources`` naming such a
+    pack reproduced the same filtered-L2/unfiltered-L3 mismatch with no
+    error, since a pack directory carries no literal ``compile_commands.
+    json`` at its root for ``_autodiscover_compile_db`` to find. Pure
+    predicate tests, no compiler needed.
+    """
+
+    @staticmethod
+    def _classic_pack(tmp_path: Path) -> Path:
+        pack = tmp_path / "classic_pack"
+        pack.mkdir()
+        (pack / "manifest.json").write_text(
+            json.dumps({"build_source_pack_version": 1}), encoding="utf-8"
+        )
+        return pack
+
+    @staticmethod
+    def _inputs_pack(tmp_path: Path) -> Path:
+        pack = tmp_path / "inputs_pack"
+        pack.mkdir()
+        (pack / "manifest.json").write_text(
+            json.dumps({"kind": "abicheck_inputs"}), encoding="utf-8"
+        )
+        return pack
+
+    def test_classic_pack_named_by_sources_is_recognized(self, tmp_path: Path) -> None:
+        from abicheck.header_conditionals import compile_db_for_filter_scope_check
+
+        pack = self._classic_pack(tmp_path)
+        resolved = compile_db_for_filter_scope_check(None, pack, (tmp_path / "api.h",))
+        assert resolved == pack
+
+    def test_inputs_pack_named_by_sources_is_recognized(self, tmp_path: Path) -> None:
+        from abicheck.header_conditionals import compile_db_for_filter_scope_check
+
+        pack = self._inputs_pack(tmp_path)
+        resolved = compile_db_for_filter_scope_check(None, pack, (tmp_path / "api.h",))
+        assert resolved == pack
+
+    def test_sources_pack_triggers_the_scope_error(self, tmp_path: Path) -> None:
+        from abicheck.header_conditionals import (
+            compile_db_filter_scope_error,
+            compile_db_for_filter_scope_check,
+        )
+
+        pack = self._classic_pack(tmp_path)
+        resolved = compile_db_for_filter_scope_check(None, pack, (tmp_path / "api.h",))
+        error = compile_db_filter_scope_error("foo.cpp", resolved, "build")
+        assert error is not None
+
+    def test_an_explicit_build_info_takes_precedence_over_a_sources_pack(
+        self, tmp_path: Path
+    ) -> None:
+        """Mirrors ``_l2_seed_pack_inputs``'s own ``if build_info is None:``
+        gate: an explicit ``--build-info`` (even one that itself resolves to
+        nothing recognizable) means the sources pack's evidence is never
+        folded into ``base_build``, so the guard must not treat the sources
+        pack as filterable evidence in that combination either."""
+        from abicheck.header_conditionals import compile_db_for_filter_scope_check
+
+        pack = self._classic_pack(tmp_path)
+        unrelated_build_info = tmp_path / "not_a_pack_or_db"
+        unrelated_build_info.mkdir()
+        resolved = compile_db_for_filter_scope_check(
+            unrelated_build_info, pack, (tmp_path / "api.h",)
+        )
+        assert resolved is None
+
+    def test_no_filter_sources_pack_is_unaffected(self, tmp_path: Path) -> None:
+        """Control: the guard only fires when a filter is actually set."""
+        from abicheck.header_conditionals import (
+            compile_db_filter_scope_error,
+            compile_db_for_filter_scope_check,
+        )
+
+        pack = self._classic_pack(tmp_path)
+        resolved = compile_db_for_filter_scope_check(None, pack, (tmp_path / "api.h",))
+        assert compile_db_filter_scope_error(None, resolved, "build") is None
+
+    def test_a_plain_sources_directory_is_still_auto_discovery(
+        self, tmp_path: Path
+    ) -> None:
+        """A ``sources`` directory that is not a pack (no manifest.json, or
+        one lacking either pack's own marker) must still fall through to
+        ordinary auto-discovery, not be misclassified as a pack."""
+        from abicheck.header_conditionals import compile_db_for_filter_scope_check
+
+        plain_tree = tmp_path / "plain_source_tree"
+        plain_tree.mkdir()
+        resolved = compile_db_for_filter_scope_check(
+            None, plain_tree, (tmp_path / "api.h",)
+        )
+        assert resolved is None

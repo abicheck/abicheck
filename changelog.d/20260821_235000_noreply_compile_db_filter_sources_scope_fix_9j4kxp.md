@@ -35,3 +35,13 @@
   typed `DumpRequest`/`CompareRequest` API alike; a `--sources` tree with no
   discoverable compile database, resolved only through the zero-config
   inferred build-system query, remains a documented gap (see `AGENTS.md`).
+- **`dump --compile-db-filter --sources <path>` now also catches a
+  `--sources` tree that is itself a pre-captured `collect` pack (a classic
+  `BuildSourcePack` or a Flow-2 `abicheck_inputs/` directory), not only an
+  explicit `--build-info` pack.** L2 seeding folds such a `--sources` pack's
+  own build evidence in whenever no `--build-info` is given, the identical
+  way a `--build-info` pack does — but the scope guard's `--sources`
+  fallback only ever looked for a literal `compile_commands.json`, which a
+  pack directory doesn't carry at its root, so the mismatch reproduced with
+  no error. Fixed on the CLI and the typed `DumpRequest`/`CompareRequest`
+  API alike.

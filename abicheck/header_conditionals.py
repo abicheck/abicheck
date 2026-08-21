@@ -1073,6 +1073,24 @@ def compile_db_for_filter_scope_check(
     jsonproto was never a valid ``-p`` operand) and widening it here would
     widen that unrelated, separately reviewed mechanism too.
 
+    A fourth under-coverage (Codex review, fresh evidence): the third
+    under-coverage's fix only checked a *pack* named by ``--build-info``,
+    but ``buildsource.l2_seed._l2_seed_pack_inputs`` recognizes a
+    ``--sources`` pack (a classic ``BuildSourcePack`` or a Flow-2
+    ``abicheck_inputs/`` directory) the identical way -- carrying its own
+    normalized ``BuildEvidence`` into L2 seeding -- whenever *no*
+    ``--build-info`` was given at all (an explicit ``--build-info`` always
+    wins L3, matching ``_l2_seed_pack_inputs``'s own ``if build_info is
+    None:`` gate on that assignment). A ``--sources`` naming such a pack,
+    with no ``--build-info``, therefore reproduced the identical mismatch:
+    this function's fallback resolution (``compile_db_from_build_info``
+    then ``_autodiscover_compile_db``) only ever looks for a literal
+    ``compile_commands.json`` inside *sources*, which a pack directory does
+    not carry at its root. Fixed by recognizing a ``sources`` pack via the
+    same two functions ``_l2_seed_pack_inputs`` itself uses (``is_pack_dir``
+    / ``inputs_pack.is_inputs_pack``), gated on ``build_info is None`` to
+    match that function's own precedence exactly.
+
     Still not covered, and not attempted here: a ``--sources`` tree with no
     discoverable ``compile_commands.json`` at all, resolved instead through
     the zero-config *inferred* build-system query (cmake/make/bazel). Unlike
@@ -1109,6 +1127,21 @@ def compile_db_for_filter_scope_check(
             "bazel_cquery",
         ):
             return build_info
+    # Codex review, fresh evidence: a --sources pack (classic BuildSourcePack or
+    # Flow-2 abicheck_inputs/) carries its own normalized BuildEvidence, which
+    # buildsource.l2_seed._l2_seed_pack_inputs folds into L2 seeding exactly
+    # like a --build-info pack -- but only when no --build-info was given at
+    # all (an explicit --build-info always wins L3, mirroring
+    # _l2_seed_pack_inputs's own `if build_info is None:` gate on the base_build
+    # assignment). Recognized the identical way _l2_seed_pack_inputs does
+    # (is_pack_dir / inputs_pack.is_inputs_pack), not via the compile-
+    # database-only sniff this function otherwise uses.
+    if build_info is None and sources is not None and sources.is_dir():
+        from .buildsource.inline import is_pack_dir
+        from .buildsource.inputs_pack import is_inputs_pack
+
+        if is_pack_dir(sources) or is_inputs_pack(sources):
+            return sources
     from .buildsource.inline import _autodiscover_compile_db
 
     return _autodiscover_compile_db(sources)
