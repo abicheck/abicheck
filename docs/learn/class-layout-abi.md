@@ -9,6 +9,8 @@ depends_on:
   - abicheck/diff_layout.py
   - abicheck/diff_elf_layout.py
   - abicheck/dumper_clang.py
+  - tests/test_diff_layout.py
+  - tests/test_diff_elf_layout.py
 lifecycle: active
 generated: false
 ---

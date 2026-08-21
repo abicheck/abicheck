@@ -100,8 +100,13 @@ different":
   why no single static tool is enough on its own.
 - [Limitations](limitations.md) and
   [Evidence & Detectability §5](evidence-and-detectability.md#5-what-abi-tools-cannot-prove)
-  — the exact, itemized boundary of what static checking cannot see, which is
-  what motivates every row in the table above.
+  — the exact, itemized boundary of what *artifact-only* (binary/header, L0-L2)
+  comparison cannot see. Several of those rows (macro-only changes, an inline
+  body, an uninstantiated template) are exactly what L3/L4 source-replay
+  evidence closes — see the row above — so the boundary that motivates *this*
+  page's table is the one no static tool can cross: pure behavioral/semantic
+  and ownership/lifetime/thread-safety changes, which stay outside static
+  checking at any evidence tier.
 - [CI Gating Pipeline](../use/ci-gating.md) — wiring abicheck's own static
   check into a release pipeline; the assurance methods above are the
   complementary jobs that sit alongside it, not inside it.
