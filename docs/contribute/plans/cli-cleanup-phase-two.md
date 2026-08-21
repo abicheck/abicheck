@@ -1705,13 +1705,31 @@ pipelines a fourth time.
   > invariants, the three layers agreeing, the resolver, and a real
   > `g++`+clang `dump` asserting the guarded field is parsed in or out
   > according to *which* TU the filter names (the end-to-end cases confirmed
-  > to fail pre-fix). Still open in this slice: the typed half —
-  > `InputSpec.compile_db_filter` plus the CLI's own
+  > to fail pre-fix). Still open in this slice (at the time it landed): the
+  > typed half — `InputSpec.compile_db_filter` plus the CLI's own
   > L2-filtered/L3-unfiltered refusal
   > (`header_conditionals.compile_db_filter_scope_error`) mirrored into
   > `resolve_dump_request`, the only place that knows the resolved collect
   > mode. That is one clearly-specified step; see the field's replacement
   > comment in `api_types.py`.
+  >
+  > **That typed half has since landed (2026-08-21, later session).**
+  > `InputSpec.compile_db_filter` exists; `_seeded_includes_and_compile_
+  > context` and `attach_build_context_for_parsed_headers` both forward it as
+  > `source_filter`; `resolve_dump_request` mirrors the CLI's scope-error
+  > refusal from `evidence.collect_mode`/`evidence.headers` and raises
+  > `ValidationError` (translated to `click.UsageError` at the CLI boundary,
+  > unchanged); `dump_cmd` forwards its own `--compile-db-filter` into the
+  > `DumpRequest` `--dry-run` resolves. Verified against the identical real
+  > `g++`+clang project through the typed `DumpRequest`/`resolve_dump_
+  > request`/`execute_dump_request` path directly (not the CLI):
+  > `tests/test_compile_db_filter_scope.py`'s
+  > `TestTypedApiHonorsTheFilterInTheFold`. The CLI's own behavior was
+  > re-verified unchanged. This closes item (1) of the "what still blocks the
+  > `dump` real-run migration" list below — it does **not** migrate the real
+  > run itself, and does not claim to; see the root `AGENTS.md`'s PR C entry
+  > for the full account, including why item (2) (castxml) still blocks the
+  > migration on its own.
   >
   > One environmental fact that independently rules out doing it in that
   > session: **the default header backend is castxml, and no working

@@ -449,3 +449,90 @@ class TestDumpCliHonorsTheFilterInTheFold:
         # Not merely "a context was chosen": the guarded field is present
         # only under the TU the filter named, so this pins *which* one.
         assert ("b" in fields) is expects_wide_field, (pick, fields)
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(
+    not sys.platform.startswith("linux"),
+    reason="ELF/Linux-scoped repro (real g++-compiled .so + compile_commands.json)",
+)
+@pytest.mark.skipif(
+    not (_HAVE_GXX and _HAVE_CLANG), reason="needs a real g++ and clang toolchain"
+)
+class TestTypedApiHonorsTheFilterInTheFold:
+    """The identical shape as ``TestDumpCliHonorsTheFilterInTheFold``, through
+    the typed ``DumpRequest``/``resolve_dump_request``/``execute_dump_request``
+    path instead of the CLI (PR 3A investigation, 2026-08-21:
+    ``InputSpec.compile_db_filter``).
+
+    ``InputSpec`` deliberately had no ``compile_db_filter`` field until this
+    slice — see its own docstring for the two prerequisites this closes:
+    the filter narrows the shared L2 fold (already landed, exercised by the
+    CLI class above), and the L2-filtered/L3-unfiltered refusal is mirrored
+    into ``resolve_dump_request`` so a typed caller cannot reach the
+    snapshot shape the CLI refuses outright.
+    """
+
+    @staticmethod
+    def _request(so_path: Path, header: Path, compile_db: Path, *, compile_db_filter):
+        from abicheck.api_types import DumpRequest, InputSpec
+
+        return DumpRequest(
+            input=InputSpec(
+                path=so_path,
+                headers=(header,),
+                sources=header.parent,
+                build_info=compile_db,
+                compile_db_filter=compile_db_filter,
+            ),
+            frontend="clang",
+            depth="headers",
+        )
+
+    def test_resolve_dump_request_refuses_the_l2_l3_scope_mismatch(
+        self, tmp_path: Path
+    ) -> None:
+        from abicheck.errors import ValidationError
+        from abicheck.service_dump_pipeline import resolve_dump_request
+
+        so_path, header, compile_db = TestDumpCliHonorsTheFilterInTheFold._project(
+            tmp_path
+        )
+        request = self._request(
+            so_path, header, compile_db, compile_db_filter="a.cpp"
+        ).replace(depth="build")
+        with pytest.raises(ValidationError, match="materially different|L2 header"):
+            resolve_dump_request(request)
+
+    def test_no_filter_is_unaffected(self, tmp_path: Path) -> None:
+        from abicheck.service_dump_pipeline import resolve_dump_request
+
+        so_path, header, compile_db = TestDumpCliHonorsTheFilterInTheFold._project(
+            tmp_path
+        )
+        request = self._request(so_path, header, compile_db, compile_db_filter=None)
+        # No filter -> the scope-error guard never fires, regardless of depth;
+        # unchanged behavior for every pre-existing caller.
+        resolve_dump_request(request.replace(depth="build"))
+
+    @pytest.mark.parametrize(
+        ("pick", "expects_wide_field"), [("a.cpp", True), ("b.cpp", False)]
+    )
+    def test_the_filter_selects_that_units_context_for_the_header_parse(
+        self, tmp_path: Path, pick: str, expects_wide_field: bool
+    ) -> None:
+        from abicheck.service_dump_pipeline import (
+            execute_dump_request,
+            resolve_dump_request,
+        )
+
+        so_path, header, compile_db = TestDumpCliHonorsTheFilterInTheFold._project(
+            tmp_path
+        )
+        request = self._request(so_path, header, compile_db, compile_db_filter=pick)
+        result = execute_dump_request(resolve_dump_request(request))
+        fields = [
+            f.name for t in result.snapshot.types if t.name == "S" for f in t.fields
+        ]
+        assert fields, result.snapshot.types
+        assert ("b" in fields) is expects_wide_field, (pick, fields)

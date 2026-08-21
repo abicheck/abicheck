@@ -495,6 +495,7 @@ def _seeded_includes_and_compile_context(
             lang=lang,
             lang_explicit=lang_explicit,
             pending_cleanups=cleanups,
+            source_filter=side.compile_db_filter,
         )
     )
     # seed_includes_and_fold_compile_context() always returns a real
@@ -818,14 +819,18 @@ def _resolve_side_snapshot_impl(
         # `user_define_flags`' own docstring, and the ninth finding in the root
         # AGENTS.md's L3->L2-fold entry).
         #
-        # No `compile_db_filter` is threaded through here (and `InputSpec`
-        # deliberately doesn't carry one -- see its own comment): this shared
-        # pipeline's own L2 header-AST context (`_seeded_includes_and_compile_
-        # context`, the P0.3 L3->L2 fold, already run above) always resolves
-        # from the *whole*, unfiltered compile database, unlike the native
-        # `dump` CLI, which threads its `--compile-db-filter` into its own,
-        # structurally different L2 mechanism too
-        # (`cli_helpers_compare._resolve_build_context_flags`).
+        # `side.compile_db_filter` (PR 3A investigation, 2026-08-21): the same
+        # filter narrowed `_seeded_includes_and_compile_context`'s fold above,
+        # forwarded here too so the ADR-039 collector scans the identical
+        # translation-unit subset the header parse used -- exactly the
+        # "the fold, the legacy match and the ADR-039 collector cannot select
+        # different translation units for the same filter" invariant
+        # `build_context.source_matches_filter` establishes for the three
+        # CLI-side layers (root AGENTS.md's PR C entry). `resolve_dump_
+        # request` is what refuses the combination this can't safely narrow
+        # (a filter with a resolved collect mode that also embeds *this*
+        # side's L3 evidence via `embed_side_build_source` below, which has no
+        # filter concept of its own) before this function is ever reached.
         attach_build_context_for_parsed_headers(
             snap,
             evidence.headers,
@@ -837,6 +842,7 @@ def _resolve_side_snapshot_impl(
                 side.compile.gcc_option_tokens if side.compile else ()
             ),
             user_gcc_options=side.compile.gcc_options if side.compile else None,
+            source_filter=side.compile_db_filter,
         )
         if side.sources or side.build_info:
             # Known, accepted limitation (Codex review, fresh evidence, not

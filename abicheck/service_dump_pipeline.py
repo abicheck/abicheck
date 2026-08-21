@@ -327,6 +327,10 @@ def resolve_dump_request(request: DumpRequest) -> ResolvedDumpRequest:
     """
     from . import service, service_compare_evidence as _sce
     from .api_types import HEADER_AST_FRONTENDS
+    from .header_conditionals import (
+        compile_db_filter_scope_error,
+        compile_db_from_build_info,
+    )
     from .header_utils import split_public_header_inputs
 
     request.validate()
@@ -348,6 +352,22 @@ def resolve_dump_request(request: DumpRequest) -> ResolvedDumpRequest:
     _sce.reject_debug_format_for_binaries(debug_format, (("input", fmt),))
 
     evidence = _sce.resolve_dump_request_evidence(request)
+    # Mirrors the ELF `dump` CLI's own `compile_db_filter_scope_error` check
+    # (`cli.py`'s `dump_cmd`) -- this is the one place in the typed pipeline
+    # that knows the *resolved* collect mode a `--compile-db-filter`-shaped
+    # `InputSpec.compile_db_filter` would otherwise silently disagree with
+    # (PR 3A investigation, 2026-08-21; see `InputSpec.compile_db_filter`'s
+    # own docstring). `evidence.headers` is the same post-resolution header
+    # set the CLI reads `compile_db_from_build_info` back against -- both
+    # already reflect `depth="binary"` clearing.
+    if (
+        _filter_scope_error := compile_db_filter_scope_error(
+            side.compile_db_filter,
+            compile_db_from_build_info(side.build_info, tuple(evidence.headers)),
+            evidence.collect_mode,
+        )
+    ) is not None:
+        raise ValidationError(_filter_scope_error)
     _reject_unsupported_frontends(request, header_backend, evidence)
     # Pinned once, here -- not a lazily-recomputed property (see
     # ResolvedDumpRequest.effective_header_backend's own comment).

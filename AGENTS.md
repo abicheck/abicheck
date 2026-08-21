@@ -4855,6 +4855,43 @@ Once a root command genuinely clears the bar above, pick the right home:
   while able to exercise only the non-default backend is not a verified change.
   PR 3C stays blocked, per the plan's own ordering rule.
 
+  **Item (1) closed (2026-08-21, later session): `InputSpec.compile_db_filter`
+  now exists, exactly as specified above — nothing more, nothing less.**
+  `service_input_resolution._seeded_includes_and_compile_context` forwards it
+  as `source_filter` to `seed_includes_and_fold_compile_context`; the
+  `attach_build_context_for_parsed_headers` call two paragraphs down does the
+  same, so the fold and the ADR-039 collector agree on which translation
+  units the filter selects (the identical invariant
+  `build_context.source_matches_filter` already established for the three
+  CLI-side layers — see the root AGENTS.md's forced-include entry's
+  MSVC-driver-vocabulary lesson on why a second copy of a shared matching
+  rule is the wrong move). `resolve_dump_request` mirrors the CLI's own
+  `compile_db_filter_scope_error` refusal, computed from `evidence.
+  collect_mode`/`evidence.headers` — the same resolved values the CLI reads
+  `compile_db_from_build_info` back against — so a typed caller cannot reach
+  the L2-filtered/L3-unfiltered snapshot shape the CLI refuses outright; the
+  refusal raises `ValidationError` (translated to `click.UsageError` at the
+  CLI boundary by `resolve_dump_request_for_cli`, unchanged). `dump_cmd`
+  forwards its own `--compile-db-filter` local into `build_dump_request`, so
+  `--dry-run`'s resolved object now records the same filter the real run
+  applies, closing the last gap in that request's own honesty contract for
+  this one field. Verified against the identical real `g++`+clang project
+  `TestDumpCliHonorsTheFilterInTheFold` already uses (two TUs disagreeing on
+  an ABI-relevant `-D` behind one `#ifdef`-guarded field), driven through the
+  typed `DumpRequest`/`resolve_dump_request`/`execute_dump_request` path
+  directly rather than the CLI: the scope-error refusal fires under the same
+  condition the CLI refuses under, a request with no filter is unaffected,
+  and the filter selects the same translation unit's context for the header
+  parse the CLI test already pins (`tests/test_compile_db_filter_scope.py`'s
+  `TestTypedApiHonorsTheFilterInTheFold`). Confirmed the CLI's own behavior
+  is unchanged by re-running `TestDumpCliHonorsTheFilterInTheFold` directly.
+  **Item (2) is unchanged and remains the sole blocker**: castxml is still
+  unavailable in every environment this work has been done in, so the real
+  `dump` CLI execution path (`perform_elf_dump`/`handle_non_elf_dump`) still
+  does not route through `execute_dump_request`, and PR 3C stays blocked.
+  This slice narrows what item (2) alone is blocking, nothing more — it does
+  not migrate the real run, and does not claim to.
+
   **A real regression the scan-migration paragraph above introduced, found
   by Codex review and fixed the same session (2026-08-21): `scan --config
   <path>` silently lost the config's own *passive* settings whenever the
