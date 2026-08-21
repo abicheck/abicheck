@@ -260,6 +260,24 @@ def _clang_header_dump(
     ``force_cpp`` (Codex review: the provenance probe must not re-derive a
     stale guess once this already resolved the real answer).
 
+    Known, narrower residual (Codex review, fresh evidence, not fixed
+    here): a cache/memo *hit* still returns the pre-retry ``force_cpp``
+    rather than the mode that actually produced the *cached* AST, since
+    neither the disk cache (a raw JSON/XML document, byte-identical to what
+    a fresh parse writes) nor the in-process memo (``dumper_cache.
+    store_cached_ast``, a bare ``(backend, key, root)`` tuple) persists this
+    fact alongside the AST -- and the cache key deliberately does *not*
+    distinguish a C-mode success from an initially-C-mode call's self-healed
+    C++ success (see the key's own ``system_includes`` comment below). A
+    correct fix needs a real cache-format change on both backends (a
+    wrapper or sidecar carrying this one extra bit) verified against their
+    existing cache-corruption/eviction paths -- a genuine, if narrow,
+    cross-cutting change, not a follow-up to this fix. Matters only when a
+    *second*, cache-hit call is made for the identical self-healed input
+    (the common single-dump-per-process path never hits this, since the
+    fresh call that actually self-healed already reports the correct
+    value).
+
     The clang-frontend counterpart of :func:`_castxml_dump`: aggregates the
     headers into one ``#include`` TU, runs ``clang -ast-dump=json``, returns
     the JSON dict :class:`abicheck.dumper_clang._ClangAstParser` consumes.

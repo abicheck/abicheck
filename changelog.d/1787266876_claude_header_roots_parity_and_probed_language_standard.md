@@ -68,4 +68,20 @@
   `dumper_toolchain._resolve_standard_provenance` now reports that forced
   standard directly for a gnu-dialect C parse, and only probes the
   remaining genuinely-unpinned cases (C++ with no C++20 heuristic, or any
-  MSVC-dialect parse, neither of which either command builder pins).
+  MSVC-dialect parse, neither of which either command builder pins). That
+  fix in turn broke the upgrade-corroboration carve-out itself: it only
+  recognized an empty-string-to-`"probed:..."` transition, but the forced
+  standard produces three shapes it had never seen — an unpinned, no-`--lang`
+  baseline moving to the bare `"gnu11"` literal (no `"probed:"` marker at
+  all), and an explicit-`--lang` baseline moving from a *bare* `"c"`/`"c++"`
+  tag (not an empty string) to `"c:gnu11"`/`"c++:probed:..."`. Generalized
+  the carve-out (`_newly_resolved_standard_remainder`) to recognize every
+  pre-upgrade "nothing resolved yet" spelling (`""`, `"c"`, `"c++"`) against
+  a same-lang-tagged, newly-populated successor (the forced literal or a
+  probed value), in either comparison direction.
+- Known, narrower residual, documented rather than fixed: a cache/memo
+  *hit* for a header that previously self-healed C→C++ still reports the
+  pre-retry language mode, since neither backend's AST cache persists that
+  fact alongside the cached document — see `_clang_header_dump`'s own
+  docstring for why a correct fix needs a cache-format change on both
+  backends, not a follow-up to this PR.

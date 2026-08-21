@@ -167,3 +167,101 @@ def test_gate_empty_vs_probed_language_standard_waived_when_lang_qualified():
         )
     )
     check_contracts_comparable(old, new)  # must not raise
+
+
+def test_gate_empty_vs_forced_gnu11_waived_when_compiler_unchanged():
+    """Codex review, fresh evidence: an unpinned C/gnu-dialect parse no
+    longer probes at all -- it reports the forced ``"gnu11"`` standard
+    directly (see ``dumper_toolchain._FORCED_C_STANDARD``), which carries no
+    ``"probed:"`` marker. The carve-out must still recognize this as the
+    identical class of upgrade-only transition, not just the probed-value
+    shape."""
+    old = _snap(
+        compute_extraction_contract(
+            l2_frontend_ran=True,
+            compiler_family="gnu",
+            compiler_version="11.4.0",
+            language_standard="",
+        )
+    )
+    new = _snap(
+        compute_extraction_contract(
+            l2_frontend_ran=True,
+            compiler_family="gnu",
+            compiler_version="11.4.0",
+            language_standard="gnu11",
+        )
+    )
+    check_contracts_comparable(old, new)  # must not raise
+
+
+def test_gate_bare_lang_c_vs_lang_qualified_gnu11_waived():
+    """Codex review, fresh evidence: an explicit ``--lang c`` baseline
+    recorded a bare ``"c"`` (no resolved standard existed yet), not an
+    empty string -- the carve-out must recognize this pre-upgrade shape
+    too, not only the no-``--lang``-at-all empty-string case."""
+    old = _snap(
+        compute_extraction_contract(
+            l2_frontend_ran=True,
+            compiler_family="gnu",
+            compiler_version="11.4.0",
+            language_standard="c",
+        )
+    )
+    new = _snap(
+        compute_extraction_contract(
+            l2_frontend_ran=True,
+            compiler_family="gnu",
+            compiler_version="11.4.0",
+            language_standard="c:gnu11",
+        )
+    )
+    check_contracts_comparable(old, new)  # must not raise
+
+
+def test_gate_bare_lang_cpp_vs_lang_qualified_probed_waived():
+    """The ``--lang c++`` counterpart of the above: a bare ``"c++"``
+    pre-upgrade baseline against a lang-qualified probed value."""
+    old = _snap(
+        compute_extraction_contract(
+            l2_frontend_ran=True,
+            compiler_family="clang",
+            compiler_version="18.1.3",
+            language_standard="c++",
+        )
+    )
+    new = _snap(
+        compute_extraction_contract(
+            l2_frontend_ran=True,
+            compiler_family="clang",
+            compiler_version="18.1.3",
+            language_standard="c++:probed:__cplusplus=202002L",
+        )
+    )
+    check_contracts_comparable(old, new)  # must not raise
+
+
+def test_gate_bare_lang_c_vs_different_lang_still_raises():
+    """A bare ``"c"`` pre-upgrade baseline against a *different* lang tag
+    post-upgrade (``"c++:..."``) is a genuine profile difference, not an
+    upgrade artifact -- the carve-out must not waive a real language-mode
+    change just because the old side happens to match one of the
+    unresolved-standard spellings."""
+    old = _snap(
+        compute_extraction_contract(
+            l2_frontend_ran=True,
+            compiler_family="gnu",
+            compiler_version="11.4.0",
+            language_standard="c",
+        )
+    )
+    new = _snap(
+        compute_extraction_contract(
+            l2_frontend_ran=True,
+            compiler_family="gnu",
+            compiler_version="11.4.0",
+            language_standard="c++:gnu++17",
+        )
+    )
+    with pytest.raises(ProfileMismatchError):
+        check_contracts_comparable(old, new)

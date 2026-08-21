@@ -695,24 +695,67 @@ def _build_context_corroborated(old: AbiSnapshot, new: AbiSnapshot) -> bool:
 #: this module has no other reason to depend on ``dumper_toolchain``.
 _PROBED_STANDARD_PREFIX = "probed:"
 
+#: The literal standard both header-AST command builders unconditionally
+#: force for an unpinned C/gnu-dialect parse -- mirrors
+#: ``dumper_toolchain._FORCED_C_STANDARD`` (not imported, same reasoning as
+#: ``_PROBED_STANDARD_PREFIX`` above).
+_FORCED_C_STANDARD = "gnu11"
+
+#: Every ``language_standard_field`` spelling an *unpinned, no-resolved-
+#: standard* dump could have produced before either the probe or the
+#: forced-``gnu11`` report existed: no lang given at all (``""``), or an
+#: explicit ``--lang`` with nothing else resolved (bare ``"c"``/``"c++"``).
+_UNRESOLVED_STANDARD_SPELLINGS = ("", "c", "c++")
+
+
+def _newly_resolved_standard_remainder(
+    old_std: str, new_std: str
+) -> str | None:
+    """If *old_std* is one of :data:`_UNRESOLVED_STANDARD_SPELLINGS` and
+    *new_std* carries the identical lang tag (if any) plus something newly
+    resolved, return that "something" (the part after the tag); otherwise
+    ``None``.
+
+    Split out of :func:`_language_standard_probe_upgrade_corroborated` so
+    the "same lang tag, newly populated" structural check has one
+    definition, checked in both directions there (Codex review, fresh
+    evidence: an explicit-``--lang`` baseline moves from a bare ``"c"``/
+    ``"c++"`` to ``"c:gnu11"``/``"c++:probed:..."``, not from an empty
+    string, which the previous version of this check could not recognize).
+    """
+    if old_std not in _UNRESOLVED_STANDARD_SPELLINGS:
+        return None
+    if old_std:
+        prefix = f"{old_std}:"
+        if not new_std.startswith(prefix):
+            return None
+        return new_std[len(prefix) :]
+    return new_std
+
 
 def _language_standard_probe_upgrade_corroborated(
     old_fields: dict[str, str], new_fields: dict[str, str]
 ) -> bool:
     """Whether a differing ``language_standard`` is fully explained by this
-    probe having been *added* by an abicheck upgrade, not by a genuine
-    toolchain difference (Codex review, fresh evidence).
+    probe (or the sibling forced-``gnu11`` report) having been *added* by an
+    abicheck upgrade, not by a genuine toolchain difference (Codex review,
+    fresh evidence).
 
     A baseline persisted before ``dumper_toolchain._probe_default_language_
-    standard`` existed recorded an *empty* ``language_standard`` for any
-    unpinned (no explicit ``-std=``, no forced-C++20-heuristic) dump --
-    that was the only value this field could ever take for that shape of
-    input. A freshly re-dumped snapshot of the identical input under the
-    identical toolchain now records a real ``"probed:..."`` value there
-    instead, purely because the tool was upgraded -- comparing the two
-    would otherwise raise ``ProfileMismatchError`` on every such baseline,
-    solely from the upgrade itself, not from anything about the library
-    changing.
+    standard``/the forced-C-standard report existed recorded one of
+    :data:`_UNRESOLVED_STANDARD_SPELLINGS` for any unpinned (no explicit
+    ``-std=``, no forced-C++20-heuristic) dump -- that was the only value
+    this field could ever take for that shape of input, whether or not
+    ``--lang`` was also given. A freshly re-dumped snapshot of the identical
+    input under the identical toolchain now records a real, newly-resolved
+    value there instead (:data:`_FORCED_C_STANDARD` for an unpinned C/gnu
+    parse, or a ``"probed:..."`` value for an unpinned C++ parse or an
+    MSVC-dialect C parse), purely because the tool was upgraded -- comparing
+    the two would otherwise raise ``ProfileMismatchError`` on every such
+    baseline, solely from the upgrade itself, not from anything about the
+    library changing. :func:`_newly_resolved_standard_remainder` checks both
+    directions share the same lang tag (if any) and isolates the
+    newly-resolved remainder for the check below.
 
     Waived only when independently corroborated by an EXACT, non-empty
     ``compiler_family``/``compiler_version`` match on both sides: the
@@ -737,10 +780,15 @@ def _language_standard_probe_upgrade_corroborated(
     """
     old_std = old_fields.get("language_standard", "")
     new_std = new_fields.get("language_standard", "")
-    is_upgrade_transition = (
-        old_std == "" and _PROBED_STANDARD_PREFIX in new_std
-    ) or (new_std == "" and _PROBED_STANDARD_PREFIX in old_std)
-    if not is_upgrade_transition:
+    remainder = _newly_resolved_standard_remainder(
+        old_std, new_std
+    ) or _newly_resolved_standard_remainder(new_std, old_std)
+    if remainder is None:
+        return False
+    is_newly_resolved = (
+        remainder == _FORCED_C_STANDARD or _PROBED_STANDARD_PREFIX in remainder
+    )
+    if not is_newly_resolved:
         return False
     for key in ("compiler_family", "compiler_version"):
         old_v = old_fields.get(key, "")
