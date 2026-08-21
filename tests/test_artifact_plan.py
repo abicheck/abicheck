@@ -155,3 +155,22 @@ def test_run_cleanups_with_nothing_new_after_a_drain_is_a_true_no_op() -> None:
     plan.run_cleanups()
     plan.run_cleanups()
     assert calls == ["a"]
+
+
+def test_cleanup_registered_during_the_drain_itself_still_runs() -> None:
+    """Codex review: an earlier revision snapshotted the pending slice and
+    advanced the cursor past it *before* running any of them, so a cleanup
+    that itself calls add_cleanup() while running (discovering a further
+    owned resource mid-teardown) was silently skipped -- registered strictly
+    before run_cleanups() returned, but never drained by that same call, and
+    with no second drain guaranteed to ever come."""
+    calls: list[str] = []
+    plan = ResolvedArtifactPlan()
+
+    def _discovers_another_resource() -> None:
+        calls.append("outer")
+        plan.add_cleanup(lambda: calls.append("discovered-mid-drain"))
+
+    plan.add_cleanup(_discovers_another_resource)
+    plan.run_cleanups()
+    assert calls == ["outer", "discovered-mid-drain"]

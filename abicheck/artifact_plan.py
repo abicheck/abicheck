@@ -143,10 +143,21 @@ class ResolvedArtifactPlan:
         a cleanup — but a cleanup registered *after* the previous drain
         (post-close ``add_cleanup()``, or a plan re-entered via a second
         ``with`` block) still runs on this call rather than being dropped.
+
+        Also covers registration *during* the drain itself: the cursor
+        (:attr:`_drained_count`) advances one entry at a time, re-checking
+        ``len(pending_cleanups)`` before each step, so a running cleanup that
+        itself calls :meth:`add_cleanup` (discovering a further owned
+        resource) has that new entry picked up in this same call rather than
+        left for a drain that may never come again (Codex review: an earlier
+        revision snapshotted the pending slice and advanced the cursor past
+        it *before* running any of them, so a cleanup registered mid-drain
+        was silently skipped even though it was registered strictly before
+        the call finished).
         """
-        pending = self.pending_cleanups[self._drained_count :]
-        self._drained_count = len(self.pending_cleanups)
-        for cleanup in pending:
+        while self._drained_count < len(self.pending_cleanups):
+            cleanup = self.pending_cleanups[self._drained_count]
+            self._drained_count += 1
             try:
                 cleanup()
             except Exception:  # noqa: BLE001 - see _run_cleanups' own rationale
