@@ -494,6 +494,43 @@ def _missing_requested_evidence_layers(
     return missing
 
 
+def build_source_already_satisfies(
+    snap: AbiSnapshot, collect_mode: str
+) -> bool:
+    """True when *snap* already carries every layer *collect_mode* asks for.
+
+    The idempotence predicate behind :func:`_write_snapshot_output`'s
+    check-before-embed guard (CLI cleanup phase two, PR 3A blocker 5,
+    sub-issue 3). The ``dump`` CLI embeds L3-L5 at *write* time, while the
+    typed pipeline (``service_dump_pipeline.execute_dump_request`` →
+    ``service_input_resolution._resolve_side_snapshot_impl``) embeds at
+    *resolve* time — so any future migration that routes the real ``dump`` run
+    through the typed executor would otherwise embed twice, re-running L4
+    source-ABI replay (a real compiler invocation per translation unit, not a
+    cheap recomputation) and overwriting the pack the first embed produced.
+
+    Stated in this module's own existing vocabulary rather than a second depth
+    ladder: :func:`_missing_requested_evidence_layers` already answers "which
+    layers did *collect_mode* ask for that this pack does not have", and it is
+    the same function the G21.7 fail-loud warning below already trusts, so the
+    guard and the warning cannot disagree about what "satisfied" means. Its
+    ``pack is None -> []`` case is *not* satisfaction (nothing was embedded at
+    all), hence the explicit ``build_source is not None`` half — without it a
+    bare snapshot would read as already-complete and skip the embed entirely.
+
+    ``collect_mode="off"`` with a pack present is deliberately treated as
+    satisfied: nothing was requested, so re-running the embed could only
+    replace an existing pack with a weaker one.
+
+    A no-op for every caller that exists today — nothing in the ``dump`` CLI
+    populates ``build_source`` before the write step — which is exactly what
+    makes it safe to land ahead of the migration it exists for.
+    """
+    if snap.build_source is None:
+        return False
+    return not _missing_requested_evidence_layers(snap.build_source, collect_mode)
+
+
 def _classify_missing_layers(
     pack: BuildSourcePack | None, missing: list[str]
 ) -> tuple[list[str], list[str]]:
@@ -578,7 +615,13 @@ def _write_snapshot_output(
     )
     from .serialization import snapshot_to_dict
 
-    if build_info is not None or sources is not None:
+    if (build_info is not None or sources is not None) and not (
+        # PR 3A blocker 5, sub-issue 3: check before embedding. See
+        # `build_source_already_satisfies`' own docstring -- a snapshot that
+        # already carries every layer this collect mode asks for must not have
+        # L4 source-ABI replay run over it a second time.
+        build_source_already_satisfies(snap, collect_mode)
+    ):
         from .cli_buildsource import embed_build_source
         embed_build_source(
             snap, build_info, sources,
