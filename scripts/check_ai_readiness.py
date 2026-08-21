@@ -2395,23 +2395,37 @@ def _iter_calls_in_own_scope(node: ast.AST) -> Iterable[ast.Call]:
     having a caller pass ``node.body`` statements one at a time, matters:
     the pruning check below only fires when a scope-defining node is
     discovered as a *child* during recursion — calling this function
-    directly on a *nested* ``def`` would bypass it entirely.
+    directly on a *nested* ``def`` would bypass it entirely. The actual
+    per-child walk is :func:`_iter_calls_in_children`, reused for a head
+    part's own recursion too — a head part can itself be scope-defining
+    (e.g. a comprehension nested inside another comprehension's outermost
+    iterable), and it must get the identical pruning treatment an ordinary
+    body statement gets, not the naive top-level entry (Codex review: that
+    naive entry skipped the pruning check for exactly this shape).
     """
     children: Iterable[ast.AST] = (
         node.body
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
         else ast.iter_child_nodes(node)
     )
+    yield from _iter_calls_in_children(children)
+
+
+def _iter_calls_in_children(children: Iterable[ast.AST]) -> Iterable[ast.Call]:
+    """The shared per-child walk behind :func:`_iter_calls_in_own_scope`:
+    yield a ``Call`` child directly, and for a scope-defining child recurse
+    only into its own head parts (never its body); everything else
+    descends normally. Used both for a node's ordinary children and for a
+    scope-defining child's own head parts, so a head part that is itself
+    scope-defining is pruned the same way either shape is reached.
+    """
     for child in children:
         if isinstance(child, ast.Call):
             yield child
         if isinstance(child, _SCOPE_DEFINING_TYPES):
-            for head_part in _definition_head_parts(child):
-                if isinstance(head_part, ast.Call):
-                    yield head_part
-                yield from _iter_calls_in_own_scope(head_part)
+            yield from _iter_calls_in_children(_definition_head_parts(child))
             continue
-        yield from _iter_calls_in_own_scope(child)
+        yield from _iter_calls_in_children(ast.iter_child_nodes(child))
 
 
 def _resolve_input_wrapper_call_sites(tree: ast.Module) -> frozenset[tuple[int, int]]:

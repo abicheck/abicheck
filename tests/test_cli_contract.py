@@ -586,6 +586,38 @@ def test_cli_resolve_exemption_covers_comprehensions_outermost_iterable(
     assert errors == []
 
 
+def test_cli_resolve_exemption_ignores_bypass_in_nested_comprehension_iterable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A head part can itself be scope-defining: an outer comprehension's
+    outermost iterable is itself another comprehension
+    (`[x for x in [service.resolve_input(y) for y in xs]]`), and the
+    *inner* comprehension's own result expression is not the outer
+    comprehension's enclosing-scope iterable — it's the inner
+    comprehension's own scope — so it must still be flagged (Codex
+    review: recursing into a head part via the top-level entry point
+    bypassed the pruning check that only fires on an ordinary child,
+    letting a scope-defining head part's own body inherit the
+    exemption)."""
+    import scripts.check_ai_readiness as gate
+
+    pkg = tmp_path / "abicheck"
+    pkg.mkdir()
+    (pkg / "cli_resolve.py").write_text(
+        "def _resolve_input(xs):\n"
+        "    from . import service\n"
+        "    return [x for x in [service.resolve_input(y) for y in xs]]\n"
+    )
+    monkeypatch.setattr(gate, "PKG", pkg)
+    monkeypatch.setattr(gate, "ROOT", tmp_path)
+
+    findings = gate.Findings()
+    gate.check_cli_contract(findings)
+    errors = [m for c, m in findings.errors if c == "cli-contract"]
+    assert len(errors) == 1
+    assert "cli_resolve.py:3" in errors[0]
+
+
 def test_allowlist_does_not_cover_a_second_call_to_the_same_target_on_one_line(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
