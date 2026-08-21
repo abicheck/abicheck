@@ -4438,6 +4438,80 @@ Once a root command genuinely clears the bar above, pick the right home:
   open, unchanged from the notes above — see the plan doc's own PR 3A
   section for the identical, fuller account.
 
+  **Slice landed (2026-08-21): the ADR-039 collector gate is now one shared
+  function all three resolvers call, which closed a real dump-vs-scan
+  asymmetry nobody had named — and attempting blocker 5 next turned up three
+  concrete obstacles the notes above do not mention.** Re-reading the three
+  resolvers side by side found that `scan_engine._build_new_snapshot` never
+  ran the ADR-039 build-context collector **at all** (the ELF `dump` CLI
+  always had; the typed pipeline gained it in PR #809), so `scan --against`
+  a `dump`-produced baseline compared a candidate with no
+  `build_context_defines`/`conditional_fields` against a baseline carrying
+  both — and the reconciler could clear a context-free header-parse false
+  positive (a `#ifdef`-guarded record field the context-free parse pruned)
+  on the baseline side but not on the candidate's. Fixed at the gate rather
+  than by writing a fourth copy of it:
+  `header_conditionals.attach_build_context_for_parsed_headers` now owns the
+  compile-DB resolution (from an already-resolved path *or* from
+  `build_info`), the best-effort header expansion a directory `-H` entry
+  needs, the `snap.from_headers` check, and the caller-supplied
+  `live_elf_parse` answer; `perform_elf_dump`,
+  `_resolve_side_snapshot_impl`, and `_build_new_snapshot` all call it.
+  `perform_elf_dump` gains `from_headers` in the process — the same gate its
+  own sibling `parsed_with_build_context` stamp ten lines above already
+  applies, for the recorded reason that a `--dwarf-only` run explicitly
+  ignores `-H`. A latent ordering bug was fixed alongside:
+  `_resolve_side_snapshot_impl` drained the L2 seed's cleanups only *after*
+  `embed_side_build_source`, so an inferred build query's lock was still
+  held when the embed ran its own — the self-contention this entry's own
+  fifth finding records for the CLI resolvers. Unreachable today (the seed's
+  `collect_mode` is pinned `"off"`), fixed now because it springs on
+  whichever PR relaxes that pin, which is what migrating the CLI resolvers
+  means. Tests: `tests/test_scan_adr039_build_context.py` (7 cases; the
+  three positive ones confirmed to fail against the pre-fix
+  `scan_engine.py`) and `tests/test_typed_dump_request.py::
+  TestSeedCleanupsDrainBeforeTheEmbedStep` (confirmed to fail pre-fix).
+
+  **Blocker 5's three obstacles, each verified rather than assumed** (full
+  account in the plan doc's PR 3A section): (a) `InputSpec.path` is a
+  *required* field and `dump`'s source-only branch (`dump --sources ./tree`
+  with no SO_PATH) has no path, while `--dry-run` runs before that dispatch
+  — so "both branches build from one `DumpRequest`" is unreachable for that
+  shape until `InputSpec` can express "no binary", a public typed-API model
+  change reaching every consumer. (b) The two collect-mode resolvers
+  genuinely disagree, measured directly: they agree for *every* explicit
+  `--depth`, and the no-inputs case is unobservable, but **`--build-info`
+  with no `--depth` is `source-target` on the CLI
+  (`resolve_dump_collect_context`) and `build` through the typed path
+  (`collect_mode_for`)** — so taking the collect mode from
+  `resolve_dump_request` would silently stop a `dump --build-info <pack>`
+  at L3 that attempts L4 today. Which default is right is a product
+  decision, not a mechanical reconciliation. (c) The ELF `dump` CLI embeds
+  L3–L5 at *write* time (`cli_buildsource._write_snapshot_output`, together
+  with the G21.7 warning, the Flow-2 `--inputs` fold, the depth gate and
+  the provenance fold) while `execute_dump_request` embeds at *resolve*
+  time inside `_resolve_side_snapshot_impl` — routing the real run through
+  the typed executor **embeds twice**, re-running L4 replay, unless the
+  write path is restructured in the same change. Note what (b) implies for
+  a "just migrate the dry-run first" shortcut: it would report a collect
+  mode the real run does not use, which is worse than today's two
+  hand-synced implementations.
+
+  **One more verified divergence, not fixed:** `scan`'s
+  `embed_build_source` call passes no `extractor`, taking that function's
+  `"auto"` default, and `buildsource.inline._make_source_extractor` treats
+  anything but a literal `"castxml"` as clang — while every other resolver
+  passes `service_compare_evidence.effective_frontend(...)`, which resolves
+  `"auto"` to **castxml** (`dumper._resolve_header_backend`, no availability
+  fallback). So `dump --depth source` and `scan --depth source` over one
+  project at their defaults replay L4 through *different extractors*, and a
+  `scan --against` a `dump` baseline compares source-ABI facts from two
+  different tools — precisely what `effective_frontend`'s own docstring says
+  it exists to prevent. Making `scan` match would newly require castxml for
+  a scan that works with clang today: a real behavior change for real users,
+  unverifiable without a castxml-capable environment, so it needs its own
+  slice rather than a same-pass patch.
+
 - Don't hand-edit `CHANGELOG.md`'s `## [Unreleased]` section directly — add a `changelog.d/` fragment instead (see Conventions above); CI enforces this
 - Don't modify `examples/` test cases without understanding the ground truth they encode
 - Don't add dependencies without strong justification (this is a lightweight tool)
