@@ -923,17 +923,15 @@ def _language_standard_probe_upgrade_corroborated(
 
 
 def _language_standard_is_lang_pinned(std: str) -> bool:
-    """Whether *std* (a ``language_standard`` profile-field value) reflects
-    an explicit ``--lang`` given by the caller, as opposed to pure
-    content-based auto-detection (:func:`dumper_toolchain._resolve_force_cpp`).
+    """Whether *std* reflects an explicit ``--lang`` given by the caller,
+    as opposed to pure content-based auto-detection
+    (:func:`dumper_toolchain._resolve_force_cpp`).
 
     ``language_standard_field`` only ever prefixes the resolved standard
-    with a lang tag (``"c:"``/``"c++:"``/``"cpp:"``) -- or returns the bare
-    tag alone, pre-probe -- when ``lang`` was actually passed; a pure
-    auto-detected value (whether the bare :data:`_FORCED_C_STANDARD`
-    literal, a ``"probed:..."`` value, or the ``force_cpp20`` literal
-    ``"gnu++20"``) never carries one. See that function's own docstring.
-    """
+    with a lang tag (``"c:"``/``"c++:"``/``"cpp:"``) -- or the bare tag,
+    pre-probe -- when ``lang`` was actually passed; a pure auto-detected
+    value (the bare :data:`_FORCED_C_STANDARD` literal, a ``"probed:..."``
+    value, or ``force_cpp20``'s ``"gnu++20"``) never carries one."""
     return std in _UNRESOLVED_STANDARD_SPELLINGS or std.startswith(
         tuple(f"{tag}:" for tag in _UNRESOLVED_STANDARD_SPELLINGS)
     )
@@ -995,9 +993,15 @@ def _compiler_install_dir(ast_toolchain: dict[str, str]) -> str:
     return str(PureWindowsPath(path).parent) if path else ""
 
 
+def _nonempty_match(old_value: str, new_value: str) -> bool:
+    """Both sides carry the identical, non-empty value -- real
+    corroborating evidence, not merely "absent on both sides"."""
+    return bool(old_value) and bool(new_value) and old_value == new_value
+
+
 def _driver_prefix(word: str, bare: str, suffix: str) -> str | None:
-    """*word*'s cross-compile prefix if it's a ``bare``/``*-suffix`` driver
-    name (``""`` for the bare form), else ``None``."""
+    """*word*'s prefix if it's a ``bare``/``*-suffix`` driver name (``""``
+    for the bare form), else ``None``."""
     if word == bare:
         return ""
     return word[: -len(suffix)] if word.endswith(suffix) else None
@@ -1051,11 +1055,9 @@ def _language_standard_content_divergence_corroborated(
     edition within the same mode** (pinned by ``test_dumper_contract_
     wiring.py::test_cpp20_heuristic_forced_standard_flows_into_profile_
     fingerprint``): two header sets both parsed as C++ but resolving to a
-    different *edition* purely because ``force_cpp20`` fires on only one
-    side are still genuinely different dialects. Checked via
-    ``AbiSnapshot.ast_toolchain["resolved_lang_mode"]``
-    (:func:`dumper_toolchain._stamp_ast_parser`), not the
-    ``language_standard`` string shape.
+    different *edition* only because ``force_cpp20`` fires on one side are
+    still genuinely different dialects. Checked via ``AbiSnapshot.
+    ast_toolchain["resolved_lang_mode"]``, not the string shape.
 
     Waived only when: (1) neither side's non-empty ``language_standard``
     reflects an explicit ``--lang`` (:func:`_language_standard_is_lang_pinned`);
@@ -1073,11 +1075,10 @@ def _language_standard_content_divergence_corroborated(
     new_std = new_fields.get("language_standard", "")
     if old_std == new_std:
         return False
-    # A bare-empty side (the probe can reject for reasons unrelated to
-    # language mode -- real Windows CI failure) is deliberately not
-    # excluded, unlike the sibling carve-out: `resolved_lang_mode` below
-    # already proves the mode switch regardless of probe success, and
-    # `language_standard_explicit` confirms it wasn't a pin either way.
+    # A bare-empty side (the probe can reject unrelated to language mode --
+    # real Windows CI failure) is deliberately not excluded, unlike the
+    # sibling carve-out: `resolved_lang_mode` below already proves the mode
+    # switch regardless of probe success.
     if old_std and _language_standard_is_lang_pinned(old_std):
         return False
     if new_std and _language_standard_is_lang_pinned(new_std):
@@ -1103,15 +1104,13 @@ def _language_standard_content_divergence_corroborated(
         new_std, new_mode
     ):
         return False
-    # The check above still can't tell apart the exact-collision pair --
-    # an explicit -std=gnu11/-std=gnu++20 given without --lang produces the
-    # identical literal :data:`_KNOWN_AUTO_RESOLVED_BARE_STANDARDS` uses for
-    # the unpinned path. Needs real provenance instead:
-    # AbiSnapshot.ast_toolchain["language_standard_explicit"]
-    # (dumper_toolchain._stamp_ast_parser) records whether the caller
-    # actually gave an explicit pin, independent of the resulting literal.
-    # Missing on either side (a legacy pre-provenance snapshot) fails
-    # closed -- re-dump once rather than trusting an unconfirmed pair.
+    # The check above still can't tell apart the exact-collision pair -- an
+    # explicit -std=gnu11/-std=gnu++20 given without --lang produces the
+    # identical literal :data:`_KNOWN_AUTO_RESOLVED_BARE_STANDARDS` uses.
+    # Needs real provenance: AbiSnapshot.ast_toolchain[
+    # "language_standard_explicit"] (dumper_toolchain._stamp_ast_parser)
+    # records whether the caller gave an explicit pin. Missing on either
+    # side (a legacy pre-provenance snapshot) fails closed.
     if (
         old.ast_toolchain.get("language_standard_explicit") != "0"
         or new.ast_toolchain.get("language_standard_explicit") != "0"
@@ -1119,22 +1118,22 @@ def _language_standard_content_divergence_corroborated(
         return False
     old_family = old_fields.get("compiler_family", "")
     new_family = new_fields.get("compiler_family", "")
-    if not old_family or not new_family or old_family != new_family:
+    if not _nonempty_match(old_family, new_family):
         return False
     old_producer = old.ast_toolchain.get("producer", "")
     new_producer = new.ast_toolchain.get("producer", "")
-    if not old_producer or not new_producer or old_producer != new_producer:
+    if not _nonempty_match(old_producer, new_producer):
         return False
-    # The frontend's OWN version (castxml's, or clang's own --version for
-    # the direct-clang backend) must match independently of the host
-    # compiler check below -- confirms the same castxml/clang build parsed
-    # both sides, not just an equivalent host toolchain.
-    old_frontend_version = old.ast_toolchain.get("version", "")
-    new_frontend_version = new.ast_toolchain.get("version", "")
-    if (
-        not old_frontend_version
-        or not new_frontend_version
-        or old_frontend_version != new_frontend_version
+    # The frontend's OWN version AND content hash (castxml's, or clang's for
+    # the direct-clang backend) must match, unconditionally -- confirms the
+    # same build parsed both sides, not just an equivalent host toolchain.
+    # Unlike the host compiler's sha256 (skipped for a real gcc/g++ split),
+    # the frontend is the *same* binary invoked twice, so a vendor-patched
+    # rebuild reporting an unchanged --version string is still caught here.
+    if not _nonempty_match(
+        old.ast_toolchain.get("version", ""), new.ast_toolchain.get("version", "")
+    ) or not _nonempty_match(
+        old.ast_toolchain.get("sha256", ""), new.ast_toolchain.get("sha256", "")
     ):
         return False
     old_host_version = old.ast_toolchain.get("compiler_version", "")

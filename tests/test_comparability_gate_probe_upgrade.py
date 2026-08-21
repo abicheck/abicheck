@@ -458,6 +458,7 @@ def _content_ast_toolchain(
     explicit: str | None = "0",
     producer: str = "clang",
     frontend_version: str = "1.0",
+    frontend_sha256: str = "f" * 64,
     host_version: str = "18.1.3",
     **extra: str,
 ) -> dict[str, str]:
@@ -470,11 +471,16 @@ def _content_ast_toolchain(
     produces -- see ``_language_standard_content_divergence_corroborated``'s
     own docstring. *explicit* omitted (``None``) leaves
     ``language_standard_explicit`` unset entirely, for the fail-closed
-    "missing provenance" test."""
+    "missing provenance" test. *frontend_sha256* defaults to a shared
+    constant (the frontend's own content hash, distinct from the host
+    compiler's ``compiler_sha256``) so ordinary waive tests corroborate by
+    default; a test asserting on it directly overrides it via ``**extra``'s
+    ``sha256=``."""
     fields = {
         "resolved_lang_mode": mode,
         "producer": producer,
         "version": frontend_version,
+        "sha256": frontend_sha256,
         "compiler_version": host_version,
         **extra,
     }
@@ -1003,6 +1009,57 @@ def test_gate_content_driven_still_raises_when_frontend_version_differs():
         ),
         ast_toolchain=_content_ast_toolchain(
             "c", producer="castxml", frontend_version="0.7.0"
+        ),
+    )
+    with pytest.raises(ProfileMismatchError):
+        check_contracts_comparable(old, new)
+
+
+def test_gate_content_driven_still_raises_for_mismatched_frontend_content_hash():
+    """Codex review, fresh evidence (P2, sixth round): a matching frontend
+    ``--version`` string alone isn't proof of one frontend build -- a
+    vendor-patched or in-place rebuilt castxml could report the identical
+    version text while being genuinely different content. Every other leg
+    of this carve-out (a real gcc/g++ pair, matching install dir, matching
+    target triple) is satisfied here; only the frontend's own content hash
+    (``ast_toolchain["sha256"]``, distinct from the host compiler's
+    ``compiler_sha256``) differs, and that alone must still block it."""
+    old = _snap(
+        compute_extraction_contract(
+            l2_frontend_ran=True,
+            compiler_family="gnu",
+            compiler_version="13.3.0",
+            language_standard="probed:__cplusplus=201703L",
+        ),
+        ast_toolchain=_content_ast_toolchain(
+            "c++",
+            producer="castxml",
+            frontend_version="0.6.11",
+            frontend_sha256="a" * 64,
+            host_version="g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+            compiler_sha256="a" * 64,
+            compiler_selected="/usr/bin/g++",
+            compiler_realpath="/usr/bin/g++",
+            compiler_target_triple="x86_64-linux-gnu",
+        ),
+    )
+    new = _snap(
+        compute_extraction_contract(
+            l2_frontend_ran=True,
+            compiler_family="gnu",
+            compiler_version="13.3.0",
+            language_standard="gnu11",
+        ),
+        ast_toolchain=_content_ast_toolchain(
+            "c",
+            producer="castxml",
+            frontend_version="0.6.11",
+            frontend_sha256="b" * 64,
+            host_version="gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+            compiler_sha256="b" * 64,
+            compiler_selected="/usr/bin/gcc",
+            compiler_realpath="/usr/bin/gcc",
+            compiler_target_triple="x86_64-linux-gnu",
         ),
     )
     with pytest.raises(ProfileMismatchError):
