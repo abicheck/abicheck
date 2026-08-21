@@ -360,12 +360,22 @@ CLAUDE.md` for the full account of what is and is not verified.
 > graders (`evidence.py`/`dimensions.py`/`claim.py`) — and produces
 > `reward=1`. One task per *scenario*, not per (scenario, arm): reading
 > Harbor's own `claude-code` agent adapter source directly (not its docs)
-> confirmed `[environment].skills_dir`/`--ak skills_dir=...` is a real,
-> already-built mechanism for installing a skill into the agent's
-> environment at trial time — so whether the skill is present is correctly
-> modeled as an agent-configuration choice, not a task-directory choice,
-> closing the original concern about tasks being written *for* the
-> evaluation's own arms rather than for the underlying user problem.
+> confirmed a real, already-built mechanism exists for installing a skill
+> at trial time — so whether the skill is present is correctly modeled as
+> an agent-configuration choice, not a task-directory choice, closing the
+> original concern about tasks being written *for* the evaluation's own
+> arms rather than for the underlying user problem. [Corrected 2026-08-21,
+> Codex review on PR #818: the mechanism actually used is Harbor's own
+> `--skill owner/repo:path[@ref]` CLI flag
+> (`Trial._upload_injected_skills()`), which uploads the skill into the
+> *running* container after the image has already started, entirely
+> outside the Docker build — not `[environment].skills_dir`/`--ak
+> skills_dir=...`, which was this pass's first, incorrect reading of the
+> adapter source and required the skill to be baked into the image at
+> build time, unconditionally, for every arm (a real leak: it let a
+> baseline trial's own agent discover and manually follow the treatment
+> via ordinary shell access, fixed by removing the bake-in step entirely).
+> See `agent-evals/skills/harbor/CLAUDE.md` for the corrected mechanism.]
 > **What is not real yet, stated plainly rather than implied otherwise.**
 > No task has been run through an actual Harbor trial: this environment has
 > no Docker daemon (confirmed unable to start one, not merely unavailable
