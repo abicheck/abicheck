@@ -1551,6 +1551,57 @@ def test_gate_content_driven_still_raises_when_host_compiler_version_missing_on_
         check_contracts_comparable(old, new)
 
 
+def test_gate_content_driven_still_raises_for_distinct_wrapper_scripts_sharing_a_banner():
+    """Codex review, fresh evidence: two distinct wrapper scripts in one
+    directory (`/opt/bin/vendor-a-g++`, `/opt/bin/vendor-b-gcc`) can each
+    faithfully delegate `--version` to the *same* real, bare "gcc"/"g++"
+    underneath -- passing the banner-driver-pair check, sharing a
+    directory, and sharing a target triple -- while still being genuinely
+    different tools (different injected extraction flags) with genuinely
+    different `compiler_sha256`. The banner-only `_is_gcc_gxx_driver_pair`
+    check alone cannot see this: the banner text itself is bare ("g++ (GCC)
+    13.3.0"/"gcc (GCC) 13.3.0"), so only the *resolved binary path's own*
+    vendor-specific prefix distinguishes them."""
+    old = _snap(
+        compute_extraction_contract(
+            l2_frontend_ran=True,
+            compiler_family="gnu",
+            compiler_version="13.3.0",
+            language_standard="probed:__cplusplus=201703L",
+        ),
+        ast_toolchain=_content_ast_toolchain(
+            "c++",
+            producer="castxml",
+            frontend_version="0.6.11",
+            host_version="g++ (GCC) 13.3.0",
+            compiler_sha256="a" * 64,
+            compiler_selected="/opt/bin/vendor-a-g++",
+            compiler_realpath="/opt/bin/vendor-a-g++",
+            compiler_target_triple="x86_64-linux-gnu",
+        ),
+    )
+    new = _snap(
+        compute_extraction_contract(
+            l2_frontend_ran=True,
+            compiler_family="gnu",
+            compiler_version="13.3.0",
+            language_standard="gnu11",
+        ),
+        ast_toolchain=_content_ast_toolchain(
+            "c",
+            producer="castxml",
+            frontend_version="0.6.11",
+            host_version="gcc (GCC) 13.3.0",
+            compiler_sha256="b" * 64,
+            compiler_selected="/opt/bin/vendor-b-gcc",
+            compiler_realpath="/opt/bin/vendor-b-gcc",
+            compiler_target_triple="x86_64-linux-gnu",
+        ),
+    )
+    with pytest.raises(ProfileMismatchError):
+        check_contracts_comparable(old, new)
+
+
 def test_gate_content_driven_divergence_still_raises_for_the_exact_literal_collision_pair():
     """Codex review finding, PR #816 (second round): an explicit
     ``-std=gnu11``/``-std=gnu++20`` given without ``--lang`` produces

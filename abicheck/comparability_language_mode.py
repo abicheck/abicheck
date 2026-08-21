@@ -344,13 +344,19 @@ def _tc(ast_toolchain: dict[str, str], key: str) -> str:
     return ast_toolchain.get(key) or ast_toolchain.get(f"castxml_{key}", "")
 
 
-def _compiler_install_dir(ast_toolchain: dict[str, str]) -> str:
-    """The resolved host compiler's own directory (``compiler_realpath``,
-    falling back to ``compiler_selected``) -- proof of one toolchain install.
-    ``PureWindowsPath``, not ``Path``: a persisted path may be from another OS."""
-    path = _tc(ast_toolchain, "compiler_realpath") or _tc(
+def _compiler_binary_path(ast_toolchain: dict[str, str]) -> str:
+    """The resolved host compiler's own on-disk path (``compiler_realpath``,
+    falling back to ``compiler_selected``)."""
+    return _tc(ast_toolchain, "compiler_realpath") or _tc(
         ast_toolchain, "compiler_selected"
     )
+
+
+def _compiler_install_dir(ast_toolchain: dict[str, str]) -> str:
+    """The resolved host compiler's own directory -- proof of one toolchain
+    install. ``PureWindowsPath``, not ``Path``: a persisted path may be
+    from another OS."""
+    path = _compiler_binary_path(ast_toolchain)
     return str(PureWindowsPath(path).parent) if path else ""
 
 
@@ -526,12 +532,31 @@ def language_standard_content_divergence_corroborated(
         # unchanged toolchain; a real cross-version skew still differs.
         return False
     # sha256 skipped only for: castxml, gnu, a real gcc/g++ pair
-    # (_is_gcc_gxx_driver_pair), same install dir, AND compiler_target_triple
-    # -- dir/names alone still accept two cross-compilers side by side with
-    # a shared banner but different architectures. Missing either side
-    # (a best-effort probe) fails closed, not "unknown = same".
+    # (_is_gcc_gxx_driver_pair), same install dir, matching resolved-binary
+    # driver prefix, AND compiler_target_triple -- dir/banner alone still
+    # accept two cross-compilers side by side with a shared banner but
+    # different architectures. Missing either side (a best-effort probe)
+    # fails closed, not "unknown = same".
+    #
+    # The resolved-binary check (Codex review, fresh evidence) is a
+    # DIFFERENT signal from the banner-driver-pair check above, not a
+    # duplicate of it: two distinct wrapper scripts in one directory
+    # (`/opt/bin/vendor-a-g++`, `/opt/bin/vendor-b-gcc`) can each
+    # faithfully delegate `--version` to the *same* real, bare "gcc"/"g++"
+    # underneath -- passing the banner-pair check, the shared directory,
+    # and a shared target triple -- while still being genuinely different
+    # tools (different injected flags) with genuinely different
+    # `compiler_sha256`. `_is_gcc_gxx_driver_pair` reused directly against
+    # the two full resolved paths (not just their basenames): since the
+    # directory is already required to match, the leading path segment is
+    # identical on both sides, leaving exactly the vendor-specific
+    # basename prefix (`vendor-a-`/`vendor-b-`) as what must also agree --
+    # which correctly rejects this pair even though every other signal
+    # above already passed.
     old_dir = _compiler_install_dir(old.ast_toolchain)
     new_dir = _compiler_install_dir(new.ast_toolchain)
+    old_bin = _compiler_binary_path(old.ast_toolchain)
+    new_bin = _compiler_binary_path(new.ast_toolchain)
     old_triple = _tc(old.ast_toolchain, "compiler_target_triple")
     new_triple = _tc(new.ast_toolchain, "compiler_target_triple")
     if not (
@@ -539,6 +564,7 @@ def language_standard_content_divergence_corroborated(
         and old_producer == "castxml"
         and old_family == "gnu"
         and _is_gcc_gxx_driver_pair(old_host_version, new_host_version)
+        and _is_gcc_gxx_driver_pair(old_bin, new_bin)
         and old_triple
         and old_triple == new_triple
         and old_dir
