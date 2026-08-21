@@ -121,6 +121,37 @@ def _sequence(value: object, *, what: str) -> Sequence[Any]:
     return value
 
 
+def _sequence_field(
+    m: Mapping[str, Any], key: str, *, what: str, required: bool = False
+) -> Sequence[Any]:
+    """Decode an optional JSON array field, honoring the same absent-vs-
+    required distinction :func:`_bool` draws (Codex review, fresh evidence,
+    fourth round: a version-2 ``gate.scope`` object with its own ``targets``
+    key absent hit the identical "legitimate default vs. truncated payload"
+    ambiguity :func:`_bool` was fixed for, one level down).
+
+    Unlike :func:`_sequence`, which most call sites in this module use for a
+    genuinely optional collection with no version-conditional strictness,
+    this variant takes the mapping and key so *required* can reject absence
+    -- and, when required, a present ``null`` too (this build's writer never
+    emits ``null`` for a list field, only a real, possibly-empty array;
+    accepting ``null`` as "empty" here would reopen the same gap
+    :func:`_bool`'s ``required`` mode closes for a present ``null``).
+    """
+    if key not in m:
+        if required:
+            raise TypeError(f"{what} is missing the required key {key!r}.")
+        return ()
+    value: object = m[key]
+    if value is None:
+        if required:
+            raise TypeError(f"{what} must be a JSON array, not None.")
+        return ()
+    if isinstance(value, (str, bytes)) or not isinstance(value, Sequence):
+        raise TypeError(f"{what} must be a JSON array, not {value!r}.")
+    return value
+
+
 _GATE_SCOPE_FIELDS_SCHEMA_VERSION = 2
 """The ``evaluation_context.schema_version`` at which ``gate.require_complete_
 analysis``/``gate.scope`` were introduced (dedup-and-convergence plan, Phase 2
@@ -206,6 +237,13 @@ def _gate_scope_from_dict(
     Takes the mapping and key rather than a pre-fetched value, mirroring
     :func:`_bool`, so *required* can distinguish "key absent" from "key
     present with value ``null``" the same way.
+
+    *required* also propagates one level down to a present, non-``None``
+    scope object's own ``targets`` key (via :func:`_sequence_field`): this
+    build's writer always emits ``targets`` (a real, possibly-empty array)
+    whenever it emits a scope object at all, so a required scope missing
+    its own ``targets`` key is the same truncated-payload signal as the
+    outer key being absent (Codex review, fresh evidence, fourth round).
     """
     if key not in m:
         if required:
@@ -217,7 +255,9 @@ def _gate_scope_from_dict(
     m2 = _require_mapping(d, what="gate.scope")
     return ScopedGateSelection(
         kind=_required(m2, "kind", what="gate.scope"),
-        targets=tuple(_sequence(m2.get("targets"), what="gate.scope.targets")),
+        targets=tuple(
+            _sequence_field(m2, "targets", what="gate.scope.targets", required=required)
+        ),
     )
 
 

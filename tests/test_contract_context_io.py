@@ -432,6 +432,70 @@ class TestEvaluationContextGateSchemaVersionGating:
         )
         assert decoded == self._block()
 
+    def _block_with_scope(self) -> EvaluationContextBlock:
+        return dataclasses.replace(
+            self._block(),
+            resolved_config=dataclasses.replace(
+                self._config(),
+                gate=dataclasses.replace(
+                    self._config().gate,
+                    scope=ScopedGateSelection(kind="used_by", targets=("/opt/app1",)),
+                ),
+            ),
+        )
+
+    def test_current_schema_version_scope_missing_targets_key_raises(self) -> None:
+        # Codex review, fresh evidence (fourth round): a present, non-null
+        # gate.scope object's own targets key hits the identical
+        # legitimate-default-vs-truncated-payload ambiguity the outer keys
+        # were fixed for -- this build's writer always emits targets (a
+        # real, possibly-empty array) whenever it emits a scope at all.
+        from abicheck.contract_context_io import (
+            evaluation_context_from_dict,
+            evaluation_context_to_dict,
+        )
+
+        raw = evaluation_context_to_dict(self._block_with_scope())
+        del raw["resolved_config"]["gate"]["scope"]["targets"]
+        with pytest.raises(TypeError, match="gate.scope.targets"):
+            evaluation_context_from_dict(raw)
+
+    def test_current_schema_version_scope_targets_explicit_null_raises(self) -> None:
+        from abicheck.contract_context_io import (
+            evaluation_context_from_dict,
+            evaluation_context_to_dict,
+        )
+
+        raw = evaluation_context_to_dict(self._block_with_scope())
+        raw["resolved_config"]["gate"]["scope"]["targets"] = None
+        with pytest.raises(TypeError, match="gate.scope.targets"):
+            evaluation_context_from_dict(raw)
+
+    def test_legacy_schema_version_scope_missing_targets_key_defaults_empty(
+        self,
+    ) -> None:
+        from abicheck.contract_context_io import (
+            evaluation_context_from_dict,
+            evaluation_context_to_dict,
+        )
+
+        raw = evaluation_context_to_dict(self._block_with_scope())
+        raw["schema_version"] = 1
+        del raw["resolved_config"]["gate"]["scope"]["targets"]
+        decoded = evaluation_context_from_dict(raw)
+        assert decoded.resolved_config.gate.scope is not None
+        assert decoded.resolved_config.gate.scope.targets == ()
+
+    def test_current_schema_version_scope_with_targets_round_trips(self) -> None:
+        from abicheck.contract_context_io import (
+            evaluation_context_from_dict,
+            evaluation_context_to_dict,
+        )
+
+        block = self._block_with_scope()
+        decoded = evaluation_context_from_dict(evaluation_context_to_dict(block))
+        assert decoded == block
+
 
 class TestResolvedContextContent:
     """What the persisted context says about the run that produced it."""
