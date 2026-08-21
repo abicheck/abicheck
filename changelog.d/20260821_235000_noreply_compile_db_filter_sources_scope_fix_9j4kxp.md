@@ -55,3 +55,11 @@
   `--sources`-discovered database instead. Fixed by returning cleanly (no
   usage error) once an explicit, given `--build-info` resolves to nothing,
   matching the real resolver's own precedence.
+- **`dump --compile-db-filter --build-info <path>` now also catches a
+  `--build-info` naming a Flow-2 `abicheck_inputs/` pack**, not only a
+  classic `BuildSourcePack`. An earlier fix in this same release recognized
+  a `--build-info` pack directory, but only checked for the classic pack
+  format — the L2 seed and the L3 embed both also recognize a Flow-2
+  `abicheck_inputs/` directory identically, so that shape silently
+  reproduced the same filtered-L2/unfiltered-L3 mismatch. Fixed on the CLI
+  and the typed `DumpRequest`/`CompareRequest` API alike.

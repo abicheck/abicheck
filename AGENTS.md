@@ -5075,6 +5075,24 @@ Once a root command genuinely clears the bar above, pick the right home:
   g++/clang project fixture, confirming the guard doesn't reject a genuinely
   safe combination.
 
+  **A ninth finding (Codex review, fresh evidence): the third
+  under-coverage's own pack recognition for `--build-info` (the sixth
+  finding above) only ever checked `is_pack_dir` — a classic
+  `BuildSourcePack` — never `inputs_pack.is_inputs_pack`, the Flow-2
+  `abicheck_inputs/` shape.** `_l2_seed_pack_inputs` recognizes both shapes
+  for `build_info` identically (`is_pack_dir(build_info) or
+  _is_inputs_pack_dir(build_info)`), and `embed_build_source`'s own
+  `bi_is_inputs` check embeds a Flow-2 `build_info` pack the same way — so a
+  `--build-info` naming a Flow-2 pack reproduced the identical mismatch,
+  missed only because the sixth finding's fix carried over `is_pack_dir`
+  without its Flow-2 sibling, even though the seventh finding's fix
+  (`--sources` packs) already checks both. Fixed by adding `or
+  is_inputs_pack(build_info)` to the same branch. Regression coverage:
+  `TestScopeGuardCoversPackAndBazelBuildInfo::
+  test_flow2_inputs_pack_named_by_build_info_is_recognized` in
+  `tests/test_compile_db_filter_scope.py`, confirmed to fail against the
+  pre-fix guard.
+
   **A real regression the scan-migration paragraph above introduced, found
   by Codex review and fixed the same session (2026-08-21): `scan --config
   <path>` silently lost the config's own *passive* settings whenever the

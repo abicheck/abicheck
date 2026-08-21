@@ -927,12 +927,40 @@ class TestScopeGuardCoversPackAndBazelBuildInfo:
         path.write_text(json.dumps({"results": []}), encoding="utf-8")
         return path
 
+    @staticmethod
+    def _inputs_pack(tmp_path: Path) -> Path:
+        pack = tmp_path / "inputs_pack"
+        pack.mkdir()
+        (pack / "manifest.json").write_text(
+            json.dumps({"kind": "abicheck_inputs"}), encoding="utf-8"
+        )
+        return pack
+
     def test_pack_directory_is_recognized(self, tmp_path: Path) -> None:
         from abicheck.header_conditionals import compile_db_for_filter_scope_check
 
         pack = self._pack_dir(tmp_path)
         resolved = compile_db_for_filter_scope_check(pack, None, (tmp_path / "api.h",))
         assert resolved == pack
+
+    def test_flow2_inputs_pack_named_by_build_info_is_recognized(
+        self, tmp_path: Path
+    ) -> None:
+        """Codex review, P1 (a ninth finding): the original pack recognition
+        here only checked ``is_pack_dir`` (classic ``BuildSourcePack``),
+        missing the identical Flow-2 ``abicheck_inputs/`` shape its own
+        ``--sources`` sibling (``TestScopeGuardCoversSourcesPacks``) already
+        covers -- even though ``_l2_seed_pack_inputs`` recognizes both
+        shapes for ``build_info`` too."""
+        from abicheck.header_conditionals import (
+            compile_db_filter_scope_error,
+            compile_db_for_filter_scope_check,
+        )
+
+        pack = self._inputs_pack(tmp_path)
+        resolved = compile_db_for_filter_scope_check(pack, None, (tmp_path / "api.h",))
+        assert resolved == pack
+        assert compile_db_filter_scope_error("foo.cpp", resolved, "build") is not None
 
     def test_bazel_aquery_file_is_recognized(self, tmp_path: Path) -> None:
         from abicheck.header_conditionals import compile_db_for_filter_scope_check

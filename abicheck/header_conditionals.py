@@ -1051,19 +1051,24 @@ def compile_db_for_filter_scope_check(
     *whatever* ``BuildEvidence.compile_units`` a ``--build-info`` resolves
     to -- it is not specific to a literal ``compile_commands.json``. A
     ``--build-info`` naming a pre-captured ``collect`` pack directory
-    (``is_pack_dir``) or a Bazel ``aquery``/``cquery`` jsonproto (both
-    routed through their own adapters in
+    (``is_pack_dir``), a Flow-2 ``abicheck_inputs/`` pack
+    (``inputs_pack.is_inputs_pack`` -- a ninth finding, Codex review, fresh
+    evidence, closing the identical gap this paragraph's own ``--sources``
+    sibling below already covers, missed here originally since the pack
+    recognition and the Bazel-jsonproto recognition were added in the same
+    pass and only ``is_pack_dir`` was carried over), or a Bazel
+    ``aquery``/``cquery`` jsonproto (routed through their own adapters in
     ``buildsource.inline._maybe_collect_bazel_build_info``/pack loading, not
     ``load_compile_db()``) resolves compile units the identical way a
     literal compile database does, and the L3 embed collects that same
     ``BuildEvidence`` with no filter either way -- so the mismatch this
-    guard exists to reject reproduces for those two shapes too, just never
-    detected because neither is a ``compile_commands.json`` file
+    guard exists to reject reproduces for those three shapes too, just never
+    detected because none is a ``compile_commands.json`` file
     ``compile_db_from_build_info`` recognizes. ``sniff_build_info_format``
     is the same cheap, execution-free classifier ``compile_db_from_
-    build_info`` already uses to tell these shapes apart -- checking it here
-    costs nothing and cannot disagree with what dispatch itself does with
-    the same path.
+    build_info`` already uses to tell the Bazel shapes apart -- checking it
+    here costs nothing and cannot disagree with what dispatch itself does
+    with the same path.
 
     Deliberately **not** folded into ``compile_db_from_build_info`` itself
     -- that function's result also drives ``dump``'s own legacy ``-p``
@@ -1116,11 +1121,18 @@ def compile_db_for_filter_scope_check(
 
         if build_info.is_dir():
             from .buildsource.inline import _find_compile_db_in_dir, is_pack_dir
+            from .buildsource.inputs_pack import is_inputs_pack
 
             nested = _find_compile_db_in_dir(build_info)
             if nested is not None:
                 return nested
-            if is_pack_dir(build_info):
+            # Codex review, fresh evidence (a ninth finding): a --build-info
+            # naming a Flow-2 abicheck_inputs/ pack is recognized by
+            # _l2_seed_pack_inputs (is_pack_dir OR _is_inputs_pack_dir) and
+            # by embed_build_source's own bi_is_inputs check -- this branch
+            # previously checked only is_pack_dir, missing the Flow-2 shape
+            # its own --sources sibling below already covers.
+            if is_pack_dir(build_info) or is_inputs_pack(build_info):
                 return build_info
         elif build_info.is_file() and sniff_build_info_format(build_info) in (
             "bazel_aquery",
