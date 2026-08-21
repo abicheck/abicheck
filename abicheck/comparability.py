@@ -985,6 +985,23 @@ def _compiler_version_sans_driver_name(version: str) -> str:
     return parts[1] if len(parts) == 2 else version
 
 
+def _is_gcc_gxx_driver_pair(old_version: str, new_version: str) -> bool:
+    """Whether each banner's leading token is genuinely a C vs. C++ driver
+    name (``gcc``/``cc`` vs. ``g++``/``c++``, cross-compile prefix
+    included) -- not merely two words whose stripped remainders happen to
+    match, which a coincidental same-version vendor pair could also
+    produce (Codex review, second round)."""
+    old_word = old_version.split(None, 1)[0].lower() if old_version else ""
+    new_word = new_version.split(None, 1)[0].lower() if new_version else ""
+    if not old_word or not new_word:
+        return False
+    old_is_c = old_word == "cc" or old_word.endswith("gcc")
+    old_is_cxx = old_word == "c++" or old_word.endswith("g++")
+    new_is_c = new_word == "cc" or new_word.endswith("gcc")
+    new_is_cxx = new_word == "c++" or new_word.endswith("g++")
+    return (old_is_c and new_is_cxx) or (old_is_cxx and new_is_c)
+
+
 def _language_standard_content_divergence_corroborated(
     old: AbiSnapshot,
     new: AbiSnapshot,
@@ -1000,84 +1017,63 @@ def _language_standard_content_divergence_corroborated(
 
     When neither side was given an explicit ``--lang``,
     :func:`dumper_toolchain._resolve_force_cpp` decides the parse language
-    purely from each side's own header *content* -- and a public header
-    losing its ``extern "C"`` wrapper (case66) or gaining a C++-only
-    trivially-copyable-affecting construct (case69) is exactly the kind of
+    purely from each side's own header *content* -- losing an ``extern
+    "C"`` wrapper (case66) or gaining a C++-only construct (case69) is a
     real, ABI-relevant edit these two example cases exist to prove abicheck
-    still catches. Under the identical toolchain, a resulting
-    ``language_standard`` divergence (e.g. a probed ``__cplusplus`` value
-    on one side against the forced ``gnu11`` literal on the other) is
-    therefore not evidence the two snapshots were extracted under a
-    different *environment* -- the one thing this comparability gate exists
-    to guard against (ADR-050 D1/D2) -- it is evidence the *library's own
-    headers* changed, which is real signal for the dedicated detectors that
-    already operate independently of header language mode (e.g.
-    ``diff_symbols.py``'s mangled/unmangled reconciliation, the source of
-    case66's own ``func_language_linkage_changed`` finding) to report, not
-    a reason to refuse the comparison outright.
+    still catches. Under an identical toolchain, the resulting
+    ``language_standard`` divergence is therefore not evidence of a
+    different extraction *environment* (what this gate guards against,
+    ADR-050 D1/D2) -- it is evidence the library's own headers changed,
+    real signal for the dedicated detectors that already operate
+    independently of header language mode (e.g. ``diff_symbols.py``'s
+    mangled/unmangled reconciliation) to report, not a reason to refuse
+    the comparison outright.
 
     **Scoped to a genuine mode switch (``c`` <-> ``c++``), not merely a
-    differing edition within the same mode** (Codex review, real CI
-    failure: ``test_dumper_contract_wiring.py::
+    differing edition within the same mode** (Codex review: pinned by
+    ``test_dumper_contract_wiring.py::
     test_cpp20_heuristic_forced_standard_flows_into_profile_fingerprint``,
-    a pre-existing regression test for exactly the *narrower* case this
-    carve-out must NOT also waive). Two header sets that both parse as C++
-    but resolve to a different *edition* purely because one side trips the
-    ``force_cpp20`` requires-clause heuristic is materially different from
-    case66/case69: the same shared declarations are parsed under genuinely
-    different C++ dialects, which can itself produce different recorded
-    facts for unchanged code -- exactly what
-    ``_probe_default_language_standard``/``force_cpp20`` were added to
-    catch, and still must. Checked via each side's own
-    ``AbiSnapshot.ast_toolchain["resolved_lang_mode"]`` (set by
-    :func:`dumper_toolchain._stamp_ast_parser`) rather than the
-    ``language_standard`` string shape alone, since only that field records
-    the actual language *mode*, independent of edition.
+    the narrower case this must NOT also waive). Two header sets that both
+    parse as C++ but resolve to a different *edition* purely because
+    ``force_cpp20`` fires on only one side are parsed under genuinely
+    different dialects -- exactly what that heuristic exists to catch, and
+    still must. Checked via ``AbiSnapshot.ast_toolchain["resolved_lang_
+    mode"]`` (:func:`dumper_toolchain._stamp_ast_parser`), not the
+    ``language_standard`` string shape, since only that field records the
+    actual mode, independent of edition.
 
     Given a genuine mode switch, this does not need the sibling upgrade
     carve-out's narrower "same lang tag plus a newly-resolved remainder"
-    structure to distinguish an upgrade artifact from a real language-mode
-    change -- a real content-driven language-*mode* change under an
-    identical, corroborated toolchain must not make the whole comparison
-    ``NOT_COMPARABLE`` either way, whether it turns out to be an upgrade
-    artifact or a genuine edit.
+    structure -- a real content-driven mode change under an identical,
+    corroborated toolchain must not raise ``NOT_COMPARABLE`` either way,
+    upgrade artifact or genuine edit.
 
     Waived only when: (1) neither side's non-empty ``language_standard``
     reflects an explicit ``--lang`` (:func:`_language_standard_is_lang_pinned`)
-    -- an explicit, user-pinned language mode that still disagrees between
-    old and new *is* a genuine extraction-configuration difference this
-    gate should keep catching; (2) each side's non-empty value is a form
-    the *unpinned* path can actually produce for its own resolved mode
-    (:func:`_language_standard_is_known_auto_resolved_form` -- Codex
-    review, fresh evidence: an explicit ``-std=gnu11``/``-std=gnu++17``
-    given without ``--lang`` is invisible to check (1) and can collide
-    exactly with the bare literal the unpinned path produces, so this is a
-    second, independent guard, not a redundant one); a *bare-empty* value
-    on either side is not itself rejected -- see the code's own comment for
-    why a probe failure there is safe here, unlike for the sibling carve-out;
-    and (3) independently corroborated by matching ``compiler_family``/
-    ``producer``/frontend ``version``, plus a driver-name-normalized
-    ``compiler_version`` (see :func:`_compiler_version_sans_driver_name`)
-    -- deliberately no ``compiler_sha256`` check here, unlike the sibling
-    carve-out: ``gcc``/``g++`` are different files on disk even from the
-    identical package, so hashing would defeat that normalization for
-    exactly the pairing this carve-out exists to support.
+    -- an explicit, user-pinned mode that still disagrees *is* a genuine
+    extraction-configuration difference; (2) each side's non-empty value is
+    a form the *unpinned* path can actually produce for its own mode
+    (:func:`_language_standard_is_known_auto_resolved_form` -- an explicit
+    ``-std=gnu11``/``-std=gnu++17`` given without ``--lang`` is invisible
+    to check (1) and can collide with the bare literal the unpinned path
+    produces); a *bare-empty* value is not itself rejected here (see the
+    code's own comment for why a probe failure is safe, unlike the sibling
+    carve-out); and (3) independently corroborated by matching
+    ``compiler_family``/``producer``/frontend ``version``, a driver-name-
+    normalized ``compiler_version`` (:func:`_compiler_version_sans_driver_name`),
+    and ``compiler_sha256`` -- skipped only for the corroborated castxml
+    gcc/g++ driver split (see the code's own comment).
     """
     old_std = old_fields.get("language_standard", "")
     new_std = new_fields.get("language_standard", "")
     if old_std == new_std:
         return False
-    # A bare-empty side (real CI failure on Windows: a real g++/clang++
-    # found on PATH can still reject the `-E -dM -x <mode> -` probe for
-    # reasons unrelated to language mode -- the same fail-open convention
-    # every other best-effort toolchain probe here already uses) is
-    # deliberately NOT excluded, unlike the sibling carve-out's bare-empty
-    # exclusion just above: that exclusion exists because the sibling has
-    # no independent signal for which mode a bare-empty side resolved to,
-    # but this carve-out already requires `resolved_lang_mode` (below) to
-    # prove the mode switch regardless of probe success, and each side's
-    # `language_standard_explicit` provenance (checked below) still
-    # confirms it wasn't a pin either way.
+    # A bare-empty side (real CI failure on Windows: the probe can reject
+    # for reasons unrelated to language mode) is deliberately NOT excluded
+    # here, unlike the sibling carve-out: this one already requires
+    # `resolved_lang_mode` (below) to prove the mode switch regardless of
+    # probe success, and `language_standard_explicit` (checked below)
+    # still confirms it wasn't a pin either way.
     if old_std and _language_standard_is_lang_pinned(old_std):
         return False
     if new_std and _language_standard_is_lang_pinned(new_std):
@@ -1095,12 +1091,9 @@ def _language_standard_content_divergence_corroborated(
     if old_std and not _language_standard_is_known_auto_resolved_form(
         old_std, old_mode
     ):
-        # Codex review, fresh evidence: a bare literal that isn't one of the
-        # forms the unpinned path can actually produce for its own mode can
-        # only have come from an explicit -std=/--std=/std: pin given
-        # without --lang -- _language_standard_is_lang_pinned above cannot
-        # see that (it only recognizes an explicit lang tag), so this is a
-        # separate, necessary guard, not a redundant one.
+        # A bare literal not in the unpinned-producible set can only be an
+        # explicit -std=/--std=/std: pin given without --lang -- invisible
+        # to the lang-pinned check above, so this is a separate guard.
         return False
     if new_std and not _language_standard_is_known_auto_resolved_form(
         new_std, new_mode
@@ -1151,21 +1144,28 @@ def _language_standard_content_divergence_corroborated(
     new_host_version = new.ast_toolchain.get("compiler_version", "")
     if not old_host_version or not new_host_version:
         return False
-    if old_host_version != new_host_version and _compiler_version_sans_driver_name(
+    banners_differ = old_host_version != new_host_version
+    if banners_differ and _compiler_version_sans_driver_name(
         old_host_version
     ) != _compiler_version_sans_driver_name(new_host_version):
         # castxml resolves a separate, mode-specific host-compiler binary
-        # per side ("gcc" for C, "g++" for C++), so their --version banners
-        # differ only in that leading driver word under one unchanged
-        # toolchain (direct-clang invokes the identical binary either way,
-        # so this never applies there). A genuine cross-version skew still
-        # differs in the remainder and still fails here correctly.
+        # per side ("gcc"/"g++"), so their banners differ only in that
+        # leading word under one unchanged toolchain (direct-clang invokes
+        # the same binary either way, so this never applies there). A
+        # genuine cross-version skew still differs in the remainder.
         return False
-    # sha256 is skipped only for the confirmed driver-split case above --
-    # "gcc"/"g++" always hash differently even for the identical package.
-    # When banners are already identical, a differing sha256 is real drift
-    # and must still raise (Codex review: this was unconditional before).
-    if old_host_version == new_host_version:
+    # sha256 is skipped only for the corroborated driver-split case:
+    # castxml, gnu family, and a genuine gcc/g++ leading-token pair
+    # (Codex review, second round: a normalized-remainder match alone
+    # isn't enough -- two different vendor toolchains could coincidentally
+    # share a version-suffix banner). Anything else falls through to a
+    # real hash match.
+    if not (
+        banners_differ
+        and old_producer == "castxml"
+        and old_family == "gnu"
+        and _is_gcc_gxx_driver_pair(old_host_version, new_host_version)
+    ):
         old_sha = old.ast_toolchain.get("compiler_sha256", "")
         new_sha = new.ast_toolchain.get("compiler_sha256", "")
         if old_sha and new_sha and old_sha != new_sha:

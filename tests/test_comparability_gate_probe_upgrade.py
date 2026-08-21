@@ -682,6 +682,51 @@ def test_gate_content_driven_still_raises_when_identical_banner_but_sha256_diffe
         check_contracts_comparable(old, new)
 
 
+def test_gate_content_driven_still_raises_for_a_coincidental_vendor_banner_match():
+    """Codex review, fresh evidence (second round): the normalized-remainder
+    match by itself is not sufficient corroboration that two banners are
+    genuinely the castxml gcc/g++ driver split -- two different vendor
+    toolchains (`/opt/toolchain-a/bin/g++`, `/opt/toolchain-b/bin/gcc`)
+    could coincidentally report an identical version-suffix banner while
+    being different builds with different `compiler_sha256`. Neither
+    leading word here is a real `gcc`/`cc`/`g++`/`c++` driver name, so
+    `_is_gcc_gxx_driver_pair` must decline, and the differing sha256 must
+    still raise -- must not be waived just because the two banners'
+    driver-stripped remainders happen to match."""
+    old = _snap(
+        compute_extraction_contract(
+            l2_frontend_ran=True,
+            compiler_family="gnu",
+            compiler_version="13.3.0",
+            language_standard="probed:__cplusplus=201703L",
+        ),
+        ast_toolchain=_content_ast_toolchain(
+            "c++",
+            producer="castxml",
+            frontend_version="0.6.11",
+            host_version="toolchain-a (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+            compiler_sha256="a" * 64,
+        ),
+    )
+    new = _snap(
+        compute_extraction_contract(
+            l2_frontend_ran=True,
+            compiler_family="gnu",
+            compiler_version="13.3.0",
+            language_standard="gnu11",
+        ),
+        ast_toolchain=_content_ast_toolchain(
+            "c",
+            producer="castxml",
+            frontend_version="0.6.11",
+            host_version="toolchain-b (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+            compiler_sha256="b" * 64,
+        ),
+    )
+    with pytest.raises(ProfileMismatchError):
+        check_contracts_comparable(old, new)
+
+
 def test_gate_content_driven_still_raises_when_producer_differs():
     """A castxml-produced snapshot compared against a direct-clang-produced
     one is a genuinely different extraction mechanism, not merely a
