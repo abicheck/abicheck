@@ -236,6 +236,8 @@ def _stamp_ast_parser(
     fallback_reason: str | None = None,
     resolved_compiler: str | None = None,
     resolved_force_cpp: bool | None = None,
+    gcc_options: str | None = None,
+    gcc_option_tokens: tuple[str, ...] = (),
 ) -> Any:
     """Attach the frontend/compiler provenance attributes to a built parser.
 
@@ -249,6 +251,22 @@ def _stamp_ast_parser(
     function's own ``_selected_meta_out`` docstring). *resolved_force_cpp*,
     when given, records either backend's real, post-retry C->C++ self-heal
     as ``metadata["resolved_lang_mode"]``.
+
+    *gcc_options*/*gcc_option_tokens* (Codex review, PR #816 follow-up):
+    stamps ``metadata["language_standard_explicit"]`` (``"1"``/``"0"``) with
+    whether the caller gave an explicit ``-std=``/``/std:`` — real
+    provenance ``comparability._language_standard_content_divergence_
+    corroborated`` reads to tell a genuinely content-driven, auto-resolved
+    ``language_standard`` apart from an explicit pin whose value happens to
+    collide with an auto-resolved literal (e.g. ``-std=gnu11`` given
+    without ``--lang``, which is otherwise indistinguishable from the
+    unpinned forced-``gnu11`` default by string inspection alone). Stored
+    on ``AbiSnapshot.ast_toolchain`` -- a free-form provenance dict, not a
+    ``profile_fields``/``PROFILE_FIELD_KEYS`` entry -- specifically so a
+    fresh snapshot compared against a legacy baseline that predates this
+    field (which simply lacks the key) degrades to "no provenance
+    available" rather than tripping ``_unexplained_profile_fields``'s
+    unconditionally-fatal ``unknown_differing`` check.
 
     Moved here from ``dumper.py`` (unchanged logic) purely to stay under that
     module's AI-readiness file-size hard cap -- ``parser`` is typed ``Any``
@@ -298,6 +316,9 @@ def _stamp_ast_parser(
         metadata["abi_dialect"] = dialect
     if resolved_force_cpp is not None:
         metadata["resolved_lang_mode"] = "c++" if resolved_force_cpp else "c"
+    metadata["language_standard_explicit"] = (
+        "1" if has_explicit_std(gcc_options, gcc_option_tokens) else "0"
+    )
     setattr(parser, "_abicheck_ast_toolchain", metadata)
     setattr(parser, "_abicheck_ast_fallback_reason", fallback_reason)
     if producer == "castxml":

@@ -976,6 +976,26 @@ def _language_standard_is_known_auto_resolved_form(std: str, mode: str) -> bool:
     return std == _KNOWN_AUTO_RESOLVED_BARE_STANDARDS.get(mode)
 
 
+def _compiler_version_sans_driver_name(version: str) -> str:
+    """Strip a leading driver-name token from a raw ``--version`` banner
+    (real CI failure, Codex review): a castxml-resolved host compiler is
+    invoked as a language-mode-specific binary --
+    ``dumper_ast_config._resolve_compiler_binary`` maps C mode to
+    ``gcc``/``cc`` and C++ mode to ``g++``/``c++`` -- so a GNU host
+    compiler's banner differs *only* in that leading word between the two
+    modes, even for the exact same toolchain installation/version:
+    ``"gcc (Ubuntu 13.3.0-...) 13.3.0..."`` vs. ``"g++ (Ubuntu 13.3.0-...)
+    13.3.0..."``. Used by
+    :func:`_language_standard_content_divergence_corroborated` to compare
+    what's left after that leading word, rather than the raw banner text.
+    A no-op for clang (``clang``/``clang++`` report byte-identical banners
+    -- confirmed empirically) and effectively a no-op for two genuinely
+    different compiler versions too, since their remainders still differ.
+    """
+    parts = version.split(None, 1)
+    return parts[1] if len(parts) == 2 else version
+
+
 def _language_standard_content_divergence_corroborated(
     old: AbiSnapshot,
     new: AbiSnapshot,
@@ -1080,15 +1100,79 @@ def _language_standard_content_divergence_corroborated(
         # see that (it only recognizes an explicit lang tag), so this is a
         # separate, necessary guard, not a redundant one.
         return False
-    for key in ("compiler_family", "compiler_version"):
-        old_v = old_fields.get(key, "")
-        new_v = new_fields.get(key, "")
-        if not old_v or not new_v or old_v != new_v:
-            return False
-    old_sha = old.ast_toolchain.get("compiler_sha256", "")
-    new_sha = new.ast_toolchain.get("compiler_sha256", "")
-    if old_sha and new_sha and old_sha != new_sha:
+    # Codex review, fresh evidence (second round): the check above still
+    # cannot tell apart the exact-collision pair -- an explicit
+    # -std=gnu11/-std=gnu++20 given without --lang produces literals that
+    # equal :data:`_KNOWN_AUTO_RESOLVED_BARE_STANDARDS`' own entries, since
+    # those are exactly the forms the unpinned path independently produces
+    # for the same two modes. No string-shape check can resolve that
+    # collision -- it needs real provenance:
+    # AbiSnapshot.ast_toolchain["language_standard_explicit"]
+    # (dumper_toolchain._stamp_ast_parser, PR #816 follow-up) records
+    # whether the caller actually gave an explicit -std=/--std=/std:,
+    # independent of what the resulting value happens to look like. Missing
+    # on either side (a legacy snapshot dumped before this provenance
+    # existed) fails closed -- rather than a bare literal being trusted by
+    # default, an unconfirmed pair simply doesn't get this carve-out until
+    # re-dumped, the same "safe workaround: re-dump once" degradation this
+    # codebase's toolchain-provenance carve-outs already use elsewhere.
+    if (
+        old.ast_toolchain.get("language_standard_explicit") != "0"
+        or new.ast_toolchain.get("language_standard_explicit") != "0"
+    ):
         return False
+    old_family = old_fields.get("compiler_family", "")
+    new_family = new_fields.get("compiler_family", "")
+    if not old_family or not new_family or old_family != new_family:
+        return False
+    old_producer = old.ast_toolchain.get("producer", "")
+    new_producer = new.ast_toolchain.get("producer", "")
+    if not old_producer or not new_producer or old_producer != new_producer:
+        return False
+    # The frontend's OWN version (castxml's, or clang's own --version for
+    # the direct-clang backend) must match independently of the host
+    # compiler check below -- confirms the same castxml/clang build parsed
+    # both sides, not just an equivalent host toolchain.
+    old_frontend_version = old.ast_toolchain.get("version", "")
+    new_frontend_version = new.ast_toolchain.get("version", "")
+    if (
+        not old_frontend_version
+        or not new_frontend_version
+        or old_frontend_version != new_frontend_version
+    ):
+        return False
+    old_host_version = old.ast_toolchain.get("compiler_version", "")
+    new_host_version = new.ast_toolchain.get("compiler_version", "")
+    if not old_host_version or not new_host_version:
+        return False
+    if old_host_version != new_host_version and _compiler_version_sans_driver_name(
+        old_host_version
+    ) != _compiler_version_sans_driver_name(new_host_version):
+        # Codex review, fresh evidence (real CI failure): castxml resolves
+        # a SEPARATE, mode-specific host-compiler binary per side -- "gcc"
+        # for a C-mode parse, "g++" for C++ (dumper_ast_config._resolve_
+        # compiler_binary) -- so a genuine C<->C++ mode switch legitimately
+        # changes which binary gets probed even under one, completely
+        # unchanged toolchain installation. Their --version banners then
+        # differ ONLY in that leading driver-name word (e.g. "gcc (Ubuntu
+        # 13.3.0-...) 13.3.0..." vs "g++ (Ubuntu 13.3.0-...) 13.3.0...") --
+        # comparing the raw banner (as the sibling upgrade carve-out
+        # correctly does, where the driver name never changes) would treat
+        # this legitimate, same-toolchain pairing as a real version skew
+        # and block exactly the case66/case69 shape this carve-out exists
+        # for, but only under castxml (the direct-clang backend invokes
+        # the identical binary either way and reports byte-identical
+        # banners, so this never applies there). Not a weaker check for
+        # a genuine cross-version skew: two different GCC installations
+        # produce different remainders (real differing version numbers),
+        # which still fails this comparison correctly.
+        return False
+    # Deliberately no compiler_sha256 check here (unlike the sibling
+    # upgrade carve-out): "gcc" and "g++" are two distinct files on disk
+    # even from the identical package/version, so their content hashes
+    # always differ for exactly the legitimate pairing this carve-out
+    # exists to corroborate -- requiring sha256 equality would defeat the
+    # normalization above entirely.
     return True
 
 
@@ -1483,14 +1567,21 @@ def _unexplained_profile_fields(
     # toolchain -- see _language_standard_content_divergence_corroborated's
     # own docstring for why this must never be treated as a blocking
     # extraction-environment mismatch, unlike the narrower upgrade-only
-    # carve-out just above.
-    if (
-        "language_standard" in unexplained
-        and _language_standard_content_divergence_corroborated(
-            old, new, old_fields, new_fields
-        )
+    # carve-out just above. Also discards "compiler_version" when present
+    # (real CI failure, second round): under castxml specifically, the
+    # mode switch this carve-out corroborates changes which host-compiler
+    # binary gets resolved ("gcc" vs "g++"), which by itself makes the
+    # *raw* compiler_version profile field differ even though
+    # _language_standard_content_divergence_corroborated's own,
+    # driver-name-normalized comparison already confirmed it's the
+    # identical toolchain -- so once that corroboration succeeds,
+    # compiler_version's raw-field divergence is explained by the exact
+    # same fact language_standard's was, not a second, independent one.
+    if "language_standard" in unexplained and _language_standard_content_divergence_corroborated(
+        old, new, old_fields, new_fields
     ):
         unexplained.discard("language_standard")
+        unexplained.discard("compiler_version")
 
     # Both sequence carve-outs below additionally require
     # _scope_growth_corroborated (Codex review, PR #641 follow-up, P1):

@@ -451,6 +451,37 @@ def test_gate_bare_lang_c_vs_gnu11_waived_when_compiler_sha256_absent_on_one_sid
     check_contracts_comparable(old, new)  # must not raise
 
 
+def _content_ast_toolchain(
+    mode: str,
+    *,
+    explicit: str | None = "0",
+    producer: str = "clang",
+    frontend_version: str = "1.0",
+    host_version: str = "18.1.3",
+    **extra: str,
+) -> dict[str, str]:
+    """Shared ``ast_toolchain`` shape for the content-divergence carve-out's
+    own test group below: real ``check_contracts_comparable`` corroboration
+    (PR #816 second/third review rounds) needs ``producer``/``version``
+    (the frontend's own identity) and a raw ``compiler_version`` on
+    ``ast_toolchain`` directly, not just the combined ``profile_fields``
+    blob :func:`compute_extraction_contract`'s ``compiler_version=`` kwarg
+    produces -- see ``_language_standard_content_divergence_corroborated``'s
+    own docstring. *explicit* omitted (``None``) leaves
+    ``language_standard_explicit`` unset entirely, for the fail-closed
+    "missing provenance" test."""
+    fields = {
+        "resolved_lang_mode": mode,
+        "producer": producer,
+        "version": frontend_version,
+        "compiler_version": host_version,
+        **extra,
+    }
+    if explicit is not None:
+        fields["language_standard_explicit"] = explicit
+    return fields
+
+
 def test_gate_waives_content_driven_language_mode_divergence_when_toolchain_matches():
     """Real CI failure (Codex review, fresh evidence):
     examples/case66_language_linkage_changed and
@@ -479,7 +510,7 @@ def test_gate_waives_content_driven_language_mode_divergence_when_toolchain_matc
             compiler_version="18.1.3",
             language_standard="probed:__cplusplus=201703L",
         ),
-        ast_toolchain={"resolved_lang_mode": "c++"},
+        ast_toolchain=_content_ast_toolchain("c++"),
     )
     new = _snap(
         compute_extraction_contract(
@@ -488,9 +519,180 @@ def test_gate_waives_content_driven_language_mode_divergence_when_toolchain_matc
             compiler_version="18.1.3",
             language_standard="gnu11",
         ),
-        ast_toolchain={"resolved_lang_mode": "c"},
+        ast_toolchain=_content_ast_toolchain("c"),
     )
     check_contracts_comparable(old, new)  # must not raise
+
+
+def test_gate_waives_when_castxml_resolves_a_mode_specific_gnu_driver_name():
+    """Real CI failure, second round (Codex review + a real castxml/gcc
+    repro against examples/case66_language_linkage_changed): castxml
+    resolves a genuinely SEPARATE, mode-specific host-compiler binary per
+    side (``dumper_ast_config._resolve_compiler_binary`` maps C mode to
+    ``gcc``/``cc``, C++ mode to ``g++``/``c++``), so the raw
+    ``compiler_version`` --version banner differs *only* in that leading
+    driver-name word even for the exact same toolchain installation:
+    ``"gcc (Ubuntu 13.3.0-...) 13.3.0..."`` vs. ``"g++ (Ubuntu 13.3.0-...)
+    13.3.0..."``. Confirmed empirically against a real
+    ``gcc``/``g++ 13.3.0`` pair. This must still waive -- rejecting it
+    would reintroduce the exact case66/case69 CI failure this whole
+    carve-out exists to close, just narrowed to the castxml lane."""
+    old = _snap(
+        compute_extraction_contract(
+            l2_frontend_ran=True,
+            compiler_family="gnu",
+            compiler_version="13.3.0",
+            language_standard="probed:__cplusplus=201703L",
+        ),
+        ast_toolchain=_content_ast_toolchain(
+            "c++",
+            producer="castxml",
+            frontend_version="0.6.11",
+            host_version="g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0\nCopyright ...",
+        ),
+    )
+    new = _snap(
+        compute_extraction_contract(
+            l2_frontend_ran=True,
+            compiler_family="gnu",
+            compiler_version="13.3.0",
+            language_standard="gnu11",
+        ),
+        ast_toolchain=_content_ast_toolchain(
+            "c",
+            producer="castxml",
+            frontend_version="0.6.11",
+            host_version="gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0\nCopyright ...",
+        ),
+    )
+    check_contracts_comparable(old, new)  # must not raise
+
+
+def test_gate_content_driven_still_raises_when_gnu_driver_version_number_genuinely_differs():
+    """The normalization above must not become "any two GNU compiler_version
+    strings match" -- a real cross-version skew (GCC 11 vs. GCC 13, both
+    resolved with the mode-appropriate gcc/g++ driver name) still differs
+    in its *remainder* after the leading driver-name word is stripped, so
+    it must still raise."""
+    old = _snap(
+        compute_extraction_contract(
+            l2_frontend_ran=True,
+            compiler_family="gnu",
+            compiler_version="11.4.0",
+            language_standard="probed:__cplusplus=201703L",
+        ),
+        ast_toolchain=_content_ast_toolchain(
+            "c++",
+            producer="castxml",
+            frontend_version="0.6.11",
+            host_version="g++ (Ubuntu 11.4.0-1ubuntu1~22.04) 11.4.0\nCopyright ...",
+        ),
+    )
+    new = _snap(
+        compute_extraction_contract(
+            l2_frontend_ran=True,
+            compiler_family="gnu",
+            compiler_version="13.3.0",
+            language_standard="gnu11",
+        ),
+        ast_toolchain=_content_ast_toolchain(
+            "c",
+            producer="castxml",
+            frontend_version="0.6.11",
+            host_version="gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0\nCopyright ...",
+        ),
+    )
+    with pytest.raises(ProfileMismatchError):
+        check_contracts_comparable(old, new)
+
+
+def test_gate_content_driven_still_raises_when_producer_differs():
+    """A castxml-produced snapshot compared against a direct-clang-produced
+    one is a genuinely different extraction mechanism, not merely a
+    different mode-resolved host-compiler name -- ``producer`` disagreeing
+    must still raise regardless of how well compiler_version happens to
+    normalize."""
+    old = _snap(
+        compute_extraction_contract(
+            l2_frontend_ran=True,
+            compiler_family="gnu",
+            compiler_version="13.3.0",
+            language_standard="probed:__cplusplus=201703L",
+        ),
+        ast_toolchain=_content_ast_toolchain(
+            "c++", producer="castxml", frontend_version="0.6.11"
+        ),
+    )
+    new = _snap(
+        compute_extraction_contract(
+            l2_frontend_ran=True,
+            compiler_family="gnu",
+            compiler_version="13.3.0",
+            language_standard="gnu11",
+        ),
+        ast_toolchain=_content_ast_toolchain("c", producer="clang", frontend_version="18.1.3"),
+    )
+    with pytest.raises(ProfileMismatchError):
+        check_contracts_comparable(old, new)
+
+
+def test_gate_content_driven_still_raises_when_frontend_version_differs():
+    """Same producer (``castxml``), but a genuinely different castxml
+    *build* (its own ``version`` string) -- must still raise even though
+    the host compiler's own identity matches, since the two dumps did not
+    go through the same castxml binary."""
+    old = _snap(
+        compute_extraction_contract(
+            l2_frontend_ran=True,
+            compiler_family="gnu",
+            compiler_version="13.3.0",
+            language_standard="probed:__cplusplus=201703L",
+        ),
+        ast_toolchain=_content_ast_toolchain(
+            "c++", producer="castxml", frontend_version="0.6.11"
+        ),
+    )
+    new = _snap(
+        compute_extraction_contract(
+            l2_frontend_ran=True,
+            compiler_family="gnu",
+            compiler_version="13.3.0",
+            language_standard="gnu11",
+        ),
+        ast_toolchain=_content_ast_toolchain(
+            "c", producer="castxml", frontend_version="0.7.0"
+        ),
+    )
+    with pytest.raises(ProfileMismatchError):
+        check_contracts_comparable(old, new)
+
+
+def test_gate_content_driven_language_mode_divergence_not_waived_when_provenance_missing():
+    """Fail-closed default: a snapshot with no ``language_standard_explicit``
+    provenance at all (a legacy snapshot dumped before this field existed)
+    must not be silently trusted as auto-resolved -- the carve-out only
+    waives once the provenance positively confirms *neither* side was
+    explicitly pinned, not merely when nothing says otherwise."""
+    old = _snap(
+        compute_extraction_contract(
+            l2_frontend_ran=True,
+            compiler_family="clang",
+            compiler_version="18.1.3",
+            language_standard="probed:__cplusplus=201703L",
+        ),
+        ast_toolchain=_content_ast_toolchain("c++", explicit=None),
+    )
+    new = _snap(
+        compute_extraction_contract(
+            l2_frontend_ran=True,
+            compiler_family="clang",
+            compiler_version="18.1.3",
+            language_standard="gnu11",
+        ),
+        ast_toolchain=_content_ast_toolchain("c"),
+    )
+    with pytest.raises(ProfileMismatchError):
+        check_contracts_comparable(old, new)
 
 
 def test_gate_content_driven_language_mode_divergence_still_raises_when_compiler_family_differs():
@@ -504,7 +706,7 @@ def test_gate_content_driven_language_mode_divergence_still_raises_when_compiler
             compiler_version="18.1.3",
             language_standard="probed:__cplusplus=201703L",
         ),
-        ast_toolchain={"resolved_lang_mode": "c++"},
+        ast_toolchain=_content_ast_toolchain("c++"),
     )
     new = _snap(
         compute_extraction_contract(
@@ -513,7 +715,7 @@ def test_gate_content_driven_language_mode_divergence_still_raises_when_compiler
             compiler_version="11.4.0",
             language_standard="gnu11",
         ),
-        ast_toolchain={"resolved_lang_mode": "c"},
+        ast_toolchain=_content_ast_toolchain("c", host_version="11.4.0"),
     )
     with pytest.raises(ProfileMismatchError):
         check_contracts_comparable(old, new)
@@ -531,7 +733,7 @@ def test_gate_content_driven_language_mode_divergence_not_waived_when_lang_pinne
             compiler_version="18.1.3",
             language_standard="c++:probed:__cplusplus=201703L",
         ),
-        ast_toolchain={"resolved_lang_mode": "c++"},
+        ast_toolchain=_content_ast_toolchain("c++"),
     )
     new = _snap(
         compute_extraction_contract(
@@ -540,33 +742,7 @@ def test_gate_content_driven_language_mode_divergence_not_waived_when_lang_pinne
             compiler_version="18.1.3",
             language_standard="c:gnu11",
         ),
-        ast_toolchain={"resolved_lang_mode": "c"},
-    )
-    with pytest.raises(ProfileMismatchError):
-        check_contracts_comparable(old, new)
-
-
-def test_gate_content_driven_language_mode_divergence_still_raises_when_compiler_sha256_differs():
-    """A different compiler_sha256 (a wrapper swapped at the same path)
-    overrides an otherwise-matching family/version, mirroring the sibling
-    upgrade carve-out's own sha256 check."""
-    old = _snap(
-        compute_extraction_contract(
-            l2_frontend_ran=True,
-            compiler_family="clang",
-            compiler_version="18.1.3",
-            language_standard="probed:__cplusplus=201703L",
-        ),
-        ast_toolchain={"compiler_sha256": "a" * 64, "resolved_lang_mode": "c++"},
-    )
-    new = _snap(
-        compute_extraction_contract(
-            l2_frontend_ran=True,
-            compiler_family="clang",
-            compiler_version="18.1.3",
-            language_standard="gnu11",
-        ),
-        ast_toolchain={"compiler_sha256": "b" * 64, "resolved_lang_mode": "c"},
+        ast_toolchain=_content_ast_toolchain("c"),
     )
     with pytest.raises(ProfileMismatchError):
         check_contracts_comparable(old, new)
@@ -592,7 +768,7 @@ def test_gate_same_mode_differing_edition_still_raises_even_with_compiler_unchan
             compiler_version="11.4.0",
             language_standard="probed:__cplusplus=201703L",
         ),
-        ast_toolchain={"resolved_lang_mode": "c++"},
+        ast_toolchain=_content_ast_toolchain("c++", host_version="11.4.0"),
     )
     new = _snap(
         compute_extraction_contract(
@@ -601,7 +777,7 @@ def test_gate_same_mode_differing_edition_still_raises_even_with_compiler_unchan
             compiler_version="11.4.0",
             language_standard="gnu++20",
         ),
-        ast_toolchain={"resolved_lang_mode": "c++"},
+        ast_toolchain=_content_ast_toolchain("c++", host_version="11.4.0"),
     )
     with pytest.raises(ProfileMismatchError):
         check_contracts_comparable(old, new)
@@ -626,7 +802,7 @@ def test_gate_content_driven_divergence_still_raises_for_explicit_std_without_la
             compiler_version="11.4.0",
             language_standard="gnu11",  # -std=gnu11, no --lang
         ),
-        ast_toolchain={"resolved_lang_mode": "c"},
+        ast_toolchain=_content_ast_toolchain("c", explicit="1", host_version="11.4.0"),
     )
     new = _snap(
         compute_extraction_contract(
@@ -635,7 +811,7 @@ def test_gate_content_driven_divergence_still_raises_for_explicit_std_without_la
             compiler_version="11.4.0",
             language_standard="gnu++17",  # -std=gnu++17, no --lang
         ),
-        ast_toolchain={"resolved_lang_mode": "c++"},
+        ast_toolchain=_content_ast_toolchain("c++", explicit="1", host_version="11.4.0"),
     )
     with pytest.raises(ProfileMismatchError):
         check_contracts_comparable(old, new)
@@ -658,7 +834,7 @@ def test_gate_content_driven_divergence_still_raises_when_bare_forced_literal_is
             compiler_version="18.1.3",
             language_standard="gnu11",  # ambiguous: forced default OR -std=gnu11
         ),
-        ast_toolchain={"resolved_lang_mode": "c"},
+        ast_toolchain=_content_ast_toolchain("c", explicit="1"),
     )
     new = _snap(
         compute_extraction_contract(
@@ -667,7 +843,40 @@ def test_gate_content_driven_divergence_still_raises_when_bare_forced_literal_is
             compiler_version="18.1.3",
             language_standard="gnu++17",  # never producible unpinned
         ),
-        ast_toolchain={"resolved_lang_mode": "c++"},
+        ast_toolchain=_content_ast_toolchain("c++", explicit="1"),
+    )
+    with pytest.raises(ProfileMismatchError):
+        check_contracts_comparable(old, new)
+
+
+def test_gate_content_driven_divergence_still_raises_for_the_exact_literal_collision_pair():
+    """Codex review finding, PR #816 (second round): an explicit
+    ``-std=gnu11``/``-std=gnu++20`` given without ``--lang`` produces
+    literals that exactly equal *both* entries of
+    :data:`comparability._KNOWN_AUTO_RESOLVED_BARE_STANDARDS` -- the one
+    collision the bare-form check (previous test) cannot reject on its own,
+    since both literals genuinely are ``"known auto-resolved forms"`` for
+    their respective modes. Only the real
+    ``language_standard_explicit`` provenance (set ``"1"`` here, as a real
+    explicit dump would record) tells this apart from case66/case69's
+    genuinely auto-resolved shape."""
+    old = _snap(
+        compute_extraction_contract(
+            l2_frontend_ran=True,
+            compiler_family="gnu",
+            compiler_version="11.4.0",
+            language_standard="gnu11",  # -std=gnu11, no --lang
+        ),
+        ast_toolchain=_content_ast_toolchain("c", explicit="1", host_version="11.4.0"),
+    )
+    new = _snap(
+        compute_extraction_contract(
+            l2_frontend_ran=True,
+            compiler_family="gnu",
+            compiler_version="11.4.0",
+            language_standard="gnu++20",  # -std=gnu++20, no --lang
+        ),
+        ast_toolchain=_content_ast_toolchain("c++", explicit="1", host_version="11.4.0"),
     )
     with pytest.raises(ProfileMismatchError):
         check_contracts_comparable(old, new)
