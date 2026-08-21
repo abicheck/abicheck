@@ -9,14 +9,16 @@ Sibling of `agent-evals/`'s existing task harness, not a replacement: that one
 scores an agent **modifying abicheck**, this one scores an agent **equipped
 with a skill**. Same mechanism, different subject.
 
-## What exists today (Phase 0, plus the first slice of Phases 1–2)
+## What exists today (Phase 0 through Phase 3)
 
 Phase 0's contracts and deterministic checks are complete. On top of them sit a
 recording shim, a headless two-arm runner, and the four deterministic graders
 with the bad-run corpus that exercises them — enough to produce a transcript
-*and* score it. **Still missing: the judged dimensions (4 and 5), the trigger
-corpus runner, and any committed evidence.** Nothing here has been run at scale
-yet, so there are no numbers to cite.
+*and* score it. Phase 3 landed a full 12-scenario corpus and a real 48-run
+pilot against it — see `pilot-results/README.md` for the numbers and, just as
+important, the harness confound (`--max-turns`) that limits how much weight
+they can bear today. **Still missing: the judged dimensions (4 and 5), the
+trigger corpus runner, and any committed evidence.**
 
 | Path | Role |
 |------|------|

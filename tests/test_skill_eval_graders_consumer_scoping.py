@@ -284,6 +284,50 @@ class TestDimensionSix:
         )
         assert result.status == "pass", result.reasons
 
+    def test_a_required_symbol_does_not_satisfy_a_declared_used_by_target(
+        self, tmp_path
+    ):
+        """`--used-by` and `--required-symbol` are two distinct scoping
+        mechanisms; a `--required-symbol analytics-daemon` call is a
+        coincidental name collision, not an actual consumer analysis, and
+        must not satisfy a scenario's declared `used_by: [analytics-daemon]`
+        requirement (Codex review, PR #808)."""
+        scenario = {
+            "skill": "review-native-library-change",
+            "invocation": {"used_by": ["analytics-daemon"]},
+            "expected": {"verdict": "COMPATIBLE", "full_verdict": "BREAKING"},
+        }
+        calls = [
+            a_breaking_call(
+                0,
+                argv=[
+                    "compare",
+                    "old.so",
+                    "new.so",
+                    "--required-symbol",
+                    "analytics-daemon",
+                ],
+            )
+        ]
+        result = self._grade(
+            tmp_path,
+            envelope(
+                verdict="COMPATIBLE",
+                full_verdict="BREAKING",
+                evidence=[0],
+                confident=True,
+            ),
+            scenario,
+            calls=calls,
+            artifacts={
+                "captured/0.out": json.dumps(
+                    {"verdict": "COMPATIBLE", "full_verdict": "BREAKING"}
+                )
+            },
+        )
+        assert result.status == "fail"
+        assert any("used_by" in r for r in result.reasons)
+
     def test_required_symbol_scoping_is_recognized_too(self, tmp_path):
         scenario = {
             "skill": "review-native-library-change",

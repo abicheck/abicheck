@@ -523,6 +523,44 @@ class TestEvidenceReading:
         )
         assert ev.contract_mode({"argv": ["compare", "a", "b"]}) is None
 
+    def test_consumer_scope_targets_by_kind_keeps_the_two_dials_apart(self):
+        """`--used-by` and `--required-symbol` are distinct scoping
+        mechanisms -- a name that coincidentally matches across the two
+        dials must not appear in the wrong bucket (Codex review, PR #808)."""
+        by_kind = ev.consumer_scope_targets_by_kind(
+            {
+                "argv": [
+                    "compare",
+                    "a",
+                    "b",
+                    "--used-by",
+                    "renderer",
+                    "--required-symbol",
+                    "analytics-daemon",
+                ]
+            }
+        )
+        assert by_kind.used_by == frozenset({"renderer"})
+        assert by_kind.required_symbols == frozenset({"analytics-daemon"})
+        assert "analytics-daemon" not in by_kind.used_by
+        assert "renderer" not in by_kind.required_symbols
+        # The union view still sees both, for callers that only ask "was
+        # anything declared" without caring which dial produced it.
+        union = ev.consumer_scope_targets(
+            {
+                "argv": [
+                    "compare",
+                    "a",
+                    "b",
+                    "--used-by",
+                    "renderer",
+                    "--required-symbol",
+                    "analytics-daemon",
+                ]
+            }
+        )
+        assert {"renderer", "analytics-daemon"} <= union
+
     def test_required_symbols_file_missing_or_unresolvable_is_a_silent_no_op(
         self, tmp_path
     ):
@@ -688,6 +726,29 @@ class TestDimensionTwo:
 
     def test_coverage_gaps_stand_when_contract_evaluation_was_asked_for(self, tmp_path):
         call = a_breaking_call(argv=["compare", "a", "b", "--contract", "public"])
+        run = build_run(tmp_path, final="", calls=[call])
+        parsed, _ = claim_mod.extract(
+            envelope(
+                verdict="BREAKING",
+                evidence=[0],
+                confident=False,
+                uncertainty={
+                    "reason": "contract_coverage_incomplete",
+                    "unresolved": "the exports domain",
+                },
+            )
+        )
+        assert (
+            dim.dimension_2(run, SCENARIO_BREAKING, ev.load_calls(run), parsed).status
+            == "pass"
+        )
+
+    def test_coverage_gaps_stand_for_the_equals_form_contract_flag_too(self, tmp_path):
+        """`--contract=exports` is a real, CLI-accepted spelling -- a literal
+        `"--contract" in argv` membership test misses it, hard-failing an
+        otherwise-valid caveat on a correctly-contracted call (Codex
+        review, PR #808)."""
+        call = a_breaking_call(argv=["compare", "a", "b", "--contract=public"])
         run = build_run(tmp_path, final="", calls=[call])
         parsed, _ = claim_mod.extract(
             envelope(

@@ -167,7 +167,7 @@ def _refutes(reason: str, run_dir: Path, calls: list[dict], claim: dict) -> str 
         # — an unrelated --contract call elsewhere in the transcript must not
         # excuse a claim that itself rests on a plain, uncontracted call.
         resolved, _dangling = _cited(calls, claim)
-        if not any("--contract" in (c.get("argv") or []) for c in resolved.values()):
+        if not any(ev.contract_mode(c) is not None for c in resolved.values()):
             return (
                 "claimed contract coverage is incomplete, but none of the "
                 "cited calls asked for contract evaluation, under which "
@@ -468,30 +468,52 @@ def dimension_6(
     # — a claim resting on that alone gets its expected verdict "right" by
     # construction, not by having checked what the scenario asks (Codex
     # review, PR #808).
-    declared_targets = frozenset(
+    declared_used_by = frozenset(
         (scenario.get("invocation") or {}).get("used_by") or []
-    ) | frozenset((scenario.get("invocation") or {}).get("required_symbols") or [])
-    if declared_targets:
+    )
+    declared_required_symbols = frozenset(
+        (scenario.get("invocation") or {}).get("required_symbols") or []
+    )
+    if declared_used_by or declared_required_symbols:
         # A non-empty overlap is not enough when more than one target is
         # declared: `plugin-required-symbol-loss` declares BOTH
         # plugin_register and plugin_teardown, and the removed one
         # (plugin_teardown) is the whole point of the scenario. A claim
         # citing only `--required-symbol plugin_register` overlapped the
-        # declared set under the old any()-based check and passed without
+        # declared set under an earlier any()-based check and passed without
         # the removed symbol ever being checked. Union what every
         # qualifying cited call actually covered and require the full
         # declared set to be a subset of it — a real workflow can cover
         # several targets across several calls (Codex review, PR #808).
-        covered: set[str] = set()
+        #
+        # `used_by` and `required_symbols` are kept apart throughout, not
+        # merged into one target set: they are two distinct scoping
+        # mechanisms (a consumer binary vs. a required symbol), and merging
+        # let a `--required-symbol analytics-daemon` call — a coincidental
+        # name collision, never an actual consumer analysis — satisfy a
+        # declared `used_by: [analytics-daemon]` requirement (Codex review,
+        # PR #808).
+        covered_used_by: set[str] = set()
+        covered_required_symbols: set[str] = set()
         for c in resolved.values():
             if ev.ran_to_a_verdict(c) and not ev.compares_one_side_against_itself(c):
-                covered |= ev.consumer_scope_targets(c)
-        missing = declared_targets - covered
-        if missing:
+                by_kind = ev.consumer_scope_targets_by_kind(c)
+                covered_used_by |= by_kind.used_by
+                covered_required_symbols |= by_kind.required_symbols
+        missing_used_by = declared_used_by - covered_used_by
+        missing_required_symbols = declared_required_symbols - covered_required_symbols
+        if missing_used_by or missing_required_symbols:
+            missing_parts = []
+            if missing_used_by:
+                missing_parts.append(f"used_by={sorted(missing_used_by)}")
+            if missing_required_symbols:
+                missing_parts.append(
+                    f"required_symbols={sorted(missing_required_symbols)}"
+                )
             reasons.append(
                 (
                     "cited no call scoped to the scenario's own declared "
-                    f"target(s) — missing {sorted(missing)}",
+                    f"target(s) — missing {', '.join(missing_parts)}",
                     True,
                 )
             )

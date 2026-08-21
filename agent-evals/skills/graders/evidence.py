@@ -32,7 +32,7 @@ import json
 import re
 from collections.abc import Iterable
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 from .claim import VERDICT_ORDER
 
@@ -516,16 +516,35 @@ def _required_symbols_file_targets(call: dict, value: str) -> list[str]:
     return [line.strip() for line in text.splitlines() if line.strip()]
 
 
-def consumer_scope_targets(call: dict) -> frozenset[str]:
-    """The consumer/symbol identities this call passed to a scoping dial.
+class ScopeTargets(NamedTuple):
+    """Targets this call declared, kept apart by which dial produced them.
+
+    `--used-by` and `--required-symbol(s)` are two distinct scoping
+    mechanisms with different meanings (`abicheck compare --help`:
+    "narrow the compatibility question to a specific consumer" vs. "...to
+    a specific required symbol") — a call scoped to a *consumer* answers a
+    different question from one scoped to a *symbol*, even when the two
+    happen to share a spelling. Merging them into one set let a
+    `--required-symbol analytics-daemon` call (a coincidental name
+    collision, not an actual consumer analysis) satisfy a scenario's
+    declared `used_by: [analytics-daemon]` requirement (Codex review,
+    PR #808).
+    """
+
+    used_by: frozenset[str]
+    required_symbols: frozenset[str]
+
+
+def consumer_scope_targets_by_kind(call: dict) -> ScopeTargets:
+    """The consumer/symbol identities this call passed, split by dial.
 
     `--used-by`/`--required-symbol`, each repeatable and each carrying its
     value as a plain string operand, are recovered directly from argv.
     `--required-symbols FILE` names a *file*, not the symbols themselves —
     its contents are read (see `_required_symbols_file_targets`) and each
-    listed symbol contributes as its own target; a file that can't be read
-    (workspace already gone, unreadable path) contributes nothing rather
-    than fabricating a match.
+    listed symbol contributes as its own `required_symbols` target; a file
+    that can't be read (workspace already gone, unreadable path)
+    contributes nothing rather than fabricating a match.
 
     `--used-by` takes a real path to the consumer binary, not a bare logical
     name — while a scenario's `invocation.used_by` declares the logical name
@@ -538,39 +557,58 @@ def consumer_scope_targets(call: dict) -> frozenset[str]:
     transforms are no-ops there.
     """
     argv = call.get("argv", [])
-    targets: set[str] = set()
+    used_by: set[str] = set()
+    required_symbols: set[str] = set()
 
-    def _add(value: str) -> None:
-        targets.add(value)
+    def _add(bucket: set[str], value: str) -> None:
+        bucket.add(value)
         basename = Path(value).name
-        targets.add(basename)
-        targets.update(_stripped_binary_names(basename))
+        bucket.add(basename)
+        bucket.update(_stripped_binary_names(basename))
 
     def _add_required_symbols_file(value: str) -> None:
         for symbol in _required_symbols_file_targets(call, value):
-            _add(symbol)
+            _add(required_symbols, symbol)
 
     i = 0
     while i < len(argv):
         token = argv[i]
-        if token in ("--used-by", "--required-symbol") and i + 1 < len(argv):
-            _add(argv[i + 1])
+        if token == "--used-by" and i + 1 < len(argv):
+            _add(used_by, argv[i + 1])
+            i += 2
+            continue
+        if token == "--required-symbol" and i + 1 < len(argv):
+            _add(required_symbols, argv[i + 1])
             i += 2
             continue
         if token == "--required-symbols" and i + 1 < len(argv):
             _add_required_symbols_file(argv[i + 1])
             i += 2
             continue
-        matched = False
-        for flag in ("--used-by", "--required-symbol"):
-            if token.startswith(f"{flag}="):
-                _add(token[len(flag) + 1 :])
-                matched = True
-                break
-        if not matched and token.startswith("--required-symbols="):
+        if token.startswith("--used-by="):
+            _add(used_by, token[len("--used-by=") :])
+        elif token.startswith("--required-symbol="):
+            _add(required_symbols, token[len("--required-symbol=") :])
+        elif token.startswith("--required-symbols="):
             _add_required_symbols_file(token[len("--required-symbols=") :])
         i += 1
-    return frozenset(targets)
+    return ScopeTargets(frozenset(used_by), frozenset(required_symbols))
+
+
+def consumer_scope_targets(call: dict) -> frozenset[str]:
+    """The union of `consumer_scope_targets_by_kind(call)`'s two buckets.
+
+    Kept for callers that only need "was any declared target touched at
+    all" and don't need to distinguish which scoping mechanism produced
+    it — `is_consumer_scoped`-adjacent checks, and this module's own
+    tests. A check that must honor a *specific* declared `used_by` or
+    `required_symbols` target should call `consumer_scope_targets_by_kind`
+    directly instead, the way `dimensions.py`'s declared-target check
+    does — merging back into one set here is exactly the collapse that
+    let a same-spelled symbol satisfy an unrelated consumer requirement.
+    """
+    by_kind = consumer_scope_targets_by_kind(call)
+    return by_kind.used_by | by_kind.required_symbols
 
 
 def _artifact_texts(run_dir: Path, call: dict) -> list[str]:
