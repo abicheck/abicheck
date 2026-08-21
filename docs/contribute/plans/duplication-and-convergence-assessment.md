@@ -1266,6 +1266,52 @@ performance duplication (redundant inferred build queries).
    (d) (making resolution unconditional) remain fully open — the latter is
    the deepest and largest remaining piece, described next.
 
+   **A round of review on this slice's JSON round-trip (`contract_context_io.py`)
+   converged through four increasingly narrow findings before surfacing a
+   fifth that is real but not yet reachable — worth recording rather than
+   chasing with a fifth patch.** The first four (both new `GateConfig`
+   fields omitted from the round-trip entirely; a present JSON `null`
+   silently defaulting instead of being rejected; a `schema_version >= 2`
+   payload silently defaulting an *absent* key instead of rejecting it;
+   the identical absence gap one level down in a present `gate.scope`
+   object's own `targets` key) were all fixed, each with regression tests
+   confirmed to fail pre-fix — see the four `fix:` commits on PR #817 for
+   the detail. The fifth: `evaluation_context_to_dict()` writes a block's
+   `schema_version` verbatim (by design — see the module's own "version
+   fields survive verbatim" docstring), so a hypothetical caller that
+   decoded a genuinely legacy (`schema_version == 1`) persisted context
+   and then attached real, non-default `require_complete_analysis`/`scope`
+   values to its `resolved_config.gate` before re-serializing would
+   produce a payload that mislabels itself — a real, genuinely-populated
+   v2 gate field under a v1 stamp, which a hypothetical old reader
+   (predating this PR) would silently ignore regardless of the label,
+   since it has no code path for the field's *existence* at all, not just
+   its absence. **Confirmed unreachable by any current production code
+   path**: the one call site that reconstructs a `GateConfig` post-decode
+   (`with_resolved_gate`, `cli_compare_receipt.py`) always operates on a
+   freshly-built `PersistedContractContext` from a live `compare()` run
+   (via `build_persisted_context`/`with_resolved_config`), never on one
+   decoded from an old persisted payload — and, per this same slice's own
+   "Deliberately not yet done" note two paragraphs up, *nothing* in the
+   current codebase constructs a non-default `require_complete_analysis`
+   or a real `scope` from real input yet, so the specific combination this
+   finding describes cannot occur today regardless of which context a
+   caller starts from. A correct fix also can't simply auto-upgrade the
+   label on write (silently re-stamping `schema_version` to 2 the moment a
+   v2 field is populated) without contradicting this module's own
+   documented "version fields survive verbatim" invariant one paragraph
+   above the `evaluation_context_to_dict` this finding is about — the
+   right fix is a write-side *rejection* of the mismatched combination,
+   which is a real design decision (where the check lives, what error type
+   it raises, whether it belongs in this leaf serializer at all versus a
+   caller-side invariant) rather than a mechanical extension of the
+   absent-key pattern the first four rounds established. Left for the
+   resolver work items 2-6 below to pick up once a real caller populates
+   these fields from real input — the point at which this combination
+   first becomes reachable and a concrete design has real call sites to be
+   verified against, rather than being designed against a hypothetical one
+   now.
+
    **The right further scoping for item 1** is additive to the existing
    object rather than a parallel one: add a `digest` computation onto
    `CompatibilityEvaluationConfig` itself (folding in
