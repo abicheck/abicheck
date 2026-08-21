@@ -2,11 +2,12 @@
 
 Canonical, vendor-neutral repository instructions live in **`AGENTS.md`** —
 imported below so Claude Code loads the full contract automatically as part
-of this file. `.github/copilot-instructions.md` and `.cursor/rules/` are the
-equivalent adapters for Copilot and Cursor; all three point at the same
-source instead of keeping independent copies (CLAUDE.md "M1-1"). If you're
-updating repository-wide commands or invariants, edit `AGENTS.md`, not this
-file.
+of this file. `.github/copilot-instructions.md` is the equivalent adapter for
+Copilot; both point at the same source instead of keeping independent copies
+(CLAUDE.md "M1-1"). A Cursor adapter (`.cursor/rules/abicheck.mdc`) was
+removed in this repository's repo-structure cleanup — see `AGENTS.md`'s own
+adapter table. If you're updating repository-wide commands or invariants,
+edit `AGENTS.md`, not this file.
 
 @AGENTS.md
 

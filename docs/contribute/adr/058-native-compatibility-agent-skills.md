@@ -6,7 +6,8 @@ have landed: `skills-src/` with its `SKILL.md` file(s) — four originally,
 reduced to one (`check-abi-compatibility`) by the 2026-08-20 portfolio
 reset amendment below — and Layer-B
 fragments, `scripts/gen_agent_skills.py` generating the three publication
-trees (`.agents/skills/`, `.claude/skills/`, `.gemini/skills/`), AI-readiness
+trees (`.agents/skills/`, `.claude/skills/`, `.gemini/skills/` — no longer
+committed as of the 2026-08-21 amendment below; generated on demand), AI-readiness
 and docs-contract gate coverage, structural/tool-API-drift/trigger tests, and
 the `docs/use/agent-skills.md` catalog page. Still open: P0.4 (`abicheck
 info`, blocked on an explicit maintainer decision between the two design
@@ -47,6 +48,71 @@ Harbor trial (no working container/sandbox runtime available in this
 environment); see the two amendments below and `agent-evals/skills/harbor/
 CLAUDE.md` for the full account of what is and is not verified.
 **Decision maker:** (pending — recorded per repository convention)
+
+> **Amendment (2026-08-21, generated trees no longer committed —
+> user-decided repo-structure cleanup).** The three publication trees
+> (`.agents/skills/`, `.claude/skills/`, `.gemini/skills/`) described
+> throughout this ADR as "committed" or "tracked" — including in the
+> "Decision" section's own file-tree diagram and its "ordinary tracked
+> directories in this repo" line — are, as of this amendment, **no longer
+> committed to the repository**. They are gitignored build output,
+> regenerated on demand: CI regenerates them itself wherever a job needs one
+> materialized, and `scripts/gen_agent_skills.py --check` was rewritten to
+> validate `skills-src/`'s own internal consistency (a clean, deterministic,
+> byte-identical-across-targets render) rather than diffing against on-disk
+> files that no longer exist. A new script, `scripts/install_dev_skill.py`
+> (a thin wrapper over `gen_agent_skills.py`'s existing render/write
+> machinery, `--target {codex,claude,gemini,all}`), materializes the trees
+> locally for a contributor who wants to point an agent, or a manual Harbor
+> task run, at an installed skill.
+>
+> **What this amendment does not change: which trees get generated, or why.**
+> This is purely a "commit the output vs. regenerate it on demand" decision —
+> the same generated-artifact-family choice this repository already makes
+> differently for other generated content (compare `docs/reference/
+> cli-reference.md`, which stays committed, against these three trees, which
+> now don't). It does **not** revisit this ADR's own researched finding that
+> Claude Code and Gemini CLI each need their own generated copy because
+> neither scans `.agents/skills` (see "Canonical portable default" and the
+> "`.claude/skills/` and `.gemini/skills/` are the two additional generated
+> packaging targets" bullet in the Decision section below) — that research
+> stands, unchanged by this amendment, and continues to govern: all three
+> trees are still generated, in the same shape, from the same one
+> `skills-src/` source, by the same generator. A repo-structure-cleanup
+> proposal considered while making this change asserted the opposite (that
+> Gemini CLI reads `.agents/skills` directly and needs no copy of its own)
+> without citing a source; given this ADR's claim is sourced (Gemini CLI's
+> own `docs/reference/tools.md`, cited at the "confirmed against Gemini
+> CLI's own" bullet below) and the competing claim is not, this amendment
+> deliberately keeps generating `.gemini/skills/` rather than dropping it.
+>
+> **Known consequence, left open rather than silently patched.**
+> `agent-evals/skills/harbor/` documents a real external mechanism (`harbor
+> run ... --skill abicheck/abicheck:.claude/skills/check-abi-compatibility`)
+> that resolves a path *inside the pushed GitHub repository* — that path no
+> longer exists in a fresh clone of `main` unless something materializes it
+> first. Neither the Harbor task generator nor its CLAUDE.md were updated by
+> this amendment to account for that; a real Harbor trial run today would
+> need either a CI/publish step that regenerates and commits the tree to the
+> ref Harbor checks out, or the Harbor tooling itself updated to point at
+> `skills-src/` (or a Harbor-runtime install step) instead of a path inside
+> the repository. No Harbor trial has actually been run end to end against
+> this codebase yet regardless (see the amendments below), so this is a
+> documented gap for whoever runs the first one, not a regression against a
+> working mechanism.
+>
+> Files affected: `.gitignore` (the three trees, precisely scoped rather than
+> blanket-ignoring `.claude/skills/`, which may also hold an unrelated
+> hand-authored Claude Code skill), `scripts/gen_agent_skills.py` (`--check`
+> rewritten, module docstring), `scripts/install_dev_skill.py` (new),
+> `tests/test_gen_agent_skills.py` (the "real committed trees" assertions now
+> render into a throwaway temp directory instead of reading checked-in
+> files), `scripts/CLAUDE.md` (inventory), `docs/AGENTS.md` ("Regenerating
+> generated docs"), `docs/use/agent-skills.md` ("Installing them"),
+> `AGENTS.md`/`CLAUDE.md` (the same-cleanup removal of the Cursor adapter,
+> `.cursor/rules/abicheck.mdc` — an unrelated file this ADR does not
+> otherwise govern, noted here only because it was part of the same
+> commit), `README.md`.
 
 > **Amendment (2026-08-20, portfolio reset to one internal candidate).**
 > The 2026-08-11 amendment below froze the portfolio at four skills — one
@@ -960,8 +1026,9 @@ scripts/gen_agent_skills.py              # the sole generator (Layer C
   submission's shape is a distribution-time decision, not part of this
   generator's own committed output trees.
 - **abicheck/abicheck stays the single authoritative repository.** Nothing
-  in this model requires a second repository; `skills-src/` and
-  `.agents/skills/` are ordinary tracked directories in this repo, gated by
+  in this model requires a second repository; `skills-src/` is an ordinary
+  tracked directory in this repo (`.agents/skills/` is **not**, as of the
+  2026-08-21 amendment above — it is regenerated build output), gated by
   the same CI (drift tests below) as every other generated-doc pattern this
   repository already has (`docs/reference/cli-reference.md`, etc. —
   `docs/AGENTS.md`'s

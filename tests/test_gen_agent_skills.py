@@ -17,8 +17,11 @@
 
 Two halves: the generator's own mechanics exercised against synthetic skill
 trees (fragment resolution, transitivity, link rewriting, orphan detection),
-and assertions over the three real committed publication trees — which must
-reproduce from `skills-src/` and must each be self-contained.
+and assertions over a fresh render/write of the real `skills-src/` tree — the
+three publication trees are no longer committed (2026-08-21 ADR-058
+amendment), so these are proven against a throwaway render rather than
+checked-in files, but the invariant is the same: it must reproduce cleanly
+from `skills-src/` and each generated tree must be self-contained.
 """
 
 from __future__ import annotations
@@ -782,15 +785,20 @@ def test_published_docs_url_honours_use_directory_urls_false(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# The real committed trees
+# The real skills-src/, rendered fresh (the three trees are no longer
+# committed — 2026-08-21 ADR-058 amendment — so these invariants are proven
+# against a throwaway render/write of the real source, not checked-in files)
 # ---------------------------------------------------------------------------
 
 
-def test_committed_trees_match_skills_src():
-    assert gen.check_trees(gen.render_all()) == [], (
-        "generated agent-skill trees are stale — run "
-        "`python scripts/gen_agent_skills.py` and commit the result"
-    )
+def test_skills_src_renders_cleanly():
+    """`render_all()` raises `SkillGenerationError` on any structural problem
+    in the real `skills-src/` tree — a missing fragment reference, an
+    orphaned fragment, an unrewritable or skill-escaping link. Simply not
+    raising is most of what `test_committed_trees_match_skills_src` used to
+    prove indirectly by diffing against on-disk output that no longer
+    exists."""
+    assert gen.render_all(), "a real skills-src/ must render at least one file"
 
 
 #: The skill directories this generator owns — an output root may also hold
@@ -804,27 +812,45 @@ def _generated_files(root):
     ]
 
 
-def test_all_three_trees_are_byte_identical():
+@pytest.fixture(scope="module")
+def real_rendered():
+    return gen.render_all()
+
+
+@pytest.fixture(scope="module")
+def real_trees(real_rendered, tmp_path_factory):
+    """The real render of `skills-src/`, written to a throwaway directory —
+    never the real `.agents/`/`.claude/`/`.gemini/` (gitignored, dev-only,
+    and not guaranteed to exist or be fresh in a CI checkout)."""
+    tmp = tmp_path_factory.mktemp("agent-skills")
+    roots = tuple(tmp / name for name in ("agents", "claude", "gemini"))
+    gen.write_trees(real_rendered, roots=roots)
+    return roots
+
+
+def test_all_three_trees_are_byte_identical(real_trees):
     """`.claude/` and `.gemini/` are copies, not a second emission path — so
     every assertion proven for `.agents/skills/` holds for them too."""
     trees = [
         {p.relative_to(root).as_posix(): p.read_bytes() for p in _generated_files(root)}
-        for root in gen.OUTPUT_ROOTS
+        for root in real_trees
     ]
     assert all(t == trees[0] for t in trees[1:])
     assert trees[0], "the authoritative tree must not be empty"
 
 
-@pytest.mark.parametrize("root", gen.OUTPUT_ROOTS, ids=lambda p: str(p))
-def test_no_symlinks_in_generated_output(root):
+@pytest.mark.parametrize("root_index", range(3))
+def test_no_symlinks_in_generated_output(real_trees, root_index):
+    root = real_trees[root_index]
     assert not [p for name in OWNED for p in (root / name).rglob("*") if p.is_symlink()]
 
 
-@pytest.mark.parametrize("root", gen.OUTPUT_ROOTS, ids=lambda p: str(p))
-def test_every_generated_link_resolves_inside_its_own_skill(root):
+@pytest.mark.parametrize("root_index", range(3))
+def test_every_generated_link_resolves_inside_its_own_skill(real_trees, root_index):
     """The self-containment invariant, checked mechanically over every
     generated file — `SKILL.md`, skill-specific references, and copied shared
     fragments alike — not only over each skill's top-level `SKILL.md`."""
+    root = real_trees[root_index]
     offenders: list[str] = []
     for path in [p for p in _generated_files(root) if p.suffix == ".md"]:
         skill_root = path
@@ -847,8 +873,11 @@ def test_every_generated_link_resolves_inside_its_own_skill(root):
     assert offenders == []
 
 
-@pytest.mark.parametrize("root", gen.OUTPUT_ROOTS, ids=lambda p: str(p))
-def test_every_generated_markdown_file_carries_the_ownership_marker(root):
+@pytest.mark.parametrize("root_index", range(3))
+def test_every_generated_markdown_file_carries_the_ownership_marker(
+    real_trees, root_index
+):
+    root = real_trees[root_index]
     missing = [
         str(p)
         for p in _generated_files(root)
@@ -860,8 +889,8 @@ def test_every_generated_markdown_file_carries_the_ownership_marker(root):
 
 def test_every_shared_fragment_is_cited_by_at_least_one_skill():
     """`render_all` raises on an orphan; this asserts the real tree has none,
-    so the invariant is proven against committed content, not only against a
-    synthetic fixture."""
+    so the invariant is proven against real `skills-src/` content, not only
+    against a synthetic fixture."""
     gen.render_all()  # raises SkillGenerationError on an orphaned fragment
     assert sorted(p.name for p in gen.SHARED_DIR.glob("*.md"))
 

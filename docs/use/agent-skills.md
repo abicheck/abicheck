@@ -62,12 +62,16 @@ still-unrun behavioral evaluation. See
 
 | Skill | Status | The question it answers |
 |---|---|---|
-| [`check-abi-compatibility`](https://github.com/abicheck/abicheck/blob/main/.agents/skills/check-abi-compatibility/SKILL.md) | **Internal candidate** | "Will this change break existing consumers?" — review a diff, branch, commit, or PR, ending in a verdict plus a root-cause explanation. Also handles "why did this suddenly report dozens of breaks?" |
+| [`check-abi-compatibility`](https://github.com/abicheck/abicheck/blob/main/skills-src/check-abi-compatibility/SKILL.md) | **Internal candidate** | "Will this change break existing consumers?" — review a diff, branch, commit, or PR, ending in a verdict plus a root-cause explanation. Also handles "why did this suddenly report dozens of breaks?" |
 
 ## Installing them
 
-The skills are committed to this repository in three trees, all generated
-from one source:
+`skills-src/` is the one hand-authored source; the three publication trees
+below are **generated build output, not committed to this repository**
+(2026-08-21 ADR-058 amendment) — regenerate them with
+`python scripts/gen_agent_skills.py` (writes all three) or
+`python scripts/install_dev_skill.py --target <name>` (writes one or more by
+name: `codex`, `claude`, `gemini`, or `all`):
 
 | Tree | Read by |
 |---|---|
@@ -75,10 +79,11 @@ from one source:
 | `.claude/skills/` | Claude Code, which does not scan `.agents/skills` |
 | `.gemini/skills/` | Gemini CLI, which does not either |
 
-Each skill directory is fully self-contained: copy
-`.agents/skills/<skill-name>/` into your own project (or your personal skills
-directory) and every reference it needs comes with it. There are no symlinks
-and no cross-skill paths, so a single skill installs and works on its own.
+Each generated skill directory is fully self-contained: after generating it,
+copy `.agents/skills/<skill-name>/` into your own project (or your personal
+skills directory) and every reference it needs comes with it. There are no
+symlinks and no cross-skill paths, so a single skill installs and works on
+its own.
 
 Skills are executable content. Anthropic's own guidance applies to these as
 to any others: install only from sources you trust, and read what you install.

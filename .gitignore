@@ -17,6 +17,17 @@ build/
 site/
 .hypothesis/
 .claude/worktrees/
+
+# ADR-058 generated Agent Skill publication trees (scripts/gen_agent_skills.py
+# / scripts/install_dev_skill.py, from skills-src/) — build output, no longer
+# committed (2026-08-21 amendment). .agents/ and .gemini/ hold nothing else in
+# this repo, so both are ignored wholesale; .claude/skills/ may also hold a
+# hand-authored, non-generated Claude Code skill, so only the specific
+# generated skill directory is ignored by name (update this if skills-src/
+# gains or renames a skill).
+.agents/
+.gemini/
+.claude/skills/check-abi-compatibility/
 /results/
 .pixi/
 
