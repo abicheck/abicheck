@@ -84,6 +84,17 @@ from .tu_fragment import MergedTuFragments, TuFragment, entity_key
 INCONSISTENT_DECLARATION = "INCONSISTENT_DECLARATION"
 HETEROGENEOUS_ABI_CONTEXT = "HETEROGENEOUS_ABI_CONTEXT"
 
+#: Sentinel written into a merged manifest's ``ast_toolchain["resolved_lang_mode"]``
+#: (never a real ``"c"``/``"c++"`` tag) when the contributing TUs genuinely
+#: disagree on it -- an ordinary mixed-language manifest, not an error.
+#: ``dumper_toolchain._resolve_standard_provenance`` recognizes this exact
+#: value and returns ``None`` outright rather than falling back to a static
+#: re-derivation that can be confidently *wrong* (not just unknown) for a TU
+#: whose language mode came from something invisible to the manifest's
+#: combined public headers (Codex review, fresh evidence). See
+#: ``merge_fragments``'s own inline comment for the full reasoning.
+_HETEROGENEOUS_LANG_MODE = "heterogeneous"
+
 
 class _Provenanced(Protocol):
     """The ADR-015 schema v6 provenance fields every model type this module
@@ -495,10 +506,24 @@ def merge_fragments(
     # should never diverge and are rejected outright when they do. Blindly
     # copying one representative TU's resolved_lang_mode would silently
     # mislabel the whole merged snapshot's language_standard for every
-    # other TU. Strip it when it's not unanimous, falling back to
-    # _resolve_standard_provenance's own static re-derivation over the
-    # manifest's combined headers -- the same quality of answer this field
-    # didn't exist to improve on before this PR, not a new failure mode.
+    # other TU.
+    #
+    # Merely *dropping* the key when it's not unanimous (an earlier version
+    # of this fix) is not safe either: dropping it makes
+    # ``_resolve_standard_provenance`` fall back to its static
+    # re-derivation (``_resolve_force_cpp`` over the manifest's combined,
+    # *public/declared* headers alone) -- which can be confidently *wrong*,
+    # not merely uninformed, for a TU whose C++-ness comes only from a
+    # private forced include invisible to those public headers (Codex
+    # review, fresh evidence). A merged manifest genuinely known to mix
+    # language modes must not let that static re-derivation guess at all.
+    # ``_HETEROGENEOUS_LANG_MODE`` is a sentinel value (never a real
+    # ``"c"``/``"c++"`` tag) that ``_resolve_standard_provenance`` (see its
+    # own docstring) recognizes and treats as "cannot determine this at
+    # all" -- skipping *both* the forced-``gnu11``-literal path and the
+    # probe-fallback path, returning ``None`` outright, the same honest
+    # "unknown" this field didn't exist to improve on before this PR, not
+    # a new failure mode and not a wrong guess either.
     lang_modes = {
         f.ast_toolchain["resolved_lang_mode"]
         for f in ordered
@@ -507,7 +532,8 @@ def merge_fragments(
     merged_ast_toolchain = representative.ast_toolchain
     if len(lang_modes) > 1:
         merged_ast_toolchain = {
-            k: v for k, v in representative.ast_toolchain.items() if k != "resolved_lang_mode"
+            **representative.ast_toolchain,
+            "resolved_lang_mode": _HETEROGENEOUS_LANG_MODE,
         }
     return MergedTuFragments(
         functions=functions,

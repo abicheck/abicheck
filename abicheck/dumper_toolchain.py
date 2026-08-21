@@ -254,6 +254,16 @@ def _stamp_ast_parser(
     module's AI-readiness file-size hard cap -- ``parser`` is typed ``Any``
     rather than ``_CastxmlParser | _ClangAstParser`` to avoid importing those
     two dumper.py-local classes here just for a type hint.
+
+    Resolving against *resolved_compiler* (rather than the caller's
+    original *compiler*) is a real correctness fix, but it has one known,
+    documented interaction with a *legacy* baseline persisted before this
+    fix existed -- see
+    ``comparability._language_standard_probe_upgrade_corroborated``'s own
+    docstring for the full account (a legacy dump's ``compiler_family``/
+    ``compiler_version`` can appear to "change" against a fresh re-dump of
+    the identical installation, purely because this fix corrected which
+    binary's identity gets recorded).
     """
     from .castxml_policy import evaluate_castxml_version
     from .dumper_ast_config import _resolve_compiler_binary
@@ -595,6 +605,18 @@ def _probe_default_language_standard(compiler_bin: str, lang_mode: str) -> str |
 #: default is typically C17, but the AST is always generated as gnu11).
 _FORCED_C_STANDARD = "gnu11"
 
+#: Mirrors ``tu_merge._HETEROGENEOUS_LANG_MODE`` (not imported directly --
+#: ``tu_merge.py`` already imports from this module's sibling ``dumper.py``
+#: chain, and a reverse import would risk a cycle the AI-readiness gate
+#: rejects; the two are kept in lockstep by
+#: ``tests/test_tu_merge.py``/``tests/test_ast_compile_provenance.py``
+#: asserting the literal string). Written into a merged multi-TU manifest's
+#: ``resolved_lang_mode`` when the contributing TUs genuinely disagree on
+#: it -- signals "cannot determine this at all," distinct from the field
+#: simply being absent (a single-TU dump, or a fragment merge where every
+#: TU agreed), which still falls back to the static re-derivation below.
+_HETEROGENEOUS_LANG_MODE = "heterogeneous"
+
 
 def _resolve_standard_provenance(
     headers: list[Path],
@@ -635,11 +657,25 @@ def _resolve_standard_provenance(
     header-AST parse actually settled on (e.g. after a C->C++ self-heal
     retry), which a static re-derivation from *lang*/*headers* alone cannot
     reconstruct (Codex review, fresh evidence).
+
+    *resolved_lang_mode* may also be :data:`_HETEROGENEOUS_LANG_MODE` --
+    ``tu_merge.merge_fragments``'s sentinel for "the contributing TUs of a
+    merged manifest genuinely disagree on this." That is a stronger signal
+    than "unknown": falling through to the static ``_resolve_force_cpp``
+    re-derivation below (over the manifest's combined *public/declared*
+    headers only) can be confidently *wrong*, not merely uninformed, for a
+    TU whose C++-ness came from something invisible to those public
+    headers (e.g. a private forced include). So this function returns
+    ``None`` immediately for that sentinel, skipping both the forced-
+    standard path and the probe path entirely, rather than guessing
+    (Codex review, fresh evidence).
     """
     if has_explicit_std(gcc_options, gcc_option_tokens):
         return _extract_explicit_std_value(gcc_options, gcc_option_tokens)
     if headers and _detect_cpp20_headers(headers):
         return "gnu++20"
+    if resolved_lang_mode == _HETEROGENEOUS_LANG_MODE:
+        return None
     if probe_compiler_bin is None:
         # No resolved-compiler identity to probe *or* to report a forced
         # standard against (the dialect check below needs it too) --

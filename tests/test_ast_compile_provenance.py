@@ -69,11 +69,12 @@ class TestCplusplusMacroForStandard:
         no longer sits at position 0 -- must still resolve, not silently
         return ``None`` for a pinned-lang probed dump."""
         assert (
-            _cplusplus_macro_for_standard("c++:probed:__cplusplus=201703L")
-            == "201703L"
+            _cplusplus_macro_for_standard("c++:probed:__cplusplus=201703L") == "201703L"
         )
         assert _cplusplus_macro_for_standard("probed:__cplusplus=201703L") == "201703L"
-        assert _cplusplus_macro_for_standard("c:probed:__STDC_VERSION__=201710L") is None
+        assert (
+            _cplusplus_macro_for_standard("c:probed:__STDC_VERSION__=201710L") is None
+        )
 
 
 class TestExtractExplicitStdValue:
@@ -386,7 +387,12 @@ class TestResolveStandardProvenanceProbing:
         c_header = tmp_path / "c.h"
         c_header.write_text("int f(int x);\n", encoding="utf-8")
         result = _resolve_standard_provenance(
-            [c_header], None, (), probe_compiler_bin="cl.exe", lang=None, abi_dialect="msvc"
+            [c_header],
+            None,
+            (),
+            probe_compiler_bin="cl.exe",
+            lang=None,
+            abi_dialect="msvc",
         )
         assert seen_modes == ["c"]
         assert result == "probed:stub"
@@ -420,6 +426,39 @@ class TestResolveStandardProvenanceProbing:
             resolved_lang_mode="c++",
         )
         assert seen_modes == ["c++"]
+
+    def test_heterogeneous_resolved_lang_mode_returns_none_without_probing(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        """Codex review, fresh evidence: ``tu_merge.merge_fragments`` writes
+        ``_HETEROGENEOUS_LANG_MODE`` when a merged manifest's contributing
+        TUs genuinely disagree on their resolved language mode. Falling
+        back to the static ``_resolve_force_cpp`` re-derivation for that
+        case (over the manifest's combined public headers alone) can be
+        confidently *wrong* -- not just unknown -- for a TU whose
+        language mode came from something invisible to those headers, so
+        this must return ``None`` outright, skipping both the forced-
+        ``gnu11`` path and the probe path, rather than guessing either
+        way."""
+        from abicheck.tu_merge import _HETEROGENEOUS_LANG_MODE
+
+        def fail_probe(*a, **k):
+            raise AssertionError("must not probe a heterogeneous manifest")
+
+        monkeypatch.setattr(
+            "abicheck.dumper_toolchain._probe_default_language_standard", fail_probe
+        )
+        c_header = tmp_path / "c.h"
+        c_header.write_text("int f(int x);\n", encoding="utf-8")
+        result = _resolve_standard_provenance(
+            [c_header],
+            None,
+            (),
+            probe_compiler_bin="cc",
+            lang=None,
+            resolved_lang_mode=_HETEROGENEOUS_LANG_MODE,
+        )
+        assert result is None
 
 
 class TestAstCompileProvenanceProbing:

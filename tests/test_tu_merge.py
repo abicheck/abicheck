@@ -49,6 +49,7 @@ from abicheck.model import (
 )
 from abicheck.tu_fragment import MergedTuFragments, TuFragment
 from abicheck.tu_merge import (
+    _HETEROGENEOUS_LANG_MODE,
     HETEROGENEOUS_ABI_CONTEXT,
     INCONSISTENT_DECLARATION,
     merge_fragments,
@@ -139,29 +140,44 @@ def test_merge_fragments_allows_uniform_frontend_context_kind():
     assert merged.frontend_context_kind == "device"
 
 
-def test_merge_fragments_drops_resolved_lang_mode_when_tus_disagree():
+def test_merge_fragments_sentinels_resolved_lang_mode_when_tus_disagree():
     """Codex review, fresh evidence: unlike ast_producer/frontend_context_kind
     above, resolved_lang_mode is NOT guaranteed uniform across TUs -- an
     ordinary mixed-language manifest (some .c TUs, some .cpp TUs, one
     shared compiler) legitimately resolves it differently per TU. Blindly
     copying one representative TU's resolved_lang_mode would silently
     mislabel the whole merged snapshot's language_standard for every other
-    TU, so a genuine mismatch must drop the field (not raise -- this is an
-    expected, common shape, unlike the producer/context mismatches above)."""
+    TU, so a genuine mismatch must not raise -- this is an expected, common
+    shape, unlike the producer/context mismatches above.
+
+    Merely *dropping* the field (an earlier version of this fix) is also
+    wrong: dropping it lets ``_resolve_standard_provenance`` fall back to a
+    static re-derivation that can be confidently *wrong*, not just
+    unknown, for a TU whose language mode came from something invisible to
+    the manifest's combined public headers. The merge must instead write
+    the explicit ``_HETEROGENEOUS_LANG_MODE`` sentinel, which that function
+    recognizes and treats as "cannot determine this at all" (see
+    ``dumper_toolchain._resolve_standard_provenance``'s own docstring)."""
     a = TuFragment(
         tu_name="a.c",
         ast_producer="clang",
-        ast_toolchain={"compiler_selected": "/usr/bin/clang", "resolved_lang_mode": "c"},
+        ast_toolchain={
+            "compiler_selected": "/usr/bin/clang",
+            "resolved_lang_mode": "c",
+        },
     )
     b = TuFragment(
         tu_name="b.cpp",
         ast_producer="clang",
-        ast_toolchain={"compiler_selected": "/usr/bin/clang", "resolved_lang_mode": "c++"},
+        ast_toolchain={
+            "compiler_selected": "/usr/bin/clang",
+            "resolved_lang_mode": "c++",
+        },
     )
     merged = merge_fragments([a, b])
-    assert "resolved_lang_mode" not in merged.ast_toolchain
+    assert merged.ast_toolchain["resolved_lang_mode"] == _HETEROGENEOUS_LANG_MODE
     # The rest of the representative fragment's ast_toolchain survives --
-    # only the per-TU-varying field is stripped.
+    # only the per-TU-varying field is overridden.
     assert merged.ast_toolchain["compiler_selected"] == "/usr/bin/clang"
 
 
@@ -169,12 +185,18 @@ def test_merge_fragments_keeps_resolved_lang_mode_when_tus_agree():
     a = TuFragment(
         tu_name="a.cpp",
         ast_producer="clang",
-        ast_toolchain={"compiler_selected": "/usr/bin/clang", "resolved_lang_mode": "c++"},
+        ast_toolchain={
+            "compiler_selected": "/usr/bin/clang",
+            "resolved_lang_mode": "c++",
+        },
     )
     b = TuFragment(
         tu_name="b.cpp",
         ast_producer="clang",
-        ast_toolchain={"compiler_selected": "/usr/bin/clang", "resolved_lang_mode": "c++"},
+        ast_toolchain={
+            "compiler_selected": "/usr/bin/clang",
+            "resolved_lang_mode": "c++",
+        },
     )
     merged = merge_fragments([a, b])
     assert merged.ast_toolchain["resolved_lang_mode"] == "c++"

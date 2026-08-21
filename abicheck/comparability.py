@@ -827,6 +827,41 @@ def _language_standard_probe_upgrade_corroborated(
     ``"c++:probed:__cplusplus=201703L"``), so the marker does not
     necessarily sit at position 0 -- mirroring
     ``dumper_toolchain._cplusplus_macro_for_standard``'s identical fix.
+
+    **Known, narrower residual (Codex review, fresh evidence), not fixed
+    here**: the ``compiler_family``/``compiler_version`` corroboration
+    above reads ``dumper_toolchain._stamp_ast_parser``'s ``compiler_*``
+    stamping, which this same PR also fixed to resolve against the
+    header-AST parse's *actual* post-retry compiler (``resolved_compiler``)
+    rather than the caller's original, unresolved request -- see that
+    function's own docstring. For a castxml dump where those two diverge
+    (a force_cpp self-heal/remap changed which binary was actually
+    invoked), a **legacy baseline persisted by pre-fix abicheck** recorded
+    ``compiler_selected``/``compiler_family``/``compiler_version`` from the
+    *wrong*, unresolved binary -- so comparing it against a freshly
+    re-dumped snapshot of the identical input under the identical
+    toolchain installation can now see a *changed* ``compiler_family``/
+    ``compiler_version`` purely because this PR's own stamping fix
+    corrected which binary's identity gets recorded, not because the
+    installation changed. That is the same "an abicheck upgrade must not
+    by itself make an unchanged baseline ``NOT_COMPARABLE``" problem this
+    whole carve-out exists to solve, just on the corroboration axis rather
+    than the ``language_standard`` axis it corroborates -- and it
+    compounds: a real, waivable ``language_standard`` transition on such a
+    baseline now also fails this function's own compiler-identity check,
+    so the corroboration this carve-out depends on is unavailable exactly
+    when the legacy stamping bug applies. Deliberately not addressed with
+    a further carve-out: there is no sound way, from either snapshot's
+    persisted content alone, to distinguish "this compiler_family/version
+    difference is purely the stamping fix correcting a mis-recorded legacy
+    baseline" from "the installation's compiler genuinely changed between
+    the two dumps" -- the old baseline recorded only the (wrong) binary it
+    picked, never what the corrected resolution *would* have produced, so
+    there is no fact to corroborate against. Affected users should
+    re-``dump`` their baseline once after upgrading past this fix rather
+    than rely on the carve-out to bridge it, the same guidance any
+    ``ProfileMismatchError`` from an unrelated real toolchain change
+    already implies.
     """
     old_std = old_fields.get("language_standard", "")
     new_std = new_fields.get("language_standard", "")

@@ -118,11 +118,35 @@
   differs per TU in an ordinary mixed C/.c and C++/.cpp manifest under one
   shared compiler — blindly copying one representative TU's value would
   stamp the whole merged snapshot's `language_standard` from whichever TU
-  happened to sort first, silently wrong for every other TU. Now dropped
-  from the merged `ast_toolchain` (falling back to the pre-existing static
-  re-derivation over the manifest's combined headers) whenever the
-  contributing TUs disagree, rather than picked arbitrarily.
+  happened to sort first, silently wrong for every other TU. A first fix
+  dropped the field from the merged `ast_toolchain` on disagreement,
+  falling back to `_resolve_standard_provenance`'s static re-derivation
+  over the manifest's combined headers — a follow-up review found that
+  fallback can be confidently *wrong*, not just uninformed, for a TU whose
+  language mode came from something invisible to those combined public
+  headers (e.g. a private forced include). Now writes an explicit
+  `_HETEROGENEOUS_LANG_MODE` sentinel instead, which
+  `_resolve_standard_provenance` recognizes and treats as "cannot
+  determine this at all," skipping both the forced-`gnu11` and probe
+  fallback paths and reporting `None` rather than guessing.
 - Known, narrower residuals, documented rather than fixed:
+  - **A legacy (pre-this-fix) castxml baseline's `compiler_family`/
+    `compiler_version` can appear to "change" against a fresh re-dump of
+    the identical toolchain installation**, when the two diverge on
+    whether a force_cpp self-heal/remap changed which binary the parse
+    actually invoked: this PR's `resolved_compiler` stamping fix corrects
+    which binary's identity gets recorded, but a legacy baseline recorded
+    the *wrong* (unresolved-request) binary's identity, with no way to
+    recover what the corrected resolution would have produced from the
+    persisted baseline alone. This independently defeats the
+    `language_standard` upgrade-corroboration carve-out above too (its own
+    `compiler_family`/`compiler_version` corroboration check fails for the
+    same reason), compounding the two. Not addressed with a further
+    carve-out — there is no sound way to distinguish this from a genuine
+    compiler change using only what a legacy snapshot persisted; see
+    `comparability._language_standard_probe_upgrade_corroborated`'s own
+    docstring. Affected users should re-`dump` their baseline once after
+    upgrading past this fix.
   - A cache/memo *hit* for a header that previously self-healed C→C++
     still reports the pre-retry language mode, since neither backend's AST
     cache persists that fact alongside the cached document — see
