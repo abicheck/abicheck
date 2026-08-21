@@ -94,15 +94,13 @@ verdict coverage, false positives, and false negatives) is exactly the kind
 of volatile, machine-checkable fact this repo's docs contract says must have
 one owner — [Tool Comparison's "Current scan-quality
 snapshot"](../reference/tool-comparison.md#current-scan-quality-snapshot)
-(the "Scan-depth matrix" row) is that owner. As of this page's own last edit,
-that row itself records the matrix as **not independently re-run** against
-the current catalog since an older, smaller 141-target pin — see that page
-for the up-to-date status rather than a second, independently-drifting
-number here. Do not re-add a specific eval-target count or per-depth
-percentage table to *this* page; a second copy is exactly how the two pages
-disagreed before (this page previously claimed measured `100.0%`
-correct-verdict coverage at `source` depth while the catalog it was measured
-against had already grown past the pinned target count).
+(the "Scan-depth matrix" row) is that owner; see that page for the run
+status and target count. Do not re-add a specific eval-target count,
+run-freshness claim, or per-depth percentage table to *this* page — a second
+copy is exactly how this page and that one disagreed before (this page
+previously claimed measured `100.0%` correct-verdict coverage at `source`
+depth after the catalog it was measured against had already grown past the
+pinned target count).
 
 Qualitatively — and this part doesn't drift, because it follows from what
 each layer can and cannot observe, not from a specific run's numbers — the
