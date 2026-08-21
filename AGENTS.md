@@ -497,10 +497,20 @@ Core pipeline (in order of data flow):
      which is why the now-removed MCP `abi_dump` tool historically sat at a
      five-argument subset of what `abicheck dump` accepts. Deliberately
      excludes the CLI's provenance/
-     presentation layer (`--dry-run` rendering, git/build-id stamping,
-     `fold_dump_provenance_into_json`); the native `dump` CLI does not build a
-     `DumpRequest` yet — see G33's Phase 5 note for what that migration needs
-     first
+     presentation layer (git/build-id stamping,
+     `fold_dump_provenance_into_json`). Since CLI cleanup phase two's PR 3A
+     the native `dump` CLI *does* build a real `DumpRequest`
+     (`cli_dump_request.py`) and `--dry-run` renders from
+     `resolve_dump_request`'s `ResolvedDumpRequest` — but the real ELF/PE/
+     Mach-O run still executes through `perform_elf_dump`/
+     `handle_non_elf_dump`, not `execute_dump_request`; see the "PR C" entry
+     under "Known gaps" for what that last step needs
+   - `cli_dump_request.py` — CLI cleanup phase two, PR 3A: `dump_cmd`'s ~30
+     Click parameters as one `DumpRequest`, plus the Tier-2-to-Click error
+     translation the boundary owes. Fed the CLI's *already-resolved* compile
+     context/frontend/language decision rather than re-deriving them, so the
+     resolved object records the run instead of forming a second opinion
+     about it
    - `stack_checker.py`, `stack_report.py`, `stack_html.py` — stack analysis
 9. **Build-source evidence (optional L3–L5 layers)** — `buildsource/` package
    (collect/merge/source-ABI replay/source graph; ADR-028…033). See
@@ -4510,7 +4520,97 @@ Once a root command genuinely clears the bar above, pick the right home:
   it exists to prevent. Making `scan` match would newly require castxml for
   a scan that works with clang today: a real behavior change for real users,
   unverifiable without a castxml-capable environment, so it needs its own
-  slice rather than a same-pass patch.
+  slice rather than a same-pass patch. **Re-checked 2026-08-21: castxml is
+  still absent from this environment, so this stays a documented gap rather
+  than a guessed fix.**
+
+  **Blockers 5 and 6 closed (2026-08-21, later the same day) — `dump_cmd`
+  now builds one real `DumpRequest`, and the pair-aware baseline rule lives
+  in one primitive. The real runs are deliberately still not migrated.**
+
+  *Blocker 5* was three sub-issues, each closed at the layer that had the
+  gap rather than at the call site that noticed it. (a) `InputSpec.path` is
+  now `Path | None` — a pure widening, so no existing caller changes — with
+  "which requests may leave it `None`" enforced once, per request type, in
+  `validation_errors()` (never for `CompareRequest`; for `DumpRequest` only
+  alongside real `sources`/`build_info`/`dump_manifest`), and
+  `api_types.required_path` as the single place the narrowing is spelled
+  rather than seven defensive call sites. The `dump_manifest` clause is
+  worth recording because it was found the right way round: a first revision
+  named only `sources`/`build_info` and broke `dump --dump-manifest
+  m.yaml --dry-run` (no SO_PATH), caught by the *existing*
+  `tests/test_cli_dump_manifest.py` — which is precisely the "the model
+  cannot express what the CLI accepts" gap the widening exists to close.
+  (b) The CLI-vs-typed collect-mode disagreement (`--build-info` with no
+  `--depth`: `source-target` on the CLI, `build` through the typed path)
+  is resolved in favour of the CLI's older, documented default, via a new
+  `service_compare_evidence.dump_collect_mode_for`. `collect_mode_for` is
+  **unchanged** — `compare`'s own front end genuinely infers omitted depth
+  from its inputs, which is a different question, and changing it would have
+  been the easy wrong fix. Pinned by
+  `tests/test_dump_collect_mode_parity.py` against the *real* CLI resolver
+  over the whole `(depth, sources, build_info)` grid. (c) The write-time
+  embed is now idempotent: `cli_buildsource.build_source_already_satisfies`,
+  stated through the same `_missing_requested_evidence_layers` the
+  neighbouring G21.7 warning already trusts, so the guard and the warning
+  cannot disagree about what "satisfied" means; its `pack is None -> []`
+  case is deliberately *not* satisfaction, which is what keeps it a no-op
+  for today's CLI (`tests/test_dump_embed_idempotence.py`, including an
+  `integration` end-to-end count proving one real `dump --depth source`
+  embeds exactly once).
+
+  With those closed, `abicheck/cli_dump_request.py` builds one `DumpRequest`
+  from `dump_cmd`'s parameters and `--dry-run` renders from a real
+  `ResolvedDumpRequest`. **The half-migration hazard the plan names — "a
+  preview built from one resolver describing an execution built from another
+  is worse than two hand-synced implementations, since it looks
+  authoritative without being connected to what actually runs" — is answered
+  structurally, not asserted.** The request is fed the CLI's
+  *already-resolved* values (compile context, frontend, explicit-language
+  decision) rather than re-deriving them, so it records the run; and the
+  fields the pipeline *does* derive independently are pinned equal to the
+  CLI's own by `tests/test_dump_request_from_cli.py::
+  TestResolvedRequestAgreesWithTheCliLocals`. Sub-issue (b) was a
+  prerequisite for exactly that: without it the preview would have reported
+  a collect mode the real run does not use. One user-visible consequence,
+  stated rather than left to be discovered: `DumpRequest.validate()`
+  front-runs `dumper.dump()`'s own runtime rejection of `--dump-manifest`
+  combined with `-I`, so that combination is now a usage error in the dry
+  run too — inside the dry-run contract, which permits usage errors.
+
+  *Blocker 6* is `service_input_resolution.BaselineReuseContext` /
+  `resolve_baseline_compile_context`: the "may the candidate's folded
+  context also parse the baseline" rule, extracted from the four-clause
+  boolean inline in `scan_engine.run_scan_core` that the twelfth, thirteenth
+  and fifteenth findings above each had to correct in turn. `run_scan_core`
+  calls it today; `_resolve_side_snapshot_impl` accepts the same object as
+  an **optional** `baseline_reuse_hint` and reports the identical answer on
+  `SideResolution.baseline_compile_context`, so the migration that finally
+  routes `_build_new_snapshot` through the shared resolver inherits the rule
+  instead of reimplementing it a fourth time. Deliberately an opt-in hint,
+  not a widening of `resolve_side_snapshot`'s single-input contract — a
+  caller that passes none is bit-for-bit unaffected. Given that correction
+  history, it is tested as a primitive rather than only through `scan`
+  (`tests/test_baseline_reuse_context.py`), per this file's own
+  "Primitive-level property tests" guidance: the contract as invariants,
+  the resolver-agrees-with-its-own-predicate property, and a pin that
+  include *order* matters (search order is first-match-wins, so a "compare
+  as sets" simplification has to argue with a test rather than pass
+  silently).
+
+  **Still open, unchanged:** neither real run routes through the shared
+  pipeline. `dump` executes through `perform_elf_dump`/
+  `handle_non_elf_dump` and `scan`'s candidate through `service.
+  resolve_input`/`embed_build_source` directly. What blocks each is now
+  concrete rather than open-ended — the ADR-039 collector's CLI-only inputs
+  (`--compile-db-filter`, the raw `effective_compile_db`) need typed-API
+  representation, and `_write_snapshot_output`'s provenance/`--inputs`/
+  depth-gate sequence needs reordering around a resolve-time embed — but
+  each is its own slice. PR 3C (removing `dump --build-query`/
+  `--build-compile-db`) therefore stays blocked, per the plan's own ordering
+  rule: moving those inputs into config while two resolvers still interpret
+  that config independently is the exact failure the three-way split exists
+  to prevent.
 
 - Don't hand-edit `CHANGELOG.md`'s `## [Unreleased]` section directly — add a `changelog.d/` fragment instead (see Conventions above); CI enforces this
 - Don't modify `examples/` test cases without understanding the ground truth they encode

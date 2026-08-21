@@ -355,20 +355,29 @@ def _path_required_errors(
     dereferences it.
 
     *source_only_allowed* is the per-request-type half: ``True`` for
-    :class:`DumpRequest` (which still requires real source/build evidence to
+    :class:`DumpRequest` (which still requires *some* declared evidence to
     make a binary-less snapshot out of — mirroring ``cli_buildsource.
     dump_source_only``'s own "a bare dump errors clearly here"), ``False`` for
     :class:`CompareRequest`.
+
+    ``dump_manifest`` counts as that evidence alongside ``sources``/
+    ``build_info``: ``abicheck dump --dump-manifest m.yaml`` with no SO_PATH
+    is a real, tested CLI shape (the manifest's own ``roots``/translation
+    units declare the surface), and an earlier revision of this check that
+    named only ``sources``/``build_info`` rejected it — caught by
+    ``tests/test_cli_dump_manifest.py``'s existing dry-run cases, which is
+    exactly the kind of "the model can't say what the CLI accepts" gap this
+    widening exists to close.
     """
     if side.path is not None:
         return []
     if not source_only_allowed:
         return [f"the {label} side needs a path (a binary or a snapshot file)"]
-    if not (side.sources or side.build_info):
+    if not (side.sources or side.build_info or side.dump_manifest is not None):
         return [
-            f"the {label} side has no path and no sources/build_info: a "
-            "binary-less (source-only) dump needs at least one of "
-            "sources/build_info to have anything to extract"
+            f"the {label} side has no path and no sources/build_info/"
+            "dump_manifest: a binary-less dump needs at least one of them to "
+            "have anything to extract"
         ]
     return []
 

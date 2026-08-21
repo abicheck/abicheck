@@ -83,6 +83,10 @@ from .cli_scan_helpers import (
 )
 from .errors import ProfileMismatchError, ScopeMismatchError
 from .schemas import SCAN_SCHEMA_VERSION
+from .service_input_resolution import (
+    BaselineReuseContext,
+    resolve_baseline_compile_context,
+)
 
 if TYPE_CHECKING:
     from .environment_matrix import EnvironmentMatrix
@@ -1342,50 +1346,35 @@ def run_scan_core(
                     list(public_header_dirs),
                     # The *effective* compile_context (the P0.3 L3->L2 fold's
                     # own merged result, when applied) -- but ONLY when the
-                    # baseline actually reuses the candidate's own headers.
-                    # `baseline_headers` alone is the wrong signal here (Codex
-                    # review, fresh evidence): cli_scan.py's own
-                    # `baseline_header = header_both + header_old` means a
-                    # bare, *shared* `-H api.h` (no `old=` scoping at all --
-                    # the ordinary, most common case) already makes
-                    # `baseline_headers` truthy and identical in content to
-                    # `headers`, so gating on mere truthiness wrongly treated
-                    # every scan with any headers at all as "old-side-scoped"
-                    # and silently reintroduced this whole fix's own
-                    # NOT_COMPARABLE/false-ABI-diff bug for the common case.
-                    # The real signal is whether the resolved old-side header
-                    # set genuinely *differs* from the candidate's (a real
-                    # `-H old=PATH` override) -- only then does the fold's
-                    # new-side-specific -D/-U/-std/include flags risk not
-                    # fitting the old side's own, different headers, whose
-                    # macros/standard/generated-header paths may genuinely
-                    # differ; there is no old-side build evidence to derive a
-                    # matching fold for that case, so the caller's plain,
-                    # unfolded compile_context is the correct fallback there.
+                    # baseline actually reuses the candidate's own resolved
+                    # header *and* include scope.
                     #
-                    # Header equality alone is not sufficient (Codex review,
-                    # fresh evidence): `-H api.h -I old=old-build -I
-                    # new=new-build` shares one header list across both sides
-                    # while still routing each side through a genuinely
-                    # different include tree via `baseline_includes` --
-                    # `cli_scan.py` builds that list independently of
-                    # `baseline_headers`. Forwarding the new side's folded
-                    # `-D`/`-std`/sysroot/include flags there would parse the
-                    # old binary under the new build's configuration, so the
-                    # fold is only reused when the old side's *resolved
-                    # include scope* also matches the candidate's own (no
-                    # side-specific include override at all).
-                    compile_context=(
-                        eff_compile_context
-                        if (
-                            not baseline_headers
-                            or list(baseline_headers) == list(headers)
-                        )
-                        and (
-                            not baseline_includes
-                            or list(baseline_includes) == list(eff_includes)
-                        )
-                        else compile_context
+                    # The rule itself, and the three review rounds it took to
+                    # get right (content-vs-truthiness on the header axis, and
+                    # the independently-built include axis -- the twelfth,
+                    # thirteenth and fifteenth findings on the root AGENTS.md's
+                    # L3->L2-fold entry), now live in ONE place:
+                    # `service_input_resolution.BaselineReuseContext` /
+                    # `resolve_baseline_compile_context` (PR 3A blocker 6). It
+                    # was hand-rolled here as a four-clause boolean, which is
+                    # exactly the shape that drifts once a second caller needs
+                    # it -- and a second caller is precisely what PR 3A is
+                    # building toward: `_resolve_side_snapshot_impl` accepts
+                    # the same `BaselineReuseContext` as an optional
+                    # `baseline_reuse_hint` and reports the identical answer on
+                    # `SideResolution.baseline_compile_context`, so whichever
+                    # slice finally routes `_build_new_snapshot` through the
+                    # shared primitive inherits this decision rather than
+                    # reimplementing it.
+                    compile_context=resolve_baseline_compile_context(
+                        BaselineReuseContext(
+                            baseline_headers=tuple(baseline_headers or ()),
+                            baseline_includes=tuple(baseline_includes or ()),
+                        ),
+                        folded=eff_compile_context,
+                        unfolded=compile_context,
+                        headers=list(headers),
+                        effective_includes=list(eff_includes),
                     ),
                     baseline_headers=baseline_headers,
                     baseline_includes=baseline_includes,

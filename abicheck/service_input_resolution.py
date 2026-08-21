@@ -58,11 +58,13 @@ if TYPE_CHECKING:
     from .service_compare_evidence import SideEvidence
 
 __all__ = [
+    "BaselineReuseContext",
     "SideResolution",
     "embed_side_build_source",
     "enforce_requested_depth",
     "is_raw_source_tree",
     "reject_hybrid_source_frontend",
+    "resolve_baseline_compile_context",
     "resolve_side_snapshot",
 ]
 
@@ -100,6 +102,121 @@ class SideResolution:
     snapshot: AbiSnapshot
     effective_includes: tuple[Path, ...]
     effective_compile_context: CompileContext | None
+    #: PR 3A blocker 6: the context the *other* (baseline) side's parse should
+    #: use, when the caller supplied a ``baseline_reuse_hint``. Identical to
+    #: ``effective_compile_context`` when no hint was given (no second side to
+    #: decide about) or when the two sides' resolved scopes match, and the
+    #: caller's own unfolded context when they genuinely diverge -- see
+    #: :class:`BaselineReuseContext` for why that is the correct fallback.
+    #: Defaulted, so a caller that ignores it is unaffected.
+    baseline_compile_context: CompileContext | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class BaselineReuseContext:
+    """The *other* side's resolved header/include scope, for a paired resolve.
+
+    PR 3A blocker 6 (CLI cleanup phase two). ``scan --against`` resolves one
+    side — the candidate — through the per-input machinery, then has to answer
+    a question that is inherently about *two* snapshots: may the candidate's
+    own P0.3 L3→L2 folded :class:`CompileContext` also be used to parse the
+    baseline, or must the baseline fall back to the caller's plain, unfolded
+    one?
+
+    That decision was hand-rolled inline in ``scan_engine.run_scan_core`` as a
+    four-clause boolean expression, and it took three separate review rounds to
+    get right (the twelfth, thirteenth and fifteenth findings on the root
+    ``AGENTS.md``'s L3→L2-fold entry: gating on ``baseline_headers``
+    truthiness rather than content, then on headers alone while
+    ``-I old=``/``-I new=`` routed the two sides through different include
+    trees). It is exactly the kind of rule that must exist once, not once per
+    caller.
+
+    Deliberately **not** a widening of :func:`resolve_side_snapshot`'s general
+    single-input contract: this is an optional, opt-in hint, and a caller that
+    does not pass one is bit-for-bit unaffected — every field of
+    :class:`SideResolution` it does not touch keeps its previous meaning. The
+    per-input primitives stay per-input; this is the one pair-shaped fact a
+    ``scan`` caller can hand *in*, mirroring how
+    ``service_compare_pipeline``'s own docstring keeps pair-shaped decisions
+    out of the per-input layer rather than pretending they don't exist.
+    """
+
+    #: The old side's resolved header list (``cli_scan``'s
+    #: ``header_both + header_old``). Empty means "no old-side header scope of
+    #: its own", which reuses the candidate's.
+    baseline_headers: tuple[Path, ...] = ()
+    #: The old side's resolved include list (``include_both + include_old``),
+    #: built by ``cli_scan`` completely independently of the header list —
+    #: which is why both have to be checked, not just one.
+    baseline_includes: tuple[Path, ...] = ()
+
+    def folded_context_is_reusable(
+        self,
+        *,
+        headers: Sequence[Path],
+        effective_includes: Sequence[Path],
+    ) -> bool:
+        """May the candidate's folded context also parse the baseline?
+
+        Only when the baseline's own resolved scope is either absent or
+        *identical in content* to the candidate's, on **both** axes.
+
+        Content, not truthiness, on the header axis: a bare, shared ``-H
+        api.h`` (no ``old=`` scoping — the ordinary, most common
+        ``scan --against`` usage) already makes ``baseline_headers`` truthy
+        and equal to the candidate's, since ``cli_scan`` builds it as
+        ``header_both + header_old``. Gating on mere truthiness treats every
+        scan with any headers at all as old-side-scoped and drops the fold for
+        the common case, which is the whole ``NOT_COMPARABLE`` bug this fold
+        exists to prevent.
+
+        And both axes, not just headers: ``-H api.h -I old=old-build -I
+        new=new-build`` shares one header list while routing each side through
+        a genuinely different include tree. Forwarding the new side's folded
+        ``-D``/``-std``/sysroot flags there would parse the old binary under
+        the new build's configuration.
+
+        There is no ``--build-info-old``/``--sources-old``, so no old-side
+        fold can be derived for the diverging case — the caller's plain,
+        unfolded context is the correct fallback, not a second guess.
+        """
+        if self.baseline_headers and list(self.baseline_headers) != list(headers):
+            return False
+        return not (
+            self.baseline_includes
+            and list(self.baseline_includes) != list(effective_includes)
+        )
+
+
+def resolve_baseline_compile_context(
+    hint: BaselineReuseContext | None,
+    *,
+    folded: CompileContext | None,
+    unfolded: CompileContext | None,
+    headers: Sequence[Path],
+    effective_includes: Sequence[Path],
+) -> CompileContext | None:
+    """The :class:`CompileContext` the *baseline* side's parse should use.
+
+    The one implementation of :meth:`BaselineReuseContext.
+    folded_context_is_reusable`'s consequence, shared by
+    ``scan_engine.run_scan_core`` (which calls it directly today) and by
+    :func:`_resolve_side_snapshot_impl`'s ``baseline_reuse_hint`` parameter
+    (which reports the same answer on :class:`SideResolution` for whichever
+    slice finally routes ``scan``'s candidate resolution through the shared
+    primitive). Two callers, one rule — which is the point.
+
+    *hint* of ``None`` means the caller has no second side, so there is
+    nothing to decide: the folded context is simply this side's own.
+    """
+    if hint is None:
+        return folded
+    if hint.folded_context_is_reusable(
+        headers=headers, effective_includes=effective_includes
+    ):
+        return folded
+    return unfolded
 
 
 def is_raw_source_tree(path: Path | None) -> bool:
@@ -440,6 +557,7 @@ def _resolve_side_snapshot_impl(
     build_compile_db: str | None = None,
     changed_paths: tuple[str, ...] = (),
     allow_build_query: bool | None = None,
+    baseline_reuse_hint: BaselineReuseContext | None = None,
 ) -> SideResolution:
     """The real implementation behind :func:`resolve_side_snapshot`.
 
@@ -666,6 +784,17 @@ def _resolve_side_snapshot_impl(
         snapshot=snap,
         effective_includes=tuple(includes),
         effective_compile_context=compile_ctx,
+        # PR 3A blocker 6: the pair-shaped answer, computed only when the
+        # caller handed in the second side's scope. Without a hint this is
+        # just `compile_ctx` -- there is no other side to decide about -- so
+        # every pre-existing caller reads exactly what it read before.
+        baseline_compile_context=resolve_baseline_compile_context(
+            baseline_reuse_hint,
+            folded=compile_ctx,
+            unfolded=evidence.compile,
+            headers=evidence.headers,
+            effective_includes=includes,
+        ),
     )
 
 

@@ -491,6 +491,7 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
     # access on the module (`cli._write_snapshot_output`); a bare name inside
     # this module needs a real import.
     from .cli_buildsource import _write_snapshot_output as _write_snapshot_output_fn
+    from .cli_dump_request import build_dump_request, resolve_dump_request_for_cli
     from .cli_options import warn_deprecated_header_graph_flags
     from .dry_run import emit_dry_run, reject_dry_run_with_output
 
@@ -675,6 +676,28 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
         so_path, debug_format_opt, debug_format,
     )
 
+    # CLI cleanup phase two, PR 3A blocker 5: one `DumpRequest` describing this
+    # invocation, built from the CLI's *already-resolved* values (the
+    # `CompileContext` above, the frontend, the explicit-language decision) so
+    # the request records the run rather than forming a second opinion about
+    # it. See `cli_dump_request.py`'s own module docstring for why that
+    # direction matters, and for what still executes outside it.
+    _dump_request = build_dump_request(
+        so_path=so_path, headers=headers, includes=includes,
+        version=version, lang=lang, lang_explicit=lang_explicit,
+        header_backend=header_backend, compile_context=_cc,
+        frontend_context=frontend_context, depth=depth,
+        dwarf_only=dwarf_only, debug_format=effective_debug_format,
+        pdb_path=pdb_path, debug_roots=debug_roots,
+        debuginfod=debuginfod, debuginfod_url=debuginfod_url,
+        dump_manifest=parsed_dump_manifest,
+        sources=sources, build_info=build_info, build_targets=build_targets,
+        include_dependencies=include_dependencies,
+        follow_deps=follow_deps, search_paths=search_paths,
+        ld_library_path=ld_library_path,
+        include_labels=_resolved_include_labels,
+    )
+
     if dry_run:
         from .buildsource.inline import is_pack_dir
         from .cli_buildsource_helpers import _is_inputs_pack_dir
@@ -682,14 +705,22 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
         from .cli_dump_helpers import render_dump_dry_run
         from .cli_helpers_compare import dry_run_compile_db_matched
 
+        # The dry-run report is now rendered from a real `ResolvedDumpRequest`
+        # -- the resolve-only half of the same pipeline `run_dump_request`
+        # executes -- instead of from `dump_cmd`'s own hand-derived locals.
+        # `resolve_dump_request` runs no castxml/clang and writes nothing, so
+        # this stays inside `render_dump_dry_run`'s own "cheap, read-only
+        # resolution" contract.
+        _resolved = resolve_dump_request_for_cli(_dump_request)
         _dry_matched = dry_run_compile_db_matched(
             compile_db_path, None, headers, compile_db_filter,
         )
         _dry_result = render_dump_dry_run(
-            so_path=so_path, headers=headers, sources=sources,
+            so_path=so_path, headers=_resolved.headers, sources=sources,
             build_info=build_info, build_config=build_config,
-            depth=depth, collect_mode=collect_mode,
-            header_backend=header_backend, output=output,
+            depth=_resolved.requested_depth,
+            collect_mode=_resolved.collect_mode,
+            header_backend=_resolved.header_backend, output=output,
             snapshot_compression=snapshot_compression,
             has_compile_db=compile_db_path is not None,
             # External review: dry-run previously only checked bare -p/
