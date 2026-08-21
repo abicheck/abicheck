@@ -170,10 +170,17 @@ class TestGeneratorCheck:
         (comment-annotated) `fixtures/` sources, and `examples/
         ground_truth.json` (a Category A scenario's expected outcome is
         *derived* from this file) unless those paths are explicitly removed
-        before the agent phase (Codex review, fresh evidence). Pinned as a
-        content assertion on the generated Dockerfile rather than an actual
-        Docker build (no Docker in this sandbox -- see `agent-evals/skills/
-        harbor/CLAUDE.md`)."""
+        before the agent phase (Codex review, fresh evidence). Also pins
+        `.git` itself: deleting a file's working-tree copy alone leaves it
+        fully recoverable from history (`git show HEAD:<path>`,
+        `git log`/`cat-file` against the blob) as long as `/opt/
+        abicheck-src/.git` still exists -- reproduced this exact way against
+        a real repository (a fresh `git init` + commit + `rm` of the tracked
+        file, followed by a real `git show HEAD:<path>` still printing the
+        deleted content) before trusting the claim (Codex review, fresh
+        evidence, second round). Pinned as a content assertion on the
+        generated Dockerfile rather than an actual Docker build (no Docker
+        in this sandbox -- see `agent-evals/skills/harbor/CLAUDE.md`)."""
         dockerfile = (
             TASKS_DIR / "removed-export" / "environment" / "Dockerfile"
         ).read_text(encoding="utf-8")
@@ -191,6 +198,7 @@ class TestGeneratorCheck:
             "/opt/abicheck-src/agent-evals/skills/harbor/tasks",
             "/opt/abicheck-src/agent-evals/skills/fixtures",
             "/opt/abicheck-src/agent-evals/skills/pilot-results",
+            "/opt/abicheck-src/.git",
         ):
             assert answer_bearing_path in removal_block, (
                 f"{answer_bearing_path} is not removed from the agent-visible "

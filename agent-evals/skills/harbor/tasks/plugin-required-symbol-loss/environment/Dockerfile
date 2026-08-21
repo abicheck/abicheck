@@ -23,7 +23,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # real fix (vendoring the runtime sources directly, or a published
 # release tag) is a bigger, cross-cutting change than this generator's
 # own scope; see agent-evals/skills/harbor/CLAUDE.md.
-ARG ABICHECK_REF=54e1d7e5b2f4c5507c57a31ef4a98e37b1af60b3
+ARG ABICHECK_REF=be1f9a4455829126ce75fd973d542730454e4c5f
 # ABICHECK_RUNTIME_DIGEST=3a668eb4b65a0cb03c7c02a626e5d61e8c9a0d65f13b03f92f734ee08f65d418
 # ^ content digest of `_RUNTIME_RELEVANT_PATHS` at generation time -- what
 # `--check` (scripts/gen_harbor_tasks.py) actually compares to detect real
@@ -139,6 +139,23 @@ RUN mkdir -p /opt/skills \
 # (a repeat of exactly this bug), where a denylist naming known-sensitive
 # paths degrades safely -- worst case it under-covers a genuinely new
 # category of leak, not silently re-opens this one.
+#
+# Deleting the working-tree copies alone is not enough, and shipped that
+# way once before this was caught: `/opt/abicheck-src/.git` is *also*
+# agent-visible for the whole trial, and it still holds every one of these
+# files' blobs in its object database regardless of what the working tree
+# looks like -- `git -C /opt/abicheck-src show HEAD:agent-evals/skills/
+# scenarios.yaml` (or `git log`/`git cat-file` against the same blob)
+# recovers the exact answer straight out of history even after the file
+# above is gone from disk (Codex review, fresh evidence, second round).
+# Nothing after this point needs git any further -- the version was
+# already patched directly in the installed package metadata (not derived
+# from a git tag/describe, no `setuptools_scm` in this repo), and no later
+# step in this file runs a `git` command -- so `.git` itself is removed
+# entirely, not selectively rewritten: pruning specific blobs out of a
+# repository's history is exactly the kind of fragile, easy-to-get-wrong
+# operation (`git filter-repo`/`BFG`, unavailable in this base image
+# anyway) that a full deletion sidesteps outright.
 RUN rm -rf /opt/abicheck-src/examples \
     /opt/abicheck-src/agent-evals/skills/scenarios.yaml \
     /opt/abicheck-src/agent-evals/skills/skill-eval-pack.json \
@@ -147,7 +164,8 @@ RUN rm -rf /opt/abicheck-src/examples \
     /opt/abicheck-src/agent-evals/skills/pilot-results \
     /opt/abicheck-src/agent-evals/skills/runners \
     /opt/abicheck-src/agent-evals/skills/run_skill_eval.py \
-    /opt/abicheck-src/agent-evals/skills/grade_bundle.py
+    /opt/abicheck-src/agent-evals/skills/grade_bundle.py \
+    /opt/abicheck-src/.git
 
 WORKDIR /workspace
 COPY workspace/ /workspace/

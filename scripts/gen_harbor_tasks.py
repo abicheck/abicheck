@@ -281,6 +281,23 @@ RUN mkdir -p /opt/skills \\
 # (a repeat of exactly this bug), where a denylist naming known-sensitive
 # paths degrades safely -- worst case it under-covers a genuinely new
 # category of leak, not silently re-opens this one.
+#
+# Deleting the working-tree copies alone is not enough, and shipped that
+# way once before this was caught: `/opt/abicheck-src/.git` is *also*
+# agent-visible for the whole trial, and it still holds every one of these
+# files' blobs in its object database regardless of what the working tree
+# looks like -- `git -C /opt/abicheck-src show HEAD:agent-evals/skills/
+# scenarios.yaml` (or `git log`/`git cat-file` against the same blob)
+# recovers the exact answer straight out of history even after the file
+# above is gone from disk (Codex review, fresh evidence, second round).
+# Nothing after this point needs git any further -- the version was
+# already patched directly in the installed package metadata (not derived
+# from a git tag/describe, no `setuptools_scm` in this repo), and no later
+# step in this file runs a `git` command -- so `.git` itself is removed
+# entirely, not selectively rewritten: pruning specific blobs out of a
+# repository's history is exactly the kind of fragile, easy-to-get-wrong
+# operation (`git filter-repo`/`BFG`, unavailable in this base image
+# anyway) that a full deletion sidesteps outright.
 RUN rm -rf /opt/abicheck-src/examples \\
     /opt/abicheck-src/agent-evals/skills/scenarios.yaml \\
     /opt/abicheck-src/agent-evals/skills/skill-eval-pack.json \\
@@ -289,7 +306,8 @@ RUN rm -rf /opt/abicheck-src/examples \\
     /opt/abicheck-src/agent-evals/skills/pilot-results \\
     /opt/abicheck-src/agent-evals/skills/runners \\
     /opt/abicheck-src/agent-evals/skills/run_skill_eval.py \\
-    /opt/abicheck-src/agent-evals/skills/grade_bundle.py
+    /opt/abicheck-src/agent-evals/skills/grade_bundle.py \\
+    /opt/abicheck-src/.git
 
 WORKDIR /workspace
 COPY workspace/ /workspace/
