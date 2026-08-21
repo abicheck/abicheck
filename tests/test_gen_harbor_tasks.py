@@ -564,11 +564,22 @@ class TestGeneratorCheck:
         finally:
             _write_lf_text(stray, original)
 
+    @_SKIP_ON_WINDOWS
     def test_check_catches_a_lost_executable_bit(self):
         """A byte-identical `tests/test.sh` that lost its executable bit
         (e.g. a manual re-save) is unusable to Harbor, which executes it
         directly -- a bytes-only comparison would silently pass this
-        (Codex review)."""
+        (Codex review).
+
+        Skipped on Windows (real CI evidence, PR #816): NTFS has no POSIX
+        executable-bit concept, so `os.chmod`/`Path.stat().st_mode` there
+        cannot actually clear or observe `0o111` -- `stray.chmod(original_
+        mode & ~0o111)` is a silent no-op, `_diff_trees`'s executable-bit
+        comparison then correctly finds nothing changed, and `--check`
+        reports `True` (matching reality on that filesystem) instead of
+        the `False` this test expects. Not a bug in `_diff_trees` or the
+        generator -- there is no executable bit to lose on this platform in
+        the first place."""
         stray = TASKS_DIR / "removed-export" / "tests" / "test.sh"
         original_mode = stray.stat().st_mode
         try:
