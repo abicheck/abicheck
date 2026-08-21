@@ -121,7 +121,33 @@ def _sequence(value: object, *, what: str) -> Sequence[Any]:
     return value
 
 
-def _bool(m: Mapping[str, Any], key: str, *, what: str, default: bool) -> bool:
+_GATE_SCOPE_FIELDS_SCHEMA_VERSION = 2
+"""The ``evaluation_context.schema_version`` at which ``gate.require_complete_
+analysis``/``gate.scope`` were introduced (dedup-and-convergence plan, Phase 2
+item 1) -- matches ``contract_relevance_types.EVALUATION_CONTEXT_SCHEMA_
+VERSION``'s own bump for the same change, but is its own constant rather than
+a reference to that live ceiling: the ceiling moves on any future,
+unrelated bump to that block's shape, while this one names a fixed
+historical fact (the version these two specific keys started being
+unconditionally emitted) and must not drift with it.
+
+Every writer at or above this version (this build's ``resolved_config_to_
+dict`` included) always emits both keys, so a payload declaring
+``schema_version >= _GATE_SCOPE_FIELDS_SCHEMA_VERSION`` with either key
+missing is not a legitimate older-writer omission -- it is truncated or
+hand-crafted, and ``resolved_config_from_dict`` rejects it outright rather
+than silently defaulting (Codex review, fresh evidence, third round: the
+first two rounds closed "wrong type" and "explicit null", but neither
+covered a version-2-labeled payload simply missing the key). A payload
+declaring an older ``schema_version`` degrades to the field's documented
+default, per this module's own "no lossy defaults on read" rule -- that
+degrade is the *legitimate* forward-compatibility case, not the malformed
+one this constant exists to catch."""
+
+
+def _bool(
+    m: Mapping[str, Any], key: str, *, what: str, default: bool, required: bool = False
+) -> bool:
     """Decode an optional JSON boolean field, rejecting anything merely truthy.
 
     A bare ``bool(value)`` accepts any JSON value at all -- including the
@@ -134,13 +160,23 @@ def _bool(m: Mapping[str, Any], key: str, *, what: str, default: bool) -> bool:
 
     Takes the mapping and key, not a pre-fetched ``m.get(key)`` value, so it
     can tell a genuinely *absent* key (a legacy payload written before this
-    field existed -- degrades to *default*) apart from a *present* JSON
-    ``null`` (an explicit, malformed "no value" that must be rejected the
-    same as any other wrong-typed value): a pre-fetched value collapses both
-    to Python ``None``, which is exactly the gap a second round of review
-    found in this decoder's first cut (Codex review, fresh evidence).
+    field existed -- degrades to *default*, unless *required*) apart from a
+    *present* JSON ``null`` (an explicit, malformed "no value" that must
+    always be rejected -- ``bool`` has no legitimate null encoding, unlike
+    an ``Optional`` field): a pre-fetched value collapses both to Python
+    ``None``, which is exactly the gap a second round of review found in
+    this decoder's first cut (Codex review, fresh evidence).
+
+    *required* rejects absence too, for a payload whose own declared
+    ``evaluation_context.schema_version`` is new enough that this build's
+    own writer always emits the key -- see
+    :data:`_GATE_SCOPE_FIELDS_SCHEMA_VERSION`'s docstring for why a
+    version-gated caller, not a blanket default, decides this (third round
+    of review, fresh evidence).
     """
     if key not in m:
+        if required:
+            raise TypeError(f"{what} is missing the required key {key!r}.")
         return default
     value = m[key]
     if not isinstance(value, bool):
@@ -153,19 +189,35 @@ def _bool(m: Mapping[str, Any], key: str, *, what: str, default: bool) -> bool:
 # --------------------------------------------------------------------------
 
 
-def _gate_scope_from_dict(d: object) -> ScopedGateSelection | None:
+def _gate_scope_from_dict(
+    m: Mapping[str, Any], key: str, *, what: str, required: bool = False
+) -> ScopedGateSelection | None:
     """Inverse of :func:`resolved_config_to_dict`'s ``gate.scope`` encoding.
 
     ``None`` when the resolved config carried no ADR-043 scoped-gate
     selection at all (the common case) -- distinct from a present-but-empty
-    ``targets`` list, which round-trips as a real, zero-target selection.
+    ``targets`` list, which round-trips as a real, zero-target selection. A
+    present JSON ``null`` is the correct, unambiguous encoding of that
+    common case (``resolved_config_to_dict`` writes exactly that), so unlike
+    :func:`_bool` a present ``null`` is never rejected here -- only the
+    *key itself* being absent is conditionally rejected, via *required* (see
+    :data:`_GATE_SCOPE_FIELDS_SCHEMA_VERSION`).
+
+    Takes the mapping and key rather than a pre-fetched value, mirroring
+    :func:`_bool`, so *required* can distinguish "key absent" from "key
+    present with value ``null``" the same way.
     """
+    if key not in m:
+        if required:
+            raise TypeError(f"{what} is missing the required key {key!r}.")
+        return None
+    d = m[key]
     if d is None:
         return None
-    m = _require_mapping(d, what="gate.scope")
+    m2 = _require_mapping(d, what="gate.scope")
     return ScopedGateSelection(
-        kind=_required(m, "kind", what="gate.scope"),
-        targets=tuple(_sequence(m.get("targets"), what="gate.scope.targets")),
+        kind=_required(m2, "kind", what="gate.scope"),
+        targets=tuple(_sequence(m2.get("targets"), what="gate.scope.targets")),
     )
 
 
@@ -354,7 +406,10 @@ def resolved_config_to_dict(config: CompatibilityEvaluationConfig) -> dict[str, 
 
 
 def resolved_config_from_dict(
-    d: object, provenance: Mapping[str, ValueProvenance] | None = None
+    d: object,
+    provenance: Mapping[str, ValueProvenance] | None = None,
+    *,
+    gate_schema_version: int | None = None,
 ) -> CompatibilityEvaluationConfig:
     """Inverse of :func:`resolved_config_to_dict`.
 
@@ -363,7 +418,20 @@ def resolved_config_from_dict(
     it (:class:`~abicheck.contract_evidence.EvaluationContextBlock` documents
     the same asymmetry) -- so the caller that decoded the outer block owns
     reassembling the two halves.
+
+    *gate_schema_version* is the enclosing ``evaluation_context.schema_
+    version`` this ``resolved_config`` was persisted under, when the caller
+    has one (:func:`evaluation_context_from_dict` always does) -- ``None``
+    (the default, for a caller with no enclosing context to be strict
+    against, e.g. a bare unit test) means "unknown version", which degrades
+    to this function's original, lenient behavior: an absent ``gate.require_
+    complete_analysis``/``gate.scope`` key defaults rather than raising. See
+    :data:`_GATE_SCOPE_FIELDS_SCHEMA_VERSION`.
     """
+    _require_gate_scope_fields = (
+        gate_schema_version is not None
+        and gate_schema_version >= _GATE_SCOPE_FIELDS_SCHEMA_VERSION
+    )
     m = _require_mapping(d, what="resolved_config")
     contract = _require_mapping(
         _required(m, "contract", what="resolved_config"),
@@ -471,8 +539,14 @@ def resolved_config_from_dict(
                 "require_complete_analysis",
                 what="gate.require_complete_analysis",
                 default=False,
+                required=_require_gate_scope_fields,
             ),
-            scope=_gate_scope_from_dict(gate.get("scope")),
+            scope=_gate_scope_from_dict(
+                gate,
+                "scope",
+                what="gate.scope",
+                required=_require_gate_scope_fields,
+            ),
         ),
         suppressions=(
             SuppressionConfig(
@@ -647,11 +721,14 @@ def evaluation_context_from_dict(d: object) -> EvaluationContextBlock:
             m.get("field_provenance") or {}, what="field_provenance"
         ).items()
     }
+    schema_version = int(m.get("schema_version", 1))
     return EvaluationContextBlock(
         resolved_config=resolved_config_from_dict(
-            _required(m, "resolved_config", what="evaluation_context"), provenance
+            _required(m, "resolved_config", what="evaluation_context"),
+            provenance,
+            gate_schema_version=schema_version,
         ),
-        schema_version=int(m.get("schema_version", 1)),
+        schema_version=schema_version,
         evaluator_version=int(m.get("evaluator_version", 1)),
         identity_algorithm_version=int(m.get("identity_algorithm_version", 1)),
     )

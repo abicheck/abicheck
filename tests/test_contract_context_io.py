@@ -336,6 +336,102 @@ class TestResolvedConfigRoundTrip:
         with pytest.raises(TypeError, match="require_complete_analysis"):
             resolved_config_from_dict(raw)
 
+    def test_bare_call_with_no_gate_schema_version_stays_lenient_on_absence(
+        self,
+    ) -> None:
+        # A caller with no enclosing evaluation_context (gate_schema_version
+        # omitted -- e.g. a standalone resolved_config document) still
+        # degrades an absent key to the default, regardless of what a
+        # current writer would have emitted -- only a caller that *knows*
+        # the enclosing schema_version can distinguish "legitimately never
+        # had this field" from "this version-2 payload lost the key".
+        config = self._full_config()
+        raw = resolved_config_to_dict(config)
+        del raw["gate"]["scope"]
+        decoded = resolved_config_from_dict(raw)
+        assert decoded.gate.scope is None
+
+
+class TestEvaluationContextGateSchemaVersionGating:
+    """Codex review, fresh evidence (third round): an ``evaluation_context``
+    payload that *declares* ``schema_version >= 2`` (this build's own value)
+    is expected to always carry ``gate.require_complete_analysis``/
+    ``gate.scope`` -- this build's own writer always emits both. A version-2
+    payload missing either key is truncated or hand-crafted, not a
+    legitimate older-writer omission, and must be rejected rather than
+    silently defaulted.
+    """
+
+    def _config(self) -> CompatibilityEvaluationConfig:
+        return CompatibilityEvaluationConfig(
+            contract=ContractConfig(mode=ContractMode.PUBLIC),
+            evidence=EvidenceConfig(),
+            surface=SurfaceConfig(),
+            assurance=AssuranceConfig(),
+            policy=CompatibilityPolicyConfig(
+                base=ImmutableIdentity(id="strict_abi", version=1, sha256="a" * 8)
+            ),
+            gate=GateConfig(),
+        )
+
+    def _block(self) -> EvaluationContextBlock:
+        return EvaluationContextBlock(resolved_config=self._config())
+
+    def test_current_schema_version_missing_scope_key_raises(self) -> None:
+        from abicheck.contract_context_io import (
+            evaluation_context_from_dict,
+            evaluation_context_to_dict,
+        )
+
+        raw = evaluation_context_to_dict(self._block())
+        del raw["resolved_config"]["gate"]["scope"]
+        with pytest.raises(TypeError, match="gate.scope"):
+            evaluation_context_from_dict(raw)
+
+    def test_current_schema_version_missing_require_complete_analysis_key_raises(
+        self,
+    ) -> None:
+        from abicheck.contract_context_io import (
+            evaluation_context_from_dict,
+            evaluation_context_to_dict,
+        )
+
+        raw = evaluation_context_to_dict(self._block())
+        del raw["resolved_config"]["gate"]["require_complete_analysis"]
+        with pytest.raises(TypeError, match="require_complete_analysis"):
+            evaluation_context_from_dict(raw)
+
+    def test_legacy_schema_version_missing_both_keys_degrades_to_defaults(
+        self,
+    ) -> None:
+        # A genuinely older writer (schema_version 1, predating this PR's
+        # two new gate keys entirely) never emitted them -- this is the
+        # documented, legitimate forward-compat degrade, not the malformed
+        # case above.
+        from abicheck.contract_context_io import (
+            evaluation_context_from_dict,
+            evaluation_context_to_dict,
+        )
+
+        raw = evaluation_context_to_dict(self._block())
+        raw["schema_version"] = 1
+        del raw["resolved_config"]["gate"]["scope"]
+        del raw["resolved_config"]["gate"]["require_complete_analysis"]
+        decoded = evaluation_context_from_dict(raw)
+        assert decoded.resolved_config.gate.scope is None
+        assert decoded.resolved_config.gate.require_complete_analysis is False
+
+    def test_current_schema_version_with_both_keys_present_round_trips(self) -> None:
+        from abicheck.contract_context_io import (
+            evaluation_context_from_dict,
+            evaluation_context_to_dict,
+        )
+
+        decoded = evaluation_context_from_dict(
+            evaluation_context_to_dict(self._block())
+        )
+        assert decoded == self._block()
+
 
 class TestResolvedContextContent:
     """What the persisted context says about the run that produced it."""
