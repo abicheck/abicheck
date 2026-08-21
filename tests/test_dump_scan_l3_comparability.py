@@ -74,23 +74,52 @@ _HAVE_GXX = shutil.which("g++") is not None
 _HAVE_CLANG = shutil.which("clang") is not None
 
 
-def _build_library(tmp_path: Path) -> tuple[Path, Path, Path]:
+def _build_library(
+    tmp_path: Path, *, extra_include_dir: str | None = None
+) -> tuple[Path, Path, Path]:
     """Compile a tiny real C++17 library + a matching compile_commands.json.
 
     Mirrors the bug report's repro shape: a library genuinely built with an
     explicit ``-std=`` the header itself depends on (so a dump that failed
     to fold the real standard would produce headers parsed under the wrong
     dialect, not merely empty metadata).
+
+    ``extra_include_dir``, when given, adds a real dependency header under a
+    separate ``-I``-supplied directory (mirroring
+    ``tests/test_dump_cli_typed_api_parity.py``'s own ``"extra-include-dir"``
+    shape) -- the specific build-evidence shape the AGENTS.md "Known gaps"
+    entry's "Two real mechanisms found and fixed" paragraph diagnoses as
+    what actually reproduces the reported ``include_sequence`` divergence; a
+    compile database with no extra ``-I`` at all does not exercise the
+    legacy-match-overlap/derived-include-routing bug this module regression-
+    tests, on either the buggy or the fixed commit (verified directly: see
+    the module docstring's own note against re-adding one without this
+    parameter).
     """
+    include_dirs = [tmp_path]
+    dep_header_snippet = ""
+    dep_field = ""
+    if extra_include_dir is not None:
+        dep_dir = tmp_path / extra_include_dir
+        dep_dir.mkdir(parents=True, exist_ok=True)
+        (dep_dir / "dep.h").write_text(
+            "#pragma once\nstruct Dep { int tag; };\n", encoding="utf-8"
+        )
+        include_dirs.append(dep_dir)
+        dep_header_snippet = '#include "dep.h"\n'
+        dep_field = "    Dep dep;\n"
+
     header = tmp_path / "widget.h"
     header.write_text(
         "#pragma once\n"
+        f"{dep_header_snippet}"
         "#if __cplusplus < 201703L\n"
         '#error "needs c++17"\n'
         "#endif\n"
         "struct Widget {\n"
         "    int x;\n"
         "    int y;\n"
+        f"{dep_field}"
         "    int sum() const { return x + y; }\n"
         "};\n",
         encoding="utf-8",
@@ -101,8 +130,18 @@ def _build_library(tmp_path: Path) -> tuple[Path, Path, Path]:
         encoding="utf-8",
     )
     so_path = tmp_path / "libwidget.so"
+    include_flags = [f"-I{d}" for d in include_dirs[1:]]
     subprocess.run(
-        ["g++", "-std=c++17", "-shared", "-fPIC", "-o", str(so_path), str(src)],
+        [
+            "g++",
+            "-std=c++17",
+            *include_flags,
+            "-shared",
+            "-fPIC",
+            "-o",
+            str(so_path),
+            str(src),
+        ],
         check=True,
         capture_output=True,
     )
@@ -115,6 +154,7 @@ def _build_library(tmp_path: Path) -> tuple[Path, Path, Path]:
                     "arguments": [
                         "g++",
                         "-std=c++17",
+                        *include_flags,
                         "-shared",
                         "-fPIC",
                         "-c",
@@ -229,3 +269,88 @@ def test_scan_against_real_dump_baseline_is_comparable_on_unchanged_source(
     assert "profile_fingerprint mismatch" not in scan_result.output, scan_result.output
     assert scan_result.exit_code == 0, scan_result.output
     assert "Verdict: NO_CHANGE" in scan_result.output, scan_result.output
+
+
+@pytest.mark.skipif(
+    not (_HAVE_GXX and _HAVE_CLANG), reason="needs a real g++ and clang toolchain"
+)
+def test_scan_against_real_dump_baseline_matches_reported_cli_invocation(
+    tmp_path: Path,
+) -> None:
+    """The exact CLI invocation shape from the bug report: a side-prefixed
+    ``-H new=PATH`` header, an explicit ``--lang c++``, an explicit
+    ``--policy strict_abi``, and JSON output -- not just the bare
+    ``-H PATH``/default-policy shape the sibling test above already covers.
+
+    None of those extra flags should matter to whether the P0.3 L3->L2 fold
+    reconciles ``dump``'s and ``scan``'s compile contexts, but the original
+    report used exactly this combination, so it is pinned directly rather
+    than trusted to be equivalent to the simpler sibling test.
+
+    Uses ``extra_include_dir`` (a real dependency header under its own
+    ``-I``-supplied directory) rather than the sibling test's plain,
+    no-extra-``-I`` build: a compile database with no extra include
+    directory at all does not exercise the legacy-match-overlap/derived-
+    include-routing bug this module regression-tests -- confirmed directly
+    against the reported buggy commit (``6fb8536``), which resolves this
+    same invocation as ``NO_CHANGE`` even *without* the fix when no extra
+    ``-I`` is involved. See ``_build_library``'s own docstring.
+    """
+    so_path, header, compile_db = _build_library(tmp_path, extra_include_dir="dep")
+    baseline = tmp_path / "baseline.json"
+
+    dump_result = CliRunner().invoke(
+        main,
+        [
+            "dump",
+            str(so_path),
+            "-H",
+            str(header),
+            "--sources",
+            str(tmp_path),
+            "--build-info",
+            str(compile_db),
+            "--depth",
+            "source",
+            "--ast-frontend",
+            "clang",
+            "-o",
+            str(baseline),
+        ],
+    )
+    assert dump_result.exit_code == 0, dump_result.output
+
+    scan_report = tmp_path / "scan-report.json"
+    scan_result = CliRunner().invoke(
+        main,
+        [
+            "scan",
+            str(so_path),
+            "-H",
+            f"new={header}",
+            "--sources",
+            str(tmp_path),
+            "--build-info",
+            str(compile_db),
+            "--against",
+            str(baseline),
+            "--lang",
+            "c++",
+            "--depth",
+            "source",
+            "--ast-frontend",
+            "clang",
+            "--policy",
+            "strict_abi",
+            "--format",
+            "json",
+            "-o",
+            str(scan_report),
+        ],
+    )
+    assert scan_result.exit_code == 0, scan_result.output
+
+    report = json.loads(scan_report.read_text(encoding="utf-8"))
+    assert report.get("verdict") == "NO_CHANGE", report
+    diff = report.get("diff") or {}
+    assert diff.get("reason") is None, diff.get("reason")
