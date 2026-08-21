@@ -41,7 +41,7 @@ for naming which kind of compatibility you're promising in the first place).
 | **Reverse swap** (a new consumer built and run against the *old* library) | Forward/downgrade compatibility — relevant when an older library build is still shipped or pinned longer than the newest consumer | Same exercised-paths limit as binary-swap, in the other direction |
 | **Host × plugin version matrix** | The two-sided contract a plugin/host relationship depends on, across the version combinations you actually support ([Plugin Systems](../use/plugin-systems.md), [Consumer Models](consumer-models.md)) | Any combination outside the matrix — an unlisted host/plugin pair is unverified, not verified-compatible |
 | **Oldest-supported-OS/runtime load test** | The deployment floor: does the binary even load and link on the oldest target you claim to support ([Dependency & Runtime Floors](dependency-floors.md)) | Correctness beyond "it loaded" — a clean load is necessary, not sufficient |
-| **Golden / differential output tests** | Behavioral compatibility for the specific scenarios the fixtures cover — the only method here that observes *behaviour* at all | Any scenario the fixture set doesn't exercise; a passing suite is a statement about coverage, not universal correctness |
+| **Golden / differential output tests** | General output/semantic behavioral compatibility for the specific scenarios the fixtures cover — the one method here aimed at behaviour broadly, rather than one specific contract (lifetime, concurrency, wire format) the way the rows below it are | Any scenario the fixture set doesn't exercise; a passing suite is a statement about coverage, not universal correctness |
 | **Old-reader/new-writer and new-reader/old-writer fixture tests** | Wire, storage, and serialization-format compatibility — the [data/wire dimension](data-wire-compatibility.md) static ABI/API checking cannot see at all | Schema paths or field combinations the fixtures don't exercise |
 | **ASan-instrumented lifecycle tests** | [Ownership/lifetime contract](ownership-and-lifetime.md) violations across the library boundary — double-free, use-after-free, cross-allocator frees | Only what the exercised lifecycle actually triggers; an untested destruction order stays unverified |
 | **TSan / stress / reentrancy tests** | [Concurrency and initialization contract](concurrency-and-initialization.md) violations — data races, unsafe reentrancy, ordering assumptions | Requires a workload that actually contends; a single-threaded run through the same suite proves nothing about the concurrency contract |
@@ -69,11 +69,18 @@ different":
    diminishing returns on the same one.
 3. **None of this replaces static checking — it's additive.** Static
    artifact/header diffing is the only method in this table that is
-   *exhaustive* over the shipped ABI/API surface without needing a
-   hand-written test to exercise the right path first. The other methods are
-   necessarily sampling — a golden test proves the scenarios it encodes, an
-   ASan run proves the lifecycle it exercises. Losing the exhaustive layer to
-   "we have behavioral tests" reopens exactly the blind spot
+   *exhaustive over the evidence it was given* — every declaration and
+   symbol in the captured snapshot is compared, without needing a
+   hand-written test to exercise the right path first. That's narrower than
+   "exhaustive over the shipped ABI/API surface": the
+   [detectability matrix](evidence-and-detectability.md#5-what-abi-tools-cannot-prove)
+   this same page opens by citing lists real, structural blind spots even
+   with full evidence (macro values, inline/template bodies, uninstantiated
+   templates), and incomplete debug info or headers narrows it further
+   still. The other methods are necessarily *sampling* on top of that —
+   a golden test proves the scenarios it encodes, an ASan run proves the
+   lifecycle it exercises. Losing the systematic layer to "we have
+   behavioral tests" reopens exactly the blind spot
    [Detecting Breaks §3](abi-series/08-detection.md#3-why-an-abidiff-or-abicc-class-checker-is-not-sufficient)
    describes for single-method static checkers, just moved to a different
    axis: sampled coverage instead of missing evidence tiers.
