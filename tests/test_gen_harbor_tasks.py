@@ -145,6 +145,19 @@ class TestGeneratorCheck:
         finally:
             stray.write_text(original, encoding="utf-8")
 
+    def test_check_catches_a_lost_executable_bit(self):
+        """A byte-identical `tests/test.sh` that lost its executable bit
+        (e.g. a manual re-save) is unusable to Harbor, which executes it
+        directly -- a bytes-only comparison would silently pass this
+        (Codex review)."""
+        stray = TASKS_DIR / "removed-export" / "tests" / "test.sh"
+        original_mode = stray.stat().st_mode
+        try:
+            stray.chmod(original_mode & ~0o111)
+            assert gen.generate(check=True) is False
+        finally:
+            stray.chmod(original_mode)
+
     def test_regeneration_is_idempotent(self):
         """Same normalization `--check` applies, and for the identical
         reason: the tree on disk (a checkout of the *last* commit that ran

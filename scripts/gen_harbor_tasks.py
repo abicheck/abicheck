@@ -671,13 +671,24 @@ def _diff_trees(committed: Path, generated: Path) -> list[str]:
         diffs.append(f"only in generated tree: {rel}")
     tolerate_ref_drift = _ref_drift_is_tolerable(_extract_committed_ref(committed))
     for rel in sorted(committed_files & generated_files):
-        a = (committed / rel).read_bytes()
-        b = (generated / rel).read_bytes()
+        committed_path = committed / rel
+        generated_path = generated / rel
+        a = committed_path.read_bytes()
+        b = generated_path.read_bytes()
         if tolerate_ref_drift:
             a = _normalize_pinned_ref(a)
             b = _normalize_pinned_ref(b)
         if a != b:
             diffs.append(f"content differs: {rel}")
+        # Bytes-only comparison would miss the executable bit -- `tests/
+        # test.sh` and `solution/solve.sh` are explicitly chmod'd 0o755 at
+        # generation time (Harbor executes them directly), and a committed
+        # file that lost that bit (e.g. a manual re-save) would otherwise
+        # pass `--check` as "current" while being unusable (Codex review).
+        committed_executable = bool(committed_path.stat().st_mode & 0o111)
+        generated_executable = bool(generated_path.stat().st_mode & 0o111)
+        if committed_executable != generated_executable:
+            diffs.append(f"executable bit differs: {rel}")
     return diffs
 
 

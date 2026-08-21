@@ -7,7 +7,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Pinned to the commit this task pack was generated from -- see
 # `_abicheck_ref()` in scripts/gen_harbor_tasks.py.
-ARG ABICHECK_REF=9403471e7d10bc3236ed93cfe06d8e5f174da16b
+ARG ABICHECK_REF=99ee3942af63eeca2ad9428a6d203e68f8c83cd3
 RUN git clone https://github.com/abicheck/abicheck.git /opt/abicheck-src \
     && cd /opt/abicheck-src && git checkout "$ABICHECK_REF" \
     && pip install --no-cache-dir -e ".[dev]"

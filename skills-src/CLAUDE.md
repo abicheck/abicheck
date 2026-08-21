@@ -141,9 +141,9 @@ repo. **PR 3 landed** under that new name (a complete G37 evaluation
 corpus, 12 scenarios, plus a real 48-run pilot) — see the ADR's "PR 3"
 amendment and `agent-evals/skills/pilot-results/README.md`; its dominant
 finding is a harness turn-budget confound, not a skill-quality result, so
-the skill is still not behaviorally validated. PR 4 (a thin
-external-distribution repository, removing the internal-candidate marker)
-remains fully open.
+the skill is still not behaviorally validated. PR 4 (an npm/npx-installable
+package published from this repository, removing the internal-candidate
+marker) remains fully open.
 
 `native-api-evolution`, `native-consumer-compatibility`, and
 `native-release-compatibility` are no longer published — their source is
