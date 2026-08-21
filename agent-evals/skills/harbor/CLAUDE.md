@@ -122,16 +122,30 @@ harbor run -a claude-code -m claude-sonnet-5 \
 # passes `--skill` at all. Still untested against a real trial in this
 # repository -- see the caveats above.
 #
-# ALWAYS pin `@ref` to the exact commit the task's own environment image is
-# pinned to (Codex review, fresh evidence): omitting it lets Harbor resolve
-# the skill against the coordinate's default branch, which can drift between
-# runs and, more importantly, need not be the revision the task's own
-# `environment/Dockerfile` cloned `abicheck` from -- silently comparing the
-# treatment from one commit against the harness from another and invalidating
-# the A/B result. Read the matching ref straight off the generated task:
-#   grep '^ARG ABICHECK_REF=' agent-evals/skills/harbor/tasks/removed-export/environment/Dockerfile
+# ALWAYS pin `@ref` to the exact commit whose SKILL CONTENT you intend to
+# evaluate (Codex review, fresh evidence, two rounds): omitting it lets
+# Harbor resolve the skill against the coordinate's default branch, which
+# can drift between otherwise-identical runs and need not be any commit you
+# actually intended to test.
+#
+# This ref is deliberately NOT the same axis as the environment image's own
+# `ARG ABICHECK_REF` (a first version of this note said to read the pin
+# straight off that line -- wrong, caught by a second review round: since
+# the skill is no longer baked into the image at all, `_RUNTIME_RELEVANT_
+# PATHS` correctly stopped tracking it in the freshness digest, which means
+# `ARG ABICHECK_REF` can now go many commits stale behind a skill-only edit
+# without `gen_harbor_tasks.py --check` ever flagging it -- pinning `--skill`
+# to that value would silently inject a stale treatment, exactly the failure
+# this note exists to prevent. The two pins answer two different questions:
+# `ARG ABICHECK_REF` fixes the harness/grader/CLI state for build
+# reproducibility; `--skill@ref` picks which skill revision this one trial
+# evaluates. Name the skill ref explicitly -- your own working HEAD, or the
+# specific commit under test -- rather than deriving it from the Dockerfile.
+# Only use the *same* commit for both when you deliberately want a fully
+# consistent, single-point-in-history snapshot (regenerate the task from
+# that commit first, so its `ARG ABICHECK_REF` agrees too):
 harbor run -a claude-code -m claude-sonnet-5 \
-  --skill abicheck/abicheck:.claude/skills/check-abi-compatibility@<ABICHECK_REF from above> \
+  --skill abicheck/abicheck:.claude/skills/check-abi-compatibility@<commit under test> \
   -c agent-evals/skills/harbor/tasks/removed-export
 ```
 
