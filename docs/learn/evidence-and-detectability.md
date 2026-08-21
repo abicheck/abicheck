@@ -88,36 +88,35 @@ struct is non-public ([case118](../reference/examples/case118_internal_struct_fi
 
 ### What each layer buys: fewer false negatives *and* fewer false positives
 
-Current scan-depth status is measured on the comparable v1/v2 shared-library
-targets: **141/141 targets scanned at every pinned depth**. FP/FN math uses the
-**141 targets** in that scope: `NO_CHANGE` sentinel cases are checked as
-compatible/no-change outcomes. Bundle-component results are structural
-diagnostics only; the catalog keeps one canonical case-level verdict.
+**Fact owner for current numbers.** A per-depth accuracy count (`binary` /
+`headers` / `build` / `source`, each with its own eval-target count, correct-
+verdict coverage, false positives, and false negatives) is exactly the kind
+of volatile, machine-checkable fact this repo's docs contract says must have
+one owner — [Tool Comparison's "Current scan-quality
+snapshot"](../reference/tool-comparison.md#current-scan-quality-snapshot)
+(the "Scan-depth matrix" row) is that owner. As of this page's own last edit,
+that row itself records the matrix as **not independently re-run** against
+the current catalog since an older, smaller 141-target pin — see that page
+for the up-to-date status rather than a second, independently-drifting
+number here. Do not re-add a specific eval-target count or per-depth
+percentage table to *this* page; a second copy is exactly how the two pages
+disagreed before (this page previously claimed measured `100.0%`
+correct-verdict coverage at `source` depth while the catalog it was measured
+against had already grown past the pinned target count).
 
-> **Freshness note.** This 141-target pin predates the catalog's growth to
-> 193 cases (159 of them compilable `.so`-pair lanes today — see [Tool
-> Comparison's "Which denominator is which"](../reference/tool-comparison.md)
-> for how that split is derived and kept in sync). The table below has not
-> been re-run against the current catalog; treat the percentages as
-> directionally representative of each depth's value, not as current exact
-> counts. Regenerating it against all current `.so`-pair targets is a
-> tracked follow-up, matching the same caveat on the [scan-depth matrix
-> row](../reference/tool-comparison.md#current-scan-quality-snapshot) in
-> Tool Comparison.
-
-| Pinned scan depth | Eval targets | Correct verdicts | Correct verdict coverage | False positives | False negatives | What this says about the layer today |
-|---|---:|---:|---:|---:|---:|---|
-| `binary` | 141 | 79 | 56.0% | 1 | 61 | Cheap artifact floor; many API/header/source-only breaks are invisible. |
-| `headers` | 141 | 115 | 81.6% | 0 | 26 | Best low-cost gate: public-header evidence removes many misses without FP. |
-| `build` | 141 | 115 | 81.6% | 0 | 26 | Adds build context; no advisory-crosscheck false positives after policy fix. |
-| `source` | 141 | 141 | 100.0% | 0 | 0 | Highest recall; source-smoke proofs cover consumer-only API hazards. |
-
-The full example catalog is covered by multiple proof lanes. This table is only
-the compare-style scan-depth lane, so its compare-style scope is complete at 141/141.
-(An earlier `full` rung — whole-library replay, as opposed to `source`'s
-changed-TU replay — scored identically on this comparable-target set, which is
-why the two were collapsed into one public `source` rung; see the appendix
-below.)
+Qualitatively — and this part doesn't drift, because it follows from what
+each layer can and cannot observe, not from a specific run's numbers — the
+shape holds regardless of the exact counts: `binary` (L0 alone) is the cheap
+floor with many invisible API/header/source-only breaks; `headers` (L0+L2)
+is the best low-cost gate, since public-header evidence removes most of
+those misses without introducing false positives; `build` (+L3) adds
+build-context corroboration on top; `source` (+L4) has the highest recall,
+since source-smoke proofs additionally cover consumer-only API hazards no
+artifact tier can see. An earlier `full` rung — whole-library replay, as
+opposed to `source`'s changed-TU replay — scored identically to `source` on
+the comparable-target set the matrix was last measured against, which is why
+the two were collapsed into one public `source` rung; see the appendix
+below.
 
 Across the full staircase, adding evidence drives **both** error axes down — it
 is not a trade-off where you must choose between missing breaks and crying wolf.
