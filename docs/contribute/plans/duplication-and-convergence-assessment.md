@@ -1095,17 +1095,38 @@ sign-off, not a routine PR).
    session), identical single-drain timing (the one `finally` this
    function's cleanup ever ran from). Existing coverage
    (`tests/test_non_elf_dump_l2_seed.py`,
-   `tests/test_cli_dump_helpers_coverage.py`) passed unmodified. **Not yet
-   done, and deliberately out of scope for this slice**: this is not yet
-   "resolve_artifact_request() onward" as item 1's own text above describes
-   — there is no `resolve_artifact_request()`/`execute_artifact_plan()`
-   split yet, `dump --dry-run` still doesn't build from or render a
-   `ResolvedArtifactPlan` (`render_dump_dry_run()` is still its own
-   independent resolution, per the "PR C" entry in AGENTS.md's "Known
-   gaps"), `service_input_resolution._resolve_side_snapshot_impl`'s own
-   accumulator is untouched, and none of items 2–10 below have been
-   attempted. See item 1's own original text (kept below) for the shape a
-   full implementation still needs to reach.
+   `tests/test_cli_dump_helpers_coverage.py`) passed unmodified.
+   **Milestone A completion.** `service_input_resolution.
+   _resolve_side_snapshot_impl`'s own hand-rolled `cleanups: list[...] = []`
+   + manual `if cleanups: _run_cleanups(cleanups)` finally block — the third
+   and, per this item's own earlier audit, last known call site with this
+   exact pattern — is migrated the same way: its own `ResolvedArtifactPlan`
+   instance, `_seeded_includes_and_compile_context`'s returned cleanups list
+   extended onto `_artifact_plan.pending_cleanups` (that helper's own return
+   contract is unchanged — only what the caller does with the returned list
+   changes), drained via `run_cleanups()` at the identical point the old
+   code called `_run_cleanups()`. This is the shared primitive `compare`'s
+   implicit-dump operand and `dump`'s typed `execute_dump_request` both
+   already route through (`resolve_side_snapshot`), so this migration reaches
+   both without touching either of their own call sites. Existing coverage
+   (`tests/test_header_compile_context.py`, `tests/test_bazel_root_targets_
+   l2_seed.py`, `tests/test_bazel_root_targets.py`,
+   `tests/test_scan_l2_cleanup_ordering.py`, `tests/test_typed_dump_
+   request.py`, `tests/test_dump_cli_typed_api_parity.py`,
+   `tests/test_header_compile_context_gcc_path.py`, `tests/test_header_
+   compile_context_merge.py`, `tests/test_clang_public_roots_coverage.py`)
+   passed unmodified. All three call sites the plan's own earlier audit
+   named now share this one primitive.
+
+   **Not yet done, and deliberately out of scope for this slice**: this is
+   not yet "resolve_artifact_request() onward" as item 1's own text above
+   describes — there is no `resolve_artifact_request()`/
+   `execute_artifact_plan()` split yet, `dump --dry-run` still doesn't build
+   from or render a `ResolvedArtifactPlan` (`render_dump_dry_run()` is still
+   its own independent resolution, per the "PR C" entry in AGENTS.md's
+   "Known gaps"), and none of items 2–10 below have been attempted. See
+   item 1's own original text (kept below) for the shape a full
+   implementation still needs to reach.
 
 1. (Full shape, not yet reached) Introduce `ResolvedArtifactPlan` as a
    context-managed session that owns any resource resolution itself
@@ -1150,7 +1171,86 @@ performance duplication (redundant inferred build queries).
 
 ### Phase 2 — Make resolved configuration the runtime contract
 
-1. Introduce `EffectiveEvaluationConfig`.
+1. **Not yet started; item 1's own target shape needs re-scoping before any
+   code lands — recorded here rather than guessed at, per this plan's own
+   "known gaps over risky reactive patches" convention (AGENTS.md).**
+   Investigating item 1 (introduce `EffectiveEvaluationConfig`) against the
+   actual codebase — not just this document's own sketch — found the
+   target shape overlaps far more with an *already-existing* object than
+   this section's original text accounted for: `abicheck/
+   compatibility_evaluation_config.py`'s `CompatibilityEvaluationConfig`
+   (ADR-049 D7) already composes `policy` (`CompatibilityPolicyConfig`),
+   `gate` (`GateConfig` — `exit_code_scheme`, `severity: SeverityConfig`,
+   `preset`, `packs`), `contract` (`ContractConfig`), `assurance`
+   (`AssuranceConfig`), `surface` (`SurfaceConfig`), `evidence`
+   (`EvidenceConfig`), and `suppressions` (`SuppressionConfig | None`) —
+   essentially every sub-object this section's own `EffectiveEvaluationConfig`
+   sketch names, under different but directly corresponding field names,
+   plus real per-field `ValueProvenance` (D7's precedence-tier record) this
+   section's sketch only gestures at via a single `provenance:
+   ConfigProvenance` field. The "Relationship to in-flight work" section
+   below already says as much at the plan level ("Public contract default
+   (ADR-049) is the compatibility-configuration resolver Phase 2 makes the
+   sole runtime contract... this plan does not change ADR-049's own D7/D8
+   precedence rules, only how uniformly the result of applying them reaches
+   every operation") — but item 1's own code sketch, written before this
+   closer look, reads as "introduce a new, separate dataclass," which would
+   recreate exactly the kind of duplication this whole plan exists to
+   eliminate, and directly contradicts the file it sits in a few lines
+   below its own sketch.
+
+   **What's genuinely missing from `CompatibilityEvaluationConfig` today,
+   confirmed by grep rather than assumed:** (a) `GateConfig` has no
+   `require_complete_analysis` field — that flag is threaded as a raw
+   `bool` through a long, independent chain of function signatures
+   (`cli.py`, `cli_compare_helpers.py`, `cli_compare_options.py`, ~15+ call
+   sites) with no typed home at all; (b) no `scope`
+   field for ADR-043's `--used-by`/`--required-symbol` scoped-gate
+   selection either, and there is no existing `ScopedGateSelection`-shaped
+   type anywhere in the codebase to reuse — representing that scope
+   correctly (a real union of "no scope" / "used-by consumer" /
+   "required-symbol entrypoint", each carrying its own resolved target
+   list) is its own small design question, not a one-line addition; (c) no
+   whole-object `digest` field or method — `effective_config_digest.py`
+   already computes one, but as an external function over a *two-tier*
+   input (`DiffResult`'s own fields, only reading a
+   `CompatibilityEvaluationConfig` when one happens to be attached under
+   `--contract`/`--pack`), not a method on this object; and (d) — the
+   deepest gap — `CompatibilityEvaluationConfig` is deliberately *opt-in*
+   today (built only when `--contract`/`--pack` selected something,
+   documented as an explicit ADR-049 Phase 1-6 design choice in both that
+   module's docstring and `effective_config_digest.py`'s own "two tiers"
+   docstring), while this phase's whole point is a runtime contract
+   resolved for *every* comparison unconditionally.
+
+   **The right re-scoping for item 1** (not yet attempted) is additive to
+   the existing object rather than a parallel one: extend `GateConfig` with
+   `require_complete_analysis`/`scope` (needs the `ScopedGateSelection`
+   design question above resolved first), add a `digest` computation onto
+   `CompatibilityEvaluationConfig` itself (folding in
+   `effective_config_digest.py`'s existing hashing logic rather than
+   duplicating it), and make resolving one *unconditional* for every
+   comparison — collapsing `effective_config_digest.py`'s two-tier
+   "rich or baseline" split into the rich tier always, once every
+   comparison path actually populates the object it currently only
+   populates opportunistically. That last part is the real work items 2-6
+   below already describe (`compare`, `scan`, the release fan-out, and the
+   four comparison call sites item 5 names all need to *resolve* this
+   object, not just consume one that happens to exist) — so this
+   re-scoping doesn't shrink the phase, it corrects what object items 2-6
+   are migrating *onto*. `docs/contribute/plans/public-contract-default.md`
+   (ADR-049's own plan doc) is the right place to check for whether "make
+   `CompatibilityEvaluationConfig` universal" is already an open item
+   there — a keyword sweep of it (`universal`/`opt-in`/`unconditional`)
+   found no existing item phrased that way; its own phases (through
+   Phase 7's "default flip") are about whether *contract evaluation*
+   defaults on, a related but distinct axis from whether the
+   *configuration object itself* always resolves regardless of
+   `--contract`/`--pack` — so this looks like a genuinely new item for
+   that plan or this one to own, not a duplicate of an existing one, but
+   the sweep was keyword-based over a 4000+-line document, not a full
+   read, so treat that as a strong lead rather than a settled fact before
+   committing to it.
 2. Move `compare` to consuming it directly.
 3. Move `scan` to the same object.
 4. Move the release fan-out off its six raw gate/severity strings.

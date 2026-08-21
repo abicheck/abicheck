@@ -26,21 +26,25 @@ allocates such a resource (``service_input_resolution._resolve_side_snapshot_imp
 plain ``list[Callable[[], None]]`` accumulator by hand and drains it in its
 own ``finally``, strictly before returning anything to its caller — there is
 no reusable, tested primitive. This module is that primitive, generalized
-just enough to replace two such hand-rolled accumulators
-(``cli_dump_helpers.perform_elf_dump`` and ``handle_non_elf_dump``, each
-still their own separate ``ResolvedArtifactPlan`` instance — the two
-functions are independent dump paths never invoked together, so nothing
-here makes them share a session) with a single, reviewed implementation;
-migrating the remaining call sites named in the plan
-(``service_input_resolution._resolve_side_snapshot_impl``, and everything
-downstream of a real resolve/execute split) is deliberately out of scope
-for this slice — see the plan doc's own Phase 1 section for the full,
-still-open list.
+just enough to replace all three known hand-rolled accumulators
+(``cli_dump_helpers.perform_elf_dump``, ``handle_non_elf_dump``, and
+``service_input_resolution._resolve_side_snapshot_impl``, each still its own
+separate ``ResolvedArtifactPlan`` instance — the three call sites are never
+invoked concurrently against the same instance, so nothing here makes them
+share a session) with a single, reviewed implementation. Migrating
+everything downstream of a real resolve/execute split (Phase 1 items 2–10 —
+routing native ``dump``, ``scan``, PE/Mach-O, ``appcompat``, `deps compare`,
+and the two ``symbols_only=True`` supplementary paths through a typed
+artifact pipeline, and making dry-run render the resolved plan) is
+deliberately out of scope for this slice — see the plan doc's own Phase 1
+section for the full, still-open list.
 
 Deliberately a leaf, engine-layer module: no ``click``/``cli_*`` import (the
-``engine-cli-boundary`` AI-readiness gate would reject one), no dependency on
-``service_dump_pipeline.py``/``service_input_resolution.py`` — those keep
-their own existing dataclasses unchanged in this pass.
+``engine-cli-boundary`` AI-readiness gate would reject one). Depended on by
+``service_input_resolution.py`` and ``cli_dump_helpers.py`` (not the
+reverse) — this module itself has no dependency on either, or on
+``service_dump_pipeline.py``, which keeps its own existing dataclasses
+unchanged in this pass.
 """
 
 from __future__ import annotations

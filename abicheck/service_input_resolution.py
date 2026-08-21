@@ -45,6 +45,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from .artifact_plan import ResolvedArtifactPlan
 from .errors import SnapshotError, ValidationError
 from .header_conditionals import (
     attach_build_context,
@@ -472,11 +473,11 @@ def _resolve_side_snapshot_impl(
     # collection, by _seeded_includes_and_compile_context -- see that
     # function's own docstring for why two independent collections here was
     # a latent self-deadlock risk, not just duplicated work.
-    # Pre-seeded (rather than left unbound) so the `finally` below is safe
-    # even if _seeded_includes_and_compile_context itself raises before
-    # returning -- it drains its own cleanups internally on
-    # HeaderCompileContextAmbiguousError (see its docstring), so an empty
-    # list here is correct, not a leak.
+    # The `_artifact_plan` constructed below (rather than left unbound) makes
+    # the `finally` below safe even if _seeded_includes_and_compile_context
+    # itself raises before returning -- it drains its own cleanups internally
+    # on HeaderCompileContextAmbiguousError (see its docstring), so an empty
+    # `pending_cleanups` here is correct, not a leak.
     # Computed once, shared by the seed below and the embed step further
     # down, so both apply the identical permission decision (Codex review,
     # fresh evidence) rather than each independently gating build_config/
@@ -486,9 +487,19 @@ def _resolve_side_snapshot_impl(
     _gated_build_config, _gated_build_query = _gated_build_query_inputs(
         build_config, build_query, allow_build_query=bool(allow_build_query)
     )
-    cleanups: list[Callable[[], None]] = []
+    # Phase 1 (dedup-and-convergence plan) Milestone A follow-up: the third
+    # and (per the plan doc's own Phase 1 item list) last known hand-rolled
+    # `pending_cleanups: list[...] = []` + manual drain-in-finally pattern,
+    # after `perform_elf_dump` and `handle_non_elf_dump`. Same primitive,
+    # same behavior: `_seeded_includes_and_compile_context` still *returns*
+    # its own cleanups list (its return contract is unchanged, and shared
+    # with other reasoning in its docstring) -- only what the caller does
+    # with that list changes, from a bare local to
+    # `_artifact_plan.pending_cleanups`, drained once via `run_cleanups()`
+    # at the identical point the old code called `_run_cleanups()`.
+    _artifact_plan = ResolvedArtifactPlan()
     try:
-        includes, compile_ctx, context_applied, cleanups = (
+        includes, compile_ctx, context_applied, _seed_cleanups = (
             _seeded_includes_and_compile_context(
                 side,
                 evidence,
@@ -500,6 +511,7 @@ def _resolve_side_snapshot_impl(
                 allow_build_query=bool(allow_build_query),
             )
         )
+        _artifact_plan.pending_cleanups.extend(_seed_cleanups)
         snap = service.resolve_input(
             side.path,
             evidence.headers,
@@ -715,10 +727,7 @@ def _resolve_side_snapshot_impl(
         # Only after the L2 parse (and any embed) has consumed the seeded dirs:
         # an inferred CMake build dir can hold the generated headers they point
         # into, so draining earlier would delete them mid-parse.
-        if cleanups:
-            from .buildsource.inline import _run_cleanups
-
-            _run_cleanups(cleanups)
+        _artifact_plan.run_cleanups()
     return SideResolution(
         snapshot=snap,
         effective_includes=tuple(includes),
