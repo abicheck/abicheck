@@ -54,7 +54,50 @@ different inputs.
 > the same model tailored to their context and link back here — when the model
 > changes, update this table first.
 
-A release engineer can hand a compatibility checker up to **five different
+### A model independent of any one tool
+
+Before the abicheck-specific vocabulary: any compatibility checker — this one
+or another — draws its evidence from some subset of six generic categories,
+each answering a genuinely different question about the library. This split
+matters because it is what lets you reason about a tool you've never used:
+ask which of these six categories it actually consumes, and you already know
+its blind spots.
+
+| Generic evidence category | Question it answers |
+|---|---|
+| **Artifact evidence** | What did the compiler actually emit — symbols, loader metadata? |
+| **Debug/type evidence** | What layout facts did the compiler record about emitted types? |
+| **Declared-interface evidence** | What does the source *say* the interface is (headers, an AST)? |
+| **Build evidence** | Under what compiler, flags, and environment was this built? |
+| **Source evidence** | What do macros, inline bodies, and templates actually contain? |
+| **Consumer evidence** | What does one real, specific consumer actually use? |
+| **Runtime evidence** | What actually happens when the code runs? |
+
+abicheck's own `L0`–`L5` layer codes are **one tool's concrete realization**
+of five of these — runtime evidence is structurally out of reach for any
+*static* checker, which is exactly the gap
+[Assurance Beyond Static Checking](assurance-methods.md) covers instead:
+
+| Generic category | abicheck layer |
+|---|:---:|
+| Artifact evidence | `L0` |
+| Debug/type evidence | `L1` |
+| Declared-interface evidence | `L2` |
+| Build evidence | `L3` |
+| Source evidence | `L4` |
+| *(derived from L3/L4, not itself provided)* | `L5` |
+| Consumer evidence | *(named contract only — see [`--used-by`/`--required-symbol`](../use/appcompat.md))* |
+| Runtime evidence | *(not modeled — see [Assurance Beyond Static Checking](assurance-methods.md))* |
+
+The rest of this page, and every other page that cites "`L0`–`L5`," is
+using abicheck's own vocabulary for this generic model — worth keeping
+distinct in your head from the model itself, since a different tool
+realizes the same six categories with different names, different
+granularity, or gaps in different places.
+
+### abicheck's five inputs
+
+A release engineer can hand abicheck up to **five different
 sources of information** about a library, ordered from the least to the most.
 Each one *adds* facts the previous cannot see; none of them is complete on its
 own. abicheck names them with the layer codes `L0`–`L4`. A **sixth** layer,
@@ -79,12 +122,28 @@ L0–L5 presence/absence without writing a snapshot); the build/source layers
 | 4 | **+ Build system data & options** | **L3** | `-p build/` (compile DB, CMake/Ninja/Bazel/Make) | The **flags the library was actually built with**: `-std`, `_GLIBCXX_USE_CXX11_ABI`, `-fvisibility`, `-fabi-version`, toolchain/sysroot, target graph, export maps | Corroborating |
 | 5 | **+ Sources** | **L4** | a build/source pack (per-TU source ABI replay, ADR-030) | Facts that never reach the binary: macro constants, `constexpr` values, default-argument *values*, inline/template **bodies**, uninstantiated templates | Corroborating (→ `API_BREAK`/risk) |
 
-Read this as a staircase: **each step up the table can both *find* breaks the
-step below is blind to and *prevent false positives* the step below would
-raise.** A struct-field insertion is invisible at L0 but obvious at L1
-([case07](../reference/examples/case07_struct_layout.md)); an internal-struct change that
-*looks* like a break at L1 is correctly dismissed once L2 headers reveal the
-struct is non-public ([case118](../reference/examples/case118_internal_struct_field_added_scoped.md)).
+Read this staircase-shaped **for the common case**: each step up the table
+*usually* both finds breaks the step below is blind to and prevents false
+positives the step below would raise. A struct-field insertion is invisible
+at L0 but obvious at L1 ([case07](../reference/examples/case07_struct_layout.md));
+an internal-struct change that *looks* like a break at L1 is correctly
+dismissed once L2 headers reveal the struct is non-public
+([case118](../reference/examples/case118_internal_struct_field_added_scoped.md)).
+
+**But it is not a strict ranking where every higher layer is more
+authoritative than every lower one for every question** — the table's own
+rightmost column already says why: L0-L2 are marked **Authoritative**, L3/L4
+only **Corroborating**. A higher layer adds *scope* (what's public, what
+flags applied) that can correctly overrule a lower layer's naive reading —
+but for the one fact a lower artifact layer directly observed (a symbol is
+present, a struct is this many bytes), a higher layer's absence of evidence
+is never grounds to override it. That asymmetry is the
+[*authority rule*](build-source-data.md) below in full, and it is why the
+next section's own false-positive/false-negative table is not monotonic on
+both axes at every step (L1 alone *adds* false positives L0 was too blind to
+raise) even though the false-negative axis is. Read "staircase" as *more
+evidence, generally fewer misses* — not as *every layer strictly dominates
+the one below it on every question*.
 
 ### What each layer buys: fewer false negatives *and* fewer false positives
 
