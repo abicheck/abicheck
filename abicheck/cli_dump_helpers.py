@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING, Any, Protocol
 import click
 
 from . import dumper_cache
+from .artifact_plan import ResolvedArtifactPlan
 from .dumper import dump
 from .dumper_scoping import dump_manifest_header_roots as _dump_manifest_header_roots
 from .errors import AbicheckError
@@ -1567,7 +1568,6 @@ def perform_elf_dump(
     # collect_inline_pack calls for the same --sources tree could otherwise
     # contend on the same inferred-build-query lock and wait up to its 600s
     # timeout (Codex review; see that function's own docstring).
-    from .buildsource.inline import _run_cleanups
     from .buildsource.l2_seed import seed_includes_and_fold_compile_context
 
     # The ADR-039 collector's _user_define_flags() call below must see only
@@ -1579,7 +1579,21 @@ def perform_elf_dump(
     # that reassignment folds the derived flags in before this variable is
     # read again. Captured here, before any L3 reassignment.
     _user_gcc_option_tokens = gcc_option_tokens
-    _l2_pending_cleanups: list[Callable[[], None]] = []
+    # Phase 1 (dedup-and-convergence plan) Milestone A: the two try blocks
+    # below share one `ResolvedArtifactPlan` session spanning from the L2
+    # seed's own resource allocation through the whole post-dump pipeline --
+    # replacing the hand-rolled `_l2_pending_cleanups: list[...] = []` +
+    # manual `if _l2_pending_cleanups: _run_cleanups(...)` this function used
+    # before, with a single reusable, independently-tested primitive
+    # (`artifact_plan.py`) that drains exactly once (idempotent -- calling
+    # `run_cleanups()` from both the except branch below and the second
+    # block's `finally` is therefore safe on the shared-block path where
+    # only one of the two ever actually has anything to drain) regardless of
+    # which of the two blocks below raises or both complete normally.
+    # Behavior-preserving only -- no change to resolution order, dry-run, or
+    # `handle_non_elf_dump` (which keeps its own separate, untouched
+    # `_l2_pending_cleanups`).
+    _artifact_plan = ResolvedArtifactPlan()
     try:
         (
             eff_includes,
@@ -1614,7 +1628,7 @@ def perform_elf_dump(
             ),
             lang=lang,
             lang_explicit=lang_explicit,
-            pending_cleanups=_l2_pending_cleanups,
+            pending_cleanups=_artifact_plan.pending_cleanups,
         )
         if l3_context_applied:
             gcc_path = l3_effective_ctx.gcc_path
@@ -1677,8 +1691,7 @@ def perform_elf_dump(
         # requested --header-graph pass) will run, so the seeded temp build
         # dir is no longer needed by anything; release it now rather than
         # leaking it.
-        if _l2_pending_cleanups:
-            _run_cleanups(_l2_pending_cleanups)
+        _artifact_plan.run_cleanups()
         raise click.ClickException(str(exc)) from exc
 
     try:
@@ -1864,8 +1877,7 @@ def perform_elf_dump(
         # before the header-graph pass is ever reached (Codex review). One
         # try/finally around the whole pipeline drains the cleanup exactly
         # once, on every exit path.
-        if _l2_pending_cleanups:
-            _run_cleanups(_l2_pending_cleanups)
+        _artifact_plan.run_cleanups()
 
     if follow_deps:
         populate_dependency_info(
