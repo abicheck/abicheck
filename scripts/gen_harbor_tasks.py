@@ -987,7 +987,11 @@ def _runtime_relevant_digest(root: Path = ROOT) -> str:
     """
     hasher = hashlib.sha256()
     for path in _runtime_relevant_files(root):
-        hasher.update(str(path.relative_to(root)).encode())
+        # .as_posix(), not str(): str() renders a Windows PureWindowsPath
+        # with backslashes, so hashing it would make the digest differ by
+        # platform even once the content bytes themselves are LF-stable
+        # (CodeRabbit review, fresh evidence).
+        hasher.update(path.relative_to(root).as_posix().encode())
         hasher.update(b"\0")
         hasher.update(path.read_bytes())
         hasher.update(b"\0")

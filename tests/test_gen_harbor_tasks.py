@@ -201,6 +201,44 @@ class TestGeneratorCheck:
         gen._write_lf(target, "line one\nline two\n")
         assert target.read_bytes() == b"line one\nline two\n"
 
+    def test_runtime_relevant_digest_hashes_posix_style_relative_paths(self):
+        """CodeRabbit review, fresh evidence: `_runtime_relevant_digest`
+        must key each file by `path.relative_to(root).as_posix()`, not
+        `str(...)` -- `str()` on a `PureWindowsPath` renders backslashes
+        (`agent-evals\\skills\\graders\\dimensions.py`), which would make
+        the digest differ from a POSIX checkout's forward-slash rendering
+        of the identical relative path even once the content bytes
+        themselves are LF-stable, so a genuinely unchanged tree would still
+        read as stale on Windows.
+
+        `_runtime_relevant_digest` itself always resolves real `Path`
+        objects for the host it runs on, so it can't be driven with a
+        `PureWindowsPath` directly -- this instead replays the function's
+        own hashing loop (same byte layout: relative-path bytes, a NUL,
+        content bytes, a NUL) against `PurePosixPath`'s and
+        `PureWindowsPath`'s renderings of the identical relative path and
+        content, keyed by `.as_posix()` exactly as the real function does,
+        and asserts the two produce the identical digest -- which fails
+        immediately if `.as_posix()` is swapped back for a bare `str()`."""
+        from hashlib import sha256
+        from pathlib import PurePosixPath, PureWindowsPath
+
+        relative = "agent-evals/skills/graders/dimensions.py"
+        content = b"x = 1\n"
+
+        def _digest(path_cls):
+            h = sha256()
+            h.update(path_cls(relative).as_posix().encode())
+            h.update(b"\0")
+            h.update(content)
+            h.update(b"\0")
+            return h.hexdigest()
+
+        assert _digest(PurePosixPath) == _digest(PureWindowsPath)
+        # And the two renderings must genuinely differ under `str()` --
+        # otherwise this test would pass even against the pre-fix code.
+        assert str(PureWindowsPath(relative)) != str(PurePosixPath(relative))
+
     def test_runtime_relevant_digest_does_not_track_the_skill_tree(self, tmp_path):
         """`.claude/skills/check-abi-compatibility` is deliberately absent
         from `_RUNTIME_RELEVANT_PATHS` -- an earlier round added it because
