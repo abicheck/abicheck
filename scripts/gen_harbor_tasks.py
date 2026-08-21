@@ -21,13 +21,16 @@ exists; this docstring covers only what the generator itself does.
 
 **One task per scenario, not per (scenario, arm).** Whether the skill is
 installed is not a property of the *question* — it is a property of which
-agent configuration answers it. Harbor's own `claude-code` agent adapter
-already models this split (`[environment].skills_dir`, copied into the
-agent's own skills directory at trial start, confirmed by reading
-`harbor.agents.installed.claude_code`'s source directly, not guessed from
-docs) — so the generated task never bakes a skill in. A baseline trial is
-`harbor run -a claude-code ...`; a skill trial is the same command with
-`--ak skills_dir=/opt/skills`. See `agent-evals/skills/harbor/CLAUDE.md`.
+agent configuration answers it. Harbor's own `--skill owner/repo:path`
+mechanism already models this split, confirmed by reading
+`harbor.trial.trial.Trial._upload_injected_skills()`'s source directly (not
+guessed from docs): it clones/resolves the skill on the orchestrator host
+and uploads it into the *running* container after the image has already
+started, entirely outside the Docker build, so an unrequested arm's image
+never carries the skill's content at all — the generated task never bakes a
+skill in. A baseline trial is `harbor run -a claude-code ...`; a skill
+trial is the same command with `--skill abicheck/abicheck:.claude/skills/
+check-abi-compatibility`. See `agent-evals/skills/harbor/CLAUDE.md`.
 
 **Reuses, never re-derives, three things this repo already has right:**
 
@@ -263,10 +266,27 @@ ENV SKILL_EVAL_REAL_PYTHON=/usr/local/bin/python3.13-real
 # harness's own documented workaround.
 ENV ABICHECK_ALLOW_AST_FALLBACK=1
 
-# Opt-in only -- see this file's own module docstring. A skill-arm trial
-# requests it explicitly: `harbor run ... --ak skills_dir=/opt/skills`.
-RUN mkdir -p /opt/skills \\
-    && cp -r /opt/abicheck-src/.claude/skills/check-abi-compatibility /opt/skills/
+# The skill is deliberately never baked into this image -- an earlier
+# version of this step did (`cp -r .../check-abi-compatibility /opt/skills/`,
+# unconditionally, in every image regardless of arm), which a baseline
+# trial's own agent -- with the same ordinary shell access to this
+# container everything else in this file's comments already document --
+# could discover and manually follow, contaminating the one arm this whole
+# corpus exists to keep clean of the treatment (Codex review, fresh
+# evidence). Confirmed against the real, installed `harbor` package's own
+# source, not assumed: `Trial._upload_injected_skills()`
+# (`harbor.trial.trial`) uploads a `--skill owner/repo:path[@ref]`-resolved
+# skill directly into the *running* container, after the image has already
+# started, entirely outside the Docker build -- a complete no-op when
+# `--skill` isn't passed. A skill-arm trial therefore requests it via
+# `harbor run ... --skill abicheck/abicheck:.claude/skills/check-abi-
+# compatibility` (see `agent-evals/skills/harbor/CLAUDE.md`), which the
+# real `harbor` package's own `--ak skills_dir=...`-driven `claude_code`
+# adapter (`_build_register_skills_command`) then copies from
+# Harbor's own resolved skills directory into Claude's config at trial
+# start -- never from anything this Dockerfile wrote. A baseline trial
+# never receives that upload at all, and the image itself now carries no
+# skill content for a baseline agent to stumble onto.
 
 # The agent has ordinary shell access to this whole clone for the entire
 # agent phase -- so anything answer-bearing left under `/opt/abicheck-src`
@@ -778,25 +798,25 @@ _DIGEST_LINE = re.compile(rb"^# ABICHECK_RUNTIME_DIGEST=([0-9a-f]{64})$", re.MUL
 #: the ordinary byte comparison (it changes what task.toml/instruction.md/
 #: etc. actually contain).
 #:
-#: `.claude/skills/check-abi-compatibility` is the treatment itself --
-#: `_dockerfile()` copies this exact generated tree into every image's
-#: `/opt/skills/` for a skill-arm trial -- and it was missing here (Codex
-#: review, fresh evidence): if only the skill's content changes,
-#: `skill-eval-pack.json` is untouched, so nothing in the *original* list
-#: moves the digest either, and a stale, already-committed task keeps
-#: baking in the old skill while `--check` reports it as current
-#: (confirmed directly: appending content to the generated `SKILL.md` and
-#: rerunning `--check` still reported "up to date" before this was added).
-#: Tracking the generated `.claude/skills/` tree directly, rather than its
-#: `skills-src/` source, matches exactly what `_dockerfile()`'s own `cp -r`
-#: reads -- the generated tree is what the image actually depends on, and
-#: it's already committed (never hand-edited, but not gitignored either),
-#: so hashing it needs no extra generation step of its own.
+#: `.claude/skills/check-abi-compatibility` previously belonged here --
+#: `_dockerfile()` used to `cp -r` this exact generated tree into every
+#: image's `/opt/skills/` for a skill-arm trial, so a skill-content-only
+#: edit needed tracking here for `--check` to catch it (a real gap this
+#: same list once closed, Codex review). That bake-in step was removed
+#: entirely in a later round (Codex review, fresh evidence): baking the
+#: skill into *every* image regardless of arm meant a baseline trial's own
+#: agent -- with the same ordinary shell access every other finding in
+#: `_dockerfile()`'s own comments already documents -- could discover and
+#: manually follow the treatment, contaminating the baseline arm. The
+#: skill is now injected per-trial by Harbor's own `--skill` mechanism
+#: (`Trial._upload_injected_skills()`, entirely outside the Docker build),
+#: so no generated task file depends on the skill's content any more --
+#: `.claude/skills/check-abi-compatibility` is correctly absent from this
+#: list, not by oversight.
 _RUNTIME_RELEVANT_PATHS = (
     "agent-evals/skills/graders",
     "agent-evals/skills/shim",
     "agent-evals/skills/harbor/verify_run.py",
-    ".claude/skills/check-abi-compatibility",
 )
 
 

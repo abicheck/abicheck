@@ -76,9 +76,16 @@ claude_code`), not assumed.
   decisions nobody has made yet — the CI step this pass added validates
   the *task shape*, not a real trial.
 - **The A/B (skill vs. baseline) mechanism is a documented design, not a
-  proven one.** `[environment].skills_dir` and the `--ak skills_dir=...`
-  override are real, confirmed-from-source Harbor mechanisms, but no trial
-  has actually exercised either path.
+  proven one.** `--skill owner/repo:path[@ref]` -- confirmed against the
+  real, installed `harbor` package's own source
+  (`Trial._upload_injected_skills()`) to clone/resolve the skill on the
+  orchestrator host and upload it into the *running* container after the
+  image has already started, entirely outside the Docker build -- is now
+  the *only* supported way to supply the skill for a skill-arm trial; the
+  generated image deliberately never bakes it in (an earlier version did,
+  which let a baseline trial's own agent discover and manually follow it
+  via ordinary shell access, corrupting the baseline arm -- Codex review,
+  fresh evidence). No trial has actually exercised this path yet.
 - **`dimension_1`'s skill-activation check has no Harbor equivalent.** A
   Harbor task has no "arm," so `verify_run.py` calls `grade_run(...,
   arm=None)` — activation-was-required is simply not checked here. See
@@ -103,12 +110,17 @@ pip install harbor
 # baseline (no skill):
 harbor run -a claude-code -m claude-sonnet-5 \
   -c agent-evals/skills/harbor/tasks/removed-export
-# skill arm -- either the task-baked path (already in the image at
-# /opt/skills/check-abi-compatibility):
-harbor run -a claude-code -m claude-sonnet-5 --ak skills_dir=/opt/skills \
-  -c agent-evals/skills/harbor/tasks/removed-export
-# ...or Harbor's own dedicated flag, pointed straight at this repo (neither
-# spelling has been exercised against a real trial -- see the caveats above):
+# skill arm -- Harbor's own `--skill owner/repo:path[@ref]` flag, the *only*
+# supported spelling: the generated image deliberately never bakes the skill
+# in (an earlier version did, unconditionally, letting a baseline trial's
+# own agent discover and manually follow it via ordinary shell access --
+# Codex review, fresh evidence). Confirmed against the real, installed
+# `harbor` package's own source (`Trial._upload_injected_skills()`): this
+# clones/resolves the skill on the orchestrator host and uploads it into the
+# *running* container after the image has already started, entirely outside
+# the Docker build -- a complete no-op for a baseline trial that never
+# passes `--skill` at all. Still untested against a real trial in this
+# repository -- see the caveats above:
 harbor run -a claude-code -m claude-sonnet-5 \
   --skill abicheck/abicheck:.claude/skills/check-abi-compatibility \
   -c agent-evals/skills/harbor/tasks/removed-export

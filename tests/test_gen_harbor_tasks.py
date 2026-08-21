@@ -158,20 +158,21 @@ class TestGeneratorCheck:
 
         assert before == after
 
-    def test_runtime_relevant_digest_covers_the_installed_skill_tree(self, tmp_path):
-        """`_dockerfile()` copies `.claude/skills/check-abi-compatibility`
-        into every image's `/opt/skills/` for a skill-arm trial -- it's the
-        treatment itself -- but it was missing from `_RUNTIME_RELEVANT_
-        PATHS` (Codex review, fresh evidence): editing only the skill's
-        content leaves `skill-eval-pack.json` untouched, so nothing in the
-        original list moved the digest either, and an already-committed
-        task kept baking in the stale skill while `--check` reported it as
-        current. Confirmed directly against the real repository before
-        this fix: appending content to the real, generated `SKILL.md` and
-        rerunning `gen_harbor_tasks.py --check` still reported "up to
-        date". Built against a synthetic tree, like the sibling
-        determinism test above, so this doesn't depend on the real skill's
-        current content."""
+    def test_runtime_relevant_digest_does_not_track_the_skill_tree(self, tmp_path):
+        """`.claude/skills/check-abi-compatibility` is deliberately absent
+        from `_RUNTIME_RELEVANT_PATHS` -- an earlier round added it because
+        `_dockerfile()` used to `cp -r` this tree into every image's
+        `/opt/skills/` for a skill-arm trial, but that bake-in step was
+        itself later removed (Codex review, fresh evidence: baking the
+        skill into *every* image regardless of arm let a baseline trial's
+        own agent discover and manually follow it via ordinary shell
+        access, contaminating the baseline arm -- the skill is now
+        injected per-trial by Harbor's own `--skill` mechanism, entirely
+        outside the Docker build). No generated task file depends on the
+        skill's content any more, so a skill-only edit must not move this
+        digest -- the inverse of what this test used to assert. Built
+        against a synthetic tree, like the sibling determinism test above,
+        so this doesn't depend on the real skill's current content."""
         root = tmp_path / "src"
         (root / "agent-evals" / "skills" / "graders").mkdir(parents=True)
         (root / "agent-evals" / "skills" / "shim").mkdir(parents=True)
@@ -196,7 +197,7 @@ class TestGeneratorCheck:
         )
         after = gen._runtime_relevant_digest(root)
 
-        assert before != after
+        assert before == after
 
     def test_dockerfile_reduces_the_agent_visible_clone_to_an_allowlist(self):
         """The agent has ordinary shell access to its own container's
@@ -527,6 +528,34 @@ class TestTaskStructure:
         assert (task_dir / "tests" / "scenario.json").is_file()
         assert not (task_dir / "environment" / "scenario.json").exists()
         assert not (task_dir / "environment" / "workspace" / "scenario.json").exists()
+
+    @pytest.mark.parametrize("task_dir", _task_dirs(), ids=lambda p: p.name)
+    def test_agent_image_never_bakes_in_the_skill(self, task_dir):
+        """Every agent image used to `cp -r` the skill into `/opt/skills/`
+        unconditionally, regardless of which arm the trial actually
+        requested -- so a baseline agent, with the same ordinary shell
+        access to its own container every other finding in `_dockerfile()`
+        already documents, could discover and manually follow the treatment,
+        contaminating the one arm this corpus exists to keep clean of it
+        (Codex review, fresh evidence). Fixed by dropping the bake-in step
+        entirely: the skill is now injected per-trial by Harbor's own
+        `--skill` mechanism (`Trial._upload_injected_skills()`, confirmed
+        against the real, installed `harbor` package's source to run
+        entirely outside the Docker build, after the image has already
+        started), so no *instruction* in either arm's built image may
+        reference `/opt/skills` or the skill's own name at all -- only this
+        step's own explanatory comment, checked separately below, is
+        allowed to name it as history."""
+        dockerfile = (task_dir / "environment" / "Dockerfile").read_text(
+            encoding="utf-8"
+        )
+        instruction_lines = "\n".join(
+            line
+            for line in dockerfile.splitlines()
+            if line.strip() and not line.strip().startswith("#")
+        )
+        assert "/opt/skills" not in instruction_lines
+        assert "check-abi-compatibility" not in instruction_lines
 
     def test_no_task_leaks_the_tool_name_or_a_verdict_word(self):
         """The exact `workspace_leaks` scan the existing harness runs before
