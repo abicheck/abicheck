@@ -1658,7 +1658,15 @@ _file_fingerprint() {
   # equal a real file's, so "did not exist before, exists now" always
   # reads as changed without a separate existence check.
   [[ -n "$_PY_BIN" && -n "${1:-}" ]] || return 0
-  "$_PY_BIN" -c '
+  local _fingerprint_path="$1"
+  # The Python process deliberately runs outside the untrusted checkout, but
+  # report destinations are still relative to the action's original working
+  # directory. Anchor before entering $_PY_SAFE_DIR so its stat target keeps
+  # the same meaning as abicheck's output path.
+  if ! _is_path_already_qualified "$_fingerprint_path"; then
+    _fingerprint_path="$PWD/$_fingerprint_path"
+  fi
+  (cd "$_PY_SAFE_DIR" && PYTHONPATH= "$_PY_BIN" -c '
 import os, sys
 try:
     st = os.stat(sys.argv[1])
@@ -1666,7 +1674,7 @@ except OSError:
     pass
 else:
     print(f"{st.st_mtime_ns}:{st.st_size}")
-' "$1" 2>/dev/null
+' "$_fingerprint_path") 2>/dev/null
 }
 _output_file_pre_fp=""
 if [[ -n "${OUTPUT_FILE:-}" ]]; then

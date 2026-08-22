@@ -55,6 +55,7 @@ that the attack genuinely reproduces without it.
 from __future__ import annotations
 
 import os
+import shlex
 import subprocess
 import tempfile
 from pathlib import Path
@@ -66,7 +67,9 @@ _PY_SAFE_DIR_END = "\ntrap 'rm -rf \"$_PY_SAFE_DIR\"' EXIT\n"
 
 _MALICIOUS_MARKER = "MALICIOUS CODE EXECUTED"
 
-_PY_BIN_RESOLUTION_START = '_PY_BIN="$(command -v python3 || command -v python || true)"'
+_PY_BIN_RESOLUTION_START = (
+    '_PY_BIN="$(command -v python3 || command -v python || true)"'
+)
 _PY_BIN_RESOLUTION_END = "\nfi\n"
 
 #: `$_PY_BIN`'s anchoring (below) delegates to this shared helper -- also
@@ -116,6 +119,40 @@ def _py_bin_resolution_source() -> str:
     start = text.index(_PY_BIN_RESOLUTION_START)
     end = text.index(_PY_BIN_RESOLUTION_END, start) + len(_PY_BIN_RESOLUTION_END)
     return _path_qualified_helper_source() + "\n" + text[start:end]
+
+
+def test_file_fingerprint_uses_python_startup_isolation() -> None:
+    """The pre-run fingerprint helper must not start Python in the checkout."""
+    text = RUN_SH.read_text(encoding="utf-8")
+    start = text.index("_file_fingerprint() {")
+    end = text.index("\n}\n", start)
+    helper = text[start:end]
+
+    assert '(cd "$_PY_SAFE_DIR" && PYTHONPATH= "$_PY_BIN" -c' in helper
+    assert '_fingerprint_path="$PWD/$_fingerprint_path"' in helper
+    assert '"$_fingerprint_path") 2>/dev/null' in helper
+
+
+def test_file_fingerprint_preserves_relative_report_path_base(tmp_path: Path) -> None:
+    """Fingerprinting a relative report must still resolve from the checkout."""
+    text = RUN_SH.read_text(encoding="utf-8")
+    start = text.index("_file_fingerprint() {")
+    end = text.index("\n}\n", start) + 2
+    helper = text[start:end]
+    report = tmp_path / "result.json"
+    report.write_text("{}", encoding="utf-8")
+    script = (
+        _path_qualified_helper_source()
+        + '\n_PY_BIN="$(command -v python3 || command -v python || true)"\n'
+        + '_PY_SAFE_DIR="$(mktemp -d)"\n'
+        + helper
+        + "\ncd "
+        + shlex.quote(str(tmp_path))
+        + "\n_file_fingerprint result.json\n"
+    )
+    result = _run_bash_script(script, timeout=30)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip()
 
 
 def _write_fake_abicheck_package(root: Path) -> None:
@@ -632,8 +669,6 @@ class TestPyBinResolvedAsAbsolute:
         env = {**os.environ, "PATH": f"tools{os.pathsep}{os.environ.get('PATH', '')}"}
         result = _run_bash_script(script, env=env, cwd=tmp_path, timeout=30)
         assert result.returncode == 0, result.stderr
-        line = next(
-            ln for ln in result.stdout.splitlines() if ln.startswith("PY_BIN=")
-        )
+        line = next(ln for ln in result.stdout.splitlines() if ln.startswith("PY_BIN="))
         py_bin = line[len("PY_BIN=") :]
         assert not Path(py_bin).is_absolute()
