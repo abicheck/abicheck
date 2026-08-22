@@ -149,6 +149,34 @@ class TestPackProductBaseline:
         )
         assert manifest.header_roots == ("include",)
 
+    def test_pack_preserves_an_empty_header_root_directory(
+        self, tmp_path: Path
+    ) -> None:
+        # A --header-root naming an existing but currently-empty directory
+        # must still exist in DEST_DIR after unpack, or the documented
+        # follow-on `compare -H` workflow is unusable (Codex review, fresh
+        # evidence: _discover_paths only archives files/symlinks, so an
+        # empty directory used to vanish entirely).
+        product = _make_product(tmp_path)
+        empty_header_root = product / "empty-include"
+        empty_header_root.mkdir()
+        archive = tmp_path / "b.tar.zst"
+        pack_product_baseline(product, archive, header_roots=["empty-include"])
+
+        dest = tmp_path / "unpacked"
+        unpack_product_baseline(archive, dest)
+        assert (dest / "empty-include").is_dir()
+
+    def test_pack_preserves_a_nested_empty_directory(self, tmp_path: Path) -> None:
+        product = _make_product(tmp_path)
+        (product / "extra" / "nested" / "empty").mkdir(parents=True)
+        archive = tmp_path / "b.tar.zst"
+        pack_product_baseline(product, archive)
+
+        dest = tmp_path / "unpacked"
+        unpack_product_baseline(archive, dest)
+        assert (dest / "extra" / "nested" / "empty").is_dir()
+
     def test_pack_rejects_missing_source_dir(self, tmp_path: Path) -> None:
         with pytest.raises(SnapshotError, match="not a directory"):
             pack_product_baseline(tmp_path / "nope", tmp_path / "out.tar.zst")
@@ -210,8 +238,25 @@ class TestPackProductBaseline:
         product = _make_product(tmp_path)
         outside = tmp_path / "outside.so"
         outside.write_bytes(b"outside")
-        (product / "lib" / "evil.so").symlink_to(outside)
+        # A *relative* target that still walks outside source_dir --
+        # distinct from an absolute target (test_pack_rejects_absolute_
+        # symlink_target below), which is rejected earlier for a
+        # different reason regardless of where it points.
+        (product / "lib" / "evil.so").symlink_to(Path("..") / ".." / "outside.so")
         with pytest.raises(SnapshotError, match="escapes"):
+            pack_product_baseline(product, tmp_path / "b.tar.zst")
+
+    def test_pack_rejects_absolute_symlink_target(self, tmp_path: Path) -> None:
+        # An absolute target inside SOURCE_DIR at pack time can't round-trip
+        # -- it names a path that won't exist at that same absolute
+        # location once unpacked into a different staging directory, so
+        # the paired unpack would fail TarExtractor's own symlink-escape
+        # check on an archive that packed successfully (Codex review,
+        # fresh evidence).
+        product = _make_product(tmp_path)
+        target = product / "lib" / "libb.so"
+        (product / "lib" / "absolute-link.so").symlink_to(target.resolve())
+        with pytest.raises(SnapshotError, match="absolute target"):
             pack_product_baseline(product, tmp_path / "b.tar.zst")
 
     def test_pack_preserves_hardlinked_duplicate_content(self, tmp_path: Path) -> None:

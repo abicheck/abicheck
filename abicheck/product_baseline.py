@@ -258,6 +258,37 @@ def _discover_paths(source_dir: Path) -> list[Path]:
     return paths
 
 
+def _discover_empty_dirs(source_dir: Path, paths: Sequence[Path]) -> list[Path]:
+    """Every real (non-symlink) directory under *source_dir* with nothing
+    from *paths* archived beneath it -- these need an explicit tar
+    directory member, since ``tarfile`` only creates intermediate
+    directories implicitly for a *file*'s own path components. Without
+    this, a directory with no file or symlink under it (most notably an
+    explicitly declared ``--header-root`` with nothing in it yet) would
+    silently vanish on unpack even though the manifest still names it
+    (Codex review, fresh evidence). Only leaf empty directories are
+    returned -- a leaf's own tar member is enough for extraction to
+    recreate its whole parent chain, the same way a file's member already
+    does."""
+    covered: set[Path] = set()
+    for p in paths:
+        parent = p.parent
+        while True:
+            covered.add(parent)
+            if parent == source_dir:
+                break
+            parent = parent.parent
+
+    empty_dirs: list[Path] = []
+    for dirpath, dirnames, _filenames in os.walk(source_dir, followlinks=False):
+        current = Path(dirpath)
+        dirnames[:] = [name for name in dirnames if not (current / name).is_symlink()]
+        if current != source_dir and current not in covered and not dirnames:
+            empty_dirs.append(current)
+    empty_dirs.sort(key=lambda p: _relative_posix(p, source_dir))
+    return empty_dirs
+
+
 class _HashingReader:
     """Wrap a binary file object, updating *hasher* with every byte read —
     lets :func:`pack_product_baseline` hash a library's content while
@@ -295,7 +326,20 @@ def _add_member(
 
     if info.issym():
         target = info.linkname
-        link_abs = Path(target) if os.path.isabs(target) else (path.parent / target)
+        if os.path.isabs(target):
+            # An absolute target can't round-trip: it names a path under
+            # *this* pack's source_dir, which won't exist at that same
+            # absolute location once unpacked into a different staging
+            # directory -- TarExtractor's own symlink-escape check would
+            # then (correctly) refuse the archive at unpack time, even
+            # though the target was genuinely inside source_dir when this
+            # was packed (Codex review, fresh evidence: pack succeeds,
+            # its own paired unpack can never read the result).
+            raise SnapshotError(
+                f"symlink {arcname!r} has an absolute target {target!r} -- "
+                "only relative symlink targets can be packed portably"
+            )
+        link_abs = path.parent / target
         try:
             link_abs.resolve().relative_to(source_dir.resolve())
         except ValueError as exc:
@@ -333,6 +377,17 @@ def _add_member(
     with open(path, "rb") as fh:
         tf.addfile(info, fileobj=fh)
     return None
+
+
+def _add_directory_member(tf: tarfile.TarFile, path: Path, arcname: str) -> None:
+    info = tf.gettarinfo(str(path), arcname=arcname)
+    info.mtime = 0
+    info.uid = 0
+    info.gid = 0
+    info.uname = ""
+    info.gname = ""
+    info.mode = 0o755
+    tf.addfile(info)
 
 
 def _add_manifest_member(
@@ -415,7 +470,8 @@ def pack_product_baseline(
         output_rel = None
     if output_rel is not None:
         paths = [p for p in paths if _relative_posix(p, source_path) != output_rel]
-    if not paths:
+    empty_dirs = _discover_empty_dirs(source_path, paths)
+    if not paths and not empty_dirs:
         raise SnapshotError(
             f"no files found under {source_path} to pack into a product baseline"
         )
@@ -459,11 +515,14 @@ def pack_product_baseline(
                         entry = _add_member(tf, path, arcname, source_path)
                         if entry is not None:
                             libraries.append(entry)
+                    for empty_dir in empty_dirs:
+                        arcname = _relative_posix(empty_dir, source_path)
+                        _add_directory_member(tf, empty_dir, arcname)
                     manifest = ProductBaselineManifest(
                         product=product,
                         libraries=tuple(sorted(libraries, key=lambda e: e.path)),
                         header_roots=tuple(resolved_header_roots),
-                        file_count=len(paths) + 1,
+                        file_count=len(paths) + len(empty_dirs) + 1,
                     )
                     _add_manifest_member(tf, manifest)
         os.replace(tmp_path, output_path)
