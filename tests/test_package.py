@@ -322,6 +322,20 @@ class TestValidateSymlinkTarget:
                 "usr/lib/evil", "../../../../etc/passwd", tmp_path
             )
 
+    def test_duplicate_member_validated_against_own_parent_not_stale_target(
+        self, tmp_path: Path
+    ) -> None:
+        # A duplicate member name is a legal tar shape -- the last one
+        # wins on extraction, replacing whatever was there. Simulating the
+        # filesystem state right after a first `a -> deep/x` symlink
+        # member was extracted, a second `a -> ../victim` symlink member
+        # must be validated against `a`'s own real parent directory, not
+        # against wherever the stale first symlink currently resolves
+        # (Codex, concrete repro).
+        (tmp_path / "a").symlink_to("deep/x")
+        with pytest.raises(ExtractionSecurityError, match="symlink target"):
+            _validate_symlink_target("a", "../victim", tmp_path)
+
 
 # ── Format detection tests ──────────────────────────────────────────────────
 
@@ -2468,6 +2482,37 @@ class TestTarExtractorSymlinks:
         TarExtractor().extract(archive, out)
         assert (out / "lib/libfoo.so.1.0").read_bytes() == b"data"
         assert (out / "lib/libfoo.so").resolve() == (out / "lib/libfoo.so.1.0").resolve()
+
+    def test_pre_312_path_duplicate_symlink_member_escape_rejected(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # A second `a -> ../victim` symlink member, duplicating an earlier
+        # `a -> deep/x` member's name, must be rejected end to end -- not
+        # just at the _validate_symlink_target primitive level -- since
+        # tarfile's real extraction replaces `a` outright rather than
+        # writing through the first symlink (Codex, concrete repro).
+        import abicheck.package as pb
+
+        monkeypatch.setattr(pb.sys, "version_info", (3, 11, 0, "final", 0))
+
+        archive = tmp_path / "dup.tar"
+        with tarfile.open(archive, "w") as tf:
+            first = tarfile.TarInfo(name="a")
+            first.type = tarfile.SYMTYPE
+            first.linkname = "deep/x"
+            tf.addfile(first)
+
+            second = tarfile.TarInfo(name="a")
+            second.type = tarfile.SYMTYPE
+            second.linkname = "../victim"
+            tf.addfile(second)
+
+        out = tmp_path / "output"
+        out.mkdir()
+        with pytest.raises(ExtractionSecurityError, match="symlink target"):
+            TarExtractor().extract(archive, out)
+
+        assert not (tmp_path / "victim").exists()
 
 
 class TestTarExtractorZstDecompressionBomb:

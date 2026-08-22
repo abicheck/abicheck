@@ -105,8 +105,11 @@ def _validate_member_path(member_name: str, target_root: Path) -> Path:
 def _validate_symlink_target(
     member_name: str, link_target: str, target_root: Path
 ) -> None:
-    """Validate that a symlink target resolves within the extraction root."""
-    member_parent = (target_root / member_name).resolve().parent
+    """Validate that a symlink target resolves within the extraction root.
+    Resolves only `member_name`'s *lexical* parent (a string op, never its
+    own final component): resolving the full path first instead followed a
+    duplicate member's stale prior target, not its real parent (Codex)."""
+    member_parent = (target_root / member_name).parent.resolve()
     resolved = (member_parent / link_target).resolve()
     root_resolved = target_root.resolve()
     try:
@@ -137,8 +140,7 @@ def _reject_oversized_declared_content(tf: tarfile.TarFile) -> None:
     limit `_safe_extract_zst_tar` enforces on the decompressed tar
     *stream* -- a GNU/PAX sparse member's `TarInfo.size` is the real
     logical extent tarfile materializes even though the stream only
-    carries non-hole blocks, so it can declare an arbitrary size while
-    barely touching that stream-byte count (Codex)."""
+    carries non-hole blocks (Codex)."""
     max_bytes = _max_decompressed_tar_bytes()
     total = 0
     for member in tf.getmembers():
@@ -292,10 +294,8 @@ class TarExtractor:
         nonexistent levels deep), but once `a` is a real symlink the
         filesystem collapses that sibling to 2 levels, letting
         `../../../victim` resolve outside target_root despite its own
-        stale pre-extraction validation (Codex, concrete repro).
-        Re-validating each member against the real, live-extracted state
-        closes this generally, since `Path.resolve()` follows symlinks
-        prior members actually created."""
+        stale pre-extraction validation (Codex). Re-validating each member
+        against the real, live-extracted state closes this generally."""
         directories: list[tarfile.TarInfo] = []
         for member in tf.getmembers():
             _validate_member(member, target_root)
