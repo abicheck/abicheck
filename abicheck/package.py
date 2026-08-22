@@ -185,6 +185,31 @@ _ZSTD_CLI_TIMEOUT_S = 120
 _ZSTD_READER_QUEUE_MAXSIZE = 8
 
 
+def _drain_reader_queue(
+    chunk_queue: queue.Queue[bytes | None | Exception],
+    reader_thread: threading.Thread,
+    timeout: float,
+) -> None:
+    """Unblock a `_safe_extract_zst_tar` reader thread possibly stuck in
+    `put()` on the now-full bounded queue after the consumer stopped
+    draining it mid-abort -- keeps pulling items until the reader finishes
+    on its own (its producer, the killed/exhausted zstd process, closes
+    its pipe quickly) rather than leaking a permanently-blocked daemon
+    thread and its queued chunks (Codex review, fresh evidence). *timeout*
+    is a backstop, not the expected case.
+    """
+    deadline = time.monotonic() + timeout
+    while reader_thread.is_alive():
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        try:
+            chunk_queue.get(timeout=min(remaining, 0.1))
+        except queue.Empty:
+            continue
+    reader_thread.join(timeout=max(0.0, deadline - time.monotonic()))
+
+
 class TarExtractor:
     """Extract tar, tar.gz, tar.xz, tar.bz2, and .tgz archives."""
 
@@ -410,6 +435,18 @@ class TarExtractor:
                     if proc.poll() is None:
                         proc.kill()
                         proc.wait(timeout=_ZSTD_CLI_TIMEOUT_S)
+                    # An abort (timeout, the size limit above, a reader
+                    # exception) can leave _reader blocked in put() on the
+                    # now-full bounded queue -- the consumer stopped
+                    # draining it the moment it raised, so killing the
+                    # process alone doesn't unblock a reader stuck on a
+                    # full queue rather than its own read() call. Leaks a
+                    # daemon thread and its queued chunks for the life of
+                    # a long-running process otherwise (Codex review,
+                    # fresh evidence). Cheap no-op on the success path,
+                    # where the reader already finished before the
+                    # terminal None was consumed.
+                    _drain_reader_queue(chunk_queue, reader_thread, _ZSTD_CLI_TIMEOUT_S)
             TarExtractor._safe_extract(tar_path, target_dir)
         finally:
             shutil.rmtree(staging, ignore_errors=True)

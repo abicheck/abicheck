@@ -616,16 +616,18 @@ def _add_member(
             )
         # A library-shaped symlink (by name) whose real target is NOT
         # independently library-shaped (e.g. `libfoo.so -> payload`)
-        # previously got no LibraryEntry at all -- unlike the ordinary
-        # case (`libfoo.so.1 -> libfoo.so.1.2.3`), there's no other
-        # declared identity for unpack's own discovery to match it
-        # against, so it was permanently undeclared and unpack rejected
-        # the archive as tampered (Codex review, fresh evidence). A
-        # target the ordinary case already declares is left alone --
-        # unpack's identity-based check already covers it.
+        # previously got no LibraryEntry at all -- there's no other
+        # declared identity for unpack's own discovery to match, so it
+        # was permanently undeclared and unpack rejected the archive as
+        # tampered. A target the ordinary case (`liba.so ->
+        # liba.so.1.2.3`) already declares is left alone. S_ISREG guards
+        # against the same match on a directory-targeting symlink
+        # (`plugins.so -> payload/`), where open() below would otherwise
+        # raise an uncaught IsADirectoryError (Codex review).
         entry = None
         if (
             target_stat is not None
+            and stat_module.S_ISREG(target_stat.st_mode)
             and _is_library_path(path)
             and not _is_library_path(link_real)
         ):
@@ -1106,18 +1108,11 @@ def unpack_product_baseline(
         if not isinstance(raw, dict):
             raise SnapshotError(f"{archive_path}: corrupt product baseline manifest")
         # ProductBaselineManifest.from_dict() defensively *defaults* a
-        # missing "schema" key to PRODUCT_BASELINE_SCHEMA, per this
-        # codebase's established "never abort on a hand-edited/malformed
-        # pack" from_dict() convention -- correct for every *other* field,
-        # but applied to `schema` itself it defeats the one check this
-        # whole discriminator exists for: an archive whose manifest is any
-        # parseable mapping without a `schema` key at all (e.g. `{}`)
-        # would silently pass _check_schema_supported() and get published
-        # as a recognized baseline (Codex review, fresh evidence). Checked
-        # explicitly, before the defensive from_dict() default ever
-        # applies, so a manifest that doesn't genuinely self-identify as
-        # this format is rejected rather than defaulted into looking like
-        # one.
+        # missing "schema" key to PRODUCT_BASELINE_SCHEMA -- correct for
+        # every *other* field, but applied to `schema` it defeats the
+        # check this discriminator exists for: any mapping without a
+        # `schema` key at all (e.g. `{}`) would pass _check_schema_supported()
+        # (Codex review). Checked explicitly, before the default applies.
         if not isinstance(raw.get("schema"), str) or not raw["schema"]:
             raise SnapshotError(
                 f"{archive_path}: product baseline manifest is missing its "

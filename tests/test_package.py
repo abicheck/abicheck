@@ -6,6 +6,7 @@ import shutil
 import struct
 import sys
 import tarfile
+import threading
 import time
 import zipfile
 from pathlib import Path
@@ -2617,6 +2618,65 @@ class TestTarExtractorZstDecompressionBomb:
 
         assert (out / "lib" / "libfoo.so").read_bytes() == b"data"
         assert captured_maxsize == [package_mod._ZSTD_READER_QUEUE_MAXSIZE]
+
+    def test_external_zstd_fallback_joins_the_reader_thread_after_aborting(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Bounding the queue above introduced a leak of its own: aborting
+        # (here, the decompression-bomb limit) stops the consumer from
+        # draining the queue, so a reader thread that has already produced
+        # a second chunk blocks forever in put() on the now-full queue --
+        # the killed process's pipe closing doesn't help, since the
+        # reader never gets back to its own read() call to see that
+        # (Codex review, fresh evidence). Forced deterministic with
+        # maxsize=1: the bomb overruns the 1000-byte limit on the very
+        # first chunk, guaranteeing a second chunk is already produced
+        # and stuck when the main thread aborts.
+        zstandard = pytest.importorskip("zstandard")
+        if shutil.which("zstd") is None:
+            pytest.skip("real zstd CLI not available")
+        import abicheck.package as package_mod
+
+        monkeypatch.setenv("_ABICHECK_TAR_ZST_MAX_DECODED_BYTES", "1000")
+        monkeypatch.setattr(package_mod, "_ZSTD_READER_QUEUE_MAXSIZE", 1)
+
+        tar_buf = io.BytesIO()
+        with tarfile.open(fileobj=tar_buf, mode="w") as tf:
+            data = b"\x00" * (10 * 1024 * 1024)
+            info = tarfile.TarInfo(name="bigfile.bin")
+            info.size = len(data)
+            tf.addfile(info, io.BytesIO(data))
+        cctx = zstandard.ZstdCompressor(level=19)
+        compressed = cctx.compress(tar_buf.getvalue())
+        assert len(compressed) < 1000
+
+        zst_path = tmp_path / "bomb.tar.zst"
+        zst_path.write_bytes(compressed)
+        out = tmp_path / "output"
+        out.mkdir()
+
+        captured_threads: list[threading.Thread] = []
+        real_thread_cls = package_mod.threading.Thread
+
+        class _RecordingThread(real_thread_cls):  # type: ignore[misc,valid-type]
+            def __init__(self, *args: object, **kwargs: object) -> None:
+                super().__init__(*args, **kwargs)  # type: ignore[arg-type]
+                captured_threads.append(self)
+
+        monkeypatch.setattr(package_mod.threading, "Thread", _RecordingThread)
+
+        from abicheck.errors import SnapshotError
+
+        with mock.patch("builtins.__import__", side_effect=_zstandard_import_blocker):
+            with pytest.raises(SnapshotError, match="safety limit"):
+                TarExtractor()._safe_extract_zst_tar(zst_path, out)
+
+        assert captured_threads, "reader thread was never created"
+        reader_thread = captured_threads[0]
+        # A regression back to no draining would make this join() hang
+        # for the full duration instead of returning quickly.
+        reader_thread.join(timeout=5)
+        assert not reader_thread.is_alive()
         assert package_mod._ZSTD_READER_QUEUE_MAXSIZE > 0  # not the unbounded default
 
 
