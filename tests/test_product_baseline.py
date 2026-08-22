@@ -77,6 +77,43 @@ def _rewrite_manifest_member(
     return bad_archive
 
 
+def _rewrite_archive_member(
+    tmp_path: Path, archive: Path, member_name: str, payload: bytes
+) -> Path:
+    """Rewrite *archive*'s *member_name* member to *payload*, keeping every
+    other member (the manifest included) as-is -- for tests exercising
+    unpack's handling of an archive whose actual content diverges from what
+    its own manifest declares (a stale/tampered archive), which a real
+    pack_product_baseline() call could never produce."""
+    import zstandard
+
+    raw = archive.read_bytes()
+    dctx = zstandard.ZstdDecompressor()
+    tar_bytes = dctx.decompress(raw, max_output_size=1 << 30)
+    rewritten = tmp_path / f"{archive.stem}-rewritten.tar"
+    with (
+        tarfile.open(fileobj=io.BytesIO(tar_bytes), mode="r") as src,
+        tarfile.open(rewritten, mode="w") as dst,
+    ):
+        for member in src.getmembers():
+            if member.name == member_name:
+                info = tarfile.TarInfo(name=member_name)
+                info.size = len(payload)
+                dst.addfile(info, io.BytesIO(payload))
+            else:
+                fh = src.extractfile(member)
+                dst.addfile(member, fh)
+
+    tampered_archive = tmp_path / f"{archive.stem}-tampered.tar.zst"
+    cctx = zstandard.ZstdCompressor()
+    with (
+        open(rewritten, "rb") as in_fh,
+        open(tampered_archive, "wb") as out_fh,
+    ):
+        cctx.copy_stream(in_fh, out_fh)
+    return tampered_archive
+
+
 def _make_product(root: Path) -> Path:
     product = root / "product"
     (product / "lib").mkdir(parents=True)
@@ -767,6 +804,46 @@ class TestUnpackProductBaseline:
             unpack_product_baseline(bogus, dest)
         assert dest.is_dir()
         assert not list(dest.iterdir())
+
+    def test_unpack_rejects_tampered_library_content_size_mismatch(
+        self, tmp_path: Path
+    ) -> None:
+        # The manifest's own size/sha256 are trusted at pack time but never
+        # re-verified against the actually-extracted bytes at unpack time --
+        # a stale or tampered archive whose library content no longer
+        # matches its own recorded size (still declaring the original,
+        # larger size) would otherwise be published unverified, and a
+        # later product comparison would silently analyze corrupted
+        # content instead of failing here where the problem can be named
+        # (Codex review, fresh evidence).
+        product = _make_product(tmp_path)
+        archive = tmp_path / "baseline.tar.zst"
+        pack_product_baseline(product, archive)
+
+        tampered = _rewrite_archive_member(
+            tmp_path, archive, "lib/libb.so", b"TRUNCATED"
+        )
+        dest = tmp_path / "dest"
+        with pytest.raises(SnapshotError, match="size mismatch"):
+            unpack_product_baseline(tampered, dest)
+        assert not dest.exists()
+
+    def test_unpack_rejects_tampered_library_content_checksum_mismatch(
+        self, tmp_path: Path
+    ) -> None:
+        # Same-length corruption -- the size check alone wouldn't catch
+        # this; only the sha256 comparison does.
+        product = _make_product(tmp_path)
+        archive = tmp_path / "baseline.tar.zst"
+        pack_product_baseline(product, archive)
+
+        original_len = len(b"ELF-B" * 300)
+        corrupted = b"X" * original_len
+        tampered = _rewrite_archive_member(tmp_path, archive, "lib/libb.so", corrupted)
+        dest = tmp_path / "dest"
+        with pytest.raises(SnapshotError, match="checksum mismatch"):
+            unpack_product_baseline(tampered, dest)
+        assert not dest.exists()
 
     def test_unpack_leaves_no_staging_directory_behind_on_failure(
         self, tmp_path: Path

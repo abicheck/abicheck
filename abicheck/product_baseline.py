@@ -1066,6 +1066,41 @@ def unpack_product_baseline(
                     f"path {lib.path!r} (absolute, escapes the product "
                     "root, or is not an existing file)"
                 )
+            # This check only confirmed the path *exists*, not that its
+            # bytes are what the manifest claims -- a stale or tampered
+            # archive whose actual library content no longer matches its
+            # own recorded size/sha256 (e.g. a truncated libfoo.so with
+            # the original, larger values still on the manifest) would
+            # otherwise be published unverified, and a later product
+            # comparison would silently analyze corrupted content instead
+            # of failing here where the problem can be named (Codex
+            # review, fresh evidence). Mirrors pack_product_baseline()'s
+            # own hashing (`_add_member`) -- read once, in chunks, not
+            # loaded whole into memory. A recorded size/sha256 of 0/""
+            # (the `_safe_int`/from_dict() default for a field a hand-
+            # edited or older manifest never set) has nothing to verify
+            # against and is skipped, matching this codebase's existing
+            # "don't abort on missing, only on wrong" defensive-parsing
+            # convention -- an explicitly wrong value still fails closed.
+            actual_size = lib_resolved.stat().st_size
+            if lib.size and actual_size != lib.size:
+                raise SnapshotError(
+                    f"{archive_path}: library {lib.path!r} size mismatch "
+                    f"(manifest declares {lib.size} bytes, extracted "
+                    f"content is {actual_size} bytes) -- archive may be "
+                    "corrupt or tampered with"
+                )
+            if lib.sha256:
+                hasher = hashlib.sha256()
+                with open(lib_resolved, "rb") as fh:
+                    for chunk in iter(lambda: fh.read(1 << 20), b""):
+                        hasher.update(chunk)
+                if hasher.hexdigest() != lib.sha256:
+                    raise SnapshotError(
+                        f"{archive_path}: library {lib.path!r} checksum "
+                        "mismatch -- archive may be corrupt or tampered "
+                        "with"
+                    )
     except BaseException:
         shutil.rmtree(staging, ignore_errors=True)
         raise
@@ -1493,6 +1528,54 @@ def compare_product_directories(
         raise SnapshotError(f"product directory is not a directory: {new_root}")
     old_roots_spec = old_header_roots if old_header_roots is not None else header_roots
     new_roots_spec = new_header_roots if new_header_roots is not None else header_roots
+
+    def _validate_header_roots_spec(root: Path, spec: HeaderRootsSpec) -> None:
+        """Validate every root declared in *spec* against *root*, independent
+        of whether any library pair below actually references it.
+
+        `_resolved_headers` below performs the identical containment check,
+        but only for the roots a *matched* library pair actually asks for --
+        when discovery produces zero pairs (two empty directories, or every
+        library left unmatched) that loop never runs at all, so a
+        structurally invalid root (absolute, escaping, or a bare string
+        typo) was silently accepted instead of raising the documented
+        `SnapshotError`, and the comparison could return `NO_CHANGE` for a
+        caller/config error rather than rejecting it (Codex review, fresh
+        evidence). Rejects the same way for a mapping key naming a library
+        that never ends up paired either, which `_resolved_headers`'s own
+        per-pair lookup can never reach.
+        """
+        if isinstance(spec, str):
+            raise SnapshotError(
+                "header roots must be a sequence of paths or a per-library "
+                f"mapping, not a bare string: {spec!r}"
+            )
+        if isinstance(spec, Mapping):
+            all_roots: list[tuple[str, str]] = []
+            for library_key, value in spec.items():
+                if isinstance(value, str):
+                    raise SnapshotError(
+                        "per-library header roots must be a sequence of "
+                        f"paths, not a bare string, for library "
+                        f"{library_key!r}: {value!r}"
+                    )
+                all_roots.extend((library_key, rel) for rel in value)
+        else:
+            all_roots = [(None, rel) for rel in spec]  # type: ignore[misc]
+        for library_key, rel in all_roots:
+            if _resolve_under_root(root, rel) is None:
+                context = (
+                    f" for library {library_key!r}" if library_key is not None else ""
+                )
+                raise SnapshotError(
+                    f"header root {rel!r}{context} is absolute or escapes "
+                    f"the product directory ({root}) -- header roots must "
+                    "be relative paths contained within the product "
+                    "directory."
+                )
+
+    _validate_header_roots_spec(old_root, old_roots_spec)
+    _validate_header_roots_spec(new_root, new_roots_spec)
 
     old_map = _discover_library_map(old_root, include_private=include_private)
     new_map = _discover_library_map(new_root, include_private=include_private)

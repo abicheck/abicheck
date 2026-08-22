@@ -499,6 +499,50 @@ class TestCompareProductDirectoriesHeaderRootsContainment:
         assert calls[0]["old_headers"] == []
         assert calls[0]["new_headers"] == []
 
+    def test_invalid_header_root_is_rejected_with_no_matched_pairs(
+        self, tmp_path: Path
+    ) -> None:
+        # _resolved_headers' own containment check only runs for a root a
+        # *matched* library pair actually asks for -- two empty
+        # directories (or two directories with no library in common) never
+        # reach that loop at all, so an absolute/escaping header root was
+        # previously silently accepted and the comparison returned
+        # NO_CHANGE instead of the documented SnapshotError (Codex review,
+        # fresh evidence). No mocking needed: this must be rejected before
+        # any discovery/compare machinery runs.
+        from abicheck.product_baseline import compare_product_directories
+
+        old_dir = tmp_path / "old"
+        new_dir = tmp_path / "new"
+        old_dir.mkdir()
+        new_dir.mkdir()
+
+        with pytest.raises(SnapshotError, match="absolute or escapes"):
+            compare_product_directories(old_dir, new_dir, header_roots=["/etc"])
+
+    def test_invalid_root_for_an_unmatched_mapping_key_is_rejected(
+        self, tmp_path: Path
+    ) -> None:
+        # A per-library header_roots mapping key naming a library that
+        # never ends up in `pairs` (misspelled, or genuinely absent from
+        # this comparison) can still declare an invalid root --
+        # _resolved_headers' per-pair lookup can never reach that key, so
+        # only validating the whole spec up front catches it (Codex
+        # review, fresh evidence).
+        from abicheck.product_baseline import compare_product_directories
+
+        old_dir = tmp_path / "old"
+        new_dir = tmp_path / "new"
+        old_dir.mkdir()
+        new_dir.mkdir()
+
+        with pytest.raises(SnapshotError, match="absolute or escapes"):
+            compare_product_directories(
+                old_dir,
+                new_dir,
+                header_roots={"never/matched.so": ["/etc"]},
+            )
+
 
 class TestCompareProductDirectoriesStandaloneRemoval:
     def test_reports_a_library_removed_with_no_surviving_consumer(
