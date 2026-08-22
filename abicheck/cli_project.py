@@ -104,7 +104,7 @@ def project_baseline_group() -> None:
     whatever else sits alongside them — debug info, installed headers) —
     one release asset for a multi-library product instead of one per-library
     ``dump`` snapshot each. Unpacking it reproduces a directory
-    ``compare``/``compare-release`` can run against directly, so a
+    ``compare``'s directory-mode operand can run against directly, so a
     multi-library product's whole ABI surface — including cross-library
     (bundle-level, ADR-023) breakage a per-library ``scan --against`` a
     header/DWARF snapshot cannot see at all — is checked in one invocation.
@@ -754,8 +754,9 @@ def project_baseline_unpack_cmd(
     DEST_DIR, and report its manifest.
 
     DEST_DIR must not already exist, or must be empty. The result is an
-    ordinary directory — pass it directly to ``compare``/``compare-release
-    -H <header-root>`` for a bundle-aware, whole-product comparison.
+    ordinary directory — pass it directly to
+    ``abicheck compare <old_dir> <new_dir> -H <header-root>`` for a
+    bundle-aware, whole-product comparison.
 
     \b
     Exit codes:

@@ -34,16 +34,17 @@ else ships alongside it — debug info, headers) into one deterministic
 ``.tar.zst`` file, with a small JSON manifest (:class:`ProductBaselineManifest`)
 recording which archived files are libraries and which relative directories
 hold the product's public headers. :func:`unpack_product_baseline` reverses
-it, reproducing a directory ``compare``/``compare-release`` can run against
+it, reproducing a directory that ``abicheck compare``'s directory-mode
+operand (bundle analysis, ADR-023, on by default there) can run against
 directly — covering every library, and every cross-library edge between
 them, in one invocation instead of one per library.
 
 This is a storage/transport format only: it packs and unpacks a directory
-tree. It does not itself invoke ``compare``/``compare-release`` — see
+tree. It does not itself invoke ``compare`` — see
 ``abicheck project baseline pack``/``unpack`` (:mod:`abicheck.cli_project`)
 for the CLI, and a project's own CI workflow for wiring the unpacked
-directory into ``compare-release`` in place of a per-library ``scan
---against`` step.
+directory into ``compare <old_dir> <new_dir>`` in place of a per-library
+``scan --against`` step.
 """
 
 from __future__ import annotations
@@ -130,7 +131,7 @@ class ProductBaselineManifest:
     product: str = ""
     libraries: tuple[LibraryEntry, ...] = ()
     #: Header roots, relative to the product root, that a follow-on
-    #: ``compare``/``compare-release -H`` invocation should pass — recorded
+    #: ``compare -H`` invocation should pass — recorded
     #: here so a single archive carries both sides of the multilib
     #: comparison's own header contract, rather than requiring the caller
     #: to remember (or re-derive) it separately per product.
@@ -339,8 +340,8 @@ def pack_product_baseline(
 
     *header_roots* names the product's public-header directories, relative
     to *source_dir* — recorded in the manifest so a later
-    ``compare``/``compare-release -H`` invocation against the unpacked
-    archive doesn't have to rediscover them. Each must resolve under
+    ``compare -H`` invocation against the unpacked archive doesn't have to
+    rediscover them. Each must resolve under
     *source_dir* and exist; raises :class:`SnapshotError` otherwise, the
     same way an escaping/missing header root fails on write elsewhere in
     this codebase (see ``buildsource.baseline_publish``'s identical guard).
@@ -392,6 +393,23 @@ def pack_product_baseline(
     if not paths:
         raise SnapshotError(
             f"no files found under {source_path} to pack into a product baseline"
+        )
+
+    # MANIFEST_MEMBER_NAME is reserved: a real source file at that path
+    # would collide with the generated manifest member added after every
+    # other file, and the generated one -- added last -- would silently
+    # win on extraction (tarfile writes members in order; a later member
+    # of the same name overwrites an earlier one), replacing the source
+    # file's real content with the archive's own manifest.
+    collision = next(
+        (p for p in paths if _relative_posix(p, source_path) == MANIFEST_MEMBER_NAME),
+        None,
+    )
+    if collision is not None:
+        raise SnapshotError(
+            f"{collision} collides with the reserved product baseline manifest "
+            f"member name ({MANIFEST_MEMBER_NAME!r}) -- rename or remove it "
+            "before packing"
         )
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -471,7 +489,22 @@ def unpack_product_baseline(
         )
     )
     try:
-        TarExtractor().extract(archive_path, staging)
+        try:
+            TarExtractor().extract(archive_path, staging)
+        except SnapshotError:
+            raise
+        except Exception as exc:
+            # TarExtractor.extract() can raise ExtractionSecurityError (a
+            # sibling AbicheckError, not a SnapshotError -- a malicious
+            # archive triggering the symlink-escape/path-traversal/device
+            # checks), tarfile.TarError (malformed tar), or a zstandard
+            # decompression error (corrupt/truncated .tar.zst) -- none of
+            # which the CLI's `except SnapshotError` catches, so any of
+            # them would otherwise surface as an unhandled traceback
+            # instead of the documented exit-64 usage error.
+            raise SnapshotError(
+                f"{archive_path}: failed to extract product baseline archive: {exc}"
+            ) from exc
 
         manifest_path = staging / MANIFEST_MEMBER_NAME
         if not manifest_path.is_file():

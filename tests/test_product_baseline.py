@@ -174,6 +174,17 @@ class TestPackProductBaseline:
         with pytest.raises(SnapshotError, match="escapes"):
             pack_product_baseline(product, tmp_path / "b.tar.zst")
 
+    def test_pack_rejects_source_file_colliding_with_manifest_name(
+        self, tmp_path: Path
+    ) -> None:
+        # A real source file at the reserved manifest path would otherwise
+        # be silently overwritten on extraction by the generated manifest
+        # member, added last (Codex review, fresh evidence).
+        product = _make_product(tmp_path)
+        (product / MANIFEST_MEMBER_NAME).write_text('{"not": "the real manifest"}\n')
+        with pytest.raises(SnapshotError, match="reserved product baseline manifest"):
+            pack_product_baseline(product, tmp_path / "b.tar.zst")
+
     def test_pack_repeated_invocation_into_source_dir_does_not_grow(
         self, tmp_path: Path
     ) -> None:
@@ -294,6 +305,18 @@ class TestUnpackProductBaseline:
         plain_tar = self._plain_tar_zst(tmp_path)
         with pytest.raises(SnapshotError, match=MANIFEST_MEMBER_NAME):
             unpack_product_baseline(plain_tar, tmp_path / "dest")
+
+    def test_unpack_translates_corrupt_zstd_data_to_snapshot_error(
+        self, tmp_path: Path
+    ) -> None:
+        # A corrupt/truncated .tar.zst must raise SnapshotError (which the
+        # CLI catches and reports as exit 64), not an unhandled
+        # zstandard.ZstdError escaping TarExtractor.extract() (Codex
+        # review, fresh evidence).
+        bogus = tmp_path / "corrupt.tar.zst"
+        bogus.write_bytes(b"\x28\xb5\x2f\xfd" + b"not really zstd content")
+        with pytest.raises(SnapshotError, match="failed to extract"):
+            unpack_product_baseline(bogus, tmp_path / "dest")
 
     def test_unpack_rejects_newer_major_schema(self, tmp_path: Path) -> None:
         product = _make_product(tmp_path)
