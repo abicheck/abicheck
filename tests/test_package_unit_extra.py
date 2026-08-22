@@ -242,25 +242,39 @@ class TestZstFallbackToExternalCommand:
     """Fallback to system zstd command (lines 480-490)."""
 
     @patch("abicheck.package.TarExtractor._safe_extract")
-    @patch("subprocess.run")
+    @patch("subprocess.Popen")
     @patch("shutil.which", return_value="/usr/bin/zstd")
     def test_uses_subprocess_when_no_python_zstandard(
-        self, mock_which, mock_run, mock_safe_extract, tmp_path
+        self, mock_which, mock_popen, mock_safe_extract, tmp_path
     ):
+        # Streamed via Popen + a chunked read loop, not subprocess.run(),
+        # since the decompression-bomb fix needs to bound total output
+        # size incrementally rather than let the CLI write its own
+        # decoded output straight to disk unbounded (Codex review, fresh
+        # evidence) -- see TestTarExtractorZstDecompressionBomb in
+        # test_package.py for the real end-to-end bomb-rejection coverage.
         import sys
 
         zst_path = tmp_path / "test.tar.zst"
         zst_path.touch()
+
+        proc = MagicMock()
+        proc.stdout = BytesIO(b"")
+        proc.returncode = 0
+        proc.communicate.return_value = (b"", b"")
+        proc.poll.return_value = 0
+        mock_popen.return_value = proc
 
         # Make zstandard import fail
         with patch.dict(sys.modules, {"zstandard": None}):
             with patch("builtins.__import__", side_effect=_import_blocker("zstandard")):
                 CondaExtractor._extract_zst_tar(zst_path, tmp_path)
 
-        mock_run.assert_called_once()
-        args = mock_run.call_args
+        mock_popen.assert_called_once()
+        args = mock_popen.call_args
         assert args[0][0][0] == "/usr/bin/zstd"
-        assert "-d" in args[0][0]
+        assert "-dc" in args[0][0]
+        assert any(a.startswith("--memory=") for a in args[0][0])
         mock_safe_extract.assert_called_once()
 
 

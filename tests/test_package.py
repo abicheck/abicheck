@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import io
+import shutil
 import struct
 import sys
 import tarfile
@@ -2460,6 +2461,75 @@ class TestTarExtractorZstDecompressionBomb:
         TarExtractor()._safe_extract_zst_tar(zst_path, out)
         assert (out / "lib" / "libfoo.so").read_bytes() == b"data"
 
+    def test_external_zstd_fallback_also_rejects_a_bomb(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The zstandard-module branch above got the size bound; the
+        # `zstd` CLI subprocess fallback (reachable whenever the
+        # always-installed zstandard package is somehow absent) used the
+        # CLI's own unbounded `-d ... -o ...` form, writing its decoded
+        # output straight to disk with no size check at all (Codex
+        # review, fresh evidence).
+        zstandard = pytest.importorskip("zstandard")
+        if shutil.which("zstd") is None:
+            pytest.skip("real zstd CLI not available")
+        monkeypatch.setenv("_ABICHECK_TAR_ZST_MAX_DECODED_BYTES", "1000")
+
+        tar_buf = io.BytesIO()
+        with tarfile.open(fileobj=tar_buf, mode="w") as tf:
+            data = b"\x00" * (10 * 1024 * 1024)
+            info = tarfile.TarInfo(name="bigfile.bin")
+            info.size = len(data)
+            tf.addfile(info, io.BytesIO(data))
+        cctx = zstandard.ZstdCompressor(level=19)
+        compressed = cctx.compress(tar_buf.getvalue())
+        assert len(compressed) < 1000
+
+        zst_path = tmp_path / "bomb.tar.zst"
+        zst_path.write_bytes(compressed)
+        out = tmp_path / "output"
+        out.mkdir()
+
+        from abicheck.errors import SnapshotError
+
+        with mock.patch("builtins.__import__", side_effect=_zstandard_import_blocker):
+            with pytest.raises(SnapshotError, match="safety limit"):
+                TarExtractor()._safe_extract_zst_tar(zst_path, out)
+
+    def test_external_zstd_fallback_still_extracts_an_ordinary_archive(
+        self, tmp_path: Path
+    ) -> None:
+        pytest.importorskip("zstandard")
+        if shutil.which("zstd") is None:
+            pytest.skip("real zstd CLI not available")
+        import zstandard
+
+        tar_buf = io.BytesIO()
+        with tarfile.open(fileobj=tar_buf, mode="w") as tf:
+            info = tarfile.TarInfo(name="lib/libfoo.so")
+            info.size = 4
+            tf.addfile(info, io.BytesIO(b"data"))
+        cctx = zstandard.ZstdCompressor()
+        zst_path = tmp_path / "ok.tar.zst"
+        zst_path.write_bytes(cctx.compress(tar_buf.getvalue()))
+        out = tmp_path / "output"
+        out.mkdir()
+
+        with mock.patch("builtins.__import__", side_effect=_zstandard_import_blocker):
+            TarExtractor()._safe_extract_zst_tar(zst_path, out)
+        assert (out / "lib" / "libfoo.so").read_bytes() == b"data"
+
+
+_real_import = __import__
+
+
+def _zstandard_import_blocker(name, *args, **kwargs):
+    """__import__ side_effect forcing the CLI-fallback branch of
+    _safe_extract_zst_tar() to exercise the real `zstd` binary."""
+    if name == "zstandard":
+        raise ImportError("Mocked: no module named 'zstandard'")
+    return _real_import(name, *args, **kwargs)
+
 
 # ── ELF detection extended ───────────────────────────────────────────────
 
@@ -3086,18 +3156,32 @@ class TestDebExtractorExtended:
                 raise ImportError
             return real_import(name, *args, **kwargs)
 
+        # Streamed via Popen + stdout, not a `-o <path>` CLI-written file,
+        # since the decompression-bomb fix needs to bound total output
+        # size incrementally rather than let the CLI write straight to
+        # disk unbounded (Codex review, fresh evidence) -- this test's
+        # own job (the tar path lands in staging, not next to the input)
+        # is unaffected by that rewrite.
+        proc = mock.MagicMock()
+        proc.stdout = io.BytesIO(b"")
+        proc.returncode = 0
+        proc.communicate.return_value = (b"", b"")
+        proc.poll.return_value = 0
+
         with mock.patch("builtins.__import__", side_effect=fake_import):
             with mock.patch("abicheck.package.shutil.which", return_value="/usr/bin/zstd"):
-                with mock.patch("abicheck.package.subprocess.run") as run_zstd:
+                with mock.patch(
+                    "abicheck.package.subprocess.Popen", return_value=proc
+                ) as popen_zstd:
                     with mock.patch("abicheck.package.TarExtractor._safe_extract") as safe_extract:
                         TarExtractor._safe_extract_zst_tar(zst_path, target)
 
-        cmd = run_zstd.call_args.args[0]
-        output_path = Path(cmd[cmd.index("-o") + 1])
+        cmd = popen_zstd.call_args.args[0]
+        assert "-o" not in cmd
+        assert "-dc" in cmd
         tar_path = safe_extract.call_args.args[0]
-        assert output_path == tar_path
-        assert output_path.parent.parent == target
-        assert not output_path.parent.exists()
+        assert tar_path.parent.parent == target
+        assert not tar_path.parent.exists()
         assert safe_extract.call_args.args[1] == target
         assert sibling_tar.read_text() == "do not touch"
 

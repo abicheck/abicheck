@@ -154,6 +154,17 @@ def _max_decompressed_tar_bytes() -> int:
     return DEFAULT_MAX_DECOMPRESSED_TAR_BYTES
 
 
+#: The `zstd` CLI's own `--memory=` window-size bound (used only by the
+#: external-binary fallback below) rejects any value above 2048 MiB as
+#: "out of bound" (verified against a real `zstd` 1.5.5 binary) --
+#: independent of, and much smaller than, DEFAULT_MAX_DECOMPRESSED_TAR_BYTES
+#: above, which bounds total decoded *output* size via this module's own
+#: streaming byte count, not the decoder's working-memory window. Mirrors
+#: snapshot_io.py's identical `_ZSTD_MAX_WINDOW_LOG = 31` ceiling for the
+#: zstandard-module decoder path.
+_ZSTD_CLI_MAX_MEMORY_MB = 2048
+
+
 class TarExtractor:
     """Extract tar, tar.gz, tar.xz, tar.bz2, and .tgz archives."""
 
@@ -260,12 +271,61 @@ class TarExtractor:
                         "Cannot extract .tar.zst: install 'zstandard' Python package "
                         "or 'zstd' command-line tool."
                     )
-                subprocess.run(
-                    [zstd, "-d", "-f", str(zst_path), "-o", str(tar_path)],
-                    check=True,
-                    capture_output=True,
-                    timeout=120,
+                # Streamed via a pipe and bounded the same way as the
+                # zstandard-module branch above -- the earlier
+                # `zstd -d -f ... -o ...` form let the CLI write its own
+                # decoded output straight to disk, unbounded, so only the
+                # Python-module decoder path got the size limit even
+                # though both are reachable in production (this fallback
+                # runs whenever the always-installed `zstandard` package
+                # is somehow absent) (Codex review, fresh evidence).
+                # `--memory=` bounds the CLI's own decompression window --
+                # unrelated to max_decoded_bytes (total output size,
+                # enforced by the streaming loop below); see
+                # _ZSTD_CLI_MAX_MEMORY_MB's own docstring for why these
+                # two bounds can't share a value.
+                max_decoded_bytes = _max_decompressed_tar_bytes()
+                proc = subprocess.Popen(
+                    [
+                        zstd,
+                        "-dc",
+                        f"--memory={_ZSTD_CLI_MAX_MEMORY_MB}MB",
+                        str(zst_path),
+                    ],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
                 )
+                assert proc.stdout is not None
+                total_bytes = 0
+                try:
+                    with open(tar_path, "wb") as out:
+                        while True:
+                            chunk = proc.stdout.read(1024 * 1024)
+                            if not chunk:
+                                break
+                            total_bytes += len(chunk)
+                            if total_bytes > max_decoded_bytes:
+                                proc.kill()
+                                proc.wait(timeout=120)
+                                raise SnapshotError(
+                                    f"{zst_path}: decompressed payload "
+                                    f"exceeds the {max_decoded_bytes} byte "
+                                    "safety limit -- refusing to continue "
+                                    "decompressing (possible decompression "
+                                    f"bomb; override via "
+                                    f"{_MAX_DECOMPRESSED_TAR_BYTES_ENV})"
+                                )
+                            out.write(chunk)
+                    _, stderr = proc.communicate(timeout=120)
+                    if proc.returncode != 0:
+                        raise SnapshotError(
+                            f"{zst_path}: 'zstd' decompression failed: "
+                            f"{stderr.decode('utf-8', errors='replace')}"
+                        )
+                finally:
+                    if proc.poll() is None:
+                        proc.kill()
+                        proc.wait(timeout=120)
             TarExtractor._safe_extract(tar_path, target_dir)
         finally:
             shutil.rmtree(staging, ignore_errors=True)

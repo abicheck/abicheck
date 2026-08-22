@@ -103,12 +103,9 @@ _LIBRARY_SUFFIXES = (".so", ".dylib", ".dll")
 
 
 #: A versioned SONAME real file, e.g. "libfoo.so.1.2.3" -- no suffix in
-#: _LIBRARY_SUFFIXES matches it, since ".3" isn't a recognized library
-#: extension. Anchored at the end and requires every dotted segment after
-#: ".so" to be purely numeric, so a conventional split-debug companion
-#: like "libfoo.so.1.debug" -- which a real ".so."-substring check
-#: misclassifies as a library, since "debug" isn't checked at all -- is
-#: correctly excluded (Codex review, fresh evidence).
+#: _LIBRARY_SUFFIXES matches it. Anchored at the end, every dotted segment
+#: after ".so" must be purely numeric, so a split-debug companion like
+#: "libfoo.so.1.debug" is correctly excluded (Codex review, fresh evidence).
 _VERSIONED_SONAME = re.compile(r"\.so(\.\d+)+$", re.IGNORECASE)
 
 
@@ -224,17 +221,11 @@ def _is_library_path(path: Path) -> bool:
     )
     if not is_library:
         return False
-    # A GNU ld INPUT()/GROUP() linker script (`libfoo.so -> INPUT(libfoo.
-    # so.1)`) is library-suffix-named but carries no binary content.
-    # `_discover_library_map` already excluded it separately -- but
-    # `_add_member` (packing) called this predicate directly with no
-    # equivalent exclusion, so packing and comparison ended up with
-    # contradictory inventories for the identical tree (Codex review,
-    # fresh evidence). Centralized here, matching this function's own
-    # "one predicate, no drift" docstring promise. `resolve_linker_script`
-    # itself guards against misclassifying real binary content whose
-    # bytes happen to contain linker-script-shaped text (see its own
-    # docstring) -- no need to duplicate that check here.
+    # A GNU ld INPUT()/GROUP() linker script is library-suffix-named but
+    # carries no binary content -- centralized here so packing and
+    # comparison share one exclusion instead of drifting (Codex review,
+    # fresh evidence). `resolve_linker_script` itself guards against
+    # misclassifying real binary content (see its own docstring).
     _, is_linker_script = resolve_linker_script(path)
     return not is_linker_script
 
@@ -654,15 +645,11 @@ def _add_member(
         return None
 
     if info.islnk():
-        # gettarinfo() converts a second (and later) path sharing an
-        # inode with an already-archived one into a hardlink reference
-        # (TarFile tracks (dev, ino) -> arcname internally when
-        # dereference=False, the default this module uses) -- a member
-        # carrying no data of its own, just info.linkname pointing at the
-        # first archived path. Falling through to the "not info.isreg()"
-        # guard below would silently drop it from the archive entirely
-        # (isreg() is False for a hardlink member too), losing the file on
-        # round-trip rather than merely losing its hardlink-ness.
+        # gettarinfo() converts a second path sharing an inode with an
+        # already-archived one into a hardlink reference -- a member
+        # carrying no data of its own. Falling through to the
+        # "not info.isreg()" guard below would silently drop it from the
+        # archive entirely, losing the file on round-trip.
         #
         # A hardlink member's own info.size is 0, so it cannot supply a
         # LibraryEntry's size the way the first-archived copy's does --
@@ -795,23 +782,18 @@ def pack_product_baseline(
             )
         resolved_header_roots.append(Path(rel).as_posix())
 
-    # Created *before* discovery, not just before the write below: doing
-    # so only after discovery ran would make a first pack and a second
-    # (already-created dir) disagree on file_count and archive bytes
-    # (Codex review, fresh evidence).
-    #
-    # Captured *before* the mkdir call below: an originally-empty
-    # SOURCE_DIR whose only content is this scaffold chain must still
-    # reject as "nothing to pack" (Codex review, fresh evidence).
-    # Two layered aliasing concerns, resolved once and reused below:
-    #  - OUTPUT itself may be a symlink -- handled by its own lexical
-    #    name, not its target (Codex review, fresh evidence).
-    #  - SOURCE_DIR itself may be a symlink alias with OUTPUT spelled
-    #    through the real directory -- a lexical comparison then shares
-    #    no common prefix, so the scaffold reads as genuine content and
-    #    bypasses the rejection (Codex review, fresh evidence, second
-    #    round). Resolving *only* OUTPUT's parent (and SOURCE_DIR in
-    #    full) fixes both at once, while OUTPUT's own leaf stays lexical.
+    # Created *before* discovery: doing so only after would make a first
+    # pack and a second (already-created dir) disagree on file_count and
+    # archive bytes (Codex review, fresh evidence). Also captured before
+    # the mkdir call below, for the same "nothing to pack" reasoning.
+    # Two aliasing concerns, resolved once and reused below: OUTPUT
+    # itself may be a symlink (handled by its own lexical name, not its
+    # target), and SOURCE_DIR itself may be a symlink alias with OUTPUT
+    # spelled through the real directory (a lexical comparison then
+    # shares no common prefix, bypassing rejection -- Codex review,
+    # fresh evidence, both rounds). Resolving *only* OUTPUT's parent
+    # (and SOURCE_DIR in full) fixes both, while OUTPUT's leaf stays
+    # lexical.
     source_real = source_path.resolve()
     try:
         output_parent_real = output_path.parent.resolve()
@@ -885,21 +867,13 @@ def pack_product_baseline(
     output_parent_chain = _output_parent_chain(source_path, leaf_parent_lexical)
     archived_empty_dirs = [d for d in empty_dirs if d not in output_parent_chain]
 
-    # MANIFEST_MEMBER_NAME is reserved: a real source entry at that path
-    # would collide with the generated manifest member added after every
-    # other entry, and the generated one -- added last -- would silently
-    # win on extraction (tarfile writes members in order; a later member
-    # of the same name overwrites an earlier one), replacing the source
-    # entry's real content with the archive's own manifest. This must
-    # reject a *directory* at the reserved path too, not just a file: the
-    # earlier file-only check missed both an empty directory (never in
-    # `paths`, which holds only files/symlinks) and a non-empty one
-    # (whose own children are in `paths`, prefixed by the reserved name,
-    # but the directory entry itself never is) -- either shape lets
-    # packing succeed while writing a tar that requires the same path to
-    # be both a directory (for the source entries) and a regular file
-    # (for the generated manifest, added last), which the paired unpack
-    # then fails on with an unhandled IsADirectoryError (Codex review,
+    # MANIFEST_MEMBER_NAME is reserved: a real source entry there would
+    # collide with the generated manifest member, added last, silently
+    # winning on extraction. Must reject a *directory* at the reserved
+    # path too, not just a file: an empty one is never in `paths`, and a
+    # non-empty one's own directory entry never is either, only its
+    # children -- either shape let packing write a tar requiring the
+    # same path to be both a directory and a regular file (Codex review,
     # fresh evidence).
     manifest_child_prefix = MANIFEST_MEMBER_NAME + "/"
     collision = next(
@@ -936,6 +910,34 @@ def pack_product_baseline(
             f"member name ({MANIFEST_MEMBER_NAME!r}) -- rename or remove it "
             "before packing"
         )
+
+    # A case-sensitive host can archive two distinct member names (files,
+    # directories, or the manifest) that fold to the same identity on a
+    # case-insensitive Windows filesystem -- extraction there overwrites
+    # one, failing the manifest's own checksum for it (Codex review,
+    # fresh evidence). Checked per path *component* (every ancestor
+    # prefix), not just full leaf names: `Lib/a.so` vs `lib/b.so` have
+    # distinct full arcnames but Windows still unifies `Lib`/`lib` into
+    # one physical directory.
+    all_arcnames = [_relative_posix(p, source_path) for p in paths]
+    all_arcnames.extend(_relative_posix(d, source_path) for d in archived_empty_dirs)
+    all_arcnames.append(MANIFEST_MEMBER_NAME)
+    case_folded: dict[str, str] = {}
+    for arcname in all_arcnames:
+        parts = arcname.split("/")
+        for depth in range(1, len(parts) + 1):
+            prefix = "/".join(parts[:depth])
+            folded = prefix.casefold()
+            prior = case_folded.get(folded)
+            if prior is not None and prior != prefix:
+                _cleanup_output_scaffold_dirs()
+                raise SnapshotError(
+                    f"{prefix!r} collides with {prior!r} once case-folded "
+                    "-- the archive could not be safely unpacked on a "
+                    "case-insensitive filesystem (e.g. Windows); rename "
+                    "one of them before packing"
+                )
+            case_folded[folded] = prefix
 
     # Resolve the compressor before mkstemp() hands out an open descriptor:
     # an invalid zstd_level (a public parameter of this function) must fail

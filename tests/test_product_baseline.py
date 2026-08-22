@@ -254,17 +254,12 @@ class TestPackProductBaseline:
     def test_pack_does_not_classify_a_linker_script_as_a_library(
         self, tmp_path: Path
     ) -> None:
-        # A GNU ld INPUT()/GROUP() script (the conventional
-        # `libfoo.so -> INPUT(libfoo.so.1)` SDK-install pattern) is
-        # library-suffix-named but carries no binary content of its own.
-        # _discover_library_map already excludes it from comparison, but
-        # _add_member (this packing path) called _is_library_path directly
-        # with no equivalent exclusion, so the persisted manifest
-        # advertised the script as its own LibraryEntry -- packing and
-        # comparison ended up with contradictory inventories for the
-        # identical tree (Codex review, fresh evidence). The script itself
-        # is still archived as a regular file (round-tripping correctly),
-        # just not double-counted as a library.
+        # A GNU ld INPUT()/GROUP() script is library-suffix-named but
+        # carries no binary content. _add_member (packing) used to call
+        # _is_library_path with no exclusion, so the manifest advertised
+        # it as its own LibraryEntry -- inconsistent with comparison's
+        # own exclusion (Codex review, fresh evidence). Still archived
+        # as a regular file, just not double-counted as a library.
         from tests.test_package import _make_minimal_elf_so
 
         product = _make_product(tmp_path)
@@ -283,11 +278,8 @@ class TestPackProductBaseline:
         # over a file's first 8KiB, with no check of its own for the
         # absence of binary magic -- a real ELF/PE/Mach-O binary whose
         # content happens to contain the literal text "INPUT("/"GROUP("/
-        # "OUTPUT_FORMAT(" (embedded strings, symbol names, or plain
-        # coincidence) matched too, even though it's a genuine library,
-        # not a linker script -- wrongly excluding it from packing (and,
-        # via the same shared _is_library_path predicate, from
-        # comparison) (Codex review, fresh evidence).
+        # "OUTPUT_FORMAT(" matched too, even though it's a genuine
+        # library, wrongly excluding it (Codex review, fresh evidence).
         from tests.test_package import _make_minimal_elf_so
 
         product = _make_product(tmp_path)
@@ -671,6 +663,33 @@ class TestPackProductBaseline:
         product = _make_product(tmp_path)
         (product / "lib" / "name.").write_bytes(b"ELF")
         with pytest.raises(SnapshotError, match="stripping its trailing dot/space"):
+            pack_product_baseline(product, tmp_path / "b.tar.zst")
+
+    def test_pack_rejects_case_colliding_file_names(self, tmp_path: Path) -> None:
+        # Foo.dll/foo.dll are distinct on a case-sensitive host but
+        # unify on Windows extraction, overwriting one (Codex review,
+        # fresh evidence).
+        product = _make_product(tmp_path)
+        (product / "Foo.dll").write_bytes(b"MZ" + b"\x00" * 20)
+        (product / "foo.dll").write_bytes(b"MZ" + b"\x00" * 30)
+        with pytest.raises(SnapshotError, match="collides with"):
+            pack_product_baseline(product, tmp_path / "b.tar.zst")
+
+    def test_pack_rejects_case_colliding_directory_names(self, tmp_path: Path) -> None:
+        # `Lib/a.so` vs `lib/b.so` have distinct full arcnames, but
+        # Windows unifies `Lib`/`lib` into one directory (Codex review,
+        # fresh evidence).
+        product = _make_product(tmp_path)
+        (product / "Lib").mkdir()
+        (product / "lib" / "a.so").write_bytes(b"ELF")
+        (product / "Lib" / "b.so").write_bytes(b"ELF")
+        with pytest.raises(SnapshotError, match="collides with"):
+            pack_product_baseline(product, tmp_path / "b.tar.zst")
+
+    def test_pack_rejects_a_manifest_name_case_variant(self, tmp_path: Path) -> None:
+        product = _make_product(tmp_path)
+        (product / MANIFEST_MEMBER_NAME.upper()).write_bytes(b"not the manifest")
+        with pytest.raises(SnapshotError, match="collides with"):
             pack_product_baseline(product, tmp_path / "b.tar.zst")
 
     def test_pack_rejects_a_self_referential_symlink_loop(self, tmp_path: Path) -> None:
@@ -1120,19 +1139,10 @@ class TestUnpackProductBaseline:
     def test_unpack_rejects_a_blanked_sha256_even_with_a_correct_size(
         self, tmp_path: Path
     ) -> None:
-        # An earlier revision of the checksum-verification fix above used
-        # an `if lib.sha256:` truthiness guard to tell a hand-edited/older
-        # manifest missing the field apart from an explicit mismatch --
-        # but pack_product_baseline() always writes a real sha256 for
-        # every LibraryEntry, so an attacker who can edit the manifest
-        # (and correspondingly forge the size field, which is far easier
-        # to fake than a real digest) could trivially disable checksum
-        # verification entirely by blanking just this one field, while
-        # still shipping tampered library content of the same size
-        # (Codex review, fresh evidence). Isolated from a size mismatch
-        # here (size is left correct) so this specifically exercises the
-        # "missing digest is rejected outright" path, not the separate
-        # size check.
+        # An earlier revision used an `if lib.sha256:` truthiness guard,
+        # letting an attacker blank the field to disable checksum
+        # verification entirely (Codex review, fresh evidence). Size is
+        # left correct so this isolates the "missing digest" path.
         product = _make_product(tmp_path)
         archive = tmp_path / "baseline.tar.zst"
         pack_product_baseline(product, archive)
@@ -1192,17 +1202,13 @@ class TestUnpackProductBaseline:
     def test_unpack_rejects_an_undeclared_hardlink_library_alias(
         self, tmp_path: Path
     ) -> None:
-        # The extracted-inventory cross-check above compares by
-        # filesystem identity (dev, ino) -- correct for a symlink alias,
-        # which pack_product_baseline() deliberately never gives its own
-        # LibraryEntry. A hardlink alias is different: _add_member()'s
-        # own islnk() branch DOES give it a separate LibraryEntry when
-        # honestly packed, so an attacker who omits just the alias's
-        # entry (keeping the first-archived copy's) produces an
-        # undeclared hardlink alias that shares (dev, ino) with the
-        # still-declared library -- silently passing an identity-only
-        # check even though its own path was never verified (Codex
-        # review, fresh evidence).
+        # The extracted-inventory cross-check compares by identity --
+        # correct for a symlink alias, which never gets its own
+        # LibraryEntry. A hardlink alias does get one when honestly
+        # packed, so omitting just its entry shares (dev, ino) with the
+        # still-declared library, passing an identity-only check even
+        # though its own path was never verified (Codex review, fresh
+        # evidence).
         product = _make_product(tmp_path)
         first = product / "lib" / "libb.so"
         second = product / "lib" / "libb-alias.so"
