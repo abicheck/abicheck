@@ -1066,6 +1066,38 @@ def _shared_frontend_explicit(ctx: click.Context) -> bool:
     return True
 
 
+def sided_frontend_explicit(ctx: click.Context) -> bool:
+    """Did the command line state a *sided* ``--ast-frontend old=/new=`` value?
+
+    The inverse-shaped sibling of :func:`_shared_frontend_explicit`, for a
+    caller that needs to know whether a per-side override was given (as
+    opposed to a bare/``both=`` value) -- e.g. a directory/package compare,
+    which threads the both-sides compile context to its release fan-out but
+    has no per-library-pair-within-a-release meaning for "parse the old
+    library's headers with a different frontend than the new one" (see
+    ``cli_resolve._reject_compile_context_for_set_inputs``). Reads the same
+    raw ``(side, frontend)`` pairs off ``ctx.params`` that
+    :func:`_shared_frontend_explicit` does, for the same reason (normalize_
+    sided_options rewrites the command's own kwargs dict, not the context).
+
+    A command composing the unsided ``@compile_context_options()`` has a
+    plain string on ``ctx.params["header_backend"]``, never a pair list, so
+    this always answers ``False`` for it.
+    """
+    if (
+        ctx.get_parameter_source("header_backend")
+        != click.core.ParameterSource.COMMANDLINE
+    ):
+        return False
+    raw = ctx.params.get("header_backend")
+    if isinstance(raw, (tuple, list)):
+        return any(
+            isinstance(pair, tuple) and len(pair) == 2 and pair[0] != "both"
+            for pair in raw
+        )
+    return False
+
+
 def resolve_compile_context(
     ctx: click.Context,
     *,

@@ -297,6 +297,102 @@ class TestIntraDepRemoved:
         )
         assert len(with_extra.bundle_findings) <= len(result_default.bundle_findings)
 
+    def test_system_providers_suppresses_non_system_shaped_symbol(self) -> None:
+        """Regression: --bundle-system-providers must suppress a finding for
+        a non-system-shaped symbol (not std::-mangled, not in
+        DEFAULT_SYSTEM_SYMBOLS) once every one of the consumer's non-intra
+        DT_NEEDED edges is covered by the allow-list -- e.g. a vendor C API
+        symbol like MKL's mkl_custom_op imported from a soname the user
+        explicitly named via --bundle-system-providers. A prior revision
+        gated this allow-list match on the symbol *also* looking
+        system-shaped, which made --bundle-system-providers inert for
+        exactly this case.
+        """
+        new = _snapshot(
+            {
+                "libfoo.so": _meta(
+                    soname="libfoo.so.1",
+                    needed=["libmkl_core.so.2"],
+                    imports=["mkl_custom_op"],
+                ),
+            }
+        )
+        # Without the allow-list entry: real, reportable finding.
+        without_extra = compare_bundle(new, new, per_library_results=[])
+        assert any(
+            f.kind == ChangeKind.BUNDLE_INTRA_DEP_REMOVED
+            and f.symbol == "mkl_custom_op"
+            for f in without_extra.bundle_findings
+        )
+        # With the exact soname allow-listed: finding must be suppressed.
+        with_extra = compare_bundle(
+            new,
+            new,
+            per_library_results=[],
+            system_providers=["libmkl_core.so.2"],
+        )
+        assert not any(
+            f.kind == ChangeKind.BUNDLE_INTRA_DEP_REMOVED
+            for f in with_extra.bundle_findings
+        )
+
+    def test_system_providers_matches_versioned_soname_by_stem(self) -> None:
+        """A user-supplied allow-list entry without the real DT_NEEDED
+        version suffix (e.g. 'libmkl_core', no '.so.2') must still match
+        the real, versioned soname -- hand-typed allow-list entries rarely
+        carry the exact runtime version suffix.
+        """
+        new = _snapshot(
+            {
+                "libfoo.so": _meta(
+                    soname="libfoo.so.1",
+                    needed=["libmkl_core.so.2"],
+                    imports=["mkl_custom_op"],
+                ),
+            }
+        )
+        with_extra = compare_bundle(
+            new,
+            new,
+            per_library_results=[],
+            system_providers=["libmkl_core"],
+        )
+        assert not any(
+            f.kind == ChangeKind.BUNDLE_INTRA_DEP_REMOVED
+            for f in with_extra.bundle_findings
+        )
+
+    def test_system_providers_explicit_major_version_does_not_match_a_different_one(
+        self,
+    ) -> None:
+        """Regression (Codex review): an allow-list entry that itself names
+        a specific major version (`libvendor.so.1`) must require an exact
+        match -- it must NOT also match an unrelated major
+        (`libvendor.so.2`) via stem comparison. Stem fallback exists for a
+        version-*generic* entry (`libmkl_core`/`libmkl_core.so`, no numeric
+        major) matching any real runtime version, not for treating two
+        different, explicitly-pinned majors as interchangeable."""
+        new = _snapshot(
+            {
+                "libfoo.so": _meta(
+                    soname="libfoo.so.1",
+                    needed=["libvendor.so.2"],
+                    imports=["vendor_custom_op"],
+                ),
+            }
+        )
+        with_extra = compare_bundle(
+            new,
+            new,
+            per_library_results=[],
+            system_providers=["libvendor.so.1"],
+        )
+        assert any(
+            f.kind == ChangeKind.BUNDLE_INTRA_DEP_REMOVED
+            and f.symbol == "vendor_custom_op"
+            for f in with_extra.bundle_findings
+        )
+
     def test_fires_when_dt_needed_was_stripped(self) -> None:
         # Regression for the CodeRabbit feedback: previously the bundle
         # layer short-circuited when consumer.intra_needed was empty,
@@ -324,6 +420,212 @@ class TestIntraDepRemoved:
         assert len(intra_removed) == 1
         assert intra_removed[0].symbol == "onedal_internal_op"
         assert intra_removed[0].consumer_library == "libalgo.so"
+
+    def test_stripped_provider_still_fires_when_a_system_dep_remains(self) -> None:
+        """Regression (Codex review): the previous fix for
+        test_fires_when_dt_needed_was_stripped above only exercised a
+        consumer with an EMPTY DT_NEEDED after stripping -- but a real
+        binary almost always still needs libc. If the allow-list check
+        (--bundle-system-providers / DEFAULT_SYSTEM_PROVIDERS) were trusted
+        whenever every *remaining* DT_NEEDED happens to be a system
+        library, the canonical regression (provider AND its DT_NEEDED edge
+        both dropped) would be silently swallowed the moment the consumer
+        also links libc -- which is nearly always. The allow-list evidence
+        must not be trusted here: `onedal_internal_op` was provided by a
+        sibling in `old`, so its disappearance is a real, reportable
+        regression regardless of what other (system) libraries the
+        consumer still needs.
+        """
+        old = _snapshot(
+            {
+                "libcore.so": _meta(
+                    soname="libcore.so.1", exports=["onedal_internal_op"]
+                ),
+                "libalgo.so": _meta(
+                    soname="libalgo.so.1",
+                    needed=["libcore.so.1", "libc.so.6"],
+                    imports=["onedal_internal_op"],
+                ),
+            }
+        )
+        new = _snapshot(
+            {
+                "libcore.so": _meta(soname="libcore.so.1"),  # provider gone
+                "libalgo.so": _meta(
+                    soname="libalgo.so.1",
+                    needed=["libc.so.6"],  # intra-bundle edge dropped too,
+                    # but the consumer still needs libc -- a real, near-
+                    # universal system dependency, already covered by
+                    # DEFAULT_SYSTEM_PROVIDERS with no --bundle-system-
+                    # providers involved at all.
+                    imports=["onedal_internal_op"],
+                ),
+            }
+        )
+        result = compare_bundle(old, new, per_library_results=[])
+        intra_removed = [
+            f
+            for f in result.bundle_findings
+            if f.kind == ChangeKind.BUNDLE_INTRA_DEP_REMOVED
+        ]
+        assert len(intra_removed) == 1
+        assert intra_removed[0].symbol == "onedal_internal_op"
+        assert intra_removed[0].consumer_library == "libalgo.so"
+
+    def test_explicit_provider_migration_still_suppressed(self) -> None:
+        """Regression (Codex review): a legitimate provider migration --
+        a symbol moved from an in-tree sibling to an explicitly allow-listed
+        external DSO -- must still be suppressed by --bundle-system-providers
+        even though a sibling *used to* provide it (the guard the previous
+        finding above added must not over-correct into vetoing every
+        allow-list match once `old` had any provider at all)."""
+        old = _snapshot(
+            {
+                "libcore.so": _meta(soname="libcore.so.1", exports=["vendor_op"]),
+                "libalgo.so": _meta(
+                    soname="libalgo.so.1",
+                    needed=["libcore.so.1"],
+                    imports=["vendor_op"],
+                ),
+            }
+        )
+        new = _snapshot(
+            {
+                "libcore.so": _meta(soname="libcore.so.1"),  # no longer exports it
+                "libalgo.so": _meta(
+                    soname="libalgo.so.1",
+                    needed=["libvendor.so.1"],  # migrated to an external DSO
+                    imports=["vendor_op"],
+                ),
+            }
+        )
+        result = compare_bundle(
+            old, new, per_library_results=[], system_providers=["libvendor.so.1"]
+        )
+        assert not any(
+            f.kind == ChangeKind.BUNDLE_INTRA_DEP_REMOVED
+            for f in result.bundle_findings
+        )
+
+    def test_explicit_provider_migration_needs_the_explicit_soname(self) -> None:
+        """The migration exception above only fires when the user actually
+        named the new provider -- a plain, unexplained soname swap to a
+        library that merely *happens* to be default-system-shaped (but was
+        never asserted by the user for this run) must still be treated as
+        a potential regression, not silently trusted."""
+        old = _snapshot(
+            {
+                "libcore.so": _meta(soname="libcore.so.1", exports=["vendor_op"]),
+                "libalgo.so": _meta(
+                    soname="libalgo.so.1",
+                    needed=["libcore.so.1"],
+                    imports=["vendor_op"],
+                ),
+            }
+        )
+        new = _snapshot(
+            {
+                "libcore.so": _meta(soname="libcore.so.1"),
+                "libalgo.so": _meta(
+                    soname="libalgo.so.1",
+                    needed=["libvendor.so.1"],
+                    imports=["vendor_op"],
+                ),
+            }
+        )
+        # No --bundle-system-providers given, and libvendor.so.1 doesn't
+        # match _looks_system -- extra_needed isn't even fully allow-listed,
+        # so this must still be reported regardless of the migration guard.
+        result = compare_bundle(old, new, per_library_results=[])
+        assert any(
+            f.kind == ChangeKind.BUNDLE_INTRA_DEP_REMOVED
+            and f.symbol == "vendor_op"
+            for f in result.bundle_findings
+        )
+
+    def test_old_provider_veto_is_scoped_to_the_reaching_consumer(self) -> None:
+        """Regression (Codex review): "did a sibling ever provide this
+        symbol" must be scoped to *this consumer's* own old reachability,
+        not to whether *any* consumer anywhere in the old bundle reached a
+        provider. `liba.so` used to reach `libcore.so`'s `vendor_op`
+        export; `libb.so` has always imported the same unversioned symbol
+        name from the built-in-allow-listed `libsycl.so.7` and never
+        depended on `libcore.so` at all. Once `liba.so`/`libcore.so`'s
+        export are both removed, `libb.so`'s own always-external import
+        must not be vetoed by an unrelated consumer's old provider."""
+        old = _snapshot(
+            {
+                "libcore.so": _meta(soname="libcore.so.1", exports=["vendor_op"]),
+                "liba.so": _meta(
+                    soname="liba.so.1",
+                    needed=["libcore.so.1"],
+                    imports=["vendor_op"],
+                ),
+                "libb.so": _meta(
+                    soname="libb.so.1",
+                    needed=["libsycl.so.7"],
+                    imports=["vendor_op"],
+                ),
+            }
+        )
+        new = _snapshot(
+            {
+                "libcore.so": _meta(soname="libcore.so.1"),  # no longer exports it
+                "libb.so": _meta(
+                    soname="libb.so.1",
+                    needed=["libsycl.so.7"],
+                    imports=["vendor_op"],
+                ),
+            }
+        )
+        # No --bundle-system-providers given -- libsycl.so.7 is covered by
+        # the built-in DEFAULT_SYSTEM_PROVIDERS allow-list alone.
+        result = compare_bundle(old, new, per_library_results=[])
+        assert not any(
+            f.kind == ChangeKind.BUNDLE_INTRA_DEP_REMOVED and f.consumer_library == "libb.so"
+            for f in result.bundle_findings
+        )
+
+    def test_old_provider_veto_requires_version_compatibility(self) -> None:
+        """Regression (Codex review): an old reachable sibling that could
+        never have satisfied *this* consumer's own reference must not veto
+        the allow-list either. `libcore.so` reachably exported `vendor_op`
+        only as a non-default versioned definition (`vendor_op@V1`, never
+        `vendor_op@@V1`) -- the dynamic linker can only satisfy `libalgo.so`'s
+        genuinely unversioned `vendor_op` reference against a *default*
+        definition, so that sibling could never have resolved it in the
+        first place. Once `libcore.so`/its `DT_NEEDED` edge are both
+        removed, `libalgo.so`'s always-external (built-in-allow-listed)
+        import must not be vetoed by a provider that was never compatible."""
+        old_core = _meta(soname="libcore.so.1")
+        old_core.symbols.append(
+            ElfSymbol(name="vendor_op", visibility="default", version="V1", is_default=False)
+        )
+        old = _snapshot(
+            {
+                "libcore.so": old_core,
+                "libalgo.so": _meta(
+                    soname="libalgo.so.1",
+                    needed=["libcore.so.1", "libsycl.so.7"],
+                    imports=["vendor_op"],
+                ),
+            }
+        )
+        new = _snapshot(
+            {
+                "libcore.so": _meta(soname="libcore.so.1"),  # no longer exports it
+                "libalgo.so": _meta(
+                    soname="libalgo.so.1",
+                    needed=["libsycl.so.7"],
+                    imports=["vendor_op"],
+                ),
+            }
+        )
+        result = compare_bundle(old, new, per_library_results=[])
+        assert not any(
+            f.kind == ChangeKind.BUNDLE_INTRA_DEP_REMOVED
+            for f in result.bundle_findings
+        )
 
     @pytest.mark.parametrize(
         ("symbol", "version"),

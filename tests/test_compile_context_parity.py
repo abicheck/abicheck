@@ -35,7 +35,7 @@ import pytest
 from click.testing import CliRunner
 
 from abicheck.cli import compare_cmd, dump_cmd, main
-from abicheck.cli_options import compile_context_options
+from abicheck.cli_options import compile_context_options, sided_frontend_explicit
 from abicheck.cli_scan import scan_cmd
 from abicheck.model import AbiSnapshot
 from abicheck.service_scan import CompileContext, ScanRequest
@@ -1246,50 +1246,127 @@ def test_dump_reads_compile_block_from_config(
     assert captured["gcc_option_tokens"] == ("-std=c++17",)
 
 
-def test_compare_rejects_compile_context_for_set_inputs(tmp_path: Path) -> None:
-    """Directory/package operands + a compile-context flag must fail loudly, not
-    silently drop it: the per-library fan-out doesn't thread the L2 context
-    (Codex review)."""
+def test_compare_threads_compile_context_for_set_inputs(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Directory/package operands + a compile-context flag must thread the
+    resolved CompileContext to the release fan-out, not reject it -- the
+    per-library fan-out now threads the L2 context to each pair's header
+    dump (fix: whole-product-bundle known-gap entry, AGENTS.md)."""
+    import abicheck.cli as cli_mod
+
     old_dir = tmp_path / "old"
     new_dir = tmp_path / "new"
     old_dir.mkdir()
     new_dir.mkdir()
+
+    dispatched: dict[str, object] = {}
+    monkeypatch.setattr(
+        cli_mod, "_dispatch_release_compare", lambda ctx, **kw: dispatched.update(kw)
+    )
     result = CliRunner().invoke(
         main,
         ["compare", str(old_dir), str(new_dir), "--compiler-option", "-DX=1"],
     )
-    assert result.exit_code != 0
-    assert "--compiler-option" in result.output
-    assert "directory/package" in result.output
+    assert result.exit_code == 0, result.output
+    assert dispatched
+    compile_context = dispatched["compile_context"]
+    assert compile_context.gcc_option_tokens == ("-DX=1",)
 
 
 @pytest.mark.parametrize(
-    "flag,value",
+    ("flag", "value", "attr", "expected"),
     [
-        ("--compiler", "/custom/clang"),
-        ("--compiler-prefix", "aarch64-linux-gnu-"),
-        ("--compiler-option", "-DX=1"),
+        ("--compiler", "/custom/clang", "gcc_path", "/custom/clang"),
+        ("--compiler-prefix", "aarch64-linux-gnu-", "gcc_prefix", "aarch64-linux-gnu-"),
+        ("--compiler-option", "-DX=1", "gcc_option_tokens", ("-DX=1",)),
     ],
 )
-def test_compare_rejects_compiler_aliases_for_set_inputs(
-    tmp_path: Path, flag: str, value: str
+def test_compare_threads_compiler_aliases_for_set_inputs(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    flag: str,
+    value: str,
+    attr: str,
+    expected: object,
 ) -> None:
-    """The --compiler*/--gcc-* aliases (CLI audit PR 2/5) must be rejected for
-    directory/package operands exactly like their legacy gcc_* counterparts
-    (test_compare_rejects_compile_context_for_set_inputs above) -- without
-    this, --compiler would silently no-op instead of raising, unlike
-    --compiler (Codex review, PR #757)."""
+    """The --compiler*/--gcc-* aliases (CLI audit PR 2/5) must reach the
+    release fan-out's resolved CompileContext exactly like they reach a
+    single-pair compare's (test_compare_threads_compile_context_for_set_inputs
+    above)."""
+    import abicheck.cli as cli_mod
+
+    old_dir = tmp_path / "old"
+    new_dir = tmp_path / "new"
+    old_dir.mkdir()
+    new_dir.mkdir()
+
+    dispatched: dict[str, object] = {}
+    monkeypatch.setattr(
+        cli_mod, "_dispatch_release_compare", lambda ctx, **kw: dispatched.update(kw)
+    )
+    result = CliRunner().invoke(
+        main,
+        ["compare", str(old_dir), str(new_dir), flag, value],
+    )
+    assert result.exit_code == 0, result.output
+    compile_context = dispatched["compile_context"]
+    assert getattr(compile_context, attr) == expected
+
+
+@pytest.mark.parametrize(
+    "flag",
+    ["--ast-frontend"],
+)
+def test_compare_rejects_sided_ast_frontend_for_set_inputs(
+    tmp_path: Path, flag: str
+) -> None:
+    """A *sided* --ast-frontend old=/new= override still has no
+    per-library-pair-within-a-release meaning, so it stays rejected."""
     old_dir = tmp_path / "old"
     new_dir = tmp_path / "new"
     old_dir.mkdir()
     new_dir.mkdir()
     result = CliRunner().invoke(
         main,
-        ["compare", str(old_dir), str(new_dir), flag, value],
+        ["compare", str(old_dir), str(new_dir), flag, "old=clang"],
     )
     assert result.exit_code != 0
-    assert flag in result.output
+    assert "--ast-frontend old=" in result.output
     assert "directory/package" in result.output
+
+
+class _FakeCtx:
+    """Minimal click.Context stand-in for sided_frontend_explicit's own
+    contract, exercised directly rather than only through a real CLI
+    invocation -- see this file's own module docstring on why this guard
+    exists."""
+
+    def __init__(
+        self,
+        source: click.core.ParameterSource,
+        header_backend: list[tuple[str, str]],
+    ) -> None:
+        self._source = source
+        self.params = {"header_backend": header_backend}
+
+    def get_parameter_source(self, name: str) -> click.core.ParameterSource:
+        assert name == "header_backend"
+        return self._source
+
+
+def test_sided_frontend_explicit_direct() -> None:
+    cmdline = click.core.ParameterSource.COMMANDLINE
+    default = click.core.ParameterSource.DEFAULT
+    # Not COMMANDLINE at all -> False, regardless of the raw value.
+    assert sided_frontend_explicit(_FakeCtx(default, [("old", "clang")])) is False
+    # A sided pair (old=/new=, not "both") -> True.
+    assert sided_frontend_explicit(_FakeCtx(cmdline, [("old", "clang")])) is True
+    assert sided_frontend_explicit(_FakeCtx(cmdline, [("new", "clang")])) is True
+    # Only a "both" pair -> False (that's _shared_frontend_explicit's case).
+    assert sided_frontend_explicit(_FakeCtx(cmdline, [("both", "clang")])) is False
+    # An unsided command's plain string (no pair list at all) -> False.
+    assert sided_frontend_explicit(_FakeCtx(cmdline, "clang")) is False
 
 
 def test_compare_set_inputs_without_compile_flags_not_rejected(
@@ -1316,12 +1393,13 @@ def test_compare_set_inputs_without_compile_flags_not_rejected(
     assert dispatched  # the fan-out was reached, not rejected
 
 
-def test_compare_set_inputs_warns_on_config_compile_block(
+def test_compare_set_inputs_applies_config_compile_block(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """A directory/package compare in a project with a .abicheck.yml compile:
-    block must WARN (not silently drop, not hard-fail) — the fan-out doesn't
-    thread the L2 context (Codex review)."""
+    block must apply it (not silently drop it, and no longer just warn) --
+    the fan-out now threads the L2 context (fix: whole-product-bundle
+    known-gap entry, AGENTS.md)."""
     import abicheck.cli as cli_mod
 
     old_dir = tmp_path / "old"
@@ -1341,8 +1419,49 @@ def test_compare_set_inputs_warns_on_config_compile_block(
         main, ["compare", str(old_dir), str(new_dir), "--config", str(cfg)]
     )
     assert result.exit_code == 0, result.output
-    assert dispatched  # warned, still dispatched (not rejected)
-    assert "compile: block is not applied" in result.output
+    assert dispatched
+    assert "compile: block is not applied" not in result.output
+    compile_context = dispatched["compile_context"]
+    assert compile_context.gcc_option_tokens == ("-std=c++20",)
+
+
+def test_compare_set_inputs_forwards_config_include_dirs(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Regression (Codex review): a directory/package compare in a project
+    with a .abicheck.yml compile.include_dirs block must forward the
+    merged include dirs (CLI -I roots + config-appended ones) to the
+    release fan-out's own `includes=` -- a prior revision resolved the
+    merged tuple via resolve_compile_context() but discarded it, dispatching
+    the raw, unmerged CLI `includes` instead, so headers requiring the
+    configured include root could fail or parse incompletely despite the
+    compile: block otherwise being applied.
+    """
+    import abicheck.cli as cli_mod
+
+    old_dir = tmp_path / "old"
+    new_dir = tmp_path / "new"
+    old_dir.mkdir()
+    new_dir.mkdir()
+    include_dir = tmp_path / "vendor_include"
+    include_dir.mkdir()
+    cfg = tmp_path / ".abicheck.yml"
+    cfg.write_text(
+        f"compile:\n  include_dirs:\n    - {include_dir}\n", encoding="utf-8"
+    )
+
+    dispatched: dict[str, object] = {}
+    monkeypatch.setattr(
+        cli_mod,
+        "_dispatch_release_compare",
+        lambda ctx, **kw: dispatched.update(kw),
+    )
+    result = CliRunner().invoke(
+        main, ["compare", str(old_dir), str(new_dir), "--config", str(cfg)]
+    )
+    assert result.exit_code == 0, result.output
+    assert dispatched
+    assert include_dir in dispatched["includes"]
 
 
 def test_compare_config_include_dirs_survive_per_side_include(

@@ -836,6 +836,28 @@ def compute_public_surface(snap: AbiSnapshot) -> PublicSurface:
     # Scoping only makes sense when we actually have header-derived public
     # visibility. Without headers every symbol is ELF_ONLY (ADR-016) and a
     # surface filter would hide everything — so declare it unresolvable.
+    #
+    # An ELF ``st_other`` visibility-based fallback (treating a
+    # default/protected-visibility dynamic symbol as a public-surface proxy)
+    # was attempted and reverted: ``elf_metadata._parse_dynsym`` already
+    # discards every ``STV_HIDDEN``/``STV_INTERNAL`` symbol before
+    # ``meta.symbols`` is populated (a real shared library's exported-symbol
+    # surface always comes from ``.dynsym`` via that function -- ``.symtab``
+    # is only a fallback for a ``.o`` relocatable object with no ``.dynsym``
+    # at all), and ELF-only-mode ``snap.functions``/``snap.variables`` are
+    # themselves built exclusively from that same, already-filtered
+    # ``elf_meta.symbols`` set. So every symbol reaching this function's
+    # headerless path is, by construction, always DEFAULT or PROTECTED
+    # visibility -- never HIDDEN/INTERNAL -- and a visibility-based fallback
+    # has zero discriminating power on real production ELF dumps: it would
+    # unconditionally mark the entire ELF-only surface public, providing no
+    # actual scoping while claiming (via a resolved, "reduced confidence"
+    # surface) that scoping had been applied (Codex review, fresh evidence).
+    # Closing the underlying issue -- headerless bundle/directory compares
+    # over-report internal churn as breaking -- needs a real, non-ELF-level
+    # signal (e.g. symbol-name-shape heuristics, an opt-in allow/deny list,
+    # or requiring at least a public-header list for scoped comparisons) and
+    # its own scoped design; not attempted here.
     surface.resolvable = has_public and not getattr(snap, "elf_only_mode", False)
     if not surface.resolvable:
         return surface

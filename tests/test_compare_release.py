@@ -1484,6 +1484,7 @@ class TestDebianSymbolsWarning:
             (),
             (),
             (),
+            (),
             _fake_extract,
             lambda *_args, **_kwargs: [],
             lambda _p: False,
@@ -1537,6 +1538,7 @@ class TestCompareReleaseIncludes:
             (),
             (old_inc_only,),
             (new_inc_only,),
+            (),
             lambda p, _dbg, _dev: (p, None, None, None),
             lambda *_args, **_kwargs: [],
             lambda _p: False,
@@ -1547,6 +1549,59 @@ class TestCompareReleaseIncludes:
         new_inc = result[5]
         assert old_inc == [old_inc_only]
         assert new_inc == [new_inc_only]
+
+    def test_prepare_inputs_config_includes_survive_side_specific_override(
+        self, tmp_path: Path
+    ) -> None:
+        """Regression (Codex review): a project .abicheck.yml
+        compile.include_dirs root must reach BOTH sides even when one side
+        also has a --old-include/--new-include override -- a prior revision
+        let the override fully replace `includes` (which is where the
+        config-appended dirs live), silently dropping them for the
+        overridden side.
+        """
+        old = tmp_path / "old"
+        new = tmp_path / "new"
+        old.mkdir()
+        new.mkdir()
+        (old / "libfoo.so").write_text("old")
+        (new / "libfoo.so").write_text("new")
+        old_inc_only = tmp_path / "old-include"
+        old_inc_only.mkdir()
+        config_dir = tmp_path / "vendor_include"
+        config_dir.mkdir()
+
+        result = _prepare_compare_release_inputs(
+            old,
+            new,
+            None,
+            None,
+            None,
+            None,
+            False,
+            False,
+            (),
+            (),
+            (),
+            (config_dir,),  # includes: the caller already folds
+            # config_includes into this merged tuple, matching what
+            # resolve_directory_compile_context's real return looks like.
+            (old_inc_only,),  # old side overridden
+            (),  # new side not overridden -- uses `includes` directly
+            (config_dir,),  # config_includes: same dir, passed separately
+            lambda p, _dbg, _dev: (p, None, None, None),
+            lambda *_args, **_kwargs: [],
+            lambda _p: False,
+            lambda _p: True,
+        )
+
+        old_inc = result[4]
+        new_inc = result[5]
+        # Overridden side: override root + config root, both present.
+        assert old_inc_only in old_inc
+        assert config_dir in old_inc
+        # Non-overridden side: reaches the config root via `includes` itself.
+        assert config_dir in new_inc
 
 
 class TestLockstepSonameCoupling:
