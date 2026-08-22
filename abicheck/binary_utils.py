@@ -347,4 +347,22 @@ def _canonical_library_key(path: Path) -> str:
         # to the stripped wrapper suffix, so it's a valid index into `name`
         # too.
         return name[: m.start()] + m.group(1)
+    # An *unversioned* dylib has no numeric segment for _DYLIB_VERSION_RE
+    # to match at all (see its own docstring), so a stored snapshot of one
+    # (`libfoo.dylib.abicheck.json`) fell through to here unchanged --
+    # keeping its wrapper suffix -- while a *versioned* sibling
+    # (`libfoo.1.dylib.abicheck.json`) matched above and had its wrapper
+    # dropped by that branch's own `name[: m.start()] + m.group(1)`
+    # construction. Two different canonical keys for a version-drop pair
+    # of the same evolving library (Codex review, fresh evidence).
+    # Scoped to exactly that case (the represented name genuinely ends in
+    # ".dylib") -- an earlier revision of this fix returned
+    # `represented_cased` unconditionally here, which also stripped the
+    # wrapper from a name with *no* recognized binary extension at all
+    # (e.g. a bare "libfoo.abicheck.json" for an extensionless plugin),
+    # changing its canonical key from the whole wrapped name to just
+    # "libfoo" and breaking existing snapshot-matching behavior for that
+    # unrelated case.
+    if represented.endswith(".dylib"):
+        return represented_cased
     return name

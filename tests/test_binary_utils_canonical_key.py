@@ -165,3 +165,15 @@ class TestCanonicalLibraryKeyCaseFolding:
         assert _canonical_library_key(Path("libFoo.dll.so")) != _canonical_library_key(
             Path("libfoo.dll.so")
         )
+
+    def test_stored_dylib_snapshot_version_drop_pairs_with_unversioned(self) -> None:
+        # An *unversioned* dylib has no numeric segment for
+        # _DYLIB_VERSION_RE to match at all, so a stored snapshot of one
+        # fell through unchanged (wrapper suffix kept: "libfoo.dylib.
+        # abicheck.json"), while a *versioned* sibling matched and had its
+        # wrapper dropped ("libfoo.dylib") -- two different canonical keys
+        # for a real version-drop pair of the same evolving library
+        # (Codex review, fresh evidence).
+        assert _canonical_library_key(
+            Path("libfoo.1.dylib.abicheck.json")
+        ) == _canonical_library_key(Path("libfoo.dylib.abicheck.json"))

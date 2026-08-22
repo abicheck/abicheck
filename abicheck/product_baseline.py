@@ -235,9 +235,34 @@ def _is_library_path(path: Path) -> bool:
     """
     if path.name.lower().endswith(".debug"):
         return False
-    if _is_shared_library(path.name) or _is_elf_shared_object(path):
-        return True
-    return _macho_is_library_content(path) or _pe_is_dll_content(path)
+    is_library = (
+        _is_shared_library(path.name)
+        or _is_elf_shared_object(path)
+        or _macho_is_library_content(path)
+        or _pe_is_dll_content(path)
+    )
+    if not is_library:
+        return False
+    # A GNU ld INPUT()/GROUP() linker script (the conventional
+    # `libfoo.so -> INPUT(libfoo.so.1)` SDK-install pattern) is library-
+    # suffix-named but carries no binary content of its own -- only
+    # `_is_shared_library`'s suffix check can ever classify one as a
+    # library here (it's plain text, so none of the three content probes
+    # above match it). `_discover_library_map` already excludes it via
+    # this same check, applied separately at its own call site -- but
+    # `_add_member` (the packing path) called this predicate directly with
+    # no equivalent exclusion, so a linker script was archived under a
+    # library-suffixed name AND classified as its own `LibraryEntry`,
+    # while `_discover_library_map`/`compare_product_directories` excluded
+    # it -- packing and comparison ended up with contradictory inventories
+    # for the identical tree (Codex review, fresh evidence). Centralizing
+    # the exclusion in this one shared predicate is exactly what this
+    # function's own docstring already promises ("Factored into one
+    # predicate so discovery and manifest classification can never drift
+    # apart on this question again") -- it just hadn't actually happened
+    # for this specific check yet.
+    _, is_linker_script = resolve_linker_script(path)
+    return not is_linker_script
 
 
 @dataclass(frozen=True)
@@ -654,6 +679,25 @@ def pack_product_baseline(
     # evidence the caller actually asked for (Codex review, fresh
     # evidence -- the earlier output-parent-determinism fix below didn't
     # close this interaction).
+    if isinstance(header_roots, str):
+        # A bare str satisfies the declared Sequence[str] annotation (it's
+        # a sequence of its own characters), so the natural single-root
+        # spelling header_roots="include" -- a typo for the intended
+        # ["include"] -- would otherwise iterate character-by-character
+        # below: 'i', 'n', 'c', 'l', 'u', 'd', 'e', each checked as its own
+        # "header root". Depending on the tree, that either rejects a
+        # real, intended include/ with a misleading error, or (if
+        # matching single-character directories happen to exist) silently
+        # persists the wrong header roots into the manifest.
+        # compare_product_directories()'s own `_roots_for_library` already
+        # rejects this same shape on the comparison side (`HeaderRootsSpec`
+        # is the identical Sequence[str] | Mapping[str, Sequence[str]]
+        # type), but that guard doesn't cover this, the packing entry
+        # point (Codex review, fresh evidence).
+        raise SnapshotError(
+            "header_roots must be a sequence of paths, not a bare string: "
+            f"{header_roots!r}"
+        )
     resolved_header_roots: list[str] = []
     for rel in header_roots:
         resolved = _resolve_under_root(source_path, rel)
@@ -1320,17 +1364,20 @@ def _discover_library_map(root: Path, *, include_private: bool) -> dict[str, Pat
             # `libfoo.so -> INPUT(libfoo.so.1)` SDK-install pattern) is
             # library-suffix-named but carries no binary content of its
             # own -- discovering it alongside its real target (libfoo.so.1,
-            # discovered independently under its own name) previously
-            # produced two DiffResults for the identical library, and if
-            # the target were unavailable a non-library script could abort
-            # the whole comparison as "cannot detect format" (Codex review,
-            # fresh evidence). The real target -- if present in this same
-            # tree -- is already discovered on its own merits by this same
-            # walk, so the script itself is simply excluded, never
-            # resolved to a duplicate entry.
-            _, is_linker_script = resolve_linker_script(path)
-            if is_linker_script:
-                continue
+            # discovered independently under its own name) would produce
+            # two DiffResults for the identical library, and if the target
+            # were unavailable a non-library script could abort the whole
+            # comparison as "cannot detect format". The real target -- if
+            # present in this same tree -- is already discovered on its
+            # own merits by this same walk, so the script itself must be
+            # excluded, never resolved to a duplicate entry -- now handled
+            # by `_is_library_path` itself (the `continue` above), so
+            # every caller shares one exclusion instead of this walk
+            # re-checking a fact its own dependency already established
+            # (Codex review, fresh evidence: `_add_member`, the packing
+            # path, called `_is_library_path` directly with no equivalent
+            # check of its own, so a linker script was archived as its own
+            # `LibraryEntry` even though this walk already excluded it).
             try:
                 real = path.resolve()
             except OSError:

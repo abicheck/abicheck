@@ -217,6 +217,31 @@ class TestPackProductBaseline:
         names = {lib.name for lib in manifest.libraries}
         assert "libb.so.1.debug" not in names
 
+    def test_pack_does_not_classify_a_linker_script_as_a_library(
+        self, tmp_path: Path
+    ) -> None:
+        # A GNU ld INPUT()/GROUP() script (the conventional
+        # `libfoo.so -> INPUT(libfoo.so.1)` SDK-install pattern) is
+        # library-suffix-named but carries no binary content of its own.
+        # _discover_library_map already excludes it from comparison, but
+        # _add_member (this packing path) called _is_library_path directly
+        # with no equivalent exclusion, so the persisted manifest
+        # advertised the script as its own LibraryEntry -- packing and
+        # comparison ended up with contradictory inventories for the
+        # identical tree (Codex review, fresh evidence). The script itself
+        # is still archived as a regular file (round-tripping correctly),
+        # just not double-counted as a library.
+        from tests.test_package import _make_minimal_elf_so
+
+        product = _make_product(tmp_path)
+        _make_minimal_elf_so(product / "lib" / "libscripted.so.1")
+        (product / "lib" / "libscripted.so").write_text("INPUT(libscripted.so.1)\n")
+
+        manifest = pack_product_baseline(product, tmp_path / "b.tar.zst")
+        names = {lib.name for lib in manifest.libraries}
+        assert "libscripted.so.1" in names
+        assert "libscripted.so" not in names
+
     def test_pack_records_correct_hash_and_size(self, tmp_path: Path) -> None:
         product = _make_product(tmp_path)
         manifest = pack_product_baseline(product, tmp_path / "b.tar.zst")
@@ -382,6 +407,22 @@ class TestPackProductBaseline:
         monkeypatch.setattr(Path, "lstat", flaky_lstat)
         manifest = pack_product_baseline(product, tmp_path / "b.tar.zst")
         assert "libb.so" not in {lib.name for lib in manifest.libraries}
+
+    def test_pack_rejects_a_bare_string_header_roots(self, tmp_path: Path) -> None:
+        # header_roots="include" -- a natural typo for the intended
+        # ["include"] -- satisfies the declared Sequence[str] annotation
+        # (a str is a sequence of its own characters), so it iterated
+        # character-by-character: 'i', 'n', 'c', 'l', 'u', 'd', 'e', each
+        # checked as its own "header root". compare_product_directories()'s
+        # own _roots_for_library already rejects this same shape on the
+        # comparison side, but that guard didn't cover this, the packing
+        # entry point (Codex review, fresh evidence).
+        product = _make_product(tmp_path)
+        (product / "include").mkdir(exist_ok=True)
+        with pytest.raises(SnapshotError, match="bare string"):
+            pack_product_baseline(
+                product, tmp_path / "b.tar.zst", header_roots="include"
+            )
 
     def test_pack_rejects_absolute_header_root(self, tmp_path: Path) -> None:
         product = _make_product(tmp_path)
