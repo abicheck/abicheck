@@ -39,12 +39,14 @@ operand (bundle analysis, ADR-023, on by default there) can run against
 directly — covering every library, and every cross-library edge between
 them, in one invocation instead of one per library.
 
-This is a storage/transport format only: it packs and unpacks a directory
-tree. It does not itself invoke ``compare`` — library-only surface, no CLI
-command. A caller (typically a project's own CI workflow) invokes
-:func:`pack_product_baseline`/:func:`unpack_product_baseline` directly and
-wires the unpacked directory into ``compare <old_dir> <new_dir>`` in place
-of a per-library ``scan --against`` step.
+This is a storage/transport format only: :func:`pack_product_baseline`/
+:func:`unpack_product_baseline` pack and unpack a directory tree, nothing
+more — library-only surface, no CLI command. :func:`compare_product_directories`
+is the other half: given the two directories a caller just unpacked, it
+runs the actual bundle-aware comparison (per-library diff via
+:mod:`abicheck.service_compare_pipeline`, cross-library findings via
+:mod:`abicheck.bundle`) — the plain-Python counterpart of directory-mode
+``compare <old_dir> <new_dir>``, requiring no CLI subprocess.
 """
 
 from __future__ import annotations
@@ -58,13 +60,16 @@ import shutil
 import stat as stat_module
 import tarfile
 import tempfile
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import IO, Any
+from typing import IO, TYPE_CHECKING, Any
 
 from .errors import SnapshotError
 from .package import TarExtractor
+
+if TYPE_CHECKING:
+    from .bundle import BundleDiffResult
 from .snapshot_io import ZSTD_LEVEL_BASELINE
 
 #: Name the manifest is stored under inside the archive — deliberately not a
@@ -841,3 +846,123 @@ def _check_schema_supported(schema: str, archive_path: Path) -> None:
             f"this abicheck build supports ({PRODUCT_BASELINE_SCHEMA!r}) — "
             "upgrade abicheck to read it."
         )
+
+
+def compare_product_directories(
+    old_dir: Path | str,
+    new_dir: Path | str,
+    *,
+    header_roots: Sequence[str] = (),
+    lang: str = "c++",
+    frontend: str = "auto",
+    policy: str = "strict_abi",
+    include_private: bool = True,
+    manifest_path: Path | str | None = None,
+    system_providers: Iterable[str] | None = None,
+    cohorts: list[str] | None = None,
+) -> BundleDiffResult:
+    """Compare every shared library two directories have in common, plus
+    the cross-library (bundle-level, ADR-023) edges between them — in one
+    plain, importable call.
+
+    This is the differentiator a stored whole-product baseline exists for:
+    unpack two archives with :func:`unpack_product_baseline`, then pass the
+    two resulting directories straight to this function. It reproduces
+    what ``abicheck compare <old_dir> <new_dir>`` computes internally for a
+    directory pair (per-library diff via
+    :func:`abicheck.service_compare_pipeline.run_compare`, cross-library
+    findings via :func:`abicheck.bundle.compare_bundle`) — before this
+    function existed, the only way to get that combined result without
+    shelling out to the CLI was to hand-assemble the same three steps
+    yourself (discover + match libraries by canonical name, run a
+    per-library compare over each matched pair, build two
+    :class:`~abicheck.bundle.BundleSnapshot`\\ s and call
+    :func:`~abicheck.bundle.compare_bundle`); the CLI's own version of that
+    assembly (``cli_compare_release_helpers._run_bundle_analysis``) is both
+    private and Click-coupled (it reports failures via ``click.echo``
+    rather than raising), so it was never reusable from plain Python
+    either.
+
+    Deliberately not in :mod:`abicheck.bundle` alongside
+    :func:`~abicheck.bundle.compare_bundle`: it needs the per-pair compare
+    engine (:mod:`abicheck.service_compare_pipeline`), and that module's
+    own import graph already reaches back into :mod:`abicheck.bundle`
+    (``service_scan`` calls :func:`~abicheck.bundle.audit_bundle`) — living
+    here instead of there avoids that import cycle.
+
+    *header_roots* names header directories relative to *old_dir*/*new_dir*
+    — the exact shape :attr:`ProductBaselineManifest.header_roots` already
+    records, so a caller that just unpacked an archive can pass its
+    manifest's own ``header_roots`` straight through. A root missing on
+    either side is silently skipped, matching this format's own tolerance
+    for a library that ships no public headers.
+
+    Every library discovered in *both* directories (matched by canonical
+    library name — see :func:`abicheck.bundle.discover_artifact_set`,
+    called once per side) is compared; a library present on only one side
+    never reaches the per-library pass, but bundle analysis still reports
+    it via ``bundle_library_added``/``bundle_library_removed``. Unlike the
+    CLI's ``compare-release`` engine, a failure here is never swallowed
+    into a warning — this is a library call, so a per-library compare
+    failure or a bundle-analysis failure propagates directly (whatever the
+    failing step itself raises — :class:`SnapshotError`,
+    :class:`~abicheck.bundle.ArtifactSetError`, ...); a caller wanting the
+    CLI's own "report degradation, keep going" behavior should catch what
+    it needs.
+    """
+    from .bundle import (
+        build_bundle_snapshot,
+        compare_bundle,
+        discover_artifact_set,
+        load_manifest,
+    )
+    from .package import discover_shared_libraries
+    from .service_compare_pipeline import run_compare
+
+    old_root = Path(old_dir)
+    new_root = Path(new_dir)
+    roots = list(header_roots)
+
+    old_map = discover_artifact_set(
+        discover_shared_libraries(old_root, include_private=include_private),
+        explicit=False,
+    )
+    new_map = discover_artifact_set(
+        discover_shared_libraries(new_root, include_private=include_private),
+        explicit=False,
+    )
+
+    def _resolved_headers(root: Path) -> list[Path]:
+        return [candidate for rel in roots if (candidate := root / rel).is_dir()]
+
+    old_headers = _resolved_headers(old_root)
+    new_headers = _resolved_headers(new_root)
+
+    per_library_results = []
+    for key in sorted(set(old_map) & set(new_map)):
+        result = run_compare(
+            old_map[key],
+            new_map[key],
+            old_headers=old_headers,
+            new_headers=new_headers,
+            lang=lang,
+            frontend=frontend,
+            policy=policy,
+        )
+        per_library_results.append(result.diff)
+
+    old_snapshot = build_bundle_snapshot(old_map)
+    new_snapshot = build_bundle_snapshot(new_map)
+
+    manifest = None
+    if manifest_path is not None:
+        manifest = load_manifest(Path(manifest_path))
+
+    return compare_bundle(
+        old_snapshot,
+        new_snapshot,
+        per_library_results,
+        manifest=manifest,
+        system_providers=system_providers,
+        cohorts=cohorts,
+    )

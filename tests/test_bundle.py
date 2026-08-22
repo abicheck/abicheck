@@ -177,15 +177,15 @@ class TestResolutionGraph:
         }
         metadata = {
             "libfoo.so": _meta(soname=""),  # no DT_SONAME
-            "libconsumer.so": _meta(
-                soname="libconsumer.so", needed=["libfoo.so.1"]
-            ),
+            "libconsumer.so": _meta(soname="libconsumer.so", needed=["libfoo.so.1"]),
         }
         graph = _compute_resolution_graph(libraries, metadata)
         assert graph.intra_needed["libconsumer.so"] == ["libfoo.so.1"]
         assert graph.extra_needed["libconsumer.so"] == []
 
-    @pytest.mark.skipif(sys.platform == "win32", reason="symlinks need admin on Windows")
+    @pytest.mark.skipif(
+        sys.platform == "win32", reason="symlinks need admin on Windows"
+    )
     def test_dt_needed_resolves_via_real_filename_of_symlinked_member(
         self, tmp_path: Path
     ) -> None:
@@ -208,9 +208,7 @@ class TestResolutionGraph:
         }
         metadata = {
             "libfoo.so": _meta(soname=""),  # no DT_SONAME
-            "libconsumer.so": _meta(
-                soname="libconsumer.so", needed=["libfoo.so.1"]
-            ),
+            "libconsumer.so": _meta(soname="libconsumer.so", needed=["libfoo.so.1"]),
         }
         graph = _compute_resolution_graph(libraries, metadata)
         assert graph.intra_needed["libconsumer.so"] == ["libfoo.so.1"]
@@ -1546,12 +1544,12 @@ class TestUnresolvedIntraDependency:
     """`_detect_unresolved_intra_dependency` — the audit-mode sibling of
     `_detect_intra_dep_removed` (no old side, single resolution graph)."""
 
-    def _detect(self, snapshot: BundleSnapshot, system_providers: set[str] | None = None):
+    def _detect(
+        self, snapshot: BundleSnapshot, system_providers: set[str] | None = None
+    ):
         from abicheck.bundle import _detect_unresolved_intra_dependency
 
-        return _detect_unresolved_intra_dependency(
-            snapshot, system_providers or set()
-        )
+        return _detect_unresolved_intra_dependency(snapshot, system_providers or set())
 
     def test_detects_missing_provider(self) -> None:
         new = _snapshot(
@@ -1585,9 +1583,7 @@ class TestUnresolvedIntraDependency:
         from abicheck.elf_metadata import ElfImport, SymbolBinding
 
         meta = _meta(soname="libplugin.so.1")
-        meta.imports.append(
-            ElfImport(name="optional_hook", binding=SymbolBinding.WEAK)
-        )
+        meta.imports.append(ElfImport(name="optional_hook", binding=SymbolBinding.WEAK))
         new = _snapshot({"libplugin.so": meta})
         assert self._detect(new) == []
 
@@ -1628,9 +1624,7 @@ class TestUnresolvedIntraDependency:
         # unversioned import regardless of default-ness.
         provider_meta = _meta(soname="libcore.so.1")
         provider_meta.symbols.append(
-            ElfSymbol(
-                name="foo", visibility="default", version="V1", is_default=False
-            )
+            ElfSymbol(name="foo", visibility="default", version="V1", is_default=False)
         )
         new = _snapshot(
             {
@@ -1754,9 +1748,7 @@ class TestUnresolvedIntraDependency:
         # an empty list is vacuously True.
         new = _snapshot(
             {
-                "libalgo.so": _meta(
-                    soname="libalgo.so.1", imports=["orphan_symbol"]
-                ),
+                "libalgo.so": _meta(soname="libalgo.so.1", imports=["orphan_symbol"]),
             }
         )
         findings = self._detect(new, {"anything"})
@@ -1780,9 +1772,7 @@ class TestUnresolvedIntraDependency:
         new = _snapshot(
             {
                 "libbase.so": _meta(soname="libbase.so.1", exports=["base_fn"]),
-                "libcore.so": _meta(
-                    soname="libcore.so.1", needed=["libbase.so.1"]
-                ),
+                "libcore.so": _meta(soname="libcore.so.1", needed=["libbase.so.1"]),
                 "libalgo.so": _meta(
                     soname="libalgo.so.1",
                     needed=["libcore.so.1"],
@@ -1804,9 +1794,7 @@ class TestAuditBundleDuplicateSoname:
     audit_bundle() now rejects the ambiguity outright instead of guessing.
     """
 
-    def test_rejects_duplicate_soname(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_rejects_duplicate_soname(self, monkeypatch: pytest.MonkeyPatch) -> None:
         import abicheck.bundle as bundle_mod
         from abicheck.bundle import ArtifactSetError, audit_bundle
 
@@ -1953,9 +1941,7 @@ class TestReachableIntraLibrariesSymlinkAlias:
             "libconsumer.so": tmp_path / "libconsumer.so",
         }
         metadata = {
-            "aaa.so": _meta(
-                soname="", exports=["foo"], export_versions={"foo": "V1"}
-            ),
+            "aaa.so": _meta(soname="", exports=["foo"], export_versions={"foo": "V1"}),
             "libconsumer.so": _meta(
                 soname="libconsumer.so",
                 needed=["libreal.so.1"],
@@ -2434,6 +2420,87 @@ class TestCompareReleaseBundleE2E:
         assert intra["consumer_library"] == "libalgo.so"
         assert intra["symbol"] == "core_mul"
 
+    def test_compare_product_directories_matches_the_cli_result(
+        self, tmp_path: Path
+    ) -> None:
+        # The exact same scenario as test_compare_release_emits_bundle_
+        # findings_by_default above, but driven through the plain library
+        # function (abicheck.product_baseline.compare_product_directories)
+        # instead of the CLI -- proving it reproduces the identical
+        # per-library and bundle-level result with no Click, no subprocess,
+        # no directory-mode `compare` invocation.
+        import shutil
+        import subprocess
+
+        from abicheck.product_baseline import compare_product_directories
+
+        old = tmp_path / "old"
+        new = tmp_path / "new"
+        old.mkdir()
+        new.mkdir()
+        _build_tiny_so(
+            old,
+            "libcore.so",
+            "int core_add(int a, int b){return a+b;}\n"
+            "int core_mul(int a, int b){return a*b;}\n",
+        )
+        _build_tiny_so(
+            new,
+            "libcore.so",
+            "int core_add(int a, int b){return a+b;}\n",  # core_mul removed
+        )
+        algo_src = (
+            "extern int core_add(int,int);\n"
+            "extern int core_mul(int,int);\n"
+            "int algo_sum(int lo, int hi){int s=0;for(int i=lo;i<=hi;++i)s=core_add(s,i);return s;}\n"
+            "int algo_square(int x){return core_mul(x,x);}\n"
+        )
+        gcc = shutil.which("gcc")
+        if gcc is None:
+            pytest.skip("gcc unavailable; cannot build bundle E2E fixture")
+        for side in (old, new):
+            src_dir = side.parent / f"{side.name}.sources"
+            src_dir.mkdir(exist_ok=True)
+            src_file = src_dir / "libalgo.c"
+            src_file.write_text(algo_src)
+            subprocess.run(
+                [
+                    gcc,
+                    "-shared",
+                    "-fPIC",
+                    "-g",
+                    "-O0",
+                    str(src_file),
+                    "-o",
+                    str(side / "libalgo.so"),
+                    "-L",
+                    str(side),
+                    "-Wl,--no-as-needed",
+                    "-lcore",
+                    "-Wl,-soname,libalgo.so.1",
+                ],
+                check=True,
+                capture_output=True,
+            )
+
+        result = compare_product_directories(old, new)
+
+        assert result.bundle_verdict == Verdict.BREAKING
+        kinds = {f.kind for f in result.bundle_findings}
+        assert ChangeKind.BUNDLE_INTRA_DEP_REMOVED in kinds
+        intra = next(
+            f
+            for f in result.bundle_findings
+            if f.kind == ChangeKind.BUNDLE_INTRA_DEP_REMOVED
+        )
+        assert intra.consumer_library == "libalgo.so"
+        assert intra.symbol == "core_mul"
+        # The per-library pass itself must have caught the removal too --
+        # this is what diff_by_library indexes to attribute the bundle
+        # finding to its provider.
+        core_result = next(r for r in result.per_library if "libcore" in r.library)
+        assert any(c.kind == ChangeKind.FUNC_REMOVED for c in core_result.changes)
+
     def test_compare_release_no_bundle_analysis_opts_out(self, tmp_path: Path) -> None:
         # --no-bundle-analysis must suppress bundle output and report only
         # per-library results.
@@ -2910,13 +2977,12 @@ class TestSonameSkewCohortScoping:
                 resolution=_compute_resolution_graph(libs, meta),
             )
 
-        old = _snap(
-            "libonedal_core-a1b2c3d4.so.1", "libonedal_thread-1a1b2c2d.so.1"
-        )
+        old = _snap("libonedal_core-a1b2c3d4.so.1", "libonedal_thread-1a1b2c2d.so.1")
         new = _snap(
             # core bumps major AND gets a fresh hash; thread lags but also
             # gets a fresh hash (a hash-only rebuild, not a real SONAME change).
-            "libonedal_core-e5f6a7b8.so.2", "libonedal_thread-9e9f8a8b.so.1"
+            "libonedal_core-e5f6a7b8.so.2",
+            "libonedal_thread-9e9f8a8b.so.1",
         )
         findings = _detect_soname_skew(old, new, ["libonedal_"])
         assert [f.kind for f in findings] == [ChangeKind.BUNDLE_SONAME_SKEW]

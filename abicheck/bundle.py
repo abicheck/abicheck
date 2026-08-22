@@ -32,7 +32,24 @@ Public surface:
     - :class:`BundleFinding`      — one cross-library change with provider
                                     and consumer attribution.
     - :class:`BundleDiffResult`   — output of :func:`compare_bundle`.
-    - :func:`compare_bundle`      — main entry point.
+    - :func:`compare_bundle`      — main entry point, given two already-built
+                                    :class:`BundleSnapshot`\\ s and the
+                                    per-library diffs to correlate.
+    - :func:`discover_artifact_set` — resolve a set of paths into a
+                                    ``{canonical_name: path}`` bundle map,
+                                    the shape :func:`build_bundle_snapshot`
+                                    and :func:`compare_bundle` both need.
+
+For a caller with two plain *directories* on disk (e.g. two
+:mod:`abicheck.product_baseline` archives already unpacked) who doesn't want
+to build snapshots or run the per-library compares themselves, see
+:func:`abicheck.product_baseline.compare_product_directories` — it discovers,
+matches, and diffs for you, then calls :func:`compare_bundle`. Kept in
+``product_baseline`` rather than here: it needs the per-pair compare engine
+(``service_compare_pipeline.run_compare``), and that module's own import
+graph already reaches back into this one (``service_scan`` calls
+:func:`audit_bundle`), so importing it from this module would create an
+import cycle.
 
 Bundle findings use the ``ChangeKind.BUNDLE_*`` values registered in
 :mod:`abicheck.change_registry`. They participate in policy classification,
@@ -166,9 +183,7 @@ class ArtifactSetError(ValueError):
     """
 
 
-def discover_artifact_set(
-    paths: list[Path], *, explicit: bool
-) -> dict[str, Path]:
+def discover_artifact_set(paths: list[Path], *, explicit: bool) -> dict[str, Path]:
     """Resolve a list of paths into a ``{canonical_name: path}`` bundle map.
 
     ADR-056: shared by both ``--artifact-set`` forms (a directory the caller
@@ -328,7 +343,9 @@ def check_artifact_set_soname_collisions(libraries: dict[str, Path]) -> None:
             continue
         try:
             meta = parse_elf_metadata(path)
-        except Exception as exc:  # pragma: no cover — parse_elf_metadata already swallows most
+        except (
+            Exception
+        ) as exc:  # pragma: no cover — parse_elf_metadata already swallows most
             log.warning("bundle: failed to parse %s: %s", path, exc)
             continue
         if meta is not None:
@@ -989,8 +1006,7 @@ def _detect_unresolved_intra_dependency(
                     not intra_edges
                     and extra_edges
                     and all(
-                        e in system_providers or _looks_system(e)
-                        for e in extra_edges
+                        e in system_providers or _looks_system(e) for e in extra_edges
                     )
                 ):
                     continue
