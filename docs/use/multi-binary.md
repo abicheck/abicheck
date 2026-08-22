@@ -34,26 +34,39 @@ becomes the worst of `bundle_verdict` and the per-library worst.
 ## Bundle findings answer a different question than public-surface findings
 
 A `bundle_*` kind answers *"does the shipped bundle still work end-to-end"*
-— not *"did the public API change"*. That is a deliberately different
-question from the one `BREAKING_KINDS`/`API_BREAK_KINDS` answer, and it has
-a direct consequence for policy scoping: **`--scope-public-headers`
-(on by default) and a `--policy` profile scoped to the public surface do
-not suppress a `bundle_*` finding on an internal, non-public symbol.**
+— not *"did the public API change"*. `bundle_intra_dep_removed` and its
+siblings are classified as `BREAKING` through the same registry/verdict
+machinery every other `ChangeKind` uses — they aren't a separate category —
+but the **scoping** layer that sits in front of that classification treats
+them differently: **`--scope-public-headers` (on by default) and a
+`--policy` profile scoped to the public surface do not suppress a
+`bundle_*` finding on an internal, non-public symbol.**
 
 This is by design, not a gap. `core_mul` in the table above never needs to
 be part of `libcore.so`'s *public* API for `bundle_intra_dep_removed` to be
 real and `BREAKING`: `libalgo.so` still imports it, so removing it breaks
 `libalgo.so`'s runtime load regardless of whether any external consumer
-ever called `core_mul` directly. A public-surface scope answers "can code
-outside this release still compile and link against what it used to" —
-the bundle layer answers "does the release still boot as a unit" — and an
+ever called `core_mul` directly. Public-surface scoping answers "can code
+outside this release still compile and link against what it used to" — the
+bundle layer answers "does the release still boot as a unit" — and an
 internal symbol can fail the second question while being irrelevant to the
-first. Suppress a specific `bundle_*` finding the same way you'd suppress
-any other finding (see [suppressions](suppressions.md)) if you've
-determined a particular internal contract is intentionally being broken;
-don't reach for `--no-scope-public-headers` or a public-surface policy
-profile expecting it to quiet bundle findings, since neither is scoped to
-touch them.
+first. Contrast this with an *ordinary* per-library finding on an internal
+symbol (`func_removed` on something never exported as part of the public
+surface): that one **is** filtered by `--scope-public-headers`/a
+public-surface `--policy` profile, same as any other per-library finding.
+
+**There is currently no per-finding suppression for `bundle_*` findings.**
+Unlike ordinary per-library findings, `compare_bundle()` (both the
+directory/package `compare` fan-out and the whole-product baseline compare
+in `abicheck/product_baseline.py`) is never given a suppression ruleset, so
+[suppressions](suppressions.md) — which apply to per-library findings —
+have no effect on a bundle-level finding. If you've determined a specific
+intra-bundle contract is intentionally being broken, the only levers today
+are `--no-bundle-analysis` (turns off bundle analysis for the whole run —
+see below) and, for a symbol that genuinely comes from outside the release,
+`--bundle-system-providers` (see below) — there is no narrower way to quiet
+one specific `bundle_*` finding while keeping the rest of bundle analysis
+active.
 
 The reverse holds too: an *unused* internal export being removed does not
 get bundle severity. `bundle_library_removed`/`bundle_intra_dep_removed`
