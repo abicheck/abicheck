@@ -35,24 +35,44 @@ becomes the worst of `bundle_verdict` and the per-library worst.
 
 A `bundle_*` kind answers *"does the shipped bundle still work end-to-end"*
 — not *"did the public API change"*. `bundle_intra_dep_removed` and its
-siblings are classified as `BREAKING` through the same registry/verdict
-machinery every other `ChangeKind` uses — they aren't a separate category —
-but the **scoping** layer that sits in front of that classification treats
-them differently: **`--scope-public-headers` (on by default) and a
-`--policy` profile scoped to the public surface do not suppress a
-`bundle_*` finding on an internal, non-public symbol.**
+siblings are classified as `BREAKING`/`COMPATIBLE_WITH_RISK`/etc. through the
+same registry/verdict machinery every other `ChangeKind` uses — they aren't a
+separate category — but the **scoping** layer that sits in front of that
+classification treats some of them differently, and *which* bundle detector
+you're looking at determines whether that's true.
 
-This is by design, not a gap. `core_mul` in the table above never needs to
-be part of `libcore.so`'s *public* API for `bundle_intra_dep_removed` to be
-real and `BREAKING`: `libalgo.so` still imports it, so removing it breaks
-`libalgo.so`'s runtime load regardless of whether any external consumer
-ever called `core_mul` directly. Public-surface scoping answers "can code
-outside this release still compile and link against what it used to" — the
-bundle layer answers "does the release still boot as a unit" — and an
-internal symbol can fail the second question while being irrelevant to the
-first. Contrast this with an *ordinary* per-library finding on an internal
-symbol (`func_removed` on something never exported as part of the public
-surface): that one **is** filtered by `--scope-public-headers`/a
+**Graph-native detectors ignore public-surface scoping entirely.**
+`bundle_intra_dep_removed`, `bundle_library_removed`/`bundle_library_added`,
+`bundle_intra_dep_resolved_to_different_version`, `bundle_soname_skew`, and
+manifest enforcement (`bundle_manifest_instantiation_*`) work directly from
+the bundle's own ELF resolution graph and declared contracts (manifest,
+SONAME cohorts) — never from a per-library `DiffResult`'s already-scoped
+`changes` list. `core_mul` in the table above never needs to be part of
+`libcore.so`'s *public* API for `bundle_intra_dep_removed` to fire: `libalgo.so`
+still imports it via DT_NEEDED, so removing it breaks `libalgo.so`'s runtime
+load regardless of whether any external consumer ever called `core_mul`
+directly, and neither `--scope-public-headers` nor a public-surface `--policy`
+profile touches this detector's input at all.
+
+**Diff-derived detectors inherit scoping indirectly, through starvation.**
+`bundle_intra_dep_signature_changed`, `bundle_intra_type_changed`, and
+`bundle_provider_changed` are computed by scanning each library's own
+per-library `DiffResult.changes` for the specific kinds they promote
+(`func_params_changed`/`func_return_changed`/`var_type_changed` for the
+signature-change detector, `func_removed`+`func_added` pairs for the
+provider-migration detector, and so on) — and that `DiffResult` is the
+*same*, already-scoped result the per-library report itself uses. If
+`--scope-public-headers` (on by default) filtered the underlying provider-side
+change out of `diff.changes` because the changed symbol isn't part of
+`libcore.so`'s public surface, the bundle detector never sees it and never
+promotes it to a `bundle_*` finding either. So for these three kinds,
+public-surface scoping *does* reach bundle-level findings — just indirectly,
+by removing the upstream signal they depend on, not by filtering the
+`bundle_*` finding itself.
+
+Contrast either case with an *ordinary* per-library finding that never gets
+promoted to a bundle finding at all (`func_removed` on something no sibling
+imports): that one **is** filtered by `--scope-public-headers`/a
 public-surface `--policy` profile, same as any other per-library finding.
 
 **There is currently no per-finding suppression for `bundle_*` findings.**
@@ -60,20 +80,32 @@ Unlike ordinary per-library findings, `compare_bundle()` (both the
 directory/package `compare` fan-out and the whole-product baseline compare
 in `abicheck/product_baseline.py`) is never given a suppression ruleset, so
 [suppressions](suppressions.md) — which apply to per-library findings —
-have no effect on a bundle-level finding. If you've determined a specific
-intra-bundle contract is intentionally being broken, the only levers today
-are `--no-bundle-analysis` (turns off bundle analysis for the whole run —
-see below) and, for a symbol that genuinely comes from outside the release,
-`--bundle-system-providers` (see below) — there is no narrower way to quiet
-one specific `bundle_*` finding while keeping the rest of bundle analysis
-active.
+have no effect on a bundle-level finding, once it does fire. If you've
+determined a specific intra-bundle contract is intentionally being broken,
+the only levers today are `--no-bundle-analysis` (turns off bundle analysis
+for the whole run — see below) and, for a symbol that genuinely comes from
+outside the release, `--bundle-system-providers` (see below) — there is no
+narrower way to quiet one specific `bundle_*` finding while keeping the rest
+of bundle analysis active.
 
-The reverse holds too: an *unused* internal export being removed does not
-get bundle severity. `bundle_library_removed`/`bundle_intra_dep_removed`
-and friends only fire when a sibling in the bundle actually consumes the
-symbol — an unconsumed internal export removal falls through to the
-ordinary per-library `func_removed`, whose severity is governed by the
-usual public-surface/suppression rules, unaffected by the bundle layer.
+**The sibling-consumption gate is specific to two kinds, not a blanket rule.**
+Only `bundle_intra_dep_removed` (an import with no provider at all) and
+`bundle_library_removed` (a removed library, gated on whether a surviving
+sibling actually imported one of its exports — a standalone removal with no
+internal consumer is left to the separate `--fail-on-removed-library` flow)
+require a sibling to actually consume the affected symbol/library before
+firing. Several other `bundle_*` kinds have no such gate: `bundle_library_added`
+fires for any new library unconditionally; `bundle_provider_changed` fires
+whenever a symbol migrates from one sibling to another, whether or not any
+third sibling consumes it; and manifest/SONAME-cohort findings
+(`bundle_manifest_instantiation_removed`, `bundle_soname_skew`) are driven by
+their own declared contract, not by internal consumption at all — a manifest
+promising a since-removed symbol produces
+`bundle_manifest_instantiation_removed` even if no sibling in the bundle ever
+imported it. An *unconsumed*, *unmanifested* internal export removal is the
+one case that falls through to the ordinary per-library `func_removed`,
+governed by the usual public-surface/suppression rules, unaffected by the
+bundle layer.
 
 ## Running it
 
@@ -364,9 +396,12 @@ Same as before, but a bundle finding can promote the verdict:
 
 If you previously had a green CI on a release and bundle analysis now
 flips it red, the finding section in the markdown / JSON tells you what
-changed and which consumer is affected. The most common bisect path
-is: silence the offending finding with a [suppression](suppressions.md)
-or fix the intra-bundle contract.
+changed and which consumer is affected. The bisect path depends on which
+finding fired: a per-library finding (something in `libraries[].changes`)
+can be silenced with a [suppression](suppressions.md) if it's expected; a
+`bundle_*` finding cannot be suppressed today (see above) — your options are
+to fix the intra-bundle contract, or fall back to `--no-bundle-analysis` /
+`--bundle-system-providers` as described below.
 
 ## Platform support
 

@@ -1,16 +1,20 @@
 ### Documentation
 
-- **Documented why `bundle_*` findings aren't suppressed by public-surface
-  policy scoping, and that they currently have no per-finding suppression
-  mechanism at all.** [Multi-binary (bundle) ABI analysis](docs/use/multi-binary.md)
-  now explains that a `bundle_*` kind answers "does the shipped bundle still
-  work end-to-end" — classified as `BREAKING`/etc. through the same
-  registry as every other `ChangeKind`, but scoped differently — so
-  `--scope-public-headers` and a public-surface-scoped `--policy` profile
-  do not suppress a `bundle_*` finding on an internal, non-public symbol.
-  This was already the intended scoping behavior, just previously
-  undocumented. Also documents, as a known limitation, that `compare_bundle()`
-  is never given a suppression ruleset, so `--suppress` rules have no effect
-  on bundle findings today; `--no-bundle-analysis` and
-  `--bundle-system-providers` remain the only available levers
-  (G38 Phase 1, an amendment to ADR-023).
+- **Documented `bundle_*` finding scoping and suppression precisely, per
+  detector.** [Multi-binary (bundle) ABI analysis](docs/use/multi-binary.md)
+  now explains that `--scope-public-headers`/a public-surface `--policy`
+  profile never filters the **graph-native** bundle detectors
+  (`bundle_intra_dep_removed`, `bundle_library_removed`/`_added`, version
+  drift, SONAME skew, manifest enforcement — which work from the bundle's
+  own ELF resolution graph and declared contracts, not a per-library
+  `DiffResult`), but *does* reach the three **diff-derived** detectors
+  (`bundle_intra_dep_signature_changed`, `bundle_intra_type_changed`,
+  `bundle_provider_changed`) indirectly, by filtering the already-scoped
+  per-library `Change`s those detectors promote from. Also documents that
+  the sibling-consumption gate is specific to `bundle_intra_dep_removed`/
+  `bundle_library_removed`, not a blanket rule (`bundle_library_added` and
+  `bundle_provider_changed` have no such gate; manifest/cohort findings are
+  contract-driven), and that `compare_bundle()` is never given a suppression
+  ruleset, so `--suppress` rules have no effect on any bundle-level finding
+  once it fires — `--no-bundle-analysis` and `--bundle-system-providers`
+  remain the only available levers (G38 Phase 1, an amendment to ADR-023).
