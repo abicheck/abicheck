@@ -163,8 +163,16 @@ def detect_archive(path: str | Path) -> bool:
 #: silently hiding a real SONAME/dependency change as vendor-hash noise —
 #: the exact false-negative an ABI-breaking-change detector must not produce
 #: (self-review finding).
+#: Case-insensitive (``re.IGNORECASE``): a vendored library can carry an
+#: uppercase-hex or uppercase-extension spelling (``libfoo-ABCDEF.SO.1``) --
+#: matching only lowercase let two releases differing solely in that
+#: generated hash's case key as unrelated libraries, reporting spurious
+#: removal/addition noise (Codex). Only the matched hash/extension span is
+#: affected -- re.sub() replaces just that span with "", so the rest of the
+#: name (and every other consumer of the stripped result) keeps its
+#: original case.
 _VENDOR_HASH_RE = re.compile(
-    r"-(?=[0-9a-f]*[a-f])[0-9a-f]{6,16}(?=\.(?:so|dylib)\b|\.\d)"
+    r"-(?=[0-9a-f]*[a-f])[0-9a-f]{6,16}(?=\.(?:so|dylib)\b|\.\d)", re.IGNORECASE
 )
 
 

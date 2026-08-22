@@ -60,7 +60,14 @@ from typing import IO, TYPE_CHECKING, Any
 
 from .binary_utils import _pe_is_dll_content, resolve_linker_script
 from .errors import SnapshotError
-from .package import TarExtractor, _is_elf_shared_object
+from .package import (
+    _MAX_DECOMPRESSED_TAR_BYTES_ENV,
+    _MAX_TAR_MEMBERS_ENV,
+    TarExtractor,
+    _is_elf_shared_object,
+    _max_decompressed_tar_bytes,
+    _max_tar_members,
+)
 
 if TYPE_CHECKING:
     from .bundle import BundleDiffResult
@@ -773,6 +780,19 @@ def _add_manifest_member(
     payload = (
         json.dumps(manifest.to_dict(), indent=2, sort_keys=True).encode("utf-8") + b"\n"
     )
+    # Enforced at the single point the manifest is serialized, so it can
+    # never drift from the identical check unpack_product_baseline() (via
+    # _max_manifest_bytes()) applies on read -- otherwise pack could
+    # publish a manifest unpack always refuses (Codex).
+    max_manifest_bytes = _max_manifest_bytes()
+    if len(payload) > max_manifest_bytes:
+        raise SnapshotError(
+            f"product baseline manifest would be {len(payload)} bytes, "
+            f"exceeding the {max_manifest_bytes}-byte safety limit "
+            f"unpack_product_baseline() enforces (override via "
+            f"{_MAX_MANIFEST_BYTES_ENV}) -- reduce the number of packed "
+            "libraries or header roots, or raise the limit on both sides"
+        )
     info = tarfile.TarInfo(name=MANIFEST_MEMBER_NAME)
     info.size = len(payload)
     info.mtime = 0
@@ -901,6 +921,39 @@ def pack_product_baseline(
     ]
     # Known gap: an *undeclared*, pre-existing empty dir holding OUTPUT is still excluded like pure scaffolding -- structurally indistinguishable by content, and existence can't separate them (OUTPUT's own dir survives after a first pack, so a rerun would misclassify scaffold as real content). Needs a declaration mechanism beyond header_roots.
 
+    # Reject up front, before any temp file is created, an archive that
+    # unpack_product_baseline() (via TarExtractor's own decompression-bomb
+    # defenses) would always refuse -- otherwise pack_product_baseline()
+    # can successfully publish something that can never be unpacked
+    # (Codex). Member count is exact (matches file_count below); the byte
+    # total is a lower-bound estimate (declared content only, no tar header
+    # overhead, no manifest -- computed after packing and checked
+    # separately at write time), same as what the reader's own check sums.
+    total_member_count = len(paths) + len(archived_empty_dirs) + 1  # +1 manifest
+    max_members = _max_tar_members()
+    if total_member_count > max_members:
+        _cleanup_output_scaffold_dirs()
+        raise SnapshotError(
+            f"product baseline would pack {total_member_count} tar members, "
+            f"exceeding the {max_members}-member safety limit "
+            f"unpack_product_baseline() enforces (override via "
+            f"{_MAX_TAR_MEMBERS_ENV}) -- reduce the number of packed paths, "
+            "or raise the limit on both sides"
+        )
+    estimated_content_bytes = sum(
+        p.stat().st_size for p in paths if p.is_file() and not p.is_symlink()
+    )
+    max_decoded_bytes = _max_decompressed_tar_bytes()
+    if estimated_content_bytes > max_decoded_bytes:
+        _cleanup_output_scaffold_dirs()
+        raise SnapshotError(
+            f"product baseline would pack at least {estimated_content_bytes} "
+            f"bytes of file content, exceeding the {max_decoded_bytes}-byte "
+            f"decompressed-archive safety limit unpack_product_baseline() "
+            f"enforces (override via {_MAX_DECOMPRESSED_TAR_BYTES_ENV}) -- "
+            "reduce what's packed, or raise the limit on both sides"
+        )
+
     # MANIFEST_MEMBER_NAME is reserved: a real source entry there would collide with the generated manifest member, added last, silently winning on extraction. Must reject a *directory* at the reserved path too -- an empty one is never in `paths`, and a non-empty one's own directory entry never is either, only its children -- either shape let packing write a tar requiring the same path to be both a directory and a regular file.
     manifest_child_prefix = MANIFEST_MEMBER_NAME + "/"
     collision = next(
@@ -983,6 +1036,20 @@ def pack_product_baseline(
     tmp_path = Path(tmp_name)
     try:
         os.chmod(tmp_path, target_mode)
+    except BaseException:
+        # fd hasn't been handed to os.fdopen() yet at this point, so
+        # ownership is still ours to close -- otherwise a chmod failure
+        # (e.g. a filesystem that permits creation but rejects mode
+        # changes) leaks the descriptor on every failed pack attempt
+        # (Codex).
+        os.close(fd)
+        try:
+            tmp_path.unlink(missing_ok=True)
+        except OSError:  # pragma: no cover - best-effort cleanup
+            pass
+        _cleanup_output_scaffold_dirs()
+        raise
+    try:
         libraries: list[LibraryEntry] = []
         with os.fdopen(fd, "wb") as raw_out:
             with cctx.stream_writer(raw_out, closefd=False) as compressor:
