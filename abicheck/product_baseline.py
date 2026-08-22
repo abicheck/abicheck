@@ -682,6 +682,24 @@ def pack_product_baseline(
     # before there is a descriptor to leak -- the except BaseException
     # block below unlinks the temp *file*, but never closes an fd that
     # failed to reach os.fdopen()'s ownership transfer.
+    # tempfile.mkstemp() always creates its file mode 0600, deliberately,
+    # for its own general-purpose "private scratch file" contract -- wrong
+    # for a release asset this function is about to publish under
+    # `output_path`. os.replace() carries the temp file's own mode across
+    # (POSIX rename never touches permissions), so left alone a packed
+    # archive would be unreadable by anyone but its creator even under an
+    # ordinary 0022 umask, and repacking an existing group/world-readable
+    # baseline would silently strip its access (Codex review, fresh
+    # evidence). Preserve an existing destination's own mode when
+    # overwriting it (a caller may have deliberately set one); otherwise
+    # fall back to the ordinary umask-derived file permissions a freshly
+    # written file would normally get.
+    if output_path.exists():
+        target_mode = stat_module.S_IMODE(output_path.stat().st_mode)
+    else:
+        umask = os.umask(0)
+        os.umask(umask)
+        target_mode = 0o666 & ~umask
     zstandard = _zstd_module()
     cctx = zstandard.ZstdCompressor(level=zstd_level, write_checksum=True)
     fd, tmp_name = tempfile.mkstemp(
@@ -689,6 +707,7 @@ def pack_product_baseline(
     )
     tmp_path = Path(tmp_name)
     try:
+        os.chmod(tmp_path, target_mode)
         libraries: list[LibraryEntry] = []
         with os.fdopen(fd, "wb") as raw_out:
             with cctx.stream_writer(raw_out, closefd=False) as compressor:
@@ -759,6 +778,17 @@ def unpack_product_baseline(
         # already-validated staging directory behind uncleaned (Codex
         # review, fresh evidence).
         raise SnapshotError(f"unpack destination must not be a symlink: {dest_path}")
+    # Captured before publication, not derived from the umask at that
+    # point: a caller may have pre-created dest_path with deliberate,
+    # non-default permissions (a private 0700 scratch dir, a shared 0775
+    # group directory), and publication below replaces dest_path outright
+    # -- if it always re-derived the mode from the process umask instead,
+    # a pre-created private directory would silently become world-
+    # traversable (or a shared one would silently lose its group bit)
+    # the moment this function ran (Codex review, fresh evidence).
+    existing_dest_mode = (
+        stat_module.S_IMODE(dest_path.stat().st_mode) if dest_path.exists() else None
+    )
     if dest_path.exists():
         if not dest_path.is_dir():
             raise SnapshotError(f"unpack destination is not a directory: {dest_path}")
@@ -855,11 +885,18 @@ def unpack_product_baseline(
         # function is about to publish as the product's own extracted
         # content: a caller (or a later CI step/container stage) running
         # as a different user would then be unable to even traverse it.
-        # Apply the ordinary umask-derived permissions an extraction would
-        # normally get instead.
-        umask = os.umask(0)
-        os.umask(umask)
-        os.chmod(staging, 0o777 & ~umask)
+        # If the caller's own dest_path already existed with a deliberate
+        # mode, preserve it instead of overwriting it with an umask-
+        # derived guess -- see the mode capture above for why silently
+        # replacing it would be a real permission regression, not just a
+        # cosmetic difference.
+        if existing_dest_mode is not None:
+            target_dir_mode = existing_dest_mode
+        else:
+            umask = os.umask(0)
+            os.umask(umask)
+            target_dir_mode = 0o777 & ~umask
+        os.chmod(staging, target_dir_mode)
 
         # dest_path, if it existed, was already confirmed empty above, so
         # removing it and renaming staging into its place is safe (and
@@ -912,6 +949,17 @@ def _check_schema_supported(schema: str, archive_path: Path) -> None:
             f"this abicheck build supports ({PRODUCT_BASELINE_SCHEMA!r}) — "
             "upgrade abicheck to read it."
         )
+    # Only major >= 1 has ever been a real, shipped format -- v1 is both
+    # the first and (today) the only one this build implements. The check
+    # above alone accepts any major <= supported_major, including v0 or a
+    # negative major that no version of this codebase ever wrote, so a
+    # malformed or foreign manifest spelling one of those would still be
+    # deserialized with the v1 field layout and published as a supported
+    # baseline (Codex review, fresh evidence).
+    if major < 1:
+        raise SnapshotError(
+            f"{archive_path}: unrecognized product baseline schema {schema!r}"
+        )
 
 
 def _discover_library_map(root: Path, *, include_private: bool) -> dict[str, Path]:
@@ -961,6 +1009,8 @@ def compare_product_directories(
     new_dir: Path | str,
     *,
     header_roots: Sequence[str] = (),
+    old_header_roots: Sequence[str] | None = None,
+    new_header_roots: Sequence[str] | None = None,
     lang: str = "c++",
     frontend: str = "auto",
     policy: str = "strict_abi",
@@ -1001,9 +1051,20 @@ def compare_product_directories(
     *header_roots* names header directories relative to *old_dir*/*new_dir*
     — the exact shape :attr:`ProductBaselineManifest.header_roots` already
     records, so a caller that just unpacked an archive can pass its
-    manifest's own ``header_roots`` straight through. A root missing on
-    either side is silently skipped, matching this format's own tolerance
-    for a library that ships no public headers.
+    manifest's own ``header_roots`` straight through, applied to *both*
+    sides. A root missing on a given side is silently skipped, matching
+    this format's own tolerance for a library that ships no public
+    headers.
+
+    *old_header_roots*/*new_header_roots* override *header_roots*
+    independently per side, for a product that relocated its public
+    headers between releases (e.g. old ships ``include``, new ships
+    ``sdk/include``) — a single shared root list cannot express that, and
+    silently resolving only the side that happens to match would compare
+    one side without its real header evidence rather than reporting the
+    intended whole-product comparison. Each defaults to *header_roots*
+    when not given, so passing one manifest's roots to *header_roots*
+    alone still works for the common case where both sides agree.
 
     Every library discovered in *both* directories (matched by discovered
     filename — see :func:`_discover_library_map`, called once per side) is
@@ -1022,16 +1083,21 @@ def compare_product_directories(
 
     old_root = Path(old_dir)
     new_root = Path(new_dir)
-    roots = list(header_roots)
+    old_roots = (
+        list(old_header_roots) if old_header_roots is not None else list(header_roots)
+    )
+    new_roots = (
+        list(new_header_roots) if new_header_roots is not None else list(header_roots)
+    )
 
     old_map = _discover_library_map(old_root, include_private=include_private)
     new_map = _discover_library_map(new_root, include_private=include_private)
 
-    def _resolved_headers(root: Path) -> list[Path]:
+    def _resolved_headers(root: Path, roots: Sequence[str]) -> list[Path]:
         return [candidate for rel in roots if (candidate := root / rel).is_dir()]
 
-    old_headers = _resolved_headers(old_root)
-    new_headers = _resolved_headers(new_root)
+    old_headers = _resolved_headers(old_root, old_roots)
+    new_headers = _resolved_headers(new_root, new_roots)
 
     per_library_results = []
     for key in sorted(set(old_map) & set(new_map)):

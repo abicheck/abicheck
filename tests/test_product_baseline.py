@@ -831,3 +831,156 @@ class TestUnpackProductBaseline:
 
         with pytest.raises(SnapshotError, match="newer than this abicheck build"):
             pb._check_schema_supported("abicheck.product-baseline/v999", archive)
+
+    def test_unpack_rejects_nonexistent_older_major_schema(
+        self, tmp_path: Path
+    ) -> None:
+        # Only major >= 1 was ever a real, shipped format -- v1 is both
+        # the first and (today) the only one this build implements. The
+        # pre-existing "newer than supported" check alone let v0 (and any
+        # negative major) through, since it only ever rejects a major
+        # *greater* than what's supported -- a malformed or foreign
+        # manifest spelling one of those got deserialized with the v1
+        # field layout and published as a supported baseline (Codex
+        # review, fresh evidence).
+        product = _make_product(tmp_path)
+        archive = tmp_path / "baseline.tar.zst"
+        pack_product_baseline(product, archive)
+
+        from abicheck import product_baseline as pb
+
+        with pytest.raises(SnapshotError, match="unrecognized product baseline schema"):
+            pb._check_schema_supported("abicheck.product-baseline/v0", archive)
+        with pytest.raises(SnapshotError, match="unrecognized product baseline schema"):
+            pb._check_schema_supported("abicheck.product-baseline/v-1", archive)
+
+    def test_unpack_preserves_existing_destination_permissions(
+        self, tmp_path: Path
+    ) -> None:
+        # A caller may pre-create DEST_DIR with deliberate, non-default
+        # permissions (a private 0700 scratch dir, a shared 0775 group
+        # directory) before unpacking into it. Publication replaces
+        # DEST_DIR outright (rmdir + rename staging into place), and
+        # staging's own mode was previously always re-derived from the
+        # process umask regardless -- silently making a private
+        # directory world-traversable, or a shared one lose its group
+        # bit, the moment unpack ran (Codex review, fresh evidence).
+        product = _make_product(tmp_path)
+        archive = tmp_path / "baseline.tar.zst"
+        pack_product_baseline(product, archive)
+
+        dest = tmp_path / "dest"
+        dest.mkdir(mode=0o700)
+        os.chmod(dest, 0o700)  # mkdir's mode is umask-filtered; force it.
+        unpack_product_baseline(archive, dest)
+        assert stat_mod.S_IMODE(dest.stat().st_mode) == 0o700
+
+
+class TestPackProductBaselinePermissions:
+    def test_pack_output_gets_umask_derived_permissions_not_mkstemp_0600(
+        self, tmp_path: Path
+    ) -> None:
+        # tempfile.mkstemp() always creates its file mode 0600, and
+        # os.replace() carries that mode straight across to OUTPUT --
+        # even under a normal 0022 umask, a freshly packed archive was
+        # unreadable by anyone but its own creator (Codex review, fresh
+        # evidence).
+        product = _make_product(tmp_path)
+        out = tmp_path / "baseline.tar.zst"
+        pack_product_baseline(product, out)
+        mode = stat_mod.S_IMODE(out.stat().st_mode)
+        umask = os.umask(0)
+        os.umask(umask)
+        assert mode == (0o666 & ~umask)
+        assert mode != 0o600
+
+    def test_pack_preserves_existing_output_permissions_when_overwriting(
+        self, tmp_path: Path
+    ) -> None:
+        # Repacking an existing group/world-readable release asset must
+        # not silently strip its access just because mkstemp()'s own
+        # 0600 default rides along on os.replace() (Codex review, fresh
+        # evidence).
+        product = _make_product(tmp_path)
+        out = tmp_path / "baseline.tar.zst"
+        pack_product_baseline(product, out)
+        os.chmod(out, 0o644)
+        pack_product_baseline(product, out)
+        assert stat_mod.S_IMODE(out.stat().st_mode) == 0o644
+
+
+class TestCompareProductDirectoriesHeaderRoots:
+    def _capture_run_compare_calls(
+        self, monkeypatch: pytest.MonkeyPatch, old_dir: Path, new_dir: Path
+    ) -> list[dict[str, object]]:
+        # Bypasses real library discovery/parsing entirely -- this test
+        # is purely about which header directories get resolved and
+        # passed through to run_compare, not about the per-library
+        # compare itself, and building real ELF shared objects needs a
+        # compiler this sandbox doesn't reliably have.
+        from abicheck import product_baseline as pb, service_compare_pipeline as scp
+
+        calls: list[dict[str, object]] = []
+
+        def _fake_discover_library_map(
+            root: Path, *, include_private: bool
+        ) -> dict[str, Path]:
+            return {"libfoo.so": root / "lib" / "libfoo.so"}
+
+        def _fake_run_compare(old_lib, new_lib, **kwargs):  # type: ignore[no-untyped-def]
+            calls.append(kwargs)
+            raise SnapshotError("stop before a real compare runs")
+
+        monkeypatch.setattr(pb, "_discover_library_map", _fake_discover_library_map)
+        monkeypatch.setattr(scp, "run_compare", _fake_run_compare)
+        return calls
+
+    def test_accepts_distinct_header_roots_per_side(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # A product that relocates its public headers between releases
+        # (old ships `include`, new ships `sdk/include`) can't be
+        # expressed by one shared header_roots list -- the old code
+        # silently dropped the nonexistent root on whichever side didn't
+        # have it, so that side's compare ran with no header evidence at
+        # all instead of the intended whole-product comparison (Codex
+        # review, fresh evidence).
+        from abicheck.product_baseline import compare_product_directories
+
+        old_dir = tmp_path / "old"
+        new_dir = tmp_path / "new"
+        (old_dir / "include").mkdir(parents=True)
+        (old_dir / "include" / "a.h").write_text("struct A { int x; };\n")
+        (new_dir / "sdk" / "include").mkdir(parents=True)
+        (new_dir / "sdk" / "include" / "a.h").write_text("struct A { int x; };\n")
+
+        calls = self._capture_run_compare_calls(monkeypatch, old_dir, new_dir)
+        with pytest.raises(SnapshotError, match="stop before"):
+            compare_product_directories(
+                old_dir,
+                new_dir,
+                old_header_roots=["include"],
+                new_header_roots=["sdk/include"],
+            )
+
+        assert len(calls) == 1
+        assert calls[0]["old_headers"] == [old_dir / "include"]
+        assert calls[0]["new_headers"] == [new_dir / "sdk" / "include"]
+
+    def test_per_side_roots_default_to_the_shared_header_roots(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from abicheck.product_baseline import compare_product_directories
+
+        old_dir = tmp_path / "old"
+        new_dir = tmp_path / "new"
+        (old_dir / "include").mkdir(parents=True)
+        (new_dir / "include").mkdir(parents=True)
+
+        calls = self._capture_run_compare_calls(monkeypatch, old_dir, new_dir)
+        with pytest.raises(SnapshotError, match="stop before"):
+            compare_product_directories(old_dir, new_dir, header_roots=["include"])
+
+        assert len(calls) == 1
+        assert calls[0]["old_headers"] == [old_dir / "include"]
+        assert calls[0]["new_headers"] == [new_dir / "include"]
