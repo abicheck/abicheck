@@ -570,6 +570,36 @@ class TestPackProductBaseline:
         with pytest.raises(SnapshotError, match="absolute target"):
             pack_product_baseline(product, tmp_path / "b.tar.zst")
 
+    def test_pack_rejects_a_windows_drive_absolute_symlink_target(
+        self, tmp_path: Path
+    ) -> None:
+        # os.path.isabs() alone is host-dependent -- on POSIX it doesn't
+        # recognize a Windows drive-absolute target as absolute at all,
+        # so packing accepted it (the POSIX containment check also treats
+        # the backslashes as an ordinary, in-tree filename) even though
+        # the same string really is absolute on Windows, where
+        # TarExtractor correctly refuses it at unpack time -- an archive
+        # this function documents as "packed portably" that cannot
+        # actually be unpacked on Windows (Codex review, fresh evidence).
+        product = _make_product(tmp_path)
+        (product / "lib" / "windows-abs.so").symlink_to("C:\\outside\\foo.dll")
+        with pytest.raises(SnapshotError, match="absolute target"):
+            pack_product_baseline(product, tmp_path / "b.tar.zst")
+
+    def test_pack_rejects_a_backslash_traversal_symlink_target(
+        self, tmp_path: Path
+    ) -> None:
+        # A relative target spelled with backslash ".." components
+        # (Windows separators) is one opaque filename component on
+        # POSIX -- the POSIX containment check sees no traversal at all
+        # and packs successfully, but the identical string genuinely
+        # walks above the archive root when later interpreted with
+        # Windows path separators (Codex review, fresh evidence).
+        product = _make_product(tmp_path)
+        (product / "lib" / "evil.so").symlink_to("..\\..\\outside.so")
+        with pytest.raises(SnapshotError, match="Windows path separators"):
+            pack_product_baseline(product, tmp_path / "b.tar.zst")
+
     def test_pack_rejects_a_self_referential_symlink_loop(self, tmp_path: Path) -> None:
         # A self-referential symlink (loop.so -> loop.so) made
         # _add_member()'s own direct Path.resolve() raise RuntimeError,

@@ -63,7 +63,7 @@ import tarfile
 import tempfile
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import IO, TYPE_CHECKING, Any
 
 from .binary_utils import _pe_is_dll_content, resolve_linker_script
@@ -200,35 +200,25 @@ def _is_library_path(path: Path) -> bool:
     or PE/COFF).
 
     Shared by every place that decides "is this a library" -- packing's own
-    manifest-entry classification (:func:`_add_member`, both its regular-
-    file and hardlink-member branches) and :func:`_discover_library_map`'s
-    discovery walk. Previously each checked filename suffix alone (via
-    :func:`_is_shared_library`); an extensionless ELF DSO -- a plugin named
-    without a conventional ``.so`` suffix, real on Linux -- was discovered
-    by neither at first, and even after discovery gained the content-aware
-    fallback, packing's own manifest classification still didn't, so such a
-    file was archived (``_discover_paths`` archives every regular file
-    regardless of suffix) but produced no ``LibraryEntry`` — the returned
-    and persisted manifest falsely reported the product had no such library
-    (Codex review, fresh evidence). Factored into one predicate so
-    discovery and manifest classification can never drift apart on this
-    question again.
+    manifest-entry classification (:func:`_add_member`) and
+    :func:`_discover_library_map`'s discovery walk. Previously each checked
+    filename suffix alone; an extensionless ELF DSO (a plugin named
+    without a conventional ``.so`` suffix, real on Linux) was archived but
+    produced no ``LibraryEntry`` -- the manifest falsely reported the
+    product had no such library (Codex review, fresh evidence). Factored
+    into one predicate so discovery and packing can never drift apart.
 
-    The ELF content fallback (:func:`~abicheck.package._is_elf_shared_object`)
-    had no Mach-O/PE counterpart, so a macOS framework binary
-    (``Foo.framework/Foo``, conventionally extensionless) or a Windows
-    ``.pyd`` extension module never entered either library map (Codex
-    review, fresh evidence). :func:`_macho_is_library_content`/
-    :func:`_pe_is_dll_content` close that for both.
+    The ELF content fallback had no Mach-O/PE counterpart, so a macOS
+    framework binary or a Windows ``.pyd`` extension module never
+    entered either library map (Codex review, fresh evidence).
+    :func:`_macho_is_library_content`/:func:`_pe_is_dll_content` close
+    that for both.
 
     A ``.debug`` split-debug sidecar (``objcopy --only-keep-debug``
-    output, e.g. ``libfoo.so.1.debug``) is excluded outright, ahead of
-    every content check: it retains its original binary's ``ET_DYN``
-    header, so the ELF fallback above would otherwise discover it as a
-    second, independent "library" (Codex review, fresh evidence).
-    ``_is_shared_library`` already excludes this filename from the
-    suffix check; this guard closes the identical gap for the
-    content-based fallbacks, which have no notion of filename at all.
+    output) is excluded outright, ahead of every content check: it
+    retains its original binary's ``ET_DYN`` header, so the ELF fallback
+    would otherwise discover it as a second, independent "library"
+    (Codex review, fresh evidence).
     """
     if path.name.lower().endswith(".debug"):
         return False
@@ -490,6 +480,33 @@ class _HashingReader:
         return chunk
 
 
+def _windows_relative_target_escapes(arcname: str, target: str) -> bool:
+    """Would *target* (a relative symlink target for the archive member at
+    *arcname*) escape the archive root if interpreted with Windows path
+    semantics (backslash separators)?
+
+    Purely lexical -- no real Windows filesystem to ``.resolve()``
+    against on any host this runs on -- so this walks a virtual depth
+    counter from *arcname*'s own directory, decrementing on ``..`` and
+    incrementing on a named component; a negative depth means the target
+    walks above the root. Only ever *adds* rejections a POSIX-only
+    check misses: a backslash ``..`` traversal is one opaque filename
+    component on POSIX, silently packing an archive that fails (or
+    escapes) on Windows (Codex review, fresh evidence).
+    """
+    depth = len(PureWindowsPath(arcname).parent.parts)
+    for part in PureWindowsPath(target).parts:
+        if part in ("", "."):
+            continue
+        if part == "..":
+            depth -= 1
+            if depth < 0:
+                return True
+        else:
+            depth += 1
+    return False
+
+
 def _add_member(
     tf: tarfile.TarFile, path: Path, arcname: str, source_dir: Path
 ) -> LibraryEntry | None:
@@ -511,15 +528,17 @@ def _add_member(
 
     if info.issym():
         target = info.linkname
-        if os.path.isabs(target):
-            # An absolute target can't round-trip: it names a path under
-            # *this* pack's source_dir, which won't exist at that same
-            # absolute location once unpacked into a different staging
-            # directory -- TarExtractor's own symlink-escape check would
-            # then (correctly) refuse the archive at unpack time, even
-            # though the target was genuinely inside source_dir when this
-            # was packed (Codex review, fresh evidence: pack succeeds,
-            # its own paired unpack can never read the result).
+        # An absolute target can't round-trip: it names a path under
+        # *this* pack's source_dir, which won't exist at that same
+        # absolute location once unpacked elsewhere -- TarExtractor's
+        # own symlink-escape check then (correctly) refuses it at
+        # unpack time (Codex review, fresh evidence). os.path.isabs()
+        # alone is host-dependent -- packing on POSIX, it doesn't
+        # recognize a Windows drive-absolute/UNC target as absolute, so
+        # the archive would pack "portably" and only fail on a later
+        # Windows unpack; PureWindowsPath.is_absolute() catches that
+        # too (Codex review, fresh evidence).
+        if os.path.isabs(target) or PureWindowsPath(target).is_absolute():
             raise SnapshotError(
                 f"symlink {arcname!r} has an absolute target {target!r} -- "
                 "only relative symlink targets can be packed portably"
@@ -541,6 +560,12 @@ def _add_member(
                 f"symlink {arcname!r} targets {target!r}, which forms a "
                 "symlink loop — refusing to pack it"
             ) from exc
+        if _windows_relative_target_escapes(arcname, target):
+            raise SnapshotError(
+                f"symlink {arcname!r} targets {target!r}, which would "
+                f"escape {source_dir} when interpreted with Windows path "
+                "separators -- refusing to pack it for portability"
+            )
         tf.addfile(info)
         return None
 
@@ -647,16 +672,13 @@ def pack_product_baseline(
     or is left untouched — a failure partway through never leaves a
     truncated file at the destination path.
     """
-    # Normalized to an absolute path up front, not just where the output-
-    # exclusion logic below happens to need it: _scaffold_dirs_for_mkdir()'s
-    # own containment check (source_path / output_path.parent) is a plain
-    # lexical is_relative_to() -- a caller mixing spellings (an absolute
-    # SOURCE_DIR with a relative OUTPUT under the same tree, or vice versa)
-    # would make that check spuriously fail, silently reintroducing the
-    # empty-source bypass this module's own scaffold-cleanup fix exists to
-    # close (CodeRabbit review, fresh evidence). os.path.abspath(), not
-    # .resolve() -- OUTPUT's own final path component must stay lexical,
-    # matching the symlinked-OUTPUT exclusion logic a few lines down.
+    # Normalized to an absolute path up front: _scaffold_dirs_for_mkdir()'s
+    # own containment check is a plain lexical is_relative_to() -- mixed
+    # spellings (an absolute SOURCE_DIR with a relative OUTPUT, or vice
+    # versa) would make it spuriously fail (CodeRabbit review, fresh
+    # evidence). os.path.abspath(), not .resolve() -- OUTPUT's own final
+    # component must stay lexical, matching the symlinked-OUTPUT
+    # exclusion logic a few lines down.
     source_path = Path(os.path.abspath(str(source_dir)))
     if not source_path.is_dir():
         raise SnapshotError(
@@ -664,43 +686,26 @@ def pack_product_baseline(
         )
     output_path = Path(os.path.abspath(str(output)))
     if not output_path.name.lower().endswith(".tar.zst"):
-        # Not merely a naming preference: unpack_product_baseline() (via
-        # TarExtractor.extract()) decides whether to run the archive
-        # through the zstd decompressor purely from this suffix — Python's
+        # Not merely a naming preference: unpack_product_baseline() decides
+        # whether to run zstd decompression purely from this suffix --
         # stdlib tarfile has no zstd auto-detection the way it does for
-        # gzip/bz2/xz. A different suffix here would silently produce an
-        # archive unpack_product_baseline() can't read back correctly.
+        # gzip/bz2/xz.
         raise SnapshotError(
             f"product baseline output must end with '.tar.zst': {output_path}"
         )
     # Validated against the tree as it exists *before* the output-parent
-    # scaffold below can fabricate anything: a header root is only ever
-    # legitimate if it named a real, pre-existing directory in the
-    # product. Doing this after the scaffold mkdir would let a header
-    # root that happens to name the freshly-created (empty) output-parent
-    # chain pass validation on the strength of a directory that mkdir()
-    # just manufactured -- e.g. `output=SOURCE/include/base.tar.zst,
-    # header_roots=["include"]` would silently accept `include/` as a
-    # real header root and persist an empty, fabricated header tree in
-    # the manifest, with a later comparison running without the header
-    # evidence the caller actually asked for (Codex review, fresh
-    # evidence -- the earlier output-parent-determinism fix below didn't
-    # close this interaction).
+    # scaffold below can fabricate anything: doing this after the
+    # scaffold mkdir would let a header root that happens to name the
+    # freshly-created (empty) output-parent chain pass validation on the
+    # strength of a directory mkdir() just manufactured, persisting an
+    # empty, fabricated header tree (Codex review, fresh evidence).
     if isinstance(header_roots, str):
-        # A bare str satisfies the declared Sequence[str] annotation (it's
-        # a sequence of its own characters), so the natural single-root
-        # spelling header_roots="include" -- a typo for the intended
-        # ["include"] -- would otherwise iterate character-by-character
-        # below: 'i', 'n', 'c', 'l', 'u', 'd', 'e', each checked as its own
-        # "header root". Depending on the tree, that either rejects a
-        # real, intended include/ with a misleading error, or (if
-        # matching single-character directories happen to exist) silently
-        # persists the wrong header roots into the manifest.
-        # compare_product_directories()'s own `_roots_for_library` already
-        # rejects this same shape on the comparison side (`HeaderRootsSpec`
-        # is the identical Sequence[str] | Mapping[str, Sequence[str]]
-        # type), but that guard doesn't cover this, the packing entry
-        # point (Codex review, fresh evidence).
+        # A bare str satisfies the declared Sequence[str] annotation, so
+        # the natural typo header_roots="include" would otherwise iterate
+        # character-by-character below -- compare_product_directories()'s
+        # own `_roots_for_library` already rejects this shape on the
+        # comparison side, but not this, the packing entry point (Codex
+        # review, fresh evidence).
         raise SnapshotError(
             "header_roots must be a sequence of paths, not a bare string: "
             f"{header_roots!r}"
@@ -1353,15 +1358,12 @@ def _roots_for_library(spec: HeaderRootsSpec, library_key: str) -> Sequence[str]
     passing a bare list keeps working exactly as it always has.
 
     A bare ``str`` is rejected outright rather than silently accepted: it
-    satisfies the declared ``Sequence[str]`` type (a `str` is a sequence of
-    its own characters), so `header_roots="include"` — a natural typo for
-    the intended single-root-list shape — previously returned unchanged and
-    was iterated character-by-character by the caller, each single-character
-    candidate failing ``.is_dir()`` and silently running the comparison with
-    zero header evidence (Codex/CodeRabbit review, fresh evidence). The same
-    applies to a per-library mapping value spelled as a bare string
-    (``{"lib/a.so": "include"}``) — that value is returned unchanged too and
-    hits the identical character-iteration failure.
+    satisfies the declared ``Sequence[str]`` type (a `str` is a sequence
+    of its own characters), so `header_roots="include"` -- a natural
+    typo -- previously ran character-by-character, each single-character
+    candidate silently failing ``.is_dir()`` (Codex/CodeRabbit review,
+    fresh evidence). Same for a per-library mapping value spelled as a
+    bare string.
     """
     if isinstance(spec, Mapping):
         value = spec.get(library_key, ())
@@ -1739,26 +1741,21 @@ def compare_product_directories(
 
     # Canonical (SONAME-major-stripped) fallback for the libraries exact
     # matching left unpaired -- two ambiguity-safe passes, each grouping
-    # the *complete* per-side discovery (not just what's still unpaired),
-    # so an exact match or pass 1 consuming one member of an ambiguous
-    # group never makes the remaining members look artificially
-    # unambiguous.
+    # the *complete* per-side discovery, so an exact match or pass 1
+    # consuming one member of an ambiguous group never makes the
+    # remaining members look artificially unambiguous.
     #
-    # Pass 1 is directory-scoped (relative directory, canonical name):
-    # two independent libraries sharing a basename in different
-    # directories (plugins/a/libfoo.so.1, plugins/b/libfoo.so.1) that
-    # each bump their own SONAME major must not land in one shared,
-    # cross-directory bucket -- ambiguous on both sides, silently
-    # leaving both pairs uncompared (Codex review, fresh evidence).
+    # Pass 1 is directory-scoped: two independent libraries sharing a
+    # basename in different directories that each bump their own SONAME
+    # major must not land in one shared, cross-directory bucket --
+    # ambiguous on both sides, silently leaving both pairs uncompared
+    # (Codex review, fresh evidence).
     #
-    # Pass 2 is a bare, global fallback (no directory) over whatever
-    # pass 1 left unpaired: a library that moves directories between
-    # releases (lib/provider.so -> lib64/provider.so), version bump
-    # included, has no shared directory for pass 1 to key on at all --
-    # restricting the fallback to pass 1 alone silently stopped pairing
-    # that case (Codex review, fresh evidence). A group pass 1 rejected
-    # for having >1 member in one directory can still be unambiguous
-    # globally once every directory's candidates are counted together.
+    # Pass 2 is a bare, global fallback over whatever pass 1 left
+    # unpaired: a library that moves directories between releases has no
+    # shared directory for pass 1 to key on at all -- restricting the
+    # fallback to pass 1 alone silently stopped pairing that case
+    # (Codex review, fresh evidence).
     def _canonical_groups(
         discovered: dict[str, Path], *, scope_by_directory: bool
     ) -> dict[tuple[str, str], list[str]]:
