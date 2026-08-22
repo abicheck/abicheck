@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import hashlib
 import io
+import json
 import os
 import stat as stat_mod
 import tarfile
@@ -38,6 +39,42 @@ from abicheck.product_baseline import (
     pack_product_baseline,
     unpack_product_baseline,
 )
+
+
+def _rewrite_manifest_member(
+    tmp_path: Path, archive: Path, manifest_payload: bytes
+) -> Path:
+    """Rewrite *archive*'s manifest member to *manifest_payload*, keeping
+    every other member as-is -- for tests exercising unpack's handling of
+    a hand-edited/adversarial manifest that a real pack_product_baseline()
+    call could never produce."""
+    import zstandard
+
+    raw = archive.read_bytes()
+    dctx = zstandard.ZstdDecompressor()
+    tar_bytes = dctx.decompress(raw, max_output_size=1 << 30)
+    rewritten = tmp_path / f"{archive.stem}-rewritten.tar"
+    with (
+        tarfile.open(fileobj=io.BytesIO(tar_bytes), mode="r") as src,
+        tarfile.open(rewritten, mode="w") as dst,
+    ):
+        for member in src.getmembers():
+            if member.name == MANIFEST_MEMBER_NAME:
+                info = tarfile.TarInfo(name=MANIFEST_MEMBER_NAME)
+                info.size = len(manifest_payload)
+                dst.addfile(info, io.BytesIO(manifest_payload))
+            else:
+                fh = src.extractfile(member)
+                dst.addfile(member, fh)
+
+    bad_archive = tmp_path / f"{archive.stem}-bad.tar.zst"
+    cctx = zstandard.ZstdCompressor()
+    with (
+        open(rewritten, "rb") as in_fh,
+        open(bad_archive, "wb") as out_fh,
+    ):
+        cctx.copy_stream(in_fh, out_fh)
+    return bad_archive
 
 
 def _make_product(root: Path) -> Path:
@@ -248,6 +285,27 @@ class TestPackProductBaseline:
         with pytest.raises(SnapshotError, match="no files found"):
             pack_product_baseline(empty, out)
 
+    def test_pack_rejects_empty_source_dir_with_mixed_relative_absolute_spelling(
+        self, tmp_path: Path
+    ) -> None:
+        # _scaffold_dirs_for_mkdir()'s own containment check is a plain
+        # lexical is_relative_to() -- an absolute SOURCE_DIR paired with a
+        # RELATIVE OUTPUT under the identical tree (no symlink involved,
+        # just differing path spellings for the same location) used to
+        # make that check spuriously fail, silently reintroducing the
+        # empty-source bypass the scaffold-cleanup fix exists to close
+        # (CodeRabbit review, fresh evidence).
+        empty = tmp_path / "empty"
+        empty.mkdir()
+        cwd = Path.cwd()
+        os.chdir(empty)
+        try:
+            out = Path("artifacts") / "base.tar.zst"
+            with pytest.raises(SnapshotError, match="no files found"):
+                pack_product_baseline(empty, out)
+        finally:
+            os.chdir(cwd)
+
     def test_pack_skips_a_file_that_vanishes_during_the_walk(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -395,6 +453,22 @@ class TestPackProductBaseline:
         collide_dir = product / MANIFEST_MEMBER_NAME
         collide_dir.mkdir()
         (collide_dir / "child.txt").write_text("not the real manifest\n")
+        with pytest.raises(SnapshotError, match="reserved product baseline manifest"):
+            pack_product_baseline(product, tmp_path / "b.tar.zst")
+
+    def test_pack_rejects_nested_empty_subdirectory_under_manifest_name(
+        self, tmp_path: Path
+    ) -> None:
+        # A directory at the reserved path containing only empty
+        # subdirectories (MANIFEST_MEMBER_NAME/sub/, itself empty) is
+        # absent from `paths` (no files anywhere under it) AND isn't
+        # itself in `empty_dirs` (it has a subdirectory, so it isn't a
+        # leaf) -- only its nested empty leaf is, matched by the reserved
+        # name as a *prefix*, not an exact match. The exact-match-only
+        # empty_dirs check missed this shape entirely (CodeRabbit review,
+        # fresh evidence).
+        product = _make_product(tmp_path)
+        (product / MANIFEST_MEMBER_NAME / "sub").mkdir(parents=True)
         with pytest.raises(SnapshotError, match="reserved product baseline manifest"):
             pack_product_baseline(product, tmp_path / "b.tar.zst")
 
@@ -596,6 +670,30 @@ class TestUnpackProductBaseline:
             unpack_product_baseline(bogus, tmp_path / "dest")
         assert not list(tmp_path.glob(".abicheck-product-baseline-unpack-*"))
 
+    def test_unpack_cleans_up_staging_when_publication_fails(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # A failure during publication (chmod/rmdir/os.replace) used to run
+        # outside the extraction/validation cleanup try -- staging survived
+        # and the raw OSError escaped unwrapped instead of SnapshotError
+        # (Codex review, fresh evidence). A valid archive is used so
+        # extraction/validation genuinely succeed and the failure is
+        # isolated to the publish step itself.
+        product = _make_product(tmp_path)
+        archive = tmp_path / "baseline.tar.zst"
+        pack_product_baseline(product, archive)
+
+        def _boom(*args: object, **kwargs: object) -> None:
+            raise OSError("simulated publish failure")
+
+        monkeypatch.setattr("abicheck.product_baseline.os.replace", _boom)
+
+        dest = tmp_path / "dest"
+        with pytest.raises(SnapshotError, match="failed to publish"):
+            unpack_product_baseline(archive, dest)
+        assert not dest.exists()
+        assert not list(tmp_path.glob(".abicheck-product-baseline-unpack-*"))
+
     @staticmethod
     def _plain_tar_zst(tmp_path: Path) -> Path:
         import io
@@ -644,34 +742,66 @@ class TestUnpackProductBaseline:
         archive = tmp_path / "baseline.tar.zst"
         pack_product_baseline(product, archive)
 
-        import zstandard
-
-        # Rewrite the archive with a schema-less manifest, keeping every
-        # other member as-is.
-        raw = archive.read_bytes()
-        dctx = zstandard.ZstdDecompressor()
-        tar_bytes = dctx.decompress(raw, max_output_size=1 << 30)
-        rewritten = tmp_path / "rewritten.tar"
-        with (
-            tarfile.open(fileobj=io.BytesIO(tar_bytes), mode="r") as src,
-            tarfile.open(rewritten, mode="w") as dst,
-        ):
-            for member in src.getmembers():
-                if member.name == MANIFEST_MEMBER_NAME:
-                    payload = b"{}\n"
-                    info = tarfile.TarInfo(name=MANIFEST_MEMBER_NAME)
-                    info.size = len(payload)
-                    dst.addfile(info, io.BytesIO(payload))
-                else:
-                    fh = src.extractfile(member)
-                    dst.addfile(member, fh)
-
-        bad_archive = tmp_path / "bad.tar.zst"
-        cctx = zstandard.ZstdCompressor()
-        with open(bad_archive, "wb") as out_fh:
-            cctx.copy_stream(open(rewritten, "rb"), out_fh)
-
+        bad_archive = _rewrite_manifest_member(tmp_path, archive, b"{}\n")
         with pytest.raises(SnapshotError, match="missing its schema discriminator"):
+            unpack_product_baseline(bad_archive, tmp_path / "dest")
+
+    def test_unpack_rejects_header_root_escaping_the_product_root(
+        self, tmp_path: Path
+    ) -> None:
+        # header_roots is meant to be re-joined against the caller's own
+        # unpack destination and handed straight to a header-parsing
+        # tool, so a corrupt or adversarial manifest declaring an
+        # escaping root must be rejected here -- ProductBaselineManifest.
+        # from_dict()'s own defensive str() coercion accepts and returns
+        # any string unchanged, so nothing upstream of this catches it
+        # (CodeRabbit review, fresh evidence).
+        product = _make_product(tmp_path)
+        archive = tmp_path / "baseline.tar.zst"
+        pack_product_baseline(product, archive)
+
+        payload = (
+            json.dumps(
+                {
+                    "schema": PRODUCT_BASELINE_SCHEMA,
+                    "product": "",
+                    "libraries": [],
+                    "header_roots": ["../../etc"],
+                    "file_count": 1,
+                }
+            ).encode("utf-8")
+            + b"\n"
+        )
+        bad_archive = _rewrite_manifest_member(tmp_path, archive, payload)
+        with pytest.raises(SnapshotError, match="invalid header root"):
+            unpack_product_baseline(bad_archive, tmp_path / "dest")
+
+    def test_unpack_rejects_header_root_that_does_not_exist(
+        self, tmp_path: Path
+    ) -> None:
+        # A header root that resolves *under* the product root but names
+        # nothing real is equally untrustworthy -- it never round-tripped
+        # through a real pack_product_baseline() call (which requires
+        # existence at pack time), so it can only be a hand-edited or
+        # corrupt manifest.
+        product = _make_product(tmp_path)
+        archive = tmp_path / "baseline.tar.zst"
+        pack_product_baseline(product, archive)
+
+        payload = (
+            json.dumps(
+                {
+                    "schema": PRODUCT_BASELINE_SCHEMA,
+                    "product": "",
+                    "libraries": [],
+                    "header_roots": ["nonexistent-headers"],
+                    "file_count": 1,
+                }
+            ).encode("utf-8")
+            + b"\n"
+        )
+        bad_archive = _rewrite_manifest_member(tmp_path, archive, payload)
+        with pytest.raises(SnapshotError, match="invalid header root"):
             unpack_product_baseline(bad_archive, tmp_path / "dest")
 
     def test_unpack_rejects_newer_major_schema(self, tmp_path: Path) -> None:

@@ -485,12 +485,22 @@ def pack_product_baseline(
     or is left untouched — a failure partway through never leaves a
     truncated file at the destination path.
     """
-    source_path = Path(source_dir)
+    # Normalized to an absolute path up front, not just where the output-
+    # exclusion logic below happens to need it: _scaffold_dirs_for_mkdir()'s
+    # own containment check (source_path / output_path.parent) is a plain
+    # lexical is_relative_to() -- a caller mixing spellings (an absolute
+    # SOURCE_DIR with a relative OUTPUT under the same tree, or vice versa)
+    # would make that check spuriously fail, silently reintroducing the
+    # empty-source bypass this module's own scaffold-cleanup fix exists to
+    # close (CodeRabbit review, fresh evidence). os.path.abspath(), not
+    # .resolve() -- OUTPUT's own final path component must stay lexical,
+    # matching the symlinked-OUTPUT exclusion logic a few lines down.
+    source_path = Path(os.path.abspath(str(source_dir)))
     if not source_path.is_dir():
         raise SnapshotError(
             f"product baseline source is not a directory: {source_path}"
         )
-    output_path = Path(output)
+    output_path = Path(os.path.abspath(str(output)))
     if not output_path.name.lower().endswith(".tar.zst"):
         # Not merely a naming preference: unpack_product_baseline() (via
         # TarExtractor.extract()) decides whether to run the archive
@@ -637,11 +647,20 @@ def pack_product_baseline(
         None,
     )
     if collision is None:
+        # Same prefix test as the `paths` scan above, not just an exact
+        # match: a directory at the reserved path containing only empty
+        # subdirectories (e.g. MANIFEST_MEMBER_NAME/sub/, itself empty)
+        # is absent from `paths` (no files anywhere under it) AND isn't
+        # itself in `empty_dirs` (it has a subdirectory, so it isn't a
+        # leaf) -- only its nested empty leaf is, under the reserved
+        # name as a *prefix*, not an exact match (CodeRabbit review,
+        # fresh evidence).
         collision = next(
             (
                 d
                 for d in empty_dirs
                 if _relative_posix(d, source_path) == MANIFEST_MEMBER_NAME
+                or _relative_posix(d, source_path).startswith(manifest_child_prefix)
             ),
             None,
         )
@@ -800,29 +819,70 @@ def unpack_product_baseline(
 
         manifest = ProductBaselineManifest.from_dict(raw)
         _check_schema_supported(manifest.schema, archive_path)
+
+        # The manifest is untrusted input (the archive could come from
+        # anywhere) -- header_roots is meant to be re-joined against the
+        # caller's own unpack destination and handed straight to a
+        # header-parsing tool, so a corrupt or adversarial manifest
+        # declaring an absolute or escaping root ("../../etc", "/etc")
+        # must be rejected here, the same way pack_product_baseline()
+        # itself refuses to record one on write. from_dict()'s own
+        # defensive str() coercion accepts and returns any string
+        # unchanged, so this check has to happen here, not there (Codex
+        # review, fresh evidence).
+        for rel in manifest.header_roots:
+            resolved = _resolve_under_root(staging, rel)
+            if resolved is None or not resolved.exists():
+                raise SnapshotError(
+                    f"{archive_path}: manifest declares an invalid header "
+                    f"root {rel!r} (absolute, escapes the product root, "
+                    "or does not exist)"
+                )
     except BaseException:
         shutil.rmtree(staging, ignore_errors=True)
         raise
 
-    # tempfile.mkdtemp() creates staging with mode 0700 regardless of the
-    # process umask -- deliberately, for its own general-purpose "private
-    # scratch dir" contract, but wrong for a directory this function is
-    # about to publish as the product's own extracted content: a caller
-    # (or a later CI step/container stage) running as a different user
-    # would then be unable to even traverse it. Apply the ordinary
-    # umask-derived permissions an extraction would normally get instead.
-    umask = os.umask(0)
-    os.umask(umask)
-    os.chmod(staging, 0o777 & ~umask)
+    try:
+        # tempfile.mkdtemp() creates staging with mode 0700 regardless of
+        # the process umask -- deliberately, for its own general-purpose
+        # "private scratch dir" contract, but wrong for a directory this
+        # function is about to publish as the product's own extracted
+        # content: a caller (or a later CI step/container stage) running
+        # as a different user would then be unable to even traverse it.
+        # Apply the ordinary umask-derived permissions an extraction would
+        # normally get instead.
+        umask = os.umask(0)
+        os.umask(umask)
+        os.chmod(staging, 0o777 & ~umask)
 
-    # Validated -- publish. dest_path, if it existed, was already confirmed
-    # empty above, so removing it and renaming staging into its place is
-    # safe (and portable: os.replace()/os.rename() cannot atomically
-    # replace an existing directory on every platform, but replacing a
-    # path that no longer exists works everywhere).
-    if dest_path.exists():
-        dest_path.rmdir()
-    os.replace(staging, dest_path)
+        # dest_path, if it existed, was already confirmed empty above, so
+        # removing it and renaming staging into its place is safe (and
+        # portable: os.replace()/os.rename() cannot atomically replace an
+        # existing directory on every platform, but replacing a path that
+        # no longer exists works everywhere). This whole block -- not just
+        # extraction/validation above -- is wrapped so a failure here
+        # (a concurrent process populating dest_path, a permission error
+        # on chmod/rmdir/replace) still cleans up staging instead of
+        # leaving a `.abicheck-product-baseline-unpack-*` directory behind
+        # (Codex review, fresh evidence). One residual, inherent to
+        # rmdir()+replace() not being atomic: if rmdir() succeeds but
+        # os.replace() then fails, the caller's pre-existing empty
+        # dest_path is already gone and cannot be restored -- the same
+        # cross-platform limitation the comment above already accepts,
+        # just now surfaced as a clear SnapshotError instead of silently
+        # leaving stray state.
+        if dest_path.exists():
+            dest_path.rmdir()
+        os.replace(staging, dest_path)
+    except OSError as exc:
+        shutil.rmtree(staging, ignore_errors=True)
+        raise SnapshotError(
+            f"{archive_path}: failed to publish the unpacked product "
+            f"baseline to {dest_path}: {exc}"
+        ) from exc
+    except BaseException:
+        shutil.rmtree(staging, ignore_errors=True)
+        raise
     return manifest
 
 
