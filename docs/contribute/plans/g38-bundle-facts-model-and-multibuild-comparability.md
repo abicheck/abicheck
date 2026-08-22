@@ -574,9 +574,11 @@ silently dropped:
 - **A genuine toolchain-identity probe validating a resolved compiler
   binding's real family/version against a declared multibuild-variant
   constraint** — `bundle_multibuild.variant_fingerprint` records the
-  *declared* toolchain facts (target, compiler family/version string,
-  standard, flags); it does not independently verify the resolved binary at
-  `compile.binding` actually matches them. That verification is already
+  *declared* logical-identity toolchain facts (target triple, compiler
+  family/version string); it deliberately excludes standard/flags (see
+  Phase 3's own design section for why) and does not independently verify
+  the resolved binary at `compile.binding` actually matches even the
+  fields it does record. That verification is already
   tracked as its own gap (root `AGENTS.md`'s "Toolchain-profile compiler-
   family rendering" entry, and G34 Phase A's toolchain-binding probe) and is
   not duplicated here.
