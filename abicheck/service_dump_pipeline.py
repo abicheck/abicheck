@@ -348,6 +348,15 @@ def resolve_dump_request(request: DumpRequest) -> ResolvedDumpRequest:
     _sce.reject_debug_format_for_binaries(debug_format, (("input", fmt),))
 
     evidence = _sce.resolve_dump_request_evidence(request)
+    # Mirrors the ELF `dump` CLI's own `compile_db_filter_scope_error` check
+    # (`cli.py`'s `dump_cmd`) -- this is the one place in the typed pipeline
+    # that knows the *resolved* collect mode a `--compile-db-filter`-shaped
+    # `InputSpec.compile_db_filter` would otherwise silently disagree with
+    # (PR 3A investigation, 2026-08-21; see `InputSpec.compile_db_filter`'s
+    # own docstring). Shared with `resolve_compare_request`'s identical
+    # per-side check (Codex review: a `CompareRequest` side reaches the exact
+    # same fold/embed split, so the guard belongs in one place both call).
+    _sce.reject_compile_db_filter_scope_mismatch((("input", side, evidence),))
     _reject_unsupported_frontends(request, header_backend, evidence)
     # Pinned once, here -- not a lazily-recomputed property (see
     # ResolvedDumpRequest.effective_header_backend's own comment).

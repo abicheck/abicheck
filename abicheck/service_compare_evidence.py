@@ -63,6 +63,7 @@ __all__ = [
     "dump_collect_mode_for",
     "effective_frontend",
     "normalized_debug_format",
+    "reject_compile_db_filter_scope_mismatch",
     "reject_debug_format_for_binaries",
     "reject_debug_format_for_non_elf",
     "resolve_compare_request_evidence",
@@ -367,6 +368,59 @@ def resolve_compare_request_evidence(
         )
 
     return _side(request.old), _side(request.new)
+
+
+def reject_compile_db_filter_scope_mismatch(
+    sides: Iterable[tuple[str, InputSpec, SideEvidence]],
+) -> None:
+    """Raise if any side's ``InputSpec.compile_db_filter`` would narrow the L2
+    header parse while its L3 build evidence -- collected by
+    ``embed_build_source``, which has no filter concept of its own -- stays
+    unfiltered.
+
+    Mirrors the native ``dump`` CLI's own
+    ``header_conditionals.compile_db_filter_scope_error`` refusal (``cli.py``'s
+    ``dump_cmd``), computed per side from that side's own resolved
+    :class:`~abicheck.service_compare_evidence.SideEvidence` --
+    ``evidence.collect_mode``/``evidence.headers`` are the same resolved
+    values the CLI reads ``compile_db_from_build_info`` back against.
+
+    *sides* is ``(label, side, evidence)`` triples, mirroring
+    :func:`reject_debug_format_for_binaries`'s ``(label, ...)`` shape --
+    ``dump`` passes its single ``input``, ``compare`` passes ``old``/``new``.
+    Without this, a typed ``CompareRequest`` side could reach the exact
+    L2-filtered/L3-unfiltered snapshot shape the CLI refuses outright: a
+    `compile_db_filter` narrows `resolve_side_snapshot`'s own P0.3 L3->L2 fold
+    (`_seeded_includes_and_compile_context`) but `embed_side_build_source`
+    collects L3 evidence from the *whole* compile database regardless, so the
+    resulting snapshot carries build facts for translation units the header
+    parse never saw (Codex review — `resolve_dump_request`'s own guard,
+    landed first, covered `DumpRequest` alone).
+
+    Resolves the checked compile database via
+    ``header_conditionals.compile_db_for_filter_scope_check`` -- not the
+    narrower ``compile_db_from_build_info`` -- so a side whose database is
+    only auto-discovered from ``sources`` (no explicit ``build_info`` at
+    all) is covered too (Codex review, fresh evidence: the fold and the L3
+    embed both resolve that same auto-discovered database independently,
+    so the identical mismatch reproduces with no ``build_info`` in play).
+    """
+    from .errors import ValidationError
+    from .header_conditionals import (
+        compile_db_filter_scope_error,
+        compile_db_for_filter_scope_check,
+    )
+
+    for label, side, evidence in sides:
+        error = compile_db_filter_scope_error(
+            side.compile_db_filter,
+            compile_db_for_filter_scope_check(
+                side.build_info, side.sources, tuple(evidence.headers)
+            ),
+            evidence.collect_mode,
+        )
+        if error is not None:
+            raise ValidationError(f"{label}: {error}")
 
 
 def normalized_debug_format(request: CompareRequest | DumpRequest) -> str | None:

@@ -449,3 +449,780 @@ class TestDumpCliHonorsTheFilterInTheFold:
         # Not merely "a context was chosen": the guarded field is present
         # only under the TU the filter named, so this pins *which* one.
         assert ("b" in fields) is expects_wide_field, (pick, fields)
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(
+    not sys.platform.startswith("linux"),
+    reason="ELF/Linux-scoped repro (real g++-compiled .so + compile_commands.json)",
+)
+@pytest.mark.skipif(
+    not (_HAVE_GXX and _HAVE_CLANG), reason="needs a real g++ and clang toolchain"
+)
+class TestTypedApiHonorsTheFilterInTheFold:
+    """The identical shape as ``TestDumpCliHonorsTheFilterInTheFold``, through
+    the typed ``DumpRequest``/``resolve_dump_request``/``execute_dump_request``
+    path instead of the CLI (PR 3A investigation, 2026-08-21:
+    ``InputSpec.compile_db_filter``).
+
+    ``InputSpec`` deliberately had no ``compile_db_filter`` field until this
+    slice — see its own docstring for the two prerequisites this closes:
+    the filter narrows the shared L2 fold (already landed, exercised by the
+    CLI class above), and the L2-filtered/L3-unfiltered refusal is mirrored
+    into ``resolve_dump_request`` so a typed caller cannot reach the
+    snapshot shape the CLI refuses outright.
+    """
+
+    @staticmethod
+    def _request(so_path: Path, header: Path, compile_db: Path, *, compile_db_filter):
+        from abicheck.api_types import DumpRequest, InputSpec
+
+        return DumpRequest(
+            input=InputSpec(
+                path=so_path,
+                headers=(header,),
+                sources=header.parent,
+                build_info=compile_db,
+                compile_db_filter=compile_db_filter,
+            ),
+            frontend="clang",
+            depth="headers",
+        )
+
+    def test_resolve_dump_request_refuses_the_l2_l3_scope_mismatch(
+        self, tmp_path: Path
+    ) -> None:
+        from abicheck.errors import ValidationError
+        from abicheck.service_dump_pipeline import resolve_dump_request
+
+        so_path, header, compile_db = TestDumpCliHonorsTheFilterInTheFold._project(
+            tmp_path
+        )
+        request = self._request(
+            so_path, header, compile_db, compile_db_filter="a.cpp"
+        ).replace(depth="build")
+        with pytest.raises(ValidationError, match="materially different|L2 header"):
+            resolve_dump_request(request)
+
+    def test_no_filter_is_unaffected(self, tmp_path: Path) -> None:
+        from abicheck.service_dump_pipeline import resolve_dump_request
+
+        so_path, header, compile_db = TestDumpCliHonorsTheFilterInTheFold._project(
+            tmp_path
+        )
+        request = self._request(so_path, header, compile_db, compile_db_filter=None)
+        # No filter -> the scope-error guard never fires, regardless of depth;
+        # unchanged behavior for every pre-existing caller.
+        resolved = resolve_dump_request(request.replace(depth="build"))
+        assert resolved.collect_mode == "build"
+
+    @pytest.mark.parametrize(
+        ("pick", "expects_wide_field"), [("a.cpp", True), ("b.cpp", False)]
+    )
+    def test_the_filter_selects_that_units_context_for_the_header_parse(
+        self, tmp_path: Path, pick: str, expects_wide_field: bool
+    ) -> None:
+        from abicheck.service_dump_pipeline import (
+            execute_dump_request,
+            resolve_dump_request,
+        )
+
+        so_path, header, compile_db = TestDumpCliHonorsTheFilterInTheFold._project(
+            tmp_path
+        )
+        request = self._request(so_path, header, compile_db, compile_db_filter=pick)
+        result = execute_dump_request(resolve_dump_request(request))
+        fields = [
+            f.name for t in result.snapshot.types if t.name == "S" for f in t.fields
+        ]
+        assert fields, result.snapshot.types
+        assert ("b" in fields) is expects_wide_field, (pick, fields)
+
+
+def test_input_spec_of_forwards_compile_db_filter() -> None:
+    """Codex review, P2: the documented convenience factory
+    (``InputSpec.of``) silently dropped ``compile_db_filter`` -- constructing
+    through it (rather than the dataclass directly) raised ``TypeError`` for
+    an unrecognized keyword, so the field was reachable only via the
+    dataclass constructor despite being advertised on the public type."""
+    from abicheck.api_types import InputSpec
+
+    spec = InputSpec.of(path="lib.so", compile_db_filter="src/**")
+    assert spec.compile_db_filter == "src/**"
+    # And the default is unaffected -- every existing `InputSpec.of(...)`
+    # call site stays a no-op for this field.
+    assert InputSpec.of(path="lib.so").compile_db_filter is None
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(
+    not sys.platform.startswith("linux"),
+    reason="ELF/Linux-scoped repro (real g++-compiled .so + compile_commands.json)",
+)
+@pytest.mark.skipif(
+    not (_HAVE_GXX and _HAVE_CLANG), reason="needs a real g++ and clang toolchain"
+)
+class TestCompareRequestAppliesTheSameScopeGuard:
+    """Codex review, P1: the L2-filtered/L3-unfiltered scope guard was wired
+    into ``resolve_dump_request`` only -- a typed ``CompareRequest`` side
+    reaches the identical ``_seeded_includes_and_compile_context`` fold /
+    ``embed_side_build_source`` split (``resolve_side_snapshot`` is the one
+    primitive both pipelines share), so the same refusal must fire there
+    too. Both pipelines now call the shared
+    ``service_compare_evidence.reject_compile_db_filter_scope_mismatch``.
+    """
+
+    def test_a_side_with_the_scope_mismatch_is_refused(self, tmp_path: Path) -> None:
+        from abicheck.api_types import CompareRequest, InputSpec
+        from abicheck.errors import ValidationError
+        from abicheck.service_compare_pipeline import resolve_compare_request
+
+        so_path, header, compile_db = TestDumpCliHonorsTheFilterInTheFold._project(
+            tmp_path
+        )
+        side = InputSpec(
+            path=so_path,
+            headers=(header,),
+            sources=header.parent,
+            build_info=compile_db,
+            compile_db_filter="a.cpp",
+        )
+        request = CompareRequest(old=side, new=side, frontend="clang", depth="build")
+        with pytest.raises(ValidationError, match="old: .*L2 header parse only"):
+            resolve_compare_request(request)
+
+    def test_a_scope_matched_filter_is_unaffected_by_the_guard(
+        self, tmp_path: Path
+    ) -> None:
+        """Not "no filter" -- a bare, unfiltered compare of this exact project
+        would still fail closed on the real ambiguity
+        (`TestDumpCliHonorsTheFilterInTheFold.
+        test_unfiltered_still_fails_closed_on_the_real_ambiguity`), which
+        would make a `resolve_compare_request` call here indistinguishable
+        from the guard actually firing. Isolating the guard itself needs a
+        filter that resolves that ambiguity (as it does on the CLI/`dump`
+        paths) *and* a collect mode (`"headers"` -> `"off"`) the guard
+        permits regardless of the filter -- so this pins "the guard doesn't
+        misfire on a legitimate filtered compare", not "no filter changes
+        nothing"."""
+        from abicheck.api_types import CompareRequest, InputSpec
+        from abicheck.service_compare_pipeline import resolve_compare_request
+
+        so_path, header, compile_db = TestDumpCliHonorsTheFilterInTheFold._project(
+            tmp_path
+        )
+        side = InputSpec(
+            path=so_path,
+            headers=(header,),
+            sources=header.parent,
+            build_info=compile_db,
+            compile_db_filter="a.cpp",
+        )
+        request = CompareRequest(
+            old=side, new=side, frontend="clang", depth="headers"
+        )
+        pair = resolve_compare_request(request)
+        assert pair.old is not None and pair.new is not None
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(
+    not sys.platform.startswith("linux"),
+    reason="ELF/Linux-scoped repro (real g++-compiled .so + compile_commands.json)",
+)
+@pytest.mark.skipif(
+    not (_HAVE_GXX and _HAVE_CLANG), reason="needs a real g++ and clang toolchain"
+)
+class TestScopeGuardCoversSourcesOnlyAutoDiscovery:
+    """Codex review, P1 (a fresh round on the same slice): the scope guard
+    resolved the checked compile database via
+    ``compile_db_from_build_info`` alone -- ``--build-info``-only -- so a
+    request giving only ``sources`` (no ``build_info`` at all) could still
+    reach the exact filtered-L2/unfiltered-L3 mismatch uncaught: the P0.3
+    fold and ``embed_build_source``'s L3 collection both independently
+    auto-discover the same ``compile_commands.json`` under ``sources``
+    (``buildsource.inline._autodiscover_compile_db``, the same strategy
+    both already use with no explicit ``--build-info``), but only the fold
+    honors ``compile_db_filter``. Reproduced directly before the fix: a
+    real two-TU project resolved with ``sources`` only, filtered to one TU
+    at L2, still embedded *both* TUs' compile units as L3 evidence
+    (`BuildEvidence.compile_units` had length 2).
+
+    This is not a regression introduced by the typed-API slice -- the
+    native CLI's own pre-existing `compile_db_path = compile_db_from_
+    build_info(build_info, headers)` had the identical gap: before this
+    fix, the CLI-path test below silently succeeded (exit 0) instead of
+    rejecting the mismatch, since the CLI's own scope check used the same
+    narrow, `--build-info`-only resolution. Fixed once, in the shared
+    `header_conditionals.compile_db_for_filter_scope_check`, consumed by
+    both the CLI and the typed pipelines' guard.
+    """
+
+    def test_cli_rejects_a_sources_only_scope_mismatch(self, tmp_path: Path) -> None:
+        from click.testing import CliRunner
+
+        from abicheck.cli import main
+
+        so_path, header, _compile_db = TestDumpCliHonorsTheFilterInTheFold._project(
+            tmp_path
+        )
+        result = CliRunner().invoke(
+            main,
+            [
+                "dump",
+                str(so_path),
+                "-H",
+                str(header),
+                "--sources",
+                str(header.parent),
+                "--depth",
+                "build",
+                "--ast-frontend",
+                "clang",
+                "--compile-db-filter",
+                "a.cpp",
+                "-o",
+                str(tmp_path / "out.json"),
+            ],
+        )
+        assert result.exit_code == 64, result.output
+        assert "L2 header parse only" in result.output
+
+    def test_dump_request_rejects_a_sources_only_scope_mismatch(
+        self, tmp_path: Path
+    ) -> None:
+        from abicheck.api_types import DumpRequest, InputSpec
+        from abicheck.errors import ValidationError
+        from abicheck.service_dump_pipeline import resolve_dump_request
+
+        so_path, header, _compile_db = TestDumpCliHonorsTheFilterInTheFold._project(
+            tmp_path
+        )
+        request = DumpRequest(
+            input=InputSpec(
+                path=so_path,
+                headers=(header,),
+                sources=header.parent,
+                compile_db_filter="a.cpp",
+            ),
+            frontend="clang",
+            depth="build",
+        )
+        with pytest.raises(ValidationError, match="input: .*L2 header parse only"):
+            resolve_dump_request(request)
+
+    def test_compare_request_rejects_a_sources_only_scope_mismatch(
+        self, tmp_path: Path
+    ) -> None:
+        from abicheck.api_types import CompareRequest, InputSpec
+        from abicheck.errors import ValidationError
+        from abicheck.service_compare_pipeline import resolve_compare_request
+
+        so_path, header, _compile_db = TestDumpCliHonorsTheFilterInTheFold._project(
+            tmp_path
+        )
+        side = InputSpec(
+            path=so_path,
+            headers=(header,),
+            sources=header.parent,
+            compile_db_filter="a.cpp",
+        )
+        request = CompareRequest(old=side, new=side, frontend="clang", depth="build")
+        with pytest.raises(ValidationError, match="old: .*L2 header parse only"):
+            resolve_compare_request(request)
+
+    def test_no_filter_sources_only_is_unaffected_by_the_guard(
+        self, tmp_path: Path
+    ) -> None:
+        """No filter -> the guard itself never fires for this shape either
+        (a downstream real ambiguity error from the same project's two
+        conflicting TUs is a separate, pre-existing failure mode -- see
+        `test_unfiltered_still_fails_closed_on_the_real_ambiguity` -- and
+        `resolve_dump_request` never reaches the fold at all, only
+        `execute_dump_request` does, so it cannot surface here)."""
+        from abicheck.api_types import DumpRequest, InputSpec
+        from abicheck.service_dump_pipeline import resolve_dump_request
+
+        so_path, header, _compile_db = TestDumpCliHonorsTheFilterInTheFold._project(
+            tmp_path
+        )
+        request = DumpRequest(
+            input=InputSpec(path=so_path, headers=(header,), sources=header.parent),
+            frontend="clang",
+            depth="build",
+        )
+        resolved = resolve_dump_request(request)
+        assert resolved.collect_mode == "build"
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(
+    not sys.platform.startswith("linux"),
+    reason="ELF/Linux-scoped repro (real g++-compiled .so + compile_commands.json)",
+)
+@pytest.mark.skipif(
+    not (_HAVE_GXX and _HAVE_CLANG), reason="needs a real g++ and clang toolchain"
+)
+class TestScopeGuardCoversNestedBuildInfoDatabases:
+    """Codex review, P1 (a fourth finding on the same slice): the scope
+    guard's ``build_info`` resolution (``compile_db_from_build_info``) only
+    ever checks ``<build_info>/compile_commands.json`` directly -- it has
+    no notion of a conventional out-of-tree build directory. The real
+    fold's own ``--build-info`` resolution
+    (``buildsource.inline._compile_db_at``, for a directory delegating to
+    ``_find_compile_db_in_dir``) searches immediate subdirectories too
+    (``build/``, ``cmake-build-debug/``, ...) -- explicitly documented as
+    matching ``--sources`` auto-discovery's own contract. So
+    ``--build-info <project-root>`` whose database actually lives at
+    ``<project-root>/build/compile_commands.json`` resolved for the fold
+    but not for the scope guard, reproducing the identical filtered-L2/
+    unfiltered-L3 mismatch. Fixed by having
+    ``compile_db_for_filter_scope_check`` search the same immediate-
+    subdirectory strategy for a directory ``build_info`` before falling
+    back to ``sources`` auto-discovery.
+    """
+
+    @staticmethod
+    def _project_with_nested_build_info(tmp_path: Path) -> tuple[Path, Path, Path]:
+        so_path, header, compile_db = TestDumpCliHonorsTheFilterInTheFold._project(
+            tmp_path
+        )
+        build_dir = tmp_path / "build"
+        build_dir.mkdir()
+        compile_db.rename(build_dir / "compile_commands.json")
+        return so_path, header, tmp_path  # build_info = the project root
+
+    def test_cli_rejects_a_nested_build_info_scope_mismatch(
+        self, tmp_path: Path
+    ) -> None:
+        from click.testing import CliRunner
+
+        from abicheck.cli import main
+
+        so_path, header, build_info = self._project_with_nested_build_info(tmp_path)
+        result = CliRunner().invoke(
+            main,
+            [
+                "dump",
+                str(so_path),
+                "-H",
+                str(header),
+                "--build-info",
+                str(build_info),
+                "--depth",
+                "build",
+                "--ast-frontend",
+                "clang",
+                "--compile-db-filter",
+                "a.cpp",
+                "-o",
+                str(tmp_path / "out.json"),
+            ],
+        )
+        assert result.exit_code == 64, result.output
+        assert "L2 header parse only" in result.output
+
+    def test_dump_request_rejects_a_nested_build_info_scope_mismatch(
+        self, tmp_path: Path
+    ) -> None:
+        from abicheck.api_types import DumpRequest, InputSpec
+        from abicheck.errors import ValidationError
+        from abicheck.service_dump_pipeline import resolve_dump_request
+
+        so_path, header, build_info = self._project_with_nested_build_info(tmp_path)
+        request = DumpRequest(
+            input=InputSpec(
+                path=so_path,
+                headers=(header,),
+                build_info=build_info,
+                compile_db_filter="a.cpp",
+            ),
+            frontend="clang",
+            depth="build",
+        )
+        with pytest.raises(ValidationError, match="input: .*L2 header parse only"):
+            resolve_dump_request(request)
+
+    def test_compare_request_rejects_a_nested_build_info_scope_mismatch(
+        self, tmp_path: Path
+    ) -> None:
+        from abicheck.api_types import CompareRequest, InputSpec
+        from abicheck.errors import ValidationError
+        from abicheck.service_compare_pipeline import resolve_compare_request
+
+        so_path, header, build_info = self._project_with_nested_build_info(tmp_path)
+        side = InputSpec(
+            path=so_path,
+            headers=(header,),
+            build_info=build_info,
+            compile_db_filter="a.cpp",
+        )
+        request = CompareRequest(old=side, new=side, frontend="clang", depth="build")
+        with pytest.raises(ValidationError, match="old: .*L2 header parse only"):
+            resolve_compare_request(request)
+
+    def test_the_nested_database_still_narrows_the_header_parse(
+        self, tmp_path: Path
+    ) -> None:
+        """Positive control: the nested database really is what the fold
+        resolves and filters by -- not merely a guard-level assumption."""
+        from abicheck.api_types import DumpRequest, InputSpec
+        from abicheck.service_dump_pipeline import (
+            execute_dump_request,
+            resolve_dump_request,
+        )
+
+        so_path, header, build_info = self._project_with_nested_build_info(tmp_path)
+        request = DumpRequest(
+            input=InputSpec(
+                path=so_path,
+                headers=(header,),
+                build_info=build_info,
+                compile_db_filter="a.cpp",
+            ),
+            frontend="clang",
+            depth="headers",  # collect_mode "off" -- the guard doesn't fire
+        )
+        result = execute_dump_request(resolve_dump_request(request))
+        fields = [
+            f.name for t in result.snapshot.types if t.name == "S" for f in t.fields
+        ]
+        assert "b" in fields, fields  # a.cpp's -DWIDE field, confirms narrowing
+
+
+class TestScopeGuardCoversPackAndBazelBuildInfo:
+    """Codex review, P1 (a sixth finding on the same guard): the fold's own
+    ``resolve_header_compile_context``/``filter_units_by_source`` narrows
+    *whatever* ``BuildEvidence.compile_units`` a ``--build-info`` resolves
+    to -- not only a literal ``compile_commands.json``. A ``--build-info``
+    naming a pre-captured ``collect`` pack directory, or a Bazel
+    ``aquery``/``cquery`` jsonproto, resolves compile units the identical
+    way and is embedded at L3 with no filter either way -- so the guard's
+    original ``compile_db_from_build_info``-only check (which deliberately
+    returns ``None`` for both, since neither is a literal compile database)
+    silently let the exact filtered-L2/unfiltered-L3 mismatch through for
+    both shapes. These tests exercise the pure predicate directly -- no
+    compiler needed, since the guard is a read-only classification over
+    ``--build-info``'s own path shape.
+    """
+
+    @staticmethod
+    def _pack_dir(tmp_path: Path) -> Path:
+        pack = tmp_path / "pack"
+        pack.mkdir()
+        (pack / "manifest.json").write_text(
+            json.dumps({"build_source_pack_version": 1}), encoding="utf-8"
+        )
+        return pack
+
+    @staticmethod
+    def _bazel_aquery_file(tmp_path: Path) -> Path:
+        path = tmp_path / "aquery.json"
+        path.write_text(json.dumps({"actions": [], "artifacts": []}), encoding="utf-8")
+        return path
+
+    @staticmethod
+    def _bazel_cquery_file(tmp_path: Path) -> Path:
+        path = tmp_path / "cquery.json"
+        path.write_text(json.dumps({"results": []}), encoding="utf-8")
+        return path
+
+    @staticmethod
+    def _inputs_pack(tmp_path: Path) -> Path:
+        pack = tmp_path / "inputs_pack"
+        pack.mkdir()
+        (pack / "manifest.json").write_text(
+            json.dumps({"kind": "abicheck_inputs"}), encoding="utf-8"
+        )
+        return pack
+
+    def test_pack_directory_is_recognized(self, tmp_path: Path) -> None:
+        from abicheck.header_conditionals import compile_db_for_filter_scope_check
+
+        pack = self._pack_dir(tmp_path)
+        resolved = compile_db_for_filter_scope_check(pack, None, (tmp_path / "api.h",))
+        assert resolved == pack
+
+    def test_flow2_inputs_pack_named_by_build_info_is_recognized(
+        self, tmp_path: Path
+    ) -> None:
+        """Codex review, P1 (a ninth finding): the original pack recognition
+        here only checked ``is_pack_dir`` (classic ``BuildSourcePack``),
+        missing the identical Flow-2 ``abicheck_inputs/`` shape its own
+        ``--sources`` sibling (``TestScopeGuardCoversSourcesPacks``) already
+        covers -- even though ``_l2_seed_pack_inputs`` recognizes both
+        shapes for ``build_info`` too."""
+        from abicheck.header_conditionals import (
+            compile_db_filter_scope_error,
+            compile_db_for_filter_scope_check,
+        )
+
+        pack = self._inputs_pack(tmp_path)
+        resolved = compile_db_for_filter_scope_check(pack, None, (tmp_path / "api.h",))
+        assert resolved == pack
+        assert compile_db_filter_scope_error("foo.cpp", resolved, "build") is not None
+
+    def test_bazel_aquery_file_is_recognized(self, tmp_path: Path) -> None:
+        from abicheck.header_conditionals import compile_db_for_filter_scope_check
+
+        aquery = self._bazel_aquery_file(tmp_path)
+        resolved = compile_db_for_filter_scope_check(
+            aquery, None, (tmp_path / "api.h",)
+        )
+        assert resolved == aquery
+
+    def test_bazel_cquery_file_is_recognized(self, tmp_path: Path) -> None:
+        from abicheck.header_conditionals import compile_db_for_filter_scope_check
+
+        cquery = self._bazel_cquery_file(tmp_path)
+        resolved = compile_db_for_filter_scope_check(
+            cquery, None, (tmp_path / "api.h",)
+        )
+        assert resolved == cquery
+
+    def test_pack_directory_triggers_the_scope_error(self, tmp_path: Path) -> None:
+        from abicheck.header_conditionals import (
+            compile_db_filter_scope_error,
+            compile_db_for_filter_scope_check,
+        )
+
+        pack = self._pack_dir(tmp_path)
+        resolved = compile_db_for_filter_scope_check(pack, None, (tmp_path / "api.h",))
+        error = compile_db_filter_scope_error("foo.cpp", resolved, "build")
+        assert error is not None
+        assert "--compile-db-filter" in error
+
+    def test_bazel_jsonproto_triggers_the_scope_error(self, tmp_path: Path) -> None:
+        from abicheck.header_conditionals import (
+            compile_db_filter_scope_error,
+            compile_db_for_filter_scope_check,
+        )
+
+        aquery = self._bazel_aquery_file(tmp_path)
+        resolved = compile_db_for_filter_scope_check(
+            aquery, None, (tmp_path / "api.h",)
+        )
+        error = compile_db_filter_scope_error("foo.cpp", resolved, "build")
+        assert error is not None
+
+    def test_no_filter_pack_directory_is_unaffected(self, tmp_path: Path) -> None:
+        """Control: the guard only fires when a filter is actually set."""
+        from abicheck.header_conditionals import (
+            compile_db_filter_scope_error,
+            compile_db_for_filter_scope_check,
+        )
+
+        pack = self._pack_dir(tmp_path)
+        resolved = compile_db_for_filter_scope_check(pack, None, (tmp_path / "api.h",))
+        assert compile_db_filter_scope_error(None, resolved, "build") is None
+
+    def test_collect_mode_off_pack_directory_is_unaffected(
+        self, tmp_path: Path
+    ) -> None:
+        """Control: no L3 embed at ``collect_mode == "off"``, nothing to
+        mismatch against."""
+        from abicheck.header_conditionals import (
+            compile_db_filter_scope_error,
+            compile_db_for_filter_scope_check,
+        )
+
+        pack = self._pack_dir(tmp_path)
+        resolved = compile_db_for_filter_scope_check(pack, None, (tmp_path / "api.h",))
+        assert compile_db_filter_scope_error("foo.cpp", resolved, "off") is None
+
+    def test_a_plain_non_pack_directory_is_still_a_build_dir_search(
+        self, tmp_path: Path
+    ) -> None:
+        """A directory that is not a pack (no manifest.json, or one lacking
+        the BuildSourcePack marker) must still fall through to the ordinary
+        nested-compile-db search / sources auto-discovery, not be
+        misclassified as a pack."""
+        from abicheck.header_conditionals import compile_db_for_filter_scope_check
+
+        plain_dir = tmp_path / "not_a_pack"
+        plain_dir.mkdir()
+        resolved = compile_db_for_filter_scope_check(
+            plain_dir, None, (tmp_path / "api.h",)
+        )
+        assert resolved is None
+
+    def test_a_non_bazel_json_object_file_is_unrecognized(self, tmp_path: Path) -> None:
+        """An ordinary JSON-object build-info file (neither a compile-DB
+        array nor a Bazel aquery/cquery shape) must not be mistaken for
+        filterable build evidence."""
+        from abicheck.header_conditionals import compile_db_for_filter_scope_check
+
+        odd = tmp_path / "odd.json"
+        odd.write_text(json.dumps({"hello": "world"}), encoding="utf-8")
+        resolved = compile_db_for_filter_scope_check(odd, None, (tmp_path / "api.h",))
+        assert resolved is None
+
+
+class TestScopeGuardCoversSourcesPacks:
+    """Codex review, P1 (a seventh finding on the same guard): the sixth
+    finding's fix only recognized a pack named by ``--build-info``, but
+    ``buildsource.l2_seed._l2_seed_pack_inputs`` folds a ``--sources`` pack
+    (a classic ``BuildSourcePack`` or a Flow-2 ``abicheck_inputs/``
+    directory) into L2 seeding the identical way -- whenever no
+    ``--build-info`` was given at all -- so a ``--sources`` naming such a
+    pack reproduced the same filtered-L2/unfiltered-L3 mismatch with no
+    error, since a pack directory carries no literal ``compile_commands.
+    json`` at its root for ``_autodiscover_compile_db`` to find. Pure
+    predicate tests, no compiler needed.
+    """
+
+    @staticmethod
+    def _classic_pack(tmp_path: Path) -> Path:
+        pack = tmp_path / "classic_pack"
+        pack.mkdir()
+        (pack / "manifest.json").write_text(
+            json.dumps({"build_source_pack_version": 1}), encoding="utf-8"
+        )
+        return pack
+
+    @staticmethod
+    def _inputs_pack(tmp_path: Path) -> Path:
+        pack = tmp_path / "inputs_pack"
+        pack.mkdir()
+        (pack / "manifest.json").write_text(
+            json.dumps({"kind": "abicheck_inputs"}), encoding="utf-8"
+        )
+        return pack
+
+    def test_classic_pack_named_by_sources_is_recognized(self, tmp_path: Path) -> None:
+        from abicheck.header_conditionals import compile_db_for_filter_scope_check
+
+        pack = self._classic_pack(tmp_path)
+        resolved = compile_db_for_filter_scope_check(None, pack, (tmp_path / "api.h",))
+        assert resolved == pack
+
+    def test_inputs_pack_named_by_sources_is_recognized(self, tmp_path: Path) -> None:
+        from abicheck.header_conditionals import compile_db_for_filter_scope_check
+
+        pack = self._inputs_pack(tmp_path)
+        resolved = compile_db_for_filter_scope_check(None, pack, (tmp_path / "api.h",))
+        assert resolved == pack
+
+    def test_sources_pack_triggers_the_scope_error(self, tmp_path: Path) -> None:
+        from abicheck.header_conditionals import (
+            compile_db_filter_scope_error,
+            compile_db_for_filter_scope_check,
+        )
+
+        pack = self._classic_pack(tmp_path)
+        resolved = compile_db_for_filter_scope_check(None, pack, (tmp_path / "api.h",))
+        error = compile_db_filter_scope_error("foo.cpp", resolved, "build")
+        assert error is not None
+
+    def test_an_explicit_build_info_takes_precedence_over_a_sources_pack(
+        self, tmp_path: Path
+    ) -> None:
+        """Mirrors ``_l2_seed_pack_inputs``'s own ``if build_info is None:``
+        gate: an explicit ``--build-info`` (even one that itself resolves to
+        nothing recognizable) means the sources pack's evidence is never
+        folded into ``base_build``, so the guard must not treat the sources
+        pack as filterable evidence in that combination either."""
+        from abicheck.header_conditionals import compile_db_for_filter_scope_check
+
+        pack = self._classic_pack(tmp_path)
+        unrelated_build_info = tmp_path / "not_a_pack_or_db"
+        unrelated_build_info.mkdir()
+        resolved = compile_db_for_filter_scope_check(
+            unrelated_build_info, pack, (tmp_path / "api.h",)
+        )
+        assert resolved is None
+
+    def test_no_filter_sources_pack_is_unaffected(self, tmp_path: Path) -> None:
+        """Control: the guard only fires when a filter is actually set."""
+        from abicheck.header_conditionals import (
+            compile_db_filter_scope_error,
+            compile_db_for_filter_scope_check,
+        )
+
+        pack = self._classic_pack(tmp_path)
+        resolved = compile_db_for_filter_scope_check(None, pack, (tmp_path / "api.h",))
+        assert compile_db_filter_scope_error(None, resolved, "build") is None
+
+    def test_a_plain_sources_directory_is_still_auto_discovery(
+        self, tmp_path: Path
+    ) -> None:
+        """A ``sources`` directory that is not a pack (no manifest.json, or
+        one lacking either pack's own marker) must still fall through to
+        ordinary auto-discovery, not be misclassified as a pack."""
+        from abicheck.header_conditionals import compile_db_for_filter_scope_check
+
+        plain_tree = tmp_path / "plain_source_tree"
+        plain_tree.mkdir()
+        resolved = compile_db_for_filter_scope_check(
+            None, plain_tree, (tmp_path / "api.h",)
+        )
+        assert resolved is None
+
+
+class TestScopeGuardDoesNotFallBackToSourcesWhenBuildInfoMisses:
+    """Codex review, P2 (an eighth finding): the seventh finding's fix made
+    every branch fall through unconditionally to the sources-based checks
+    once none of the ``build_info`` branches matched -- but
+    ``buildsource.inline._resolve_compile_db``'s own ``explicit_input_
+    missed`` logic (the real function every one of these seeded resolvers
+    ultimately calls) returns ``None`` as soon as a *given* ``build_info``
+    misses, deliberately, per its own comment: "surface that miss rather
+    than masking it with a stale auto-discovered DB ... checked BEFORE
+    auto-discovery". So an explicit ``--build-info`` that doesn't resolve
+    to anything recognizable means neither the real L2 fold nor the L3
+    embed ever falls back to a ``sources``-discovered database -- falling
+    back in the guard produced a false positive, rejecting a
+    ``--compile-db-filter`` combination the real resolvers wouldn't
+    actually apply to either side of. Pure predicate tests, no compiler
+    needed for the unrecognized-build_info half; the auto-discoverable-
+    sources half reuses the real g++/clang project fixture to prove the
+    combination the guard now permits is genuinely one the real fold
+    ignores ``sources`` for.
+    """
+
+    def test_unresolvable_build_info_does_not_fall_back_to_sources_auto_discovery(
+        self, tmp_path: Path
+    ) -> None:
+        from abicheck.header_conditionals import compile_db_for_filter_scope_check
+
+        unrelated_build_info = tmp_path / "not_a_pack_or_db"
+        unrelated_build_info.mkdir()
+        sources = tmp_path / "sources"
+        sources.mkdir()
+        (sources / "compile_commands.json").write_text("[]", encoding="utf-8")
+        resolved = compile_db_for_filter_scope_check(
+            unrelated_build_info, sources, (tmp_path / "api.h",)
+        )
+        assert resolved is None
+
+    @pytest.mark.integration
+    @pytest.mark.skipif(
+        not sys.platform.startswith("linux"),
+        reason="ELF/Linux-scoped repro (real g++-compiled .so + compile_commands.json)",
+    )
+    @pytest.mark.skipif(
+        not (_HAVE_GXX and _HAVE_CLANG), reason="needs a real g++ and clang toolchain"
+    )
+    def test_an_unresolvable_build_info_alongside_a_real_sources_db_is_unaffected(
+        self, tmp_path: Path
+    ) -> None:
+        """Positive control against the real g++/clang project: with a
+        genuinely unresolvable ``--build-info`` alongside a ``--sources``
+        tree that *does* auto-discover a real compile database, the guard
+        must not reject the request -- confirming the fix isn't merely
+        unit-testing the predicate in isolation."""
+        from abicheck.header_conditionals import (
+            compile_db_filter_scope_error,
+            compile_db_for_filter_scope_check,
+        )
+
+        _so_path, header, _compile_db = TestDumpCliHonorsTheFilterInTheFold._project(
+            tmp_path
+        )
+        unrelated_build_info = tmp_path / "not_a_pack_or_db"
+        unrelated_build_info.mkdir()
+        resolved = compile_db_for_filter_scope_check(
+            unrelated_build_info, header.parent, (header,)
+        )
+        assert resolved is None
+        assert compile_db_filter_scope_error("a.cpp", resolved, "build") is None

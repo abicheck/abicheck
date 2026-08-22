@@ -95,6 +95,7 @@ def build_dump_request(
     ld_library_path: str,
     include_labels: dict[Path, str] | None,
     resolved_collect_mode: str | None = None,
+    compile_db_filter: str | None = None,
 ) -> DumpRequest:
     """One :class:`DumpRequest` describing this ``abicheck dump`` invocation.
 
@@ -126,6 +127,14 @@ def build_dump_request(
     ``api_types.DumpRequest.resolved_collect_mode``'s own docstring). ``None``
     for an ordinary ``dump`` invocation, which lets
     ``resolve_dump_request()`` derive it from *depth* as usual.
+
+    *compile_db_filter* is ``dump``'s own ``--compile-db-filter`` value,
+    forwarded onto :attr:`~abicheck.api_types.InputSpec.compile_db_filter`
+    verbatim (PR 3A investigation, 2026-08-21) so a ``--dry-run`` resolved
+    from this request reports the same
+    ``compile_db_filter_scope_error`` refusal ``dump_cmd`` already raises
+    directly, and so the object records the filter that would actually
+    narrow the header parse were the real run migrated onto it.
     """
     from .api_types import DumpRequest, InputSpec
 
@@ -143,6 +152,7 @@ def build_dump_request(
             build_targets=tuple(build_targets),
             dump_manifest=dump_manifest,
             compile=compile_context,
+            compile_db_filter=compile_db_filter,
         ),
         lang=lang,
         frontend=header_backend,

@@ -181,37 +181,26 @@ class InputSpec:
     # (D4) would have silently dropped that guard, so it is request surface,
     # not an MCP-local wrapper concern.
     follow_linker_scripts: bool = True
-    # PR C (CLI cleanup phase two, typed dump/scan convergence) deliberately
-    # does *not* add a `compile_db_filter` field here mirroring `dump
-    # --compile-db-filter`. This pipeline's own L2 header-AST context
-    # (`_seeded_includes_and_compile_context`, the P0.3 L3->L2 fold) has no
-    # filter concept and always resolves from the *whole*, unfiltered compile
-    # database -- unlike the native `dump` CLI, which threads its filter into
-    # its own, structurally different L2 mechanism too
-    # (`cli_helpers_compare._resolve_build_context_flags`). Exposing a field
-    # here that could only ever be combined with a resolvable compile
-    # database by raising (never by actually narrowing the ADR-039
-    # collector's scan) would be a field with no successful use -- see the
-    # plan doc's PR C status notes; a real implementation needs the filter
-    # threaded into the shared L2 fold itself, a separate feature addition to
-    # `buildsource/l2_seed.py`/`header_compile_context.py` (Codex review,
-    # PR #809).
-    #
-    # **That feature addition has since landed** (PR 3A investigation,
-    # 2026-08-21): `resolve_header_compile_context` takes a `source_filter`,
-    # `l2_seed` forwards it, and the ELF `dump` CLI threads its own
-    # `--compile-db-filter` through -- so a filter now genuinely narrows the
-    # fold rather than only the legacy match. The field is still deliberately
-    # absent here, for a *different*, remaining reason: adding it would let a
-    # typed caller reach the L2-filtered/L3-unfiltered snapshot shape the CLI
-    # refuses outright (`header_conditionals.compile_db_filter_scope_error`,
-    # which fires only when the resolved collect mode also *embeds* L3
-    # evidence). Closing that needs the same refusal mirrored into the typed
-    # request's own resolution -- `service_dump_pipeline.resolve_dump_request`
-    # is the right place, since only it knows the resolved collect mode --
-    # plus forwarding through `_seeded_includes_and_compile_context` and into
-    # `attach_build_context_for_parsed_headers`. One clearly-specified step,
-    # not an open-ended one.
+    # Mirrors `dump --compile-db-filter` (PR 3A, dump/scan resolver
+    # convergence -- see the plan doc's PR C status notes and the root
+    # AGENTS.md "PR C" known-gap entry for the two review rounds that shaped
+    # this). `None` (the default) is the pre-existing, unfiltered behavior
+    # for every caller -- `compare`'s implicit-dump path, `dump`'s typed
+    # pipeline via any caller that doesn't set this. `resolve_header_
+    # compile_context`/`l2_seed.seed_includes_and_fold_compile_context`
+    # already accept a `source_filter` and narrow the P0.3 L3->L2 fold by
+    # it (landed alongside the ELF `dump` CLI's own `--compile-db-filter`
+    # threading); `service_dump_pipeline.resolve_dump_request` mirrors the
+    # CLI's own `compile_db_filter_scope_error` refusal (a filter combined
+    # with a resolved collect mode that also embeds L3 evidence is a usage
+    # error, not a silent unfiltered L3 collection) using the resolved
+    # collect mode it alone knows; `service_input_resolution` forwards this
+    # field into both `_seeded_includes_and_compile_context` (the fold) and
+    # `attach_build_context_for_parsed_headers` (the ADR-039 collector), so
+    # the header parse and the collector agree on which translation units
+    # the filter selects, exactly as the three CLI-side layers already do
+    # via `build_context.source_matches_filter`.
+    compile_db_filter: str | None = None
 
     @classmethod
     def of(
@@ -231,6 +220,7 @@ class InputSpec:
         compile: CompileContext | None = None,
         public_header_dirs: Iterable[Path | str] | None = None,
         follow_linker_scripts: bool = True,
+        compile_db_filter: str | None = None,
     ) -> InputSpec:
         """Build an :class:`InputSpec`, coercing loose front-end values."""
         return cls(
@@ -248,6 +238,7 @@ class InputSpec:
             compile=compile,
             public_header_dirs=_path_tuple(public_header_dirs),
             follow_linker_scripts=follow_linker_scripts,
+            compile_db_filter=compile_db_filter,
         )
 
 

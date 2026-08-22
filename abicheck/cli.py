@@ -41,6 +41,7 @@ from .cli_audit import echo_filtered_surface, echo_reconciled
 from .cli_dump_helpers import (
     _dump_will_attempt_hybrid_l4_extraction,
     compile_db_filter_scope_error,
+    compile_db_for_filter_scope_check,
     compile_db_from_build_info,
     handle_non_elf_dump,
     perform_elf_dump,
@@ -576,9 +577,19 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
     # --depth binary has had its say about the headers (a headerless dump has
     # no header AST for a database to parameterize).
     compile_db_path = compile_db_from_build_info(build_info, headers)
+    # The scope check itself resolves the compile database more broadly than
+    # `compile_db_path` above -- a `--sources` tree with no `--build-info` can
+    # still auto-discover one, and the L3->L2 fold/L3 embed both resolve it
+    # from `sources` alone (Codex review, fresh evidence). Deliberately a
+    # *separate* variable: `compile_db_path` itself must stay `--build-info`-
+    # only, since it also drives the legacy `-p` auto-match further down
+    # (`effective_compile_db`) -- see `compile_db_for_filter_scope_check`'s
+    # own docstring for why widening it here would widen that too.
     if (
         _filter_scope_error := compile_db_filter_scope_error(
-            compile_db_filter, compile_db_path, collect_mode
+            compile_db_filter,
+            compile_db_for_filter_scope_check(build_info, sources, headers),
+            collect_mode,
         )
     ) is not None:
         raise click.UsageError(_filter_scope_error)
@@ -712,6 +723,7 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
         ld_library_path=ld_library_path,
         include_labels=_resolved_include_labels,
         resolved_collect_mode=_resolved_collect_mode,
+        compile_db_filter=compile_db_filter,
     )
 
     if dry_run:

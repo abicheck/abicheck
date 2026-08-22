@@ -1003,6 +1003,175 @@ def compile_db_from_build_info(
     return db if db.is_file() and sniff_build_info_format(db) == "compile_db" else None
 
 
+def compile_db_for_filter_scope_check(
+    build_info: Path | None,
+    sources: Path | None,
+    headers: tuple[Path, ...],
+) -> Path | None:
+    """The compile database ``compile_db_filter_scope_error`` should check
+    against -- covering both ways the L3->L2 fold can resolve one, not only
+    an explicit ``--build-info`` (Codex review, fresh evidence).
+
+    ``compile_db_from_build_info`` alone under-covers this: when no
+    ``--build-info`` is given but ``--sources`` names a tree containing an
+    auto-discovered ``compile_commands.json``
+    (``buildsource.inline._autodiscover_compile_db`` -- the identical P4
+    strategy ``seed_includes_and_fold_compile_context``'s own fold and
+    ``embed_build_source``'s L3 collection *both* already use to find one
+    from ``sources`` alone), the fold still narrows the L2 header parse by
+    ``compile_db_filter`` while the L3 embed collects the same
+    auto-discovered database unfiltered -- the exact filtered-L2/
+    unfiltered-L3 mismatch this whole scope guard exists to reject, just
+    reached without ``--build-info`` at all. Reproduced directly: a real
+    ``g++``-compiled two-TU project resolved with ``sources`` only (no
+    ``build_info``) and a filter narrowing the L2 parse to one TU still
+    embedded both TUs' compile units as L3 evidence.
+
+    A second, distinct under-coverage (Codex review, fresh evidence): even
+    with an explicit ``--build-info <dir>`` given, ``compile_db_from_
+    build_info`` only ever checks ``<build_info>/compile_commands.json``
+    directly -- it has no notion of a conventional out-of-tree build
+    directory (``<build_info>/build/compile_commands.json``,
+    ``<build_info>/cmake-build-debug/compile_commands.json``, ...). The
+    real fold's own ``--build-info`` resolution
+    (``buildsource.inline._compile_db_at``, for a directory delegating to
+    ``_find_compile_db_in_dir``) searches those conventional hint
+    subdirectories -- explicitly "so ``--build-info <dir>`` honours the
+    same contract as ``--sources`` auto-discovery" per that function's own
+    docstring -- so a ``--build-info`` naming a project root whose database
+    lives one level down resolves for the fold but not for this scope
+    check. Reproduced directly: a real two-TU project with its
+    ``compile_commands.json`` moved into a ``build/`` subdirectory,
+    ``--build-info`` pointed at the project root -- the fold correctly
+    found and filtered by the nested database (L3 compile units: 2, L2
+    narrowed to the filtered TU), and the guard never fired.
+
+    A third under-coverage (Codex review, fresh evidence): the fold's own
+    ``resolve_header_compile_context``/``filter_units_by_source`` narrows
+    *whatever* ``BuildEvidence.compile_units`` a ``--build-info`` resolves
+    to -- it is not specific to a literal ``compile_commands.json``. A
+    ``--build-info`` naming a pre-captured ``collect`` pack directory
+    (``is_pack_dir``), a Flow-2 ``abicheck_inputs/`` pack
+    (``inputs_pack.is_inputs_pack`` -- a ninth finding, Codex review, fresh
+    evidence, closing the identical gap this paragraph's own ``--sources``
+    sibling below already covers, missed here originally since the pack
+    recognition and the Bazel-jsonproto recognition were added in the same
+    pass and only ``is_pack_dir`` was carried over), or a Bazel
+    ``aquery``/``cquery`` jsonproto (routed through their own adapters in
+    ``buildsource.inline._maybe_collect_bazel_build_info``/pack loading, not
+    ``load_compile_db()``) resolves compile units the identical way a
+    literal compile database does, and the L3 embed collects that same
+    ``BuildEvidence`` with no filter either way -- so the mismatch this
+    guard exists to reject reproduces for those three shapes too, just never
+    detected because none is a ``compile_commands.json`` file
+    ``compile_db_from_build_info`` recognizes. ``sniff_build_info_format``
+    is the same cheap, execution-free classifier ``compile_db_from_
+    build_info`` already uses to tell the Bazel shapes apart -- checking it
+    here costs nothing and cannot disagree with what dispatch itself does
+    with the same path.
+
+    Deliberately **not** folded into ``compile_db_from_build_info`` itself
+    -- that function's result also drives ``dump``'s own legacy ``-p``
+    auto-match (``cli.py``'s ``effective_compile_db``), which is
+    intentionally ``--build-info``-only (direct child only, no subdirectory
+    search, and only ever a real ``compile_commands.json`` -- a pack/Bazel
+    jsonproto was never a valid ``-p`` operand) and widening it here would
+    widen that unrelated, separately reviewed mechanism too.
+
+    A fourth under-coverage (Codex review, fresh evidence): the third
+    under-coverage's fix only checked a *pack* named by ``--build-info``,
+    but ``buildsource.l2_seed._l2_seed_pack_inputs`` recognizes a
+    ``--sources`` pack (a classic ``BuildSourcePack`` or a Flow-2
+    ``abicheck_inputs/`` directory) the identical way -- carrying its own
+    normalized ``BuildEvidence`` into L2 seeding -- whenever *no*
+    ``--build-info`` was given at all (an explicit ``--build-info`` always
+    wins L3, matching ``_l2_seed_pack_inputs``'s own ``if build_info is
+    None:`` gate on that assignment). A ``--sources`` naming such a pack,
+    with no ``--build-info``, therefore reproduced the identical mismatch:
+    this function's fallback resolution (``compile_db_from_build_info``
+    then ``_autodiscover_compile_db``) only ever looks for a literal
+    ``compile_commands.json`` inside *sources*, which a pack directory does
+    not carry at its root. Fixed by recognizing a ``sources`` pack via the
+    same two functions ``_l2_seed_pack_inputs`` itself uses (``is_pack_dir``
+    / ``inputs_pack.is_inputs_pack``), gated on ``build_info is None`` to
+    match that function's own precedence exactly.
+
+    Still not covered, and not attempted here: a ``--sources`` tree with no
+    discoverable ``compile_commands.json`` at all, resolved instead through
+    the zero-config *inferred* build-system query (cmake/make/bazel). Unlike
+    every case above, telling whether that combination would actually
+    resolve multiple compile units means running the build system's own
+    query -- the exact side effect this cheap, read-only scope check is
+    built to avoid paying twice per invocation. See this repository's
+    ``AGENTS.md`` "Known gaps" for that residual, documented rather than
+    guessed at.
+
+    ``None`` when neither source names usable build evidence, or when
+    *headers* is empty (mirrors ``compile_db_from_build_info``: no L2
+    header parse to narrow means nothing for the filter to be inconsistent
+    with).
+    """
+    if not headers:
+        return None
+    explicit = compile_db_from_build_info(build_info, headers)
+    if explicit is not None:
+        return explicit
+    if build_info is not None:
+        from .buildsource.inline import sniff_build_info_format
+
+        if build_info.is_dir():
+            from .buildsource.inline import _find_compile_db_in_dir, is_pack_dir
+            from .buildsource.inputs_pack import is_inputs_pack
+
+            nested = _find_compile_db_in_dir(build_info)
+            if nested is not None:
+                return nested
+            # Codex review, fresh evidence (a ninth finding): a --build-info
+            # naming a Flow-2 abicheck_inputs/ pack is recognized by
+            # _l2_seed_pack_inputs (is_pack_dir OR _is_inputs_pack_dir) and
+            # by embed_build_source's own bi_is_inputs check -- this branch
+            # previously checked only is_pack_dir, missing the Flow-2 shape
+            # its own --sources sibling below already covers.
+            if is_pack_dir(build_info) or is_inputs_pack(build_info):
+                return build_info
+        elif build_info.is_file() and sniff_build_info_format(build_info) in (
+            "bazel_aquery",
+            "bazel_cquery",
+        ):
+            return build_info
+        # Codex review, fresh evidence (an eighth finding): an explicit
+        # --build-info that resolves to none of the above must NOT fall
+        # through to sources auto-discovery. buildsource.inline.
+        # _resolve_compile_db's own `explicit_input_missed` logic returns
+        # None as soon as a given --build-info misses -- deliberately,
+        # per its own comment, "surface that miss rather than masking it
+        # with a stale auto-discovered DB ... checked BEFORE
+        # auto-discovery" -- so neither the real L2 fold nor the L3 embed
+        # ever falls back to a sources-discovered database in this case.
+        # Falling back here (the pre-fix behavior) produced a false
+        # positive: rejecting a --compile-db-filter combination the real
+        # resolvers wouldn't actually apply it to either side of.
+        return None
+    # Codex review, fresh evidence: a --sources pack (classic BuildSourcePack or
+    # Flow-2 abicheck_inputs/) carries its own normalized BuildEvidence, which
+    # buildsource.l2_seed._l2_seed_pack_inputs folds into L2 seeding exactly
+    # like a --build-info pack -- but only when no --build-info was given at
+    # all (an explicit --build-info always wins L3, mirroring
+    # _l2_seed_pack_inputs's own `if build_info is None:` gate on the base_build
+    # assignment). Recognized the identical way _l2_seed_pack_inputs does
+    # (is_pack_dir / inputs_pack.is_inputs_pack), not via the compile-
+    # database-only sniff this function otherwise uses.
+    if build_info is None and sources is not None and sources.is_dir():
+        from .buildsource.inline import is_pack_dir
+        from .buildsource.inputs_pack import is_inputs_pack
+
+        if is_pack_dir(sources) or is_inputs_pack(sources):
+            return sources
+    from .buildsource.inline import _autodiscover_compile_db
+
+    return _autodiscover_compile_db(sources)
+
+
 def compile_db_filter_scope_error(
     compile_db_filter: str | None,
     compile_db_path: Path | None,
@@ -1030,17 +1199,22 @@ def compile_db_filter_scope_error(
     change to ``buildsource/`` with its own evidence gates, not something to
     infer from one review round.
 
-    ``None`` when the combination cannot arise: no filter, a ``--build-info``
-    that is not a compile database (a pack or Bazel jsonproto routes through
-    a different adapter), or ``collect_mode == "off"``, where no build
-    evidence is embedded for the filter to be inconsistent with.
+    ``None`` when the combination cannot arise: no filter, no resolvable
+    build evidence for *compile_db_path* to name (see
+    ``compile_db_for_filter_scope_check``, this function's real caller --
+    since ADR/Codex review it resolves a pack directory and a Bazel
+    aquery/cquery jsonproto here too, not only a literal
+    ``compile_commands.json``, so this parameter no longer names a compile
+    database specifically despite its name), or ``collect_mode == "off"``,
+    where no build evidence is embedded for the filter to be inconsistent
+    with.
     """
     if not compile_db_filter or compile_db_path is None or collect_mode == "off":
         return None
     return (
         "--compile-db-filter scopes the L2 header parse only; the L3 build "
-        "evidence embedded from the same --build-info compilation database is "
-        "collected unfiltered, so the snapshot would carry build facts for "
+        "evidence embedded from the same --build-info source is collected "
+        "unfiltered, so the snapshot would carry build facts for "
         "translation units the filter excludes. Pass a pre-filtered "
         "compile_commands.json as --build-info (then --compile-db-filter is "
         "unnecessary), or drop --compile-db-filter to accept the whole "

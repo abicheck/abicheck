@@ -4855,6 +4855,244 @@ Once a root command genuinely clears the bar above, pick the right home:
   while able to exercise only the non-default backend is not a verified change.
   PR 3C stays blocked, per the plan's own ordering rule.
 
+  **Item (1) closed (2026-08-21, later session): `InputSpec.compile_db_filter`
+  now exists, exactly as specified above — nothing more, nothing less.**
+  `service_input_resolution._seeded_includes_and_compile_context` forwards it
+  as `source_filter` to `seed_includes_and_fold_compile_context`; the
+  `attach_build_context_for_parsed_headers` call two paragraphs down does the
+  same, so the fold and the ADR-039 collector agree on which translation
+  units the filter selects (the identical invariant
+  `build_context.source_matches_filter` already established for the three
+  CLI-side layers — see the root AGENTS.md's forced-include entry's
+  MSVC-driver-vocabulary lesson on why a second copy of a shared matching
+  rule is the wrong move). `resolve_dump_request` mirrors the CLI's own
+  `compile_db_filter_scope_error` refusal, computed from `evidence.
+  collect_mode`/`evidence.headers` — the same resolved values the CLI reads
+  `compile_db_from_build_info` back against — so a typed caller cannot reach
+  the L2-filtered/L3-unfiltered snapshot shape the CLI refuses outright; the
+  refusal raises `ValidationError` (translated to `click.UsageError` at the
+  CLI boundary by `resolve_dump_request_for_cli`, unchanged). `dump_cmd`
+  forwards its own `--compile-db-filter` local into `build_dump_request`, so
+  `--dry-run`'s resolved object now records the same filter the real run
+  applies, closing the last gap in that request's own honesty contract for
+  this one field. Verified against the identical real `g++`+clang project
+  `TestDumpCliHonorsTheFilterInTheFold` already uses (two TUs disagreeing on
+  an ABI-relevant `-D` behind one `#ifdef`-guarded field), driven through the
+  typed `DumpRequest`/`resolve_dump_request`/`execute_dump_request` path
+  directly rather than the CLI: the scope-error refusal fires under the same
+  condition the CLI refuses under, a request with no filter is unaffected,
+  and the filter selects the same translation unit's context for the header
+  parse the CLI test already pins (`tests/test_compile_db_filter_scope.py`'s
+  `TestTypedApiHonorsTheFilterInTheFold`). Confirmed the CLI's own behavior
+  is unchanged by re-running `TestDumpCliHonorsTheFilterInTheFold` directly.
+  **Item (2) is unchanged and remains the sole blocker**: castxml is still
+  unavailable in every environment this work has been done in, so the real
+  `dump` CLI execution path (`perform_elf_dump`/`handle_non_elf_dump`) still
+  does not route through `execute_dump_request`, and PR 3C stays blocked.
+  This slice narrows what item (2) alone is blocking, nothing more — it does
+  not migrate the real run, and does not claim to.
+
+  **Two Codex review findings on the same slice, both real, both fixed
+  before merge.** (P2) `InputSpec.of()` — the documented loose-value
+  convenience factory every front end other than a direct dataclass
+  construction uses — never gained a `compile_db_filter` parameter, so
+  `InputSpec.of(..., compile_db_filter=...)` raised `TypeError` for an
+  unrecognized keyword: the field was reachable only by constructing
+  `InputSpec` directly, despite being advertised as public typed-API
+  surface. Fixed by adding the parameter and forwarding it through
+  unchanged. (P1) The scope-error guard above was wired into
+  `resolve_dump_request` only — but `InputSpec.compile_db_filter` is shared
+  by `CompareRequest.old`/`.new` too, and `resolve_compare_request` reaches
+  the identical `resolve_side_snapshot` primitive (the P0.3 fold narrows,
+  `embed_side_build_source` still collects L3 unfiltered), so a typed
+  `CompareRequest` side could reach the exact L2-filtered/L3-unfiltered
+  snapshot shape the guard exists to reject, with no check catching it. Fixed
+  by extracting the guard into a shared function,
+  `service_compare_evidence.reject_compile_db_filter_scope_mismatch` (mirrors
+  `reject_debug_format_for_binaries`'s existing `(label, ...)` per-side
+  shape), called from both `resolve_dump_request` (`input`) and
+  `resolve_compare_request` (`old`/`new`) — one guard, not two independently
+  drifting copies. Regression coverage: `tests/test_compile_db_filter_scope.py`'s
+  `test_input_spec_of_forwards_compile_db_filter` and
+  `TestCompareRequestAppliesTheSameScopeGuard` (the latter, like its
+  `DumpRequest` sibling, verified against the identical real `g++`+clang
+  project), plus a re-run of every pre-existing test in this area to confirm
+  the extraction changed no behavior.
+
+  **Three further Codex review findings on the same slice, each real, each
+  fixed, and each a pre-existing gap in the native CLI's own scope check
+  too (not introduced by this typed-API slice).** (P1) The guard's compile-
+  database resolution considered only an explicit `--build-info`/
+  `build_info` — a `--sources`/`sources` tree with no `build_info` at all
+  can still have its `compile_commands.json` auto-discovered
+  (`buildsource.inline._autodiscover_compile_db`, the identical P4 strategy
+  the fold and the L3 embed both already use to find one from `sources`
+  alone), so that combination reached the same filtered-L2/unfiltered-L3
+  mismatch uncaught. Reproduced directly: a real two-TU project resolved
+  with `sources` only, filtered to one TU at L2, still embedded both TUs'
+  compile units as L3 evidence (`BuildEvidence.compile_units` length 2).
+  (P1) Even with an explicit `--build-info <dir>` given, the resolution
+  checked only `<dir>/compile_commands.json` directly — not a conventional
+  out-of-tree build subdirectory (`<dir>/build/compile_commands.json`) the
+  real fold's own `--build-info` resolution
+  (`buildsource.inline._compile_db_at`, delegating to
+  `_find_compile_db_in_dir` for a directory) already searches, explicitly
+  documented as matching `--sources` auto-discovery's own contract.
+  Reproduced directly: the identical project with its database moved into
+  a `build/` subdirectory, `--build-info` pointed at the project root — the
+  fold correctly resolved and filtered by the nested database while the
+  guard never fired. Both fixed in one place,
+  `header_conditionals.compile_db_for_filter_scope_check` (deliberately
+  **not** folded into `compile_db_from_build_info` itself, which also
+  drives the CLI's unrelated legacy `-p` auto-match and must stay
+  `--build-info`-direct-child-only — see that function's own docstring),
+  consumed by both `cli.py`'s `dump_cmd` and the shared typed guard.
+  Regression coverage: `TestScopeGuardCoversSourcesOnlyAutoDiscovery` and
+  `TestScopeGuardCoversNestedBuildInfoDatabases` in
+  `tests/test_compile_db_filter_scope.py` (three entry points each — CLI,
+  `DumpRequest`, `CompareRequest` — plus a positive control for the nested
+  case confirming the database is genuinely what gets filtered).
+
+  **A fifth finding, investigated and deliberately left as a documented gap
+  rather than fixed reactively — the point at which these findings stopped
+  converging on real, reachable bugs.** `execute_dump_request()`/
+  `_resolve_side_snapshot_impl()` also accept a keyword-only
+  `build_compile_db` (a glob, mirroring `--build-compile-db`), forwarded
+  unfiltered to both the L2 fold and the L3 embed the same way
+  `build_info`/`sources` are — in principle the identical mismatch class.
+  But `build_compile_db` is not a field of `DumpRequest`/`InputSpec` at
+  all: it exists purely as scaffolding for the not-yet-landed PR 3A
+  real-run migration (this module's own docstring: "the real ELF/PE/
+  Mach-O run still executes through `perform_elf_dump`/
+  `handle_non_elf_dump`, not through `execute_dump_request`"), and
+  `execute_dump_request` has exactly one caller in the whole codebase —
+  `run_dump_request`, which never passes it. No CLI, no typed-API path, and
+  no test can reach this combination without bypassing the entire
+  `DumpRequest`-shaped public surface and hand-calling the semi-internal
+  `execute_dump_request` with a kwarg nothing in that surface can set —
+  a different reachability class from the four findings above, each
+  reproduced end-to-end through real, ordinary usage before being fixed.
+  Left for whichever change gives `build_compile_db` its first real caller
+  (i.e. the PR 3A real-run migration itself) to close alongside that
+  migration, rather than shipping validation code with no real path to
+  verify it against.
+
+  **A sixth finding (Codex review, fresh evidence) reopened convergence:
+  the guard's original `compile_db_from_build_info`-only check covered a
+  literal compile database and nothing else, but the fold it guards
+  (`resolve_header_compile_context`/`filter_units_by_source`) narrows
+  *whatever* `BuildEvidence.compile_units` a `--build-info` resolves to,
+  regardless of shape.** A `--build-info` naming a pre-captured `collect`
+  pack directory (`is_pack_dir`) or a Bazel `aquery`/`cquery` jsonproto
+  resolves compile units the identical way a literal compile database does
+  — both are routed through their own adapters
+  (`buildsource.inline._maybe_collect_bazel_build_info`/pack loading), not
+  `load_compile_db()` — and the L3 embed collects that same `BuildEvidence`
+  unfiltered either way, so the mismatch reproduced for both shapes with no
+  error, purely because neither is a `compile_commands.json` file
+  `compile_db_from_build_info` recognizes. Fixed: `compile_db_for_filter_
+  scope_check` now also recognizes a `--build-info` that `sniff_build_info_
+  format` (the same cheap, execution-free classifier `compile_db_from_
+  build_info` already uses, so the two cannot disagree) reports as `"pack"`
+  or `"bazel_aquery"`/`"bazel_cquery"`, returning the `--build-info` path
+  itself as the guard's non-`None` signal (the guard only ever checks
+  `is None`, so this needs no literal compile-database content).
+  `compile_db_filter_scope_error`'s docstring, which had explicitly claimed
+  the opposite ("a pack or Bazel jsonproto routes through a different
+  adapter" → `None`, i.e. by design out of scope), was corrected alongside
+  the fix — that claim was the bug's own design rationale, not a separate
+  error. **Still not covered, and not attempted here**: a `--sources` tree
+  with no discoverable `compile_commands.json` at all, resolved instead
+  through the zero-config *inferred* build-system query (cmake/make/bazel).
+  Unlike the pack/Bazel-jsonproto case, telling whether that combination
+  would actually resolve multiple compile units means running the build
+  system's own query — the exact side effect this cheap, read-only scope
+  check exists to avoid paying twice per invocation (once to check, once for
+  real) — so this residual is documented rather than guessed at, per this
+  file's own "known gaps over risky reactive patches" convention. Regression
+  coverage: `TestScopeGuardCoversPackAndBazelBuildInfo` in
+  `tests/test_compile_db_filter_scope.py` (the predicate directly — pack
+  directory, both Bazel jsonproto shapes, both positive and negative
+  controls, plus a plain non-pack directory and a non-Bazel JSON-object file
+  confirmed to still resolve `None`; five of nine cases confirmed to fail
+  against the pre-fix guard).
+
+  **A seventh finding (Codex review, fresh evidence) on the same guard:
+  the sixth finding's fix only recognized a pack named by `--build-info`,
+  but `buildsource.l2_seed._l2_seed_pack_inputs` folds a `--sources` pack
+  (a classic `BuildSourcePack` or a Flow-2 `abicheck_inputs/` directory)
+  into L2 seeding the identical way — carrying its own normalized
+  `BuildEvidence` in — whenever no `--build-info` was given at all (an
+  explicit `--build-info` always wins L3, matching that function's own
+  `if build_info is None:` gate on the assignment).** A `--sources` naming
+  such a pack, with no `--build-info`, reproduced the identical mismatch:
+  the guard's fallback resolution (`compile_db_from_build_info` then
+  `_autodiscover_compile_db`) only ever looks for a literal
+  `compile_commands.json` inside *sources*, which a pack directory does not
+  carry at its root — so it silently resolved `None` and let the mismatch
+  through. Fixed by recognizing a `sources` pack the identical way
+  `_l2_seed_pack_inputs` does (`is_pack_dir` / `inputs_pack.is_inputs_pack`),
+  gated on `build_info is None` to match that function's own precedence
+  exactly — an explicit `--build-info` (even one that itself resolves to
+  nothing recognizable) still means the sources pack's evidence is never
+  folded into `base_build`, so the guard must not treat it as filterable
+  evidence in that combination either (pinned by its own regression test).
+  Regression coverage: `TestScopeGuardCoversSourcesPacks` in
+  `tests/test_compile_db_filter_scope.py` (a classic pack and a Flow-2
+  inputs pack named by `sources`, the scope error firing, the
+  `build_info`-takes-precedence control, a no-filter control, and a plain
+  non-pack `sources` directory still falling through to ordinary
+  auto-discovery; three of six cases confirmed to fail against the pre-fix
+  guard).
+
+  **An eighth finding (Codex review, fresh evidence) — not a missing case
+  this time, but a genuine false positive the seventh finding's fix
+  introduced.** That fix restructured the function so every branch fell
+  through unconditionally to the `sources`-based checks once none of the
+  `build_info` branches matched — including the case where `build_info`
+  was genuinely given but resolved to nothing recognizable. That is wrong:
+  `buildsource.inline._resolve_compile_db` — the real function every one
+  of these seeded resolvers (`collect_inline_pack`, in turn called by
+  `seed_includes_and_fold_compile_context`/`embed_build_source` alike)
+  ultimately calls — tracks `explicit_input_missed` and returns `None` as
+  soon as a *given* `--build-info` misses, deliberately, per its own
+  comment: "surface that miss rather than masking it with a stale
+  auto-discovered DB ... checked BEFORE auto-discovery." So an explicit
+  `--build-info` that doesn't resolve means neither the real L2 fold nor
+  the L3 embed ever falls back to a `sources`-discovered database — falling
+  back in the guard (the post-seventh-finding behavior) produced a false
+  positive: rejecting a `--compile-db-filter` combination the real
+  resolvers wouldn't actually apply to either side of, a usage error for a
+  perfectly safe invocation. Fixed by returning `None` immediately once the
+  `build_info is not None` branch exhausts its own checks, before ever
+  reaching the `sources`-based fallbacks — matching `_resolve_compile_db`'s
+  own precedence exactly. Regression
+  coverage: `TestScopeGuardDoesNotFallBackToSourcesWhenBuildInfoMisses` in
+  `tests/test_compile_db_filter_scope.py` — a pure-predicate case (an
+  unresolvable `build_info` alongside a `sources` tree carrying a real,
+  auto-discoverable `compile_commands.json`, confirmed to fail against the
+  post-seventh-finding code) plus a positive control against the real
+  g++/clang project fixture, confirming the guard doesn't reject a genuinely
+  safe combination.
+
+  **A ninth finding (Codex review, fresh evidence): the third
+  under-coverage's own pack recognition for `--build-info` (the sixth
+  finding above) only ever checked `is_pack_dir` — a classic
+  `BuildSourcePack` — never `inputs_pack.is_inputs_pack`, the Flow-2
+  `abicheck_inputs/` shape.** `_l2_seed_pack_inputs` recognizes both shapes
+  for `build_info` identically (`is_pack_dir(build_info) or
+  _is_inputs_pack_dir(build_info)`), and `embed_build_source`'s own
+  `bi_is_inputs` check embeds a Flow-2 `build_info` pack the same way — so a
+  `--build-info` naming a Flow-2 pack reproduced the identical mismatch,
+  missed only because the sixth finding's fix carried over `is_pack_dir`
+  without its Flow-2 sibling, even though the seventh finding's fix
+  (`--sources` packs) already checks both. Fixed by adding `or
+  is_inputs_pack(build_info)` to the same branch. Regression coverage:
+  `TestScopeGuardCoversPackAndBazelBuildInfo::
+  test_flow2_inputs_pack_named_by_build_info_is_recognized` in
+  `tests/test_compile_db_filter_scope.py`, confirmed to fail against the
+  pre-fix guard.
+
   **A real regression the scan-migration paragraph above introduced, found
   by Codex review and fixed the same session (2026-08-21): `scan --config
   <path>` silently lost the config's own *passive* settings whenever the

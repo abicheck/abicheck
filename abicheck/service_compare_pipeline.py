@@ -308,6 +308,15 @@ def resolve_compare_request(
     old_evidence, new_evidence = _sce.resolve_compare_request_evidence(
         request, pair_compile
     )
+    # Mirrors `resolve_dump_request`'s identical per-side check (Codex
+    # review, PR 3A investigation): a `CompareRequest` side's own
+    # `InputSpec.compile_db_filter` reaches the same P0.3 L3->L2 fold /
+    # `embed_side_build_source` split `resolve_dump_request`'s guard was
+    # written for, so the same L2-filtered/L3-unfiltered refusal must fire
+    # here too, not only on the single-input `dump` path.
+    _sce.reject_compile_db_filter_scope_mismatch(
+        (("old", request.old, old_evidence), ("new", request.new, new_evidence))
+    )
     _reject_unsupported_frontends(
         request, frontend_lower, header_backend, old_evidence, new_evidence
     )
