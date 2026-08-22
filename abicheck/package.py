@@ -308,6 +308,46 @@ def _max_tar_members() -> int:
     return DEFAULT_MAX_TAR_MEMBERS
 
 
+#: A PAX ('x'/'g') or GNU longname/longlink ('L'/'K') extended-header record's own declared byte length -- read from the SAME 512-byte header block every ordinary member's size is, so it's known before any data is read. `tarfile.TarInfo._proc_pax()`/`_proc_gnulong()` both read that many bytes in ONE `fileobj.read(size)` call before returning control to a caller iterating the archive, materializing the whole declared blob regardless of any per-member check a caller runs afterward -- so `_reject_oversized_declared_content`'s own streaming, member-by-member checks never get a chance to intervene before this allocation already happened (Codex, fresh evidence: reproduced an uncompressed tar with a 2 MiB PAX header being accepted even with a 1 MiB overall decoded-bytes limit, and noted the same shape applies to a highly compressible `.tar.zst` forcing an allocation approaching the far larger overall decoded-stream limit). Real PAX/GNU extended headers are practically always well under a few KiB (a handful of path/uid/gid/mtime key=value pairs, or a single long path/linkpath) even for unusual legitimate metadata, so this is generous headroom, not a tight fit.
+DEFAULT_MAX_TAR_EXTENDED_HEADER_BYTES = 1 * 1024 * 1024  # 1 MiB
+_MAX_TAR_EXTENDED_HEADER_BYTES_ENV = "_ABICHECK_TAR_ZST_MAX_EXTENDED_HEADER_BYTES"
+
+
+def _max_tar_extended_header_bytes() -> int:
+    override = os.environ.get(_MAX_TAR_EXTENDED_HEADER_BYTES_ENV)
+    if override:
+        try:
+            return int(override)
+        except ValueError:
+            pass
+    return DEFAULT_MAX_TAR_EXTENDED_HEADER_BYTES
+
+
+class _BoundedTarInfo(tarfile.TarInfo):
+    """A `tarfile.TarInfo` that pre-screens a PAX/GNU extended-header record's declared size against `_max_tar_extended_header_bytes()` BEFORE `tarfile`'s own parsing reads that many bytes into memory in one call -- closing the gap `DEFAULT_MAX_TAR_EXTENDED_HEADER_BYTES`'s own docstring describes. Passed as `tarfile.open(..., tarinfo=_BoundedTarInfo)`; `TarFile` uses this class for every member it parses for the lifetime of that one open archive, so setting it once at open time covers every subsequent `next()` call, including ones made later by `getmembers()`/`extractall()` on the same `TarFile` object.
+
+    Raising `ExtractionSecurityError` directly (rather than a `tarfile`-specific exception needing translation afterward) works cleanly here because `TarFile.next()`'s own exception handling only special-cases `tarfile`'s own header-parsing exception hierarchy (`EOFHeaderError`/`InvalidHeaderError`/`EmptyHeaderError`/`TruncatedHeaderError`/`SubsequentHeaderError`) plus `zlib.error`; any other exception -- ours included -- is re-raised completely unchanged, verified directly against a real archive before relying on it.
+
+    Only `_proc_pax`/`_proc_gnulong` are overridden -- the other extended-record path, `_proc_sparse` (old-style GNU sparse), reads a bounded, fixed `BLOCKSIZE` (512 bytes) per iteration regardless of the record's own declared size, so it doesn't exhibit the single-large-allocation pattern this guards against.
+    """
+
+    def _proc_pax(self, tarfile_obj: tarfile.TarFile) -> tarfile.TarInfo:
+        self._reject_if_oversized()
+        return super()._proc_pax(tarfile_obj)  # type: ignore[misc,no-any-return]
+
+    def _proc_gnulong(self, tarfile_obj: tarfile.TarFile) -> tarfile.TarInfo:
+        self._reject_if_oversized()
+        return super()._proc_gnulong(tarfile_obj)  # type: ignore[misc,no-any-return]
+
+    def _reject_if_oversized(self) -> None:
+        limit = _max_tar_extended_header_bytes()
+        if self.size > limit:
+            raise ExtractionSecurityError(
+                self.name or "<extended header>",
+                f"archive's extended header record declares {self.size} bytes, exceeding the {limit}-byte safety limit (override via {_MAX_TAR_EXTENDED_HEADER_BYTES_ENV})",
+            )
+
+
 #: The `zstd` CLI's own `--memory=` window-size bound (used only by the external-binary fallback below) rejects any value above 2048 MiB as "out of bound" (verified against a real `zstd` 1.5.5 binary) -- independent of, and much smaller than, DEFAULT_MAX_DECOMPRESSED_TAR_BYTES above, which bounds total decoded *output* size via this module's own streaming byte count, not the decoder's working-memory window. Mirrors snapshot_io.py's identical `_ZSTD_MAX_WINDOW_LOG = 31` ceiling for the zstandard-module decoder path.
 _ZSTD_CLI_MAX_MEMORY_MB = 2048
 
@@ -369,7 +409,7 @@ class TarExtractor:
           create dangerous filesystem entries
         """
         target_root = target_dir.resolve()
-        with tarfile.open(archive_path) as tf:
+        with tarfile.open(archive_path, tarinfo=_BoundedTarInfo) as tf:
             _reject_oversized_declared_content(tf)
             # Probed once per extraction, not per member -- see
             # _target_supports_symlinks()'s own docstring for why this
@@ -585,17 +625,7 @@ class TarExtractor:
                     if proc.poll() is None:
                         proc.kill()
                         proc.wait(timeout=_ZSTD_CLI_TIMEOUT_S)
-                    # An abort (timeout, the size limit above, a reader
-                    # exception) can leave _reader blocked in put() on the
-                    # now-full bounded queue -- the consumer stopped
-                    # draining it the moment it raised, so killing the
-                    # process alone doesn't unblock a reader stuck on a
-                    # full queue rather than its own read() call. Leaks a
-                    # daemon thread and its queued chunks for the life of
-                    # a long-running process otherwise (Codex review,
-                    # fresh evidence). Cheap no-op on the success path,
-                    # where the reader already finished before the
-                    # terminal None was consumed.
+                    # An abort (timeout, the size limit above, a reader exception) can leave _reader blocked in put() on the now-full bounded queue -- the consumer stopped draining it the moment it raised, so killing the process alone doesn't unblock a reader stuck on a full queue rather than its own read() call. Leaks a daemon thread and its queued chunks for the life of a long-running process otherwise (Codex review, fresh evidence). Cheap no-op on the success path, where the reader already finished before the terminal None was consumed.
                     _drain_reader_queue(chunk_queue, reader_thread, _ZSTD_CLI_TIMEOUT_S)
             TarExtractor._safe_extract(tar_path, target_dir)
         finally:
@@ -854,10 +884,15 @@ class CondaExtractor:
         if name.endswith(".tar.bz2") and name.count("-") >= 2:
             # Peek inside for info/ directory (conda marker)
             try:
-                with tarfile.open(pkg_path, "r:bz2") as tf:
+                with tarfile.open(pkg_path, "r:bz2", tarinfo=_BoundedTarInfo) as tf:
                     names = tf.getnames()
                     return any(n.startswith("info/") for n in names[:50])
-            except (tarfile.TarError, OSError):
+            # ExtractionSecurityError alongside tarfile's own exceptions: a
+            # _BoundedTarInfo rejection during this mere format-sniff peek
+            # should degrade to "not detected as this format" the same way
+            # a malformed archive already does here, not propagate out of
+            # a detection step and abort dispatch to every other detector.
+            except (tarfile.TarError, OSError, ExtractionSecurityError):
                 return False
         return False
 
@@ -1473,23 +1508,9 @@ def parse_numpy_requirement_from_metadata(
     from packaging.requirements import InvalidRequirement, Requirement
     from packaging.specifiers import SpecifierSet
 
-    # Core Metadata is an RFC 5322-style header block: a long Requires-Dist
-    # value may be folded across physical lines with leading whitespace on
-    # the continuation lines. A plain `line.startswith("Requires-Dist:")`
-    # scan only sees the first physical line and mangles a folded specifier
-    # or marker, so parse it as real headers instead. The default
-    # (compat32) email policy preserves the raw fold (embedded newline +
-    # leading whitespace) in the returned value; ``policy.default`` is the
-    # one that actually joins a folded header into a single logical line
-    # (Codex review).
+    # Core Metadata is an RFC 5322-style header block: a long Requires-Dist value may be folded across physical lines with leading whitespace on the continuation lines. A plain `line.startswith("Requires-Dist:")` scan only sees the first physical line and mangles a folded specifier or marker, so parse it as real headers instead. The default (compat32) email policy preserves the raw fold (embedded newline + leading whitespace) in the returned value; ``policy.default`` is the one that actually joins a folded header into a single logical line (Codex review).
     headers = message_from_string(metadata_text, policy=_email_default_policy)
-    # Marker.evaluate() only auto-defaults "extra" to "" on packaging>=22;
-    # this project's pinned floor is packaging>=21.0, whose evaluate() has
-    # no such default and raises UndefinedEnvironmentName on a bare `extra
-    # == "test"` marker instead of treating it as inactive. Seed it
-    # ourselves so behavior is identical across the whole supported range;
-    # a caller-supplied *environment* can still override it explicitly
-    # (Codex review).
+    # Marker.evaluate() only auto-defaults "extra" to "" on packaging>=22; this project's pinned floor is packaging>=21.0, whose evaluate() has no such default and raises UndefinedEnvironmentName on a bare `extra == "test"` marker instead of treating it as inactive. Seed it ourselves so behavior is identical across the whole supported range; a caller-supplied *environment* can still override it explicitly (Codex review).
     eval_environment = {"extra": "", **(environment or {})}
     found = False
     combined = SpecifierSet()
@@ -1768,16 +1789,7 @@ def _is_elf_shared_object(path: Path) -> bool:
             if e_type != _ET_DYN:
                 return False
 
-            # Check the DF_1_PIE flag *before* the PT_INTERP/filename
-            # fallback below, not only in the no-PT_INTERP branch: a normal
-            # `gcc -pie -o fake.so` executable has *both* PT_INTERP and
-            # DF_1_PIE set, and previously reached the has_interp branch's
-            # filename check first, which accepts anything shaped like a
-            # library name -- silently admitting a real, directly-invocable
-            # PIE executable that only happens to be named ``*.so`` (Codex
-            # review; verified against a real `gcc -pie` binary). DF_1_PIE
-            # is unconditionally decisive when set: a real shared object
-            # never carries it, PT_INTERP or not.
+            # Check the DF_1_PIE flag *before* the PT_INTERP/filename fallback below, not only in the no-PT_INTERP branch: a normal `gcc -pie -o fake.so` executable has *both* PT_INTERP and DF_1_PIE set, and previously reached the has_interp branch's filename check first, which accepts anything shaped like a library name -- silently admitting a real, directly-invocable PIE executable that only happens to be named ``*.so`` (Codex review; verified against a real `gcc -pie` binary). DF_1_PIE is unconditionally decisive when set: a real shared object never carries it, PT_INTERP or not.
             if _has_pie_executable_flag(f, ei_class, byte_order):
                 return False
 
@@ -1826,18 +1838,7 @@ def discover_shared_libraries(
 
     libraries: list[Path] = []
     for dirpath, _dirnames, filenames in os.walk(extract_dir, followlinks=False):
-        # DebExtractor extracts a .deb's control.tar.* (package metadata --
-        # control, md5sums, and the dpkg-gensymbols(1) symbols contract) into
-        # this internal, dot-prefixed sentinel subdirectory of the same
-        # target_dir this function walks. It is package *metadata*, never
-        # payload -- a crafted/malicious control.tar.* could plant a file
-        # shaped like a shared object there (or a legitimate payload could
-        # coincidentally use the name .deb_control/, which the earlier
-        # pre-extraction cleanup now removes), and this function's own
-        # "accept any .so-suffixed file at any depth" fallback would then
-        # discover it as though it were a real library in the package
-        # (Codex review). No legitimate package payload uses this name, so
-        # pruning it from the walk is safe.
+        # DebExtractor extracts a .deb's control.tar.* (package metadata -- control, md5sums, and the dpkg-gensymbols(1) symbols contract) into this internal, dot-prefixed sentinel subdirectory of the same target_dir this function walks. It is package *metadata*, never payload -- a crafted/malicious control.tar.* could plant a file shaped like a shared object there (or a legitimate payload could coincidentally use the name .deb_control/, which the earlier pre-extraction cleanup now removes), and this function's own "accept any .so-suffixed file at any depth" fallback would then discover it as though it were a real library in the package (Codex review). No legitimate package payload uses this name, so pruning it from the walk is safe.
         _dirnames[:] = [d for d in _dirnames if d != ".deb_control"]
         for fn in filenames:
             fp = Path(dirpath) / fn

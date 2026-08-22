@@ -2972,6 +2972,104 @@ class TestTarExtractorZstDecompressionBomb:
         assert package_mod._ZSTD_READER_QUEUE_MAXSIZE > 0  # not the unbounded default
 
 
+class TestBoundedTarInfoExtendedHeaders:
+    """A PAX/GNU extended-header record's own declared size is known from
+    its 512-byte header block alone -- but tarfile.TarInfo._proc_pax()/
+    _proc_gnulong() each read that many bytes in ONE call before any
+    per-member check in _reject_oversized_declared_content ever runs, so
+    a single oversized extended header could force a huge allocation
+    regardless of the overall decoded-bytes limit (Codex, fresh
+    evidence)."""
+
+    def test_oversized_pax_header_is_rejected_before_the_big_read(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The exact repro shape reported: a 2 MiB PAX header accepted
+        # even with a 1 MiB overall decoded-bytes limit, because the pax
+        # allocation happens before that limit's own per-member check
+        # gets a chance to run.
+        monkeypatch.setenv("_ABICHECK_TAR_ZST_MAX_DECODED_BYTES", str(1024 * 1024))
+        archive = tmp_path / "evil.tar"
+        with tarfile.open(archive, "w") as tf:
+            info = tarfile.TarInfo(name="real.bin")
+            info.size = 4
+            info.pax_headers = {"comment": "y" * (2 * 1024 * 1024)}
+            tf.addfile(info, io.BytesIO(b"data"))
+
+        out = tmp_path / "output"
+        out.mkdir()
+        with pytest.raises(ExtractionSecurityError, match="extended header"):
+            TarExtractor().extract(archive, out)
+
+    def test_oversized_pax_header_is_rejected_through_a_highly_compressible_zst(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # A trivially small, highly compressible .tar.zst (a repeated
+        # byte compresses to almost nothing) must still be rejected --
+        # the guard operates on the PARSED record's declared size, not
+        # on-disk/compressed size, so it isn't fooled by compression the
+        # way a naive compressed-size check would be.
+        zstandard = pytest.importorskip("zstandard")
+        monkeypatch.setenv("_ABICHECK_TAR_ZST_MAX_DECODED_BYTES", str(64 * 1024 * 1024))
+        tar_buf = io.BytesIO()
+        with tarfile.open(fileobj=tar_buf, mode="w") as tf:
+            info = tarfile.TarInfo(name="real.bin")
+            info.size = 4
+            info.pax_headers = {"comment": "y" * (2 * 1024 * 1024)}
+            tf.addfile(info, io.BytesIO(b"data"))
+        archive = tmp_path / "evil.tar.zst"
+        archive.write_bytes(zstandard.ZstdCompressor().compress(tar_buf.getvalue()))
+        # Confirm the premise: tiny on disk, large once decompressed.
+        assert archive.stat().st_size < 10_000
+
+        out = tmp_path / "output"
+        out.mkdir()
+        with pytest.raises(ExtractionSecurityError, match="extended header"):
+            TarExtractor().extract(archive, out)
+
+    def test_oversized_gnu_longname_header_is_rejected(self, tmp_path: Path) -> None:
+        # The GNU-format sibling of the PAX case above ('L' longname
+        # records go through _proc_gnulong, a separate but identically-
+        # shaped unbounded single read). Checked at the parse layer
+        # directly (matching the real _safe_extract() open call, but
+        # stopping short of actually writing a member out) rather than
+        # through a full TarExtractor().extract() -- the resulting name
+        # is itself 2 MiB long, which a real filesystem legitimately
+        # rejects as ENAMETOOLONG regardless of this guard, and that
+        # unrelated OS limit would otherwise mask what's being tested.
+        from abicheck.package import _BoundedTarInfo
+
+        archive = tmp_path / "evil_gnu.tar"
+        with tarfile.open(archive, "w", format=tarfile.GNU_FORMAT) as tf:
+            info = tarfile.TarInfo(name="a" * (2 * 1024 * 1024))
+            info.size = 4
+            tf.addfile(info, io.BytesIO(b"data"))
+
+        with pytest.raises(ExtractionSecurityError, match="extended header"):
+            with tarfile.open(archive, tarinfo=_BoundedTarInfo) as tf:
+                for _ in tf:
+                    pass
+
+    def test_ordinary_long_path_pax_archive_still_extracts(
+        self, tmp_path: Path
+    ) -> None:
+        # Negative control: a real, legitimate long path (forcing a real,
+        # small PAX extended-header record) must still extract normally
+        # -- the guard's default limit is far above any real metadata
+        # record's size.
+        archive = tmp_path / "longname.tar"
+        long_name = "a/" * 60 + "deep_file.bin"
+        with tarfile.open(archive, "w", format=tarfile.PAX_FORMAT) as tf:
+            info = tarfile.TarInfo(name=long_name)
+            info.size = 4
+            tf.addfile(info, io.BytesIO(b"data"))
+
+        out = tmp_path / "output"
+        out.mkdir()
+        TarExtractor().extract(archive, out)
+        assert (out / long_name).exists()
+
+
 class TestRejectOversizedDeclaredContent:
     def test_rejects_when_declared_sizes_exceed_the_limit(
         self, monkeypatch: pytest.MonkeyPatch
