@@ -784,16 +784,13 @@ def pack_product_baseline(
 
     # Created *before* discovery: doing so only after would make a first
     # pack and a second (already-created dir) disagree on file_count and
-    # archive bytes (Codex review, fresh evidence). Also captured before
-    # the mkdir call below, for the same "nothing to pack" reasoning.
-    # Two aliasing concerns, resolved once and reused below: OUTPUT
-    # itself may be a symlink (handled by its own lexical name, not its
-    # target), and SOURCE_DIR itself may be a symlink alias with OUTPUT
-    # spelled through the real directory (a lexical comparison then
-    # shares no common prefix, bypassing rejection -- Codex review,
-    # fresh evidence, both rounds). Resolving *only* OUTPUT's parent
-    # (and SOURCE_DIR in full) fixes both, while OUTPUT's leaf stays
-    # lexical.
+    # archive bytes; also captured before the mkdir call below, for the
+    # same "nothing to pack" reasoning (Codex review, fresh evidence).
+    # Two aliasing concerns, resolved once: OUTPUT itself may be a
+    # symlink (its own lexical name, not target), and SOURCE_DIR itself
+    # may be a symlink alias with OUTPUT spelled through the real
+    # directory (Codex review, both rounds). Resolving *only* OUTPUT's
+    # parent (and SOURCE_DIR in full) fixes both, leaf stays lexical.
     source_real = source_path.resolve()
     try:
         output_parent_real = output_path.parent.resolve()
@@ -940,22 +937,14 @@ def pack_product_baseline(
             case_folded[folded] = prefix
 
     # Resolve the compressor before mkstemp() hands out an open descriptor:
-    # an invalid zstd_level (a public parameter of this function) must fail
-    # before there is a descriptor to leak -- the except BaseException
-    # block below unlinks the temp *file*, but never closes an fd that
-    # failed to reach os.fdopen()'s ownership transfer.
-    # tempfile.mkstemp() always creates its file mode 0600, deliberately,
-    # for its own general-purpose "private scratch file" contract -- wrong
-    # for a release asset this function is about to publish under
-    # `output_path`. os.replace() carries the temp file's own mode across
-    # (POSIX rename never touches permissions), so left alone a packed
-    # archive would be unreadable by anyone but its creator even under an
-    # ordinary 0022 umask, and repacking an existing group/world-readable
-    # baseline would silently strip its access (Codex review, fresh
-    # evidence). Preserve an existing destination's own mode when
-    # overwriting it (a caller may have deliberately set one); otherwise
-    # fall back to the ordinary umask-derived file permissions a freshly
-    # written file would normally get.
+    # an invalid zstd_level must fail before there is a descriptor to leak.
+    # tempfile.mkstemp() always creates its file mode 0600 -- wrong for a
+    # release asset this function is about to publish. os.replace() carries
+    # the temp file's own mode across, so left alone a packed archive would
+    # be unreadable by anyone but its creator even under an ordinary 0022
+    # umask (Codex review, fresh evidence). Preserve an existing
+    # destination's own mode when overwriting; otherwise fall back to the
+    # ordinary umask-derived permissions.
     if output_path.exists():
         target_mode = stat_module.S_IMODE(output_path.stat().st_mode)
     else:
@@ -1187,13 +1176,9 @@ def unpack_product_baseline(
                 )
             # This check only confirmed the path *exists*, not that its
             # bytes are what the manifest claims -- a stale/tampered
-            # archive (e.g. a truncated libfoo.so with the original,
-            # larger size/sha256 still on the manifest) would otherwise
-            # publish unverified, and a later comparison would silently
-            # analyze corrupted content (Codex review, fresh evidence).
-            # Mirrors pack_product_baseline()'s own hashing (`_add_member`)
-            # -- read once, in chunks, not loaded whole into memory.
-            #
+            # archive would otherwise publish unverified content (Codex
+            # review, fresh evidence). Mirrors pack_product_baseline()'s
+            # own hashing -- read once, in chunks, not loaded whole.
             # Size is compared unconditionally, sha256 validated as a
             # genuine 64-hex digest before comparison -- neither is
             # skippable for a 0/"" value, unlike this codebase's usual
@@ -1497,6 +1482,43 @@ def _iter_discovered_libraries(
             yield _relative_posix(path, root), path, identity
 
 
+def _bundle_map_by_bare_name(
+    library_map: dict[str, Path], root: Path
+) -> dict[str, Path]:
+    """Rekey *library_map* (relative-path -> Path) by each library's bare
+    filename, the identity build_bundle_snapshot()/compare_bundle() use.
+
+    Last-wins on a collision, *not* rejected outright: compare_product_
+    directories()'s own standalone add/remove detection below already
+    handles this shape correctly via the collision-free old_map/new_map
+    directly, and several existing tests pin that as intended, supported
+    behavior. What can't be fixed without a larger redesign is
+    compare_bundle()'s own *graph*-level analysis -- bare-name keyed
+    throughout bundle.py's public surface -- which still only ever sees
+    whichever of the two colliding libraries survives here (Codex
+    review, fresh evidence). A warning at least surfaces the gap.
+    """
+    bundle_map: dict[str, Path] = {}
+    for path in library_map.values():
+        prior = bundle_map.get(path.name)
+        if prior is not None:
+            import warnings
+
+            warnings.warn(
+                f"{root}: {_relative_posix(path, root)!r} and "
+                f"{_relative_posix(prior, root)!r} share the bare filename "
+                f"{path.name!r} -- compare_bundle()'s own dependency-edge "
+                "analysis can only see one of them "
+                f"({_relative_posix(path, root)!r}); a real intra-bundle "
+                "dependency on or drift in the other is invisible to it "
+                "(standalone add/remove detection is unaffected)",
+                UserWarning,
+                stacklevel=2,
+            )
+        bundle_map[path.name] = path
+    return bundle_map
+
+
 def compare_product_directories(
     old_dir: Path | str,
     new_dir: Path | str,
@@ -1744,20 +1766,14 @@ def compare_product_directories(
 
     # Canonical (SONAME-major-stripped) fallback for the libraries exact
     # matching left unpaired -- two ambiguity-safe passes, each grouping
-    # the *complete* per-side discovery, so an exact match or pass 1
-    # consuming one member of an ambiguous group never makes the
-    # remaining members look artificially unambiguous.
-    #
+    # the *complete* per-side discovery, so consuming one member of an
+    # ambiguous group never makes the rest look artificially unambiguous.
     # Pass 1 is directory-scoped: two independent libraries sharing a
     # basename in different directories that each bump their own SONAME
-    # major must not land in one shared, cross-directory bucket --
-    # ambiguous on both sides, silently leaving both pairs uncompared
-    # (Codex review, fresh evidence).
-    #
-    # Pass 2 is a bare, global fallback over whatever pass 1 left
-    # unpaired: a library that moves directories between releases has no
-    # shared directory for pass 1 to key on at all -- restricting the
-    # fallback to pass 1 alone silently stopped pairing that case
+    # major must not land in one shared, cross-directory bucket (Codex
+    # review, fresh evidence). Pass 2 is a bare, global fallback over
+    # whatever pass 1 left unpaired -- a library that moves directories
+    # between releases has no shared directory for pass 1 to key on
     # (Codex review, fresh evidence).
     def _canonical_groups(
         discovered: dict[str, Path], *, scope_by_directory: bool
@@ -1818,31 +1834,24 @@ def compare_product_directories(
         per_library_results.append(result.diff)
 
     # Bundle-level identity is each library's own bare filename, not the
-    # relative-path identity above -- see this function's own docstring
-    # for why (matches compare_bundle()'s pre-existing diff_by_library
-    # convention; a directory move no longer reads as remove+add). A
-    # collision between two distinct libraries sharing an identical bare
-    # filename in different directories is last-wins here, the same
-    # pre-existing limitation compare_bundle()'s own diff_by_library
-    # index already has regardless of this dict's construction.
-    old_bundle_map = {p.name: p for p in old_map.values()}
-    new_bundle_map = {p.name: p for p in new_map.values()}
+    # relative-path identity above (matches compare_bundle()'s pre-
+    # existing diff_by_library convention and DT_NEEDED's own bare-name
+    # resolution). See _bundle_map_by_bare_name()'s own docstring for the
+    # last-wins-plus-warning tradeoff this makes on a same-basename
+    # collision (Codex review, fresh evidence).
+    old_bundle_map = _bundle_map_by_bare_name(old_map, old_root)
+    new_bundle_map = _bundle_map_by_bare_name(new_map, new_root)
 
     # A canonically-paired library (SONAME-major bump, dylib-version bump,
-    # PE case-fold -- or a discovery-dedup representative mismatch, e.g. a
-    # dev symlink `libfoo.so -> libfoo.so.1` present only on one side) can
-    # have two different bare filenames even though `pairs` above already
-    # determined it's one library. Left alone, old/new_bundle_map (keyed
-    # by bare filename) would register that one library under two keys
-    # and compare_bundle() would report a spurious removal+addition (or
-    # BREAKING, if a sibling imports it) for a library that never changed
-    # (Codex review, fresh evidence). Normalize the old side's key to the
-    # new side's bare filename, matching the DiffResult.library
-    # convention above -- but only when old_path survived
-    # old_bundle_map's own last-wins collapse, and only when the
-    # destination slot isn't already occupied by a *different* old-side
-    # library, or the rekey would silently evict it (CodeRabbit review,
-    # fresh evidence).
+    # PE case-fold) can have two different bare filenames even though
+    # `pairs` above already determined it's one library. Left alone,
+    # old/new_bundle_map would register it under two keys and
+    # compare_bundle() would report a spurious removal+addition for a
+    # library that never changed (Codex review, fresh evidence).
+    # Normalize the old side's key to the new side's -- but only when
+    # old_path survived the last-wins collapse, and only when the
+    # destination isn't already occupied by a *different* old-side
+    # library, or the rekey would silently evict it (CodeRabbit review).
     for _old_key, old_path, _new_key, new_path in pairs:
         if old_path.name == new_path.name:
             continue
@@ -1892,37 +1901,25 @@ def compare_product_directories(
         if f.kind == ChangeKind.BUNDLE_LIBRARY_ADDED and f.provider_library
     }
     # Unmatched-by-identity, not bare-filename set difference: every key in
-    # old_map/new_map is either paired above (an exact relative-path match
-    # or the canonical SONAME/dylib-version/case-insensitive fallback) or
-    # genuinely has no counterpart on the other side -- unlike
-    # old_bundle_map/new_bundle_map (bare-filename-keyed, last-wins on a
-    # collision), old_map/new_map are relative-path-keyed and collision-
-    # free, so this is exact even when two distinct libraries share a
-    # basename. Computing "was this library removed/added" from the
-    # collapsed bare-filename maps instead -- the original shape of this
-    # fallback -- silently missed exactly that case: old containing both
-    # plugins/a/plugin.so and plugins/b/plugin.so, new retaining only the
-    # first, collapsed both sides to the identical single key "plugin.so",
-    # so the set difference found nothing removed even though a whole
-    # library plainly vanished (Codex review, fresh evidence).
+    # old_map/new_map is either paired above or genuinely has no
+    # counterpart -- unlike old/new_bundle_map (bare-filename-keyed,
+    # last-wins), old_map/new_map are relative-path-keyed and collision-
+    # free, exact even when two distinct libraries share a basename.
+    # Computing removed/added from the collapsed bare-filename maps
+    # instead silently missed the second of two same-basename libraries
+    # vanishing (Codex review, fresh evidence).
     paired_old_keys = {old_key for old_key, _, _, _ in pairs}
     paired_new_keys = {new_key for _, _, new_key, _ in pairs}
 
     def _is_bundle_collapse_survivor(
         candidate_map: dict[str, Path], bundle_map: dict[str, Path], key: str
     ) -> bool:
-        """True when *key*'s path is the one that survived
-        old_bundle_map/new_bundle_map's own last-wins bare-filename
-        collapse -- i.e. the one path compare_bundle() actually analyzed
-        for this bare name. Excluding an unmatched key from the
-        standalone-removal/addition fallback is only sound when this is
-        true: `already_reported`/`already_reported_added` are bare-name
-        sets, so when two unmatched libraries share a basename
-        (plugins/a/plugin.so, plugins/b/plugin.so) and only ONE of them
-        actually vanished/appeared, a bare-name membership check alone
-        would suppress BOTH -- including the one compare_bundle() never
-        analyzed at all (the collapse discarded it before compare_bundle()
-        ever saw it), silently losing a real, distinct removal/addition
+        """True when *key*'s path is the one that survived the bundle
+        map's own last-wins bare-filename collapse -- the one
+        compare_bundle() actually analyzed. Excluding an unmatched key
+        from the standalone fallback is sound only when this is true:
+        otherwise a bare-name membership check alone would suppress a
+        real, distinct removal/addition compare_bundle() never even saw
         (Codex review, fresh evidence).
         """
         path = candidate_map[key]

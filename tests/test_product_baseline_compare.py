@@ -737,6 +737,30 @@ class TestCompareProductDirectoriesStandaloneRemoval:
         assert len(removed) == 2
         assert all(f.provider_library == "plugin.so" for f in removed)
 
+    def test_duplicate_basename_collision_warns_about_the_bundle_graph_gap(
+        self, tmp_path: Path
+    ) -> None:
+        # Standalone add/remove detection (the two sibling tests above)
+        # already handles this shape correctly, but compare_bundle()'s own
+        # dependency-edge analysis still only ever sees one of the two
+        # colliding libraries -- a real intra-bundle dependency on or
+        # drift in the discarded one is invisible to it, silently, with
+        # no signal at all (Codex review, fresh evidence). A warning at
+        # least surfaces the gap instead of leaving it entirely silent.
+        from abicheck.product_baseline import compare_product_directories
+        from tests.test_package import _make_minimal_elf_so
+
+        old_dir = tmp_path / "old"
+        new_dir = tmp_path / "new"
+        for root in (old_dir, new_dir):
+            (root / "plugins" / "a").mkdir(parents=True)
+            (root / "plugins" / "b").mkdir(parents=True)
+            _make_minimal_elf_so(root / "plugins" / "a" / "plugin.so")
+            _make_minimal_elf_so(root / "plugins" / "b" / "plugin.so")
+
+        with pytest.warns(UserWarning, match="share the bare filename"):
+            compare_product_directories(old_dir, new_dir)
+
     def test_canonical_fallback_pair_is_not_reported_as_a_removal(
         self, tmp_path: Path
     ) -> None:

@@ -2519,6 +2519,60 @@ class TestTarExtractorZstDecompressionBomb:
             TarExtractor()._safe_extract_zst_tar(zst_path, out)
         assert (out / "lib" / "libfoo.so").read_bytes() == b"data"
 
+    def test_external_zstd_fallback_times_out_on_a_hung_process(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The pre-streaming subprocess.run(..., timeout=120) call bounded
+        # this fallback; the streaming rewrite for the size bound above
+        # replaced it with a plain blocking proc.stdout.read() with no
+        # deadline at all, so a stalled zstd process could hang
+        # extraction indefinitely (Codex review, fresh evidence).
+        pytest.importorskip("zstandard")
+        import abicheck.package as package_mod
+        from abicheck.errors import SnapshotError
+
+        monkeypatch.setattr(package_mod, "_ZSTD_CLI_TIMEOUT_S", 1)
+        monkeypatch.setattr(package_mod.shutil, "which", lambda name: "/usr/bin/zstd")
+
+        class _HangingStdout:
+            def read(self, n: int) -> bytes:
+                time.sleep(10)  # far longer than the 1s test timeout
+                return b""  # pragma: no cover - never reached in time
+
+        class _HangingProc:
+            def __init__(self) -> None:
+                self.stdout = _HangingStdout()
+                self.returncode: int | None = None
+
+            def kill(self) -> None:
+                self.returncode = -9
+
+            def wait(self, timeout: float | None = None) -> None:
+                pass
+
+            def poll(self) -> int | None:
+                return self.returncode
+
+            def communicate(self, timeout: float | None = None) -> tuple[bytes, bytes]:
+                return (b"", b"")
+
+        monkeypatch.setattr(
+            package_mod.subprocess, "Popen", lambda *a, **k: _HangingProc()
+        )
+
+        zst_path = tmp_path / "ok.tar.zst"
+        zst_path.write_bytes(b"irrelevant, Popen is mocked")
+        out = tmp_path / "output"
+        out.mkdir()
+
+        start = time.monotonic()
+        with mock.patch("builtins.__import__", side_effect=_zstandard_import_blocker):
+            with pytest.raises(SnapshotError, match="timed out"):
+                TarExtractor()._safe_extract_zst_tar(zst_path, out)
+        # Confirms the fix actually bounds the wait -- a regression back to
+        # the unbounded read would make this assertion the one that hangs.
+        assert time.monotonic() - start < 10
+
 
 _real_import = __import__
 

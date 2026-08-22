@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import logging
 import os
+import queue
 import re
 import shutil
 import struct
@@ -38,6 +39,8 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import threading
+import time
 import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -163,6 +166,13 @@ def _max_decompressed_tar_bytes() -> int:
 #: snapshot_io.py's identical `_ZSTD_MAX_WINDOW_LOG = 31` ceiling for the
 #: zstandard-module decoder path.
 _ZSTD_CLI_MAX_MEMORY_MB = 2048
+
+#: Overall wall-clock deadline for the external `zstd` CLI fallback,
+#: covering both the streamed decode loop and the final wait/communicate
+#: calls -- matches what the pre-streaming `subprocess.run(...,
+#: timeout=120)` call enforced, so a stalled/hung process still can't
+#: block extraction indefinitely (Codex review, fresh evidence).
+_ZSTD_CLI_TIMEOUT_S = 120
 
 
 class TarExtractor:
@@ -296,17 +306,65 @@ class TarExtractor:
                     stderr=subprocess.PIPE,
                 )
                 assert proc.stdout is not None
+                stdout_pipe: IO[bytes] = proc.stdout
                 total_bytes = 0
+                # subprocess.run(..., timeout=120) previously bounded this
+                # fallback -- the streaming rewrite above (for the size
+                # bound) replaced it with a plain blocking proc.stdout.read()
+                # with no deadline at all, so a stalled/hung zstd process
+                # could block extraction indefinitely (Codex review, fresh
+                # evidence). A read() on a pipe has no portable timeout
+                # parameter (select() doesn't work on Windows pipes), so
+                # the read is offloaded to a daemon thread and the main
+                # loop polls a queue with the same overall 120s deadline
+                # the old subprocess.run() call enforced.
+                chunk_queue: queue.Queue[bytes | None | Exception] = queue.Queue()
+
+                def _reader() -> None:
+                    try:
+                        while True:
+                            piece = stdout_pipe.read(1024 * 1024)
+                            chunk_queue.put(piece if piece else None)
+                            if not piece:
+                                return
+                    except Exception as exc:  # pragma: no cover - defensive
+                        chunk_queue.put(exc)
+
+                reader_thread = threading.Thread(target=_reader, daemon=True)
+                reader_thread.start()
+                deadline = time.monotonic() + _ZSTD_CLI_TIMEOUT_S
                 try:
                     with open(tar_path, "wb") as out:
                         while True:
-                            chunk = proc.stdout.read(1024 * 1024)
-                            if not chunk:
+                            remaining = deadline - time.monotonic()
+                            if remaining <= 0:
+                                proc.kill()
+                                proc.wait(timeout=_ZSTD_CLI_TIMEOUT_S)
+                                raise SnapshotError(
+                                    f"{zst_path}: 'zstd' decompression "
+                                    "timed out after "
+                                    f"{_ZSTD_CLI_TIMEOUT_S}s -- the process "
+                                    "may be hung or stalled"
+                                )
+                            try:
+                                chunk = chunk_queue.get(timeout=remaining)
+                            except queue.Empty:
+                                proc.kill()
+                                proc.wait(timeout=_ZSTD_CLI_TIMEOUT_S)
+                                raise SnapshotError(
+                                    f"{zst_path}: 'zstd' decompression "
+                                    "timed out after "
+                                    f"{_ZSTD_CLI_TIMEOUT_S}s -- the process "
+                                    "may be hung or stalled"
+                                ) from None
+                            if isinstance(chunk, Exception):
+                                raise chunk
+                            if chunk is None:
                                 break
                             total_bytes += len(chunk)
                             if total_bytes > max_decoded_bytes:
                                 proc.kill()
-                                proc.wait(timeout=120)
+                                proc.wait(timeout=_ZSTD_CLI_TIMEOUT_S)
                                 raise SnapshotError(
                                     f"{zst_path}: decompressed payload "
                                     f"exceeds the {max_decoded_bytes} byte "
@@ -316,7 +374,7 @@ class TarExtractor:
                                     f"{_MAX_DECOMPRESSED_TAR_BYTES_ENV})"
                                 )
                             out.write(chunk)
-                    _, stderr = proc.communicate(timeout=120)
+                    _, stderr = proc.communicate(timeout=_ZSTD_CLI_TIMEOUT_S)
                     if proc.returncode != 0:
                         raise SnapshotError(
                             f"{zst_path}: 'zstd' decompression failed: "
@@ -325,7 +383,7 @@ class TarExtractor:
                 finally:
                     if proc.poll() is None:
                         proc.kill()
-                        proc.wait(timeout=120)
+                        proc.wait(timeout=_ZSTD_CLI_TIMEOUT_S)
             TarExtractor._safe_extract(tar_path, target_dir)
         finally:
             shutil.rmtree(staging, ignore_errors=True)
