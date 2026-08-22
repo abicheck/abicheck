@@ -456,8 +456,7 @@ class TestPackProductBaseline:
         self, tmp_path: Path
     ) -> None:
         # compare_product_directories() only includes a header root when
-        # .is_dir() is true -- one naming a regular file must be rejected
-        # at pack time, or it round-trips without reaching a comparison.
+        # .is_dir() is true -- one naming a regular file must be rejected at pack time.
         product = _make_product(tmp_path)
         with pytest.raises(SnapshotError, match="header root"):
             pack_product_baseline(
@@ -468,17 +467,15 @@ class TestPackProductBaseline:
         product = _make_product(tmp_path)
         outside = tmp_path / "outside.so"
         outside.write_bytes(b"outside")
-        # A *relative* target that still walks outside source_dir --
-        # distinct from an absolute target, rejected earlier regardless
-        # of where it points.
+        # A *relative* target that still walks outside source_dir -- distinct
+        # from an absolute target, rejected earlier regardless of where it points.
         (product / "lib" / "evil.so").symlink_to(Path("..") / ".." / "outside.so")
         with pytest.raises(SnapshotError, match="escapes"):
             pack_product_baseline(product, tmp_path / "b.tar.zst")
 
     def test_pack_rejects_absolute_symlink_target(self, tmp_path: Path) -> None:
-        # An absolute target inside SOURCE_DIR can't round-trip -- it
-        # names a path that won't exist once unpacked elsewhere, failing
-        # TarExtractor's own symlink-escape check on the paired unpack.
+        # An absolute target inside SOURCE_DIR can't round-trip -- it names a path
+        # that won't exist once unpacked elsewhere (TarExtractor's own check).
         product = _make_product(tmp_path)
         target = product / "lib" / "libb.so"
         (product / "lib" / "absolute-link.so").symlink_to(target.resolve())
@@ -488,9 +485,8 @@ class TestPackProductBaseline:
     def test_pack_rejects_a_windows_drive_absolute_symlink_target(
         self, tmp_path: Path
     ) -> None:
-        # os.path.isabs() doesn't recognize a Windows drive-absolute
-        # target as absolute on POSIX, even though it's absolute on
-        # Windows, where TarExtractor correctly refuses it (Codex).
+        # os.path.isabs() doesn't recognize a Windows drive-absolute target as
+        # absolute on POSIX, even though it's absolute on Windows (Codex).
         product = _make_product(tmp_path)
         (product / "lib" / "windows-abs.so").symlink_to("C:\\outside\\foo.dll")
         with pytest.raises(SnapshotError, match="absolute target"):
@@ -499,9 +495,8 @@ class TestPackProductBaseline:
     def test_pack_rejects_a_backslash_traversal_symlink_target(
         self, tmp_path: Path
     ) -> None:
-        # A relative target spelled with backslash ".." is one opaque
-        # component on POSIX -- but genuinely walks above root under
-        # Windows path separators (Codex).
+        # A relative target spelled with backslash ".." is one opaque component
+        # on POSIX -- but genuinely walks above root under Windows (Codex).
         product = _make_product(tmp_path)
         (product / "lib" / "evil.so").symlink_to("..\\..\\outside.so")
         with pytest.raises(SnapshotError, match="backslash"):
@@ -510,9 +505,8 @@ class TestPackProductBaseline:
     def test_pack_rejects_a_symlink_target_with_a_benign_backslash(
         self, tmp_path: Path
     ) -> None:
-        # A backslash target decomposing into neither an escape nor an
-        # anchor (`sub\file.so`) still restores as two components on
-        # Windows -- only an actual escape is rejected (Codex).
+        # A backslash target decomposing into neither an escape nor an anchor
+        # (`sub\file.so`) still restores fine on Windows (Codex).
         product = _make_product(tmp_path)
         (product / "lib" / "benign.so").symlink_to("sub\\file.so")
         with pytest.raises(SnapshotError, match="backslash"):
@@ -521,9 +515,8 @@ class TestPackProductBaseline:
     def test_pack_rejects_a_windows_root_relative_symlink_target(
         self, tmp_path: Path
     ) -> None:
-        # A current-drive-rooted target (no drive letter, leading
-        # backslash) is anchored to whatever drive is current on Windows
-        # -- but PureWindowsPath.is_absolute() is False for it (Codex).
+        # A current-drive-rooted target (no drive letter, leading backslash) is
+        # anchored on Windows -- but PureWindowsPath.is_absolute() is False (Codex).
         product = _make_product(tmp_path)
         (product / "lib" / "root-rel.so").symlink_to("\\outside\\foo.dll")
         with pytest.raises(SnapshotError, match="absolute target"):
@@ -532,9 +525,7 @@ class TestPackProductBaseline:
     def test_pack_rejects_a_windows_drive_relative_symlink_target(
         self, tmp_path: Path
     ) -> None:
-        # A drive-relative target (C:outside\\foo.dll) resolves against
-        # the *current directory on that drive* on Windows -- also False
-        # under is_absolute() (drive="C:", root=""), the same gap above (Codex).
+        # A drive-relative target (C:outside\\foo.dll) resolves against the current directory on that drive on Windows -- also False under is_absolute() (Codex).
         product = _make_product(tmp_path)
         (product / "lib" / "drive-rel.so").symlink_to("C:outside\\foo.dll")
         with pytest.raises(SnapshotError, match="absolute target"):
@@ -543,9 +534,8 @@ class TestPackProductBaseline:
     def test_pack_rejects_a_windows_drive_anchored_member_name(
         self, tmp_path: Path
     ) -> None:
-        # Only symlink *targets* got Windows-anchor validation -- a real
-        # file named `C:library.dll` (valid on POSIX) is archived
-        # unchanged, and TarExtractor treats it as anchored on unpack.
+        # Only symlink *targets* got Windows-anchor validation -- a real file
+        # named `C:library.dll` (valid on POSIX) is archived unchanged.
         product = _make_product(tmp_path)
         (product / "C:library.dll").write_bytes(b"MZ")
         with pytest.raises(SnapshotError, match="anchored under Windows"):
@@ -554,9 +544,8 @@ class TestPackProductBaseline:
     def test_pack_rejects_a_backslash_traversal_member_name(
         self, tmp_path: Path
     ) -> None:
-        # A real filename literally containing backslashes decomposes into
-        # a genuine ".." under Windows separators -- caught by the
-        # unconditional backslash rejection, ahead of the narrower check.
+        # A real filename literally containing backslashes decomposes into a
+        # genuine ".." under Windows separators (unconditional rejection).
         product = _make_product(tmp_path)
         (product / "lib" / "dir\\..\\outside.so").write_bytes(b"ELF")
         with pytest.raises(SnapshotError, match="backslash"):
@@ -566,8 +555,7 @@ class TestPackProductBaseline:
         self, tmp_path: Path
     ) -> None:
         # A backslash decomposing into neither an anchor nor a traversal
-        # (`foo\bar.so`) still restores as two components on Windows --
-        # the pre-existing checks only rejected a dangerous one (Codex).
+        # (`foo\bar.so`) still restores fine on Windows (Codex).
         product = _make_product(tmp_path)
         (product / "lib" / "foo\\bar.so").write_bytes(b"ELF")
         with pytest.raises(SnapshotError, match="backslash"):
@@ -595,10 +583,9 @@ class TestPackProductBaseline:
     def test_pack_rejects_further_reserved_windows_device_names(
         self, tmp_path: Path, reserved_name: str
     ) -> None:
-        # Beyond CON/PRN/AUX/NUL/COM1-9/LPT1-9, Windows reserves
-        # CONIN$/CONOUT$ (console I/O) and COM0/LPT0, plus the
-        # superscript-digit spellings COM¹/COM²/COM³/LPT¹/LPT²/LPT³
-        # Windows still treats as equivalent to the ASCII names (Codex).
+        # Beyond CON/PRN/AUX/NUL/COM1-9/LPT1-9, Windows reserves CONIN$/CONOUT$
+        # (console I/O) and COM0/LPT0, plus the superscript-digit spellings
+        # COM¹/COM²/COM³/LPT¹/LPT²/LPT³ Windows treats as equivalent (Codex).
         product = _make_product(tmp_path)
         (product / f"{reserved_name}.txt").write_bytes(b"data")
         with pytest.raises(SnapshotError, match="reserved Windows device name"):
@@ -741,6 +728,19 @@ class TestPackProductBaseline:
         (product / "links" / "libfoo.so").symlink_to("../payload/data")
         with pytest.raises(SnapshotError, match="case/Unicode-folded"):
             pack_product_baseline(product, tmp_path / "b.tar.zst")
+
+    def test_pack_allows_a_symlink_chain_dangling_on_a_broken_intermediate_link(
+        self, tmp_path: Path
+    ) -> None:
+        # `libfoo.so -> alias -> missing`: target_stat is None because the
+        # *chain* is broken, not because `alias` itself is absent -- the
+        # exact-match check must be lexical (`os.path.lexists`), not `.exists()`
+        # (which follows `alias`, reading a broken chain as absent) (Codex).
+        product = _make_product(tmp_path)
+        (product / "lib" / "alias").symlink_to("missing")
+        (product / "lib" / "libfoo.so").symlink_to("alias")
+        manifest = pack_product_baseline(product, tmp_path / "b.tar.zst")
+        assert not any(lib.path == "lib/libfoo.so" for lib in manifest.libraries)
 
     def test_pack_skips_a_library_shaped_symlink_targeting_a_directory(
         self, tmp_path: Path

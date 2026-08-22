@@ -159,8 +159,7 @@ def _macho_is_library_content(path: Path) -> bool:
         macho = MachO(str(path))
     except Exception:  # noqa: BLE001 -- macholib has no single documented
         # exception type for a malformed/truncated fat archive (see the
-        # identical catch in macho_metadata.py's SymbolTable parse); a
-        # best-effort predicate, same "OSError -> False" degrade as above.
+        # identical catch in macho_metadata.py's SymbolTable parse).
         return False
     return any(
         int(getattr(header.header, "filetype", -1)) in _MACHO_LIBRARY_FILETYPES
@@ -198,9 +197,8 @@ def _is_library_path(path: Path) -> bool:
         return False
     # A GNU ld INPUT()/GROUP() linker script is library-suffix-named but carries
     # no binary content -- centralized here so packing and comparison share one
-    # exclusion instead of drifting (Codex review, fresh evidence).
-    # `resolve_linker_script` itself guards against misclassifying real binary
-    # content (see its own docstring).
+    # exclusion instead of drifting. `resolve_linker_script` itself guards
+    # against misclassifying real binary content (see its own docstring).
     _, is_linker_script = resolve_linker_script(path)
     return not is_linker_script
 
@@ -240,10 +238,9 @@ class ProductBaselineManifest:
     product: str = ""
     libraries: tuple[LibraryEntry, ...] = ()
     #: Header roots, relative to the product root, that a follow-on
-    #: ``compare -H`` invocation should pass — recorded
-    #: here so a single archive carries both sides of the multilib
-    #: comparison's own header contract, rather than requiring the caller
-    #: to remember (or re-derive) it separately per product.
+    #: ``compare -H`` invocation should pass — recorded here so a single
+    #: archive carries both sides of the multilib comparison's own header
+    #: contract, rather than requiring the caller to remember it separately.
     header_roots: tuple[str, ...] = ()
     #: Total number of members in the archive, manifest included — purely
     #: informational (a quick sanity count), not load-bearing for unpacking.
@@ -332,7 +329,10 @@ def _case_insensitive_target_resolves(parent: Path, target: str) -> bool:
             current = current.parent
             continue
         exact = current / part
-        if exact.exists():
+        # Lexical existence (Codex): a component present under its own exact
+        # spelling -- even a symlink whose own chain is broken -- is an ordinary
+        # dangling target, not a case-fold hazard; `.exists()` follows the chain.
+        if os.path.lexists(exact):
             current = exact
             continue
         if not current.is_dir():
