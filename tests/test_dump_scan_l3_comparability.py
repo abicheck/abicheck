@@ -167,14 +167,34 @@ _KNOWN_L4_EXTRACTOR_DIVERGENCE_TOTALS = (
 )  # breaking, api_break, risk, compatible
 
 
+#: ``render_crosscheck_lines`` only emits this block at all when
+#: ``out.crosscheck["counts_by_check"]`` is non-empty -- an entirely
+#: separate, always-on block from the baseline ``diff`` this module
+#: otherwise inspects (``ScanOutcome.crosscheck``, not
+#: ``ScanOutcome.diff_summary``), rendered as its own
+#: ``[<severity>] <kind>: <n>`` lines under one of these two headings
+#: depending on ``--audit``. Neither heading appeared in the real
+#: CI-captured failure text this module's docstring quotes, but nothing
+#: before this checked for its *absence* -- Codex review, round 4: an
+#: unrelated cross-source regression would leave the verdict and every
+#: baseline count this module already checks completely untouched.
+_CROSSCHECK_HEADINGS = (
+    "Cross-source findings (advisory)",
+    "ABI-hygiene catalog (intra-version, advisory)",
+)
+
+
 def _is_known_l4_extractor_divergence_text(output: str) -> bool:
     """Text-output variant: the verdict must be ``COMPATIBLE_WITH_RISK``,
     the counts line must read exactly ``breaking=0 api_break=0 risk=2
-    compatible=0``, and the multiset of ``[risk] <kind>:`` lines must equal
-    exactly the known two-kind, one-each multiset -- no more, no fewer, no
-    duplicates, and no unrelated finding hiding in a bucket this module
-    doesn't otherwise inspect."""
+    compatible=0``, the multiset of ``[risk] <kind>:`` lines must equal
+    exactly the known two-kind, one-each multiset, and no cross-check
+    finding may be present -- no more, no fewer, no duplicates, and no
+    unrelated finding hiding in a bucket this module doesn't otherwise
+    inspect."""
     if "COMPATIBLE_WITH_RISK" not in output:
+        return False
+    if any(heading in output for heading in _CROSSCHECK_HEADINGS):
         return False
     counts_match = _COUNTS_LINE_RE.search(output)
     if (
@@ -191,12 +211,22 @@ def _is_known_l4_extractor_divergence_text(output: str) -> bool:
 def _is_known_l4_extractor_divergence_report(report: dict) -> bool:
     """JSON-report variant: the verdict must be ``COMPATIBLE_WITH_RISK``,
     the diff summary's ``breaking``/``api_break``/``risk``/``compatible``
-    counts must read exactly ``0``/``0``/``2``/``0``, and the multiset of
+    counts must read exactly ``0``/``0``/``2``/``0``, the multiset of
     finding kinds must equal exactly the known two-kind, one-each
-    multiset -- no more, no fewer, no duplicates, and no unrelated
-    *compatible*-category finding hiding under ``additions``/``quality``
-    (Codex review, round 3 -- those buckets itemize ``diff.compatible``,
-    which the ``verdict``/``findings`` fields alone never reflect).
+    multiset, and no cross-check finding may be present -- no more, no
+    fewer, no duplicates, and no unrelated finding hiding in a bucket this
+    module doesn't otherwise inspect.
+
+    Two buckets live entirely outside ``report["diff"]`` and must be
+    checked separately: an unrelated *compatible*-category finding
+    (Codex review, round 3 -- itemized under ``diff.additions``/
+    ``diff.quality``, which the ``verdict``/``findings`` fields alone
+    never reflect, so only the aggregate ``compatible`` count above can
+    see it) and an unrelated cross-check finding (Codex review, round 4 --
+    ``ScanOutcome.crosscheck``/``crosscheck_severities`` are a wholly
+    separate, always-on block from the baseline ``diff``, non-empty
+    ``report["crosscheck"]["counts_by_check"]`` only when a cross-source
+    check actually fired).
 
     ``scan --format json``'s ``ScanOutcome.to_dict()`` has no top-level
     ``changes`` array (that's ``compare``'s report shape) -- its baseline
@@ -208,6 +238,8 @@ def _is_known_l4_extractor_divergence_report(report: dict) -> bool:
     known-divergent case fell through to ``pytest.fail()`` instead of
     ``xfail`` -- Codex review, round 1."""
     if report.get("verdict") != "COMPATIBLE_WITH_RISK":
+        return False
+    if (report.get("crosscheck") or {}).get("counts_by_check"):
         return False
     diff = report.get("diff") or {}
     totals = (
