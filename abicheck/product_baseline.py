@@ -478,6 +478,20 @@ def pack_product_baseline(
         raise SnapshotError(
             f"product baseline output must end with '.tar.zst': {output_path}"
         )
+    # Created *before* discovery, not just before the write below: if
+    # OUTPUT lives under a not-yet-existing subdirectory of SOURCE_DIR
+    # (e.g. SOURCE_DIR/artifacts/base.tar.zst), creating this directory
+    # only after _discover_paths()/_discover_empty_dirs() ran would mean
+    # the first pack never sees `artifacts/` at all (it doesn't exist
+    # yet), while a second pack -- run after this same mkdir call already
+    # created it -- sees an empty `artifacts/` directory (its only file,
+    # OUTPUT itself, is excluded below) and adds an explicit directory
+    # member for it. Two runs of the identical invocation would then
+    # disagree on file_count and produce different archive bytes (Codex
+    # review, fresh evidence). Creating it up front makes every run see
+    # the same input tree -- `artifacts/` is discovered as an empty
+    # directory member consistently, from the very first pack.
+    output_path.parent.mkdir(parents=True, exist_ok=True)
 
     resolved_header_roots: list[str] = []
     for rel in header_roots:
@@ -535,16 +549,41 @@ def pack_product_baseline(
             f"no files found under {source_path} to pack into a product baseline"
         )
 
-    # MANIFEST_MEMBER_NAME is reserved: a real source file at that path
+    # MANIFEST_MEMBER_NAME is reserved: a real source entry at that path
     # would collide with the generated manifest member added after every
-    # other file, and the generated one -- added last -- would silently
+    # other entry, and the generated one -- added last -- would silently
     # win on extraction (tarfile writes members in order; a later member
     # of the same name overwrites an earlier one), replacing the source
-    # file's real content with the archive's own manifest.
+    # entry's real content with the archive's own manifest. This must
+    # reject a *directory* at the reserved path too, not just a file: the
+    # earlier file-only check missed both an empty directory (never in
+    # `paths`, which holds only files/symlinks) and a non-empty one
+    # (whose own children are in `paths`, prefixed by the reserved name,
+    # but the directory entry itself never is) -- either shape lets
+    # packing succeed while writing a tar that requires the same path to
+    # be both a directory (for the source entries) and a regular file
+    # (for the generated manifest, added last), which the paired unpack
+    # then fails on with an unhandled IsADirectoryError (Codex review,
+    # fresh evidence).
+    manifest_child_prefix = MANIFEST_MEMBER_NAME + "/"
     collision = next(
-        (p for p in paths if _relative_posix(p, source_path) == MANIFEST_MEMBER_NAME),
+        (
+            p
+            for p in paths
+            if _relative_posix(p, source_path) == MANIFEST_MEMBER_NAME
+            or _relative_posix(p, source_path).startswith(manifest_child_prefix)
+        ),
         None,
     )
+    if collision is None:
+        collision = next(
+            (
+                d
+                for d in empty_dirs
+                if _relative_posix(d, source_path) == MANIFEST_MEMBER_NAME
+            ),
+            None,
+        )
     if collision is not None:
         raise SnapshotError(
             f"{collision} collides with the reserved product baseline manifest "
@@ -552,7 +591,6 @@ def pack_product_baseline(
             "before packing"
         )
 
-    output_path.parent.mkdir(parents=True, exist_ok=True)
     # Resolve the compressor before mkstemp() hands out an open descriptor:
     # an invalid zstd_level (a public parameter of this function) must fail
     # before there is a descriptor to leak -- the except BaseException

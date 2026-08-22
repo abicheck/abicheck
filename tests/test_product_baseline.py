@@ -326,6 +326,35 @@ class TestPackProductBaseline:
         with pytest.raises(SnapshotError, match="reserved product baseline manifest"):
             pack_product_baseline(product, tmp_path / "b.tar.zst")
 
+    def test_pack_rejects_empty_directory_colliding_with_manifest_name(
+        self, tmp_path: Path
+    ) -> None:
+        # An empty directory at the reserved manifest path isn't in
+        # `paths` (files/symlinks only), so the file-only collision check
+        # missed it -- packing would succeed and write a tar requiring
+        # the same path to be both a directory and (from the generated
+        # manifest, added last) a regular file, which the paired unpack
+        # then fails on with an unhandled IsADirectoryError (Codex
+        # review, fresh evidence).
+        product = _make_product(tmp_path)
+        (product / MANIFEST_MEMBER_NAME).mkdir()
+        with pytest.raises(SnapshotError, match="reserved product baseline manifest"):
+            pack_product_baseline(product, tmp_path / "b.tar.zst")
+
+    def test_pack_rejects_non_empty_directory_colliding_with_manifest_name(
+        self, tmp_path: Path
+    ) -> None:
+        # A non-empty directory at the reserved path: its own children
+        # are in `paths` (prefixed by the reserved name), but the
+        # directory entry itself never is -- a distinct gap from the
+        # empty-directory case above (Codex review, fresh evidence).
+        product = _make_product(tmp_path)
+        collide_dir = product / MANIFEST_MEMBER_NAME
+        collide_dir.mkdir()
+        (collide_dir / "child.txt").write_text("not the real manifest\n")
+        with pytest.raises(SnapshotError, match="reserved product baseline manifest"):
+            pack_product_baseline(product, tmp_path / "b.tar.zst")
+
     def test_pack_repeated_invocation_into_source_dir_does_not_grow(
         self, tmp_path: Path
     ) -> None:
@@ -383,6 +412,27 @@ class TestPackProductBaseline:
         assert out.stat().st_size == first_size
         assert manifest1.libraries == manifest2.libraries
         assert manifest1.file_count == manifest2.file_count
+
+    def test_pack_into_not_yet_existing_subdirectory_is_deterministic_across_reruns(
+        self, tmp_path: Path
+    ) -> None:
+        # OUTPUT under a not-yet-existing subdirectory of SOURCE_DIR
+        # (SOURCE_DIR/artifacts/base.tar.zst): creating that directory
+        # only after discovery meant the first pack never saw
+        # `artifacts/` at all, while a second pack -- run after mkdir
+        # already created it -- discovered it as an empty directory
+        # (its only file, OUTPUT itself, excluded) and added an explicit
+        # directory member, changing file_count and archive bytes between
+        # two runs of the identical invocation (Codex review, fresh
+        # evidence).
+        product = _make_product(tmp_path)
+        out = product / "artifacts" / "base.tar.zst"
+        manifest1 = pack_product_baseline(product, out)
+        first_size = out.stat().st_size
+        manifest2 = pack_product_baseline(product, out)
+        assert out.stat().st_size == first_size
+        assert manifest1.file_count == manifest2.file_count
+        assert manifest1.libraries == manifest2.libraries
 
     def test_pack_leaves_no_partial_output_on_failure(self, tmp_path: Path) -> None:
         product = _make_product(tmp_path)
