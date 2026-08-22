@@ -2407,6 +2407,60 @@ class TestTarExtractorSymlinks:
             TarExtractor().extract(archive, out)
 
 
+class TestTarExtractorZstDecompressionBomb:
+    def test_highly_compressible_payload_is_rejected_over_the_limit(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # _safe_extract_zst_tar() used an unbounded shutil.copyfileobj()
+        # to materialize the entire decoded tar before any member was
+        # validated -- a tiny, highly compressible .tar.zst could fill
+        # the host/CI runner's disk first (Codex review, fresh evidence).
+        zstandard = pytest.importorskip("zstandard")
+        monkeypatch.setenv("_ABICHECK_TAR_ZST_MAX_DECODED_BYTES", "1000")
+
+        tar_buf = io.BytesIO()
+        with tarfile.open(fileobj=tar_buf, mode="w") as tf:
+            data = b"\x00" * (10 * 1024 * 1024)  # 10 MiB, highly compressible
+            info = tarfile.TarInfo(name="bigfile.bin")
+            info.size = len(data)
+            tf.addfile(info, io.BytesIO(data))
+
+        cctx = zstandard.ZstdCompressor(level=19)
+        compressed = cctx.compress(tar_buf.getvalue())
+        assert len(compressed) < 1000  # confirms the payload is a real bomb shape
+
+        zst_path = tmp_path / "bomb.tar.zst"
+        zst_path.write_bytes(compressed)
+        out = tmp_path / "output"
+        out.mkdir()
+
+        from abicheck.errors import SnapshotError
+
+        with pytest.raises(SnapshotError, match="safety limit"):
+            TarExtractor()._safe_extract_zst_tar(zst_path, out)
+
+    def test_ordinary_archive_within_the_limit_still_extracts(
+        self, tmp_path: Path
+    ) -> None:
+        pytest.importorskip("zstandard")
+        import zstandard
+
+        tar_buf = io.BytesIO()
+        with tarfile.open(fileobj=tar_buf, mode="w") as tf:
+            info = tarfile.TarInfo(name="lib/libfoo.so")
+            info.size = 4
+            tf.addfile(info, io.BytesIO(b"data"))
+
+        cctx = zstandard.ZstdCompressor()
+        zst_path = tmp_path / "ok.tar.zst"
+        zst_path.write_bytes(cctx.compress(tar_buf.getvalue()))
+        out = tmp_path / "output"
+        out.mkdir()
+
+        TarExtractor()._safe_extract_zst_tar(zst_path, out)
+        assert (out / "lib" / "libfoo.so").read_bytes() == b"data"
+
+
 # ── ELF detection extended ───────────────────────────────────────────────
 
 

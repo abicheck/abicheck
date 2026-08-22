@@ -132,6 +132,27 @@ class PackageExtractor(Protocol):
 
 # ── Tar extractor ────────────────────────────────────────────────────────────
 
+#: Decompression-bomb defense for `.tar.zst` extraction (Codex review, fresh
+#: evidence): a tiny, highly compressible archive can otherwise fill the
+#: host/CI runner's disk via an unbounded `shutil.copyfileobj()` before any
+#: member is ever validated. Generous relative to `snapshot_io.py`'s 1 GiB
+#: single-snapshot limit (ADR-059) since this bounds a whole product
+#: archive's worth of shared libraries, not one snapshot payload.
+#: Overridable only via the private env var below, mirroring
+#: `snapshot_io.py`'s identical override mechanism.
+DEFAULT_MAX_DECOMPRESSED_TAR_BYTES = 8 * 1024 * 1024 * 1024  # 8 GiB
+_MAX_DECOMPRESSED_TAR_BYTES_ENV = "_ABICHECK_TAR_ZST_MAX_DECODED_BYTES"
+
+
+def _max_decompressed_tar_bytes() -> int:
+    override = os.environ.get(_MAX_DECOMPRESSED_TAR_BYTES_ENV)
+    if override:
+        try:
+            return int(override)
+        except ValueError:
+            pass
+    return DEFAULT_MAX_DECOMPRESSED_TAR_BYTES
+
 
 class TarExtractor:
     """Extract tar, tar.gz, tar.xz, tar.bz2, and .tgz archives."""
@@ -200,10 +221,38 @@ class TarExtractor:
             else:
                 zstandard_mod = zstandard
             if zstandard_mod is not None:
-                dctx = zstandard_mod.ZstdDecompressor()
+                # Bounded, incremental decompression -- shutil.copyfileobj()
+                # materialized the entire decoded tar unconditionally
+                # before any member was ever validated, so a tiny, highly
+                # compressible archive could fill the host/CI runner's
+                # disk before extraction ever got a chance to raise
+                # (Codex review, fresh evidence). max_window_size reuses
+                # snapshot_io.py's own zstd-memory-bomb defense rather
+                # than a second, independently-derived window ceiling.
+                from .snapshot_io import _zstd_max_window_size_bytes
+
+                max_decoded_bytes = _max_decompressed_tar_bytes()
+                dctx = zstandard_mod.ZstdDecompressor(
+                    max_window_size=_zstd_max_window_size_bytes(zstandard_mod)
+                )
+                total_bytes = 0
                 with open(zst_path, "rb") as compressed, open(tar_path, "wb") as out:
                     with dctx.stream_reader(compressed) as reader:
-                        shutil.copyfileobj(reader, out)
+                        while True:
+                            chunk = reader.read(1024 * 1024)
+                            if not chunk:
+                                break
+                            total_bytes += len(chunk)
+                            if total_bytes > max_decoded_bytes:
+                                raise SnapshotError(
+                                    f"{zst_path}: decompressed payload exceeds "
+                                    f"the {max_decoded_bytes} byte safety "
+                                    "limit -- refusing to continue "
+                                    "decompressing (possible decompression "
+                                    f"bomb; override via "
+                                    f"{_MAX_DECOMPRESSED_TAR_BYTES_ENV})"
+                                )
+                            out.write(chunk)
             else:
                 zstd = shutil.which("zstd")
                 if zstd is None:

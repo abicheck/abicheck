@@ -391,15 +391,10 @@ class TestPackProductBaseline:
     def test_pack_rejects_empty_source_dir_with_in_tree_subdir_output(
         self, tmp_path: Path
     ) -> None:
-        # An in-tree OUTPUT under a not-yet-existing subdirectory
-        # (SOURCE_DIR/artifacts/base.tar.zst) is created via mkdir()
-        # *before* discovery, for determinism (see the sibling rerun
-        # test) -- but that scaffold directory carries no real product
-        # content of its own, and a genuinely empty SOURCE_DIR must still
-        # be rejected regardless of where OUTPUT was asked to go. Before
-        # this fix, the scaffold directory was discovered as an "empty
-        # directory" and silently satisfied the not-paths-and-not-
-        # empty-dirs check, succeeding with zero libraries (Codex review,
+        # OUTPUT under a not-yet-existing subdirectory is mkdir()'d
+        # before discovery for determinism (see the rerun test below),
+        # but that scaffold carries no real content -- a genuinely empty
+        # SOURCE_DIR must still be rejected regardless (Codex review,
         # fresh evidence).
         empty = tmp_path / "empty"
         empty.mkdir()
@@ -409,16 +404,10 @@ class TestPackProductBaseline:
     def test_pack_rejects_empty_source_dir_identically_on_repeated_calls(
         self, tmp_path: Path
     ) -> None:
-        # The mkdir() call above leaves the scaffold directory
-        # (SOURCE_DIR/artifacts/) behind on disk even though pack itself
-        # raised -- an identical second call must not see that leftover
-        # directory as pre-existing, real content: _scaffold_dirs_for_
-        # mkdir() only reports a directory that doesn't exist *yet*, so
-        # without cleanup the second call's own scaffold set comes back
-        # empty and the leftover directory silently satisfies the
-        # not-paths-and-not-empty-dirs check, succeeding with an
-        # otherwise-empty archive instead of reproducing the same
-        # rejection (Codex review, fresh evidence).
+        # The mkdir() call above leaves the scaffold dir behind on disk
+        # even though pack raised -- an identical second call must not
+        # see that leftover as pre-existing, real content (Codex review,
+        # fresh evidence).
         empty = tmp_path / "empty"
         empty.mkdir()
         out = empty / "artifacts" / "base.tar.zst"
@@ -431,12 +420,9 @@ class TestPackProductBaseline:
     def test_pack_rejects_empty_source_dir_with_mixed_relative_absolute_spelling(
         self, tmp_path: Path
     ) -> None:
-        # _scaffold_dirs_for_mkdir()'s own containment check is a plain
-        # lexical is_relative_to() -- an absolute SOURCE_DIR paired with a
-        # RELATIVE OUTPUT under the identical tree (no symlink involved,
-        # just differing path spellings for the same location) used to
-        # make that check spuriously fail, silently reintroducing the
-        # empty-source bypass the scaffold-cleanup fix exists to close
+        # An absolute SOURCE_DIR paired with a RELATIVE OUTPUT under the
+        # identical tree (differing path spellings, same location) used
+        # to make the lexical containment check spuriously fail
         # (CodeRabbit review, fresh evidence).
         empty = tmp_path / "empty"
         empty.mkdir()
@@ -452,18 +438,11 @@ class TestPackProductBaseline:
     def test_pack_rejects_empty_source_dir_when_source_is_a_symlink_alias(
         self, tmp_path: Path
     ) -> None:
-        # SOURCE_DIR passed as a symlink alias (`source-link -> source`),
-        # with OUTPUT spelled through the real, non-aliased directory
-        # (`source/artifacts/base.tar.zst`, not `source-link/artifacts/
-        # ...`) -- a purely lexical (os.path.abspath()) comparison in
-        # _scaffold_dirs_for_mkdir() never shares a common prefix with
-        # SOURCE_DIR's own alias spelling, so it silently reported the
-        # freshly-created `artifacts/` scaffold directory as *not* being
-        # inside SOURCE_DIR at all. That directory then read as genuine,
-        # pre-existing empty-directory content instead of output-only
-        # scaffolding, letting an otherwise genuinely empty SOURCE_DIR
-        # bypass the "no files found" rejection entirely (Codex review,
-        # fresh evidence).
+        # SOURCE_DIR passed as a symlink alias, with OUTPUT spelled
+        # through the real, non-aliased directory -- a purely lexical
+        # comparison never shares a common prefix with the alias
+        # spelling, letting an empty SOURCE_DIR bypass rejection (Codex
+        # review, fresh evidence).
         real = tmp_path / "source"
         real.mkdir()
         alias = tmp_path / "source-link"
@@ -883,6 +862,37 @@ class TestPackProductBaseline:
         assert out.stat().st_size == first_size
         assert manifest1.file_count == manifest2.file_count
         assert manifest1.libraries == manifest2.libraries
+
+    def test_pack_excludes_the_output_scaffold_directory_from_the_archive(
+        self, tmp_path: Path
+    ) -> None:
+        # The sibling test above only checked file_count/libraries
+        # equality across two runs -- it never unpacked and inspected
+        # the archive's own content, so it missed that the output-only
+        # `artifacts/` scaffold dir was itself still an archive member
+        # (Codex review, fresh evidence).
+        product = _make_product(tmp_path)
+        out = product / "artifacts" / "base.tar.zst"
+        pack_product_baseline(product, out)
+
+        dest = tmp_path / "dest"
+        unpack_product_baseline(out, dest)
+        assert not (dest / "artifacts").exists()
+
+    def test_pack_excludes_the_scaffold_directory_identically_across_reruns(
+        self, tmp_path: Path
+    ) -> None:
+        # Self-caught regression: existence-gated exclusion excluded
+        # `artifacts/` on the first pack but silently included it on a
+        # second, identical pack, since by then it already existed.
+        product = _make_product(tmp_path)
+        out = product / "artifacts" / "base.tar.zst"
+        pack_product_baseline(product, out)
+        pack_product_baseline(product, out)  # second run, artifacts/ now exists
+
+        dest = tmp_path / "dest"
+        unpack_product_baseline(out, dest)
+        assert not (dest / "artifacts").exists()
 
     def test_pack_rejects_header_root_matching_the_output_scaffold_directory(
         self, tmp_path: Path

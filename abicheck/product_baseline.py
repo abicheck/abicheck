@@ -378,6 +378,25 @@ def _scaffold_dirs_for_mkdir(base: Path, leaf_parent: Path) -> set[Path]:
     return created
 
 
+def _output_parent_chain(base: Path, leaf_parent: Path) -> set[Path]:
+    """Every ancestor of *leaf_parent*, up to and excluding *base*,
+    regardless of whether it exists -- the archive-content-exclusion
+    counterpart of :func:`_scaffold_dirs_for_mkdir` above, which reports
+    only what doesn't exist *yet*, wrong for this purpose: a rerun sees
+    OUTPUT's parent as already-existing (the first run's own mkdir made
+    it), so an existence-gated set excludes it on run one and silently
+    includes it on run two (Codex review, fresh evidence).
+    """
+    chain: set[Path] = set()
+    if leaf_parent != base and not leaf_parent.is_relative_to(base):
+        return chain
+    node = leaf_parent
+    while node != base:
+        chain.add(node)
+        node = node.parent
+    return chain
+
+
 def _safe_int(value: Any) -> int:
     """Defensively coerce a manifest numeric field to ``int``, the same
     "never abort on a hand-edited/malformed pack" convention every other
@@ -528,7 +547,6 @@ def _validate_portable_arcname(arcname: str) -> None:
     A component that decomposes safely under Windows separators can
     still be a name Windows can't represent -- a reserved device name, a
     forbidden character, or a trailing dot/space it silently strips
-    (``name.``/``name`` would collide) -- each checked per component
     (Codex review, fresh evidence).
     """
     wpath = PureWindowsPath(arcname)
@@ -777,34 +795,23 @@ def pack_product_baseline(
             )
         resolved_header_roots.append(Path(rel).as_posix())
 
-    # Created *before* discovery, not just before the write below: if
-    # OUTPUT lives under a not-yet-existing subdirectory of SOURCE_DIR,
-    # creating it only after discovery ran would make a first pack and a
-    # second (run after this mkdir already created the dir) disagree on
-    # file_count and produce different archive bytes (Codex review,
-    # fresh evidence). Creating it up front makes every run see the same
-    # input tree.
+    # Created *before* discovery, not just before the write below: doing
+    # so only after discovery ran would make a first pack and a second
+    # (already-created dir) disagree on file_count and archive bytes
+    # (Codex review, fresh evidence).
     #
     # Captured *before* the mkdir call below: an originally-empty
-    # SOURCE_DIR whose only content is this newly-created output-only
-    # directory chain must still be rejected as "nothing to pack" -- that
-    # scaffold carries no real product content (Codex review, fresh
-    # evidence).
-    # Two layered aliasing concerns, resolved once and reused below for
-    # both the scaffold-dir computation and the output-exclusion logic:
+    # SOURCE_DIR whose only content is this scaffold chain must still
+    # reject as "nothing to pack" (Codex review, fresh evidence).
+    # Two layered aliasing concerns, resolved once and reused below:
     #  - OUTPUT itself may be a symlink -- handled by its own lexical
-    #    name, not by whatever it points to (Codex review, fresh
-    #    evidence).
+    #    name, not its target (Codex review, fresh evidence).
     #  - SOURCE_DIR itself may be a symlink alias with OUTPUT spelled
-    #    through the real, non-aliased directory -- a purely lexical
-    #    comparison then shares no common prefix with SOURCE_DIR's own
-    #    alias path, so the scaffold dir reads as genuine pre-existing
-    #    content and bypasses the "nothing to pack" rejection (Codex
-    #    review, fresh evidence, second round).
-    # Resolving *only* OUTPUT's parent (and SOURCE_DIR in full) sees
-    # through a directory-level alias for containment purposes, while
-    # OUTPUT's own final path component stays lexical -- exactly the
-    # combination both cases need at once.
+    #    through the real directory -- a lexical comparison then shares
+    #    no common prefix, so the scaffold reads as genuine content and
+    #    bypasses the rejection (Codex review, fresh evidence, second
+    #    round). Resolving *only* OUTPUT's parent (and SOURCE_DIR in
+    #    full) fixes both at once, while OUTPUT's own leaf stays lexical.
     source_real = source_path.resolve()
     try:
         output_parent_real = output_path.parent.resolve()
@@ -873,6 +880,10 @@ def pack_product_baseline(
         raise SnapshotError(
             f"no files found under {source_path} to pack into a product baseline"
         )
+    # A separate, existence-independent exclusion for what actually gets
+    # archived below -- see _output_parent_chain()'s own docstring.
+    output_parent_chain = _output_parent_chain(source_path, leaf_parent_lexical)
+    archived_empty_dirs = [d for d in empty_dirs if d not in output_parent_chain]
 
     # MANIFEST_MEMBER_NAME is reserved: a real source entry at that path
     # would collide with the generated manifest member added after every
@@ -984,14 +995,19 @@ def pack_product_baseline(
                         entry = _add_member(tf, path, arcname, source_path)
                         if entry is not None:
                             libraries.append(entry)
-                    for empty_dir in empty_dirs:
+                    # archived_empty_dirs, not empty_dirs: an output-only
+                    # scaffold dir (see the mkdir call above) must not be
+                    # archived either, or an unpacked baseline gains a
+                    # directory never part of the original product
+                    # (Codex review, fresh evidence).
+                    for empty_dir in archived_empty_dirs:
                         arcname = _relative_posix(empty_dir, source_path)
                         _add_directory_member(tf, empty_dir, arcname)
                     manifest = ProductBaselineManifest(
                         product=product,
                         libraries=tuple(sorted(libraries, key=lambda e: e.path)),
                         header_roots=tuple(resolved_header_roots),
-                        file_count=len(paths) + len(empty_dirs) + 1,
+                        file_count=len(paths) + len(archived_empty_dirs) + 1,
                     )
                     _add_manifest_member(tf, manifest)
         os.replace(tmp_path, output_path)
@@ -1178,16 +1194,10 @@ def unpack_product_baseline(
             #
             # Size is compared unconditionally, sha256 validated as a
             # genuine 64-hex digest before comparison -- neither is
-            # skippable for a 0/"" value. pack_product_baseline() always
-            # records real values, so 0/"" can only mean a hand-crafted
-            # manifest with nothing to compare (no real library is 0
-            # bytes) or an attacker who zeroed the fields specifically to
-            # bypass this check -- unlike this codebase's usual "don't
-            # abort on missing, only on wrong" convention, a value this
-            # check's own security purpose depends on must not be
-            # skippable by simply omitting it (Codex review, fresh
-            # evidence: an earlier revision's `if lib.size and ...`/
-            # `if lib.sha256:` truthiness guards let exactly that happen).
+            # skippable for a 0/"" value, unlike this codebase's usual
+            # "don't abort on missing, only on wrong" convention (Codex
+            # review, fresh evidence: an earlier revision's truthiness
+            # guards let a zeroed field bypass this check entirely).
             actual_size = lib_resolved.stat().st_size
             if actual_size != lib.size:
                 raise SnapshotError(
@@ -1213,21 +1223,16 @@ def unpack_product_baseline(
                     "with"
                 )
         # The verification loop above only examines manifest-declared
-        # entries -- an archive that omits a LibraryEntry entirely (or
-        # corrupts "libraries" to a non-list value from_dict() degrades to
-        # ()) has that library's real content never verified, republishing
-        # tampered bytes under a manifest that claims it doesn't exist
-        # (Codex review, fresh evidence). Cross-checked against what was
-        # actually extracted via _discover_library_map(), the same walk
-        # compare_product_directories() uses, so "is this a library" can't
-        # drift between packing, this check, and a later comparison.
+        # entries -- an archive that omits a LibraryEntry entirely has
+        # that library's real content never verified (Codex review,
+        # fresh evidence). Cross-checked against what was actually
+        # extracted via _discover_library_map(), the same walk
+        # compare_product_directories() uses.
         #
         # A symlink alias is compared by filesystem identity (dev, ino),
         # not path string: a dev-symlink alias never gets its own
-        # LibraryEntry (self-caught: an earlier revision compared by
-        # path string and failed this module's own round-trip tests). A
-        # hardlink alias is compared by path string instead, below --
-        # it DOES get its own declared entry.
+        # LibraryEntry. A hardlink alias is compared by path string
+        # instead, below -- it DOES get its own declared entry.
         declared_identities = set()
         declared_paths = set()
         for lib in manifest.libraries:
@@ -1294,20 +1299,14 @@ def unpack_product_baseline(
 
         # dest_path, if it existed, was already confirmed empty above, so
         # removing it and renaming staging into its place is safe (and
-        # portable: os.replace()/os.rename() cannot atomically replace an
-        # existing directory on every platform, but replacing a path that
-        # no longer exists works everywhere). This whole block -- not just
-        # extraction/validation above -- is wrapped so a failure here
-        # (a concurrent process populating dest_path, a permission error
-        # on chmod/rmdir/replace) still cleans up staging instead of
-        # leaving a `.abicheck-product-baseline-unpack-*` directory behind
-        # (Codex review, fresh evidence). One residual, inherent to
-        # rmdir()+replace() not being atomic: if rmdir() succeeds but
-        # os.replace() then fails, the caller's pre-existing empty
-        # dest_path is already gone and cannot be restored -- the same
-        # cross-platform limitation the comment above already accepts,
-        # just now surfaced as a clear SnapshotError instead of silently
-        # leaving stray state.
+        # portable: os.replace() cannot atomically replace an existing
+        # directory on every platform, but a path that no longer exists
+        # works everywhere). This whole block is wrapped so a failure
+        # here still cleans up staging (Codex review, fresh evidence).
+        # One residual, inherent to rmdir()+replace() not being atomic:
+        # if rmdir() succeeds but replace() then fails, the caller's
+        # pre-existing empty dest_path is already gone and cannot be
+        # restored -- surfaced as a clear SnapshotError, not silently.
         if dest_path.exists():
             dest_path.rmdir()
         os.replace(staging, dest_path)
