@@ -196,9 +196,8 @@ def _is_library_path(path: Path) -> bool:
     if not is_library:
         return False
     # A GNU ld INPUT()/GROUP() linker script is library-suffix-named but carries
-    # no binary content -- centralized here so packing and comparison share one
-    # exclusion instead of drifting. `resolve_linker_script` itself guards
-    # against misclassifying real binary content (see its own docstring).
+    # no binary content -- centralized so packing/comparison share one exclusion
+    # (see resolve_linker_script's own docstring for the binary-content guard).
     _, is_linker_script = resolve_linker_script(path)
     return not is_linker_script
 
@@ -627,9 +626,8 @@ def _add_member(
     info.gid = 0
     info.uname = ""
     info.gname = ""
-    # Mode too: an umask difference between two builders would otherwise
-    # produce two different archives from byte-identical content -- keep
-    # only the owner-executable bit.
+    # Mode too: an umask difference between two builders would otherwise produce
+    # two archives from byte-identical content -- keep only the executable bit.
     if not info.issym():
         info.mode = 0o755 if info.mode & 0o100 else 0o644
 
@@ -854,12 +852,11 @@ def pack_product_baseline(
     # Created *before* discovery: doing so only after would make a first pack
     # and a second (already-created dir) disagree on file_count and archive
     # bytes; also captured before the mkdir call below, for the same "nothing
-    # to pack" reasoning (Codex review, fresh evidence).
-    # Two aliasing concerns, resolved once: OUTPUT itself may be a symlink (its
-    # own lexical name, not target), and SOURCE_DIR itself may be a symlink
-    # alias with OUTPUT spelled through the real directory (Codex review, both
-    # rounds). Resolving *only* OUTPUT's parent (and SOURCE_DIR in full) fixes
-    # both, leaf stays lexical.
+    # to pack" reasoning. Two aliasing concerns, resolved once: OUTPUT itself
+    # may be a symlink (its own lexical name, not target), and SOURCE_DIR
+    # itself may be a symlink alias with OUTPUT spelled through the real
+    # directory. Resolving *only* OUTPUT's parent (and SOURCE_DIR in full)
+    # fixes both, leaf stays lexical.
     source_real = source_path.resolve()
     try:
         output_parent_real = output_path.parent.resolve()
@@ -902,11 +899,9 @@ def pack_product_baseline(
     # The scaffold directories the mkdir() call above just created must not
     # survive *any* failure path below that leaves them empty -- otherwise an
     # identical repeat call sees them as already-existing, pre-existing content
-    # (Codex review, fresh evidence; a second round found one rejection path
-    # further down, not just the empty-source one, needed the identical
-    # cleanup). One shared helper so every failure path after the mkdir() cleans
-    # up the same way: deepest-first, best-effort (an OSError here is a
-    # secondary problem, not worth masking the real error over).
+    # (a second review round found one rejection path further down, not just
+    # the empty-source one, needed the identical cleanup). One shared helper so
+    # every failure path cleans up the same way: deepest-first, best-effort.
     def _cleanup_output_scaffold_dirs() -> None:
         for scaffold_dir in sorted(
             output_scaffold_dirs, key=lambda d: len(d.parts), reverse=True
@@ -936,20 +931,18 @@ def pack_product_baseline(
         for d in empty_dirs
         if d not in output_parent_chain or d in declared_header_root_dirs
     ]
-    # Known gap (Codex review): an *undeclared*, pre-existing empty dir holding
-    # OUTPUT is still excluded like pure scaffolding -- structurally
-    # indistinguishable by content, and existence can't separate them (OUTPUT's
-    # own dir survives after a first pack, so a rerun would misclassify scaffold
-    # as real content, regressing determinism-across-reruns). Needs a
-    # declaration mechanism beyond header_roots, not another heuristic guess.
+    # Known gap: an *undeclared*, pre-existing empty dir holding OUTPUT is still
+    # excluded like pure scaffolding -- structurally indistinguishable by
+    # content, and existence can't separate them (OUTPUT's own dir survives
+    # after a first pack, so a rerun would misclassify scaffold as real
+    # content). Needs a declaration mechanism beyond header_roots.
 
     # MANIFEST_MEMBER_NAME is reserved: a real source entry there would collide
     # with the generated manifest member, added last, silently winning on
-    # extraction. Must reject a *directory* at the reserved path too, not just a
-    # file: an empty one is never in `paths`, and a non-empty one's own
-    # directory entry never is either, only its children -- either shape let
-    # packing write a tar requiring the same path to be both a directory and a
-    # regular file (Codex review, fresh evidence).
+    # extraction. Must reject a *directory* at the reserved path too -- an
+    # empty one is never in `paths`, and a non-empty one's own directory entry
+    # never is either, only its children -- either shape let packing write a
+    # tar requiring the same path to be both a directory and a regular file.
     manifest_child_prefix = MANIFEST_MEMBER_NAME + "/"
     collision = next(
         (
@@ -1104,16 +1097,16 @@ def unpack_product_baseline(
     dest_path = Path(dest_dir)
     if dest_path.is_symlink():
         # Rejected outright: publishing later replaces dest_path via
-        # dest_path.rmdir() + os.replace(), and rmdir() operates on the
-        # symlink itself (never follows a final symlink component) -- even
-        # a symlink to a genuinely empty dir would pass the checks below
-        # then raise NotADirectoryError at publish, unhandled by the CLI's
-        # SnapshotError-only catch, leaving staging uncleaned (Codex).
+        # dest_path.rmdir() + os.replace(), and rmdir() operates on the symlink
+        # itself (never follows a final symlink component) -- even a symlink to
+        # a genuinely empty dir would pass the checks below then raise
+        # NotADirectoryError at publish, unhandled by the CLI's SnapshotError-
+        # only catch, leaving staging uncleaned (Codex).
         raise SnapshotError(f"unpack destination must not be a symlink: {dest_path}")
-    # Captured before publication, not derived from the umask: a caller
-    # may have pre-created dest_path with deliberate permissions, and
-    # publication replaces it outright -- re-deriving from the umask
-    # would silently widen or narrow those permissions instead (Codex).
+    # Captured before publication, not derived from the umask: a caller may
+    # have pre-created dest_path with deliberate permissions, and publication
+    # replaces it outright -- re-deriving from the umask would silently widen
+    # or narrow those permissions instead (Codex).
     existing_dest_mode = (
         stat_module.S_IMODE(dest_path.stat().st_mode) if dest_path.exists() else None
     )
@@ -1187,11 +1180,16 @@ def unpack_product_baseline(
                     f"root {rel!r} (absolute, escapes the product root, "
                     "or is not an existing directory)"
                 )
-        # LibraryEntry.path carries the identical untrusted-manifest risk
-        # as header_roots above -- from_dict()'s defensive str() coercion
-        # accepts any string unchanged, so an archive declaring
-        # "../../outside.so" would otherwise hand the caller a manifest
-        # whose library inventory resolves outside the unpacked baseline.
+        # LibraryEntry.path carries the identical untrusted-manifest risk as
+        # header_roots above -- from_dict()'s defensive str() coercion accepts
+        # any string unchanged, so an archive declaring "../../outside.so"
+        # would otherwise resolve outside the unpacked baseline.
+        # Cached by resolved (dev, ino) identity, not path: an untrusted archive
+        # can declare many entries hardlinked/aliased to one physical payload,
+        # and hashing each entry's full content independently turns N declared
+        # aliases into N full reads of the same bytes -- a cumulative-hashing
+        # CPU cost an attacker controls directly via manifest size (Codex).
+        library_hash_cache: dict[tuple[int, int], str] = {}
         for lib in manifest.libraries:
             lib_resolved = _resolve_under_root(staging, lib.path)
             if lib_resolved is None or not lib_resolved.is_file():
@@ -1222,7 +1220,8 @@ def unpack_product_baseline(
             # for a 0/"" value, unlike this codebase's usual "don't abort
             # on missing" convention -- an earlier revision's truthiness
             # guards let a zeroed field bypass this check) (Codex).
-            actual_size = lib_resolved.stat().st_size
+            lib_stat = lib_resolved.stat()
+            actual_size = lib_stat.st_size
             if actual_size != lib.size:
                 raise SnapshotError(
                     f"{archive_path}: library {lib.path!r} size mismatch "
@@ -1236,11 +1235,16 @@ def unpack_product_baseline(
                     "or malformed sha256 checksum in the manifest -- "
                     "archive may be corrupt or tampered with"
                 )
-            hasher = hashlib.sha256()
-            with open(lib_resolved, "rb") as fh:
-                for chunk in iter(lambda: fh.read(1 << 20), b""):
-                    hasher.update(chunk)
-            if hasher.hexdigest() != lib.sha256:
+            content_identity = (lib_stat.st_dev, lib_stat.st_ino)
+            digest = library_hash_cache.get(content_identity)
+            if digest is None:
+                hasher = hashlib.sha256()
+                with open(lib_resolved, "rb") as fh:
+                    for chunk in iter(lambda: fh.read(1 << 20), b""):
+                        hasher.update(chunk)
+                digest = hasher.hexdigest()
+                library_hash_cache[content_identity] = digest
+            if digest != lib.sha256:
                 raise SnapshotError(
                     f"{archive_path}: library {lib.path!r} checksum "
                     "mismatch -- archive may be corrupt or tampered "
@@ -1268,22 +1272,20 @@ def unpack_product_baseline(
             _iter_discovered_libraries(staging), key=lambda item: item[0]
         ):
             if path.is_symlink():
-                # A symlink alias is checked by identity, not path
-                # string, regardless of whether it has its own
-                # LibraryEntry (a "standalone" symlink now gets one --
-                # see _add_member's symlink branch): the declared-
-                # identities loop above resolves lib.path through to its
-                # real target's (dev, ino) either way. A non-tuple
-                # identity means its own stat() failed for a reason
-                # other than ELOOP (raised above) -- skipped, not
+                # A symlink alias is checked by identity, not path string,
+                # regardless of whether it has its own LibraryEntry (a
+                # "standalone" symlink now gets one -- see _add_member's
+                # symlink branch): the declared-identities loop above resolves
+                # lib.path through to its real target's (dev, ino) either way.
+                # A non-tuple identity means its own stat() failed for a
+                # reason other than ELOOP (raised above) -- skipped, not
                 # flagged, matching the pre-existing tolerant behavior.
                 if isinstance(identity, tuple) and identity not in declared_identities:
                     undeclared.append(rel_path)
             else:
-                # A hardlink alias DOES get its own LibraryEntry when
-                # honestly packed -- identity alone can't distinguish
-                # "expected alias" from "unverified extra name" (Codex
-                # review, fresh evidence). Its path must be declared.
+                # A hardlink alias DOES get its own LibraryEntry when honestly
+                # packed -- identity alone can't distinguish "expected alias"
+                # from "unverified extra name". Its path must be declared.
                 if rel_path not in declared_paths:
                     undeclared.append(rel_path)
         if undeclared:
@@ -1308,11 +1310,11 @@ def unpack_product_baseline(
             target_dir_mode = 0o777 & ~_process_umask()
         os.chmod(staging, target_dir_mode)
 
-        # dest_path, confirmed empty above, is removed and staging renamed
-        # into its place (os.replace() can't atomically replace an
-        # existing dir everywhere, but a gone path works anywhere).
-        # Residual: if rmdir() succeeds but replace() fails, dest_path
-        # can't be restored -- surfaced as SnapshotError, not silently.
+        # dest_path, confirmed empty above, is removed and staging renamed into
+        # its place (os.replace() can't atomically replace an existing dir
+        # everywhere, but a gone path works anywhere). Residual: if rmdir()
+        # succeeds but replace() fails, dest_path can't be restored -- surfaced
+        # as SnapshotError, not silently.
         if dest_path.exists():
             dest_path.rmdir()
         os.replace(staging, dest_path)
@@ -1348,13 +1350,12 @@ def _check_schema_supported(schema: str, archive_path: Path) -> None:
             f"this abicheck build supports ({PRODUCT_BASELINE_SCHEMA!r}) — "
             "upgrade abicheck to read it."
         )
-    # Only major >= 1 has ever been a real, shipped format -- v1 is both
-    # the first and (today) the only one this build implements. The check
-    # above alone accepts any major <= supported_major, including v0 or a
-    # negative major that no version of this codebase ever wrote, so a
-    # malformed or foreign manifest spelling one of those would still be
-    # deserialized with the v1 field layout and published as a supported
-    # baseline (Codex review, fresh evidence).
+    # Only major >= 1 has ever been a real, shipped format -- v1 is both the
+    # first and (today) the only one this build implements. The check above
+    # alone accepts any major <= supported_major, including v0 or a negative
+    # major no version of this codebase ever wrote, so a malformed or foreign
+    # manifest spelling one of those would still deserialize with the v1
+    # field layout and publish as a supported baseline (Codex).
     if major < 1:
         raise SnapshotError(
             f"{archive_path}: unrecognized product baseline schema {schema!r}"
@@ -1775,15 +1776,14 @@ def compare_product_directories(
     ]
 
     # Canonical (SONAME-major-stripped) fallback for the libraries exact
-    # matching left unpaired -- two ambiguity-safe passes, each grouping
-    # the *complete* per-side discovery, so consuming one member of an
-    # ambiguous group never makes the rest look artificially unambiguous.
-    # Pass 1 is directory-scoped: two independent libraries sharing a
-    # basename in different directories that each bump their own SONAME
-    # major must not land in one shared, cross-directory bucket. Pass 2
-    # is a bare, global fallback over whatever pass 1 left unpaired -- a
-    # library that moves directories between releases has no shared
-    # directory for pass 1 to key on (Codex review).
+    # matching left unpaired -- two ambiguity-safe passes, each grouping the
+    # *complete* per-side discovery, so consuming one member of an ambiguous
+    # group never makes the rest look artificially unambiguous. Pass 1 is
+    # directory-scoped: two independent libraries sharing a basename in
+    # different directories that each bump their own SONAME major must not
+    # land in one shared, cross-directory bucket. Pass 2 is a bare, global
+    # fallback over whatever pass 1 left unpaired -- a library that moves
+    # directories between releases has no shared directory to key on (Codex).
     def _canonical_groups(
         discovered: dict[str, Path], *, scope_by_directory: bool
     ) -> dict[tuple[str, str], list[str]]:

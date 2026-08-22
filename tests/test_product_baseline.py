@@ -636,8 +636,7 @@ class TestPackProductBaseline:
         self, tmp_path: Path
     ) -> None:
         # NFC/NFD spellings are distinct bytes on Linux -- casefold() doesn't
-        # compose/decompose -- but APFS/HFS+ treat them as one filename,
-        # overwriting one on extraction (Codex).
+        # compose/decompose -- but APFS/HFS+ treat them as one filename (Codex).
         import unicodedata
 
         product = _make_product(tmp_path)
@@ -656,9 +655,8 @@ class TestPackProductBaseline:
             pack_product_baseline(product, tmp_path / "b.tar.zst")
 
     def test_pack_rejects_a_self_referential_symlink_loop(self, tmp_path: Path) -> None:
-        # A self-referential symlink made _add_member()'s direct
-        # Path.resolve() raise RuntimeError, only caught by the sibling
-        # `except ValueError` (target-escape) path (Codex).
+        # A self-referential symlink made _add_member()'s Path.resolve() raise
+        # RuntimeError, caught by the sibling `except ValueError` path (Codex).
         product = _make_product(tmp_path)
         (product / "lib" / "loop.so").symlink_to("loop.so")
         with pytest.raises(SnapshotError, match="symlink loop"):
@@ -667,9 +665,8 @@ class TestPackProductBaseline:
     def test_pack_records_a_standalone_library_shaped_symlink(
         self, tmp_path: Path
     ) -> None:
-        # A library-shaped symlink whose target isn't itself library-
-        # shaped was omitted from the manifest -- no entry for unpack's
-        # identity check to match, so it couldn't round-trip (Codex).
+        # A library-shaped symlink whose target isn't itself library-shaped
+        # was omitted from the manifest, so it couldn't round-trip (Codex).
         product = _make_product(tmp_path)
         (product / "lib" / "payload").write_bytes(b"not a library, just data")
         (product / "lib" / "libfoo.so").symlink_to("payload")
@@ -680,9 +677,8 @@ class TestPackProductBaseline:
         assert "lib/libfoo.so" in by_path
         assert by_path["lib/libfoo.so"].size == len(b"not a library, just data")
 
-        # liba.so -> liba.so.1.2.3 (from _make_product()) is the ordinary
-        # case and must NOT gain a redundant entry -- its target is already
-        # independently declared.
+        # liba.so -> liba.so.1.2.3 (from _make_product()) must NOT gain a
+        # redundant entry -- its target is already independently declared.
         assert "lib/liba.so" not in by_path
 
         dest = tmp_path / "unpacked"
@@ -694,9 +690,8 @@ class TestPackProductBaseline:
     def test_pack_rejects_a_symlink_target_matching_a_sibling_only_by_case(
         self, tmp_path: Path
     ) -> None:
-        # `libfoo.so -> payload` is dangling here (only `Payload` exists),
-        # so no LibraryEntry -- but on a case-insensitive host it resolves
-        # live, and unpack's discovery walk rejects it as undeclared (Codex).
+        # `libfoo.so -> payload` is dangling here (only `Payload` exists) -- but
+        # on a case-insensitive host it resolves live, rejected as undeclared.
         product = _make_product(tmp_path)
         (product / "lib" / "Payload").write_bytes(b"\x7fELF" + b"\x00" * 20)
         (product / "lib" / "libfoo.so").symlink_to("payload")
@@ -706,9 +701,8 @@ class TestPackProductBaseline:
     def test_pack_allows_a_genuinely_dangling_symlink_with_no_sibling_match(
         self, tmp_path: Path
     ) -> None:
-        # A dangling target with no case/Unicode-folded sibling anywhere
-        # in its own directory is not ambiguous across platforms -- must
-        # still pack, unaffected by the case-mismatch rejection above.
+        # A dangling target with no case/Unicode-folded sibling anywhere is not
+        # ambiguous across platforms -- must still pack.
         product = _make_product(tmp_path)
         (product / "lib" / "dangling.so").symlink_to("does-not-exist-at-all.so")
         manifest = pack_product_baseline(product, tmp_path / "b.tar.zst")
@@ -718,9 +712,8 @@ class TestPackProductBaseline:
         self, tmp_path: Path
     ) -> None:
         # The case/Unicode-fold check must walk every target component, not
-        # just the basename: `links/libfoo.so -> ../Payload/data` is
-        # dangling here on the *intermediate* `payload` directory, not the
-        # final `data` component (Codex, concrete repro).
+        # just the basename: `links/libfoo.so -> ../Payload/data` is dangling
+        # on the *intermediate* `payload` directory, not `data` (Codex).
         product = _make_product(tmp_path)
         (product / "links").mkdir()
         (product / "Payload").mkdir()
@@ -732,10 +725,9 @@ class TestPackProductBaseline:
     def test_pack_allows_a_symlink_chain_dangling_on_a_broken_intermediate_link(
         self, tmp_path: Path
     ) -> None:
-        # `libfoo.so -> alias -> missing`: target_stat is None because the
-        # *chain* is broken, not because `alias` itself is absent -- the
-        # exact-match check must be lexical (`os.path.lexists`), not `.exists()`
-        # (which follows `alias`, reading a broken chain as absent) (Codex).
+        # `libfoo.so -> alias -> missing`: the exact-match check must be
+        # lexical (`os.path.lexists`), not `.exists()` (which follows `alias`,
+        # reading a broken chain as absent) (Codex).
         product = _make_product(tmp_path)
         (product / "lib" / "alias").symlink_to("missing")
         (product / "lib" / "libfoo.so").symlink_to("alias")
@@ -746,9 +738,8 @@ class TestPackProductBaseline:
         self, tmp_path: Path
     ) -> None:
         # A suffix-shaped symlink can target a directory (`plugins.so ->
-        # payload/`) -- _is_library_path() matches by name alone, so the
-        # standalone-symlink fix above hashed unconditionally and raised
-        # an uncaught IsADirectoryError (Codex review).
+        # payload/`) -- the standalone-symlink fix above hashed unconditionally
+        # and raised an uncaught IsADirectoryError (Codex review).
         product = _make_product(tmp_path)
         (product / "lib" / "payload").mkdir()
         (product / "lib" / "payload" / "inner.txt").write_text("hi")
@@ -766,9 +757,8 @@ class TestPackProductBaseline:
         assert (restored / "inner.txt").read_text() == "hi"
 
     def test_pack_preserves_hardlinked_duplicate_content(self, tmp_path: Path) -> None:
-        # gettarinfo() converts a second path sharing an inode into a
-        # hardlink (LNKTYPE) member -- neither isreg() nor issym(), so it
-        # fell through _add_member's isreg() guard and vanished (CodeRabbit).
+        # gettarinfo() converts a second path sharing an inode into a hardlink
+        # (LNKTYPE) member -- fell through _add_member's isreg() guard (CodeRabbit).
         product = _make_product(tmp_path)
         first = product / "lib" / "libb.so"
         second = product / "lib" / "libb-alias.so"
@@ -788,9 +778,8 @@ class TestPackProductBaseline:
     def test_pack_records_a_library_entry_for_a_hardlinked_library(
         self, tmp_path: Path
     ) -> None:
-        # A hardlink member's own info.size is 0 -- the first-archived-
-        # copy-only code path silently omitted a library-named hardlink
-        # from the manifest even though its content round-trips (Codex).
+        # A hardlink member's own info.size is 0 -- the first-archived-copy-only
+        # path silently omitted a library-named hardlink from the manifest.
         product = _make_product(tmp_path)
         first = product / "lib" / "libb.so"
         second = product / "lib" / "libb-alias.so"
@@ -807,9 +796,8 @@ class TestPackProductBaseline:
     def test_pack_rejects_source_file_colliding_with_manifest_name(
         self, tmp_path: Path
     ) -> None:
-        # A real source file at the reserved manifest path would
-        # otherwise be silently overwritten by the generated manifest
-        # member, added last (Codex).
+        # A real source file at the reserved manifest path would otherwise be
+        # silently overwritten by the generated manifest member, added last.
         product = _make_product(tmp_path)
         (product / MANIFEST_MEMBER_NAME).write_text('{"not": "the real manifest"}\n')
         with pytest.raises(SnapshotError, match="reserved product baseline manifest"):
@@ -818,8 +806,8 @@ class TestPackProductBaseline:
     def test_pack_rejects_empty_directory_colliding_with_manifest_name(
         self, tmp_path: Path
     ) -> None:
-        # An empty directory at the reserved manifest path isn't in
-        # `paths`, so the file-only collision check missed it (Codex).
+        # An empty directory at the reserved path isn't in `paths`, so the
+        # file-only collision check missed it (Codex).
         product = _make_product(tmp_path)
         (product / MANIFEST_MEMBER_NAME).mkdir()
         with pytest.raises(SnapshotError, match="reserved product baseline manifest"):
@@ -828,8 +816,8 @@ class TestPackProductBaseline:
     def test_pack_rejects_non_empty_directory_colliding_with_manifest_name(
         self, tmp_path: Path
     ) -> None:
-        # A non-empty directory at the reserved path: its children are in
-        # `paths`, but the directory entry itself never is (Codex).
+        # A non-empty directory at the reserved path: children are in `paths`,
+        # but the directory entry itself never is (Codex).
         product = _make_product(tmp_path)
         collide_dir = product / MANIFEST_MEMBER_NAME
         collide_dir.mkdir()
@@ -850,8 +838,8 @@ class TestPackProductBaseline:
     def test_pack_repeated_invocation_into_source_dir_does_not_grow(
         self, tmp_path: Path
     ) -> None:
-        # pack SOURCE_DIR SOURCE_DIR/baseline.tar.zst, run twice -- must
-        # not embed the first run's own output, or archive size grows (Codex).
+        # pack SOURCE_DIR SOURCE_DIR/baseline.tar.zst, run twice -- must not
+        # embed the first run's own output (Codex).
         product = _make_product(tmp_path)
         out = product / "baseline.tar.zst"
         manifest1 = pack_product_baseline(product, out)
@@ -864,9 +852,8 @@ class TestPackProductBaseline:
     def test_pack_excludes_output_when_output_path_is_itself_a_symlink(
         self, tmp_path: Path
     ) -> None:
-        # If OUTPUT already exists as a symlink, excluding by the
-        # *resolved* target path -- not OUTPUT's own lexical path --
-        # wrongly excludes an unrelated real file (Codex).
+        # If OUTPUT exists as a symlink, excluding by its *resolved* target --
+        # not its own lexical path -- wrongly excludes a real file (Codex).
         product = _make_product(tmp_path)
         out = product / "baseline.tar.zst"
         out.symlink_to(product / "lib" / "libb.so")
@@ -881,9 +868,8 @@ class TestPackProductBaseline:
     def test_pack_repeated_invocation_via_source_dir_alias_does_not_grow(
         self, tmp_path: Path
     ) -> None:
-        # SOURCE_DIR as a symlink alias, OUTPUT through the real
-        # directory -- lexical comparison never shares a prefix with the
-        # alias, so a rerun embeds the previous archive (Codex).
+        # SOURCE_DIR as a symlink alias, OUTPUT through the real directory --
+        # lexical comparison never shares a prefix with the alias (Codex).
         product = _make_product(tmp_path)
         alias = tmp_path / "product-link"
         alias.symlink_to(product, target_is_directory=True)
@@ -899,9 +885,9 @@ class TestPackProductBaseline:
     def test_pack_into_not_yet_existing_subdirectory_is_deterministic_across_reruns(
         self, tmp_path: Path
     ) -> None:
-        # OUTPUT under a not-yet-existing subdirectory: the first pack
-        # never saw it, while a second (post-mkdir) pack discovered it
-        # as empty and added a member -- changing file_count (Codex).
+        # OUTPUT under a not-yet-existing subdirectory: the first pack never
+        # saw it, while a second (post-mkdir) pack discovered it as empty --
+        # changing file_count (Codex).
         product = _make_product(tmp_path)
         out = product / "artifacts" / "base.tar.zst"
         manifest1 = pack_product_baseline(product, out)
@@ -914,9 +900,8 @@ class TestPackProductBaseline:
     def test_pack_excludes_the_output_scaffold_directory_from_the_archive(
         self, tmp_path: Path
     ) -> None:
-        # The sibling test above only checked file_count/libraries
-        # equality, never unpacking to see `artifacts/` was itself still
-        # an archive member (Codex).
+        # The sibling test above only checked file_count/libraries equality,
+        # never unpacking to see `artifacts/` was itself still a member.
         product = _make_product(tmp_path)
         out = product / "artifacts" / "base.tar.zst"
         pack_product_baseline(product, out)
@@ -928,9 +913,8 @@ class TestPackProductBaseline:
     def test_pack_excludes_the_scaffold_directory_identically_across_reruns(
         self, tmp_path: Path
     ) -> None:
-        # Self-caught regression: existence-gated exclusion excluded
-        # `artifacts/` on the first pack but silently included it on a
-        # second, identical pack, since by then it already existed.
+        # Existence-gated exclusion excluded `artifacts/` on the first pack but
+        # silently included it on a second, identical pack (already existed).
         product = _make_product(tmp_path)
         out = product / "artifacts" / "base.tar.zst"
         pack_product_baseline(product, out)
@@ -943,9 +927,8 @@ class TestPackProductBaseline:
     def test_pack_preserves_a_declared_header_root_holding_the_output(
         self, tmp_path: Path
     ) -> None:
-        # OUTPUT inside a pre-existing (if empty) declared header root --
-        # real content. Unqualified exclusion dropped it anyway, so
-        # unpack rejected its own output (Codex).
+        # OUTPUT inside a pre-existing declared header root -- real content.
+        # Unqualified exclusion dropped it anyway (Codex).
         product = _make_product(tmp_path)
         (product / "public_headers").mkdir()
         out = product / "public_headers" / "base.tar.zst"
@@ -959,25 +942,23 @@ class TestPackProductBaseline:
     def test_pack_rejects_header_root_matching_the_output_scaffold_directory(
         self, tmp_path: Path
     ) -> None:
-        # output=SOURCE/newheaders/base.tar.zst, header root naming a dir
-        # that doesn't exist: the output-parent scaffold mkdir() fabricated
-        # an empty `newheaders/` that then wrongly passed validation,
-        # since validation ran *after* the mkdir (Codex).
+        # output=SOURCE/newheaders/base.tar.zst, header root naming a dir that
+        # doesn't exist: the output-parent scaffold mkdir() fabricated an empty
+        # `newheaders/` that then wrongly passed validation, since validation
+        # ran *after* the mkdir (Codex).
         product = _make_product(tmp_path)
         out = product / "newheaders" / "base.tar.zst"
         with pytest.raises(SnapshotError, match="header root"):
             pack_product_baseline(product, out, header_roots=["newheaders"])
-        # And the scaffold directory itself must not have been left
-        # behind by the failed call, same as any other pack rejection.
+        # Scaffold must not be left behind, same as any other rejection.
         assert not (product / "newheaders").exists()
 
     def test_pack_cleans_up_scaffold_after_manifest_collision_rejection(
         self, tmp_path: Path
     ) -> None:
         # The scaffold-cleanup fix originally only wired the empty-source
-        # rejection -- a *different* rejection (a source entry colliding
-        # with the reserved manifest name) left the scaffold dir behind
-        # (Codex). A retry must not see it as pre-existing real content.
+        # rejection -- a *different* rejection (colliding with the reserved
+        # manifest name) left the scaffold dir behind (Codex).
         from abicheck.product_baseline import MANIFEST_MEMBER_NAME
 
         product = _make_product(tmp_path)
@@ -995,9 +976,8 @@ class TestPackProductBaseline:
     def test_pack_cleans_up_scaffold_when_mkstemp_fails(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        # tempfile.mkstemp() sat between the two existing scaffold-cleanup
-        # try/except blocks, uncovered by either -- a failure there
-        # (ENOSPC, EMFILE) left the scaffold directory behind (Codex).
+        # tempfile.mkstemp() sat between the two scaffold-cleanup try/except
+        # blocks, uncovered by either -- a failure (ENOSPC) left it behind.
         import abicheck.product_baseline as pb_mod
 
         product = _make_product(tmp_path)
@@ -1049,9 +1029,8 @@ class TestUnpackProductBaseline:
     def test_unpack_destination_gets_umask_derived_permissions(
         self, tmp_path: Path
     ) -> None:
-        # mkdtemp() (the staging dir) is always 0700 regardless of umask
-        # -- published DEST_DIR must not inherit that, or a different-
-        # user step can't traverse it (CodeRabbit).
+        # mkdtemp() (the staging dir) is always 0700 regardless of umask --
+        # published DEST_DIR must not inherit that (CodeRabbit).
         product = _make_product(tmp_path)
         archive = tmp_path / "baseline.tar.zst"
         pack_product_baseline(product, archive)
@@ -1085,9 +1064,9 @@ class TestUnpackProductBaseline:
             unpack_product_baseline(archive, dest)
 
     def test_unpack_rejects_symlink_destination(self, tmp_path: Path) -> None:
-        # A symlink to a genuinely empty directory passed the empty-
-        # destination check and crashed at publish: Path.rmdir() operates
-        # on the symlink itself, raising unhandled NotADirectoryError (Codex).
+        # A symlink to a genuinely empty directory passed the empty-destination
+        # check and crashed at publish: Path.rmdir() operates on the symlink
+        # itself, raising unhandled NotADirectoryError (Codex).
         product = _make_product(tmp_path)
         archive = tmp_path / "baseline.tar.zst"
         pack_product_baseline(product, archive)
@@ -1125,8 +1104,7 @@ class TestUnpackProductBaseline:
         self, tmp_path: Path
     ) -> None:
         # The manifest's size/sha256 are trusted at pack time but never
-        # re-verified against extracted bytes at unpack -- a tampered
-        # archive would be published unverified and silently analyzed (Codex).
+        # re-verified against extracted bytes at unpack (Codex).
         product = _make_product(tmp_path)
         archive = tmp_path / "baseline.tar.zst"
         pack_product_baseline(product, archive)
@@ -1160,8 +1138,7 @@ class TestUnpackProductBaseline:
         self, tmp_path: Path
     ) -> None:
         # An earlier revision used an `if lib.sha256:` truthiness guard,
-        # letting an attacker blank the field to disable checksum
-        # verification entirely (Codex). Size stays correct to isolate this.
+        # letting an attacker blank the field to disable verification (Codex).
         product = _make_product(tmp_path)
         archive = tmp_path / "baseline.tar.zst"
         pack_product_baseline(product, archive)
@@ -1188,9 +1165,8 @@ class TestUnpackProductBaseline:
     def test_unpack_rejects_an_extracted_library_with_no_manifest_entry(
         self, tmp_path: Path
     ) -> None:
-        # The per-library checksum verification above only examines
-        # declared entries -- an attacker could omit a LibraryEntry
-        # entirely, so that file is never verified and gets published (Codex).
+        # The per-library checksum verification above only examines declared
+        # entries -- an attacker could omit a LibraryEntry entirely (Codex).
         product = _make_product(tmp_path)
         archive = tmp_path / "baseline.tar.zst"
         pack_product_baseline(product, archive)
@@ -1217,9 +1193,8 @@ class TestUnpackProductBaseline:
     def test_unpack_rejects_an_undeclared_hardlink_library_alias(
         self, tmp_path: Path
     ) -> None:
-        # The cross-check compares by identity, right for a symlink alias
-        # -- but a hardlink alias gets its own entry, so omitting it
-        # shares (dev, ino) with the declared library (Codex).
+        # The cross-check compares by identity, right for a symlink alias --
+        # but a hardlink alias gets its own entry (Codex).
         product = _make_product(tmp_path)
         first = product / "lib" / "libb.so"
         second = product / "lib" / "libb-alias.so"
@@ -1252,9 +1227,9 @@ class TestUnpackProductBaseline:
         self, tmp_path: Path
     ) -> None:
         # The hardlink check compared against _discover_library_map()'s
-        # deduplicated map -- a symlink alias sharing identity, sorted
-        # before an undeclared hardlink alias, survives dedup as the sole
-        # representative, hiding the undeclared hardlink (Codex).
+        # deduplicated map -- a symlink alias sharing identity, sorted before
+        # an undeclared hardlink alias, survives dedup as the sole
+        # representative, hiding it (Codex).
         product = _make_product(tmp_path)
         target = product / "lib" / "z.so"
         target.write_bytes(b"ELF-CONTENT")
@@ -1282,12 +1257,49 @@ class TestUnpackProductBaseline:
             unpack_product_baseline(tampered, dest)
         assert not dest.exists()
 
+    def test_unpack_hashes_each_hardlinked_payload_only_once(
+        self, tmp_path: Path
+    ) -> None:
+        # N library-shaped hardlink aliases of one payload each get their own
+        # declared LibraryEntry (unlike a symlink alias) -- hashing every
+        # entry's full content independently turns N declared aliases into N
+        # full reads of the same bytes, a cost an attacker controls (Codex).
+        product = _make_product(tmp_path)
+        first = product / "lib" / "lib0.so"
+        first.write_bytes(b"\x7fELF" + b"payload" * 100)
+        n_aliases = 12
+        for i in range(1, n_aliases):
+            (product / "lib" / f"lib{i}.so").hardlink_to(first)
+        archive = tmp_path / "baseline.tar.zst"
+        manifest = pack_product_baseline(product, archive)
+        # + the fixture's own liba.so.1.2.3 and libb.so, each a distinct entry
+        # (liba.so itself, a symlink to a library-shaped target, gets none).
+        assert len(manifest.libraries) == n_aliases + 2
+
+        hash_calls = []
+        real_sha256 = hashlib.sha256
+
+        def counting_sha256(*args: object, **kwargs: object) -> object:
+            hash_calls.append(1)
+            return real_sha256(*args, **kwargs)
+
+        import abicheck.product_baseline as pb
+
+        original = pb.hashlib.sha256
+        pb.hashlib.sha256 = counting_sha256
+        try:
+            unpack_product_baseline(archive, tmp_path / "dest")
+        finally:
+            pb.hashlib.sha256 = original
+        # One hash per unique (dev, ino) identity: the shared hardlinked
+        # payload once, plus liba.so.1.2.3 and libb.so each once.
+        assert len(hash_calls) == 3
+
     def test_unpack_rejects_a_falsely_declared_non_library(
         self, tmp_path: Path
     ) -> None:
-        # The inventory checks only catch an *undeclared* library -- a
-        # declared ordinary file (README.txt) with a correct size/digest
-        # was accepted, handing every caller a false library (Codex).
+        # The inventory checks only catch an *undeclared* library -- a declared
+        # ordinary file (README.txt) with a correct size/digest was accepted.
         product = _make_product(tmp_path)
         (product / "README.txt").write_bytes(b"hello world, not a library")
         archive = tmp_path / "baseline.tar.zst"
@@ -1307,9 +1319,7 @@ class TestUnpackProductBaseline:
             assert readme_fh is not None
             readme_bytes = readme_fh.read()
         # Appended, not replaced: the product's own real libraries stay
-        # declared, so only the added false entry is under test here --
-        # dropping them would instead trip the *undeclared*-library check
-        # (a different code path than the one this test targets) first.
+        # declared, so only the added false entry is under test here.
         manifest_raw["libraries"].append(
             {
                 "path": "README.txt",
@@ -1328,9 +1338,8 @@ class TestUnpackProductBaseline:
     def test_unpack_translates_a_symlink_loop_into_snapshot_error(
         self, tmp_path: Path
     ) -> None:
-        # A self-referential symlink made Path.resolve() raise
-        # RuntimeError from _resolve_under_root() -- unpack re-raised the
-        # raw exception, bypassing its SnapshotError-only contract (Codex).
+        # A self-referential symlink made Path.resolve() raise RuntimeError
+        # from _resolve_under_root() -- unpack re-raised it raw (Codex).
         product = _make_product(tmp_path)
         archive = tmp_path / "baseline.tar.zst"
         pack_product_baseline(product, archive)
@@ -1365,9 +1374,8 @@ class TestUnpackProductBaseline:
     def test_unpack_translates_an_embedded_nul_path_into_snapshot_error(
         self, tmp_path: Path
     ) -> None:
-        # _resolve_under_root() only caught RuntimeError -- an embedded
-        # NUL byte in a manifest path makes Path.resolve() raise
-        # ValueError instead, escaping past the SnapshotError contract.
+        # _resolve_under_root() only caught RuntimeError -- an embedded NUL
+        # byte makes Path.resolve() raise ValueError instead (Codex).
         product = _make_product(tmp_path)
         archive = tmp_path / "baseline.tar.zst"
         pack_product_baseline(product, archive)
@@ -1400,9 +1408,8 @@ class TestUnpackProductBaseline:
     def test_unpack_cleans_up_staging_when_publication_fails(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        # A failure during publication ran outside the extraction cleanup
-        # try -- staging survived and the raw OSError escaped unwrapped
-        # instead of SnapshotError (Codex).
+        # A failure during publication ran outside the extraction cleanup try
+        # -- staging survived and the raw OSError escaped unwrapped (Codex).
         product = _make_product(tmp_path)
         archive = tmp_path / "baseline.tar.zst"
         pack_product_baseline(product, archive)
@@ -1444,8 +1451,8 @@ class TestUnpackProductBaseline:
     def test_unpack_translates_corrupt_zstd_data_to_snapshot_error(
         self, tmp_path: Path
     ) -> None:
-        # A corrupt/truncated .tar.zst must raise SnapshotError (exit 64),
-        # not an unhandled zstandard.ZstdError escaping extract() (Codex).
+        # A corrupt/truncated .tar.zst must raise SnapshotError, not an
+        # unhandled zstandard.ZstdError escaping extract() (Codex).
         bogus = tmp_path / "corrupt.tar.zst"
         bogus.write_bytes(b"\x28\xb5\x2f\xfd" + b"not really zstd content")
         with pytest.raises(SnapshotError, match="failed to extract"):
@@ -1454,9 +1461,8 @@ class TestUnpackProductBaseline:
     def test_unpack_rejects_manifest_missing_schema_discriminator(
         self, tmp_path: Path
     ) -> None:
-        # from_dict() defensively *defaults* a missing "schema" key --
-        # applied to the discriminator itself it would pass any mapping
-        # without one (e.g. "{}") as a recognized baseline (Codex).
+        # from_dict() defensively *defaults* a missing "schema" key -- applied
+        # to the discriminator itself it would pass "{}" as recognized (Codex).
         product = _make_product(tmp_path)
         archive = tmp_path / "baseline.tar.zst"
         pack_product_baseline(product, archive)
@@ -1468,9 +1474,8 @@ class TestUnpackProductBaseline:
     def test_unpack_rejects_header_root_escaping_the_product_root(
         self, tmp_path: Path
     ) -> None:
-        # header_roots is handed to a header-parsing tool, so an escaping
-        # root must be rejected -- from_dict()'s defensive str() coercion
-        # accepts any string unchanged, so nothing upstream catches it (CodeRabbit).
+        # header_roots is handed to a header-parsing tool, so an escaping root
+        # must be rejected -- from_dict()'s str() coercion accepts it unchanged.
         product = _make_product(tmp_path)
         archive = tmp_path / "baseline.tar.zst"
         pack_product_baseline(product, archive)
@@ -1495,8 +1500,7 @@ class TestUnpackProductBaseline:
         self, tmp_path: Path
     ) -> None:
         # LibraryEntry.path carries the same untrusted-manifest risk as
-        # header_roots -- an escaping path must be rejected the same
-        # way, not published as though it round-tripped (Codex).
+        # header_roots -- an escaping path must be rejected the same way.
         product = _make_product(tmp_path)
         archive = tmp_path / "baseline.tar.zst"
         pack_product_baseline(product, archive)
@@ -1557,9 +1561,8 @@ class TestUnpackProductBaseline:
     def test_unpack_rejects_header_root_that_does_not_exist(
         self, tmp_path: Path
     ) -> None:
-        # A header root resolving *under* root but naming nothing real
-        # never round-tripped through a real pack() call (which requires
-        # existence at pack time) -- hand-edited or corrupt.
+        # A header root resolving *under* root but naming nothing real never
+        # round-tripped through a real pack() call -- hand-edited or corrupt.
         product = _make_product(tmp_path)
         archive = tmp_path / "baseline.tar.zst"
         pack_product_baseline(product, archive)
@@ -1585,9 +1588,8 @@ class TestUnpackProductBaseline:
         archive = tmp_path / "baseline.tar.zst"
         pack_product_baseline(product, archive)
 
-        # Monkey-patch the schema forward-compat check directly, since
-        # constructing a real "future" archive would require writing
-        # this format twice.
+        # Monkey-patch the schema forward-compat check directly, since a
+        # real "future" archive would require writing this format twice.
         from abicheck import product_baseline as pb
 
         with pytest.raises(SnapshotError, match="newer than this abicheck build"):
@@ -1596,9 +1598,8 @@ class TestUnpackProductBaseline:
     def test_unpack_rejects_nonexistent_older_major_schema(
         self, tmp_path: Path
     ) -> None:
-        # Only major >= 1 was ever real; the "newer than supported" check
-        # alone let v0 (or negative) through -- a malformed manifest got
-        # deserialized with v1's layout and published (Codex).
+        # Only major >= 1 was ever real; "newer than supported" alone let v0
+        # (or negative) through, deserialized with v1's layout (Codex).
         product = _make_product(tmp_path)
         archive = tmp_path / "baseline.tar.zst"
         pack_product_baseline(product, archive)
@@ -1614,9 +1615,8 @@ class TestUnpackProductBaseline:
     def test_unpack_preserves_existing_destination_permissions(
         self, tmp_path: Path
     ) -> None:
-        # A pre-created DEST_DIR with non-default permissions: publication
-        # replaces it outright, and staging's mode was previously always
-        # re-derived from the umask, silently widening/narrowing it (Codex).
+        # A pre-created DEST_DIR with non-default permissions: staging's mode
+        # was previously re-derived from the umask, silently changing it (Codex).
         product = _make_product(tmp_path)
         archive = tmp_path / "baseline.tar.zst"
         pack_product_baseline(product, archive)
