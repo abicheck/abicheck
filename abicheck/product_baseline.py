@@ -804,6 +804,41 @@ def _add_manifest_member(
     tf.addfile(info, io.BytesIO(payload))
 
 
+class _LimitedTarStreamWriter:
+    """Wraps the zstd compressor `tarfile` writes raw tar bytes to,
+    raising `SnapshotError` as soon as more than `max_bytes` of raw
+    (pre-compression) tar stream have been written -- byte-for-byte the
+    same measure `_safe_extract_zst_tar()`'s own `total_bytes` counts on
+    read, so `pack_product_baseline()` can never publish an archive whose
+    real decompressed size the reader's decompression-bomb defense would
+    reject. See `pack_product_baseline()`'s own comment for why this
+    replaced an earlier pre-write estimate (Codex)."""
+
+    def __init__(self, wrapped: Any, max_bytes: int) -> None:
+        self._wrapped = wrapped
+        self._max_bytes = max_bytes
+        self._total = 0
+
+    def write(self, data: bytes) -> int:
+        self._total += len(data)
+        if self._total > self._max_bytes:
+            raise SnapshotError(
+                f"product baseline archive would produce a decompressed "
+                f"tar stream of at least {self._total} bytes, exceeding "
+                f"the {self._max_bytes}-byte safety limit "
+                f"unpack_product_baseline() enforces (override via "
+                f"{_MAX_DECOMPRESSED_TAR_BYTES_ENV}) -- reduce what's "
+                "packed, or raise the limit on both sides"
+            )
+        result: int = self._wrapped.write(data)
+        return result
+
+    def flush(self) -> None:
+        flush = getattr(self._wrapped, "flush", None)
+        if flush is not None:
+            flush()
+
+
 def pack_product_baseline(
     source_dir: Path | str,
     output: Path | str,
@@ -925,10 +960,18 @@ def pack_product_baseline(
     # unpack_product_baseline() (via TarExtractor's own decompression-bomb
     # defenses) would always refuse -- otherwise pack_product_baseline()
     # can successfully publish something that can never be unpacked
-    # (Codex). Member count is exact (matches file_count below); the byte
-    # total is a lower-bound estimate (declared content only, no tar header
-    # overhead, no manifest -- computed after packing and checked
-    # separately at write time), same as what the reader's own check sums.
+    # (Codex). Member count is exact (matches file_count below) and cheap
+    # to check up front. The decompressed-byte total is NOT checked here as
+    # a pre-write estimate -- an estimate over declared file content alone
+    # omits tar framing (a 512-byte header per member, data padded to a
+    # 512-byte boundary, the end-of-archive marker), which is exactly what
+    # the reader's own check (_safe_extract_zst_tar's `total_bytes`, the
+    # raw decompressed stream) counts -- so an estimate could pass here
+    # while the reader's stricter, framing-inclusive check still rejects
+    # the real archive (Codex, fresh evidence). Enforced exactly instead,
+    # byte-for-byte matching the reader, by _LimitedTarStreamWriter below,
+    # which wraps the same raw pre-compression byte stream the reader
+    # later measures on decompression.
     total_member_count = len(paths) + len(archived_empty_dirs) + 1  # +1 manifest
     max_members = _max_tar_members()
     if total_member_count > max_members:
@@ -940,19 +983,7 @@ def pack_product_baseline(
             f"{_MAX_TAR_MEMBERS_ENV}) -- reduce the number of packed paths, "
             "or raise the limit on both sides"
         )
-    estimated_content_bytes = sum(
-        p.stat().st_size for p in paths if p.is_file() and not p.is_symlink()
-    )
     max_decoded_bytes = _max_decompressed_tar_bytes()
-    if estimated_content_bytes > max_decoded_bytes:
-        _cleanup_output_scaffold_dirs()
-        raise SnapshotError(
-            f"product baseline would pack at least {estimated_content_bytes} "
-            f"bytes of file content, exceeding the {max_decoded_bytes}-byte "
-            f"decompressed-archive safety limit unpack_product_baseline() "
-            f"enforces (override via {_MAX_DECOMPRESSED_TAR_BYTES_ENV}) -- "
-            "reduce what's packed, or raise the limit on both sides"
-        )
 
     # MANIFEST_MEMBER_NAME is reserved: a real source entry there would collide with the generated manifest member, added last, silently winning on extraction. Must reject a *directory* at the reserved path too -- an empty one is never in `paths`, and a non-empty one's own directory entry never is either, only its children -- either shape let packing write a tar requiring the same path to be both a directory and a regular file.
     manifest_child_prefix = MANIFEST_MEMBER_NAME + "/"
@@ -1053,7 +1084,8 @@ def pack_product_baseline(
         libraries: list[LibraryEntry] = []
         with os.fdopen(fd, "wb") as raw_out:
             with cctx.stream_writer(raw_out, closefd=False) as compressor:
-                with tarfile.open(fileobj=compressor, mode="w|") as tf:
+                limited = _LimitedTarStreamWriter(compressor, max_decoded_bytes)
+                with tarfile.open(fileobj=limited, mode="w|") as tf:  # type: ignore[call-overload]
                     for path in paths:
                         arcname = _relative_posix(path, source_path)
                         entry = _add_member(tf, path, arcname, source_path)

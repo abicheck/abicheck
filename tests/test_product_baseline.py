@@ -312,6 +312,7 @@ class TestPackProductBaseline:
         pack_product_baseline(product_b, out_b)
         assert out_a.read_bytes() == out_b.read_bytes()
 
+    @pytest.mark.skipif(os.name == "nt", reason="POSIX file mode semantics only")
     def test_pack_preserves_executable_bit_set_only_for_group_or_other(
         self, tmp_path: Path
     ) -> None:
@@ -494,7 +495,8 @@ class TestPackProductBaseline:
         outside = tmp_path / "outside.so"
         outside.write_bytes(b"outside")
         # A *relative* target that still walks outside source_dir -- distinct from an absolute target, rejected earlier regardless of where it points.
-        (product / "lib" / "evil.so").symlink_to(Path("..") / ".." / "outside.so")
+        # A literal forward-slash string, not `Path("..") / ".." / "outside.so"`: stringifying a Path renders native separators, so on Windows the identical target would come out backslash-joined and trip the (also real, but different) backslash rejection first instead of this escape check (Codex).
+        (product / "lib" / "evil.so").symlink_to("../../outside.so")
         with pytest.raises(SnapshotError, match="escapes"):
             pack_product_baseline(product, tmp_path / "b.tar.zst")
 
@@ -551,6 +553,10 @@ class TestPackProductBaseline:
         with pytest.raises(SnapshotError, match="absolute target"):
             pack_product_baseline(product, tmp_path / "b.tar.zst")
 
+    @pytest.mark.skipif(
+        os.name == "nt",
+        reason="fixture needs a POSIX-only filename Windows cannot create",
+    )
     def test_pack_rejects_a_windows_drive_anchored_member_name(
         self, tmp_path: Path
     ) -> None:
@@ -560,6 +566,10 @@ class TestPackProductBaseline:
         with pytest.raises(SnapshotError, match="anchored under Windows"):
             pack_product_baseline(product, tmp_path / "b.tar.zst")
 
+    @pytest.mark.skipif(
+        os.name == "nt",
+        reason="fixture needs a POSIX-only filename Windows cannot create -- a literal backslash in a name component is a path separator there, so this decomposes into a real subdirectory instead",
+    )
     def test_pack_rejects_a_backslash_traversal_member_name(
         self, tmp_path: Path
     ) -> None:
@@ -569,6 +579,10 @@ class TestPackProductBaseline:
         with pytest.raises(SnapshotError, match="backslash"):
             pack_product_baseline(product, tmp_path / "b.tar.zst")
 
+    @pytest.mark.skipif(
+        os.name == "nt",
+        reason="fixture needs a POSIX-only filename Windows cannot create -- a literal backslash in a name component is a path separator there, so this decomposes into a real subdirectory instead",
+    )
     def test_pack_rejects_a_member_name_with_a_benign_backslash(
         self, tmp_path: Path
     ) -> None:
@@ -666,6 +680,10 @@ class TestPackProductBaseline:
         with pytest.raises(SnapshotError, match="collides with"):
             pack_product_baseline(product, tmp_path / "b.tar.zst")
 
+    @pytest.mark.skipif(
+        os.name == "nt",
+        reason="self-referential-symlink loop detection here keys on POSIX's errno.ELOOP from stat(), which Windows's own reparse-point loop handling does not reliably raise the same way (known gap, not exercised on this platform)",
+    )
     def test_pack_rejects_a_self_referential_symlink_loop(self, tmp_path: Path) -> None:
         # A self-referential symlink made _add_member()'s Path.resolve() raise RuntimeError, caught by the sibling `except ValueError` path (Codex).
         product = _make_product(tmp_path)
@@ -1643,6 +1661,7 @@ class TestPackProductBaselinePermissions:
         pack_product_baseline(product, out)
         assert stat_mod.S_IMODE(out.stat().st_mode) == 0o644
 
+    @pytest.mark.skipif(os.name == "nt", reason="POSIX file mode semantics only")
     def test_umask_derived_mode_never_calls_os_umask_and_leaves_no_probe(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -1662,6 +1681,7 @@ class TestPackProductBaselinePermissions:
         assert mode == 0o644
         assert not list(tmp_path.iterdir())  # probe entry removed
 
+    @pytest.mark.skipif(os.name == "nt", reason="POSIX file mode semantics only")
     def test_umask_derived_mode_reflects_a_mid_process_umask_change(
         self, tmp_path: Path
     ) -> None:

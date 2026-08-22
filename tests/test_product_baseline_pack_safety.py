@@ -27,7 +27,7 @@ from pathlib import Path
 import pytest
 
 from abicheck.errors import SnapshotError
-from abicheck.product_baseline import pack_product_baseline
+from abicheck.product_baseline import pack_product_baseline, unpack_product_baseline
 
 
 def _make_product(root: Path) -> Path:
@@ -127,7 +127,7 @@ class TestPackProductBaselineReaderLimits:
         monkeypatch.setenv("_ABICHECK_TAR_ZST_MAX_DECODED_BYTES", "10")
         product = _make_product(tmp_path)  # libb.so alone is 1500 bytes
         out = tmp_path / "b.tar.zst"
-        with pytest.raises(SnapshotError, match="decompressed-archive safety limit"):
+        with pytest.raises(SnapshotError, match="decompressed tar stream"):
             pack_product_baseline(product, out)
         assert not out.exists()
 
@@ -139,6 +139,55 @@ class TestPackProductBaselineReaderLimits:
         out = tmp_path / "b.tar.zst"
         pack_product_baseline(product, out)
         assert out.exists()
+
+    def test_rejects_on_tar_framing_overhead_alone_even_when_declared_content_is_tiny(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The actual bug: many tiny files have negligible declared content
+        # but each still costs a 512-byte tar header plus padding -- a
+        # pre-write estimate over declared content alone would pass a limit
+        # the real, framing-inclusive decompressed stream exceeds (Codex).
+        product = tmp_path / "product"
+        (product / "lib").mkdir(parents=True)
+        for i in range(200):
+            (product / "lib" / f"f{i}.so").write_bytes(b"x")  # 1 byte each
+        # 200 files * 1 byte = 200 bytes of declared content -- comfortably
+        # under this limit -- but 200 * (512-byte header + 512-byte padded
+        # data) + manifest + end-of-archive marker is well over it.
+        monkeypatch.setenv("_ABICHECK_TAR_ZST_MAX_DECODED_BYTES", "5000")
+        out = tmp_path / "b.tar.zst"
+        with pytest.raises(SnapshotError, match="decompressed tar stream"):
+            pack_product_baseline(product, out)
+        assert not out.exists()
+
+    def test_pack_and_unpack_agree_at_a_tight_byte_boundary(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Round-trip proof that pack's exact in-stream byte count really
+        # matches what unpack enforces: pack succeeds at a limit set from
+        # the real archive's own decompressed size, and a real unpack under
+        # the identical limit succeeds too -- neither side's check is an
+        # estimate that could disagree with the other's.
+        product = _make_product(tmp_path)
+        out = tmp_path / "b.tar.zst"
+        pack_product_baseline(product, out)  # default (generous) limits
+
+        import zstandard
+
+        dctx = zstandard.ZstdDecompressor()
+        real_stream_len = len(
+            dctx.decompress(out.read_bytes(), max_output_size=1 << 30)
+        )
+
+        # Re-pack under a limit set to the real archive's own exact size --
+        # deterministic packing (same inputs) means this must succeed.
+        monkeypatch.setenv("_ABICHECK_TAR_ZST_MAX_DECODED_BYTES", str(real_stream_len))
+        out2 = tmp_path / "b2.tar.zst"
+        pack_product_baseline(product, out2)
+        assert out2.exists()
+
+        dest = tmp_path / "unpacked"
+        unpack_product_baseline(out2, dest)  # must not raise under the same limit
 
     def test_rejects_when_manifest_bytes_exceed_the_readers_limit(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

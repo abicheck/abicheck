@@ -2423,6 +2423,60 @@ class TestTarExtractorSymlinks:
         with pytest.raises(ExtractionSecurityError, match="symlink target"):
             TarExtractor().extract(archive, out)
 
+    def test_symlink_member_rejected_when_destination_cannot_create_symlinks(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # tarfile silently substitutes a full copy of the target when
+        # os.symlink() fails (e.g. Windows without symlink privilege) --
+        # no exception, no flag. Detected up front instead of letting a
+        # confusing downstream error surface (Codex).
+        from abicheck import package as package_mod
+
+        archive = tmp_path / "symlink.tar.gz"
+        with tarfile.open(archive, "w:gz") as tf:
+            info = tarfile.TarInfo(name="lib/libfoo.so.1.0")
+            info.size = 4
+            tf.addfile(info, io.BytesIO(b"data"))
+            sym = tarfile.TarInfo(name="lib/libfoo.so")
+            sym.type = tarfile.SYMTYPE
+            sym.linkname = "libfoo.so.1.0"
+            tf.addfile(sym)
+
+        out = tmp_path / "output"
+        out.mkdir()
+        monkeypatch.setattr(
+            package_mod, "_target_supports_symlinks", lambda target_root: False
+        )
+        from abicheck.errors import SnapshotError
+
+        with pytest.raises(SnapshotError, match="cannot create one"):
+            TarExtractor().extract(archive, out)
+
+    def test_target_supports_symlinks_probe_true_on_a_real_symlink_capable_fs(
+        self, tmp_path: Path
+    ) -> None:
+        from abicheck.package import _target_supports_symlinks
+
+        assert _target_supports_symlinks(tmp_path) is True
+        # No leftover probe entries.
+        assert not list(tmp_path.iterdir())
+
+    def test_target_supports_symlinks_probe_false_when_symlink_raises(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import os as os_mod
+
+        from abicheck.package import _target_supports_symlinks
+
+        def _failing_symlink(*args: object, **kwargs: object) -> None:
+            raise OSError("simulated: no privilege")
+
+        monkeypatch.setattr(os_mod, "symlink", _failing_symlink)
+        assert _target_supports_symlinks(tmp_path) is False
+        # The probe target (created via touch(), unaffected by the
+        # symlink failure) is still cleaned up.
+        assert not list(tmp_path.iterdir())
+
     def test_pre_312_path_depth_collapse_escape_rejected(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -2820,6 +2874,13 @@ class TestRejectOversizedDeclaredContent:
             def __init__(self, name: str, size: int) -> None:
                 self.name = name
                 self.size = size
+                self.linkname = ""
+
+            def isreg(self) -> bool:
+                return True
+
+            def islnk(self) -> bool:
+                return False
 
         class _FakeTarFile:
             def getmembers(self) -> list[_FakeMember]:
@@ -2880,6 +2941,13 @@ class TestRejectOversizedDeclaredContent:
             def __init__(self, name: str, size: int) -> None:
                 self.name = name
                 self.size = size
+                self.linkname = ""
+
+            def isreg(self) -> bool:
+                return True
+
+            def islnk(self) -> bool:
+                return False
 
         class _FakeTarFile:
             def getmembers(self) -> list[_FakeMember]:
@@ -2941,6 +3009,100 @@ class TestRejectOversizedDeclaredContent:
         out.mkdir()
         with pytest.raises(ExtractionSecurityError, match="safety limit"):
             TarExtractor().extract(archive, out)
+
+
+class TestRejectHardlinkFallbackAmplification:
+    """A hard-link member's own declared size is 0 -- tarfile.makelink()
+    falls back to a full copy of the *referenced* member's content when
+    os.link() fails, so many hard links to one payload can expand real
+    disk usage far past the declared-byte-sum check, which never sees it
+    (Codex)."""
+
+    @staticmethod
+    def _write_archive(
+        tmp_path: Path, *, real_size: int, hardlink_count: int
+    ) -> Path:
+        archive = tmp_path / "hardlinks.tar"
+        with tarfile.open(archive, "w") as tf:
+            info = tarfile.TarInfo(name="real.bin")
+            info.size = real_size
+            tf.addfile(info, io.BytesIO(b"x" * real_size))
+            for i in range(hardlink_count):
+                link = tarfile.TarInfo(name=f"alias{i}.bin")
+                link.type = tarfile.LNKTYPE
+                link.linkname = "real.bin"
+                link.size = 0  # real tar writers always declare 0 here
+                tf.addfile(link)
+        return archive
+
+    def test_rejects_worst_case_hardlink_expansion_beyond_the_limit(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Declared byte sum: 600 (only the real file; every hardlink
+        # declares 0) -- comfortably under this limit. Worst case if every
+        # alias falls back to a full copy: 600 * 11 = 6600, well over it.
+        monkeypatch.setenv("_ABICHECK_TAR_ZST_MAX_DECODED_BYTES", "1000")
+        archive = self._write_archive(tmp_path, real_size=600, hardlink_count=10)
+        out = tmp_path / "output"
+        out.mkdir()
+        with pytest.raises(ExtractionSecurityError, match="hard-link members"):
+            TarExtractor().extract(archive, out)
+
+    def test_accepts_hardlinks_whose_worst_case_stays_within_the_limit(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("_ABICHECK_TAR_ZST_MAX_DECODED_BYTES", "100000")
+        archive = self._write_archive(tmp_path, real_size=600, hardlink_count=10)
+        out = tmp_path / "output"
+        out.mkdir()
+        TarExtractor().extract(archive, out)
+        assert (out / "real.bin").exists()
+
+    def test_rejects_a_chained_hardlink_worst_case(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # A link to a link (never emitted by a real tar writer, but not
+        # forbidden by the format) must still resolve to the real payload
+        # at the bottom of the chain, not stop at the first hop.
+        monkeypatch.setenv("_ABICHECK_TAR_ZST_MAX_DECODED_BYTES", "1000")
+        archive = tmp_path / "chained.tar"
+        with tarfile.open(archive, "w") as tf:
+            info = tarfile.TarInfo(name="real.bin")
+            info.size = 600
+            tf.addfile(info, io.BytesIO(b"x" * 600))
+            for i in range(10):
+                link = tarfile.TarInfo(name=f"alias{i}.bin")
+                link.type = tarfile.LNKTYPE
+                # Each alias points to the previous one, not straight to
+                # the real file -- a 10-deep chain.
+                link.linkname = "real.bin" if i == 0 else f"alias{i - 1}.bin"
+                link.size = 0
+                tf.addfile(link)
+        out = tmp_path / "output"
+        out.mkdir()
+        with pytest.raises(ExtractionSecurityError, match="hard-link members"):
+            TarExtractor().extract(archive, out)
+
+    def test_dangling_hardlink_reference_does_not_crash_the_check(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # A hard link naming a member that doesn't exist in the archive
+        # can't be exploited for amplification (extraction fails outright
+        # on it either way) -- must degrade safely, not raise internally
+        # (an AttributeError/KeyError escaping this check's own logic).
+        from abicheck.package import _reject_hardlink_fallback_amplification
+
+        archive = tmp_path / "dangling.tar"
+        with tarfile.open(archive, "w") as tf:
+            link = tarfile.TarInfo(name="alias.bin")
+            link.type = tarfile.LNKTYPE
+            link.linkname = "nonexistent.bin"
+            link.size = 0
+            tf.addfile(link)
+        with tarfile.open(archive) as tf:
+            # Doesn't raise: the dangling link's own declared size (0)
+            # never approaches this generous limit.
+            _reject_hardlink_fallback_amplification(tf, 1_000_000)
 
 
 _real_import = __import__

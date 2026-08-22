@@ -121,7 +121,28 @@ def _validate_symlink_target(
         ) from exc
 
 
-def _validate_member(member: tarfile.TarInfo, target_root: Path) -> None:
+def _target_supports_symlinks(target_root: Path) -> bool:
+    """Probe whether *target_root* can actually create a symlink. Most notably false on Windows without `SeCreateSymbolicLinkPrivilege` (no Developer Mode enabled, not running elevated): `os.symlink()` raises `OSError`, and Python's own `tarfile` extraction machinery (`TarFile.makelink()`) silently falls back to extracting a full copy of the symlink's *referenced* member instead -- no exception, no flag, nothing that distinguishes "a real symlink" from "a copy that used to be a symlink" in the extracted result. Left undetected, this surfaces far downstream as a confusing "manifest never declared this file" error rather than an honest diagnosis of the real, platform-level cause (Codex).
+
+    A live, unlinked probe entry (mirroring `product_baseline.py`'s own `_umask_derived_mode()` technique) rather than a cached platform check: the answer can change within a process's lifetime (Developer Mode toggled, a differently-privileged re-exec), so caching risks staleness for no real benefit -- this probe is cheap, one create/unlink pair, and called at most once per extraction.
+    """
+    probe_target = target_root / f".abicheck-symlink-probe-target-{os.getpid()}"
+    probe_link = target_root / f".abicheck-symlink-probe-link-{os.getpid()}"
+    try:
+        probe_target.touch()
+        os.symlink(probe_target.name, probe_link)
+    except OSError:
+        return False
+    else:
+        return True
+    finally:
+        probe_link.unlink(missing_ok=True)
+        probe_target.unlink(missing_ok=True)
+
+
+def _validate_member(
+    member: tarfile.TarInfo, target_root: Path, *, supports_symlinks: bool = True
+) -> None:
     """Every `_safe_extract` member check, shared by the bulk (3.12+) and
     per-member (< 3.12) extraction paths so the two can't drift."""
     _validate_member_path(member.name, target_root)
@@ -131,21 +152,21 @@ def _validate_member(member: tarfile.TarInfo, target_root: Path) -> None:
         )
     if member.issym():
         _validate_symlink_target(member.name, member.linkname, target_root)
+        if not supports_symlinks:
+            # Not a security violation -- a platform/privilege limitation.
+            # tarfile would otherwise silently substitute a full copy of
+            # the symlink's target here, corrupting the archive's
+            # declared structure without any error at all (see
+            # _target_supports_symlinks()'s own docstring).
+            raise SnapshotError(
+                f"archive member {member.name!r} is a symlink, but this destination cannot create one (no privilege/support for symlinks here) -- extracting would silently substitute a full copy of its target instead of the declared link, corrupting the archive's structure. Extract somewhere that supports symlinks (on Windows: enable Developer Mode, or run elevated)."
+            )
     elif member.islnk():
         _validate_member_path(member.linkname, target_root)  # a member name
 
 
 def _reject_oversized_declared_content(tf: tarfile.TarFile) -> None:
-    """Reject an archive whose declared member sizes sum past the same
-    limit `_safe_extract_zst_tar` enforces on the decompressed tar
-    *stream* -- a GNU/PAX sparse member's `TarInfo.size` is the real
-    logical extent tarfile materializes even though the stream only
-    carries non-hole blocks. Iterates `tf` directly (not `tf.getmembers()`,
-    which reads every header to EOF before returning anything) and also
-    caps the member *count*, so millions of zero-length members -- whose
-    declared sizes never trip the byte-sum check at all -- are rejected
-    before all of them are parsed into memory, not after (Codex, two
-    review rounds)."""
+    """Reject an archive whose declared member sizes sum past the same limit `_safe_extract_zst_tar` enforces on the decompressed tar *stream* -- a GNU/PAX sparse member's `TarInfo.size` is the real logical extent tarfile materializes even though the stream only carries non-hole blocks. Iterates `tf` directly (not `tf.getmembers()`, which reads every header to EOF before returning anything) and also caps the member *count*, so millions of zero-length members -- whose declared sizes never trip the byte-sum check at all -- are rejected before all of them are parsed into memory, not after (Codex, two review rounds)."""
     max_bytes = _max_decompressed_tar_bytes()
     max_members = _max_tar_members()
     total = 0
@@ -164,6 +185,49 @@ def _reject_oversized_declared_content(tf: tarfile.TarFile) -> None:
                 member.name,
                 f"archive declares more than the {max_members}-member safety "
                 f"limit's worth of entries (override via {_MAX_TAR_MEMBERS_ENV})",
+            )
+    _reject_hardlink_fallback_amplification(tf, max_bytes)
+
+
+def _reject_hardlink_fallback_amplification(
+    tf: tarfile.TarFile, max_bytes: int
+) -> None:
+    """Reject an archive whose hard-link members could expand far past `max_bytes` if extraction falls back to copying instead of linking.
+
+    A hard-link member's own declared `size` is 0 in tar format -- its data lives in the first-archived (regular) copy the link refers to by name -- so the byte-sum check above, which sums declared sizes as-is, never sees it. But `tarfile.TarFile.makelink()` falls back to extracting a full, independent copy of the *referenced* member whenever `os.link()` fails (unsupported filesystem, a cross-device link, ...), giving every alias its own distinct inode. An archive combining one large payload with up to the member-count cap's worth of hard links to it can therefore amplify real disk usage (and subsequent checksum work) far beyond the declared-byte-sum ceiling, entirely invisible to that check (Codex).
+
+    Only ever called after the byte-sum/member-count pass above completed without rejecting, so `tf.getmembers()` here is free: for the seekable `TarFile` this function is always called with, that pass's own `for member in tf:` iteration already built the full `tf.members` list as a side effect (`TarFile.next()` does this regardless of iteration style for a non-stream file) -- getmembers() just returns it, no re-parse. Safe against a hard-link chain (a link to a link) and against a reference cycle, neither of which a real tar writer emits but an adversarial archive could.
+    """
+    members = tf.getmembers()
+    sizes_by_name = {m.name: m.size for m in members if m.isreg()}
+    link_to_name = {m.name: m.linkname for m in members if m.islnk()}
+
+    def _worst_case_size(name: str, own_size: int) -> int:
+        seen: set[str] = set()
+        while name not in sizes_by_name:
+            if name in seen:
+                return 0  # a link cycle -- nothing real to duplicate
+            seen.add(name)
+            next_name = link_to_name.get(name)
+            if next_name is None:
+                return own_size  # dangling reference; extraction fails anyway
+            name = next_name
+        return sizes_by_name[name]
+
+    worst_case_total = 0
+    for member in members:
+        worst_case_total += (
+            _worst_case_size(member.linkname, member.size)
+            if member.islnk()
+            else member.size
+        )
+        if worst_case_total > max_bytes:
+            raise ExtractionSecurityError(
+                member.name,
+                "archive's hard-link members could expand to more than "
+                f"the {max_bytes}-byte safety limit's worth of content if "
+                "this filesystem falls back to copying instead of "
+                f"linking (override via {_MAX_DECOMPRESSED_TAR_BYTES_ENV})",
             )
 
 
@@ -280,17 +344,29 @@ class TarExtractor:
         target_root = target_dir.resolve()
         with tarfile.open(archive_path) as tf:
             _reject_oversized_declared_content(tf)
+            # Probed once per extraction, not per member -- see
+            # _target_supports_symlinks()'s own docstring for why this
+            # isn't cached across calls instead.
+            supports_symlinks = _target_supports_symlinks(target_root)
             if sys.version_info >= (3, 12):
                 for member in tf.getmembers():
-                    _validate_member(member, target_root)
+                    _validate_member(
+                        member, target_root, supports_symlinks=supports_symlinks
+                    )
                 # `filter="data"` (PEP 706) carries its own, equivalent per-member safety contract.
                 tf.extractall(path=target_dir, filter="data")  # nosec B202 — members validated above
             else:
-                TarExtractor._safe_extract_member_by_member(tf, target_dir, target_root)
+                TarExtractor._safe_extract_member_by_member(
+                    tf, target_dir, target_root, supports_symlinks=supports_symlinks
+                )
 
     @staticmethod
     def _safe_extract_member_by_member(
-        tf: tarfile.TarFile, target_dir: Path, target_root: Path
+        tf: tarfile.TarFile,
+        target_dir: Path,
+        target_root: Path,
+        *,
+        supports_symlinks: bool = True,
     ) -> None:
         """Validate and extract each member right after the previous one
         lands on disk -- the Python < 3.12 fallback (`filter="data"` isn't
@@ -304,7 +380,7 @@ class TarExtractor:
         against the real, live-extracted state closes this generally."""
         directories: list[tarfile.TarInfo] = []
         for member in tf.getmembers():
-            _validate_member(member, target_root)
+            _validate_member(member, target_root, supports_symlinks=supports_symlinks)
             if member.isdir():
                 directories.append(member)
                 extract_info = copy.copy(member)
@@ -815,11 +891,7 @@ class CondaExtractor:
 # ── Wheel (pip) extractor ────────────────────────────────────────────────────
 
 
-# manylinux platform-tag -> the glibc version it promises as a ceiling
-# (PEP 600's ``manylinux_<glibc_major>_<glibc_minor>`` plus the three frozen
-# legacy aliases PEP 600 defines as exact synonyms). G10: a wheel's filename
-# tag is a promise about the *maximum* glibc symbol version its binaries may
-# require — see docs/contribute/plans/g10-glibc-floor-check.md.
+# manylinux platform-tag -> the glibc version it promises as a ceiling (PEP 600's ``manylinux_<glibc_major>_<glibc_minor>`` plus the three frozen legacy aliases PEP 600 defines as exact synonyms). G10: a wheel's filename tag is a promise about the *maximum* glibc symbol version its binaries may require — see docs/contribute/plans/g10-glibc-floor-check.md.
 _MANYLINUX_LEGACY_FLOORS: dict[str, tuple[int, int]] = {
     "manylinux1": (2, 5),
     "manylinux2010": (2, 12),
@@ -887,12 +959,7 @@ def _wheel_platform_tag_segment(name: str) -> str:
     return name
 
 
-#: PEP 656 musllinux platform-tag -> the musl libc major.minor version it
-#: names, e.g. ``musllinux_1_2_x86_64``. Unlike manylinux/glibc, musl carries
-#: no symbol-versioning scheme, so there is no binary-evidence floor to check
-#: this version *against* — its presence is a yes/no "this wheel targets
-#: musl" signal for check_musllinux_glibc_dependency (G27). See
-#: docs/contribute/plans/g27-wheel-deployment-verification.md.
+#: PEP 656 musllinux platform-tag -> the musl libc major.minor version it names, e.g. ``musllinux_1_2_x86_64``. Unlike manylinux/glibc, musl carries no symbol-versioning scheme, so there is no binary-evidence floor to check this version *against* — its presence is a yes/no "this wheel targets musl" signal for check_musllinux_glibc_dependency (G27). See docs/contribute/plans/g27-wheel-deployment-verification.md.
 _MUSLLINUX_TAG_RE = re.compile(r"musllinux_(?P<major>\d+)_(?P<minor>\d+)(?=_|$)")
 
 
@@ -920,22 +987,12 @@ def parse_musllinux_floor(name: str) -> str | None:
     return f"{best[0]}.{best[1]}" if best is not None else None
 
 
-#: PEP 425 macOS platform-tag -> the deployment target it promises as a
-#: ceiling, e.g. ``macosx_10_9_x86_64`` or ``macosx_11_0_universal2``. The
-#: arch component may contain digits and underscores (``x86_64``,
-#: ``universal2``); the trailing ``(?=[._]|$)`` boundary keeps a multi-tag
-#: compressed segment's dot separator from being swallowed into the match.
+#: PEP 425 macOS platform-tag -> the deployment target it promises as a ceiling, e.g. ``macosx_10_9_x86_64`` or ``macosx_11_0_universal2``. The arch component may contain digits and underscores (``x86_64``, ``universal2``); the trailing ``(?=[._]|$)`` boundary keeps a multi-tag compressed segment's dot separator from being swallowed into the match.
 _MACOSX_TAG_RE = re.compile(
     r"macosx_(?P<major>\d+)_(?P<minor>\d+)_(?P<arch>[a-zA-Z0-9_]+?)(?=[.]|$)"
 )
 
-#: macOS wheel arch tokens that bundle more than one real CPU architecture
-#: under a single string (PEP 425's macOS "fat"/universal-binary tags). Even
-#: a *lone* tag using one of these can't be safely reduced to a single
-#: deployment-target floor: a real ``universal2`` wheel's arm64 slice
-#: commonly has a genuinely higher minimum OS (11.0 — Apple Silicon didn't
-#: exist before macOS 11) than its x86_64 slice's declared 10.9 floor, even
-#: though the tag names only one literal arch token (Codex review #583).
+#: macOS wheel arch tokens that bundle more than one real CPU architecture under a single string (PEP 425's macOS "fat"/universal-binary tags). Even a *lone* tag using one of these can't be safely reduced to a single deployment-target floor: a real ``universal2`` wheel's arm64 slice commonly has a genuinely higher minimum OS (11.0 — Apple Silicon didn't exist before macOS 11) than its x86_64 slice's declared 10.9 floor, even though the tag names only one literal arch token (Codex review #583).
 _MACOS_MULTI_SLICE_ARCH_TOKENS = frozenset(
     {"universal2", "universal", "intel", "fat", "fat3", "fat64"}
 )
@@ -990,13 +1047,7 @@ def parse_macos_deployment_target_floor(name: str) -> str | None:
     return f"{best[0]}.{best[1]}"
 
 
-#: Matches a PEP 425 Python tag: an implementation abbreviation (``cp``
-#: CPython, ``pp`` PyPy, ``py`` generic, ``ip`` IronPython, ``jy`` Jython)
-#: followed by a single-digit major version and one-or-more-digit minor
-#: version run together, e.g. ``cp311`` -> major ``3``, minor ``11``. A bare
-#: implementation with no minor digits (``py3``) is intentionally
-#: unmatched — it doesn't pin a specific minor version, so there's nothing
-#: useful to derive.
+#: Matches a PEP 425 Python tag: an implementation abbreviation (``cp`` CPython, ``pp`` PyPy, ``py`` generic, ``ip`` IronPython, ``jy`` Jython) followed by a single-digit major version and one-or-more-digit minor version run together, e.g. ``cp311`` -> major ``3``, minor ``11``. A bare implementation with no minor digits (``py3``) is intentionally unmatched — it doesn't pin a specific minor version, so there's nothing useful to derive.
 _WHEEL_PYTHON_TAG_RE = re.compile(r"^(?:cp|pp|py|ip|jy)(\d)(\d+)$")
 
 
@@ -1230,14 +1281,7 @@ def _os_name_from_wheel_filename(filename: str) -> str | None:
     return None
 
 
-#: Single-architecture suffixes a Linux wheel platform tag can end in. Order
-#: doesn't matter for correctness (each is ``$``-anchored, so e.g. ``ppc64``
-#: can't spuriously match a ``...ppc64le`` tag), but longer/more-specific
-#: names are listed first for readability. ``riscv64``/``loongarch64`` are
-#: valid ``manylinux``/``musllinux`` single-arch suffixes too (``packaging``'s
-#: own ``_manylinux._ALLOWED_ARCHS`` includes both) — omitting them silently
-#: skipped ``wheel_tag_architecture_mismatch`` derivation for those wheels
-#: entirely (Codex review #583).
+#: Single-architecture suffixes a Linux wheel platform tag can end in. Order doesn't matter for correctness (each is ``$``-anchored, so e.g. ``ppc64`` can't spuriously match a ``...ppc64le`` tag), but longer/more-specific names are listed first for readability. ``riscv64``/``loongarch64`` are valid ``manylinux``/``musllinux`` single-arch suffixes too (``packaging``'s own ``_manylinux._ALLOWED_ARCHS`` includes both) — omitting them silently skipped ``wheel_tag_architecture_mismatch`` derivation for those wheels entirely (Codex review #583).
 _WHEEL_LINUX_MACHINE_RE = re.compile(
     r"(x86_64|aarch64|i686|armv7l|ppc64le|ppc64|s390x|riscv64|loongarch64)$"
 )
@@ -1309,84 +1353,22 @@ def parse_wheel_architecture_claim(filename: str) -> str | None:
     return _platform_machine_from_wheel_filename(filename)
 
 
-# G26: a wheel's *.dist-info/METADATA declares its runtime dependencies —
-# the "declared" side of the NumPy C-API compatibility-envelope check (the
-# binary-evidence "required" side comes from numpy_capi.py). Mirrors
-# parse_manylinux_glibc_floor's role for G10: a pure function callers wire
-# in programmatically (see diff_numpy_capi.check_numpy_metadata_contract).
+# G26: a wheel's *.dist-info/METADATA declares its runtime dependencies — the "declared" side of the NumPy C-API compatibility-envelope check (the binary-evidence "required" side comes from numpy_capi.py). Mirrors parse_manylinux_glibc_floor's role for G10: a pure function callers wire in programmatically (see diff_numpy_capi.check_numpy_metadata_contract).
 
-#: A real METADATA file is ordinarily a few KB even with a long dependency
-#: list; this bounds how much a single wheel's METADATA member is allowed
-#: to decompress to, so a malicious wheel can't zip-bomb this scan (a small
-#: compressed member declaring a tiny size that in fact decompresses to
-#: gigabytes) (CodeRabbit review).
+#: A real METADATA file is ordinarily a few KB even with a long dependency list; this bounds how much a single wheel's METADATA member is allowed to decompress to, so a malicious wheel can't zip-bomb this scan (a small compressed member declaring a tiny size that in fact decompresses to gigabytes) (CodeRabbit review).
 _MAX_METADATA_SIZE = 1_048_576
 
 
 def parse_wheel_numpy_requirement(
     wheel_path: Path, environment: dict[str, str] | None = None
 ) -> str | None:
-    """Extract the declared ``numpy`` version-specifier range from a wheel's
-    ``*.dist-info/METADATA`` (``Requires-Dist: numpy...``).
+    """Extract the declared ``numpy`` version-specifier range from a wheel's ``*.dist-info/METADATA`` (``Requires-Dist: numpy...``).
 
-    Returns the specifier text (e.g. ``">=1.23.5,<3"``, or ``""`` for a bare
-    ``Requires-Dist: numpy`` with no version constraint) for the numpy
-    requirement(s) active for *environment*, or ``None`` when the wheel is
-    unreadable, carries no ``.dist-info/METADATA`` member, or declares no
-    such numpy dependency at all — including when the only ``numpy`` entry
-    is gated behind an optional extra (e.g. ``numpy; extra == "test"``, only
-    installed via ``pip install pkg[test]``, not a real runtime requirement)
-    or an ordinary marker that doesn't hold for *environment*.
+    Returns the specifier text (e.g. ``">=1.23.5,<3"``, or ``""`` for a bare ``Requires-Dist: numpy`` with no version constraint) for the numpy requirement(s) active for *environment*, or ``None`` when the wheel is unreadable, carries no ``.dist-info/METADATA`` member, or declares no such numpy dependency at all — including when the only ``numpy`` entry is gated behind an optional extra (e.g. ``numpy; extra == "test"``, only installed via ``pip install pkg[test]``, not a real runtime requirement) or an ordinary marker that doesn't hold for *environment*.
 
-    When *environment* is omitted, ``python_version``, ``python_full_version``,
-    ``implementation_version``, ``implementation_name``,
-    ``platform_python_implementation``, ``platform_system``, ``sys_platform``,
-    ``os_name``, and (for single-architecture Linux/macOS tags)
-    ``platform_machine`` are derived from the wheel's *own* filename tags
-    (e.g. ``cp39`` -> ``python_version="3.9"``/``python_full_version="3.9.0"``/
-    ``implementation_version="3.9.0"``/``implementation_name="cpython"``/
-    ``platform_python_implementation="CPython"``, a ``macosx_11_0_arm64``
-    platform tag -> ``platform_system="Darwin"``/``sys_platform="darwin"``/
-    ``os_name="posix"``/``platform_machine="arm64"``) rather than defaulting
-    to the interpreter running abicheck — evaluating a marker gated on any
-    of these against the wrong interpreter/implementation/OS/architecture
-    could hide a real under-declared floor on a wheel built for a different
-    Python, implementation, platform, or CPU than the one running the scan
-    (Codex review; both implementation-marker and all three OS-marker
-    spellings are covered since real-world metadata uses any of them).
-    ``implementation_version`` is derived for CPython (``cp``) tags only —
-    see :func:`_implementation_version_from_wheel_filename` for why guessing
-    it for any other implementation (e.g. PyPy) would be actively wrong
-    rather than merely imprecise, unlike every other marker derived here.
-    Falls back to the interpreter's own environment for whichever of these
-    the filename doesn't pin down (e.g. a bare directory-derived METADATA
-    path, the pure-Python ``any`` platform tag, a fat/universal macOS wheel,
-    or a Windows tag, whose ``platform_machine`` isn't derived at all).
+    When *environment* is omitted, ``python_version``, ``python_full_version``, ``implementation_version``, ``implementation_name``, ``platform_python_implementation``, ``platform_system``, ``sys_platform``, ``os_name``, and (for single-architecture Linux/macOS tags) ``platform_machine`` are derived from the wheel's *own* filename tags (e.g. ``cp39`` -> ``python_version="3.9"``/``python_full_version="3.9.0"``/``implementation_version="3.9.0"``/``implementation_name="cpython"``/``platform_python_implementation="CPython"``, a ``macosx_11_0_arm64`` platform tag -> ``platform_system="Darwin"``/``sys_platform="darwin"``/``os_name="posix"``/``platform_machine="arm64"``) rather than defaulting to the interpreter running abicheck — evaluating a marker gated on any of these against the wrong interpreter/implementation/OS/architecture could hide a real under-declared floor on a wheel built for a different Python, implementation, platform, or CPU than the one running the scan (Codex review; both implementation-marker and all three OS-marker spellings are covered since real-world metadata uses any of them). ``implementation_version`` is derived for CPython (``cp``) tags only — see :func:`_implementation_version_from_wheel_filename` for why guessing it for any other implementation (e.g. PyPy) would be actively wrong rather than merely imprecise, unlike every other marker derived here. Falls back to the interpreter's own environment for whichever of these the filename doesn't pin down (e.g. a bare directory-derived METADATA path, the pure-Python ``any`` platform tag, a fat/universal macOS wheel, or a Windows tag, whose ``platform_machine`` isn't derived at all).
 
-    Known residual gap: a wheel tag naming a *range* rather than one exact
-    value — either the Python-version axis (the ``abi3`` stable-ABI tag,
-    ``cp39-abi3-...``, installable on Python 3.9 and every later 3.x minor;
-    or a PEP 425 compressed multi-tag Python segment, ``cp310.cp311-...``,
-    installable on either minor) or the architecture axis (a fat/universal
-    macOS wheel, ``macosx_11_0_universal2``, or a PEP 600 compressed
-    multi-tag platform segment spanning more than one architecture) —
-    deliberately leaves the corresponding marker key(s)
-    (``python_version``/``python_full_version``, or ``platform_machine``)
-    undetermined rather than pinning a single (wrong) value (see
-    :func:`_python_version_from_wheel_filename` and
-    :func:`_platform_machine_from_wheel_filename`), which means those keys
-    fall back to whatever interpreter/host abicheck is running on rather
-    than being evaluated across the wheel's whole supported range — a real
-    metadata gap that only affects some Python versions, or only one
-    architecture slice, the wheel supports (e.g. a split requirement like
-    ``numpy>=1.23; platform_machine == "x86_64"`` /
-    ``numpy>=2; platform_machine == "arm64"``) could go undetected
-    depending on the scanning host (Codex review). Correctly checking the
-    full range/every architecture would mean evaluating markers at every
-    value a wheel's metadata references along that axis and combining the
-    results, which is meaningfully more than a wheel-tag-derivation fix;
-    left as a known limitation of this G26-partial feature rather than
-    attempted here.
+    Known residual gap: a wheel tag naming a *range* rather than one exact value — either the Python-version axis (the ``abi3`` stable-ABI tag, ``cp39-abi3-...``, installable on Python 3.9 and every later 3.x minor; or a PEP 425 compressed multi-tag Python segment, ``cp310.cp311-...``, installable on either minor) or the architecture axis (a fat/universal macOS wheel, ``macosx_11_0_universal2``, or a PEP 600 compressed multi-tag platform segment spanning more than one architecture) — deliberately leaves the corresponding marker key(s) (``python_version``/``python_full_version``, or ``platform_machine``) undetermined rather than pinning a single (wrong) value (see :func:`_python_version_from_wheel_filename` and :func:`_platform_machine_from_wheel_filename`), which means those keys fall back to whatever interpreter/host abicheck is running on rather than being evaluated across the wheel's whole supported range — a real metadata gap that only affects some Python versions, or only one architecture slice, the wheel supports (e.g. a split requirement like ``numpy>=1.23; platform_machine == "x86_64"`` / ``numpy>=2; platform_machine == "arm64"``) could go undetected depending on the scanning host (Codex review). Correctly checking the full range/every architecture would mean evaluating markers at every value a wheel's metadata references along that axis and combining the results, which is meaningfully more than a wheel-tag-derivation fix; left as a known limitation of this G26-partial feature rather than attempted here.
     """
     try:
         with zipfile.ZipFile(wheel_path) as zf:

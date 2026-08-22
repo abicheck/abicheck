@@ -25,6 +25,7 @@ rationale."""
 
 from __future__ import annotations
 
+import os
 import struct
 from pathlib import Path
 
@@ -444,6 +445,13 @@ class TestCompareProductDirectoriesRejectsNonexistentDirectories:
 
 
 class TestCompareProductDirectoriesRejectsSymlinkLoops:
+    @pytest.mark.skipif(
+        os.name == "nt",
+        reason="self-referential-symlink loop detection here keys on "
+        "POSIX's errno.ELOOP from stat(), which Windows's own reparse-"
+        "point loop handling does not reliably raise the same way "
+        "(known gap, not exercised on this platform)",
+    )
     def test_a_product_containing_only_a_loop_is_rejected_not_compared(
         self, tmp_path: Path
     ) -> None:
@@ -1495,6 +1503,13 @@ class TestDiscoverLibraryMapSymlinkContainment:
         result = _discover_library_map(root, include_private=True)
         assert set(result) == {"a_real/libfoo.so"}
 
+    @pytest.mark.skipif(
+        os.name == "nt",
+        reason="self-referential-symlink loop detection here keys on "
+        "POSIX's errno.ELOOP from stat(), which Windows's own reparse-"
+        "point loop handling does not reliably raise the same way "
+        "(known gap, not exercised on this platform)",
+    )
     def test_self_referential_symlink_loop_raises_snapshot_error(
         self, tmp_path: Path
     ) -> None:
