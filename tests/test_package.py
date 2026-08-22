@@ -4,6 +4,7 @@ from __future__ import annotations
 import io
 import shutil
 import struct
+import subprocess
 import sys
 import tarfile
 import threading
@@ -2408,6 +2409,66 @@ class TestTarExtractorSymlinks:
         with pytest.raises(ExtractionSecurityError, match="symlink target"):
             TarExtractor().extract(archive, out)
 
+    def test_pre_312_path_depth_collapse_escape_rejected(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The pre-fix < 3.12 fallback validated every member against a
+        # target_root snapshot where nothing had been extracted yet -- so
+        # an earlier symlink member `a -> .` looked like a literal, still-
+        # nonexistent directory to the *next* member's validation,
+        # undercounting how many real levels collapse once `a` is actually
+        # created. By the time tarfile's own bulk extraction walked through
+        # the now-real symlink, a target that validated as contained could
+        # resolve outside target_root (Codex review, fresh evidence).
+        import abicheck.package as pb
+
+        monkeypatch.setattr(pb.sys, "version_info", (3, 11, 0, "final", 0))
+
+        archive = tmp_path / "collapse.tar"
+        with tarfile.open(archive, "w") as tf:
+            a = tarfile.TarInfo(name="a")
+            a.type = tarfile.SYMTYPE
+            a.linkname = "."
+            tf.addfile(a)
+
+            link = tarfile.TarInfo(name="a/b/c/link")
+            link.type = tarfile.SYMTYPE
+            link.linkname = "../../../victim"
+            tf.addfile(link)
+
+        out = tmp_path / "output"
+        out.mkdir()
+        with pytest.raises(ExtractionSecurityError, match="symlink target"):
+            TarExtractor().extract(archive, out)
+
+        assert not (tmp_path / "victim").exists()
+
+    def test_pre_312_path_ordinary_archive_still_extracts(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Negative control for the member-by-member < 3.12 fallback: a
+        # legitimate nested-directory archive with an internal symlink
+        # still extracts correctly (contents present, symlink resolvable).
+        import abicheck.package as pb
+
+        monkeypatch.setattr(pb.sys, "version_info", (3, 11, 0, "final", 0))
+
+        archive = tmp_path / "ok.tar"
+        with tarfile.open(archive, "w") as tf:
+            info = tarfile.TarInfo(name="lib/libfoo.so.1.0")
+            info.size = 4
+            tf.addfile(info, io.BytesIO(b"data"))
+            sym = tarfile.TarInfo(name="lib/libfoo.so")
+            sym.type = tarfile.SYMTYPE
+            sym.linkname = "libfoo.so.1.0"
+            tf.addfile(sym)
+
+        out = tmp_path / "output"
+        out.mkdir()
+        TarExtractor().extract(archive, out)
+        assert (out / "lib/libfoo.so.1.0").read_bytes() == b"data"
+        assert (out / "lib/libfoo.so").resolve() == (out / "lib/libfoo.so.1.0").resolve()
+
 
 class TestTarExtractorZstDecompressionBomb:
     def test_highly_compressible_payload_is_rejected_over_the_limit(
@@ -2678,6 +2739,79 @@ class TestTarExtractorZstDecompressionBomb:
         reader_thread.join(timeout=5)
         assert not reader_thread.is_alive()
         assert package_mod._ZSTD_READER_QUEUE_MAXSIZE > 0  # not the unbounded default
+
+
+class TestRejectOversizedDeclaredContent:
+    def test_rejects_when_declared_sizes_exceed_the_limit(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from abicheck.package import _reject_oversized_declared_content
+
+        monkeypatch.setenv("_ABICHECK_TAR_ZST_MAX_DECODED_BYTES", "1000")
+
+        class _FakeMember:
+            def __init__(self, name: str, size: int) -> None:
+                self.name = name
+                self.size = size
+
+        class _FakeTarFile:
+            def getmembers(self) -> list[_FakeMember]:
+                return [_FakeMember("sparse.bin", 10**12)]
+
+        with pytest.raises(ExtractionSecurityError, match="safety limit"):
+            _reject_oversized_declared_content(_FakeTarFile())  # type: ignore[arg-type]
+
+    def test_accepts_ordinary_declared_sizes(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from abicheck.package import _reject_oversized_declared_content
+
+        monkeypatch.setenv("_ABICHECK_TAR_ZST_MAX_DECODED_BYTES", "1000")
+
+        class _FakeMember:
+            def __init__(self, name: str, size: int) -> None:
+                self.name = name
+                self.size = size
+
+        class _FakeTarFile:
+            def getmembers(self) -> list[_FakeMember]:
+                return [_FakeMember("a.bin", 100), _FakeMember("b.bin", 200)]
+
+        _reject_oversized_declared_content(_FakeTarFile())  # type: ignore[arg-type]
+
+    def test_gnu_sparse_member_declaring_huge_size_is_rejected(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # A GNU sparse member's on-stream size can be tiny (mostly holes)
+        # while TarInfo.size -- what tarfile will materialize on
+        # extraction -- is unbounded: DEFAULT_MAX_DECOMPRESSED_TAR_BYTES
+        # only bounds the decompressed *tar stream*, not this declared
+        # logical size, so a real, ~10 KiB archive can declare a
+        # multi-GiB member and sail straight past that check (Codex
+        # review, fresh evidence). Built with the real `tar --sparse`
+        # binary, not a hand-rolled header -- Python's own tarfile module
+        # does not generate GNU sparse output on write.
+        tar_bin = shutil.which("tar")
+        if tar_bin is None:
+            pytest.skip("system 'tar' binary not available")
+        monkeypatch.setenv("_ABICHECK_TAR_ZST_MAX_DECODED_BYTES", "1000")
+
+        sparse_file = tmp_path / "huge.bin"
+        with open(sparse_file, "wb") as f:
+            f.truncate(2 * 1024 * 1024 * 1024)  # 2 GiB logical, ~0 real bytes
+
+        archive = tmp_path / "sparse.tar"
+        subprocess.run(
+            [tar_bin, "--sparse", "-cf", str(archive), "-C", str(tmp_path), "huge.bin"],
+            check=True,
+            capture_output=True,
+        )
+        assert archive.stat().st_size < 100_000  # confirms a real sparse-shape archive
+
+        out = tmp_path / "output"
+        out.mkdir()
+        with pytest.raises(ExtractionSecurityError, match="safety limit"):
+            TarExtractor().extract(archive, out)
 
 
 _real_import = __import__

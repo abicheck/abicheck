@@ -29,6 +29,7 @@ devices, FIFOs).  See ``_validate_member_path()`` and
 """
 from __future__ import annotations
 
+import copy
 import logging
 import os
 import queue
@@ -115,6 +116,39 @@ def _validate_symlink_target(
             member_name,
             f"symlink target '{link_target}' resolves outside extraction root: {resolved}",
         ) from exc
+
+
+def _validate_member(member: tarfile.TarInfo, target_root: Path) -> None:
+    """Every `_safe_extract` member check, shared by the bulk (3.12+) and
+    per-member (< 3.12) extraction paths so the two can't drift."""
+    _validate_member_path(member.name, target_root)
+    if member.ischr() or member.isblk() or member.isfifo():
+        raise ExtractionSecurityError(
+            member.name, "archive contains a device or FIFO entry"
+        )
+    if member.issym():
+        _validate_symlink_target(member.name, member.linkname, target_root)
+    elif member.islnk():
+        _validate_member_path(member.linkname, target_root)  # a member name
+
+
+def _reject_oversized_declared_content(tf: tarfile.TarFile) -> None:
+    """Reject an archive whose declared member sizes sum past the same
+    limit `_safe_extract_zst_tar` enforces on the decompressed tar
+    *stream* -- a GNU/PAX sparse member's `TarInfo.size` is the real
+    logical extent tarfile materializes even though the stream only
+    carries non-hole blocks, so it can declare an arbitrary size while
+    barely touching that stream-byte count (Codex)."""
+    max_bytes = _max_decompressed_tar_bytes()
+    total = 0
+    for member in tf.getmembers():
+        total += member.size
+        if total > max_bytes:
+            raise ExtractionSecurityError(
+                member.name,
+                f"archive declares more than the {max_bytes}-byte safety "
+                f"limit's worth of extracted content (override via {_MAX_DECOMPRESSED_TAR_BYTES_ENV})",
+            )
 
 
 # ── Protocol ─────────────────────────────────────────────────────────────────
@@ -237,32 +271,55 @@ class TarExtractor:
         """
         target_root = target_dir.resolve()
         with tarfile.open(archive_path) as tf:
-            for member in tf.getmembers():
-                _validate_member_path(member.name, target_root)
-
-                # Reject special device/FIFO types that should never appear
-                # in package archives (security risk on extraction)
-                if member.ischr() or member.isblk() or member.isfifo():
-                    raise ExtractionSecurityError(
-                        member.name,
-                        "archive contains a device or FIFO entry",
-                    )
-
-                if member.issym():
-                    _validate_symlink_target(
-                        member.name, member.linkname, target_root
-                    )
-                elif member.islnk():
-                    # Hardlink targets are archive member names, not
-                    # filesystem-relative paths — validate as a member path.
-                    _validate_member_path(member.linkname, target_root)
-
-            # All members validated — now extract
-            # Use data_filter if available (Python 3.12+), otherwise manual
+            _reject_oversized_declared_content(tf)
             if sys.version_info >= (3, 12):
+                for member in tf.getmembers():
+                    _validate_member(member, target_root)
+                # `filter="data"` (PEP 706) carries its own, equivalent per-member safety contract.
                 tf.extractall(path=target_dir, filter="data")  # nosec B202 — members validated above
             else:
-                tf.extractall(path=target_dir)  # nosec B202 — members validated above
+                TarExtractor._safe_extract_member_by_member(tf, target_dir, target_root)
+
+    @staticmethod
+    def _safe_extract_member_by_member(
+        tf: tarfile.TarFile, target_dir: Path, target_root: Path
+    ) -> None:
+        """Validate and extract each member right after the previous one
+        lands on disk -- the Python < 3.12 fallback (`filter="data"` isn't
+        reliably available there). Validate-all-then-bulk-extractall has a
+        path-depth-collapse TOCTOU: a symlink `a -> .` validates as
+        contained pre-extraction (sibling `a/b/c/link` reads as 3 real,
+        nonexistent levels deep), but once `a` is a real symlink the
+        filesystem collapses that sibling to 2 levels, letting
+        `../../../victim` resolve outside target_root despite its own
+        stale pre-extraction validation (Codex, concrete repro).
+        Re-validating each member against the real, live-extracted state
+        closes this generally, since `Path.resolve()` follows symlinks
+        prior members actually created."""
+        directories: list[tarfile.TarInfo] = []
+        for member in tf.getmembers():
+            _validate_member(member, target_root)
+            if member.isdir():
+                directories.append(member)
+                extract_info = copy.copy(member)
+                extract_info.mode = 0o700
+            else:
+                extract_info = member
+            tf.extract(  # nosec B202 — member validated above, against live fs state
+                extract_info, path=target_dir, set_attrs=not member.isdir()
+            )
+        # Mirror extractall()'s deferred dir attr fixup: extracted early
+        # (mode 0o700, writable) then restored once every member lands.
+        directories.sort(key=lambda info: info.name)
+        directories.reverse()
+        for member in directories:
+            dirpath = os.path.join(target_dir, member.name)
+            try:
+                tf.chown(member, dirpath, numeric_owner=False)
+                tf.utime(member, dirpath)
+                tf.chmod(member, dirpath)
+            except tarfile.ExtractError:
+                pass
 
     @staticmethod
     def _safe_extract_zst_tar(zst_path: Path, target_dir: Path) -> None:
