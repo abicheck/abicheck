@@ -1012,6 +1012,7 @@ class TestUnpackProductBaseline:
         with pytest.raises(SnapshotError, match="unrecognized product baseline schema"):
             pb._check_schema_supported("abicheck.product-baseline/v-1", archive)
 
+    @pytest.mark.skipif(os.name == "nt", reason="POSIX file mode semantics only")
     def test_unpack_preserves_existing_destination_permissions(
         self, tmp_path: Path
     ) -> None:
@@ -1052,6 +1053,7 @@ class TestPackProductBaselinePermissions:
         assert mode == (0o666 & ~umask)
         assert mode != 0o600
 
+    @pytest.mark.skipif(os.name == "nt", reason="POSIX file mode semantics only")
     def test_pack_preserves_existing_output_permissions_when_overwriting(
         self, tmp_path: Path
     ) -> None:
