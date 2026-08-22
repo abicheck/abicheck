@@ -294,6 +294,27 @@ class TestPackProductBaseline:
         assert restored_second.is_file()
         assert restored_second.read_bytes() == restored_first.read_bytes()
 
+    def test_pack_records_a_library_entry_for_a_hardlinked_library(
+        self, tmp_path: Path
+    ) -> None:
+        # A hardlink member's own info.size is 0 -- no data bytes follow it
+        # in the tar stream -- so the first-archived-copy-only code path
+        # used to silently omit a library-named hardlink from the manifest
+        # even though its content round-trips correctly (Codex review,
+        # fresh evidence).
+        product = _make_product(tmp_path)
+        first = product / "lib" / "libb.so"
+        second = product / "lib" / "libb-alias.so"
+        second.hardlink_to(first)
+
+        manifest = pack_product_baseline(product, tmp_path / "baseline.tar.zst")
+        names = {lib.name for lib in manifest.libraries}
+        assert "libb.so" in names
+        assert "libb-alias.so" in names
+        by_name = {lib.name: lib for lib in manifest.libraries}
+        assert by_name["libb-alias.so"].sha256 == by_name["libb.so"].sha256
+        assert by_name["libb-alias.so"].size == by_name["libb.so"].size
+
     def test_pack_rejects_source_file_colliding_with_manifest_name(
         self, tmp_path: Path
     ) -> None:
@@ -340,6 +361,28 @@ class TestPackProductBaseline:
         dest = tmp_path / "unpacked"
         unpack_product_baseline(out, dest)
         assert (dest / "lib" / "libb.so").is_file()
+
+    def test_pack_repeated_invocation_via_source_dir_alias_does_not_grow(
+        self, tmp_path: Path
+    ) -> None:
+        # SOURCE_DIR itself given as a symlink alias (`pack /tmp/link OUT`,
+        # `/tmp/link -> /tmp/product`), with OUTPUT spelled through the
+        # real, non-aliased directory -- a purely lexical (os.path.abspath)
+        # comparison never shares a prefix with the alias path, so nothing
+        # gets excluded and a rerun embeds the previous archive (Codex
+        # review, fresh evidence, distinct from the in-tree-output and
+        # symlinked-OUTPUT cases already covered above).
+        product = _make_product(tmp_path)
+        alias = tmp_path / "product-link"
+        alias.symlink_to(product, target_is_directory=True)
+        out = product / "baseline.tar.zst"
+
+        manifest1 = pack_product_baseline(alias, out)
+        first_size = out.stat().st_size
+        manifest2 = pack_product_baseline(alias, out)
+        assert out.stat().st_size == first_size
+        assert manifest1.libraries == manifest2.libraries
+        assert manifest1.file_count == manifest2.file_count
 
     def test_pack_leaves_no_partial_output_on_failure(self, tmp_path: Path) -> None:
         product = _make_product(tmp_path)

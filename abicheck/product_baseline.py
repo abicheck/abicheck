@@ -369,8 +369,31 @@ def _add_member(
         # guard below would silently drop it from the archive entirely
         # (isreg() is False for a hardlink member too), losing the file on
         # round-trip rather than merely losing its hardlink-ness.
+        #
+        # A hardlink member's own info.size is 0 (no data bytes follow it
+        # in the tar stream), so it cannot supply a LibraryEntry's size the
+        # way the first-archived copy's streamed info.size does -- and if
+        # this path's own name is itself library-named, skipping it here
+        # would silently omit it from the manifest even though it round-
+        # trips correctly as file content (Codex review, fresh evidence:
+        # two hardlinked library names, only the first-archived one gets a
+        # LibraryEntry). Hash and stat the real file directly instead --
+        # its content is identical to the already-archived copy's by
+        # definition of being a hardlink to the same inode.
+        entry = None
+        if _is_shared_library(path.name):
+            hasher = hashlib.sha256()
+            with open(path, "rb") as fh:
+                for chunk in iter(lambda: fh.read(1 << 20), b""):
+                    hasher.update(chunk)
+            entry = LibraryEntry(
+                name=path.name,
+                path=arcname,
+                sha256=hasher.hexdigest(),
+                size=path.stat().st_size,
+            )
         tf.addfile(info)
-        return None
+        return entry
 
     if not info.isreg():  # pragma: no cover - _discover_paths already filters
         return None
@@ -474,19 +497,34 @@ def pack_product_baseline(
     # Computed from the two paths, not existence, so this excludes the
     # output slot even on a first-ever pack (before the file exists).
     #
-    # Deliberately os.path.abspath(), not .resolve(): if OUTPUT already
-    # exists as a symlink (e.g. left over from a prior run pointing
-    # somewhere else), .resolve() would follow it to its *target*'s path
-    # -- excluding the wrong file from the archive while leaving the
-    # symlink itself, keyed by its own lexical name, still in `paths`
-    # (Codex review, fresh evidence). abspath() normalizes without ever
-    # dereferencing a symlink, matching how `_discover_paths` itself
-    # names a symlink member: by its own lexical path, not its target's.
+    # Two, layered concerns here, not one:
+    #  - if OUTPUT itself is a symlink (e.g. left over from a prior run
+    #    pointing somewhere else), we must exclude it by its own lexical
+    #    name, not by whatever it points to -- resolving OUTPUT's own leaf
+    #    would follow it to its *target*'s path, excluding the wrong file
+    #    while leaving the symlink itself, keyed by its own lexical name,
+    #    still in `paths` (Codex review, fresh evidence).
+    #  - if SOURCE_DIR itself is a symlink alias (e.g. `pack /tmp/src-link
+    #    OUTPUT` where `/tmp/src-link -> /tmp/src`) and OUTPUT is spelled
+    #    through the real, non-aliased directory, a purely lexical
+    #    (os.path.abspath()) comparison never shares a common prefix with
+    #    SOURCE_DIR's own alias path, so relative_to() always raises and
+    #    nothing gets excluded -- a rerun grows the archive exactly the
+    #    way the plain in-tree-output case already did before that fix
+    #    (Codex review, fresh evidence, distinct from the leaf-symlink
+    #    case above).
+    # Resolving *only* OUTPUT's parent (and SOURCE_DIR in full) sees
+    # through a directory-level alias for containment purposes, while
+    # OUTPUT's own final path component stays lexical -- exactly the
+    # combination both cases need at once.
+    source_real = source_path.resolve()
     try:
-        output_rel = _relative_posix(
-            Path(os.path.abspath(str(output_path))),
-            Path(os.path.abspath(str(source_path))),
-        )
+        output_parent_real = output_path.parent.resolve()
+    except OSError:  # pragma: no cover - defensive, e.g. a permission error
+        output_parent_real = Path(os.path.abspath(str(output_path.parent)))
+    output_canonical = output_parent_real / output_path.name
+    try:
+        output_rel = _relative_posix(output_canonical, source_real)
     except ValueError:
         output_rel = None
     if output_rel is not None:
