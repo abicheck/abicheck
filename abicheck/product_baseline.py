@@ -484,9 +484,13 @@ def _windows_relative_target_escapes(arcname: str, target: str) -> bool:
 #: name (before the first ``.``), case-insensitively: ``aux.txt`` is
 #: reserved exactly as ``AUX`` is (Codex review, fresh evidence).
 _WINDOWS_RESERVED_NAMES = frozenset(
-    {"CON", "PRN", "AUX", "NUL"}
-    | {f"COM{i}" for i in range(1, 10)}
-    | {f"LPT{i}" for i in range(1, 10)}
+    {"CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$"}
+    | {f"COM{i}" for i in range(10)}
+    | {f"LPT{i}" for i in range(10)}
+    # Superscript 1-3 (U+00B9/B2/B3): legacy code-page COM/LPT renderings
+    # Windows still treats as equivalent to the plain-ASCII names (Codex).
+    | {f"COM{d}" for d in "¹²³"}
+    | {f"LPT{d}" for d in "¹²³"}
 )
 
 #: Characters Windows never allows in a path component (beyond the
@@ -614,16 +618,13 @@ def _add_member(
                 f"escape {source_dir} when interpreted with Windows path "
                 "separators -- refusing to pack it for portability"
             )
-        # A library-shaped symlink (by name) whose real target is NOT
-        # independently library-shaped (e.g. `libfoo.so -> payload`)
-        # previously got no LibraryEntry at all -- there's no other
-        # declared identity for unpack's own discovery to match, so it
-        # was permanently undeclared and unpack rejected the archive as
-        # tampered. A target the ordinary case (`liba.so ->
-        # liba.so.1.2.3`) already declares is left alone. S_ISREG guards
-        # against the same match on a directory-targeting symlink
-        # (`plugins.so -> payload/`), where open() below would otherwise
-        # raise an uncaught IsADirectoryError (Codex review).
+        # A library-shaped symlink whose real target is NOT independently
+        # library-shaped previously got no LibraryEntry -- no declared
+        # identity for unpack's discovery to match, so it was undeclared
+        # and rejected as tampered. The ordinary case (`liba.so ->
+        # liba.so.1.2.3`) is left alone. S_ISREG guards against the same
+        # match on a directory-targeting symlink, where open() below
+        # would otherwise raise IsADirectoryError (Codex review).
         entry = None
         if (
             target_stat is not None
@@ -860,9 +861,21 @@ def pack_product_baseline(
             f"no files found under {source_path} to pack into a product baseline"
         )
     # A separate, existence-independent exclusion for what actually gets
-    # archived below -- see _output_parent_chain()'s own docstring.
+    # archived below -- see _output_parent_chain()'s own docstring. A
+    # declared header root is excluded from this chain: OUTPUT landing
+    # inside a genuine, pre-existing (if currently empty) header root is
+    # real product content the manifest already promises, not scaffolding
+    # -- the unqualified exclusion dropped it while still declaring it,
+    # so unpack rejected its own honestly produced output (Codex review).
+    # Built in the same lexical (unresolved) space empty_dirs/
+    # output_parent_chain use, not the `.resolve()`d dirs above.
     output_parent_chain = _output_parent_chain(source_path, leaf_parent_lexical)
-    archived_empty_dirs = [d for d in empty_dirs if d not in output_parent_chain]
+    declared_header_root_dirs = {source_path / rel for rel in resolved_header_roots}
+    archived_empty_dirs = [
+        d
+        for d in empty_dirs
+        if d not in output_parent_chain or d in declared_header_root_dirs
+    ]
 
     # MANIFEST_MEMBER_NAME is reserved: a real source entry there would
     # collide with the generated manifest member, added last, silently
@@ -1123,16 +1136,12 @@ def unpack_product_baseline(
         manifest = ProductBaselineManifest.from_dict(raw)
         _check_schema_supported(manifest.schema, archive_path)
 
-        # The manifest is untrusted input (the archive could come from
-        # anywhere) -- header_roots is meant to be re-joined against the
-        # caller's own unpack destination and handed straight to a
-        # header-parsing tool, so a corrupt or adversarial manifest
-        # declaring an absolute or escaping root ("../../etc", "/etc")
-        # must be rejected here, the same way pack_product_baseline()
-        # itself refuses to record one on write. from_dict()'s own
-        # defensive str() coercion accepts and returns any string
-        # unchanged, so this check has to happen here, not there (Codex
-        # review, fresh evidence).
+        # The manifest is untrusted -- header_roots is re-joined against
+        # the unpack destination and handed to a header-parsing tool, so
+        # an adversarial manifest declaring an absolute/escaping root
+        # ("../../etc") must be rejected the same way pack refuses to
+        # record one. from_dict()'s defensive str() coercion accepts any
+        # string unchanged, so this check happens here, not there.
         for rel in manifest.header_roots:
             resolved = _resolve_under_root(staging, rel)
             if resolved is None or not resolved.is_dir():
@@ -1210,15 +1219,12 @@ def unpack_product_baseline(
                 )
         # The verification loop above only examines manifest-declared
         # entries -- an archive that omits a LibraryEntry entirely has
-        # that library's real content never verified (Codex review,
-        # fresh evidence). Cross-checked against what was actually
-        # extracted via _discover_library_map(), the same walk
-        # compare_product_directories() uses.
-        #
-        # A symlink alias is compared by filesystem identity (dev, ino),
-        # not path string: a dev-symlink alias never gets its own
-        # LibraryEntry. A hardlink alias is compared by path string
-        # instead, below -- it DOES get its own declared entry.
+        # that library's content never verified (Codex review). Cross-
+        # checked against what was actually extracted via
+        # _discover_library_map(), the same walk compare_product_
+        # directories() uses. A symlink alias is compared by identity
+        # (dev, ino); a hardlink alias is compared by path string below,
+        # since it DOES get its own declared entry.
         declared_identities = set()
         declared_paths = set()
         for lib in manifest.libraries:
@@ -1768,11 +1774,10 @@ def compare_product_directories(
     # ambiguous group never makes the rest look artificially unambiguous.
     # Pass 1 is directory-scoped: two independent libraries sharing a
     # basename in different directories that each bump their own SONAME
-    # major must not land in one shared, cross-directory bucket (Codex
-    # review, fresh evidence). Pass 2 is a bare, global fallback over
-    # whatever pass 1 left unpaired -- a library that moves directories
-    # between releases has no shared directory for pass 1 to key on
-    # (Codex review, fresh evidence).
+    # major must not land in one shared, cross-directory bucket. Pass 2
+    # is a bare, global fallback over whatever pass 1 left unpaired -- a
+    # library that moves directories between releases has no shared
+    # directory for pass 1 to key on (Codex review).
     def _canonical_groups(
         discovered: dict[str, Path], *, scope_by_directory: bool
     ) -> dict[tuple[str, str], list[str]]:
@@ -1881,13 +1886,11 @@ def compare_product_directories(
     # only fires when a surviving sibling actually imports the removed
     # library -- a standalone removal (no internal consumer) is by design
     # left to the CLI's separate --fail-on-removed-library flow, which
-    # this library-only entry point has no equivalent of. Left as-is, a
-    # release that drops its one public library (or any library nothing
-    # else in the product imports) would silently return NO_CHANGE here
-    # (Codex review, fresh evidence) -- a false-green whole-product
-    # compatibility gate. Report it directly: any bare filename present in
-    # the old bundle map and absent from the new one, that compare_bundle()
-    # didn't already report.
+    # this library-only entry point has none of. Left as-is, a release
+    # dropping its one public library would silently return NO_CHANGE
+    # (Codex review) -- a false-green whole-product compatibility gate.
+    # Report it directly: any bare filename present in the old bundle map
+    # and absent from the new one, that compare_bundle() didn't already report.
     already_reported = {
         f.provider_library
         for f in bundle_result.bundle_findings
