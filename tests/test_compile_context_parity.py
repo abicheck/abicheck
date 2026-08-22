@@ -1342,16 +1342,20 @@ class _FakeCtx:
     invocation -- see this file's own module docstring on why this guard
     exists."""
 
-    def __init__(self, source, header_backend):
+    def __init__(
+        self,
+        source: click.core.ParameterSource,
+        header_backend: list[tuple[str, str]],
+    ) -> None:
         self._source = source
         self.params = {"header_backend": header_backend}
 
-    def get_parameter_source(self, name):
+    def get_parameter_source(self, name: str) -> click.core.ParameterSource:
         assert name == "header_backend"
         return self._source
 
 
-def test_sided_frontend_explicit_direct():
+def test_sided_frontend_explicit_direct() -> None:
     cmdline = click.core.ParameterSource.COMMANDLINE
     default = click.core.ParameterSource.DEFAULT
     # Not COMMANDLINE at all -> False, regardless of the raw value.
