@@ -93,8 +93,8 @@ root cause — not one gap wearing four names:
    bundle layer has no way to say "this consumer's import still resolves by
    name, but nothing establishes the signature agrees" — it silently
    reports nothing, which reads as "compatible."
-4. **The finding taxonomy conflates "public ABI promise" with "shipped
-   bundle still works."** `bundle_library_removed`/
+4. **The rationale for separate public-ABI and bundle-integrity findings is
+   undocumented.** `bundle_library_removed`/
    `bundle_intra_dep_removed` etc. already exist as their own kinds (not
    reusing `BREAKING_KINDS`' public-surface language) — this part of
    ADR-023's design is already correct. What's missing is the reporter/
@@ -339,28 +339,53 @@ pair still uses the existing `bundle_*` kinds unchanged).
 
 `bundle_intra_dep_signature_changed` already fires correctly when a
 provider's DWARF/header evidence shows a real signature change. This phase
-adds the missing negative case: a new field on `BundleFinding` (or a new,
-narrower `ChangeKind`, `bundle_intra_dep_signature_unverified` — to be
-decided during implementation based on which reads better in the reporter,
-not pre-decided here) fires when:
+adds the missing negative case: a new, dedicated `ChangeKind`,
+`bundle_intra_dep_signature_unverified` — **required, not a
+field-vs-kind choice left open for implementation time.** A bare field on
+`BundleFinding` cannot be independently suppressed, promoted, or exit-coded
+by a `--policy` file the way a `ChangeKind` can (`policy_file.py`'s
+`overrides:` block, `checker_policy.py`'s severity/verdict registry, and
+`severity.py`'s exit-code mapping all key off `ChangeKind`, not an
+ad-hoc finding field) — so only the dedicated-kind form actually satisfies
+this plan's own acceptance criterion 5 ("a distinct finding... so a
+`--policy` file can suppress or promote it independently"). Registered in
+`change_registry.py` exactly like every other `bundle_*` kind, with its own
+report/JSON representation, registry entry, and acceptance test pinning its
+default `RISK` verdict plus a policy-override case — the same bar every
+other new `ChangeKind` in this codebase clears (see the root `AGENTS.md`'s
+"Adding a new ChangeKind" checklist).
+
+The kind fires per **consumer/provider symbol pair**, evaluated with
+symbol-level evidence, not a report-level signal:
 
 1. the consumer's undefined symbol resolves by name to a provider's export
    (the C-linkage match `compare_bundle()` already establishes), **and**
-2. neither side's evidence tier for that symbol is sufficient to confirm or
-   deny a signature change (no DWARF, no header AST, L0-only bundle
-   members) — reusing `evidence_status_for_result`'s existing
-   `ARTIFACT_PROVEN`/`UNATTRIBUTED` distinction (see AGENTS.md's own
-   "Evidence-provider model" known-gap entry for why this is a report-level,
-   not per-finding, signal today, and why this phase does not attempt the
-   full per-finding provider model that entry says is out of scope) rather
-   than inventing a second evidence-confidence scale for bundle findings
-   specifically.
+2. *that specific symbol's* evidence — on the provider side, whether its
+   `Function`/`Variable` entry in the provider's `AbiSnapshot` carries real
+   DWARF/header-derived type information at all, vs. being visible only as
+   a bare ELF export with no corroborating declaration (an L0-only bundle
+   member, or a provider whose header crosscheck never matched this
+   symbol) — is insufficient to confirm or deny a signature change on
+   *either* side. `evidence_status_for_result`'s existing
+   `ARTIFACT_PROVEN`/`UNATTRIBUTED` distinction is report-level (see
+   AGENTS.md's own "Evidence-provider model" known-gap entry) and is
+   explicitly **not** reused here for exactly that reason — a report-level
+   signal would make this finding's outcome depend on unrelated symbols
+   elsewhere in the same comparison, which defeats the point of a
+   per-symbol gate. Instead, this phase adds one narrow, symbol-scoped
+   check: does the resolved provider `Function`/`Variable` for this
+   specific symbol have a non-`None` signature (`Function.params`/
+   `Function.return_type`, or `Variable.type`, populated from real
+   evidence rather than absent) on both old and new. This is deliberately
+   much narrower than the full per-finding evidence-provider model
+   AGENTS.md's known-gap entry describes out of scope — it answers only
+   "does *this* symbol have a corroborated signature," not "which tier
+   produced every finding in the report."
 
 Default verdict: `RISK`, distinct from both "no change" and the confirmed
 `BREAKING` `bundle_intra_dep_signature_changed` — this is the "binary-name
 compatible, signature unverified" language the review's finding-taxonomy
-table asks for, expressed as its own kind rather than a footnote on an
-existing one, so a `--policy` file can suppress or promote it independently.
+table asks for.
 
 ---
 
@@ -373,7 +398,7 @@ existing one, so a `--policy` file can suppress or promote it independently.
 | `abicheck/bundle_multibuild.py` | New — `variant_fingerprint`, `pair_variants`, `VariantComparison` (Phase 3) |
 | `abicheck/serialization.py` | `save_bundle_facts`/`load_bundle_facts` (Phase 2) |
 | `abicheck/comparability.py` | Bundle-level fingerprint-mismatch refusal, mirroring the existing single-snapshot `ScopeMismatchError` (Phase 2); no change to single-snapshot behavior |
-| `abicheck/checker_policy.py` / `abicheck/change_registry.py` | `bundle_variant_coverage_regressed`, `bundle_intra_dep_signature_unverified` (or the finalized field-based alternative) registry entries (Phases 3-4) |
+| `abicheck/checker_policy.py` / `abicheck/change_registry.py` | `bundle_variant_coverage_regressed`, `bundle_intra_dep_signature_unverified` registry entries (Phases 3-4) |
 | `abicheck/cli.py` / `abicheck/cli_compare_release*.py` | `--bundle-facts-out`, `compare --against <bundle facts>` wiring (Phase 2); whichever multibuild CLI surface Phase 3 needs — deferred to implementation time pending CLI-cleanup-phase-two's own convergence |
 | `abicheck/reporter.py` / `abicheck/report_summary.py` | Render the two new finding shapes; extend `bundle.json`/`bundle.md` (Phases 3-4) |
 | `docs/reference/change-kinds.md` | Phase 1 taxonomy note; new-kind entries for Phases 3-4 |
