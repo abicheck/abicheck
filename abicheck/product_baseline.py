@@ -618,13 +618,11 @@ def _add_member(
                 f"escape {source_dir} when interpreted with Windows path "
                 "separators -- refusing to pack it for portability"
             )
-        # A library-shaped symlink whose real target is NOT independently
-        # library-shaped previously got no LibraryEntry -- no declared
-        # identity for unpack's discovery to match, so it was undeclared
-        # and rejected as tampered. The ordinary case (`liba.so ->
-        # liba.so.1.2.3`) is left alone. S_ISREG guards against the same
-        # match on a directory-targeting symlink, where open() below
-        # would otherwise raise IsADirectoryError (Codex review).
+        # A library-shaped symlink whose target is NOT independently
+        # library-shaped got no LibraryEntry -- no declared identity for
+        # unpack to match, so it was rejected as tampered. `liba.so ->
+        # liba.so.1.2.3` is left alone. S_ISREG guards a directory-
+        # targeting symlink, where open() would raise IsADirectoryError.
         entry = None
         if (
             target_stat is not None
@@ -876,6 +874,13 @@ def pack_product_baseline(
         for d in empty_dirs
         if d not in output_parent_chain or d in declared_header_root_dirs
     ]
+    # Known gap (Codex review): an *undeclared*, pre-existing empty dir
+    # holding OUTPUT is still excluded like pure scaffolding --
+    # structurally indistinguishable by content, and existence can't
+    # separate them (OUTPUT's own dir survives after a first pack, so a
+    # rerun would misclassify scaffold as real content, regressing
+    # determinism-across-reruns). Needs a declaration mechanism beyond
+    # header_roots, not another heuristic guess.
 
     # MANIFEST_MEMBER_NAME is reserved: a real source entry there would
     # collide with the generated manifest member, added last, silently
@@ -1120,12 +1125,9 @@ def unpack_product_baseline(
             ) from exc
         if not isinstance(raw, dict):
             raise SnapshotError(f"{archive_path}: corrupt product baseline manifest")
-        # ProductBaselineManifest.from_dict() defensively *defaults* a
-        # missing "schema" key to PRODUCT_BASELINE_SCHEMA -- correct for
-        # every *other* field, but applied to `schema` it defeats the
-        # check this discriminator exists for: any mapping without a
-        # `schema` key at all (e.g. `{}`) would pass _check_schema_supported()
-        # (Codex review). Checked explicitly, before the default applies.
+        # from_dict() defensively *defaults* a missing "schema" key --
+        # applied to `schema` it defeats the check: any mapping without
+        # one (e.g. `{}`) would pass _check_schema_supported() (Codex).
         if not isinstance(raw.get("schema"), str) or not raw["schema"]:
             raise SnapshotError(
                 f"{archive_path}: product baseline manifest is missing its "
@@ -1218,13 +1220,11 @@ def unpack_product_baseline(
                     "with"
                 )
         # The verification loop above only examines manifest-declared
-        # entries -- an archive that omits a LibraryEntry entirely has
-        # that library's content never verified (Codex review). Cross-
-        # checked against what was actually extracted via
-        # _discover_library_map(), the same walk compare_product_
-        # directories() uses. A symlink alias is compared by identity
-        # (dev, ino); a hardlink alias is compared by path string below,
-        # since it DOES get its own declared entry.
+        # entries -- an omitted LibraryEntry has content never verified
+        # (Codex). Cross-checked against what compare_product_
+        # directories()'s own walk actually extracted. A symlink alias
+        # is compared by identity (dev, ino); a hardlink alias by path
+        # string below, since it DOES get its own declared entry.
         declared_identities = set()
         declared_paths = set()
         for lib in manifest.libraries:
