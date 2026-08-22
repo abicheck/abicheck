@@ -207,7 +207,18 @@ def _is_known_l4_extractor_divergence_text(output: str) -> bool:
     advisory blocks (cross-check, pattern, preprocessor) may have
     anything to report -- no more, no fewer, no duplicates, and no
     unrelated finding hiding in a bucket this module doesn't otherwise
-    inspect."""
+    inspect.
+
+    Structurally cannot go further than kind-multiset granularity (Codex
+    review, round 5, raised the same concern the JSON variant below
+    closes with a description-substring check): ``cli_scan_helpers.
+    render_baseline_lines`` renders each finding as only
+    ``[<bucket>] <kind>: <symbol><location>`` -- the ``description`` field
+    that actually distinguishes *which* cause produced a given kind is
+    never rendered in text mode at all, so there is no substring left in
+    ``output`` for this variant to check. The JSON variant is the
+    cause-specific one; prefer it in any new test that needs to
+    distinguish this from a same-kind-different-cause regression."""
     if "COMPATIBLE_WITH_RISK" not in output:
         return False
     if any(heading in output for heading in _ADVISORY_HEADINGS):
@@ -277,7 +288,27 @@ def _is_known_l4_extractor_divergence_report(report: dict) -> bool:
         return False
     findings = diff.get("findings") or []
     kinds = Counter(f.get("kind") for f in findings)
-    return kinds == _KNOWN_L4_EXTRACTOR_DIVERGENCE_COUNTS
+    if kinds != _KNOWN_L4_EXTRACTOR_DIVERGENCE_COUNTS:
+        return False
+    # Codex review, round 5: the kind alone is not cause-specific --
+    # SOURCE_FACT_COVERAGE_INCOMPLETE (buildsource/source_diff.py's
+    # `_coverage_incomplete_change`) is one ChangeKind covering several
+    # distinct underlying incompleteness reasons joined into one
+    # description, and a real regression could reproduce the identical
+    # kind pair/verdict/totals for a genuinely different cause (a
+    # different incomplete fact family, a different side). Each
+    # description is the one place that cause is actually recorded, so
+    # match the fixed, distinctive substrings each producer emits.
+    descriptions = {f.get("kind"): f.get("description") or "" for f in findings}
+    coverage_desc = descriptions.get("source_fact_coverage_incomplete", "")
+    provenance_desc = descriptions.get("source_binary_provenance_mismatch", "")
+    return (
+        "treat this pair's other source-replay findings as unreliable "
+        "until re-collected"
+        in coverage_desc
+        and "do not map to any exported binary symbol" in provenance_desc
+        and "wrong tag/commit" in provenance_desc
+    )
 
 
 def _build_library(
