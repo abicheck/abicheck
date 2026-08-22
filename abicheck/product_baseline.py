@@ -58,6 +58,7 @@ import os
 import re
 import shutil
 import stat as stat_module
+import struct
 import tarfile
 import tempfile
 from collections.abc import Iterable, Mapping, Sequence
@@ -111,8 +112,85 @@ def _is_shared_library(name: str) -> bool:
     return _VERSIONED_SONAME.search(name) is not None
 
 
+#: Mach-O ``mach_header``/``mach_header_64`` ``filetype`` values that are a
+#: dynamically-loadable image, not a plain executable -- the values that
+#: made a ``.so``-shaped ABI question meaningful for the file at all (a
+#: framework binary or plugin bundle is exactly the extensionless-Mach-O
+#: case this predicate exists to catch). MH_EXECUTE (2) is deliberately
+#: excluded: an executable is not a shared library regardless of content.
+_MACHO_LIBRARY_FILETYPES = frozenset({6, 8, 9})  # MH_DYLIB, MH_BUNDLE, MH_DYLIB_STUB
+
+#: PE/COFF ``IMAGE_FILE_DLL`` bit in the COFF file header's ``Characteristics``
+#: field -- set for a DLL, clear for a plain ``.exe``.
+_PE_IMAGE_FILE_DLL = 0x2000
+
+
+def _macho_is_library_content(path: Path) -> bool:
+    """True when *path* is a thin (single-architecture) Mach-O dynamic
+    library, bundle, or dylib stub, identified from its header ``filetype``
+    field rather than its filename -- the Mach-O counterpart of
+    :func:`abicheck.package._is_elf_shared_object`, for an extensionless
+    framework binary (``Foo.framework/Foo``) or a nonstandard-extension
+    plugin (``.node``) that a suffix check alone never catches (Codex
+    review, fresh evidence).
+
+    Deliberately conservative for a *fat* (universal) Mach-O archive: its
+    per-architecture ``fat_arch`` slices are not guaranteed to agree on
+    ``filetype``, and correctly walking the fat header to make a sound
+    per-file decision is a larger, separately-verifiable piece of work: not
+    attempted here, so a fat binary always reads ``False`` from this
+    function regardless of its actual content (falling back to whatever the
+    filename suffix alone already recognizes).
+    """
+    try:
+        with open(path, "rb") as f:
+            magic = f.read(4)
+            if magic in (b"\xfe\xed\xfa\xce", b"\xfe\xed\xfa\xcf"):
+                byte_order = ">"
+            elif magic in (b"\xce\xfa\xed\xfe", b"\xcf\xfa\xed\xfe"):
+                byte_order = "<"
+            else:
+                return False  # not a thin Mach-O (incl. fat archives)
+            f.seek(12)  # magic(4) + cputype(4) + cpusubtype(4)
+            raw_filetype = f.read(4)
+    except OSError:
+        return False
+    if len(raw_filetype) < 4:
+        return False
+    (filetype,) = struct.unpack(f"{byte_order}I", raw_filetype)
+    return filetype in _MACHO_LIBRARY_FILETYPES
+
+
+def _pe_is_dll_content(path: Path) -> bool:
+    """True when *path* is a PE/COFF image with the ``IMAGE_FILE_DLL`` bit
+    set in its COFF file header, identified from content rather than
+    filename -- the PE counterpart of :func:`_macho_is_library_content`,
+    for a DLL shipped under a nonstandard extension (a Python ``.pyd``
+    extension module) that a suffix check alone never catches (Codex
+    review, fresh evidence).
+    """
+    try:
+        with open(path, "rb") as f:
+            dos_header = f.read(64)
+            if len(dos_header) < 64 or dos_header[0:2] != b"MZ":
+                return False
+            (pe_offset,) = struct.unpack_from("<I", dos_header, 0x3C)
+            f.seek(pe_offset)
+            sig = f.read(4)
+            if sig != b"PE\x00\x00":
+                return False
+            coff_header = f.read(20)
+    except (OSError, struct.error):
+        return False
+    if len(coff_header) < 20:
+        return False
+    (characteristics,) = struct.unpack_from("<H", coff_header, 18)
+    return bool(characteristics & _PE_IMAGE_FILE_DLL)
+
+
 def _is_library_path(path: Path) -> bool:
-    """A shared library, by filename suffix or (for ELF) real content.
+    """A shared library, by filename suffix or real content (ELF, Mach-O,
+    or PE/COFF).
 
     Shared by every place that decides "is this a library" -- packing's own
     manifest-entry classification (:func:`_add_member`, both its regular-
@@ -128,8 +206,38 @@ def _is_library_path(path: Path) -> bool:
     (Codex review, fresh evidence). Factored into one predicate so
     discovery and manifest classification can never drift apart on this
     question again.
+
+    The ELF content fallback (:func:`~abicheck.package._is_elf_shared_object`)
+    had no Mach-O/PE counterpart, so a macOS framework binary
+    (``Foo.framework/Foo``, conventionally extensionless) or a Windows
+    ``.pyd`` extension module never entered either library map even though
+    both are real, supported native-binary formats — a framework-only
+    product silently compared as if it shipped no libraries at all (Codex
+    review, fresh evidence). :func:`_macho_is_library_content`/
+    :func:`_pe_is_dll_content` close that for a *thin* Mach-O and any PE
+    image respectively; see the former's own docstring for the one
+    remaining gap (fat/universal Mach-O archives).
+
+    A ``.debug`` split-debug sidecar (the conventional
+    ``objcopy --only-keep-debug`` output, e.g. ``libfoo.so.1.debug``) is
+    excluded outright, ahead of every content check: it is itself a valid
+    ELF file that retains its original binary's ``ET_DYN`` header (objcopy
+    strips sections/symbols, not the header), so the content-aware ELF
+    fallback above would otherwise discover it as a second, independent
+    "library" alongside the real DSO it was split from. A release that
+    merely omits or relocates the sidecar then read as a breaking removal
+    of a library that, from the shipped DSO's own perspective, never
+    changed at all (Codex review, fresh evidence). ``_is_shared_library``
+    already excludes this filename from the suffix check (``_VERSIONED_
+    SONAME`` requires every post-``.so`` segment to be purely numeric, and
+    ``debug`` is not) — this guard closes the identical gap for the
+    content-based fallbacks, which have no notion of filename at all.
     """
-    return _is_shared_library(path.name) or _is_elf_shared_object(path)
+    if path.name.lower().endswith(".debug"):
+        return False
+    if _is_shared_library(path.name) or _is_elf_shared_object(path):
+        return True
+    return _macho_is_library_content(path) or _pe_is_dll_content(path)
 
 
 @dataclass(frozen=True)
@@ -1164,6 +1272,7 @@ def _discover_library_map(root: Path, *, include_private: bool) -> dict[str, Pat
     """
     del include_private  # accepted for API symmetry only; see docstring.
 
+    root_resolved = root.resolve()
     seen_identity: set[Path | tuple[int, int]] = set()
     library_map: dict[str, Path] = {}
     for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
@@ -1191,6 +1300,24 @@ def _discover_library_map(root: Path, *, include_private: bool) -> dict[str, Pat
                 real = path.resolve()
             except OSError:
                 real = path
+            else:
+                # A library-shaped symlink (os.walk(followlinks=False)
+                # still lists a symlink-to-a-*file* under filenames, only
+                # a symlink-to-a-*directory* is skipped) whose target
+                # resolves outside root entirely -- e.g. `libfoo.so ->
+                # /usr/lib/libfoo.so` -- is rejected rather than
+                # discovered: comparing it would silently analyze a host
+                # file that isn't part of the product at all, making the
+                # result machine-dependent and potentially hiding a
+                # missing shipped library. Matches the containment
+                # discipline pack/unpack already enforce via
+                # `_resolve_under_root` for a manifest-declared path
+                # (Codex review, fresh evidence). A conventional in-tree
+                # dev symlink (`libfoo.so -> libfoo.so.1`, same directory
+                # or elsewhere under root) still resolves within root and
+                # is unaffected.
+                if real != root_resolved and not real.is_relative_to(root_resolved):
+                    continue
             try:
                 st = real.stat()
                 identity: Path | tuple[int, int] = (st.st_dev, st.st_ino)

@@ -25,6 +25,7 @@ rationale."""
 
 from __future__ import annotations
 
+import struct
 from pathlib import Path
 
 import pytest
@@ -634,6 +635,67 @@ class TestCompareProductDirectoriesStandaloneRemoval:
         ]
         assert removed == []
 
+    def test_does_not_double_report_a_sibling_consumed_removal(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # When compare_bundle() already reported a removal (a surviving
+        # sibling imports it), the standalone-removal pass must not add
+        # a second, duplicate finding for the same library.
+        from abicheck import bundle as bundle_mod
+        from abicheck.checker_policy import ChangeKind
+        from abicheck.product_baseline import compare_product_directories
+
+        old_dir = tmp_path / "old"
+        new_dir = tmp_path / "new"
+        old_dir.mkdir()
+        new_dir.mkdir()
+
+        class _FakeFinding:
+            def __init__(self, provider_library: str) -> None:
+                self.kind = ChangeKind.BUNDLE_LIBRARY_REMOVED
+                self.provider_library = provider_library
+
+        class _FakeResult:
+            def __init__(self) -> None:
+                self.bundle_findings = [_FakeFinding("liba.so")]
+
+        def _fake_discover_library_map(root, *, include_private):  # type: ignore[no-untyped-def]
+            # Compare the resolved Path against old_dir directly, not a
+            # substring match on str(root) -- on macOS the pytest tmp
+            # directory is under /private/var/folders/..., where "folders"
+            # itself contains the substring "old", so a naive `"old" in
+            # str(root)` check matched *both* sides (old_dir and new_dir
+            # alike), silently pairing a library whose files were never
+            # written to disk and blowing up in real ELF-format detection
+            # instead of exercising the mocked path this test is about
+            # (macOS CI, fresh evidence).
+            if Path(root) == old_dir:
+                return {"lib/liba.so": root / "lib" / "liba.so"}
+            return {}
+
+        def _fake_build_bundle_snapshot(libraries):  # type: ignore[no-untyped-def]
+            return {"libraries": dict(libraries)}
+
+        def _fake_compare_bundle(old, new, per_library_results, **kwargs):  # type: ignore[no-untyped-def]
+            return _FakeResult()
+
+        from abicheck import product_baseline as pb
+
+        monkeypatch.setattr(pb, "_discover_library_map", _fake_discover_library_map)
+        monkeypatch.setattr(
+            bundle_mod, "build_bundle_snapshot", _fake_build_bundle_snapshot
+        )
+        monkeypatch.setattr(bundle_mod, "compare_bundle", _fake_compare_bundle)
+
+        result = compare_product_directories(old_dir, new_dir)
+
+        removed = [
+            f
+            for f in result.bundle_findings
+            if f.kind == ChangeKind.BUNDLE_LIBRARY_REMOVED
+        ]
+        assert len(removed) == 1
+
 
 class TestCompareProductDirectoriesStandaloneAddition:
     def test_reports_a_non_elf_library_addition(self, tmp_path: Path) -> None:
@@ -742,6 +804,167 @@ class TestDiscoverLibraryMapExtensionlessElf:
         result = _discover_library_map(root, include_private=True)
         assert result == {}
 
+    def test_split_debug_elf_sidecar_is_not_discovered_as_a_library(
+        self, tmp_path: Path
+    ) -> None:
+        # A real objcopy --only-keep-debug sidecar (libfoo.so.1.debug) is
+        # itself a valid ELF file that retains its original binary's
+        # ET_DYN header -- the content-aware ELF fallback above would
+        # otherwise discover it as a second, independent "library"
+        # alongside the real DSO it was split from (Codex review, fresh
+        # evidence).
+        from abicheck.product_baseline import _discover_library_map
+        from tests.test_package import _make_minimal_elf_so
+
+        root = tmp_path / "product"
+        (root / "lib").mkdir(parents=True)
+        _make_minimal_elf_so(root / "lib" / "libfoo.so.1")
+        _make_minimal_elf_so(root / "lib" / "libfoo.so.1.debug")
+
+        result = _discover_library_map(root, include_private=True)
+        assert set(result) == {"lib/libfoo.so.1"}
+
+
+class TestDiscoverLibraryMapExtensionlessMachOAndPe:
+    """The Mach-O/PE counterpart of the ELF extensionless-DSO class above:
+    a real Mach-O dylib/bundle or a real PE DLL under a nonstandard
+    extension (a macOS framework binary, a Python .pyd) previously never
+    entered discovery at all -- the ELF content fallback had no
+    counterpart for either format (Codex review, fresh evidence)."""
+
+    def test_extensionless_macho_dylib_is_discovered(self, tmp_path: Path) -> None:
+        # Mirrors a macOS framework binary's own convention
+        # (Foo.framework/Foo, no suffix at all).
+        from abicheck.product_baseline import _discover_library_map
+        from tests.test_cross_platform_fixtures import _make_minimal_macho
+
+        root = tmp_path / "product"
+        framework = root / "Foo.framework"
+        framework.mkdir(parents=True)
+        _make_minimal_macho(framework, filename="Foo")
+
+        result = _discover_library_map(root, include_private=True)
+        assert set(result) == {"Foo.framework/Foo"}
+
+    def test_extensionless_macho_be_dylib_is_discovered(self, tmp_path: Path) -> None:
+        from abicheck.product_baseline import _discover_library_map
+        from tests.test_cross_platform_fixtures import _make_minimal_macho_be
+
+        root = tmp_path / "product"
+        root.mkdir(parents=True)
+        macho_be = _make_minimal_macho_be(root)
+        macho_be.rename(root / "libbe_no_suffix")
+
+        result = _discover_library_map(root, include_private=True)
+        assert set(result) == {"libbe_no_suffix"}
+
+    def test_macho_executable_is_not_discovered(self, tmp_path: Path) -> None:
+        # MH_EXECUTE (2), not MH_DYLIB/MH_BUNDLE/MH_DYLIB_STUB -- a plain
+        # executable is not a shared library regardless of content.
+        from abicheck.product_baseline import _discover_library_map
+
+        root = tmp_path / "product"
+        root.mkdir(parents=True)
+        header = struct.pack(
+            "<IIIIIIII",
+            0xFEEDFACF,  # magic (MH_MAGIC_64)
+            0x01000007,  # cputype (CPU_TYPE_X86_64)
+            0x00000003,  # cpusubtype
+            0x00000002,  # filetype (MH_EXECUTE)
+            0,
+            0,
+            0,
+            0,
+        )
+        (root / "an_executable").write_bytes(header)
+
+        result = _discover_library_map(root, include_private=True)
+        assert result == {}
+
+    def test_pyd_extension_module_is_discovered_by_content(
+        self, tmp_path: Path
+    ) -> None:
+        # A Python extension module shipped as .pyd is a real PE DLL under
+        # a nonstandard extension -- IMAGE_FILE_DLL alone identifies it,
+        # not the suffix.
+        from abicheck.product_baseline import _discover_library_map
+        from tests.test_cross_platform_fixtures import _make_minimal_pe
+
+        root = tmp_path / "product"
+        root.mkdir(parents=True)
+        dll = _make_minimal_pe(root)
+        pyd = root / "extension.pyd"
+        pyd.write_bytes(dll.read_bytes())
+        dll.unlink()
+
+        result = _discover_library_map(root, include_private=True)
+        assert set(result) == {"extension.pyd"}
+
+    def test_pe_executable_is_not_discovered(self, tmp_path: Path) -> None:
+        # Same DOS/PE header shape as _make_minimal_pe, but Characteristics
+        # has no IMAGE_FILE_DLL bit set -- an ordinary .exe.
+        from abicheck.product_baseline import _discover_library_map
+
+        root = tmp_path / "product"
+        root.mkdir(parents=True)
+        dos_header = bytearray(64)
+        dos_header[0:2] = b"MZ"
+        pe_offset = 64
+        struct.pack_into("<I", dos_header, 0x3C, pe_offset)
+        coff_header = struct.pack("<HHIIIHH", 0x8664, 0, 0, 0, 0, 0, 0x0002)
+        (root / "an_executable").write_bytes(
+            bytes(dos_header) + b"PE\x00\x00" + coff_header
+        )
+
+        result = _discover_library_map(root, include_private=True)
+        assert result == {}
+
+
+class TestDiscoverLibraryMapSymlinkContainment:
+    def test_symlink_escaping_the_product_root_is_not_discovered(
+        self, tmp_path: Path
+    ) -> None:
+        # A library-shaped symlink whose target resolves outside root
+        # entirely (libfoo.so -> /some/host/path/libfoo.so) was previously
+        # discovered and later opened by run_compare() through the symlink,
+        # silently analyzing a host file that is no part of the product at
+        # all -- machine-dependent results, and a potential way to hide a
+        # library the product should have shipped but didn't. Rejected the
+        # same way pack/unpack already reject an escaping manifest path
+        # (Codex review, fresh evidence).
+        from abicheck.product_baseline import _discover_library_map
+
+        root = tmp_path / "product"
+        (root / "lib").mkdir(parents=True)
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        (outside / "libfoo.so").write_bytes(b"HOST-CONTENT")
+        (root / "lib" / "libfoo.so").symlink_to(outside / "libfoo.so")
+
+        result = _discover_library_map(root, include_private=True)
+        assert result == {}
+
+    def test_in_tree_symlink_across_directories_is_still_discovered(
+        self, tmp_path: Path
+    ) -> None:
+        # The containment check must not reject an ordinary in-tree
+        # symlink -- only one whose resolved target actually escapes root.
+        from abicheck.product_baseline import _discover_library_map
+
+        root = tmp_path / "product"
+        (root / "a_real").mkdir(parents=True)
+        (root / "z_alias").mkdir(parents=True)
+        target = root / "a_real" / "libfoo.so"
+        target.write_bytes(b"REAL-CONTENT")
+        (root / "z_alias" / "libfoo.so").symlink_to(target)
+
+        # Both the real file and the alias resolve within root, so exactly
+        # one survives (the deterministic-walk-order dedup this class's
+        # sibling already covers, unaffected by the containment check
+        # here) -- "a_real" sorts first.
+        result = _discover_library_map(root, include_private=True)
+        assert set(result) == {"a_real/libfoo.so"}
+
 
 class TestDiscoverLibraryMapDeterministicWalkOrder:
     def test_symlink_alias_survivor_is_stable_regardless_of_walk_order(
@@ -767,64 +990,3 @@ class TestDiscoverLibraryMapDeterministicWalkOrder:
 
         result = _discover_library_map(root, include_private=True)
         assert set(result) == {"a/target.so"}
-
-    def test_does_not_double_report_a_sibling_consumed_removal(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        # When compare_bundle() already reported a removal (a surviving
-        # sibling imports it), the standalone-removal pass must not add
-        # a second, duplicate finding for the same library.
-        from abicheck import bundle as bundle_mod
-        from abicheck.checker_policy import ChangeKind
-        from abicheck.product_baseline import compare_product_directories
-
-        old_dir = tmp_path / "old"
-        new_dir = tmp_path / "new"
-        old_dir.mkdir()
-        new_dir.mkdir()
-
-        class _FakeFinding:
-            def __init__(self, provider_library: str) -> None:
-                self.kind = ChangeKind.BUNDLE_LIBRARY_REMOVED
-                self.provider_library = provider_library
-
-        class _FakeResult:
-            def __init__(self) -> None:
-                self.bundle_findings = [_FakeFinding("liba.so")]
-
-        def _fake_discover_library_map(root, *, include_private):  # type: ignore[no-untyped-def]
-            # Compare the resolved Path against old_dir directly, not a
-            # substring match on str(root) -- on macOS the pytest tmp
-            # directory is under /private/var/folders/..., where "folders"
-            # itself contains the substring "old", so a naive `"old" in
-            # str(root)` check matched *both* sides (old_dir and new_dir
-            # alike), silently pairing a library whose files were never
-            # written to disk and blowing up in real ELF-format detection
-            # instead of exercising the mocked path this test is about
-            # (macOS CI, fresh evidence).
-            if Path(root) == old_dir:
-                return {"lib/liba.so": root / "lib" / "liba.so"}
-            return {}
-
-        def _fake_build_bundle_snapshot(libraries):  # type: ignore[no-untyped-def]
-            return {"libraries": dict(libraries)}
-
-        def _fake_compare_bundle(old, new, per_library_results, **kwargs):  # type: ignore[no-untyped-def]
-            return _FakeResult()
-
-        from abicheck import product_baseline as pb
-
-        monkeypatch.setattr(pb, "_discover_library_map", _fake_discover_library_map)
-        monkeypatch.setattr(
-            bundle_mod, "build_bundle_snapshot", _fake_build_bundle_snapshot
-        )
-        monkeypatch.setattr(bundle_mod, "compare_bundle", _fake_compare_bundle)
-
-        result = compare_product_directories(old_dir, new_dir)
-
-        removed = [
-            f
-            for f in result.bundle_findings
-            if f.kind == ChangeKind.BUNDLE_LIBRARY_REMOVED
-        ]
-        assert len(removed) == 1

@@ -159,7 +159,12 @@ library rather than trying to fold them into a single baseline file — see
 facts
 pack](github-action-source-scans.md#recommended-flow-a-multi-library-release-with-one-shared-facts-pack)
 for a concrete per-library baseline-set walkthrough (build once, one facts
-pack, one baseline file per library).
+pack, one baseline file per library). This per-library baseline-set is still
+the right workflow for checking each library's own ABI — it is not
+superseded by the whole-product `pack_product_baseline`/
+`compare_product_directories` module described above, which answers a
+different question (cross-library, bundle-aware breakage) rather than
+replacing the per-library one.
 
 ### A new library's first release
 

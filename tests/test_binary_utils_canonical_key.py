@@ -50,3 +50,33 @@ class TestCanonicalLibraryKeyMachOVersioning:
         # The pre-existing ELF handling takes priority and is unchanged by
         # this addition.
         assert _canonical_library_key(Path("libfoo.so.1.2")) == "libfoo.so"
+
+
+class TestCanonicalLibraryKeyCaseFolding:
+    """Case-folding is restricted to the PE/.dll suffix, the one format
+    whose loader identity is genuinely case-insensitive (Windows). ELF
+    .so and Mach-O .dylib identity is case-sensitive -- a case-only
+    rename breaks a case-sensitive consumer's DT_NEEDED/LC_LOAD_DYLIB, a
+    real break the canonical fallback must not silently pair away (Codex
+    review, fresh evidence)."""
+
+    def test_dll_case_only_rename_still_shares_a_canonical_key(self) -> None:
+        assert _canonical_library_key(Path("Foo.dll")) == _canonical_library_key(
+            Path("foo.dll")
+        )
+
+    def test_elf_case_only_rename_does_not_share_a_canonical_key(self) -> None:
+        assert _canonical_library_key(Path("libFoo.so")) != _canonical_library_key(
+            Path("libfoo.so")
+        )
+
+    def test_dylib_case_only_rename_does_not_share_a_canonical_key(self) -> None:
+        assert _canonical_library_key(Path("libFoo.dylib")) != _canonical_library_key(
+            Path("libfoo.dylib")
+        )
+
+    def test_elf_stem_case_is_preserved_in_the_key(self) -> None:
+        assert _canonical_library_key(Path("libFoo.so.1.2")) == "libFoo.so"
+
+    def test_dylib_stem_case_is_preserved_in_the_key(self) -> None:
+        assert _canonical_library_key(Path("libFoo.1.2.dylib")) == "libFoo.dylib"

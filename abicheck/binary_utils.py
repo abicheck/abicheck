@@ -173,8 +173,11 @@ def strip_vendor_hash(name: str) -> str:
 #: encodes directly in the on-disk filename, distinct from ELF's
 #: version-*after*-extension ``libfoo.so.1`` convention the regex below
 #: already handles. Requires at least one numeric segment so a bare
-#: ``libfoo.dylib`` (no version at all) is left untouched.
-_DYLIB_VERSION_RE = re.compile(r"\.(?:\d+\.)*\d+\.dylib$")
+#: ``libfoo.dylib`` (no version at all) is left untouched. Case-insensitive
+#: to match a ``.DYLIB`` extension spelling the same way the ELF ``.so``
+#: match below does, but the *stem* is never case-folded -- see
+#: :func:`_canonical_library_key`'s own docstring for why.
+_DYLIB_VERSION_RE = re.compile(r"\.(?:\d+\.)*\d+\.dylib$", re.IGNORECASE)
 
 
 def _canonical_library_key(path: Path) -> str:
@@ -203,21 +206,37 @@ def _canonical_library_key(path: Path) -> str:
     ``libfoo.abicheck.json`` and a new release publishing the identical
     snapshot as ``libfoo.abicheck.json.gz`` must still key-match as the same
     library rather than surfacing as an unrelated removal+addition pair.
+
+    Case-folding is restricted to the PE/``.dll`` suffix, matching only
+    the one format whose loader identity is genuinely case-insensitive
+    (Windows). Whole-string lowercasing previously applied to *every*
+    format alike, so an ELF ``libFoo.so`` -> ``libfoo.so`` case-only
+    rename (or the identical Mach-O case) paired via this same canonical
+    fallback and its removal/addition was silently suppressed — but a
+    case-sensitive ELF/Mach-O loader cannot resolve a symbol-table-only
+    case difference the way Windows' loader resolves a `.dll` one: an
+    existing consumer whose ``DT_NEEDED``/``LC_LOAD_DYLIB`` still names
+    the old spelling fails to load the renamed file, a real break this
+    canonical pairing must not hide (Codex review, fresh evidence).
     """
     from .snapshot_io import _COMPRESSED_SUFFIXES
 
-    lower = strip_vendor_hash(path.name.lower())
+    name = strip_vendor_hash(path.name)
+    name_lower = name.lower()
     for suffix, _compression in _COMPRESSED_SUFFIXES:
-        if lower.endswith(suffix):
+        if name_lower.endswith(suffix):
             # Strip only the compression extension (".gz"/".zst"), keeping the
             # ".json" so a compressed and an uncompressed snapshot of the same
             # release still reduce to the same key.
             trailing_ext = suffix[len(".json") :]
-            lower = lower[: -len(trailing_ext)]
+            name = name[: -len(trailing_ext)]
+            name_lower = name_lower[: -len(trailing_ext)]
             break
-    m = re.search(r"\.so(?:\.|$)", lower)
+    if name_lower.endswith(".dll"):
+        return name_lower
+    m = re.search(r"\.so(?:\.|$)", name, re.IGNORECASE)
     if m:
-        return lower[: m.start() + 3]
-    if _DYLIB_VERSION_RE.search(lower):
-        return _DYLIB_VERSION_RE.sub(".dylib", lower)
-    return lower
+        return name[: m.start() + 3]
+    if _DYLIB_VERSION_RE.search(name):
+        return _DYLIB_VERSION_RE.sub(".dylib", name)
+    return name
