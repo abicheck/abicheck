@@ -1658,7 +1658,7 @@ _file_fingerprint() {
   # equal a real file's, so "did not exist before, exists now" always
   # reads as changed without a separate existence check.
   [[ -n "$_PY_BIN" && -n "${1:-}" ]] || return 0
-  "$_PY_BIN" -c '
+  (cd "$_PY_SAFE_DIR" && PYTHONPATH= "$_PY_BIN" -c '
 import os, sys
 try:
     st = os.stat(sys.argv[1])
@@ -1666,7 +1666,7 @@ except OSError:
     pass
 else:
     print(f"{st.st_mtime_ns}:{st.st_size}")
-' "$1" 2>/dev/null
+' "$1") 2>/dev/null
 }
 _output_file_pre_fp=""
 if [[ -n "${OUTPUT_FILE:-}" ]]; then
