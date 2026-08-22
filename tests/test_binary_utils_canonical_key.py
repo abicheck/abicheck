@@ -1,0 +1,52 @@
+# Copyright 2026 Nikolay Petrov
+# SPDX-License-Identifier: Apache-2.0
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""Direct unit tests for :func:`abicheck.binary_utils._canonical_library_key`'s
+Mach-O version-in-filename handling (the ``libfoo.N.dylib`` ld64
+compatibility-version convention, the Mach-O counterpart of the pre-existing
+ELF ``libfoo.so.N`` handling this function already covered)."""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+from abicheck.binary_utils import _canonical_library_key
+
+
+class TestCanonicalLibraryKeyMachOVersioning:
+    def test_single_component_version_reduces_to_bare_dylib(self) -> None:
+        assert _canonical_library_key(Path("libfoo.1.dylib")) == "libfoo.dylib"
+
+    def test_multi_component_version_reduces_to_bare_dylib(self) -> None:
+        assert _canonical_library_key(Path("libfoo.1.2.3.dylib")) == "libfoo.dylib"
+
+    def test_two_different_major_versions_share_a_canonical_key(self) -> None:
+        assert _canonical_library_key(Path("libfoo.1.dylib")) == _canonical_library_key(
+            Path("libfoo.2.dylib")
+        )
+
+    def test_unversioned_dylib_is_left_unchanged(self) -> None:
+        # No numeric segment before .dylib -- nothing to strip.
+        assert _canonical_library_key(Path("libfoo.dylib")) == "libfoo.dylib"
+
+    def test_a_version_looking_number_inside_the_stem_is_not_touched(self) -> None:
+        # Only a version segment directly before ".dylib" is stripped --
+        # not an arbitrary digit anywhere in the name.
+        assert _canonical_library_key(Path("libfoo2.dylib")) == "libfoo2.dylib"
+
+    def test_elf_versioning_is_unaffected(self) -> None:
+        # The pre-existing ELF handling takes priority and is unchanged by
+        # this addition.
+        assert _canonical_library_key(Path("libfoo.so.1.2")) == "libfoo.so"

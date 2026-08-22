@@ -18,6 +18,7 @@ Provides a single-file-open format detector for ELF, PE, and Mach-O
 binaries, replacing duplicated detection logic in cli.py, appcompat.py,
 and mcp_server.py.
 """
+
 from __future__ import annotations
 
 import re
@@ -25,12 +26,18 @@ from pathlib import Path
 
 # Mach-O magic bytes — covers all variants:
 # 32-bit BE/LE, 64-bit BE/LE, fat archive 32/64
-_MACHO_MAGICS: frozenset[bytes] = frozenset({
-    b"\xfe\xed\xfa\xce", b"\xce\xfa\xed\xfe",  # 32-bit
-    b"\xfe\xed\xfa\xcf", b"\xcf\xfa\xed\xfe",  # 64-bit
-    b"\xca\xfe\xba\xbe", b"\xbe\xba\xfe\xca",  # fat archive 32
-    b"\xca\xfe\xba\xbf", b"\xbf\xba\xfe\xca",  # fat archive 64
-})
+_MACHO_MAGICS: frozenset[bytes] = frozenset(
+    {
+        b"\xfe\xed\xfa\xce",
+        b"\xce\xfa\xed\xfe",  # 32-bit
+        b"\xfe\xed\xfa\xcf",
+        b"\xcf\xfa\xed\xfe",  # 64-bit
+        b"\xca\xfe\xba\xbe",
+        b"\xbe\xba\xfe\xca",  # fat archive 32
+        b"\xca\xfe\xba\xbf",
+        b"\xbf\xba\xfe\xca",  # fat archive 64
+    }
+)
 
 # Unix `ar` archive magics — shared by static libraries (`.a`) and MSVC/COFF
 # import/static libraries (`.lib`). `!<arch>\n` is the standard archive;
@@ -161,10 +168,26 @@ def strip_vendor_hash(name: str) -> str:
     return _VENDOR_HASH_RE.sub("", name)
 
 
+#: Mach-O's version-before-extension convention: ``libfoo.1.dylib``,
+#: ``libfoo.1.2.3.dylib`` -- the compatibility/current-version numbers ld64
+#: encodes directly in the on-disk filename, distinct from ELF's
+#: version-*after*-extension ``libfoo.so.1`` convention the regex below
+#: already handles. Requires at least one numeric segment so a bare
+#: ``libfoo.dylib`` (no version at all) is left untouched.
+_DYLIB_VERSION_RE = re.compile(r"\.(?:\d+\.)*\d+\.dylib$")
+
+
 def _canonical_library_key(path: Path) -> str:
     """Canonical key used to match libraries across releases.
 
     For ELF versioned names, canonicalize to ``*.so`` (e.g. ``libfoo.so.1.2`` → ``libfoo.so``).
+    For Mach-O versioned names, canonicalize to ``*.dylib`` (e.g.
+    ``libfoo.1.2.dylib`` → ``libfoo.dylib``) -- the standard ld64
+    compatibility-version-in-filename convention, the Mach-O counterpart of
+    the ELF handling above (Codex review, fresh evidence: a normal Mach-O
+    major-version bump, e.g. ``libfoo.1.dylib`` -> ``libfoo.2.dylib``, never
+    matched anything before this, since a plain ``.dylib`` filename fell
+    through this function entirely unchanged).
     Vendored auditwheel/delocate hash suffixes are stripped first (G9) so the
     same bundled dependency pairs across rebuilds despite its hash changing.
 
@@ -195,4 +218,6 @@ def _canonical_library_key(path: Path) -> str:
     m = re.search(r"\.so(?:\.|$)", lower)
     if m:
         return lower[: m.start() + 3]
+    if _DYLIB_VERSION_RE.search(lower):
+        return _DYLIB_VERSION_RE.sub(".dylib", lower)
     return lower

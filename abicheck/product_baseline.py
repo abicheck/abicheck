@@ -1469,21 +1469,46 @@ def compare_product_directories(
         for f in bundle_result.bundle_findings
         if f.kind == ChangeKind.BUNDLE_LIBRARY_REMOVED and f.provider_library
     }
+    already_reported_added = {
+        f.provider_library
+        for f in bundle_result.bundle_findings
+        if f.kind == ChangeKind.BUNDLE_LIBRARY_ADDED and f.provider_library
+    }
+    # Unmatched-by-identity, not bare-filename set difference: every key in
+    # old_map/new_map is either paired above (an exact relative-path match
+    # or the canonical SONAME/dylib-version/case-insensitive fallback) or
+    # genuinely has no counterpart on the other side -- unlike
+    # old_bundle_map/new_bundle_map (bare-filename-keyed, last-wins on a
+    # collision), old_map/new_map are relative-path-keyed and collision-
+    # free, so this is exact even when two distinct libraries share a
+    # basename. Computing "was this library removed/added" from the
+    # collapsed bare-filename maps instead -- the original shape of this
+    # fallback -- silently missed exactly that case: old containing both
+    # plugins/a/plugin.so and plugins/b/plugin.so, new retaining only the
+    # first, collapsed both sides to the identical single key "plugin.so",
+    # so the set difference found nothing removed even though a whole
+    # library plainly vanished (Codex review, fresh evidence).
+    paired_old_keys = {old_key for old_key, _, _, _ in pairs}
+    paired_new_keys = {new_key for _, _, new_key, _ in pairs}
+    unmatched_old_names = sorted(
+        {old_map[k].name for k in old_map if k not in paired_old_keys}
+        - already_reported
+    )
+    unmatched_new_names = sorted(
+        {new_map[k].name for k in new_map if k not in paired_new_keys}
+        - already_reported_added
+    )
     # A library matched to a surviving library on the new side -- whether by
     # an exact relative-path match or the canonical (SONAME-major-stripped,
     # case-insensitive) fallback above -- is not a standalone removal even
     # though its own bare filename may be absent from new_bundle_map: a
     # SONAME major bump (`libfoo.so.1` -> `libfoo.so.2`) and a case-only DLL
     # rename (`Foo.dll` -> `foo.dll`) both pair via the canonical fallback
-    # while their bare filenames genuinely differ, so a naive bundle-map set
-    # difference reported them as a removal even though the per-library ABI
-    # comparison above already ran for the very same library (Codex review,
-    # fresh evidence, the DLL case; the SONAME-major case is the identical
-    # mechanism generalized).
-    paired_old_names = {old_path.name for _, old_path, _, _ in pairs}
-    for name in sorted(
-        set(old_bundle_map) - set(new_bundle_map) - already_reported - paired_old_names
-    ):
+    # while their bare filenames genuinely differ (Codex review, fresh
+    # evidence, the DLL case; the SONAME-major case is the identical
+    # mechanism generalized) -- already excluded above, since a paired key
+    # is never in `unmatched_old_names`/`unmatched_new_names` to begin with.
+    for name in unmatched_old_names:
         bundle_result.bundle_findings.append(
             BundleFinding(
                 kind=ChangeKind.BUNDLE_LIBRARY_REMOVED,
@@ -1506,24 +1531,8 @@ def compare_product_directories(
     # therefore never reaches that detection at all, regardless of any
     # sibling-consumer gating -- an empty old directory versus a new
     # directory containing foo.dll still returned NO_CHANGE with no
-    # findings (Codex review, fresh evidence). Report it directly, the
-    # same format-neutral way the removal fallback already does: any bare
-    # filename present in the new bundle map and absent from the old one,
-    # not already reported and not already paired via the canonical
-    # fallback (a case-only rename/SONAME bump is a paired library, not an
-    # addition).
-    already_reported_added = {
-        f.provider_library
-        for f in bundle_result.bundle_findings
-        if f.kind == ChangeKind.BUNDLE_LIBRARY_ADDED and f.provider_library
-    }
-    paired_new_names = {new_path.name for _, _, _, new_path in pairs}
-    for name in sorted(
-        set(new_bundle_map)
-        - set(old_bundle_map)
-        - already_reported_added
-        - paired_new_names
-    ):
+    # findings (Codex review, fresh evidence).
+    for name in unmatched_new_names:
         bundle_result.bundle_findings.append(
             BundleFinding(
                 kind=ChangeKind.BUNDLE_LIBRARY_ADDED,

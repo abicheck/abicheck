@@ -101,6 +101,32 @@ class TestCompareProductDirectoriesCanonicalFallbackAndPolicy:
         assert run_compare_calls[0]["old"] == old_dir / "lib" / "libfoo.so.1"
         assert run_compare_calls[0]["new"] == new_dir / "lib" / "libfoo.so.2"
 
+    def test_pairs_unmatched_dylibs_across_a_macho_version_bump(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The Mach-O counterpart of the SONAME-major-bump case above:
+        # libfoo.1.dylib -> libfoo.2.dylib is the standard ld64
+        # compatibility-version-in-filename convention, distinct from ELF's
+        # version-after-extension form -- _canonical_library_key() only
+        # stripped ELF `.so` versions, so this pair was never even
+        # considered for the canonical fallback (Codex review, fresh
+        # evidence).
+        from abicheck.product_baseline import compare_product_directories
+
+        old_dir = tmp_path / "old"
+        new_dir = tmp_path / "new"
+        (old_dir / "lib").mkdir(parents=True)
+        (new_dir / "lib").mkdir(parents=True)
+        (old_dir / "lib" / "libfoo.1.dylib").write_bytes(b"OLD")
+        (new_dir / "lib" / "libfoo.2.dylib").write_bytes(b"NEW")
+
+        run_compare_calls, _ = self._capture_calls(monkeypatch)
+        compare_product_directories(old_dir, new_dir)
+
+        assert len(run_compare_calls) == 1
+        assert run_compare_calls[0]["old"] == old_dir / "lib" / "libfoo.1.dylib"
+        assert run_compare_calls[0]["new"] == new_dir / "lib" / "libfoo.2.dylib"
+
     def test_does_not_guess_when_the_canonical_group_is_ambiguous(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -396,6 +422,44 @@ class TestCompareProductDirectoriesStandaloneRemoval:
         ]
         assert len(removed) == 1
         assert removed[0].provider_library == "liba.so"
+
+    def test_reports_removal_of_one_of_two_duplicate_basename_libraries(
+        self, tmp_path: Path
+    ) -> None:
+        # Old has plugins/a/plugin.so AND plugins/b/plugin.so; new retains
+        # only plugins/a/plugin.so. old_bundle_map/new_bundle_map (bare-
+        # filename-keyed, last-wins) both collapse to a single "plugin.so"
+        # key, so a naive bundle-map set difference found nothing removed
+        # even though a whole library plainly vanished. Detection is now
+        # based on old_map/new_map (relative-path-keyed, collision-free)
+        # crossed against the actual pair identities instead (Codex review,
+        # fresh evidence).
+        from abicheck.checker_policy import ChangeKind
+        from abicheck.product_baseline import compare_product_directories
+        from tests.test_package import _make_minimal_elf_so
+
+        old_dir = tmp_path / "old"
+        new_dir = tmp_path / "new"
+        (old_dir / "plugins" / "a").mkdir(parents=True)
+        (old_dir / "plugins" / "b").mkdir(parents=True)
+        (new_dir / "plugins" / "a").mkdir(parents=True)
+        # plugins/a/plugin.so is an exact-path match on both sides -- real
+        # ELF content, since it's paired and run through run_compare().
+        # plugins/b/plugin.so has no counterpart at all and is never
+        # parsed, so fake content is fine for it.
+        _make_minimal_elf_so(old_dir / "plugins" / "a" / "plugin.so")
+        _make_minimal_elf_so(new_dir / "plugins" / "a" / "plugin.so")
+        (old_dir / "plugins" / "b" / "plugin.so").write_bytes(b"PLUGIN-B")
+
+        result = compare_product_directories(old_dir, new_dir)
+
+        removed = [
+            f
+            for f in result.bundle_findings
+            if f.kind == ChangeKind.BUNDLE_LIBRARY_REMOVED
+        ]
+        assert len(removed) == 1
+        assert removed[0].provider_library == "plugin.so"
 
     def test_canonical_fallback_pair_is_not_reported_as_a_removal(
         self, tmp_path: Path
