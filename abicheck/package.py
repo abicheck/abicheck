@@ -209,30 +209,21 @@ def _reject_hardlink_fallback_amplification(
 
     Only ever called after the byte-sum/member-count pass above completed without rejecting, so `tf.getmembers()` here is free: for the seekable `TarFile` this function is always called with, that pass's own `for member in tf:` iteration already built the full `tf.members` list as a side effect (`TarFile.next()` does this regardless of iteration style for a non-stream file) -- getmembers() just returns it, no re-parse. Safe against a hard-link chain (a link to a link) and against a reference cycle, neither of which a real tar writer emits but an adversarial archive could.
 
-    Resolves each hard link only against members *preceding* it in archive order, matching `tarfile.TarFile._getmember(tarinfo=...)`'s own truncated search (it slices `self.members` to everything before the link being resolved) -- a global, order-blind name map does not: an archive naming a large regular member `real`, many hard links to `real`, and then a *further*, zero-length regular member also named `real` would have a last-wins global map record size 0 for the name every earlier hard link actually resolves against, hiding the real amplification behind a member that appears too late to matter (Codex, fresh evidence). Built incrementally in one forward pass instead -- each member is resolved against, then folded into, the running maps in the same order tarfile itself would see them.
+    Resolves each hard link only against members *preceding* it in archive order, matching `tarfile.TarFile._getmember(tarinfo=...)`'s own truncated search (it slices `self.members` to everything before the link being resolved) -- a global, order-blind name map does not: an archive naming a large regular member `real`, many hard links to `real`, and then a *further*, zero-length regular member also named `real` would have a last-wins global map record size 0 for the name every earlier hard link actually resolves against, hiding the real amplification behind a member that appears too late to matter (Codex, fresh evidence). Built incrementally in one forward pass instead -- each member is resolved against, then folded into, the running map in the same order tarfile itself would see them.
+
+    Keeps exactly one map, `resolved_size_by_name`, always holding the fully-resolved worst-case size for the *latest* member seen so far under a given name -- regardless of whether that latest member is a regular file or itself a hard link. An earlier revision kept two separate maps (`sizes_by_name` for regular files, `link_to_name` for hard-link targets) and never evicted a name's stale `sizes_by_name` entry when a later hard-link member reused that same name -- so a hard link A -> B, where B's name was earlier a small regular file B and is now itself a hard link to some large C, resolved through the stale `sizes_by_name[B]` (the small regular file's own size) instead of B's real, current worst-case size (C's) (Codex, fresh evidence). Storing one resolved size per name, overwritten unconditionally by every member in order, makes this impossible by construction: a hard link's own resolved size is looked up and folded into the map in the same step, so a subsequent link naming it always sees its true, current worst case with a single dict lookup -- no separate chain-walk or cycle guard needed, since the map is already fully resolved at each step rather than holding raw, unresolved link targets to walk later.
     """
-    sizes_by_name: dict[str, int] = {}
-    link_to_name: dict[str, str] = {}
-
-    def _worst_case_size(name: str, own_size: int) -> int:
-        seen: set[str] = set()
-        while name not in sizes_by_name:
-            if name in seen:
-                return 0  # a link cycle -- nothing real to duplicate
-            seen.add(name)
-            next_name = link_to_name.get(name)
-            if next_name is None:
-                return own_size  # dangling reference; extraction fails anyway
-            name = next_name
-        return sizes_by_name[name]
-
+    resolved_size_by_name: dict[str, int] = {}
     worst_case_total = 0
     for member in tf.getmembers():
-        worst_case_total += (
-            _worst_case_size(member.linkname, member.size)
-            if member.islnk()
-            else member.size
-        )
+        if member.islnk():
+            # Dangling reference (no preceding member with this name):
+            # extraction fails anyway, so the link's own declared size
+            # (0 in tar format) is the honest worst case here.
+            own_size = resolved_size_by_name.get(member.linkname, member.size)
+        else:
+            own_size = member.size
+        worst_case_total += own_size
         if worst_case_total > max_bytes:
             raise ExtractionSecurityError(
                 member.name,
@@ -241,12 +232,13 @@ def _reject_hardlink_fallback_amplification(
                 "this filesystem falls back to copying instead of "
                 f"linking (override via {_MAX_DECOMPRESSED_TAR_BYTES_ENV})",
             )
-        # Fold this member into the running maps *after* resolving it
-        # against them, matching tarfile's own precedes-me-only search.
-        if member.isreg():
-            sizes_by_name[member.name] = member.size
-        elif member.islnk():
-            link_to_name[member.name] = member.linkname
+        # Fold this member's *resolved* size into the map *after*
+        # resolving it against the map, matching tarfile's own
+        # precedes-me-only search -- unconditionally replacing whatever
+        # this name previously mapped to, so a later member can never
+        # resolve through a stale entry left by an earlier one.
+        if member.isreg() or member.islnk():
+            resolved_size_by_name[member.name] = own_size
 
 
 # ── Protocol ─────────────────────────────────────────────────────────────────

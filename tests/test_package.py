@@ -3136,6 +3136,43 @@ class TestRejectHardlinkFallbackAmplification:
         with pytest.raises(ExtractionSecurityError, match="hard-link members"):
             TarExtractor().extract(archive, out)
 
+    def test_rejects_when_a_hardlink_overwrites_a_same_named_regular_file(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # "real.bin" is first a small regular file, then a *hard link*
+        # reusing that exact name and pointing at a large payload -- the
+        # same shape tarfile.makelink() actually extracts (the hard link
+        # overwrites the earlier regular file on disk). A stale
+        # name->size map that only ever recorded regular-file sizes and
+        # never evicted them when a later hard link reused the name
+        # would still resolve every subsequent alias of "real.bin"
+        # against the small regular file's size instead of the payload's
+        # (Codex).
+        monkeypatch.setenv("_ABICHECK_TAR_ZST_MAX_DECODED_BYTES", "1300")
+        archive = tmp_path / "overwritten.tar"
+        with tarfile.open(archive, "w") as tf:
+            payload = tarfile.TarInfo(name="payload.bin")
+            payload.size = 600
+            tf.addfile(payload, io.BytesIO(b"x" * 600))
+            small = tarfile.TarInfo(name="real.bin")
+            small.size = 1
+            tf.addfile(small, io.BytesIO(b"x"))
+            overwrite = tarfile.TarInfo(name="real.bin")
+            overwrite.type = tarfile.LNKTYPE
+            overwrite.linkname = "payload.bin"
+            overwrite.size = 0
+            tf.addfile(overwrite)
+            for i in range(10):
+                link = tarfile.TarInfo(name=f"alias{i}.bin")
+                link.type = tarfile.LNKTYPE
+                link.linkname = "real.bin"
+                link.size = 0
+                tf.addfile(link)
+        out = tmp_path / "output"
+        out.mkdir()
+        with pytest.raises(ExtractionSecurityError, match="hard-link members"):
+            TarExtractor().extract(archive, out)
+
     def test_accepts_hardlinks_whose_worst_case_stays_within_the_limit(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
