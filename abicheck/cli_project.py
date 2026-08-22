@@ -710,8 +710,9 @@ def project_baseline_pack_cmd(
     \b
     Exit codes:
       0   Archive written.
-      64  Usage error (SOURCE_DIR is empty, or --header-root is absolute,
-          escapes SOURCE_DIR, or does not exist).
+      64  Usage error (OUTPUT does not end with '.tar.zst', SOURCE_DIR is
+          empty, or --header-root is absolute, escapes SOURCE_DIR, or does
+          not exist).
     """
     _setup_verbosity(verbose)
     try:

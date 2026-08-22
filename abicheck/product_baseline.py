@@ -246,7 +246,12 @@ def _discover_paths(source_dir: Path) -> list[Path]:
         dirnames[:] = kept
         for name in filenames:
             candidate = current / name
-            st = candidate.lstat()
+            try:
+                st = candidate.lstat()
+            except OSError:
+                # Vanished between os.walk() listing it and this stat (a
+                # concurrent build/cleanup process) -- nothing to archive.
+                continue
             if stat_module.S_ISREG(st.st_mode) or stat_module.S_ISLNK(st.st_mode):
                 paths.append(candidate)
     paths.sort(key=lambda p: _relative_posix(p, source_dir))
@@ -280,6 +285,13 @@ def _add_member(
     info.gid = 0
     info.uname = ""
     info.gname = ""
+    # Mode too: an umask difference between two builders (0644 vs. 0664),
+    # or an unrelated permission bit, would otherwise produce two
+    # different archives from byte-identical content -- keep only the
+    # owner-executable bit, which is what actually distinguishes a
+    # program/shared library from data here.
+    if not info.issym():
+        info.mode = 0o755 if info.mode & 0o100 else 0o644
 
     if info.issym():
         target = info.linkname
@@ -291,6 +303,19 @@ def _add_member(
                 f"symlink {arcname!r} targets {target!r}, which escapes "
                 f"{source_dir} — refusing to pack it"
             ) from exc
+        tf.addfile(info)
+        return None
+
+    if info.islnk():
+        # gettarinfo() converts a second (and later) path sharing an
+        # inode with an already-archived one into a hardlink reference
+        # (TarFile tracks (dev, ino) -> arcname internally when
+        # dereference=False, the default this module uses) -- a member
+        # carrying no data of its own, just info.linkname pointing at the
+        # first archived path. Falling through to the "not info.isreg()"
+        # guard below would silently drop it from the archive entirely
+        # (isreg() is False for a hardlink member too), losing the file on
+        # round-trip rather than merely losing its hardlink-ness.
         tf.addfile(info)
         return None
 
@@ -413,14 +438,19 @@ def pack_product_baseline(
         )
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
+    # Resolve the compressor before mkstemp() hands out an open descriptor:
+    # an invalid zstd_level (a public parameter of this function) must fail
+    # before there is a descriptor to leak -- the except BaseException
+    # block below unlinks the temp *file*, but never closes an fd that
+    # failed to reach os.fdopen()'s ownership transfer.
+    zstandard = _zstd_module()
+    cctx = zstandard.ZstdCompressor(level=zstd_level, write_checksum=True)
     fd, tmp_name = tempfile.mkstemp(
         dir=str(output_path.parent), prefix=".abicheck-product-baseline-", suffix=".tmp"
     )
     tmp_path = Path(tmp_name)
     try:
         libraries: list[LibraryEntry] = []
-        zstandard = _zstd_module()
-        cctx = zstandard.ZstdCompressor(level=zstd_level, write_checksum=True)
         with os.fdopen(fd, "wb") as raw_out:
             with cctx.stream_writer(raw_out, closefd=False) as compressor:
                 with tarfile.open(fileobj=compressor, mode="w|") as tf:
@@ -526,6 +556,17 @@ def unpack_product_baseline(
     except BaseException:
         shutil.rmtree(staging, ignore_errors=True)
         raise
+
+    # tempfile.mkdtemp() creates staging with mode 0700 regardless of the
+    # process umask -- deliberately, for its own general-purpose "private
+    # scratch dir" contract, but wrong for a directory this function is
+    # about to publish as the product's own extracted content: a caller
+    # (or a later CI step/container stage) running as a different user
+    # would then be unable to even traverse it. Apply the ordinary
+    # umask-derived permissions an extraction would normally get instead.
+    umask = os.umask(0)
+    os.umask(umask)
+    os.chmod(staging, 0o777 & ~umask)
 
     # Validated -- publish. dest_path, if it existed, was already confirmed
     # empty above, so removing it and renaming staging into its place is

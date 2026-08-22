@@ -127,7 +127,7 @@ class TestBaselineUnpackCli:
     def test_unpack_json_output(self, tmp_path: Path) -> None:
         product = _make_product(tmp_path)
         archive = tmp_path / "baseline.tar.zst"
-        CliRunner().invoke(
+        pack_result = CliRunner().invoke(
             main,
             [
                 "project",
@@ -139,6 +139,7 @@ class TestBaselineUnpackCli:
                 "demo",
             ],
         )
+        assert pack_result.exit_code == 0, pack_result.output
 
         dest = tmp_path / "unpacked"
         result = CliRunner().invoke(
@@ -161,9 +162,10 @@ class TestBaselineUnpackCli:
     def test_unpack_nonempty_destination_is_usage_error(self, tmp_path: Path) -> None:
         product = _make_product(tmp_path)
         archive = tmp_path / "baseline.tar.zst"
-        CliRunner().invoke(
+        pack_result = CliRunner().invoke(
             main, ["project", "baseline", "pack", str(product), str(archive)]
         )
+        assert pack_result.exit_code == 0, pack_result.output
 
         dest = tmp_path / "unpacked"
         dest.mkdir()
@@ -172,6 +174,7 @@ class TestBaselineUnpackCli:
             main, ["project", "baseline", "unpack", str(archive), str(dest)]
         )
         assert result.exit_code == 64
+        assert "not empty" in result.output
 
     def test_unpack_missing_archive_is_a_click_usage_error(
         self, tmp_path: Path

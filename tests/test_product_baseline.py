@@ -20,6 +20,8 @@ wiring is exercised separately in ``test_cli_project_baseline.py``."""
 from __future__ import annotations
 
 import hashlib
+import os
+import stat as stat_mod
 from pathlib import Path
 
 import pytest
@@ -123,6 +125,23 @@ class TestPackProductBaseline:
         pack_product_baseline(product, out2, product="demo", header_roots=["include"])
         assert out1.read_bytes() == out2.read_bytes()
 
+    def test_pack_is_deterministic_across_differing_permission_bits(
+        self, tmp_path: Path
+    ) -> None:
+        # Two byte-identical trees differing only in file mode (e.g. two
+        # builders with different umasks) must still produce a
+        # byte-identical archive -- info.mode was left at the on-disk
+        # bits, unlike mtime/uid/gid/uname/gname, which were already
+        # pinned (CodeRabbit review, fresh evidence).
+        product_a = _make_product(tmp_path / "a")
+        product_b = _make_product(tmp_path / "b")
+        (product_b / "lib" / "libb.so").chmod(0o664)
+        out_a = tmp_path / "a.tar.zst"
+        out_b = tmp_path / "b.tar.zst"
+        pack_product_baseline(product_a, out_a)
+        pack_product_baseline(product_b, out_b)
+        assert out_a.read_bytes() == out_b.read_bytes()
+
     def test_pack_records_header_roots(self, tmp_path: Path) -> None:
         product = _make_product(tmp_path)
         manifest = pack_product_baseline(
@@ -136,7 +155,7 @@ class TestPackProductBaseline:
 
     def test_pack_rejects_non_tar_zst_output_suffix(self, tmp_path: Path) -> None:
         product = _make_product(tmp_path)
-        with pytest.raises(SnapshotError, match="tar.zst"):
+        with pytest.raises(SnapshotError, match=r"tar\.zst"):
             pack_product_baseline(product, tmp_path / "out.tar.gz")
 
     def test_pack_rejects_empty_source_dir(self, tmp_path: Path) -> None:
@@ -144,6 +163,27 @@ class TestPackProductBaseline:
         empty.mkdir()
         with pytest.raises(SnapshotError, match="no files found"):
             pack_product_baseline(empty, tmp_path / "out.tar.zst")
+
+    def test_pack_skips_a_file_that_vanishes_during_the_walk(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # os.walk() lists directory entries first; lstat() runs later --
+        # a file removed in that window must be skipped, not propagate a
+        # bare FileNotFoundError out of pack_product_baseline() (which the
+        # CLI's `except SnapshotError` wouldn't catch either) (CodeRabbit
+        # review, fresh evidence).
+        product = _make_product(tmp_path)
+        vanished = product / "lib" / "libb.so"
+        real_lstat = Path.lstat
+
+        def flaky_lstat(self: Path) -> os.stat_result:
+            if self == vanished:
+                raise FileNotFoundError(vanished)
+            return real_lstat(self)
+
+        monkeypatch.setattr(Path, "lstat", flaky_lstat)
+        manifest = pack_product_baseline(product, tmp_path / "b.tar.zst")
+        assert "libb.so" not in {lib.name for lib in manifest.libraries}
 
     def test_pack_rejects_absolute_header_root(self, tmp_path: Path) -> None:
         product = _make_product(tmp_path)
@@ -173,6 +213,28 @@ class TestPackProductBaseline:
         (product / "lib" / "evil.so").symlink_to(outside)
         with pytest.raises(SnapshotError, match="escapes"):
             pack_product_baseline(product, tmp_path / "b.tar.zst")
+
+    def test_pack_preserves_hardlinked_duplicate_content(self, tmp_path: Path) -> None:
+        # gettarinfo() converts a second path sharing an inode with an
+        # already-archived one into a hardlink (LNKTYPE) member -- which
+        # is neither isreg() nor issym(), so it used to fall through
+        # _add_member's "not info.isreg(): return None" guard and vanish
+        # from the archive entirely (CodeRabbit review, fresh evidence).
+        product = _make_product(tmp_path)
+        first = product / "lib" / "libb.so"
+        second = product / "lib" / "libb-alias.so"
+        second.hardlink_to(first)
+
+        archive = tmp_path / "baseline.tar.zst"
+        pack_product_baseline(product, archive)
+
+        dest = tmp_path / "unpacked"
+        unpack_product_baseline(archive, dest)
+        restored_first = dest / "lib" / "libb.so"
+        restored_second = dest / "lib" / "libb-alias.so"
+        assert restored_first.is_file()
+        assert restored_second.is_file()
+        assert restored_second.read_bytes() == restored_first.read_bytes()
 
     def test_pack_rejects_source_file_colliding_with_manifest_name(
         self, tmp_path: Path
@@ -230,10 +292,28 @@ class TestUnpackProductBaseline:
         assert (dest / "include" / "api" / "a.h").is_file()
         assert (dest / MANIFEST_MEMBER_NAME).is_file()
 
+    def test_unpack_destination_gets_umask_derived_permissions(
+        self, tmp_path: Path
+    ) -> None:
+        # tempfile.mkdtemp() (the staging dir) is always 0700 regardless of
+        # umask -- the published DEST_DIR must not inherit that, or a
+        # later step running as a different user/UID can't even traverse
+        # it (CodeRabbit review, fresh evidence).
+        product = _make_product(tmp_path)
+        archive = tmp_path / "baseline.tar.zst"
+        pack_product_baseline(product, archive)
+
+        dest = tmp_path / "unpacked"
+        unpack_product_baseline(archive, dest)
+        mode = stat_mod.S_IMODE(dest.stat().st_mode)
+        umask = os.umask(0)
+        os.umask(umask)
+        assert mode == (0o777 & ~umask)
+
     def test_unpack_rejects_non_tar_zst_suffix(self, tmp_path: Path) -> None:
         bogus = tmp_path / "baseline.tar.gz"
         bogus.write_bytes(b"not really a tar.zst")
-        with pytest.raises(SnapshotError, match="tar.zst"):
+        with pytest.raises(SnapshotError, match=r"tar\.zst"):
             unpack_product_baseline(bogus, tmp_path / "dest")
 
     def test_unpack_rejects_missing_archive(self, tmp_path: Path) -> None:
