@@ -315,12 +315,18 @@ class TestPackProductBaseline:
     def test_pack_preserves_executable_bit_set_only_for_group_or_other(
         self, tmp_path: Path
     ) -> None:
-        # A file executable only for group/other (e.g. 0o055, no owner-exec
+        # A file executable only for group/other (e.g. 0o655, no owner-exec
         # bit) must still round-trip as executable -- checking only the
         # owner bit (0o100) would silently normalize it to 0o644 (Codex).
+        # Owner keeps read (0o600, not 0o055) so packing can still open the
+        # file when run as a real, non-root user -- 0o055 strips ALL owner
+        # access and made this fail with PermissionError on CI's non-root
+        # runner even though it passed locally under root, which bypasses
+        # permission bits entirely (caught by real CI, not local root-only
+        # testing).
         product = _make_product(tmp_path)
         target = product / "lib" / "libb.so"
-        target.chmod(0o055)
+        target.chmod(0o655)
         out = tmp_path / "b.tar.zst"
         pack_product_baseline(product, out)
         import zstandard
