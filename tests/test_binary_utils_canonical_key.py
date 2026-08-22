@@ -141,3 +141,27 @@ class TestCanonicalLibraryKeyCaseFolding:
         assert _canonical_library_key(
             Path("Foo.dll.abicheck.json.gz")
         ) == _canonical_library_key(Path("foo.dll.abicheck.json"))
+
+    def test_stored_dylib_snapshot_version_bump_still_pairs(self) -> None:
+        # The Mach-O counterpart of the stored-PE-snapshot case above:
+        # _DYLIB_VERSION_RE is anchored to the end of string, so it never
+        # matched through a stored snapshot's own wrapper suffix
+        # (Codex review, fresh evidence).
+        assert _canonical_library_key(
+            Path("libfoo.1.dylib.abicheck.json")
+        ) == _canonical_library_key(Path("libfoo.2.dylib.abicheck.json"))
+
+    def test_a_dll_segment_that_is_not_the_represented_extension_is_not_folded(
+        self,
+    ) -> None:
+        # A genuinely case-sensitive ELF name that happens to contain the
+        # literal substring ".dll." (e.g. a compatibility shim) must not be
+        # case-folded just because ".dll" appears somewhere in the name --
+        # only a *represented* library whose own (wrapper-suffix-stripped)
+        # name genuinely ends in ".dll" is a PE identity (Codex review,
+        # fresh evidence: an earlier fix matched any ".dll" segment
+        # anywhere in the name, which wrongly case-folded this and hid a
+        # real ELF case-only-rename break).
+        assert _canonical_library_key(Path("libFoo.dll.so")) != _canonical_library_key(
+            Path("libfoo.dll.so")
+        )

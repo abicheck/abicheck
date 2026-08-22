@@ -270,21 +270,40 @@ def _canonical_library_key(path: Path) -> str:
     case-insensitive on Windows as a ``.dll``'s, and a suffix-only check
     would miss it (Codex review, fresh evidence).
 
-    A *stored snapshot* of a PE library (``Foo.dll.abicheck.json``, or its
-    compressed ``.gz``/``.zst`` forms) carries its DLL identity embedded in
+    A *stored snapshot* of a library (``Foo.dll.abicheck.json``, or its
+    compressed ``.gz``/``.zst`` forms) carries its represented format in
     the filename, not in the (JSON) file content -- ``_pe_is_dll_content``
     reads the represented binary's own bytes, which for a snapshot are the
-    JSON envelope, not a PE image, so it always answers False here. Without
-    recognizing the embedded ``.dll`` segment, ``Foo.dll.abicheck.json`` and
-    ``foo.dll.abicheck.json`` (the same release's PE snapshot published
-    under two spellings) never case-folded to one key, and
-    ``compare-release``'s ``_build_match_map`` reported them as an unrelated
-    removal+addition instead of comparing them (Codex review, fresh
-    evidence). Matched the same way the ELF ``.so`` regex above already
-    allows an arbitrary trailing suffix after the extension (``\\.so.`` or
-    end of string) -- ``\\.dll`` followed by ``.`` or end of string, so a
-    plain ``.dll`` and a ``.dll``-derived snapshot filename are recognized
-    identically.
+    JSON envelope, not a PE image, so it always answers False here.
+    Matching the represented library's format (``.dll``/``.dylib`` version)
+    is therefore done against the *represented* name -- the stored
+    filename with one recognized wrapper suffix (the ``.abicheck.json``
+    convention `docs/use/baseline-management.md` documents, or the plainer
+    ``.json``/``.pl``/``.pm`` forms `_version_sort_key` already recognizes)
+    stripped, not the raw stored-snapshot name (Codex review, fresh
+    evidence, two rounds). The first round matched any ``\\.dll`` segment
+    anywhere in the (unwrapped) name -- true for ``Foo.dll.abicheck.json``,
+    but also true for an unrelated, genuinely case-sensitive ELF name that
+    happens to literally contain ``.dll.`` (e.g. a compatibility shim named
+    ``libFoo.dll.so``), wrongly case-folding it and hiding a real
+    case-only-rename break. Stripping the wrapper suffix first and then
+    requiring the represented name to genuinely *end* in ``.dll`` avoids
+    that false positive while still recognizing a stored PE snapshot: the
+    same mechanism also lets a versioned dylib snapshot
+    (``libfoo.1.dylib.abicheck.json``) match `_DYLIB_VERSION_RE` below,
+    which is anchored to the end of string and previously never matched
+    through a wrapper suffix at all.
+
+    Not closed by this: a stored snapshot of a PE library shipped under a
+    nonstandard extension (``Foo.pyd.abicheck.json``) still isn't
+    recognized -- unlike a live ``.pyd`` file, there is no PE content to
+    probe, and ".pyd" is not a wrapper-suffix-stripped ``.dll``. Closing
+    that would need reading the stored snapshot's own ``platform`` field
+    (``model.AbiSnapshot.platform``) rather than its filename, a genuine
+    new content-peek primitive (locating a field reliably regardless of a
+    JSON snapshot's key order or compression, verified on its own) rather
+    than a filename heuristic extension -- left as a known, narrower gap
+    (Codex review, fresh evidence).
     """
     from .snapshot_io import _COMPRESSED_SUFFIXES
 
@@ -299,15 +318,33 @@ def _canonical_library_key(path: Path) -> str:
             name = name[: -len(trailing_ext)]
             name_lower = name_lower[: -len(trailing_ext)]
             break
-    if re.search(r"\.dll(?:\.|$)", name_lower) or _pe_is_dll_content(path):
+
+    # The represented library's own name, with one recognized stored-
+    # snapshot wrapper suffix stripped (if present) -- see this function's
+    # own docstring for why format/case-folding decisions are made against
+    # this, not the raw stored-snapshot name. A plain (unwrapped) binary
+    # name passes through unchanged (no suffix matches), so every check
+    # below still applies identically to a live .dll/.dylib file.
+    represented = name_lower
+    represented_cased = name
+    for wrapper_suffix in (".abicheck.json", ".json", ".pl", ".pm"):
+        if represented.endswith(wrapper_suffix):
+            represented = represented[: -len(wrapper_suffix)]
+            represented_cased = represented_cased[: -len(wrapper_suffix)]
+            break
+
+    if represented.endswith(".dll") or _pe_is_dll_content(path):
         return name_lower
     m = re.search(r"\.so(?:\.|$)", name, re.IGNORECASE)
     if m:
         return name[: m.start() + 3]
-    m = _DYLIB_VERSION_RE.search(name)
+    m = _DYLIB_VERSION_RE.search(represented_cased)
     if m:
         # group(1) is the matched extension exactly as spelled (preserving
         # its case) -- see _DYLIB_VERSION_RE's own docstring for why a
-        # fixed-case literal replacement is wrong here.
+        # fixed-case literal replacement is wrong here. m.start() indexes
+        # into `represented_cased`, which shares its prefix with `name` up
+        # to the stripped wrapper suffix, so it's a valid index into `name`
+        # too.
         return name[: m.start()] + m.group(1)
     return name
