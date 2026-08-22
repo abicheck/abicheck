@@ -579,6 +579,28 @@ def pack_product_baseline(
     # asked to go (see the mkdir call above for the full reasoning).
     real_empty_dirs = [d for d in empty_dirs if d not in output_scaffold_dirs]
     if not paths and not real_empty_dirs:
+        # The scaffold directories the mkdir() call above just created
+        # must not survive this rejection: they're still empty (nothing
+        # was ever packed), and leaving them behind would make an
+        # identical repeat call see them as already-existing -- silently
+        # different from the first call's own view of the world, since
+        # _scaffold_dirs_for_mkdir() only ever reports a directory that
+        # doesn't exist yet. Left uncleaned, a second identical `pack()`
+        # call would then treat that directory as real, pre-existing
+        # content and succeed with an otherwise-empty archive instead of
+        # reproducing the same rejection (Codex review, fresh evidence).
+        # Deepest-first, best-effort: still empty by construction (only
+        # this call created them, and nothing was packed), so an OSError
+        # here (a concurrent process, a permission change) is left as a
+        # secondary problem rather than masking the real "nothing to
+        # pack" error.
+        for scaffold_dir in sorted(
+            output_scaffold_dirs, key=lambda d: len(d.parts), reverse=True
+        ):
+            try:
+                scaffold_dir.rmdir()
+            except OSError:
+                pass
         raise SnapshotError(
             f"no files found under {source_path} to pack into a product baseline"
         )

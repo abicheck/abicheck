@@ -226,6 +226,28 @@ class TestPackProductBaseline:
         with pytest.raises(SnapshotError, match="no files found"):
             pack_product_baseline(empty, empty / "artifacts" / "base.tar.zst")
 
+    def test_pack_rejects_empty_source_dir_identically_on_repeated_calls(
+        self, tmp_path: Path
+    ) -> None:
+        # The mkdir() call above leaves the scaffold directory
+        # (SOURCE_DIR/artifacts/) behind on disk even though pack itself
+        # raised -- an identical second call must not see that leftover
+        # directory as pre-existing, real content: _scaffold_dirs_for_
+        # mkdir() only reports a directory that doesn't exist *yet*, so
+        # without cleanup the second call's own scaffold set comes back
+        # empty and the leftover directory silently satisfies the
+        # not-paths-and-not-empty-dirs check, succeeding with an
+        # otherwise-empty archive instead of reproducing the same
+        # rejection (Codex review, fresh evidence).
+        empty = tmp_path / "empty"
+        empty.mkdir()
+        out = empty / "artifacts" / "base.tar.zst"
+        with pytest.raises(SnapshotError, match="no files found"):
+            pack_product_baseline(empty, out)
+        assert not (empty / "artifacts").exists()
+        with pytest.raises(SnapshotError, match="no files found"):
+            pack_product_baseline(empty, out)
+
     def test_pack_skips_a_file_that_vanishes_during_the_walk(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
