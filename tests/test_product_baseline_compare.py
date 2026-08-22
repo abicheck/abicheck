@@ -693,7 +693,16 @@ class TestDiscoverLibraryMapDeterministicWalkOrder:
                 self.bundle_findings = [_FakeFinding("liba.so")]
 
         def _fake_discover_library_map(root, *, include_private):  # type: ignore[no-untyped-def]
-            if "old" in str(root):
+            # Compare the resolved Path against old_dir directly, not a
+            # substring match on str(root) -- on macOS the pytest tmp
+            # directory is under /private/var/folders/..., where "folders"
+            # itself contains the substring "old", so a naive `"old" in
+            # str(root)` check matched *both* sides (old_dir and new_dir
+            # alike), silently pairing a library whose files were never
+            # written to disk and blowing up in real ELF-format detection
+            # instead of exercising the mocked path this test is about
+            # (macOS CI, fresh evidence).
+            if Path(root) == old_dir:
                 return {"lib/liba.so": root / "lib" / "liba.so"}
             return {}
 
