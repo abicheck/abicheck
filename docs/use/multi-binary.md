@@ -41,6 +41,19 @@ separate category — but the **scoping** layer that sits in front of that
 classification treats some of them differently, and *which* bundle detector
 you're looking at determines whether that's true.
 
+First, a terminology note this page relies on throughout: **scoping** and
+**policy** are two separate mechanisms, not two names for the same thing.
+`--scope-public-headers` (on by default) and an explicit surface allowlist
+control whether a `Change` is *removed from* `DiffResult.changes` at all —
+that's the only thing that filters findings. A `--policy` profile's
+`overrides:` block never removes a `Change` from `changes`; it only
+reclassifies which `Verdict` a given `ChangeKind` maps to (the underlying
+`PolicyFile` machinery). So "a policy profile scoped to the public surface"
+isn't
+a real, separate filtering mechanism — a private `func_removed` still shows
+up in the report under any `--policy` profile; only `--scope-public-headers`
+decides whether it's there at all.
+
 **Graph-native detectors ignore public-surface scoping entirely.**
 `bundle_intra_dep_removed`, `bundle_library_removed`/`bundle_library_added`,
 `bundle_intra_dep_resolved_to_different_version`, `bundle_soname_skew`, and
@@ -51,29 +64,32 @@ SONAME cohorts) — never from a per-library `DiffResult`'s already-scoped
 `libcore.so`'s *public* API for `bundle_intra_dep_removed` to fire: `libalgo.so`
 still imports it via DT_NEEDED, so removing it breaks `libalgo.so`'s runtime
 load regardless of whether any external consumer ever called `core_mul`
-directly, and neither `--scope-public-headers` nor a public-surface `--policy`
-profile touches this detector's input at all.
+directly, and `--scope-public-headers` never touches this detector's input at
+all.
 
 **Diff-derived detectors inherit scoping indirectly, through starvation.**
 `bundle_intra_dep_signature_changed`, `bundle_intra_type_changed`, and
 `bundle_provider_changed` are computed by scanning each library's own
 per-library `DiffResult.changes` for the specific kinds they promote
 (`func_params_changed`/`func_return_changed`/`var_type_changed` for the
-signature-change detector, `func_removed`+`func_added` pairs for the
-provider-migration detector, and so on) — and that `DiffResult` is the
-*same*, already-scoped result the per-library report itself uses. If
-`--scope-public-headers` (on by default) filtered the underlying provider-side
-change out of `diff.changes` because the changed symbol isn't part of
-`libcore.so`'s public surface, the bundle detector never sees it and never
-promotes it to a `bundle_*` finding either. So for these three kinds,
-public-surface scoping *does* reach bundle-level findings — just indirectly,
-by removing the upstream signal they depend on, not by filtering the
-`bundle_*` finding itself.
+signature-change detector, `type_size_changed`/`type_field_removed`/etc. for
+the type-change detector, `func_removed`+`func_added` pairs for the
+provider-migration detector) — and that `DiffResult` is the *same*,
+already-scoped result the per-library report itself uses. If
+`--scope-public-headers` filtered the underlying provider-side change out of
+`diff.changes` because the changed symbol isn't part of `libcore.so`'s public
+surface, the bundle detector never sees it and never promotes it to a
+`bundle_*` finding either. So for these three kinds, `--scope-public-headers`
+*does* reach bundle-level findings — just indirectly, by removing the
+upstream signal they depend on, not by filtering the `bundle_*` finding
+itself.
 
 Contrast either case with an *ordinary* per-library finding that never gets
 promoted to a bundle finding at all (`func_removed` on something no sibling
-imports): that one **is** filtered by `--scope-public-headers`/a
-public-surface `--policy` profile, same as any other per-library finding.
+imports): that one **is** filtered by `--scope-public-headers`, same as any
+other per-library finding — but is unaffected by which `--policy` profile is
+selected, since policy never removes a finding, only reclassifies its
+verdict.
 
 **There is currently no per-finding suppression for `bundle_*` findings.**
 Unlike ordinary per-library findings, `compare_bundle()` (both the
@@ -88,23 +104,27 @@ outside the release, `--bundle-system-providers` (see below) — there is no
 narrower way to quiet one specific `bundle_*` finding while keeping the rest
 of bundle analysis active.
 
-**The sibling-consumption gate is specific to two kinds, not a blanket rule —
-and even those two are gated only inside `compare_bundle()` itself.**
-Within `compare_bundle()`, only `bundle_intra_dep_removed` (an import with no
-provider at all) and `bundle_library_removed` (a removed library, gated on
-whether a surviving sibling actually imported one of its exports — a
+**The sibling-consumption gate covers most, but not all, kinds — and even
+those are gated only inside `compare_bundle()` itself.** Within
+`compare_bundle()`, four kinds require a sibling to actually consume the
+affected symbol/library before firing: `bundle_intra_dep_removed` (an import
+with no provider at all), `bundle_library_removed` (a removed library, gated
+on whether a surviving sibling actually imported one of its exports — a
 standalone removal with no internal consumer there is by design left to the
-directory/package CLI's separate `--fail-on-removed-library` flow) require a
-sibling to actually consume the affected symbol/library before firing.
-Several other `bundle_*` kinds have no such gate even inside
+directory/package CLI's separate `--fail-on-removed-library` flow),
+`bundle_intra_dep_signature_changed` (gated on
+`new.resolution.consumers_of(symbol)` returning at least one other library),
+and `bundle_intra_type_changed` (gated on the changed type's name appearing
+in some other library's own symbols). Two kinds have no such gate even inside
 `compare_bundle()`: `bundle_library_added` fires for any new library
-unconditionally; `bundle_provider_changed` fires whenever a symbol migrates
-from one sibling to another, whether or not any third sibling consumes it;
-and manifest/SONAME-cohort findings (`bundle_manifest_instantiation_removed`,
-`bundle_soname_skew`) are driven by their own declared contract, not by
-internal consumption at all — a manifest promising a since-removed symbol
-produces `bundle_manifest_instantiation_removed` even if no sibling in the
-bundle ever imported it.
+unconditionally, and `bundle_provider_changed` fires whenever a symbol
+migrates from one sibling to another, whether or not any third sibling
+consumes it. Manifest/SONAME-cohort findings
+(`bundle_manifest_instantiation_removed`, `bundle_soname_skew`) are a third
+category entirely — driven by their own declared contract, not by internal
+consumption at all — a manifest promising a since-removed symbol produces
+`bundle_manifest_instantiation_removed` even if no sibling in the bundle ever
+imported it.
 
 The whole-product baseline compare (`abicheck/product_baseline.py`'s
 `compare_product_directories`) goes further still: it calls `compare_bundle()`
