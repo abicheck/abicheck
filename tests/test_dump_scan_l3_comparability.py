@@ -147,13 +147,41 @@ _KNOWN_L4_EXTRACTOR_DIVERGENCE_COUNTS = Counter(
     {"source_fact_coverage_incomplete": 1, "source_binary_provenance_mismatch": 1}
 )
 _RISK_LINE_RE = re.compile(r"^\s*\[risk\]\s+(\S+):", re.MULTILINE)
+#: ``cli_scan_helpers.render_baseline_lines``'s exact counts-line format:
+#: "  breaking=N api_break=N risk=N compatible=N". Checked in addition to
+#: the risk-finding multiset above -- Codex review, round 3: an unrelated
+#: *compatible*-category false positive (``diff.compatible``, itemized
+#: under ``summary["additions"]``/``["quality"]``, never
+#: ``summary["findings"]``) leaves ``verdict``/``[risk] ...`` lines
+#: completely untouched, so neither prior check could ever see it. Only
+#: the aggregate ``compatible=0`` (and the ``breaking``/``api_break``
+#: counts, for the same reason) can.
+_COUNTS_LINE_RE = re.compile(
+    r"breaking=(\d+)\s+api_break=(\d+)\s+risk=(\d+)\s+compatible=(\d+)"
+)
+_KNOWN_L4_EXTRACTOR_DIVERGENCE_TOTALS = (
+    0,
+    0,
+    2,
+    0,
+)  # breaking, api_break, risk, compatible
 
 
 def _is_known_l4_extractor_divergence_text(output: str) -> bool:
-    """Text-output variant: the verdict must be ``COMPATIBLE_WITH_RISK`` and
-    the multiset of ``[risk] <kind>:`` lines must equal exactly the known
-    two-kind, one-each multiset -- no more, no fewer, no duplicates."""
+    """Text-output variant: the verdict must be ``COMPATIBLE_WITH_RISK``,
+    the counts line must read exactly ``breaking=0 api_break=0 risk=2
+    compatible=0``, and the multiset of ``[risk] <kind>:`` lines must equal
+    exactly the known two-kind, one-each multiset -- no more, no fewer, no
+    duplicates, and no unrelated finding hiding in a bucket this module
+    doesn't otherwise inspect."""
     if "COMPATIBLE_WITH_RISK" not in output:
+        return False
+    counts_match = _COUNTS_LINE_RE.search(output)
+    if (
+        counts_match is None
+        or tuple(int(g) for g in counts_match.groups())
+        != _KNOWN_L4_EXTRACTOR_DIVERGENCE_TOTALS
+    ):
         return False
     return (
         Counter(_RISK_LINE_RE.findall(output)) == _KNOWN_L4_EXTRACTOR_DIVERGENCE_COUNTS
@@ -161,9 +189,14 @@ def _is_known_l4_extractor_divergence_text(output: str) -> bool:
 
 
 def _is_known_l4_extractor_divergence_report(report: dict) -> bool:
-    """JSON-report variant: the verdict must be ``COMPATIBLE_WITH_RISK`` and
-    the multiset of finding kinds must equal exactly the known two-kind,
-    one-each multiset -- no more, no fewer, no duplicates.
+    """JSON-report variant: the verdict must be ``COMPATIBLE_WITH_RISK``,
+    the diff summary's ``breaking``/``api_break``/``risk``/``compatible``
+    counts must read exactly ``0``/``0``/``2``/``0``, and the multiset of
+    finding kinds must equal exactly the known two-kind, one-each
+    multiset -- no more, no fewer, no duplicates, and no unrelated
+    *compatible*-category finding hiding under ``additions``/``quality``
+    (Codex review, round 3 -- those buckets itemize ``diff.compatible``,
+    which the ``verdict``/``findings`` fields alone never reflect).
 
     ``scan --format json``'s ``ScanOutcome.to_dict()`` has no top-level
     ``changes`` array (that's ``compare``'s report shape) -- its baseline
@@ -176,7 +209,16 @@ def _is_known_l4_extractor_divergence_report(report: dict) -> bool:
     ``xfail`` -- Codex review, round 1."""
     if report.get("verdict") != "COMPATIBLE_WITH_RISK":
         return False
-    findings = (report.get("diff") or {}).get("findings") or []
+    diff = report.get("diff") or {}
+    totals = (
+        diff.get("breaking"),
+        diff.get("api_break"),
+        diff.get("risk"),
+        diff.get("compatible"),
+    )
+    if totals != _KNOWN_L4_EXTRACTOR_DIVERGENCE_TOTALS:
+        return False
+    findings = diff.get("findings") or []
     kinds = Counter(f.get("kind") for f in findings)
     return kinds == _KNOWN_L4_EXTRACTOR_DIVERGENCE_COUNTS
 
