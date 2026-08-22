@@ -1028,8 +1028,18 @@ class TestCompareProductDirectoriesPerLibraryHeaderRoots:
         def _fake_build_bundle_snapshot(libraries):  # type: ignore[no-untyped-def]
             return {"libraries": dict(libraries)}
 
+        class _FakeBundleDiffResult(dict):  # type: ignore[type-arg]
+            """Behaves like a dict for existing kwargs-based assertions,
+            while also carrying a real, mutable ``bundle_findings`` list --
+            compare_product_directories() appends standalone-removal
+            findings to the real BundleDiffResult it gets back."""
+
+            def __init__(self, **kwargs):  # type: ignore[no-untyped-def]
+                super().__init__(**kwargs)
+                self.bundle_findings: list[object] = []
+
         def _fake_compare_bundle(old, new, per_library_results, **kwargs):  # type: ignore[no-untyped-def]
-            return kwargs
+            return _FakeBundleDiffResult(**kwargs)
 
         monkeypatch.setattr(pb, "_discover_library_map", _fake_discover_library_map)
         monkeypatch.setattr(scp, "run_compare", _fake_run_compare)
@@ -1225,9 +1235,19 @@ class TestCompareProductDirectoriesCanonicalFallbackAndPolicy:
         def _fake_build_bundle_snapshot(libraries):  # type: ignore[no-untyped-def]
             return {"libraries": dict(libraries)}
 
+        class _FakeBundleDiffResult(dict):  # type: ignore[type-arg]
+            """Behaves like a dict for existing kwargs-based assertions,
+            while also carrying a real, mutable ``bundle_findings`` list --
+            compare_product_directories() appends standalone-removal
+            findings to the real BundleDiffResult it gets back."""
+
+            def __init__(self, **kwargs):  # type: ignore[no-untyped-def]
+                super().__init__(**kwargs)
+                self.bundle_findings: list[object] = []
+
         def _fake_compare_bundle(old, new, per_library_results, **kwargs):  # type: ignore[no-untyped-def]
             compare_bundle_calls.append(kwargs)
-            return kwargs
+            return _FakeBundleDiffResult(**kwargs)
 
         monkeypatch.setattr(scp, "run_compare", _fake_run_compare)
         monkeypatch.setattr(
@@ -1319,3 +1339,291 @@ class TestCompareProductDirectoriesCanonicalFallbackAndPolicy:
 
         assert len(compare_bundle_calls) == 1
         assert compare_bundle_calls[0]["policy"] == "plugin_abi"
+
+    def test_preserves_ambiguity_when_an_exact_match_consumes_one_member(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # old={.1,.2}, new={.2,.3}: .2/.2 exact-matches, but that must not
+        # make the *remaining* .1/.3 candidates look artificially
+        # unambiguous -- they're an unrelated removal+addition, not one
+        # evolving library (Codex review, fresh evidence).
+        from abicheck.product_baseline import compare_product_directories
+
+        old_dir = tmp_path / "old"
+        new_dir = tmp_path / "new"
+        (old_dir / "lib").mkdir(parents=True)
+        (new_dir / "lib").mkdir(parents=True)
+        (old_dir / "lib" / "libfoo.so.1").write_bytes(b"OLD1")
+        (old_dir / "lib" / "libfoo.so.2").write_bytes(b"OLD2")
+        (new_dir / "lib" / "libfoo.so.2").write_bytes(b"NEW2")
+        (new_dir / "lib" / "libfoo.so.3").write_bytes(b"NEW3")
+
+        run_compare_calls, _ = self._capture_calls(monkeypatch)
+        compare_product_directories(old_dir, new_dir)
+
+        # Only the genuine exact match (.2/.2) is compared -- .1 and .3
+        # are left unpaired, not guessed together.
+        assert len(run_compare_calls) == 1
+        assert run_compare_calls[0]["old"] == old_dir / "lib" / "libfoo.so.2"
+        assert run_compare_calls[0]["new"] == new_dir / "lib" / "libfoo.so.2"
+
+    def test_bundle_snapshot_is_keyed_by_bare_filename_not_relative_path(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # A library that moves directories between releases
+        # (lib/provider.so -> lib64/provider.so) must not read as an
+        # unrelated removal+addition at the bundle-snapshot level, and
+        # bundle-level cross-referencing must key the same way
+        # compare_bundle()'s own diff_by_library does (bare filename) --
+        # otherwise intra-dep signature/type correlation silently breaks
+        # for any library not sitting at the discovery root (Codex
+        # review, fresh evidence).
+        from abicheck import bundle as bundle_mod
+        from abicheck.product_baseline import compare_product_directories
+
+        old_dir = tmp_path / "old"
+        new_dir = tmp_path / "new"
+        (old_dir / "lib").mkdir(parents=True)
+        (new_dir / "lib64").mkdir(parents=True)
+        (old_dir / "lib" / "provider.so").write_bytes(b"OLD")
+        (new_dir / "lib64" / "provider.so").write_bytes(b"NEW")
+
+        build_calls: list[dict[str, object]] = []
+
+        def _fake_build_bundle_snapshot(libraries):  # type: ignore[no-untyped-def]
+            build_calls.append(dict(libraries))
+            return {"libraries": dict(libraries)}
+
+        def _fake_compare_bundle(old, new, per_library_results, **kwargs):  # type: ignore[no-untyped-def]
+            class _Result(dict):  # type: ignore[type-arg]
+                def __init__(self):  # type: ignore[no-untyped-def]
+                    super().__init__()
+                    self.bundle_findings: list[object] = []
+
+            return _Result()
+
+        from abicheck import service_compare_pipeline as scp
+
+        class _FakeDiffResult:
+            def __init__(self, library: str) -> None:
+                self.library = library
+
+        class _FakeResult:
+            def __init__(self, library: str) -> None:
+                self.diff = _FakeDiffResult(library)
+
+        monkeypatch.setattr(
+            scp, "run_compare", lambda old, new, **kw: _FakeResult(str(new))
+        )
+        monkeypatch.setattr(
+            bundle_mod, "build_bundle_snapshot", _fake_build_bundle_snapshot
+        )
+        monkeypatch.setattr(bundle_mod, "compare_bundle", _fake_compare_bundle)
+
+        compare_product_directories(old_dir, new_dir)
+
+        assert len(build_calls) == 2
+        old_call, new_call = build_calls
+        assert set(old_call) == {"provider.so"}
+        assert set(new_call) == {"provider.so"}
+
+
+class TestCompareProductDirectoriesRejectsNonexistentDirectories:
+    def test_rejects_a_nonexistent_old_directory(self, tmp_path: Path) -> None:
+        # Silently returning an empty BundleDiffResult (NO_CHANGE) for a
+        # misspelled/missing directory is a false-green whole-product
+        # compatibility gate (Codex review, fresh evidence).
+        from abicheck.product_baseline import compare_product_directories
+
+        new_dir = tmp_path / "new"
+        new_dir.mkdir()
+        with pytest.raises(SnapshotError, match="not a directory"):
+            compare_product_directories(tmp_path / "does-not-exist", new_dir)
+
+    def test_rejects_a_nonexistent_new_directory(self, tmp_path: Path) -> None:
+        from abicheck.product_baseline import compare_product_directories
+
+        old_dir = tmp_path / "old"
+        old_dir.mkdir()
+        with pytest.raises(SnapshotError, match="not a directory"):
+            compare_product_directories(old_dir, tmp_path / "does-not-exist")
+
+    def test_rejects_a_regular_file_as_a_directory_operand(
+        self, tmp_path: Path
+    ) -> None:
+        from abicheck.product_baseline import compare_product_directories
+
+        old_dir = tmp_path / "old"
+        old_dir.mkdir()
+        not_a_dir = tmp_path / "new.txt"
+        not_a_dir.write_text("oops")
+        with pytest.raises(SnapshotError, match="not a directory"):
+            compare_product_directories(old_dir, not_a_dir)
+
+
+class TestCompareProductDirectoriesHeaderRootsContainment:
+    def test_absolute_header_root_is_rejected(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # A caller-supplied absolute or escaping header root must not
+        # resolve outside the product directory -- the same containment
+        # pack/unpack already enforce for header_roots on disk (Codex
+        # review, fresh evidence).
+        from abicheck.product_baseline import compare_product_directories
+
+        old_dir = tmp_path / "old"
+        new_dir = tmp_path / "new"
+        (old_dir / "lib").mkdir(parents=True)
+        (new_dir / "lib").mkdir(parents=True)
+        (old_dir / "lib" / "libfoo.so").write_bytes(b"OLD")
+        (new_dir / "lib" / "libfoo.so").write_bytes(b"NEW")
+
+        outside = tmp_path / "outside-etc"
+        outside.mkdir()
+
+        from abicheck import bundle as bundle_mod, service_compare_pipeline as scp
+
+        calls: list[dict[str, object]] = []
+
+        def _fake_run_compare(old_lib, new_lib, **kwargs):  # type: ignore[no-untyped-def]
+            calls.append(kwargs)
+            raise SnapshotError("stop before a real compare runs")
+
+        def _fake_build_bundle_snapshot(libraries):  # type: ignore[no-untyped-def]
+            return {"libraries": dict(libraries)}
+
+        monkeypatch.setattr(scp, "run_compare", _fake_run_compare)
+        monkeypatch.setattr(
+            bundle_mod, "build_bundle_snapshot", _fake_build_bundle_snapshot
+        )
+
+        with pytest.raises(SnapshotError, match="stop before"):
+            compare_product_directories(old_dir, new_dir, header_roots=[str(outside)])
+
+        assert len(calls) == 1
+        assert calls[0]["old_headers"] == []
+        assert calls[0]["new_headers"] == []
+
+    def test_escaping_relative_header_root_is_rejected(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from abicheck.product_baseline import compare_product_directories
+
+        old_dir = tmp_path / "old"
+        new_dir = tmp_path / "new"
+        (old_dir / "lib").mkdir(parents=True)
+        (new_dir / "lib").mkdir(parents=True)
+        (old_dir / "lib" / "libfoo.so").write_bytes(b"OLD")
+        (new_dir / "lib" / "libfoo.so").write_bytes(b"NEW")
+        # A real directory one level above old_dir/new_dir -- if
+        # containment were not enforced, "../escaped" would resolve here.
+        (tmp_path / "escaped").mkdir()
+
+        from abicheck import bundle as bundle_mod, service_compare_pipeline as scp
+
+        calls: list[dict[str, object]] = []
+
+        def _fake_run_compare(old_lib, new_lib, **kwargs):  # type: ignore[no-untyped-def]
+            calls.append(kwargs)
+            raise SnapshotError("stop before a real compare runs")
+
+        def _fake_build_bundle_snapshot(libraries):  # type: ignore[no-untyped-def]
+            return {"libraries": dict(libraries)}
+
+        monkeypatch.setattr(scp, "run_compare", _fake_run_compare)
+        monkeypatch.setattr(
+            bundle_mod, "build_bundle_snapshot", _fake_build_bundle_snapshot
+        )
+
+        with pytest.raises(SnapshotError, match="stop before"):
+            compare_product_directories(old_dir, new_dir, header_roots=["../escaped"])
+
+        assert len(calls) == 1
+        assert calls[0]["old_headers"] == []
+        assert calls[0]["new_headers"] == []
+
+
+class TestCompareProductDirectoriesStandaloneRemoval:
+    def test_reports_a_library_removed_with_no_surviving_consumer(
+        self, tmp_path: Path
+    ) -> None:
+        # compare_bundle()'s own BUNDLE_LIBRARY_REMOVED detection only
+        # fires when a surviving sibling imports the removed library --
+        # a standalone removal (this library API's only entry point, no
+        # --fail-on-removed-library equivalent) previously vanished
+        # entirely: NO_CHANGE, no findings (Codex review, fresh evidence).
+        # No mocking here -- exercises the real build_bundle_snapshot()/
+        # compare_bundle() machinery end to end; the discovered "library"
+        # content doesn't need to be real ELF, since the standalone-
+        # removal computation is based on raw discovery, not on whether
+        # ELF parsing succeeded.
+        from abicheck.checker_policy import ChangeKind
+        from abicheck.product_baseline import compare_product_directories
+
+        old_dir = tmp_path / "old"
+        new_dir = tmp_path / "new"
+        (old_dir / "lib").mkdir(parents=True)
+        new_dir.mkdir(parents=True)
+        (old_dir / "lib" / "liba.so").write_bytes(b"not-real-elf")
+
+        result = compare_product_directories(old_dir, new_dir)
+
+        removed = [
+            f
+            for f in result.bundle_findings
+            if f.kind == ChangeKind.BUNDLE_LIBRARY_REMOVED
+        ]
+        assert len(removed) == 1
+        assert removed[0].provider_library == "liba.so"
+
+    def test_does_not_double_report_a_sibling_consumed_removal(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # When compare_bundle() already reported a removal (a surviving
+        # sibling imports it), the standalone-removal pass must not add
+        # a second, duplicate finding for the same library.
+        from abicheck import bundle as bundle_mod
+        from abicheck.checker_policy import ChangeKind
+        from abicheck.product_baseline import compare_product_directories
+
+        old_dir = tmp_path / "old"
+        new_dir = tmp_path / "new"
+        old_dir.mkdir()
+        new_dir.mkdir()
+
+        class _FakeFinding:
+            def __init__(self, provider_library: str) -> None:
+                self.kind = ChangeKind.BUNDLE_LIBRARY_REMOVED
+                self.provider_library = provider_library
+
+        class _FakeResult:
+            def __init__(self) -> None:
+                self.bundle_findings = [_FakeFinding("liba.so")]
+
+        def _fake_discover_library_map(root, *, include_private):  # type: ignore[no-untyped-def]
+            if "old" in str(root):
+                return {"lib/liba.so": root / "lib" / "liba.so"}
+            return {}
+
+        def _fake_build_bundle_snapshot(libraries):  # type: ignore[no-untyped-def]
+            return {"libraries": dict(libraries)}
+
+        def _fake_compare_bundle(old, new, per_library_results, **kwargs):  # type: ignore[no-untyped-def]
+            return _FakeResult()
+
+        from abicheck import product_baseline as pb
+
+        monkeypatch.setattr(pb, "_discover_library_map", _fake_discover_library_map)
+        monkeypatch.setattr(
+            bundle_mod, "build_bundle_snapshot", _fake_build_bundle_snapshot
+        )
+        monkeypatch.setattr(bundle_mod, "compare_bundle", _fake_compare_bundle)
+
+        result = compare_product_directories(old_dir, new_dir)
+
+        removed = [
+            f
+            for f in result.bundle_findings
+            if f.kind == ChangeKind.BUNDLE_LIBRARY_REMOVED
+        ]
+        assert len(removed) == 1

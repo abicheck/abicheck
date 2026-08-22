@@ -1151,42 +1151,93 @@ def compare_product_directories(
     compared. A library whose relative path changed but whose *canonical*
     name (SONAME major stripped, e.g. a ``lib/libfoo.so.1`` -> ``lib/
     libfoo.so.2`` bump with no unversioned alias carried across) matches
-    exactly one unmatched candidate on the other side is paired too — a
-    release that only bumps a SONAME major would otherwise never reach
+    exactly one candidate on the other side, counting the *complete*
+    per-side discovery (not just what exact-path matching left unpaired),
+    is paired too — a release that only bumps a SONAME major would
+    otherwise never reach
     :func:`~abicheck.service_compare_pipeline.run_compare` at all (the
     exact-path intersection is empty), silently losing every symbol/type
     change between the two versions (Codex review, fresh evidence). This
     canonical fallback only ever pairs an *unambiguous* match — a
-    canonical name shared by more than one unmatched candidate on either
-    side is left unpaired rather than guessed at, the same
-    ambiguity-safe-fallback discipline this codebase's other identity
-    resolvers already follow (see ``finding_identity.py``'s own
-    docstring). A library present on only one side even after this
-    fallback never reaches the per-library pass, but bundle analysis
-    still reports it via ``bundle_library_added``/``bundle_library_removed``
-    (a genuine SONAME bump also being a structural bundle-level event, not
-    only a per-library ABI question). Unlike the CLI's ``compare-release``
-    engine, a failure here is never swallowed into a warning — this is a
-    library call, so a per-library compare failure or a bundle-analysis
-    failure propagates directly (whatever the failing step itself raises
-    — :class:`SnapshotError`, ...); a caller wanting the CLI's own "report
-    degradation, keep going" behavior should catch what it needs.
+    canonical name shared by more than one candidate on either side stays
+    unpaired regardless of whether one of those candidates happens to
+    already be exact-matched (an exact match consuming one member of an
+    otherwise-ambiguous group must not make the *remaining* members look
+    artificially unambiguous — a product shipping parallel majors
+    old={.1,.2}/new={.2,.3} must not silently treat the unrelated .1/.3 as
+    one evolving library just because .2/.2 happened to match exactly;
+    Codex review, fresh evidence), the same ambiguity-safe-fallback
+    discipline this codebase's other identity resolvers already follow
+    (see ``finding_identity.py``'s own docstring). A library present on
+    only one side even after this fallback never reaches the per-library
+    pass, but bundle analysis still reports it via
+    ``bundle_library_added``/``bundle_library_removed`` when a surviving
+    sibling actually depends on it, plus a standalone
+    ``bundle_library_removed`` finding this function adds itself for any
+    other vanished library (see below) — a genuine SONAME bump also being
+    a structural bundle-level event, not only a per-library ABI question.
+    Unlike the CLI's ``compare-release`` engine, a failure here is never
+    swallowed into a warning — this is a library call, so a per-library
+    compare failure or a bundle-analysis failure propagates directly
+    (whatever the failing step itself raises — :class:`SnapshotError`,
+    ...); a caller wanting the CLI's own "report degradation, keep going"
+    behavior should catch what it needs.
+
+    Bundle-level cross-referencing (``bundle_intra_dep_signature_changed``,
+    ``bundle_intra_type_changed``, ``bundle_provider_changed``) keys by
+    each library's own bare filename, matching
+    :func:`~abicheck.bundle.compare_bundle`'s own pre-existing internal
+    convention (its ``diff_by_library`` index, and therefore the CLI's
+    ``compare-release`` engine too) — *not* the relative-path identity
+    :func:`_discover_library_map` uses for per-library pairing above. Using
+    the relative-path identity for the bundle snapshot itself would (and,
+    before this was fixed, silently did) break that cross-referencing for
+    any library not sitting directly at the discovery root, and would
+    treat a library that simply *moved* directories between releases
+    (``lib/provider.so`` -> ``lib64/provider.so``) as an unrelated
+    removal-plus-addition even though the canonical fallback above
+    already pairs it correctly for its own per-library diff (Codex
+    review, fresh evidence). Bare-filename keying is not itself a new
+    limitation: two distinct libraries sharing an identical bare filename
+    in different directories already collide inside
+    :func:`~abicheck.bundle.compare_bundle`'s own ``diff_by_library``
+    index regardless of what identity this function hands it, so this
+    isn't a regression relative to the CLI's own bundle analysis — closing
+    that fully needs a directory-qualified identity threaded through
+    ``compare_bundle`` itself, out of scope here.
     """
     from .binary_utils import _canonical_library_key
-    from .bundle import build_bundle_snapshot, compare_bundle, load_manifest
+    from .bundle import (
+        BundleFinding,
+        build_bundle_snapshot,
+        compare_bundle,
+        load_manifest,
+    )
+    from .checker_policy import ChangeKind
     from .service_compare_pipeline import run_compare
 
     old_root = Path(old_dir)
     new_root = Path(new_dir)
+    if not old_root.is_dir():
+        raise SnapshotError(f"product directory is not a directory: {old_root}")
+    if not new_root.is_dir():
+        raise SnapshotError(f"product directory is not a directory: {new_root}")
     old_roots_spec = old_header_roots if old_header_roots is not None else header_roots
     new_roots_spec = new_header_roots if new_header_roots is not None else header_roots
 
     old_map = _discover_library_map(old_root, include_private=include_private)
     new_map = _discover_library_map(new_root, include_private=include_private)
 
-    def _resolved_headers(root: Path, spec: HeaderRootsSpec, library_key: str) -> list[Path]:
+    def _resolved_headers(
+        root: Path, spec: HeaderRootsSpec, library_key: str
+    ) -> list[Path]:
         roots = _roots_for_library(spec, library_key)
-        return [candidate for rel in roots if (candidate := root / rel).is_dir()]
+        resolved = []
+        for rel in roots:
+            candidate = _resolve_under_root(root, rel)
+            if candidate is not None and candidate.is_dir():
+                resolved.append(candidate)
+        return resolved
 
     exact_matches = sorted(set(old_map) & set(new_map))
     # (old_key, old_path, new_key, new_path) -- both sides' own discovered
@@ -1201,24 +1252,28 @@ def compare_product_directories(
     # Canonical (SONAME-major-stripped) fallback for the libraries exact
     # matching left unpaired -- keyed by canonical name, dropped entirely
     # (not just left as one candidate) the moment a second contributor
-    # appears, so an ambiguous canonical group never guesses which pair is
-    # "the" match.
-    def _canonical_groups(unmatched: dict[str, Path]) -> dict[str, list[str]]:
+    # appears anywhere in the *complete* per-side discovery, so an exact
+    # match consuming one member of an ambiguous group never makes the
+    # remaining members look artificially unambiguous.
+    def _canonical_groups(discovered: dict[str, Path]) -> dict[str, list[str]]:
         groups: dict[str, list[str]] = {}
-        for key, path in unmatched.items():
+        for key, path in discovered.items():
             groups.setdefault(_canonical_library_key(path), []).append(key)
         return groups
 
-    old_unmatched = {k: v for k, v in old_map.items() if k not in set(exact_matches)}
-    new_unmatched = {k: v for k, v in new_map.items() if k not in set(exact_matches)}
-    old_canonical = _canonical_groups(old_unmatched)
-    new_canonical = _canonical_groups(new_unmatched)
+    old_canonical = _canonical_groups(old_map)
+    new_canonical = _canonical_groups(new_map)
+    already_paired_old = {k for k, _, _, _ in pairs}
+    already_paired_new = {k for _, _, k, _ in pairs}
     for canonical_key in sorted(set(old_canonical) & set(new_canonical)):
         old_candidates = old_canonical[canonical_key]
         new_candidates = new_canonical[canonical_key]
-        if len(old_candidates) == 1 and len(new_candidates) == 1:
-            old_key, new_key = old_candidates[0], new_candidates[0]
-            pairs.append((old_key, old_map[old_key], new_key, new_map[new_key]))
+        if len(old_candidates) != 1 or len(new_candidates) != 1:
+            continue
+        old_key, new_key = old_candidates[0], new_candidates[0]
+        if old_key in already_paired_old or new_key in already_paired_new:
+            continue  # already covered by an exact match
+        pairs.append((old_key, old_map[old_key], new_key, new_map[new_key]))
 
     per_library_results = []
     for old_key, old_path, new_key, new_path in pairs:
@@ -1235,14 +1290,24 @@ def compare_product_directories(
         )
         per_library_results.append(result.diff)
 
-    old_snapshot = build_bundle_snapshot(old_map)
-    new_snapshot = build_bundle_snapshot(new_map)
+    # Bundle-level identity is each library's own bare filename, not the
+    # relative-path identity above -- see this function's own docstring
+    # for why (matches compare_bundle()'s pre-existing diff_by_library
+    # convention; a directory move no longer reads as remove+add). A
+    # collision between two distinct libraries sharing an identical bare
+    # filename in different directories is last-wins here, the same
+    # pre-existing limitation compare_bundle()'s own diff_by_library
+    # index already has regardless of this dict's construction.
+    old_bundle_map = {p.name: p for p in old_map.values()}
+    new_bundle_map = {p.name: p for p in new_map.values()}
+    old_snapshot = build_bundle_snapshot(old_bundle_map)
+    new_snapshot = build_bundle_snapshot(new_bundle_map)
 
     manifest = None
     if manifest_path is not None:
         manifest = load_manifest(Path(manifest_path))
 
-    return compare_bundle(
+    bundle_result = compare_bundle(
         old_snapshot,
         new_snapshot,
         per_library_results,
@@ -1251,3 +1316,34 @@ def compare_product_directories(
         cohorts=cohorts,
         policy=policy,
     )
+
+    # compare_bundle()'s own BUNDLE_LIBRARY_REMOVED detection deliberately
+    # only fires when a surviving sibling actually imports the removed
+    # library -- a standalone removal (no internal consumer) is by design
+    # left to the CLI's separate --fail-on-removed-library flow, which
+    # this library-only entry point has no equivalent of. Left as-is, a
+    # release that drops its one public library (or any library nothing
+    # else in the product imports) would silently return NO_CHANGE here
+    # (Codex review, fresh evidence) -- a false-green whole-product
+    # compatibility gate. Report it directly: any bare filename present in
+    # the old bundle map and absent from the new one, that compare_bundle()
+    # didn't already report.
+    already_reported = {
+        f.provider_library
+        for f in bundle_result.bundle_findings
+        if f.kind == ChangeKind.BUNDLE_LIBRARY_REMOVED and f.provider_library
+    }
+    for name in sorted(set(old_bundle_map) - set(new_bundle_map) - already_reported):
+        bundle_result.bundle_findings.append(
+            BundleFinding(
+                kind=ChangeKind.BUNDLE_LIBRARY_REMOVED,
+                symbol=name,
+                description=(
+                    f"Library {name} removed from the product; no surviving "
+                    "sibling imports it, but a whole-product comparison must "
+                    "still report it."
+                ),
+                provider_library=name,
+            )
+        )
+    return bundle_result
