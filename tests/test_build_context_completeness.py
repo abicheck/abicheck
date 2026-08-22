@@ -179,6 +179,20 @@ class TestForcedIncludeRecognizer:
             == []
         )
 
+    @pytest.mark.parametrize(
+        ("argv", "msvc"),
+        [
+            (["c++", "-include", "@evil.rsp"], False),
+            (["c++", "-include@evil.rsp"], False),
+            (["clang-cl", "/FI", "@evil.rsp"], True),
+            (["clang-cl", "/FI@evil.rsp"], True),
+        ],
+    )
+    def test_response_file_operands_are_not_forwarded_to_l2(
+        self, argv: list[str], msvc: bool
+    ) -> None:
+        assert forced_include_operands(argv, msvc=msvc) == []
+
 
 class TestReplayStillEmitsForcedIncludesExactlyOnce:
     """Why forced includes deliberately never enter ``abi_relevant_flags``.
