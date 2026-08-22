@@ -91,31 +91,45 @@ other per-library finding — but is unaffected by which `--policy` profile is
 selected, since policy never removes a finding, only reclassifies its
 verdict.
 
-**There is currently no per-finding suppression for `bundle_*` findings.**
-Unlike ordinary per-library findings, `compare_bundle()` (both the
-directory/package `compare` fan-out and the whole-product baseline compare
-in `abicheck/product_baseline.py`) is never given a suppression ruleset, so
-[suppressions](suppressions.md) — which apply to per-library findings —
-have no effect on a bundle-level finding, once it does fire. If you've
-determined a specific intra-bundle contract is intentionally being broken,
-the only levers today are `--no-bundle-analysis` (turns off bundle analysis
-for the whole run — see below) and, for a symbol that genuinely comes from
-outside the release, `--bundle-system-providers` (see below) — there is no
-narrower way to quiet one specific `bundle_*` finding while keeping the rest
-of bundle analysis active.
+**No `bundle_*` kind can be suppressed *directly* — but suppression can still
+reach a diff-derived finding indirectly, the same way scoping does.**
+`compare_bundle()` (both the directory/package `compare` fan-out and the
+whole-product baseline compare in `abicheck/product_baseline.py`) is never
+given a suppression ruleset itself, so no [suppression](suppressions.md) rule
+can target a `bundle_*` kind by name — that part holds for every `bundle_*`
+kind, with no exception. But for the three **diff-derived** detectors
+(`bundle_intra_dep_signature_changed`, `bundle_intra_type_changed`,
+`bundle_provider_changed`), `--suppress` is applied to each library's
+`DiffResult` *before* it reaches `compare_bundle()` (the same per-library
+compare pipeline that applies `--scope-public-headers`) — so a suppression
+rule targeting the underlying per-library kind (`func_params_changed`,
+`type_size_changed`, `func_removed`/`func_added`) starves the bundle
+detector exactly like a scoping exclusion would, and the `bundle_*` finding
+never fires. This is a side effect of suppressing the per-library finding,
+not a way to suppress the bundle finding on its own terms — you can't write
+a rule that says "ignore `bundle_intra_dep_signature_changed` for symbol X"
+directly. For the remaining, **graph-native** kinds
+(`bundle_intra_dep_removed`, `bundle_library_removed`/`_added`, version
+drift, SONAME skew, manifest enforcement), there is no per-library `Change`
+to suppress upstream of them at all, so the only levers are
+`--no-bundle-analysis` (turns off bundle analysis for the whole run — see
+below) and, for a symbol that genuinely comes from outside the release,
+`--bundle-system-providers` (see below).
 
 **The sibling-consumption gate covers most, but not all, kinds — and even
 those are gated only inside `compare_bundle()` itself.** Within
-`compare_bundle()`, four kinds require a sibling to actually consume the
+`compare_bundle()`, five kinds require a sibling to actually consume the
 affected symbol/library before firing: `bundle_intra_dep_removed` (an import
 with no provider at all), `bundle_library_removed` (a removed library, gated
 on whether a surviving sibling actually imported one of its exports — a
 standalone removal with no internal consumer there is by design left to the
 directory/package CLI's separate `--fail-on-removed-library` flow),
-`bundle_intra_dep_signature_changed` (gated on
-`new.resolution.consumers_of(symbol)` returning at least one other library),
-and `bundle_intra_type_changed` (gated on the changed type's name appearing
-in some other library's own symbols). Two kinds have no such gate even inside
+`bundle_intra_dep_signature_changed` and `bundle_intra_type_changed` (each
+gated on `new.resolution.consumers_of(...)`/a sibling's own symbols, as
+described above), and `bundle_intra_dep_resolved_to_different_version`
+(gated on `new.resolution.consumers_of(symbol)` returning at least one other
+library — an exported version bump nobody in the bundle actually imports
+produces no finding). Two kinds have no such gate even inside
 `compare_bundle()`: `bundle_library_added` fires for any new library
 unconditionally, and `bundle_provider_changed` fires whenever a symbol
 migrates from one sibling to another, whether or not any third sibling
