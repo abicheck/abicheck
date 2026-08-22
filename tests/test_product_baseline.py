@@ -1595,6 +1595,155 @@ class TestCompareProductDirectoriesStandaloneRemoval:
         assert len(removed) == 1
         assert removed[0].provider_library == "liba.so"
 
+    def test_canonical_fallback_pair_is_not_reported_as_a_removal(
+        self, tmp_path: Path
+    ) -> None:
+        # A library matched via the canonical (SONAME-major-stripped)
+        # fallback -- not an exact relative-path match -- has bare
+        # filenames that genuinely differ between the old and new bundle
+        # maps (libfoo.so.1 vs libfoo.so.2). A naive bundle-map set
+        # difference read that as a standalone removal even though the
+        # per-library ABI comparison already ran for the very same
+        # library (Codex review, fresh evidence).
+        from abicheck.checker_policy import ChangeKind
+        from abicheck.product_baseline import compare_product_directories
+        from tests.test_package import _make_minimal_elf_so
+
+        old_dir = tmp_path / "old"
+        new_dir = tmp_path / "new"
+        old_dir.mkdir()
+        new_dir.mkdir()
+        _make_minimal_elf_so(old_dir / "libfoo.so.1")
+        _make_minimal_elf_so(new_dir / "libfoo.so.2")
+
+        result = compare_product_directories(old_dir, new_dir)
+
+        removed = [
+            f
+            for f in result.bundle_findings
+            if f.kind == ChangeKind.BUNDLE_LIBRARY_REMOVED
+        ]
+        assert removed == []
+
+    def test_case_only_dll_rename_is_not_reported_as_a_removal(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Identical mechanism to the SONAME-major case above, reached via
+        # a Windows-shaped case-only rename instead: Foo.dll -> foo.dll
+        # pairs via the canonical (case-insensitive) fallback, but their
+        # bare filenames differ, so the naive set difference reported it
+        # as a removal (Codex review, fresh evidence). Building a PE binary
+        # complete enough for real PE metadata parsing to succeed is not
+        # this test's concern -- run_compare() is stubbed out so only the
+        # standalone-removal exclusion logic under test actually runs;
+        # _discover_library_map()/the canonical-fallback pairing (what this
+        # test exercises) still run for real, unmocked.
+        from abicheck import service_compare_pipeline
+        from abicheck.checker_policy import ChangeKind
+        from abicheck.checker_types import DiffResult
+        from abicheck.product_baseline import compare_product_directories
+
+        class _FakeCompareResult:
+            def __init__(self, library: str) -> None:
+                self.diff = DiffResult(old_version="", new_version="", library=library)
+
+        def _fake_run_compare(old_path, new_path, **kwargs):  # type: ignore[no-untyped-def]
+            return _FakeCompareResult(Path(new_path).name)
+
+        monkeypatch.setattr(service_compare_pipeline, "run_compare", _fake_run_compare)
+
+        old_dir = tmp_path / "old"
+        new_dir = tmp_path / "new"
+        old_dir.mkdir()
+        new_dir.mkdir()
+        (old_dir / "Foo.dll").write_bytes(b"MZ-not-a-real-pe")
+        (new_dir / "foo.dll").write_bytes(b"MZ-not-a-real-pe")
+
+        result = compare_product_directories(old_dir, new_dir)
+
+        removed = [
+            f
+            for f in result.bundle_findings
+            if f.kind == ChangeKind.BUNDLE_LIBRARY_REMOVED
+        ]
+        assert removed == []
+
+
+class TestRootsForLibraryRejectsBareStrings:
+    def test_flat_bare_string_raises(self) -> None:
+        # A `str` satisfies the declared `Sequence[str]` type, so
+        # header_roots="include" previously returned unchanged and was
+        # iterated character-by-character by the caller -- every
+        # single-character candidate failing .is_dir(), silently running
+        # the comparison with zero header evidence (Codex/CodeRabbit
+        # review, fresh evidence).
+        from abicheck.errors import SnapshotError
+        from abicheck.product_baseline import _roots_for_library
+
+        with pytest.raises(SnapshotError, match="bare string"):
+            _roots_for_library("include", "liba.so")
+
+    def test_mapping_value_bare_string_raises(self) -> None:
+        from abicheck.errors import SnapshotError
+        from abicheck.product_baseline import _roots_for_library
+
+        with pytest.raises(SnapshotError, match="bare string"):
+            _roots_for_library({"liba.so": "include"}, "liba.so")
+
+
+class TestDiscoverLibraryMapExtensionlessElf:
+    def test_extensionless_elf_dso_is_discovered(self, tmp_path: Path) -> None:
+        # A real ELF ET_DYN shared object with no conventional .so suffix
+        # (a plugin named without one -- real on Linux) previously
+        # dropped out of discovery entirely, since _is_shared_library is
+        # a filename-only check (Codex review, fresh evidence: two
+        # changed products silently comparing as NO_CHANGE).
+        from abicheck.product_baseline import _discover_library_map
+        from tests.test_package import _make_minimal_elf_so
+
+        root = tmp_path / "product"
+        (root / "lib").mkdir(parents=True)
+        _make_minimal_elf_so(root / "lib" / "plugin_no_suffix")
+
+        result = _discover_library_map(root, include_private=True)
+        assert set(result) == {"lib/plugin_no_suffix"}
+
+    def test_non_elf_extensionless_file_is_not_discovered(self, tmp_path: Path) -> None:
+        from abicheck.product_baseline import _discover_library_map
+
+        root = tmp_path / "product"
+        (root / "lib").mkdir(parents=True)
+        (root / "lib" / "README").write_bytes(b"not a library at all")
+
+        result = _discover_library_map(root, include_private=True)
+        assert result == {}
+
+
+class TestDiscoverLibraryMapDeterministicWalkOrder:
+    def test_symlink_alias_survivor_is_stable_regardless_of_walk_order(
+        self, tmp_path: Path
+    ) -> None:
+        # os.walk() yields sibling directories in filesystem order, which
+        # is unspecified -- if a symlink alias and its target live in
+        # different directories, the surviving representative for their
+        # shared identity previously depended on which directory the walk
+        # reached first (CodeRabbit review). Sorting both dirnames and
+        # filenames makes the discovered key deterministic: with "a" and
+        # "z" both sorting the same way regardless of the order the
+        # filesystem happens to report them in, "a/target.so" must always
+        # be the survivor over "z/alias.so".
+        from abicheck.product_baseline import _discover_library_map
+
+        root = tmp_path / "product"
+        (root / "a").mkdir(parents=True)
+        (root / "z").mkdir(parents=True)
+        target = root / "a" / "target.so"
+        target.write_bytes(b"REAL-CONTENT")
+        (root / "z" / "alias.so").symlink_to(target)
+
+        result = _discover_library_map(root, include_private=True)
+        assert set(result) == {"a/target.so"}
+
     def test_does_not_double_report_a_sibling_consumed_removal(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:

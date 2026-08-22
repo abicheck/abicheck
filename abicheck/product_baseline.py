@@ -66,7 +66,7 @@ from pathlib import Path
 from typing import IO, TYPE_CHECKING, Any
 
 from .errors import SnapshotError
-from .package import TarExtractor
+from .package import TarExtractor, _is_elf_shared_object
 
 if TYPE_CHECKING:
     from .bundle import BundleDiffResult
@@ -995,15 +995,32 @@ def _roots_for_library(spec: HeaderRootsSpec, library_key: str) -> Sequence[str]
     headers is the common case this format already tolerates elsewhere, not
     a misconfiguration to paper over). A flat ``Sequence[str]`` (the
     original, pre-per-library shape) applies unchanged to every library, so
-    passing a bare list keeps working exactly as it always has. A `str` is
-    technically a `Sequence[str]` of characters too, but is never a
-    `Mapping`, so an accidental `header_roots="include"` typo still falls
-    through as a Sequence, matching this function's own type contract --
-    no different from the guard this parameter already needed before
-    per-library support existed.
+    passing a bare list keeps working exactly as it always has.
+
+    A bare ``str`` is rejected outright rather than silently accepted: it
+    satisfies the declared ``Sequence[str]`` type (a `str` is a sequence of
+    its own characters), so `header_roots="include"` — a natural typo for
+    the intended single-root-list shape — previously returned unchanged and
+    was iterated character-by-character by the caller, each single-character
+    candidate failing ``.is_dir()`` and silently running the comparison with
+    zero header evidence (Codex/CodeRabbit review, fresh evidence). The same
+    applies to a per-library mapping value spelled as a bare string
+    (``{"lib/a.so": "include"}``) — that value is returned unchanged too and
+    hits the identical character-iteration failure.
     """
     if isinstance(spec, Mapping):
-        return spec.get(library_key, ())
+        value = spec.get(library_key, ())
+        if isinstance(value, str):
+            raise SnapshotError(
+                "per-library header roots must be a sequence of paths, not "
+                f"a bare string, for library {library_key!r}: {value!r}"
+            )
+        return value
+    if isinstance(spec, str):
+        raise SnapshotError(
+            "header roots must be a sequence of paths or a per-library "
+            f"mapping, not a bare string: {spec!r}"
+        )
     return spec
 
 
@@ -1034,15 +1051,25 @@ def _discover_library_map(root: Path, *, include_private: bool) -> dict[str, Pat
     filename separately from this dict's own key.
 
     Format-neutral, unlike :func:`abicheck.package.discover_shared_libraries`
-    (ELF-only, via ``_is_elf_shared_object``'s magic-byte sniff): this walks
-    the tree directly and matches by suffix using the same
-    :func:`_is_shared_library` predicate :func:`pack_product_baseline`
+    (ELF-only): this walks the tree directly and matches by suffix using the
+    same :func:`_is_shared_library` predicate :func:`pack_product_baseline`
     already uses to classify a :class:`LibraryEntry` — so a PE ``.dll`` or
     Mach-O ``.dylib`` a product baseline archive genuinely carries is
     discovered here too, not silently invisible to every comparison this
     function drives (Codex review, fresh evidence: a Windows/macOS product
     baseline compared as empty/no-change with no per-library comparisons
-    ever run, despite packing recognizing and archiving those files).
+    ever run, despite packing recognizing and archiving those files). The
+    suffix check is supplemented, not replaced, by
+    :func:`abicheck.package._is_elf_shared_object`'s content-aware ELF
+    ``ET_DYN`` sniff: an extensionless ELF DSO (a plugin named without a
+    conventional ``.so`` suffix, real on Linux) previously dropped out of
+    both the per-library and bundle-level comparison entirely — two changed
+    products silently comparing as ``NO_CHANGE`` — since a filename-only
+    check has no way to recognize it (Codex review, fresh evidence). The DLL/
+    Mach-O suffix checks are unaffected; only the ELF side gains the
+    content-aware fallback, matching what
+    :func:`abicheck.package.discover_shared_libraries` already does for its
+    own ELF-only walk.
 
     A real hardlink/symlink alias pointing at the identical file is still
     collapsed to one entry — using the same ``(dev, ino)`` filesystem
@@ -1051,19 +1078,29 @@ def _discover_library_map(root: Path, *, include_private: bool) -> dict[str, Pat
     double-count as two separate libraries. *include_private* is accepted
     for API symmetry with the ELF-only discovery it replaces, but has no
     effect here: every discovered file already carries a recognizable
-    library suffix, so there is no "real DSO with an unconventional name
-    at a conventional path" case left for a public/private directory
-    split to disambiguate.
+    library suffix or a recognized ELF ``ET_DYN`` header, so there is no
+    "real DSO with an unconventional name at a conventional path" case left
+    for a public/private directory split to disambiguate.
+
+    The directory-walk order is sorted (both ``dirnames`` and ``filenames``,
+    in place), not just the filenames within one directory: ``os.walk``
+    otherwise yields sibling directories in filesystem order, which is
+    unspecified — if a symlink alias and its target live in different
+    directories, the surviving representative for their shared identity
+    depended on which directory the walk reached first, so two runs over the
+    identical tree could produce different ``library_map`` keys (CodeRabbit
+    review).
     """
     del include_private  # accepted for API symmetry only; see docstring.
 
     seen_identity: set[Path | tuple[int, int]] = set()
     library_map: dict[str, Path] = {}
-    for dirpath, _dirnames, filenames in os.walk(root, followlinks=False):
+    for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
+        dirnames.sort()
         for fn in sorted(filenames):
-            if not _is_shared_library(fn):
-                continue
             path = Path(dirpath) / fn
+            if not _is_shared_library(fn) and not _is_elf_shared_object(path):
+                continue
             try:
                 real = path.resolve()
             except OSError:
@@ -1346,7 +1383,21 @@ def compare_product_directories(
         for f in bundle_result.bundle_findings
         if f.kind == ChangeKind.BUNDLE_LIBRARY_REMOVED and f.provider_library
     }
-    for name in sorted(set(old_bundle_map) - set(new_bundle_map) - already_reported):
+    # A library matched to a surviving library on the new side -- whether by
+    # an exact relative-path match or the canonical (SONAME-major-stripped,
+    # case-insensitive) fallback above -- is not a standalone removal even
+    # though its own bare filename may be absent from new_bundle_map: a
+    # SONAME major bump (`libfoo.so.1` -> `libfoo.so.2`) and a case-only DLL
+    # rename (`Foo.dll` -> `foo.dll`) both pair via the canonical fallback
+    # while their bare filenames genuinely differ, so a naive bundle-map set
+    # difference reported them as a removal even though the per-library ABI
+    # comparison above already ran for the very same library (Codex review,
+    # fresh evidence, the DLL case; the SONAME-major case is the identical
+    # mechanism generalized).
+    paired_old_names = {old_path.name for _, old_path, _, _ in pairs}
+    for name in sorted(
+        set(old_bundle_map) - set(new_bundle_map) - already_reported - paired_old_names
+    ):
         bundle_result.bundle_findings.append(
             BundleFinding(
                 kind=ChangeKind.BUNDLE_LIBRARY_REMOVED,
