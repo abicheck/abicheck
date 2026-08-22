@@ -288,9 +288,14 @@ def variant_fingerprint(evidence: BuildEvidence | None, env: EnvironmentMatrix |
     """Stable fingerprint over BUILD-AXIS coordinates only: target triple,
     compiler family+version, C/C++ standard, ABI-affecting flags/defines,
     feature toggles (e.g. ONEDAL_DATA_PARALLEL), header-set identity.
-    Reuses environment_matrix.py's existing SyclConstraints/CudaConstraints/
-    runtime-floor fields rather than re-deriving them. Deliberately EXCLUDES
-    artifact membership (which libraries actually shipped) — see below."""
+    Reuses environment_matrix.py's existing SyclConstraints/CudaConstraints
+    fields (what the build actually targets) rather than re-deriving them.
+    Deliberately EXCLUDES two things: artifact membership (which libraries
+    actually shipped) — see below — and EnvironmentMatrix.runtime_floors
+    (a deployment/comparison-policy input used to classify symbol-version
+    and deployment findings, not a build-defining fact; two byte-identical
+    CPU builds compared under different declared deployment floors must
+    still pair as the same variant)."""
 
 def pair_variants(
     old: dict[str, BundleFacts], new: dict[str, BundleFacts]
@@ -372,15 +377,26 @@ symbol-level evidence, not a report-level signal:
    explicitly **not** reused here for exactly that reason — a report-level
    signal would make this finding's outcome depend on unrelated symbols
    elsewhere in the same comparison, which defeats the point of a
-   per-symbol gate. Instead, this phase adds one narrow, symbol-scoped
-   check: does the resolved provider `Function`/`Variable` for this
-   specific symbol have a non-`None` signature (`Function.params`/
-   `Function.return_type`, or `Variable.type`, populated from real
-   evidence rather than absent) on both old and new. This is deliberately
-   much narrower than the full per-finding evidence-provider model
-   AGENTS.md's known-gap entry describes out of scope — it answers only
-   "does *this* symbol have a corroborated signature," not "which tier
-   produced every finding in the report."
+   per-symbol gate. **Checking `Function.params`/`Function.return_type`/
+   `Variable.type` for non-`None` does not actually work as this gate's
+   check** (caught in review — `Function.return_type`/`Variable.type` are
+   required `str` fields, never `None`, and `Function.params` defaults to
+   an empty list, so an L0-only symbol has *the same shape* as a real,
+   evidenced zero-argument function: `dumper_elf_fallback.py`'s ELF-only
+   path fills the unknown type in explicitly as the literal sentinel
+   string `"?"` with an empty parameter list, and stamps
+   `visibility=Visibility.ELF_ONLY` on the entry rather than leaving any
+   field empty or absent). The real, symbol-scoped check this phase needs
+   is therefore: does the resolved provider (and consumer, where
+   applicable) `Function`/`Variable` for this specific symbol have
+   `visibility != Visibility.ELF_ONLY` **and** a return/variable type other
+   than the `"?"` sentinel, on both old and new — i.e. recognize the actual
+   unknown-evidence marker this codebase already uses, not merely check a
+   field's presence. This is deliberately much narrower than the full
+   per-finding evidence-provider model AGENTS.md's known-gap entry
+   describes out of scope — it answers only "does *this* symbol have a
+   corroborated signature," not "which tier produced every finding in the
+   report."
 
 Default verdict: `RISK`, distinct from both "no change" and the confirmed
 `BREAKING` `bundle_intra_dep_signature_changed` — this is the "binary-name
@@ -466,9 +482,12 @@ silently dropped:
 - **Full per-finding evidence-provider model** (which extractor/tier
   produced each individual finding, not just each `AbiSnapshot`) — already
   tracked as its own, larger, cross-cutting gap in the root `AGENTS.md`'s
-  "Evidence-provider model" known-gap entry; Phase 4 above reuses the
-  existing report-level `evidence_status_for_result` signal rather than
-  attempting that larger project as a side effect of this plan.
+  "Evidence-provider model" known-gap entry; Phase 4 above deliberately
+  does **not** reuse the existing report-level `evidence_status_for_result`
+  signal (see Phase 4's own design section for why a report-level signal
+  is wrong for a per-symbol gate) and instead adds one narrow,
+  symbol-scoped check, rather than attempting that larger per-finding
+  project as a side effect of this plan.
 - **A genuine toolchain-identity probe validating a resolved compiler
   binding's real family/version against a declared multibuild-variant
   constraint** — `bundle_multibuild.variant_fingerprint` records the
