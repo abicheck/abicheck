@@ -101,3 +101,18 @@ class TestCanonicalLibraryKeyCaseFolding:
         lower.write_bytes(pe_bytes)
 
         assert _canonical_library_key(upper) == _canonical_library_key(lower)
+
+    def test_versioned_uppercase_dylib_pairs_with_unversioned_uppercase(
+        self,
+    ) -> None:
+        # libfoo.1.DYLIB -> libfoo.DYLIB is a real version-drop pair. A
+        # fixed lowercase replacement on the versioned side would produce
+        # "libfoo.dylib" while the untouched unversioned side stays
+        # "libfoo.DYLIB" -- two different-cased keys for what should be
+        # one canonical identity (Codex review, fresh evidence).
+        assert _canonical_library_key(Path("libfoo.1.DYLIB")) == _canonical_library_key(
+            Path("libfoo.DYLIB")
+        )
+
+    def test_versioned_uppercase_dylib_extension_case_is_preserved(self) -> None:
+        assert _canonical_library_key(Path("libfoo.1.DYLIB")) == "libfoo.DYLIB"

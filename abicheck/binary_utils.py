@@ -177,8 +177,15 @@ def strip_vendor_hash(name: str) -> str:
 #: ``libfoo.dylib`` (no version at all) is left untouched. Case-insensitive
 #: to match a ``.DYLIB`` extension spelling the same way the ELF ``.so``
 #: match below does, but the *stem* is never case-folded -- see
-#: :func:`_canonical_library_key`'s own docstring for why.
-_DYLIB_VERSION_RE = re.compile(r"\.(?:\d+\.)*\d+\.dylib$", re.IGNORECASE)
+#: :func:`_canonical_library_key`'s own docstring for why. The extension
+#: itself is a capture group so its *matched* case can be preserved on
+#: substitution -- a fixed lowercase replacement would normalize
+#: ``libfoo.1.DYLIB`` to ``libfoo.dylib`` while leaving an unversioned
+#: ``libfoo.DYLIB`` untouched, so a real version-drop pair (``libfoo.1.
+#: DYLIB`` -> ``libfoo.DYLIB``) would land on two different-cased keys and
+#: never be paired by the canonical fallback (Codex review, fresh
+#: evidence).
+_DYLIB_VERSION_RE = re.compile(r"\.(?:\d+\.)*\d+(\.dylib)$", re.IGNORECASE)
 
 #: PE/COFF ``IMAGE_FILE_DLL`` bit in the COFF file header's ``Characteristics``
 #: field -- set for a DLL, clear for a plain ``.exe``.
@@ -281,6 +288,10 @@ def _canonical_library_key(path: Path) -> str:
     m = re.search(r"\.so(?:\.|$)", name, re.IGNORECASE)
     if m:
         return name[: m.start() + 3]
-    if _DYLIB_VERSION_RE.search(name):
-        return _DYLIB_VERSION_RE.sub(".dylib", name)
+    m = _DYLIB_VERSION_RE.search(name)
+    if m:
+        # group(1) is the matched extension exactly as spelled (preserving
+        # its case) -- see _DYLIB_VERSION_RE's own docstring for why a
+        # fixed-case literal replacement is wrong here.
+        return name[: m.start()] + m.group(1)
     return name
