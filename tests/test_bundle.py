@@ -362,6 +362,37 @@ class TestIntraDepRemoved:
             for f in with_extra.bundle_findings
         )
 
+    def test_system_providers_explicit_major_version_does_not_match_a_different_one(
+        self,
+    ) -> None:
+        """Regression (Codex review): an allow-list entry that itself names
+        a specific major version (`libvendor.so.1`) must require an exact
+        match -- it must NOT also match an unrelated major
+        (`libvendor.so.2`) via stem comparison. Stem fallback exists for a
+        version-*generic* entry (`libmkl_core`/`libmkl_core.so`, no numeric
+        major) matching any real runtime version, not for treating two
+        different, explicitly-pinned majors as interchangeable."""
+        new = _snapshot(
+            {
+                "libfoo.so": _meta(
+                    soname="libfoo.so.1",
+                    needed=["libvendor.so.2"],
+                    imports=["vendor_custom_op"],
+                ),
+            }
+        )
+        with_extra = compare_bundle(
+            new,
+            new,
+            per_library_results=[],
+            system_providers=["libvendor.so.1"],
+        )
+        assert any(
+            f.kind == ChangeKind.BUNDLE_INTRA_DEP_REMOVED
+            and f.symbol == "vendor_custom_op"
+            for f in with_extra.bundle_findings
+        )
+
     def test_fires_when_dt_needed_was_stripped(self) -> None:
         # Regression for the CodeRabbit feedback: previously the bundle
         # layer short-circuited when consumer.intra_needed was empty,
