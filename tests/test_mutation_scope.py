@@ -14,19 +14,21 @@ MODULES = ["abicheck/diff_types.py", "abicheck/serialization.py"]
 
 
 def test_source_changes_select_only_changed_detector_modules() -> None:
-    assert scope.selected_modules({"abicheck/diff_types.py", "docs/guide.md"}, MODULES) == [
-        "abicheck/diff_types.py"
-    ]
+    assert scope.selected_modules(
+        {"abicheck/diff_types.py", "docs/guide.md"}, MODULES
+    ) == ["abicheck/diff_types.py"]
 
 
 def test_conventional_detector_test_selects_its_module() -> None:
-    assert scope.selected_modules({"tests/test_serialization_roundtrip.py"}, MODULES) == [
-        "abicheck/serialization.py"
-    ]
+    assert scope.selected_modules(
+        {"tests/test_serialization_roundtrip.py"}, MODULES
+    ) == ["abicheck/serialization.py"]
 
 
 def test_unclassified_test_keeps_full_scope_without_detector_source() -> None:
-    assert scope.selected_modules({"tests/test_integration_helpers.py"}, MODULES) is None
+    assert (
+        scope.selected_modules({"tests/test_integration_helpers.py"}, MODULES) is None
+    )
 
 
 def test_mutation_infrastructure_with_detector_change_keeps_detector_subset() -> None:
@@ -58,4 +60,6 @@ def test_rewrite_only_mutate_preserves_following_config(tmp_path: Path) -> None:
     config = tmp_path / "pyproject.toml"
     config.write_text('before = 1\nonly_mutate = [\n    "a.py",\n]\nafter = 2\n')
     scope.rewrite_only_mutate(config, ["b.py"])
-    assert config.read_text() == 'before = 1\nonly_mutate = [\n    "b.py",\n]\nafter = 2\n'
+    assert (
+        config.read_text() == 'before = 1\nonly_mutate = [\n    "b.py",\n]\nafter = 2\n'
+    )

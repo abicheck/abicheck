@@ -20,6 +20,7 @@ Exit codes:
     1  one or more cases gained a spurious BREAKING
     2  input/usage error
 """
+
 from __future__ import annotations
 
 import json
@@ -167,7 +168,9 @@ def _dwarf_evidence_loss_allows_downgrade(
     kinds = entry.get("expected_kinds")
     if not isinstance(kinds, list) or not kinds:
         return False
-    channels = {_DEBUG_CHANNEL_BY_KIND.get(kind) for kind in kinds if isinstance(kind, str)}
+    channels = {
+        _DEBUG_CHANNEL_BY_KIND.get(kind) for kind in kinds if isinstance(kind, str)
+    }
     if None in channels or not channels:
         return False
 
@@ -181,15 +184,22 @@ def _dwarf_evidence_loss_allows_downgrade(
     sides = [evidence.get(side) for side in ("old", "new")]
     if not all(isinstance(side, dict) for side in sides):
         return False
+    non_parsed_states = {"not_available", "presence_only", "partial", "failed"}
     for channel in channels:
-        if not any(side.get(channel) != "parsed" for side in sides):
+        if not any(side.get(channel) in non_parsed_states for side in sides):
             return False
     return True
 
 
 def _known_gap_covers_row(
-    entry: dict[str, Any], *, got: str, status: object,
-    case: str, platform: str, variant: str, data: dict[str, Any],
+    entry: dict[str, Any],
+    *,
+    got: str,
+    status: object,
+    case: str,
+    platform: str,
+    variant: str,
+    data: dict[str, Any],
 ) -> bool:
     """Whether a reviewed, exact known-gap observation covers this row.
 
@@ -244,8 +254,13 @@ def _classify_results(
         # to the CLI label when a row has neither (Codex review).
         variant = r.get("mode") or r.get("variant") or label
         known_gap_applies = _known_gap_covers_row(
-            entry, got=got, status=status, case=case, platform=platform,
-            variant=variant, data=data,
+            entry,
+            got=got,
+            status=status,
+            case=case,
+            platform=platform,
+            variant=variant,
+            data=data,
         )
         assurance = r.get("analysis_assurance")
         assurance_status = (
@@ -291,19 +306,26 @@ def _report(
 ) -> int:
     """Print the guard report and return the process exit code."""
     if downgrades:
-        print(f"{label} downgrades (expected evidence loss, reported): {len(downgrades)}")
+        print(
+            f"{label} downgrades (expected evidence loss, reported): {len(downgrades)}"
+        )
         for d in downgrades:
             print(f"  - {d}")
 
     failed = False
     if errors:
-        print(f"\nERROR: {label} run did not produce a verdict for {len(errors)} case(s) "
-              "(crash/compare failure — the FP invariant was never checked):", file=sys.stderr)
+        print(
+            f"\nERROR: {label} run did not produce a verdict for {len(errors)} case(s) "
+            "(crash/compare failure — the FP invariant was never checked):",
+            file=sys.stderr,
+        )
         for e in errors:
             print(f"  - {e}", file=sys.stderr)
         failed = True
     if false_positives:
-        print(f"\nERROR: {label} false positives: {len(false_positives)}", file=sys.stderr)
+        print(
+            f"\nERROR: {label} false positives: {len(false_positives)}", file=sys.stderr
+        )
         for fp in false_positives:
             print(f"  - {fp}", file=sys.stderr)
         failed = True

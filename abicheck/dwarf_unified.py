@@ -44,6 +44,7 @@ The two legacy modules (dwarf_metadata.py, dwarf_advanced.py) keep their
 internal helpers unchanged and are re-exported here so no import sites
 outside dumper.py need updating.
 """
+
 # pylint: disable=invalid-name  # CU is the standard DWARF term (Compilation Unit)
 from __future__ import annotations
 
@@ -70,6 +71,7 @@ log = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Shared DWARF session — one ELF open + one DWARFInfo, reusable across passes
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class DwarfSession:
@@ -202,6 +204,7 @@ def parse_dwarf_from_session(
 # Unified single-pass entry point
 # ---------------------------------------------------------------------------
 
+
 def parse_dwarf(
     so_path: Path,
     *,
@@ -250,6 +253,7 @@ def parse_dwarf(
 # ---------------------------------------------------------------------------
 # Backward-compatible shims
 # ---------------------------------------------------------------------------
+
 
 def parse_dwarf_metadata(so_path: Path) -> DwarfMetadata:
     """Thin shim — delegates to parse_dwarf() and returns only DwarfMetadata.

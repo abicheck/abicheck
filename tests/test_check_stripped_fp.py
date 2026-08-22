@@ -1,4 +1,5 @@
 """Focused tests for the reduced-evidence false-positive guard."""
+
 from __future__ import annotations
 
 import importlib.util
@@ -62,7 +63,8 @@ def test_l0_func_removed_is_not_waived_by_partial_dwarf_assurance() -> None:
     guard = _guard_module()
     row = _row("partial")
     row["analysis_assurance"] = {
-        "status": "partial", "dwarf_context_status": "asymmetric"
+        "status": "partial",
+        "dwarf_context_status": "asymmetric",
     }
 
     false_positives, downgrades, errors = guard._classify_results(
@@ -96,7 +98,8 @@ def test_failed_and_not_comparable_assurance_are_validation_errors() -> None:
     for assurance_status in ("failed", "not_comparable"):
         row = _row(assurance_status, result_status="XFAIL")
         row["analysis_assurance"] = {
-            "status": assurance_status, "dwarf_context_status": "asymmetric"
+            "status": assurance_status,
+            "dwarf_context_status": "asymmetric",
         }
         _, downgrades, errors = guard._classify_results(
             [row], entry, "stripped-headers", {}
@@ -109,7 +112,8 @@ def test_dwarf_dependent_partial_downgrade_is_reported_not_failed() -> None:
     guard = _guard_module()
     row = _row("partial")
     row["analysis_assurance"] = {
-        "status": "partial", "dwarf_context_status": "asymmetric",
+        "status": "partial",
+        "dwarf_context_status": "asymmetric",
         "debug_evidence": {
             "old": {"basic": "parsed", "advanced": "parsed"},
             "new": {"basic": "not_available", "advanced": "not_available"},
@@ -134,12 +138,24 @@ def test_dwarf_dependent_partial_downgrade_is_reported_not_failed() -> None:
     assert errors == []
 
 
+def test_missing_or_unknown_evidence_channel_does_not_waive_downgrade() -> None:
+    guard = _guard_module()
+    entry = {"min_evidence": "L1", "expected_kinds": ["type_size_changed"]}
+    for state in ({"advanced": "not_available"}, {"basic": "bogus"}):
+        assurance = {
+            "status": "partial",
+            "debug_evidence": {"old": {"basic": "parsed"}, "new": state},
+        }
+        assert not guard._dwarf_evidence_loss_allows_downgrade(entry, assurance)
+
+
 def test_advanced_only_gap_does_not_waive_basic_layout_kind() -> None:
     """A receipt must name the channel the missing detector actually needs."""
     guard = _guard_module()
     row = _row("partial")
     row["analysis_assurance"] = {
-        "status": "partial", "dwarf_context_status": "asymmetric",
+        "status": "partial",
+        "dwarf_context_status": "asymmetric",
         "debug_evidence": {
             "old": {"basic": "parsed", "advanced": "parsed"},
             "new": {"basic": "parsed", "advanced": "not_available"},
@@ -148,11 +164,15 @@ def test_advanced_only_gap_does_not_waive_basic_layout_kind() -> None:
 
     _, downgrades, errors = guard._classify_results(
         [row],
-        {"case_break": {
-            "expected": "BREAKING", "min_evidence": "L1",
-            "expected_kinds": ["type_size_changed"],
-        }},
-        "stripped-headers", {},
+        {
+            "case_break": {
+                "expected": "BREAKING",
+                "min_evidence": "L1",
+                "expected_kinds": ["type_size_changed"],
+            }
+        },
+        "stripped-headers",
+        {},
     )
 
     assert downgrades == []
@@ -163,7 +183,8 @@ def test_advanced_only_gap_waives_advanced_detector_kind() -> None:
     guard = _guard_module()
     row = _row("partial")
     row["analysis_assurance"] = {
-        "status": "partial", "dwarf_context_status": "asymmetric",
+        "status": "partial",
+        "dwarf_context_status": "asymmetric",
         "debug_evidence": {
             "old": {"basic": "parsed", "advanced": "parsed"},
             "new": {"basic": "parsed", "advanced": "not_available"},
@@ -172,11 +193,15 @@ def test_advanced_only_gap_waives_advanced_detector_kind() -> None:
 
     _, downgrades, errors = guard._classify_results(
         [row],
-        {"case_break": {
-            "expected": "BREAKING", "min_evidence": "L1",
-            "expected_kinds": ["calling_convention_changed"],
-        }},
-        "stripped-headers", {},
+        {
+            "case_break": {
+                "expected": "BREAKING",
+                "min_evidence": "L1",
+                "expected_kinds": ["calling_convention_changed"],
+            }
+        },
+        "stripped-headers",
+        {},
     )
 
     assert len(downgrades) == 1

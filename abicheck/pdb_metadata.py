@@ -32,6 +32,7 @@ parse_pdb_debug_info(pdb_path)
 Requires a PDB file path.  Use ``pdb_utils.locate_pdb()`` to find the PDB
 for a given PE binary.
 """
+
 from __future__ import annotations
 
 import logging
@@ -62,6 +63,7 @@ def _machine_name(machine_code: int) -> str:
     """
     try:
         import pefile
+
         full_name: str | None = pefile.MACHINE_TYPE.get(machine_code)
         if full_name:
             return full_name.replace("IMAGE_FILE_MACHINE_", "")
@@ -69,8 +71,12 @@ def _machine_name(machine_code: int) -> str:
         pass
     # Fallback for common machine types when pefile is not available
     _FALLBACK: dict[int, str] = {
-        0x014C: "I386", 0x0200: "IA64", 0x8664: "AMD64",
-        0xAA64: "ARM64", 0x01C0: "ARM", 0x01C4: "ARMNT",
+        0x014C: "I386",
+        0x0200: "IA64",
+        0x8664: "AMD64",
+        0xAA64: "ARM64",
+        0x01C0: "ARM",
+        0x01C4: "ARMNT",
     }
     return _FALLBACK.get(machine_code, f"0x{machine_code:04x}")
 
@@ -92,6 +98,7 @@ def _is_user_visible(name: str | None, is_forward_ref: bool) -> bool:
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
+
 
 def parse_pdb_debug_info(
     pdb_path: Path,
@@ -160,6 +167,7 @@ def parse_pdb_debug_info(
 # Phase 1: Struct/class/union layouts
 # ---------------------------------------------------------------------------
 
+
 def _extract_struct_layouts(
     types: TypeDatabase,
     meta: DwarfMetadata,
@@ -186,8 +194,9 @@ def _extract_struct_layouts(
         except Exception as exc:  # noqa: BLE001
             # Don't record an empty layout — a later duplicate with the
             # same name may succeed and should become the canonical def.
-            log.debug("_extract_struct_layouts: bad fields for %s: %s",
-                      cv_struct.name, exc)
+            log.debug(
+                "_extract_struct_layouts: bad fields for %s: %s", cv_struct.name, exc
+            )
             skipped = True
             continue
 
@@ -265,14 +274,16 @@ def _extract_fields(types: TypeDatabase, cv_struct: CvStruct) -> list[FieldInfo]
             type_name = types.type_name(bf.underlying_ti)
             byte_size = types.type_size(bf.underlying_ti)
 
-        fields.append(FieldInfo(
-            name=member.name,
-            type_name=type_name,
-            byte_offset=member.offset,
-            byte_size=byte_size,
-            bit_offset=bit_offset,
-            bit_size=bit_size,
-        ))
+        fields.append(
+            FieldInfo(
+                name=member.name,
+                type_name=type_name,
+                byte_offset=member.offset,
+                byte_size=byte_size,
+                bit_offset=bit_offset,
+                bit_size=bit_size,
+            )
+        )
 
     return fields
 
@@ -280,6 +291,7 @@ def _extract_fields(types: TypeDatabase, cv_struct: CvStruct) -> list[FieldInfo]
 # ---------------------------------------------------------------------------
 # Phase 2: Enum types
 # ---------------------------------------------------------------------------
+
 
 def _extract_enums(
     types: TypeDatabase,
@@ -313,6 +325,7 @@ def _extract_enums(
 # ---------------------------------------------------------------------------
 # Phase 4: Toolchain / compiler info from DBI
 # ---------------------------------------------------------------------------
+
 
 def _extract_toolchain_info(pdb: PdbFile, adv: AdvancedDwarfMetadata) -> None:
     """Extract compiler/toolchain info from DBI stream header."""

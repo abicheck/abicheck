@@ -52,12 +52,16 @@ def test_symmetric_binary_without_dwarf_is_partial() -> None:
     assert any("without DWARF" in note for note in assurance.notes)
 
 
-def test_clean_verdict_keeps_default_exit_but_require_complete_fails(tmp_path: Path) -> None:
+def test_clean_verdict_keeps_default_exit_but_require_complete_fails(
+    tmp_path: Path,
+) -> None:
     assert _compare(tmp_path).exit_code == 0
     assert _compare(tmp_path, "--require-complete-analysis").exit_code == 1
 
 
-def _debug_snapshot(version: str, dwarf: object, advanced: object | None = None) -> AbiSnapshot:
+def _debug_snapshot(
+    version: str, dwarf: object, advanced: object | None = None
+) -> AbiSnapshot:
     return AbiSnapshot(
         version=version,
         library="libfoo.so.1",
@@ -76,7 +80,9 @@ def test_ctf_source_and_capability_survive_snapshot_round_trip() -> None:
 
     assert isinstance(aa, AnalysisAssurance)
     assert aa.debug_evidence["old"] == {
-        "source": "ctf", "basic": "parsed", "advanced": "not_supported"
+        "source": "ctf",
+        "basic": "parsed",
+        "advanced": "not_supported",
     }
     assert aa.status == "partial"
 
@@ -111,11 +117,13 @@ def test_presence_only_receipt_does_not_claim_parsed_facts() -> None:
 
 def test_failed_debug_parse_is_preserved_in_receipt() -> None:
     old = _debug_snapshot(
-        "1.0", DwarfMetadata(evidence_state="failed"),
+        "1.0",
+        DwarfMetadata(evidence_state="failed"),
         AdvancedDwarfMetadata(evidence_state="failed"),
     )
     new = _debug_snapshot(
-        "2.0", DwarfMetadata(evidence_state="failed"),
+        "2.0",
+        DwarfMetadata(evidence_state="failed"),
         AdvancedDwarfMetadata(evidence_state="failed"),
     )
 
@@ -128,9 +136,15 @@ def test_failed_debug_parse_is_preserved_in_receipt() -> None:
 
 
 def test_legacy_debug_blocks_are_presence_only_not_claimed_parsed() -> None:
-    raw = json.loads(snapshot_to_json(_debug_snapshot(
-        "1.0", DwarfMetadata(has_dwarf=True), AdvancedDwarfMetadata(has_dwarf=True)
-    )))
+    raw = json.loads(
+        snapshot_to_json(
+            _debug_snapshot(
+                "1.0",
+                DwarfMetadata(has_dwarf=True),
+                AdvancedDwarfMetadata(has_dwarf=True),
+            )
+        )
+    )
     # Provenance arrived in schema v26; a v25 snapshot cannot establish that
     # its DWARF-shaped blocks came from completed parsing.
     raw["schema_version"] = 25
@@ -139,10 +153,14 @@ def test_legacy_debug_blocks_are_presence_only_not_claimed_parsed() -> None:
     del raw["dwarf_advanced"]["evidence_state"]
     restored = snapshot_from_dict(raw)
 
-    aa = checker.compare(restored, restored, scope_to_public_surface=False).analysis_assurance
+    aa = checker.compare(
+        restored, restored, scope_to_public_surface=False
+    ).analysis_assurance
 
     assert isinstance(aa, AnalysisAssurance)
     assert aa.debug_evidence["old"] == {
-        "source": "unknown", "basic": "presence_only", "advanced": "presence_only"
+        "source": "unknown",
+        "basic": "presence_only",
+        "advanced": "presence_only",
     }
     assert aa.status == "partial"

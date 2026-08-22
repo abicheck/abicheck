@@ -36,6 +36,7 @@ Coverage note:
   The toolchain flag detector (DW_AT_producer) provides broader coverage for
   ABI-flag drift on Linux.
 """
+
 # pylint: disable=invalid-name  # CU is the standard DWARF term (Compilation Unit)
 from __future__ import annotations
 
@@ -67,21 +68,21 @@ _CC_NAMES: dict[int, str] = {
     0x01: "normal",
     0x02: "program",
     0x03: "nocall",
-    0x04: "pass_by_reference",      # DWARF 5
-    0x05: "pass_by_value",          # DWARF 5
+    0x04: "pass_by_reference",  # DWARF 5
+    0x05: "pass_by_value",  # DWARF 5
     0x40: "GNU_renesas_sh",
     0x41: "GNU_borland_fastcall_i386",
-    0x80: "GNU_push_call_stub",     # GCC internal
-    0x81: "GNU_push_arg",           # GCC internal
-    0xb0: "BORLAND_safecall",
-    0xb1: "BORLAND_stdcall",
-    0xb2: "BORLAND_pascal",
-    0xb3: "BORLAND_msfastcall",
-    0xb4: "BORLAND_msreturn",
-    0xb5: "BORLAND_thiscall",
-    0xb6: "BORLAND_fastcall",
-    0xb9: "LLVM_PreserveMost",
-    0xd0: "LLVM_vectorcall",
+    0x80: "GNU_push_call_stub",  # GCC internal
+    0x81: "GNU_push_arg",  # GCC internal
+    0xB0: "BORLAND_safecall",
+    0xB1: "BORLAND_stdcall",
+    0xB2: "BORLAND_pascal",
+    0xB3: "BORLAND_msfastcall",
+    0xB4: "BORLAND_msreturn",
+    0xB5: "BORLAND_thiscall",
+    0xB6: "BORLAND_fastcall",
+    0xB9: "LLVM_PreserveMost",
+    0xD0: "LLVM_vectorcall",
 }
 
 # Flags in DW_AT_producer that affect binary ABI
@@ -106,9 +107,7 @@ _ABI_FLAGS_RE = re.compile(
 # vector entry points resolve to a different ABI — a binary break for callers
 # of those vector variants. Cross-compiler: -mveclibabi= (GCC),
 # -fveclib= (clang), -vecabi= (Intel-style icx/icc).
-_VECTOR_ABI_FLAGS_RE = re.compile(
-    r"-mveclibabi=\S+|-fveclib=\S+|-vecabi=\S+"
-)
+_VECTOR_ABI_FLAGS_RE = re.compile(r"-mveclibabi=\S+|-fveclib=\S+|-vecabi=\S+")
 
 # wchar_t data-model flag in DW_AT_producer. GCC/Clang document that objects
 # built with and without -fshort-wchar are not binary compatible: the flag
@@ -130,20 +129,27 @@ _PRUNE_TAGS: frozenset[str] = BASE_PRUNE_TAGS
 # Data model
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class ToolchainInfo:
     """Parsed DW_AT_producer metadata from a binary."""
-    producer_string: str = ""       # raw DW_AT_producer value
-    compiler: str = ""              # "GCC", "clang", "ICC" (ICC/ICX/DPC++ family)
-    version: str = ""               # e.g. "13.2.1"
+
+    producer_string: str = ""  # raw DW_AT_producer value
+    compiler: str = ""  # "GCC", "clang", "ICC" (ICC/ICX/DPC++ family)
+    version: str = ""  # e.g. "13.2.1"
     abi_flags: set[str] = field(default_factory=set)  # extracted ABI-affecting flags
-    vector_abi_flags: set[str] = field(default_factory=set)  # vector-function (SIMD clone) ABI flags
-    wchar_flags: set[str] = field(default_factory=set)  # -fshort-wchar / -fno-short-wchar
+    vector_abi_flags: set[str] = field(
+        default_factory=set
+    )  # vector-function (SIMD clone) ABI flags
+    wchar_flags: set[str] = field(
+        default_factory=set
+    )  # -fshort-wchar / -fno-short-wchar
 
 
 @dataclass
 class AdvancedDwarfMetadata:
     """Sprint 4 metadata extracted from a single .so."""
+
     has_dwarf: bool = False
     # See DwarfMetadata.evidence_state.  BTF/CTF explicitly use
     # ``not_supported``: their basic layouts must never be represented as
@@ -202,6 +208,7 @@ class AdvancedDwarfMetadata:
 # Public API
 # ---------------------------------------------------------------------------
 
+
 def parse_advanced_dwarf(so_path: Path) -> AdvancedDwarfMetadata:
     """Extract Sprint 4 metadata from *so_path*.
 
@@ -232,6 +239,7 @@ def parse_advanced_dwarf(so_path: Path) -> AdvancedDwarfMetadata:
 # ---------------------------------------------------------------------------
 # Internal: per-CU processing
 # ---------------------------------------------------------------------------
+
 
 def _process_cu(CU: Any, meta: AdvancedDwarfMetadata) -> None:
     top = CU.get_top_DIE()
@@ -351,7 +359,8 @@ def _walk_cu(root: Any, meta: AdvancedDwarfMetadata, CU: Any) -> None:
 @dataclass
 class _DwarfTypeCache:
     """Per-parse caches to avoid redundant DWARF traversals."""
-    unwrap: dict[int, Any] = field(default_factory=dict)    # die.offset → unwrapped DIE
+
+    unwrap: dict[int, Any] = field(default_factory=dict)  # die.offset → unwrapped DIE
     nontrivial: dict[int, bool] = field(default_factory=dict)  # die.offset → bool
 
 
@@ -397,9 +406,13 @@ def _is_nontrivial_aggregate(
 
 
 def _check_children_nontrivial(
-    type_die: Any, class_name: str, cache: dict[int, bool] | None, CU: Any,
+    type_die: Any,
+    class_name: str,
+    cache: dict[int, bool] | None,
+    CU: Any,
 ) -> bool:
     """Iterate children of a struct/class DIE to detect non-trivial properties."""
+
     def _member_type_is_nontrivial(ch: Any) -> bool:
         if CU is None:
             return False
@@ -407,7 +420,11 @@ def _check_children_nontrivial(
         if member_type_die is None:
             return False
         member_tag = getattr(member_type_die, "tag", "")
-        if member_tag not in ("DW_TAG_structure_type", "DW_TAG_class_type", "DW_TAG_union_type"):
+        if member_tag not in (
+            "DW_TAG_structure_type",
+            "DW_TAG_class_type",
+            "DW_TAG_union_type",
+        ):
             return False
         return _is_nontrivial_aggregate(member_type_die, cache=cache, CU=CU)
 
@@ -447,7 +464,9 @@ def _check_children_nontrivial(
     return False
 
 
-def _unwrap_qualifiers(type_die: Any, CU: Any, cache: _DwarfTypeCache | None = None) -> Any:
+def _unwrap_qualifiers(
+    type_die: Any, CU: Any, cache: _DwarfTypeCache | None = None
+) -> Any:
     """Unwrap transparent qualifier/typedef layers."""
     key = getattr(type_die, "offset", None)
     if cache is not None and key is not None and key in cache.unwrap:
@@ -471,7 +490,8 @@ def _unwrap_qualifiers(type_die: Any, CU: Any, cache: _DwarfTypeCache | None = N
     else:
         # for-else: exhausted depth without finding a non-qualifier tag
         log.debug(
-            "_unwrap_qualifiers: depth limit reached at tag=%s", getattr(cur, "tag", "?")
+            "_unwrap_qualifiers: depth limit reached at tag=%s",
+            getattr(cur, "tag", "?"),
         )
 
     if cache is not None and key is not None:
@@ -479,7 +499,9 @@ def _unwrap_qualifiers(type_die: Any, CU: Any, cache: _DwarfTypeCache | None = N
     return cur
 
 
-def _value_abi_trait_for_typed_die(die: Any, CU: Any, cache: _DwarfTypeCache | None = None) -> str | None:
+def _value_abi_trait_for_typed_die(
+    die: Any, CU: Any, cache: _DwarfTypeCache | None = None
+) -> str | None:
     """Return ABI trait for by-value aggregate type (or None if irrelevant).
 
     Fingerprint contains only ABI-relevant triviality, not type name.
@@ -504,11 +526,17 @@ def _value_abi_trait_for_typed_die(die: Any, CU: Any, cache: _DwarfTypeCache | N
 
     nontrivial_cache = cache.nontrivial if cache is not None else None
     # Pass CU so member-type non-triviality (e.g. struct Outer { std::string s; }) is detected
-    triviality = "nontrivial" if _is_nontrivial_aggregate(t, cache=nontrivial_cache, CU=CU) else "trivial"
+    triviality = (
+        "nontrivial"
+        if _is_nontrivial_aggregate(t, cache=nontrivial_cache, CU=CU)
+        else "trivial"
+    )
     return triviality  # "trivial" or "nontrivial"
 
 
-def _aggregate_byte_size_for_typed_die(die: Any, CU: Any, cache: _DwarfTypeCache | None = None) -> int | None:
+def _aggregate_byte_size_for_typed_die(
+    die: Any, CU: Any, cache: _DwarfTypeCache | None = None
+) -> int | None:
     """Return the byte size of a by-value aggregate type (or None if irrelevant).
 
     Mirrors :func:`_value_abi_trait_for_typed_die`'s type resolution: only
@@ -558,7 +586,9 @@ def _scalar_leaf_align(t: Any) -> int:
     return _NATURAL_ALIGN.get(min(sz, 16), 1) if sz > 0 else 1
 
 
-def _type_unaligned_at(type_die: Any, CU: Any, base_offset: int, cache: _DwarfTypeCache | None) -> bool:
+def _type_unaligned_at(
+    type_die: Any, CU: Any, base_offset: int, cache: _DwarfTypeCache | None
+) -> bool:
     """Whether any scalar leaf of *type_die* lands at a misaligned absolute offset.
 
     *base_offset* is the absolute offset at which this type starts within the
@@ -587,7 +617,9 @@ def _type_unaligned_at(type_die: Any, CU: Any, base_offset: int, cache: _DwarfTy
     return False
 
 
-def _aggregate_has_unaligned_member(die: Any, CU: Any, cache: _DwarfTypeCache | None = None) -> bool:
+def _aggregate_has_unaligned_member(
+    die: Any, CU: Any, cache: _DwarfTypeCache | None = None
+) -> bool:
     """Whether a by-value aggregate return type has an unaligned member (recursively).
 
     A struct/class/union with a leaf at a misaligned offset (e.g. a packed
@@ -610,7 +642,9 @@ def _aggregate_has_unaligned_member(die: Any, CU: Any, cache: _DwarfTypeCache | 
     return _type_unaligned_at(t, CU, 0, cache)
 
 
-def _extract_calling_convention(die: Any, meta: AdvancedDwarfMetadata, CU: Any, cache: _DwarfTypeCache | None = None) -> None:
+def _extract_calling_convention(
+    die: Any, meta: AdvancedDwarfMetadata, CU: Any, cache: _DwarfTypeCache | None = None
+) -> None:
     """Record calling conventions + DWARF value-ABI traits for ABI-exported functions.
 
     Key: DW_AT_linkage_name (mangled), falling back to DW_AT_MIPS_linkage_name,
@@ -670,6 +704,7 @@ def _extract_calling_convention(die: Any, meta: AdvancedDwarfMetadata, CU: Any, 
 # ---------------------------------------------------------------------------
 # Packed struct detection
 # ---------------------------------------------------------------------------
+
 
 def _check_packed_typedef(die: Any, meta: AdvancedDwarfMetadata, CU: Any) -> None:
     """Handle `typedef struct __attribute__((packed)) {...} Name`.
@@ -737,8 +772,12 @@ def _check_packed(
             continue  # char/bool/unknown composite: cannot determine — skip
 
         if offset % natural != 0:
-            log.debug("packed struct detected: %s field at offset %d (natural align %d)",
-                      name, offset, natural)
+            log.debug(
+                "packed struct detected: %s field at offset %d (natural align %d)",
+                name,
+                offset,
+                natural,
+            )
             meta.packed_structs.add(name)
             return  # one misaligned field is sufficient
 
@@ -761,17 +800,39 @@ def _decode_member_location(member_die: Any) -> int:
 
 # Register name tables for common architectures (pyelftools register numbers)
 _REG_NAMES_X86_64: dict[int, str] = {
-    0: "rax", 1: "rdx", 2: "rcx", 3: "rbx", 4: "rsi", 5: "rdi",
-    6: "rbp", 7: "rsp", 8: "r8", 9: "r9", 10: "r10", 11: "r11",
-    12: "r12", 13: "r13", 14: "r14", 15: "r15", 16: "rip",
+    0: "rax",
+    1: "rdx",
+    2: "rcx",
+    3: "rbx",
+    4: "rsi",
+    5: "rdi",
+    6: "rbp",
+    7: "rsp",
+    8: "r8",
+    9: "r9",
+    10: "r10",
+    11: "r11",
+    12: "r12",
+    13: "r13",
+    14: "r14",
+    15: "r15",
+    16: "rip",
 }
 _REG_NAMES_X86: dict[int, str] = {
-    0: "eax", 1: "ecx", 2: "edx", 3: "ebx", 4: "esp", 5: "ebp",
-    6: "esi", 7: "edi", 8: "eip",
+    0: "eax",
+    1: "ecx",
+    2: "edx",
+    3: "ebx",
+    4: "esp",
+    5: "ebp",
+    6: "esi",
+    7: "edi",
+    8: "eip",
 }
 _REG_NAMES_AARCH64: dict[int, str] = {
     **{i: f"x{i}" for i in range(31)},
-    31: "sp", 32: "pc",
+    31: "sp",
+    32: "pc",
 }
 
 
@@ -790,9 +851,12 @@ def _normalize_arch(elf: Any) -> str:
     """Normalize ELF machine arch string to internal arch_key for register lookup."""
     arch = str(elf.get_machine_arch())
     return {
-        "x64": "x64", "x86_64": "x64",
-        "x86": "x86", "i386": "x86",
-        "AArch64": "aarch64", "aarch64": "aarch64",
+        "x64": "x64",
+        "x86_64": "x64",
+        "x86": "x86",
+        "i386": "x86",
+        "AArch64": "aarch64",
+        "aarch64": "aarch64",
     }.get(arch, arch)
 
 
@@ -943,7 +1007,10 @@ def _extract_callee_saved_regs(entry: Any, arch_key: str) -> frozenset[str] | No
                     continue
                 # rule is an object with .type; "offset" means register is saved
                 rule_type = getattr(rule, "type", None)
-                if rule_type and str(rule_type).lower() in ("offset", "reg_rule_offset"):
+                if rule_type and str(rule_type).lower() in (
+                    "offset",
+                    "reg_rule_offset",
+                ):
                     if isinstance(reg_key, int):
                         saved.add(_reg_name(reg_key, arch_key))
         return frozenset(saved)
@@ -987,6 +1054,7 @@ def _parse_producer(producer: str) -> ToolchainInfo:
 # Diff (called from checker.py _diff_advanced_dwarf)
 # ---------------------------------------------------------------------------
 
+
 def _diff_calling_conventions(
     old_meta: AdvancedDwarfMetadata,
     new_meta: AdvancedDwarfMetadata,
@@ -999,13 +1067,20 @@ def _diff_calling_conventions(
         old_cc = old_meta.calling_conventions[fname]
         new_cc = new_meta.calling_conventions[fname]
         if old_cc != new_cc:
-            results.append((
-                "calling_convention_changed", fname,
-                f"Calling convention changed: {fname} ({old_cc} → {new_cc})",
-                old_cc, new_cc,
-            ))
-    already_reported_cc = {fname for fname in (old_cc_keys & new_cc_keys)
-                           if old_meta.calling_conventions[fname] != new_meta.calling_conventions[fname]}
+            results.append(
+                (
+                    "calling_convention_changed",
+                    fname,
+                    f"Calling convention changed: {fname} ({old_cc} → {new_cc})",
+                    old_cc,
+                    new_cc,
+                )
+            )
+    already_reported_cc = {
+        fname
+        for fname in (old_cc_keys & new_cc_keys)
+        if old_meta.calling_conventions[fname] != new_meta.calling_conventions[fname]
+    }
     return results, already_reported_cc
 
 
@@ -1028,13 +1103,17 @@ def _diff_callee_saved_regs(
             new_has_ms_hint = bool(new_saved & _MS_ABI_MARKERS)
             if old_has_ms_hint == new_has_ms_hint:
                 continue
-            results.append((
-                "calling_convention_changed", fname,
-                f"Calling convention changed (ELF CFI fallback): {fname} "
-                f"(saved regs: {sorted(old_saved)} → {sorted(new_saved)}) "
-                f"(ms_abi/sysv_abi drift inferred from CFI saved regs)",
-                ",".join(sorted(old_saved)), ",".join(sorted(new_saved)),
-            ))
+            results.append(
+                (
+                    "calling_convention_changed",
+                    fname,
+                    f"Calling convention changed (ELF CFI fallback): {fname} "
+                    f"(saved regs: {sorted(old_saved)} → {sorted(new_saved)}) "
+                    f"(ms_abi/sysv_abi drift inferred from CFI saved regs)",
+                    ",".join(sorted(old_saved)),
+                    ",".join(sorted(new_saved)),
+                )
+            )
             already_reported_cc.add(fname)
     return results, already_reported_cc
 
@@ -1058,7 +1137,9 @@ _SYSV_AMD64_RETURN_ARCHES = frozenset({"x86_64", "x64", ""})
 
 def _sysv_amd64_return_model(old_arch: str, new_arch: str) -> bool:
     """Whether both sides use the SysV-AMD64 aggregate-return model (or unknown)."""
-    return old_arch in _SYSV_AMD64_RETURN_ARCHES and new_arch in _SYSV_AMD64_RETURN_ARCHES
+    return (
+        old_arch in _SYSV_AMD64_RETURN_ARCHES and new_arch in _SYSV_AMD64_RETURN_ARCHES
+    )
 
 
 def _diff_value_abi_traits(
@@ -1078,11 +1159,13 @@ def _diff_value_abi_traits(
         old_rc = _ret_component(old_trait)
         new_rc = _ret_component(new_trait)
         old_reg = _returns_in_registers(
-            old_rc, old_meta.return_value_sizes.get(fname),
+            old_rc,
+            old_meta.return_value_sizes.get(fname),
             fname in old_meta.return_memory_classified,
         )
         new_reg = _returns_in_registers(
-            new_rc, new_meta.return_value_sizes.get(fname),
+            new_rc,
+            new_meta.return_value_sizes.get(fname),
             fname in new_meta.return_memory_classified,
         )
         # struct_return_convention_changed only on the SysV AMD64 return model
@@ -1094,22 +1177,35 @@ def _diff_value_abi_traits(
         # through to the generic finding. When the return component is only
         # added/removed (aggregate <-> scalar) the scalar side can still be
         # register-returned, so that is left to the generic return/type findings.
-        if sysv_return and old_rc is not None and new_rc is not None and old_reg != new_reg:
-            results.append((
-                "struct_return_convention_changed", fname,
-                f"Aggregate return convention changed: {fname} "
-                f"({old_trait} → {new_trait})",
-                old_trait, new_trait,
-            ))
+        if (
+            sysv_return
+            and old_rc is not None
+            and new_rc is not None
+            and old_reg != new_reg
+        ):
+            results.append(
+                (
+                    "struct_return_convention_changed",
+                    fname,
+                    f"Aggregate return convention changed: {fname} "
+                    f"({old_trait} → {new_trait})",
+                    old_trait,
+                    new_trait,
+                )
+            )
         elif old_trait != new_trait:
             # Same return mechanism (or a non-return trait change), but the
             # value-ABI fingerprint still changed — a generic value-ABI trait
             # change (parameter passing or copy-semantics).
-            results.append((
-                "value_abi_trait_changed", fname,
-                f"DWARF value-ABI trait changed: {fname} ({old_trait} → {new_trait})",
-                old_trait, new_trait,
-            ))
+            results.append(
+                (
+                    "value_abi_trait_changed",
+                    fname,
+                    f"DWARF value-ABI trait changed: {fname} ({old_trait} → {new_trait})",
+                    old_trait,
+                    new_trait,
+                )
+            )
         # else: identical trait and same return mechanism — nothing to report.
     return results
 
@@ -1156,18 +1252,30 @@ def _diff_struct_packing(
     """Diff struct packing attributes. Returns results list."""
     results: list[tuple[str, str, str, str | None, str | None]] = []
     both_struct_names = old_meta.all_struct_names & new_meta.all_struct_names
-    for name in sorted((old_meta.packed_structs - new_meta.packed_structs) & both_struct_names):
-        results.append((
-            "struct_packing_changed", name,
-            f"Struct packing removed: {name} was packed, now standard layout",
-            "packed", "standard",
-        ))
-    for name in sorted((new_meta.packed_structs - old_meta.packed_structs) & old_meta.all_struct_names):
-        results.append((
-            "struct_packing_changed", name,
-            f"Struct packing added: {name} is now __attribute__((packed))",
-            "standard", "packed",
-        ))
+    for name in sorted(
+        (old_meta.packed_structs - new_meta.packed_structs) & both_struct_names
+    ):
+        results.append(
+            (
+                "struct_packing_changed",
+                name,
+                f"Struct packing removed: {name} was packed, now standard layout",
+                "packed",
+                "standard",
+            )
+        )
+    for name in sorted(
+        (new_meta.packed_structs - old_meta.packed_structs) & old_meta.all_struct_names
+    ):
+        results.append(
+            (
+                "struct_packing_changed",
+                name,
+                f"Struct packing added: {name} is now __attribute__((packed))",
+                "standard",
+                "packed",
+            )
+        )
     return results
 
 
@@ -1187,12 +1295,15 @@ def _diff_toolchain_flags(
             parts.append(f"added: {', '.join(sorted(added_flags))}")
         if removed_flags:
             parts.append(f"removed: {', '.join(sorted(removed_flags))}")
-        results.append((
-            "toolchain_flag_drift", "<toolchain>",
-            f"ABI-affecting compiler flags changed: {'; '.join(parts)}",
-            ",".join(sorted(old_flags)) or None,
-            ",".join(sorted(new_flags)) or None,
-        ))
+        results.append(
+            (
+                "toolchain_flag_drift",
+                "<toolchain>",
+                f"ABI-affecting compiler flags changed: {'; '.join(parts)}",
+                ",".join(sorted(old_flags)) or None,
+                ",".join(sorted(new_flags)) or None,
+            )
+        )
     return results
 
 
@@ -1217,12 +1328,15 @@ def _diff_vector_abi_flags(
             parts.append(f"added: {', '.join(sorted(added_flags))}")
         if removed_flags:
             parts.append(f"removed: {', '.join(sorted(removed_flags))}")
-        results.append((
-            "vector_abi_changed", "<vector-abi>",
-            f"Vector-function (SIMD clone) ABI flags changed: {'; '.join(parts)}",
-            ",".join(sorted(old_flags)) or None,
-            ",".join(sorted(new_flags)) or None,
-        ))
+        results.append(
+            (
+                "vector_abi_changed",
+                "<vector-abi>",
+                f"Vector-function (SIMD clone) ABI flags changed: {'; '.join(parts)}",
+                ",".join(sorted(old_flags)) or None,
+                ",".join(sorted(new_flags)) or None,
+            )
+        )
     return results
 
 
@@ -1243,15 +1357,23 @@ def _diff_wchar_flags(
     new_short = "-fshort-wchar" in new_meta.toolchain.wchar_flags
     if old_short == new_short:
         return []
-    old_label = "short (2-byte unsigned, -fshort-wchar)" if old_short else "default wchar_t"
-    new_label = "short (2-byte unsigned, -fshort-wchar)" if new_short else "default wchar_t"
-    return [(
-        "wchar_model_changed", "<wchar_t>",
-        f"wchar_t model changed: {old_label} → {new_label}. Objects built with "
-        "and without -fshort-wchar are not binary compatible for any public "
-        "wchar_t parameter, field, or return value.",
-        old_label, new_label,
-    )]
+    old_label = (
+        "short (2-byte unsigned, -fshort-wchar)" if old_short else "default wchar_t"
+    )
+    new_label = (
+        "short (2-byte unsigned, -fshort-wchar)" if new_short else "default wchar_t"
+    )
+    return [
+        (
+            "wchar_model_changed",
+            "<wchar_t>",
+            f"wchar_t model changed: {old_label} → {new_label}. Objects built with "
+            "and without -fshort-wchar are not binary compatible for any public "
+            "wchar_t parameter, field, or return value.",
+            old_label,
+            new_label,
+        )
+    ]
 
 
 def _diff_frame_registers(
@@ -1266,11 +1388,15 @@ def _diff_frame_registers(
         old_reg = old_meta.frame_registers[fname]
         new_reg = new_meta.frame_registers[fname]
         if old_reg != new_reg:
-            results.append((
-                "frame_register_changed", fname,
-                f"Frame/CFA register changed: {fname} ({old_reg} → {new_reg})",
-                old_reg, new_reg,
-            ))
+            results.append(
+                (
+                    "frame_register_changed",
+                    fname,
+                    f"Frame/CFA register changed: {fname} ({old_reg} → {new_reg})",
+                    old_reg,
+                    new_reg,
+                )
+            )
     return results
 
 
@@ -1286,7 +1412,9 @@ def diff_advanced_dwarf(
         return []
 
     cc_results, already_reported_cc = _diff_calling_conventions(old_meta, new_meta)
-    csr_results, already_reported_cc = _diff_callee_saved_regs(old_meta, new_meta, already_reported_cc)
+    csr_results, already_reported_cc = _diff_callee_saved_regs(
+        old_meta, new_meta, already_reported_cc
+    )
     trait_results = _diff_value_abi_traits(old_meta, new_meta, already_reported_cc)
     pack_results = _diff_struct_packing(old_meta, new_meta)
     flag_results = _diff_toolchain_flags(old_meta, new_meta)
@@ -1294,8 +1422,16 @@ def diff_advanced_dwarf(
     wchar_results = _diff_wchar_flags(old_meta, new_meta)
     frame_results = _diff_frame_registers(old_meta, new_meta)
 
-    return (cc_results + csr_results + trait_results + pack_results
-            + flag_results + vec_results + wchar_results + frame_results)
+    return (
+        cc_results
+        + csr_results
+        + trait_results
+        + pack_results
+        + flag_results
+        + vec_results
+        + wchar_results
+        + frame_results
+    )
 
 
 # ---------------------------------------------------------------------------

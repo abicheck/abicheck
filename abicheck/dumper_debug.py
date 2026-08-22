@@ -6,6 +6,7 @@ kernel-binary heuristic and the DWARF/BTF/CTF selection logic in one coherent
 place. ``dumper`` re-imports both names, so ``abicheck.dumper._is_kernel_binary``
 and ``abicheck.dumper._resolve_debug_metadata`` remain valid patch targets.
 """
+
 from __future__ import annotations
 
 import logging
@@ -32,6 +33,7 @@ def _is_kernel_binary(path: Path) -> bool:
     # Check for .modinfo section (kernel module indicator)
     try:
         from elftools.elf.elffile import ELFFile
+
         with open(path, "rb") as f:
             elf = ELFFile(f)  # type: ignore[no-untyped-call]
             return elf.get_section_by_name(".modinfo") is not None  # type: ignore[no-untyped-call]
@@ -85,22 +87,29 @@ def _resolve_debug_metadata(
 
     if debug_format == "btf":
         from .btf_metadata import parse_btf_metadata
+
         btf = parse_btf_metadata(so_path)
         if not btf.has_btf:
             log.warning("BTF requested but no .BTF section in %s", so_path)
         _resolved("btf")
-        return btf.to_dwarf_metadata(), AdvancedDwarfMetadata(evidence_state="not_supported")
+        return btf.to_dwarf_metadata(), AdvancedDwarfMetadata(
+            evidence_state="not_supported"
+        )
 
     if debug_format == "ctf":
         from .ctf_metadata import parse_ctf_metadata
+
         ctf = parse_ctf_metadata(so_path)
         if not ctf.has_ctf:
             log.warning("CTF requested but no .ctf section in %s", so_path)
         _resolved("ctf")
-        return ctf.to_dwarf_metadata(), AdvancedDwarfMetadata(evidence_state="not_supported")
+        return ctf.to_dwarf_metadata(), AdvancedDwarfMetadata(
+            evidence_state="not_supported"
+        )
 
     if debug_format == "dwarf":
         from .dwarf_unified import parse_dwarf
+
         _resolved("dwarf")
         return parse_dwarf(dwarf_path, _session_out=_session_out)
 
@@ -123,7 +132,9 @@ def _resolve_debug_metadata(
             if btf.has_btf:
                 log.info("Using BTF debug info from %s (kernel binary)", so_path)
                 _resolved("btf")
-                return btf.to_dwarf_metadata(), AdvancedDwarfMetadata(evidence_state="not_supported")
+                return btf.to_dwarf_metadata(), AdvancedDwarfMetadata(
+                    evidence_state="not_supported"
+                )
 
     # DWARF > BTF > CTF for userspace (or kernel fallback)
     dwarf_meta, dwarf_adv = parse_dwarf(dwarf_path, _session_out=_session_out)
@@ -137,7 +148,9 @@ def _resolve_debug_metadata(
         if btf.has_btf:
             log.info("No DWARF, falling back to BTF in %s", so_path)
             _resolved("btf")
-            return btf.to_dwarf_metadata(), AdvancedDwarfMetadata(evidence_state="not_supported")
+            return btf.to_dwarf_metadata(), AdvancedDwarfMetadata(
+                evidence_state="not_supported"
+            )
 
     # Fallback to CTF
     if has_ctf_section(so_path):
@@ -145,7 +158,9 @@ def _resolve_debug_metadata(
         if ctf.has_ctf:
             log.info("No DWARF/BTF, falling back to CTF in %s", so_path)
             _resolved("ctf")
-            return ctf.to_dwarf_metadata(), AdvancedDwarfMetadata(evidence_state="not_supported")
+            return ctf.to_dwarf_metadata(), AdvancedDwarfMetadata(
+                evidence_state="not_supported"
+            )
 
     # No debug info at all — return empty DWARF metadata
     _resolved(None)

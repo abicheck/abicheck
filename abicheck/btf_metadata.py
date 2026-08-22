@@ -31,6 +31,7 @@ parse_btf_metadata(elf_path)
 has_btf_section(elf_path)
     → bool  (quick check without full parse)
 """
+
 from __future__ import annotations
 
 import logging
@@ -88,14 +89,16 @@ _BTF_HEADER_SIZE = 24  # magic(2) + version(1) + flags(1) + hdr_len(4) + type_of
 # Data model
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class BtfType:
     """Raw parsed BTF type entry."""
+
     type_id: int
     name_off: int
-    info: int       # kind(5) | vlen(16) | kflag(1)
+    info: int  # kind(5) | vlen(16) | kflag(1)
     size_or_type: int
-    extra: bytes    # kind-specific trailing data
+    extra: bytes  # kind-specific trailing data
 
     @property
     def kind(self) -> int:
@@ -117,6 +120,7 @@ class BtfMetadata:
     Implements the same interface as DwarfMetadata so the checker's
     detectors work without modification (TypeMetadataSource protocol).
     """
+
     structs: dict[str, StructLayout] = field(default_factory=dict)
     enums: dict[str, EnumInfo] = field(default_factory=dict)
     func_protos: dict[str, FuncProto] = field(default_factory=dict)
@@ -161,10 +165,12 @@ class BtfMetadata:
 # BTF section reader
 # ---------------------------------------------------------------------------
 
+
 def has_btf_section(elf_path: Path) -> bool:
     """Quick check: does the ELF file have a .BTF section?"""
     try:
         from elftools.elf.elffile import ELFFile
+
         with open(elf_path, "rb") as f:
             elf = ELFFile(f)  # type: ignore[no-untyped-call]
             return elf.get_section_by_name(".BTF") is not None  # type: ignore[no-untyped-call]
@@ -175,6 +181,7 @@ def has_btf_section(elf_path: Path) -> bool:
 def _read_btf_section(elf_path: Path) -> tuple[bytes, int] | None:
     """Read raw .BTF section data from an ELF file; return (data, pointer_size)."""
     from elftools.elf.elffile import ELFFile
+
     with open(elf_path, "rb") as f:
         elf = ELFFile(f)  # type: ignore[no-untyped-call]
         section = elf.get_section_by_name(".BTF")  # type: ignore[no-untyped-call]
@@ -188,9 +195,11 @@ def _read_btf_section(elf_path: Path) -> tuple[bytes, int] | None:
 # BTF header + type/string parsing
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class BtfHeader:
     """Parsed BTF header."""
+
     magic: int
     version: int
     flags: int
@@ -204,21 +213,30 @@ class BtfHeader:
 def _parse_header(data: bytes) -> BtfHeader:
     """Parse BTF header from raw bytes."""
     if len(data) < _BTF_HEADER_SIZE:
-        raise ValueError(f"BTF data too small ({len(data)} bytes, need {_BTF_HEADER_SIZE})")
+        raise ValueError(
+            f"BTF data too small ({len(data)} bytes, need {_BTF_HEADER_SIZE})"
+        )
 
     magic, version, flags, hdr_len = struct.unpack_from("<HBBI", data, 0)
 
     if magic != BTF_MAGIC:
         raise ValueError(f"Bad BTF magic: 0x{magic:04X} (expected 0x{BTF_MAGIC:04X})")
     if version != BTF_VERSION:
-        log.warning("BTF version %d (expected %d), parsing may fail", version, BTF_VERSION)
+        log.warning(
+            "BTF version %d (expected %d), parsing may fail", version, BTF_VERSION
+        )
 
     type_off, type_len, str_off, str_len = struct.unpack_from("<IIII", data, 8)
 
     return BtfHeader(
-        magic=magic, version=version, flags=flags, hdr_len=hdr_len,
-        type_off=type_off, type_len=type_len,
-        str_off=str_off, str_len=str_len,
+        magic=magic,
+        version=version,
+        flags=flags,
+        hdr_len=hdr_len,
+        type_off=type_off,
+        type_len=type_len,
+        str_off=str_off,
+        str_len=str_len,
     )
 
 
@@ -233,7 +251,9 @@ def _parse_types(type_data: bytes) -> list[BtfType]:
     Returns a list indexed by type_id (0-based; type_id 0 is void/sentinel).
     """
     # Type ID 0 is always void (implicit, not in the data)
-    types: list[BtfType] = [BtfType(type_id=0, name_off=0, info=0, size_or_type=0, extra=b"")]
+    types: list[BtfType] = [
+        BtfType(type_id=0, name_off=0, info=0, size_or_type=0, extra=b"")
+    ]
 
     pos = 0
     type_id = 1
@@ -246,19 +266,23 @@ def _parse_types(type_data: bytes) -> list[BtfType]:
         # Determine extra data size based on kind
         extra_size = _extra_data_size(kind, vlen)
         if pos + extra_size > len(type_data):
-            log.warning("BTF type %d (kind=%d) truncated at offset %d", type_id, kind, pos)
+            log.warning(
+                "BTF type %d (kind=%d) truncated at offset %d", type_id, kind, pos
+            )
             break
 
-        extra = type_data[pos:pos + extra_size]
+        extra = type_data[pos : pos + extra_size]
         pos += extra_size
 
-        types.append(BtfType(
-            type_id=type_id,
-            name_off=name_off,
-            info=info,
-            size_or_type=size_or_type,
-            extra=extra,
-        ))
+        types.append(
+            BtfType(
+                type_id=type_id,
+                name_off=name_off,
+                info=info,
+                size_or_type=size_or_type,
+                extra=extra,
+            )
+        )
         type_id += 1
 
     return types
@@ -292,10 +316,13 @@ def _extra_data_size(kind: int, vlen: int) -> int:
 # Type resolution
 # ---------------------------------------------------------------------------
 
+
 class _TypeResolver:
     """Resolves BTF type references to names and sizes."""
 
-    def __init__(self, types: list[BtfType], str_data: bytes, *, pointer_size: int = 8) -> None:
+    def __init__(
+        self, types: list[BtfType], str_data: bytes, *, pointer_size: int = 8
+    ) -> None:
         self._types = types
         self._str = str_data
         self._pointer_size = pointer_size
@@ -452,7 +479,9 @@ class _TypeResolver:
             return t.size_or_type
 
         if kind == BTF_KIND_PTR:
-            return self._pointer_size  # derived from ELF class (4 for 32-bit, 8 for 64-bit)
+            return (
+                self._pointer_size
+            )  # derived from ELF class (4 for 32-bit, 8 for 64-bit)
 
         if kind == BTF_KIND_ARRAY:
             if len(t.extra) >= 12:
@@ -462,8 +491,13 @@ class _TypeResolver:
                 return self.size(elem_type) * nelems
             return 0
 
-        if kind in (BTF_KIND_TYPEDEF, BTF_KIND_VOLATILE, BTF_KIND_CONST,
-                     BTF_KIND_RESTRICT, BTF_KIND_TYPE_TAG):
+        if kind in (
+            BTF_KIND_TYPEDEF,
+            BTF_KIND_VOLATILE,
+            BTF_KIND_CONST,
+            BTF_KIND_RESTRICT,
+            BTF_KIND_TYPE_TAG,
+        ):
             return self.size(t.size_or_type)
 
         return 0
@@ -473,8 +507,11 @@ class _TypeResolver:
 # High-level extraction
 # ---------------------------------------------------------------------------
 
+
 def _extract_structs(
-    types: list[BtfType], resolver: _TypeResolver, str_data: bytes,
+    types: list[BtfType],
+    resolver: _TypeResolver,
+    str_data: bytes,
 ) -> dict[str, StructLayout]:
     """Extract struct/union layouts from BTF types."""
     structs: dict[str, StructLayout] = {}
@@ -509,14 +546,16 @@ def _extract_structs(
             byte_offset = bit_offset_total // 8
             bit_offset = bit_offset_total % 8 if bit_size else 0
 
-            fields.append(FieldInfo(
-                name=m_name,
-                type_name=resolver.name(m_type),
-                byte_offset=byte_offset,
-                byte_size=resolver.size(m_type),
-                bit_offset=bit_offset,
-                bit_size=bit_size,
-            ))
+            fields.append(
+                FieldInfo(
+                    name=m_name,
+                    type_name=resolver.name(m_type),
+                    byte_offset=byte_offset,
+                    byte_size=resolver.size(m_type),
+                    bit_offset=bit_offset,
+                    bit_size=bit_size,
+                )
+            )
 
         layout = StructLayout(
             name=name,
@@ -567,7 +606,8 @@ def _parse_enum64_members(t: BtfType, str_data: bytes) -> dict[str, int]:
 
 
 def _extract_enums(
-    types: list[BtfType], str_data: bytes,
+    types: list[BtfType],
+    str_data: bytes,
 ) -> dict[str, EnumInfo]:
     """Extract enum types from BTF."""
     enums: dict[str, EnumInfo] = {}
@@ -592,7 +632,9 @@ def _extract_enums(
 
 
 def _extract_func_protos(
-    types: list[BtfType], resolver: _TypeResolver, str_data: bytes,
+    types: list[BtfType],
+    resolver: _TypeResolver,
+    str_data: bytes,
 ) -> dict[str, FuncProto]:
     """Extract function prototypes from BTF FUNC + FUNC_PROTO pairs."""
     # Build proto_id → FuncProto mapping first
@@ -638,7 +680,9 @@ def _extract_func_protos(
 
 
 def _extract_typedefs(
-    types: list[BtfType], resolver: _TypeResolver, str_data: bytes,
+    types: list[BtfType],
+    resolver: _TypeResolver,
+    str_data: bytes,
 ) -> dict[str, str]:
     """Extract typedef mappings."""
     typedefs: dict[str, str] = {}
@@ -658,6 +702,7 @@ def _extract_typedefs(
 # Public API
 # ---------------------------------------------------------------------------
 
+
 def parse_btf_metadata(elf_path: Path) -> BtfMetadata:
     """Parse BTF section from an ELF file and return BtfMetadata.
 
@@ -668,7 +713,9 @@ def parse_btf_metadata(elf_path: Path) -> BtfMetadata:
     try:
         raw = _read_btf_section(elf_path)
     except Exception as exc:  # noqa: BLE001
-        log.warning("parse_btf_metadata: failed to read .BTF from %s: %s", elf_path, exc)
+        log.warning(
+            "parse_btf_metadata: failed to read .BTF from %s: %s", elf_path, exc
+        )
         return empty
 
     if raw is None:

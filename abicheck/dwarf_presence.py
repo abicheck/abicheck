@@ -22,7 +22,9 @@ from .dwarf_advanced import AdvancedDwarfMetadata
 from .dwarf_metadata import DwarfMetadata
 
 
-def cheap_dwarf_presence_metadata(so_path: Path) -> tuple[DwarfMetadata, AdvancedDwarfMetadata]:
+def cheap_dwarf_presence_metadata(
+    so_path: Path,
+) -> tuple[DwarfMetadata, AdvancedDwarfMetadata]:
     """Return empty DWARF metadata objects carrying only cheap presence.
 
     ``scan --depth binary`` needs to report whether debug info exists, but must

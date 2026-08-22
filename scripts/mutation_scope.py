@@ -14,7 +14,10 @@ import fnmatch
 import subprocess
 from pathlib import Path
 
-import tomllib
+try:  # Python 3.11+
+    import tomllib
+except ModuleNotFoundError:  # pragma: no cover - Python 3.10
+    import tomli as tomllib
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 _CONFIG = REPO_ROOT / "pyproject.toml"
@@ -35,7 +38,9 @@ MUTATION_INFRASTRUCTURE_PATHS = frozenset(
 )
 
 
-def selected_modules(changed_paths: set[str], only_mutate: list[str]) -> list[str] | None:
+def selected_modules(
+    changed_paths: set[str], only_mutate: list[str]
+) -> list[str] | None:
     """Return a safe PR mutation subset, or ``None`` for the full scope.
 
     A changed detector module selects itself.  A conventional detector-test
@@ -52,7 +57,11 @@ def selected_modules(changed_paths: set[str], only_mutate: list[str]) -> list[st
         if matches:
             selected.add(module)
 
-    changed_tests = {path for path in changed_paths if path.startswith("tests/") and path.endswith(".py")}
+    changed_tests = {
+        path
+        for path in changed_paths
+        if path.startswith("tests/") and path.endswith(".py")
+    }
     # When the PR changes a detector module, `--diff-scoped` can only gate
     # that module's changed functions.  An unrelated test edit cannot enlarge
     # that function set, so retain the source-derived subset.  With no source
@@ -74,13 +83,19 @@ def rewrite_only_mutate(config_path: Path, modules: list[str]) -> None:
     text = config_path.read_text(encoding="utf-8")
     start = text.index("only_mutate = [")
     end = text.index("]\n", start) + 2
-    rendered = "only_mutate = [\n" + "".join(f'    "{module}",\n' for module in modules) + "]\n"
+    rendered = (
+        "only_mutate = [\n"
+        + "".join(f'    "{module}",\n' for module in modules)
+        + "]\n"
+    )
     config_path.write_text(text[:start] + rendered + text[end:], encoding="utf-8")
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--base-ref", required=True)
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--base-ref", required=True, help="Git revision used as the merge-base"
+    )
     args = parser.parse_args()
 
     config = tomllib.loads(_CONFIG.read_text(encoding="utf-8"))["tool"]["mutmut"]

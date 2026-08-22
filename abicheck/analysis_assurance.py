@@ -328,16 +328,14 @@ def _debug_evidence_receipt(snap: AbiSnapshot) -> dict[str, Any]:
     basic = getattr(snap, "dwarf", None)
     advanced = getattr(snap, "dwarf_advanced", None)
     source = getattr(basic, "evidence_source", "dwarf") if basic else "dwarf"
-    basic_state = (
-        getattr(basic, "evidence_state", None)
-        or ("parsed" if basic is not None and basic.has_dwarf else "not_available")
+    basic_state = getattr(basic, "evidence_state", None) or (
+        "parsed" if basic is not None and basic.has_dwarf else "not_available"
     )
     if source in ("btf", "ctf"):
         advanced_state = "not_supported"
     else:
-        advanced_state = (
-            getattr(advanced, "evidence_state", None)
-            or ("parsed" if advanced is not None and advanced.has_dwarf else "not_available")
+        advanced_state = getattr(advanced, "evidence_state", None) or (
+            "parsed" if advanced is not None and advanced.has_dwarf else "not_available"
         )
     receipt: dict[str, Any] = {
         "source": source,
@@ -1397,9 +1395,11 @@ def compute_analysis_assurance(
         receipt["basic"] == "parsed" and receipt["advanced"] != "parsed"
         for receipt in debug_evidence.values()
     )
+    # Evidence states are a closed vocabulary. Any unknown state is unsafe to
+    # treat as parsed: it may come from a hand-edited/third-party snapshot and
+    # cannot prove the corresponding detector facts were evaluated.
     debug_parse_incomplete = any(
-        receipt["basic"] in ("partial", "presence_only", "failed")
-        or receipt["advanced"] in ("partial", "presence_only", "failed")
+        receipt["basic"] != "parsed" or receipt["advanced"] != "parsed"
         for receipt in debug_evidence.values()
     )
     if advanced_unavailable:

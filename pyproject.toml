@@ -37,6 +37,7 @@ dependencies = [
     "packaging>=21.0",    # Version comparison for suppression version_range
     "pefile>=2023.2.7",   # Windows PE/COFF parsing
     "macholib>=1.16",     # macOS Mach-O parsing
+    "tomli>=2.0; python_version < '3.11'",  # TOML parser for supported Python 3.10
     # Core snapshot storage (ADR-059): first-class `.abicheck.json.zst`
     # support for `dump`/`compare`/`scan --against`/baseline-set snapshots
     # needs one zstd backend that works identically across every supported
