@@ -1688,13 +1688,10 @@ def compare_product_directories(
 
     def _validate_header_roots_spec(root: Path, spec: HeaderRootsSpec) -> None:
         """Validate every root declared in *spec* against *root*, independent
-        of whether any library pair below actually references it.
-
-        `_resolved_headers` below performs the identical containment check,
-        but only for roots a *matched* pair asks for -- when discovery
-        produces zero pairs that loop never runs, so an invalid root was
-        silently accepted instead of raising `SnapshotError` (Codex
-        review, fresh evidence).
+        of whether any library pair below actually references it -- unlike
+        `_resolved_headers` below, which only checks roots a *matched* pair
+        asks for and never runs at all when discovery produces zero pairs
+        (Codex review, fresh evidence).
         """
         if isinstance(spec, str):
             raise SnapshotError(
@@ -1714,14 +1711,22 @@ def compare_product_directories(
         else:
             all_roots = [(None, rel) for rel in spec]  # type: ignore[misc]
         for library_key, rel in all_roots:
-            if _resolve_under_root(root, rel) is None:
-                context = (
-                    f" for library {library_key!r}" if library_key is not None else ""
-                )
+            resolved = _resolve_under_root(root, rel)
+            context = f" for library {library_key!r}" if library_key is not None else ""
+            if resolved is None:
                 raise SnapshotError(
                     f"header root {rel!r}{context} is absolute or escapes "
                     f"the product directory ({root}) -- header roots must "
                     "be relative paths contained within the product "
+                    "directory."
+                )
+            if resolved.exists() and not resolved.is_dir():
+                # Nonexistent is tolerated (no public headers here); an
+                # *existing* non-directory is malformed config -- silently
+                # dropping it ran the compare with no evidence (Codex).
+                raise SnapshotError(
+                    f"header root {rel!r}{context} exists but is not a "
+                    f"directory ({resolved}) -- header roots must name a "
                     "directory."
                 )
 
@@ -1739,16 +1744,11 @@ def compare_product_directories(
         for rel in roots:
             candidate = _resolve_under_root(root, rel)
             if candidate is None:
-                # A structurally invalid root -- absolute, or escaping
-                # root -- is a caller/config error, not a library that
-                # legitimately ships no public headers: silently dropping
-                # it (the pre-existing behavior) still ran the per-library
-                # compare, just with that side's header evidence quietly
-                # missing, risking a false-green result for an API/
-                # header-only break the header evidence would have caught
-                # (Codex review, fresh evidence). Reject outright, the
-                # same containment discipline pack/unpack already enforce
-                # for a manifest-declared path.
+                # Defense-in-depth: `_validate_header_roots_spec` above
+                # already rejects an absolute/escaping root before any
+                # pair is matched, so this should be unreachable in
+                # practice -- kept in case a future caller reaches
+                # `_resolved_headers` without going through validation.
                 raise SnapshotError(
                     f"header root {rel!r} for library {library_key!r} is "
                     "absolute or escapes the product directory "

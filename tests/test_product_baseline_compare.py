@@ -588,6 +588,26 @@ class TestCompareProductDirectoriesHeaderRootsContainment:
         assert calls[0]["old_headers"] == []
         assert calls[0]["new_headers"] == []
 
+    def test_header_root_that_is_a_regular_file_is_rejected(
+        self, tmp_path: Path
+    ) -> None:
+        # An existing header root naming a regular file, not a directory,
+        # is a malformed configuration -- distinct from the nonexistent
+        # case tolerated above. Silently dropping it (the pre-existing
+        # behavior) ran the compare with no header evidence for that side,
+        # risking a false-green result for a header-only API change
+        # (Codex review, fresh evidence).
+        from abicheck.product_baseline import compare_product_directories
+
+        old_dir = tmp_path / "old"
+        new_dir = tmp_path / "new"
+        old_dir.mkdir()
+        new_dir.mkdir()
+        (old_dir / "include").write_bytes(b"not a directory")
+
+        with pytest.raises(SnapshotError, match="not a directory"):
+            compare_product_directories(old_dir, new_dir, header_roots=["include"])
+
     def test_invalid_header_root_is_rejected_with_no_matched_pairs(
         self, tmp_path: Path
     ) -> None:
