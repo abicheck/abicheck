@@ -2624,6 +2624,82 @@ class TestTarExtractorSymlinks:
 
         assert not (tmp_path / "victim").exists()
 
+    def test_hardlink_naming_a_relocated_symlink_is_rejected(
+        self, tmp_path: Path
+    ) -> None:
+        # A symlink "a/b/link -> ../../safe" validates safely at its own
+        # two-levels-deep location. tarfile.makelink() falls back to a
+        # full copy whenever os.link() fails -- for a hard link "x"
+        # (archive root) naming "a/b/link", that fallback re-extracts the
+        # ORIGINAL symlink itself, with its own unmodified relative
+        # target text, but at "x"'s shallower location: "x -> ../../safe"
+        # now escapes the extraction root. Whether os.link() actually
+        # fails is filesystem-dependent, so this must be rejected up
+        # front regardless (Codex, fresh evidence).
+        archive = tmp_path / "relocated_symlink.tar"
+        with tarfile.open(archive, "w") as tf:
+            safe = tarfile.TarInfo(name="safe")
+            safe.size = 4
+            tf.addfile(safe, io.BytesIO(b"data"))
+            link = tarfile.TarInfo(name="a/b/link")
+            link.type = tarfile.SYMTYPE
+            link.linkname = "../../safe"
+            tf.addfile(link)
+            hardlink = tarfile.TarInfo(name="x")
+            hardlink.type = tarfile.LNKTYPE
+            hardlink.linkname = "a/b/link"
+            tf.addfile(hardlink)
+
+        out = tmp_path / "output"
+        out.mkdir()
+        with pytest.raises(ExtractionSecurityError, match="symlink target"):
+            TarExtractor().extract(archive, out)
+
+    def test_hardlink_naming_a_symlink_at_the_same_depth_is_accepted(
+        self, tmp_path: Path
+    ) -> None:
+        # Negative control: when the hard link sits at the SAME nesting
+        # depth as the symlink it names, the relocated interpretation is
+        # identical to the original and must not be rejected.
+        archive = tmp_path / "same_depth.tar"
+        with tarfile.open(archive, "w") as tf:
+            safe = tarfile.TarInfo(name="a/safe")
+            safe.size = 4
+            tf.addfile(safe, io.BytesIO(b"data"))
+            link = tarfile.TarInfo(name="a/link")
+            link.type = tarfile.SYMTYPE
+            link.linkname = "safe"
+            tf.addfile(link)
+            hardlink = tarfile.TarInfo(name="a/alias")
+            hardlink.type = tarfile.LNKTYPE
+            hardlink.linkname = "a/link"
+            tf.addfile(hardlink)
+
+        out = tmp_path / "output"
+        out.mkdir()
+        TarExtractor().extract(archive, out)
+        assert (out / "a/safe").exists()
+
+    def test_hardlink_naming_a_regular_file_is_unaffected(
+        self, tmp_path: Path
+    ) -> None:
+        # A hard link naming an ordinary regular file (not a symlink) has
+        # nothing to relocate -- must not be rejected by this check.
+        archive = tmp_path / "regular.tar"
+        with tarfile.open(archive, "w") as tf:
+            real = tarfile.TarInfo(name="a/b/real")
+            real.size = 4
+            tf.addfile(real, io.BytesIO(b"data"))
+            hardlink = tarfile.TarInfo(name="alias")
+            hardlink.type = tarfile.LNKTYPE
+            hardlink.linkname = "a/b/real"
+            tf.addfile(hardlink)
+
+        out = tmp_path / "output"
+        out.mkdir()
+        TarExtractor().extract(archive, out)
+        assert (out / "alias").exists()
+
 
 class TestTarExtractorZstDecompressionBomb:
     def test_highly_compressible_payload_is_rejected_over_the_limit(

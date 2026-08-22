@@ -152,10 +152,16 @@ def _target_supports_symlinks(target_root: Path) -> bool:
 
 
 def _validate_member(
-    member: tarfile.TarInfo, target_root: Path, *, supports_symlinks: bool = True
+    member: tarfile.TarInfo,
+    target_root: Path,
+    *,
+    supports_symlinks: bool = True,
+    symlink_target_by_name: dict[str, str] | None = None,
 ) -> None:
-    """Every `_safe_extract` member check, shared by the bulk (3.12+) and
-    per-member (< 3.12) extraction paths so the two can't drift."""
+    """Every `_safe_extract` member check, shared by the bulk (3.12+) and per-member (< 3.12) extraction paths so the two can't drift.
+
+    `symlink_target_by_name`, when given, is one dict shared and mutated across every call in one extraction's archive-member order -- it lets a hard-link member's validation see whether the name it references was a *symlink*, and if so re-validate that symlink's raw target text as if it were being (re-)created at the hard link's own, possibly differently-nested location. This closes a real escape (Codex, fresh evidence): `tarfile.TarFile.makelink()` falls back to a full copy whenever `os.link()` fails, and for a hard link naming a *symlink* member, that fallback re-extracts the referenced symlink itself (`_find_link_target` finds the original `SYMTYPE` `TarInfo`, not a regular file) using its own unmodified, relative target text -- but at the hard link's own path, not the symlink's original one. A symlink `a/b/link -> ../../safe` validates safely at its own two-levels-deep location; a hard link `x` (at the archive root) naming `a/b/link` re-extracts, on fallback, as `x -> ../../safe` -- the identical text now resolved from one level shallower, escaping `target_root`. Whether `os.link()` actually fails is filesystem-dependent and unknowable at validation time, so this treats the fallback as the worst case (the same principle `_reject_hardlink_fallback_amplification` already applies to disk-usage amplification) rather than trusting it won't happen. Propagates transitively (a hard link to a hard link to a symlink) and evicts a name's entry the moment a later, non-symlink member reuses it, so no stale symlink text can leak to an unrelated hard link the way the round-64/65 amplification-check maps once did.
+    """
     _validate_member_path(member.name, target_root)
     if member.ischr() or member.isblk() or member.isfifo():
         raise ExtractionSecurityError(
@@ -164,16 +170,27 @@ def _validate_member(
     if member.issym():
         _validate_symlink_target(member.name, member.linkname, target_root)
         if not supports_symlinks:
-            # Not a security violation -- a platform/privilege limitation.
-            # tarfile would otherwise silently substitute a full copy of
-            # the symlink's target here, corrupting the archive's
-            # declared structure without any error at all (see
-            # _target_supports_symlinks()'s own docstring).
+            # Not a security violation -- a platform/privilege limitation. tarfile would otherwise silently substitute a full copy of the symlink's target here, corrupting the archive's declared structure without any error at all (see _target_supports_symlinks()'s own docstring).
             raise SnapshotError(
                 f"archive member {member.name!r} is a symlink, but this destination cannot create one (no privilege/support for symlinks here) -- extracting would silently substitute a full copy of its target instead of the declared link, corrupting the archive's structure. Extract somewhere that supports symlinks (on Windows: enable Developer Mode, or run elevated)."
             )
+        if symlink_target_by_name is not None:
+            symlink_target_by_name[member.name] = member.linkname
     elif member.islnk():
         _validate_member_path(member.linkname, target_root)  # a member name
+        if symlink_target_by_name is not None:
+            propagated = symlink_target_by_name.get(member.linkname)
+            if propagated is not None:
+                # The referenced member is (transitively) a symlink -- tarfile's fallback would re-create it here, so make sure its raw target text still resolves within bounds from THIS member's own location before allowing extraction.
+                _validate_symlink_target(member.name, propagated, target_root)
+                symlink_target_by_name[member.name] = propagated
+            else:
+                symlink_target_by_name.pop(member.name, None)
+    elif symlink_target_by_name is not None:
+        # A regular file (or other non-symlink, non-hard-link member)
+        # reusing this exact name means any earlier symlink recorded
+        # under it no longer applies to a further hard link.
+        symlink_target_by_name.pop(member.name, None)
 
 
 def _reject_oversized_declared_content(tf: tarfile.TarFile) -> None:
@@ -358,16 +375,27 @@ class TarExtractor:
             # _target_supports_symlinks()'s own docstring for why this
             # isn't cached across calls instead.
             supports_symlinks = _target_supports_symlinks(target_root)
+            # One dict shared across every _validate_member() call in this
+            # extraction, in archive-member order -- see _validate_member()'s
+            # own docstring for why a hard-link member's validation needs it.
+            symlink_target_by_name: dict[str, str] = {}
             if sys.version_info >= (3, 12):
                 for member in tf.getmembers():
                     _validate_member(
-                        member, target_root, supports_symlinks=supports_symlinks
+                        member,
+                        target_root,
+                        supports_symlinks=supports_symlinks,
+                        symlink_target_by_name=symlink_target_by_name,
                     )
                 # `filter="data"` (PEP 706) carries its own, equivalent per-member safety contract.
                 tf.extractall(path=target_dir, filter="data")  # nosec B202 — members validated above
             else:
                 TarExtractor._safe_extract_member_by_member(
-                    tf, target_dir, target_root, supports_symlinks=supports_symlinks
+                    tf,
+                    target_dir,
+                    target_root,
+                    supports_symlinks=supports_symlinks,
+                    symlink_target_by_name=symlink_target_by_name,
                 )
 
     @staticmethod
@@ -377,6 +405,7 @@ class TarExtractor:
         target_root: Path,
         *,
         supports_symlinks: bool = True,
+        symlink_target_by_name: dict[str, str] | None = None,
     ) -> None:
         """Validate and extract each member right after the previous one
         lands on disk -- the Python < 3.12 fallback (`filter="data"` isn't
@@ -390,7 +419,12 @@ class TarExtractor:
         against the real, live-extracted state closes this generally."""
         directories: list[tarfile.TarInfo] = []
         for member in tf.getmembers():
-            _validate_member(member, target_root, supports_symlinks=supports_symlinks)
+            _validate_member(
+                member,
+                target_root,
+                supports_symlinks=supports_symlinks,
+                symlink_target_by_name=symlink_target_by_name,
+            )
             if member.isdir():
                 directories.append(member)
                 extract_info = copy.copy(member)
@@ -465,19 +499,7 @@ class TarExtractor:
                         "Cannot extract .tar.zst: install 'zstandard' Python package "
                         "or 'zstd' command-line tool."
                     )
-                # Streamed via a pipe and bounded the same way as the
-                # zstandard-module branch above -- the earlier
-                # `zstd -d -f ... -o ...` form let the CLI write its own
-                # decoded output straight to disk, unbounded, so only the
-                # Python-module decoder path got the size limit even
-                # though both are reachable in production (this fallback
-                # runs whenever the always-installed `zstandard` package
-                # is somehow absent) (Codex review, fresh evidence).
-                # `--memory=` bounds the CLI's own decompression window --
-                # unrelated to max_decoded_bytes (total output size,
-                # enforced by the streaming loop below); see
-                # _ZSTD_CLI_MAX_MEMORY_MB's own docstring for why these
-                # two bounds can't share a value.
+                # Streamed via a pipe and bounded the same way as the zstandard-module branch above -- the earlier `zstd -d -f ... -o ...` form let the CLI write its own decoded output straight to disk, unbounded, so only the Python-module decoder path got the size limit even though both are reachable in production (this fallback runs whenever the always-installed `zstandard` package is somehow absent) (Codex review, fresh evidence). `--memory=` bounds the CLI's own decompression window -- unrelated to max_decoded_bytes (total output size, enforced by the streaming loop below); see _ZSTD_CLI_MAX_MEMORY_MB's own docstring for why these two bounds can't share a value.
                 max_decoded_bytes = _max_decompressed_tar_bytes()
                 proc = subprocess.Popen(
                     [
@@ -492,30 +514,9 @@ class TarExtractor:
                 assert proc.stdout is not None
                 stdout_pipe: IO[bytes] = proc.stdout
                 total_bytes = 0
-                # subprocess.run(..., timeout=120) previously bounded this
-                # fallback -- the streaming rewrite above (for the size
-                # bound) replaced it with a plain blocking proc.stdout.read()
-                # with no deadline at all, so a stalled/hung zstd process
-                # could block extraction indefinitely (Codex review, fresh
-                # evidence). A read() on a pipe has no portable timeout
-                # parameter (select() doesn't work on Windows pipes), so
-                # the read is offloaded to a daemon thread and the main
-                # loop polls a queue with the same overall 120s deadline
-                # the old subprocess.run() call enforced.
+                # subprocess.run(..., timeout=120) previously bounded this fallback -- the streaming rewrite above (for the size bound) replaced it with a plain blocking proc.stdout.read() with no deadline at all, so a stalled/hung zstd process could block extraction indefinitely (Codex review, fresh evidence). A read() on a pipe has no portable timeout parameter (select() doesn't work on Windows pipes), so the read is offloaded to a daemon thread and the main loop polls a queue with the same overall 120s deadline the old subprocess.run() call enforced.
                 #
-                # The queue is bounded (a small, fixed number of 1 MiB
-                # chunks) rather than unbounded: an untrusted archive that
-                # expands quickly can otherwise let the reader thread race
-                # ahead of the main thread's own size check, buffering
-                # gigabytes of decoded data in the queue before
-                # total_bytes > max_decoded_bytes is ever evaluated --
-                # defeating the whole point of the decompression-bomb
-                # limit below (Codex review, fresh evidence). A bounded
-                # queue's put() blocks once full, so the reader thread
-                # stalls -- real pipe backpressure -- until the main
-                # thread drains a chunk, capping in-memory decoded data to
-                # a small, fixed multiple of the chunk size regardless of
-                # how fast zstd itself can decompress.
+                # The queue is bounded (a small, fixed number of 1 MiB chunks) rather than unbounded: an untrusted archive that expands quickly can otherwise let the reader thread race ahead of the main thread's own size check, buffering gigabytes of decoded data in the queue before total_bytes > max_decoded_bytes is ever evaluated -- defeating the whole point of the decompression-bomb limit below (Codex review, fresh evidence). A bounded queue's put() blocks once full, so the reader thread stalls -- real pipe backpressure -- until the main thread drains a chunk, capping in-memory decoded data to a small, fixed multiple of the chunk size regardless of how fast zstd itself can decompress.
                 chunk_queue: queue.Queue[bytes | None | Exception] = queue.Queue(
                     maxsize=_ZSTD_READER_QUEUE_MAXSIZE
                 )
