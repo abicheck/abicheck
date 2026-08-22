@@ -237,10 +237,34 @@ path for both entry points, not two.
   mirroring `save_snapshot`/`load_snapshot`'s existing envelope
   (`snapshot_io.py`'s plain/gzip/zstd detection, atomic writes) rather than
   inventing a second I/O layer.
-- `dump`/`compare`'s directory-fan-out path gains an opt-in
-  `--bundle-facts-out <path>` (mirroring how `dump --dump-manifest`
-  already works for a single snapshot) that writes one `BundleFacts` file
-  alongside each library's own snapshot.
+- **There is no existing directory-level dump mechanism to attach a
+  `BundleFacts` producer to — a real gap in an earlier draft of this
+  plan, caught in review.** `dump` (`cli.py`'s `dump_cmd`) produces exactly
+  one snapshot from one binary; its `--dump-manifest` option is an *input*
+  (a YAML describing translation units to merge into that one snapshot),
+  not a directory fan-out or an output mechanism. The only existing
+  directory/package fan-out lives in `compare`'s release path
+  (`cli_compare_release.py`), and it does not persist each library's
+  generated snapshot today — it discards them after diffing. Phase 2
+  therefore needs a genuine new producer, not a flag bolted onto something
+  that already walks a directory in the wrong shape. **This is deliberately
+  scoped as a new flag on the existing `compare` release fan-out, not a new
+  root command** — a bare `abicheck dump-bundle` would need to separately
+  clear the root's own admission bar (root `AGENTS.md`'s "Adding a new
+  top-level command" criteria; a directory-of-libraries operand a user
+  already thinks of as a `compare-release`-shaped input, with a real usage
+  scenario beyond one PR, is exactly the class of thing that bar exists to
+  keep off the root surface unless it independently earns a place there).
+  `compare`'s release fan-out (`cli_compare_release.py`) already walks
+  every library in a directory and already produces each side's
+  `AbiSnapshot` in memory before diffing and discarding it — an opt-in
+  `--bundle-facts-out <path>` flag on that existing command persists what
+  it already computes (`per_library_snapshots` plus the resolution graph)
+  into one `BundleFacts` file for the *old*-side directory, rather than
+  inventing a second directory-walking entry point. `compare release-1.0/
+  release-2.0/ --bundle-facts-out old.bundlefacts` is therefore both the
+  producer and, in the same invocation, a normal live-vs-live comparison —
+  the flag is additive output, not a new mode.
 - `compare --against <old-dir-or-bundle-facts> <new-dir>` (or the
   `compare-release`-shaped equivalent, per whatever `cli_compare_release.py`
   looks like when this lands — this plan does not re-litigate the ongoing
@@ -259,8 +283,11 @@ path for both entry points, not two.
 ```text
 compare_bundle(old_dir, new_dir).bundle_findings
 ==
-compare_bundle_from_facts(load_bundle_facts(dump(old_dir)), new_dir).bundle_findings
+compare_bundle_from_facts(load_bundle_facts(dump_bundle(old_dir)), new_dir).bundle_findings
 ```
+(`dump_bundle` names the new directory-level producer above, not the
+single-artifact `dump` command — see the "Wiring" note on why the latter
+cannot produce this.)
 including evidence and `affected_libraries`, not just `ChangeKind` values —
 mirroring the existing single-snapshot dump/live parity tests this repo
 already runs for `dump`/`scan --against` (see `tests/test_dump_scan_l3_
@@ -285,30 +312,60 @@ plan, informed by whatever `BundleFacts` looked like in production by then.
 
 ```python
 def variant_fingerprint(evidence: BuildEvidence | None, env: EnvironmentMatrix | None) -> str:
-    """Stable fingerprint over BUILD-AXIS coordinates only: target triple,
-    compiler family+version, C/C++ standard, ABI-affecting flags/defines,
-    feature toggles (e.g. ONEDAL_DATA_PARALLEL), header-set identity.
-    Deliberately EXCLUDES three things, none of which describe what the
-    build itself targets: artifact membership (which libraries actually
-    shipped) — see below; EnvironmentMatrix.runtime_floors (a deployment/
-    comparison-policy input used to classify symbol-version and deployment
-    findings); and, within SyclConstraints/CudaConstraints themselves, the
-    declared-deployment-policy fields those dataclasses also carry
-    (`SyclConstraints.min_pi_version`, `CudaConstraints.driver_range`) — a
-    real gap caught in review, since a first draft of this function
-    proposed fingerprinting those objects wholesale, and both objects mix
-    build-defining fields with policy fields. `variant_fingerprint` reads
-    only the fields that describe what the CPU/DPC build itself compiles
-    against, never a declared floor/range two identical builds could
-    legitimately disagree on."""
+    """Stable fingerprint over LOGICAL VARIANT IDENTITY only — which
+    distinct build configuration this is (target triple, feature toggles
+    such as ONEDAL_DATA_PARALLEL that mean "this is the DPC build, not the
+    CPU build") — never over versioned build STATE that legitimately
+    drifts release to release. Deliberately EXCLUDES four things:
+
+    1. Artifact membership (which libraries actually shipped) — see below.
+    2. EnvironmentMatrix.runtime_floors (a deployment/comparison-policy
+       input used to classify symbol-version and deployment findings).
+    3. Within SyclConstraints/CudaConstraints, the declared-deployment-
+       policy fields those dataclasses also carry
+       (SyclConstraints.min_pi_version, CudaConstraints.driver_range).
+    4. C/C++ standard and ABI-affecting flags/defines — a THIRD, and the
+       most consequential, instance of the same "policy/state leaking into
+       an identity key" class of bug the two exclusions above already fix,
+       caught in yet another review round: an earlier draft of this
+       docstring listed these as fingerprinted fields. That is wrong for a
+       different reason than (2)/(3) — these genuinely are build facts,
+       not policy — but `comparability.py`'s own machinery
+       (`_unexplained_profile_fields`, `language_standard_probe_upgrade_
+       corroborated`, `language_standard_content_divergence_corroborated`)
+       exists specifically to let a *corroborated* language-standard or
+       macro-defines change between old and new be compared and classified
+       (`cxx_standard_floor_raised`, `abi_relevant_build_flag_changed`),
+       not to refuse the comparison. Fingerprinting these fields for
+       *pairing* would make `pair_variants` reject exactly the same-variant,
+       drifted-build-state comparisons the existing engine is already
+       designed to run — the same CPU variant that raised its `-std=`
+       between releases would read as two different, unmatched variants,
+       replacing a real, classified finding with a generic coverage
+       regression. `variant_fingerprint` therefore reads only what
+       distinguishes one *logical* variant from another (which feature
+       build this is), and leaves everything about how that variant was
+       compiled — which can and does change release to release — to the
+       ordinary per-library comparability/diff layers to classify once
+       `pair_variants` has matched the pair."""
 
 def pair_variants(
     old: dict[str, BundleFacts], new: dict[str, BundleFacts]
 ) -> list[VariantComparison]:
     """Pairs by fingerprint equality (not nearest-match). A variant present
-    only on one side becomes its own VariantComparison with
-    comparable=False and a build-coverage-regression finding — never
-    dropped, never paired with a mismatched variant."""
+    on both sides is diffed normally. A variant present only in OLD is a
+    real coverage regression (`bundle_variant_coverage_regressed`) — the
+    release stopped building a variant a consumer may still depend on. A
+    variant present only in NEW is coverage EXPANSION, not regression — a
+    real gap in an earlier draft of this function, caught in review: an
+    added DPC build on a previously CPU-only release is new coverage, not
+    a build that "went missing," and treating it identically would emit a
+    RISK-classified regression finding for what is actually good news. New-
+    only variants get their own, differently-named outcome (no regression
+    finding; recorded as an addition in the `VariantComparison` list so the
+    reporter can still show "3 variants compared, 1 newly added," but nothing
+    here reads as a regression). Neither shape is ever dropped or paired
+    with a mismatched variant."""
 ```
 
 **Artifact membership must not be part of the fingerprint** (a real design
@@ -343,7 +400,11 @@ structural, default verdict: `RISK`, not `BREAKING` — a missing variant is
 a build-coverage gap the user needs to see, not by itself proof the
 missing variant's ABI broke, since it may simply have been dropped from
 the release intentionally; a real per-variant ABI break inside a matched
-pair still uses the existing `bundle_*` kinds unchanged).
+pair still uses the existing `bundle_*` kinds unchanged). Fires only for an
+**old-only** variant (per `pair_variants`' asymmetric handling above) — a
+**new-only** variant is coverage expansion, not a `ChangeKind` at all;
+it is recorded only in the `VariantComparison` list the reporter renders,
+never emitted as a finding.
 
 ### Phase 4 — C-boundary signature-evidence gate
 
@@ -431,7 +492,7 @@ table asks for.
 | `abicheck/serialization.py` | `save_bundle_facts`/`load_bundle_facts` (Phase 2) |
 | `abicheck/comparability.py` | Bundle-level fingerprint-mismatch refusal, mirroring the existing single-snapshot `ScopeMismatchError` (Phase 2); no change to single-snapshot behavior |
 | `abicheck/checker_policy.py` / `abicheck/change_registry.py` | `bundle_variant_coverage_regressed`, `bundle_intra_dep_signature_unverified` registry entries (Phases 3-4) |
-| `abicheck/cli.py` / `abicheck/cli_compare_release*.py` | `--bundle-facts-out`, `compare --against <bundle facts>` wiring (Phase 2); whichever multibuild CLI surface Phase 3 needs — deferred to implementation time pending CLI-cleanup-phase-two's own convergence |
+| `abicheck/cli.py` / `abicheck/cli_compare_release*.py` | New `dump-bundle DIR --bundle-facts-out <path>` command (or equivalent surface, see Phase 2's "Wiring" note on why `dump`/`compare` alone cannot host this); `compare --against <bundle facts>` wiring (Phase 2); whichever multibuild CLI surface Phase 3 needs — deferred to implementation time pending CLI-cleanup-phase-two's own convergence |
 | `abicheck/reporter.py` / `abicheck/report_summary.py` | Render the two new finding shapes; extend `bundle.json`/`bundle.md` (Phases 3-4) |
 | `docs/reference/change-kinds.md` | Phase 1 taxonomy note; new-kind entries for Phases 3-4 |
 | `docs/contribute/adr/023-bundle-aware-multi-binary-analysis.md` | Amendment block linking to this plan (see below) |
