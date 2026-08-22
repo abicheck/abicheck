@@ -972,7 +972,11 @@ def forced_include_operands(
         # real file operand (``-include-pchfoo`` reaches the joined ``-include``
         # branch with ``-pchfoo``); replaying it verbatim is harmless, but
         # re-rendering it as a forced include would not be.
-        if operand and not operand.startswith("-"):
+        # Unlike the verbatim L4 replay view, this normalized view feeds a new
+        # compiler invocation.  Never forward response-file syntax across
+        # that boundary: clang expands an ``@file`` operand before parsing
+        # ``-include``, allowing the file to inject unrelated compiler flags.
+        if operand and not operand.startswith(("-", "@")):
             out.append((option, operand))
         i = new_i
     return out

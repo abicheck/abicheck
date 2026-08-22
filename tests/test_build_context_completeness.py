@@ -179,6 +179,20 @@ class TestForcedIncludeRecognizer:
             == []
         )
 
+    @pytest.mark.parametrize(
+        ("argv", "msvc"),
+        [
+            (["c++", "-include", "@evil.rsp"], False),
+            (["c++", "-include@evil.rsp"], False),
+            (["clang-cl", "/FI", "@evil.rsp"], True),
+            (["clang-cl", "/FI@evil.rsp"], True),
+        ],
+    )
+    def test_response_file_operands_are_not_forwarded_to_l2(
+        self, argv: list[str], msvc: bool
+    ) -> None:
+        assert forced_include_operands(argv, msvc=msvc) == []
+
 
 class TestReplayStillEmitsForcedIncludesExactlyOnce:
     """Why forced includes deliberately never enter ``abi_relevant_flags``.
@@ -203,6 +217,49 @@ class TestReplayStillEmitsForcedIncludesExactlyOnce:
 
         argv = ["c++", "-include", "cfg.h", "-imacros", "defs.h", "/FIw.h", "-fPIC"]
         assert extract_abi_relevant_flags(argv) == ["-fPIC"]
+
+    @pytest.mark.parametrize(
+        ("abi_relevant_flags", "cc_id"),
+        [
+            (["-include", "@evil.rsp"], "gnu"),
+            (["-include@evil.rsp"], "gnu"),
+            (["/FI", "@evil.rsp"], "msvc"),
+            (["/FI@evil.rsp"], "msvc"),
+        ],
+    )
+    def test_response_file_forced_includes_from_build_pack_are_not_replayed(
+        self, abi_relevant_flags: list[str], cc_id: str
+    ) -> None:
+        from abicheck.buildsource.source_extractors._argv import replay_extra_flags
+
+        cu = _cu(abi_relevant_flags=abi_relevant_flags)
+        assert replay_extra_flags(cu, [], cc_id) == []
+
+    @pytest.mark.parametrize(
+        ("argv", "cc_id"),
+        [
+            (["c++", "-include", "@evil.rsp", "-c", "a.cpp"], "gnu"),
+            (["c++", "-include@evil.rsp", "-c", "a.cpp"], "gnu"),
+            (["clang-cl", "/FI", "@evil.rsp", "-c", "a.cpp"], "msvc"),
+            (["clang-cl", "/FI@evil.rsp", "-c", "a.cpp"], "msvc"),
+        ],
+    )
+    def test_response_file_forced_includes_from_raw_argv_are_not_replayed(
+        self, argv: list[str], cc_id: str
+    ) -> None:
+        from abicheck.buildsource.source_extractors._argv import replay_extra_flags
+
+        assert replay_extra_flags(_cu(argv=argv), [], cc_id) == []
+
+    def test_bare_response_file_from_build_pack_is_not_forwarded_to_l2_or_l4(
+        self,
+    ) -> None:
+        from abicheck.buildsource.header_compile_context import _context_flags
+        from abicheck.buildsource.source_extractors._argv import replay_extra_flags
+
+        cu = _cu(abi_relevant_flags=["-fPIC", "@evil.rsp"])
+        assert _context_flags(cu) == ["-fPIC"]
+        assert replay_extra_flags(cu, [], "gnu") == ["-fPIC"]
 
 
 # ---------------------------------------------------------------------------
