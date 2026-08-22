@@ -820,7 +820,7 @@ def compare_bundle(
     findings.extend(_detect_library_structural_changes(old, new))
 
     # 2. bundle_intra_dep_removed: an import in the new bundle has no provider.
-    findings.extend(_detect_intra_dep_removed(new, sys_libs))
+    findings.extend(_detect_intra_dep_removed(old, new, sys_libs))
 
     # 3. bundle_intra_dep_signature_changed: provider's per-library diff
     #    flagged func_params_changed / func_return_changed / var_type_changed
@@ -923,6 +923,7 @@ def _detect_library_structural_changes(
 
 
 def _detect_intra_dep_removed(
+    old: BundleSnapshot,
     new: BundleSnapshot,
     system_providers: set[str],
 ) -> list[BundleFinding]:
@@ -939,7 +940,15 @@ def _detect_intra_dep_removed(
     A consumer's import is treated as system-provided when every DT_NEEDED
     edge it carries that resolves *outside* the bundle is in the
     ``system_providers`` allow-list (built-in plus user-extended via
-    ``--bundle-system-providers``).
+    ``--bundle-system-providers``) -- but only when no sibling *ever*
+    provided this symbol (:attr:`old`'s resolution graph, not just
+    ``new``'s). The allow-list alone can't tell "always external" apart
+    from "a sibling provider and its DT_NEEDED edge were both dropped by
+    the same refactor, and this consumer also happens to need libc" (nearly
+    universal) -- so when ``old`` shows a sibling used to provide the
+    symbol, the allow-list match alone isn't trusted; the symbol-name check
+    below still has to agree (Codex review: an earlier revision trusted the
+    allow-list unconditionally, silently hiding that regression).
     """
     findings: list[BundleFinding] = []
 
@@ -947,6 +956,8 @@ def _detect_intra_dep_removed(
         providers = new.resolution.providers_for(symbol)
         if providers:
             continue  # someone in the bundle provides it
+        # Whether a sibling *used to* provide this symbol (docstring above).
+        ever_provided_in_bundle = bool(old.resolution.providers_for(symbol))
         # Symbol not provided by any sibling. Is it system?
         for consumer in consumers:
             if consumer.weak:
@@ -964,28 +975,19 @@ def _detect_intra_dep_removed(
             # NOT skipped here and still produces the finding.
             if _import_is_external(consumer, consumer_meta, new):
                 continue
-            # Note: an earlier version of this code short-circuited here
-            # when consumer had no intra-bundle DT_NEEDED edges. That
-            # heuristic hid the canonical regression where a refactor
-            # drops both the only sibling provider *and* the DT_NEEDED
-            # edge that pointed at it — the .dynsym still carries the
-            # `U symbol` but no graph evidence remains. The downstream
-            # system-symbol allow-list (DEFAULT_SYSTEM_SYMBOLS +
-            # `_looks_system_symbol`) is what filters legitimately-
-            # external imports; rely on that signal alone.
             # If every non-intra DT_NEEDED of this consumer is on the
-            # allow-list (built-in libc/libstdc++/libgcc plus user extras),
-            # any unresolved import is assumed to come from outside the
-            # bundle. This is what --bundle-system-providers controls.
-            # No symbol-name-shape re-check here (mirrors
-            # _detect_unresolved_intra_dependency's identical branch): a
-            # reverted earlier revision gated this on that heuristic too,
-            # making --bundle-system-providers inert for a legitimate
-            # non-system-shaped custom export (e.g. MKL/TBB/SYCL C APIs).
+            # allow-list AND no sibling ever provided this symbol, trust it
+            # unconditionally -- what makes --bundle-system-providers
+            # suppress a non-system-shaped custom export (MKL/TBB/SYCL).
+            # Otherwise fall through to the symbol-name check (docstring).
             extra_needed = new.resolution.extra_needed.get(consumer.library, [])
-            if extra_needed and all(
-                soname_matches_providers(e, system_providers) or _looks_system(e)
-                for e in extra_needed
+            if (
+                not ever_provided_in_bundle
+                and extra_needed
+                and all(
+                    soname_matches_providers(e, system_providers) or _looks_system(e)
+                    for e in extra_needed
+                )
             ):
                 continue
             if symbol in DEFAULT_SYSTEM_SYMBOLS or _looks_system_symbol(symbol):

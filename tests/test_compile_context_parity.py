@@ -1392,6 +1392,45 @@ def test_compare_set_inputs_applies_config_compile_block(
     assert compile_context.gcc_option_tokens == ("-std=c++20",)
 
 
+def test_compare_set_inputs_forwards_config_include_dirs(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Regression (Codex review): a directory/package compare in a project
+    with a .abicheck.yml compile.include_dirs block must forward the
+    merged include dirs (CLI -I roots + config-appended ones) to the
+    release fan-out's own `includes=` -- a prior revision resolved the
+    merged tuple via resolve_compile_context() but discarded it, dispatching
+    the raw, unmerged CLI `includes` instead, so headers requiring the
+    configured include root could fail or parse incompletely despite the
+    compile: block otherwise being applied.
+    """
+    import abicheck.cli as cli_mod
+
+    old_dir = tmp_path / "old"
+    new_dir = tmp_path / "new"
+    old_dir.mkdir()
+    new_dir.mkdir()
+    include_dir = tmp_path / "vendor_include"
+    include_dir.mkdir()
+    cfg = tmp_path / ".abicheck.yml"
+    cfg.write_text(
+        f"compile:\n  include_dirs:\n    - {include_dir}\n", encoding="utf-8"
+    )
+
+    dispatched: dict[str, object] = {}
+    monkeypatch.setattr(
+        cli_mod,
+        "_dispatch_release_compare",
+        lambda ctx, **kw: dispatched.update(kw),
+    )
+    result = CliRunner().invoke(
+        main, ["compare", str(old_dir), str(new_dir), "--config", str(cfg)]
+    )
+    assert result.exit_code == 0, result.output
+    assert dispatched
+    assert include_dir in dispatched["includes"]
+
+
 def test_compare_config_include_dirs_survive_per_side_include(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

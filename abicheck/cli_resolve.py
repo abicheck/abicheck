@@ -31,7 +31,7 @@ caller is a CLI entry point — the parallel, framework-free contract lives in
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import click
 
@@ -752,3 +752,42 @@ def _reject_compile_context_for_set_inputs(ctx: click.Context) -> None:
             "already compared under one shared, both-sides compile context). "
             "Compare the libraries individually to use a sided override."
         )
+
+
+def resolve_directory_compile_context(
+    ctx: click.Context,
+    *,
+    gcc_options: str | None,
+    sysroot: Any,
+    nostdinc: bool,
+    header_backend: str,
+    includes: Any,
+    build_config: Any,
+    frontend_context: str,
+    compiler_path: str | None,
+    compiler_prefix: str | None,
+    compiler_option_tokens: tuple[str, ...],
+) -> Any:
+    """Resolve the both-sides L2 compile context for a directory/package
+    compare's release fan-out -- the identical ``resolve_compile_context``
+    call the single-pair path uses, folding the project ``.abicheck.yml``
+    ``compile:`` block in the same way (CLI > config). Returns
+    ``(CompileContext, merged_includes)`` -- the caller must forward
+    *both*: dropping the merged-includes half silently drops
+    ``compile.include_dirs`` for every library (Codex review).
+    """
+    from .cli_options import resolve_compile_context
+
+    return resolve_compile_context(
+        ctx,
+        gcc_options=gcc_options,
+        sysroot=sysroot,
+        nostdinc=nostdinc,
+        header_backend=header_backend,
+        includes=includes,
+        build_config=build_config,
+        frontend_context=frontend_context,
+        compiler_path=compiler_path,
+        compiler_prefix=compiler_prefix,
+        compiler_option_tokens=compiler_option_tokens,
+    )

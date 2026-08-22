@@ -390,6 +390,57 @@ class TestIntraDepRemoved:
         assert intra_removed[0].symbol == "onedal_internal_op"
         assert intra_removed[0].consumer_library == "libalgo.so"
 
+    def test_stripped_provider_still_fires_when_a_system_dep_remains(self) -> None:
+        """Regression (Codex review): the previous fix for
+        test_fires_when_dt_needed_was_stripped above only exercised a
+        consumer with an EMPTY DT_NEEDED after stripping -- but a real
+        binary almost always still needs libc. If the allow-list check
+        (--bundle-system-providers / DEFAULT_SYSTEM_PROVIDERS) were trusted
+        whenever every *remaining* DT_NEEDED happens to be a system
+        library, the canonical regression (provider AND its DT_NEEDED edge
+        both dropped) would be silently swallowed the moment the consumer
+        also links libc -- which is nearly always. The allow-list evidence
+        must not be trusted here: `onedal_internal_op` was provided by a
+        sibling in `old`, so its disappearance is a real, reportable
+        regression regardless of what other (system) libraries the
+        consumer still needs.
+        """
+        old = _snapshot(
+            {
+                "libcore.so": _meta(
+                    soname="libcore.so.1", exports=["onedal_internal_op"]
+                ),
+                "libalgo.so": _meta(
+                    soname="libalgo.so.1",
+                    needed=["libcore.so.1", "libc.so.6"],
+                    imports=["onedal_internal_op"],
+                ),
+            }
+        )
+        new = _snapshot(
+            {
+                "libcore.so": _meta(soname="libcore.so.1"),  # provider gone
+                "libalgo.so": _meta(
+                    soname="libalgo.so.1",
+                    needed=["libc.so.6"],  # intra-bundle edge dropped too,
+                    # but the consumer still needs libc -- a real, near-
+                    # universal system dependency, already covered by
+                    # DEFAULT_SYSTEM_PROVIDERS with no --bundle-system-
+                    # providers involved at all.
+                    imports=["onedal_internal_op"],
+                ),
+            }
+        )
+        result = compare_bundle(old, new, per_library_results=[])
+        intra_removed = [
+            f
+            for f in result.bundle_findings
+            if f.kind == ChangeKind.BUNDLE_INTRA_DEP_REMOVED
+        ]
+        assert len(intra_removed) == 1
+        assert intra_removed[0].symbol == "onedal_internal_op"
+        assert intra_removed[0].consumer_library == "libalgo.so"
+
     @pytest.mark.parametrize(
         ("symbol", "version"),
         [

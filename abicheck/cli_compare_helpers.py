@@ -103,6 +103,7 @@ from .cli_resolve import (
     _reject_evidence_flags_for_set_inputs,
     _resolve_compare_snapshots,
     classify_compare_operand,
+    resolve_directory_compile_context,
 )
 from .cli_secondary_output import reject_incoherent_secondary_output
 from .contract_coverage_exit import announce_coverage_floor, fold_coverage_exit
@@ -1617,16 +1618,14 @@ def run_compare(
         ))
 
     if {old_kind, new_kind} & {"directory", "package"}:
-        # L2 header compile context for the release fan-out, via the same
-        # `resolve_compile_context` call the single-pair path uses further
-        # below (folds the project `.abicheck.yml` `compile:` block in
-        # too). A sided `--ast-frontend old=/new=` override still has no
-        # per-library-pair meaning, so it stays rejected below.
-        directory_compile_context, _ = resolve_compile_context(
+        # Both-sides L2 compile context for the release fan-out -- see
+        # resolve_directory_compile_context's own docstring (including why
+        # its merged-includes half must be forwarded too).
+        directory_compile_context, directory_includes = resolve_directory_compile_context(
             ctx,
             gcc_options=gcc_options, sysroot=sysroot, nostdinc=nostdinc,
-            header_backend=header_backend, includes=includes, build_config=cfg_path,
-            frontend_context=frontend_context,
+            header_backend=header_backend, includes=includes,
+            build_config=cfg_path, frontend_context=frontend_context,
             compiler_path=compiler_path, compiler_prefix=compiler_prefix,
             compiler_option_tokens=compiler_option_tokens,
         )
@@ -1636,7 +1635,7 @@ def run_compare(
         cli._dispatch_release_compare(
             ctx,
             old_dir=old_input, new_dir=new_input,
-            headers=headers, includes=includes,
+            headers=headers, includes=directory_includes,
             old_headers_only=old_headers_only, new_headers_only=new_headers_only,
             old_includes_only=old_includes_only, new_includes_only=new_includes_only,
             old_version=old_version, new_version=new_version, lang=lang,
