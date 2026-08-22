@@ -555,6 +555,47 @@ class TestIntraDepRemoved:
             for f in result.bundle_findings
         )
 
+    def test_old_provider_veto_requires_version_compatibility(self) -> None:
+        """Regression (Codex review): an old reachable sibling that could
+        never have satisfied *this* consumer's own reference must not veto
+        the allow-list either. `libcore.so` reachably exported `vendor_op`
+        only as a non-default versioned definition (`vendor_op@V1`, never
+        `vendor_op@@V1`) -- the dynamic linker can only satisfy `libalgo.so`'s
+        genuinely unversioned `vendor_op` reference against a *default*
+        definition, so that sibling could never have resolved it in the
+        first place. Once `libcore.so`/its `DT_NEEDED` edge are both
+        removed, `libalgo.so`'s always-external (built-in-allow-listed)
+        import must not be vetoed by a provider that was never compatible."""
+        old_core = _meta(soname="libcore.so.1")
+        old_core.symbols.append(
+            ElfSymbol(name="vendor_op", visibility="default", version="V1", is_default=False)
+        )
+        old = _snapshot(
+            {
+                "libcore.so": old_core,
+                "libalgo.so": _meta(
+                    soname="libalgo.so.1",
+                    needed=["libcore.so.1", "libsycl.so.7"],
+                    imports=["vendor_op"],
+                ),
+            }
+        )
+        new = _snapshot(
+            {
+                "libcore.so": _meta(soname="libcore.so.1"),  # no longer exports it
+                "libalgo.so": _meta(
+                    soname="libalgo.so.1",
+                    needed=["libsycl.so.7"],
+                    imports=["vendor_op"],
+                ),
+            }
+        )
+        result = compare_bundle(old, new, per_library_results=[])
+        assert not any(
+            f.kind == ChangeKind.BUNDLE_INTRA_DEP_REMOVED
+            for f in result.bundle_findings
+        )
+
     @pytest.mark.parametrize(
         ("symbol", "version"),
         [

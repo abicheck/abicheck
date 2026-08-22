@@ -939,23 +939,18 @@ def _detect_intra_dep_removed(
 
     A consumer's import is treated as system-provided when every DT_NEEDED
     edge it carries that resolves *outside* the bundle is in the
-    ``system_providers`` allow-list (built-in ``DEFAULT_SYSTEM_PROVIDERS``
-    plus user-extended via ``--bundle-system-providers``) -- but only when
-    either (a) *this consumer* never reached an in-bundle sibling providing
-    this symbol in ``old`` (checked via reachability, not merely a provider
-    existing somewhere in the old bundle -- an unrelated consumer's own old
-    provider must not veto a different consumer's always-external
-    dependency), or (b) the user explicitly named at least one of this
-    consumer's remaining sonames via ``explicit_providers``. Without
-    (a)/(b), the allow-list can't tell "always external" apart from "a
-    sibling provider and its DT_NEEDED edge were both dropped by the same
-    refactor, and this consumer also happens to need libc" (nearly
-    universal) -- so absent either, the symbol-name check below still has
-    to agree (Codex review history: trusting the allow-list unconditionally
-    regardless of ``old`` silently hid that regression; over-correcting to
-    never trust it once *any* old provider existed silently defeated a
-    legitimate migration *and* misclassified an unrelated always-external
-    dependency as suspect).
+    ``system_providers`` allow-list -- but only when either (a) *this
+    consumer* never reached a *version-compatible* in-bundle sibling
+    providing this symbol in ``old`` (checked via reachability, not merely
+    a same-named provider existing somewhere in the old bundle -- an
+    unrelated consumer's own old provider must not veto a different
+    consumer's always-external dependency, nor may a provider whose
+    version could never have satisfied this consumer's own reference), or
+    (b) the user explicitly named at least one of this consumer's
+    remaining sonames via ``explicit_providers``. Without (a)/(b), a
+    sibling provider and its DT_NEEDED edge could have been dropped by the
+    same refactor that left this consumer needing libc -- so absent
+    either, the symbol-name check below still has to agree.
     """
     findings: list[BundleFinding] = []
     old_reachable_cache: dict[str, set[str]] = {}
@@ -969,7 +964,7 @@ def _detect_intra_dep_removed(
         providers = new.resolution.providers_for(symbol)
         if providers:
             continue  # someone in the bundle provides it
-        old_providers = {p.library for p in old.resolution.providers_for(symbol)}
+        old_all_providers = old.resolution.providers_for(symbol)
         for consumer in consumers:
             if consumer.weak:
                 continue
@@ -977,13 +972,19 @@ def _detect_intra_dep_removed(
             if consumer_meta is None:
                 continue
             # Did *this* consumer -- not merely some other consumer of the
-            # same symbol name -- previously reach one of those old
-            # providers? A consumer absent from the old bundle (newly added
-            # this release) has no old reachability to check.
+            # same symbol name -- previously reach a *version-compatible*
+            # old provider (docstring above; mirrors the audit-mode
+            # sibling's identical compatibility rule)?
+            if consumer.version:
+                compatible_old = {
+                    p.library for p in old_all_providers if p.version == consumer.version
+                }
+            else:
+                compatible_old = {p.library for p in old_all_providers if p.is_default}
             ever_provided_in_bundle = bool(
-                old_providers
+                compatible_old
                 and consumer.library in old.libraries
-                and old_providers & _old_reachable(consumer.library)
+                and compatible_old & _old_reachable(consumer.library)
             )
             if _import_is_external(consumer, consumer_meta, new):
                 continue
