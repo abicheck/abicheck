@@ -479,6 +479,36 @@ def test_dump_cli_and_typed_api_agree_on_resolved_compile_context(
 _CONTRACT_KNOWN_DIVERGENT_FIELDS: dict[str, str] = {}
 
 
+def _assert_duplicate_owned_include_dirs_oracle(fields: dict) -> None:
+    """Positive oracle for the ``"duplicate-owned-include-dirs"`` shape
+    (Codex review, PR #825): the cross-path equality check in the test
+    below only proves the CLI and typed-API paths agree with *each other*
+    -- if a regression made every path uniformly drop one or both owned
+    ``-I`` roots (e.g. a change to ``seed_includes_and_fold_compile_context``
+    or ``_slot_token_for_ancestor`` that stops recognizing this shape at
+    all), the snapshots would still be equal, and the equality check alone
+    would stay green while this fixture silently stopped exercising the
+    two-owner-directories behavior it exists to pin. Assert the actual
+    expected content instead: two ordered ``hdrs:`` slots, one per owning
+    ``-I`` directory, each with the distinct header-relative spelling
+    ``_build_library``'s docstring documents for this shape."""
+    raw = fields.get("include_sequence")
+    assert raw is not None, "duplicate-owned-include-dirs: no include_sequence recorded"
+    slots = json.loads(raw)
+    assert len(slots) == 2, (
+        "duplicate-owned-include-dirs: expected exactly two owned include-dir "
+        f"slots, got {slots!r}"
+    )
+    assert slots[0].startswith("0:hdrs:") and slots[1].startswith("1:hdrs:"), slots
+    assert '"pkg/widget.h"' in slots[0], slots
+    assert '"include/pkg/widget.h"' in slots[1], slots
+
+
+_SHAPE_ORACLES: dict[str, object] = {
+    "duplicate-owned-include-dirs": _assert_duplicate_owned_include_dirs_oracle,
+}
+
+
 @pytest.mark.skipif(not (_HAVE_GXX and _HAVE_CLANG), reason=_SKIP_REASON)
 @pytest.mark.parametrize("shape_name", sorted(_BUILD_SHAPES))
 def test_dump_cli_and_typed_api_agree_on_extraction_contract(
@@ -503,6 +533,10 @@ def test_dump_cli_and_typed_api_agree_on_extraction_contract(
 
     assert cli_fields, f"{shape_name}: the CLI dump recorded no extraction contract"
     assert typed_fields, f"{shape_name}: the typed dump recorded no extraction contract"
+
+    oracle = _SHAPE_ORACLES.get(shape_name)
+    if oracle is not None:
+        oracle(cli_fields)  # type: ignore[operator]
 
     differing = sorted(
         key
