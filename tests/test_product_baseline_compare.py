@@ -919,6 +919,71 @@ class TestDiscoverLibraryMapExtensionlessMachOAndPe:
         result = _discover_library_map(root, include_private=True)
         assert result == {}
 
+    @staticmethod
+    def _make_fat_macho(*, filetype: int) -> bytes:
+        """A minimal, real fat/universal Mach-O archive with one slice --
+        big-endian fat_header + one fat_arch entry pointing at a thin
+        mach_header_64 with the given *filetype*. Real bytes, verified
+        parseable by macholib.MachO directly (not a description of the
+        format)."""
+        thin = struct.pack(
+            ">IIIIIIII",
+            0xFEEDFACF,  # MH_MAGIC_64
+            0x01000007,  # cputype (CPU_TYPE_X86_64)
+            0x00000003,  # cpusubtype
+            filetype,
+            0,
+            0,
+            0,
+            0,
+        )
+        fat_header = struct.pack(">II", 0xCAFEBABE, 1)  # magic, nfat_arch=1
+        arch_offset = 8 + 20  # fat_header(8) + one fat_arch(20)
+        fat_arch = struct.pack(
+            ">IIIII", 0x01000007, 0x00000003, arch_offset, len(thin), 0
+        )
+        return fat_header + fat_arch + thin
+
+    def test_extensionless_fat_macho_dylib_is_discovered(self, tmp_path: Path) -> None:
+        # A universal framework binary (x86_64 + arm64 in one file, the
+        # common real-world shape for a distributed macOS framework) has
+        # fat magic, not a thin one -- the thin-only header read alone
+        # can't classify it (Codex review, fresh evidence).
+        from abicheck.product_baseline import _discover_library_map
+
+        root = tmp_path / "product"
+        framework = root / "Foo.framework"
+        framework.mkdir(parents=True)
+        (framework / "Foo").write_bytes(self._make_fat_macho(filetype=6))  # MH_DYLIB
+
+        result = _discover_library_map(root, include_private=True)
+        assert set(result) == {"Foo.framework/Foo"}
+
+    def test_fat_macho_executable_is_not_discovered(self, tmp_path: Path) -> None:
+        from abicheck.product_baseline import _discover_library_map
+
+        root = tmp_path / "product"
+        root.mkdir(parents=True)
+        (root / "an_executable").write_bytes(
+            self._make_fat_macho(filetype=2)
+        )  # MH_EXECUTE
+
+        result = _discover_library_map(root, include_private=True)
+        assert result == {}
+
+    def test_malformed_fat_macho_is_not_discovered(self, tmp_path: Path) -> None:
+        # A truncated/malformed fat archive must degrade to "not a
+        # library" (best-effort discovery), never raise out of the
+        # directory walk.
+        from abicheck.product_baseline import _discover_library_map
+
+        root = tmp_path / "product"
+        root.mkdir(parents=True)
+        (root / "broken").write_bytes(struct.pack(">II", 0xCAFEBABE, 1))  # truncated
+
+        result = _discover_library_map(root, include_private=True)
+        assert result == {}
+
 
 class TestDiscoverLibraryMapSymlinkContainment:
     def test_symlink_escaping_the_product_root_is_not_discovered(

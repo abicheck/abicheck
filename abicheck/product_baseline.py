@@ -126,39 +126,71 @@ _PE_IMAGE_FILE_DLL = 0x2000
 
 
 def _macho_is_library_content(path: Path) -> bool:
-    """True when *path* is a thin (single-architecture) Mach-O dynamic
-    library, bundle, or dylib stub, identified from its header ``filetype``
-    field rather than its filename -- the Mach-O counterpart of
+    """True when *path* is a Mach-O dynamic library, bundle, or dylib
+    stub, identified from its header ``filetype`` field rather than its
+    filename -- the Mach-O counterpart of
     :func:`abicheck.package._is_elf_shared_object`, for an extensionless
     framework binary (``Foo.framework/Foo``) or a nonstandard-extension
     plugin (``.node``) that a suffix check alone never catches (Codex
     review, fresh evidence).
 
-    Deliberately conservative for a *fat* (universal) Mach-O archive: its
-    per-architecture ``fat_arch`` slices are not guaranteed to agree on
-    ``filetype``, and correctly walking the fat header to make a sound
-    per-file decision is a larger, separately-verifiable piece of work: not
-    attempted here, so a fat binary always reads ``False`` from this
-    function regardless of its actual content (falling back to whatever the
-    filename suffix alone already recognizes).
+    Covers a *thin* (single-architecture) Mach-O via a direct header read
+    (no dependency needed for the common case), and a *fat* (universal)
+    archive via :class:`macholib.MachO.MachO` -- a real, if narrow, gap in
+    the thin-only version of this check: a universal framework binary
+    (the common case for a distributed macOS framework, which routinely
+    ships x86_64 + arm64 slices in one file) has fat magic, not a thin
+    one, and `macholib` -- already a core, unconditional dependency
+    (`macho_metadata.py`) -- already knows how to walk its ``fat_arch``
+    slices (Codex review, fresh evidence). A fat archive is recognized as
+    a library when *any* slice's filetype is a library type: real-world
+    fat binaries are built from one source and their slices agree in
+    practice, so requiring unanimous agreement would only risk a
+    false-negative on an otherwise-ordinary universal library for no real
+    safety benefit.
     """
     try:
         with open(path, "rb") as f:
             magic = f.read(4)
             if magic in (b"\xfe\xed\xfa\xce", b"\xfe\xed\xfa\xcf"):
-                byte_order = ">"
+                byte_order: str | None = ">"
             elif magic in (b"\xce\xfa\xed\xfe", b"\xcf\xfa\xed\xfe"):
                 byte_order = "<"
+            elif magic in (
+                b"\xca\xfe\xba\xbe",
+                b"\xbe\xba\xfe\xca",
+                b"\xca\xfe\xba\xbf",
+                b"\xbf\xba\xfe\xca",
+            ):
+                byte_order = None  # fat/universal -- handled via macholib below
             else:
-                return False  # not a thin Mach-O (incl. fat archives)
-            f.seek(12)  # magic(4) + cputype(4) + cpusubtype(4)
-            raw_filetype = f.read(4)
+                return False  # not Mach-O at all
+            if byte_order is not None:
+                f.seek(12)  # magic(4) + cputype(4) + cpusubtype(4)
+                raw_filetype = f.read(4)
     except OSError:
         return False
-    if len(raw_filetype) < 4:
+    if byte_order is not None:
+        if len(raw_filetype) < 4:
+            return False
+        (filetype,) = struct.unpack(f"{byte_order}I", raw_filetype)
+        return filetype in _MACHO_LIBRARY_FILETYPES
+
+    try:
+        from macholib.MachO import MachO  # type: ignore[import-untyped]
+
+        macho = MachO(str(path))
+    except Exception:  # noqa: BLE001 -- macholib has no single documented
+        # exception type for a malformed/truncated fat archive (see the
+        # identical broad catch in macho_metadata.py's own SymbolTable
+        # parse); this is a best-effort discovery predicate, never a hard
+        # failure -- the same "OSError -> False" degrade the thin-header
+        # read above already applies.
         return False
-    (filetype,) = struct.unpack(f"{byte_order}I", raw_filetype)
-    return filetype in _MACHO_LIBRARY_FILETYPES
+    return any(
+        int(getattr(header.header, "filetype", -1)) in _MACHO_LIBRARY_FILETYPES
+        for header in macho.headers
+    )
 
 
 def _pe_is_dll_content(path: Path) -> bool:
@@ -214,9 +246,8 @@ def _is_library_path(path: Path) -> bool:
     both are real, supported native-binary formats — a framework-only
     product silently compared as if it shipped no libraries at all (Codex
     review, fresh evidence). :func:`_macho_is_library_content`/
-    :func:`_pe_is_dll_content` close that for a *thin* Mach-O and any PE
-    image respectively; see the former's own docstring for the one
-    remaining gap (fat/universal Mach-O archives).
+    :func:`_pe_is_dll_content` close that for both thin and fat
+    (universal) Mach-O and for any PE image respectively.
 
     A ``.debug`` split-debug sidecar (the conventional
     ``objcopy --only-keep-debug`` output, e.g. ``libfoo.so.1.debug``) is
