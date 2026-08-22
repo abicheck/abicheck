@@ -1,0 +1,413 @@
+---
+doc_type: contributor
+level: advanced
+lifecycle: active
+---
+
+# G38 — Bundle facts model, persisted multi-library graphs, and multibuild-variant comparability
+
+**Origin:** External review of ADR-023 (bundle-aware multi-binary analysis)
+against a real oneDAL checkout (`libonedal_core.so` +
+`libonedal_thread.so`/`libonedal_sequential.so`/`libonedal_dpc.so`/
+`libonedal_parameters*.so` behind one shared `include/oneapi/dal/` header
+tree). The review reproduced a real bundle-integrity break (an internal
+`_daal_*`-style C symbol renamed in the thread provider, consumer left
+unchanged) and confirmed `compare`'s bundle layer (`abicheck/bundle.py`)
+catches it correctly from live `.so` files — but found the layer cannot
+answer the same question from a **stored dump**, cannot express **build
+variants** (CPU vs. `ONEDAL_DATA_PARALLEL`) without silently unioning them,
+and treats an internal C boundary's binary-name match as if it proved
+signature compatibility. See ADR-023's own "Amendment" block at the top of
+that file for the earlier (2026-07-29), narrower correction this plan
+builds on.
+
+**ADR:** No new ADR is proposed. This plan is scoped as an amendment/
+extension to [ADR-023](../adr/023-bundle-aware-multi-binary-analysis.md)
+(bundle layer) and [ADR-050](../adr/050-comparability-contract-and-multi-tu-manifest.md)
+(comparability contract, which already owns the "two snapshots must agree
+on their extraction recipe before being compared" invariant this plan
+extends to bundle-level and multibuild-level comparisons). If Phase 2
+below (the persisted `BundleFacts` schema) grows real design disagreement
+during implementation, split it into its own ADR at that point — this plan
+does not pre-empt that.
+
+**Type:** Initiative plan (cross-cutting; touches `abicheck/bundle.py`,
+`abicheck/bundle_models.py`, `abicheck/bundle_manifest.py`,
+`abicheck/serialization.py`, `abicheck/model.py`, `abicheck/comparability.py`,
+`abicheck/environment_matrix.py`, `abicheck/diff_cxx_rules.py`,
+`abicheck/checker_policy.py`, `abicheck/change_registry.py`,
+`abicheck/cli_scan_baseline.py`, `abicheck/reporter.py`).
+
+**Effort:** XL (phased — see "Phases" below). **Risk:** medium — Phase 1
+(taxonomy) and Phase 4 (finding-severity split) are additive and low-risk;
+Phase 2 (persisted `BundleFacts`) is a real schema addition with its own
+version bump and round-trip contract; Phase 3 (multibuild pairing) changes
+default behavior for any caller that today silently unions variants (none
+do today — see "Why this is additive" below — but a future multibuild
+consumer must not reintroduce a union by default).
+
+---
+
+## Problem
+
+ADR-023 shipped a real, working bundle layer: `compare_bundle()` builds a
+`ResolutionGraph` from live `.so` files (`ProviderEntry`/`ConsumerEntry`
+per symbol, DT_NEEDED edges, `gnu.version_r`/`gnu.version_d`) and detects
+five real cross-DSO break patterns (intra-bundle removed symbol, signature
+drift across a C boundary, cross-DSO type drift, template-instantiation
+manifest drift, provider migration). Reproducing this end-to-end against a
+real oneDAL build (a modified `libonedal_thread.so` mutating one exported
+C symbol name, all other siblings byte-identical) confirms the layer
+produces the correct causal chain: provider delta, consumer delta (none),
+bundle-level `bundle_intra_dep_removed`. That part of ADR-023 works as
+designed.
+
+Four gaps remain, each independently reproducible and each with a distinct
+root cause — not one gap wearing four names:
+
+1. **`compare_bundle()` only ever reopens live `.so` files.** `BundleSnapshot`
+   is built directly from filesystem paths inside `abicheck/bundle.py`; there
+   is no serialized `BundleFacts` object a `dump`-produced snapshot set
+   carries, and no `compare --against <stored bundle>` path exists at all.
+   `analyze(extract(live))` and `analyze(load(dump))` are not the same
+   function today because the second one doesn't exist. This means a stored
+   baseline — the normal `scan --against`/CI workflow for every other
+   surface this tool supports — cannot get a bundle-level verdict; only a
+   live-directory-vs-live-directory `compare` invocation can.
+2. **No build-variant (multibuild) model for the bundle layer.** oneDAL
+   ships CPU-only and `ONEDAL_DATA_PARALLEL` (SYCL) builds from the same
+   source tree. `environment_matrix.py` already models a *build matrix*
+   for `compare --env-matrix` (SYCL/CUDA constraints, runtime floors) at the
+   per-library level, but nothing pairs two *bundle* snapshots per variant
+   and rejects a mismatched pairing — a naive "run the bundle layer once per
+   available build" caller would have to invent variant fingerprinting and
+   pairing from scratch, and get it wrong the same way a union would (see
+   "Why a union is wrong" below).
+3. **A C-linkage symbol match is treated as proof of signature
+   compatibility, not just proof of binary-name compatibility.**
+   `bundle_intra_dep_signature_changed` is keyed off a *provider's own*
+   per-library `func_params_changed`/`func_return_changed` finding — which
+   already requires DWARF/header evidence for that provider. That part is
+   sound. What's missing is the negative case: when neither side has that
+   evidence (a stripped provider, or a provider only ever dumped at L0), the
+   bundle layer has no way to say "this consumer's import still resolves by
+   name, but nothing establishes the signature agrees" — it silently
+   reports nothing, which reads as "compatible."
+4. **The finding taxonomy conflates "public ABI promise" with "shipped
+   bundle still works."** `bundle_library_removed`/
+   `bundle_intra_dep_removed` etc. already exist as their own kinds (not
+   reusing `BREAKING_KINDS`' public-surface language) — this part of
+   ADR-023's design is already correct. What's missing is the reporter/
+   policy-facing documentation of *why* an internal, non-public symbol can
+   still be `BREAKING` at the bundle level, which is a recurring point of
+   confusion when a `--policy` profile scoped to "public API only" doesn't
+   suppress a `bundle_intra_dep_removed` finding on an internal symbol (by
+   design — see Phase 1).
+
+### Why a union is wrong (multibuild)
+
+If a declaration/export is present in the DPC build and accidentally
+missing from the CPU build, unioning the two variants' facts before
+diffing reports "present" in both old and new — hiding a real, CPU-only-build
+regression. The correct model pairs each variant independently
+(`CPU old ↔ CPU new`, `DPC old ↔ DPC new`, ...) and aggregates only after
+each pair has its own verdict. A variant present in old with no matching
+variant in new is `NOT_COMPARABLE`/a build-coverage regression for that
+variant specifically — never silently dropped or paired with the nearest
+available build. `comparability.py`'s existing `check_contracts_comparable`
+already enforces exactly this discipline for a single old/new snapshot pair
+(refusing to compare two snapshots whose `scope_fingerprint`/
+`profile_fingerprint` disagree); this plan extends the same discipline one
+level up, to a *set* of variant-tagged bundle snapshots, rather than
+inventing a second comparability mechanism.
+
+### Why this is additive, not a behavior change
+
+No shipped caller invokes the bundle layer once per build variant today —
+`compare`/`compare-release` runs it exactly once, against whatever one
+directory pair was given. So there is no existing "silent union" to fix;
+the risk this plan calls out is prospective (a naive multibuild extension
+would reach for a union), not a regression already shipped. Phases 1-4 add
+new fields/kinds/modules; none change the meaning of an existing
+`BundleFinding`, `ChangeKind`, or exit code for a single-variant
+`compare`/`compare-release` invocation.
+
+---
+
+## Goal & acceptance criteria
+
+Mirrors the acceptance bar the originating review proposed, restated as
+this plan's phases so each criterion has an owning phase rather than
+floating as an unattached checklist:
+
+1. Removing a sibling-consumed internal C symbol produces one causal
+   bundle-integrity finding naming consumer, import, old provider, and
+   failed new resolution. **Already true today** (verified against a real
+   oneDAL reproduction) — not a gap this plan closes, recorded here only so
+   the acceptance list is complete and the "already works" part isn't lost
+   in a plan about what doesn't.
+2. The same finding reproduces from a **stored bundle dump**, not only from
+   two live directories. — Phase 2.
+3. An unused private export removal does not produce the same severity as
+   (1). **Already true** — `bundle_library_removed`/
+   `bundle_intra_dep_removed` only fire when a sibling actually consumes the
+   symbol; an unconsumed export removal falls through to the existing
+   per-library `func_removed`, whose severity is governed by the ordinary
+   public-surface/suppression rules, unaffected by this plan.
+4. CPU and DPC variants are evaluated independently, with a missing
+   matching variant reported as its own finding rather than silently
+   dropped or unioned. — Phase 3.
+5. A same-name C symbol with no signature evidence on either side is
+   reported as **binary-name-compatible, signature-unverified** — a
+   distinct finding from a verified-compatible signature match. — Phase 4.
+6. Live-directory and stored-dump bundle comparisons produce identical
+   findings and evidence for the same underlying facts (the same parity
+   invariant ADR-050/G32 already hold single-snapshot comparisons to). —
+   Phase 2's acceptance test.
+
+---
+
+## Design
+
+### Phase 1 — Finding-taxonomy documentation (no code change)
+
+Add a short section to `docs/reference/change-kinds.md` (the curated,
+narrative change-kind guide — this topic's existing fact owner per
+`docs/_meta/topics.yaml`'s ownership split) explaining, in plain language,
+that a `bundle_*` kind answers "does the shipped bundle still work
+end-to-end" and is deliberately **not** filtered by a public-surface-only
+policy scope the way `BREAKING_KINDS`/`API_BREAK_KINDS` are — an internal,
+non-public symbol can still be `bundle_intra_dep_removed` because a sibling
+DSO's `dlopen` genuinely fails. This is a documentation-only phase (no
+`ChangeKind`/registry change) since the underlying behavior is already
+correct; it exists purely to close the confusion the review's item 4
+identified. Lowest risk, do first.
+
+### Phase 2 — Persisted `BundleFacts` and `compare --against <bundle dump>`
+
+**New model, additive to `abicheck/bundle_models.py`:**
+
+```python
+@dataclass
+class BundleFacts:
+    """Serializable projection of everything compare_bundle() derives from
+    live .so files, decoupled from filesystem paths — the bundle-level
+    counterpart to AbiSnapshot for a single library."""
+    schema_version: int
+    variant_fingerprint: str  # see Phase 3 — always present, "default" for a non-multibuild bundle
+    artifacts: list[BundleArtifactFacts]  # per-DSO: soname, aliases, build-id/hash, path label (ADR-032 D7 redaction rules apply)
+    resolution_graph: ResolutionGraph  # already exists — just needs schema_version + serialization
+    manifest: InstantiationManifest | None
+```
+
+`BundleArtifactFacts` carries exactly what `ResolutionGraph`'s
+`ProviderEntry`/`ConsumerEntry` already compute per-library (exported
+symbols, undefined/imported symbols with `gnu.version_r`, DT_NEEDED,
+RPATH/RUNPATH) — this phase does not add new *extraction*, it adds
+*serialization* of facts `bundle.py` already derives in memory and
+discards after `compare_bundle()` returns.
+
+**Wiring:**
+
+- `serialization.py` gains `save_bundle_facts`/`load_bundle_facts`,
+  mirroring `save_snapshot`/`load_snapshot`'s existing envelope
+  (`snapshot_io.py`'s plain/gzip/zstd detection, atomic writes) rather than
+  inventing a second I/O layer.
+- `dump`/`compare`'s directory-fan-out path gains an opt-in
+  `--bundle-facts-out <path>` (mirroring how `dump --dump-manifest`
+  already works for a single snapshot) that writes one `BundleFacts` file
+  alongside each library's own snapshot.
+- `compare --against <old-dir-or-bundle-facts> <new-dir>` (or the
+  `compare-release`-shaped equivalent, per whatever `cli_compare_release.py`
+  looks like when this lands — this plan does not re-litigate the ongoing
+  CLI-cleanup-phase-two convergence, it plugs into whichever entry point
+  that work has converged on by the time this phase starts) accepts either
+  a live directory (today's behavior, unchanged) or a `BundleFacts` file for
+  the *old* side. The *new* side may still be live (the common `scan`-style
+  workflow: compare a stored baseline bundle against what's on disk today).
+- `checker_policy`/`comparability.py`: a `BundleFacts.variant_fingerprint`
+  mismatch between old and new is refused the same way a single-snapshot
+  `scope_fingerprint` mismatch already is (`ScopeMismatchError`'s bundle-level
+  sibling), rather than silently comparing incompatible bundles.
+
+**Acceptance test (the mandatory parity invariant, restated executably):**
+
+```text
+compare_bundle(old_dir, new_dir).bundle_findings
+==
+compare_bundle_from_facts(load_bundle_facts(dump(old_dir)), new_dir).bundle_findings
+```
+including evidence and `affected_libraries`, not just `ChangeKind` values —
+mirroring the existing single-snapshot dump/live parity tests this repo
+already runs for `dump`/`scan --against` (see `tests/test_dump_scan_l3_
+comparability.py` for the established pattern this test follows).
+
+**What is deliberately NOT attempted in Phase 2:** a fully lossless,
+extractor-agnostic bundle archive format (the review's §9 `bundle-dump-
+vNext.tar.zst` sketch — content-addressed shared headers, per-artifact
+`.json.zst`, optional raw-binary retention). That is a real, separate
+storage-architecture project on the scale of ADR-059 (snapshot compression)
+or the `docs/contribute/plans/g32-comparability-contract-and-multi-tu-
+manifest.md` multi-TU manifest work, not a sub-step of making the bundle
+layer stored-data-capable. `BundleFacts` above is scoped to "enough to
+reproduce `compare_bundle()`'s existing analysis without live binaries" —
+not to "a general-purpose reanalysis substrate for extractors that don't
+exist yet." If a future need for the latter materializes, it gets its own
+plan, informed by whatever `BundleFacts` looked like in production by then.
+
+### Phase 3 — Multibuild variant pairing
+
+**New module, `abicheck/bundle_multibuild.py`:**
+
+```python
+def variant_fingerprint(evidence: BuildEvidence | None, env: EnvironmentMatrix | None) -> str:
+    """Stable fingerprint: target triple, compiler family+version, C/C++
+    standard, ABI-affecting flags/defines, feature toggles (e.g.
+    ONEDAL_DATA_PARALLEL), header-set identity, artifact membership.
+    Reuses environment_matrix.py's existing SyclConstraints/CudaConstraints/
+    runtime-floor fields rather than re-deriving them."""
+
+def pair_variants(
+    old: dict[str, BundleFacts], new: dict[str, BundleFacts]
+) -> list[VariantComparison]:
+    """Pairs by fingerprint equality (not nearest-match). A variant present
+    only on one side becomes its own VariantComparison with
+    comparable=False and a build-coverage-regression finding — never
+    dropped, never paired with a mismatched variant."""
+```
+
+`pair_variants` is the enforcement point for "never union" — it has no
+code path that merges two variants' facts before diffing; it only ever
+returns one-to-one pairs or explicit non-comparable singletons. Each pair's
+own `compare_bundle()` call and finding set stay completely independent;
+aggregation (a release-wide worst-of verdict across variants) is a
+reduction over already-computed per-variant results, done by the caller
+(the same "worst-of, computed by the caller, never inside the comparison
+primitive" shape `compute_verdict`/`compute_exit_code` already use for
+per-library verdicts).
+
+New `ChangeKind`: `bundle_variant_coverage_regressed` (category: Bundle /
+structural, default verdict: `RISK`, not `BREAKING` — a missing variant is
+a build-coverage gap the user needs to see, not by itself proof the
+missing variant's ABI broke, since it may simply have been dropped from
+the release intentionally; a real per-variant ABI break inside a matched
+pair still uses the existing `bundle_*` kinds unchanged).
+
+### Phase 4 — C-boundary signature-evidence gate
+
+`bundle_intra_dep_signature_changed` already fires correctly when a
+provider's DWARF/header evidence shows a real signature change. This phase
+adds the missing negative case: a new field on `BundleFinding` (or a new,
+narrower `ChangeKind`, `bundle_intra_dep_signature_unverified` — to be
+decided during implementation based on which reads better in the reporter,
+not pre-decided here) fires when:
+
+1. the consumer's undefined symbol resolves by name to a provider's export
+   (the C-linkage match `compare_bundle()` already establishes), **and**
+2. neither side's evidence tier for that symbol is sufficient to confirm or
+   deny a signature change (no DWARF, no header AST, L0-only bundle
+   members) — reusing `evidence_status_for_result`'s existing
+   `ARTIFACT_PROVEN`/`UNATTRIBUTED` distinction (see AGENTS.md's own
+   "Evidence-provider model" known-gap entry for why this is a report-level,
+   not per-finding, signal today, and why this phase does not attempt the
+   full per-finding provider model that entry says is out of scope) rather
+   than inventing a second evidence-confidence scale for bundle findings
+   specifically.
+
+Default verdict: `RISK`, distinct from both "no change" and the confirmed
+`BREAKING` `bundle_intra_dep_signature_changed` — this is the "binary-name
+compatible, signature unverified" language the review's finding-taxonomy
+table asks for, expressed as its own kind rather than a footnote on an
+existing one, so a `--policy` file can suppress or promote it independently.
+
+---
+
+## Files & surfaces
+
+| File | Change |
+|---|---|
+| `abicheck/bundle_models.py` | `BundleFacts`, `BundleArtifactFacts` (Phase 2); `bundle_variant_coverage_regressed`/`bundle_intra_dep_signature_unverified` support types (Phases 3-4) |
+| `abicheck/bundle.py` | `compare_bundle_from_facts()` alongside existing `compare_bundle()`; both delegate to one shared internal comparison function so Phase 2's parity test has something to hold equal |
+| `abicheck/bundle_multibuild.py` | New — `variant_fingerprint`, `pair_variants`, `VariantComparison` (Phase 3) |
+| `abicheck/serialization.py` | `save_bundle_facts`/`load_bundle_facts` (Phase 2) |
+| `abicheck/comparability.py` | Bundle-level fingerprint-mismatch refusal, mirroring the existing single-snapshot `ScopeMismatchError` (Phase 2); no change to single-snapshot behavior |
+| `abicheck/checker_policy.py` / `abicheck/change_registry.py` | `bundle_variant_coverage_regressed`, `bundle_intra_dep_signature_unverified` (or the finalized field-based alternative) registry entries (Phases 3-4) |
+| `abicheck/cli.py` / `abicheck/cli_compare_release*.py` | `--bundle-facts-out`, `compare --against <bundle facts>` wiring (Phase 2); whichever multibuild CLI surface Phase 3 needs — deferred to implementation time pending CLI-cleanup-phase-two's own convergence |
+| `abicheck/reporter.py` / `abicheck/report_summary.py` | Render the two new finding shapes; extend `bundle.json`/`bundle.md` (Phases 3-4) |
+| `docs/reference/change-kinds.md` | Phase 1 taxonomy note; new-kind entries for Phases 3-4 |
+| `docs/contribute/adr/023-bundle-aware-multi-binary-analysis.md` | Amendment block linking to this plan (see below) |
+
+---
+
+## Tests
+
+- `tests/test_bundle.py` — extend with `BundleFacts` round-trip
+  (`save_bundle_facts` → `load_bundle_facts` → identical
+  `compare_bundle_from_facts` output), the dump/live parity test from
+  Phase 2's acceptance criterion, and the two new `ChangeKind`s' positive/
+  negative cases.
+- New `tests/test_bundle_multibuild.py` — `variant_fingerprint` determinism
+  and sensitivity (two builds differing only in an ABI-irrelevant flag
+  fingerprint identically; two differing in `-std=`/a feature toggle
+  fingerprint differently), `pair_variants`' never-union guarantee as a
+  Hypothesis property (mirroring this repo's existing "Primitive-level
+  property tests" convention for a reusable merge/pairing primitive — see
+  AGENTS.md's own guidance on why a primitive this shape needs a
+  property-test class, not only hand-picked examples), and the missing-
+  variant-produces-its-own-finding case.
+- Extend the FP-rate/tier-accuracy corpora with one oneDAL-shaped case per
+  new `ChangeKind` (mirroring how `bundle_soname_skew` already has
+  `examples/case84_bundle_soname_skew/`).
+
+## Example fixtures
+
+- `examples/case<N>_bundle_dump_comparability/` — a real, small multi-.so
+  bundle (three tiny libraries, one importing from another) with a stored
+  `BundleFacts` baseline compared against a live "new" directory
+  reproducing the same internal-symbol-removed break the review's oneDAL
+  repro used, at a fixture scale this repo's example corpus can actually
+  check in.
+- `examples/case<N>_bundle_multibuild_coverage_gap/` — two variants old
+  side, one variant new side, pinning `bundle_variant_coverage_regressed`.
+- `examples/case<N>_bundle_c_boundary_unverified/` — an L0-only bundle
+  member (stripped, no DWARF) whose C-linkage import still resolves by
+  name, pinning the unverified-signature finding.
+
+---
+
+## Out of scope
+
+Restated from the originating review, explicitly deferred rather than
+silently dropped:
+
+- **Reverse impact analysis against an external consumer application** —
+  stays in `appcompat`/`stack-check`, unchanged by ADR-023 and unchanged by
+  this plan.
+- **`dlopen`/`dlsym` plugin-style dynamic dependency edges** — invisible
+  from DT_NEEDED; needs source/manifest evidence this plan does not add
+  (ADR-008's own follow-up work already tracks this, and G5's
+  `plugin-check` covers a related but distinct host↔plugin contract).
+- **Mach-O/PE bundle equivalents** — Phase 2's `BundleFacts` schema is
+  written to be platform-neutral in shape (artifact identity + resolution
+  graph + evidence), but populating `BundleArtifactFacts` from a
+  `.dylib`/`.dll` set, and the loader-graph specifics (load commands vs.
+  import tables vs. DT_NEEDED), is real per-platform work left for a
+  follow-up once the ELF path is proven out.
+- **A general-purpose, content-addressed bundle archive format** (the
+  review's §9 sketch) — see Phase 2's own "deliberately not attempted"
+  note above.
+- **Full per-finding evidence-provider model** (which extractor/tier
+  produced each individual finding, not just each `AbiSnapshot`) — already
+  tracked as its own, larger, cross-cutting gap in the root `AGENTS.md`'s
+  "Evidence-provider model" known-gap entry; Phase 4 above reuses the
+  existing report-level `evidence_status_for_result` signal rather than
+  attempting that larger project as a side effect of this plan.
+- **A genuine toolchain-identity probe validating a resolved compiler
+  binding's real family/version against a declared multibuild-variant
+  constraint** — `bundle_multibuild.variant_fingerprint` records the
+  *declared* toolchain facts (target, compiler family/version string,
+  standard, flags); it does not independently verify the resolved binary at
+  `compile.binding` actually matches them. That verification is already
+  tracked as its own gap (root `AGENTS.md`'s "Toolchain-profile compiler-
+  family rendering" entry, and G34 Phase A's toolchain-binding probe) and is
+  not duplicated here.

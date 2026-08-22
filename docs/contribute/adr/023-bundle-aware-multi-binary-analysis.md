@@ -28,6 +28,29 @@ rather than retconning the original text); treat "reuses `resolver.py`/
 `binder.py`" in that section as historical intent, not current fact. See
 [ADR-056](056-multi-artifact-library-set-scan.md) for the follow-on decision
 that surfaced this while scoping multi-artifact `scan`.
+**Amendment (2026-08-22):** an external review reproduced the bundle layer's
+core detection (case 1, intra-bundle removed symbol) end-to-end against a
+real oneDAL checkout and confirmed it works correctly from two live
+directories, but found four real, independent gaps this ADR did not scope:
+(1) `compare_bundle()` only ever reopens live `.so` files — there is no
+persisted `BundleFacts` a `dump`-produced bundle snapshot can carry, so a
+stored-baseline workflow (`scan --against`-style) cannot get a bundle-level
+verdict at all; (2) no multi-build-variant (CPU vs.
+`ONEDAL_DATA_PARALLEL`/SYCL) model exists for the bundle layer — a future
+caller comparing multiple build variants would have to invent variant
+pairing from scratch, and a naive union of variants would silently hide a
+break present in only one variant; (3) `bundle_intra_dep_signature_changed`
+correctly fires when DWARF/header evidence shows a real change, but there is
+no distinct finding for "the C-linkage import resolves by name and no
+evidence on either side confirms or denies a signature change" — that case
+today silently reads as compatible; (4) the finding taxonomy already keeps
+bundle-level kinds separate from public-surface `BREAKING_KINDS`
+(correctly — an internal, unconsumed export removal does not get bundle
+severity), but this distinction was undocumented, a recurring source of
+confusion when a public-surface-scoped policy doesn't suppress a
+`bundle_*` finding on an internal symbol. See
+[G38](../plans/g38-bundle-facts-model-and-multibuild-comparability.md) for
+the phased plan closing all four.
 **Decision maker:** Nikolay Petrov
 
 ---
