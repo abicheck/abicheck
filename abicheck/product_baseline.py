@@ -606,28 +606,28 @@ def pack_product_baseline(
     if output_rel is not None:
         paths = [p for p in paths if _relative_posix(p, source_path) != output_rel]
     empty_dirs = _discover_empty_dirs(source_path, paths)
-    # A scaffold directory we just created solely to hold OUTPUT doesn't
-    # count as real content for this check -- it always ends up empty
-    # once OUTPUT itself is excluded above, and an originally-empty
-    # SOURCE_DIR must still be rejected regardless of where OUTPUT was
-    # asked to go (see the mkdir call above for the full reasoning).
-    real_empty_dirs = [d for d in empty_dirs if d not in output_scaffold_dirs]
-    if not paths and not real_empty_dirs:
-        # The scaffold directories the mkdir() call above just created
-        # must not survive this rejection: they're still empty (nothing
-        # was ever packed), and leaving them behind would make an
-        # identical repeat call see them as already-existing -- silently
-        # different from the first call's own view of the world, since
-        # _scaffold_dirs_for_mkdir() only ever reports a directory that
-        # doesn't exist yet. Left uncleaned, a second identical `pack()`
-        # call would then treat that directory as real, pre-existing
-        # content and succeed with an otherwise-empty archive instead of
-        # reproducing the same rejection (Codex review, fresh evidence).
-        # Deepest-first, best-effort: still empty by construction (only
-        # this call created them, and nothing was packed), so an OSError
-        # here (a concurrent process, a permission change) is left as a
-        # secondary problem rather than masking the real "nothing to
-        # pack" error.
+
+    # The scaffold directories the mkdir() call above just created must not
+    # survive *any* failure path below that leaves them empty: an in-tree
+    # output parent created solely to hold OUTPUT never carries real source
+    # content by construction, so leaving one behind after a rejection would
+    # make an identical repeat call see it as already-existing -- silently
+    # different from the first call's own view of the world, since
+    # _scaffold_dirs_for_mkdir() only ever reports a directory that doesn't
+    # exist yet. Originally only wired into the empty-source rejection below
+    # (Codex review, fresh evidence) -- a *different* rejection further down
+    # (e.g. a reserved manifest-name collision) left the identical scaffold
+    # behind too, since only that one call site cleaned up; a retry after
+    # fixing the collision then treated the leftover scaffold as real,
+    # pre-existing content instead of reproducing an equivalent check
+    # (Codex review, fresh evidence, second round). Factored into one helper
+    # so every failure path after the mkdir() call — not just the one this
+    # was first noticed on — cleans up the same way: deepest-first,
+    # best-effort (still empty by construction whenever nothing was
+    # actually packed, so an OSError here — a concurrent process, a
+    # permission change — is left as a secondary problem rather than
+    # masking the real error).
+    def _cleanup_output_scaffold_dirs() -> None:
         for scaffold_dir in sorted(
             output_scaffold_dirs, key=lambda d: len(d.parts), reverse=True
         ):
@@ -635,6 +635,15 @@ def pack_product_baseline(
                 scaffold_dir.rmdir()
             except OSError:
                 pass
+
+    # A scaffold directory we just created solely to hold OUTPUT doesn't
+    # count as real content for this check -- it always ends up empty
+    # once OUTPUT itself is excluded above, and an originally-empty
+    # SOURCE_DIR must still be rejected regardless of where OUTPUT was
+    # asked to go (see the mkdir call above for the full reasoning).
+    real_empty_dirs = [d for d in empty_dirs if d not in output_scaffold_dirs]
+    if not paths and not real_empty_dirs:
+        _cleanup_output_scaffold_dirs()
         raise SnapshotError(
             f"no files found under {source_path} to pack into a product baseline"
         )
@@ -684,6 +693,7 @@ def pack_product_baseline(
             None,
         )
     if collision is not None:
+        _cleanup_output_scaffold_dirs()
         raise SnapshotError(
             f"{collision} collides with the reserved product baseline manifest "
             f"member name ({MANIFEST_MEMBER_NAME!r}) -- rename or remove it "
@@ -713,8 +723,15 @@ def pack_product_baseline(
         umask = os.umask(0)
         os.umask(umask)
         target_mode = 0o666 & ~umask
-    zstandard = _zstd_module()
-    cctx = zstandard.ZstdCompressor(level=zstd_level, write_checksum=True)
+    try:
+        zstandard = _zstd_module()
+        cctx = zstandard.ZstdCompressor(level=zstd_level, write_checksum=True)
+    except BaseException:
+        # Nothing has been written yet (no temp file exists at this
+        # point) -- the same best-effort scaffold cleanup as every other
+        # failure path after the mkdir() call above.
+        _cleanup_output_scaffold_dirs()
+        raise
     fd, tmp_name = tempfile.mkstemp(
         dir=str(output_path.parent), prefix=".abicheck-product-baseline-", suffix=".tmp"
     )
@@ -746,6 +763,11 @@ def pack_product_baseline(
             tmp_path.unlink(missing_ok=True)
         except OSError:  # pragma: no cover - best-effort cleanup
             pass
+        # The temp file above is unlinked first, so a scaffold directory
+        # that held nothing but it is empty again by the time this runs --
+        # safe to attempt the same best-effort cleanup every other failure
+        # path after the mkdir() call above already does.
+        _cleanup_output_scaffold_dirs()
         raise
     return manifest
 

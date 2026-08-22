@@ -585,6 +585,31 @@ class TestPackProductBaseline:
         # behind by the failed call, same as any other pack rejection.
         assert not (product / "newheaders").exists()
 
+    def test_pack_cleans_up_scaffold_after_manifest_collision_rejection(
+        self, tmp_path: Path
+    ) -> None:
+        # The scaffold-cleanup fix above was originally wired into only the
+        # empty-source rejection -- a *different* rejection reached after
+        # the same mkdir() (a real source entry colliding with the reserved
+        # manifest member name) left the identical scaffold directory
+        # behind, since only that one call site cleaned up (Codex review,
+        # fresh evidence). A retry after removing the colliding entry must
+        # succeed rather than seeing the leftover scaffold as pre-existing,
+        # real content.
+        from abicheck.product_baseline import MANIFEST_MEMBER_NAME
+
+        product = _make_product(tmp_path)
+        (product / MANIFEST_MEMBER_NAME).write_text("not a real manifest")
+        out = product / "artifacts" / "base.tar.zst"
+
+        with pytest.raises(SnapshotError, match="reserved product baseline manifest"):
+            pack_product_baseline(product, out)
+        assert not (product / "artifacts").exists()
+
+        (product / MANIFEST_MEMBER_NAME).unlink()
+        manifest = pack_product_baseline(product, out)
+        assert manifest.file_count > 0
+
     def test_pack_leaves_no_partial_output_on_failure(self, tmp_path: Path) -> None:
         product = _make_product(tmp_path)
         outside = tmp_path / "outside.so"
