@@ -492,7 +492,7 @@ table asks for.
 | `abicheck/serialization.py` | `save_bundle_facts`/`load_bundle_facts` (Phase 2) |
 | `abicheck/comparability.py` | Bundle-level fingerprint-mismatch refusal, mirroring the existing single-snapshot `ScopeMismatchError` (Phase 2); no change to single-snapshot behavior |
 | `abicheck/checker_policy.py` / `abicheck/change_registry.py` | `bundle_variant_coverage_regressed`, `bundle_intra_dep_signature_unverified` registry entries (Phases 3-4) |
-| `abicheck/cli.py` / `abicheck/cli_compare_release*.py` | New `dump-bundle DIR --bundle-facts-out <path>` command (or equivalent surface, see Phase 2's "Wiring" note on why `dump`/`compare` alone cannot host this); `compare --against <bundle facts>` wiring (Phase 2); whichever multibuild CLI surface Phase 3 needs — deferred to implementation time pending CLI-cleanup-phase-two's own convergence |
+| `abicheck/cli_compare_release*.py` | `--bundle-facts-out <path>` on the existing `compare` release fan-out (Phase 2's "Wiring" note — an additive output flag, not a new root command); `compare --against <bundle facts>` wiring (Phase 2); whichever multibuild CLI surface Phase 3 needs — deferred to implementation time pending CLI-cleanup-phase-two's own convergence |
 | `abicheck/reporter.py` / `abicheck/report_summary.py` | Render the two new finding shapes; extend `bundle.json`/`bundle.md` (Phases 3-4) |
 | `docs/reference/change-kinds.md` | Phase 1 taxonomy note; new-kind entries for Phases 3-4 |
 | `docs/contribute/adr/023-bundle-aware-multi-binary-analysis.md` | Amendment block linking to this plan (see below) |
@@ -508,9 +508,14 @@ table asks for.
   Phase 2's acceptance criterion, and the two new `ChangeKind`s' positive/
   negative cases.
 - New `tests/test_bundle_multibuild.py` — `variant_fingerprint` determinism
-  and sensitivity (two builds differing only in an ABI-irrelevant flag
-  fingerprint identically; two differing in `-std=`/a feature toggle
-  fingerprint differently), `pair_variants`' never-union guarantee as a
+  and sensitivity: two builds differing only in an ABI-irrelevant flag, or
+  only in `-std=`/build-derived defines, fingerprint **identically** (Phase
+  3's own point — that drift is corroborated-comparable build state, not
+  variant identity, so it must pair and let `cxx_standard_floor_raised`/
+  `abi_relevant_build_flag_changed` classify it); two builds differing in a
+  logical-identity coordinate (target triple, or a feature toggle like
+  `ONEDAL_DATA_PARALLEL`) fingerprint **differently**. `pair_variants`'
+  never-union guarantee as a
   Hypothesis property (mirroring this repo's existing "Primitive-level
   property tests" convention for a reusable merge/pairing primitive — see
   AGENTS.md's own guidance on why a primitive this shape needs a
