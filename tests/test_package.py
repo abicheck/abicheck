@@ -2803,6 +2803,9 @@ class TestRejectOversizedDeclaredContent:
             def getmembers(self) -> list[_FakeMember]:
                 return [_FakeMember("sparse.bin", 10**12)]
 
+            def __iter__(self):  # type: ignore[no-untyped-def]
+                return iter(self.getmembers())
+
         with pytest.raises(ExtractionSecurityError, match="safety limit"):
             _reject_oversized_declared_content(_FakeTarFile())  # type: ignore[arg-type]
 
@@ -2822,7 +2825,71 @@ class TestRejectOversizedDeclaredContent:
             def getmembers(self) -> list[_FakeMember]:
                 return [_FakeMember("a.bin", 100), _FakeMember("b.bin", 200)]
 
+            def __iter__(self):  # type: ignore[no-untyped-def]
+                return iter(self.getmembers())
+
         _reject_oversized_declared_content(_FakeTarFile())  # type: ignore[arg-type]
+
+    def test_rejects_when_member_count_exceeds_the_limit(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Millions of zero-length members never trip the byte-sum check at
+        # all, but each still costs a retained TarInfo object -- an
+        # independent, incrementally-checked count cap is what stops the
+        # loop from consuming the whole malicious archive (Codex).
+        from abicheck.package import _reject_oversized_declared_content
+
+        monkeypatch.setenv("_ABICHECK_TAR_ZST_MAX_MEMBERS", "3")
+
+        class _FakeMember:
+            def __init__(self, name: str, size: int) -> None:
+                self.name = name
+                self.size = size
+
+        class _CountingFakeTarFile:
+            """Raises if asked for more members than the cap should ever
+            need to read -- proves the loop stops early rather than merely
+            asserting on the final exception."""
+
+            def __init__(self, total: int) -> None:
+                self._total = total
+                self.yielded = 0
+
+            def __iter__(self):  # type: ignore[no-untyped-def]
+                for i in range(self._total):
+                    if self.yielded > 3 + 1:
+                        raise AssertionError(
+                            "iterated well past the member-count cap"
+                        )
+                    self.yielded += 1
+                    yield _FakeMember(f"m{i}.bin", 0)
+
+        fake = _CountingFakeTarFile(total=10_000)
+        with pytest.raises(ExtractionSecurityError, match="member safety limit"):
+            _reject_oversized_declared_content(fake)  # type: ignore[arg-type]
+        assert fake.yielded <= 4, "did not stop shortly after the cap"
+
+    def test_accepts_member_count_at_or_below_the_limit(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from abicheck.package import _reject_oversized_declared_content
+
+        monkeypatch.setenv("_ABICHECK_TAR_ZST_MAX_MEMBERS", "3")
+
+        class _FakeMember:
+            def __init__(self, name: str, size: int) -> None:
+                self.name = name
+                self.size = size
+
+        class _FakeTarFile:
+            def getmembers(self) -> list[_FakeMember]:
+                return [_FakeMember(f"m{i}.bin", 0) for i in range(3)]
+
+            def __iter__(self):  # type: ignore[no-untyped-def]
+                return iter(self.getmembers())
+
+        result = _reject_oversized_declared_content(_FakeTarFile())  # type: ignore[arg-type]
+        assert result is None  # doesn't raise -- exactly at the cap is accepted
 
     def test_gnu_sparse_member_declaring_huge_size_is_rejected(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

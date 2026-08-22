@@ -639,8 +639,11 @@ def _add_member(
     info.gname = ""
     # Mode too: an umask difference between two builders would otherwise produce
     # two archives from byte-identical content -- keep only the executable bit.
+    # Checked across all three permission classes (0o111), not just owner
+    # (0o100): a source file executable only for group/other (e.g. 0o055)
+    # would otherwise be silently normalized to non-executable (Codex).
     if not info.issym():
-        info.mode = 0o755 if info.mode & 0o100 else 0o644
+        info.mode = 0o755 if info.mode & 0o111 else 0o644
 
     if info.issym():
         target = info.linkname

@@ -312,6 +312,25 @@ class TestPackProductBaseline:
         pack_product_baseline(product_b, out_b)
         assert out_a.read_bytes() == out_b.read_bytes()
 
+    def test_pack_preserves_executable_bit_set_only_for_group_or_other(
+        self, tmp_path: Path
+    ) -> None:
+        # A file executable only for group/other (e.g. 0o055, no owner-exec
+        # bit) must still round-trip as executable -- checking only the
+        # owner bit (0o100) would silently normalize it to 0o644 (Codex).
+        product = _make_product(tmp_path)
+        target = product / "lib" / "libb.so"
+        target.chmod(0o055)
+        out = tmp_path / "b.tar.zst"
+        pack_product_baseline(product, out)
+        import zstandard
+
+        dctx = zstandard.ZstdDecompressor()
+        tar_bytes = dctx.decompress(out.read_bytes(), max_output_size=1 << 30)
+        with tarfile.open(fileobj=io.BytesIO(tar_bytes), mode="r") as tf:
+            member = tf.getmember("lib/libb.so")
+        assert member.mode == 0o755
+
     def test_pack_records_header_roots(self, tmp_path: Path) -> None:
         product = _make_product(tmp_path)
         manifest = pack_product_baseline(

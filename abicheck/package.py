@@ -140,16 +140,30 @@ def _reject_oversized_declared_content(tf: tarfile.TarFile) -> None:
     limit `_safe_extract_zst_tar` enforces on the decompressed tar
     *stream* -- a GNU/PAX sparse member's `TarInfo.size` is the real
     logical extent tarfile materializes even though the stream only
-    carries non-hole blocks (Codex)."""
+    carries non-hole blocks. Iterates `tf` directly (not `tf.getmembers()`,
+    which reads every header to EOF before returning anything) and also
+    caps the member *count*, so millions of zero-length members -- whose
+    declared sizes never trip the byte-sum check at all -- are rejected
+    before all of them are parsed into memory, not after (Codex, two
+    review rounds)."""
     max_bytes = _max_decompressed_tar_bytes()
+    max_members = _max_tar_members()
     total = 0
-    for member in tf.getmembers():
+    count = 0
+    for member in tf:
         total += member.size
+        count += 1
         if total > max_bytes:
             raise ExtractionSecurityError(
                 member.name,
                 f"archive declares more than the {max_bytes}-byte safety "
                 f"limit's worth of extracted content (override via {_MAX_DECOMPRESSED_TAR_BYTES_ENV})",
+            )
+        if count > max_members:
+            raise ExtractionSecurityError(
+                member.name,
+                f"archive declares more than the {max_members}-member safety "
+                f"limit's worth of entries (override via {_MAX_TAR_MEMBERS_ENV})",
             )
 
 
@@ -171,14 +185,7 @@ class PackageExtractor(Protocol):
 
 # ── Tar extractor ────────────────────────────────────────────────────────────
 
-#: Decompression-bomb defense for `.tar.zst` extraction (Codex review, fresh
-#: evidence): a tiny, highly compressible archive can otherwise fill the
-#: host/CI runner's disk via an unbounded `shutil.copyfileobj()` before any
-#: member is ever validated. Generous relative to `snapshot_io.py`'s 1 GiB
-#: single-snapshot limit (ADR-059) since this bounds a whole product
-#: archive's worth of shared libraries, not one snapshot payload.
-#: Overridable only via the private env var below, mirroring
-#: `snapshot_io.py`'s identical override mechanism.
+#: Decompression-bomb defense for `.tar.zst` extraction (Codex review, fresh evidence): a tiny, highly compressible archive can otherwise fill the host/CI runner's disk via an unbounded `shutil.copyfileobj()` before any member is ever validated. Generous relative to `snapshot_io.py`'s 1 GiB single-snapshot limit (ADR-059) since this bounds a whole product archive's worth of shared libraries, not one snapshot payload. Overridable only via the private env var below, mirroring `snapshot_io.py`'s identical override mechanism.
 DEFAULT_MAX_DECOMPRESSED_TAR_BYTES = 8 * 1024 * 1024 * 1024  # 8 GiB
 _MAX_DECOMPRESSED_TAR_BYTES_ENV = "_ABICHECK_TAR_ZST_MAX_DECODED_BYTES"
 
@@ -193,31 +200,30 @@ def _max_decompressed_tar_bytes() -> int:
     return DEFAULT_MAX_DECOMPRESSED_TAR_BYTES
 
 
-#: The `zstd` CLI's own `--memory=` window-size bound (used only by the
-#: external-binary fallback below) rejects any value above 2048 MiB as
-#: "out of bound" (verified against a real `zstd` 1.5.5 binary) --
-#: independent of, and much smaller than, DEFAULT_MAX_DECOMPRESSED_TAR_BYTES
-#: above, which bounds total decoded *output* size via this module's own
-#: streaming byte count, not the decoder's working-memory window. Mirrors
-#: snapshot_io.py's identical `_ZSTD_MAX_WINDOW_LOG = 31` ceiling for the
-#: zstandard-module decoder path.
+#: Independent of the byte-sum limit above -- millions of zero-length
+#: members never trip a size check at all, but each still costs a retained
+#: TarInfo object (Codex). Generous for any real archive.
+DEFAULT_MAX_TAR_MEMBERS = 200_000
+_MAX_TAR_MEMBERS_ENV = "_ABICHECK_TAR_ZST_MAX_MEMBERS"
+
+
+def _max_tar_members() -> int:
+    override = os.environ.get(_MAX_TAR_MEMBERS_ENV)
+    if override:
+        try:
+            return int(override)
+        except ValueError:
+            pass
+    return DEFAULT_MAX_TAR_MEMBERS
+
+
+#: The `zstd` CLI's own `--memory=` window-size bound (used only by the external-binary fallback below) rejects any value above 2048 MiB as "out of bound" (verified against a real `zstd` 1.5.5 binary) -- independent of, and much smaller than, DEFAULT_MAX_DECOMPRESSED_TAR_BYTES above, which bounds total decoded *output* size via this module's own streaming byte count, not the decoder's working-memory window. Mirrors snapshot_io.py's identical `_ZSTD_MAX_WINDOW_LOG = 31` ceiling for the zstandard-module decoder path.
 _ZSTD_CLI_MAX_MEMORY_MB = 2048
 
-#: Overall wall-clock deadline for the external `zstd` CLI fallback,
-#: covering both the streamed decode loop and the final wait/communicate
-#: calls -- matches what the pre-streaming `subprocess.run(...,
-#: timeout=120)` call enforced, so a stalled/hung process still can't
-#: block extraction indefinitely (Codex review, fresh evidence).
+#: Overall wall-clock deadline for the external `zstd` CLI fallback, covering both the streamed decode loop and the final wait/communicate calls -- matches what the pre-streaming `subprocess.run(..., timeout=120)` call enforced, so a stalled/hung process still can't block extraction indefinitely (Codex review, fresh evidence).
 _ZSTD_CLI_TIMEOUT_S = 120
 
-#: Bound on the reader-thread-to-main-thread chunk queue in the external
-#: `zstd` CLI fallback (each chunk is at most 1 MiB). Keeps the reader
-#: thread from racing arbitrarily far ahead of the main thread's own
-#: decompression-bomb size check -- an unbounded queue could otherwise
-#: buffer gigabytes of already-decoded data before total_bytes is ever
-#: compared against the limit (Codex review, fresh evidence). A small
-#: bound still allows real streaming throughput while keeping the
-#: in-memory decoded backlog to a fixed, small multiple of the chunk size.
+#: Bound on the reader-thread-to-main-thread chunk queue in the external `zstd` CLI fallback (each chunk is at most 1 MiB). Keeps the reader thread from racing arbitrarily far ahead of the main thread's own decompression-bomb size check -- an unbounded queue could otherwise buffer gigabytes of already-decoded data before total_bytes is ever compared against the limit (Codex review, fresh evidence). A small bound still allows real streaming throughput while keeping the in-memory decoded backlog to a fixed, small multiple of the chunk size.
 _ZSTD_READER_QUEUE_MAXSIZE = 8
 
 
@@ -1077,14 +1083,7 @@ def _implementation_version_from_wheel_filename(filename: str) -> str | None:
     return _python_full_version_from_wheel_filename(filename)
 
 
-#: Wheel Python-tag implementation abbreviation -> PEP 508 marker value, in
-#: each of the two marker spellings (``implementation_name`` uses
-#: ``sys.implementation.name``'s lowercase spelling;
-#: ``platform_python_implementation`` uses ``platform.python_implementation()``'s
-#: capitalized spelling). The generic ``py`` abbreviation is deliberately
-#: absent from both maps -- it's an implementation-agnostic tag (a
-#: pure-Python wheel meant to run under CPython, PyPy, or anything else),
-#: so it makes no implementation promise at all to derive.
+#: Wheel Python-tag implementation abbreviation -> PEP 508 marker value, in each of the two marker spellings (``implementation_name`` uses ``sys.implementation.name``'s lowercase spelling; ``platform_python_implementation`` uses ``platform.python_implementation()``'s capitalized spelling). The generic ``py`` abbreviation is deliberately absent from both maps -- it's an implementation-agnostic tag (a pure-Python wheel meant to run under CPython, PyPy, or anything else), so it makes no implementation promise at all to derive.
 _WHEEL_IMPLEMENTATION_NAMES = {
     "cp": "cpython",
     "pp": "pypy",
