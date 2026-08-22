@@ -87,7 +87,6 @@ topics:
       - abicheck/buildsource/baseline_set.py
       - abicheck/buildsource/baseline_publish.py
       - abicheck/product_baseline.py
-      - abicheck/cli_project.py
       - actions/baseline/action.yml
       - actions/baseline/build_manifest.py
       - actions/resolve-baseline/action.yml

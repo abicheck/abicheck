@@ -316,48 +316,6 @@ Dump ABI snapshot of a shared library to JSON.
 
 Advanced multi-target project integration (ADR-047).
 
-### `project baseline`
-
-Pack/unpack a whole-product baseline archive (see :mod:`abicheck.product_baseline`).
-
-#### `project baseline pack`
-
-Pack SOURCE_DIR (a product's whole library directory) into one deterministic OUTPUT ``.tar.zst`` product baseline archive.
-
-**Arguments**
-
-| Name | Required | Description |
-|---|:--:|---|
-| `source_dir` | yes |  |
-| `output` | yes |  |
-
-**Options**
-
-| Option | Required | Default | Description |
-|---|:--:|---|---|
-| `--product` | no | `` | Product name recorded in the archive's manifest (informational). |
-| `--header-root` | no | — | A public-header directory, relative to SOURCE\_DIR — recorded in the manifest so a later `compare -H` against the unpacked archive doesn't have to rediscover it. Repeatable; must exist under SOURCE\_DIR. |
-| `--verbose`, `-v` | no | `False` | Enable verbose/debug output. |
-
-#### `project baseline unpack`
-
-Extract ARCHIVE (as written by ``project baseline pack``) into DEST_DIR, and report its manifest.
-
-**Arguments**
-
-| Name | Required | Description |
-|---|:--:|---|
-| `archive` | yes |  |
-| `dest_dir` | yes |  |
-
-**Options**
-
-| Option | Required | Default | Description |
-|---|:--:|---|---|
-| `--format` | no | `text` | Output format for the unpacked manifest summary. Choices: `text`, `json`. |
-| `--output`, `-o` | no | — | Write output to this path (default: stdout). |
-| `--verbose`, `-v` | no | `False` | Enable verbose/debug output. |
-
 ### `project plan`
 
 Generate run-plan.json from CONFIG's targets:/bundles:/profiles: block.
