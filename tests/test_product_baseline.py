@@ -114,6 +114,40 @@ def _rewrite_archive_member(
     return tampered_archive
 
 
+def _add_symlink_loop_member(tmp_path: Path, archive: Path, name: str) -> Path:
+    """Add a new, self-referential symlink member (*name* -> *name*) to
+    *archive*, keeping every existing member as-is -- for tests exercising
+    unpack's handling of an untrusted archive containing a genuine
+    symlink loop, which a real pack_product_baseline() call could never
+    produce."""
+    import zstandard
+
+    raw = archive.read_bytes()
+    dctx = zstandard.ZstdDecompressor()
+    tar_bytes = dctx.decompress(raw, max_output_size=1 << 30)
+    rewritten = tmp_path / f"{archive.stem}-rewritten.tar"
+    with (
+        tarfile.open(fileobj=io.BytesIO(tar_bytes), mode="r") as src,
+        tarfile.open(rewritten, mode="w") as dst,
+    ):
+        for member in src.getmembers():
+            fh = src.extractfile(member)
+            dst.addfile(member, fh)
+        loop_info = tarfile.TarInfo(name=name)
+        loop_info.type = tarfile.SYMTYPE
+        loop_info.linkname = name
+        dst.addfile(loop_info)
+
+    bad_archive = tmp_path / f"{archive.stem}-loop.tar.zst"
+    cctx = zstandard.ZstdCompressor()
+    with (
+        open(rewritten, "rb") as in_fh,
+        open(bad_archive, "wb") as out_fh,
+    ):
+        cctx.copy_stream(in_fh, out_fh)
+    return bad_archive
+
+
 def _make_product(root: Path) -> Path:
     product = root / "product"
     (product / "lib").mkdir(parents=True)
@@ -1007,6 +1041,46 @@ class TestUnpackProductBaseline:
         dest = tmp_path / "dest"
         with pytest.raises(SnapshotError, match="never declared"):
             unpack_product_baseline(tampered, dest)
+        assert not dest.exists()
+
+    def test_unpack_translates_a_symlink_loop_into_snapshot_error(
+        self, tmp_path: Path
+    ) -> None:
+        # A self-referential symlink under an untrusted extracted tree
+        # made Path.resolve() raise RuntimeError from inside
+        # _resolve_under_root() -- unpack_product_baseline() cleaned
+        # staging but re-raised that raw exception, bypassing its own
+        # documented SnapshotError-only contract (Codex review, fresh
+        # evidence).
+        product = _make_product(tmp_path)
+        archive = tmp_path / "baseline.tar.zst"
+        pack_product_baseline(product, archive)
+
+        payload = (
+            json.dumps(
+                {
+                    "schema": PRODUCT_BASELINE_SCHEMA,
+                    "product": "",
+                    "libraries": [
+                        {
+                            "name": "loop.so",
+                            "path": "loop",
+                            "sha256": "ab" * 32,
+                            "size": 1,
+                        }
+                    ],
+                    "header_roots": [],
+                    "file_count": 1,
+                }
+            ).encode("utf-8")
+            + b"\n"
+        )
+        looped = _rewrite_manifest_member(tmp_path, archive, payload)
+        looped = _add_symlink_loop_member(tmp_path, looped, "loop")
+
+        dest = tmp_path / "dest"
+        with pytest.raises(SnapshotError, match="invalid library path"):
+            unpack_product_baseline(looped, dest)
         assert not dest.exists()
 
     def test_unpack_leaves_no_staging_directory_behind_on_failure(

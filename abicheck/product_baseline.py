@@ -366,8 +366,16 @@ def _resolve_under_root(root: Path, rel: str) -> Path | None:
     """Resolve *rel* under *root*, refusing an absolute path or an escape."""
     if Path(rel).is_absolute():
         return None
-    candidate = (root / rel).resolve()
-    root_resolved = root.resolve()
+    try:
+        candidate = (root / rel).resolve()
+        root_resolved = root.resolve()
+    except RuntimeError:
+        # A self-referential symlink loop makes Path.resolve() raise
+        # RuntimeError instead of returning a value -- pathlib's own loop
+        # detection can fire unconditionally (Codex review, fresh
+        # evidence). Callers expect a clean None, not an uncaught
+        # exception.
+        return None
     if candidate != root_resolved and not candidate.is_relative_to(root_resolved):
         return None
     return root / rel
@@ -1738,32 +1746,37 @@ def compare_product_directories(
                 )
             if candidate.is_dir():
                 resolved.append(candidate)
-            # A well-formed root that simply doesn't exist (or isn't a
-            # directory) for this library is tolerated -- the library
-            # legitimately ships no public headers here, matching this
-            # function's own docstring.
+            # A well-formed root that just doesn't exist is tolerated --
+            # the library ships no public headers here.
         return resolved
 
     exact_matches = sorted(set(old_map) & set(new_map))
-    # (old_key, old_path, new_key, new_path) -- both sides' own discovered
+    # (old_key, old_path, new_key, new_path) -- both sides' discovered
     # identity is kept alongside the path so per-library header roots
-    # resolve against the identity the *caller* observed (via
-    # _discover_library_map's own return value), not a shared/canonical
-    # one that may not exist for a canonical-fallback pair below.
+    # resolve against the identity the caller observed, not a
+    # shared/canonical one that may not exist for a fallback pair below.
     pairs: list[tuple[str, Path, str, Path]] = [
         (k, old_map[k], k, new_map[k]) for k in exact_matches
     ]
 
     # Canonical (SONAME-major-stripped) fallback for the libraries exact
-    # matching left unpaired -- keyed by canonical name, dropped entirely
-    # (not just left as one candidate) the moment a second contributor
-    # appears anywhere in the *complete* per-side discovery, so an exact
-    # match consuming one member of an ambiguous group never makes the
-    # remaining members look artificially unambiguous.
-    def _canonical_groups(discovered: dict[str, Path]) -> dict[str, list[str]]:
-        groups: dict[str, list[str]] = {}
+    # matching left unpaired -- keyed by (relative directory, canonical
+    # name), dropped entirely once a second contributor appears anywhere
+    # in that *same directory's* per-side discovery. Directory-scoped
+    # rather than a bare global canonical key: two independent libraries
+    # sharing a basename in different directories (plugins/a/libfoo.so.1,
+    # plugins/b/libfoo.so.1) that each bump their SONAME major used to
+    # land in one shared, cross-directory bucket -- ambiguous on both
+    # sides, so neither pair was ever compared even though each pairing
+    # is unambiguous once directory is considered (Codex review, fresh
+    # evidence). The discovery key is already a relative path.
+    def _canonical_groups(
+        discovered: dict[str, Path],
+    ) -> dict[tuple[str, str], list[str]]:
+        groups: dict[tuple[str, str], list[str]] = {}
         for key, path in discovered.items():
-            groups.setdefault(_canonical_library_key(path), []).append(key)
+            rel_dir = key.rsplit("/", 1)[0] if "/" in key else ""
+            groups.setdefault((rel_dir, _canonical_library_key(path)), []).append(key)
         return groups
 
     old_canonical = _canonical_groups(old_map)
@@ -1793,24 +1806,14 @@ def compare_product_directories(
             frontend=frontend,
             policy=policy,
         )
-        # run_compare()'s DiffResult.library is always stamped from the
-        # *old* side's bare filename (checker.py: `library=old.library`,
-        # itself `so_path.name` from the path handed to dump()) -- for an
-        # exact-path pair that's also the new side's own filename, but for
-        # a canonical-fallback pair (SONAME/dylib-version bump, e.g.
-        # libfoo.so.1 -> libfoo.so.2) it is not. compare_bundle() indexes
-        # per_library_results by `Path(result.library).name` and then, in
-        # _detect_intra_type_changed()/_detect_intra_dep_signature_changed()/
-        # _detect_provider_changed(), excludes that same key from its own
-        # sibling/consumer scan over `new.metadata` -- which is keyed by
-        # each library's *new*-side bare filename (see new_bundle_map
-        # below). Left as old.library, the provider's own new binary
-        # (libfoo.so.2) would never match "libfoo.so.1" and so would never
-        # be excluded from that scan, letting a provider be reported as a
-        # cross-DSO consumer of its own type/symbol change (Codex review,
-        # fresh evidence). Stamping the new side's identity here keeps
-        # every downstream `new.metadata`-keyed lookup consistent with what
-        # this function actually paired.
+        # DiffResult.library is always the *old* side's bare filename,
+        # which for a canonical-fallback pair (SONAME/dylib bump) isn't
+        # the new side's own filename. compare_bundle()'s consumer/
+        # provider detectors key off new.metadata's new-side bare
+        # filename and exclude a provider from its own scan by that key
+        # -- left as old.library, the provider's new binary would never
+        # match and would falsely read as a consumer of its own change
+        # (Codex review, fresh evidence). Stamp the new side's identity.
         result.diff.library = new_path.name
         per_library_results.append(result.diff)
 
@@ -1829,19 +1832,17 @@ def compare_product_directories(
     # PE case-fold -- or a discovery-dedup representative mismatch, e.g. a
     # dev symlink `libfoo.so -> libfoo.so.1` present only on one side) can
     # have two different bare filenames even though `pairs` above already
-    # determined it's one library. old_bundle_map/new_bundle_map are keyed
-    # by bare filename independently of `pairs`, so left alone they'd
-    # register that one library under two different keys and
-    # compare_bundle() reports a spurious removal+addition (or BREAKING,
-    # if a sibling imports it) for a library that never changed (Codex
-    # review, fresh evidence). Normalize the old side's key to the new
-    # side's bare filename -- matching the DiffResult.library convention
-    # above. Only rekey when old_path actually survived old_bundle_map's
-    # own last-wins collapse (matching `_is_bundle_collapse_survivor`
-    # below), and only when the destination slot isn't already occupied
-    # by a *different* old-side library -- otherwise the rekey would
-    # silently evict that unrelated library from old_snapshot entirely
-    # (CodeRabbit review, fresh evidence).
+    # determined it's one library. Left alone, old/new_bundle_map (keyed
+    # by bare filename) would register that one library under two keys
+    # and compare_bundle() would report a spurious removal+addition (or
+    # BREAKING, if a sibling imports it) for a library that never changed
+    # (Codex review, fresh evidence). Normalize the old side's key to the
+    # new side's bare filename, matching the DiffResult.library
+    # convention above -- but only when old_path survived
+    # old_bundle_map's own last-wins collapse, and only when the
+    # destination slot isn't already occupied by a *different* old-side
+    # library, or the rekey would silently evict it (CodeRabbit review,
+    # fresh evidence).
     for _old_key, old_path, _new_key, new_path in pairs:
         if old_path.name == new_path.name:
             continue

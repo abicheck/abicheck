@@ -216,6 +216,46 @@ class TestCompareProductDirectoriesCanonicalFallbackAndPolicy:
 
         assert run_compare_calls == []
 
+    def test_canonical_fallback_is_scoped_per_directory_not_globally(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Two independent libraries sharing a basename in different
+        # directories (an ordinary plugin-host layout) that each bump
+        # their own SONAME major must each pair with their own directory's
+        # counterpart -- a bare, global canonical key would put both
+        # old-side and both new-side candidates in one shared bucket,
+        # read that bucket as ambiguous (len != 1) on both sides, and
+        # silently leave both pairs unmatched (Codex review, fresh
+        # evidence).
+        from abicheck.product_baseline import compare_product_directories
+
+        old_dir = tmp_path / "old"
+        new_dir = tmp_path / "new"
+        (old_dir / "plugins" / "a").mkdir(parents=True)
+        (old_dir / "plugins" / "b").mkdir(parents=True)
+        (new_dir / "plugins" / "a").mkdir(parents=True)
+        (new_dir / "plugins" / "b").mkdir(parents=True)
+        (old_dir / "plugins" / "a" / "libfoo.so.1").write_bytes(b"OLDA")
+        (old_dir / "plugins" / "b" / "libfoo.so.1").write_bytes(b"OLDB")
+        (new_dir / "plugins" / "a" / "libfoo.so.2").write_bytes(b"NEWA")
+        (new_dir / "plugins" / "b" / "libfoo.so.2").write_bytes(b"NEWB")
+
+        run_compare_calls, _ = self._capture_calls(monkeypatch)
+        compare_product_directories(old_dir, new_dir)
+
+        assert len(run_compare_calls) == 2
+        pairs = {(call["old"], call["new"]) for call in run_compare_calls}
+        assert pairs == {
+            (
+                old_dir / "plugins" / "a" / "libfoo.so.1",
+                new_dir / "plugins" / "a" / "libfoo.so.2",
+            ),
+            (
+                old_dir / "plugins" / "b" / "libfoo.so.1",
+                new_dir / "plugins" / "b" / "libfoo.so.2",
+            ),
+        }
+
     def test_exact_path_match_is_not_reconsidered_by_the_canonical_fallback(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
