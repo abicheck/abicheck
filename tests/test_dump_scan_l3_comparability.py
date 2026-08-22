@@ -183,18 +183,34 @@ _CROSSCHECK_HEADINGS = (
     "ABI-hygiene catalog (intra-version, advisory)",
 )
 
+#: The remaining two advisory blocks (``render_pattern_lines``/
+#: ``render_preprocessor_lines``) with the identical shape as crosscheck
+#: above: each is rendered only when its own source has something to
+#: report, entirely independent of ``diff``/``crosscheck``. Closed
+#: proactively alongside the crosscheck fix rather than waiting for a
+#: fifth review round to name each one individually -- the three
+#: advisory blocks are ``ScanOutcome``'s complete, enumerable set (see
+#: ``cli_scan_helpers.py``'s own ``render_*_lines`` functions), so this is
+#: the general fix ("no advisory finding of any kind"), not another
+#: one-off patch.
+_ADVISORY_HEADINGS = _CROSSCHECK_HEADINGS + (
+    "Pattern pre-scan facts (advisory)",
+    "Preprocessor pre-scan facts (S2, advisory)",
+)
+
 
 def _is_known_l4_extractor_divergence_text(output: str) -> bool:
     """Text-output variant: the verdict must be ``COMPATIBLE_WITH_RISK``,
     the counts line must read exactly ``breaking=0 api_break=0 risk=2
     compatible=0``, the multiset of ``[risk] <kind>:`` lines must equal
-    exactly the known two-kind, one-each multiset, and no cross-check
-    finding may be present -- no more, no fewer, no duplicates, and no
+    exactly the known two-kind, one-each multiset, and none of the three
+    advisory blocks (cross-check, pattern, preprocessor) may have
+    anything to report -- no more, no fewer, no duplicates, and no
     unrelated finding hiding in a bucket this module doesn't otherwise
     inspect."""
     if "COMPATIBLE_WITH_RISK" not in output:
         return False
-    if any(heading in output for heading in _CROSSCHECK_HEADINGS):
+    if any(heading in output for heading in _ADVISORY_HEADINGS):
         return False
     counts_match = _COUNTS_LINE_RE.search(output)
     if (
@@ -213,20 +229,24 @@ def _is_known_l4_extractor_divergence_report(report: dict) -> bool:
     the diff summary's ``breaking``/``api_break``/``risk``/``compatible``
     counts must read exactly ``0``/``0``/``2``/``0``, the multiset of
     finding kinds must equal exactly the known two-kind, one-each
-    multiset, and no cross-check finding may be present -- no more, no
+    multiset, and none of the three advisory blocks (cross-check,
+    pattern, preprocessor) may have anything to report -- no more, no
     fewer, no duplicates, and no unrelated finding hiding in a bucket this
     module doesn't otherwise inspect.
 
-    Two buckets live entirely outside ``report["diff"]`` and must be
+    Several buckets live entirely outside ``report["diff"]`` and must be
     checked separately: an unrelated *compatible*-category finding
     (Codex review, round 3 -- itemized under ``diff.additions``/
     ``diff.quality``, which the ``verdict``/``findings`` fields alone
     never reflect, so only the aggregate ``compatible`` count above can
-    see it) and an unrelated cross-check finding (Codex review, round 4 --
-    ``ScanOutcome.crosscheck``/``crosscheck_severities`` are a wholly
-    separate, always-on block from the baseline ``diff``, non-empty
-    ``report["crosscheck"]["counts_by_check"]`` only when a cross-source
-    check actually fired).
+    see it) and the three advisory blocks (Codex review, round 4 named
+    cross-check specifically; pattern/preprocessor closed proactively
+    alongside it, same shape, same reasoning -- each is a wholly separate,
+    always-on ``ScanOutcome`` field the ``verdict``/``diff`` never
+    reflect, non-empty only when that source actually found something:
+    ``report["crosscheck"]["counts_by_check"]``,
+    ``report["pattern_scan"]["counts_by_kind"]``, and
+    ``report["preprocessor_scan"]["divergences"/"leaks"]``).
 
     ``scan --format json``'s ``ScanOutcome.to_dict()`` has no top-level
     ``changes`` array (that's ``compare``'s report shape) -- its baseline
@@ -240,6 +260,11 @@ def _is_known_l4_extractor_divergence_report(report: dict) -> bool:
     if report.get("verdict") != "COMPATIBLE_WITH_RISK":
         return False
     if (report.get("crosscheck") or {}).get("counts_by_check"):
+        return False
+    if (report.get("pattern_scan") or {}).get("counts_by_kind"):
+        return False
+    preprocessor_scan = report.get("preprocessor_scan") or {}
+    if preprocessor_scan.get("divergences") or preprocessor_scan.get("leaks"):
         return False
     diff = report.get("diff") or {}
     totals = (
