@@ -976,6 +976,39 @@ class TestUnpackProductBaseline:
             unpack_product_baseline(tampered, dest)
         assert not dest.exists()
 
+    def test_unpack_rejects_an_extracted_library_with_no_manifest_entry(
+        self, tmp_path: Path
+    ) -> None:
+        # The per-library checksum verification above only examines
+        # entries the manifest itself declares -- an attacker who can edit
+        # the manifest could simply omit a LibraryEntry entirely (rather
+        # than tampering with its size/sha256, which the earlier fixes
+        # already close), so the corresponding extracted library file is
+        # never verified at all and gets published under a manifest that
+        # falsely claims it doesn't exist (Codex review, fresh evidence).
+        product = _make_product(tmp_path)
+        archive = tmp_path / "baseline.tar.zst"
+        pack_product_baseline(product, archive)
+
+        import zstandard
+
+        dctx = zstandard.ZstdDecompressor()
+        tar_bytes = dctx.decompress(archive.read_bytes(), max_output_size=1 << 30)
+        with tarfile.open(fileobj=io.BytesIO(tar_bytes), mode="r") as tf:
+            manifest_fh = tf.extractfile(MANIFEST_MEMBER_NAME)
+            assert manifest_fh is not None
+            manifest_raw = json.loads(manifest_fh.read())
+        manifest_raw["libraries"] = [
+            lib for lib in manifest_raw["libraries"] if lib["path"] != "lib/libb.so"
+        ]
+        payload = json.dumps(manifest_raw).encode("utf-8") + b"\n"
+        tampered = _rewrite_manifest_member(tmp_path, archive, payload)
+
+        dest = tmp_path / "dest"
+        with pytest.raises(SnapshotError, match="never declared"):
+            unpack_product_baseline(tampered, dest)
+        assert not dest.exists()
+
     def test_unpack_leaves_no_staging_directory_behind_on_failure(
         self, tmp_path: Path
     ) -> None:

@@ -249,24 +249,17 @@ def _is_library_path(path: Path) -> bool:
     )
     if not is_library:
         return False
-    # A GNU ld INPUT()/GROUP() linker script (the conventional
-    # `libfoo.so -> INPUT(libfoo.so.1)` SDK-install pattern) is library-
-    # suffix-named but carries no binary content of its own. `_discover_
-    # library_map` already excludes it via this same check, applied
-    # separately at its own call site -- but `_add_member` (the packing
-    # path) called this predicate directly with no equivalent exclusion,
-    # so a linker script was archived under a library-suffixed name AND
-    # classified as its own `LibraryEntry`, while `_discover_library_map`/
-    # `compare_product_directories` excluded it -- packing and comparison
-    # ended up with contradictory inventories for the identical tree
-    # (Codex review, fresh evidence). Centralizing the exclusion in this
-    # one shared predicate is exactly what this function's own docstring
-    # already promises ("Factored into one predicate so discovery and
-    # manifest classification can never drift apart on this question
-    # again") -- it just hadn't actually happened for this specific check
-    # yet. `resolve_linker_script` itself guards against misclassifying a
-    # real binary whose content happens to contain linker-script-shaped
-    # text (see its own docstring) -- no need to duplicate that check here.
+    # A GNU ld INPUT()/GROUP() linker script (`libfoo.so -> INPUT(libfoo.
+    # so.1)`) is library-suffix-named but carries no binary content.
+    # `_discover_library_map` already excluded it separately -- but
+    # `_add_member` (packing) called this predicate directly with no
+    # equivalent exclusion, so packing and comparison ended up with
+    # contradictory inventories for the identical tree (Codex review,
+    # fresh evidence). Centralized here, matching this function's own
+    # "one predicate, no drift" docstring promise. `resolve_linker_script`
+    # itself guards against misclassifying real binary content whose
+    # bytes happen to contain linker-script-shaped text (see its own
+    # docstring) -- no need to duplicate that check here.
     _, is_linker_script = resolve_linker_script(path)
     return not is_linker_script
 
@@ -744,26 +737,23 @@ def pack_product_baseline(
     # under a not-yet-existing subdirectory).
     # Two, layered aliasing concerns, resolved once and reused below for
     # both the scaffold-dir computation and the output-exclusion logic:
-    #  - if OUTPUT itself is a symlink (e.g. left over from a prior run
-    #    pointing somewhere else), it must be handled by its own lexical
-    #    name, not by whatever it points to -- resolving OUTPUT's own leaf
-    #    would follow it to its *target*'s path (Codex review, fresh
-    #    evidence).
-    #  - if SOURCE_DIR itself is a symlink alias (e.g. `pack /tmp/src-link
+    #  - if OUTPUT itself is a symlink, it must be handled by its own
+    #    lexical name, not by whatever it points to -- resolving OUTPUT's
+    #    own leaf would follow it to its *target*'s path (Codex review,
+    #    fresh evidence).
+    #  - if SOURCE_DIR itself is a symlink alias (`pack /tmp/src-link
     #    OUTPUT` where `/tmp/src-link -> /tmp/src`) and OUTPUT is spelled
     #    through the real, non-aliased directory, a purely lexical
-    #    (os.path.abspath()) comparison never shares a common prefix with
-    #    SOURCE_DIR's own alias path, so relative_to() always raises and
-    #    nothing is recognized as being inside SOURCE_DIR at all (Codex
-    #    review, fresh evidence, distinct from the leaf-symlink case
-    #    above). This bit the scaffold-dir computation specifically too:
-    #    _scaffold_dirs_for_mkdir(source_path, output_path.parent) below
-    #    used to receive the *un-resolved* pair, so its own containment
-    #    check silently returned an empty set for this exact alias
-    #    mismatch -- the freshly-created output-only directory chain then
-    #    read as genuine pre-existing content, letting an otherwise-empty
-    #    SOURCE_DIR bypass the "nothing to pack" rejection entirely
-    #    (Codex review, fresh evidence, second round).
+    #    comparison never shares a common prefix with SOURCE_DIR's own
+    #    alias path, so nothing is recognized as being inside SOURCE_DIR
+    #    at all (Codex review, fresh evidence, distinct from the leaf-
+    #    symlink case above). This bit the scaffold-dir computation too:
+    #    it used to receive the *un-resolved* pair, so its own containment
+    #    check silently returned an empty set for this exact mismatch --
+    #    the freshly-created output-only directory then read as genuine
+    #    pre-existing content, letting an otherwise-empty SOURCE_DIR
+    #    bypass the "nothing to pack" rejection (Codex review, fresh
+    #    evidence, second round).
     # Resolving *only* OUTPUT's parent (and SOURCE_DIR in full) sees
     # through a directory-level alias for containment purposes, while
     # OUTPUT's own final path component stays lexical -- exactly the
@@ -780,11 +770,10 @@ def pack_product_baseline(
         output_rel = None
 
     # _scaffold_dirs_for_mkdir()/_discover_empty_dirs() below both need a
-    # `leaf_parent`/root spelled *lexically* relative to `source_path` (the
-    # same, possibly-aliased spelling `paths`/`empty_dirs` themselves use),
-    # not the resolved `output_parent_real` -- so the alias is translated
-    # back into source_path's own spelling rather than switching the whole
-    # computation over to resolved paths.
+    # `leaf_parent`/root spelled *lexically* relative to `source_path`
+    # (the same spelling `paths`/`empty_dirs` themselves use), not the
+    # resolved `output_parent_real` -- so the alias is translated back
+    # into source_path's own spelling instead.
     if output_rel is not None:
         output_rel_parent = os.path.dirname(output_rel)
         leaf_parent_lexical = (
@@ -1159,36 +1148,26 @@ def unpack_product_baseline(
                     "root, or is not an existing file)"
                 )
             # This check only confirmed the path *exists*, not that its
-            # bytes are what the manifest claims -- a stale or tampered
-            # archive whose actual library content no longer matches its
-            # own recorded size/sha256 (e.g. a truncated libfoo.so with
-            # the original, larger values still on the manifest) would
-            # otherwise be published unverified, and a later product
-            # comparison would silently analyze corrupted content instead
-            # of failing here where the problem can be named (Codex
-            # review, fresh evidence). Mirrors pack_product_baseline()'s
-            # own hashing (`_add_member`) -- read once, in chunks, not
-            # loaded whole into memory.
+            # bytes are what the manifest claims -- a stale/tampered
+            # archive (e.g. a truncated libfoo.so with the original,
+            # larger size/sha256 still on the manifest) would otherwise
+            # publish unverified, and a later comparison would silently
+            # analyze corrupted content (Codex review, fresh evidence).
+            # Mirrors pack_product_baseline()'s own hashing (`_add_member`)
+            # -- read once, in chunks, not loaded whole into memory.
             #
-            # Size is compared unconditionally, never skipped for a 0
-            # value: pack_product_baseline() always records a real size
-            # for every LibraryEntry it writes, so a genuine 0 here can
-            # only mean either a hand-crafted manifest with nothing to
-            # compare (in which case there's no size the extracted file
-            # could plausibly disagree with, since real shared libraries
-            # are never 0 bytes) or an adversarial one that zeroed the
-            # field specifically to bypass this exact check -- unlike
-            # this codebase's usual "don't abort on missing, only on
-            # wrong" defensive-parsing convention, a value this check's
-            # own security purpose depends on must not be skippable by
-            # simply omitting it (Codex review, fresh evidence: an
-            # earlier revision's `if lib.size and ...`/`if lib.sha256:`
-            # truthiness guards let an attacker who can edit the manifest
-            # trivially disable verification by zeroing/blanking the
-            # very fields it checks). sha256 is validated as a genuine
-            # 64-hex-digit digest before comparison, for the same reason
-            # -- a missing or malformed digest is rejected outright
-            # rather than silently treated as "nothing to verify".
+            # Size is compared unconditionally, sha256 validated as a
+            # genuine 64-hex digest before comparison -- neither is
+            # skippable for a 0/"" value. pack_product_baseline() always
+            # records real values, so 0/"" can only mean a hand-crafted
+            # manifest with nothing to compare (no real library is 0
+            # bytes) or an attacker who zeroed the fields specifically to
+            # bypass this check -- unlike this codebase's usual "don't
+            # abort on missing, only on wrong" convention, a value this
+            # check's own security purpose depends on must not be
+            # skippable by simply omitting it (Codex review, fresh
+            # evidence: an earlier revision's `if lib.size and ...`/
+            # `if lib.sha256:` truthiness guards let exactly that happen).
             actual_size = lib_resolved.stat().st_size
             if actual_size != lib.size:
                 raise SnapshotError(
@@ -1213,6 +1192,48 @@ def unpack_product_baseline(
                     "mismatch -- archive may be corrupt or tampered "
                     "with"
                 )
+        # The verification loop above only examines manifest-declared
+        # entries -- an archive that omits a LibraryEntry entirely (or
+        # corrupts "libraries" to a non-list value from_dict() degrades to
+        # ()) has that library's real content never verified, republishing
+        # tampered bytes under a manifest that claims it doesn't exist
+        # (Codex review, fresh evidence). Cross-checked against what was
+        # actually extracted via _discover_library_map(), the same walk
+        # compare_product_directories() uses, so "is this a library" can't
+        # drift between packing, this check, and a later comparison.
+        #
+        # Compared by filesystem identity (dev, ino), not path string:
+        # pack_product_baseline() never gives a dev-symlink alias
+        # (`liba.so -> liba.so.1.2.3`) its own LibraryEntry -- only the
+        # real target is declared -- while _discover_library_map()'s own
+        # dedup can surface *either* alias as survivor depending on walk
+        # order. A path-string comparison misfires on an ordinary,
+        # unmodified archive whenever the symlink is the survivor (self-
+        # caught: the first revision of this fix did exactly that and
+        # failed this module's own round-trip tests). Path.stat() follows
+        # symlinks, so both sides resolve to the real target's identity.
+        declared_identities = set()
+        for lib in manifest.libraries:
+            lib_resolved = _resolve_under_root(staging, lib.path)
+            assert lib_resolved is not None  # already validated above
+            st = lib_resolved.stat()
+            declared_identities.add((st.st_dev, st.st_ino))
+        extracted_libraries = _discover_library_map(staging, include_private=True)
+        undeclared = []
+        for rel_path, real_path in sorted(extracted_libraries.items()):
+            try:
+                st = real_path.stat()
+            except OSError:
+                continue
+            if (st.st_dev, st.st_ino) not in declared_identities:
+                undeclared.append(rel_path)
+        if undeclared:
+            raise SnapshotError(
+                f"{archive_path}: extracted content contains "
+                f"{len(undeclared)} library file(s) the manifest never "
+                f"declared (e.g. {undeclared[0]!r}) -- archive may be "
+                "corrupt or tampered with"
+            )
     except BaseException:
         shutil.rmtree(staging, ignore_errors=True)
         raise
@@ -1649,16 +1670,12 @@ def compare_product_directories(
         of whether any library pair below actually references it.
 
         `_resolved_headers` below performs the identical containment check,
-        but only for the roots a *matched* library pair actually asks for --
-        when discovery produces zero pairs (two empty directories, or every
-        library left unmatched) that loop never runs at all, so a
-        structurally invalid root (absolute, escaping, or a bare string
-        typo) was silently accepted instead of raising the documented
-        `SnapshotError`, and the comparison could return `NO_CHANGE` for a
-        caller/config error rather than rejecting it (Codex review, fresh
-        evidence). Rejects the same way for a mapping key naming a library
-        that never ends up paired either, which `_resolved_headers`'s own
-        per-pair lookup can never reach.
+        but only for roots a *matched* pair asks for -- when discovery
+        produces zero pairs that loop never runs, so an invalid root
+        (absolute, escaping, bare-string typo) was silently accepted
+        instead of raising `SnapshotError` (Codex review, fresh evidence).
+        Also catches a mapping key naming a library that never ends up
+        paired, which `_resolved_headers` can never reach either way.
         """
         if isinstance(spec, str):
             raise SnapshotError(
@@ -1810,34 +1827,20 @@ def compare_product_directories(
 
     # A canonically-paired library (SONAME-major bump, dylib-version bump,
     # PE case-fold -- or a discovery-dedup representative mismatch, e.g. a
-    # dev symlink `libfoo.so -> libfoo.so.1` present only on one side, so
-    # _discover_library_map's (dev, ino) collapse picks the symlink's bare
-    # name on that side and the real file's on the other) can have two
-    # different bare filenames even though `pairs` above already
+    # dev symlink `libfoo.so -> libfoo.so.1` present only on one side) can
+    # have two different bare filenames even though `pairs` above already
     # determined it's one library. old_bundle_map/new_bundle_map are keyed
     # by bare filename independently of `pairs`, so left alone they'd
-    # register that one library under two different keys -- one present
-    # only in old_snapshot, one only in new_snapshot -- and
-    # compare_bundle()'s own real snapshot diff reports a spurious
-    # removal+addition (or BREAKING, if a surviving sibling imports it)
-    # for a library that never actually changed (Codex review, fresh
-    # evidence, reproduced with an unchanged ELF provider whose dev
-    # symlink existed only in the old tree). Normalize the old side's key
-    # to the new side's bare filename -- matching the DiffResult.library
-    # convention already established above -- so both snapshots agree on
-    # one identity for this library. Only rekey when old_path is actually
-    # the entry that survived old_bundle_map's own last-wins bare-name
-    # collapse: if a *different*, unrelated library already won that slot,
-    # compare_bundle() never analyzed old_path under its bare name to
-    # begin with, and forcing it into the map now would misrepresent what
-    # was actually compared (the same collapse-survivor discipline
-    # `_is_bundle_collapse_survivor` below already applies). Separately,
-    # the destination slot (new_path.name) must not already be occupied by
-    # a *different* old-side library: old shipping both `a/libfoo.so`
-    # (paired canonically to new `libfoo.so.1`) and an unrelated, distinct
-    # `b/libfoo.so.1` would otherwise have the rekey silently evict
-    # `b/libfoo.so.1` from old_bundle_map/old_snapshot entirely, rather
-    # than merely leaving the paired library under its own bare name
+    # register that one library under two different keys and
+    # compare_bundle() reports a spurious removal+addition (or BREAKING,
+    # if a sibling imports it) for a library that never changed (Codex
+    # review, fresh evidence). Normalize the old side's key to the new
+    # side's bare filename -- matching the DiffResult.library convention
+    # above. Only rekey when old_path actually survived old_bundle_map's
+    # own last-wins collapse (matching `_is_bundle_collapse_survivor`
+    # below), and only when the destination slot isn't already occupied
+    # by a *different* old-side library -- otherwise the rekey would
+    # silently evict that unrelated library from old_snapshot entirely
     # (CodeRabbit review, fresh evidence).
     for _old_key, old_path, _new_key, new_path in pairs:
         if old_path.name == new_path.name:
