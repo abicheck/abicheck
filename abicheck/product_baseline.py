@@ -202,15 +202,13 @@ def _is_library_path(path: Path) -> bool:
 
     Shared by every place that decides "is this a library" -- packing's own
     manifest-entry classification (:func:`_add_member`) and
-    :func:`_discover_library_map`'s discovery walk. Previously each checked
-    filename suffix alone; an extensionless ELF DSO was archived but
-    produced no ``LibraryEntry`` (Codex review, fresh evidence). Factored
-    into one predicate so discovery and packing can never drift apart.
+    :func:`_discover_library_map`'s discovery walk (Codex review, fresh
+    evidence: previously each checked filename suffix alone, and an
+    extensionless ELF DSO was archived but produced no ``LibraryEntry``).
 
-    The ELF content fallback had no Mach-O/PE counterpart, so a macOS
-    framework binary or a Windows ``.pyd`` module never entered either
-    library map (Codex review, fresh evidence).
-    :func:`_macho_is_library_content`/:func:`_pe_is_dll_content` close it.
+    The ELF content fallback had no Mach-O/PE counterpart, closed by
+    :func:`_macho_is_library_content`/:func:`_pe_is_dll_content` (Codex
+    review, fresh evidence).
 
     A ``.debug`` split-debug sidecar is excluded outright, ahead of
     every content check: it retains its original binary's ``ET_DYN``
@@ -483,13 +481,12 @@ def _windows_relative_target_escapes(arcname: str, target: str) -> bool:
     semantics (backslash separators)?
 
     Purely lexical -- no real Windows filesystem to ``.resolve()``
-    against on any host -- so this walks a virtual depth counter from
-    *arcname*'s own directory, decrementing on ``..`` and incrementing
-    on a named component; negative depth means the target walks above
-    the root. Only ever *adds* rejections a POSIX-only check misses: a
-    backslash ``..`` traversal is one opaque filename on POSIX,
-    silently packing an archive that fails (or escapes) on Windows
-    (Codex review, fresh evidence).
+    against -- walks a virtual depth counter from *arcname*'s own
+    directory, decrementing on ``..``, incrementing on a named
+    component; negative depth means the target walks above root. Only
+    ever *adds* rejections a POSIX-only check misses: a backslash ``..``
+    traversal is one opaque filename on POSIX (Codex review, fresh
+    evidence).
     """
     depth = len(PureWindowsPath(arcname).parent.parts)
     for part in PureWindowsPath(target).parts:
@@ -526,16 +523,13 @@ def _add_member(
     if info.issym():
         target = info.linkname
         # An absolute (or Windows-anchored) target can't round-trip --
-        # TarExtractor's own symlink-escape check refuses it at unpack
-        # time (Codex review, fresh evidence). os.path.isabs() alone is
-        # host-dependent -- doesn't recognize a Windows drive-absolute/
-        # UNC target on POSIX. PureWindowsPath.is_absolute() alone isn't
-        # enough either: False for a current-drive-rooted target
-        # (``\outside\foo.dll``, drive="", root="\\") or a
-        # drive-relative one (``C:outside\foo.dll``, drive="C:",
-        # root="") -- both Windows-specific-state-dependent, so any
-        # nonempty drive or root is rejected (Codex review, fresh
-        # evidence).
+        # TarExtractor refuses it at unpack time (Codex review, fresh
+        # evidence). os.path.isabs() alone doesn't recognize a Windows
+        # drive-absolute/UNC target on POSIX; PureWindowsPath.is_absolute()
+        # alone isn't enough either -- False for a current-drive-rooted
+        # target (drive="", root="\\") or a drive-relative one (drive="C:",
+        # root="") -- so any nonempty drive or root is rejected (Codex
+        # review, fresh evidence).
         wpath = PureWindowsPath(target)
         if os.path.isabs(target) or wpath.drive or wpath.root:
             raise SnapshotError(
@@ -544,12 +538,11 @@ def _add_member(
             )
         # A self-referential symlink loop is detected via a raw stat() --
         # not by catching Path.resolve() raising, which Python 3.13's
-        # realpath()-backed rewrite stopped doing in non-strict mode: it
-        # silently returns the unresolved path instead, so a loop packed
-        # with no error at all on 3.13+ (verified empirically; CI caught
-        # this). stat() still raises OSError(ELOOP) on every version --
-        # the kernel's own errno, not pathlib's; a dangling target
-        # raises ENOENT instead, left alone (Codex review, CI evidence).
+        # realpath()-backed rewrite stopped doing in non-strict mode
+        # (silently returns the unresolved path instead; verified
+        # empirically, CI caught this). stat() still raises
+        # OSError(ELOOP) on every version -- the kernel's own errno; a
+        # dangling target raises ENOENT instead, left alone.
         try:
             path.stat()
         except OSError as exc:
@@ -671,12 +664,9 @@ def pack_product_baseline(
     ``.tar.zst`` product baseline archive at *output*.
 
     *header_roots* names the product's public-header directories, relative
-    to *source_dir* — recorded in the manifest so a later
-    ``compare -H`` invocation against the unpacked archive doesn't have to
-    rediscover them. Each must resolve under
-    *source_dir* and exist; raises :class:`SnapshotError` otherwise, the
-    same way an escaping/missing header root fails on write elsewhere in
-    this codebase (see ``buildsource.baseline_publish``'s identical guard).
+    to *source_dir* — recorded in the manifest so a later ``compare -H``
+    invocation doesn't have to rediscover them. Each must resolve under
+    *source_dir* and exist; raises :class:`SnapshotError` otherwise.
 
     Writes atomically: *output* either ends up as a complete, valid archive
     or is left untouched — a failure partway through never leaves a
@@ -706,9 +696,9 @@ def pack_product_baseline(
     # would pass on a directory mkdir() just manufactured (Codex review,
     # fresh evidence).
     if isinstance(header_roots, str):
-        # A bare str satisfies the declared Sequence[str] annotation, so
-        # the natural typo header_roots="include" would otherwise iterate
-        # character-by-character below (Codex review, fresh evidence).
+        # A bare str satisfies Sequence[str], so header_roots="include"
+        # would iterate character-by-character (Codex review, fresh
+        # evidence).
         raise SnapshotError(
             "header_roots must be a sequence of paths, not a bare string: "
             f"{header_roots!r}"
@@ -1218,31 +1208,43 @@ def unpack_product_baseline(
         # compare_product_directories() uses, so "is this a library" can't
         # drift between packing, this check, and a later comparison.
         #
-        # Compared by filesystem identity (dev, ino), not path string:
-        # pack_product_baseline() never gives a dev-symlink alias
-        # (`liba.so -> liba.so.1.2.3`) its own LibraryEntry -- only the
-        # real target is declared -- while _discover_library_map()'s own
-        # dedup can surface *either* alias as survivor depending on walk
-        # order. A path-string comparison misfires on an ordinary,
-        # unmodified archive whenever the symlink is the survivor (self-
-        # caught: the first revision of this fix did exactly that and
-        # failed this module's own round-trip tests). Path.stat() follows
-        # symlinks, so both sides resolve to the real target's identity.
+        # A symlink alias is compared by filesystem identity (dev, ino),
+        # not path string: pack_product_baseline() never gives a
+        # dev-symlink alias (`liba.so -> liba.so.1.2.3`) its own
+        # LibraryEntry, only the real target is declared (self-caught:
+        # the first revision of this fix compared by path string and
+        # failed this module's own round-trip tests). A hardlink alias
+        # is compared by path string instead, below -- it DOES get its
+        # own declared entry, so identity alone can't be trusted for it.
         declared_identities = set()
+        declared_paths = set()
         for lib in manifest.libraries:
             lib_resolved = _resolve_under_root(staging, lib.path)
             assert lib_resolved is not None  # already validated above
             st = lib_resolved.stat()
             declared_identities.add((st.st_dev, st.st_ino))
+            declared_paths.add(lib.path)
         extracted_libraries = _discover_library_map(staging, include_private=True)
         undeclared = []
         for rel_path, real_path in sorted(extracted_libraries.items()):
-            try:
-                st = real_path.stat()
-            except OSError:
-                continue
-            if (st.st_dev, st.st_ino) not in declared_identities:
-                undeclared.append(rel_path)
+            if real_path.is_symlink():
+                # A symlink alias never gets its own LibraryEntry, so
+                # checked by identity only -- fine if it resolves to a
+                # declared library.
+                try:
+                    st = real_path.stat()
+                except OSError:
+                    continue
+                if (st.st_dev, st.st_ino) not in declared_identities:
+                    undeclared.append(rel_path)
+            else:
+                # A hardlink alias DOES get its own LibraryEntry when
+                # honestly packed (_add_member's islnk() branch) --
+                # identity alone can't distinguish "expected alias" from
+                # "unverified extra name for the same content" (Codex
+                # review, fresh evidence). Its own path must be declared.
+                if rel_path not in declared_paths:
+                    undeclared.append(rel_path)
         if undeclared:
             raise SnapshotError(
                 f"{archive_path}: extracted content contains "
@@ -1354,17 +1356,12 @@ def _roots_for_library(spec: HeaderRootsSpec, library_key: str) -> Sequence[str]
 
     A ``Mapping`` is looked up by *library_key*, defaulting to no roots at
     all for a library the mapping doesn't mention (never a fallback to
-    some other library's roots — a library legitimately shipping no public
-    headers is the common case this format already tolerates elsewhere, not
-    a misconfiguration to paper over). A flat ``Sequence[str]`` (the
-    original, pre-per-library shape) applies unchanged to every library, so
-    passing a bare list keeps working exactly as it always has.
+    some other library's roots). A flat ``Sequence[str]`` (the original,
+    pre-per-library shape) applies unchanged to every library.
 
     A bare ``str`` is rejected outright: it satisfies the declared
-    ``Sequence[str]`` type, so `header_roots="include"` -- a natural
-    typo -- previously ran character-by-character (Codex/CodeRabbit
-    review, fresh evidence). Same for a per-library mapping value
-    spelled as a bare string.
+    ``Sequence[str]`` type, so `header_roots="include"` previously ran
+    character-by-character (Codex/CodeRabbit review, fresh evidence).
     """
     if isinstance(spec, Mapping):
         value = spec.get(library_key, ())
@@ -1461,27 +1458,31 @@ def _discover_library_map(root: Path, *, include_private: bool) -> dict[str, Pat
                 # review, fresh evidence).
                 real = path
             else:
-                # A library-shaped symlink (os.walk(followlinks=False)
-                # still lists a symlink-to-a-*file* under filenames, only
-                # a symlink-to-a-*directory* is skipped) whose target
-                # resolves outside root entirely -- e.g. `libfoo.so ->
-                # /usr/lib/libfoo.so` -- is rejected rather than
-                # discovered: comparing it would silently analyze a host
-                # file that isn't part of the product at all, making the
-                # result machine-dependent and potentially hiding a
-                # missing shipped library. Matches the containment
-                # discipline pack/unpack already enforce via
-                # `_resolve_under_root` for a manifest-declared path
-                # (Codex review, fresh evidence). A conventional in-tree
-                # dev symlink (`libfoo.so -> libfoo.so.1`, same directory
-                # or elsewhere under root) still resolves within root and
-                # is unaffected.
+                # A library-shaped symlink whose target resolves outside
+                # root entirely (e.g. `libfoo.so -> /usr/lib/libfoo.so`)
+                # is rejected rather than discovered -- comparing it
+                # would silently analyze a host file that isn't part of
+                # the product at all. Matches the containment discipline
+                # pack/unpack already enforce (Codex review, fresh
+                # evidence). A conventional in-tree dev symlink still
+                # resolves within root and is unaffected.
                 if real != root_resolved and not real.is_relative_to(root_resolved):
                     continue
             try:
                 st = real.stat()
                 identity: Path | tuple[int, int] = (st.st_dev, st.st_ino)
-            except OSError:
+            except OSError as exc:
+                if exc.errno == errno.ELOOP:
+                    # A library-shaped self-referential symlink loop is
+                    # not a real library -- silently discovering it let a
+                    # product containing nothing but a loop compare as a
+                    # spurious bundle_library_removed/added finding
+                    # instead of being rejected outright (Codex review,
+                    # fresh evidence).
+                    raise SnapshotError(
+                        f"{root}: {_relative_posix(path, root)!r} is a "
+                        "self-referential symlink loop, not a real library"
+                    ) from exc
                 identity = real
             if identity in seen_identity:
                 continue

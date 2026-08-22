@@ -1112,6 +1112,48 @@ class TestUnpackProductBaseline:
             unpack_product_baseline(tampered, dest)
         assert not dest.exists()
 
+    def test_unpack_rejects_an_undeclared_hardlink_library_alias(
+        self, tmp_path: Path
+    ) -> None:
+        # The extracted-inventory cross-check above compares by
+        # filesystem identity (dev, ino) -- correct for a symlink alias,
+        # which pack_product_baseline() deliberately never gives its own
+        # LibraryEntry. A hardlink alias is different: _add_member()'s
+        # own islnk() branch DOES give it a separate LibraryEntry when
+        # honestly packed, so an attacker who omits just the alias's
+        # entry (keeping the first-archived copy's) produces an
+        # undeclared hardlink alias that shares (dev, ino) with the
+        # still-declared library -- silently passing an identity-only
+        # check even though its own path was never verified (Codex
+        # review, fresh evidence).
+        product = _make_product(tmp_path)
+        first = product / "lib" / "libb.so"
+        second = product / "lib" / "libb-alias.so"
+        second.hardlink_to(first)
+        archive = tmp_path / "baseline.tar.zst"
+        pack_product_baseline(product, archive)
+
+        import zstandard
+
+        dctx = zstandard.ZstdDecompressor()
+        tar_bytes = dctx.decompress(archive.read_bytes(), max_output_size=1 << 30)
+        with tarfile.open(fileobj=io.BytesIO(tar_bytes), mode="r") as tf:
+            manifest_fh = tf.extractfile(MANIFEST_MEMBER_NAME)
+            assert manifest_fh is not None
+            manifest_raw = json.loads(manifest_fh.read())
+        manifest_raw["libraries"] = [
+            lib
+            for lib in manifest_raw["libraries"]
+            if lib["path"] != "lib/libb-alias.so"
+        ]
+        payload = json.dumps(manifest_raw).encode("utf-8") + b"\n"
+        tampered = _rewrite_manifest_member(tmp_path, archive, payload)
+
+        dest = tmp_path / "dest"
+        with pytest.raises(SnapshotError, match="never declared"):
+            unpack_product_baseline(tampered, dest)
+        assert not dest.exists()
+
     def test_unpack_translates_a_symlink_loop_into_snapshot_error(
         self, tmp_path: Path
     ) -> None:

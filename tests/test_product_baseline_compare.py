@@ -443,6 +443,28 @@ class TestCompareProductDirectoriesRejectsNonexistentDirectories:
             compare_product_directories(old_dir, not_a_dir)
 
 
+class TestCompareProductDirectoriesRejectsSymlinkLoops:
+    def test_a_product_containing_only_a_loop_is_rejected_not_compared(
+        self, tmp_path: Path
+    ) -> None:
+        # A library-shaped self-referential symlink loop is not a real
+        # library -- discovering it anyway previously made a product
+        # containing nothing but a loop compare against an empty product
+        # as a spurious bundle_library_removed finding, instead of the
+        # invalid product being rejected with SnapshotError (Codex
+        # review, fresh evidence).
+        from abicheck.product_baseline import compare_product_directories
+
+        old_dir = tmp_path / "old"
+        new_dir = tmp_path / "new"
+        (old_dir / "lib").mkdir(parents=True)
+        new_dir.mkdir()
+        (old_dir / "lib" / "loop.so").symlink_to("loop.so")
+
+        with pytest.raises(SnapshotError, match="symlink loop"):
+            compare_product_directories(old_dir, new_dir)
+
+
 class TestCompareProductDirectoriesHeaderRootsContainment:
     def test_absolute_header_root_is_rejected(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -1429,25 +1451,28 @@ class TestDiscoverLibraryMapSymlinkContainment:
         result = _discover_library_map(root, include_private=True)
         assert set(result) == {"a_real/libfoo.so"}
 
-    def test_self_referential_symlink_loop_does_not_raise(self, tmp_path: Path) -> None:
+    def test_self_referential_symlink_loop_raises_snapshot_error(
+        self, tmp_path: Path
+    ) -> None:
         # A library-shaped self-referential symlink (loop.so -> loop.so)
-        # made Path.resolve() raise RuntimeError, which the containment
-        # check's own `except OSError` did not catch -- the raw exception
-        # escaped _discover_library_map(), and therefore
-        # compare_product_directories(), instead of the loop being
-        # treated the same as any other unresolvable path (Codex review,
-        # fresh evidence).
+        # first made Path.resolve() raise RuntimeError unhandled (fixed:
+        # the earlier revision of this test pinned the resulting
+        # tolerant behavior -- silently discovering the loop as though
+        # it were a real library). A further review round found that
+        # tolerance itself wrong: comparing a product containing nothing
+        # but a loop against an empty one produced a spurious
+        # bundle_library_removed/added finding instead of the invalid
+        # product being rejected outright (Codex review, fresh
+        # evidence). A loop is not a real library -- reject it.
+        from abicheck.errors import SnapshotError
         from abicheck.product_baseline import _discover_library_map
 
         root = tmp_path / "product"
         (root / "lib").mkdir(parents=True)
         (root / "lib" / "loop.so").symlink_to("loop.so")
 
-        # Doesn't raise -- the loop is discovered (its own unresolved
-        # symlink path stands in for the unresolvable target) rather than
-        # aborting the whole walk.
-        result = _discover_library_map(root, include_private=True)
-        assert set(result) == {"lib/loop.so"}
+        with pytest.raises(SnapshotError, match="symlink loop"):
+            _discover_library_map(root, include_private=True)
 
 
 class TestDiscoverLibraryMapDeterministicWalkOrder:
