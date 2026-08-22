@@ -288,14 +288,19 @@ def variant_fingerprint(evidence: BuildEvidence | None, env: EnvironmentMatrix |
     """Stable fingerprint over BUILD-AXIS coordinates only: target triple,
     compiler family+version, C/C++ standard, ABI-affecting flags/defines,
     feature toggles (e.g. ONEDAL_DATA_PARALLEL), header-set identity.
-    Reuses environment_matrix.py's existing SyclConstraints/CudaConstraints
-    fields (what the build actually targets) rather than re-deriving them.
-    Deliberately EXCLUDES two things: artifact membership (which libraries
-    actually shipped) — see below — and EnvironmentMatrix.runtime_floors
-    (a deployment/comparison-policy input used to classify symbol-version
-    and deployment findings, not a build-defining fact; two byte-identical
-    CPU builds compared under different declared deployment floors must
-    still pair as the same variant)."""
+    Deliberately EXCLUDES three things, none of which describe what the
+    build itself targets: artifact membership (which libraries actually
+    shipped) — see below; EnvironmentMatrix.runtime_floors (a deployment/
+    comparison-policy input used to classify symbol-version and deployment
+    findings); and, within SyclConstraints/CudaConstraints themselves, the
+    declared-deployment-policy fields those dataclasses also carry
+    (`SyclConstraints.min_pi_version`, `CudaConstraints.driver_range`) — a
+    real gap caught in review, since a first draft of this function
+    proposed fingerprinting those objects wholesale, and both objects mix
+    build-defining fields with policy fields. `variant_fingerprint` reads
+    only the fields that describe what the CPU/DPC build itself compiles
+    against, never a declared floor/range two identical builds could
+    legitimately disagree on."""
 
 def pair_variants(
     old: dict[str, BundleFacts], new: dict[str, BundleFacts]
@@ -389,10 +394,21 @@ symbol-level evidence, not a report-level signal:
    field empty or absent). The real, symbol-scoped check this phase needs
    is therefore: does the resolved provider (and consumer, where
    applicable) `Function`/`Variable` for this specific symbol have
-   `visibility != Visibility.ELF_ONLY` **and** a return/variable type other
-   than the `"?"` sentinel, on both old and new — i.e. recognize the actual
-   unknown-evidence marker this codebase already uses, not merely check a
-   field's presence. This is deliberately much narrower than the full
+   `visibility != Visibility.ELF_ONLY`, a return/variable type other than
+   the `"?"` sentinel, **and every parameter's own type also other than
+   `"?"`**, on both old and new. That last clause is not redundant with the
+   return-type check — a second review round caught a DWARF-specific gap
+   in an earlier draft that checked only the return/variable type: a
+   function can have full DWARF coverage overall (so it is never
+   `ELF_ONLY`) while one *parameter's* own `DW_AT_type` is absent —
+   `dwarf_snapshot.py`'s `_process_param` explicitly emits
+   `Param(type="?")` for exactly this case — so a signature with a known
+   return type but an unresolved parameter type would otherwise read as
+   fully verified when it is only partially so. The check must walk every
+   parameter, not just the return/variable type, i.e. recognize the actual
+   unknown-evidence marker this codebase already uses everywhere it can
+   appear, not merely at the top level of a signature. This is deliberately
+   much narrower than the full
    per-finding evidence-provider model AGENTS.md's known-gap entry
    describes out of scope — it answers only "does *this* symbol have a
    corroborated signature," not "which tier produced every finding in the
@@ -419,6 +435,7 @@ table asks for.
 | `abicheck/reporter.py` / `abicheck/report_summary.py` | Render the two new finding shapes; extend `bundle.json`/`bundle.md` (Phases 3-4) |
 | `docs/reference/change-kinds.md` | Phase 1 taxonomy note; new-kind entries for Phases 3-4 |
 | `docs/contribute/adr/023-bundle-aware-multi-binary-analysis.md` | Amendment block linking to this plan (see below) |
+| `tests/canonical_identity_contract.py` | Classify both new kinds (`bundle_variant_coverage_regressed`, `bundle_intra_dep_signature_unverified`) into exactly one of `TYPE_BEARING`/`VALUE_INSENSITIVE`/`UNVERIFIED` — required by the root `AGENTS.md`'s "Adding a new ChangeKind" step 5; `tests/test_canonical_finding_id_completeness.py` fails until both are classified, same as every other new kind (Phases 3-4) |
 
 ---
 
