@@ -2181,6 +2181,128 @@ class TestNonElfInputs:
         assert len(snap.resolution.provides) > 0
 
 
+class TestBuildBundleSnapshotFromMetadata:
+    """build_bundle_snapshot_from_metadata() -- the split-out primitive
+    behind build_bundle_snapshot() that lets a caller holding already-parsed
+    ElfMetadata (e.g. AbiSnapshot.elf from a real dump) build a real
+    BundleSnapshot without any binary on disk."""
+
+    def test_matches_build_bundle_snapshot_for_the_same_real_elf(self) -> None:
+        # The wrapper and the primitive it now delegates to must agree
+        # exactly for the identical real input -- this is the split's own
+        # equivalence contract, not just "doesn't crash".
+        from abicheck.bundle import (
+            build_bundle_snapshot,
+            build_bundle_snapshot_from_metadata,
+        )
+        from abicheck.elf_metadata import parse_elf_metadata
+
+        candidate = None
+        for p in (
+            "/lib/x86_64-linux-gnu/libc.so.6",
+            "/lib64/libc.so.6",
+            "/usr/lib/libc.so.6",
+            "/usr/lib/x86_64-linux-gnu/libc.so.6",
+        ):
+            if Path(p).is_file():
+                candidate = Path(p)
+                break
+        if candidate is None:
+            pytest.skip("no system libc available for ELF round-trip")
+
+        via_path = build_bundle_snapshot({"libc.so.6": candidate})
+        meta = parse_elf_metadata(candidate)
+        assert meta is not None
+        via_metadata = build_bundle_snapshot_from_metadata(
+            {"libc.so.6": meta}, paths={"libc.so.6": candidate}
+        )
+
+        assert via_metadata.root == via_path.root
+        assert via_metadata.libraries == via_path.libraries
+        assert via_metadata.metadata.keys() == via_path.metadata.keys()
+        assert via_metadata.resolution == via_path.resolution
+
+    def test_drops_empty_metadata_the_same_way_the_wrapper_does(self) -> None:
+        from abicheck.bundle import build_bundle_snapshot_from_metadata
+
+        empty = _meta()  # no soname, symbols, imports, or needed
+        real = _meta(soname="libfoo.so.1", exports=["foo"])
+        snap = build_bundle_snapshot_from_metadata(
+            {"empty.so": empty, "libfoo.so.1": real}
+        )
+        assert set(snap.metadata) == {"libfoo.so.1"}
+        assert set(snap.libraries) == {"libfoo.so.1"}
+
+    def test_drops_none_metadata_entries(self) -> None:
+        from abicheck.bundle import build_bundle_snapshot_from_metadata
+
+        snap = build_bundle_snapshot_from_metadata({"a.so": None})  # type: ignore[dict-item]
+        assert snap.metadata == {}
+        assert snap.libraries == {}
+
+    def test_synthesizes_a_path_from_the_name_when_paths_is_omitted(self) -> None:
+        # No real file on disk anywhere -- the whole point of this
+        # function -- so a caller that never supplies `paths` still gets a
+        # usable BundleSnapshot.libraries value (its .name is what
+        # _detect_soname_skew's own fallback reads).
+        from abicheck.bundle import build_bundle_snapshot_from_metadata
+
+        meta = _meta(soname="libfoo.so.1", exports=["foo"])
+        snap = build_bundle_snapshot_from_metadata({"libfoo.so.1": meta})
+        assert snap.libraries["libfoo.so.1"] == Path("libfoo.so.1")
+        assert snap.libraries["libfoo.so.1"].name == "libfoo.so.1"
+
+    def test_explicit_root_overrides_the_derived_default(self) -> None:
+        from abicheck.bundle import build_bundle_snapshot_from_metadata
+
+        meta = _meta(soname="libfoo.so.1", exports=["foo"])
+        snap = build_bundle_snapshot_from_metadata(
+            {"libfoo.so.1": meta}, root=Path("/explicit/root")
+        )
+        assert snap.root == Path("/explicit/root")
+
+    def test_resolution_graph_matches_direct_construction(self) -> None:
+        # Cross-checks the primitive's resolution-graph output against
+        # _compute_resolution_graph() called directly (the same helper
+        # _snapshot() in this file's own fixtures uses) for a real
+        # provider/consumer pair.
+        from abicheck.bundle import (
+            _compute_resolution_graph,
+            build_bundle_snapshot_from_metadata,
+        )
+
+        provider = _meta(soname="libprovider.so.1", exports=["do_thing"])
+        consumer = _meta(needed=["libprovider.so.1"], imports=["do_thing"])
+        metadata = {"libprovider.so.1": provider, "libconsumer.so": consumer}
+
+        snap = build_bundle_snapshot_from_metadata(metadata)
+        expected_graph = _compute_resolution_graph(
+            {name: Path(name) for name in metadata}, metadata
+        )
+        assert snap.resolution == expected_graph
+
+    def test_compare_bundle_end_to_end_over_metadata_only_snapshots(self) -> None:
+        # The actual point of this primitive: a real ADR-023 cross-DSO
+        # finding (a provider's export disappearing) computed entirely
+        # from ElfMetadata, no binaries involved on either side.
+        from abicheck.bundle import build_bundle_snapshot_from_metadata, compare_bundle
+        from abicheck.checker_policy import ChangeKind
+
+        old_provider = _meta(soname="libprovider.so.1", exports=["do_thing"])
+        new_provider = _meta(soname="libprovider.so.1", exports=[])
+        consumer = _meta(needed=["libprovider.so.1"], imports=["do_thing"])
+
+        old_snap = build_bundle_snapshot_from_metadata(
+            {"libprovider.so.1": old_provider, "libconsumer.so": consumer}
+        )
+        new_snap = build_bundle_snapshot_from_metadata(
+            {"libprovider.so.1": new_provider, "libconsumer.so": consumer}
+        )
+        result = compare_bundle(old_snap, new_snap, per_library_results=[])
+        kinds = {f.kind for f in result.bundle_findings}
+        assert ChangeKind.BUNDLE_INTRA_DEP_REMOVED in kinds
+
+
 # ---------------------------------------------------------------------------
 # BundleSnapshot.is_intra_bundle_provider
 # ---------------------------------------------------------------------------

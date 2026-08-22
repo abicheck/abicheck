@@ -109,11 +109,21 @@ def build_bundle_snapshot(libraries: dict[str, Path]) -> BundleSnapshot:
     Non-ELF inputs are skipped with a warning; the bundle layer is
     Linux/ELF-only by design (see ADR-018 — PE/Mach-O bundle analysis is
     out of scope for this iteration).
+
+    A thin wrapper around :func:`build_bundle_snapshot_from_metadata`: this
+    function's own job is *only* turning a path into an :class:`ElfMetadata`
+    (parsing, format-sniffing, the parse-failure/empty-result skip logic);
+    everything after that — the emptiness check, the resolution graph, the
+    root computation — lives in the shared function so a caller that
+    already has parsed :class:`ElfMetadata` (e.g. from an
+    :class:`~abicheck.model.AbiSnapshot`'s own ``.elf`` field, populated by
+    every ELF ``dump``) doesn't have to re-parse the binary from disk to
+    reach the identical bundle-analysis result (see that function's own
+    docstring for why this split exists).
     """
     from . import deadline
 
     metadata: dict[str, ElfMetadata] = {}
-    surviving: dict[str, Path] = {}
     for name, path in libraries.items():
         # Cooperative checkpoint (no-op unless a deadline.deadline_scope()
         # is active, e.g. service_scan.run_scan_set's audit-mode call) --
@@ -152,24 +162,92 @@ def build_bundle_snapshot(libraries: dict[str, Path]) -> BundleSnapshot:
         ) as exc:  # pragma: no cover — parse_elf_metadata already swallows most
             log.warning("bundle: failed to parse %s: %s", path, exc)
             continue
+        if meta is None:
+            log.debug("bundle: skipping non-ELF input %s", path)
+            continue
+        metadata[name] = meta
+
+    return build_bundle_snapshot_from_metadata(metadata, paths=libraries)
+
+
+def build_bundle_snapshot_from_metadata(
+    metadata: dict[str, ElfMetadata],
+    *,
+    paths: dict[str, Path] | None = None,
+    root: Path | None = None,
+) -> BundleSnapshot:
+    """Build a :class:`BundleSnapshot` from already-parsed :class:`ElfMetadata`,
+    without re-parsing (or even requiring) the underlying binary files.
+
+    :func:`build_bundle_snapshot` needs real files on disk purely to call
+    :func:`~abicheck.elf_metadata.parse_elf_metadata` — everything the
+    bundle layer actually analyzes (``DT_NEEDED``, ``.gnu.version_r``/
+    ``.gnu.version_d``, exported symbols) lives in the resulting
+    :class:`~abicheck.elf_metadata.ElfMetadata` alone. That struct is
+    exactly what :attr:`abicheck.model.AbiSnapshot.elf` already stores for
+    every ELF ``dump`` (populated straight from the same
+    :func:`~abicheck.elf_metadata.parse_elf_metadata` call), so a caller
+    holding two sides' worth of *snapshots* (rather than two directories of
+    live binaries — e.g. a future snapshot-only product baseline, or any
+    other caller that already dumped each library) can build a real,
+    fully-functional :class:`BundleSnapshot` — cross-DSO ``DT_NEEDED``/
+    version-table analysis included — directly from that stored metadata,
+    with no binaries required at compare time at all. This is the primitive
+    a snapshot-first product baseline would build on; it does not itself
+    change how ``dump``/``pack_product_baseline`` work today.
+
+    Args:
+        metadata: A ``{library_name: ElfMetadata}`` map — the same keying
+            :func:`build_bundle_snapshot` uses, e.g. one entry per
+            ``AbiSnapshot.elf`` already on hand. An entry whose metadata is
+            empty (no soname, symbols, imports, or needed libraries — the
+            same heuristic :func:`build_bundle_snapshot` applies after a
+            successful parse) is dropped, the same as a non-ELF/failed
+            parse is dropped there.
+        paths: Optional ``{library_name: Path}`` map used only for
+            :attr:`BundleSnapshot.libraries`' values and the default
+            *root* computation (both currently used only for their
+            ``.name``/``.parent`` — see ``_detect_soname_skew``'s own
+            ``path.name`` SONAME fallback). A name with no entry here
+            synthesizes ``Path(name)``, which still gives a sensible
+            ``.name`` for that same fallback when *name* is (or ends in) a
+            real filename — the common case for every caller so far.
+        root: Explicit bundle root. When omitted, derived from the first
+            surviving library's resolved path's parent (matching
+            :func:`build_bundle_snapshot`'s own behavior exactly when
+            *paths* holds real filesystem paths).
+    """
+    from . import deadline
+
+    paths = paths or {}
+    surviving_metadata: dict[str, ElfMetadata] = {}
+    surviving_paths: dict[str, Path] = {}
+    for name, meta in metadata.items():
+        deadline.check()
         if meta is None or (
             not meta.soname
             and not meta.symbols
             and not meta.imports
             and not meta.needed
         ):
-            log.debug("bundle: skipping non-ELF or empty input %s", path)
+            log.debug("bundle: skipping empty metadata for %s", name)
             continue
-        metadata[name] = meta
-        surviving[name] = path
+        surviving_metadata[name] = meta
+        surviving_paths[name] = paths.get(name, Path(name))
 
-    resolution = _compute_resolution_graph(surviving, metadata)
+    resolution = _compute_resolution_graph(surviving_paths, surviving_metadata)
     # Use the first library's parent as the root if available; otherwise empty path
-    root = next(iter(surviving.values())).parent if surviving else Path()
+    resolved_root = (
+        root
+        if root is not None
+        else (
+            next(iter(surviving_paths.values())).parent if surviving_paths else Path()
+        )
+    )
     return BundleSnapshot(
-        root=root,
-        libraries=surviving,
-        metadata=metadata,
+        root=resolved_root,
+        libraries=surviving_paths,
+        metadata=surviving_metadata,
         resolution=resolution,
     )
 
