@@ -991,6 +991,14 @@ def _detect_intra_dep_removed(
             # ever provided this symbol, OR the user explicitly asserted a
             # remaining soname) -> trust it unconditionally. Otherwise fall
             # through to the symbol-name check (docstring above).
+            # Known limitation (Codex review, pre-existing -- shared by the
+            # audit-mode sibling below): this allow-list match is absence of
+            # a *bundle* regression, not proof the symbol is exported by a
+            # system DSO -- neither detector parses a system library's own
+            # export table, only its soname, so a genuinely never-provided
+            # symbol (typo, forgotten dependency) is suppressed the same
+            # way a real system-provided one is. Fixing this needs an
+            # actual export-table probe of each allow-listed DSO.
             extra_needed = new.resolution.extra_needed.get(consumer.library, [])
             if (
                 extra_needed
@@ -1880,16 +1888,8 @@ def _looks_system_symbol(name: str) -> bool:
 # This is the version-evidence half of the field-derived oneDAL fix
 # (``syscall@GLIBC_*``, ``stdout@GLIBC_*``, ``_ZdlPvm@CXXABI_*``).
 _SYSTEM_VERSION_PREFIXES: tuple[str, ...] = (
-    "GLIBC_",
-    "GLIBCXX_",
-    "CXXABI_",
-    "GCC_",
-    "LIBGCC_",
-    "LIBC_",
-    "GOMP_",
-    "OMP_",
-    "GFORTRAN_",
-    "GLIBCABI_",
+    "GLIBC_", "GLIBCXX_", "CXXABI_", "GCC_", "LIBGCC_",
+    "LIBC_", "GOMP_", "OMP_", "GFORTRAN_", "GLIBCABI_",
 )
 
 
@@ -1917,19 +1917,15 @@ def _import_is_external(
 
     ``is_intra_bundle_provider`` matches by exact soname *and* filename stem, so
     a SONAME-major bump (``libcore.so.1`` → ``libcore.so.2``) where a sibling
-    still NEEDs the old soname is still recognised as intra-bundle, and a
-    release that itself vendors a runtime DSO (``libgomp.so.1``) keeps a dropped
-    ``GOMP_4.0`` export visible.
+    still NEEDs the old soname is still recognised as intra-bundle.
 
-    When the per-symbol verneed soname is unavailable (e.g. a JSON snapshot
-    that predates the field, or a stripped verneed), fall back to the
+    When the per-symbol verneed soname is unavailable, fall back to the
     label-level scan over ``versions_required`` — provider evidence still wins
     over the ``_looks_system_version`` toolchain-namespace heuristic.
 
     Unversioned imports (``version == ""``) return ``False`` so an unversioned
-    internal sibling import still produces a finding. This is the field-derived
-    oneDAL fix: classify by provider/version evidence, not only by symbol-name
-    allow-lists.
+    internal sibling import still produces a finding: classify by
+    provider/version evidence, not only by symbol-name allow-lists.
     """
     version = consumer.version
     if not version:
