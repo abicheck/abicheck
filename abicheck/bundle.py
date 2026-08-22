@@ -167,7 +167,17 @@ def build_bundle_snapshot(libraries: dict[str, Path]) -> BundleSnapshot:
             continue
         metadata[name] = meta
 
-    return build_bundle_snapshot_from_metadata(metadata, paths=libraries)
+    # probe_filesystem=True: unlike build_bundle_snapshot_from_metadata's
+    # own metadata-only default, this wrapper is handed real, live paths on
+    # disk -- preserve its pre-existing filesystem alias-probing behavior
+    # (symlink targets, hard-link aliases) rather than silently losing it
+    # to that function's metadata-only default (Codex review, fresh
+    # evidence: a second-round regression in the first-round filesystem-
+    # independence fix, which changed this callee's own default without
+    # threading this caller's real requirement through it).
+    return build_bundle_snapshot_from_metadata(
+        metadata, paths=libraries, probe_filesystem=True
+    )
 
 
 def build_bundle_snapshot_from_metadata(
@@ -175,6 +185,7 @@ def build_bundle_snapshot_from_metadata(
     *,
     paths: dict[str, Path] | None = None,
     root: Path | None = None,
+    probe_filesystem: bool = False,
 ) -> BundleSnapshot:
     """Build a :class:`BundleSnapshot` from already-parsed :class:`ElfMetadata`,
     without re-parsing (or even requiring) the underlying binary files.
@@ -216,6 +227,23 @@ def build_bundle_snapshot_from_metadata(
             surviving library's resolved path's parent (matching
             :func:`build_bundle_snapshot`'s own behavior exactly when
             *paths* holds real filesystem paths).
+        probe_filesystem: Forwarded to :func:`_compute_resolution_graph`.
+            Defaults to ``False`` — this function's whole contract is
+            metadata-only resolution, so even a caller-supplied *paths*
+            (given only for display purposes — a library's own
+            ``.name``/``.parent``) must not make the resolution graph
+            silently depend on what those paths happen to resolve to on
+            the real filesystem (Codex review, fresh evidence).
+            :func:`build_bundle_snapshot` — the one caller that genuinely
+            holds real, live binaries on disk, not just their already-
+            parsed metadata — passes ``True`` explicitly to preserve its
+            own pre-existing live-filesystem alias-probing behavior
+            (symlink targets, hard-link aliases): this function is its
+            thin metadata-extraction wrapper (see its own docstring), so a
+            regression here silently reached every real caller of it, not
+            only a genuinely metadata-only one (Codex review, fresh
+            evidence — a second-round regression in the first-round fix
+            above).
     """
     from . import deadline
 
@@ -235,14 +263,8 @@ def build_bundle_snapshot_from_metadata(
         surviving_metadata[name] = meta
         surviving_paths[name] = paths.get(name, Path(name))
 
-    # probe_filesystem=False unconditionally: this function's whole
-    # contract is metadata-only resolution (see its own docstring), so
-    # even a caller-supplied `paths` -- given only for display purposes
-    # (a library's own .name/.parent) -- must not make the resolution
-    # graph depend on what those paths happen to resolve to on the real
-    # filesystem (Codex review, fresh evidence).
     resolution = _compute_resolution_graph(
-        surviving_paths, surviving_metadata, probe_filesystem=False
+        surviving_paths, surviving_metadata, probe_filesystem=probe_filesystem
     )
     # Use the first library's parent as the root if available; otherwise empty path
     resolved_root = (

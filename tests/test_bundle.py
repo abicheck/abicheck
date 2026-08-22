@@ -2334,6 +2334,36 @@ class TestBuildBundleSnapshotFromMetadata:
         )
         assert "libprovider.so" not in snap.resolution.soname_to_name
 
+    def test_build_bundle_snapshot_still_probes_the_filesystem(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # build_bundle_snapshot() -- the real-path wrapper, handed live
+        # binaries on disk -- delegates to
+        # build_bundle_snapshot_from_metadata(), whose own default is now
+        # probe_filesystem=False (the fix above). Without explicitly
+        # threading probe_filesystem=True through that delegation, the
+        # real-path wrapper would silently lose its pre-existing
+        # filesystem alias-probing (symlink targets, hard-link aliases)
+        # too -- a second-round regression in the first-round fix (Codex
+        # review, fresh evidence).
+        import abicheck.bundle as bundle_mod
+
+        captured: dict[str, object] = {}
+        real_impl = bundle_mod.build_bundle_snapshot_from_metadata
+
+        def _capturing(*args, **kwargs):  # type: ignore[no-untyped-def]
+            captured.update(kwargs)
+            return real_impl(*args, **kwargs)
+
+        monkeypatch.setattr(
+            bundle_mod, "build_bundle_snapshot_from_metadata", _capturing
+        )
+
+        _write_elf_shared_object_stub(tmp_path / "libfoo.so")
+        bundle_mod.build_bundle_snapshot({"libfoo.so": tmp_path / "libfoo.so"})
+
+        assert captured.get("probe_filesystem") is True
+
 
 # ---------------------------------------------------------------------------
 # BundleSnapshot.is_intra_bundle_provider
