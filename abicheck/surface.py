@@ -66,7 +66,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from .diff_cxx_rules import owner_class_of
-from .model import ScopeOrigin, Visibility
+from .model import ElfVisibility, ScopeOrigin, Visibility
 
 if TYPE_CHECKING:
     from .checker_types import Change
@@ -401,6 +401,18 @@ class PublicSurface:
     # "unreachable" — doing so would hide a real break (ADR-024 §D5.2). Only
     # confident provenance (private/system header) may demote in that case.
     has_typed_roots: bool = False
+    # True when this surface was resolved via the ELF-visibility fallback
+    # (:func:`_seed_elf_visibility_roots`) rather than header-derived
+    # Visibility.PUBLIC data — i.e. no headers were supplied at all, and
+    # default/protected-visibility exported symbols were used as a coarser
+    # public-surface proxy instead. Never set together with a "real"
+    # header-scoped resolution (the fallback only ever runs when the
+    # header-derived seeding found nothing to work with). Surfaces
+    # resolved this way carry no type-reachability closure (a headerless
+    # snapshot has no record/enum data to walk), so `public_types`/
+    # `all_types` stay empty and type-level findings fall through to the
+    # conservative "unknown, keep it" path.
+    elf_visibility_fallback: bool = False
 
 
 def _symbol_keys(name: str, mangled: str) -> set[str]:
@@ -785,6 +797,59 @@ def _walk_exact_type_closure(
                     queue.append(ident)
 
 
+_ELF_VISIBILITY_PUBLIC_PROXY: frozenset[ElfVisibility] = frozenset(
+    {ElfVisibility.DEFAULT, ElfVisibility.PROTECTED}
+)
+
+
+def _seed_elf_visibility_roots(snap: AbiSnapshot, surface: PublicSurface) -> bool:
+    """Fallback public-root seeding for a headerless (ELF-only) snapshot.
+
+    When no header-derived :data:`Visibility.PUBLIC` signal exists at all
+    (every symbol is ``ELF_ONLY`` — ADR-016, no ``-H``/``--header`` given),
+    a bundle/directory-mode comparison would otherwise report every changed
+    symbol — public API or purely internal — as breaking (issue: headerless
+    bundle compare produces no public-surface scoping). This falls back to
+    real ELF ``st_other`` symbol visibility (:data:`Function.elf_visibility`
+    / :data:`Variable.elf_visibility`, populated from ``.dynsym`` on every
+    symbol independent of whether headers were supplied — see
+    ``dumper_elf_symbols._populate_elf_visibility``) as a coarser
+    public-surface proxy: a default/protected-visibility dynamic symbol is
+    externally linkable and callable by any consumer, so it is treated as
+    public; a hidden/internal-visibility one is not observable to a
+    consumer at all, so it is treated as private.
+
+    This is strictly coarser than header-derived scoping: there is no
+    type-reachability closure to run (a headerless dump carries no
+    record/enum data to walk — ``public_types``/``all_types`` stay empty),
+    and default ELF visibility is a much weaker public-API signal than an
+    explicit public header (a library routinely exports more than its
+    documented public API at the ELF level, e.g. helper symbols with no
+    ``-fvisibility=hidden`` annotation). Callers must treat a surface
+    resolved this way as reduced confidence
+    (:data:`SCOPE_NOTE_ELF_VISIBILITY_FALLBACK`), never as equivalent to a
+    real header-scoped resolution.
+
+    Returns whether any real ``elf_visibility`` evidence was found at all —
+    when none is populated (e.g. a non-ELF binary, or a snapshot dumped
+    before ``elf_visibility`` existed), the caller keeps the pre-existing
+    "no headers ⇒ unresolvable, keep everything" behaviour rather than
+    fabricating a surface from nothing.
+    """
+    seeded_any_evidence = False
+    for coll in (snap.functions, snap.variables):
+        for sym in coll:
+            vis = getattr(sym, "elf_visibility", None)
+            if vis is None:
+                continue
+            seeded_any_evidence = True
+            keys = _symbol_keys(sym.name, sym.mangled)
+            surface.all_symbols |= keys
+            if vis in _ELF_VISIBILITY_PUBLIC_PROXY:
+                surface.public_symbols |= keys
+    return seeded_any_evidence
+
+
 def compute_public_surface(snap: AbiSnapshot) -> PublicSurface:
     """Compute the public-ABI surface of *snap*.
 
@@ -835,9 +900,21 @@ def compute_public_surface(snap: AbiSnapshot) -> PublicSurface:
 
     # Scoping only makes sense when we actually have header-derived public
     # visibility. Without headers every symbol is ELF_ONLY (ADR-016) and a
-    # surface filter would hide everything — so declare it unresolvable.
+    # surface filter would hide everything — so declare it unresolvable,
+    # unless real ELF symbol-visibility evidence lets us fall back to a
+    # coarser proxy surface instead of giving up entirely (see
+    # _seed_elf_visibility_roots).
     surface.resolvable = has_public and not getattr(snap, "elf_only_mode", False)
     if not surface.resolvable:
+        if getattr(snap, "elf_only_mode", False) and not has_public:
+            if _seed_elf_visibility_roots(snap, surface):
+                surface.resolvable = True
+                surface.elf_visibility_fallback = True
+        if not surface.resolvable:
+            return surface
+        # No type-reachability closure to run here (see
+        # elf_visibility_fallback's own docstring) — return the
+        # symbol-only surface as-is.
         return surface
 
     # Transitive closure over the record/typedef graph.
@@ -855,6 +932,12 @@ def compute_public_surface(snap: AbiSnapshot) -> PublicSurface:
 SCOPE_NOTE_MANGLING_FALLBACK = "mangling-fallback"  # MSVC C++ name-mangling gap
 SCOPE_NOTE_HEADER_BACKEND_UNAVAILABLE = "header-backend-unavailable"
 SCOPE_NOTE_NO_PROVENANCE = "no-provenance"  # surface resolved without provenance
+# Surface resolved from ELF st_other symbol visibility alone (no headers at
+# all were supplied) — see PublicSurface.elf_visibility_fallback /
+# _seed_elf_visibility_roots. Strictly coarser than a header-derived
+# resolution: no type-reachability closure, and default ELF visibility is a
+# weaker public-API signal than an explicit public header.
+SCOPE_NOTE_ELF_VISIBILITY_FALLBACK = "elf-visibility-fallback"
 
 
 def surface_scope_confidence(
@@ -896,6 +979,8 @@ def surface_scope_confidence(
         # must fire unless every resolvable side carries provenance.
         if any(s.resolvable and not s.has_provenance for s in (s_old, s_new)):
             _add(SCOPE_NOTE_NO_PROVENANCE)
+        if any(s.elf_visibility_fallback for s in (s_old, s_new)):
+            _add(SCOPE_NOTE_ELF_VISIBILITY_FALLBACK)
 
     return ("reduced" if notes else "high"), notes
 

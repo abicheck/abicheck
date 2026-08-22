@@ -1027,7 +1027,7 @@ def _attach_suppression_audit(result: Any, suppression: Any) -> None:
 
 
 def _reject_flags_unsupported_for_set_inputs(
-    ctx: click.Context, project_cfg: Any, *,
+    ctx: click.Context, *,
     exit_code_scheme: str | None, reconcile_build_context: bool,
     env_matrix_path: Path | None,
     used_by_apps: tuple[Path, ...], required_symbols: tuple[str, ...],
@@ -1060,7 +1060,7 @@ def _reject_flags_unsupported_for_set_inputs(
         include_labels=include_labels,
         require_complete_analysis=require_complete_analysis,
     )
-    _reject_compile_context_for_set_inputs(ctx, project_cfg)
+    _reject_compile_context_for_set_inputs(ctx)
     _reject_evidence_flags_for_set_inputs(ctx)
 
 
@@ -1523,7 +1523,7 @@ def run_compare(
     release_pack_application = None
     if {old_kind, new_kind} & {"directory", "package"}:
         _reject_flags_unsupported_for_set_inputs(
-            ctx, project_cfg,
+            ctx,
             exit_code_scheme=exit_code_scheme,
             reconcile_build_context=reconcile_build_context,
             env_matrix_path=env_matrix_path,
@@ -1617,6 +1617,19 @@ def run_compare(
         ))
 
     if {old_kind, new_kind} & {"directory", "package"}:
+        # L2 header compile context for the release fan-out, via the same
+        # `resolve_compile_context` call the single-pair path uses further
+        # below (folds the project `.abicheck.yml` `compile:` block in
+        # too). A sided `--ast-frontend old=/new=` override still has no
+        # per-library-pair meaning, so it stays rejected below.
+        directory_compile_context, _ = resolve_compile_context(
+            ctx,
+            gcc_options=gcc_options, sysroot=sysroot, nostdinc=nostdinc,
+            header_backend=header_backend, includes=includes, build_config=cfg_path,
+            frontend_context=frontend_context,
+            compiler_path=compiler_path, compiler_prefix=compiler_prefix,
+            compiler_option_tokens=compiler_option_tokens,
+        )
         # Resolved through the ``cli`` module (not a by-name import) so a test that
         # monkeypatches ``abicheck.cli._dispatch_release_compare`` before invoking
         # ``compare`` is honoured — matching the pre-split resolution semantics.
@@ -1653,6 +1666,7 @@ def run_compare(
             contract_mode=contract_mode,
             pack_application=release_pack_application,
             secondary_fmt=secondary_fmt, secondary_output=secondary_output,
+            compile_context=directory_compile_context,
         )
         return
     # Single-file/snapshot inputs: the set-only fan-out flags do not apply.

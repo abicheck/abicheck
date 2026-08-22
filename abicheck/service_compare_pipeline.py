@@ -63,6 +63,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from .api_types import CompareRequest, CompareResult, InputSpec, required_path
+from .compile_context import CompileContext
 from .dependency_info import populate_pair_dependency_info
 from .errors import ValidationError
 from .service_input_resolution import enforce_requested_depth, resolve_side_snapshot
@@ -70,7 +71,6 @@ from .service_input_resolution import enforce_requested_depth, resolve_side_snap
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from .compile_context import CompileContext
     from .model import AbiSnapshot
     from .service_compare_evidence import SideEvidence
 
@@ -605,6 +605,7 @@ def run_compare(
     contract_mode: str | None = None,
     pack_policy_overrides: dict[Any, Any] | None = None,
     pack_internal_namespaces: tuple[str, ...] | None = None,
+    compile_context: CompileContext | None = None,
 ) -> CompareResult:
     """Compare two ABI inputs and return the classified diff result.
 
@@ -625,6 +626,16 @@ def run_compare(
     folds them in and why. ``None``/empty on both is a no-op, matching every
     pre-existing caller.
 
+    ``compile_context`` is a both-sides :class:`~abicheck.compile_context.
+    CompileContext` (the L2 cross-toolchain/frontend family --
+    ``--ast-frontend``/``--compiler``/``--compiler-prefix``/
+    ``--compiler-option``/``--sysroot``/``--nostdinc``/``--frontend-context``),
+    applied identically to :class:`InputSpec.compile` on both sides -- the
+    same both-sides-only granularity ``include_dependencies`` already has in
+    this shim; a caller needing a genuine per-side override should build a
+    :class:`CompareRequest` directly instead. ``None`` (the default) is a
+    no-op, matching every pre-existing caller.
+
     Returns:
         A :class:`~abicheck.api_types.CompareResult`. This returned the bare
         ``(DiffResult, old, new)`` tuple before 0.6; ``.as_tuple()`` gives that
@@ -642,6 +653,7 @@ def run_compare(
             pdb=old_pdb_path,
             debug_roots=tuple(old_debug_roots or ()),
             include_dependencies=include_dependencies,
+            compile=compile_context,
         ),
         new=InputSpec(
             path=new_input,
@@ -651,6 +663,7 @@ def run_compare(
             pdb=new_pdb_path,
             debug_roots=tuple(new_debug_roots or ()),
             include_dependencies=include_dependencies,
+            compile=compile_context,
         ),
         lang=lang,
         frontend=frontend,

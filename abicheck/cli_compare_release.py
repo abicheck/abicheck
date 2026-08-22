@@ -88,6 +88,7 @@ from .model import AbiSnapshot
 from .reporter import to_json
 
 if TYPE_CHECKING:
+    from .compile_context import CompileContext
     from .pack_application import PackApplication
     from .severity import SeverityConfig
 
@@ -117,6 +118,7 @@ def _run_compare_pair(
     contract_evaluation: bool = False,
     contract_mode: str | None = None,
     pack_application: PackApplication | None = None,
+    compile_context: CompileContext | None = None,
 ) -> CompareResult:
     """Run compare for one old/new pair and return result + resolved snapshots.
 
@@ -143,6 +145,20 @@ def _run_compare_pair(
     classify_compare_pair`` folds into *this pair's own* freshly-loaded
     ``PolicyFile`` the same way a single-pair ``compare`` folds its packs
     into its one ambient policy file.
+
+    *compile_context* is the release's already-resolved, both-sides L2
+    header-AST compile context (``--ast-frontend``/``--compiler``/
+    ``--compiler-prefix``/``--compiler-option``/``--sysroot``/``--nostdinc``/
+    ``--frontend-context``, resolved once for the whole release by
+    ``cli_compare_helpers.run_compare`` the same way a single-pair
+    ``compare`` resolves it -- see ``cli_options.resolve_compile_context``).
+    Forwarded to ``service.run_compare`` unchanged so each library's header
+    dump parses with the same cross-toolchain/frontend context a single-pair
+    ``compare`` of that library would use, closing the gap this function's
+    own historical docstring used to flag ("the per-library fan-out does not
+    thread the L2 compile context" -- see AGENTS.md's whole-product-bundle
+    known-gap entry). ``None`` (the default) is a true no-op, matching every
+    pre-existing caller.
     """
     from . import service
 
@@ -177,6 +193,7 @@ def _run_compare_pair(
         pack_internal_namespaces=(
             pack_application.internal_namespaces if pack_application else None
         ),
+        compile_context=compile_context,
     )
 
 
@@ -204,6 +221,7 @@ _CompareReleaseCommonArgs = tuple[
     "SeverityConfig | None",
     "PackApplication | None",
     bool,
+    "CompileContext | None",
 ]
 
 
@@ -249,6 +267,7 @@ def _compare_one_library(
     severity_config: SeverityConfig | None = None,
     pack_application: PackApplication | None = None,
     collect_diff_results: bool = False,
+    compile_context: CompileContext | None = None,
 ) -> dict[str, object]:
     """Compare one library pair — suitable for parallel dispatch.
 
@@ -306,6 +325,7 @@ def _compare_one_library(
             contract_evaluation=contract_evaluation,
             contract_mode=contract_mode,
             pack_application=pack_application,
+            compile_context=compile_context,
         )
         result = compare_result.diff
         v = result.verdict.value
@@ -502,6 +522,7 @@ def _compare_release_libraries(
     contract_evaluation: bool = False,
     contract_mode: str | None = None,
     pack_application: PackApplication | None = None,
+    compile_context: CompileContext | None = None,
 ) -> tuple[list[dict[str, object]], str, list[tuple[DiffResult, AbiSnapshot]]]:
     """Compare each matched library pair and collect results.
 
@@ -546,6 +567,7 @@ def _compare_release_libraries(
         severity_config,
         pack_application,
         collect_diff_results,
+        compile_context,
     )
 
     if effective_jobs > 1 and len(matched_keys) > 1:
@@ -1244,7 +1266,10 @@ def _strip_diff_results_and_adjust_verdict(
     "bundle_system_providers",
     default="",
     help="Comma-separated extra sonames to treat as system-provided "
-    "(extends the built-in libc/libstdc++/libgcc/libtbb allow-list).",
+    "(extends the built-in libc/libstdc++/libgcc/libtbb allow-list). "
+    "Matched against the real DT_NEEDED soname either exactly or by its "
+    "version-suffix-stripped stem (e.g. 'libmkl_core' matches a real "
+    "'libmkl_core.so.2' DT_NEEDED entry); matching is case-sensitive.",
 )
 @click.option(
     "--bundle-cohort",
@@ -1350,6 +1375,12 @@ def compare_release_cmd(
     # true no-op: every library is compared exactly as it was before this
     # parameter existed.
     pack_application: PackApplication | None = None,
+    # `compare`'s directory/package fan-out resolves the both-sides L2
+    # header-AST compile context once, ahead of dispatch (the same
+    # `cli_options.resolve_compile_context` call the single-pair path uses),
+    # and hands it over here -- same internal-parameter shape as
+    # pack_application above. `None` (the default) is a true no-op.
+    compile_context: CompileContext | None = None,
 ) -> None:
     """Compare all libraries in two release directories or packages.
 
@@ -1598,6 +1629,7 @@ def compare_release_cmd(
                 contract_evaluation=contract_evaluation,
                 contract_mode=contract_mode,
                 pack_application=pack_application,
+                compile_context=compile_context,
             )
 
             # ADR-049 Phase 7's orthogonal contract-coverage floor, aggregated

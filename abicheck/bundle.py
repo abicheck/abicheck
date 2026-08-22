@@ -80,6 +80,7 @@ from .bundle_models import (  # noqa: F401  (re-exported for back-compat)
     ProviderEntry as ProviderEntry,
     ResolutionGraph as ResolutionGraph,
 )
+from .bundle_soname import soname_matches_providers
 from .checker_policy import ChangeKind, Verdict, compute_verdict
 from .checker_types import DiffResult
 from .elf_metadata import ElfMetadata, ElfSymbol, SymbolBinding, parse_elf_metadata
@@ -976,14 +977,17 @@ def _detect_intra_dep_removed(
             # allow-list (built-in libc/libstdc++/libgcc plus user extras),
             # any unresolved import is assumed to come from outside the
             # bundle. This is what --bundle-system-providers controls.
+            # No symbol-name-shape re-check here (mirrors
+            # _detect_unresolved_intra_dependency's identical branch): a
+            # reverted earlier revision gated this on that heuristic too,
+            # making --bundle-system-providers inert for a legitimate
+            # non-system-shaped custom export (e.g. MKL/TBB/SYCL C APIs).
             extra_needed = new.resolution.extra_needed.get(consumer.library, [])
             if extra_needed and all(
-                e in system_providers or _looks_system(e) for e in extra_needed
+                soname_matches_providers(e, system_providers) or _looks_system(e)
+                for e in extra_needed
             ):
-                # And the symbol itself looks system-shaped (mangled std::,
-                # well-known C runtime entry, etc.) — skip the finding.
-                if symbol in DEFAULT_SYSTEM_SYMBOLS or _looks_system_symbol(symbol):
-                    continue
+                continue
             if symbol in DEFAULT_SYSTEM_SYMBOLS or _looks_system_symbol(symbol):
                 continue
             findings.append(
@@ -1062,8 +1066,8 @@ def _detect_unresolved_intra_dependency(
        actually be loaded together with the consumer.
     2. **A narrower, explicitly-approximate suppression path for unversioned
        imports.** Mirrors ``_detect_intra_dep_removed``'s
-       ``e in system_providers or _looks_system(e)`` allow-list union
-       (built-in ``DEFAULT_SYSTEM_PROVIDERS`` plus caller-supplied
+       ``soname_matches_providers(e, system_providers) or _looks_system(e)``
+       allow-list union (built-in ``DEFAULT_SYSTEM_PROVIDERS`` plus caller-supplied
        ``--bundle-system-providers``) and its non-empty guard
        (``extra_edges and all(...)``, never a bare ``all([])``), but adds a
        requirement that one-sided audit needs and the diff-driven detector
@@ -1147,7 +1151,9 @@ def _detect_unresolved_intra_dependency(
                     not intra_edges
                     and extra_edges
                     and all(
-                        e in system_providers or _looks_system(e) for e in extra_edges
+                        soname_matches_providers(e, system_providers)
+                        or _looks_system(e)
+                        for e in extra_edges
                     )
                 ):
                     continue

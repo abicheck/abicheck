@@ -73,43 +73,55 @@ def test_frontend_context_invalid_value_rejected_by_click(tmp_path, runner):
     assert "Invalid value" in result.output or "invalid choice" in result.output.lower()
 
 
-def test_compare_frontend_context_device_rejected_for_directory_inputs(
-    tmp_path, runner
+def test_compare_frontend_context_device_threaded_for_directory_inputs(
+    monkeypatch, tmp_path, runner
 ):
+    """`--frontend-context` is a both-sides L2 compile-context knob (like
+    `--ast-frontend`/`--compiler`), threaded to the release fan-out's
+    resolved `CompileContext` rather than rejected (fix: whole-product-
+    bundle known-gap entry, AGENTS.md)."""
+    import abicheck.cli as cli_mod
+
     old_dir = tmp_path / "old"
     old_dir.mkdir()
     new_dir = tmp_path / "new"
     new_dir.mkdir()
+
+    dispatched: dict[str, object] = {}
+    monkeypatch.setattr(
+        cli_mod, "_dispatch_release_compare", lambda ctx, **kw: dispatched.update(kw)
+    )
     result = runner.invoke(
         main,
         ["compare", str(old_dir), str(new_dir), "--frontend-context", "device"],
     )
-    assert result.exit_code != 0
-    assert "--frontend-context" in result.output
-    assert "not supported for directory/package" in result.output
+    assert result.exit_code == 0, result.output
+    assert dispatched["compile_context"].frontend_context == "device"
 
 
-def test_compare_frontend_context_host_rejected_for_directory_inputs(
-    tmp_path, runner
+def test_compare_frontend_context_host_threaded_for_directory_inputs(
+    monkeypatch, tmp_path, runner
 ):
-    """Same rejection, but with the value ``host`` -- always otherwise
-    accepted (Phase B honors only ``host``) -- so the only thing that can
-    make this fail is cli_resolve.py's set-input guard itself, not Phase
-    B's separate, temporary rejection of every non-``host`` value. Using
-    ``device`` alone (the test above) would let a release-rejection test
-    pass via that unrelated rejection instead, silently resurfacing once
-    Phase D makes ``device`` a normally-accepted value too."""
+    """Same threading, with the (default-looking) value ``host``, so the
+    only thing that could make this fail is cli_resolve.py's set-input
+    guard itself still rejecting an explicit ``--frontend-context``."""
+    import abicheck.cli as cli_mod
+
     old_dir = tmp_path / "old"
     old_dir.mkdir()
     new_dir = tmp_path / "new"
     new_dir.mkdir()
+
+    dispatched: dict[str, object] = {}
+    monkeypatch.setattr(
+        cli_mod, "_dispatch_release_compare", lambda ctx, **kw: dispatched.update(kw)
+    )
     result = runner.invoke(
         main,
         ["compare", str(old_dir), str(new_dir), "--frontend-context", "host"],
     )
-    assert result.exit_code != 0
-    assert "--frontend-context" in result.output
-    assert "not supported for directory/package" in result.output
+    assert result.exit_code == 0, result.output
+    assert dispatched["compile_context"].frontend_context == "host"
 
 
 def test_resolve_compile_context_defaults_to_host():

@@ -297,6 +297,71 @@ class TestIntraDepRemoved:
         )
         assert len(with_extra.bundle_findings) <= len(result_default.bundle_findings)
 
+    def test_system_providers_suppresses_non_system_shaped_symbol(self) -> None:
+        """Regression: --bundle-system-providers must suppress a finding for
+        a non-system-shaped symbol (not std::-mangled, not in
+        DEFAULT_SYSTEM_SYMBOLS) once every one of the consumer's non-intra
+        DT_NEEDED edges is covered by the allow-list -- e.g. a vendor C API
+        symbol like MKL's mkl_custom_op imported from a soname the user
+        explicitly named via --bundle-system-providers. A prior revision
+        gated this allow-list match on the symbol *also* looking
+        system-shaped, which made --bundle-system-providers inert for
+        exactly this case.
+        """
+        new = _snapshot(
+            {
+                "libfoo.so": _meta(
+                    soname="libfoo.so.1",
+                    needed=["libmkl_core.so.2"],
+                    imports=["mkl_custom_op"],
+                ),
+            }
+        )
+        # Without the allow-list entry: real, reportable finding.
+        without_extra = compare_bundle(new, new, per_library_results=[])
+        assert any(
+            f.kind == ChangeKind.BUNDLE_INTRA_DEP_REMOVED
+            and f.symbol == "mkl_custom_op"
+            for f in without_extra.bundle_findings
+        )
+        # With the exact soname allow-listed: finding must be suppressed.
+        with_extra = compare_bundle(
+            new,
+            new,
+            per_library_results=[],
+            system_providers=["libmkl_core.so.2"],
+        )
+        assert not any(
+            f.kind == ChangeKind.BUNDLE_INTRA_DEP_REMOVED
+            for f in with_extra.bundle_findings
+        )
+
+    def test_system_providers_matches_versioned_soname_by_stem(self) -> None:
+        """A user-supplied allow-list entry without the real DT_NEEDED
+        version suffix (e.g. 'libmkl_core', no '.so.2') must still match
+        the real, versioned soname -- hand-typed allow-list entries rarely
+        carry the exact runtime version suffix.
+        """
+        new = _snapshot(
+            {
+                "libfoo.so": _meta(
+                    soname="libfoo.so.1",
+                    needed=["libmkl_core.so.2"],
+                    imports=["mkl_custom_op"],
+                ),
+            }
+        )
+        with_extra = compare_bundle(
+            new,
+            new,
+            per_library_results=[],
+            system_providers=["libmkl_core"],
+        )
+        assert not any(
+            f.kind == ChangeKind.BUNDLE_INTRA_DEP_REMOVED
+            for f in with_extra.bundle_findings
+        )
+
     def test_fires_when_dt_needed_was_stripped(self) -> None:
         # Regression for the CodeRabbit feedback: previously the bundle
         # layer short-circuited when consumer.intra_needed was empty,

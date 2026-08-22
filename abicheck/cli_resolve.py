@@ -31,7 +31,7 @@ caller is a CLI entry point — the parallel, framework-free contract lives in
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import click
 
@@ -649,24 +649,24 @@ def _resolve_compare_snapshots(
 
 # ── Set-input (directory/package) compare guards (ADR-037 D3/D12) ─────────────
 #
-# The per-library release fan-out forwards only release-comparison kwargs; it
-# does not thread the single-pair L2 compile context or inline build/source
-# evidence per pair. So the corresponding flags would be silently dropped on a
-# directory/package compare — reject them loudly instead (Codex review). Kept
-# here (not in cli.py) so cli.py stays under the file-size hard cap.
+# The per-library release fan-out forwards only release-comparison kwargs, and
+# does not collect inline build/source evidence per pair (L3-L5) — those flags
+# would be silently dropped on a directory/package compare, so they are
+# rejected loudly instead (Codex review). Kept here (not in cli.py) so cli.py
+# stays under the file-size hard cap.
+#
+# The both-sides L2 compile context (--ast-frontend/--compiler/
+# --compiler-prefix/--compiler-option/--sysroot/--nostdinc/--frontend-context)
+# *is* now threaded through the fan-out (cli_compare_helpers.run_compare
+# resolves one CompileContext for the whole release, the same way a
+# single-pair compare resolves its own, and forwards it to every library pair
+# — see cli_compare_release._run_compare_pair's compile_context parameter).
+# Only the *sided* --ast-frontend old=/new= override has no home here: it
+# means "parse the old library's headers with a different frontend than the
+# new one", which has no per-library-pair-within-a-release equivalent to
+# mirror (a release fan-out already compares each library's own old vs. new
+# under one shared context) — so it stays rejected below.
 
-#: Compile-context flag dest → spelling, for the set-input rejection guard.
-_COMPILE_CONTEXT_SET_INPUT_FLAGS: dict[str, str] = {
-    "compiler_path": "--compiler",
-    "compiler_prefix": "--compiler-prefix",
-    "compiler_option_tokens": "--compiler-option",
-    "sysroot": "--sysroot",
-    "nostdinc": "--nostdinc",
-    "header_backend": "--ast-frontend",
-    "old_header_backend": "--ast-frontend old=",
-    "new_header_backend": "--ast-frontend new=",
-    "frontend_context": "--frontend-context",
-}
 
 #: Build/source evidence flags (param dest → flag). ``depth`` is the
 #: evidence-depth dial; the four per-side --sources/--build-info are the
@@ -717,65 +717,38 @@ def _reject_evidence_flags_for_set_inputs(ctx: click.Context) -> None:
         )
 
 
-def _config_has_compile_block(project_cfg: Any) -> bool:
-    """True if a loaded ``.abicheck.yml`` carries any ``compile:`` setting.
+def _reject_compile_context_for_set_inputs(ctx: click.Context) -> None:
+    """Guard the *sided* per-side L2 compile context for directory/package compares.
 
-    Used to flag that a project's L2 compile context would be dropped by the
-    per-library release fan-out (which the single-pair path honors).
+    The both-sides compile context (--ast-frontend/--compiler/
+    --compiler-prefix/--compiler-option/--sysroot/--nostdinc/
+    --frontend-context, and the project ``.abicheck.yml`` ``compile:`` block)
+    is threaded through the release fan-out — see this module's own comment
+    above. Only a sided ``--ast-frontend old=/new=`` override has no
+    per-library-pair-within-a-release meaning, so it is rejected loudly here
+    (a `UsageError`, mirroring the `--exit-code-scheme` guard) rather than
+    silently ignored.
+
+    Detected via :func:`cli_options.sided_frontend_explicit`, not a plain
+    ``ctx.get_parameter_source("old_header_backend")`` dict lookup:
+    ``old_header_backend``/``new_header_backend`` are kwargs
+    ``normalize_sided_options`` synthesizes into the command's own kwargs
+    dict, never real Click-registered parameters — so `get_parameter_source`
+    for either name is never ``COMMANDLINE``, making a dict-keyed check on
+    them silently inert (a prior revision of this guard carried exactly that
+    dead check).
     """
-    if project_cfg is None:
-        return False
-    return bool(
-        getattr(project_cfg, "compile_frontend", None)
-        or getattr(project_cfg, "compile_std", None)
-        or getattr(project_cfg, "compile_defines", None)
-        or getattr(project_cfg, "compile_include_dirs", None)
-        or getattr(project_cfg, "compile_sysroot", None)
-        or getattr(project_cfg, "compile_nostdinc", False)
-    )
+    # Lazy import: cli_options already imports this module (lazily) for
+    # classify_compare_operand/_reject_evidence_flags_for_set_inputs, so a
+    # top-level `from .cli_options import ...` here would close that cycle
+    # (see cli_options.py's own "cli_options -> cli_resolve -> ..." comment).
+    from .cli_options import sided_frontend_explicit
 
-
-def _reject_compile_context_for_set_inputs(
-    ctx: click.Context, project_cfg: Any
-) -> None:
-    """Guard the L2 compile context for directory/package compares.
-
-    The per-library fan-out (release backend) runs each pair through
-    `service.run_compare` without a `CompileContext`, so the L2 cross-toolchain /
-    frontend context is not applied per library — unlike the single-pair path that
-    now honors it. Two cases, never silent (Codex review):
-
-    * An **explicitly-passed** compile-context flag is rejected loudly (a
-      `UsageError`, mirroring the `--exit-code-scheme` guard): the user asked for
-      it, so erroring beats ignoring it.
-    * An **ambient** project ``.abicheck.yml`` ``compile:`` block only *warns*:
-      a plain ``compare dir1 dir2`` in a configured project shouldn't hard-fail,
-      but the user must know those settings apply to single-library compares and
-      not to this fan-out (so per-library snapshots may differ).
-
-    Either way, compare libraries individually (or pre-dump snapshots) to apply
-    the context.
-    """
-    used = [
-        flag
-        for dest, flag in _COMPILE_CONTEXT_SET_INPUT_FLAGS.items()
-        if ctx.get_parameter_source(dest) == click.core.ParameterSource.COMMANDLINE
-    ]
-    if used:
+    if sided_frontend_explicit(ctx):
         raise click.UsageError(
-            ", ".join(sorted(used))
-            + " "
-            + ("is" if len(used) == 1 else "are")
-            + " not supported for directory/package (release) comparisons: the "
-            "per-library fan-out does not thread the L2 compile context to each "
-            "pair's header dump. Compare the libraries individually to use them."
-        )
-    if _config_has_compile_block(project_cfg):
-        click.echo(
-            "Warning: the .abicheck.yml compile: block is not applied to "
-            "directory/package (release) comparisons — the per-library fan-out "
-            "does not thread the L2 compile context. It affects single-library "
-            "compares only; compare libraries individually for consistent "
-            "per-library snapshots.",
-            err=True,
+            "--ast-frontend old=/new= is not supported for directory/package "
+            "(release) comparisons: a sided override has no per-library-pair "
+            "meaning across a release (every library's own old vs. new is "
+            "already compared under one shared, both-sides compile context). "
+            "Compare the libraries individually to use a sided override."
         )

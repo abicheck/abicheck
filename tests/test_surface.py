@@ -15,6 +15,7 @@ from abicheck.checker_types import Change
 from abicheck.dwarf_advanced import AdvancedDwarfMetadata
 from abicheck.model import (
     AbiSnapshot,
+    ElfVisibility,
     EnumMember,
     EnumType,
     Function,
@@ -22,6 +23,7 @@ from abicheck.model import (
     RecordType,
     ScopeOrigin,
     TypeField,
+    Variable,
     Visibility,
 )
 from abicheck.surface import (
@@ -29,11 +31,13 @@ from abicheck.surface import (
     REASON_NOT_EXPORTED,
     REASON_PRIVATE_HEADER,
     REASON_SYSTEM_HEADER,
+    SCOPE_NOTE_ELF_VISIBILITY_FALLBACK,
     PublicSurface,
     _type_identifiers,
     change_in_public_surface,
     classify_change_surface,
     compute_public_surface,
+    surface_scope_confidence,
 )
 
 
@@ -114,6 +118,137 @@ class TestComputePublicSurface:
         )
         surf = compute_public_surface(snap)
         assert surf.resolvable is False
+
+    def test_elf_visibility_fallback_when_headerless_but_dynsym_visibility_known(self):
+        """Headerless bundle compare (no -H at all): every symbol is
+        ELF_ONLY, but real ELF st_other visibility is still known from
+        .dynsym. Rather than declaring the surface unresolvable (and
+        therefore keeping every changed symbol, public or internal, as
+        breaking -- the reported issue), a default/protected-visibility
+        export is treated as a public-surface proxy and a hidden/internal
+        one is not.
+        """
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            elf_only_mode=True,
+            functions=[
+                _fn(
+                    "public_api_call",
+                    vis=Visibility.ELF_ONLY,
+                    mangled="public_api_call",
+                ),
+                _fn(
+                    "internal_helper",
+                    vis=Visibility.ELF_ONLY,
+                    mangled="internal_helper",
+                ),
+            ],
+        )
+        snap.functions[0].elf_visibility = ElfVisibility.DEFAULT
+        snap.functions[1].elf_visibility = ElfVisibility.HIDDEN
+        surf = compute_public_surface(snap)
+        assert surf.resolvable is True
+        assert surf.elf_visibility_fallback is True
+        assert "public_api_call" in surf.public_symbols
+        assert "internal_helper" not in surf.public_symbols
+        assert "internal_helper" in surf.all_symbols
+        # No type-reachability closure is run for this fallback tier.
+        assert surf.public_types == set()
+
+    def test_elf_visibility_fallback_variable(self):
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            elf_only_mode=True,
+            variables=[
+                Variable(
+                    name="g_public",
+                    mangled="g_public",
+                    type="int",
+                    visibility=Visibility.ELF_ONLY,
+                    elf_visibility=ElfVisibility.DEFAULT,
+                ),
+                Variable(
+                    name="g_internal",
+                    mangled="g_internal",
+                    type="int",
+                    visibility=Visibility.ELF_ONLY,
+                    elf_visibility=ElfVisibility.INTERNAL,
+                ),
+            ],
+        )
+        surf = compute_public_surface(snap)
+        assert surf.resolvable is True
+        assert "g_public" in surf.public_symbols
+        assert "g_internal" not in surf.public_symbols
+
+    def test_no_elf_visibility_fallback_when_no_elf_visibility_evidence(self):
+        """When no elf_visibility is populated at all (e.g. a snapshot
+        predating that field, or a non-ELF headerless dump), the fallback
+        must not fabricate a surface from nothing -- stays unresolvable,
+        matching the pre-existing "keep everything" behaviour.
+        """
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            elf_only_mode=True,
+            functions=[_fn("internal", vis=Visibility.ELF_ONLY)],
+        )
+        surf = compute_public_surface(snap)
+        assert surf.resolvable is False
+        assert surf.elf_visibility_fallback is False
+
+    def test_elf_visibility_fallback_scoping_end_to_end(self):
+        """End-to-end: a headerless compare with a changed hidden-visibility
+        symbol must not be reported breaking once both sides resolve via
+        the ELF-visibility fallback; a changed default-visibility (public)
+        symbol still is.
+        """
+        from abicheck.post_processing import FilterNonPublicSurface, PipelineContext
+
+        def _snap(internal_ret: str) -> AbiSnapshot:
+            snap = AbiSnapshot(
+                library="l",
+                version="1",
+                elf_only_mode=True,
+                functions=[
+                    _fn(
+                        "public_api_call",
+                        ret="int",
+                        vis=Visibility.ELF_ONLY,
+                        mangled="public_api_call",
+                    ),
+                    _fn(
+                        "internal_helper",
+                        ret=internal_ret,
+                        vis=Visibility.ELF_ONLY,
+                        mangled="internal_helper",
+                    ),
+                ],
+            )
+            snap.functions[0].elf_visibility = ElfVisibility.DEFAULT
+            snap.functions[1].elf_visibility = ElfVisibility.HIDDEN
+            return snap
+
+        old = _snap("void")
+        new = _snap("int")  # internal_helper's return type "changed"
+        change = Change(
+            kind=ChangeKind.FUNC_RETURN_CHANGED,
+            symbol="internal_helper",
+            description="return type changed",
+            old_value="void",
+            new_value="int",
+        )
+        ctx = PipelineContext(old=old, new=new, scope_to_public_surface=True)
+        kept = FilterNonPublicSurface().run([change], ctx)
+        assert kept == []
+        assert ctx.out_of_surface == [change]
+        confidence, notes = surface_scope_confidence(
+            old, new, scope_enabled=True, surf_old=ctx.surf_old, surf_new=ctx.surf_new
+        )
+        assert confidence == "reduced"
+        assert SCOPE_NOTE_ELF_VISIBILITY_FALLBACK in notes
 
     def test_public_symbol_and_reachable_type(self):
         snap = AbiSnapshot(
