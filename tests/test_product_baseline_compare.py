@@ -1474,6 +1474,23 @@ class TestDiscoverLibraryMapSymlinkContainment:
         with pytest.raises(SnapshotError, match="symlink loop"):
             _discover_library_map(root, include_private=True)
 
+    def test_dangling_symlink_is_silently_not_discovered(self, tmp_path: Path) -> None:
+        # A library-shaped symlink with a missing target made real.stat()
+        # raise ENOENT, which the ELOOP-only branch above fell through to
+        # `identity = real` for -- still yielding the dangling path as a
+        # discovered library, so a product containing only such an alias
+        # against an empty one produced a spurious bundle_library_removed
+        # finding, the same failure mode already fixed for a genuine
+        # symlink loop just above (Codex review, fresh evidence).
+        from abicheck.product_baseline import _discover_library_map
+
+        root = tmp_path / "product"
+        (root / "lib").mkdir(parents=True)
+        (root / "lib" / "libgone.so").symlink_to("missing.so")
+
+        result = _discover_library_map(root, include_private=True)
+        assert result == {}
+
 
 class TestDiscoverLibraryMapDeterministicWalkOrder:
     def test_symlink_alias_survivor_is_stable_regardless_of_walk_order(

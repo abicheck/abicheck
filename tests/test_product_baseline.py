@@ -656,6 +656,44 @@ class TestPackProductBaseline:
         with pytest.raises(SnapshotError, match="'..' component"):
             pack_product_baseline(product, tmp_path / "b.tar.zst")
 
+    @pytest.mark.skipif(
+        os.name == "nt",
+        reason="fixture needs a POSIX-only filename Windows cannot create",
+    )
+    def test_pack_rejects_a_reserved_windows_device_name(self, tmp_path: Path) -> None:
+        # A component matching a Windows reserved device name -- even
+        # with an extension, since Windows special-cases the base name,
+        # not the extension -- decomposes safely under Windows separators
+        # (no drive/root/".." at all) but is still a name Windows cannot
+        # safely represent (Codex review, fresh evidence).
+        product = _make_product(tmp_path)
+        (product / "aux.txt").write_bytes(b"MZ")
+        with pytest.raises(SnapshotError, match="reserved Windows device name"):
+            pack_product_baseline(product, tmp_path / "b.tar.zst")
+
+    @pytest.mark.skipif(
+        os.name == "nt",
+        reason="fixture needs a POSIX-only filename Windows cannot create",
+    )
+    def test_pack_rejects_a_forbidden_windows_character(self, tmp_path: Path) -> None:
+        product = _make_product(tmp_path)
+        (product / "lib" / "dir:stream").write_bytes(b"ELF")
+        with pytest.raises(SnapshotError, match="forbids in a path component"):
+            pack_product_baseline(product, tmp_path / "b.tar.zst")
+
+    @pytest.mark.skipif(
+        os.name == "nt",
+        reason="fixture needs a POSIX-only filename Windows cannot create",
+    )
+    def test_pack_rejects_a_trailing_dot_component(self, tmp_path: Path) -> None:
+        # Windows silently strips a trailing dot/space, so "name." and
+        # "name" would collide once unpacked there (Codex review, fresh
+        # evidence).
+        product = _make_product(tmp_path)
+        (product / "lib" / "name.").write_bytes(b"ELF")
+        with pytest.raises(SnapshotError, match="stripping its trailing dot/space"):
+            pack_product_baseline(product, tmp_path / "b.tar.zst")
+
     def test_pack_rejects_a_self_referential_symlink_loop(self, tmp_path: Path) -> None:
         # A self-referential symlink (loop.so -> loop.so) made
         # _add_member()'s own direct Path.resolve() raise RuntimeError,
@@ -1219,6 +1257,52 @@ class TestUnpackProductBaseline:
 
         dest = tmp_path / "dest"
         with pytest.raises(SnapshotError, match="never declared"):
+            unpack_product_baseline(tampered, dest)
+        assert not dest.exists()
+
+    def test_unpack_rejects_a_falsely_declared_non_library(
+        self, tmp_path: Path
+    ) -> None:
+        # The inventory checks above only ever catch an *undeclared*
+        # library -- an archive can equally declare an ordinary file
+        # (README.txt) as a LibraryEntry, with a correct size/digest for
+        # that exact file, and this validation accepted it outright,
+        # handing every caller of manifest.libraries something falsely
+        # advertised as a library (Codex review, fresh evidence).
+        product = _make_product(tmp_path)
+        (product / "README.txt").write_bytes(b"hello world, not a library")
+        archive = tmp_path / "baseline.tar.zst"
+        pack_product_baseline(product, archive)
+
+        import hashlib
+
+        import zstandard
+
+        dctx = zstandard.ZstdDecompressor()
+        tar_bytes = dctx.decompress(archive.read_bytes(), max_output_size=1 << 30)
+        with tarfile.open(fileobj=io.BytesIO(tar_bytes), mode="r") as tf:
+            manifest_fh = tf.extractfile(MANIFEST_MEMBER_NAME)
+            assert manifest_fh is not None
+            manifest_raw = json.loads(manifest_fh.read())
+            readme_fh = tf.extractfile("README.txt")
+            assert readme_fh is not None
+            readme_bytes = readme_fh.read()
+        # Appended, not replaced: the product's own real libraries stay
+        # declared, so only the added false entry is under test here --
+        # dropping them would instead trip the *undeclared*-library check
+        # (a different code path than the one this test targets) first.
+        manifest_raw["libraries"].append(
+            {
+                "path": "README.txt",
+                "size": len(readme_bytes),
+                "sha256": hashlib.sha256(readme_bytes).hexdigest(),
+            }
+        )
+        payload = json.dumps(manifest_raw).encode("utf-8") + b"\n"
+        tampered = _rewrite_manifest_member(tmp_path, archive, payload)
+
+        dest = tmp_path / "dest"
+        with pytest.raises(SnapshotError, match="not library-shaped"):
             unpack_product_baseline(tampered, dest)
         assert not dest.exists()
 
