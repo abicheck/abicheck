@@ -55,6 +55,7 @@ import stat as stat_module
 import struct
 import tarfile
 import tempfile
+import unicodedata
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path, PureWindowsPath
@@ -937,10 +938,11 @@ def pack_product_baseline(
             "before packing"
         )
 
-    # A case-sensitive host can archive two distinct member names that
-    # fold to the same identity on a case-insensitive Windows filesystem
-    # -- extraction overwrites one (Codex). Checked per path *component*,
-    # not just full leaf names: `Lib/a.so` vs `lib/b.so` unify.
+    # A case-sensitive host can archive two names that fold to the same
+    # identity on Windows -- checked per path component (`Lib/a.so` vs
+    # `lib/b.so` unify), NFC-normalized first: NFC vs NFD "café.so"
+    # casefold to different keys on their own, though APFS/HFS+ treat
+    # them as one filename (Codex).
     all_arcnames = [_relative_posix(p, source_path) for p in paths]
     all_arcnames.extend(_relative_posix(d, source_path) for d in archived_empty_dirs)
     all_arcnames.append(MANIFEST_MEMBER_NAME)
@@ -949,7 +951,7 @@ def pack_product_baseline(
         parts = arcname.split("/")
         for depth in range(1, len(parts) + 1):
             prefix = "/".join(parts[:depth])
-            folded = prefix.casefold()
+            folded = unicodedata.normalize("NFC", prefix).casefold()
             prior = case_folded.get(folded)
             if prior is not None and prior != prefix:
                 _cleanup_output_scaffold_dirs()
@@ -1690,8 +1692,7 @@ def compare_product_directories(
         """Validate every root declared in *spec* against *root*, independent
         of whether any library pair below actually references it -- unlike
         `_resolved_headers` below, which only checks roots a *matched* pair
-        asks for and never runs at all when discovery produces zero pairs
-        (Codex review, fresh evidence).
+        asks for and never runs when discovery produces zero pairs (Codex).
         """
         if isinstance(spec, str):
             raise SnapshotError(
@@ -1721,9 +1722,8 @@ def compare_product_directories(
                     "directory."
                 )
             if resolved.exists() and not resolved.is_dir():
-                # Nonexistent is tolerated (no public headers here); an
-                # *existing* non-directory is malformed config -- silently
-                # dropping it ran the compare with no evidence (Codex).
+                # Nonexistent tolerated (no headers here); an *existing*
+                # non-directory was previously dropped silently (Codex).
                 raise SnapshotError(
                     f"header root {rel!r}{context} exists but is not a "
                     f"directory ({resolved}) -- header roots must name a "

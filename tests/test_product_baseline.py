@@ -175,9 +175,8 @@ class TestManifestRoundTrip:
 
     def test_from_dict_tolerates_missing_and_wrong_shaped_fields(self) -> None:
         # Mirrors this codebase's established defensive from_dict() contract
-        # (AGENTS.md: "every dataclass carries to_dict()/from_dict() with
-        # defensive .get() parsing so a newer/hand-edited pack never aborts
-        # a load") -- garbage-shaped input degrades to empty, never raises.
+        # ("every dataclass ... defensive .get() parsing so a newer/hand-
+        # edited pack never aborts a load") -- degrades to empty, no raise.
         manifest = ProductBaselineManifest.from_dict(
             {"libraries": "not-a-list", "header_roots": None, "extra": "ignored"}
         )
@@ -186,10 +185,9 @@ class TestManifestRoundTrip:
         assert manifest.schema == PRODUCT_BASELINE_SCHEMA
 
     def test_from_dict_tolerates_non_numeric_size_and_file_count(self) -> None:
-        # A hand-edited/corrupt archive's manifest.json could carry a
-        # non-numeric "size"/"file_count" -- must degrade to 0, not raise
-        # ValueError past unpack_product_baseline()'s SnapshotError handling
-        # (Codex review, fresh evidence).
+        # A hand-edited/corrupt manifest.json could carry a non-numeric
+        # "size"/"file_count" -- must degrade to 0, not raise ValueError
+        # past unpack_product_baseline()'s SnapshotError handling (Codex).
         manifest = ProductBaselineManifest.from_dict(
             {
                 "libraries": [{"name": "a.so", "path": "a.so", "size": "not-a-number"}],
@@ -235,9 +233,8 @@ class TestPackProductBaseline:
         self, tmp_path: Path
     ) -> None:
         # "libfoo.so.1.debug" contains the literal substring ".so." (the
-        # dot right before "1"), so a naive substring check misclassified
-        # a conventional split-debug companion file as a shared library
-        # (Codex review, fresh evidence).
+        # dot before "1"), so a naive substring check misclassified a
+        # split-debug companion file as a shared library (Codex).
         product = _make_product(tmp_path)
         (product / "lib" / "libb.so.1.debug").write_bytes(b"DEBUGINFO")
         manifest = pack_product_baseline(product, tmp_path / "b.tar.zst")
@@ -275,9 +272,8 @@ class TestPackProductBaseline:
         elf_path = product / "lib" / "libreal.so"
         _make_minimal_elf_so(elf_path)
         # Append linker-script-shaped text after the real ELF header --
-        # models an embedded string/symbol name a real compiled binary
-        # could plausibly contain, well within resolve_linker_script's own
-        # 8KiB probe window.
+        # models an embedded symbol name a real binary could plausibly
+        # contain, within resolve_linker_script's 8KiB probe window.
         with elf_path.open("ab") as fh:
             fh.write(b"\x00INPUT(libdoesnotexist.so)\x00")
 
@@ -382,8 +378,7 @@ class TestPackProductBaseline:
     ) -> None:
         # The mkdir() call above leaves the scaffold dir behind on disk
         # even though pack raised -- an identical second call must not
-        # see that leftover as pre-existing, real content (Codex review,
-        # fresh evidence).
+        # see that leftover as pre-existing, real content (Codex).
         empty = tmp_path / "empty"
         empty.mkdir()
         out = empty / "artifacts" / "base.tar.zst"
@@ -398,8 +393,7 @@ class TestPackProductBaseline:
     ) -> None:
         # An absolute SOURCE_DIR paired with a RELATIVE OUTPUT under the
         # identical tree (differing path spellings, same location) used
-        # to make the lexical containment check spuriously fail
-        # (CodeRabbit review, fresh evidence).
+        # to make the lexical containment check spuriously fail (CodeRabbit).
         empty = tmp_path / "empty"
         empty.mkdir()
         cwd = Path.cwd()
@@ -446,9 +440,7 @@ class TestPackProductBaseline:
 
     def test_pack_rejects_a_bare_string_header_roots(self, tmp_path: Path) -> None:
         # header_roots="include" -- a typo for ["include"] -- satisfies
-        # Sequence[str], iterating character-by-character.
-        # compare_product_directories() rejects this shape, but not
-        # packing (Codex).
+        # Sequence[str], iterating character-by-character (Codex).
         product = _make_product(tmp_path)
         (product / "include").mkdir(exist_ok=True)
         with pytest.raises(SnapshotError, match="bare string"):
@@ -482,8 +474,7 @@ class TestPackProductBaseline:
     ) -> None:
         # compare_product_directories() only includes a header root when
         # .is_dir() is true -- one naming a regular file must be rejected
-        # at pack time, or it round-trips without ever reaching a
-        # comparison (Codex review).
+        # at pack time, or it round-trips without reaching a comparison.
         product = _make_product(tmp_path)
         with pytest.raises(SnapshotError, match="header root"):
             pack_product_baseline(
@@ -504,9 +495,8 @@ class TestPackProductBaseline:
 
     def test_pack_rejects_absolute_symlink_target(self, tmp_path: Path) -> None:
         # An absolute target inside SOURCE_DIR can't round-trip -- it
-        # names a path that won't exist at that location once unpacked
-        # elsewhere, so the paired unpack would fail TarExtractor's own
-        # symlink-escape check (Codex review).
+        # names a path that won't exist once unpacked elsewhere, failing
+        # TarExtractor's own symlink-escape check on the paired unpack.
         product = _make_product(tmp_path)
         target = product / "lib" / "libb.so"
         (product / "lib" / "absolute-link.so").symlink_to(target.resolve())
@@ -553,10 +543,9 @@ class TestPackProductBaseline:
     ) -> None:
         # A current-drive-rooted target (\\outside\\foo.dll -- no drive
         # letter, just a leading backslash) is anchored to whatever drive
-        # is current at resolution time on Windows, not a portable
-        # in-tree path -- but PureWindowsPath.is_absolute() is False for
-        # it (drive="", root="\\"), so the prior fix's is_absolute()-only
-        # check let it through (Codex review, fresh evidence).
+        # is current on Windows, not portable -- but PureWindowsPath.
+        # is_absolute() is False for it (drive="", root="\\"), so the
+        # prior fix's is_absolute()-only check let it through (Codex).
         product = _make_product(tmp_path)
         (product / "lib" / "root-rel.so").symlink_to("\\outside\\foo.dll")
         with pytest.raises(SnapshotError, match="absolute target"):
@@ -578,8 +567,7 @@ class TestPackProductBaseline:
     ) -> None:
         # Only symlink *targets* got Windows-anchor validation -- a real
         # file named `C:library.dll` (valid on POSIX) is archived
-        # unchanged, and TarExtractor treats it as anchored on Windows
-        # unpack (Codex review).
+        # unchanged, and TarExtractor treats it as anchored on unpack.
         product = _make_product(tmp_path)
         (product / "C:library.dll").write_bytes(b"MZ")
         with pytest.raises(SnapshotError, match="anchored under Windows"):
@@ -588,10 +576,9 @@ class TestPackProductBaseline:
     def test_pack_rejects_a_backslash_traversal_member_name(
         self, tmp_path: Path
     ) -> None:
-        # A real filename literally containing backslashes decomposes
-        # into a genuine ".." under Windows separators -- now caught by
-        # the unconditional backslash rejection, ahead of the narrower
-        # "'..' component" check this test originally pinned.
+        # A real filename literally containing backslashes decomposes into
+        # a genuine ".." under Windows separators -- caught by the
+        # unconditional backslash rejection, ahead of the narrower check.
         product = _make_product(tmp_path)
         (product / "lib" / "dir\\..\\outside.so").write_bytes(b"ELF")
         with pytest.raises(SnapshotError, match="backslash"):
@@ -601,9 +588,8 @@ class TestPackProductBaseline:
         self, tmp_path: Path
     ) -> None:
         # A backslash decomposing into neither an anchor nor a traversal
-        # (`foo\bar.so`) still restores as a two-component path on
-        # Windows -- the pre-existing checks only rejected a dangerous
-        # decomposition (Codex).
+        # (`foo\bar.so`) still restores as two components on Windows --
+        # the pre-existing checks only rejected a dangerous one (Codex).
         product = _make_product(tmp_path)
         (product / "lib" / "foo\\bar.so").write_bytes(b"ELF")
         with pytest.raises(SnapshotError, match="backslash"):
@@ -614,9 +600,7 @@ class TestPackProductBaseline:
         reason="fixture needs a POSIX-only filename Windows cannot create",
     )
     def test_pack_rejects_a_reserved_windows_device_name(self, tmp_path: Path) -> None:
-        # A component matching a reserved device name, even with an
-        # extension (Windows special-cases the base name), decomposes
-        # safely but is still a name Windows can't represent (Codex).
+        # A reserved device name even with an extension decomposes safely but is unrepresentable on Windows.
         product = _make_product(tmp_path)
         (product / "aux.txt").write_bytes(b"MZ")
         with pytest.raises(SnapshotError, match="reserved Windows device name"):
@@ -683,6 +667,23 @@ class TestPackProductBaseline:
         (product / "Lib").mkdir()
         (product / "lib" / "a.so").write_bytes(b"ELF")
         (product / "Lib" / "b.so").write_bytes(b"ELF")
+        with pytest.raises(SnapshotError, match="collides with"):
+            pack_product_baseline(product, tmp_path / "b.tar.zst")
+
+    def test_pack_rejects_unicode_normalization_colliding_file_names(
+        self, tmp_path: Path
+    ) -> None:
+        # NFC/NFD spellings are distinct bytes on Linux -- casefold() doesn't
+        # compose/decompose -- but APFS/HFS+ treat them as one filename,
+        # overwriting one on extraction (Codex).
+        import unicodedata
+
+        product = _make_product(tmp_path)
+        nfc = unicodedata.normalize("NFC", "café.so")
+        nfd = unicodedata.normalize("NFD", "café.so")
+        assert nfc != nfd  # confirms these are genuinely distinct bytes
+        (product / nfc).write_bytes(b"\x7fELF" + b"\x00" * 20)
+        (product / nfd).write_bytes(b"\x7fELF" + b"\x00" * 30)
         with pytest.raises(SnapshotError, match="collides with"):
             pack_product_baseline(product, tmp_path / "b.tar.zst")
 
