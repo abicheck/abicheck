@@ -199,6 +199,26 @@ class TestComputePublicSurface:
         assert surf.resolvable is False
         assert surf.elf_visibility_fallback is False
 
+    def test_no_elf_visibility_fallback_attempted_when_header_derived_public_exists(
+        self,
+    ):
+        """The fallback is only ever attempted when the header-derived seed
+        found nothing at all (``not has_public``) -- an inconsistent
+        snapshot carrying both a real Visibility.PUBLIC declaration *and*
+        ``elf_only_mode=True`` must not additionally attempt the ELF-
+        visibility fallback (there is nothing to gain: the surface is
+        already correctly unresolvable per the pre-existing ADR-016 rule).
+        """
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            elf_only_mode=True,
+            functions=[_fn("api_call", vis=Visibility.PUBLIC)],
+        )
+        surf = compute_public_surface(snap)
+        assert surf.resolvable is False
+        assert surf.elf_visibility_fallback is False
+
     def test_elf_visibility_fallback_scoping_end_to_end(self):
         """End-to-end: a headerless compare with a changed hidden-visibility
         symbol must not be reported breaking once both sides resolve via
