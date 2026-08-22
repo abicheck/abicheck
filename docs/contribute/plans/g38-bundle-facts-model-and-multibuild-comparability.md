@@ -197,6 +197,7 @@ class BundleFacts:
     variant_fingerprint: str  # see Phase 3 — always present, "default" for a non-multibuild bundle
     artifacts: list[BundleArtifactFacts]  # per-DSO: soname, aliases, build-id/hash, path label (ADR-032 D7 redaction rules apply)
     resolution_graph: ResolutionGraph  # already exists — just needs schema_version + serialization
+    per_library_snapshots: dict[str, AbiSnapshot]  # one per bundle member — see below for why this is mandatory, not optional
     manifest: InstantiationManifest | None
 ```
 
@@ -206,6 +207,29 @@ symbols, undefined/imported symbols with `gnu.version_r`, DT_NEEDED,
 RPATH/RUNPATH) — this phase does not add new *extraction*, it adds
 *serialization* of facts `bundle.py` already derives in memory and
 discards after `compare_bundle()` returns.
+
+**`per_library_snapshots` is required, not a nice-to-have, and its absence
+from an earlier draft of this schema was a real gap in the parity
+invariant itself** (caught in review — see the PR that introduced this
+plan). `compare_bundle()`'s cross-DSO findings are not derived from the
+resolution graph alone: `bundle_intra_dep_signature_changed`,
+`bundle_intra_type_changed`, and `bundle_provider_changed` are each keyed
+off a *per-library* `DiffResult` (`func_params_changed`/
+`func_return_changed`/`type_*_changed`/`func_removed`+`func_added` pairs —
+see ADR-023's "Per-library diff is unchanged" section, steps 3-5). A
+`BundleFacts` carrying only artifact metadata and the resolution graph has
+nowhere for `compare_bundle_from_facts()` to get those per-library diffs
+from when the *old* side is a stored dump rather than a live directory —
+it would have to re-derive them from `AbiSnapshot`s it doesn't have, which
+defeats the entire point of Phase 2. Each entry in
+`per_library_snapshots` is exactly the `AbiSnapshot` `dump` already
+produces for that library today (no new extraction), keyed by the same
+library identity `ResolutionGraph`'s provider/consumer entries use, so
+`compare_bundle_from_facts()` can run the existing per-library diff between
+`old_facts.per_library_snapshots[lib]` and a freshly-dumped new-side
+snapshot before applying the same cross-DSO rules `compare_bundle()`
+already implements — one shared per-library-diff-then-bundle-rules code
+path for both entry points, not two.
 
 **Wiring:**
 
@@ -261,11 +285,12 @@ plan, informed by whatever `BundleFacts` looked like in production by then.
 
 ```python
 def variant_fingerprint(evidence: BuildEvidence | None, env: EnvironmentMatrix | None) -> str:
-    """Stable fingerprint: target triple, compiler family+version, C/C++
-    standard, ABI-affecting flags/defines, feature toggles (e.g.
-    ONEDAL_DATA_PARALLEL), header-set identity, artifact membership.
+    """Stable fingerprint over BUILD-AXIS coordinates only: target triple,
+    compiler family+version, C/C++ standard, ABI-affecting flags/defines,
+    feature toggles (e.g. ONEDAL_DATA_PARALLEL), header-set identity.
     Reuses environment_matrix.py's existing SyclConstraints/CudaConstraints/
-    runtime-floor fields rather than re-deriving them."""
+    runtime-floor fields rather than re-deriving them. Deliberately EXCLUDES
+    artifact membership (which libraries actually shipped) — see below."""
 
 def pair_variants(
     old: dict[str, BundleFacts], new: dict[str, BundleFacts]
@@ -275,6 +300,23 @@ def pair_variants(
     comparable=False and a build-coverage-regression finding — never
     dropped, never paired with a mismatched variant."""
 ```
+
+**Artifact membership must not be part of the fingerprint** (a real design
+error in an earlier draft of this plan, caught in review). If the set of
+libraries a build produces were folded into `variant_fingerprint`, an
+ordinary library addition/removal/rename between old and new would change
+the CPU (or DPC) variant's own identity, so `pair_variants` would see two
+*different* fingerprints and treat them as two non-comparable singletons —
+exactly the failure mode Phase 3 exists to prevent, just reached from a
+different direction than a union. That would silently replace
+`bundle_library_removed`/`bundle_library_added` and any real cross-library
+regression inside that variant with a generic coverage-regression finding,
+for the ordinary case of a library being added or dropped from a release.
+`variant_fingerprint` is scoped to stable build-axis coordinates only (what
+*compiles* the variant); which libraries that build actually produced is
+versioned output to be diffed *inside* the matched pair (that's exactly
+what `bundle_library_removed`/`bundle_library_added` already do), never a
+component of whether two variants are "the same variant."
 
 `pair_variants` is the enforcement point for "never union" — it has no
 code path that merges two variants' facts before diffing; it only ever
