@@ -306,12 +306,11 @@ def _resolve_under_root(root: Path, rel: str) -> Path | None:
     try:
         candidate = (root / rel).resolve()
         root_resolved = root.resolve()
-    except RuntimeError:
-        # A self-referential symlink loop makes Path.resolve() raise
-        # RuntimeError instead of returning a value -- pathlib's own loop
-        # detection can fire unconditionally (Codex review, fresh
-        # evidence). Callers expect a clean None, not an uncaught
-        # exception.
+    except (RuntimeError, ValueError):
+        # RuntimeError: a symlink loop makes Path.resolve() raise
+        # instead of returning a value. ValueError: an embedded NUL byte
+        # in *rel* (from an untrusted manifest) raises the same way
+        # (Codex). Callers expect a clean None either way.
         return None
     if candidate != root_resolved and not candidate.is_relative_to(root_resolved):
         return None
@@ -515,6 +514,16 @@ def _validate_portable_arcname(arcname: str) -> None:
     forbidden character, or a trailing dot/space it silently strips
     (Codex review, fresh evidence).
     """
+    # A backslash in one real POSIX component is always reinterpreted as
+    # a separator on Windows, even when the decomposition is neither
+    # anchored nor traversing (`foo\bar.so` restores as `foo/bar.so`) --
+    # checked unconditionally, ahead of every other check (Codex).
+    if "\\" in arcname:
+        raise SnapshotError(
+            f"{arcname!r} contains a backslash, which Windows always "
+            "treats as a path separator -- refusing to pack it, since "
+            "the archive could not be safely unpacked portably"
+        )
     wpath = PureWindowsPath(arcname)
     if wpath.drive or wpath.root:
         raise SnapshotError(
@@ -584,6 +593,16 @@ def _add_member(
                 f"symlink {arcname!r} has an absolute target {target!r} -- "
                 "only relative symlink targets can be packed portably"
             )
+        # Same reasoning as _validate_portable_arcname's own check: a
+        # backslash is always reinterpreted as a separator on Windows,
+        # even when it doesn't escape root -- all
+        # _windows_relative_target_escapes below checks for (Codex).
+        if "\\" in target:
+            raise SnapshotError(
+                f"symlink {arcname!r} targets {target!r}, which contains "
+                "a backslash Windows always treats as a path separator "
+                "-- refusing to pack it for portability"
+            )
         # A self-referential symlink loop is detected via a raw stat() --
         # not Path.resolve() raising, which Python 3.13's realpath()-
         # backed rewrite stopped doing in non-strict mode (verified
@@ -644,17 +663,12 @@ def _add_member(
         return entry
 
     if info.islnk():
-        # gettarinfo() converts a second path sharing an inode with an
-        # already-archived one into a hardlink reference -- a member
-        # carrying no data of its own. Falling through to the
-        # "not info.isreg()" guard below would silently drop it from the
-        # archive entirely, losing the file on round-trip.
-        #
-        # A hardlink member's own info.size is 0, so it cannot supply a
-        # LibraryEntry's size the way the first-archived copy's does --
-        # skipping it here would silently omit it from the manifest even
-        # though it round-trips correctly as file content (Codex review,
-        # fresh evidence). Hash and stat the real file directly instead.
+        # gettarinfo() converts a second path sharing an inode into a
+        # hardlink reference -- falling through to "not info.isreg()"
+        # below would silently drop it from the archive. Its own
+        # info.size is 0, so it can't supply a LibraryEntry's size the
+        # way the first-archived copy's does -- hash/stat the real file
+        # directly instead (Codex).
         entry = None
         if _is_library_path(path):
             hasher = hashlib.sha256()
@@ -860,13 +874,10 @@ def pack_product_baseline(
         )
     # A separate, existence-independent exclusion for what actually gets
     # archived below -- see _output_parent_chain()'s own docstring. A
-    # declared header root is excluded from this chain: OUTPUT landing
-    # inside a genuine, pre-existing (if currently empty) header root is
-    # real product content the manifest already promises, not scaffolding
-    # -- the unqualified exclusion dropped it while still declaring it,
-    # so unpack rejected its own honestly produced output (Codex review).
-    # Built in the same lexical (unresolved) space empty_dirs/
-    # output_parent_chain use, not the `.resolve()`d dirs above.
+    # declared header root is excluded from this chain: real product
+    # content the manifest promises, not scaffolding (Codex). Built in
+    # the same lexical space empty_dirs/output_parent_chain use, not the
+    # `.resolve()`d dirs above.
     output_parent_chain = _output_parent_chain(source_path, leaf_parent_lexical)
     declared_header_root_dirs = {source_path / rel for rel in resolved_header_roots}
     archived_empty_dirs = [
@@ -926,14 +937,10 @@ def pack_product_baseline(
             "before packing"
         )
 
-    # A case-sensitive host can archive two distinct member names (files,
-    # directories, or the manifest) that fold to the same identity on a
-    # case-insensitive Windows filesystem -- extraction there overwrites
-    # one, failing the manifest's own checksum for it (Codex review,
-    # fresh evidence). Checked per path *component* (every ancestor
-    # prefix), not just full leaf names: `Lib/a.so` vs `lib/b.so` have
-    # distinct full arcnames but Windows still unifies `Lib`/`lib` into
-    # one physical directory.
+    # A case-sensitive host can archive two distinct member names that
+    # fold to the same identity on a case-insensitive Windows filesystem
+    # -- extraction overwrites one (Codex). Checked per path *component*,
+    # not just full leaf names: `Lib/a.so` vs `lib/b.so` unify.
     all_arcnames = [_relative_posix(p, source_path) for p in paths]
     all_arcnames.extend(_relative_posix(d, source_path) for d in archived_empty_dirs)
     all_arcnames.append(MANIFEST_MEMBER_NAME)
@@ -1184,17 +1191,12 @@ def unpack_product_baseline(
                     f"{archive_path}: manifest declares {lib.path!r} as a "
                     "library, but it is not library-shaped"
                 )
-            # This check only confirmed the path *exists*, not that its
-            # bytes are what the manifest claims -- a stale/tampered
-            # archive would otherwise publish unverified content (Codex
-            # review, fresh evidence). Mirrors pack_product_baseline()'s
-            # own hashing -- read once, in chunks, not loaded whole.
-            # Size is compared unconditionally, sha256 validated as a
-            # genuine 64-hex digest before comparison -- neither is
-            # skippable for a 0/"" value, unlike this codebase's usual
-            # "don't abort on missing, only on wrong" convention (Codex
-            # review, fresh evidence: an earlier revision's truthiness
-            # guards let a zeroed field bypass this check entirely).
+            # This only confirmed the path *exists*, not that its bytes
+            # match the manifest -- mirrors pack's own hashing. Size and
+            # sha256 are both compared unconditionally (neither skippable
+            # for a 0/"" value, unlike this codebase's usual "don't abort
+            # on missing" convention -- an earlier revision's truthiness
+            # guards let a zeroed field bypass this check) (Codex).
             actual_size = lib_resolved.stat().st_size
             if actual_size != lib.size:
                 raise SnapshotError(
