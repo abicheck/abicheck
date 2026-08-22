@@ -31,6 +31,37 @@ Per-library findings are unchanged — the bundle layer only **adds**
 cross-library findings; it never hides them. The aggregate `verdict`
 becomes the worst of `bundle_verdict` and the per-library worst.
 
+## Bundle findings answer a different question than public-surface findings
+
+A `bundle_*` kind answers *"does the shipped bundle still work end-to-end"*
+— not *"did the public API change"*. That is a deliberately different
+question from the one `BREAKING_KINDS`/`API_BREAK_KINDS` answer, and it has
+a direct consequence for policy scoping: **`--scope-public-headers`
+(on by default) and a `--policy` profile scoped to the public surface do
+not suppress a `bundle_*` finding on an internal, non-public symbol.**
+
+This is by design, not a gap. `core_mul` in the table above never needs to
+be part of `libcore.so`'s *public* API for `bundle_intra_dep_removed` to be
+real and `BREAKING`: `libalgo.so` still imports it, so removing it breaks
+`libalgo.so`'s runtime load regardless of whether any external consumer
+ever called `core_mul` directly. A public-surface scope answers "can code
+outside this release still compile and link against what it used to" —
+the bundle layer answers "does the release still boot as a unit" — and an
+internal symbol can fail the second question while being irrelevant to the
+first. Suppress a specific `bundle_*` finding the same way you'd suppress
+any other finding (see [suppressions](suppressions.md)) if you've
+determined a particular internal contract is intentionally being broken;
+don't reach for `--no-scope-public-headers` or a public-surface policy
+profile expecting it to quiet bundle findings, since neither is scoped to
+touch them.
+
+The reverse holds too: an *unused* internal export being removed does not
+get bundle severity. `bundle_library_removed`/`bundle_intra_dep_removed`
+and friends only fire when a sibling in the bundle actually consumes the
+symbol — an unconsumed internal export removal falls through to the
+ordinary per-library `func_removed`, whose severity is governed by the
+usual public-surface/suppression rules, unaffected by the bundle layer.
+
 ## Running it
 
 The bundle layer is **enabled by default**:
