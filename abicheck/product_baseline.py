@@ -539,10 +539,16 @@ def pack_product_baseline(
     resolved_header_roots: list[str] = []
     for rel in header_roots:
         resolved = _resolve_under_root(source_path, rel)
-        if resolved is None or not resolved.exists():
+        # Must be a directory, not merely exist: compare_product_
+        # directories() only ever includes a header root when
+        # `.is_dir()` is true, silently dropping anything else -- a
+        # header root recorded here as a regular file would round-trip
+        # through the manifest but never actually reach a comparison
+        # (Codex review, fresh evidence).
+        if resolved is None or not resolved.is_dir():
             raise SnapshotError(
                 f"header root {rel!r} is absolute, escapes {source_path}, "
-                "or does not exist"
+                "or is not an existing directory"
             )
         resolved_header_roots.append(Path(rel).as_posix())
 
@@ -832,11 +838,11 @@ def unpack_product_baseline(
         # review, fresh evidence).
         for rel in manifest.header_roots:
             resolved = _resolve_under_root(staging, rel)
-            if resolved is None or not resolved.exists():
+            if resolved is None or not resolved.is_dir():
                 raise SnapshotError(
                     f"{archive_path}: manifest declares an invalid header "
                     f"root {rel!r} (absolute, escapes the product root, "
-                    "or does not exist)"
+                    "or is not an existing directory)"
                 )
     except BaseException:
         shutil.rmtree(staging, ignore_errors=True)
@@ -908,6 +914,48 @@ def _check_schema_supported(schema: str, archive_path: Path) -> None:
         )
 
 
+def _discover_library_map(root: Path, *, include_private: bool) -> dict[str, Path]:
+    """Discover every shared library under *root*, keyed by its own
+    discovered filename.
+
+    Deliberately not :func:`abicheck.bundle.discover_artifact_set`'s
+    canonical (SONAME-major-stripped) key: that function exists for the
+    one-sided ``--artifact-set`` audit case, where two real files
+    canonicalizing to the same bare name (``libfoo.so.1``/``libfoo.so.2``
+    both reducing to ``libfoo.so``) is treated as a genuine ambiguity and
+    rejected outright. For a *product* that intentionally ships two
+    SONAME majors side by side, that's not an ambiguity to reject — it's
+    two libraries this function must discover and compare independently
+    (Codex review, fresh evidence: a product with parallel majors
+    couldn't be compared via :func:`compare_product_directories` at all).
+
+    A real hardlink/symlink alias pointing at the identical file is still
+    collapsed to one entry — using the same ``(dev, ino)`` filesystem
+    identity :func:`~abicheck.bundle.discover_artifact_set` keys on — so a
+    conventional ``libfoo.so -> libfoo.so.1`` dev symlink doesn't
+    double-count as two separate libraries.
+    """
+    from .package import discover_shared_libraries
+
+    seen_identity: set[Path | tuple[int, int]] = set()
+    library_map: dict[str, Path] = {}
+    for path in discover_shared_libraries(root, include_private=include_private):
+        try:
+            real = path.resolve()
+        except OSError:
+            real = path
+        try:
+            st = real.stat()
+            identity: Path | tuple[int, int] = (st.st_dev, st.st_ino)
+        except OSError:
+            identity = real
+        if identity in seen_identity:
+            continue
+        seen_identity.add(identity)
+        library_map[path.name] = path
+    return library_map
+
+
 def compare_product_directories(
     old_dir: Path | str,
     new_dir: Path | str,
@@ -957,40 +1005,27 @@ def compare_product_directories(
     either side is silently skipped, matching this format's own tolerance
     for a library that ships no public headers.
 
-    Every library discovered in *both* directories (matched by canonical
-    library name — see :func:`abicheck.bundle.discover_artifact_set`,
-    called once per side) is compared; a library present on only one side
-    never reaches the per-library pass, but bundle analysis still reports
-    it via ``bundle_library_added``/``bundle_library_removed``. Unlike the
-    CLI's ``compare-release`` engine, a failure here is never swallowed
-    into a warning — this is a library call, so a per-library compare
-    failure or a bundle-analysis failure propagates directly (whatever the
-    failing step itself raises — :class:`SnapshotError`,
-    :class:`~abicheck.bundle.ArtifactSetError`, ...); a caller wanting the
-    CLI's own "report degradation, keep going" behavior should catch what
-    it needs.
+    Every library discovered in *both* directories (matched by discovered
+    filename — see :func:`_discover_library_map`, called once per side) is
+    compared; a library present on only one side never reaches the
+    per-library pass, but bundle analysis still reports it via
+    ``bundle_library_added``/``bundle_library_removed``. Unlike the CLI's
+    ``compare-release`` engine, a failure here is never swallowed into a
+    warning — this is a library call, so a per-library compare failure or
+    a bundle-analysis failure propagates directly (whatever the failing
+    step itself raises — :class:`SnapshotError`, ...); a caller wanting
+    the CLI's own "report degradation, keep going" behavior should catch
+    what it needs.
     """
-    from .bundle import (
-        build_bundle_snapshot,
-        compare_bundle,
-        discover_artifact_set,
-        load_manifest,
-    )
-    from .package import discover_shared_libraries
+    from .bundle import build_bundle_snapshot, compare_bundle, load_manifest
     from .service_compare_pipeline import run_compare
 
     old_root = Path(old_dir)
     new_root = Path(new_dir)
     roots = list(header_roots)
 
-    old_map = discover_artifact_set(
-        discover_shared_libraries(old_root, include_private=include_private),
-        explicit=False,
-    )
-    new_map = discover_artifact_set(
-        discover_shared_libraries(new_root, include_private=include_private),
-        explicit=False,
-    )
+    old_map = _discover_library_map(old_root, include_private=include_private)
+    new_map = _discover_library_map(new_root, include_private=include_private)
 
     def _resolved_headers(root: Path) -> list[Path]:
         return [candidate for rel in roots if (candidate := root / rel).is_dir()]

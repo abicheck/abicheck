@@ -18,14 +18,15 @@
   `compare`'s directory-mode operand can run against directly. Library-only
   surface, no CLI command — see `abicheck/product_baseline.py`'s module
   docstring.
-- **`abicheck.bundle.compare_bundle_directories`** — the plain-Python
-  counterpart of directory-mode `compare <old_dir> <new_dir>`: given two
-  directories (typically two `unpack_product_baseline()` results), discovers
-  and matches every shared library both sides have in common, runs the
-  per-library ABI compare on each matched pair, and correlates the results
-  into a `BundleDiffResult` carrying both per-library changes and
+- **`abicheck.product_baseline.compare_product_directories`** — the
+  plain-Python counterpart of directory-mode `compare <old_dir> <new_dir>`:
+  given two directories (typically two `unpack_product_baseline()` results),
+  discovers and matches every shared library both sides have in common, runs
+  the per-library ABI compare on each matched pair, and correlates the
+  results into a `BundleDiffResult` carrying both per-library changes and
   cross-library (bundle-level, ADR-023) findings — one call, no CLI
   subprocess, no directory-mode `compare` invocation. Previously the only
   way to get this combined result programmatically was to hand-assemble the
   same three steps yourself, or go through the CLI's private, Click-coupled
-  `compare-release` engine. See `abicheck/bundle.py`'s module docstring.
+  `compare-release` engine. See `abicheck/product_baseline.py`'s module
+  docstring.

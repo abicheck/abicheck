@@ -2501,6 +2501,37 @@ class TestCompareReleaseBundleE2E:
         core_result = next(r for r in result.per_library if "libcore" in r.library)
         assert any(c.kind == ChangeKind.FUNC_REMOVED for c in core_result.changes)
 
+    def test_compare_product_directories_handles_parallel_soname_majors(
+        self, tmp_path: Path
+    ) -> None:
+        # A product intentionally shipping two SONAME majors side by side
+        # (libfoo.so.1 and libfoo.so.2, both real, both present) is not an
+        # ambiguity: bundle.discover_artifact_set() canonicalizes both to
+        # "libfoo.so" and raises ArtifactSetError, which meant compare_
+        # product_directories() couldn't compare such a product at all
+        # (Codex review, fresh evidence). Each major must be discovered
+        # and compared independently.
+        from abicheck.product_baseline import compare_product_directories
+
+        old = tmp_path / "old"
+        new = tmp_path / "new"
+        old.mkdir()
+        new.mkdir()
+        _build_tiny_so(old, "libfoo.so.1", "int foo1(void){return 1;}\n")
+        _build_tiny_so(old, "libfoo.so.2", "int foo2(void){return 2;}\n")
+        _build_tiny_so(new, "libfoo.so.1", "int foo1(void){return 1;}\n")
+        # libfoo.so.2 drops foo2 -- a real, detectable per-library break.
+        _build_tiny_so(new, "libfoo.so.2", "int foo2_renamed(void){return 2;}\n")
+
+        result = compare_product_directories(old, new)
+
+        by_library = {Path(r.library).name: r for r in result.per_library}
+        assert set(by_library) == {"libfoo.so.1", "libfoo.so.2"}
+        assert by_library["libfoo.so.1"].verdict == Verdict.NO_CHANGE
+        assert any(
+            c.kind == ChangeKind.FUNC_REMOVED for c in by_library["libfoo.so.2"].changes
+        )
+
     def test_compare_release_no_bundle_analysis_opts_out(self, tmp_path: Path) -> None:
         # --no-bundle-analysis must suppress bundle output and report only
         # per-library results.

@@ -348,6 +348,21 @@ class TestPackProductBaseline:
                 product, tmp_path / "b.tar.zst", header_roots=["does-not-exist"]
             )
 
+    def test_pack_rejects_header_root_that_is_a_regular_file(
+        self, tmp_path: Path
+    ) -> None:
+        # compare_product_directories() only ever includes a header root
+        # when .is_dir() is true, silently dropping anything else -- a
+        # header root naming a regular file (not a directory) must be
+        # rejected at pack time, or it round-trips through the manifest
+        # while never actually reaching a comparison (Codex review, fresh
+        # evidence).
+        product = _make_product(tmp_path)
+        with pytest.raises(SnapshotError, match="header root"):
+            pack_product_baseline(
+                product, tmp_path / "b.tar.zst", header_roots=["README.txt"]
+            )
+
     def test_pack_rejects_symlink_escaping_source_dir(self, tmp_path: Path) -> None:
         product = _make_product(tmp_path)
         outside = tmp_path / "outside.so"
