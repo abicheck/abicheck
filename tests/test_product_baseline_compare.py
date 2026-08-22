@@ -101,6 +101,73 @@ class TestCompareProductDirectoriesCanonicalFallbackAndPolicy:
         assert run_compare_calls[0]["old"] == old_dir / "lib" / "libfoo.so.1"
         assert run_compare_calls[0]["new"] == new_dir / "lib" / "libfoo.so.2"
 
+    def test_canonical_fallback_diff_result_carries_the_new_side_identity(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # run_compare()'s real DiffResult.library is always stamped from
+        # the *old* side's bare filename (checker.py: library=old.library,
+        # itself so_path.name) -- for a canonical-fallback pair (SONAME
+        # bump) that differs from the new side's own filename.
+        # compare_bundle() indexes per_library_results by
+        # Path(result.library).name and excludes that same key from its
+        # own sibling/consumer scan over new.metadata, which is keyed by
+        # each library's *new*-side bare filename -- left as old.library,
+        # the provider's own new binary would never be excluded from that
+        # scan and could be reported as a cross-DSO consumer of its own
+        # change (Codex review, fresh evidence). This test uses a fake
+        # run_compare() that reproduces the real function's old-side
+        # stamping (unlike this class's shared _capture_calls() helper,
+        # whose fake already (and unrealistically) uses the new side) so
+        # the fix is actually exercised rather than masked.
+        from abicheck import bundle as bundle_mod, service_compare_pipeline as scp
+        from abicheck.product_baseline import compare_product_directories
+
+        old_dir = tmp_path / "old"
+        new_dir = tmp_path / "new"
+        (old_dir / "lib").mkdir(parents=True)
+        (new_dir / "lib").mkdir(parents=True)
+        (old_dir / "lib" / "libfoo.so.1").write_bytes(b"OLD")
+        (new_dir / "lib" / "libfoo.so.2").write_bytes(b"NEW")
+
+        class _FakeDiffResult:
+            def __init__(self, library: str) -> None:
+                self.library = library
+
+        class _FakeResult:
+            def __init__(self, library: str) -> None:
+                self.diff = _FakeDiffResult(library)
+
+        def _fake_run_compare(old_lib, new_lib, **kwargs):  # type: ignore[no-untyped-def]
+            # Mirrors the real run_compare(): DiffResult.library is the
+            # *old* side's bare filename, never the new side's.
+            return _FakeResult(Path(old_lib).name)
+
+        captured: dict[str, list[_FakeDiffResult]] = {}
+
+        def _fake_build_bundle_snapshot(libraries):  # type: ignore[no-untyped-def]
+            return {"libraries": dict(libraries)}
+
+        def _fake_compare_bundle(old, new, per_library_results, **kwargs):  # type: ignore[no-untyped-def]
+            captured["per_library_results"] = per_library_results
+            return type("R", (), {"bundle_findings": []})()
+
+        monkeypatch.setattr(scp, "run_compare", _fake_run_compare)
+        monkeypatch.setattr(
+            bundle_mod, "build_bundle_snapshot", _fake_build_bundle_snapshot
+        )
+        monkeypatch.setattr(bundle_mod, "compare_bundle", _fake_compare_bundle)
+
+        compare_product_directories(old_dir, new_dir)
+
+        per_library_results = captured["per_library_results"]
+        assert len(per_library_results) == 1
+        # Must match the new side's own bare filename -- the identity
+        # new_bundle_map/new_snapshot (and therefore new.metadata inside
+        # compare_bundle()) actually key this library under -- not the old
+        # side's, which compare_bundle()'s sibling-exclusion logic would
+        # never find in new.metadata.
+        assert per_library_results[0].library == "libfoo.so.2"
+
     def test_pairs_unmatched_dylibs_across_a_macho_version_bump(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -460,6 +527,39 @@ class TestCompareProductDirectoriesStandaloneRemoval:
         ]
         assert len(removed) == 1
         assert removed[0].provider_library == "plugin.so"
+
+    def test_reports_both_removals_when_two_duplicate_basename_libraries_vanish(
+        self, tmp_path: Path
+    ) -> None:
+        # Old has plugins/a/plugin.so AND plugins/b/plugin.so; new has
+        # neither -- both libraries are genuinely unmatched. Projecting
+        # unmatched *keys* down to a set of bare names before iterating
+        # collapsed both distinct relative-path identities to the single
+        # string "plugin.so", so only one finding was emitted even though
+        # two libraries vanished (Codex review, fresh evidence -- the
+        # sibling of test_reports_removal_of_one_of_two_duplicate_basename_
+        # libraries above, which only has one unmatched key and so could
+        # not have caught this).
+        from abicheck.checker_policy import ChangeKind
+        from abicheck.product_baseline import compare_product_directories
+
+        old_dir = tmp_path / "old"
+        new_dir = tmp_path / "new"
+        (old_dir / "plugins" / "a").mkdir(parents=True)
+        (old_dir / "plugins" / "b").mkdir(parents=True)
+        new_dir.mkdir(parents=True)
+        (old_dir / "plugins" / "a" / "plugin.so").write_bytes(b"PLUGIN-A")
+        (old_dir / "plugins" / "b" / "plugin.so").write_bytes(b"PLUGIN-B")
+
+        result = compare_product_directories(old_dir, new_dir)
+
+        removed = [
+            f
+            for f in result.bundle_findings
+            if f.kind == ChangeKind.BUNDLE_LIBRARY_REMOVED
+        ]
+        assert len(removed) == 2
+        assert all(f.provider_library == "plugin.so" for f in removed)
 
     def test_canonical_fallback_pair_is_not_reported_as_a_removal(
         self, tmp_path: Path

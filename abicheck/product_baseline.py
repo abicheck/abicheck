@@ -1424,6 +1424,25 @@ def compare_product_directories(
             frontend=frontend,
             policy=policy,
         )
+        # run_compare()'s DiffResult.library is always stamped from the
+        # *old* side's bare filename (checker.py: `library=old.library`,
+        # itself `so_path.name` from the path handed to dump()) -- for an
+        # exact-path pair that's also the new side's own filename, but for
+        # a canonical-fallback pair (SONAME/dylib-version bump, e.g.
+        # libfoo.so.1 -> libfoo.so.2) it is not. compare_bundle() indexes
+        # per_library_results by `Path(result.library).name` and then, in
+        # _detect_intra_type_changed()/_detect_intra_dep_signature_changed()/
+        # _detect_provider_changed(), excludes that same key from its own
+        # sibling/consumer scan over `new.metadata` -- which is keyed by
+        # each library's *new*-side bare filename (see new_bundle_map
+        # below). Left as old.library, the provider's own new binary
+        # (libfoo.so.2) would never match "libfoo.so.1" and so would never
+        # be excluded from that scan, letting a provider be reported as a
+        # cross-DSO consumer of its own type/symbol change (Codex review,
+        # fresh evidence). Stamping the new side's identity here keeps
+        # every downstream `new.metadata`-keyed lookup consistent with what
+        # this function actually paired.
+        result.diff.library = new_path.name
         per_library_results.append(result.diff)
 
     # Bundle-level identity is each library's own bare filename, not the
@@ -1490,13 +1509,23 @@ def compare_product_directories(
     # library plainly vanished (Codex review, fresh evidence).
     paired_old_keys = {old_key for old_key, _, _, _ in pairs}
     paired_new_keys = {new_key for _, _, new_key, _ in pairs}
-    unmatched_old_names = sorted(
-        {old_map[k].name for k in old_map if k not in paired_old_keys}
-        - already_reported
+    # One entry per unmatched *key* (relative path), not deduped by bare
+    # name -- two distinct unmatched libraries sharing a basename in
+    # different directories (plugins/a/plugin.so and plugins/b/plugin.so)
+    # must each be reported when both vanish, not collapsed into a single
+    # finding the way a `set` of names alone would (Codex review, fresh
+    # evidence: pairing already correctly distinguishes the two by
+    # relative path, but this reporting step was still projecting down to
+    # bare names before iterating, silently losing the second removal).
+    unmatched_old_items = sorted(
+        (k, old_map[k].name)
+        for k in old_map
+        if k not in paired_old_keys and old_map[k].name not in already_reported
     )
-    unmatched_new_names = sorted(
-        {new_map[k].name for k in new_map if k not in paired_new_keys}
-        - already_reported_added
+    unmatched_new_items = sorted(
+        (k, new_map[k].name)
+        for k in new_map
+        if k not in paired_new_keys and new_map[k].name not in already_reported_added
     )
     # A library matched to a surviving library on the new side -- whether by
     # an exact relative-path match or the canonical (SONAME-major-stripped,
@@ -1507,16 +1536,16 @@ def compare_product_directories(
     # while their bare filenames genuinely differ (Codex review, fresh
     # evidence, the DLL case; the SONAME-major case is the identical
     # mechanism generalized) -- already excluded above, since a paired key
-    # is never in `unmatched_old_names`/`unmatched_new_names` to begin with.
-    for name in unmatched_old_names:
+    # is never in `unmatched_old_items`/`unmatched_new_items` to begin with.
+    for key, name in unmatched_old_items:
         bundle_result.bundle_findings.append(
             BundleFinding(
                 kind=ChangeKind.BUNDLE_LIBRARY_REMOVED,
                 symbol=name,
                 description=(
-                    f"Library {name} removed from the product; no surviving "
-                    "sibling imports it, but a whole-product comparison must "
-                    "still report it."
+                    f"Library {name} ({key}) removed from the product; no "
+                    "surviving sibling imports it, but a whole-product "
+                    "comparison must still report it."
                 ),
                 provider_library=name,
             )
@@ -1532,12 +1561,12 @@ def compare_product_directories(
     # sibling-consumer gating -- an empty old directory versus a new
     # directory containing foo.dll still returned NO_CHANGE with no
     # findings (Codex review, fresh evidence).
-    for name in unmatched_new_names:
+    for key, name in unmatched_new_items:
         bundle_result.bundle_findings.append(
             BundleFinding(
                 kind=ChangeKind.BUNDLE_LIBRARY_ADDED,
                 symbol=name,
-                description=f"New library {name} appears in the product.",
+                description=f"New library {name} ({key}) appears in the product.",
                 provider_library=name,
             )
         )
