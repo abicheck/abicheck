@@ -108,6 +108,19 @@ class TestPackProductBaseline:
         # is not separately counted as a library entry.
         assert "liba.so" not in names
 
+    def test_pack_does_not_classify_split_debug_companion_as_a_library(
+        self, tmp_path: Path
+    ) -> None:
+        # "libfoo.so.1.debug" contains the literal substring ".so." (the
+        # dot right before "1"), so a naive substring check misclassified
+        # a conventional split-debug companion file as a shared library
+        # (Codex review, fresh evidence).
+        product = _make_product(tmp_path)
+        (product / "lib" / "libb.so.1.debug").write_bytes(b"DEBUGINFO")
+        manifest = pack_product_baseline(product, tmp_path / "b.tar.zst")
+        names = {lib.name for lib in manifest.libraries}
+        assert "libb.so.1.debug" not in names
+
     def test_pack_records_correct_hash_and_size(self, tmp_path: Path) -> None:
         product = _make_product(tmp_path)
         manifest = pack_product_baseline(product, tmp_path / "b.tar.zst")
@@ -308,6 +321,26 @@ class TestPackProductBaseline:
         assert manifest1.libraries == manifest2.libraries
         assert manifest1.file_count == manifest2.file_count
 
+    def test_pack_excludes_output_when_output_path_is_itself_a_symlink(
+        self, tmp_path: Path
+    ) -> None:
+        # If OUTPUT already exists as a symlink (e.g. left over from a
+        # prior run pointing elsewhere), excluding by the *resolved*
+        # target path -- instead of OUTPUT's own lexical path -- wrongly
+        # excludes an unrelated real file while leaving the symlink
+        # itself (keyed by its own name) in the archive, corrupting it
+        # (Codex review, fresh evidence).
+        product = _make_product(tmp_path)
+        out = product / "baseline.tar.zst"
+        out.symlink_to(product / "lib" / "libb.so")
+        manifest = pack_product_baseline(product, out)
+        names = {lib.name for lib in manifest.libraries}
+        assert "libb.so" in names
+
+        dest = tmp_path / "unpacked"
+        unpack_product_baseline(out, dest)
+        assert (dest / "lib" / "libb.so").is_file()
+
     def test_pack_leaves_no_partial_output_on_failure(self, tmp_path: Path) -> None:
         product = _make_product(tmp_path)
         outside = tmp_path / "outside.so"
@@ -374,6 +407,25 @@ class TestUnpackProductBaseline:
         dest.mkdir()
         (dest / "existing").write_text("already here\n")
         with pytest.raises(SnapshotError, match="not empty"):
+            unpack_product_baseline(archive, dest)
+
+    def test_unpack_rejects_symlink_destination(self, tmp_path: Path) -> None:
+        # A symlink to a genuinely empty directory used to pass the
+        # empty-destination check and then crash at publish time:
+        # Path.rmdir() operates on the symlink itself (POSIX rmdir()
+        # never follows a final symlink component), raising an unhandled
+        # NotADirectoryError past the CLI's SnapshotError-only catch and
+        # leaving the already-validated staging directory behind
+        # uncleaned (Codex review, fresh evidence).
+        product = _make_product(tmp_path)
+        archive = tmp_path / "baseline.tar.zst"
+        pack_product_baseline(product, archive)
+
+        real_empty_dir = tmp_path / "real-empty"
+        real_empty_dir.mkdir()
+        dest = tmp_path / "dest-symlink"
+        dest.symlink_to(real_empty_dir)
+        with pytest.raises(SnapshotError, match="symlink"):
             unpack_product_baseline(archive, dest)
 
     def test_unpack_leaves_missing_destination_absent_on_bad_archive(

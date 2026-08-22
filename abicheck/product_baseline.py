@@ -53,6 +53,7 @@ import hashlib
 import io
 import json
 import os
+import re
 import shutil
 import stat as stat_module
 import tarfile
@@ -87,13 +88,21 @@ PRODUCT_BASELINE_SCHEMA = "abicheck.product-baseline/v1"
 _LIBRARY_SUFFIXES = (".so", ".dylib", ".dll")
 
 
+#: A versioned SONAME real file, e.g. "libfoo.so.1.2.3" -- no suffix in
+#: _LIBRARY_SUFFIXES matches it, since ".3" isn't a recognized library
+#: extension. Anchored at the end and requires every dotted segment after
+#: ".so" to be purely numeric, so a conventional split-debug companion
+#: like "libfoo.so.1.debug" -- which a real ".so."-substring check
+#: misclassifies as a library, since "debug" isn't checked at all -- is
+#: correctly excluded (Codex review, fresh evidence).
+_VERSIONED_SONAME = re.compile(r"\.so(\.\d+)+$", re.IGNORECASE)
+
+
 def _is_shared_library(name: str) -> bool:
     lower = name.lower()
     if lower.endswith(_LIBRARY_SUFFIXES):
         return True
-    # A versioned SONAME real file, e.g. "libfoo.so.1.2.3" — no suffix
-    # match above, since ".3" isn't a recognized library extension.
-    return ".so." in lower
+    return _VERSIONED_SONAME.search(name) is not None
 
 
 @dataclass(frozen=True)
@@ -464,8 +473,20 @@ def pack_product_baseline(
     # invocation and violating the determinism this format promises.
     # Computed from the two paths, not existence, so this excludes the
     # output slot even on a first-ever pack (before the file exists).
+    #
+    # Deliberately os.path.abspath(), not .resolve(): if OUTPUT already
+    # exists as a symlink (e.g. left over from a prior run pointing
+    # somewhere else), .resolve() would follow it to its *target*'s path
+    # -- excluding the wrong file from the archive while leaving the
+    # symlink itself, keyed by its own lexical name, still in `paths`
+    # (Codex review, fresh evidence). abspath() normalizes without ever
+    # dereferencing a symlink, matching how `_discover_paths` itself
+    # names a symlink member: by its own lexical path, not its target's.
     try:
-        output_rel = _relative_posix(output_path.resolve(), source_path.resolve())
+        output_rel = _relative_posix(
+            Path(os.path.abspath(str(output_path))),
+            Path(os.path.abspath(str(source_path))),
+        )
     except ValueError:
         output_rel = None
     if output_rel is not None:
@@ -565,6 +586,17 @@ def unpack_product_baseline(
             f"product baseline archive must end with '.tar.zst': {archive_path}"
         )
     dest_path = Path(dest_dir)
+    if dest_path.is_symlink():
+        # Rejected outright rather than handled: publishing later replaces
+        # dest_path with the staging directory via dest_path.rmdir() +
+        # os.replace(), and rmdir() operates on the symlink itself (POSIX
+        # rmdir() never follows a final symlink component) -- even a
+        # symlink to a genuinely empty directory would pass the checks
+        # below and then raise NotADirectoryError at publish time,
+        # unhandled by the CLI's SnapshotError-only catch, leaving the
+        # already-validated staging directory behind uncleaned (Codex
+        # review, fresh evidence).
+        raise SnapshotError(f"unpack destination must not be a symlink: {dest_path}")
     if dest_path.exists():
         if not dest_path.is_dir():
             raise SnapshotError(f"unpack destination is not a directory: {dest_path}")
