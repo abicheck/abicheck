@@ -79,7 +79,7 @@ def project_group() -> None:
 
     \b
     Subcommands:
-      validate        Check .abicheck.yml's targets/bundles/profiles/channels block.
+      validate         Check .abicheck.yml's targets/bundles/profiles/channels block.
       validate-build   Check a project-produced abicheck-build/ directory.
       plan             Derive run-plan.json from .abicheck.yml + build-output.json.
 
@@ -87,6 +87,14 @@ def project_group() -> None:
     several targets/build profiles/baseline channels together, wired through
     the reusable ``check-project.yml`` GitHub Actions workflow. A single
     library checking one artifact just uses ``dump``/``compare``/``scan``.
+
+    A whole-*product* baseline archive (multiple interdependent libraries
+    packed into one deterministic ``.tar.zst``, so a bundle-aware
+    ``compare`` sees every cross-library edge in one invocation instead of
+    one per-library ``scan``) is a library-only surface, not a CLI command
+    here — see :mod:`abicheck.product_baseline`'s
+    :func:`~abicheck.product_baseline.pack_product_baseline`/
+    :func:`~abicheck.product_baseline.unpack_product_baseline`.
     """
 
 

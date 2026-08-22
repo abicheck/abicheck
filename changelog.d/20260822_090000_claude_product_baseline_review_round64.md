@@ -1,0 +1,8 @@
+### Fixed
+
+- **`TarExtractor`'s symlink-capability probe no longer risks colliding with real, pre-existing data.** Its probe entries previously used a predictable, pid-suffixed filename created via `Path.touch()` -- a real file already at that exact path would be silently reused, and the probe's own unconditional cleanup would then delete it; the same predictable name could also collide across two concurrent extractions into the same directory within one process. Both probe entries now use a `uuid4`-suffixed name created with exclusive-create semantics (`O_CREAT | O_EXCL`), and cleanup only ever removes an entry the probe itself actually created.
+- **`TarExtractor`'s hard-link fallback-amplification check now resolves each hard link only against the archive members that precede it**, matching `tarfile`'s own resolution order. The previous, order-blind name-to-size map could have a later, unrelated member reusing the same name as an already-hard-linked payload silently overwrite that payload's recorded size, hiding the real worst-case amplification the earlier hard links still resolve to on extraction.
+
+### Known gaps
+
+- `TarExtractor`'s symlink-capability probe (and `tarfile`'s own extraction call) always creates a *file*-type symlink on Windows, never a directory-type one, since neither ever passes `target_is_directory=True`. A symlink whose target is itself a directory can therefore pass the probe on a fully-privileged Windows host and still restore as the wrong reparse-point type -- a `tarfile`-level limitation the probe cannot detect, documented in `_target_supports_symlinks()`'s own docstring rather than fixed, since verifying and closing it needs a real Windows host and a custom directory-aware extraction step.

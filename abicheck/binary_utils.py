@@ -18,19 +18,27 @@ Provides a single-file-open format detector for ELF, PE, and Mach-O
 binaries, replacing duplicated detection logic in cli.py, appcompat.py,
 and mcp_server.py.
 """
+
 from __future__ import annotations
 
 import re
+import struct
 from pathlib import Path
 
 # Mach-O magic bytes — covers all variants:
 # 32-bit BE/LE, 64-bit BE/LE, fat archive 32/64
-_MACHO_MAGICS: frozenset[bytes] = frozenset({
-    b"\xfe\xed\xfa\xce", b"\xce\xfa\xed\xfe",  # 32-bit
-    b"\xfe\xed\xfa\xcf", b"\xcf\xfa\xed\xfe",  # 64-bit
-    b"\xca\xfe\xba\xbe", b"\xbe\xba\xfe\xca",  # fat archive 32
-    b"\xca\xfe\xba\xbf", b"\xbf\xba\xfe\xca",  # fat archive 64
-})
+_MACHO_MAGICS: frozenset[bytes] = frozenset(
+    {
+        b"\xfe\xed\xfa\xce",
+        b"\xce\xfa\xed\xfe",  # 32-bit
+        b"\xfe\xed\xfa\xcf",
+        b"\xcf\xfa\xed\xfe",  # 64-bit
+        b"\xca\xfe\xba\xbe",
+        b"\xbe\xba\xfe\xca",  # fat archive 32
+        b"\xca\xfe\xba\xbf",
+        b"\xbf\xba\xfe\xca",  # fat archive 64
+    }
+)
 
 # Unix `ar` archive magics — shared by static libraries (`.a`) and MSVC/COFF
 # import/static libraries (`.lib`). `!<arch>\n` is the standard archive;
@@ -76,7 +84,20 @@ def resolve_linker_script(path: Path) -> tuple[Path | None, bool]:
 
     Returns ``(target, is_linker_script)``. ``target`` is ``None`` when the file
     is not a linker script, or when no referenced library can be found.
+
+    Real ELF/PE/Mach-O magic bytes are checked first and are a positive,
+    unambiguous binary-content signal: a genuine GNU ld linker script is
+    plain text and never starts with one. Without this guard, a real binary
+    whose first 8KiB happens to contain the literal text ``INPUT(``/
+    ``GROUP(``/``OUTPUT_FORMAT(`` -- embedded strings, symbol names, or
+    plain coincidence -- would be misclassified as a linker script by the
+    regex probe below (Codex review, fresh evidence: reported for a real
+    ELF DSO whose own content happened to contain
+    ``INPUT(libdoesnotexist.so)``, silently excluding it from both
+    :mod:`abicheck.product_baseline` packing and product comparison).
     """
+    if detect_binary_format(path) is not None:
+        return None, False
     try:
         with open(path, "rb") as f:
             raw = f.read(8192)
@@ -142,8 +163,16 @@ def detect_archive(path: str | Path) -> bool:
 #: silently hiding a real SONAME/dependency change as vendor-hash noise —
 #: the exact false-negative an ABI-breaking-change detector must not produce
 #: (self-review finding).
+#: Case-insensitive (``re.IGNORECASE``): a vendored library can carry an
+#: uppercase-hex or uppercase-extension spelling (``libfoo-ABCDEF.SO.1``) --
+#: matching only lowercase let two releases differing solely in that
+#: generated hash's case key as unrelated libraries, reporting spurious
+#: removal/addition noise (Codex). Only the matched hash/extension span is
+#: affected -- re.sub() replaces just that span with "", so the rest of the
+#: name (and every other consumer of the stripped result) keeps its
+#: original case.
 _VENDOR_HASH_RE = re.compile(
-    r"-(?=[0-9a-f]*[a-f])[0-9a-f]{6,16}(?=\.(?:so|dylib)\b|\.\d)"
+    r"-(?=[0-9a-f]*[a-f])[0-9a-f]{6,16}(?=\.(?:so|dylib)\b|\.\d)", re.IGNORECASE
 )
 
 
@@ -161,10 +190,74 @@ def strip_vendor_hash(name: str) -> str:
     return _VENDOR_HASH_RE.sub("", name)
 
 
+#: Mach-O's version-before-extension convention: ``libfoo.1.dylib``,
+#: ``libfoo.1.2.3.dylib`` -- the compatibility/current-version numbers ld64
+#: encodes directly in the on-disk filename, distinct from ELF's
+#: version-*after*-extension ``libfoo.so.1`` convention the regex below
+#: already handles. Requires at least one numeric segment so a bare
+#: ``libfoo.dylib`` (no version at all) is left untouched. Case-insensitive
+#: to match a ``.DYLIB`` extension spelling the same way the ELF ``.so``
+#: match below does, but the *stem* is never case-folded -- see
+#: :func:`_canonical_library_key`'s own docstring for why. The extension
+#: itself is a capture group so its *matched* case can be preserved on
+#: substitution -- a fixed lowercase replacement would normalize
+#: ``libfoo.1.DYLIB`` to ``libfoo.dylib`` while leaving an unversioned
+#: ``libfoo.DYLIB`` untouched, so a real version-drop pair (``libfoo.1.
+#: DYLIB`` -> ``libfoo.DYLIB``) would land on two different-cased keys and
+#: never be paired by the canonical fallback (Codex review, fresh
+#: evidence).
+_DYLIB_VERSION_RE = re.compile(r"\.(?:\d+\.)*\d+(\.dylib)$", re.IGNORECASE)
+
+#: PE/COFF ``IMAGE_FILE_DLL`` bit in the COFF file header's ``Characteristics``
+#: field -- set for a DLL, clear for a plain ``.exe``.
+_PE_IMAGE_FILE_DLL = 0x2000
+
+
+def _pe_is_dll_content(path: Path) -> bool:
+    """True when *path* is a PE/COFF image with the ``IMAGE_FILE_DLL`` bit
+    set in its COFF file header, identified from content rather than
+    filename -- lets a DLL shipped under a nonstandard extension (a Python
+    ``.pyd`` extension module) be recognized as a library
+    (`product_baseline.py`'s `_is_library_path`) and case-folded for
+    canonical matching (`_canonical_library_key` below) the same way a
+    conventional ``.dll`` already is, since a suffix check alone never
+    catches either (Codex review, fresh evidence).
+
+    Lives in this leaf module, not `product_baseline.py` (its original
+    home): `_canonical_library_key` needs it too, and `product_baseline.py`
+    already imports `_canonical_library_key` from here -- the reverse
+    import would cycle.
+    """
+    try:
+        with open(path, "rb") as f:
+            dos_header = f.read(64)
+            if len(dos_header) < 64 or dos_header[0:2] != b"MZ":
+                return False
+            (pe_offset,) = struct.unpack_from("<I", dos_header, 0x3C)
+            f.seek(pe_offset)
+            sig = f.read(4)
+            if sig != b"PE\x00\x00":
+                return False
+            coff_header = f.read(20)
+    except (OSError, struct.error):
+        return False
+    if len(coff_header) < 20:
+        return False
+    (characteristics,) = struct.unpack_from("<H", coff_header, 18)
+    return bool(characteristics & _PE_IMAGE_FILE_DLL)
+
+
 def _canonical_library_key(path: Path) -> str:
     """Canonical key used to match libraries across releases.
 
     For ELF versioned names, canonicalize to ``*.so`` (e.g. ``libfoo.so.1.2`` → ``libfoo.so``).
+    For Mach-O versioned names, canonicalize to ``*.dylib`` (e.g.
+    ``libfoo.1.2.dylib`` → ``libfoo.dylib``) -- the standard ld64
+    compatibility-version-in-filename convention, the Mach-O counterpart of
+    the ELF handling above (Codex review, fresh evidence: a normal Mach-O
+    major-version bump, e.g. ``libfoo.1.dylib`` -> ``libfoo.2.dylib``, never
+    matched anything before this, since a plain ``.dylib`` filename fell
+    through this function entirely unchanged).
     Vendored auditwheel/delocate hash suffixes are stripped first (G9) so the
     same bundled dependency pairs across rebuilds despite its hash changing.
 
@@ -180,19 +273,117 @@ def _canonical_library_key(path: Path) -> str:
     ``libfoo.abicheck.json`` and a new release publishing the identical
     snapshot as ``libfoo.abicheck.json.gz`` must still key-match as the same
     library rather than surfacing as an unrelated removal+addition pair.
+
+    Case-folding is restricted to PE images, matching only the one format
+    whose loader identity is genuinely case-insensitive (Windows).
+    Whole-string lowercasing previously applied to *every* format alike,
+    so an ELF ``libFoo.so`` -> ``libfoo.so`` case-only rename (or the
+    identical Mach-O case) paired via this same canonical fallback and its
+    removal/addition was silently suppressed — but a case-sensitive
+    ELF/Mach-O loader cannot resolve a symbol-table-only case difference
+    the way Windows' loader resolves a PE one: an existing consumer whose
+    ``DT_NEEDED``/``LC_LOAD_DYLIB`` still names the old spelling fails to
+    load the renamed file, a real break this canonical pairing must not
+    hide (Codex review, fresh evidence). "Is this a PE image" is answered
+    by content (:func:`_pe_is_dll_content`), not just the ``.dll`` suffix:
+    a case-only rename of a PE library shipped under a nonstandard
+    extension (a Python ``.pyd`` extension module) is just as
+    case-insensitive on Windows as a ``.dll``'s, and a suffix-only check
+    would miss it (Codex review, fresh evidence).
+
+    A *stored snapshot* of a library (``Foo.dll.abicheck.json``, or its
+    compressed ``.gz``/``.zst`` forms) carries its represented format in
+    the filename, not in the (JSON) file content -- ``_pe_is_dll_content``
+    reads the represented binary's own bytes, which for a snapshot are the
+    JSON envelope, not a PE image, so it always answers False here.
+    Matching the represented library's format (``.dll``/``.dylib`` version)
+    is therefore done against the *represented* name -- the stored
+    filename with one recognized wrapper suffix (the ``.abicheck.json``
+    convention `docs/use/baseline-management.md` documents, or the plainer
+    ``.json``/``.pl``/``.pm`` forms `_version_sort_key` already recognizes)
+    stripped, not the raw stored-snapshot name (Codex review, fresh
+    evidence, two rounds). The first round matched any ``\\.dll`` segment
+    anywhere in the (unwrapped) name -- true for ``Foo.dll.abicheck.json``,
+    but also true for an unrelated, genuinely case-sensitive ELF name that
+    happens to literally contain ``.dll.`` (e.g. a compatibility shim named
+    ``libFoo.dll.so``), wrongly case-folding it and hiding a real
+    case-only-rename break. Stripping the wrapper suffix first and then
+    requiring the represented name to genuinely *end* in ``.dll`` avoids
+    that false positive while still recognizing a stored PE snapshot: the
+    same mechanism also lets a versioned dylib snapshot
+    (``libfoo.1.dylib.abicheck.json``) match `_DYLIB_VERSION_RE` below,
+    which is anchored to the end of string and previously never matched
+    through a wrapper suffix at all.
+
+    Not closed by this: a stored snapshot of a PE library shipped under a
+    nonstandard extension (``Foo.pyd.abicheck.json``) still isn't
+    recognized -- unlike a live ``.pyd`` file, there is no PE content to
+    probe, and ".pyd" is not a wrapper-suffix-stripped ``.dll``. Closing
+    that would need reading the stored snapshot's own ``platform`` field
+    (``model.AbiSnapshot.platform``) rather than its filename, a genuine
+    new content-peek primitive (locating a field reliably regardless of a
+    JSON snapshot's key order or compression, verified on its own) rather
+    than a filename heuristic extension -- left as a known, narrower gap
+    (Codex review, fresh evidence).
     """
     from .snapshot_io import _COMPRESSED_SUFFIXES
 
-    lower = strip_vendor_hash(path.name.lower())
+    name = strip_vendor_hash(path.name)
+    name_lower = name.lower()
     for suffix, _compression in _COMPRESSED_SUFFIXES:
-        if lower.endswith(suffix):
+        if name_lower.endswith(suffix):
             # Strip only the compression extension (".gz"/".zst"), keeping the
             # ".json" so a compressed and an uncompressed snapshot of the same
             # release still reduce to the same key.
             trailing_ext = suffix[len(".json") :]
-            lower = lower[: -len(trailing_ext)]
+            name = name[: -len(trailing_ext)]
+            name_lower = name_lower[: -len(trailing_ext)]
             break
-    m = re.search(r"\.so(?:\.|$)", lower)
+
+    # The represented library's own name, with one recognized stored-
+    # snapshot wrapper suffix stripped (if present) -- see this function's
+    # own docstring for why format/case-folding decisions are made against
+    # this, not the raw stored-snapshot name. A plain (unwrapped) binary
+    # name passes through unchanged (no suffix matches), so every check
+    # below still applies identically to a live .dll/.dylib file.
+    represented = name_lower
+    represented_cased = name
+    for wrapper_suffix in (".abicheck.json", ".json", ".pl", ".pm"):
+        if represented.endswith(wrapper_suffix):
+            represented = represented[: -len(wrapper_suffix)]
+            represented_cased = represented_cased[: -len(wrapper_suffix)]
+            break
+
+    if represented.endswith(".dll") or _pe_is_dll_content(path):
+        return name_lower
+    m = re.search(r"\.so(?:\.|$)", name, re.IGNORECASE)
     if m:
-        return lower[: m.start() + 3]
-    return lower
+        return name[: m.start() + 3]
+    m = _DYLIB_VERSION_RE.search(represented_cased)
+    if m:
+        # group(1) is the matched extension exactly as spelled (preserving
+        # its case) -- see _DYLIB_VERSION_RE's own docstring for why a
+        # fixed-case literal replacement is wrong here. m.start() indexes
+        # into `represented_cased`, which shares its prefix with `name` up
+        # to the stripped wrapper suffix, so it's a valid index into `name`
+        # too.
+        return name[: m.start()] + m.group(1)
+    # An *unversioned* dylib has no numeric segment for _DYLIB_VERSION_RE
+    # to match at all (see its own docstring), so a stored snapshot of one
+    # (`libfoo.dylib.abicheck.json`) fell through to here unchanged --
+    # keeping its wrapper suffix -- while a *versioned* sibling
+    # (`libfoo.1.dylib.abicheck.json`) matched above and had its wrapper
+    # dropped by that branch's own `name[: m.start()] + m.group(1)`
+    # construction. Two different canonical keys for a version-drop pair
+    # of the same evolving library (Codex review, fresh evidence).
+    # Scoped to exactly that case (the represented name genuinely ends in
+    # ".dylib") -- an earlier revision of this fix returned
+    # `represented_cased` unconditionally here, which also stripped the
+    # wrapper from a name with *no* recognized binary extension at all
+    # (e.g. a bare "libfoo.abicheck.json" for an extensionless plugin),
+    # changing its canonical key from the whole wrapped name to just
+    # "libfoo" and breaking existing snapshot-matching behavior for that
+    # unrelated case.
+    if represented.endswith(".dylib"):
+        return represented_cased
+    return name

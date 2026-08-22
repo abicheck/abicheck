@@ -156,6 +156,7 @@ def _run_bundle_analysis(
     manifest_path: Path | None,
     bundle_system_providers: str,
     bundle_cohorts: tuple[str, ...] = (),
+    policy: str = "strict_abi",
 ) -> BundleDiffResult | None:
     """Run bundle-level (ADR-023) analysis on a compare-release run.
 
@@ -210,6 +211,7 @@ def _run_bundle_analysis(
             manifest=manifest,
             system_providers=system_extra or None,
             cohorts=list(bundle_cohorts) or None,
+            policy=policy,
         )
     except Exception as exc:
         # Analysis-engine bugs should not block the per-library report;
@@ -327,6 +329,7 @@ def _collect_bundle_result(
     manifest_path: Path | None,
     bundle_system_providers: str,
     bundle_cohorts: tuple[str, ...] = (),
+    policy: str = "strict_abi",
 ) -> tuple[BundleDiffResult | None, str]:
     """Extract stashed DiffResults, run bundle analysis, update worst verdict."""
     stashed_diffs: list[DiffResult] = []
@@ -341,6 +344,7 @@ def _collect_bundle_result(
         manifest_path=manifest_path,
         bundle_system_providers=bundle_system_providers,
         bundle_cohorts=bundle_cohorts,
+        policy=policy,
     )
     if bundle_result is not None:
         bv = bundle_result.bundle_verdict.value

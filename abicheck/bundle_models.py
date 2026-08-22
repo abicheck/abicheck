@@ -247,11 +247,16 @@ class BundleDiffResult:
     new_root: Path
     per_library: list[DiffResult] = field(default_factory=list)
     bundle_findings: list[BundleFinding] = field(default_factory=list)
+    #: Policy profile bundle-level findings are scored under (see
+    #: :func:`abicheck.checker_policy.compute_verdict`'s own `policy`
+    #: parameter). Defaults to ``strict_abi`` — every caller that predates
+    #: this field behaves exactly as before.
+    policy: str = "strict_abi"
 
     @property
     def bundle_verdict(self) -> Verdict:
         changes = [f.to_change() for f in self.bundle_findings]
-        return compute_verdict(changes)
+        return compute_verdict(changes, policy=self.policy)
 
     @property
     def per_library_verdict(self) -> Verdict:

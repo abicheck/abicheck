@@ -29,8 +29,10 @@ devices, FIFOs).  See ``_validate_member_path()`` and
 """
 from __future__ import annotations
 
+import copy
 import logging
 import os
+import queue
 import re
 import shutil
 import struct
@@ -38,6 +40,9 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import threading
+import time
+import uuid
 import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -101,8 +106,11 @@ def _validate_member_path(member_name: str, target_root: Path) -> Path:
 def _validate_symlink_target(
     member_name: str, link_target: str, target_root: Path
 ) -> None:
-    """Validate that a symlink target resolves within the extraction root."""
-    member_parent = (target_root / member_name).resolve().parent
+    """Validate that a symlink target resolves within the extraction root.
+    Resolves only `member_name`'s *lexical* parent (a string op, never its
+    own final component): resolving the full path first instead followed a
+    duplicate member's stale prior target, not its real parent (Codex)."""
+    member_parent = (target_root / member_name).parent.resolve()
     resolved = (member_parent / link_target).resolve()
     root_resolved = target_root.resolve()
     try:
@@ -112,6 +120,142 @@ def _validate_symlink_target(
             member_name,
             f"symlink target '{link_target}' resolves outside extraction root: {resolved}",
         ) from exc
+
+
+def _target_supports_symlinks(target_root: Path) -> bool:
+    """Probe whether *target_root* can actually create a symlink. Most notably false on Windows without `SeCreateSymbolicLinkPrivilege` (no Developer Mode enabled, not running elevated): `os.symlink()` raises `OSError`, and Python's own `tarfile` extraction machinery (`TarFile.makelink()`) silently falls back to extracting a full copy of the symlink's *referenced* member instead -- no exception, no flag, nothing that distinguishes "a real symlink" from "a copy that used to be a symlink" in the extracted result. Left undetected, this surfaces far downstream as a confusing "manifest never declared this file" error rather than an honest diagnosis of the real, platform-level cause (Codex).
+
+    A live, unlinked probe entry (mirroring `product_baseline.py`'s own `_umask_derived_mode()` technique) rather than a cached platform check: the answer can change within a process's lifetime (Developer Mode toggled, a differently-privileged re-exec), so caching risks staleness for no real benefit -- this probe is cheap, one create/unlink pair, and called at most once per extraction.
+
+    Both probe entries use a `uuid4`-suffixed name (not a bare pid), created with exclusive-create semantics (`O_CREAT | O_EXCL`, matching `_umask_derived_mode()`'s own probe) rather than `Path.touch()`, and cleanup only ever removes an entry *this call* actually created -- a bare pid-suffixed name collides with a concurrent extraction in the same process (e.g. two threads unpacking into the same directory) or, worse, with real pre-existing user data at that exact predictable path, which `touch()` would silently reuse and the unconditional cleanup would then delete (Codex).
+
+    Known gap, not fixed here (Codex): this probe (and `tarfile`'s own extraction call, `os.symlink(tarinfo.linkname, targetpath)` with no `target_is_directory` argument) always creates a *file*-type symlink on Windows, never a directory-type one -- `os.symlink()`'s `target_is_directory` parameter defaults to `False` there and `tarfile.TarFile.makelink()` never passes it. A symlink whose target is itself a directory (which the packer legitimately archives as a leaf, never descending into it) can therefore pass this probe on a fully-privileged Windows host and still restore as the wrong reparse-point type once actually extracted -- a `tarfile`-level limitation this probe cannot detect or work around, since it is unconditional on that platform rather than a function of privilege. Verifying and fixing this would need a real Windows host to confirm the failure mode and a custom directory-aware extraction step bypassing `tarfile.makelink()`'s own symlink creation, not a probe change.
+    """
+    probe_target = target_root / f".abicheck-symlink-probe-target-{uuid.uuid4().hex}"
+    probe_link = target_root / f".abicheck-symlink-probe-link-{uuid.uuid4().hex}"
+    target_created = False
+    link_created = False
+    try:
+        os.close(os.open(probe_target, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600))
+        target_created = True
+        os.symlink(probe_target.name, probe_link)
+        link_created = True
+    except OSError:
+        return False
+    else:
+        return True
+    finally:
+        if link_created:
+            probe_link.unlink(missing_ok=True)
+        if target_created:
+            probe_target.unlink(missing_ok=True)
+
+
+def _validate_member(
+    member: tarfile.TarInfo,
+    target_root: Path,
+    *,
+    supports_symlinks: bool = True,
+    symlink_target_by_name: dict[str, str] | None = None,
+) -> None:
+    """Every `_safe_extract` member check, shared by the bulk (3.12+) and per-member (< 3.12) extraction paths so the two can't drift.
+
+    `symlink_target_by_name`, when given, is one dict shared and mutated across every call in one extraction's archive-member order -- it lets a hard-link member's validation see whether the name it references was a *symlink*, and if so re-validate that symlink's raw target text as if it were being (re-)created at the hard link's own, possibly differently-nested location. This closes a real escape (Codex, fresh evidence): `tarfile.TarFile.makelink()` falls back to a full copy whenever `os.link()` fails, and for a hard link naming a *symlink* member, that fallback re-extracts the referenced symlink itself (`_find_link_target` finds the original `SYMTYPE` `TarInfo`, not a regular file) using its own unmodified, relative target text -- but at the hard link's own path, not the symlink's original one. A symlink `a/b/link -> ../../safe` validates safely at its own two-levels-deep location; a hard link `x` (at the archive root) naming `a/b/link` re-extracts, on fallback, as `x -> ../../safe` -- the identical text now resolved from one level shallower, escaping `target_root`. Whether `os.link()` actually fails is filesystem-dependent and unknowable at validation time, so this treats the fallback as the worst case (the same principle `_reject_hardlink_fallback_amplification` already applies to disk-usage amplification) rather than trusting it won't happen. Propagates transitively (a hard link to a hard link to a symlink) and evicts a name's entry the moment a later, non-symlink member reuses it, so no stale symlink text can leak to an unrelated hard link the way the round-64/65 amplification-check maps once did.
+    """
+    _validate_member_path(member.name, target_root)
+    if member.ischr() or member.isblk() or member.isfifo():
+        raise ExtractionSecurityError(
+            member.name, "archive contains a device or FIFO entry"
+        )
+    if member.issym():
+        _validate_symlink_target(member.name, member.linkname, target_root)
+        if not supports_symlinks:
+            # Not a security violation -- a platform/privilege limitation. tarfile would otherwise silently substitute a full copy of the symlink's target here, corrupting the archive's declared structure without any error at all (see _target_supports_symlinks()'s own docstring).
+            raise SnapshotError(
+                f"archive member {member.name!r} is a symlink, but this destination cannot create one (no privilege/support for symlinks here) -- extracting would silently substitute a full copy of its target instead of the declared link, corrupting the archive's structure. Extract somewhere that supports symlinks (on Windows: enable Developer Mode, or run elevated)."
+            )
+        if symlink_target_by_name is not None:
+            symlink_target_by_name[member.name] = member.linkname
+    elif member.islnk():
+        _validate_member_path(member.linkname, target_root)  # a member name
+        if symlink_target_by_name is not None:
+            propagated = symlink_target_by_name.get(member.linkname)
+            if propagated is not None:
+                # The referenced member is (transitively) a symlink -- tarfile's fallback would re-create it here, so make sure its raw target text still resolves within bounds from THIS member's own location before allowing extraction.
+                _validate_symlink_target(member.name, propagated, target_root)
+                symlink_target_by_name[member.name] = propagated
+            else:
+                symlink_target_by_name.pop(member.name, None)
+    elif symlink_target_by_name is not None:
+        # A regular file (or other non-symlink, non-hard-link member)
+        # reusing this exact name means any earlier symlink recorded
+        # under it no longer applies to a further hard link.
+        symlink_target_by_name.pop(member.name, None)
+
+
+def _reject_oversized_declared_content(tf: tarfile.TarFile) -> None:
+    """Reject an archive whose declared member sizes sum past the same limit `_safe_extract_zst_tar` enforces on the decompressed tar *stream* -- a GNU/PAX sparse member's `TarInfo.size` is the real logical extent tarfile materializes even though the stream only carries non-hole blocks. Iterates `tf` directly (not `tf.getmembers()`, which reads every header to EOF before returning anything) and also caps the member *count*, so millions of zero-length members -- whose declared sizes never trip the byte-sum check at all -- are rejected before all of them are parsed into memory, not after (Codex, two review rounds)."""
+    max_bytes = _max_decompressed_tar_bytes()
+    max_members = _max_tar_members()
+    total = 0
+    count = 0
+    for member in tf:
+        total += member.size
+        count += 1
+        if total > max_bytes:
+            raise ExtractionSecurityError(
+                member.name,
+                f"archive declares more than the {max_bytes}-byte safety "
+                f"limit's worth of extracted content (override via {_MAX_DECOMPRESSED_TAR_BYTES_ENV})",
+            )
+        if count > max_members:
+            raise ExtractionSecurityError(
+                member.name,
+                f"archive declares more than the {max_members}-member safety "
+                f"limit's worth of entries (override via {_MAX_TAR_MEMBERS_ENV})",
+            )
+    _reject_hardlink_fallback_amplification(tf, max_bytes)
+
+
+def _reject_hardlink_fallback_amplification(
+    tf: tarfile.TarFile, max_bytes: int
+) -> None:
+    """Reject an archive whose hard-link members could expand far past `max_bytes` if extraction falls back to copying instead of linking.
+
+    A hard-link member's own declared `size` is 0 in tar format -- its data lives in the first-archived (regular) copy the link refers to by name -- so the byte-sum check above, which sums declared sizes as-is, never sees it. But `tarfile.TarFile.makelink()` falls back to extracting a full, independent copy of the *referenced* member whenever `os.link()` fails (unsupported filesystem, a cross-device link, ...), giving every alias its own distinct inode. An archive combining one large payload with up to the member-count cap's worth of hard links to it can therefore amplify real disk usage (and subsequent checksum work) far beyond the declared-byte-sum ceiling, entirely invisible to that check (Codex).
+
+    Only ever called after the byte-sum/member-count pass above completed without rejecting, so `tf.getmembers()` here is free: for the seekable `TarFile` this function is always called with, that pass's own `for member in tf:` iteration already built the full `tf.members` list as a side effect (`TarFile.next()` does this regardless of iteration style for a non-stream file) -- getmembers() just returns it, no re-parse. Safe against a hard-link chain (a link to a link) and against a reference cycle, neither of which a real tar writer emits but an adversarial archive could.
+
+    Resolves each hard link only against members *preceding* it in archive order, matching `tarfile.TarFile._getmember(tarinfo=...)`'s own truncated search (it slices `self.members` to everything before the link being resolved) -- a global, order-blind name map does not: an archive naming a large regular member `real`, many hard links to `real`, and then a *further*, zero-length regular member also named `real` would have a last-wins global map record size 0 for the name every earlier hard link actually resolves against, hiding the real amplification behind a member that appears too late to matter (Codex, fresh evidence). Built incrementally in one forward pass instead -- each member is resolved against, then folded into, the running map in the same order tarfile itself would see them.
+
+    Keeps exactly one map, `resolved_size_by_name`, always holding the fully-resolved worst-case size for the *latest* member seen so far under a given name -- regardless of whether that latest member is a regular file or itself a hard link. An earlier revision kept two separate maps (`sizes_by_name` for regular files, `link_to_name` for hard-link targets) and never evicted a name's stale `sizes_by_name` entry when a later hard-link member reused that same name -- so a hard link A -> B, where B's name was earlier a small regular file B and is now itself a hard link to some large C, resolved through the stale `sizes_by_name[B]` (the small regular file's own size) instead of B's real, current worst-case size (C's) (Codex, fresh evidence). Storing one resolved size per name, overwritten unconditionally by every member in order, makes this impossible by construction: a hard link's own resolved size is looked up and folded into the map in the same step, so a subsequent link naming it always sees its true, current worst case with a single dict lookup -- no separate chain-walk or cycle guard needed, since the map is already fully resolved at each step rather than holding raw, unresolved link targets to walk later.
+    """
+    resolved_size_by_name: dict[str, int] = {}
+    worst_case_total = 0
+    for member in tf.getmembers():
+        if member.islnk():
+            # Dangling reference (no preceding member with this name):
+            # extraction fails anyway, so the link's own declared size
+            # (0 in tar format) is the honest worst case here.
+            own_size = resolved_size_by_name.get(member.linkname, member.size)
+        else:
+            own_size = member.size
+        worst_case_total += own_size
+        if worst_case_total > max_bytes:
+            raise ExtractionSecurityError(
+                member.name,
+                "archive's hard-link members could expand to more than "
+                f"the {max_bytes}-byte safety limit's worth of content if "
+                "this filesystem falls back to copying instead of "
+                f"linking (override via {_MAX_DECOMPRESSED_TAR_BYTES_ENV})",
+            )
+        # Fold this member's *resolved* size into the map *after*
+        # resolving it against the map, matching tarfile's own
+        # precedes-me-only search -- unconditionally replacing whatever
+        # this name previously mapped to, so a later member can never
+        # resolve through a stale entry left by an earlier one.
+        if member.isreg() or member.islnk():
+            resolved_size_by_name[member.name] = own_size
 
 
 # ── Protocol ─────────────────────────────────────────────────────────────────
@@ -131,6 +275,112 @@ class PackageExtractor(Protocol):
 
 
 # ── Tar extractor ────────────────────────────────────────────────────────────
+
+#: Decompression-bomb defense for `.tar.zst` extraction (Codex review, fresh evidence): a tiny, highly compressible archive can otherwise fill the host/CI runner's disk via an unbounded `shutil.copyfileobj()` before any member is ever validated. Generous relative to `snapshot_io.py`'s 1 GiB single-snapshot limit (ADR-059) since this bounds a whole product archive's worth of shared libraries, not one snapshot payload. Overridable only via the private env var below, mirroring `snapshot_io.py`'s identical override mechanism.
+DEFAULT_MAX_DECOMPRESSED_TAR_BYTES = 8 * 1024 * 1024 * 1024  # 8 GiB
+_MAX_DECOMPRESSED_TAR_BYTES_ENV = "_ABICHECK_TAR_ZST_MAX_DECODED_BYTES"
+
+
+def _max_decompressed_tar_bytes() -> int:
+    override = os.environ.get(_MAX_DECOMPRESSED_TAR_BYTES_ENV)
+    if override:
+        try:
+            return int(override)
+        except ValueError:
+            pass
+    return DEFAULT_MAX_DECOMPRESSED_TAR_BYTES
+
+
+#: Independent of the byte-sum limit above -- millions of zero-length
+#: members never trip a size check at all, but each still costs a retained
+#: TarInfo object (Codex). Generous for any real archive.
+DEFAULT_MAX_TAR_MEMBERS = 200_000
+_MAX_TAR_MEMBERS_ENV = "_ABICHECK_TAR_ZST_MAX_MEMBERS"
+
+
+def _max_tar_members() -> int:
+    override = os.environ.get(_MAX_TAR_MEMBERS_ENV)
+    if override:
+        try:
+            return int(override)
+        except ValueError:
+            pass
+    return DEFAULT_MAX_TAR_MEMBERS
+
+
+#: A PAX ('x'/'g') or GNU longname/longlink ('L'/'K') extended-header record's own declared byte length -- read from the SAME 512-byte header block every ordinary member's size is, so it's known before any data is read. `tarfile.TarInfo._proc_pax()`/`_proc_gnulong()` both read that many bytes in ONE `fileobj.read(size)` call before returning control to a caller iterating the archive, materializing the whole declared blob regardless of any per-member check a caller runs afterward -- so `_reject_oversized_declared_content`'s own streaming, member-by-member checks never get a chance to intervene before this allocation already happened (Codex, fresh evidence: reproduced an uncompressed tar with a 2 MiB PAX header being accepted even with a 1 MiB overall decoded-bytes limit, and noted the same shape applies to a highly compressible `.tar.zst` forcing an allocation approaching the far larger overall decoded-stream limit). Real PAX/GNU extended headers are practically always well under a few KiB (a handful of path/uid/gid/mtime key=value pairs, or a single long path/linkpath) even for unusual legitimate metadata, so this is generous headroom, not a tight fit.
+DEFAULT_MAX_TAR_EXTENDED_HEADER_BYTES = 1 * 1024 * 1024  # 1 MiB
+_MAX_TAR_EXTENDED_HEADER_BYTES_ENV = "_ABICHECK_TAR_ZST_MAX_EXTENDED_HEADER_BYTES"
+
+
+def _max_tar_extended_header_bytes() -> int:
+    override = os.environ.get(_MAX_TAR_EXTENDED_HEADER_BYTES_ENV)
+    if override:
+        try:
+            return int(override)
+        except ValueError:
+            pass
+    return DEFAULT_MAX_TAR_EXTENDED_HEADER_BYTES
+
+
+class _BoundedTarInfo(tarfile.TarInfo):
+    """A `tarfile.TarInfo` that pre-screens a PAX/GNU extended-header record's declared size against `_max_tar_extended_header_bytes()` BEFORE `tarfile`'s own parsing reads that many bytes into memory in one call -- closing the gap `DEFAULT_MAX_TAR_EXTENDED_HEADER_BYTES`'s own docstring describes. Passed as `tarfile.open(..., tarinfo=_BoundedTarInfo)`; `TarFile` uses this class for every member it parses for the lifetime of that one open archive, so setting it once at open time covers every subsequent `next()` call, including ones made later by `getmembers()`/`extractall()` on the same `TarFile` object.
+
+    Raising `ExtractionSecurityError` directly (rather than a `tarfile`-specific exception needing translation afterward) works cleanly here because `TarFile.next()`'s own exception handling only special-cases `tarfile`'s own header-parsing exception hierarchy (`EOFHeaderError`/`InvalidHeaderError`/`EmptyHeaderError`/`TruncatedHeaderError`/`SubsequentHeaderError`) plus `zlib.error`; any other exception -- ours included -- is re-raised completely unchanged, verified directly against a real archive before relying on it.
+
+    Only `_proc_pax`/`_proc_gnulong` are overridden -- the other extended-record path, `_proc_sparse` (old-style GNU sparse), reads a bounded, fixed `BLOCKSIZE` (512 bytes) per iteration regardless of the record's own declared size, so it doesn't exhibit the single-large-allocation pattern this guards against.
+    """
+
+    def _proc_pax(self, tarfile_obj: tarfile.TarFile) -> tarfile.TarInfo:
+        self._reject_if_oversized()
+        return super()._proc_pax(tarfile_obj)  # type: ignore[misc,no-any-return]
+
+    def _proc_gnulong(self, tarfile_obj: tarfile.TarFile) -> tarfile.TarInfo:
+        self._reject_if_oversized()
+        return super()._proc_gnulong(tarfile_obj)  # type: ignore[misc,no-any-return]
+
+    def _reject_if_oversized(self) -> None:
+        limit = _max_tar_extended_header_bytes()
+        if self.size > limit:
+            raise ExtractionSecurityError(
+                self.name or "<extended header>",
+                f"archive's extended header record declares {self.size} bytes, exceeding the {limit}-byte safety limit (override via {_MAX_TAR_EXTENDED_HEADER_BYTES_ENV})",
+            )
+
+
+#: The `zstd` CLI's own `--memory=` window-size bound (used only by the external-binary fallback below) rejects any value above 2048 MiB as "out of bound" (verified against a real `zstd` 1.5.5 binary) -- independent of, and much smaller than, DEFAULT_MAX_DECOMPRESSED_TAR_BYTES above, which bounds total decoded *output* size via this module's own streaming byte count, not the decoder's working-memory window. Mirrors snapshot_io.py's identical `_ZSTD_MAX_WINDOW_LOG = 31` ceiling for the zstandard-module decoder path.
+_ZSTD_CLI_MAX_MEMORY_MB = 2048
+
+#: Overall wall-clock deadline for the external `zstd` CLI fallback, covering both the streamed decode loop and the final wait/communicate calls -- matches what the pre-streaming `subprocess.run(..., timeout=120)` call enforced, so a stalled/hung process still can't block extraction indefinitely (Codex review, fresh evidence).
+_ZSTD_CLI_TIMEOUT_S = 120
+
+#: Bound on the reader-thread-to-main-thread chunk queue in the external `zstd` CLI fallback (each chunk is at most 1 MiB). Keeps the reader thread from racing arbitrarily far ahead of the main thread's own decompression-bomb size check -- an unbounded queue could otherwise buffer gigabytes of already-decoded data before total_bytes is ever compared against the limit (Codex review, fresh evidence). A small bound still allows real streaming throughput while keeping the in-memory decoded backlog to a fixed, small multiple of the chunk size.
+_ZSTD_READER_QUEUE_MAXSIZE = 8
+
+
+def _drain_reader_queue(
+    chunk_queue: queue.Queue[bytes | None | Exception],
+    reader_thread: threading.Thread,
+    timeout: float,
+) -> None:
+    """Unblock a `_safe_extract_zst_tar` reader thread possibly stuck in
+    `put()` on the now-full bounded queue after the consumer stopped
+    draining it mid-abort -- keeps pulling items until the reader finishes
+    on its own (its producer, the killed/exhausted zstd process, closes
+    its pipe quickly) rather than leaking a permanently-blocked daemon
+    thread and its queued chunks (Codex review, fresh evidence). *timeout*
+    is a backstop, not the expected case.
+    """
+    deadline = time.monotonic() + timeout
+    while reader_thread.is_alive():
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        try:
+            chunk_queue.get(timeout=min(remaining, 0.1))
+        except queue.Empty:
+            continue
+    reader_thread.join(timeout=max(0.0, deadline - time.monotonic()))
 
 
 class TarExtractor:
@@ -159,33 +409,83 @@ class TarExtractor:
           create dangerous filesystem entries
         """
         target_root = target_dir.resolve()
-        with tarfile.open(archive_path) as tf:
-            for member in tf.getmembers():
-                _validate_member_path(member.name, target_root)
-
-                # Reject special device/FIFO types that should never appear
-                # in package archives (security risk on extraction)
-                if member.ischr() or member.isblk() or member.isfifo():
-                    raise ExtractionSecurityError(
-                        member.name,
-                        "archive contains a device or FIFO entry",
-                    )
-
-                if member.issym():
-                    _validate_symlink_target(
-                        member.name, member.linkname, target_root
-                    )
-                elif member.islnk():
-                    # Hardlink targets are archive member names, not
-                    # filesystem-relative paths — validate as a member path.
-                    _validate_member_path(member.linkname, target_root)
-
-            # All members validated — now extract
-            # Use data_filter if available (Python 3.12+), otherwise manual
+        with tarfile.open(archive_path, tarinfo=_BoundedTarInfo) as tf:
+            _reject_oversized_declared_content(tf)
+            # Probed once per extraction, not per member -- see
+            # _target_supports_symlinks()'s own docstring for why this
+            # isn't cached across calls instead.
+            supports_symlinks = _target_supports_symlinks(target_root)
+            # One dict shared across every _validate_member() call in this
+            # extraction, in archive-member order -- see _validate_member()'s
+            # own docstring for why a hard-link member's validation needs it.
+            symlink_target_by_name: dict[str, str] = {}
             if sys.version_info >= (3, 12):
+                for member in tf.getmembers():
+                    _validate_member(
+                        member,
+                        target_root,
+                        supports_symlinks=supports_symlinks,
+                        symlink_target_by_name=symlink_target_by_name,
+                    )
+                # `filter="data"` (PEP 706) carries its own, equivalent per-member safety contract.
                 tf.extractall(path=target_dir, filter="data")  # nosec B202 — members validated above
             else:
-                tf.extractall(path=target_dir)  # nosec B202 — members validated above
+                TarExtractor._safe_extract_member_by_member(
+                    tf,
+                    target_dir,
+                    target_root,
+                    supports_symlinks=supports_symlinks,
+                    symlink_target_by_name=symlink_target_by_name,
+                )
+
+    @staticmethod
+    def _safe_extract_member_by_member(
+        tf: tarfile.TarFile,
+        target_dir: Path,
+        target_root: Path,
+        *,
+        supports_symlinks: bool = True,
+        symlink_target_by_name: dict[str, str] | None = None,
+    ) -> None:
+        """Validate and extract each member right after the previous one
+        lands on disk -- the Python < 3.12 fallback (`filter="data"` isn't
+        reliably available there). Validate-all-then-bulk-extractall has a
+        path-depth-collapse TOCTOU: a symlink `a -> .` validates as
+        contained pre-extraction (sibling `a/b/c/link` reads as 3 real,
+        nonexistent levels deep), but once `a` is a real symlink the
+        filesystem collapses that sibling to 2 levels, letting
+        `../../../victim` resolve outside target_root despite its own
+        stale pre-extraction validation (Codex). Re-validating each member
+        against the real, live-extracted state closes this generally."""
+        directories: list[tarfile.TarInfo] = []
+        for member in tf.getmembers():
+            _validate_member(
+                member,
+                target_root,
+                supports_symlinks=supports_symlinks,
+                symlink_target_by_name=symlink_target_by_name,
+            )
+            if member.isdir():
+                directories.append(member)
+                extract_info = copy.copy(member)
+                extract_info.mode = 0o700
+            else:
+                extract_info = member
+            tf.extract(  # nosec B202 — member validated above, against live fs state
+                extract_info, path=target_dir, set_attrs=not member.isdir()
+            )
+        # Mirror extractall()'s deferred dir attr fixup: extracted early
+        # (mode 0o700, writable) then restored once every member lands.
+        directories.sort(key=lambda info: info.name)
+        directories.reverse()
+        for member in directories:
+            dirpath = os.path.join(target_dir, member.name)
+            try:
+                tf.chown(member, dirpath, numeric_owner=False)
+                tf.utime(member, dirpath)
+                tf.chmod(member, dirpath)
+            except tarfile.ExtractError:
+                pass
 
     @staticmethod
     def _safe_extract_zst_tar(zst_path: Path, target_dir: Path) -> None:
@@ -200,10 +500,38 @@ class TarExtractor:
             else:
                 zstandard_mod = zstandard
             if zstandard_mod is not None:
-                dctx = zstandard_mod.ZstdDecompressor()
+                # Bounded, incremental decompression -- shutil.copyfileobj()
+                # materialized the entire decoded tar unconditionally
+                # before any member was ever validated, so a tiny, highly
+                # compressible archive could fill the host/CI runner's
+                # disk before extraction ever got a chance to raise
+                # (Codex review, fresh evidence). max_window_size reuses
+                # snapshot_io.py's own zstd-memory-bomb defense rather
+                # than a second, independently-derived window ceiling.
+                from .snapshot_io import _zstd_max_window_size_bytes
+
+                max_decoded_bytes = _max_decompressed_tar_bytes()
+                dctx = zstandard_mod.ZstdDecompressor(
+                    max_window_size=_zstd_max_window_size_bytes(zstandard_mod)
+                )
+                total_bytes = 0
                 with open(zst_path, "rb") as compressed, open(tar_path, "wb") as out:
                     with dctx.stream_reader(compressed) as reader:
-                        shutil.copyfileobj(reader, out)
+                        while True:
+                            chunk = reader.read(1024 * 1024)
+                            if not chunk:
+                                break
+                            total_bytes += len(chunk)
+                            if total_bytes > max_decoded_bytes:
+                                raise SnapshotError(
+                                    f"{zst_path}: decompressed payload exceeds "
+                                    f"the {max_decoded_bytes} byte safety "
+                                    "limit -- refusing to continue "
+                                    "decompressing (possible decompression "
+                                    f"bomb; override via "
+                                    f"{_MAX_DECOMPRESSED_TAR_BYTES_ENV})"
+                                )
+                            out.write(chunk)
             else:
                 zstd = shutil.which("zstd")
                 if zstd is None:
@@ -211,12 +539,94 @@ class TarExtractor:
                         "Cannot extract .tar.zst: install 'zstandard' Python package "
                         "or 'zstd' command-line tool."
                     )
-                subprocess.run(
-                    [zstd, "-d", "-f", str(zst_path), "-o", str(tar_path)],
-                    check=True,
-                    capture_output=True,
-                    timeout=120,
+                # Streamed via a pipe and bounded the same way as the zstandard-module branch above -- the earlier `zstd -d -f ... -o ...` form let the CLI write its own decoded output straight to disk, unbounded, so only the Python-module decoder path got the size limit even though both are reachable in production (this fallback runs whenever the always-installed `zstandard` package is somehow absent) (Codex review, fresh evidence). `--memory=` bounds the CLI's own decompression window -- unrelated to max_decoded_bytes (total output size, enforced by the streaming loop below); see _ZSTD_CLI_MAX_MEMORY_MB's own docstring for why these two bounds can't share a value.
+                max_decoded_bytes = _max_decompressed_tar_bytes()
+                proc = subprocess.Popen(
+                    [
+                        zstd,
+                        "-dc",
+                        f"--memory={_ZSTD_CLI_MAX_MEMORY_MB}MB",
+                        str(zst_path),
+                    ],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
                 )
+                assert proc.stdout is not None
+                stdout_pipe: IO[bytes] = proc.stdout
+                total_bytes = 0
+                # subprocess.run(..., timeout=120) previously bounded this fallback -- the streaming rewrite above (for the size bound) replaced it with a plain blocking proc.stdout.read() with no deadline at all, so a stalled/hung zstd process could block extraction indefinitely (Codex review, fresh evidence). A read() on a pipe has no portable timeout parameter (select() doesn't work on Windows pipes), so the read is offloaded to a daemon thread and the main loop polls a queue with the same overall 120s deadline the old subprocess.run() call enforced.
+                #
+                # The queue is bounded (a small, fixed number of 1 MiB chunks) rather than unbounded: an untrusted archive that expands quickly can otherwise let the reader thread race ahead of the main thread's own size check, buffering gigabytes of decoded data in the queue before total_bytes > max_decoded_bytes is ever evaluated -- defeating the whole point of the decompression-bomb limit below (Codex review, fresh evidence). A bounded queue's put() blocks once full, so the reader thread stalls -- real pipe backpressure -- until the main thread drains a chunk, capping in-memory decoded data to a small, fixed multiple of the chunk size regardless of how fast zstd itself can decompress.
+                chunk_queue: queue.Queue[bytes | None | Exception] = queue.Queue(
+                    maxsize=_ZSTD_READER_QUEUE_MAXSIZE
+                )
+
+                def _reader() -> None:
+                    try:
+                        while True:
+                            piece = stdout_pipe.read(1024 * 1024)
+                            chunk_queue.put(piece if piece else None)
+                            if not piece:
+                                return
+                    except Exception as exc:  # pragma: no cover - defensive
+                        chunk_queue.put(exc)
+
+                reader_thread = threading.Thread(target=_reader, daemon=True)
+                reader_thread.start()
+                deadline = time.monotonic() + _ZSTD_CLI_TIMEOUT_S
+                try:
+                    with open(tar_path, "wb") as out:
+                        while True:
+                            remaining = deadline - time.monotonic()
+                            if remaining <= 0:
+                                proc.kill()
+                                proc.wait(timeout=_ZSTD_CLI_TIMEOUT_S)
+                                raise SnapshotError(
+                                    f"{zst_path}: 'zstd' decompression "
+                                    "timed out after "
+                                    f"{_ZSTD_CLI_TIMEOUT_S}s -- the process "
+                                    "may be hung or stalled"
+                                )
+                            try:
+                                chunk = chunk_queue.get(timeout=remaining)
+                            except queue.Empty:
+                                proc.kill()
+                                proc.wait(timeout=_ZSTD_CLI_TIMEOUT_S)
+                                raise SnapshotError(
+                                    f"{zst_path}: 'zstd' decompression "
+                                    "timed out after "
+                                    f"{_ZSTD_CLI_TIMEOUT_S}s -- the process "
+                                    "may be hung or stalled"
+                                ) from None
+                            if isinstance(chunk, Exception):
+                                raise chunk
+                            if chunk is None:
+                                break
+                            total_bytes += len(chunk)
+                            if total_bytes > max_decoded_bytes:
+                                proc.kill()
+                                proc.wait(timeout=_ZSTD_CLI_TIMEOUT_S)
+                                raise SnapshotError(
+                                    f"{zst_path}: decompressed payload "
+                                    f"exceeds the {max_decoded_bytes} byte "
+                                    "safety limit -- refusing to continue "
+                                    "decompressing (possible decompression "
+                                    f"bomb; override via "
+                                    f"{_MAX_DECOMPRESSED_TAR_BYTES_ENV})"
+                                )
+                            out.write(chunk)
+                    _, stderr = proc.communicate(timeout=_ZSTD_CLI_TIMEOUT_S)
+                    if proc.returncode != 0:
+                        raise SnapshotError(
+                            f"{zst_path}: 'zstd' decompression failed: "
+                            f"{stderr.decode('utf-8', errors='replace')}"
+                        )
+                finally:
+                    if proc.poll() is None:
+                        proc.kill()
+                        proc.wait(timeout=_ZSTD_CLI_TIMEOUT_S)
+                    # An abort (timeout, the size limit above, a reader exception) can leave _reader blocked in put() on the now-full bounded queue -- the consumer stopped draining it the moment it raised, so killing the process alone doesn't unblock a reader stuck on a full queue rather than its own read() call. Leaks a daemon thread and its queued chunks for the life of a long-running process otherwise (Codex review, fresh evidence). Cheap no-op on the success path, where the reader already finished before the terminal None was consumed.
+                    _drain_reader_queue(chunk_queue, reader_thread, _ZSTD_CLI_TIMEOUT_S)
             TarExtractor._safe_extract(tar_path, target_dir)
         finally:
             shutil.rmtree(staging, ignore_errors=True)
@@ -474,10 +884,15 @@ class CondaExtractor:
         if name.endswith(".tar.bz2") and name.count("-") >= 2:
             # Peek inside for info/ directory (conda marker)
             try:
-                with tarfile.open(pkg_path, "r:bz2") as tf:
+                with tarfile.open(pkg_path, "r:bz2", tarinfo=_BoundedTarInfo) as tf:
                     names = tf.getnames()
                     return any(n.startswith("info/") for n in names[:50])
-            except (tarfile.TarError, OSError):
+            # ExtractionSecurityError alongside tarfile's own exceptions: a
+            # _BoundedTarInfo rejection during this mere format-sniff peek
+            # should degrade to "not detected as this format" the same way
+            # a malformed archive already does here, not propagate out of
+            # a detection step and abort dispatch to every other detector.
+            except (tarfile.TarError, OSError, ExtractionSecurityError):
                 return False
         return False
 
@@ -522,11 +937,7 @@ class CondaExtractor:
 # ── Wheel (pip) extractor ────────────────────────────────────────────────────
 
 
-# manylinux platform-tag -> the glibc version it promises as a ceiling
-# (PEP 600's ``manylinux_<glibc_major>_<glibc_minor>`` plus the three frozen
-# legacy aliases PEP 600 defines as exact synonyms). G10: a wheel's filename
-# tag is a promise about the *maximum* glibc symbol version its binaries may
-# require — see docs/contribute/plans/g10-glibc-floor-check.md.
+# manylinux platform-tag -> the glibc version it promises as a ceiling (PEP 600's ``manylinux_<glibc_major>_<glibc_minor>`` plus the three frozen legacy aliases PEP 600 defines as exact synonyms). G10: a wheel's filename tag is a promise about the *maximum* glibc symbol version its binaries may require — see docs/contribute/plans/g10-glibc-floor-check.md.
 _MANYLINUX_LEGACY_FLOORS: dict[str, tuple[int, int]] = {
     "manylinux1": (2, 5),
     "manylinux2010": (2, 12),
@@ -594,12 +1005,7 @@ def _wheel_platform_tag_segment(name: str) -> str:
     return name
 
 
-#: PEP 656 musllinux platform-tag -> the musl libc major.minor version it
-#: names, e.g. ``musllinux_1_2_x86_64``. Unlike manylinux/glibc, musl carries
-#: no symbol-versioning scheme, so there is no binary-evidence floor to check
-#: this version *against* — its presence is a yes/no "this wheel targets
-#: musl" signal for check_musllinux_glibc_dependency (G27). See
-#: docs/contribute/plans/g27-wheel-deployment-verification.md.
+#: PEP 656 musllinux platform-tag -> the musl libc major.minor version it names, e.g. ``musllinux_1_2_x86_64``. Unlike manylinux/glibc, musl carries no symbol-versioning scheme, so there is no binary-evidence floor to check this version *against* — its presence is a yes/no "this wheel targets musl" signal for check_musllinux_glibc_dependency (G27). See docs/contribute/plans/g27-wheel-deployment-verification.md.
 _MUSLLINUX_TAG_RE = re.compile(r"musllinux_(?P<major>\d+)_(?P<minor>\d+)(?=_|$)")
 
 
@@ -627,22 +1033,12 @@ def parse_musllinux_floor(name: str) -> str | None:
     return f"{best[0]}.{best[1]}" if best is not None else None
 
 
-#: PEP 425 macOS platform-tag -> the deployment target it promises as a
-#: ceiling, e.g. ``macosx_10_9_x86_64`` or ``macosx_11_0_universal2``. The
-#: arch component may contain digits and underscores (``x86_64``,
-#: ``universal2``); the trailing ``(?=[._]|$)`` boundary keeps a multi-tag
-#: compressed segment's dot separator from being swallowed into the match.
+#: PEP 425 macOS platform-tag -> the deployment target it promises as a ceiling, e.g. ``macosx_10_9_x86_64`` or ``macosx_11_0_universal2``. The arch component may contain digits and underscores (``x86_64``, ``universal2``); the trailing ``(?=[._]|$)`` boundary keeps a multi-tag compressed segment's dot separator from being swallowed into the match.
 _MACOSX_TAG_RE = re.compile(
     r"macosx_(?P<major>\d+)_(?P<minor>\d+)_(?P<arch>[a-zA-Z0-9_]+?)(?=[.]|$)"
 )
 
-#: macOS wheel arch tokens that bundle more than one real CPU architecture
-#: under a single string (PEP 425's macOS "fat"/universal-binary tags). Even
-#: a *lone* tag using one of these can't be safely reduced to a single
-#: deployment-target floor: a real ``universal2`` wheel's arm64 slice
-#: commonly has a genuinely higher minimum OS (11.0 — Apple Silicon didn't
-#: exist before macOS 11) than its x86_64 slice's declared 10.9 floor, even
-#: though the tag names only one literal arch token (Codex review #583).
+#: macOS wheel arch tokens that bundle more than one real CPU architecture under a single string (PEP 425's macOS "fat"/universal-binary tags). Even a *lone* tag using one of these can't be safely reduced to a single deployment-target floor: a real ``universal2`` wheel's arm64 slice commonly has a genuinely higher minimum OS (11.0 — Apple Silicon didn't exist before macOS 11) than its x86_64 slice's declared 10.9 floor, even though the tag names only one literal arch token (Codex review #583).
 _MACOS_MULTI_SLICE_ARCH_TOKENS = frozenset(
     {"universal2", "universal", "intel", "fat", "fat3", "fat64"}
 )
@@ -697,13 +1093,7 @@ def parse_macos_deployment_target_floor(name: str) -> str | None:
     return f"{best[0]}.{best[1]}"
 
 
-#: Matches a PEP 425 Python tag: an implementation abbreviation (``cp``
-#: CPython, ``pp`` PyPy, ``py`` generic, ``ip`` IronPython, ``jy`` Jython)
-#: followed by a single-digit major version and one-or-more-digit minor
-#: version run together, e.g. ``cp311`` -> major ``3``, minor ``11``. A bare
-#: implementation with no minor digits (``py3``) is intentionally
-#: unmatched — it doesn't pin a specific minor version, so there's nothing
-#: useful to derive.
+#: Matches a PEP 425 Python tag: an implementation abbreviation (``cp`` CPython, ``pp`` PyPy, ``py`` generic, ``ip`` IronPython, ``jy`` Jython) followed by a single-digit major version and one-or-more-digit minor version run together, e.g. ``cp311`` -> major ``3``, minor ``11``. A bare implementation with no minor digits (``py3``) is intentionally unmatched — it doesn't pin a specific minor version, so there's nothing useful to derive.
 _WHEEL_PYTHON_TAG_RE = re.compile(r"^(?:cp|pp|py|ip|jy)(\d)(\d+)$")
 
 
@@ -790,14 +1180,7 @@ def _implementation_version_from_wheel_filename(filename: str) -> str | None:
     return _python_full_version_from_wheel_filename(filename)
 
 
-#: Wheel Python-tag implementation abbreviation -> PEP 508 marker value, in
-#: each of the two marker spellings (``implementation_name`` uses
-#: ``sys.implementation.name``'s lowercase spelling;
-#: ``platform_python_implementation`` uses ``platform.python_implementation()``'s
-#: capitalized spelling). The generic ``py`` abbreviation is deliberately
-#: absent from both maps -- it's an implementation-agnostic tag (a
-#: pure-Python wheel meant to run under CPython, PyPy, or anything else),
-#: so it makes no implementation promise at all to derive.
+#: Wheel Python-tag implementation abbreviation -> PEP 508 marker value, in each of the two marker spellings (``implementation_name`` uses ``sys.implementation.name``'s lowercase spelling; ``platform_python_implementation`` uses ``platform.python_implementation()``'s capitalized spelling). The generic ``py`` abbreviation is deliberately absent from both maps -- it's an implementation-agnostic tag (a pure-Python wheel meant to run under CPython, PyPy, or anything else), so it makes no implementation promise at all to derive.
 _WHEEL_IMPLEMENTATION_NAMES = {
     "cp": "cpython",
     "pp": "pypy",
@@ -944,14 +1327,7 @@ def _os_name_from_wheel_filename(filename: str) -> str | None:
     return None
 
 
-#: Single-architecture suffixes a Linux wheel platform tag can end in. Order
-#: doesn't matter for correctness (each is ``$``-anchored, so e.g. ``ppc64``
-#: can't spuriously match a ``...ppc64le`` tag), but longer/more-specific
-#: names are listed first for readability. ``riscv64``/``loongarch64`` are
-#: valid ``manylinux``/``musllinux`` single-arch suffixes too (``packaging``'s
-#: own ``_manylinux._ALLOWED_ARCHS`` includes both) — omitting them silently
-#: skipped ``wheel_tag_architecture_mismatch`` derivation for those wheels
-#: entirely (Codex review #583).
+#: Single-architecture suffixes a Linux wheel platform tag can end in. Order doesn't matter for correctness (each is ``$``-anchored, so e.g. ``ppc64`` can't spuriously match a ``...ppc64le`` tag), but longer/more-specific names are listed first for readability. ``riscv64``/``loongarch64`` are valid ``manylinux``/``musllinux`` single-arch suffixes too (``packaging``'s own ``_manylinux._ALLOWED_ARCHS`` includes both) — omitting them silently skipped ``wheel_tag_architecture_mismatch`` derivation for those wheels entirely (Codex review #583).
 _WHEEL_LINUX_MACHINE_RE = re.compile(
     r"(x86_64|aarch64|i686|armv7l|ppc64le|ppc64|s390x|riscv64|loongarch64)$"
 )
@@ -1023,84 +1399,22 @@ def parse_wheel_architecture_claim(filename: str) -> str | None:
     return _platform_machine_from_wheel_filename(filename)
 
 
-# G26: a wheel's *.dist-info/METADATA declares its runtime dependencies —
-# the "declared" side of the NumPy C-API compatibility-envelope check (the
-# binary-evidence "required" side comes from numpy_capi.py). Mirrors
-# parse_manylinux_glibc_floor's role for G10: a pure function callers wire
-# in programmatically (see diff_numpy_capi.check_numpy_metadata_contract).
+# G26: a wheel's *.dist-info/METADATA declares its runtime dependencies — the "declared" side of the NumPy C-API compatibility-envelope check (the binary-evidence "required" side comes from numpy_capi.py). Mirrors parse_manylinux_glibc_floor's role for G10: a pure function callers wire in programmatically (see diff_numpy_capi.check_numpy_metadata_contract).
 
-#: A real METADATA file is ordinarily a few KB even with a long dependency
-#: list; this bounds how much a single wheel's METADATA member is allowed
-#: to decompress to, so a malicious wheel can't zip-bomb this scan (a small
-#: compressed member declaring a tiny size that in fact decompresses to
-#: gigabytes) (CodeRabbit review).
+#: A real METADATA file is ordinarily a few KB even with a long dependency list; this bounds how much a single wheel's METADATA member is allowed to decompress to, so a malicious wheel can't zip-bomb this scan (a small compressed member declaring a tiny size that in fact decompresses to gigabytes) (CodeRabbit review).
 _MAX_METADATA_SIZE = 1_048_576
 
 
 def parse_wheel_numpy_requirement(
     wheel_path: Path, environment: dict[str, str] | None = None
 ) -> str | None:
-    """Extract the declared ``numpy`` version-specifier range from a wheel's
-    ``*.dist-info/METADATA`` (``Requires-Dist: numpy...``).
+    """Extract the declared ``numpy`` version-specifier range from a wheel's ``*.dist-info/METADATA`` (``Requires-Dist: numpy...``).
 
-    Returns the specifier text (e.g. ``">=1.23.5,<3"``, or ``""`` for a bare
-    ``Requires-Dist: numpy`` with no version constraint) for the numpy
-    requirement(s) active for *environment*, or ``None`` when the wheel is
-    unreadable, carries no ``.dist-info/METADATA`` member, or declares no
-    such numpy dependency at all — including when the only ``numpy`` entry
-    is gated behind an optional extra (e.g. ``numpy; extra == "test"``, only
-    installed via ``pip install pkg[test]``, not a real runtime requirement)
-    or an ordinary marker that doesn't hold for *environment*.
+    Returns the specifier text (e.g. ``">=1.23.5,<3"``, or ``""`` for a bare ``Requires-Dist: numpy`` with no version constraint) for the numpy requirement(s) active for *environment*, or ``None`` when the wheel is unreadable, carries no ``.dist-info/METADATA`` member, or declares no such numpy dependency at all — including when the only ``numpy`` entry is gated behind an optional extra (e.g. ``numpy; extra == "test"``, only installed via ``pip install pkg[test]``, not a real runtime requirement) or an ordinary marker that doesn't hold for *environment*.
 
-    When *environment* is omitted, ``python_version``, ``python_full_version``,
-    ``implementation_version``, ``implementation_name``,
-    ``platform_python_implementation``, ``platform_system``, ``sys_platform``,
-    ``os_name``, and (for single-architecture Linux/macOS tags)
-    ``platform_machine`` are derived from the wheel's *own* filename tags
-    (e.g. ``cp39`` -> ``python_version="3.9"``/``python_full_version="3.9.0"``/
-    ``implementation_version="3.9.0"``/``implementation_name="cpython"``/
-    ``platform_python_implementation="CPython"``, a ``macosx_11_0_arm64``
-    platform tag -> ``platform_system="Darwin"``/``sys_platform="darwin"``/
-    ``os_name="posix"``/``platform_machine="arm64"``) rather than defaulting
-    to the interpreter running abicheck — evaluating a marker gated on any
-    of these against the wrong interpreter/implementation/OS/architecture
-    could hide a real under-declared floor on a wheel built for a different
-    Python, implementation, platform, or CPU than the one running the scan
-    (Codex review; both implementation-marker and all three OS-marker
-    spellings are covered since real-world metadata uses any of them).
-    ``implementation_version`` is derived for CPython (``cp``) tags only —
-    see :func:`_implementation_version_from_wheel_filename` for why guessing
-    it for any other implementation (e.g. PyPy) would be actively wrong
-    rather than merely imprecise, unlike every other marker derived here.
-    Falls back to the interpreter's own environment for whichever of these
-    the filename doesn't pin down (e.g. a bare directory-derived METADATA
-    path, the pure-Python ``any`` platform tag, a fat/universal macOS wheel,
-    or a Windows tag, whose ``platform_machine`` isn't derived at all).
+    When *environment* is omitted, ``python_version``, ``python_full_version``, ``implementation_version``, ``implementation_name``, ``platform_python_implementation``, ``platform_system``, ``sys_platform``, ``os_name``, and (for single-architecture Linux/macOS tags) ``platform_machine`` are derived from the wheel's *own* filename tags (e.g. ``cp39`` -> ``python_version="3.9"``/``python_full_version="3.9.0"``/``implementation_version="3.9.0"``/``implementation_name="cpython"``/``platform_python_implementation="CPython"``, a ``macosx_11_0_arm64`` platform tag -> ``platform_system="Darwin"``/``sys_platform="darwin"``/``os_name="posix"``/``platform_machine="arm64"``) rather than defaulting to the interpreter running abicheck — evaluating a marker gated on any of these against the wrong interpreter/implementation/OS/architecture could hide a real under-declared floor on a wheel built for a different Python, implementation, platform, or CPU than the one running the scan (Codex review; both implementation-marker and all three OS-marker spellings are covered since real-world metadata uses any of them). ``implementation_version`` is derived for CPython (``cp``) tags only — see :func:`_implementation_version_from_wheel_filename` for why guessing it for any other implementation (e.g. PyPy) would be actively wrong rather than merely imprecise, unlike every other marker derived here. Falls back to the interpreter's own environment for whichever of these the filename doesn't pin down (e.g. a bare directory-derived METADATA path, the pure-Python ``any`` platform tag, a fat/universal macOS wheel, or a Windows tag, whose ``platform_machine`` isn't derived at all).
 
-    Known residual gap: a wheel tag naming a *range* rather than one exact
-    value — either the Python-version axis (the ``abi3`` stable-ABI tag,
-    ``cp39-abi3-...``, installable on Python 3.9 and every later 3.x minor;
-    or a PEP 425 compressed multi-tag Python segment, ``cp310.cp311-...``,
-    installable on either minor) or the architecture axis (a fat/universal
-    macOS wheel, ``macosx_11_0_universal2``, or a PEP 600 compressed
-    multi-tag platform segment spanning more than one architecture) —
-    deliberately leaves the corresponding marker key(s)
-    (``python_version``/``python_full_version``, or ``platform_machine``)
-    undetermined rather than pinning a single (wrong) value (see
-    :func:`_python_version_from_wheel_filename` and
-    :func:`_platform_machine_from_wheel_filename`), which means those keys
-    fall back to whatever interpreter/host abicheck is running on rather
-    than being evaluated across the wheel's whole supported range — a real
-    metadata gap that only affects some Python versions, or only one
-    architecture slice, the wheel supports (e.g. a split requirement like
-    ``numpy>=1.23; platform_machine == "x86_64"`` /
-    ``numpy>=2; platform_machine == "arm64"``) could go undetected
-    depending on the scanning host (Codex review). Correctly checking the
-    full range/every architecture would mean evaluating markers at every
-    value a wheel's metadata references along that axis and combining the
-    results, which is meaningfully more than a wheel-tag-derivation fix;
-    left as a known limitation of this G26-partial feature rather than
-    attempted here.
+    Known residual gap: a wheel tag naming a *range* rather than one exact value — either the Python-version axis (the ``abi3`` stable-ABI tag, ``cp39-abi3-...``, installable on Python 3.9 and every later 3.x minor; or a PEP 425 compressed multi-tag Python segment, ``cp310.cp311-...``, installable on either minor) or the architecture axis (a fat/universal macOS wheel, ``macosx_11_0_universal2``, or a PEP 600 compressed multi-tag platform segment spanning more than one architecture) — deliberately leaves the corresponding marker key(s) (``python_version``/``python_full_version``, or ``platform_machine``) undetermined rather than pinning a single (wrong) value (see :func:`_python_version_from_wheel_filename` and :func:`_platform_machine_from_wheel_filename`), which means those keys fall back to whatever interpreter/host abicheck is running on rather than being evaluated across the wheel's whole supported range — a real metadata gap that only affects some Python versions, or only one architecture slice, the wheel supports (e.g. a split requirement like ``numpy>=1.23; platform_machine == "x86_64"`` / ``numpy>=2; platform_machine == "arm64"``) could go undetected depending on the scanning host (Codex review). Correctly checking the full range/every architecture would mean evaluating markers at every value a wheel's metadata references along that axis and combining the results, which is meaningfully more than a wheel-tag-derivation fix; left as a known limitation of this G26-partial feature rather than attempted here.
     """
     try:
         with zipfile.ZipFile(wheel_path) as zf:
@@ -1194,23 +1508,9 @@ def parse_numpy_requirement_from_metadata(
     from packaging.requirements import InvalidRequirement, Requirement
     from packaging.specifiers import SpecifierSet
 
-    # Core Metadata is an RFC 5322-style header block: a long Requires-Dist
-    # value may be folded across physical lines with leading whitespace on
-    # the continuation lines. A plain `line.startswith("Requires-Dist:")`
-    # scan only sees the first physical line and mangles a folded specifier
-    # or marker, so parse it as real headers instead. The default
-    # (compat32) email policy preserves the raw fold (embedded newline +
-    # leading whitespace) in the returned value; ``policy.default`` is the
-    # one that actually joins a folded header into a single logical line
-    # (Codex review).
+    # Core Metadata is an RFC 5322-style header block: a long Requires-Dist value may be folded across physical lines with leading whitespace on the continuation lines. A plain `line.startswith("Requires-Dist:")` scan only sees the first physical line and mangles a folded specifier or marker, so parse it as real headers instead. The default (compat32) email policy preserves the raw fold (embedded newline + leading whitespace) in the returned value; ``policy.default`` is the one that actually joins a folded header into a single logical line (Codex review).
     headers = message_from_string(metadata_text, policy=_email_default_policy)
-    # Marker.evaluate() only auto-defaults "extra" to "" on packaging>=22;
-    # this project's pinned floor is packaging>=21.0, whose evaluate() has
-    # no such default and raises UndefinedEnvironmentName on a bare `extra
-    # == "test"` marker instead of treating it as inactive. Seed it
-    # ourselves so behavior is identical across the whole supported range;
-    # a caller-supplied *environment* can still override it explicitly
-    # (Codex review).
+    # Marker.evaluate() only auto-defaults "extra" to "" on packaging>=22; this project's pinned floor is packaging>=21.0, whose evaluate() has no such default and raises UndefinedEnvironmentName on a bare `extra == "test"` marker instead of treating it as inactive. Seed it ourselves so behavior is identical across the whole supported range; a caller-supplied *environment* can still override it explicitly (Codex review).
     eval_environment = {"extra": "", **(environment or {})}
     found = False
     combined = SpecifierSet()
@@ -1489,16 +1789,7 @@ def _is_elf_shared_object(path: Path) -> bool:
             if e_type != _ET_DYN:
                 return False
 
-            # Check the DF_1_PIE flag *before* the PT_INTERP/filename
-            # fallback below, not only in the no-PT_INTERP branch: a normal
-            # `gcc -pie -o fake.so` executable has *both* PT_INTERP and
-            # DF_1_PIE set, and previously reached the has_interp branch's
-            # filename check first, which accepts anything shaped like a
-            # library name -- silently admitting a real, directly-invocable
-            # PIE executable that only happens to be named ``*.so`` (Codex
-            # review; verified against a real `gcc -pie` binary). DF_1_PIE
-            # is unconditionally decisive when set: a real shared object
-            # never carries it, PT_INTERP or not.
+            # Check the DF_1_PIE flag *before* the PT_INTERP/filename fallback below, not only in the no-PT_INTERP branch: a normal `gcc -pie -o fake.so` executable has *both* PT_INTERP and DF_1_PIE set, and previously reached the has_interp branch's filename check first, which accepts anything shaped like a library name -- silently admitting a real, directly-invocable PIE executable that only happens to be named ``*.so`` (Codex review; verified against a real `gcc -pie` binary). DF_1_PIE is unconditionally decisive when set: a real shared object never carries it, PT_INTERP or not.
             if _has_pie_executable_flag(f, ei_class, byte_order):
                 return False
 
@@ -1547,18 +1838,7 @@ def discover_shared_libraries(
 
     libraries: list[Path] = []
     for dirpath, _dirnames, filenames in os.walk(extract_dir, followlinks=False):
-        # DebExtractor extracts a .deb's control.tar.* (package metadata --
-        # control, md5sums, and the dpkg-gensymbols(1) symbols contract) into
-        # this internal, dot-prefixed sentinel subdirectory of the same
-        # target_dir this function walks. It is package *metadata*, never
-        # payload -- a crafted/malicious control.tar.* could plant a file
-        # shaped like a shared object there (or a legitimate payload could
-        # coincidentally use the name .deb_control/, which the earlier
-        # pre-extraction cleanup now removes), and this function's own
-        # "accept any .so-suffixed file at any depth" fallback would then
-        # discover it as though it were a real library in the package
-        # (Codex review). No legitimate package payload uses this name, so
-        # pruning it from the walk is safe.
+        # DebExtractor extracts a .deb's control.tar.* (package metadata -- control, md5sums, and the dpkg-gensymbols(1) symbols contract) into this internal, dot-prefixed sentinel subdirectory of the same target_dir this function walks. It is package *metadata*, never payload -- a crafted/malicious control.tar.* could plant a file shaped like a shared object there (or a legitimate payload could coincidentally use the name .deb_control/, which the earlier pre-extraction cleanup now removes), and this function's own "accept any .so-suffixed file at any depth" fallback would then discover it as though it were a real library in the package (Codex review). No legitimate package payload uses this name, so pruning it from the walk is safe.
         _dirnames[:] = [d for d in _dirnames if d != ".deb_control"]
         for fn in filenames:
             fp = Path(dirpath) / fn

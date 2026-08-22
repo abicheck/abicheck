@@ -177,15 +177,15 @@ class TestResolutionGraph:
         }
         metadata = {
             "libfoo.so": _meta(soname=""),  # no DT_SONAME
-            "libconsumer.so": _meta(
-                soname="libconsumer.so", needed=["libfoo.so.1"]
-            ),
+            "libconsumer.so": _meta(soname="libconsumer.so", needed=["libfoo.so.1"]),
         }
         graph = _compute_resolution_graph(libraries, metadata)
         assert graph.intra_needed["libconsumer.so"] == ["libfoo.so.1"]
         assert graph.extra_needed["libconsumer.so"] == []
 
-    @pytest.mark.skipif(sys.platform == "win32", reason="symlinks need admin on Windows")
+    @pytest.mark.skipif(
+        sys.platform == "win32", reason="symlinks need admin on Windows"
+    )
     def test_dt_needed_resolves_via_real_filename_of_symlinked_member(
         self, tmp_path: Path
     ) -> None:
@@ -208,9 +208,7 @@ class TestResolutionGraph:
         }
         metadata = {
             "libfoo.so": _meta(soname=""),  # no DT_SONAME
-            "libconsumer.so": _meta(
-                soname="libconsumer.so", needed=["libfoo.so.1"]
-            ),
+            "libconsumer.so": _meta(soname="libconsumer.so", needed=["libfoo.so.1"]),
         }
         graph = _compute_resolution_graph(libraries, metadata)
         assert graph.intra_needed["libconsumer.so"] == ["libfoo.so.1"]
@@ -1546,12 +1544,12 @@ class TestUnresolvedIntraDependency:
     """`_detect_unresolved_intra_dependency` — the audit-mode sibling of
     `_detect_intra_dep_removed` (no old side, single resolution graph)."""
 
-    def _detect(self, snapshot: BundleSnapshot, system_providers: set[str] | None = None):
+    def _detect(
+        self, snapshot: BundleSnapshot, system_providers: set[str] | None = None
+    ):
         from abicheck.bundle import _detect_unresolved_intra_dependency
 
-        return _detect_unresolved_intra_dependency(
-            snapshot, system_providers or set()
-        )
+        return _detect_unresolved_intra_dependency(snapshot, system_providers or set())
 
     def test_detects_missing_provider(self) -> None:
         new = _snapshot(
@@ -1585,9 +1583,7 @@ class TestUnresolvedIntraDependency:
         from abicheck.elf_metadata import ElfImport, SymbolBinding
 
         meta = _meta(soname="libplugin.so.1")
-        meta.imports.append(
-            ElfImport(name="optional_hook", binding=SymbolBinding.WEAK)
-        )
+        meta.imports.append(ElfImport(name="optional_hook", binding=SymbolBinding.WEAK))
         new = _snapshot({"libplugin.so": meta})
         assert self._detect(new) == []
 
@@ -1628,9 +1624,7 @@ class TestUnresolvedIntraDependency:
         # unversioned import regardless of default-ness.
         provider_meta = _meta(soname="libcore.so.1")
         provider_meta.symbols.append(
-            ElfSymbol(
-                name="foo", visibility="default", version="V1", is_default=False
-            )
+            ElfSymbol(name="foo", visibility="default", version="V1", is_default=False)
         )
         new = _snapshot(
             {
@@ -1754,9 +1748,7 @@ class TestUnresolvedIntraDependency:
         # an empty list is vacuously True.
         new = _snapshot(
             {
-                "libalgo.so": _meta(
-                    soname="libalgo.so.1", imports=["orphan_symbol"]
-                ),
+                "libalgo.so": _meta(soname="libalgo.so.1", imports=["orphan_symbol"]),
             }
         )
         findings = self._detect(new, {"anything"})
@@ -1780,9 +1772,7 @@ class TestUnresolvedIntraDependency:
         new = _snapshot(
             {
                 "libbase.so": _meta(soname="libbase.so.1", exports=["base_fn"]),
-                "libcore.so": _meta(
-                    soname="libcore.so.1", needed=["libbase.so.1"]
-                ),
+                "libcore.so": _meta(soname="libcore.so.1", needed=["libbase.so.1"]),
                 "libalgo.so": _meta(
                     soname="libalgo.so.1",
                     needed=["libcore.so.1"],
@@ -1804,9 +1794,7 @@ class TestAuditBundleDuplicateSoname:
     audit_bundle() now rejects the ambiguity outright instead of guessing.
     """
 
-    def test_rejects_duplicate_soname(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_rejects_duplicate_soname(self, monkeypatch: pytest.MonkeyPatch) -> None:
         import abicheck.bundle as bundle_mod
         from abicheck.bundle import ArtifactSetError, audit_bundle
 
@@ -1953,9 +1941,7 @@ class TestReachableIntraLibrariesSymlinkAlias:
             "libconsumer.so": tmp_path / "libconsumer.so",
         }
         metadata = {
-            "aaa.so": _meta(
-                soname="", exports=["foo"], export_versions={"foo": "V1"}
-            ),
+            "aaa.so": _meta(soname="", exports=["foo"], export_versions={"foo": "V1"}),
             "libconsumer.so": _meta(
                 soname="libconsumer.so",
                 needed=["libreal.so.1"],
@@ -2193,6 +2179,190 @@ class TestNonElfInputs:
         snap = build_bundle_snapshot({"libc.so.6": candidate})
         assert "libc.so.6" in snap.metadata
         assert len(snap.resolution.provides) > 0
+
+
+class TestBuildBundleSnapshotFromMetadata:
+    """build_bundle_snapshot_from_metadata() -- the split-out primitive
+    behind build_bundle_snapshot() that lets a caller holding already-parsed
+    ElfMetadata (e.g. AbiSnapshot.elf from a real dump) build a real
+    BundleSnapshot without any binary on disk."""
+
+    def test_matches_build_bundle_snapshot_for_the_same_real_elf(self) -> None:
+        # The wrapper and the primitive it now delegates to must agree
+        # exactly for the identical real input -- this is the split's own
+        # equivalence contract, not just "doesn't crash".
+        from abicheck.bundle import (
+            build_bundle_snapshot,
+            build_bundle_snapshot_from_metadata,
+        )
+        from abicheck.elf_metadata import parse_elf_metadata
+
+        candidate = None
+        for p in (
+            "/lib/x86_64-linux-gnu/libc.so.6",
+            "/lib64/libc.so.6",
+            "/usr/lib/libc.so.6",
+            "/usr/lib/x86_64-linux-gnu/libc.so.6",
+        ):
+            if Path(p).is_file():
+                candidate = Path(p)
+                break
+        if candidate is None:
+            pytest.skip("no system libc available for ELF round-trip")
+
+        via_path = build_bundle_snapshot({"libc.so.6": candidate})
+        meta = parse_elf_metadata(candidate)
+        assert meta is not None
+        via_metadata = build_bundle_snapshot_from_metadata(
+            {"libc.so.6": meta}, paths={"libc.so.6": candidate}
+        )
+
+        assert via_metadata.root == via_path.root
+        assert via_metadata.libraries == via_path.libraries
+        assert via_metadata.metadata.keys() == via_path.metadata.keys()
+        assert via_metadata.resolution == via_path.resolution
+
+    def test_drops_empty_metadata_the_same_way_the_wrapper_does(self) -> None:
+        from abicheck.bundle import build_bundle_snapshot_from_metadata
+
+        empty = _meta()  # no soname, symbols, imports, or needed
+        real = _meta(soname="libfoo.so.1", exports=["foo"])
+        snap = build_bundle_snapshot_from_metadata(
+            {"empty.so": empty, "libfoo.so.1": real}
+        )
+        assert set(snap.metadata) == {"libfoo.so.1"}
+        assert set(snap.libraries) == {"libfoo.so.1"}
+
+    def test_drops_none_metadata_entries(self) -> None:
+        from abicheck.bundle import build_bundle_snapshot_from_metadata
+
+        snap = build_bundle_snapshot_from_metadata({"a.so": None})  # type: ignore[dict-item]
+        assert snap.metadata == {}
+        assert snap.libraries == {}
+
+    def test_synthesizes_a_path_from_the_name_when_paths_is_omitted(self) -> None:
+        # No real file on disk anywhere -- the whole point of this
+        # function -- so a caller that never supplies `paths` still gets a
+        # usable BundleSnapshot.libraries value (its .name is what
+        # _detect_soname_skew's own fallback reads).
+        from abicheck.bundle import build_bundle_snapshot_from_metadata
+
+        meta = _meta(soname="libfoo.so.1", exports=["foo"])
+        snap = build_bundle_snapshot_from_metadata({"libfoo.so.1": meta})
+        assert snap.libraries["libfoo.so.1"] == Path("libfoo.so.1")
+        assert snap.libraries["libfoo.so.1"].name == "libfoo.so.1"
+
+    def test_explicit_root_overrides_the_derived_default(self) -> None:
+        from abicheck.bundle import build_bundle_snapshot_from_metadata
+
+        meta = _meta(soname="libfoo.so.1", exports=["foo"])
+        snap = build_bundle_snapshot_from_metadata(
+            {"libfoo.so.1": meta}, root=Path("/explicit/root")
+        )
+        assert snap.root == Path("/explicit/root")
+
+    def test_resolution_graph_matches_direct_construction(self) -> None:
+        # Cross-checks the primitive's resolution-graph output against
+        # _compute_resolution_graph() called directly (the same helper
+        # _snapshot() in this file's own fixtures uses) for a real
+        # provider/consumer pair.
+        from abicheck.bundle import (
+            _compute_resolution_graph,
+            build_bundle_snapshot_from_metadata,
+        )
+
+        provider = _meta(soname="libprovider.so.1", exports=["do_thing"])
+        consumer = _meta(needed=["libprovider.so.1"], imports=["do_thing"])
+        metadata = {"libprovider.so.1": provider, "libconsumer.so": consumer}
+
+        snap = build_bundle_snapshot_from_metadata(metadata)
+        expected_graph = _compute_resolution_graph(
+            {name: Path(name) for name in metadata}, metadata
+        )
+        assert snap.resolution == expected_graph
+
+    def test_compare_bundle_end_to_end_over_metadata_only_snapshots(self) -> None:
+        # The actual point of this primitive: a real ADR-023 cross-DSO
+        # finding (a provider's export disappearing) computed entirely
+        # from ElfMetadata, no binaries involved on either side.
+        from abicheck.bundle import build_bundle_snapshot_from_metadata, compare_bundle
+        from abicheck.checker_policy import ChangeKind
+
+        old_provider = _meta(soname="libprovider.so.1", exports=["do_thing"])
+        new_provider = _meta(soname="libprovider.so.1", exports=[])
+        consumer = _meta(needed=["libprovider.so.1"], imports=["do_thing"])
+
+        old_snap = build_bundle_snapshot_from_metadata(
+            {"libprovider.so.1": old_provider, "libconsumer.so": consumer}
+        )
+        new_snap = build_bundle_snapshot_from_metadata(
+            {"libprovider.so.1": new_provider, "libconsumer.so": consumer}
+        )
+        result = compare_bundle(old_snap, new_snap, per_library_results=[])
+        kinds = {f.kind for f in result.bundle_findings}
+        assert ChangeKind.BUNDLE_INTRA_DEP_REMOVED in kinds
+
+    def test_resolution_is_independent_of_ambient_filesystem_state(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Without paths=, the synthesized Path(library_name) is a relative
+        # path with no real file behind it -- .resolve() would silently
+        # resolve it against the process's own current working directory,
+        # and a hard-link-alias scan would walk whatever that resolves to.
+        # An ambient libfoo.so -> libfoo.so.1 symlink sitting in cwd must
+        # not change which DT_NEEDED edges resolve as intra-bundle (Codex
+        # review, fresh evidence).
+        from abicheck.bundle import build_bundle_snapshot_from_metadata
+
+        # Plant a same-named symlink/file in a throwaway cwd -- if the
+        # resolution graph were probing the filesystem, this would be
+        # exactly the kind of ambient state that could change its output.
+        (tmp_path / "libprovider.so.1").write_bytes(b"not-real-elf")
+        (tmp_path / "libprovider.so").symlink_to("libprovider.so.1")
+        monkeypatch.chdir(tmp_path)
+
+        provider = _meta(soname="libprovider.so.1", exports=["do_thing"])
+        consumer = _meta(needed=["libprovider.so.1"], imports=["do_thing"])
+        snap = build_bundle_snapshot_from_metadata(
+            {"libprovider.so.1": provider, "libconsumer.so": consumer}
+        )
+        # soname_to_name must contain only what the metadata itself
+        # established (the soname, the canonical key, and the bare
+        # filename) -- never an alias recovered by scanning cwd.
+        assert snap.resolution.soname_to_name.get("libprovider.so.1") == (
+            "libprovider.so.1"
+        )
+        assert "libprovider.so" not in snap.resolution.soname_to_name
+
+    def test_build_bundle_snapshot_still_probes_the_filesystem(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # build_bundle_snapshot() -- the real-path wrapper, handed live
+        # binaries on disk -- delegates to
+        # build_bundle_snapshot_from_metadata(), whose own default is now
+        # probe_filesystem=False (the fix above). Without explicitly
+        # threading probe_filesystem=True through that delegation, the
+        # real-path wrapper would silently lose its pre-existing
+        # filesystem alias-probing (symlink targets, hard-link aliases)
+        # too -- a second-round regression in the first-round fix (Codex
+        # review, fresh evidence).
+        import abicheck.bundle as bundle_mod
+
+        captured: dict[str, object] = {}
+        real_impl = bundle_mod.build_bundle_snapshot_from_metadata
+
+        def _capturing(*args, **kwargs):  # type: ignore[no-untyped-def]
+            captured.update(kwargs)
+            return real_impl(*args, **kwargs)
+
+        monkeypatch.setattr(
+            bundle_mod, "build_bundle_snapshot_from_metadata", _capturing
+        )
+
+        _write_elf_shared_object_stub(tmp_path / "libfoo.so")
+        bundle_mod.build_bundle_snapshot({"libfoo.so": tmp_path / "libfoo.so"})
+
+        assert captured.get("probe_filesystem") is True
 
 
 # ---------------------------------------------------------------------------
@@ -2433,6 +2603,118 @@ class TestCompareReleaseBundleE2E:
         )
         assert intra["consumer_library"] == "libalgo.so"
         assert intra["symbol"] == "core_mul"
+
+    def test_compare_product_directories_matches_the_cli_result(
+        self, tmp_path: Path
+    ) -> None:
+        # The exact same scenario as test_compare_release_emits_bundle_
+        # findings_by_default above, but driven through the plain library
+        # function (abicheck.product_baseline.compare_product_directories)
+        # instead of the CLI -- proving it reproduces the identical
+        # per-library and bundle-level result with no Click, no subprocess,
+        # no directory-mode `compare` invocation.
+        import shutil
+        import subprocess
+
+        from abicheck.product_baseline import compare_product_directories
+
+        old = tmp_path / "old"
+        new = tmp_path / "new"
+        old.mkdir()
+        new.mkdir()
+        _build_tiny_so(
+            old,
+            "libcore.so",
+            "int core_add(int a, int b){return a+b;}\n"
+            "int core_mul(int a, int b){return a*b;}\n",
+        )
+        _build_tiny_so(
+            new,
+            "libcore.so",
+            "int core_add(int a, int b){return a+b;}\n",  # core_mul removed
+        )
+        algo_src = (
+            "extern int core_add(int,int);\n"
+            "extern int core_mul(int,int);\n"
+            "int algo_sum(int lo, int hi){int s=0;for(int i=lo;i<=hi;++i)s=core_add(s,i);return s;}\n"
+            "int algo_square(int x){return core_mul(x,x);}\n"
+        )
+        gcc = shutil.which("gcc")
+        if gcc is None:
+            pytest.skip("gcc unavailable; cannot build bundle E2E fixture")
+        for side in (old, new):
+            src_dir = side.parent / f"{side.name}.sources"
+            src_dir.mkdir(exist_ok=True)
+            src_file = src_dir / "libalgo.c"
+            src_file.write_text(algo_src)
+            subprocess.run(
+                [
+                    gcc,
+                    "-shared",
+                    "-fPIC",
+                    "-g",
+                    "-O0",
+                    str(src_file),
+                    "-o",
+                    str(side / "libalgo.so"),
+                    "-L",
+                    str(side),
+                    "-Wl,--no-as-needed",
+                    "-lcore",
+                    "-Wl,-soname,libalgo.so.1",
+                ],
+                check=True,
+                capture_output=True,
+            )
+
+        result = compare_product_directories(old, new)
+
+        assert result.bundle_verdict == Verdict.BREAKING
+        kinds = {f.kind for f in result.bundle_findings}
+        assert ChangeKind.BUNDLE_INTRA_DEP_REMOVED in kinds
+        intra = next(
+            f
+            for f in result.bundle_findings
+            if f.kind == ChangeKind.BUNDLE_INTRA_DEP_REMOVED
+        )
+        assert intra.consumer_library == "libalgo.so"
+        assert intra.symbol == "core_mul"
+        # The per-library pass itself must have caught the removal too --
+        # this is what diff_by_library indexes to attribute the bundle
+        # finding to its provider.
+        core_result = next(r for r in result.per_library if "libcore" in r.library)
+        assert any(c.kind == ChangeKind.FUNC_REMOVED for c in core_result.changes)
+
+    def test_compare_product_directories_handles_parallel_soname_majors(
+        self, tmp_path: Path
+    ) -> None:
+        # A product intentionally shipping two SONAME majors side by side
+        # (libfoo.so.1 and libfoo.so.2, both real, both present) is not an
+        # ambiguity: bundle.discover_artifact_set() canonicalizes both to
+        # "libfoo.so" and raises ArtifactSetError, which meant compare_
+        # product_directories() couldn't compare such a product at all
+        # (Codex review, fresh evidence). Each major must be discovered
+        # and compared independently.
+        from abicheck.product_baseline import compare_product_directories
+
+        old = tmp_path / "old"
+        new = tmp_path / "new"
+        old.mkdir()
+        new.mkdir()
+        _build_tiny_so(old, "libfoo.so.1", "int foo1(void){return 1;}\n")
+        _build_tiny_so(old, "libfoo.so.2", "int foo2(void){return 2;}\n")
+        _build_tiny_so(new, "libfoo.so.1", "int foo1(void){return 1;}\n")
+        # libfoo.so.2 drops foo2 -- a real, detectable per-library break.
+        _build_tiny_so(new, "libfoo.so.2", "int foo2_renamed(void){return 2;}\n")
+
+        result = compare_product_directories(old, new)
+
+        by_library = {Path(r.library).name: r for r in result.per_library}
+        assert set(by_library) == {"libfoo.so.1", "libfoo.so.2"}
+        assert by_library["libfoo.so.1"].verdict == Verdict.NO_CHANGE
+        assert any(
+            c.kind == ChangeKind.FUNC_REMOVED for c in by_library["libfoo.so.2"].changes
+        )
 
     def test_compare_release_no_bundle_analysis_opts_out(self, tmp_path: Path) -> None:
         # --no-bundle-analysis must suppress bundle output and report only
@@ -2910,13 +3192,12 @@ class TestSonameSkewCohortScoping:
                 resolution=_compute_resolution_graph(libs, meta),
             )
 
-        old = _snap(
-            "libonedal_core-a1b2c3d4.so.1", "libonedal_thread-1a1b2c2d.so.1"
-        )
+        old = _snap("libonedal_core-a1b2c3d4.so.1", "libonedal_thread-1a1b2c2d.so.1")
         new = _snap(
             # core bumps major AND gets a fresh hash; thread lags but also
             # gets a fresh hash (a hash-only rebuild, not a real SONAME change).
-            "libonedal_core-e5f6a7b8.so.2", "libonedal_thread-9e9f8a8b.so.1"
+            "libonedal_core-e5f6a7b8.so.2",
+            "libonedal_thread-9e9f8a8b.so.1",
         )
         findings = _detect_soname_skew(old, new, ["libonedal_"])
         assert [f.kind for f in findings] == [ChangeKind.BUNDLE_SONAME_SKEW]

@@ -9,6 +9,8 @@ canonical_for:
 depends_on:
   - abicheck/model.py
   - abicheck/serialization.py
+  - abicheck/product_baseline.py
+  - abicheck/bundle.py
 lifecycle: active
 generated: false
 ---
@@ -42,6 +44,26 @@ breaking changes before they ship.
 > checksum-on-pull) has no direct equivalent. For a one-off "compare against
 > a previous build" without managing a baseline file yourself, see
 > [`scan --against`](create-baseline.md#scan-against-for-a-one-off-comparison).
+
+> **A whole-product (multi-library) baseline is a separate, library-only
+> module, not a CLI feature.** Everything above is per-library. A product
+> shipping several interdependent shared libraries — where a symbol one
+> library imports from a sibling disappearing is a real cross-DSO ABI
+> break no single-library `scan --against` can see — has its own storage
+> format and comparison entry point in
+> `abicheck.product_baseline`: `pack_product_baseline`/
+> `unpack_product_baseline` archive/restore an entire product directory
+> as one deterministic `.tar.zst`, and `compare_product_directories`
+> runs the bundle-aware comparison (ADR-023) directly, in Python, with
+> no CLI subprocess. `abicheck.bundle.build_bundle_snapshot_from_metadata`
+> is the underlying primitive that lets that cross-DSO analysis run from
+> already-parsed `ElfMetadata` (e.g. a stored `AbiSnapshot.elf`) instead
+> of requiring the old release's binaries on disk. See each function's
+> own docstring for the full contract; there is no CLI wiring for this
+> module and none is planned without a concrete use case (see
+> `docs/contribute/plans/product-baseline-per-library-header-roots.md`
+> for the one follow-up slice implemented so far, and its own "Out of
+> scope" section for what isn't).
 
 This page covers the **lifecycle model**: what a baseline is, why most
 projects need two of them, and what makes a baseline comparable across
@@ -137,7 +159,12 @@ library rather than trying to fold them into a single baseline file — see
 facts
 pack](github-action-source-scans.md#recommended-flow-a-multi-library-release-with-one-shared-facts-pack)
 for a concrete per-library baseline-set walkthrough (build once, one facts
-pack, one baseline file per library).
+pack, one baseline file per library). This per-library baseline-set is still
+the right workflow for checking each library's own ABI — it is not
+superseded by the whole-product `pack_product_baseline`/
+`compare_product_directories` module described above, which answers a
+different question (cross-library, bundle-aware breakage) rather than
+replacing the per-library one.
 
 ### A new library's first release
 

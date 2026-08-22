@@ -2,9 +2,12 @@
 from __future__ import annotations
 
 import io
+import shutil
 import struct
+import subprocess
 import sys
 import tarfile
+import threading
 import time
 import zipfile
 from pathlib import Path
@@ -318,6 +321,20 @@ class TestValidateSymlinkTarget:
             _validate_symlink_target(
                 "usr/lib/evil", "../../../../etc/passwd", tmp_path
             )
+
+    def test_duplicate_member_validated_against_own_parent_not_stale_target(
+        self, tmp_path: Path
+    ) -> None:
+        # A duplicate member name is a legal tar shape -- the last one
+        # wins on extraction, replacing whatever was there. Simulating the
+        # filesystem state right after a first `a -> deep/x` symlink
+        # member was extracted, a second `a -> ../victim` symlink member
+        # must be validated against `a`'s own real parent directory, not
+        # against wherever the stale first symlink currently resolves
+        # (Codex, concrete repro).
+        (tmp_path / "a").symlink_to("deep/x")
+        with pytest.raises(ExtractionSecurityError, match="symlink target"):
+            _validate_symlink_target("a", "../victim", tmp_path)
 
 
 # ── Format detection tests ──────────────────────────────────────────────────
@@ -2406,6 +2423,997 @@ class TestTarExtractorSymlinks:
         with pytest.raises(ExtractionSecurityError, match="symlink target"):
             TarExtractor().extract(archive, out)
 
+    def test_symlink_member_rejected_when_destination_cannot_create_symlinks(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # tarfile silently substitutes a full copy of the target when
+        # os.symlink() fails (e.g. Windows without symlink privilege) --
+        # no exception, no flag. Detected up front instead of letting a
+        # confusing downstream error surface (Codex).
+        from abicheck import package as package_mod
+
+        archive = tmp_path / "symlink.tar.gz"
+        with tarfile.open(archive, "w:gz") as tf:
+            info = tarfile.TarInfo(name="lib/libfoo.so.1.0")
+            info.size = 4
+            tf.addfile(info, io.BytesIO(b"data"))
+            sym = tarfile.TarInfo(name="lib/libfoo.so")
+            sym.type = tarfile.SYMTYPE
+            sym.linkname = "libfoo.so.1.0"
+            tf.addfile(sym)
+
+        out = tmp_path / "output"
+        out.mkdir()
+        monkeypatch.setattr(
+            package_mod, "_target_supports_symlinks", lambda target_root: False
+        )
+        from abicheck.errors import SnapshotError
+
+        with pytest.raises(SnapshotError, match="cannot create one"):
+            TarExtractor().extract(archive, out)
+
+    def test_target_supports_symlinks_probe_true_on_a_real_symlink_capable_fs(
+        self, tmp_path: Path
+    ) -> None:
+        from abicheck.package import _target_supports_symlinks
+
+        assert _target_supports_symlinks(tmp_path) is True
+        # No leftover probe entries.
+        assert not list(tmp_path.iterdir())
+
+    def test_target_supports_symlinks_probe_false_when_symlink_raises(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import os as os_mod
+
+        from abicheck.package import _target_supports_symlinks
+
+        def _failing_symlink(*args: object, **kwargs: object) -> None:
+            raise OSError("simulated: no privilege")
+
+        monkeypatch.setattr(os_mod, "symlink", _failing_symlink)
+        assert _target_supports_symlinks(tmp_path) is False
+        # The probe target (created via exclusive os.open(), unaffected
+        # by the symlink failure) is still cleaned up.
+        assert not list(tmp_path.iterdir())
+
+    def test_target_supports_symlinks_probe_never_touches_preexisting_user_data(
+        self, tmp_path: Path
+    ) -> None:
+        # A bare pid-suffixed probe name (the pre-fix scheme) is
+        # predictable and could collide with real pre-existing data at
+        # that exact path -- Path.touch() would silently reuse it and the
+        # unconditional cleanup would then delete it. The uuid4-suffixed,
+        # exclusive-create scheme can't collide with anything already
+        # there (Codex).
+        from abicheck.package import _target_supports_symlinks
+
+        preexisting = tmp_path / "real-user-data.txt"
+        preexisting.write_text("do not touch")
+        assert _target_supports_symlinks(tmp_path) is True
+        assert preexisting.read_text() == "do not touch"
+        # Nothing else left behind either.
+        assert list(tmp_path.iterdir()) == [preexisting]
+
+    def test_target_supports_symlinks_probe_target_created_exclusively(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Exclusive creation (O_EXCL), not Path.touch(), is what makes a
+        # same-path collision with pre-existing data fail loudly (surfaced
+        # as the probe simply returning False) instead of silently
+        # reusing -- and then, via the unconditional cleanup, deleting --
+        # someone else's file (Codex).
+        import os as os_mod
+
+        from abicheck.package import _target_supports_symlinks
+
+        real_open = os_mod.open
+        captured_flags: list[int] = []
+
+        def _recording_open(path: object, flags: int, *args: object) -> int:
+            captured_flags.append(flags)
+            return real_open(path, flags, *args)  # type: ignore[arg-type]
+
+        monkeypatch.setattr(os_mod, "open", _recording_open)
+        assert _target_supports_symlinks(tmp_path) is True
+        assert captured_flags, "os.open() was never called for the probe target"
+        assert captured_flags[0] & os_mod.O_EXCL
+
+    def test_target_supports_symlinks_probe_uses_unique_names_across_calls(
+        self, tmp_path: Path
+    ) -> None:
+        # A bare pid-suffixed name is identical across every call from the
+        # same process -- concurrent extractions into the same directory
+        # (e.g. two threads) would then collide on it. Calling the probe
+        # many times back-to-back must never raise FileExistsError from a
+        # stale/colliding name of its own making.
+        from abicheck.package import _target_supports_symlinks
+
+        for _ in range(20):
+            assert _target_supports_symlinks(tmp_path) is True
+        assert not list(tmp_path.iterdir())
+
+    def test_pre_312_path_depth_collapse_escape_rejected(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The pre-fix < 3.12 fallback validated every member against a
+        # target_root snapshot where nothing had been extracted yet -- so
+        # an earlier symlink member `a -> .` looked like a literal, still-
+        # nonexistent directory to the *next* member's validation,
+        # undercounting how many real levels collapse once `a` is actually
+        # created. By the time tarfile's own bulk extraction walked through
+        # the now-real symlink, a target that validated as contained could
+        # resolve outside target_root (Codex review, fresh evidence).
+        import abicheck.package as pb
+
+        monkeypatch.setattr(pb.sys, "version_info", (3, 11, 0, "final", 0))
+
+        archive = tmp_path / "collapse.tar"
+        with tarfile.open(archive, "w") as tf:
+            a = tarfile.TarInfo(name="a")
+            a.type = tarfile.SYMTYPE
+            a.linkname = "."
+            tf.addfile(a)
+
+            link = tarfile.TarInfo(name="a/b/c/link")
+            link.type = tarfile.SYMTYPE
+            link.linkname = "../../../victim"
+            tf.addfile(link)
+
+        out = tmp_path / "output"
+        out.mkdir()
+        with pytest.raises(ExtractionSecurityError, match="symlink target"):
+            TarExtractor().extract(archive, out)
+
+        assert not (tmp_path / "victim").exists()
+
+    def test_pre_312_path_ordinary_archive_still_extracts(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Negative control for the member-by-member < 3.12 fallback: a
+        # legitimate nested-directory archive with an internal symlink
+        # still extracts correctly (contents present, symlink resolvable).
+        import abicheck.package as pb
+
+        monkeypatch.setattr(pb.sys, "version_info", (3, 11, 0, "final", 0))
+
+        archive = tmp_path / "ok.tar"
+        with tarfile.open(archive, "w") as tf:
+            info = tarfile.TarInfo(name="lib/libfoo.so.1.0")
+            info.size = 4
+            tf.addfile(info, io.BytesIO(b"data"))
+            sym = tarfile.TarInfo(name="lib/libfoo.so")
+            sym.type = tarfile.SYMTYPE
+            sym.linkname = "libfoo.so.1.0"
+            tf.addfile(sym)
+
+        out = tmp_path / "output"
+        out.mkdir()
+        TarExtractor().extract(archive, out)
+        assert (out / "lib/libfoo.so.1.0").read_bytes() == b"data"
+        assert (out / "lib/libfoo.so").resolve() == (out / "lib/libfoo.so.1.0").resolve()
+
+    def test_pre_312_path_duplicate_symlink_member_escape_rejected(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # A second `a -> ../victim` symlink member, duplicating an earlier
+        # `a -> deep/x` member's name, must be rejected end to end -- not
+        # just at the _validate_symlink_target primitive level -- since
+        # tarfile's real extraction replaces `a` outright rather than
+        # writing through the first symlink (Codex, concrete repro).
+        import abicheck.package as pb
+
+        monkeypatch.setattr(pb.sys, "version_info", (3, 11, 0, "final", 0))
+
+        archive = tmp_path / "dup.tar"
+        with tarfile.open(archive, "w") as tf:
+            first = tarfile.TarInfo(name="a")
+            first.type = tarfile.SYMTYPE
+            first.linkname = "deep/x"
+            tf.addfile(first)
+
+            second = tarfile.TarInfo(name="a")
+            second.type = tarfile.SYMTYPE
+            second.linkname = "../victim"
+            tf.addfile(second)
+
+        out = tmp_path / "output"
+        out.mkdir()
+        with pytest.raises(ExtractionSecurityError, match="symlink target"):
+            TarExtractor().extract(archive, out)
+
+        assert not (tmp_path / "victim").exists()
+
+    def test_hardlink_naming_a_relocated_symlink_is_rejected(
+        self, tmp_path: Path
+    ) -> None:
+        # A symlink "a/b/link -> ../../safe" validates safely at its own
+        # two-levels-deep location. tarfile.makelink() falls back to a
+        # full copy whenever os.link() fails -- for a hard link "x"
+        # (archive root) naming "a/b/link", that fallback re-extracts the
+        # ORIGINAL symlink itself, with its own unmodified relative
+        # target text, but at "x"'s shallower location: "x -> ../../safe"
+        # now escapes the extraction root. Whether os.link() actually
+        # fails is filesystem-dependent, so this must be rejected up
+        # front regardless (Codex, fresh evidence).
+        archive = tmp_path / "relocated_symlink.tar"
+        with tarfile.open(archive, "w") as tf:
+            safe = tarfile.TarInfo(name="safe")
+            safe.size = 4
+            tf.addfile(safe, io.BytesIO(b"data"))
+            link = tarfile.TarInfo(name="a/b/link")
+            link.type = tarfile.SYMTYPE
+            link.linkname = "../../safe"
+            tf.addfile(link)
+            hardlink = tarfile.TarInfo(name="x")
+            hardlink.type = tarfile.LNKTYPE
+            hardlink.linkname = "a/b/link"
+            tf.addfile(hardlink)
+
+        out = tmp_path / "output"
+        out.mkdir()
+        with pytest.raises(ExtractionSecurityError, match="symlink target"):
+            TarExtractor().extract(archive, out)
+
+    def test_hardlink_naming_a_symlink_at_the_same_depth_is_accepted(
+        self, tmp_path: Path
+    ) -> None:
+        # Negative control: when the hard link sits at the SAME nesting
+        # depth as the symlink it names, the relocated interpretation is
+        # identical to the original and must not be rejected.
+        archive = tmp_path / "same_depth.tar"
+        with tarfile.open(archive, "w") as tf:
+            safe = tarfile.TarInfo(name="a/safe")
+            safe.size = 4
+            tf.addfile(safe, io.BytesIO(b"data"))
+            link = tarfile.TarInfo(name="a/link")
+            link.type = tarfile.SYMTYPE
+            link.linkname = "safe"
+            tf.addfile(link)
+            hardlink = tarfile.TarInfo(name="a/alias")
+            hardlink.type = tarfile.LNKTYPE
+            hardlink.linkname = "a/link"
+            tf.addfile(hardlink)
+
+        out = tmp_path / "output"
+        out.mkdir()
+        TarExtractor().extract(archive, out)
+        assert (out / "a/safe").exists()
+
+    def test_hardlink_naming_a_regular_file_is_unaffected(
+        self, tmp_path: Path
+    ) -> None:
+        # A hard link naming an ordinary regular file (not a symlink) has
+        # nothing to relocate -- must not be rejected by this check.
+        archive = tmp_path / "regular.tar"
+        with tarfile.open(archive, "w") as tf:
+            real = tarfile.TarInfo(name="a/b/real")
+            real.size = 4
+            tf.addfile(real, io.BytesIO(b"data"))
+            hardlink = tarfile.TarInfo(name="alias")
+            hardlink.type = tarfile.LNKTYPE
+            hardlink.linkname = "a/b/real"
+            tf.addfile(hardlink)
+
+        out = tmp_path / "output"
+        out.mkdir()
+        TarExtractor().extract(archive, out)
+        assert (out / "alias").exists()
+
+
+class TestTarExtractorZstDecompressionBomb:
+    def test_highly_compressible_payload_is_rejected_over_the_limit(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # _safe_extract_zst_tar() used an unbounded shutil.copyfileobj()
+        # to materialize the entire decoded tar before any member was
+        # validated -- a tiny, highly compressible .tar.zst could fill
+        # the host/CI runner's disk first (Codex review, fresh evidence).
+        zstandard = pytest.importorskip("zstandard")
+        monkeypatch.setenv("_ABICHECK_TAR_ZST_MAX_DECODED_BYTES", "1000")
+
+        tar_buf = io.BytesIO()
+        with tarfile.open(fileobj=tar_buf, mode="w") as tf:
+            data = b"\x00" * (10 * 1024 * 1024)  # 10 MiB, highly compressible
+            info = tarfile.TarInfo(name="bigfile.bin")
+            info.size = len(data)
+            tf.addfile(info, io.BytesIO(data))
+
+        cctx = zstandard.ZstdCompressor(level=19)
+        compressed = cctx.compress(tar_buf.getvalue())
+        assert len(compressed) < 1000  # confirms the payload is a real bomb shape
+
+        zst_path = tmp_path / "bomb.tar.zst"
+        zst_path.write_bytes(compressed)
+        out = tmp_path / "output"
+        out.mkdir()
+
+        from abicheck.errors import SnapshotError
+
+        with pytest.raises(SnapshotError, match="safety limit"):
+            TarExtractor()._safe_extract_zst_tar(zst_path, out)
+
+    def test_ordinary_archive_within_the_limit_still_extracts(
+        self, tmp_path: Path
+    ) -> None:
+        pytest.importorskip("zstandard")
+        import zstandard
+
+        tar_buf = io.BytesIO()
+        with tarfile.open(fileobj=tar_buf, mode="w") as tf:
+            info = tarfile.TarInfo(name="lib/libfoo.so")
+            info.size = 4
+            tf.addfile(info, io.BytesIO(b"data"))
+
+        cctx = zstandard.ZstdCompressor()
+        zst_path = tmp_path / "ok.tar.zst"
+        zst_path.write_bytes(cctx.compress(tar_buf.getvalue()))
+        out = tmp_path / "output"
+        out.mkdir()
+
+        TarExtractor()._safe_extract_zst_tar(zst_path, out)
+        assert (out / "lib" / "libfoo.so").read_bytes() == b"data"
+
+    def test_external_zstd_fallback_also_rejects_a_bomb(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The zstandard-module branch above got the size bound; the
+        # `zstd` CLI subprocess fallback (reachable whenever the
+        # always-installed zstandard package is somehow absent) used the
+        # CLI's own unbounded `-d ... -o ...` form, writing its decoded
+        # output straight to disk with no size check at all (Codex
+        # review, fresh evidence).
+        zstandard = pytest.importorskip("zstandard")
+        if shutil.which("zstd") is None:
+            pytest.skip("real zstd CLI not available")
+        monkeypatch.setenv("_ABICHECK_TAR_ZST_MAX_DECODED_BYTES", "1000")
+
+        tar_buf = io.BytesIO()
+        with tarfile.open(fileobj=tar_buf, mode="w") as tf:
+            data = b"\x00" * (10 * 1024 * 1024)
+            info = tarfile.TarInfo(name="bigfile.bin")
+            info.size = len(data)
+            tf.addfile(info, io.BytesIO(data))
+        cctx = zstandard.ZstdCompressor(level=19)
+        compressed = cctx.compress(tar_buf.getvalue())
+        assert len(compressed) < 1000
+
+        zst_path = tmp_path / "bomb.tar.zst"
+        zst_path.write_bytes(compressed)
+        out = tmp_path / "output"
+        out.mkdir()
+
+        from abicheck.errors import SnapshotError
+
+        with mock.patch("builtins.__import__", side_effect=_zstandard_import_blocker):
+            with pytest.raises(SnapshotError, match="safety limit"):
+                TarExtractor()._safe_extract_zst_tar(zst_path, out)
+
+    def test_external_zstd_fallback_still_extracts_an_ordinary_archive(
+        self, tmp_path: Path
+    ) -> None:
+        pytest.importorskip("zstandard")
+        if shutil.which("zstd") is None:
+            pytest.skip("real zstd CLI not available")
+        import zstandard
+
+        tar_buf = io.BytesIO()
+        with tarfile.open(fileobj=tar_buf, mode="w") as tf:
+            info = tarfile.TarInfo(name="lib/libfoo.so")
+            info.size = 4
+            tf.addfile(info, io.BytesIO(b"data"))
+        cctx = zstandard.ZstdCompressor()
+        zst_path = tmp_path / "ok.tar.zst"
+        zst_path.write_bytes(cctx.compress(tar_buf.getvalue()))
+        out = tmp_path / "output"
+        out.mkdir()
+
+        with mock.patch("builtins.__import__", side_effect=_zstandard_import_blocker):
+            TarExtractor()._safe_extract_zst_tar(zst_path, out)
+        assert (out / "lib" / "libfoo.so").read_bytes() == b"data"
+
+    def test_external_zstd_fallback_times_out_on_a_hung_process(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The pre-streaming subprocess.run(..., timeout=120) call bounded
+        # this fallback; the streaming rewrite for the size bound above
+        # replaced it with a plain blocking proc.stdout.read() with no
+        # deadline at all, so a stalled zstd process could hang
+        # extraction indefinitely (Codex review, fresh evidence).
+        pytest.importorskip("zstandard")
+        import abicheck.package as package_mod
+        from abicheck.errors import SnapshotError
+
+        monkeypatch.setattr(package_mod, "_ZSTD_CLI_TIMEOUT_S", 1)
+        monkeypatch.setattr(package_mod.shutil, "which", lambda name: "/usr/bin/zstd")
+
+        class _HangingStdout:
+            def read(self, n: int) -> bytes:
+                time.sleep(10)  # far longer than the 1s test timeout
+                return b""  # pragma: no cover - never reached in time
+
+        class _HangingProc:
+            def __init__(self) -> None:
+                self.stdout = _HangingStdout()
+                self.returncode: int | None = None
+
+            def kill(self) -> None:
+                self.returncode = -9
+
+            def wait(self, timeout: float | None = None) -> None:
+                pass
+
+            def poll(self) -> int | None:
+                return self.returncode
+
+            def communicate(self, timeout: float | None = None) -> tuple[bytes, bytes]:
+                return (b"", b"")
+
+        monkeypatch.setattr(
+            package_mod.subprocess, "Popen", lambda *a, **k: _HangingProc()
+        )
+
+        zst_path = tmp_path / "ok.tar.zst"
+        zst_path.write_bytes(b"irrelevant, Popen is mocked")
+        out = tmp_path / "output"
+        out.mkdir()
+
+        start = time.monotonic()
+        with mock.patch("builtins.__import__", side_effect=_zstandard_import_blocker):
+            with pytest.raises(SnapshotError, match="timed out"):
+                TarExtractor()._safe_extract_zst_tar(zst_path, out)
+        # Confirms the fix actually bounds the wait -- a regression back to
+        # the unbounded read would make this assertion the one that hangs.
+        assert time.monotonic() - start < 10
+
+    def test_external_zstd_fallback_reader_queue_is_bounded(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The reader thread's chunk queue was unbounded -- an untrusted
+        # archive expanding quickly could let it race arbitrarily far
+        # ahead of the main thread's own decompression-bomb size check,
+        # buffering gigabytes of already-decoded data in the queue before
+        # total_bytes was ever compared against the limit (Codex review,
+        # fresh evidence). Confirms the queue used by the reader thread
+        # is actually constructed with the module's bounded maxsize,
+        # rather than the unbounded default (maxsize=0).
+        pytest.importorskip("zstandard")
+        if shutil.which("zstd") is None:
+            pytest.skip("real zstd CLI not available")
+        import zstandard
+
+        import abicheck.package as package_mod
+
+        real_queue_cls = package_mod.queue.Queue
+        captured_maxsize: list[int] = []
+
+        class _RecordingQueue(real_queue_cls):  # type: ignore[misc,valid-type]
+            def __init__(self, maxsize: int = 0) -> None:
+                captured_maxsize.append(maxsize)
+                super().__init__(maxsize=maxsize)
+
+        monkeypatch.setattr(package_mod.queue, "Queue", _RecordingQueue)
+
+        tar_buf = io.BytesIO()
+        with tarfile.open(fileobj=tar_buf, mode="w") as tf:
+            info = tarfile.TarInfo(name="lib/libfoo.so")
+            info.size = 4
+            tf.addfile(info, io.BytesIO(b"data"))
+        cctx = zstandard.ZstdCompressor()
+        zst_path = tmp_path / "ok.tar.zst"
+        zst_path.write_bytes(cctx.compress(tar_buf.getvalue()))
+        out = tmp_path / "output"
+        out.mkdir()
+
+        with mock.patch("builtins.__import__", side_effect=_zstandard_import_blocker):
+            TarExtractor()._safe_extract_zst_tar(zst_path, out)
+
+        assert (out / "lib" / "libfoo.so").read_bytes() == b"data"
+        assert captured_maxsize == [package_mod._ZSTD_READER_QUEUE_MAXSIZE]
+
+    def test_external_zstd_fallback_joins_the_reader_thread_after_aborting(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Bounding the queue above introduced a leak of its own: aborting
+        # (here, the decompression-bomb limit) stops the consumer from
+        # draining the queue, so a reader thread that has already produced
+        # a second chunk blocks forever in put() on the now-full queue --
+        # the killed process's pipe closing doesn't help, since the
+        # reader never gets back to its own read() call to see that
+        # (Codex review, fresh evidence). Forced deterministic with
+        # maxsize=1: the bomb overruns the 1000-byte limit on the very
+        # first chunk, guaranteeing a second chunk is already produced
+        # and stuck when the main thread aborts.
+        zstandard = pytest.importorskip("zstandard")
+        if shutil.which("zstd") is None:
+            pytest.skip("real zstd CLI not available")
+        import abicheck.package as package_mod
+
+        monkeypatch.setenv("_ABICHECK_TAR_ZST_MAX_DECODED_BYTES", "1000")
+        monkeypatch.setattr(package_mod, "_ZSTD_READER_QUEUE_MAXSIZE", 1)
+
+        tar_buf = io.BytesIO()
+        with tarfile.open(fileobj=tar_buf, mode="w") as tf:
+            data = b"\x00" * (10 * 1024 * 1024)
+            info = tarfile.TarInfo(name="bigfile.bin")
+            info.size = len(data)
+            tf.addfile(info, io.BytesIO(data))
+        cctx = zstandard.ZstdCompressor(level=19)
+        compressed = cctx.compress(tar_buf.getvalue())
+        assert len(compressed) < 1000
+
+        zst_path = tmp_path / "bomb.tar.zst"
+        zst_path.write_bytes(compressed)
+        out = tmp_path / "output"
+        out.mkdir()
+
+        captured_threads: list[threading.Thread] = []
+        real_thread_cls = package_mod.threading.Thread
+
+        class _RecordingThread(real_thread_cls):  # type: ignore[misc,valid-type]
+            def __init__(self, *args: object, **kwargs: object) -> None:
+                super().__init__(*args, **kwargs)  # type: ignore[arg-type]
+                captured_threads.append(self)
+
+        monkeypatch.setattr(package_mod.threading, "Thread", _RecordingThread)
+
+        from abicheck.errors import SnapshotError
+
+        with mock.patch("builtins.__import__", side_effect=_zstandard_import_blocker):
+            with pytest.raises(SnapshotError, match="safety limit"):
+                TarExtractor()._safe_extract_zst_tar(zst_path, out)
+
+        assert captured_threads, "reader thread was never created"
+        reader_thread = captured_threads[0]
+        # A regression back to no draining would make this join() hang
+        # for the full duration instead of returning quickly.
+        reader_thread.join(timeout=5)
+        assert not reader_thread.is_alive()
+        assert package_mod._ZSTD_READER_QUEUE_MAXSIZE > 0  # not the unbounded default
+
+
+class TestBoundedTarInfoExtendedHeaders:
+    """A PAX/GNU extended-header record's own declared size is known from
+    its 512-byte header block alone -- but tarfile.TarInfo._proc_pax()/
+    _proc_gnulong() each read that many bytes in ONE call before any
+    per-member check in _reject_oversized_declared_content ever runs, so
+    a single oversized extended header could force a huge allocation
+    regardless of the overall decoded-bytes limit (Codex, fresh
+    evidence)."""
+
+    def test_oversized_pax_header_is_rejected_before_the_big_read(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The exact repro shape reported: a 2 MiB PAX header accepted
+        # even with a 1 MiB overall decoded-bytes limit, because the pax
+        # allocation happens before that limit's own per-member check
+        # gets a chance to run.
+        monkeypatch.setenv("_ABICHECK_TAR_ZST_MAX_DECODED_BYTES", str(1024 * 1024))
+        archive = tmp_path / "evil.tar"
+        with tarfile.open(archive, "w") as tf:
+            info = tarfile.TarInfo(name="real.bin")
+            info.size = 4
+            info.pax_headers = {"comment": "y" * (2 * 1024 * 1024)}
+            tf.addfile(info, io.BytesIO(b"data"))
+
+        out = tmp_path / "output"
+        out.mkdir()
+        with pytest.raises(ExtractionSecurityError, match="extended header"):
+            TarExtractor().extract(archive, out)
+
+    def test_oversized_pax_header_is_rejected_through_a_highly_compressible_zst(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # A trivially small, highly compressible .tar.zst (a repeated
+        # byte compresses to almost nothing) must still be rejected --
+        # the guard operates on the PARSED record's declared size, not
+        # on-disk/compressed size, so it isn't fooled by compression the
+        # way a naive compressed-size check would be.
+        zstandard = pytest.importorskip("zstandard")
+        monkeypatch.setenv("_ABICHECK_TAR_ZST_MAX_DECODED_BYTES", str(64 * 1024 * 1024))
+        tar_buf = io.BytesIO()
+        with tarfile.open(fileobj=tar_buf, mode="w") as tf:
+            info = tarfile.TarInfo(name="real.bin")
+            info.size = 4
+            info.pax_headers = {"comment": "y" * (2 * 1024 * 1024)}
+            tf.addfile(info, io.BytesIO(b"data"))
+        archive = tmp_path / "evil.tar.zst"
+        archive.write_bytes(zstandard.ZstdCompressor().compress(tar_buf.getvalue()))
+        # Confirm the premise: tiny on disk, large once decompressed.
+        assert archive.stat().st_size < 10_000
+
+        out = tmp_path / "output"
+        out.mkdir()
+        with pytest.raises(ExtractionSecurityError, match="extended header"):
+            TarExtractor().extract(archive, out)
+
+    def test_oversized_gnu_longname_header_is_rejected(self, tmp_path: Path) -> None:
+        # The GNU-format sibling of the PAX case above ('L' longname
+        # records go through _proc_gnulong, a separate but identically-
+        # shaped unbounded single read). Checked at the parse layer
+        # directly (matching the real _safe_extract() open call, but
+        # stopping short of actually writing a member out) rather than
+        # through a full TarExtractor().extract() -- the resulting name
+        # is itself 2 MiB long, which a real filesystem legitimately
+        # rejects as ENAMETOOLONG regardless of this guard, and that
+        # unrelated OS limit would otherwise mask what's being tested.
+        from abicheck.package import _BoundedTarInfo
+
+        archive = tmp_path / "evil_gnu.tar"
+        with tarfile.open(archive, "w", format=tarfile.GNU_FORMAT) as tf:
+            info = tarfile.TarInfo(name="a" * (2 * 1024 * 1024))
+            info.size = 4
+            tf.addfile(info, io.BytesIO(b"data"))
+
+        with pytest.raises(ExtractionSecurityError, match="extended header"):
+            with tarfile.open(archive, tarinfo=_BoundedTarInfo) as tf:
+                for _ in tf:
+                    pass
+
+    def test_ordinary_long_path_pax_archive_still_extracts(
+        self, tmp_path: Path
+    ) -> None:
+        # Negative control: a real, legitimate long path (forcing a real,
+        # small PAX extended-header record) must still extract normally
+        # -- the guard's default limit is far above any real metadata
+        # record's size.
+        archive = tmp_path / "longname.tar"
+        long_name = "a/" * 60 + "deep_file.bin"
+        with tarfile.open(archive, "w", format=tarfile.PAX_FORMAT) as tf:
+            info = tarfile.TarInfo(name=long_name)
+            info.size = 4
+            tf.addfile(info, io.BytesIO(b"data"))
+
+        out = tmp_path / "output"
+        out.mkdir()
+        TarExtractor().extract(archive, out)
+        assert (out / long_name).exists()
+
+
+class TestRejectOversizedDeclaredContent:
+    def test_rejects_when_declared_sizes_exceed_the_limit(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from abicheck.package import _reject_oversized_declared_content
+
+        monkeypatch.setenv("_ABICHECK_TAR_ZST_MAX_DECODED_BYTES", "1000")
+
+        class _FakeMember:
+            def __init__(self, name: str, size: int) -> None:
+                self.name = name
+                self.size = size
+
+        class _FakeTarFile:
+            def getmembers(self) -> list[_FakeMember]:
+                return [_FakeMember("sparse.bin", 10**12)]
+
+            def __iter__(self):  # type: ignore[no-untyped-def]
+                return iter(self.getmembers())
+
+        with pytest.raises(ExtractionSecurityError, match="safety limit"):
+            _reject_oversized_declared_content(_FakeTarFile())  # type: ignore[arg-type]
+
+    def test_accepts_ordinary_declared_sizes(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from abicheck.package import _reject_oversized_declared_content
+
+        monkeypatch.setenv("_ABICHECK_TAR_ZST_MAX_DECODED_BYTES", "1000")
+
+        class _FakeMember:
+            def __init__(self, name: str, size: int) -> None:
+                self.name = name
+                self.size = size
+                self.linkname = ""
+
+            def isreg(self) -> bool:
+                return True
+
+            def islnk(self) -> bool:
+                return False
+
+        class _FakeTarFile:
+            def getmembers(self) -> list[_FakeMember]:
+                return [_FakeMember("a.bin", 100), _FakeMember("b.bin", 200)]
+
+            def __iter__(self):  # type: ignore[no-untyped-def]
+                return iter(self.getmembers())
+
+        _reject_oversized_declared_content(_FakeTarFile())  # type: ignore[arg-type]
+
+    def test_rejects_when_member_count_exceeds_the_limit(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Millions of zero-length members never trip the byte-sum check at
+        # all, but each still costs a retained TarInfo object -- an
+        # independent, incrementally-checked count cap is what stops the
+        # loop from consuming the whole malicious archive (Codex).
+        from abicheck.package import _reject_oversized_declared_content
+
+        monkeypatch.setenv("_ABICHECK_TAR_ZST_MAX_MEMBERS", "3")
+
+        class _FakeMember:
+            def __init__(self, name: str, size: int) -> None:
+                self.name = name
+                self.size = size
+
+        class _CountingFakeTarFile:
+            """Raises if asked for more members than the cap should ever
+            need to read -- proves the loop stops early rather than merely
+            asserting on the final exception."""
+
+            def __init__(self, total: int) -> None:
+                self._total = total
+                self.yielded = 0
+
+            def __iter__(self):  # type: ignore[no-untyped-def]
+                for i in range(self._total):
+                    if self.yielded > 3 + 1:
+                        raise AssertionError(
+                            "iterated well past the member-count cap"
+                        )
+                    self.yielded += 1
+                    yield _FakeMember(f"m{i}.bin", 0)
+
+        fake = _CountingFakeTarFile(total=10_000)
+        with pytest.raises(ExtractionSecurityError, match="member safety limit"):
+            _reject_oversized_declared_content(fake)  # type: ignore[arg-type]
+        assert fake.yielded <= 4, "did not stop shortly after the cap"
+
+    def test_accepts_member_count_at_or_below_the_limit(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from abicheck.package import _reject_oversized_declared_content
+
+        monkeypatch.setenv("_ABICHECK_TAR_ZST_MAX_MEMBERS", "3")
+
+        class _FakeMember:
+            def __init__(self, name: str, size: int) -> None:
+                self.name = name
+                self.size = size
+                self.linkname = ""
+
+            def isreg(self) -> bool:
+                return True
+
+            def islnk(self) -> bool:
+                return False
+
+        class _FakeTarFile:
+            def getmembers(self) -> list[_FakeMember]:
+                return [_FakeMember(f"m{i}.bin", 0) for i in range(3)]
+
+            def __iter__(self):  # type: ignore[no-untyped-def]
+                return iter(self.getmembers())
+
+        result = _reject_oversized_declared_content(_FakeTarFile())  # type: ignore[arg-type]
+        assert result is None  # doesn't raise -- exactly at the cap is accepted
+
+    def test_gnu_sparse_member_declaring_huge_size_is_rejected(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # A GNU sparse member's on-stream size can be tiny (mostly holes)
+        # while TarInfo.size -- what tarfile will materialize on
+        # extraction -- is unbounded: DEFAULT_MAX_DECOMPRESSED_TAR_BYTES
+        # only bounds the decompressed *tar stream*, not this declared
+        # logical size, so a real, ~10 KiB archive can declare a
+        # multi-GiB member and sail straight past that check (Codex
+        # review, fresh evidence). Built with the real `tar --sparse`
+        # binary, not a hand-rolled header -- Python's own tarfile module
+        # does not generate GNU sparse output on write.
+        tar_bin = shutil.which("tar")
+        if tar_bin is None:
+            pytest.skip("system 'tar' binary not available")
+        monkeypatch.setenv("_ABICHECK_TAR_ZST_MAX_DECODED_BYTES", "1000")
+
+        sparse_file = tmp_path / "huge.bin"
+        with open(sparse_file, "wb") as f:
+            f.truncate(2 * 1024 * 1024 * 1024)  # 2 GiB logical, ~0 real bytes
+
+        archive = tmp_path / "sparse.tar"
+        try:
+            subprocess.run(
+                [
+                    tar_bin,
+                    "--sparse",
+                    "-cf",
+                    str(archive),
+                    "-C",
+                    str(tmp_path),
+                    "huge.bin",
+                ],
+                check=True,
+                capture_output=True,
+            )
+        except subprocess.CalledProcessError as exc:
+            # BSD tar (macOS's default /usr/bin/tar) doesn't accept GNU tar's
+            # --sparse flag the same way -- this test needs a real GNU-sparse
+            # archive, which only a GNU-tar-compatible binary can produce.
+            pytest.skip(
+                f"local 'tar' binary doesn't support GNU --sparse output: "
+                f"{exc.stderr.decode('utf-8', 'replace').strip() or exc}"
+            )
+        assert archive.stat().st_size < 100_000  # confirms a real sparse-shape archive
+
+        out = tmp_path / "output"
+        out.mkdir()
+        with pytest.raises(ExtractionSecurityError, match="safety limit"):
+            TarExtractor().extract(archive, out)
+
+
+class TestRejectHardlinkFallbackAmplification:
+    """A hard-link member's own declared size is 0 -- tarfile.makelink()
+    falls back to a full copy of the *referenced* member's content when
+    os.link() fails, so many hard links to one payload can expand real
+    disk usage far past the declared-byte-sum check, which never sees it
+    (Codex)."""
+
+    @staticmethod
+    def _write_archive(
+        tmp_path: Path, *, real_size: int, hardlink_count: int
+    ) -> Path:
+        archive = tmp_path / "hardlinks.tar"
+        with tarfile.open(archive, "w") as tf:
+            info = tarfile.TarInfo(name="real.bin")
+            info.size = real_size
+            tf.addfile(info, io.BytesIO(b"x" * real_size))
+            for i in range(hardlink_count):
+                link = tarfile.TarInfo(name=f"alias{i}.bin")
+                link.type = tarfile.LNKTYPE
+                link.linkname = "real.bin"
+                link.size = 0  # real tar writers always declare 0 here
+                tf.addfile(link)
+        return archive
+
+    def test_rejects_worst_case_hardlink_expansion_beyond_the_limit(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Declared byte sum: 600 (only the real file; every hardlink
+        # declares 0) -- comfortably under this limit. Worst case if every
+        # alias falls back to a full copy: 600 * 11 = 6600, well over it.
+        monkeypatch.setenv("_ABICHECK_TAR_ZST_MAX_DECODED_BYTES", "1000")
+        archive = self._write_archive(tmp_path, real_size=600, hardlink_count=10)
+        out = tmp_path / "output"
+        out.mkdir()
+        with pytest.raises(ExtractionSecurityError, match="hard-link members"):
+            TarExtractor().extract(archive, out)
+
+    def test_rejects_when_a_later_same_named_member_would_poison_a_global_map(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # tarfile resolves a hard link only against members *preceding* it
+        # (TarFile._getmember(tarinfo=...) truncates its own search) -- a
+        # global, order-blind name->size map would have a later,
+        # zero-length member sharing the same name as the real payload
+        # silently overwrite that payload's recorded size, hiding the real
+        # amplification the earlier hard links still resolve to (Codex).
+        monkeypatch.setenv("_ABICHECK_TAR_ZST_MAX_DECODED_BYTES", "1000")
+        archive = tmp_path / "poisoned.tar"
+        with tarfile.open(archive, "w") as tf:
+            info = tarfile.TarInfo(name="real.bin")
+            info.size = 600
+            tf.addfile(info, io.BytesIO(b"x" * 600))
+            for i in range(10):
+                link = tarfile.TarInfo(name=f"alias{i}.bin")
+                link.type = tarfile.LNKTYPE
+                link.linkname = "real.bin"
+                link.size = 0
+                tf.addfile(link)
+            # A later, unrelated, zero-length member reusing the same name
+            # -- must not retroactively change what the hard links above
+            # (which already precede it) resolve to.
+            poison = tarfile.TarInfo(name="real.bin")
+            poison.size = 0
+            tf.addfile(poison, io.BytesIO(b""))
+        out = tmp_path / "output"
+        out.mkdir()
+        with pytest.raises(ExtractionSecurityError, match="hard-link members"):
+            TarExtractor().extract(archive, out)
+
+    def test_rejects_when_a_hardlink_overwrites_a_same_named_regular_file(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # "real.bin" is first a small regular file, then a *hard link*
+        # reusing that exact name and pointing at a large payload -- the
+        # same shape tarfile.makelink() actually extracts (the hard link
+        # overwrites the earlier regular file on disk). A stale
+        # name->size map that only ever recorded regular-file sizes and
+        # never evicted them when a later hard link reused the name
+        # would still resolve every subsequent alias of "real.bin"
+        # against the small regular file's size instead of the payload's
+        # (Codex).
+        monkeypatch.setenv("_ABICHECK_TAR_ZST_MAX_DECODED_BYTES", "1300")
+        archive = tmp_path / "overwritten.tar"
+        with tarfile.open(archive, "w") as tf:
+            payload = tarfile.TarInfo(name="payload.bin")
+            payload.size = 600
+            tf.addfile(payload, io.BytesIO(b"x" * 600))
+            small = tarfile.TarInfo(name="real.bin")
+            small.size = 1
+            tf.addfile(small, io.BytesIO(b"x"))
+            overwrite = tarfile.TarInfo(name="real.bin")
+            overwrite.type = tarfile.LNKTYPE
+            overwrite.linkname = "payload.bin"
+            overwrite.size = 0
+            tf.addfile(overwrite)
+            for i in range(10):
+                link = tarfile.TarInfo(name=f"alias{i}.bin")
+                link.type = tarfile.LNKTYPE
+                link.linkname = "real.bin"
+                link.size = 0
+                tf.addfile(link)
+        out = tmp_path / "output"
+        out.mkdir()
+        with pytest.raises(ExtractionSecurityError, match="hard-link members"):
+            TarExtractor().extract(archive, out)
+
+    def test_accepts_hardlinks_whose_worst_case_stays_within_the_limit(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("_ABICHECK_TAR_ZST_MAX_DECODED_BYTES", "100000")
+        archive = self._write_archive(tmp_path, real_size=600, hardlink_count=10)
+        out = tmp_path / "output"
+        out.mkdir()
+        TarExtractor().extract(archive, out)
+        assert (out / "real.bin").exists()
+
+    def test_rejects_a_chained_hardlink_worst_case(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # A link to a link (never emitted by a real tar writer, but not
+        # forbidden by the format) must still resolve to the real payload
+        # at the bottom of the chain, not stop at the first hop.
+        monkeypatch.setenv("_ABICHECK_TAR_ZST_MAX_DECODED_BYTES", "1000")
+        archive = tmp_path / "chained.tar"
+        with tarfile.open(archive, "w") as tf:
+            info = tarfile.TarInfo(name="real.bin")
+            info.size = 600
+            tf.addfile(info, io.BytesIO(b"x" * 600))
+            for i in range(10):
+                link = tarfile.TarInfo(name=f"alias{i}.bin")
+                link.type = tarfile.LNKTYPE
+                # Each alias points to the previous one, not straight to
+                # the real file -- a 10-deep chain.
+                link.linkname = "real.bin" if i == 0 else f"alias{i - 1}.bin"
+                link.size = 0
+                tf.addfile(link)
+        out = tmp_path / "output"
+        out.mkdir()
+        with pytest.raises(ExtractionSecurityError, match="hard-link members"):
+            TarExtractor().extract(archive, out)
+
+    def test_dangling_hardlink_reference_does_not_crash_the_check(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # A hard link naming a member that doesn't exist in the archive
+        # can't be exploited for amplification (extraction fails outright
+        # on it either way) -- must degrade safely, not raise internally
+        # (an AttributeError/KeyError escaping this check's own logic).
+        from abicheck.package import _reject_hardlink_fallback_amplification
+
+        archive = tmp_path / "dangling.tar"
+        with tarfile.open(archive, "w") as tf:
+            link = tarfile.TarInfo(name="alias.bin")
+            link.type = tarfile.LNKTYPE
+            link.linkname = "nonexistent.bin"
+            link.size = 0
+            tf.addfile(link)
+        with tarfile.open(archive) as tf:
+            # Doesn't raise: the dangling link's own declared size (0)
+            # never approaches this generous limit.
+            _reject_hardlink_fallback_amplification(tf, 1_000_000)
+
+
+_real_import = __import__
+
+
+def _zstandard_import_blocker(name, *args, **kwargs):
+    """__import__ side_effect forcing the CLI-fallback branch of
+    _safe_extract_zst_tar() to exercise the real `zstd` binary."""
+    if name == "zstandard":
+        raise ImportError("Mocked: no module named 'zstandard'")
+    return _real_import(name, *args, **kwargs)
+
 
 # ── ELF detection extended ───────────────────────────────────────────────
 
@@ -3032,18 +4040,32 @@ class TestDebExtractorExtended:
                 raise ImportError
             return real_import(name, *args, **kwargs)
 
+        # Streamed via Popen + stdout, not a `-o <path>` CLI-written file,
+        # since the decompression-bomb fix needs to bound total output
+        # size incrementally rather than let the CLI write straight to
+        # disk unbounded (Codex review, fresh evidence) -- this test's
+        # own job (the tar path lands in staging, not next to the input)
+        # is unaffected by that rewrite.
+        proc = mock.MagicMock()
+        proc.stdout = io.BytesIO(b"")
+        proc.returncode = 0
+        proc.communicate.return_value = (b"", b"")
+        proc.poll.return_value = 0
+
         with mock.patch("builtins.__import__", side_effect=fake_import):
             with mock.patch("abicheck.package.shutil.which", return_value="/usr/bin/zstd"):
-                with mock.patch("abicheck.package.subprocess.run") as run_zstd:
+                with mock.patch(
+                    "abicheck.package.subprocess.Popen", return_value=proc
+                ) as popen_zstd:
                     with mock.patch("abicheck.package.TarExtractor._safe_extract") as safe_extract:
                         TarExtractor._safe_extract_zst_tar(zst_path, target)
 
-        cmd = run_zstd.call_args.args[0]
-        output_path = Path(cmd[cmd.index("-o") + 1])
+        cmd = popen_zstd.call_args.args[0]
+        assert "-o" not in cmd
+        assert "-dc" in cmd
         tar_path = safe_extract.call_args.args[0]
-        assert output_path == tar_path
-        assert output_path.parent.parent == target
-        assert not output_path.parent.exists()
+        assert tar_path.parent.parent == target
+        assert not tar_path.parent.exists()
         assert safe_extract.call_args.args[1] == target
         assert sibling_tar.read_text() == "do not touch"
 
