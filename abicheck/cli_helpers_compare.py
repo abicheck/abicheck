@@ -38,6 +38,7 @@ import click
 
 from ._compiler_options import has_explicit_std
 from .binary_utils import strip_vendor_hash as strip_vendor_hash
+from .config_paths import find_config_in_dir
 from .service_scan import pair_wide_cxx20_std_override
 
 if TYPE_CHECKING:
@@ -692,15 +693,17 @@ def discover_project_config(start: Path | None = None) -> Path | None:
     """Find a project ``.abicheck.yml`` for ``compare`` (ADR-037 D4).
 
     Looks in *start* (default: current working directory) and then walks up to
-    the filesystem root, returning the first ``.abicheck.yml`` found. ``compare``
-    runs from a project checkout, so the nearest enclosing config is the
-    project's reviewed contract.
+    the filesystem root, returning the first recognized config file found —
+    see :mod:`abicheck.config_paths` for the set of locations checked within
+    each directory (the root spelling, ``.github/``, and
+    ``.github/abicheck/``). ``compare`` runs from a project checkout, so the
+    nearest enclosing config is the project's reviewed contract.
     """
     base = (start or Path.cwd()).resolve()
     for d in (base, *base.parents):
-        candidate = d / ".abicheck.yml"
-        if candidate.is_file():
-            return candidate
+        found = find_config_in_dir(d)
+        if found is not None:
+            return found
     return None
 
 

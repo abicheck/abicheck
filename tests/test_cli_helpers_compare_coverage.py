@@ -316,6 +316,47 @@ def test_discover_project_config_returns_none_when_absent(tmp_path):
     assert found is None or not str(found).startswith(str(tmp_path.resolve()))
 
 
+def test_discover_project_config_finds_dot_github(tmp_path):
+    """A config under .github/ is discovered when no root-level file exists."""
+    (tmp_path / ".github").mkdir()
+    cfg = tmp_path / ".github" / ".abicheck.yml"
+    cfg.write_text("scope_public: true\n", encoding="utf-8")
+    found = discover_project_config(start=tmp_path)
+    assert found == cfg.resolve()
+
+
+def test_discover_project_config_finds_dot_github_abicheck_subdir(tmp_path):
+    """A config under .github/abicheck/ is discovered too."""
+    (tmp_path / ".github" / "abicheck").mkdir(parents=True)
+    cfg = tmp_path / ".github" / "abicheck" / ".abicheck.yml"
+    cfg.write_text("scope_public: true\n", encoding="utf-8")
+    found = discover_project_config(start=tmp_path)
+    assert found == cfg.resolve()
+
+
+def test_discover_project_config_root_file_wins_over_dot_github(tmp_path):
+    """The root-level .abicheck.yml takes precedence over a .github copy."""
+    root_cfg = tmp_path / ".abicheck.yml"
+    root_cfg.write_text("scope_public: true\n", encoding="utf-8")
+    (tmp_path / ".github").mkdir()
+    (tmp_path / ".github" / ".abicheck.yml").write_text(
+        "scope_public: true\n", encoding="utf-8"
+    )
+    found = discover_project_config(start=tmp_path)
+    assert found == root_cfg.resolve()
+
+
+def test_discover_project_config_walks_up_to_dot_github_in_parent(tmp_path):
+    """Walking up parents also recognizes a parent's .github/ config."""
+    (tmp_path / ".github" / "abicheck").mkdir(parents=True)
+    cfg = tmp_path / ".github" / "abicheck" / ".abicheck.yml"
+    cfg.write_text("scope_public: true\n", encoding="utf-8")
+    nested = tmp_path / "a" / "b"
+    nested.mkdir(parents=True)
+    found = discover_project_config(start=nested)
+    assert found == cfg.resolve()
+
+
 # ── fold_l0_hard_removals (case97 fix) ───────────────────────────────────────
 
 

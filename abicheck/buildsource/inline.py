@@ -58,6 +58,7 @@ from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any, ClassVar
 
 from .. import deadline
+from ..config_paths import discover_build_config as _discover_build_config
 from .build_config_schema import (
     BOOL_SUBKEYS as _BOOL_SUBKEYS,
     LIST_SUBKEYS as _LIST_SUBKEYS,
@@ -667,12 +668,11 @@ def load_build_config(path: Path) -> BuildConfig:
     return BuildConfig.from_dict(raw)
 
 
-def discover_build_config(source_tree: Path | None) -> Path | None:
-    """Return the ``.abicheck.yml`` at the source-tree root, if present."""
-    if source_tree is None or not source_tree.is_dir():
-        return None
-    candidate = source_tree / ".abicheck.yml"
-    return candidate if candidate.is_file() else None
+#: Re-exported for back-compat — the implementation now lives in
+#: :mod:`abicheck.config_paths` (shared with `compare`'s own
+#: ``discover_project_config()``), since both must agree on the same set of
+#: recognized ``.abicheck.yml`` locations. See that module's docstring.
+discover_build_config = _discover_build_config
 
 
 def is_pack_dir(path: Path | None) -> bool:
