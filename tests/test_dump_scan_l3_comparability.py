@@ -96,6 +96,7 @@ import re
 import shutil
 import subprocess
 import sys
+from collections import Counter
 from pathlib import Path
 
 import pytest
@@ -134,36 +135,50 @@ def _have_frontend(ast_frontend: str) -> bool:
 # coverage should fail loudly rather than being masked here.
 _SCAN_KNOWN_DIVERGENT_FRONTENDS: frozenset[str] = frozenset({"castxml"})
 
-# The exact, already-diagnosed finding-kind set for the L4-extractor
-# divergence -- an *exact* set match, not "these are present among
-# possibly others" (Codex review: a substring-only check would still
-# xfail past an unrelated additional risk finding riding alongside the
-# known two, silently hiding a real regression).
-_KNOWN_L4_EXTRACTOR_DIVERGENCE_KINDS = frozenset(
-    {"source_fact_coverage_incomplete", "source_binary_provenance_mismatch"}
+# The exact, already-diagnosed finding-kind multiset for the L4-extractor
+# divergence -- an exact multiset match, not "these are present among
+# possibly others" (Codex review, round 1: a substring-only check would
+# still xfail past an unrelated additional risk finding riding alongside
+# the known two) and not a bare set either (Codex review, round 2: a set
+# collapses a *second* occurrence of either known kind -- e.g. one more
+# `source_binary_provenance_mismatch` reported per side -- into "no
+# change", silently hiding that regression too).
+_KNOWN_L4_EXTRACTOR_DIVERGENCE_COUNTS = Counter(
+    {"source_fact_coverage_incomplete": 1, "source_binary_provenance_mismatch": 1}
 )
 _RISK_LINE_RE = re.compile(r"^\s*\[risk\]\s+(\S+):", re.MULTILINE)
 
 
 def _is_known_l4_extractor_divergence_text(output: str) -> bool:
     """Text-output variant: the verdict must be ``COMPATIBLE_WITH_RISK`` and
-    the set of ``[risk] <kind>:`` lines must equal exactly the known
-    two-kind set -- no more, no fewer."""
+    the multiset of ``[risk] <kind>:`` lines must equal exactly the known
+    two-kind, one-each multiset -- no more, no fewer, no duplicates."""
     if "COMPATIBLE_WITH_RISK" not in output:
         return False
     return (
-        frozenset(_RISK_LINE_RE.findall(output)) == _KNOWN_L4_EXTRACTOR_DIVERGENCE_KINDS
+        Counter(_RISK_LINE_RE.findall(output)) == _KNOWN_L4_EXTRACTOR_DIVERGENCE_COUNTS
     )
 
 
 def _is_known_l4_extractor_divergence_report(report: dict) -> bool:
     """JSON-report variant: the verdict must be ``COMPATIBLE_WITH_RISK`` and
-    the set of ``changes[].kind`` must equal exactly the known two-kind
-    set -- no more, no fewer."""
+    the multiset of finding kinds must equal exactly the known two-kind,
+    one-each multiset -- no more, no fewer, no duplicates.
+
+    ``scan --format json``'s ``ScanOutcome.to_dict()`` has no top-level
+    ``changes`` array (that's ``compare``'s report shape) -- its baseline
+    findings are nested under ``report["diff"]["findings"]``
+    (``cli_scan_baseline._baseline_summary``'s ``summary["findings"]``,
+    each entry's kind read the same tolerant way as everywhere else in
+    that module: ``getattr(kind, "value", str(kind))``). Reading a
+    nonexistent top-level ``changes`` key always saw an empty set, so the
+    known-divergent case fell through to ``pytest.fail()`` instead of
+    ``xfail`` -- Codex review, round 1."""
     if report.get("verdict") != "COMPATIBLE_WITH_RISK":
         return False
-    kinds = frozenset(c.get("kind") for c in report.get("changes", []))
-    return kinds == _KNOWN_L4_EXTRACTOR_DIVERGENCE_KINDS
+    findings = (report.get("diff") or {}).get("findings") or []
+    kinds = Counter(f.get("kind") for f in findings)
+    return kinds == _KNOWN_L4_EXTRACTOR_DIVERGENCE_COUNTS
 
 
 def _build_library(
