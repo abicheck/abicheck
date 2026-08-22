@@ -627,6 +627,35 @@ class TestPackProductBaseline:
         with pytest.raises(SnapshotError, match="absolute target"):
             pack_product_baseline(product, tmp_path / "b.tar.zst")
 
+    def test_pack_rejects_a_windows_drive_anchored_member_name(
+        self, tmp_path: Path
+    ) -> None:
+        # Only symlink *targets* got Windows-anchor validation -- a real
+        # on-disk file whose own filename happens to look like a Windows
+        # drive-relative path (`C:library.dll`, valid on POSIX, colon and
+        # all) is archived with that literal name unchanged, and
+        # TarExtractor would treat it as anchored to Windows-specific
+        # per-drive state on unpack there (Codex review, fresh evidence).
+        product = _make_product(tmp_path)
+        (product / "C:library.dll").write_bytes(b"MZ")
+        with pytest.raises(SnapshotError, match="anchored under Windows"):
+            pack_product_baseline(product, tmp_path / "b.tar.zst")
+
+    def test_pack_rejects_a_backslash_traversal_member_name(
+        self, tmp_path: Path
+    ) -> None:
+        # A real on-disk filename literally containing backslashes (a
+        # single, valid POSIX path component, not a subdirectory) is
+        # archived with that literal name unchanged -- decomposing into a
+        # genuine ".." component when interpreted with Windows path
+        # separators, which TarExtractor rejects outright on unpack
+        # there, regardless of whether it would actually escape the
+        # archive root (Codex review, fresh evidence).
+        product = _make_product(tmp_path)
+        (product / "lib" / "dir\\..\\outside.so").write_bytes(b"ELF")
+        with pytest.raises(SnapshotError, match="'..' component"):
+            pack_product_baseline(product, tmp_path / "b.tar.zst")
+
     def test_pack_rejects_a_self_referential_symlink_loop(self, tmp_path: Path) -> None:
         # A self-referential symlink (loop.so -> loop.so) made
         # _add_member()'s own direct Path.resolve() raise RuntimeError,

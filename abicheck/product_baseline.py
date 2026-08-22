@@ -203,16 +203,16 @@ def _is_library_path(path: Path) -> bool:
     Shared by every place that decides "is this a library" -- packing's own
     manifest-entry classification (:func:`_add_member`) and
     :func:`_iter_discovered_libraries`'s walk (Codex review, fresh
-    evidence: previously each checked filename suffix alone, and an
-    extensionless ELF DSO was archived but produced no ``LibraryEntry``).
+    evidence: an extensionless ELF DSO was previously archived but
+    produced no ``LibraryEntry``).
 
     The ELF content fallback had no Mach-O/PE counterpart, closed by
     :func:`_macho_is_library_content`/:func:`_pe_is_dll_content`.
 
     A ``.debug`` split-debug sidecar is excluded outright, ahead of
     every content check: it retains its original binary's ``ET_DYN``
-    header, so the ELF fallback would otherwise discover it as a second,
-    independent "library" (Codex review, fresh evidence).
+    header, so the ELF fallback would otherwise discover it as a second
+    "library" (Codex review, fresh evidence).
     """
     if path.name.lower().endswith(".debug"):
         return False
@@ -499,9 +499,39 @@ def _windows_relative_target_escapes(arcname: str, target: str) -> bool:
     return False
 
 
+def _validate_portable_arcname(arcname: str) -> None:
+    """Reject an archive member name that isn't safely portable across
+    platforms.
+
+    POSIX imposes no restriction on filename characters, so a real
+    on-disk file literally named ``C:library.dll`` or
+    ``dir\\..\\outside.so`` (one POSIX component, embedded backslashes)
+    packs unchanged, then reads as drive-anchored or a real ``..``
+    traversal under Windows path semantics -- the same gap this module's
+    symlink-target validation already closes, reached via the member's
+    own name (Codex review, fresh evidence).
+    """
+    wpath = PureWindowsPath(arcname)
+    if wpath.drive or wpath.root:
+        raise SnapshotError(
+            f"{arcname!r} is anchored under Windows path semantics "
+            "(a drive letter or rooted path) -- refusing to pack it, "
+            "since the archive could not be safely unpacked portably"
+        )
+    if ".." in wpath.parts:
+        # Unconditional, not "does it escape the root": TarExtractor
+        # rejects any ".." component outright regardless of depth.
+        raise SnapshotError(
+            f"{arcname!r} contains a '..' component when interpreted "
+            "with Windows path separators -- refusing to pack it for "
+            "portability"
+        )
+
+
 def _add_member(
     tf: tarfile.TarFile, path: Path, arcname: str, source_dir: Path
 ) -> LibraryEntry | None:
+    _validate_portable_arcname(arcname)
     info = tf.gettarinfo(str(path), arcname=arcname)
     # Deterministic metadata: two packs of byte-identical content produce a
     # byte-identical archive, regardless of who built it or when.
@@ -510,11 +540,9 @@ def _add_member(
     info.gid = 0
     info.uname = ""
     info.gname = ""
-    # Mode too: an umask difference between two builders (0644 vs. 0664),
-    # or an unrelated permission bit, would otherwise produce two
-    # different archives from byte-identical content -- keep only the
-    # owner-executable bit, which is what actually distinguishes a
-    # program/shared library from data here.
+    # Mode too: an umask difference between two builders would otherwise
+    # produce two different archives from byte-identical content -- keep
+    # only the owner-executable bit.
     if not info.issym():
         info.mode = 0o755 if info.mode & 0o100 else 0o644
 
@@ -523,9 +551,9 @@ def _add_member(
         # An absolute (or Windows-anchored) target can't round-trip --
         # TarExtractor refuses it at unpack time. os.path.isabs() alone
         # doesn't recognize a Windows drive-absolute/UNC target on
-        # POSIX; PureWindowsPath.is_absolute() alone isn't enough either
-        # -- False for drive="", root="\\" or drive="C:", root="" -- so
-        # any nonempty drive or root is rejected (Codex review, fresh
+        # POSIX; PureWindowsPath.is_absolute() isn't enough either --
+        # False for drive="", root="\\" or drive="C:", root="" -- so any
+        # nonempty drive or root is rejected too (Codex review, fresh
         # evidence).
         wpath = PureWindowsPath(target)
         if os.path.isabs(target) or wpath.drive or wpath.root:
@@ -621,6 +649,7 @@ def _add_member(
 
 
 def _add_directory_member(tf: tarfile.TarFile, path: Path, arcname: str) -> None:
+    _validate_portable_arcname(arcname)
     info = tf.gettarinfo(str(path), arcname=arcname)
     info.mtime = 0
     info.uid = 0
@@ -670,8 +699,7 @@ def pack_product_baseline(
     """
     # Normalized to an absolute path up front: _scaffold_dirs_for_mkdir()'s
     # own containment check is a plain lexical is_relative_to() -- mixed
-    # spellings (an absolute SOURCE_DIR with a relative OUTPUT, or vice
-    # versa) would make it spuriously fail (CodeRabbit review, fresh
+    # spellings would make it spuriously fail (CodeRabbit review, fresh
     # evidence). os.path.abspath(), not .resolve() -- OUTPUT's own final
     # component must stay lexical, matching the symlinked-OUTPUT
     # exclusion logic a few lines down.
@@ -1005,18 +1033,13 @@ def unpack_product_baseline(
     *dest_dir* must not already exist, or must be empty — this never merges
     into or overwrites a directory that might already hold unrelated
     content. Extraction reuses :class:`abicheck.package.TarExtractor`'s
-    security-validated ``.tar.zst`` extraction (path traversal, symlink
-    escape, and device/FIFO rejection), the same code path package
-    extraction already relies on, rather than a second, independently
-    written unpacker.
+    security-validated ``.tar.zst`` extraction rather than a second,
+    independently written unpacker.
 
     Extracts into a staging directory first and only publishes it to
-    *dest_dir* once the manifest is confirmed present, parseable, and at a
-    supported schema version — a missing/corrupt/unsupported archive
-    raises :class:`SnapshotError` with *dest_dir* left exactly as it was
-    (still absent, or still the empty directory it started as), so a retry
-    with a corrected archive doesn't first have to clean up a partial
-    extraction by hand.
+    *dest_dir* once the manifest is confirmed present, parseable, and at
+    a supported schema version — a missing/corrupt/unsupported archive
+    raises :class:`SnapshotError` with *dest_dir* left exactly as it was.
     """
     archive_path = Path(archive)
     if not archive_path.is_file():
@@ -1382,38 +1405,24 @@ def _discover_library_map(root: Path, *, include_private: bool) -> dict[str, Pat
     to *root* (POSIX-style) rather than its bare filename.
 
     Deliberately not :func:`abicheck.bundle.discover_artifact_set`'s
-    canonical (SONAME-major-stripped) key: that function exists for the
-    one-sided ``--artifact-set`` audit case, where two real files
-    canonicalizing to the same bare name is a genuine ambiguity to
-    reject. For a *product* shipping two SONAME majors side by side,
-    that's two libraries this function must discover and compare
+    canonical (SONAME-major-stripped) key, and keyed by relative path
+    rather than bare filename: two real files/DSOs sharing a canonical
+    name or basename are two libraries a product shipping two SONAME
+    majors, or the same name in different directories, must discover
     independently (Codex review, fresh evidence).
 
-    Keyed by *relative path*, not bare filename: two distinct DSOs
-    sharing a basename in different directories (an ordinary
-    plugin-host layout) previously collided on the same dict key,
-    silently dropping one of them (Codex review, fresh evidence). A
-    relative-path key disambiguates that for free, since
-    :func:`~abicheck.bundle.build_bundle_snapshot`'s own resolution
-    graph indexes libraries by their real SONAME/on-disk filename
-    separately from this dict's own key.
-
     Format-neutral, unlike :func:`abicheck.package.discover_shared_libraries`
-    (ELF-only): matches by suffix using the same :func:`_is_shared_library`
-    predicate :func:`pack_product_baseline` uses, so a PE ``.dll`` or
-    Mach-O ``.dylib`` is discovered too (Codex review, fresh evidence).
-    Supplemented by :func:`abicheck.package._is_elf_shared_object`'s
-    content-aware ELF ``ET_DYN`` sniff for an extensionless ELF DSO.
+    (ELF-only): matches by suffix using :func:`_is_shared_library`, so a PE
+    ``.dll`` or Mach-O ``.dylib`` is discovered too, supplemented by
+    :func:`abicheck.package._is_elf_shared_object`'s content-aware ELF
+    ``ET_DYN`` sniff for an extensionless ELF DSO.
 
     A real hardlink/symlink alias pointing at the identical file is still
-    collapsed to one entry — the same ``(dev, ino)`` filesystem identity
-    :func:`~abicheck.bundle.discover_artifact_set` keys on — so a
-    conventional ``libfoo.so -> libfoo.so.1`` dev symlink doesn't
-    double-count. *include_private* is API-symmetry-only, no effect
-    here. Built from :func:`_iter_discovered_libraries`'s own raw
-    per-path walk (see that function's docstring for the walk-order and
-    dedup-visibility details) -- a caller needing every raw path, not
-    just the deduplicated survivor, should call that directly instead.
+    collapsed to one entry, by ``(dev, ino)`` identity. *include_private*
+    is API-symmetry-only, no effect here. Built from
+    :func:`_iter_discovered_libraries`'s own raw per-path walk -- a
+    caller needing every raw path, not just the deduplicated survivor,
+    should call that directly instead.
     """
     del include_private  # accepted for API symmetry only; see docstring.
 
@@ -1438,12 +1447,8 @@ def _iter_discovered_libraries(
     sorts first and survives dedup -- must iterate this directly: an
     undeclared hardlink alias sorting after a declared library's own
     symlink alias is invisible to the deduplicated map (Codex review,
-    fresh evidence).
-
-    Directory-walk order is sorted (``dirnames``/``filenames``): ``os.walk``
-    otherwise yields siblings in unspecified order, so an alias and its
-    target in different directories could vary across runs (CodeRabbit
-    review).
+    fresh evidence). Directory-walk order is sorted so results are
+    deterministic across runs (CodeRabbit review).
     """
     root_resolved = root.resolve()
     for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
@@ -1591,15 +1596,12 @@ def compare_product_directories(
     change between the two versions (Codex review, fresh evidence). This
     canonical fallback only ever pairs an *unambiguous* match — a
     canonical name shared by more than one candidate on either side stays
-    unpaired regardless of whether one of those candidates happens to
-    already be exact-matched (an exact match consuming one member of an
-    otherwise-ambiguous group must not make the *remaining* members look
-    artificially unambiguous — a product shipping parallel majors
-    old={.1,.2}/new={.2,.3} must not silently treat the unrelated .1/.3 as
-    one evolving library just because .2/.2 happened to match exactly;
-    Codex review, fresh evidence), the same ambiguity-safe-fallback
-    discipline this codebase's other identity resolvers already follow
-    (see ``finding_identity.py``'s own docstring). A library present on
+    unpaired even if an exact match already consumed one member of that
+    group (old={.1,.2}/new={.2,.3} must not treat the unrelated .1/.3 as
+    one evolving library just because .2/.2 matched exactly; Codex
+    review, fresh evidence), the same ambiguity-safe-fallback discipline
+    this codebase's other identity resolvers follow (see
+    ``finding_identity.py``'s own docstring). A library present on
     only one side even after this fallback never reaches the per-library
     pass, but bundle analysis still reports it via
     ``bundle_library_added``/``bundle_library_removed`` when a surviving
@@ -1662,11 +1664,9 @@ def compare_product_directories(
 
         `_resolved_headers` below performs the identical containment check,
         but only for roots a *matched* pair asks for -- when discovery
-        produces zero pairs that loop never runs, so an invalid root
-        (absolute, escaping, bare-string typo) was silently accepted
-        instead of raising `SnapshotError` (Codex review, fresh evidence).
-        Also catches a mapping key naming a library that never ends up
-        paired, which `_resolved_headers` can never reach either way.
+        produces zero pairs that loop never runs, so an invalid root was
+        silently accepted instead of raising `SnapshotError` (Codex
+        review, fresh evidence).
         """
         if isinstance(spec, str):
             raise SnapshotError(
