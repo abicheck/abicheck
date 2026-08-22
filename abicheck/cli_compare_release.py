@@ -1381,6 +1381,15 @@ def compare_release_cmd(
     # and hands it over here -- same internal-parameter shape as
     # pack_application above. `None` (the default) is a true no-op.
     compile_context: CompileContext | None = None,
+    # The dirs the project's `.abicheck.yml` `compile.include_dirs` appended
+    # past the caller's raw `-I` roots (the suffix of `resolve_compile_
+    # context`'s merged-includes return past its own `includes` input) --
+    # forwarded separately from `includes` itself so they survive a per-
+    # library-pair `--old-include`/`--new-include` override, which
+    # otherwise fully replaces `includes` for that side
+    # (`_prepare_compare_release_inputs`). `()` (the default) is a true
+    # no-op.
+    config_includes: tuple[Path, ...] = (),
 ) -> None:
     """Compare all libraries in two release directories or packages.
 
@@ -1517,6 +1526,7 @@ def compare_release_cmd(
                 includes,
                 old_includes_only,
                 new_includes_only,
+                config_includes,
                 _do_extract,
                 discover_shared_libraries,
                 is_package,
@@ -1805,6 +1815,7 @@ def _prepare_compare_release_inputs(
     includes: tuple[Path, ...],
     old_includes_only: tuple[Path, ...],
     new_includes_only: tuple[Path, ...],
+    config_includes: tuple[Path, ...],
     extract_if_package: Callable[
         [Path, Path | None, Path | None],
         tuple[Path, Path | None, Path | None, Path | None],
@@ -1869,8 +1880,22 @@ def _prepare_compare_release_inputs(
         old_header_dir,
         new_header_dir,
     )
-    old_inc = list(old_includes_only) if old_includes_only else list(includes)
-    new_inc = list(new_includes_only) if new_includes_only else list(includes)
+    # config_includes (the project .abicheck.yml compile.include_dirs
+    # suffix, already folded into `includes` by the caller) must survive a
+    # per-library-pair --old-include/--new-include override, which
+    # otherwise fully replaces `includes` for that side -- so it is
+    # re-appended explicitly here rather than relied on via `includes`
+    # (Codex review, fresh evidence).
+    old_inc = (
+        list(old_includes_only) + list(config_includes)
+        if old_includes_only
+        else list(includes)
+    )
+    new_inc = (
+        list(new_includes_only) + list(config_includes)
+        if new_includes_only
+        else list(includes)
+    )
     old_inc.extend(_discover_include_roots(old_header_dir))
     new_inc.extend(_discover_include_roots(new_header_dir))
     matched_keys, removed_keys, added_keys, old_map, new_map = _match_release_keys(

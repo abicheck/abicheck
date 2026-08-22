@@ -441,6 +441,77 @@ class TestIntraDepRemoved:
         assert intra_removed[0].symbol == "onedal_internal_op"
         assert intra_removed[0].consumer_library == "libalgo.so"
 
+    def test_explicit_provider_migration_still_suppressed(self) -> None:
+        """Regression (Codex review): a legitimate provider migration --
+        a symbol moved from an in-tree sibling to an explicitly allow-listed
+        external DSO -- must still be suppressed by --bundle-system-providers
+        even though a sibling *used to* provide it (the guard the previous
+        finding above added must not over-correct into vetoing every
+        allow-list match once `old` had any provider at all)."""
+        old = _snapshot(
+            {
+                "libcore.so": _meta(soname="libcore.so.1", exports=["vendor_op"]),
+                "libalgo.so": _meta(
+                    soname="libalgo.so.1",
+                    needed=["libcore.so.1"],
+                    imports=["vendor_op"],
+                ),
+            }
+        )
+        new = _snapshot(
+            {
+                "libcore.so": _meta(soname="libcore.so.1"),  # no longer exports it
+                "libalgo.so": _meta(
+                    soname="libalgo.so.1",
+                    needed=["libvendor.so.1"],  # migrated to an external DSO
+                    imports=["vendor_op"],
+                ),
+            }
+        )
+        result = compare_bundle(
+            old, new, per_library_results=[], system_providers=["libvendor.so.1"]
+        )
+        assert not any(
+            f.kind == ChangeKind.BUNDLE_INTRA_DEP_REMOVED
+            for f in result.bundle_findings
+        )
+
+    def test_explicit_provider_migration_needs_the_explicit_soname(self) -> None:
+        """The migration exception above only fires when the user actually
+        named the new provider -- a plain, unexplained soname swap to a
+        library that merely *happens* to be default-system-shaped (but was
+        never asserted by the user for this run) must still be treated as
+        a potential regression, not silently trusted."""
+        old = _snapshot(
+            {
+                "libcore.so": _meta(soname="libcore.so.1", exports=["vendor_op"]),
+                "libalgo.so": _meta(
+                    soname="libalgo.so.1",
+                    needed=["libcore.so.1"],
+                    imports=["vendor_op"],
+                ),
+            }
+        )
+        new = _snapshot(
+            {
+                "libcore.so": _meta(soname="libcore.so.1"),
+                "libalgo.so": _meta(
+                    soname="libalgo.so.1",
+                    needed=["libvendor.so.1"],
+                    imports=["vendor_op"],
+                ),
+            }
+        )
+        # No --bundle-system-providers given, and libvendor.so.1 doesn't
+        # match _looks_system -- extra_needed isn't even fully allow-listed,
+        # so this must still be reported regardless of the migration guard.
+        result = compare_bundle(old, new, per_library_results=[])
+        assert any(
+            f.kind == ChangeKind.BUNDLE_INTRA_DEP_REMOVED
+            and f.symbol == "vendor_op"
+            for f in result.bundle_findings
+        )
+
     @pytest.mark.parametrize(
         ("symbol", "version"),
         [
