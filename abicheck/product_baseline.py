@@ -1633,9 +1633,19 @@ def compare_product_directories(
     # compare_bundle() never analyzed old_path under its bare name to
     # begin with, and forcing it into the map now would misrepresent what
     # was actually compared (the same collapse-survivor discipline
-    # `_is_bundle_collapse_survivor` below already applies).
-    for old_key, old_path, new_key, new_path in pairs:
+    # `_is_bundle_collapse_survivor` below already applies). Separately,
+    # the destination slot (new_path.name) must not already be occupied by
+    # a *different* old-side library: old shipping both `a/libfoo.so`
+    # (paired canonically to new `libfoo.so.1`) and an unrelated, distinct
+    # `b/libfoo.so.1` would otherwise have the rekey silently evict
+    # `b/libfoo.so.1` from old_bundle_map/old_snapshot entirely, rather
+    # than merely leaving the paired library under its own bare name
+    # (CodeRabbit review, fresh evidence).
+    for _old_key, old_path, _new_key, new_path in pairs:
         if old_path.name == new_path.name:
+            continue
+        occupant = old_bundle_map.get(new_path.name)
+        if occupant is not None and occupant is not old_path:
             continue
         if old_bundle_map.get(old_path.name) is old_path:
             del old_bundle_map[old_path.name]

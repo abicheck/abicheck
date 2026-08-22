@@ -891,6 +891,99 @@ class TestCompareProductDirectoriesBundleMapAliasNormalization:
         assert old_call["libfoo.so.1"] == old_path
         assert new_call["libfoo.so.1"] == new_path
 
+    def test_rekey_does_not_evict_an_unrelated_occupant_of_the_target_name(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # A canonically-paired library's rekey target (the new side's bare
+        # filename) can already be occupied in old_bundle_map by a
+        # *different*, unrelated old-side library -- rekeying onto it would
+        # silently evict that occupant from old_snapshot entirely
+        # (CodeRabbit review, fresh evidence). This is reachable despite
+        # _canonical_groups' own ambiguity gate (which normally blocks two
+        # same-canonical-family old-side entries from ever being paired at
+        # all) because the occupant here reaches the *same final bare
+        # name* through a genuinely *different* canonical family:
+        # old/a/libfoo.so canonically pairs with new/c/libfoo.so.1 under
+        # the ELF ".so"-family key "libfoo.so", while old/b/libfoo.so.1 is
+        # a real PE image (oddly named without a .dll extension) whose own
+        # canonical key is the PE-content-derived "libfoo.so.1" -- a
+        # separate bucket old_canonical never treats as ambiguous with
+        # "libfoo.so", yet whose *bare filename* is exactly the pairing's
+        # rekey target.
+        from abicheck import bundle as bundle_mod, product_baseline as pb
+        from abicheck.product_baseline import compare_product_directories
+
+        old_dir = tmp_path / "old"
+        new_dir = tmp_path / "new"
+        old_dir.mkdir()
+        new_dir.mkdir()
+
+        (old_dir / "a").mkdir()
+        (old_dir / "b").mkdir()
+        (new_dir / "c").mkdir()
+
+        old_a = old_dir / "a" / "libfoo.so"
+        old_a.write_bytes(b"not-real-elf")
+
+        # Real PE content (MZ + PE\0\0 + COFF header with IMAGE_FILE_DLL
+        # set) so _pe_is_dll_content recognizes it despite the ".so.1"
+        # name -- this is what puts it in its own canonical bucket.
+        dos_header = bytearray(64)
+        dos_header[0:2] = b"MZ"
+        struct.pack_into("<I", dos_header, 0x3C, 64)
+        coff_header = struct.pack("<HHIIIHH", 0x8664, 0, 0, 0, 0, 0, 0x2000)
+        pe_bytes = bytes(dos_header) + b"PE\x00\x00" + coff_header
+        old_b = old_dir / "b" / "libfoo.so.1"
+        old_b.write_bytes(pe_bytes)
+
+        new_c = new_dir / "c" / "libfoo.so.1"
+        new_c.write_bytes(b"not-real-elf-either")
+
+        def _fake_discover_library_map(root, *, include_private):  # type: ignore[no-untyped-def]
+            if Path(root) == old_dir:
+                return {"a/libfoo.so": old_a, "b/libfoo.so.1": old_b}
+            return {"c/libfoo.so.1": new_c}
+
+        monkeypatch.setattr(pb, "_discover_library_map", _fake_discover_library_map)
+
+        class _FakeDiffResult:
+            def __init__(self, library: str) -> None:
+                self.library = library
+
+        class _FakeResult:
+            def __init__(self, library: str) -> None:
+                self.diff = _FakeDiffResult(library)
+
+        def _fake_run_compare(old_lib, new_lib, **kwargs):  # type: ignore[no-untyped-def]
+            return _FakeResult(Path(old_lib).name)
+
+        build_calls: list[dict[str, object]] = []
+
+        def _fake_build_bundle_snapshot(libraries):  # type: ignore[no-untyped-def]
+            build_calls.append(dict(libraries))
+            return {"libraries": dict(libraries)}
+
+        def _fake_compare_bundle(old, new, per_library_results, **kwargs):  # type: ignore[no-untyped-def]
+            return type("R", (), {"bundle_findings": []})()
+
+        from abicheck import service_compare_pipeline as scp
+
+        monkeypatch.setattr(scp, "run_compare", _fake_run_compare)
+        monkeypatch.setattr(
+            bundle_mod, "build_bundle_snapshot", _fake_build_bundle_snapshot
+        )
+        monkeypatch.setattr(bundle_mod, "compare_bundle", _fake_compare_bundle)
+
+        compare_product_directories(old_dir, new_dir)
+
+        assert len(build_calls) == 2
+        old_call, _new_call = build_calls
+        # The rekey is skipped (target already occupied), so old/a/libfoo.so
+        # stays under its own bare name -- AND the unrelated PE occupant
+        # under "libfoo.so.1" survives untouched.
+        assert old_call.get("libfoo.so") == old_a
+        assert old_call.get("libfoo.so.1") == old_b
+
 
 class TestCompareProductDirectoriesStandaloneAddition:
     def test_reports_a_non_elf_library_addition(self, tmp_path: Path) -> None:
