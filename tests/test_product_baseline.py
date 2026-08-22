@@ -570,6 +570,18 @@ class TestPackProductBaseline:
         with pytest.raises(SnapshotError, match="absolute target"):
             pack_product_baseline(product, tmp_path / "b.tar.zst")
 
+    def test_pack_rejects_a_self_referential_symlink_loop(self, tmp_path: Path) -> None:
+        # A self-referential symlink (loop.so -> loop.so) made
+        # _add_member()'s own direct Path.resolve() raise RuntimeError,
+        # which only its sibling `except ValueError` (target-escape) path
+        # caught -- the raw exception escaped pack_product_baseline()
+        # instead of the documented SnapshotError contract (Codex review,
+        # fresh evidence).
+        product = _make_product(tmp_path)
+        (product / "lib" / "loop.so").symlink_to("loop.so")
+        with pytest.raises(SnapshotError, match="symlink loop"):
+            pack_product_baseline(product, tmp_path / "b.tar.zst")
+
     def test_pack_preserves_hardlinked_duplicate_content(self, tmp_path: Path) -> None:
         # gettarinfo() converts a second path sharing an inode with an
         # already-archived one into a hardlink (LNKTYPE) member -- which

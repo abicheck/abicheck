@@ -256,6 +256,33 @@ class TestCompareProductDirectoriesCanonicalFallbackAndPolicy:
             ),
         }
 
+    def test_canonical_fallback_still_pairs_across_a_directory_move(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # A single library that moves directories between releases
+        # (lib/provider.so -> lib64/provider.so), version bump included,
+        # has no shared directory for a directory-scoped-only pass to key
+        # on at all -- restricting the canonical fallback to that pass
+        # alone regressed this case entirely, silently reporting an
+        # unchanged library as a removal plus addition (Codex review,
+        # fresh evidence: found by re-reviewing the directory-scoping fix
+        # itself).
+        from abicheck.product_baseline import compare_product_directories
+
+        old_dir = tmp_path / "old"
+        new_dir = tmp_path / "new"
+        (old_dir / "lib").mkdir(parents=True)
+        (new_dir / "lib64").mkdir(parents=True)
+        (old_dir / "lib" / "libfoo.so.1").write_bytes(b"OLD")
+        (new_dir / "lib64" / "libfoo.so.2").write_bytes(b"NEW")
+
+        run_compare_calls, _ = self._capture_calls(monkeypatch)
+        compare_product_directories(old_dir, new_dir)
+
+        assert len(run_compare_calls) == 1
+        assert run_compare_calls[0]["old"] == old_dir / "lib" / "libfoo.so.1"
+        assert run_compare_calls[0]["new"] == new_dir / "lib64" / "libfoo.so.2"
+
     def test_exact_path_match_is_not_reconsidered_by_the_canonical_fallback(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -1401,6 +1428,26 @@ class TestDiscoverLibraryMapSymlinkContainment:
         # here) -- "a_real" sorts first.
         result = _discover_library_map(root, include_private=True)
         assert set(result) == {"a_real/libfoo.so"}
+
+    def test_self_referential_symlink_loop_does_not_raise(self, tmp_path: Path) -> None:
+        # A library-shaped self-referential symlink (loop.so -> loop.so)
+        # made Path.resolve() raise RuntimeError, which the containment
+        # check's own `except OSError` did not catch -- the raw exception
+        # escaped _discover_library_map(), and therefore
+        # compare_product_directories(), instead of the loop being
+        # treated the same as any other unresolvable path (Codex review,
+        # fresh evidence).
+        from abicheck.product_baseline import _discover_library_map
+
+        root = tmp_path / "product"
+        (root / "lib").mkdir(parents=True)
+        (root / "lib" / "loop.so").symlink_to("loop.so")
+
+        # Doesn't raise -- the loop is discovered (its own unresolved
+        # symlink path stands in for the unresolvable target) rather than
+        # aborting the whole walk.
+        result = _discover_library_map(root, include_private=True)
+        assert set(result) == {"lib/loop.so"}
 
 
 class TestDiscoverLibraryMapDeterministicWalkOrder:

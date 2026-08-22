@@ -217,26 +217,17 @@ def _is_library_path(path: Path) -> bool:
     The ELF content fallback (:func:`~abicheck.package._is_elf_shared_object`)
     had no Mach-O/PE counterpart, so a macOS framework binary
     (``Foo.framework/Foo``, conventionally extensionless) or a Windows
-    ``.pyd`` extension module never entered either library map even though
-    both are real, supported native-binary formats — a framework-only
-    product silently compared as if it shipped no libraries at all (Codex
+    ``.pyd`` extension module never entered either library map (Codex
     review, fresh evidence). :func:`_macho_is_library_content`/
-    :func:`_pe_is_dll_content` close that for both thin and fat
-    (universal) Mach-O and for any PE image respectively.
+    :func:`_pe_is_dll_content` close that for both.
 
-    A ``.debug`` split-debug sidecar (the conventional
-    ``objcopy --only-keep-debug`` output, e.g. ``libfoo.so.1.debug``) is
-    excluded outright, ahead of every content check: it is itself a valid
-    ELF file that retains its original binary's ``ET_DYN`` header (objcopy
-    strips sections/symbols, not the header), so the content-aware ELF
-    fallback above would otherwise discover it as a second, independent
-    "library" alongside the real DSO it was split from. A release that
-    merely omits or relocates the sidecar then read as a breaking removal
-    of a library that, from the shipped DSO's own perspective, never
-    changed at all (Codex review, fresh evidence). ``_is_shared_library``
-    already excludes this filename from the suffix check (``_VERSIONED_
-    SONAME`` requires every post-``.so`` segment to be purely numeric, and
-    ``debug`` is not) — this guard closes the identical gap for the
+    A ``.debug`` split-debug sidecar (``objcopy --only-keep-debug``
+    output, e.g. ``libfoo.so.1.debug``) is excluded outright, ahead of
+    every content check: it retains its original binary's ``ET_DYN``
+    header, so the ELF fallback above would otherwise discover it as a
+    second, independent "library" (Codex review, fresh evidence).
+    ``_is_shared_library`` already excludes this filename from the
+    suffix check; this guard closes the identical gap for the
     content-based fallbacks, which have no notion of filename at all.
     """
     if path.name.lower().endswith(".debug"):
@@ -540,6 +531,15 @@ def _add_member(
             raise SnapshotError(
                 f"symlink {arcname!r} targets {target!r}, which escapes "
                 f"{source_dir} — refusing to pack it"
+            ) from exc
+        except RuntimeError as exc:
+            # A self-referential symlink loop (loop.so -> loop.so) makes
+            # Path.resolve() raise RuntimeError, not ValueError -- there
+            # is no real file to archive content for (Codex review,
+            # fresh evidence).
+            raise SnapshotError(
+                f"symlink {arcname!r} targets {target!r}, which forms a "
+                "symlink loop — refusing to pack it"
             ) from exc
         tf.addfile(info)
         return None
@@ -1386,65 +1386,39 @@ def _discover_library_map(root: Path, *, include_private: bool) -> dict[str, Pat
     Deliberately not :func:`abicheck.bundle.discover_artifact_set`'s
     canonical (SONAME-major-stripped) key: that function exists for the
     one-sided ``--artifact-set`` audit case, where two real files
-    canonicalizing to the same bare name (``libfoo.so.1``/``libfoo.so.2``
-    both reducing to ``libfoo.so``) is treated as a genuine ambiguity and
-    rejected outright. For a *product* that intentionally ships two
-    SONAME majors side by side, that's not an ambiguity to reject — it's
-    two libraries this function must discover and compare independently
-    (Codex review, fresh evidence: a product with parallel majors
-    couldn't be compared via :func:`compare_product_directories` at all).
+    canonicalizing to the same bare name is a genuine ambiguity to
+    reject. For a *product* shipping two SONAME majors side by side,
+    that's two libraries this function must discover and compare
+    independently (Codex review, fresh evidence).
 
-    Keyed by *relative path*, not bare filename: two distinct DSOs sharing
-    a basename in different directories (``plugins/a/plugin.so`` and
-    ``plugins/b/plugin.so`` — an ordinary plugin-host layout) previously
-    collided on the same dict key, silently dropping one of them from
-    both the per-library comparison and either bundle snapshot (Codex
-    review, fresh evidence). A relative-path key disambiguates that case
-    for free while leaving the common case (one library per basename)
-    unaffected, since :func:`~abicheck.bundle.build_bundle_snapshot`'s own
-    resolution graph indexes libraries by their real SONAME/on-disk
-    filename separately from this dict's own key.
+    Keyed by *relative path*, not bare filename: two distinct DSOs
+    sharing a basename in different directories (an ordinary
+    plugin-host layout) previously collided on the same dict key,
+    silently dropping one of them (Codex review, fresh evidence). A
+    relative-path key disambiguates that for free, since
+    :func:`~abicheck.bundle.build_bundle_snapshot`'s own resolution
+    graph indexes libraries by their real SONAME/on-disk filename
+    separately from this dict's own key.
 
     Format-neutral, unlike :func:`abicheck.package.discover_shared_libraries`
-    (ELF-only): this walks the tree directly and matches by suffix using the
-    same :func:`_is_shared_library` predicate :func:`pack_product_baseline`
-    already uses to classify a :class:`LibraryEntry` — so a PE ``.dll`` or
-    Mach-O ``.dylib`` a product baseline archive genuinely carries is
-    discovered here too, not silently invisible to every comparison this
-    function drives (Codex review, fresh evidence: a Windows/macOS product
-    baseline compared as empty/no-change with no per-library comparisons
-    ever run, despite packing recognizing and archiving those files). The
-    suffix check is supplemented, not replaced, by
-    :func:`abicheck.package._is_elf_shared_object`'s content-aware ELF
-    ``ET_DYN`` sniff: an extensionless ELF DSO (a plugin named without a
-    conventional ``.so`` suffix, real on Linux) previously dropped out of
-    both the per-library and bundle-level comparison entirely — two changed
-    products silently comparing as ``NO_CHANGE`` — since a filename-only
-    check has no way to recognize it (Codex review, fresh evidence). The DLL/
-    Mach-O suffix checks are unaffected; only the ELF side gains the
-    content-aware fallback, matching what
-    :func:`abicheck.package.discover_shared_libraries` already does for its
-    own ELF-only walk.
+    (ELF-only): matches by suffix using the same :func:`_is_shared_library`
+    predicate :func:`pack_product_baseline` uses, so a PE ``.dll`` or
+    Mach-O ``.dylib`` is discovered too (Codex review, fresh evidence).
+    Supplemented by :func:`abicheck.package._is_elf_shared_object`'s
+    content-aware ELF ``ET_DYN`` sniff for an extensionless ELF DSO.
 
     A real hardlink/symlink alias pointing at the identical file is still
-    collapsed to one entry — using the same ``(dev, ino)`` filesystem
-    identity :func:`~abicheck.bundle.discover_artifact_set` keys on — so a
+    collapsed to one entry — the same ``(dev, ino)`` filesystem identity
+    :func:`~abicheck.bundle.discover_artifact_set` keys on — so a
     conventional ``libfoo.so -> libfoo.so.1`` dev symlink doesn't
-    double-count as two separate libraries. *include_private* is accepted
-    for API symmetry with the ELF-only discovery it replaces, but has no
-    effect here: every discovered file already carries a recognizable
-    library suffix or a recognized ELF ``ET_DYN`` header, so there is no
-    "real DSO with an unconventional name at a conventional path" case left
-    for a public/private directory split to disambiguate.
+    double-count. *include_private* is API-symmetry-only, no effect here.
 
-    The directory-walk order is sorted (both ``dirnames`` and ``filenames``,
-    in place), not just the filenames within one directory: ``os.walk``
-    otherwise yields sibling directories in filesystem order, which is
-    unspecified — if a symlink alias and its target live in different
-    directories, the surviving representative for their shared identity
-    depended on which directory the walk reached first, so two runs over the
-    identical tree could produce different ``library_map`` keys (CodeRabbit
-    review).
+    The directory-walk order is sorted (both ``dirnames`` and
+    ``filenames``, in place), not just filenames within one directory:
+    ``os.walk`` otherwise yields sibling directories in unspecified
+    filesystem order, so a symlink alias and its target in different
+    directories could produce different ``library_map`` keys across two
+    runs over the identical tree (CodeRabbit review).
     """
     del include_private  # accepted for API symmetry only; see docstring.
 
@@ -1477,7 +1451,11 @@ def _discover_library_map(root: Path, *, include_private: bool) -> dict[str, Pat
             # `LibraryEntry` even though this walk already excluded it).
             try:
                 real = path.resolve()
-            except OSError:
+            except (OSError, RuntimeError):
+                # RuntimeError alongside OSError: a self-referential
+                # symlink loop makes Path.resolve() raise RuntimeError,
+                # treated the same as any other unresolvable path (Codex
+                # review, fresh evidence).
                 real = path
             else:
                 # A library-shaped symlink (os.walk(followlinks=False)
@@ -1760,38 +1738,60 @@ def compare_product_directories(
     ]
 
     # Canonical (SONAME-major-stripped) fallback for the libraries exact
-    # matching left unpaired -- keyed by (relative directory, canonical
-    # name), dropped entirely once a second contributor appears anywhere
-    # in that *same directory's* per-side discovery. Directory-scoped
-    # rather than a bare global canonical key: two independent libraries
-    # sharing a basename in different directories (plugins/a/libfoo.so.1,
-    # plugins/b/libfoo.so.1) that each bump their SONAME major used to
-    # land in one shared, cross-directory bucket -- ambiguous on both
-    # sides, so neither pair was ever compared even though each pairing
-    # is unambiguous once directory is considered (Codex review, fresh
-    # evidence). The discovery key is already a relative path.
+    # matching left unpaired -- two ambiguity-safe passes, each grouping
+    # the *complete* per-side discovery (not just what's still unpaired),
+    # so an exact match or pass 1 consuming one member of an ambiguous
+    # group never makes the remaining members look artificially
+    # unambiguous.
+    #
+    # Pass 1 is directory-scoped (relative directory, canonical name):
+    # two independent libraries sharing a basename in different
+    # directories (plugins/a/libfoo.so.1, plugins/b/libfoo.so.1) that
+    # each bump their own SONAME major must not land in one shared,
+    # cross-directory bucket -- ambiguous on both sides, silently
+    # leaving both pairs uncompared (Codex review, fresh evidence).
+    #
+    # Pass 2 is a bare, global fallback (no directory) over whatever
+    # pass 1 left unpaired: a library that moves directories between
+    # releases (lib/provider.so -> lib64/provider.so), version bump
+    # included, has no shared directory for pass 1 to key on at all --
+    # restricting the fallback to pass 1 alone silently stopped pairing
+    # that case (Codex review, fresh evidence). A group pass 1 rejected
+    # for having >1 member in one directory can still be unambiguous
+    # globally once every directory's candidates are counted together.
     def _canonical_groups(
-        discovered: dict[str, Path],
+        discovered: dict[str, Path], *, scope_by_directory: bool
     ) -> dict[tuple[str, str], list[str]]:
         groups: dict[tuple[str, str], list[str]] = {}
         for key, path in discovered.items():
-            rel_dir = key.rsplit("/", 1)[0] if "/" in key else ""
+            rel_dir = (
+                (key.rsplit("/", 1)[0] if "/" in key else "")
+                if scope_by_directory
+                else ""
+            )
             groups.setdefault((rel_dir, _canonical_library_key(path)), []).append(key)
         return groups
 
-    old_canonical = _canonical_groups(old_map)
-    new_canonical = _canonical_groups(new_map)
     already_paired_old = {k for k, _, _, _ in pairs}
     already_paired_new = {k for _, _, k, _ in pairs}
-    for canonical_key in sorted(set(old_canonical) & set(new_canonical)):
-        old_candidates = old_canonical[canonical_key]
-        new_candidates = new_canonical[canonical_key]
-        if len(old_candidates) != 1 or len(new_candidates) != 1:
-            continue
-        old_key, new_key = old_candidates[0], new_candidates[0]
-        if old_key in already_paired_old or new_key in already_paired_new:
-            continue  # already covered by an exact match
-        pairs.append((old_key, old_map[old_key], new_key, new_map[new_key]))
+    for scope_by_directory in (True, False):
+        old_canonical = _canonical_groups(
+            old_map, scope_by_directory=scope_by_directory
+        )
+        new_canonical = _canonical_groups(
+            new_map, scope_by_directory=scope_by_directory
+        )
+        for canonical_key in sorted(set(old_canonical) & set(new_canonical)):
+            old_candidates = old_canonical[canonical_key]
+            new_candidates = new_canonical[canonical_key]
+            if len(old_candidates) != 1 or len(new_candidates) != 1:
+                continue
+            old_key, new_key = old_candidates[0], new_candidates[0]
+            if old_key in already_paired_old or new_key in already_paired_new:
+                continue  # already covered by an earlier, more specific pass
+            pairs.append((old_key, old_map[old_key], new_key, new_map[new_key]))
+            already_paired_old.add(old_key)
+            already_paired_new.add(new_key)
 
     per_library_results = []
     for old_key, old_path, new_key, new_path in pairs:
