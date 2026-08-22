@@ -222,14 +222,11 @@ class TestPackProductBaseline:
     def test_pack_records_extensionless_elf_library_in_the_manifest(
         self, tmp_path: Path
     ) -> None:
-        # _add_member's own manifest-entry classification previously used
-        # the filename-only _is_shared_library check, not the content-aware
-        # ELF sniff _discover_library_map now uses -- a valid extensionless
-        # ELF DSO (a plugin named without a conventional .so suffix, real
-        # on Linux) was archived (_discover_paths archives every regular
-        # file regardless of suffix) but produced no LibraryEntry, so the
-        # returned manifest falsely reported the product had no such
-        # library (Codex review, fresh evidence).
+        # _add_member's manifest-entry classification previously used the
+        # filename-only _is_shared_library check, not the content-aware
+        # ELF sniff -- a valid extensionless ELF DSO was archived but got
+        # no LibraryEntry, so the manifest falsely reported no such
+        # library (Codex review).
         from tests.test_package import _make_minimal_elf_so
 
         product = _make_product(tmp_path)
@@ -465,14 +462,11 @@ class TestPackProductBaseline:
         assert "libb.so" not in {lib.name for lib in manifest.libraries}
 
     def test_pack_rejects_a_bare_string_header_roots(self, tmp_path: Path) -> None:
-        # header_roots="include" -- a natural typo for the intended
-        # ["include"] -- satisfies the declared Sequence[str] annotation
-        # (a str is a sequence of its own characters), so it iterated
-        # character-by-character: 'i', 'n', 'c', 'l', 'u', 'd', 'e', each
-        # checked as its own "header root". compare_product_directories()'s
-        # own _roots_for_library already rejects this same shape on the
-        # comparison side, but that guard didn't cover this, the packing
-        # entry point (Codex review, fresh evidence).
+        # header_roots="include" -- a typo for ["include"] -- satisfies
+        # Sequence[str] (a str is a sequence of its own chars), so it
+        # iterated character-by-character. compare_product_directories()'s
+        # own _roots_for_library rejects this shape on the comparison
+        # side, but not the packing entry point (Codex review).
         product = _make_product(tmp_path)
         (product / "include").mkdir(exist_ok=True)
         with pytest.raises(SnapshotError, match="bare string"):
@@ -545,13 +539,10 @@ class TestPackProductBaseline:
         self, tmp_path: Path
     ) -> None:
         # os.path.isabs() alone is host-dependent -- on POSIX it doesn't
-        # recognize a Windows drive-absolute target as absolute at all,
-        # so packing accepted it (the POSIX containment check also treats
-        # the backslashes as an ordinary, in-tree filename) even though
+        # recognize a Windows drive-absolute target as absolute (the
+        # backslashes read as an ordinary in-tree filename), even though
         # the same string really is absolute on Windows, where
-        # TarExtractor correctly refuses it at unpack time -- an archive
-        # this function documents as "packed portably" that cannot
-        # actually be unpacked on Windows (Codex review, fresh evidence).
+        # TarExtractor correctly refuses it at unpack time (Codex review).
         product = _make_product(tmp_path)
         (product / "lib" / "windows-abs.so").symlink_to("C:\\outside\\foo.dll")
         with pytest.raises(SnapshotError, match="absolute target"):
@@ -704,6 +695,35 @@ class TestPackProductBaseline:
         with pytest.raises(SnapshotError, match="symlink loop"):
             pack_product_baseline(product, tmp_path / "b.tar.zst")
 
+    def test_pack_records_a_standalone_library_shaped_symlink(
+        self, tmp_path: Path
+    ) -> None:
+        # A library-shaped symlink whose real target isn't itself
+        # library-shaped (ordinary data) was always omitted from the
+        # manifest -- unlike a symlink aliasing another declared
+        # library, there's no other entry for unpack's identity check
+        # to match, so it couldn't round-trip (Codex review, fresh evidence).
+        product = _make_product(tmp_path)
+        (product / "lib" / "payload").write_bytes(b"not a library, just data")
+        (product / "lib" / "libfoo.so").symlink_to("payload")
+
+        archive = tmp_path / "baseline.tar.zst"
+        manifest = pack_product_baseline(product, archive)
+        by_path = {lib.path: lib for lib in manifest.libraries}
+        assert "lib/libfoo.so" in by_path
+        assert by_path["lib/libfoo.so"].size == len(b"not a library, just data")
+
+        # liba.so -> liba.so.1.2.3 (from _make_product()) is the ordinary
+        # case and must NOT gain a redundant entry -- its target is already
+        # independently declared.
+        assert "lib/liba.so" not in by_path
+
+        dest = tmp_path / "unpacked"
+        unpack_product_baseline(archive, dest)
+        restored = dest / "lib" / "libfoo.so"
+        assert restored.is_symlink()
+        assert restored.read_bytes() == b"not a library, just data"
+
     def test_pack_preserves_hardlinked_duplicate_content(self, tmp_path: Path) -> None:
         # gettarinfo() converts a second path sharing an inode with an
         # already-archived one into a hardlink (LNKTYPE) member -- which
@@ -791,13 +811,11 @@ class TestPackProductBaseline:
         self, tmp_path: Path
     ) -> None:
         # A directory at the reserved path containing only empty
-        # subdirectories (MANIFEST_MEMBER_NAME/sub/, itself empty) is
-        # absent from `paths` (no files anywhere under it) AND isn't
-        # itself in `empty_dirs` (it has a subdirectory, so it isn't a
-        # leaf) -- only its nested empty leaf is, matched by the reserved
-        # name as a *prefix*, not an exact match. The exact-match-only
-        # empty_dirs check missed this shape entirely (CodeRabbit review,
-        # fresh evidence).
+        # subdirectories (MANIFEST_MEMBER_NAME/sub/) is absent from
+        # `paths` and isn't itself in `empty_dirs` either (it has a
+        # subdirectory) -- only its nested empty leaf is, matched by
+        # prefix not exact match, which the exact-match-only check
+        # missed (CodeRabbit review).
         product = _make_product(tmp_path)
         (product / MANIFEST_MEMBER_NAME / "sub").mkdir(parents=True)
         with pytest.raises(SnapshotError, match="reserved product baseline manifest"):
@@ -864,15 +882,11 @@ class TestPackProductBaseline:
     def test_pack_into_not_yet_existing_subdirectory_is_deterministic_across_reruns(
         self, tmp_path: Path
     ) -> None:
-        # OUTPUT under a not-yet-existing subdirectory of SOURCE_DIR
-        # (SOURCE_DIR/artifacts/base.tar.zst): creating that directory
-        # only after discovery meant the first pack never saw
-        # `artifacts/` at all, while a second pack -- run after mkdir
-        # already created it -- discovered it as an empty directory
-        # (its only file, OUTPUT itself, excluded) and added an explicit
-        # directory member, changing file_count and archive bytes between
-        # two runs of the identical invocation (Codex review, fresh
-        # evidence).
+        # OUTPUT under a not-yet-existing SOURCE_DIR subdirectory: creating
+        # that directory only after discovery meant the first pack never
+        # saw it, while a second (post-mkdir) pack discovered it as an
+        # empty dir and added a member -- changing file_count/bytes
+        # between two runs of the identical invocation (Codex review).
         product = _make_product(tmp_path)
         out = product / "artifacts" / "base.tar.zst"
         manifest1 = pack_product_baseline(product, out)
@@ -916,14 +930,11 @@ class TestPackProductBaseline:
     def test_pack_rejects_header_root_matching_the_output_scaffold_directory(
         self, tmp_path: Path
     ) -> None:
-        # output=SOURCE/newheaders/base.tar.zst with
-        # header_roots=["newheaders"] naming a directory that does not
-        # exist in the product at all: the output-parent scaffold
-        # mkdir() would fabricate an empty `newheaders/` directory that
-        # then wrongly passed header-root validation, since validation
-        # ran *after* the mkdir -- silently persisting an empty,
-        # fabricated header tree the product never actually had (Codex
-        # review, fresh evidence).
+        # output=SOURCE/newheaders/base.tar.zst with a header root
+        # naming a directory that doesn't exist: the output-parent
+        # scaffold mkdir() fabricated an empty `newheaders/` that then
+        # wrongly passed header-root validation, since validation ran
+        # *after* the mkdir (Codex review).
         product = _make_product(tmp_path)
         out = product / "newheaders" / "base.tar.zst"
         with pytest.raises(SnapshotError, match="header root"):
@@ -935,14 +946,12 @@ class TestPackProductBaseline:
     def test_pack_cleans_up_scaffold_after_manifest_collision_rejection(
         self, tmp_path: Path
     ) -> None:
-        # The scaffold-cleanup fix above was originally wired into only the
-        # empty-source rejection -- a *different* rejection reached after
-        # the same mkdir() (a real source entry colliding with the reserved
-        # manifest member name) left the identical scaffold directory
-        # behind, since only that one call site cleaned up (Codex review,
-        # fresh evidence). A retry after removing the colliding entry must
-        # succeed rather than seeing the leftover scaffold as pre-existing,
-        # real content.
+        # The scaffold-cleanup fix was originally wired into only the
+        # empty-source rejection -- a *different* rejection (a real
+        # source entry colliding with the reserved manifest name) left
+        # the identical scaffold dir behind, since only that call site
+        # cleaned up (Codex review). A retry must succeed, not see the
+        # leftover scaffold as pre-existing real content.
         from abicheck.product_baseline import MANIFEST_MEMBER_NAME
 
         product = _make_product(tmp_path)
@@ -1241,14 +1250,11 @@ class TestUnpackProductBaseline:
         self, tmp_path: Path
     ) -> None:
         # The path-based hardlink check above compared against
-        # _discover_library_map()'s own deduplicated map -- but a symlink
-        # alias sharing the same identity as the declared library, sorted
-        # before an undeclared hardlink alias, survives that map's dedup
-        # as the sole representative for the shared identity, making the
-        # undeclared hardlink invisible to a check that only sees the
-        # deduplicated result (Codex review, fresh evidence: reproduced
-        # with a real symlink 'a.so' sorting before hardlink 'b.so',
-        # both aliasing declared 'z.so').
+        # _discover_library_map()'s deduplicated map -- a symlink alias
+        # sharing identity with the declared library, sorted before an
+        # undeclared hardlink alias, survives that dedup as the sole
+        # representative, hiding the undeclared hardlink (Codex review:
+        # symlink 'a.so' sorting before hardlink 'b.so', both aliasing 'z.so').
         product = _make_product(tmp_path)
         target = product / "lib" / "z.so"
         target.write_bytes(b"ELF-CONTENT")
@@ -1611,13 +1617,10 @@ class TestUnpackProductBaseline:
         self, tmp_path: Path
     ) -> None:
         # A caller may pre-create DEST_DIR with deliberate, non-default
-        # permissions (a private 0700 scratch dir, a shared 0775 group
-        # directory) before unpacking into it. Publication replaces
-        # DEST_DIR outright (rmdir + rename staging into place), and
-        # staging's own mode was previously always re-derived from the
-        # process umask regardless -- silently making a private
-        # directory world-traversable, or a shared one lose its group
-        # bit, the moment unpack ran (Codex review, fresh evidence).
+        # permissions before unpacking into it. Publication replaces
+        # DEST_DIR outright, and staging's mode was previously always
+        # re-derived from the process umask regardless -- silently
+        # widening or narrowing it the moment unpack ran (Codex review).
         product = _make_product(tmp_path)
         archive = tmp_path / "baseline.tar.zst"
         pack_product_baseline(product, archive)
@@ -1948,12 +1951,9 @@ class TestDiscoverLibraryMap:
     def test_discovers_dll_and_dylib_not_just_elf_so(self, tmp_path: Path) -> None:
         # _discover_library_map previously delegated to
         # package.discover_shared_libraries(), which only recognizes real
-        # ELF shared objects via a magic-byte sniff -- a Windows/macOS
-        # product's .dll/.dylib files were silently invisible to
-        # compare_product_directories() despite pack_product_baseline()
-        # itself already classifying them as libraries via the same
-        # suffix-based _is_shared_library() predicate (Codex review, fresh
-        # evidence).
+        # ELF via magic-byte sniff -- a Windows/macOS .dll/.dylib was
+        # invisible to compare_product_directories() despite
+        # pack_product_baseline() already classifying it (Codex review).
         from abicheck.product_baseline import _discover_library_map
 
         root = tmp_path / "product"

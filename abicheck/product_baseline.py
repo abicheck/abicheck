@@ -15,38 +15,31 @@
 
 """Product baseline archive — one file for a whole multi-library product.
 
-Per-library ``dump`` snapshots (``.json.zst``) do not scale to a product
-shipping several interdependent shared libraries: they must be produced and
-stored one per library (three libraries, three release assets), and — the
-part that actually matters — ``scan --against <snapshot>`` compares exactly
-one library against exactly one snapshot, so cross-DSO ABI breakage (a
-symbol one library imports from a sibling library disappearing) is
-structurally invisible to it: no single per-library invocation ever sees
-both sides of that dependency edge. :mod:`abicheck.bundle` (ADR-023) is
-built for precisely this — but it needs *binaries* on both sides (it reads
-``DT_NEEDED``/``.gnu.version_r``/``.gnu.version_d`` straight from the ELF
-files), so a bundle-aware comparison against a stored baseline needs the old
-side's binaries available on disk, not a header/DWARF-derived snapshot.
+Per-library ``dump`` snapshots (``.json.zst``) do not scale to a product shipping
+several interdependent shared libraries: one release asset per library, and --
+the part that actually matters -- ``scan --against <snapshot>`` compares exactly
+one library against exactly one snapshot, so cross-DSO ABI breakage (a symbol one
+library imports from a sibling library disappearing) is structurally invisible to
+it. :mod:`abicheck.bundle` (ADR-023) is built for precisely this -- but it needs
+*binaries* on both sides (it reads ``DT_NEEDED``/``.gnu.version_r``/``.gnu.version_d``
+straight from the ELF files), so a bundle-aware comparison against a stored
+baseline needs the old side's binaries on disk, not a header/DWARF-derived snapshot.
 
-This module is the storage format for that: :func:`pack_product_baseline`
-archives an entire product directory (every shared library plus whatever
-else ships alongside it — debug info, headers) into one deterministic
-``.tar.zst`` file, with a small JSON manifest (:class:`ProductBaselineManifest`)
-recording which archived files are libraries and which relative directories
-hold the product's public headers. :func:`unpack_product_baseline` reverses
-it, reproducing a directory that ``abicheck compare``'s directory-mode
-operand (bundle analysis, ADR-023, on by default there) can run against
-directly — covering every library, and every cross-library edge between
-them, in one invocation instead of one per library.
-
-This is a storage/transport format only: :func:`pack_product_baseline`/
-:func:`unpack_product_baseline` pack and unpack a directory tree, nothing
-more — library-only surface, no CLI command. :func:`compare_product_directories`
-is the other half: given the two directories a caller just unpacked, it
-runs the actual bundle-aware comparison (per-library diff via
-:mod:`abicheck.service_compare_pipeline`, cross-library findings via
-:mod:`abicheck.bundle`) — the plain-Python counterpart of directory-mode
-``compare <old_dir> <new_dir>``, requiring no CLI subprocess.
+This module is the storage format for that: :func:`pack_product_baseline` archives
+an entire product directory (every shared library plus whatever else ships
+alongside it -- debug info, headers) into one deterministic ``.tar.zst`` file,
+with a small JSON manifest (:class:`ProductBaselineManifest`) recording which
+archived files are libraries and which relative directories hold the product's
+public headers. :func:`unpack_product_baseline` reverses it, reproducing a
+directory ``abicheck compare``'s directory-mode operand (bundle analysis,
+ADR-023) can run against directly -- covering every library and every
+cross-library edge in one invocation instead of one per library. Library-only
+surface, no CLI command. :func:`compare_product_directories` is the other half:
+given the two directories a caller just unpacked, it runs the actual bundle-aware
+comparison (per-library diff via :mod:`abicheck.service_compare_pipeline`,
+cross-library findings via :mod:`abicheck.bundle`) -- the plain-Python
+counterpart of directory-mode ``compare <old_dir> <new_dir>``, requiring no CLI
+subprocess.
 """
 
 from __future__ import annotations
@@ -75,37 +68,23 @@ if TYPE_CHECKING:
     from .bundle import BundleDiffResult
 from .snapshot_io import ZSTD_LEVEL_BASELINE
 
-#: Name the manifest is stored under inside the archive — deliberately not a
-#: plausible library/header file name, so it can never collide with real
-#: product content.
+#: Name the manifest is stored under -- not a plausible library/header name,
+#: so it never collides with real product content.
 MANIFEST_MEMBER_NAME = "abicheck-product-baseline.json"
 
-#: Manifest schema discriminator. Every reader of this format is new code
-#: introduced alongside it (unlike, say, ``run-plan.json``'s own schema
-#: string — see AGENTS.md's "Known gaps" entry on that document — there is
-#: no already-shipped reader this needs to protect against yet), so today
-#: this is purely a self-description; :func:`unpack_product_baseline` still
-#: checks it, so a *future* MAJOR bump has a real rejection point from the
-#: day it's introduced rather than needing one retrofitted later.
+#: Manifest schema discriminator. Purely self-description today; checked by
+#: :func:`unpack_product_baseline` so a *future* MAJOR bump has a rejection point.
 PRODUCT_BASELINE_SCHEMA = "abicheck.product-baseline/v1"
 
-#: A genuine SHA-256 digest as lowercase hex -- what pack_product_baseline()
-#: always writes. Used by unpack_product_baseline() to reject a missing or
-#: malformed LibraryEntry.sha256 outright rather than silently skip the
-#: checksum comparison it's meant to gate (see that function's own comment).
+#: A genuine SHA-256 hex digest, rejected if missing/malformed on unpack.
 _SHA256_HEX_RE = re.compile(r"[0-9a-f]{64}")
 
-#: File suffixes recognized as a shared library on pack. Informational only
-#: — every regular file under the source directory is archived regardless
-#: of suffix; this only decides which archived files are itemized in
-#: :attr:`ProductBaselineManifest.libraries`.
+#: File suffixes recognized as a shared library on pack -- decides what's
+#: itemized in :attr:`ProductBaselineManifest.libraries`, not what's archived.
 _LIBRARY_SUFFIXES = (".so", ".dylib", ".dll")
 
-
-#: A versioned SONAME real file, e.g. "libfoo.so.1.2.3" -- no suffix in
-#: _LIBRARY_SUFFIXES matches it. Anchored at the end, every dotted segment
-#: after ".so" must be purely numeric, so a split-debug companion like
-#: "libfoo.so.1.debug" is correctly excluded (Codex review, fresh evidence).
+#: A versioned SONAME, e.g. "libfoo.so.1.2.3" -- no _LIBRARY_SUFFIXES suffix
+#: matches it. Segments after ".so" must be numeric, so "libfoo.so.1.debug" is excluded.
 _VERSIONED_SONAME = re.compile(r"\.so(\.\d+)+$", re.IGNORECASE)
 
 
@@ -116,12 +95,8 @@ def _is_shared_library(name: str) -> bool:
     return _VERSIONED_SONAME.search(name) is not None
 
 
-#: Mach-O ``mach_header``/``mach_header_64`` ``filetype`` values that are a
-#: dynamically-loadable image, not a plain executable -- the values that
-#: made a ``.so``-shaped ABI question meaningful for the file at all (a
-#: framework binary or plugin bundle is exactly the extensionless-Mach-O
-#: case this predicate exists to catch). MH_EXECUTE (2) is deliberately
-#: excluded: an executable is not a shared library regardless of content.
+#: Mach-O ``filetype`` values that are a dynamically-loadable image, not a
+#: plain executable. MH_EXECUTE (2) is deliberately excluded.
 _MACHO_LIBRARY_FILETYPES = frozenset({6, 8, 9})  # MH_DYLIB, MH_BUNDLE, MH_DYLIB_STUB
 
 
@@ -306,14 +281,10 @@ class ProductBaselineManifest:
 
 
 # ── Local helpers ────────────────────────────────────────────────────────
-#
 # Deliberately not importing snapshot_io._zstd_module/_atomic_write_bytes
-# across the module boundary — both are leading-underscore internals, and
-# this codebase's established convention (see
-# abicheck/buildsource/baseline_publish.py's own
-# ``_resolve_under_root``/docstring) is to duplicate a small safety/utility
-# helper locally rather than reach across a module boundary for one.
-# ZSTD_LEVEL_BASELINE (public) is imported directly.
+# across the module boundary -- both are leading-underscore internals, and
+# this codebase's convention (see baseline_publish.py's ``_resolve_under_root``)
+# is to duplicate a small helper locally. ZSTD_LEVEL_BASELINE is imported.
 
 
 def _zstd_module() -> Any:
@@ -616,8 +587,9 @@ def _add_member(
         # (ELOOP) on every version; a dangling target raises ENOENT
         # instead, left alone.
         try:
-            path.stat()
+            target_stat = path.stat()
         except OSError as exc:
+            target_stat = None
             if exc.errno == errno.ELOOP:
                 raise SnapshotError(
                     f"symlink {arcname!r} targets {target!r}, which forms "
@@ -625,7 +597,8 @@ def _add_member(
                 ) from exc
         link_abs = path.parent / target
         try:
-            link_abs.resolve().relative_to(source_dir.resolve())
+            link_real = link_abs.resolve()
+            link_real.relative_to(source_dir.resolve())
         except ValueError as exc:
             raise SnapshotError(
                 f"symlink {arcname!r} targets {target!r}, which escapes "
@@ -641,8 +614,33 @@ def _add_member(
                 f"escape {source_dir} when interpreted with Windows path "
                 "separators -- refusing to pack it for portability"
             )
+        # A library-shaped symlink (by name) whose real target is NOT
+        # independently library-shaped (e.g. `libfoo.so -> payload`)
+        # previously got no LibraryEntry at all -- unlike the ordinary
+        # case (`libfoo.so.1 -> libfoo.so.1.2.3`), there's no other
+        # declared identity for unpack's own discovery to match it
+        # against, so it was permanently undeclared and unpack rejected
+        # the archive as tampered (Codex review, fresh evidence). A
+        # target the ordinary case already declares is left alone --
+        # unpack's identity-based check already covers it.
+        entry = None
+        if (
+            target_stat is not None
+            and _is_library_path(path)
+            and not _is_library_path(link_real)
+        ):
+            hasher = hashlib.sha256()
+            with open(path, "rb") as fh:
+                for chunk in iter(lambda: fh.read(1 << 20), b""):
+                    hasher.update(chunk)
+            entry = LibraryEntry(
+                name=path.name,
+                path=arcname,
+                sha256=hasher.hexdigest(),
+                size=target_stat.st_size,
+            )
         tf.addfile(info)
-        return None
+        return entry
 
     if info.islnk():
         # gettarinfo() converts a second path sharing an inode with an
@@ -1168,8 +1166,14 @@ def unpack_product_baseline(
             # an archive can declare an ordinary file (README.txt) as a
             # LibraryEntry, with a correct size/digest, and this
             # validation would accept it (Codex review, fresh evidence).
-            # Validate with the same predicate packing/discovery use.
-            if not _is_library_path(lib_resolved):
+            # Validate with the same predicate packing/discovery use --
+            # against the un-fully-resolved path (a symlink left as
+            # itself), since packing can now declare a library-shaped
+            # symlink whose real target is ordinary data; checking
+            # lib_resolved would re-derive the target's own identity and
+            # reject the entry packing just legitimately created.
+            lib_symlink_aware = staging / lib.path
+            if not _is_library_path(lib_symlink_aware):
                 raise SnapshotError(
                     f"{archive_path}: manifest declares {lib.path!r} as a "
                     "library, but it is not library-shaped"
@@ -1239,11 +1243,15 @@ def unpack_product_baseline(
             _iter_discovered_libraries(staging), key=lambda item: item[0]
         ):
             if path.is_symlink():
-                # A symlink alias never gets its own LibraryEntry --
-                # checked by identity only. A non-tuple identity means
-                # its own stat() failed for a reason other than ELOOP
-                # (raised above) -- skipped, not flagged, matching the
-                # pre-existing tolerant behavior.
+                # A symlink alias is checked by identity, not path
+                # string, regardless of whether it has its own
+                # LibraryEntry (a "standalone" symlink now gets one --
+                # see _add_member's symlink branch): the declared-
+                # identities loop above resolves lib.path through to its
+                # real target's (dev, ino) either way. A non-tuple
+                # identity means its own stat() failed for a reason
+                # other than ELOOP (raised above) -- skipped, not
+                # flagged, matching the pre-existing tolerant behavior.
                 if isinstance(identity, tuple) and identity not in declared_identities:
                     undeclared.append(rel_path)
             else:
@@ -1342,14 +1350,9 @@ def _check_schema_supported(schema: str, archive_path: Path) -> None:
         )
 
 
-#: Either a flat list of header-root directories applied to every library
-#: (the original shape), or a ``{library_key: [roots...]}`` mapping scoping
-#: roots to one library at a time -- see
-#: :func:`compare_product_directories`'s own docstring and
-#: ``docs/contribute/plans/product-baseline-per-library-header-roots.md``
-#: for the design rationale. The library key is whatever
-#: :func:`_discover_library_map` produced for that side (a path relative to
-#: that side's own root).
+#: Either a flat list of header-root directories applied to every library, or
+#: a ``{library_key: [roots...]}`` mapping scoping roots to one library --
+#: see :func:`compare_product_directories`'s docstring.
 HeaderRootsSpec = Sequence[str] | Mapping[str, Sequence[str]]
 
 

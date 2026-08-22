@@ -174,6 +174,16 @@ _ZSTD_CLI_MAX_MEMORY_MB = 2048
 #: block extraction indefinitely (Codex review, fresh evidence).
 _ZSTD_CLI_TIMEOUT_S = 120
 
+#: Bound on the reader-thread-to-main-thread chunk queue in the external
+#: `zstd` CLI fallback (each chunk is at most 1 MiB). Keeps the reader
+#: thread from racing arbitrarily far ahead of the main thread's own
+#: decompression-bomb size check -- an unbounded queue could otherwise
+#: buffer gigabytes of already-decoded data before total_bytes is ever
+#: compared against the limit (Codex review, fresh evidence). A small
+#: bound still allows real streaming throughput while keeping the
+#: in-memory decoded backlog to a fixed, small multiple of the chunk size.
+_ZSTD_READER_QUEUE_MAXSIZE = 8
+
 
 class TarExtractor:
     """Extract tar, tar.gz, tar.xz, tar.bz2, and .tgz archives."""
@@ -318,7 +328,23 @@ class TarExtractor:
                 # the read is offloaded to a daemon thread and the main
                 # loop polls a queue with the same overall 120s deadline
                 # the old subprocess.run() call enforced.
-                chunk_queue: queue.Queue[bytes | None | Exception] = queue.Queue()
+                #
+                # The queue is bounded (a small, fixed number of 1 MiB
+                # chunks) rather than unbounded: an untrusted archive that
+                # expands quickly can otherwise let the reader thread race
+                # ahead of the main thread's own size check, buffering
+                # gigabytes of decoded data in the queue before
+                # total_bytes > max_decoded_bytes is ever evaluated --
+                # defeating the whole point of the decompression-bomb
+                # limit below (Codex review, fresh evidence). A bounded
+                # queue's put() blocks once full, so the reader thread
+                # stalls -- real pipe backpressure -- until the main
+                # thread drains a chunk, capping in-memory decoded data to
+                # a small, fixed multiple of the chunk size regardless of
+                # how fast zstd itself can decompress.
+                chunk_queue: queue.Queue[bytes | None | Exception] = queue.Queue(
+                    maxsize=_ZSTD_READER_QUEUE_MAXSIZE
+                )
 
                 def _reader() -> None:
                     try:

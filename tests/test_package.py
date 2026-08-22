@@ -2573,6 +2573,52 @@ class TestTarExtractorZstDecompressionBomb:
         # the unbounded read would make this assertion the one that hangs.
         assert time.monotonic() - start < 10
 
+    def test_external_zstd_fallback_reader_queue_is_bounded(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The reader thread's chunk queue was unbounded -- an untrusted
+        # archive expanding quickly could let it race arbitrarily far
+        # ahead of the main thread's own decompression-bomb size check,
+        # buffering gigabytes of already-decoded data in the queue before
+        # total_bytes was ever compared against the limit (Codex review,
+        # fresh evidence). Confirms the queue used by the reader thread
+        # is actually constructed with the module's bounded maxsize,
+        # rather than the unbounded default (maxsize=0).
+        pytest.importorskip("zstandard")
+        if shutil.which("zstd") is None:
+            pytest.skip("real zstd CLI not available")
+        import zstandard
+
+        import abicheck.package as package_mod
+
+        real_queue_cls = package_mod.queue.Queue
+        captured_maxsize: list[int] = []
+
+        class _RecordingQueue(real_queue_cls):  # type: ignore[misc,valid-type]
+            def __init__(self, maxsize: int = 0) -> None:
+                captured_maxsize.append(maxsize)
+                super().__init__(maxsize=maxsize)
+
+        monkeypatch.setattr(package_mod.queue, "Queue", _RecordingQueue)
+
+        tar_buf = io.BytesIO()
+        with tarfile.open(fileobj=tar_buf, mode="w") as tf:
+            info = tarfile.TarInfo(name="lib/libfoo.so")
+            info.size = 4
+            tf.addfile(info, io.BytesIO(b"data"))
+        cctx = zstandard.ZstdCompressor()
+        zst_path = tmp_path / "ok.tar.zst"
+        zst_path.write_bytes(cctx.compress(tar_buf.getvalue()))
+        out = tmp_path / "output"
+        out.mkdir()
+
+        with mock.patch("builtins.__import__", side_effect=_zstandard_import_blocker):
+            TarExtractor()._safe_extract_zst_tar(zst_path, out)
+
+        assert (out / "lib" / "libfoo.so").read_bytes() == b"data"
+        assert captured_maxsize == [package_mod._ZSTD_READER_QUEUE_MAXSIZE]
+        assert package_mod._ZSTD_READER_QUEUE_MAXSIZE > 0  # not the unbounded default
+
 
 _real_import = __import__
 
