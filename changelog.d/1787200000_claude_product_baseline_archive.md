@@ -15,7 +15,7 @@
   installed headers) into one deterministic `.tar.zst` file, recording
   which archived files are libraries and which relative directories hold
   the product's public headers. `project baseline unpack ARCHIVE DEST_DIR`
-  reverses it, reproducing a directory `compare`/`compare-release` can run
-  against directly — checking every library, and every cross-library edge
+  reverses it, reproducing a directory `compare`'s directory-mode operand
+  can run against directly — checking every library, and every cross-library edge
   between them, in one bundle-aware invocation instead of one per-library
   `scan`. See `abicheck/product_baseline.py`'s module docstring.
