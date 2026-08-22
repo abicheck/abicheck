@@ -525,17 +525,19 @@ def _add_member(
 
     if info.issym():
         target = info.linkname
-        # An absolute target can't round-trip: it names a path under
-        # *this* pack's source_dir, which won't exist at that same
-        # absolute location once unpacked elsewhere -- TarExtractor's
-        # own symlink-escape check then (correctly) refuses it at
-        # unpack time (Codex review, fresh evidence). os.path.isabs()
-        # alone is host-dependent -- packing on POSIX, it doesn't
-        # recognize a Windows drive-absolute/UNC target as absolute, so
-        # the archive would pack "portably" and only fail on a later
-        # Windows unpack; PureWindowsPath.is_absolute() catches that
-        # too (Codex review, fresh evidence).
-        if os.path.isabs(target) or PureWindowsPath(target).is_absolute():
+        # An absolute (or Windows-anchored) target can't round-trip --
+        # TarExtractor's own symlink-escape check refuses it at unpack
+        # time (Codex review, fresh evidence). os.path.isabs() alone is
+        # host-dependent -- doesn't recognize a Windows drive-absolute/
+        # UNC target on POSIX. PureWindowsPath.is_absolute() alone isn't
+        # enough either: False for a current-drive-rooted target
+        # (``\outside\foo.dll``, drive="", root="\\") or a
+        # drive-relative one (``C:outside\foo.dll``, drive="C:",
+        # root="") -- both Windows-specific-state-dependent, so any
+        # nonempty drive or root is rejected (Codex review, fresh
+        # evidence).
+        wpath = PureWindowsPath(target)
+        if os.path.isabs(target) or wpath.drive or wpath.root:
             raise SnapshotError(
                 f"symlink {arcname!r} has an absolute target {target!r} -- "
                 "only relative symlink targets can be packed portably"
@@ -700,16 +702,13 @@ def pack_product_baseline(
             f"product baseline output must end with '.tar.zst': {output_path}"
         )
     # Validated before the output-parent scaffold below can fabricate
-    # anything: doing this after would let a header root that names the
-    # freshly-created output-parent chain pass on a directory mkdir()
-    # just manufactured (Codex review, fresh evidence).
+    # anything -- else a header root naming the freshly-created chain
+    # would pass on a directory mkdir() just manufactured (Codex review,
+    # fresh evidence).
     if isinstance(header_roots, str):
         # A bare str satisfies the declared Sequence[str] annotation, so
         # the natural typo header_roots="include" would otherwise iterate
-        # character-by-character below -- compare_product_directories()'s
-        # own `_roots_for_library` already rejects this shape on the
-        # comparison side, but not this, the packing entry point (Codex
-        # review, fresh evidence).
+        # character-by-character below (Codex review, fresh evidence).
         raise SnapshotError(
             "header_roots must be a sequence of paths, not a bare string: "
             f"{header_roots!r}"

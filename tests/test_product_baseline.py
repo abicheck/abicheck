@@ -600,6 +600,33 @@ class TestPackProductBaseline:
         with pytest.raises(SnapshotError, match="Windows path separators"):
             pack_product_baseline(product, tmp_path / "b.tar.zst")
 
+    def test_pack_rejects_a_windows_root_relative_symlink_target(
+        self, tmp_path: Path
+    ) -> None:
+        # A current-drive-rooted target (\\outside\\foo.dll -- no drive
+        # letter, just a leading backslash) is anchored to whatever drive
+        # is current at resolution time on Windows, not a portable
+        # in-tree path -- but PureWindowsPath.is_absolute() is False for
+        # it (drive="", root="\\"), so the prior fix's is_absolute()-only
+        # check let it through (Codex review, fresh evidence).
+        product = _make_product(tmp_path)
+        (product / "lib" / "root-rel.so").symlink_to("\\outside\\foo.dll")
+        with pytest.raises(SnapshotError, match="absolute target"):
+            pack_product_baseline(product, tmp_path / "b.tar.zst")
+
+    def test_pack_rejects_a_windows_drive_relative_symlink_target(
+        self, tmp_path: Path
+    ) -> None:
+        # A drive-relative target (C:outside\\foo.dll -- a drive letter
+        # with no root) resolves against the *current directory on that
+        # drive* on Windows, not a portable in-tree path -- also False
+        # under is_absolute() (drive="C:", root=""), the same gap the
+        # root-relative case above closes (Codex review, fresh evidence).
+        product = _make_product(tmp_path)
+        (product / "lib" / "drive-rel.so").symlink_to("C:outside\\foo.dll")
+        with pytest.raises(SnapshotError, match="absolute target"):
+            pack_product_baseline(product, tmp_path / "b.tar.zst")
+
     def test_pack_rejects_a_self_referential_symlink_loop(self, tmp_path: Path) -> None:
         # A self-referential symlink (loop.so -> loop.so) made
         # _add_member()'s own direct Path.resolve() raise RuntimeError,
