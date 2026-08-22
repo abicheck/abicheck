@@ -88,21 +88,39 @@ outside the release, `--bundle-system-providers` (see below) — there is no
 narrower way to quiet one specific `bundle_*` finding while keeping the rest
 of bundle analysis active.
 
-**The sibling-consumption gate is specific to two kinds, not a blanket rule.**
-Only `bundle_intra_dep_removed` (an import with no provider at all) and
-`bundle_library_removed` (a removed library, gated on whether a surviving
-sibling actually imported one of its exports — a standalone removal with no
-internal consumer is left to the separate `--fail-on-removed-library` flow)
-require a sibling to actually consume the affected symbol/library before
-firing. Several other `bundle_*` kinds have no such gate: `bundle_library_added`
-fires for any new library unconditionally; `bundle_provider_changed` fires
-whenever a symbol migrates from one sibling to another, whether or not any
-third sibling consumes it; and manifest/SONAME-cohort findings
-(`bundle_manifest_instantiation_removed`, `bundle_soname_skew`) are driven by
-their own declared contract, not by internal consumption at all — a manifest
-promising a since-removed symbol produces
-`bundle_manifest_instantiation_removed` even if no sibling in the bundle ever
-imported it. An *unconsumed*, *unmanifested* internal export removal is the
+**The sibling-consumption gate is specific to two kinds, not a blanket rule —
+and even those two are gated only inside `compare_bundle()` itself.**
+Within `compare_bundle()`, only `bundle_intra_dep_removed` (an import with no
+provider at all) and `bundle_library_removed` (a removed library, gated on
+whether a surviving sibling actually imported one of its exports — a
+standalone removal with no internal consumer there is by design left to the
+directory/package CLI's separate `--fail-on-removed-library` flow) require a
+sibling to actually consume the affected symbol/library before firing.
+Several other `bundle_*` kinds have no such gate even inside
+`compare_bundle()`: `bundle_library_added` fires for any new library
+unconditionally; `bundle_provider_changed` fires whenever a symbol migrates
+from one sibling to another, whether or not any third sibling consumes it;
+and manifest/SONAME-cohort findings (`bundle_manifest_instantiation_removed`,
+`bundle_soname_skew`) are driven by their own declared contract, not by
+internal consumption at all — a manifest promising a since-removed symbol
+produces `bundle_manifest_instantiation_removed` even if no sibling in the
+bundle ever imported it.
+
+The whole-product baseline compare (`abicheck/product_baseline.py`'s
+`compare_product_directories`) goes further still: it calls `compare_bundle()`
+for its intra-bundle analysis, but then unconditionally reports **every**
+library present in the old product and absent from the new one as
+`bundle_library_removed` (and the symmetric case as `bundle_library_added`),
+with no sibling-consumption check at all — by design, since a whole-product
+compatibility gate must not silently return `NO_CHANGE` for a release that
+dropped its only public library and had no internal consumer to notice. So
+the consumption gate on `bundle_library_removed` described above applies to
+`compare_bundle()`/the directory-package `compare` CLI flow specifically, not
+to the whole-product baseline API.
+
+An *unconsumed*, *unmanifested* internal export removal (within a single
+`compare_bundle()` call, outside the whole-product baseline's own
+unconditional library-level fallback) is the
 one case that falls through to the ordinary per-library `func_removed`,
 governed by the usual public-surface/suppression rules, unaffected by the
 bundle layer.
