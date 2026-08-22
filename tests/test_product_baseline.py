@@ -986,6 +986,181 @@ class TestCompareProductDirectoriesHeaderRoots:
         assert calls[0]["new_headers"] == [new_dir / "include"]
 
 
+class TestCompareProductDirectoriesPerLibraryHeaderRoots:
+    """HeaderRootsSpec's per-library mapping shape -- see
+    docs/contribute/plans/product-baseline-per-library-header-roots.md."""
+
+    def _capture_run_compare_calls(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> list[dict[str, object]]:
+        # Unlike TestCompareProductDirectoriesHeaderRoots's own helper,
+        # this one does NOT raise on the first call -- multiple libraries
+        # must all reach run_compare() in one invocation to exercise
+        # per-library scoping.
+        from abicheck import (
+            bundle as bundle_mod,
+            product_baseline as pb,
+            service_compare_pipeline as scp,
+        )
+
+        calls: list[dict[str, object]] = []
+
+        def _fake_discover_library_map(
+            root: Path, *, include_private: bool
+        ) -> dict[str, Path]:
+            return {
+                "lib/liba.so": root / "lib" / "liba.so",
+                "lib/libb.so": root / "lib" / "libb.so",
+            }
+
+        class _FakeDiffResult:
+            def __init__(self, library: str) -> None:
+                self.library = library
+
+        class _FakeResult:
+            def __init__(self, library: str) -> None:
+                self.diff = _FakeDiffResult(library)
+
+        def _fake_run_compare(old_lib, new_lib, **kwargs):  # type: ignore[no-untyped-def]
+            calls.append({"old": old_lib, "new": new_lib, **kwargs})
+            return _FakeResult(str(new_lib))
+
+        def _fake_build_bundle_snapshot(libraries):  # type: ignore[no-untyped-def]
+            return {"libraries": dict(libraries)}
+
+        def _fake_compare_bundle(old, new, per_library_results, **kwargs):  # type: ignore[no-untyped-def]
+            return kwargs
+
+        monkeypatch.setattr(pb, "_discover_library_map", _fake_discover_library_map)
+        monkeypatch.setattr(scp, "run_compare", _fake_run_compare)
+        monkeypatch.setattr(
+            bundle_mod, "build_bundle_snapshot", _fake_build_bundle_snapshot
+        )
+        monkeypatch.setattr(bundle_mod, "compare_bundle", _fake_compare_bundle)
+        return calls
+
+    def test_scopes_roots_to_one_library_and_not_its_sibling(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from abicheck.product_baseline import compare_product_directories
+
+        old_dir = tmp_path / "old"
+        new_dir = tmp_path / "new"
+        (old_dir / "include" / "liba").mkdir(parents=True)
+        (new_dir / "include" / "liba").mkdir(parents=True)
+        # libb.so's own root deliberately doesn't exist on either side --
+        # it must get zero headers, not liba's.
+
+        calls = self._capture_run_compare_calls(monkeypatch)
+        compare_product_directories(
+            old_dir,
+            new_dir,
+            header_roots={"lib/liba.so": ["include/liba"]},
+        )
+
+        by_new = {c["new"]: c for c in calls}
+        liba_call = by_new[new_dir / "lib" / "liba.so"]
+        libb_call = by_new[new_dir / "lib" / "libb.so"]
+        assert liba_call["old_headers"] == [old_dir / "include" / "liba"]
+        assert liba_call["new_headers"] == [new_dir / "include" / "liba"]
+        assert libb_call["old_headers"] == []
+        assert libb_call["new_headers"] == []
+
+    def test_a_library_absent_from_the_mapping_gets_no_headers(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Not a fallback to the flat/shared list, and not an error --
+        # matches this format's existing "no headers is a normal case"
+        # tolerance elsewhere.
+        from abicheck.product_baseline import compare_product_directories
+
+        old_dir = tmp_path / "old"
+        new_dir = tmp_path / "new"
+        (old_dir / "include").mkdir(parents=True)
+        (new_dir / "include").mkdir(parents=True)
+
+        calls = self._capture_run_compare_calls(monkeypatch)
+        compare_product_directories(
+            old_dir,
+            new_dir,
+            header_roots={"lib/some-other-library.so": ["include"]},
+        )
+
+        assert len(calls) == 2
+        for call in calls:
+            assert call["old_headers"] == []
+            assert call["new_headers"] == []
+
+    def test_old_and_new_header_roots_accept_per_library_mappings_independently(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from abicheck.product_baseline import compare_product_directories
+
+        old_dir = tmp_path / "old"
+        new_dir = tmp_path / "new"
+        (old_dir / "old-include").mkdir(parents=True)
+        (new_dir / "new-include").mkdir(parents=True)
+
+        calls = self._capture_run_compare_calls(monkeypatch)
+        compare_product_directories(
+            old_dir,
+            new_dir,
+            old_header_roots={"lib/liba.so": ["old-include"]},
+            new_header_roots={"lib/liba.so": ["new-include"]},
+        )
+
+        by_new = {c["new"]: c for c in calls}
+        liba_call = by_new[new_dir / "lib" / "liba.so"]
+        assert liba_call["old_headers"] == [old_dir / "old-include"]
+        assert liba_call["new_headers"] == [new_dir / "new-include"]
+
+    def test_flat_list_still_applies_to_every_library(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Regression guard: the pre-existing flat-Sequence[str] shape must
+        # keep applying identically to every discovered library.
+        from abicheck.product_baseline import compare_product_directories
+
+        old_dir = tmp_path / "old"
+        new_dir = tmp_path / "new"
+        (old_dir / "include").mkdir(parents=True)
+        (new_dir / "include").mkdir(parents=True)
+
+        calls = self._capture_run_compare_calls(monkeypatch)
+        compare_product_directories(old_dir, new_dir, header_roots=["include"])
+
+        assert len(calls) == 2
+        for call in calls:
+            assert call["old_headers"] == [old_dir / "include"]
+            assert call["new_headers"] == [new_dir / "include"]
+
+
+class TestRootsForLibrary:
+    def test_mapping_returns_the_matching_entry(self) -> None:
+        from abicheck.product_baseline import _roots_for_library
+
+        spec = {"liba.so": ["include/liba"], "libb.so": ["include/libb"]}
+        assert _roots_for_library(spec, "liba.so") == ["include/liba"]
+
+    def test_mapping_returns_empty_for_an_unlisted_library(self) -> None:
+        from abicheck.product_baseline import _roots_for_library
+
+        spec = {"liba.so": ["include/liba"]}
+        assert _roots_for_library(spec, "libb.so") == ()
+
+    def test_flat_sequence_applies_regardless_of_library_key(self) -> None:
+        from abicheck.product_baseline import _roots_for_library
+
+        spec = ["include"]
+        assert _roots_for_library(spec, "liba.so") == ["include"]
+        assert _roots_for_library(spec, "libb.so") == ["include"]
+
+    def test_empty_flat_sequence_applies_to_every_library(self) -> None:
+        from abicheck.product_baseline import _roots_for_library
+
+        assert _roots_for_library((), "liba.so") == ()
+
+
 class TestDiscoverLibraryMap:
     def test_keys_by_relative_path_not_bare_filename(self, tmp_path: Path) -> None:
         # Two distinct DSOs sharing a basename in different directories

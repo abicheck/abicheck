@@ -60,7 +60,7 @@ import shutil
 import stat as stat_module
 import tarfile
 import tempfile
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import IO, TYPE_CHECKING, Any
@@ -962,6 +962,38 @@ def _check_schema_supported(schema: str, archive_path: Path) -> None:
         )
 
 
+#: Either a flat list of header-root directories applied to every library
+#: (the original shape), or a ``{library_key: [roots...]}`` mapping scoping
+#: roots to one library at a time -- see
+#: :func:`compare_product_directories`'s own docstring and
+#: ``docs/contribute/plans/product-baseline-per-library-header-roots.md``
+#: for the design rationale. The library key is whatever
+#: :func:`_discover_library_map` produced for that side (a path relative to
+#: that side's own root).
+HeaderRootsSpec = Sequence[str] | Mapping[str, Sequence[str]]
+
+
+def _roots_for_library(spec: HeaderRootsSpec, library_key: str) -> Sequence[str]:
+    """Resolve one library's own header roots out of a :data:`HeaderRootsSpec`.
+
+    A ``Mapping`` is looked up by *library_key*, defaulting to no roots at
+    all for a library the mapping doesn't mention (never a fallback to
+    some other library's roots — a library legitimately shipping no public
+    headers is the common case this format already tolerates elsewhere, not
+    a misconfiguration to paper over). A flat ``Sequence[str]`` (the
+    original, pre-per-library shape) applies unchanged to every library, so
+    passing a bare list keeps working exactly as it always has. A `str` is
+    technically a `Sequence[str]` of characters too, but is never a
+    `Mapping`, so an accidental `header_roots="include"` typo still falls
+    through as a Sequence, matching this function's own type contract --
+    no different from the guard this parameter already needed before
+    per-library support existed.
+    """
+    if isinstance(spec, Mapping):
+        return spec.get(library_key, ())
+    return spec
+
+
 def _discover_library_map(root: Path, *, include_private: bool) -> dict[str, Path]:
     """Discover every shared library under *root*, keyed by a path relative
     to *root* (POSIX-style) rather than its bare filename.
@@ -1039,9 +1071,9 @@ def compare_product_directories(
     old_dir: Path | str,
     new_dir: Path | str,
     *,
-    header_roots: Sequence[str] = (),
-    old_header_roots: Sequence[str] | None = None,
-    new_header_roots: Sequence[str] | None = None,
+    header_roots: HeaderRootsSpec = (),
+    old_header_roots: HeaderRootsSpec | None = None,
+    new_header_roots: HeaderRootsSpec | None = None,
     lang: str = "c++",
     frontend: str = "auto",
     policy: str = "strict_abi",
@@ -1083,9 +1115,26 @@ def compare_product_directories(
     — the exact shape :attr:`ProductBaselineManifest.header_roots` already
     records, so a caller that just unpacked an archive can pass its
     manifest's own ``header_roots`` straight through, applied to *both*
-    sides. A root missing on a given side is silently skipped, matching
-    this format's own tolerance for a library that ships no public
-    headers.
+    sides *and every library*. A root missing for a given library/side is
+    silently skipped, matching this format's own tolerance for a library
+    that ships no public headers.
+
+    *header_roots* (and *old_header_roots*/*new_header_roots*) also accept
+    a ``{library_key: [roots...]}`` mapping instead of a flat list, for a
+    product whose libraries don't all share one header space (e.g.
+    ``liba.so``'s public headers live under ``include/liba/`` and
+    ``libb.so``'s under ``include/libb/`` — handing both roots to every
+    library risks an ODR collision between two independently-versioned
+    header trees that happen to declare a same-named type differently). A
+    library with no entry in such a mapping gets no headers for that side
+    — not a fallback to another library's roots. The mapping is keyed by
+    the same identity :func:`_discover_library_map` produces (a path
+    relative to that side's own root, e.g. ``"lib/liba.so"``) — the only
+    identity a caller can actually observe without reimplementing
+    discovery. See ``docs/contribute/plans/
+    product-baseline-per-library-header-roots.md`` for the design
+    rationale and what's deliberately still out of scope (a shared
+    header-AST cache across libraries, and a cross-library type graph).
 
     *old_header_roots*/*new_header_roots* override *header_roots*
     independently per side, for a product that relocated its public
@@ -1129,34 +1178,35 @@ def compare_product_directories(
 
     old_root = Path(old_dir)
     new_root = Path(new_dir)
-    old_roots = (
-        list(old_header_roots) if old_header_roots is not None else list(header_roots)
-    )
-    new_roots = (
-        list(new_header_roots) if new_header_roots is not None else list(header_roots)
-    )
+    old_roots_spec = old_header_roots if old_header_roots is not None else header_roots
+    new_roots_spec = new_header_roots if new_header_roots is not None else header_roots
 
     old_map = _discover_library_map(old_root, include_private=include_private)
     new_map = _discover_library_map(new_root, include_private=include_private)
 
-    def _resolved_headers(root: Path, roots: Sequence[str]) -> list[Path]:
+    def _resolved_headers(root: Path, spec: HeaderRootsSpec, library_key: str) -> list[Path]:
+        roots = _roots_for_library(spec, library_key)
         return [candidate for rel in roots if (candidate := root / rel).is_dir()]
 
-    old_headers = _resolved_headers(old_root, old_roots)
-    new_headers = _resolved_headers(new_root, new_roots)
-
     exact_matches = sorted(set(old_map) & set(new_map))
-    pairs: list[tuple[Path, Path]] = [(old_map[k], new_map[k]) for k in exact_matches]
+    # (old_key, old_path, new_key, new_path) -- both sides' own discovered
+    # identity is kept alongside the path so per-library header roots
+    # resolve against the identity the *caller* observed (via
+    # _discover_library_map's own return value), not a shared/canonical
+    # one that may not exist for a canonical-fallback pair below.
+    pairs: list[tuple[str, Path, str, Path]] = [
+        (k, old_map[k], k, new_map[k]) for k in exact_matches
+    ]
 
     # Canonical (SONAME-major-stripped) fallback for the libraries exact
     # matching left unpaired -- keyed by canonical name, dropped entirely
     # (not just left as one candidate) the moment a second contributor
     # appears, so an ambiguous canonical group never guesses which pair is
     # "the" match.
-    def _canonical_groups(unmatched: dict[str, Path]) -> dict[str, list[Path]]:
-        groups: dict[str, list[Path]] = {}
-        for path in unmatched.values():
-            groups.setdefault(_canonical_library_key(path), []).append(path)
+    def _canonical_groups(unmatched: dict[str, Path]) -> dict[str, list[str]]:
+        groups: dict[str, list[str]] = {}
+        for key, path in unmatched.items():
+            groups.setdefault(_canonical_library_key(path), []).append(key)
         return groups
 
     old_unmatched = {k: v for k, v in old_map.items() if k not in set(exact_matches)}
@@ -1167,10 +1217,13 @@ def compare_product_directories(
         old_candidates = old_canonical[canonical_key]
         new_candidates = new_canonical[canonical_key]
         if len(old_candidates) == 1 and len(new_candidates) == 1:
-            pairs.append((old_candidates[0], new_candidates[0]))
+            old_key, new_key = old_candidates[0], new_candidates[0]
+            pairs.append((old_key, old_map[old_key], new_key, new_map[new_key]))
 
     per_library_results = []
-    for old_path, new_path in pairs:
+    for old_key, old_path, new_key, new_path in pairs:
+        old_headers = _resolved_headers(old_root, old_roots_spec, old_key)
+        new_headers = _resolved_headers(new_root, new_roots_spec, new_key)
         result = run_compare(
             old_path,
             new_path,
