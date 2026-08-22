@@ -512,6 +512,49 @@ class TestIntraDepRemoved:
             for f in result.bundle_findings
         )
 
+    def test_old_provider_veto_is_scoped_to_the_reaching_consumer(self) -> None:
+        """Regression (Codex review): "did a sibling ever provide this
+        symbol" must be scoped to *this consumer's* own old reachability,
+        not to whether *any* consumer anywhere in the old bundle reached a
+        provider. `liba.so` used to reach `libcore.so`'s `vendor_op`
+        export; `libb.so` has always imported the same unversioned symbol
+        name from the built-in-allow-listed `libsycl.so.7` and never
+        depended on `libcore.so` at all. Once `liba.so`/`libcore.so`'s
+        export are both removed, `libb.so`'s own always-external import
+        must not be vetoed by an unrelated consumer's old provider."""
+        old = _snapshot(
+            {
+                "libcore.so": _meta(soname="libcore.so.1", exports=["vendor_op"]),
+                "liba.so": _meta(
+                    soname="liba.so.1",
+                    needed=["libcore.so.1"],
+                    imports=["vendor_op"],
+                ),
+                "libb.so": _meta(
+                    soname="libb.so.1",
+                    needed=["libsycl.so.7"],
+                    imports=["vendor_op"],
+                ),
+            }
+        )
+        new = _snapshot(
+            {
+                "libcore.so": _meta(soname="libcore.so.1"),  # no longer exports it
+                "libb.so": _meta(
+                    soname="libb.so.1",
+                    needed=["libsycl.so.7"],
+                    imports=["vendor_op"],
+                ),
+            }
+        )
+        # No --bundle-system-providers given -- libsycl.so.7 is covered by
+        # the built-in DEFAULT_SYSTEM_PROVIDERS allow-list alone.
+        result = compare_bundle(old, new, per_library_results=[])
+        assert not any(
+            f.kind == ChangeKind.BUNDLE_INTRA_DEP_REMOVED and f.consumer_library == "libb.so"
+            for f in result.bundle_findings
+        )
+
     @pytest.mark.parametrize(
         ("symbol", "version"),
         [

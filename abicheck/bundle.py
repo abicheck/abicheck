@@ -931,47 +931,60 @@ def _detect_intra_dep_removed(
 ) -> list[BundleFinding]:
     """Find imports in the new bundle that no sibling provides.
 
-    Excludes imports satisfied by system libraries (``libc``, ``libstdc++``,
-    etc.) since they are out of bundle scope by design. Classification uses
-    provider/version evidence first (:func:`_import_is_external`) and the
-    symbol-name allow-list (``DEFAULT_SYSTEM_SYMBOLS`` / ``_looks_system_*``)
-    as a fallback. Excludes weak imports (linker treats unresolved weak as
-    0/NULL at runtime).
+    Excludes imports satisfied by system libraries (out of bundle scope by
+    design). Classification uses provider/version evidence first
+    (:func:`_import_is_external`) and the symbol-name allow-list
+    (``DEFAULT_SYSTEM_SYMBOLS`` / ``_looks_system_*``) as a fallback.
+    Excludes weak imports (linker treats unresolved weak as 0/NULL).
 
     A consumer's import is treated as system-provided when every DT_NEEDED
     edge it carries that resolves *outside* the bundle is in the
     ``system_providers`` allow-list (built-in ``DEFAULT_SYSTEM_PROVIDERS``
     plus user-extended via ``--bundle-system-providers``) -- but only when
-    either (a) no sibling *ever* provided this symbol (:attr:`old`'s
-    resolution graph, not just ``new``'s), or (b) the user explicitly named
-    at least one of this consumer's remaining sonames via
-    ``explicit_providers`` -- a deliberate migration assertion (e.g. a
-    symbol legitimately moved from an in-tree sibling to an allow-listed
-    external DSO). Without that, the allow-list can't tell "always external"
-    apart from "a sibling provider and its DT_NEEDED edge were both dropped
-    by the same refactor, and this consumer also happens to need libc"
-    (nearly universal) -- so absent an explicit assertion, an ``old``-side
-    sibling provider means the allow-list match alone isn't trusted; the
-    symbol-name check below still has to agree (Codex review history: an
-    earlier revision trusted the allow-list unconditionally regardless of
-    ``old``, silently hiding that regression; a later revision then
-    over-corrected by never trusting it once ``old`` had a provider at all,
-    silently defeating a legitimate provider migration).
+    either (a) *this consumer* never reached an in-bundle sibling providing
+    this symbol in ``old`` (checked via reachability, not merely a provider
+    existing somewhere in the old bundle -- an unrelated consumer's own old
+    provider must not veto a different consumer's always-external
+    dependency), or (b) the user explicitly named at least one of this
+    consumer's remaining sonames via ``explicit_providers``. Without
+    (a)/(b), the allow-list can't tell "always external" apart from "a
+    sibling provider and its DT_NEEDED edge were both dropped by the same
+    refactor, and this consumer also happens to need libc" (nearly
+    universal) -- so absent either, the symbol-name check below still has
+    to agree (Codex review history: trusting the allow-list unconditionally
+    regardless of ``old`` silently hid that regression; over-correcting to
+    never trust it once *any* old provider existed silently defeated a
+    legitimate migration *and* misclassified an unrelated always-external
+    dependency as suspect).
     """
     findings: list[BundleFinding] = []
+    old_reachable_cache: dict[str, set[str]] = {}
+
+    def _old_reachable(lib: str) -> set[str]:
+        if lib not in old_reachable_cache:
+            old_reachable_cache[lib] = _reachable_intra_libraries(old, lib)
+        return old_reachable_cache[lib]
 
     for symbol, consumers in new.resolution.consumers.items():
         providers = new.resolution.providers_for(symbol)
         if providers:
             continue  # someone in the bundle provides it
-        # Whether a sibling *used to* provide this symbol (docstring above).
-        ever_provided_in_bundle = bool(old.resolution.providers_for(symbol))
+        old_providers = {p.library for p in old.resolution.providers_for(symbol)}
         for consumer in consumers:
             if consumer.weak:
                 continue
             consumer_meta = new.metadata.get(consumer.library)
             if consumer_meta is None:
                 continue
+            # Did *this* consumer -- not merely some other consumer of the
+            # same symbol name -- previously reach one of those old
+            # providers? A consumer absent from the old bundle (newly added
+            # this release) has no old reachability to check.
+            ever_provided_in_bundle = bool(
+                old_providers
+                and consumer.library in old.libraries
+                and old_providers & _old_reachable(consumer.library)
+            )
             if _import_is_external(consumer, consumer_meta, new):
                 continue
             # Every non-intra DT_NEEDED on the allow-list AND (no sibling
@@ -1018,24 +1031,20 @@ def _reachable_intra_libraries(snapshot: BundleSnapshot, root: str) -> set[str]:
     Returns every library transitively reachable from ``root`` through the
     bundle's own resolution graph (i.e. what would actually be loaded when
     ``root`` is loaded) — not including ``root`` itself. Used by
-    :func:`_detect_unresolved_intra_dependency` so a symbol is only
-    considered resolved by a provider the consumer can actually reach, not
-    merely one present somewhere else in the declared set.
+    :func:`_detect_unresolved_intra_dependency` and
+    :func:`_detect_intra_dep_removed` so a symbol is only considered
+    resolved (or previously reached) by a provider the consumer can
+    actually reach, not merely one present somewhere else in the snapshot.
     """
     seen: set[str] = set()
     queue = [root]
     while queue:
         lib = queue.pop()
         for soname in snapshot.resolution.intra_needed.get(lib, []):
-            # Resolve via the exact same soname_to_name map
+            # Resolve via the same soname_to_name map
             # _compute_resolution_graph() used to classify this edge as
-            # intra in the first place -- provider_library_for_soname()'s
-            # independent name/soname/filename-stem heuristic doesn't know
-            # about a resolved-through-symlink real filename, so a library
-            # discovered via a differently-named alias (Codex review)
-            # classified correctly as intra could still resolve to no
-            # target here, understating reachability and producing a false
-            # bundle_unresolved_intra_dependency finding.
+            # intra in the first place, so the two agree even for a library
+            # discovered via a differently-named symlink alias.
             target = snapshot.resolution.soname_to_name.get(soname)
             if target is None or target == lib or target in seen:
                 continue
@@ -1050,46 +1059,39 @@ def _detect_unresolved_intra_dependency(
 ) -> list[BundleFinding]:
     """Audit-mode (no old side) sibling of :func:`_detect_intra_dep_removed`.
 
-    ADR-056 D2: ``scan --artifact-set`` has no per-library diff to read
-    (unlike :func:`_detect_intra_dep_removed`, driven by a diff's
-    ``func_removed``/``var_removed`` changes) — this operates purely off the
-    new-side resolution graph. It is deliberately **not** a call into
-    :func:`_detect_intra_dep_removed` and differs from it in three ways that
-    matter for soundness here:
+    ADR-056 D2: ``scan --artifact-set`` has no per-library diff to read, so
+    this operates purely off the new-side resolution graph. Deliberately
+    **not** a call into :func:`_detect_intra_dep_removed`; differs in three
+    ways that matter for soundness here:
 
     1. **Version-aware, reachability-constrained provider matching.**
        ``providers_for(symbol)`` is name-only and set-wide.
        ``ProviderEntry.version``/``ConsumerEntry.version`` are consulted so a
        version mismatch (consumer needs ``foo@V2``, set only provides
        ``foo@V1``) is not mistaken for a resolved import; when the precise
-       ``ConsumerEntry.version_soname`` is known, the match is further
-       pinned to that exact provider library (GNU version *labels* are not
-       globally unique, so two siblings can both export ``foo@V1`` and a
-       label-only match could accept the wrong one). Every candidate
-       provider must additionally be reachable from the consumer through
-       :func:`_reachable_intra_libraries` — a name/version match on a
-       library the consumer has no ``DT_NEEDED`` path to would never
-       actually be loaded together with the consumer.
+       ``ConsumerEntry.version_soname`` is known, the match is pinned to
+       that exact provider library (GNU version *labels* are not globally
+       unique). Every candidate provider must additionally be reachable
+       from the consumer through :func:`_reachable_intra_libraries` — a
+       match on a library the consumer has no ``DT_NEEDED`` path to would
+       never actually be loaded together with the consumer.
     2. **A narrower, explicitly-approximate suppression path for unversioned
        imports.** Mirrors ``_detect_intra_dep_removed``'s allow-list union
-       (built-in ``DEFAULT_SYSTEM_PROVIDERS`` plus caller-supplied
-       ``--bundle-system-providers``) and its non-empty guard
-       (``extra_edges and all(...)``, never a bare ``all([])``), but adds a
-       requirement one-sided audit needs and the diff-driven detector does
-       not: the consumer must have **zero** intra-bundle ``DT_NEEDED`` edges
-       — a consumer still depending on an intra-set library that simply
-       stopped exporting the symbol has a real, in-set candidate provider
-       this coarse check cannot rule out. Deliberately has **no**
-       symbol-name-shape fallback (``_looks_system_symbol``):
-       ``--bundle-system-providers`` exists specifically to cover a
-       legitimate, non-system-shaped custom export (e.g. ``vendor_init``)
-       that a shape heuristic would never match.
+       and its non-empty guard (``extra_edges and all(...)``, never a bare
+       ``all([])``), but adds a requirement one-sided audit needs and the
+       diff-driven detector does not: the consumer must have **zero**
+       intra-bundle ``DT_NEEDED`` edges — a consumer still depending on an
+       intra-set library that simply stopped exporting the symbol has a
+       real, in-set candidate provider this coarse check cannot rule out.
+       Deliberately has **no** symbol-name-shape fallback
+       (``_looks_system_symbol``): ``--bundle-system-providers`` exists
+       specifically to cover a legitimate, non-system-shaped custom export
+       (e.g. ``vendor_init``) that a shape heuristic would never match.
     3. Emits ``ChangeKind.BUNDLE_UNRESOLVED_INTRA_DEPENDENCY`` (not
-       ``BUNDLE_INTRA_DEP_REMOVED`` — that kind's own description implies a
-       diff-confirmed removal, which this finding cannot claim) at
+       ``BUNDLE_INTRA_DEP_REMOVED`` — that kind implies a diff-confirmed
+       removal, which this finding cannot claim) at
        ``COMPATIBLE_WITH_RISK``, not ``BREAKING``: an audit has no old side
-       to confirm the symbol ever resolved, so this is reported as a risk to
-       investigate, not a confirmed break.
+       to confirm the symbol ever resolved.
     """
     findings: list[BundleFinding] = []
     reachable_cache: dict[str, set[str]] = {}
@@ -1903,9 +1905,8 @@ def _import_is_external(
 ) -> bool:
     """Classify an import as external using version + provider evidence.
 
-    An import is external — and therefore can never be a *dropped
-    intra-bundle* dependency — when its required symbol version is satisfied by
-    a library outside the analysed bundle.
+    An import is external (never a *dropped intra-bundle* dependency) when
+    its required symbol version is satisfied by a library outside the bundle.
 
     The precise signal is the **per-symbol verneed provider**
     (``ConsumerEntry.version_soname``): GNU version labels are scoped per
