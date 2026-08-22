@@ -742,33 +742,28 @@ def pack_product_baseline(
     # entirely (Codex review, fresh evidence: `pack` on a genuinely empty
     # SOURCE_DIR succeeded with zero libraries once its output lived
     # under a not-yet-existing subdirectory).
-    output_scaffold_dirs = _scaffold_dirs_for_mkdir(source_path, output_path.parent)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-
-    paths = _discover_paths(source_path)
-    # Exclude OUTPUT itself when it lives under SOURCE_DIR — otherwise a
-    # rerun of `pack SOURCE_DIR SOURCE_DIR/baseline.tar.zst` would embed
-    # the *previous* archive as an input member, growing on every
-    # invocation and violating the determinism this format promises.
-    # Computed from the two paths, not existence, so this excludes the
-    # output slot even on a first-ever pack (before the file exists).
-    #
-    # Two, layered concerns here, not one:
+    # Two, layered aliasing concerns, resolved once and reused below for
+    # both the scaffold-dir computation and the output-exclusion logic:
     #  - if OUTPUT itself is a symlink (e.g. left over from a prior run
-    #    pointing somewhere else), we must exclude it by its own lexical
+    #    pointing somewhere else), it must be handled by its own lexical
     #    name, not by whatever it points to -- resolving OUTPUT's own leaf
-    #    would follow it to its *target*'s path, excluding the wrong file
-    #    while leaving the symlink itself, keyed by its own lexical name,
-    #    still in `paths` (Codex review, fresh evidence).
+    #    would follow it to its *target*'s path (Codex review, fresh
+    #    evidence).
     #  - if SOURCE_DIR itself is a symlink alias (e.g. `pack /tmp/src-link
     #    OUTPUT` where `/tmp/src-link -> /tmp/src`) and OUTPUT is spelled
     #    through the real, non-aliased directory, a purely lexical
     #    (os.path.abspath()) comparison never shares a common prefix with
     #    SOURCE_DIR's own alias path, so relative_to() always raises and
-    #    nothing gets excluded -- a rerun grows the archive exactly the
-    #    way the plain in-tree-output case already did before that fix
-    #    (Codex review, fresh evidence, distinct from the leaf-symlink
-    #    case above).
+    #    nothing is recognized as being inside SOURCE_DIR at all (Codex
+    #    review, fresh evidence, distinct from the leaf-symlink case
+    #    above). This bit the scaffold-dir computation specifically too:
+    #    _scaffold_dirs_for_mkdir(source_path, output_path.parent) below
+    #    used to receive the *un-resolved* pair, so its own containment
+    #    check silently returned an empty set for this exact alias
+    #    mismatch -- the freshly-created output-only directory chain then
+    #    read as genuine pre-existing content, letting an otherwise-empty
+    #    SOURCE_DIR bypass the "nothing to pack" rejection entirely
+    #    (Codex review, fresh evidence, second round).
     # Resolving *only* OUTPUT's parent (and SOURCE_DIR in full) sees
     # through a directory-level alias for containment purposes, while
     # OUTPUT's own final path component stays lexical -- exactly the
@@ -783,6 +778,53 @@ def pack_product_baseline(
         output_rel = _relative_posix(output_canonical, source_real)
     except ValueError:
         output_rel = None
+
+    # _scaffold_dirs_for_mkdir()/_discover_empty_dirs() below both need a
+    # `leaf_parent`/root spelled *lexically* relative to `source_path` (the
+    # same, possibly-aliased spelling `paths`/`empty_dirs` themselves use),
+    # not the resolved `output_parent_real` -- so the alias is translated
+    # back into source_path's own spelling rather than switching the whole
+    # computation over to resolved paths.
+    if output_rel is not None:
+        output_rel_parent = os.path.dirname(output_rel)
+        leaf_parent_lexical = (
+            source_path / output_rel_parent if output_rel_parent else source_path
+        )
+    else:
+        leaf_parent_lexical = output_path.parent
+
+    # Created *before* discovery, not just before the write below: if
+    # OUTPUT lives under a not-yet-existing subdirectory of SOURCE_DIR
+    # (e.g. SOURCE_DIR/artifacts/base.tar.zst), creating this directory
+    # only after _discover_paths()/_discover_empty_dirs() ran would mean
+    # the first pack never sees `artifacts/` at all (it doesn't exist
+    # yet), while a second pack -- run after this same mkdir call already
+    # created it -- sees an empty `artifacts/` directory (its only file,
+    # OUTPUT itself, is excluded below) and adds an explicit directory
+    # member for it. Two runs of the identical invocation would then
+    # disagree on file_count and produce different archive bytes (Codex
+    # review, fresh evidence). Creating it up front makes every run see
+    # the same input tree -- `artifacts/` is discovered as an empty
+    # directory member consistently, from the very first pack.
+    #
+    # Captured *before* the mkdir call below: an originally-empty
+    # SOURCE_DIR whose only content is this newly-created output-only
+    # directory chain must still be rejected as "nothing to pack" -- the
+    # scaffold directory itself carries no real product content, and
+    # counting it as such would silently bypass the empty-source check
+    # entirely (Codex review, fresh evidence: `pack` on a genuinely empty
+    # SOURCE_DIR succeeded with zero libraries once its output lived
+    # under a not-yet-existing subdirectory).
+    output_scaffold_dirs = _scaffold_dirs_for_mkdir(source_path, leaf_parent_lexical)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    paths = _discover_paths(source_path)
+    # Exclude OUTPUT itself when it lives under SOURCE_DIR — otherwise a
+    # rerun of `pack SOURCE_DIR SOURCE_DIR/baseline.tar.zst` would embed
+    # the *previous* archive as an input member, growing on every
+    # invocation and violating the determinism this format promises.
+    # Computed from the two paths, not existence, so this excludes the
+    # output slot even on a first-ever pack (before the file exists).
     if output_rel is not None:
         paths = [p for p in paths if _relative_posix(p, source_path) != output_rel]
     empty_dirs = _discover_empty_dirs(source_path, paths)

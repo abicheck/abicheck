@@ -415,6 +415,29 @@ class TestPackProductBaseline:
         finally:
             os.chdir(cwd)
 
+    def test_pack_rejects_empty_source_dir_when_source_is_a_symlink_alias(
+        self, tmp_path: Path
+    ) -> None:
+        # SOURCE_DIR passed as a symlink alias (`source-link -> source`),
+        # with OUTPUT spelled through the real, non-aliased directory
+        # (`source/artifacts/base.tar.zst`, not `source-link/artifacts/
+        # ...`) -- a purely lexical (os.path.abspath()) comparison in
+        # _scaffold_dirs_for_mkdir() never shares a common prefix with
+        # SOURCE_DIR's own alias spelling, so it silently reported the
+        # freshly-created `artifacts/` scaffold directory as *not* being
+        # inside SOURCE_DIR at all. That directory then read as genuine,
+        # pre-existing empty-directory content instead of output-only
+        # scaffolding, letting an otherwise genuinely empty SOURCE_DIR
+        # bypass the "no files found" rejection entirely (Codex review,
+        # fresh evidence).
+        real = tmp_path / "source"
+        real.mkdir()
+        alias = tmp_path / "source-link"
+        alias.symlink_to(real, target_is_directory=True)
+        out = real / "artifacts" / "base.tar.zst"
+        with pytest.raises(SnapshotError, match="no files found"):
+            pack_product_baseline(alias, out)
+
     def test_pack_skips_a_file_that_vanishes_during_the_walk(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
