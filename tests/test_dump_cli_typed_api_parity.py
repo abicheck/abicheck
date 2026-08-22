@@ -116,11 +116,30 @@ def _build_library(
     std: str = "c++17",
     macros: tuple[str, ...] = (),
     extra_include_dir: str | None = None,
+    duplicate_owned_include_dirs: bool = False,
 ) -> tuple[Path, Path, Path]:
     """Compile a small, real library whose header depends on the given
     ``-std=``/macros, plus a matching ``compile_commands.json`` -- varying
     the build-evidence shape across the parametrized cases below, not just
-    the one exact shape #810's own repro used."""
+    the one exact shape #810's own repro used.
+
+    ``duplicate_owned_include_dirs`` reproduces the exact real-world shape
+    reported against a Bazel ``cc_library`` with an ``includes = [...]``
+    attribute (``napetrov/abicheck-bazel-lab``'s ``UPSTREAM_TO_ABICHECK.md``,
+    2026-08-21 entry, ``//:math``): Bazel's compile action carries *two*
+    distinct ``-I`` search directories that are both ancestors of the
+    *same* public header -- one from the package's own ``includes``
+    attribute (here, ``<root>/include``), one from Bazel's own
+    always-present package/workspace-root search path (here, ``<root>``
+    itself). Neither is redundant to drop and both are real compiler argv,
+    so ``declared_includes`` legitimately gets two "owned" slots for one
+    physical header, tokenized as two different header-relative-to-dir
+    spellings (``pkg/widget.h`` under the root dir, ``widget.h`` under the
+    package dir). This is a distinct shape from ``extra-include-dir``
+    above (an unrelated *second* header under its own, non-overlapping
+    directory) -- here both dirs own the exact same header, which is what
+    exercises the ``_slot_token_for_ancestor`` dedup/ordering machinery on
+    a genuine multi-owner case rather than a multi-header one."""
     include_dirs = [tmp_path]
     dep_header_snippet = ""
     dep_field = ""
@@ -138,7 +157,22 @@ def _build_library(
         f'#ifndef {m.split("=")[0]}\n#error "missing {m}"\n#endif' for m in macros
     )
 
-    header = tmp_path / "widget.h"
+    if duplicate_owned_include_dirs:
+        header_dir = tmp_path / "include" / "pkg"
+        header_dir.mkdir(parents=True, exist_ok=True)
+        header = header_dir / "widget.h"
+        header_include_spelling = "pkg/widget.h"
+        # Both the package's own `include` dir (owns the header as
+        # `pkg/widget.h`) and the workspace root itself (owns it as
+        # `include/pkg/widget.h`) are real, simultaneous `-I` search
+        # directories -- mirroring Bazel's `includes = ["include"]` plus
+        # its own always-present package-root search path.
+        include_dirs.append(tmp_path / "include")
+        include_dirs.append(tmp_path)
+    else:
+        header = tmp_path / "widget.h"
+        header_include_spelling = "widget.h"
+
     header.write_text(
         "#pragma once\n"
         f"{dep_header_snippet}"
@@ -156,7 +190,8 @@ def _build_library(
     )
     src = tmp_path / "widget.cpp"
     src.write_text(
-        '#include "widget.h"\nint compute(const Widget& w) { return w.sum(); }\n',
+        f'#include "{header_include_spelling}"\n'
+        "int compute(const Widget& w) { return w.sum(); }\n",
         encoding="utf-8",
     )
     so_path = tmp_path / "libwidget.so"
@@ -296,6 +331,14 @@ _BUILD_SHAPES: dict[str, dict[str, object]] = {
     "plain-c++17": {"std": "c++17"},
     "c++20-with-macro": {"std": "c++20", "macros": ("FOO=1",)},
     "extra-include-dir": {"std": "c++17", "extra_include_dir": "dep"},
+    # Real-world Bazel `cc_library(includes = [...])` shape -- see
+    # `_build_library`'s own docstring paragraph on
+    # `duplicate_owned_include_dirs` for the exact upstream report this
+    # reproduces (`napetrov/abicheck-bazel-lab`, `//:math`, 2026-08-21).
+    "duplicate-owned-include-dirs": {
+        "std": "c++17",
+        "duplicate_owned_include_dirs": True,
+    },
 }
 
 
@@ -436,6 +479,36 @@ def test_dump_cli_and_typed_api_agree_on_resolved_compile_context(
 _CONTRACT_KNOWN_DIVERGENT_FIELDS: dict[str, str] = {}
 
 
+def _assert_duplicate_owned_include_dirs_oracle(fields: dict) -> None:
+    """Positive oracle for the ``"duplicate-owned-include-dirs"`` shape
+    (Codex review, PR #825): the cross-path equality check in the test
+    below only proves the CLI and typed-API paths agree with *each other*
+    -- if a regression made every path uniformly drop one or both owned
+    ``-I`` roots (e.g. a change to ``seed_includes_and_fold_compile_context``
+    or ``_slot_token_for_ancestor`` that stops recognizing this shape at
+    all), the snapshots would still be equal, and the equality check alone
+    would stay green while this fixture silently stopped exercising the
+    two-owner-directories behavior it exists to pin. Assert the actual
+    expected content instead: two ordered ``hdrs:`` slots, one per owning
+    ``-I`` directory, each with the distinct header-relative spelling
+    ``_build_library``'s docstring documents for this shape."""
+    raw = fields.get("include_sequence")
+    assert raw is not None, "duplicate-owned-include-dirs: no include_sequence recorded"
+    slots = json.loads(raw)
+    assert len(slots) == 2, (
+        "duplicate-owned-include-dirs: expected exactly two owned include-dir "
+        f"slots, got {slots!r}"
+    )
+    assert slots[0].startswith("0:hdrs:") and slots[1].startswith("1:hdrs:"), slots
+    assert '"pkg/widget.h"' in slots[0], slots
+    assert '"include/pkg/widget.h"' in slots[1], slots
+
+
+_SHAPE_ORACLES: dict[str, object] = {
+    "duplicate-owned-include-dirs": _assert_duplicate_owned_include_dirs_oracle,
+}
+
+
 @pytest.mark.skipif(not (_HAVE_GXX and _HAVE_CLANG), reason=_SKIP_REASON)
 @pytest.mark.parametrize("shape_name", sorted(_BUILD_SHAPES))
 def test_dump_cli_and_typed_api_agree_on_extraction_contract(
@@ -460,6 +533,10 @@ def test_dump_cli_and_typed_api_agree_on_extraction_contract(
 
     assert cli_fields, f"{shape_name}: the CLI dump recorded no extraction contract"
     assert typed_fields, f"{shape_name}: the typed dump recorded no extraction contract"
+
+    oracle = _SHAPE_ORACLES.get(shape_name)
+    if oracle is not None:
+        oracle(cli_fields)  # type: ignore[operator]
 
     differing = sorted(
         key

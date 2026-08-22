@@ -2102,6 +2102,55 @@ Once a root command genuinely clears the bar above, pick the right home:
   what #810's original literal symptom was about, is caught independently
   of the `include_sequence` gap this note documents.
 
+  **The nineteenth finding's own missing prerequisite — real evidence from
+  the exact Bazel `include_sequence` mismatch — has now been supplied, and
+  the mismatch does not reproduce on current `main` (2026-08-22).**
+  `napetrov/abicheck-bazel-lab`'s `UPSTREAM_TO_ABICHECK.md` (2026-08-21
+  entry, "`abicheck scan --against` reports NOT_COMPARABLE against every
+  `abicheck dump` baseline") recorded exactly this: `mode: dump` and
+  `mode: scan` for real Bazel `//:math` evidence (`cc_library(includes =
+  ["include"])`, verified byte-identical evidence packs across runs)
+  disagreeing on `contract.profile_fields.include_sequence`, deterministic,
+  on every CI run pinned to `abicheck/abicheck@6fb8536` (#812). Reproduced
+  directly, without Bazel or castxml: a `g++`-compiled library with the
+  identical real shape a `cc_library(includes = ["include"])` action
+  produces — two simultaneous `-I` search directories (the package's own
+  `include` dir and Bazel's always-present package/workspace-root search
+  path) that are both real, legitimate ancestors of the *same* physical
+  public header, tokenizing as two `hdrs:` slots in `include_sequence`
+  (`abicheck_lab/math.h` under the `include` dir, `include/abicheck_lab/
+  math.h` under the root — matching the committed `abi/math.abicheck.json`
+  baseline's own recorded fields exactly). Checked out at the reported pin
+  (`6fb85361c`, #812) in a separate worktree: the mismatch reproduces
+  there verbatim (`dump`'s baseline records `include_sequence: []` — the
+  P0.3 L3→L2 fold never reached the ELF `dump` CLI's header parse at that
+  commit — while `scan`'s candidate resolves two `hdrs:` slots for the
+  identical evidence, so `scan --against` correctly, if unhelpfully,
+  refuses the pair as `NOT_COMPARABLE`). The identical repro against
+  current `main` (well past #812 — the "PR C" `dump`/`scan` convergence
+  work chronicled throughout this same entry, `#814`/`#815`/`#817`/`#823`,
+  landed after the lab's pin) produces `NO_CHANGE`/exit 0 on `scan
+  --against`, `compare`'s implicit-dump operand, and both CLI-vs-typed-API
+  parity lenses alike — the `dump`/`scan` convergence work already closed
+  this specific shape as a side effect, not as a targeted fix for it.
+  Given `main` was already correct, no `abicheck` source change was made
+  for this finding; what was missing was permanent regression coverage
+  pinning this exact real-world shape (a Bazel `includes`-attribute-style
+  *duplicate owned include directory*, distinct from `extra-include-dir`'s
+  unrelated-second-header shape), so a future regression in the shared
+  `seed_includes_and_fold_compile_context`/`_slot_token_for_ancestor`
+  machinery fails a fast, deterministic test here instead of needing a
+  fresh Bazel CI report to notice again. Added as a fourth parametrized
+  shape, `"duplicate-owned-include-dirs"`, in
+  `tests/test_dump_cli_typed_api_parity.py`'s `_BUILD_SHAPES` — it runs
+  through all four existing parity/comparability tests in that module
+  (both CLI-vs-typed-API lenses, `scan --against`, `compare`'s
+  implicit-dump operand) with no `xfail`, matching every other closed
+  shape there. The pinned Action commit `abicheck-bazel-lab` reported
+  against (`6fb8536`) predates the fix entirely; upstream consumers hitting
+  this exact symptom need to move their pin forward past `#814`, not wait
+  on a new `abicheck` change.
+
 - **`dump --lang c++` is silently discarded on the primary clang header-AST
   pass for a language-ambiguous header, diverging from `_attach_header_graph`'s
   own pass on the identical headers — investigated, not fixed (G31 Phase C
