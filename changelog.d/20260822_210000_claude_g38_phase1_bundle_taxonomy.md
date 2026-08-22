@@ -1,7 +1,7 @@
 ### Documentation
 
 - **Documented why `bundle_*` findings aren't suppressed by public-surface
-  policy scoping.** [Multi-binary (bundle) ABI analysis](../use/multi-binary.md)
+  policy scoping.** [Multi-binary (bundle) ABI analysis](docs/use/multi-binary.md)
   now explains that a `bundle_*` kind answers "does the shipped bundle still
   work end-to-end," a deliberately different question from
   `BREAKING_KINDS`/`API_BREAK_KINDS`, so `--scope-public-headers` and a
