@@ -40,11 +40,11 @@ directly — covering every library, and every cross-library edge between
 them, in one invocation instead of one per library.
 
 This is a storage/transport format only: it packs and unpacks a directory
-tree. It does not itself invoke ``compare`` — see
-``abicheck project baseline pack``/``unpack`` (:mod:`abicheck.cli_project`)
-for the CLI, and a project's own CI workflow for wiring the unpacked
-directory into ``compare <old_dir> <new_dir>`` in place of a per-library
-``scan --against`` step.
+tree. It does not itself invoke ``compare`` — library-only surface, no CLI
+command. A caller (typically a project's own CI workflow) invokes
+:func:`pack_product_baseline`/:func:`unpack_product_baseline` directly and
+wires the unpacked directory into ``compare <old_dir> <new_dir>`` in place
+of a per-library ``scan --against`` step.
 """
 
 from __future__ import annotations
@@ -216,6 +216,24 @@ def _resolve_under_root(root: Path, rel: str) -> Path | None:
 
 def _relative_posix(path: Path, root: Path) -> str:
     return path.relative_to(root).as_posix()
+
+
+def _scaffold_dirs_for_mkdir(base: Path, leaf_parent: Path) -> set[Path]:
+    """The directories under *base* that ``leaf_parent.mkdir(parents=True)``
+    is about to create -- i.e. every ancestor of *leaf_parent*, up to and
+    excluding *base* itself, that doesn't exist yet. Used to tell an
+    output-only directory chain (created purely to hold OUTPUT, carrying
+    no real product content of its own) apart from genuine pre-existing
+    product content, when deciding whether SOURCE_DIR has anything to
+    pack (see :func:`pack_product_baseline`'s own "no files found" check)."""
+    created: set[Path] = set()
+    if leaf_parent != base and not leaf_parent.is_relative_to(base):
+        return created
+    node = leaf_parent
+    while node != base and not node.exists():
+        created.add(node)
+        node = node.parent
+    return created
 
 
 def _safe_int(value: Any) -> int:
@@ -491,6 +509,16 @@ def pack_product_baseline(
     # review, fresh evidence). Creating it up front makes every run see
     # the same input tree -- `artifacts/` is discovered as an empty
     # directory member consistently, from the very first pack.
+    #
+    # Captured *before* the mkdir call below: an originally-empty
+    # SOURCE_DIR whose only content is this newly-created output-only
+    # directory chain must still be rejected as "nothing to pack" -- the
+    # scaffold directory itself carries no real product content, and
+    # counting it as such would silently bypass the empty-source check
+    # entirely (Codex review, fresh evidence: `pack` on a genuinely empty
+    # SOURCE_DIR succeeded with zero libraries once its output lived
+    # under a not-yet-existing subdirectory).
+    output_scaffold_dirs = _scaffold_dirs_for_mkdir(source_path, output_path.parent)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     resolved_header_roots: list[str] = []
@@ -544,7 +572,13 @@ def pack_product_baseline(
     if output_rel is not None:
         paths = [p for p in paths if _relative_posix(p, source_path) != output_rel]
     empty_dirs = _discover_empty_dirs(source_path, paths)
-    if not paths and not empty_dirs:
+    # A scaffold directory we just created solely to hold OUTPUT doesn't
+    # count as real content for this check -- it always ends up empty
+    # once OUTPUT itself is excluded above, and an originally-empty
+    # SOURCE_DIR must still be rejected regardless of where OUTPUT was
+    # asked to go (see the mkdir call above for the full reasoning).
+    real_empty_dirs = [d for d in empty_dirs if d not in output_scaffold_dirs]
+    if not paths and not real_empty_dirs:
         raise SnapshotError(
             f"no files found under {source_path} to pack into a product baseline"
         )
@@ -717,6 +751,25 @@ def unpack_product_baseline(
             ) from exc
         if not isinstance(raw, dict):
             raise SnapshotError(f"{archive_path}: corrupt product baseline manifest")
+        # ProductBaselineManifest.from_dict() defensively *defaults* a
+        # missing "schema" key to PRODUCT_BASELINE_SCHEMA, per this
+        # codebase's established "never abort on a hand-edited/malformed
+        # pack" from_dict() convention -- correct for every *other* field,
+        # but applied to `schema` itself it defeats the one check this
+        # whole discriminator exists for: an archive whose manifest is any
+        # parseable mapping without a `schema` key at all (e.g. `{}`)
+        # would silently pass _check_schema_supported() and get published
+        # as a recognized baseline (Codex review, fresh evidence). Checked
+        # explicitly, before the defensive from_dict() default ever
+        # applies, so a manifest that doesn't genuinely self-identify as
+        # this format is rejected rather than defaulted into looking like
+        # one.
+        if not isinstance(raw.get("schema"), str) or not raw["schema"]:
+            raise SnapshotError(
+                f"{archive_path}: product baseline manifest is missing its "
+                "schema discriminator -- not a genuine abicheck product "
+                "baseline archive"
+            )
 
         manifest = ProductBaselineManifest.from_dict(raw)
         _check_schema_supported(manifest.schema, archive_path)

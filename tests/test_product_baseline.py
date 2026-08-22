@@ -13,15 +13,18 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Unit tests for :mod:`abicheck.product_baseline` — the pack/unpack
-primitives behind ``abicheck project baseline pack``/``unpack``. CLI-level
-wiring is exercised separately in ``test_cli_project_baseline.py``."""
+"""Unit tests for :mod:`abicheck.product_baseline` — the
+:func:`~abicheck.product_baseline.pack_product_baseline`/
+:func:`~abicheck.product_baseline.unpack_product_baseline` library
+primitives. Library-only surface — no CLI wiring."""
 
 from __future__ import annotations
 
 import hashlib
+import io
 import os
 import stat as stat_mod
+import tarfile
 from pathlib import Path
 
 import pytest
@@ -204,6 +207,24 @@ class TestPackProductBaseline:
         empty.mkdir()
         with pytest.raises(SnapshotError, match="no files found"):
             pack_product_baseline(empty, tmp_path / "out.tar.zst")
+
+    def test_pack_rejects_empty_source_dir_with_in_tree_subdir_output(
+        self, tmp_path: Path
+    ) -> None:
+        # An in-tree OUTPUT under a not-yet-existing subdirectory
+        # (SOURCE_DIR/artifacts/base.tar.zst) is created via mkdir()
+        # *before* discovery, for determinism (see the sibling rerun
+        # test) -- but that scaffold directory carries no real product
+        # content of its own, and a genuinely empty SOURCE_DIR must still
+        # be rejected regardless of where OUTPUT was asked to go. Before
+        # this fix, the scaffold directory was discovered as an "empty
+        # directory" and silently satisfied the not-paths-and-not-
+        # empty-dirs check, succeeding with zero libraries (Codex review,
+        # fresh evidence).
+        empty = tmp_path / "empty"
+        empty.mkdir()
+        with pytest.raises(SnapshotError, match="no files found"):
+            pack_product_baseline(empty, empty / "artifacts" / "base.tar.zst")
 
     def test_pack_skips_a_file_that_vanishes_during_the_walk(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -587,6 +608,49 @@ class TestUnpackProductBaseline:
         bogus.write_bytes(b"\x28\xb5\x2f\xfd" + b"not really zstd content")
         with pytest.raises(SnapshotError, match="failed to extract"):
             unpack_product_baseline(bogus, tmp_path / "dest")
+
+    def test_unpack_rejects_manifest_missing_schema_discriminator(
+        self, tmp_path: Path
+    ) -> None:
+        # ProductBaselineManifest.from_dict() defensively *defaults* a
+        # missing "schema" key -- correct for every other field, but
+        # applied to the discriminator itself it would silently pass an
+        # archive whose manifest is any parseable mapping without a
+        # "schema" key at all (e.g. "{}") as a recognized baseline (Codex
+        # review, fresh evidence).
+        product = _make_product(tmp_path)
+        archive = tmp_path / "baseline.tar.zst"
+        pack_product_baseline(product, archive)
+
+        import zstandard
+
+        # Rewrite the archive with a schema-less manifest, keeping every
+        # other member as-is.
+        raw = archive.read_bytes()
+        dctx = zstandard.ZstdDecompressor()
+        tar_bytes = dctx.decompress(raw, max_output_size=1 << 30)
+        rewritten = tmp_path / "rewritten.tar"
+        with (
+            tarfile.open(fileobj=io.BytesIO(tar_bytes), mode="r") as src,
+            tarfile.open(rewritten, mode="w") as dst,
+        ):
+            for member in src.getmembers():
+                if member.name == MANIFEST_MEMBER_NAME:
+                    payload = b"{}\n"
+                    info = tarfile.TarInfo(name=MANIFEST_MEMBER_NAME)
+                    info.size = len(payload)
+                    dst.addfile(info, io.BytesIO(payload))
+                else:
+                    fh = src.extractfile(member)
+                    dst.addfile(member, fh)
+
+        bad_archive = tmp_path / "bad.tar.zst"
+        cctx = zstandard.ZstdCompressor()
+        with open(bad_archive, "wb") as out_fh:
+            cctx.copy_stream(open(rewritten, "rb"), out_fh)
+
+        with pytest.raises(SnapshotError, match="missing its schema discriminator"):
+            unpack_product_baseline(bad_archive, tmp_path / "dest")
 
     def test_unpack_rejects_newer_major_schema(self, tmp_path: Path) -> None:
         product = _make_product(tmp_path)
