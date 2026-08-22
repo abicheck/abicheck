@@ -74,6 +74,20 @@ class TestManifestRoundTrip:
         assert manifest.header_roots == ()
         assert manifest.schema == PRODUCT_BASELINE_SCHEMA
 
+    def test_from_dict_tolerates_non_numeric_size_and_file_count(self) -> None:
+        # A hand-edited/corrupt archive's manifest.json could carry a
+        # non-numeric "size"/"file_count" -- must degrade to 0, not raise
+        # ValueError past unpack_product_baseline()'s SnapshotError handling
+        # (Codex review, fresh evidence).
+        manifest = ProductBaselineManifest.from_dict(
+            {
+                "libraries": [{"name": "a.so", "path": "a.so", "size": "not-a-number"}],
+                "file_count": "also-not-a-number",
+            }
+        )
+        assert manifest.libraries[0].size == 0
+        assert manifest.file_count == 0
+
 
 class TestPackProductBaseline:
     def test_pack_produces_a_file(self, tmp_path: Path) -> None:
@@ -160,6 +174,22 @@ class TestPackProductBaseline:
         with pytest.raises(SnapshotError, match="escapes"):
             pack_product_baseline(product, tmp_path / "b.tar.zst")
 
+    def test_pack_repeated_invocation_into_source_dir_does_not_grow(
+        self, tmp_path: Path
+    ) -> None:
+        # pack SOURCE_DIR SOURCE_DIR/baseline.tar.zst, run twice -- the
+        # second run must not embed the first run's own output as an input
+        # member (Codex review, fresh evidence: this used to grow the
+        # archive and break the determinism promise).
+        product = _make_product(tmp_path)
+        out = product / "baseline.tar.zst"
+        manifest1 = pack_product_baseline(product, out)
+        first_size = out.stat().st_size
+        manifest2 = pack_product_baseline(product, out)
+        assert out.stat().st_size == first_size
+        assert manifest1.libraries == manifest2.libraries
+        assert manifest1.file_count == manifest2.file_count
+
     def test_pack_leaves_no_partial_output_on_failure(self, tmp_path: Path) -> None:
         product = _make_product(tmp_path)
         outside = tmp_path / "outside.so"
@@ -210,23 +240,58 @@ class TestUnpackProductBaseline:
         with pytest.raises(SnapshotError, match="not empty"):
             unpack_product_baseline(archive, dest)
 
-    def test_unpack_rejects_archive_without_manifest(self, tmp_path: Path) -> None:
+    def test_unpack_leaves_missing_destination_absent_on_bad_archive(
+        self, tmp_path: Path
+    ) -> None:
+        # Validate-before-populate (Codex review, fresh evidence): a
+        # missing/corrupt manifest must not leave any extracted content
+        # behind, so a retry with a corrected archive doesn't fail with
+        # "destination is not empty".
+        bogus = self._plain_tar_zst(tmp_path)
+        dest = tmp_path / "dest"
+        with pytest.raises(SnapshotError, match=MANIFEST_MEMBER_NAME):
+            unpack_product_baseline(bogus, dest)
+        assert not dest.exists()
+
+    def test_unpack_leaves_existing_empty_destination_empty_on_bad_archive(
+        self, tmp_path: Path
+    ) -> None:
+        bogus = self._plain_tar_zst(tmp_path)
+        dest = tmp_path / "dest"
+        dest.mkdir()
+        with pytest.raises(SnapshotError, match=MANIFEST_MEMBER_NAME):
+            unpack_product_baseline(bogus, dest)
+        assert dest.is_dir()
+        assert not list(dest.iterdir())
+
+    def test_unpack_leaves_no_staging_directory_behind_on_failure(
+        self, tmp_path: Path
+    ) -> None:
+        bogus = self._plain_tar_zst(tmp_path)
+        with pytest.raises(SnapshotError):
+            unpack_product_baseline(bogus, tmp_path / "dest")
+        assert not list(tmp_path.glob(".abicheck-product-baseline-unpack-*"))
+
+    @staticmethod
+    def _plain_tar_zst(tmp_path: Path) -> Path:
+        import io
         import tarfile
 
-        plain_tar = tmp_path / "plain.tar.zst"
         import zstandard
 
+        plain_tar = tmp_path / "plain.tar.zst"
         payload = tmp_path / "payload.tar"
         with tarfile.open(payload, "w") as tf:
             info = tarfile.TarInfo(name="not-a-baseline.txt")
             data = b"hello\n"
             info.size = len(data)
-            import io
-
             tf.addfile(info, io.BytesIO(data))
         cctx = zstandard.ZstdCompressor()
         plain_tar.write_bytes(cctx.compress(payload.read_bytes()))
+        return plain_tar
 
+    def test_unpack_rejects_archive_without_manifest(self, tmp_path: Path) -> None:
+        plain_tar = self._plain_tar_zst(tmp_path)
         with pytest.raises(SnapshotError, match=MANIFEST_MEMBER_NAME):
             unpack_product_baseline(plain_tar, tmp_path / "dest")
 

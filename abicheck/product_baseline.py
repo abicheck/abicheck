@@ -52,6 +52,7 @@ import hashlib
 import io
 import json
 import os
+import shutil
 import stat as stat_module
 import tarfile
 import tempfile
@@ -117,7 +118,7 @@ class LibraryEntry:
             name=str(data.get("name", "")),
             path=str(data.get("path", "")),
             sha256=str(data.get("sha256", "")),
-            size=int(data.get("size") or 0),
+            size=_safe_int(data.get("size")),
         )
 
 
@@ -165,7 +166,7 @@ class ProductBaselineManifest:
                     raw_header_roots if isinstance(raw_header_roots, list) else []
                 )
             ),
-            file_count=int(data.get("file_count") or 0),
+            file_count=_safe_int(data.get("file_count")),
         )
 
 
@@ -205,6 +206,21 @@ def _resolve_under_root(root: Path, rel: str) -> Path | None:
 
 def _relative_posix(path: Path, root: Path) -> str:
     return path.relative_to(root).as_posix()
+
+
+def _safe_int(value: Any) -> int:
+    """Defensively coerce a manifest numeric field to ``int``, the same
+    "never abort on a hand-edited/malformed pack" convention every other
+    ``from_dict()`` in this codebase follows (see this module's own
+    docstring reference, and AGENTS.md's "every dataclass carries
+    to_dict()/from_dict() with defensive .get() parsing" convention) —
+    a non-numeric ``size``/``file_count`` degrades to ``0`` instead of
+    raising ``ValueError`` past ``unpack_product_baseline``'s
+    :class:`SnapshotError` handling."""
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return 0
 
 
 def _discover_paths(source_dir: Path) -> list[Path]:
@@ -361,6 +377,18 @@ def pack_product_baseline(
         resolved_header_roots.append(Path(rel).as_posix())
 
     paths = _discover_paths(source_path)
+    # Exclude OUTPUT itself when it lives under SOURCE_DIR — otherwise a
+    # rerun of `pack SOURCE_DIR SOURCE_DIR/baseline.tar.zst` would embed
+    # the *previous* archive as an input member, growing on every
+    # invocation and violating the determinism this format promises.
+    # Computed from the two paths, not existence, so this excludes the
+    # output slot even on a first-ever pack (before the file exists).
+    try:
+        output_rel = _relative_posix(output_path.resolve(), source_path.resolve())
+    except ValueError:
+        output_rel = None
+    if output_rel is not None:
+        paths = [p for p in paths if _relative_posix(p, source_path) != output_rel]
     if not paths:
         raise SnapshotError(
             f"no files found under {source_path} to pack into a product baseline"
@@ -413,6 +441,14 @@ def unpack_product_baseline(
     escape, and device/FIFO rejection), the same code path package
     extraction already relies on, rather than a second, independently
     written unpacker.
+
+    Extracts into a staging directory first and only publishes it to
+    *dest_dir* once the manifest is confirmed present, parseable, and at a
+    supported schema version — a missing/corrupt/unsupported archive
+    raises :class:`SnapshotError` with *dest_dir* left exactly as it was
+    (still absent, or still the empty directory it started as), so a retry
+    with a corrected archive doesn't first have to clean up a partial
+    extraction by hand.
     """
     archive_path = Path(archive)
     if not archive_path.is_file():
@@ -427,28 +463,45 @@ def unpack_product_baseline(
             raise SnapshotError(f"unpack destination is not a directory: {dest_path}")
         if any(dest_path.iterdir()):
             raise SnapshotError(f"unpack destination is not empty: {dest_path}")
-    else:
-        dest_path.mkdir(parents=True)
+    dest_path.parent.mkdir(parents=True, exist_ok=True)
 
-    TarExtractor().extract(archive_path, dest_path)
-
-    manifest_path = dest_path / MANIFEST_MEMBER_NAME
-    if not manifest_path.is_file():
-        raise SnapshotError(
-            f"{archive_path} does not look like an abicheck product baseline "
-            f"archive (missing {MANIFEST_MEMBER_NAME})"
+    staging = Path(
+        tempfile.mkdtemp(
+            dir=str(dest_path.parent), prefix=".abicheck-product-baseline-unpack-"
         )
+    )
     try:
-        raw = json.loads(manifest_path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise SnapshotError(
-            f"{archive_path}: corrupt product baseline manifest"
-        ) from exc
-    if not isinstance(raw, dict):
-        raise SnapshotError(f"{archive_path}: corrupt product baseline manifest")
+        TarExtractor().extract(archive_path, staging)
 
-    manifest = ProductBaselineManifest.from_dict(raw)
-    _check_schema_supported(manifest.schema, archive_path)
+        manifest_path = staging / MANIFEST_MEMBER_NAME
+        if not manifest_path.is_file():
+            raise SnapshotError(
+                f"{archive_path} does not look like an abicheck product baseline "
+                f"archive (missing {MANIFEST_MEMBER_NAME})"
+            )
+        try:
+            raw = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise SnapshotError(
+                f"{archive_path}: corrupt product baseline manifest"
+            ) from exc
+        if not isinstance(raw, dict):
+            raise SnapshotError(f"{archive_path}: corrupt product baseline manifest")
+
+        manifest = ProductBaselineManifest.from_dict(raw)
+        _check_schema_supported(manifest.schema, archive_path)
+    except BaseException:
+        shutil.rmtree(staging, ignore_errors=True)
+        raise
+
+    # Validated -- publish. dest_path, if it existed, was already confirmed
+    # empty above, so removing it and renaming staging into its place is
+    # safe (and portable: os.replace()/os.rename() cannot atomically
+    # replace an existing directory on every platform, but replacing a
+    # path that no longer exists works everywhere).
+    if dest_path.exists():
+        dest_path.rmdir()
+    os.replace(staging, dest_path)
     return manifest
 
 
