@@ -269,6 +269,22 @@ def _canonical_library_key(path: Path) -> str:
     extension (a Python ``.pyd`` extension module) is just as
     case-insensitive on Windows as a ``.dll``'s, and a suffix-only check
     would miss it (Codex review, fresh evidence).
+
+    A *stored snapshot* of a PE library (``Foo.dll.abicheck.json``, or its
+    compressed ``.gz``/``.zst`` forms) carries its DLL identity embedded in
+    the filename, not in the (JSON) file content -- ``_pe_is_dll_content``
+    reads the represented binary's own bytes, which for a snapshot are the
+    JSON envelope, not a PE image, so it always answers False here. Without
+    recognizing the embedded ``.dll`` segment, ``Foo.dll.abicheck.json`` and
+    ``foo.dll.abicheck.json`` (the same release's PE snapshot published
+    under two spellings) never case-folded to one key, and
+    ``compare-release``'s ``_build_match_map`` reported them as an unrelated
+    removal+addition instead of comparing them (Codex review, fresh
+    evidence). Matched the same way the ELF ``.so`` regex above already
+    allows an arbitrary trailing suffix after the extension (``\\.so.`` or
+    end of string) -- ``\\.dll`` followed by ``.`` or end of string, so a
+    plain ``.dll`` and a ``.dll``-derived snapshot filename are recognized
+    identically.
     """
     from .snapshot_io import _COMPRESSED_SUFFIXES
 
@@ -283,7 +299,7 @@ def _canonical_library_key(path: Path) -> str:
             name = name[: -len(trailing_ext)]
             name_lower = name_lower[: -len(trailing_ext)]
             break
-    if name_lower.endswith(".dll") or _pe_is_dll_content(path):
+    if re.search(r"\.dll(?:\.|$)", name_lower) or _pe_is_dll_content(path):
         return name_lower
     m = re.search(r"\.so(?:\.|$)", name, re.IGNORECASE)
     if m:

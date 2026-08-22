@@ -116,3 +116,28 @@ class TestCanonicalLibraryKeyCaseFolding:
 
     def test_versioned_uppercase_dylib_extension_case_is_preserved(self) -> None:
         assert _canonical_library_key(Path("libfoo.1.DYLIB")) == "libfoo.DYLIB"
+
+    def test_stored_pe_snapshot_case_only_rename_shares_a_canonical_key(
+        self,
+    ) -> None:
+        # A stored snapshot of a PE library (Foo.dll.abicheck.json) carries
+        # its DLL identity in the filename, not in the represented binary's
+        # own content -- the snapshot's bytes are JSON, so
+        # _pe_is_dll_content (which reads the actual file) never recognizes
+        # it as a PE image. Without matching the embedded ".dll" segment,
+        # compare-release's _build_match_map reported the same release's
+        # snapshot published under two case spellings as an unrelated
+        # removal+addition (Codex review, fresh evidence).
+        assert _canonical_library_key(
+            Path("Foo.dll.abicheck.json")
+        ) == _canonical_library_key(Path("foo.dll.abicheck.json"))
+
+    def test_stored_pe_snapshot_compressed_case_only_rename_shares_a_key(
+        self,
+    ) -> None:
+        # Same as above, but one side is a compressed snapshot (ADR-059) --
+        # the compression-suffix stripping and the embedded ".dll" match
+        # must compose correctly.
+        assert _canonical_library_key(
+            Path("Foo.dll.abicheck.json.gz")
+        ) == _canonical_library_key(Path("foo.dll.abicheck.json"))
