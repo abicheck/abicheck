@@ -886,6 +886,45 @@ class TestUnpackProductBaseline:
             unpack_product_baseline(tampered, dest)
         assert not dest.exists()
 
+    def test_unpack_rejects_a_blanked_sha256_even_with_a_correct_size(
+        self, tmp_path: Path
+    ) -> None:
+        # An earlier revision of the checksum-verification fix above used
+        # an `if lib.sha256:` truthiness guard to tell a hand-edited/older
+        # manifest missing the field apart from an explicit mismatch --
+        # but pack_product_baseline() always writes a real sha256 for
+        # every LibraryEntry, so an attacker who can edit the manifest
+        # (and correspondingly forge the size field, which is far easier
+        # to fake than a real digest) could trivially disable checksum
+        # verification entirely by blanking just this one field, while
+        # still shipping tampered library content of the same size
+        # (Codex review, fresh evidence). Isolated from a size mismatch
+        # here (size is left correct) so this specifically exercises the
+        # "missing digest is rejected outright" path, not the separate
+        # size check.
+        product = _make_product(tmp_path)
+        archive = tmp_path / "baseline.tar.zst"
+        pack_product_baseline(product, archive)
+
+        import zstandard
+
+        dctx = zstandard.ZstdDecompressor()
+        tar_bytes = dctx.decompress(archive.read_bytes(), max_output_size=1 << 30)
+        with tarfile.open(fileobj=io.BytesIO(tar_bytes), mode="r") as tf:
+            manifest_fh = tf.extractfile(MANIFEST_MEMBER_NAME)
+            assert manifest_fh is not None
+            manifest_raw = json.loads(manifest_fh.read())
+        for lib in manifest_raw["libraries"]:
+            if lib["path"] == "lib/libb.so":
+                lib["sha256"] = ""  # size is left correct/untouched
+        payload = json.dumps(manifest_raw).encode("utf-8") + b"\n"
+        tampered = _rewrite_manifest_member(tmp_path, archive, payload)
+
+        dest = tmp_path / "dest"
+        with pytest.raises(SnapshotError, match="missing or malformed sha256"):
+            unpack_product_baseline(tampered, dest)
+        assert not dest.exists()
+
     def test_unpack_leaves_no_staging_directory_behind_on_failure(
         self, tmp_path: Path
     ) -> None:

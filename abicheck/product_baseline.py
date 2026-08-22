@@ -88,6 +88,12 @@ MANIFEST_MEMBER_NAME = "abicheck-product-baseline.json"
 #: day it's introduced rather than needing one retrofitted later.
 PRODUCT_BASELINE_SCHEMA = "abicheck.product-baseline/v1"
 
+#: A genuine SHA-256 digest as lowercase hex -- what pack_product_baseline()
+#: always writes. Used by unpack_product_baseline() to reject a missing or
+#: malformed LibraryEntry.sha256 outright rather than silently skip the
+#: checksum comparison it's meant to gate (see that function's own comment).
+_SHA256_HEX_RE = re.compile(r"[0-9a-f]{64}")
+
 #: File suffixes recognized as a shared library on pack. Informational only
 #: — every regular file under the source directory is archived regardless
 #: of suffix; this only decides which archived files are itemized in
@@ -1120,31 +1126,51 @@ def unpack_product_baseline(
             # of failing here where the problem can be named (Codex
             # review, fresh evidence). Mirrors pack_product_baseline()'s
             # own hashing (`_add_member`) -- read once, in chunks, not
-            # loaded whole into memory. A recorded size/sha256 of 0/""
-            # (the `_safe_int`/from_dict() default for a field a hand-
-            # edited or older manifest never set) has nothing to verify
-            # against and is skipped, matching this codebase's existing
-            # "don't abort on missing, only on wrong" defensive-parsing
-            # convention -- an explicitly wrong value still fails closed.
+            # loaded whole into memory.
+            #
+            # Size is compared unconditionally, never skipped for a 0
+            # value: pack_product_baseline() always records a real size
+            # for every LibraryEntry it writes, so a genuine 0 here can
+            # only mean either a hand-crafted manifest with nothing to
+            # compare (in which case there's no size the extracted file
+            # could plausibly disagree with, since real shared libraries
+            # are never 0 bytes) or an adversarial one that zeroed the
+            # field specifically to bypass this exact check -- unlike
+            # this codebase's usual "don't abort on missing, only on
+            # wrong" defensive-parsing convention, a value this check's
+            # own security purpose depends on must not be skippable by
+            # simply omitting it (Codex review, fresh evidence: an
+            # earlier revision's `if lib.size and ...`/`if lib.sha256:`
+            # truthiness guards let an attacker who can edit the manifest
+            # trivially disable verification by zeroing/blanking the
+            # very fields it checks). sha256 is validated as a genuine
+            # 64-hex-digit digest before comparison, for the same reason
+            # -- a missing or malformed digest is rejected outright
+            # rather than silently treated as "nothing to verify".
             actual_size = lib_resolved.stat().st_size
-            if lib.size and actual_size != lib.size:
+            if actual_size != lib.size:
                 raise SnapshotError(
                     f"{archive_path}: library {lib.path!r} size mismatch "
                     f"(manifest declares {lib.size} bytes, extracted "
                     f"content is {actual_size} bytes) -- archive may be "
                     "corrupt or tampered with"
                 )
-            if lib.sha256:
-                hasher = hashlib.sha256()
-                with open(lib_resolved, "rb") as fh:
-                    for chunk in iter(lambda: fh.read(1 << 20), b""):
-                        hasher.update(chunk)
-                if hasher.hexdigest() != lib.sha256:
-                    raise SnapshotError(
-                        f"{archive_path}: library {lib.path!r} checksum "
-                        "mismatch -- archive may be corrupt or tampered "
-                        "with"
-                    )
+            if not _SHA256_HEX_RE.fullmatch(lib.sha256):
+                raise SnapshotError(
+                    f"{archive_path}: library {lib.path!r} has a missing "
+                    "or malformed sha256 checksum in the manifest -- "
+                    "archive may be corrupt or tampered with"
+                )
+            hasher = hashlib.sha256()
+            with open(lib_resolved, "rb") as fh:
+                for chunk in iter(lambda: fh.read(1 << 20), b""):
+                    hasher.update(chunk)
+            if hasher.hexdigest() != lib.sha256:
+                raise SnapshotError(
+                    f"{archive_path}: library {lib.path!r} checksum "
+                    "mismatch -- archive may be corrupt or tampered "
+                    "with"
+                )
     except BaseException:
         shutil.rmtree(staging, ignore_errors=True)
         raise
