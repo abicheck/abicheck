@@ -511,6 +511,35 @@ def pack_product_baseline(
         raise SnapshotError(
             f"product baseline output must end with '.tar.zst': {output_path}"
         )
+    # Validated against the tree as it exists *before* the output-parent
+    # scaffold below can fabricate anything: a header root is only ever
+    # legitimate if it named a real, pre-existing directory in the
+    # product. Doing this after the scaffold mkdir would let a header
+    # root that happens to name the freshly-created (empty) output-parent
+    # chain pass validation on the strength of a directory that mkdir()
+    # just manufactured -- e.g. `output=SOURCE/include/base.tar.zst,
+    # header_roots=["include"]` would silently accept `include/` as a
+    # real header root and persist an empty, fabricated header tree in
+    # the manifest, with a later comparison running without the header
+    # evidence the caller actually asked for (Codex review, fresh
+    # evidence -- the earlier output-parent-determinism fix below didn't
+    # close this interaction).
+    resolved_header_roots: list[str] = []
+    for rel in header_roots:
+        resolved = _resolve_under_root(source_path, rel)
+        # Must be a directory, not merely exist: compare_product_
+        # directories() only ever includes a header root when
+        # `.is_dir()` is true, silently dropping anything else -- a
+        # header root recorded here as a regular file would round-trip
+        # through the manifest but never actually reach a comparison
+        # (Codex review, fresh evidence).
+        if resolved is None or not resolved.is_dir():
+            raise SnapshotError(
+                f"header root {rel!r} is absolute, escapes {source_path}, "
+                "or is not an existing directory"
+            )
+        resolved_header_roots.append(Path(rel).as_posix())
+
     # Created *before* discovery, not just before the write below: if
     # OUTPUT lives under a not-yet-existing subdirectory of SOURCE_DIR
     # (e.g. SOURCE_DIR/artifacts/base.tar.zst), creating this directory
@@ -535,22 +564,6 @@ def pack_product_baseline(
     # under a not-yet-existing subdirectory).
     output_scaffold_dirs = _scaffold_dirs_for_mkdir(source_path, output_path.parent)
     output_path.parent.mkdir(parents=True, exist_ok=True)
-
-    resolved_header_roots: list[str] = []
-    for rel in header_roots:
-        resolved = _resolve_under_root(source_path, rel)
-        # Must be a directory, not merely exist: compare_product_
-        # directories() only ever includes a header root when
-        # `.is_dir()` is true, silently dropping anything else -- a
-        # header root recorded here as a regular file would round-trip
-        # through the manifest but never actually reach a comparison
-        # (Codex review, fresh evidence).
-        if resolved is None or not resolved.is_dir():
-            raise SnapshotError(
-                f"header root {rel!r} is absolute, escapes {source_path}, "
-                "or is not an existing directory"
-            )
-        resolved_header_roots.append(Path(rel).as_posix())
 
     paths = _discover_paths(source_path)
     # Exclude OUTPUT itself when it lives under SOURCE_DIR — otherwise a

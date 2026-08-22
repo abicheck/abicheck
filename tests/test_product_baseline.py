@@ -566,6 +566,25 @@ class TestPackProductBaseline:
         assert manifest1.file_count == manifest2.file_count
         assert manifest1.libraries == manifest2.libraries
 
+    def test_pack_rejects_header_root_matching_the_output_scaffold_directory(
+        self, tmp_path: Path
+    ) -> None:
+        # output=SOURCE/newheaders/base.tar.zst with
+        # header_roots=["newheaders"] naming a directory that does not
+        # exist in the product at all: the output-parent scaffold
+        # mkdir() would fabricate an empty `newheaders/` directory that
+        # then wrongly passed header-root validation, since validation
+        # ran *after* the mkdir -- silently persisting an empty,
+        # fabricated header tree the product never actually had (Codex
+        # review, fresh evidence).
+        product = _make_product(tmp_path)
+        out = product / "newheaders" / "base.tar.zst"
+        with pytest.raises(SnapshotError, match="header root"):
+            pack_product_baseline(product, out, header_roots=["newheaders"])
+        # And the scaffold directory itself must not have been left
+        # behind by the failed call, same as any other pack rejection.
+        assert not (product / "newheaders").exists()
+
     def test_pack_leaves_no_partial_output_on_failure(self, tmp_path: Path) -> None:
         product = _make_product(tmp_path)
         outside = tmp_path / "outside.so"

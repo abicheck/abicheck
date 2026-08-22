@@ -2302,6 +2302,38 @@ class TestBuildBundleSnapshotFromMetadata:
         kinds = {f.kind for f in result.bundle_findings}
         assert ChangeKind.BUNDLE_INTRA_DEP_REMOVED in kinds
 
+    def test_resolution_is_independent_of_ambient_filesystem_state(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Without paths=, the synthesized Path(library_name) is a relative
+        # path with no real file behind it -- .resolve() would silently
+        # resolve it against the process's own current working directory,
+        # and a hard-link-alias scan would walk whatever that resolves to.
+        # An ambient libfoo.so -> libfoo.so.1 symlink sitting in cwd must
+        # not change which DT_NEEDED edges resolve as intra-bundle (Codex
+        # review, fresh evidence).
+        from abicheck.bundle import build_bundle_snapshot_from_metadata
+
+        # Plant a same-named symlink/file in a throwaway cwd -- if the
+        # resolution graph were probing the filesystem, this would be
+        # exactly the kind of ambient state that could change its output.
+        (tmp_path / "libprovider.so.1").write_bytes(b"not-real-elf")
+        (tmp_path / "libprovider.so").symlink_to("libprovider.so.1")
+        monkeypatch.chdir(tmp_path)
+
+        provider = _meta(soname="libprovider.so.1", exports=["do_thing"])
+        consumer = _meta(needed=["libprovider.so.1"], imports=["do_thing"])
+        snap = build_bundle_snapshot_from_metadata(
+            {"libprovider.so.1": provider, "libconsumer.so": consumer}
+        )
+        # soname_to_name must contain only what the metadata itself
+        # established (the soname, the canonical key, and the bare
+        # filename) -- never an alias recovered by scanning cwd.
+        assert snap.resolution.soname_to_name.get("libprovider.so.1") == (
+            "libprovider.so.1"
+        )
+        assert "libprovider.so" not in snap.resolution.soname_to_name
+
 
 # ---------------------------------------------------------------------------
 # BundleSnapshot.is_intra_bundle_provider

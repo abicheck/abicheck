@@ -235,7 +235,15 @@ def build_bundle_snapshot_from_metadata(
         surviving_metadata[name] = meta
         surviving_paths[name] = paths.get(name, Path(name))
 
-    resolution = _compute_resolution_graph(surviving_paths, surviving_metadata)
+    # probe_filesystem=False unconditionally: this function's whole
+    # contract is metadata-only resolution (see its own docstring), so
+    # even a caller-supplied `paths` -- given only for display purposes
+    # (a library's own .name/.parent) -- must not make the resolution
+    # graph depend on what those paths happen to resolve to on the real
+    # filesystem (Codex review, fresh evidence).
+    resolution = _compute_resolution_graph(
+        surviving_paths, surviving_metadata, probe_filesystem=False
+    )
     # Use the first library's parent as the root if available; otherwise empty path
     resolved_root = (
         root
@@ -610,6 +618,8 @@ def _hard_link_alias_basenames(path: Path) -> list[str]:
 def _compute_resolution_graph(
     libraries: dict[str, Path],
     metadata: dict[str, ElfMetadata],
+    *,
+    probe_filesystem: bool = True,
 ) -> ResolutionGraph:
     """Index exports/imports across every library in the bundle.
 
@@ -618,6 +628,22 @@ def _compute_resolution_graph(
     in this bundle (or if the symbol itself is provided by another
     library in this bundle — covers the case where the linker dropped a
     DT_NEEDED line but the import is still in .dynsym).
+
+    *probe_filesystem*: when ``True`` (the default, used by
+    :func:`build_bundle_snapshot`'s real-path callers), also resolves each
+    library's symlink target and scans its directory for hard-linked
+    aliases (see the two filesystem calls below) to recover soname
+    spellings a purely metadata-driven index would miss. Set ``False`` for
+    a *synthesized* ``libraries`` map (see
+    :func:`build_bundle_snapshot_from_metadata`) — a bare
+    ``Path(library_name)`` is a relative path with no real file behind it,
+    so ``.resolve()`` silently resolves against the *process's current
+    working directory* instead, and the hard-link scan walks whatever
+    directory that resolves to. Metadata-only resolution must not depend
+    on ambient filesystem state that happens to share a name with a
+    library (Codex review, fresh evidence: an unrelated ``libfoo.so ->
+    libfoo.so.1`` symlink sitting in the caller's cwd could silently
+    change which DT_NEEDED edges resolve as intra-bundle).
     """
     graph = ResolutionGraph()
 
@@ -648,28 +674,29 @@ def _compute_resolution_graph(
         # DT_NEEDED would name (Codex review: the original fix only worked
         # when the discovered path already *was* the real file).
         if name in libraries:
-            try:
-                resolved_name = libraries[name].resolve().name
-            except OSError:
-                resolved_name = libraries[name].name
-            soname_to_name.setdefault(resolved_name, name)
             soname_to_name.setdefault(libraries[name].name, name)
-            # A provider can also have *hard-linked* aliases -- distinct
-            # directory entries sharing one inode, common for a
-            # ``libfoo.so.1``/``libfoo.so.1.0.0`` pair. discover_artifact_
-            # set()'s own dedup keeps only one representative path per
-            # inode, so an alias basename a consumer's DT_NEEDED names is
-            # otherwise never indexed here at all -- the provider reads as
-            # unreachable and the audit emits a false
-            # bundle_unresolved_intra_dependency (Codex review, fresh
-            # evidence). Recover the discarded aliases by scanning the
-            # representative path's own directory for siblings sharing its
-            # (st_dev, st_ino) identity and indexing each one's basename
-            # too -- self-contained here, no need to thread alias lists
-            # through discover_artifact_set's public dict[str, Path] return
-            # type.
-            for alias in _hard_link_alias_basenames(libraries[name]):
-                soname_to_name.setdefault(alias, name)
+            if probe_filesystem:
+                try:
+                    resolved_name = libraries[name].resolve().name
+                except OSError:
+                    resolved_name = libraries[name].name
+                soname_to_name.setdefault(resolved_name, name)
+                # A provider can also have *hard-linked* aliases -- distinct
+                # directory entries sharing one inode, common for a
+                # ``libfoo.so.1``/``libfoo.so.1.0.0`` pair. discover_artifact_
+                # set()'s own dedup keeps only one representative path per
+                # inode, so an alias basename a consumer's DT_NEEDED names is
+                # otherwise never indexed here at all -- the provider reads as
+                # unreachable and the audit emits a false
+                # bundle_unresolved_intra_dependency (Codex review, fresh
+                # evidence). Recover the discarded aliases by scanning the
+                # representative path's own directory for siblings sharing its
+                # (st_dev, st_ino) identity and indexing each one's basename
+                # too -- self-contained here, no need to thread alias lists
+                # through discover_artifact_set's public dict[str, Path] return
+                # type.
+                for alias in _hard_link_alias_basenames(libraries[name]):
+                    soname_to_name.setdefault(alias, name)
 
     graph.soname_to_name = soname_to_name
 
