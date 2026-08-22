@@ -55,6 +55,7 @@ import stat as stat_module
 import struct
 import tarfile
 import tempfile
+import threading
 import unicodedata
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
@@ -158,10 +159,8 @@ def _macho_is_library_content(path: Path) -> bool:
         macho = MachO(str(path))
     except Exception:  # noqa: BLE001 -- macholib has no single documented
         # exception type for a malformed/truncated fat archive (see the
-        # identical broad catch in macho_metadata.py's own SymbolTable
-        # parse); this is a best-effort discovery predicate, never a hard
-        # failure -- the same "OSError -> False" degrade the thin-header
-        # read above already applies.
+        # identical catch in macho_metadata.py's SymbolTable parse); a
+        # best-effort predicate, same "OSError -> False" degrade as above.
         return False
     return any(
         int(getattr(header.header, "filetype", -1)) in _MACHO_LIBRARY_FILETYPES
@@ -308,10 +307,8 @@ def _resolve_under_root(root: Path, rel: str) -> Path | None:
         candidate = (root / rel).resolve()
         root_resolved = root.resolve()
     except (RuntimeError, ValueError):
-        # RuntimeError: a symlink loop makes Path.resolve() raise
-        # instead of returning a value. ValueError: an embedded NUL byte
-        # in *rel* (from an untrusted manifest) raises the same way
-        # (Codex). Callers expect a clean None either way.
+        # RuntimeError: a symlink loop. ValueError: an embedded NUL byte
+        # in *rel* raises the same way (Codex). Callers expect None either way.
         return None
     if candidate != root_resolved and not candidate.is_relative_to(root_resolved):
         return None
@@ -320,6 +317,45 @@ def _resolve_under_root(root: Path, rel: str) -> Path | None:
 
 def _relative_posix(path: Path, root: Path) -> str:
     return path.relative_to(root).as_posix()
+
+
+def _case_insensitive_sibling_exists(parent: Path, name: str) -> bool:
+    """True if *parent* holds an entry matching *name* once NFC-normalized
+    and casefolded, but not identical -- a case/Unicode variant that would
+    resolve case-insensitively even though *name* doesn't exist here."""
+    if not parent.is_dir():
+        return False
+    folded = unicodedata.normalize("NFC", name).casefold()
+    try:
+        entries = list(parent.iterdir())
+    except OSError:
+        return False
+    if any(entry.name == name for entry in entries):
+        return False  # an exact match exists; not a case-only mismatch
+    return any(
+        unicodedata.normalize("NFC", entry.name).casefold() == folded
+        for entry in entries
+    )
+
+
+_umask_lock = threading.Lock()
+_cached_umask: int | None = None
+
+
+def _process_umask() -> int:
+    """Return the process's umask -- POSIX has no race-free getter, only
+    `os.umask(new)` returning the *old* value, so querying it briefly
+    zeroes the process-wide umask; a file another thread creates in that
+    window could come out more permissive than intended (Codex). Cached
+    after the first call so later callers pay zero race risk."""
+    global _cached_umask
+    if _cached_umask is None:
+        with _umask_lock:
+            if _cached_umask is None:
+                mask = os.umask(0)
+                os.umask(mask)
+                _cached_umask = mask
+    return _cached_umask
 
 
 def _scaffold_dirs_for_mkdir(base: Path, leaf_parent: Path) -> set[Path]:
@@ -582,12 +618,11 @@ def _add_member(
     if info.issym():
         target = info.linkname
         # An absolute (or Windows-anchored) target can't round-trip --
-        # TarExtractor refuses it at unpack time. os.path.isabs() alone
+        # TarExtractor refuses it at unpack. os.path.isabs() alone
         # doesn't recognize a Windows drive-absolute/UNC target on
         # POSIX; PureWindowsPath.is_absolute() isn't enough either --
         # False for drive="", root="\\" or drive="C:", root="" -- so any
-        # nonempty drive or root is rejected too (Codex review, fresh
-        # evidence).
+        # nonempty drive or root is rejected too (Codex).
         wpath = PureWindowsPath(target)
         if os.path.isabs(target) or wpath.drive or wpath.root:
             raise SnapshotError(
@@ -595,9 +630,8 @@ def _add_member(
                 "only relative symlink targets can be packed portably"
             )
         # Same reasoning as _validate_portable_arcname's own check: a
-        # backslash is always reinterpreted as a separator on Windows,
-        # even when it doesn't escape root -- all
-        # _windows_relative_target_escapes below checks for (Codex).
+        # backslash always reinterprets as a Windows separator, even when
+        # it doesn't escape root (Codex).
         if "\\" in target:
             raise SnapshotError(
                 f"symlink {arcname!r} targets {target!r}, which contains "
@@ -606,10 +640,9 @@ def _add_member(
             )
         # A self-referential symlink loop is detected via a raw stat() --
         # not Path.resolve() raising, which Python 3.13's realpath()-
-        # backed rewrite stopped doing in non-strict mode (verified
-        # empirically, CI caught this). stat() still raises OSError
-        # (ELOOP) on every version; a dangling target raises ENOENT
-        # instead, left alone.
+        # backed rewrite stopped doing in non-strict mode (CI caught
+        # this). stat() still raises OSError (ELOOP); a dangling target
+        # raises ENOENT instead, left alone.
         try:
             target_stat = path.stat()
         except OSError as exc:
@@ -629,20 +662,34 @@ def _add_member(
                 f"{source_dir} — refusing to pack it"
             ) from exc
         # No `except RuntimeError` here: the stat() check above already
-        # follows the entire symlink chain from `path` (the same
-        # location `link_abs` computes), so any loop is already caught
-        # there regardless of Python version or chain length.
+        # follows the whole chain from `path` (same location `link_abs`
+        # computes), so any loop is already caught there.
         if _windows_relative_target_escapes(arcname, target):
             raise SnapshotError(
                 f"symlink {arcname!r} targets {target!r}, which would "
                 f"escape {source_dir} when interpreted with Windows path "
                 "separators -- refusing to pack it for portability"
             )
-        # A library-shaped symlink whose target is NOT independently
-        # library-shaped got no LibraryEntry -- no declared identity for
-        # unpack to match, so it was rejected as tampered. `liba.so ->
-        # liba.so.1.2.3` is left alone. S_ISREG guards a directory-
-        # targeting symlink, where open() would raise IsADirectoryError.
+        # A dangling target here (case-sensitive host) can still resolve
+        # on a case-insensitive one if a sibling differs only by case/
+        # Unicode form (`libfoo.so -> payload` alongside real `Payload`):
+        # no LibraryEntry recorded here, but live on Windows/macOS, where
+        # unpack's own discovery walk finds it as undeclared and rejects
+        # an honest archive (Codex). Same fold reasoning as the member-
+        # collision check above -- reject rather than resolve two ways.
+        if target_stat is None and _case_insensitive_sibling_exists(
+            link_abs.parent, Path(target).name
+        ):
+            raise SnapshotError(
+                f"symlink {arcname!r} targets {target!r}, which does not "
+                "exist here but matches a sibling once case/Unicode-"
+                "folded -- it would resolve differently on a case-"
+                "insensitive filesystem; refusing to pack it for portability"
+            )
+        # A library-shaped symlink whose target isn't independently
+        # library-shaped got no LibraryEntry, rejected as tampered.
+        # `liba.so -> liba.so.1.2.3` is left alone. S_ISREG guards a
+        # directory-targeting symlink (open() would raise IsADirectoryError).
         entry = None
         if (
             target_stat is not None
@@ -783,12 +830,9 @@ def pack_product_baseline(
     resolved_header_roots: list[str] = []
     for rel in header_roots:
         resolved = _resolve_under_root(source_path, rel)
-        # Must be a directory, not merely exist: compare_product_
-        # directories() only ever includes a header root when
-        # `.is_dir()` is true, silently dropping anything else -- a
-        # header root recorded here as a regular file would round-trip
-        # through the manifest but never actually reach a comparison
-        # (Codex review, fresh evidence).
+        # Must be a directory: compare_product_directories() only
+        # includes a header root when `.is_dir()` is true, so one
+        # recorded here as a file would round-trip but never reach a comparison.
         if resolved is None or not resolved.is_dir():
             raise SnapshotError(
                 f"header root {rel!r} is absolute, escapes {source_path}, "
@@ -913,14 +957,9 @@ def pack_product_baseline(
         None,
     )
     if collision is None:
-        # Same prefix test as the `paths` scan above, not just an exact
-        # match: a directory at the reserved path containing only empty
-        # subdirectories (e.g. MANIFEST_MEMBER_NAME/sub/, itself empty)
-        # is absent from `paths` (no files anywhere under it) AND isn't
-        # itself in `empty_dirs` (it has a subdirectory, so it isn't a
-        # leaf) -- only its nested empty leaf is, under the reserved
-        # name as a *prefix*, not an exact match (CodeRabbit review,
-        # fresh evidence).
+        # Same prefix test as the `paths` scan above: a directory at the
+        # reserved path holding only empty subdirs is absent from both
+        # `paths` and `empty_dirs` -- only its nested empty leaf is.
         collision = next(
             (
                 d
@@ -965,19 +1004,15 @@ def pack_product_baseline(
 
     # Resolve the compressor before mkstemp() hands out an open descriptor:
     # an invalid zstd_level must fail before there is a descriptor to leak.
-    # tempfile.mkstemp() always creates its file mode 0600 -- wrong for a
-    # release asset this function is about to publish. os.replace() carries
-    # the temp file's own mode across, so left alone a packed archive would
-    # be unreadable by anyone but its creator even under an ordinary 0022
-    # umask (Codex review, fresh evidence). Preserve an existing
-    # destination's own mode when overwriting; otherwise fall back to the
-    # ordinary umask-derived permissions.
+    # mkstemp() always creates mode 0600, and os.replace() carries that
+    # across -- left alone, a packed archive would be unreadable by
+    # anyone but its creator even under an ordinary 0022 umask (Codex).
+    # Preserve an existing destination's mode when overwriting, else
+    # fall back to the ordinary umask-derived permissions.
     if output_path.exists():
         target_mode = stat_module.S_IMODE(output_path.stat().st_mode)
     else:
-        umask = os.umask(0)
-        os.umask(umask)
-        target_mode = 0o666 & ~umask
+        target_mode = 0o666 & ~_process_umask()
     try:
         zstandard = _zstd_module()
         cctx = zstandard.ZstdCompressor(level=zstd_level, write_checksum=True)
@@ -995,10 +1030,8 @@ def pack_product_baseline(
         )
     except BaseException:
         # mkstemp() itself can fail (ENOSPC, EMFILE, a permission race) --
-        # nothing has been written yet, so the same best-effort scaffold
-        # cleanup as every other failure path after the mkdir() call above
-        # (Codex review, fresh evidence: this call sat between the two
-        # existing try/except blocks, uncovered by either).
+        # nothing written yet, so the same best-effort scaffold cleanup as
+        # every other failure path after the mkdir() call above (Codex).
         _cleanup_output_scaffold_dirs()
         raise
     tmp_path = Path(tmp_name)
@@ -1034,10 +1067,9 @@ def pack_product_baseline(
             tmp_path.unlink(missing_ok=True)
         except OSError:  # pragma: no cover - best-effort cleanup
             pass
-        # The temp file above is unlinked first, so a scaffold directory
-        # that held nothing but it is empty again by the time this runs --
-        # safe to attempt the same best-effort cleanup every other failure
-        # path after the mkdir() call above already does.
+        # The temp file above is unlinked first, so a scaffold dir that
+        # held nothing but it is empty again -- safe for the same
+        # best-effort cleanup every other failure path already does.
         _cleanup_output_scaffold_dirs()
         raise
     return manifest
@@ -1069,24 +1101,17 @@ def unpack_product_baseline(
         )
     dest_path = Path(dest_dir)
     if dest_path.is_symlink():
-        # Rejected outright rather than handled: publishing later replaces
-        # dest_path with the staging directory via dest_path.rmdir() +
-        # os.replace(), and rmdir() operates on the symlink itself (POSIX
-        # rmdir() never follows a final symlink component) -- even a
-        # symlink to a genuinely empty directory would pass the checks
-        # below and then raise NotADirectoryError at publish time,
-        # unhandled by the CLI's SnapshotError-only catch, leaving the
-        # already-validated staging directory behind uncleaned (Codex
-        # review, fresh evidence).
+        # Rejected outright: publishing later replaces dest_path via
+        # dest_path.rmdir() + os.replace(), and rmdir() operates on the
+        # symlink itself (never follows a final symlink component) -- even
+        # a symlink to a genuinely empty dir would pass the checks below
+        # then raise NotADirectoryError at publish, unhandled by the CLI's
+        # SnapshotError-only catch, leaving staging uncleaned (Codex).
         raise SnapshotError(f"unpack destination must not be a symlink: {dest_path}")
-    # Captured before publication, not derived from the umask at that
-    # point: a caller may have pre-created dest_path with deliberate,
-    # non-default permissions (a private 0700 scratch dir, a shared 0775
-    # group directory), and publication below replaces dest_path outright
-    # -- if it always re-derived the mode from the process umask instead,
-    # a pre-created private directory would silently become world-
-    # traversable (or a shared one would silently lose its group bit)
-    # the moment this function ran (Codex review, fresh evidence).
+    # Captured before publication, not derived from the umask: a caller
+    # may have pre-created dest_path with deliberate permissions, and
+    # publication replaces it outright -- re-deriving from the umask
+    # would silently widen or narrow those permissions instead (Codex).
     existing_dest_mode = (
         stat_module.S_IMODE(dest_path.stat().st_mode) if dest_path.exists() else None
     )
@@ -1149,10 +1174,9 @@ def unpack_product_baseline(
 
         # The manifest is untrusted -- header_roots is re-joined against
         # the unpack destination and handed to a header-parsing tool, so
-        # an adversarial manifest declaring an absolute/escaping root
-        # ("../../etc") must be rejected the same way pack refuses to
-        # record one. from_dict()'s defensive str() coercion accepts any
-        # string unchanged, so this check happens here, not there.
+        # an adversarial "../../etc" must be rejected the same way pack
+        # refuses to record one; from_dict()'s defensive str() coercion
+        # accepts any string unchanged, so this check happens here.
         for rel in manifest.header_roots:
             resolved = _resolve_under_root(staging, rel)
             if resolved is None or not resolved.is_dir():
@@ -1162,13 +1186,10 @@ def unpack_product_baseline(
                     "or is not an existing directory)"
                 )
         # LibraryEntry.path carries the identical untrusted-manifest risk
-        # as header_roots above -- it's documented as "relative to the
-        # archive/product root" but from_dict()'s defensive str()
-        # coercion accepts and returns any string unchanged, so an
-        # archive declaring "../../outside.so" or "/tmp/other.so" would
-        # otherwise publish the extraction and hand the caller a manifest
-        # whose advertised library inventory resolves outside the
-        # unpacked baseline entirely (Codex review, fresh evidence).
+        # as header_roots above -- from_dict()'s defensive str() coercion
+        # accepts any string unchanged, so an archive declaring
+        # "../../outside.so" would otherwise hand the caller a manifest
+        # whose library inventory resolves outside the unpacked baseline.
         for lib in manifest.libraries:
             lib_resolved = _resolve_under_root(staging, lib.path)
             if lib_resolved is None or not lib_resolved.is_file():
@@ -1223,12 +1244,10 @@ def unpack_product_baseline(
                     "mismatch -- archive may be corrupt or tampered "
                     "with"
                 )
-        # The verification loop above only examines manifest-declared
-        # entries -- an omitted LibraryEntry has content never verified
-        # (Codex). Cross-checked against what compare_product_
-        # directories()'s own walk actually extracted. A symlink alias
-        # is compared by identity (dev, ino); a hardlink alias by path
-        # string below, since it DOES get its own declared entry.
+        # The verification loop above only examines declared entries --
+        # cross-checked against what discovery actually extracted. A
+        # symlink alias compares by identity (dev, ino); a hardlink alias
+        # by path string, since it gets its own declared entry (Codex).
         declared_identities = set()
         declared_paths = set()
         for lib in manifest.libraries:
@@ -1240,9 +1259,8 @@ def unpack_product_baseline(
         # Every raw discovered path, not _discover_library_map()'s own
         # deduplicated map: an undeclared hardlink alias sorting after a
         # declared library's symlink alias (same identity) is invisible
-        # to that map's dedup, so checking it missed exactly the
-        # undeclared path this check exists to catch (Codex review,
-        # fresh evidence).
+        # to that map's dedup, missing exactly the path this exists to
+        # catch (Codex).
         undeclared = []
         for rel_path, path, identity in sorted(
             _iter_discovered_libraries(staging), key=lambda item: item[0]
@@ -1278,35 +1296,21 @@ def unpack_product_baseline(
         raise
 
     try:
-        # tempfile.mkdtemp() creates staging with mode 0700 regardless of
-        # the process umask -- deliberately, for its own general-purpose
-        # "private scratch dir" contract, but wrong for a directory this
-        # function is about to publish as the product's own extracted
-        # content: a caller (or a later CI step/container stage) running
-        # as a different user would then be unable to even traverse it.
-        # If the caller's own dest_path already existed with a deliberate
-        # mode, preserve it instead of overwriting it with an umask-
-        # derived guess -- see the mode capture above for why silently
-        # replacing it would be a real permission regression, not just a
-        # cosmetic difference.
+        # mkdtemp() creates staging mode 0700 regardless of umask --
+        # wrong for a directory about to be published: a different-user
+        # caller couldn't traverse it. Preserve dest_path's own mode if
+        # it already existed with a deliberate one.
         if existing_dest_mode is not None:
             target_dir_mode = existing_dest_mode
         else:
-            umask = os.umask(0)
-            os.umask(umask)
-            target_dir_mode = 0o777 & ~umask
+            target_dir_mode = 0o777 & ~_process_umask()
         os.chmod(staging, target_dir_mode)
 
-        # dest_path, if it existed, was already confirmed empty above, so
-        # removing it and renaming staging into its place is safe (and
-        # portable: os.replace() cannot atomically replace an existing
-        # directory on every platform, but a path that no longer exists
-        # works everywhere). This whole block is wrapped so a failure
-        # here still cleans up staging (Codex review, fresh evidence).
-        # One residual, inherent to rmdir()+replace() not being atomic:
-        # if rmdir() succeeds but replace() then fails, the caller's
-        # pre-existing empty dest_path is already gone and cannot be
-        # restored -- surfaced as a clear SnapshotError, not silently.
+        # dest_path, confirmed empty above, is removed and staging renamed
+        # into its place (os.replace() can't atomically replace an
+        # existing dir everywhere, but a gone path works anywhere).
+        # Residual: if rmdir() succeeds but replace() fails, dest_path
+        # can't be restored -- surfaced as SnapshotError, not silently.
         if dest_path.exists():
             dest_path.rmdir()
         os.replace(staging, dest_path)
@@ -1827,14 +1831,10 @@ def compare_product_directories(
             frontend=frontend,
             policy=policy,
         )
-        # DiffResult.library is always the *old* side's bare filename,
-        # which for a canonical-fallback pair (SONAME/dylib bump) isn't
-        # the new side's own filename. compare_bundle()'s consumer/
-        # provider detectors key off new.metadata's new-side bare
-        # filename and exclude a provider from its own scan by that key
-        # -- left as old.library, the provider's new binary would never
-        # match and would falsely read as a consumer of its own change
-        # (Codex review, fresh evidence). Stamp the new side's identity.
+        # DiffResult.library is the *old* side's bare filename, not the
+        # new one, for a canonical-fallback pair (SONAME/dylib bump) --
+        # compare_bundle()'s provider detectors key off the new-side name
+        # and would falsely read the provider as its own consumer (Codex).
         result.diff.library = new_path.name
         per_library_results.append(result.diff)
 
