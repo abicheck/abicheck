@@ -1519,7 +1519,7 @@ def is_msvc_mode(cc_bin: str) -> bool:
 
 
 def _carry_abi_relevant_flags(
-    abi_relevant_flags: list[str], seen: set[str], out: list[str]
+    abi_relevant_flags: list[str], seen: set[str], out: list[str], cc_id: str
 ) -> None:
     """Append ``abi_relevant_flags`` not already in ``seen`` to ``out``.
 
@@ -1568,14 +1568,39 @@ def _carry_abi_relevant_flags(
     scanning downstream (e.g. ``dumper_clang._needs_sycl_host_only``) sees
     the same sequence the real compiler did.
     """
-    for flag in abi_relevant_flags:
+    i = 0
+    while i < len(abi_relevant_flags):
+        flag = abi_relevant_flags[i]
+        forced: list[str] = []
+        new_i, _option, operand = _match_gnu_forced_include(
+            flag, abi_relevant_flags, i, forced
+        )
+        if new_i == i and cc_id == "msvc":
+            new_i, _option, operand = _match_msvc_forced_include(
+                flag, abi_relevant_flags, i, forced
+            )
+        if new_i != i:
+            # Build packs are untrusted evidence. A forced-include operand
+            # that is a response file would be expanded by the new compiler
+            # process L4 starts, so discard the complete option/operand pair.
+            if operand and not operand.startswith(("-", "@")):
+                for carried in forced:
+                    if carried not in seen:
+                        out.append(carried)
+            i = new_i
+            continue
         if is_split_operand_abi_flag_survivor(flag):
             out.extend(split_operand_survivor(flag))
+            i += 1
             continue
         if flag.startswith(STRUCTURED_TOOLCHAIN_FLAG_PREFIXES):
+            i += 1
             continue
-        if flag not in seen:
+        # A bare response-file token is also compiler syntax, even when it
+        # is not paired with a recognized forced-include option.
+        if not flag.startswith("@") and flag not in seen:
             out.append(flag)
+        i += 1
 
 
 def _match_gnu_include_search(tok: str, argv: list[str], i: int, out: list[str]) -> int:
@@ -1627,13 +1652,19 @@ def _scan_argv_for_extra_flags(argv: list[str], cc_id: str, out: list[str]) -> N
         # path (header_utils) and return (new_i, option, operand); only the
         # index matters here, since replay hands `out`'s verbatim tokens
         # straight back to the real compiler.
-        new_i, _opt, _operand = _match_gnu_forced_include(tok, argv, i, out)
+        forced: list[str] = []
+        new_i, _opt, operand = _match_gnu_forced_include(tok, argv, i, forced)
+        if new_i != i and operand and not operand.startswith(("-", "@")):
+            out.extend(forced)
         if new_i == i:
             new_i = _match_gnu_include_search(tok, argv, i, out)
         if new_i == i and cc_id == "msvc":
             new_i = _match_msvc_include_search(tok, argv, i, out)
         if new_i == i and cc_id == "msvc":
-            new_i, _opt, _operand = _match_msvc_forced_include(tok, argv, i, out)
+            forced = []
+            new_i, _opt, operand = _match_msvc_forced_include(tok, argv, i, forced)
+            if new_i != i and operand and not operand.startswith(("-", "@")):
+                out.extend(forced)
         i = new_i if new_i != i else i + 1
 
 
@@ -1653,6 +1684,6 @@ def replay_extra_flags(
     """
     seen = set(already)
     out: list[str] = []
-    _carry_abi_relevant_flags(compile_unit.abi_relevant_flags, seen, out)
+    _carry_abi_relevant_flags(compile_unit.abi_relevant_flags, seen, out, cc_id)
     _scan_argv_for_extra_flags(compile_unit.argv, cc_id, out)
     return out

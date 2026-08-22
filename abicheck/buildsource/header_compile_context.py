@@ -1217,7 +1217,9 @@ def _context_flags(
             ["-isystem", _resolve_cu_relative_path(inc, cu.directory).as_posix()]
         )
     for f in cu.abi_relevant_flags:
-        if _is_structured_field_flag(f, cu_standard=cu.standard, msvc=msvc):
+        if f.startswith("@") or _is_structured_field_flag(
+            f, cu_standard=cu.standard, msvc=msvc
+        ):
             continue
         flags.extend(_split_operand_survivor(f))
     # Last, so a forced header resolves through the include search this
