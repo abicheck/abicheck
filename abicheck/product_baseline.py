@@ -51,6 +51,7 @@ runs the actual bundle-aware comparison (per-library diff via
 
 from __future__ import annotations
 
+import errno
 import hashlib
 import io
 import json
@@ -202,23 +203,19 @@ def _is_library_path(path: Path) -> bool:
     Shared by every place that decides "is this a library" -- packing's own
     manifest-entry classification (:func:`_add_member`) and
     :func:`_discover_library_map`'s discovery walk. Previously each checked
-    filename suffix alone; an extensionless ELF DSO (a plugin named
-    without a conventional ``.so`` suffix, real on Linux) was archived but
-    produced no ``LibraryEntry`` -- the manifest falsely reported the
-    product had no such library (Codex review, fresh evidence). Factored
+    filename suffix alone; an extensionless ELF DSO was archived but
+    produced no ``LibraryEntry`` (Codex review, fresh evidence). Factored
     into one predicate so discovery and packing can never drift apart.
 
     The ELF content fallback had no Mach-O/PE counterpart, so a macOS
-    framework binary or a Windows ``.pyd`` extension module never
-    entered either library map (Codex review, fresh evidence).
-    :func:`_macho_is_library_content`/:func:`_pe_is_dll_content` close
-    that for both.
+    framework binary or a Windows ``.pyd`` module never entered either
+    library map (Codex review, fresh evidence).
+    :func:`_macho_is_library_content`/:func:`_pe_is_dll_content` close it.
 
-    A ``.debug`` split-debug sidecar (``objcopy --only-keep-debug``
-    output) is excluded outright, ahead of every content check: it
-    retains its original binary's ``ET_DYN`` header, so the ELF fallback
-    would otherwise discover it as a second, independent "library"
-    (Codex review, fresh evidence).
+    A ``.debug`` split-debug sidecar is excluded outright, ahead of
+    every content check: it retains its original binary's ``ET_DYN``
+    header, so the ELF fallback would otherwise discover it as a second,
+    independent "library" (Codex review, fresh evidence).
     """
     if path.name.lower().endswith(".debug"):
         return False
@@ -486,13 +483,13 @@ def _windows_relative_target_escapes(arcname: str, target: str) -> bool:
     semantics (backslash separators)?
 
     Purely lexical -- no real Windows filesystem to ``.resolve()``
-    against on any host this runs on -- so this walks a virtual depth
-    counter from *arcname*'s own directory, decrementing on ``..`` and
-    incrementing on a named component; a negative depth means the target
-    walks above the root. Only ever *adds* rejections a POSIX-only
-    check misses: a backslash ``..`` traversal is one opaque filename
-    component on POSIX, silently packing an archive that fails (or
-    escapes) on Windows (Codex review, fresh evidence).
+    against on any host -- so this walks a virtual depth counter from
+    *arcname*'s own directory, decrementing on ``..`` and incrementing
+    on a named component; negative depth means the target walks above
+    the root. Only ever *adds* rejections a POSIX-only check misses: a
+    backslash ``..`` traversal is one opaque filename on POSIX,
+    silently packing an archive that fails (or escapes) on Windows
+    (Codex review, fresh evidence).
     """
     depth = len(PureWindowsPath(arcname).parent.parts)
     for part in PureWindowsPath(target).parts:
@@ -543,6 +540,22 @@ def _add_member(
                 f"symlink {arcname!r} has an absolute target {target!r} -- "
                 "only relative symlink targets can be packed portably"
             )
+        # A self-referential symlink loop is detected via a raw stat() --
+        # not by catching Path.resolve() raising, which Python 3.13's
+        # realpath()-backed rewrite stopped doing in non-strict mode: it
+        # silently returns the unresolved path instead, so a loop packed
+        # with no error at all on 3.13+ (verified empirically; CI caught
+        # this). stat() still raises OSError(ELOOP) on every version --
+        # the kernel's own errno, not pathlib's; a dangling target
+        # raises ENOENT instead, left alone (Codex review, CI evidence).
+        try:
+            path.stat()
+        except OSError as exc:
+            if exc.errno == errno.ELOOP:
+                raise SnapshotError(
+                    f"symlink {arcname!r} targets {target!r}, which forms "
+                    "a symlink loop — refusing to pack it"
+                ) from exc
         link_abs = path.parent / target
         try:
             link_abs.resolve().relative_to(source_dir.resolve())
@@ -551,15 +564,10 @@ def _add_member(
                 f"symlink {arcname!r} targets {target!r}, which escapes "
                 f"{source_dir} — refusing to pack it"
             ) from exc
-        except RuntimeError as exc:
-            # A self-referential symlink loop (loop.so -> loop.so) makes
-            # Path.resolve() raise RuntimeError, not ValueError -- there
-            # is no real file to archive content for (Codex review,
-            # fresh evidence).
-            raise SnapshotError(
-                f"symlink {arcname!r} targets {target!r}, which forms a "
-                "symlink loop — refusing to pack it"
-            ) from exc
+        # No `except RuntimeError` here: the stat() check above already
+        # follows the entire symlink chain from `path` (the same
+        # location `link_abs` computes), so any loop is already caught
+        # there regardless of Python version or chain length.
         if _windows_relative_target_escapes(arcname, target):
             raise SnapshotError(
                 f"symlink {arcname!r} targets {target!r}, which would "
@@ -687,18 +695,14 @@ def pack_product_baseline(
     output_path = Path(os.path.abspath(str(output)))
     if not output_path.name.lower().endswith(".tar.zst"):
         # Not merely a naming preference: unpack_product_baseline() decides
-        # whether to run zstd decompression purely from this suffix --
-        # stdlib tarfile has no zstd auto-detection the way it does for
-        # gzip/bz2/xz.
+        # whether to run zstd decompression purely from this suffix.
         raise SnapshotError(
             f"product baseline output must end with '.tar.zst': {output_path}"
         )
-    # Validated against the tree as it exists *before* the output-parent
-    # scaffold below can fabricate anything: doing this after the
-    # scaffold mkdir would let a header root that happens to name the
-    # freshly-created (empty) output-parent chain pass validation on the
-    # strength of a directory mkdir() just manufactured, persisting an
-    # empty, fabricated header tree (Codex review, fresh evidence).
+    # Validated before the output-parent scaffold below can fabricate
+    # anything: doing this after would let a header root that names the
+    # freshly-created output-parent chain pass on a directory mkdir()
+    # just manufactured (Codex review, fresh evidence).
     if isinstance(header_roots, str):
         # A bare str satisfies the declared Sequence[str] annotation, so
         # the natural typo header_roots="include" would otherwise iterate
@@ -1357,13 +1361,11 @@ def _roots_for_library(spec: HeaderRootsSpec, library_key: str) -> Sequence[str]
     original, pre-per-library shape) applies unchanged to every library, so
     passing a bare list keeps working exactly as it always has.
 
-    A bare ``str`` is rejected outright rather than silently accepted: it
-    satisfies the declared ``Sequence[str]`` type (a `str` is a sequence
-    of its own characters), so `header_roots="include"` -- a natural
-    typo -- previously ran character-by-character, each single-character
-    candidate silently failing ``.is_dir()`` (Codex/CodeRabbit review,
-    fresh evidence). Same for a per-library mapping value spelled as a
-    bare string.
+    A bare ``str`` is rejected outright: it satisfies the declared
+    ``Sequence[str]`` type, so `header_roots="include"` -- a natural
+    typo -- previously ran character-by-character (Codex/CodeRabbit
+    review, fresh evidence). Same for a per-library mapping value
+    spelled as a bare string.
     """
     if isinstance(spec, Mapping):
         value = spec.get(library_key, ())
