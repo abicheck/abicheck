@@ -851,8 +851,11 @@ def merge_compile_config(
     review: appending after silently let config override an explicit CLI
     token once ``--gcc-options`` -- the flag that used to suppress this
     synthesis entirely -- was removed). ``include_dirs`` (resolved against
-    the config's directory) are appended *after* the CLI ``-I`` so explicit
-    roots keep search precedence.
+    the *project root* -- ``config_paths.project_root_for_config()``, not
+    necessarily the config file's own directory: a config discovered under
+    ``.github/`` or ``.github/abicheck/`` is still anchored to the project
+    root those directories live in, not to ``.github`` itself) are appended
+    *after* the CLI ``-I`` so explicit roots keep search precedence.
     Returns the merged ``(CompileContext, includes)``.
 
     The config is the explicit ``--config`` when given, else the ``.abicheck.yml``
@@ -868,6 +871,7 @@ def merge_compile_config(
     CLI-only fallback) for an **auto-discovered** config the user didn't bind to.
     """
     from .buildsource.inline import discover_build_config, load_build_config
+    from .config_paths import project_root_for_config
     from .service_scan import CompileContext
 
     explicit_config = build_config is not None
@@ -897,7 +901,13 @@ def merge_compile_config(
             err=True,
         )
         return cli_ctx, cli_includes
-    base = cfg.parent
+    # The project root a relative `compile.include_dirs` entry resolves
+    # against — cfg.parent for a root-level .abicheck.yml (unchanged), but
+    # the directory containing .github/ for a config discovered there
+    # (config_paths.py's own docstring has the full reasoning; Codex review,
+    # fresh evidence from the .github/ discovery feature landing this base
+    # was wrong for).
+    base = project_root_for_config(cfg)
 
     # CLI > config: an explicit --ast-frontend wins even when it is "auto" (the
     # documented escape hatch to bypass a pinned config frontend); only a *default*
@@ -1042,7 +1052,10 @@ def _shared_frontend_explicit(ctx: click.Context) -> bool:
     A command composing the unsided ``@compile_context_options()`` has a
     plain string here and keeps the parameter-source answer unchanged.
     """
-    if ctx.get_parameter_source("header_backend") != click.core.ParameterSource.COMMANDLINE:
+    if (
+        ctx.get_parameter_source("header_backend")
+        != click.core.ParameterSource.COMMANDLINE
+    ):
         return False
     raw = ctx.params.get("header_backend")
     if isinstance(raw, (tuple, list)):

@@ -7,6 +7,7 @@ canonical_for:
   - config-keys
 depends_on:
   - abicheck/buildsource/inline.py
+  - abicheck/config_paths.py
 lifecycle: active
 generated: false
 ---
@@ -36,10 +37,27 @@ turn overrides the built-in defaults (`CLI > config > default`).
 
 ## File discovery
 
+Within any one directory, three locations are recognized, checked in this
+order (first match wins):
+
+1. `.abicheck.yml` — the original, project-root spelling.
+2. `.github/.abicheck.yml` — alongside workflows/`CODEOWNERS`, for a project
+   that keeps tool configuration out of its own root.
+3. `.github/abicheck/.abicheck.yml` — a dedicated subdirectory, for a project
+   that wants its abicheck config kept apart from other `.github` content (or
+   that already groups per-tool config under `.github/<tool>/`).
+
+Only the file's *location* changes between these three — its content, schema,
+and strictness rules are identical regardless of which one is used. A file
+present at a higher-precedence location always wins over one at a
+lower-precedence location in the *same* directory; see
+`abicheck/config_paths.py` for the exact, shared candidate list every
+discovery entry point below draws from.
+
 | Command | Discovery | Code |
 |---------|-----------|------|
-| `compare` | Walks up from the current directory to the filesystem root and uses the first `.abicheck.yml` found. | `discover_project_config()` in `cli_helpers_compare.py` |
-| `dump --sources` / `--build-info` | Uses `.abicheck.yml` at the **source-tree root** only. | `discover_build_config()` in `buildsource/inline.py` |
+| `compare` | Walks up from the current directory to the filesystem root, checking all three locations in each directory, and uses the first one found. | `discover_project_config()` in `cli_helpers_compare.py` |
+| `dump --sources` / `--build-info` | Checks all three locations at the **source-tree root** only — no parent walk. | `discover_build_config()` in `buildsource/inline.py` |
 | any | An explicit `--config <path>` overrides discovery. | `cli_options.py` (`--config`) |
 
 > **Note:** an auto-discovered (untrusted) `.abicheck.yml` never causes a build
@@ -207,6 +225,12 @@ e.g. `c++17`), `include_dirs:`/`defines:` (lists), `sysroot:`, and
 > Values in `compile.std`/`compile.defines` must be a single whitespace-free
 > compiler-option atom (a config scalar cannot expand into multiple compiler
 > arguments).
+
+> A relative `compile.include_dirs` entry resolves against the *project
+> root* — the directory containing the discovered config, or the directory
+> containing `.github/` when the config was found under `.github/` or
+> `.github/abicheck/` (see [File discovery](#file-discovery)) — never
+> against `.github/` itself.
 
 ---
 

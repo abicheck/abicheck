@@ -2463,6 +2463,36 @@ def test_build_config_from_dict_and_load(tmp_path):
     assert discover_build_config(None) is None
 
 
+def test_discover_build_config_recognizes_dot_github_locations(tmp_path):
+    """`.github/.abicheck.yml` and `.github/abicheck/.abicheck.yml` are also
+    recognized at the source-tree root (no parent walk — dump is anchored to
+    the given tree)."""
+    from abicheck.buildsource.inline import discover_build_config
+
+    tree = tmp_path / "src"
+    tree.mkdir()
+    assert discover_build_config(tree) is None
+
+    (tree / ".github").mkdir()
+    github_cfg = tree / ".github" / ".abicheck.yml"
+    github_cfg.write_text("build: {}\n", encoding="utf-8")
+    assert discover_build_config(tree) == github_cfg
+
+    # A dedicated .github/abicheck/ subdirectory is recognized too.
+    (tree / ".github" / "abicheck").mkdir()
+    subdir_cfg = tree / ".github" / "abicheck" / ".abicheck.yml"
+    subdir_cfg.write_text("build: {}\n", encoding="utf-8")
+    assert discover_build_config(tree) == github_cfg  # .github/ still wins
+
+    # A root-level .abicheck.yml takes precedence over either .github location.
+    root_cfg = tree / ".abicheck.yml"
+    root_cfg.write_text("build: {}\n", encoding="utf-8")
+    assert discover_build_config(tree) == root_cfg
+
+    # Not anchored to a parent: a config only in a subdirectory isn't found.
+    assert discover_build_config(None) is None
+
+
 def test_is_pack_dir_and_compile_db_resolution(tmp_path):
     from abicheck.buildsource.inline import (
         _autodiscover_compile_db,
