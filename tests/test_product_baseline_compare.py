@@ -807,6 +807,91 @@ class TestCompareProductDirectoriesStandaloneRemoval:
         assert len(removed) == 2
 
 
+class TestCompareProductDirectoriesBundleMapAliasNormalization:
+    def test_dev_symlink_representative_mismatch_shares_one_bundle_key(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Reported scenario: an unchanged ELF provider is represented by a
+        # dev symlink `libfoo.so -> libfoo.so.1` in the old tree, but the
+        # symlink is absent in the new tree (only the real file remains).
+        # _discover_library_map's (dev, ino) dedup then picks a *different*
+        # bare-name representative on each side -- "libfoo.so" (the
+        # symlink) on the old side, "libfoo.so.1" (the real file) on the
+        # new side -- even though the canonical fallback (below) correctly
+        # pairs them as one library. old_bundle_map/new_bundle_map were
+        # built independently of that pairing, straight off each side's own
+        # discovery representative, so they disagreed on this library's
+        # bundle identity: present as "libfoo.so" only in old_snapshot,
+        # "libfoo.so.1" only in new_snapshot. compare_bundle()'s own real,
+        # unmocked snapshot diff read that as a removal+addition (or
+        # BREAKING, when a surviving sibling imports the provider) for a
+        # library that never actually changed (Codex review, fresh
+        # evidence, reproduced with an unchanged libbar.so.1 importing
+        # foo). Simulating the dedup representative mismatch directly via
+        # _discover_library_map (rather than a real symlink) isolates the
+        # bundle-map normalization under test from filesystem/platform
+        # symlink semantics -- the canonical-fallback pairing this fix
+        # relies on runs for real, unmocked.
+        from abicheck import bundle as bundle_mod, product_baseline as pb
+        from abicheck.product_baseline import compare_product_directories
+
+        old_dir = tmp_path / "old"
+        new_dir = tmp_path / "new"
+        old_dir.mkdir()
+        new_dir.mkdir()
+        old_path = old_dir / "libfoo.so"
+        new_path = new_dir / "libfoo.so.1"
+        old_path.write_bytes(b"OLD")
+        new_path.write_bytes(b"NEW")
+
+        def _fake_discover_library_map(root, *, include_private):  # type: ignore[no-untyped-def]
+            if Path(root) == old_dir:
+                return {"libfoo.so": old_path}
+            return {"libfoo.so.1": new_path}
+
+        monkeypatch.setattr(pb, "_discover_library_map", _fake_discover_library_map)
+
+        class _FakeDiffResult:
+            def __init__(self, library: str) -> None:
+                self.library = library
+
+        class _FakeResult:
+            def __init__(self, library: str) -> None:
+                self.diff = _FakeDiffResult(library)
+
+        def _fake_run_compare(old_lib, new_lib, **kwargs):  # type: ignore[no-untyped-def]
+            return _FakeResult(Path(old_lib).name)
+
+        build_calls: list[dict[str, object]] = []
+
+        def _fake_build_bundle_snapshot(libraries):  # type: ignore[no-untyped-def]
+            build_calls.append(dict(libraries))
+            return {"libraries": dict(libraries)}
+
+        def _fake_compare_bundle(old, new, per_library_results, **kwargs):  # type: ignore[no-untyped-def]
+            return type("R", (), {"bundle_findings": []})()
+
+        from abicheck import service_compare_pipeline as scp
+
+        monkeypatch.setattr(scp, "run_compare", _fake_run_compare)
+        monkeypatch.setattr(
+            bundle_mod, "build_bundle_snapshot", _fake_build_bundle_snapshot
+        )
+        monkeypatch.setattr(bundle_mod, "compare_bundle", _fake_compare_bundle)
+
+        compare_product_directories(old_dir, new_dir)
+
+        assert len(build_calls) == 2
+        old_call, new_call = build_calls
+        # Both sides must agree on one bundle identity for the paired
+        # library -- the new side's bare filename, matching the
+        # DiffResult.library convention this module already established.
+        assert set(old_call) == {"libfoo.so.1"}
+        assert set(new_call) == {"libfoo.so.1"}
+        assert old_call["libfoo.so.1"] == old_path
+        assert new_call["libfoo.so.1"] == new_path
+
+
 class TestCompareProductDirectoriesStandaloneAddition:
     def test_reports_a_non_elf_library_addition(self, tmp_path: Path) -> None:
         # compare_bundle()'s own BUNDLE_LIBRARY_ADDED detection reads new

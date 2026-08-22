@@ -1609,6 +1609,38 @@ def compare_product_directories(
     # index already has regardless of this dict's construction.
     old_bundle_map = {p.name: p for p in old_map.values()}
     new_bundle_map = {p.name: p for p in new_map.values()}
+
+    # A canonically-paired library (SONAME-major bump, dylib-version bump,
+    # PE case-fold -- or a discovery-dedup representative mismatch, e.g. a
+    # dev symlink `libfoo.so -> libfoo.so.1` present only on one side, so
+    # _discover_library_map's (dev, ino) collapse picks the symlink's bare
+    # name on that side and the real file's on the other) can have two
+    # different bare filenames even though `pairs` above already
+    # determined it's one library. old_bundle_map/new_bundle_map are keyed
+    # by bare filename independently of `pairs`, so left alone they'd
+    # register that one library under two different keys -- one present
+    # only in old_snapshot, one only in new_snapshot -- and
+    # compare_bundle()'s own real snapshot diff reports a spurious
+    # removal+addition (or BREAKING, if a surviving sibling imports it)
+    # for a library that never actually changed (Codex review, fresh
+    # evidence, reproduced with an unchanged ELF provider whose dev
+    # symlink existed only in the old tree). Normalize the old side's key
+    # to the new side's bare filename -- matching the DiffResult.library
+    # convention already established above -- so both snapshots agree on
+    # one identity for this library. Only rekey when old_path is actually
+    # the entry that survived old_bundle_map's own last-wins bare-name
+    # collapse: if a *different*, unrelated library already won that slot,
+    # compare_bundle() never analyzed old_path under its bare name to
+    # begin with, and forcing it into the map now would misrepresent what
+    # was actually compared (the same collapse-survivor discipline
+    # `_is_bundle_collapse_survivor` below already applies).
+    for old_key, old_path, new_key, new_path in pairs:
+        if old_path.name == new_path.name:
+            continue
+        if old_bundle_map.get(old_path.name) is old_path:
+            del old_bundle_map[old_path.name]
+            old_bundle_map[new_path.name] = old_path
+
     old_snapshot = build_bundle_snapshot(old_bundle_map)
     new_snapshot = build_bundle_snapshot(new_bundle_map)
 
