@@ -42,6 +42,7 @@ import tarfile
 import tempfile
 import threading
 import time
+import uuid
 import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -125,19 +126,29 @@ def _target_supports_symlinks(target_root: Path) -> bool:
     """Probe whether *target_root* can actually create a symlink. Most notably false on Windows without `SeCreateSymbolicLinkPrivilege` (no Developer Mode enabled, not running elevated): `os.symlink()` raises `OSError`, and Python's own `tarfile` extraction machinery (`TarFile.makelink()`) silently falls back to extracting a full copy of the symlink's *referenced* member instead -- no exception, no flag, nothing that distinguishes "a real symlink" from "a copy that used to be a symlink" in the extracted result. Left undetected, this surfaces far downstream as a confusing "manifest never declared this file" error rather than an honest diagnosis of the real, platform-level cause (Codex).
 
     A live, unlinked probe entry (mirroring `product_baseline.py`'s own `_umask_derived_mode()` technique) rather than a cached platform check: the answer can change within a process's lifetime (Developer Mode toggled, a differently-privileged re-exec), so caching risks staleness for no real benefit -- this probe is cheap, one create/unlink pair, and called at most once per extraction.
+
+    Both probe entries use a `uuid4`-suffixed name (not a bare pid), created with exclusive-create semantics (`O_CREAT | O_EXCL`, matching `_umask_derived_mode()`'s own probe) rather than `Path.touch()`, and cleanup only ever removes an entry *this call* actually created -- a bare pid-suffixed name collides with a concurrent extraction in the same process (e.g. two threads unpacking into the same directory) or, worse, with real pre-existing user data at that exact predictable path, which `touch()` would silently reuse and the unconditional cleanup would then delete (Codex).
+
+    Known gap, not fixed here (Codex): this probe (and `tarfile`'s own extraction call, `os.symlink(tarinfo.linkname, targetpath)` with no `target_is_directory` argument) always creates a *file*-type symlink on Windows, never a directory-type one -- `os.symlink()`'s `target_is_directory` parameter defaults to `False` there and `tarfile.TarFile.makelink()` never passes it. A symlink whose target is itself a directory (which the packer legitimately archives as a leaf, never descending into it) can therefore pass this probe on a fully-privileged Windows host and still restore as the wrong reparse-point type once actually extracted -- a `tarfile`-level limitation this probe cannot detect or work around, since it is unconditional on that platform rather than a function of privilege. Verifying and fixing this would need a real Windows host to confirm the failure mode and a custom directory-aware extraction step bypassing `tarfile.makelink()`'s own symlink creation, not a probe change.
     """
-    probe_target = target_root / f".abicheck-symlink-probe-target-{os.getpid()}"
-    probe_link = target_root / f".abicheck-symlink-probe-link-{os.getpid()}"
+    probe_target = target_root / f".abicheck-symlink-probe-target-{uuid.uuid4().hex}"
+    probe_link = target_root / f".abicheck-symlink-probe-link-{uuid.uuid4().hex}"
+    target_created = False
+    link_created = False
     try:
-        probe_target.touch()
+        os.close(os.open(probe_target, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600))
+        target_created = True
         os.symlink(probe_target.name, probe_link)
+        link_created = True
     except OSError:
         return False
     else:
         return True
     finally:
-        probe_link.unlink(missing_ok=True)
-        probe_target.unlink(missing_ok=True)
+        if link_created:
+            probe_link.unlink(missing_ok=True)
+        if target_created:
+            probe_target.unlink(missing_ok=True)
 
 
 def _validate_member(
@@ -197,10 +208,11 @@ def _reject_hardlink_fallback_amplification(
     A hard-link member's own declared `size` is 0 in tar format -- its data lives in the first-archived (regular) copy the link refers to by name -- so the byte-sum check above, which sums declared sizes as-is, never sees it. But `tarfile.TarFile.makelink()` falls back to extracting a full, independent copy of the *referenced* member whenever `os.link()` fails (unsupported filesystem, a cross-device link, ...), giving every alias its own distinct inode. An archive combining one large payload with up to the member-count cap's worth of hard links to it can therefore amplify real disk usage (and subsequent checksum work) far beyond the declared-byte-sum ceiling, entirely invisible to that check (Codex).
 
     Only ever called after the byte-sum/member-count pass above completed without rejecting, so `tf.getmembers()` here is free: for the seekable `TarFile` this function is always called with, that pass's own `for member in tf:` iteration already built the full `tf.members` list as a side effect (`TarFile.next()` does this regardless of iteration style for a non-stream file) -- getmembers() just returns it, no re-parse. Safe against a hard-link chain (a link to a link) and against a reference cycle, neither of which a real tar writer emits but an adversarial archive could.
+
+    Resolves each hard link only against members *preceding* it in archive order, matching `tarfile.TarFile._getmember(tarinfo=...)`'s own truncated search (it slices `self.members` to everything before the link being resolved) -- a global, order-blind name map does not: an archive naming a large regular member `real`, many hard links to `real`, and then a *further*, zero-length regular member also named `real` would have a last-wins global map record size 0 for the name every earlier hard link actually resolves against, hiding the real amplification behind a member that appears too late to matter (Codex, fresh evidence). Built incrementally in one forward pass instead -- each member is resolved against, then folded into, the running maps in the same order tarfile itself would see them.
     """
-    members = tf.getmembers()
-    sizes_by_name = {m.name: m.size for m in members if m.isreg()}
-    link_to_name = {m.name: m.linkname for m in members if m.islnk()}
+    sizes_by_name: dict[str, int] = {}
+    link_to_name: dict[str, str] = {}
 
     def _worst_case_size(name: str, own_size: int) -> int:
         seen: set[str] = set()
@@ -215,7 +227,7 @@ def _reject_hardlink_fallback_amplification(
         return sizes_by_name[name]
 
     worst_case_total = 0
-    for member in members:
+    for member in tf.getmembers():
         worst_case_total += (
             _worst_case_size(member.linkname, member.size)
             if member.islnk()
@@ -229,6 +241,12 @@ def _reject_hardlink_fallback_amplification(
                 "this filesystem falls back to copying instead of "
                 f"linking (override via {_MAX_DECOMPRESSED_TAR_BYTES_ENV})",
             )
+        # Fold this member into the running maps *after* resolving it
+        # against them, matching tarfile's own precedes-me-only search.
+        if member.isreg():
+            sizes_by_name[member.name] = member.size
+        elif member.islnk():
+            link_to_name[member.name] = member.linkname
 
 
 # ── Protocol ─────────────────────────────────────────────────────────────────

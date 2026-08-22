@@ -2473,8 +2473,64 @@ class TestTarExtractorSymlinks:
 
         monkeypatch.setattr(os_mod, "symlink", _failing_symlink)
         assert _target_supports_symlinks(tmp_path) is False
-        # The probe target (created via touch(), unaffected by the
-        # symlink failure) is still cleaned up.
+        # The probe target (created via exclusive os.open(), unaffected
+        # by the symlink failure) is still cleaned up.
+        assert not list(tmp_path.iterdir())
+
+    def test_target_supports_symlinks_probe_never_touches_preexisting_user_data(
+        self, tmp_path: Path
+    ) -> None:
+        # A bare pid-suffixed probe name (the pre-fix scheme) is
+        # predictable and could collide with real pre-existing data at
+        # that exact path -- Path.touch() would silently reuse it and the
+        # unconditional cleanup would then delete it. The uuid4-suffixed,
+        # exclusive-create scheme can't collide with anything already
+        # there (Codex).
+        from abicheck.package import _target_supports_symlinks
+
+        preexisting = tmp_path / "real-user-data.txt"
+        preexisting.write_text("do not touch")
+        assert _target_supports_symlinks(tmp_path) is True
+        assert preexisting.read_text() == "do not touch"
+        # Nothing else left behind either.
+        assert list(tmp_path.iterdir()) == [preexisting]
+
+    def test_target_supports_symlinks_probe_target_created_exclusively(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Exclusive creation (O_EXCL), not Path.touch(), is what makes a
+        # same-path collision with pre-existing data fail loudly (surfaced
+        # as the probe simply returning False) instead of silently
+        # reusing -- and then, via the unconditional cleanup, deleting --
+        # someone else's file (Codex).
+        import os as os_mod
+
+        from abicheck.package import _target_supports_symlinks
+
+        real_open = os_mod.open
+        captured_flags: list[int] = []
+
+        def _recording_open(path: object, flags: int, *args: object) -> int:
+            captured_flags.append(flags)
+            return real_open(path, flags, *args)  # type: ignore[arg-type]
+
+        monkeypatch.setattr(os_mod, "open", _recording_open)
+        assert _target_supports_symlinks(tmp_path) is True
+        assert captured_flags, "os.open() was never called for the probe target"
+        assert captured_flags[0] & os_mod.O_EXCL
+
+    def test_target_supports_symlinks_probe_uses_unique_names_across_calls(
+        self, tmp_path: Path
+    ) -> None:
+        # A bare pid-suffixed name is identical across every call from the
+        # same process -- concurrent extractions into the same directory
+        # (e.g. two threads) would then collide on it. Calling the probe
+        # many times back-to-back must never raise FileExistsError from a
+        # stale/colliding name of its own making.
+        from abicheck.package import _target_supports_symlinks
+
+        for _ in range(20):
+            assert _target_supports_symlinks(tmp_path) is True
         assert not list(tmp_path.iterdir())
 
     def test_pre_312_path_depth_collapse_escape_rejected(
@@ -3043,6 +3099,38 @@ class TestRejectHardlinkFallbackAmplification:
         # alias falls back to a full copy: 600 * 11 = 6600, well over it.
         monkeypatch.setenv("_ABICHECK_TAR_ZST_MAX_DECODED_BYTES", "1000")
         archive = self._write_archive(tmp_path, real_size=600, hardlink_count=10)
+        out = tmp_path / "output"
+        out.mkdir()
+        with pytest.raises(ExtractionSecurityError, match="hard-link members"):
+            TarExtractor().extract(archive, out)
+
+    def test_rejects_when_a_later_same_named_member_would_poison_a_global_map(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # tarfile resolves a hard link only against members *preceding* it
+        # (TarFile._getmember(tarinfo=...) truncates its own search) -- a
+        # global, order-blind name->size map would have a later,
+        # zero-length member sharing the same name as the real payload
+        # silently overwrite that payload's recorded size, hiding the real
+        # amplification the earlier hard links still resolve to (Codex).
+        monkeypatch.setenv("_ABICHECK_TAR_ZST_MAX_DECODED_BYTES", "1000")
+        archive = tmp_path / "poisoned.tar"
+        with tarfile.open(archive, "w") as tf:
+            info = tarfile.TarInfo(name="real.bin")
+            info.size = 600
+            tf.addfile(info, io.BytesIO(b"x" * 600))
+            for i in range(10):
+                link = tarfile.TarInfo(name=f"alias{i}.bin")
+                link.type = tarfile.LNKTYPE
+                link.linkname = "real.bin"
+                link.size = 0
+                tf.addfile(link)
+            # A later, unrelated, zero-length member reusing the same name
+            # -- must not retroactively change what the hard links above
+            # (which already precede it) resolve to.
+            poison = tarfile.TarInfo(name="real.bin")
+            poison.size = 0
+            tf.addfile(poison, io.BytesIO(b""))
         out = tmp_path / "output"
         out.mkdir()
         with pytest.raises(ExtractionSecurityError, match="hard-link members"):
