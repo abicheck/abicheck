@@ -1,17 +1,11 @@
 # Copyright 2026 Nikolay Petrov
 # SPDX-License-Identifier: Apache-2.0
 #
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
+# Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with the License. You may obtain a copy of the License at
 #
 #     http://www.apache.org/licenses/LICENSE-2.0
 #
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
+# Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License for the specific language governing permissions and limitations under the License.
 
 """Unit tests for :mod:`abicheck.product_baseline` -- the pack/unpack
 library primitives. Library-only surface -- no CLI wiring."""
@@ -24,6 +18,8 @@ import json
 import os
 import stat as stat_mod
 import tarfile
+import unicodedata
+import uuid
 from pathlib import Path
 
 import pytest
@@ -158,6 +154,29 @@ def _make_product(root: Path) -> Path:
     return product
 
 
+def _skip_unless_case_sensitive(tmp_path: Path) -> None:
+    """Skip if *tmp_path*'s filesystem doesn't distinguish name case -- the
+    default on macOS/Windows, where the fixture setup below can't work."""
+    probe = tmp_path / f".case-probe-{uuid.uuid4().hex}"
+    probe.write_bytes(b"a")
+    is_case_sensitive = not (tmp_path / probe.name.upper()).exists()
+    probe.unlink()
+    if not is_case_sensitive:
+        pytest.skip("host filesystem does not distinguish file name case")
+
+
+def _skip_if_filesystem_normalizes_unicode(tmp_path: Path) -> None:
+    """Skip if *tmp_path*'s filesystem treats distinct NFC/NFD spellings of
+    the same characters as one name -- APFS/HFS+'s default."""
+    nfc = tmp_path / unicodedata.normalize("NFC", ".café-probe")
+    nfd = tmp_path / unicodedata.normalize("NFD", ".café-probe")
+    nfc.write_bytes(b"a")
+    normalizes = nfd.exists()
+    nfc.unlink()
+    if normalizes:
+        pytest.skip("host filesystem normalizes Unicode NFC/NFD forms")
+
+
 class TestManifestRoundTrip:
     def test_to_dict_from_dict_round_trip(self) -> None:
         manifest = ProductBaselineManifest(
@@ -184,8 +203,7 @@ class TestManifestRoundTrip:
         assert manifest.schema == PRODUCT_BASELINE_SCHEMA
 
     def test_from_dict_tolerates_non_numeric_size_and_file_count(self) -> None:
-        # A hand-edited/corrupt manifest.json could carry a non-numeric
-        # "size"/"file_count" -- must degrade to 0, not raise ValueError (Codex).
+        # A hand-edited manifest.json could carry a non-numeric size/file_count.
         manifest = ProductBaselineManifest.from_dict(
             {
                 "libraries": [{"name": "a.so", "path": "a.so", "size": "not-a-number"}],
@@ -209,8 +227,7 @@ class TestPackProductBaseline:
         manifest = pack_product_baseline(product, tmp_path / "b.tar.zst")
         names = {lib.name for lib in manifest.libraries}
         assert names == {"liba.so.1.2.3", "libb.so"}
-        # The symlink itself is archived (round-trip test covers that) but
-        # is not separately counted as a library entry.
+        # The symlink is archived but not separately counted as a library.
         assert "liba.so" not in names
 
     def test_pack_records_extensionless_elf_library_in_the_manifest(
@@ -314,8 +331,7 @@ class TestPackProductBaseline:
         self, tmp_path: Path
     ) -> None:
         # A header root naming an existing but empty directory must still
-        # exist after unpack (Codex: _discover_paths only archives
-        # files/symlinks, so an empty directory used to vanish).
+        # exist after unpack (_discover_paths only archives files/symlinks).
         product = _make_product(tmp_path)
         empty_header_root = product / "empty-include"
         empty_header_root.mkdir()
@@ -583,9 +599,8 @@ class TestPackProductBaseline:
     def test_pack_rejects_further_reserved_windows_device_names(
         self, tmp_path: Path, reserved_name: str
     ) -> None:
-        # Beyond CON/PRN/AUX/NUL/COM1-9/LPT1-9, Windows reserves CONIN$/CONOUT$
-        # (console I/O) and COM0/LPT0, plus the superscript-digit spellings
-        # COM¹/COM²/COM³/LPT¹/LPT²/LPT³ Windows treats as equivalent (Codex).
+        # Beyond CON/PRN/AUX/NUL/COM1-9/LPT1-9, Windows also reserves CONIN$/
+        # CONOUT$, COM0/LPT0, and superscript-digit COM¹/LPT¹ spellings (Codex).
         product = _make_product(tmp_path)
         (product / f"{reserved_name}.txt").write_bytes(b"data")
         with pytest.raises(SnapshotError, match="reserved Windows device name"):
@@ -616,6 +631,7 @@ class TestPackProductBaseline:
     def test_pack_rejects_case_colliding_file_names(self, tmp_path: Path) -> None:
         # Foo.dll/foo.dll are distinct on a case-sensitive host but
         # unify on Windows extraction, overwriting one (Codex).
+        _skip_unless_case_sensitive(tmp_path)
         product = _make_product(tmp_path)
         (product / "Foo.dll").write_bytes(b"MZ" + b"\x00" * 20)
         (product / "foo.dll").write_bytes(b"MZ" + b"\x00" * 30)
@@ -625,6 +641,7 @@ class TestPackProductBaseline:
     def test_pack_rejects_case_colliding_directory_names(self, tmp_path: Path) -> None:
         # `Lib/a.so` vs `lib/b.so` have distinct full arcnames, but
         # Windows unifies `Lib`/`lib` into one directory (Codex).
+        _skip_unless_case_sensitive(tmp_path)
         product = _make_product(tmp_path)
         (product / "Lib").mkdir()
         (product / "lib" / "a.so").write_bytes(b"ELF")
@@ -637,8 +654,7 @@ class TestPackProductBaseline:
     ) -> None:
         # NFC/NFD spellings are distinct bytes on Linux -- casefold() doesn't
         # compose/decompose -- but APFS/HFS+ treat them as one filename (Codex).
-        import unicodedata
-
+        _skip_if_filesystem_normalizes_unicode(tmp_path)
         product = _make_product(tmp_path)
         nfc = unicodedata.normalize("NFC", "café.so")
         nfd = unicodedata.normalize("NFD", "café.so")
@@ -692,6 +708,7 @@ class TestPackProductBaseline:
     ) -> None:
         # `libfoo.so -> payload` is dangling here (only `Payload` exists) -- but
         # on a case-insensitive host it resolves live, rejected as undeclared.
+        _skip_unless_case_sensitive(tmp_path)
         product = _make_product(tmp_path)
         (product / "lib" / "Payload").write_bytes(b"\x7fELF" + b"\x00" * 20)
         (product / "lib" / "libfoo.so").symlink_to("payload")
@@ -711,9 +728,9 @@ class TestPackProductBaseline:
     def test_pack_rejects_a_symlink_target_case_mismatched_on_an_intermediate_component(
         self, tmp_path: Path
     ) -> None:
-        # The case/Unicode-fold check must walk every target component, not
-        # just the basename: `links/libfoo.so -> ../Payload/data` is dangling
-        # on the *intermediate* `payload` directory, not `data` (Codex).
+        # The check must walk every component, not just the basename:
+        # `links/libfoo.so -> ../Payload/data` is dangling on `payload` (Codex).
+        _skip_unless_case_sensitive(tmp_path)
         product = _make_product(tmp_path)
         (product / "links").mkdir()
         (product / "Payload").mkdir()
@@ -726,8 +743,7 @@ class TestPackProductBaseline:
         self, tmp_path: Path
     ) -> None:
         # `libfoo.so -> alias -> missing`: the exact-match check must be
-        # lexical (`os.path.lexists`), not `.exists()` (which follows `alias`,
-        # reading a broken chain as absent) (Codex).
+        # lexical (`os.path.lexists`), not `.exists()` (Codex).
         product = _make_product(tmp_path)
         (product / "lib" / "alias").symlink_to("missing")
         (product / "lib" / "libfoo.so").symlink_to("alias")
@@ -738,8 +754,7 @@ class TestPackProductBaseline:
         self, tmp_path: Path
     ) -> None:
         # A suffix-shaped symlink can target a directory (`plugins.so ->
-        # payload/`) -- the standalone-symlink fix above hashed unconditionally
-        # and raised an uncaught IsADirectoryError (Codex review).
+        # payload/`) -- hashed unconditionally, raising IsADirectoryError.
         product = _make_product(tmp_path)
         (product / "lib" / "payload").mkdir()
         (product / "lib" / "payload" / "inner.txt").write_text("hi")
@@ -885,9 +900,8 @@ class TestPackProductBaseline:
     def test_pack_into_not_yet_existing_subdirectory_is_deterministic_across_reruns(
         self, tmp_path: Path
     ) -> None:
-        # OUTPUT under a not-yet-existing subdirectory: the first pack never
-        # saw it, while a second (post-mkdir) pack discovered it as empty --
-        # changing file_count (Codex).
+        # OUTPUT under a not-yet-existing subdirectory: a second (post-mkdir)
+        # pack discovered it as empty, changing file_count (Codex).
         product = _make_product(tmp_path)
         out = product / "artifacts" / "base.tar.zst"
         manifest1 = pack_product_baseline(product, out)
@@ -942,10 +956,8 @@ class TestPackProductBaseline:
     def test_pack_rejects_header_root_matching_the_output_scaffold_directory(
         self, tmp_path: Path
     ) -> None:
-        # output=SOURCE/newheaders/base.tar.zst, header root naming a dir that
-        # doesn't exist: the output-parent scaffold mkdir() fabricated an empty
-        # `newheaders/` that then wrongly passed validation, since validation
-        # ran *after* the mkdir (Codex).
+        # header root naming a dir that doesn't exist: the output-parent
+        # scaffold mkdir() fabricated it, wrongly passing validation (Codex).
         product = _make_product(tmp_path)
         out = product / "newheaders" / "base.tar.zst"
         with pytest.raises(SnapshotError, match="header root"):
@@ -956,9 +968,8 @@ class TestPackProductBaseline:
     def test_pack_cleans_up_scaffold_after_manifest_collision_rejection(
         self, tmp_path: Path
     ) -> None:
-        # The scaffold-cleanup fix originally only wired the empty-source
-        # rejection -- a *different* rejection (colliding with the reserved
-        # manifest name) left the scaffold dir behind (Codex).
+        # Originally only the empty-source rejection wired scaffold cleanup --
+        # colliding with the reserved manifest name left it behind (Codex).
         from abicheck.product_baseline import MANIFEST_MEMBER_NAME
 
         product = _make_product(tmp_path)
@@ -1065,8 +1076,7 @@ class TestUnpackProductBaseline:
 
     def test_unpack_rejects_symlink_destination(self, tmp_path: Path) -> None:
         # A symlink to a genuinely empty directory passed the empty-destination
-        # check and crashed at publish: Path.rmdir() operates on the symlink
-        # itself, raising unhandled NotADirectoryError (Codex).
+        # check and crashed at publish: Path.rmdir() operates on the symlink.
         product = _make_product(tmp_path)
         archive = tmp_path / "baseline.tar.zst"
         pack_product_baseline(product, archive)
@@ -1226,10 +1236,7 @@ class TestUnpackProductBaseline:
     def test_unpack_rejects_an_undeclared_hardlink_alias_masked_by_a_symlink(
         self, tmp_path: Path
     ) -> None:
-        # The hardlink check compared against _discover_library_map()'s
-        # deduplicated map -- a symlink alias sharing identity, sorted before
-        # an undeclared hardlink alias, survives dedup as the sole
-        # representative, hiding it (Codex).
+        # The hardlink check compared against _discover_library_map()'s deduplicated map -- a symlink alias sharing identity, sorted before an undeclared hardlink alias, survives dedup, hiding it (Codex).
         product = _make_product(tmp_path)
         target = product / "lib" / "z.so"
         target.write_bytes(b"ELF-CONTENT")
@@ -1260,10 +1267,7 @@ class TestUnpackProductBaseline:
     def test_unpack_hashes_each_hardlinked_payload_only_once(
         self, tmp_path: Path
     ) -> None:
-        # N library-shaped hardlink aliases of one payload each get their own
-        # declared LibraryEntry (unlike a symlink alias) -- hashing every
-        # entry's full content independently turns N declared aliases into N
-        # full reads of the same bytes, a cost an attacker controls (Codex).
+        # N library-shaped hardlink aliases of one payload each get their own declared LibraryEntry (unlike a symlink alias) -- hashing every entry's full content independently turns N declared aliases into N full reads of the same bytes, a cost an attacker controls (Codex).
         product = _make_product(tmp_path)
         first = product / "lib" / "lib0.so"
         first.write_bytes(b"\x7fELF" + b"payload" * 100)
@@ -1598,8 +1602,7 @@ class TestUnpackProductBaseline:
     def test_unpack_rejects_nonexistent_older_major_schema(
         self, tmp_path: Path
     ) -> None:
-        # Only major >= 1 was ever real; "newer than supported" alone let v0
-        # (or negative) through, deserialized with v1's layout (Codex).
+        # Only major >= 1 was ever real; "newer" alone let v0/negative through.
         product = _make_product(tmp_path)
         archive = tmp_path / "baseline.tar.zst"
         pack_product_baseline(product, archive)
@@ -1615,8 +1618,7 @@ class TestUnpackProductBaseline:
     def test_unpack_preserves_existing_destination_permissions(
         self, tmp_path: Path
     ) -> None:
-        # A pre-created DEST_DIR with non-default permissions: staging's mode
-        # was previously re-derived from the umask, silently changing it (Codex).
+        # staging's mode was previously re-derived from the umask (Codex).
         product = _make_product(tmp_path)
         archive = tmp_path / "baseline.tar.zst"
         pack_product_baseline(product, archive)
@@ -1632,9 +1634,7 @@ class TestPackProductBaselinePermissions:
     def test_pack_output_gets_umask_derived_permissions_not_mkstemp_0600(
         self, tmp_path: Path
     ) -> None:
-        # mkstemp() always creates mode 0600, and os.replace() carries
-        # that across to OUTPUT -- a freshly packed archive was
-        # unreadable by anyone but its own creator (Codex).
+        # mkstemp() always creates mode 0600, unreadable by anyone else.
         product = _make_product(tmp_path)
         out = tmp_path / "baseline.tar.zst"
         pack_product_baseline(product, out)
@@ -1648,9 +1648,7 @@ class TestPackProductBaselinePermissions:
     def test_pack_preserves_existing_output_permissions_when_overwriting(
         self, tmp_path: Path
     ) -> None:
-        # Repacking an existing group/world-readable release asset must
-        # not silently strip its access just because mkstemp()'s own
-        # 0600 default rides along on os.replace() (Codex).
+        # Repacking must not strip access just because mkstemp() is 0600.
         product = _make_product(tmp_path)
         out = tmp_path / "baseline.tar.zst"
         pack_product_baseline(product, out)
@@ -1658,37 +1656,50 @@ class TestPackProductBaselinePermissions:
         pack_product_baseline(product, out)
         assert stat_mod.S_IMODE(out.stat().st_mode) == 0o644
 
-    def test_process_umask_is_queried_at_most_once_per_process(
+    def test_umask_derived_mode_never_calls_os_umask_and_leaves_no_probe(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        # os.umask() only works by briefly mutating the process-wide
-        # value -- a real race window (Codex). Caching pays it once.
+        # os.umask() mutates the process-wide value -- a race not closed by
+        # locking this module's own callers alone (Codex).
         from abicheck import product_baseline as pb
 
-        monkeypatch.setattr(pb, "_cached_umask", None)
-        real_umask = os.umask
-        calls: list[int] = []
+        def _forbidden_umask(mask: int) -> int:
+            raise AssertionError("os.umask() must not be called")
 
-        def counting_umask(mask: int) -> int:
-            calls.append(mask)
-            return real_umask(mask)
+        old = pb.os.umask(0o022)  # set before patching os.umask() itself
+        monkeypatch.setattr(pb.os, "umask", _forbidden_umask)
+        try:
+            mode = pb._umask_derived_mode(tmp_path, 0o666, directory=False)
+        finally:
+            monkeypatch.undo()
+            os.umask(old)
+        assert mode == 0o644
+        assert not list(tmp_path.iterdir())  # probe entry removed
 
-        monkeypatch.setattr(pb.os, "umask", counting_umask)
+    def test_umask_derived_mode_reflects_a_mid_process_umask_change(
+        self, tmp_path: Path
+    ) -> None:
+        # A permanent cache would go stale across a later os.umask() call
+        # elsewhere in the process -- each call must measure live (Codex).
+        from abicheck import product_baseline as pb
 
-        first = pb._process_umask()
-        second = pb._process_umask()
-
-        assert first == second
-        assert len(calls) == 2  # one os.umask(0) + one restore -- once total
+        old = os.umask(0o022)
+        try:
+            first = pb._umask_derived_mode(tmp_path, 0o666, directory=False)
+            os.umask(0o077)
+            second = pb._umask_derived_mode(tmp_path, 0o666, directory=False)
+        finally:
+            os.umask(old)
+        assert first == 0o644
+        assert second == 0o600
 
 
 class TestCompareProductDirectoriesHeaderRoots:
     def _capture_run_compare_calls(
         self, monkeypatch: pytest.MonkeyPatch, old_dir: Path, new_dir: Path
     ) -> list[dict[str, object]]:
-        # Bypasses real library discovery/parsing -- this test is purely
-        # about which header dirs resolve and reach run_compare, and
-        # building real ELF objects needs a compiler this sandbox lacks.
+        # Bypasses real library discovery/parsing -- purely about which
+        # header dirs resolve and reach run_compare (no compiler here).
         from abicheck import product_baseline as pb, service_compare_pipeline as scp
 
         calls: list[dict[str, object]] = []
@@ -1709,9 +1720,8 @@ class TestCompareProductDirectoriesHeaderRoots:
     def test_accepts_distinct_header_roots_per_side(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        # A product relocating its public headers can't be expressed by
-        # one shared header_roots list -- the old code dropped the
-        # nonexistent root, running that side with no evidence (Codex).
+        # A product relocating headers can't be expressed by one shared
+        # header_roots list -- the old code dropped the nonexistent root.
         from abicheck.product_baseline import compare_product_directories
 
         old_dir = tmp_path / "old"
@@ -1844,9 +1854,7 @@ class TestCompareProductDirectoriesPerLibraryHeaderRoots:
     def test_a_library_absent_from_the_mapping_gets_no_headers(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        # Not a fallback to the flat/shared list, and not an error --
-        # matches this format's existing "no headers is a normal case"
-        # tolerance elsewhere.
+        # Not a fallback to the flat/shared list, and not an error -- matches this format's existing "no headers is a normal case" tolerance elsewhere.
         from abicheck.product_baseline import compare_product_directories
 
         old_dir = tmp_path / "old"
@@ -1938,9 +1946,7 @@ class TestRootsForLibrary:
 
 class TestDiscoverLibraryMap:
     def test_keys_by_relative_path_not_bare_filename(self, tmp_path: Path) -> None:
-        # Two distinct DSOs sharing a basename in different directories
-        # previously collided on the same bare-filename dict key,
-        # dropping one of them (Codex).
+        # Two distinct DSOs sharing a basename in different directories previously collided on the same bare-filename dict key, dropping one of them (Codex).
         from abicheck.product_baseline import _discover_library_map
 
         root = tmp_path / "product"
@@ -1970,10 +1976,7 @@ class TestDiscoverLibraryMap:
     def test_excludes_a_linker_script_alongside_its_real_target(
         self, tmp_path: Path
     ) -> None:
-        # A GNU ld INPUT()/GROUP() script (`libfoo.so -> INPUT(libfoo.so.1)`)
-        # is library-suffix-named but carries no binary content --
-        # discovering it alongside its real target previously produced
-        # two DiffResults for one library (Codex).
+        # A GNU ld INPUT()/GROUP() script (`libfoo.so -> INPUT(libfoo.so.1)`) is library-suffix-named but carries no binary content -- discovering it alongside its real target previously produced two DiffResults for one library (Codex).
         from abicheck.product_baseline import _discover_library_map
         from tests.test_package import _make_minimal_elf_so
 
@@ -1986,10 +1989,7 @@ class TestDiscoverLibraryMap:
         assert set(result) == {"libfoo.so.1"}
 
     def test_excludes_an_unresolvable_linker_script(self, tmp_path: Path) -> None:
-        # A script whose target isn't available in this tree at all (e.g.
-        # an archive-only build) must not abort the whole comparison as
-        # "cannot detect format" either -- excluded the same way, not
-        # merely deduplicated against a target that happens to exist.
+        # A script whose target isn't available in this tree at all (e.g. an archive-only build) must not abort the whole comparison as "cannot detect format" either -- excluded the same way, not merely deduplicated against a target that happens to exist.
         from abicheck.product_baseline import _discover_library_map
 
         root = tmp_path / "product"

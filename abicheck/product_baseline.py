@@ -55,8 +55,8 @@ import stat as stat_module
 import struct
 import tarfile
 import tempfile
-import threading
 import unicodedata
+import uuid
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path, PureWindowsPath
@@ -355,24 +355,25 @@ def _case_insensitive_target_resolves(parent: Path, target: str) -> bool:
     return used_fold
 
 
-_umask_lock = threading.Lock()
-_cached_umask: int | None = None
-
-
-def _process_umask() -> int:
-    """Return the process's umask -- POSIX has no race-free getter, only
-    `os.umask(new)` returning the *old* value, so querying it briefly
-    zeroes the process-wide umask; a file another thread creates in that
-    window could come out more permissive than intended (Codex). Cached
-    after the first call so later callers pay zero race risk."""
-    global _cached_umask
-    if _cached_umask is None:
-        with _umask_lock:
-            if _cached_umask is None:
-                mask = os.umask(0)
-                os.umask(mask)
-                _cached_umask = mask
-    return _cached_umask
+def _umask_derived_mode(parent: Path, base_mode: int, *, directory: bool) -> int:
+    """Return base_mode & ~umask -- learned from a real, immediately removed
+    probe entry under *parent*, not from `os.umask(new)` (POSIX's only getter,
+    which briefly zeroes the process-wide umask and races with any concurrent
+    file creation in an unrelated thread) and not cached (a process-lifetime
+    cache goes stale across a later `os.umask()` call elsewhere) -- two
+    independent Codex findings on the same prior fix."""
+    probe = parent / f".abicheck-umask-probe-{uuid.uuid4().hex}"
+    try:
+        if directory:
+            os.mkdir(probe, base_mode)
+        else:
+            os.close(os.open(probe, os.O_CREAT | os.O_EXCL | os.O_WRONLY, base_mode))
+        return stat_module.S_IMODE(probe.stat().st_mode)
+    finally:
+        try:
+            probe.rmdir() if directory else probe.unlink()
+        except OSError:
+            pass
 
 
 def _scaffold_dirs_for_mkdir(base: Path, leaf_parent: Path) -> set[Path]:
@@ -1007,7 +1008,7 @@ def pack_product_baseline(
     if output_path.exists():
         target_mode = stat_module.S_IMODE(output_path.stat().st_mode)
     else:
-        target_mode = 0o666 & ~_process_umask()
+        target_mode = _umask_derived_mode(output_path.parent, 0o666, directory=False)
     try:
         zstandard = _zstd_module()
         cctx = zstandard.ZstdCompressor(level=zstd_level, write_checksum=True)
@@ -1300,14 +1301,13 @@ def unpack_product_baseline(
         raise
 
     try:
-        # mkdtemp() creates staging mode 0700 regardless of umask --
-        # wrong for a directory about to be published: a different-user
-        # caller couldn't traverse it. Preserve dest_path's own mode if
+        # mkdtemp() creates staging mode 0700 regardless of umask -- wrong for
+        # a directory about to be published. Preserve dest_path's own mode if
         # it already existed with a deliberate one.
         if existing_dest_mode is not None:
             target_dir_mode = existing_dest_mode
         else:
-            target_dir_mode = 0o777 & ~_process_umask()
+            target_dir_mode = _umask_derived_mode(staging, 0o777, directory=True)
         os.chmod(staging, target_dir_mode)
 
         # dest_path, confirmed empty above, is removed and staging renamed into

@@ -2846,11 +2846,28 @@ class TestRejectOversizedDeclaredContent:
             f.truncate(2 * 1024 * 1024 * 1024)  # 2 GiB logical, ~0 real bytes
 
         archive = tmp_path / "sparse.tar"
-        subprocess.run(
-            [tar_bin, "--sparse", "-cf", str(archive), "-C", str(tmp_path), "huge.bin"],
-            check=True,
-            capture_output=True,
-        )
+        try:
+            subprocess.run(
+                [
+                    tar_bin,
+                    "--sparse",
+                    "-cf",
+                    str(archive),
+                    "-C",
+                    str(tmp_path),
+                    "huge.bin",
+                ],
+                check=True,
+                capture_output=True,
+            )
+        except subprocess.CalledProcessError as exc:
+            # BSD tar (macOS's default /usr/bin/tar) doesn't accept GNU tar's
+            # --sparse flag the same way -- this test needs a real GNU-sparse
+            # archive, which only a GNU-tar-compatible binary can produce.
+            pytest.skip(
+                f"local 'tar' binary doesn't support GNU --sparse output: "
+                f"{exc.stderr.decode('utf-8', 'replace').strip() or exc}"
+            )
         assert archive.stat().st_size < 100_000  # confirms a real sparse-shape archive
 
         out = tmp_path / "output"
