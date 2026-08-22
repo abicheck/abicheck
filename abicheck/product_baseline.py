@@ -65,6 +65,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import IO, TYPE_CHECKING, Any
 
+from .binary_utils import resolve_linker_script
 from .errors import SnapshotError
 from .package import TarExtractor, _is_elf_shared_object
 
@@ -108,6 +109,27 @@ def _is_shared_library(name: str) -> bool:
     if lower.endswith(_LIBRARY_SUFFIXES):
         return True
     return _VERSIONED_SONAME.search(name) is not None
+
+
+def _is_library_path(path: Path) -> bool:
+    """A shared library, by filename suffix or (for ELF) real content.
+
+    Shared by every place that decides "is this a library" -- packing's own
+    manifest-entry classification (:func:`_add_member`, both its regular-
+    file and hardlink-member branches) and :func:`_discover_library_map`'s
+    discovery walk. Previously each checked filename suffix alone (via
+    :func:`_is_shared_library`); an extensionless ELF DSO -- a plugin named
+    without a conventional ``.so`` suffix, real on Linux -- was discovered
+    by neither at first, and even after discovery gained the content-aware
+    fallback, packing's own manifest classification still didn't, so such a
+    file was archived (``_discover_paths`` archives every regular file
+    regardless of suffix) but produced no ``LibraryEntry`` — the returned
+    and persisted manifest falsely reported the product had no such library
+    (Codex review, fresh evidence). Factored into one predicate so
+    discovery and manifest classification can never drift apart on this
+    question again.
+    """
+    return _is_shared_library(path.name) or _is_elf_shared_object(path)
 
 
 @dataclass(frozen=True)
@@ -404,7 +426,7 @@ def _add_member(
         # its content is identical to the already-archived copy's by
         # definition of being a hardlink to the same inode.
         entry = None
-        if _is_shared_library(path.name):
+        if _is_library_path(path):
             hasher = hashlib.sha256()
             with open(path, "rb") as fh:
                 for chunk in iter(lambda: fh.read(1 << 20), b""):
@@ -421,7 +443,7 @@ def _add_member(
     if not info.isreg():  # pragma: no cover - _discover_paths already filters
         return None
 
-    if _is_shared_library(path.name):
+    if _is_library_path(path):
         hasher = hashlib.sha256()
         with open(path, "rb") as fh:
             tf.addfile(info, fileobj=_HashingReader(fh, hasher))
@@ -732,9 +754,20 @@ def pack_product_baseline(
         # failure path after the mkdir() call above.
         _cleanup_output_scaffold_dirs()
         raise
-    fd, tmp_name = tempfile.mkstemp(
-        dir=str(output_path.parent), prefix=".abicheck-product-baseline-", suffix=".tmp"
-    )
+    try:
+        fd, tmp_name = tempfile.mkstemp(
+            dir=str(output_path.parent),
+            prefix=".abicheck-product-baseline-",
+            suffix=".tmp",
+        )
+    except BaseException:
+        # mkstemp() itself can fail (ENOSPC, EMFILE, a permission race) --
+        # nothing has been written yet, so the same best-effort scaffold
+        # cleanup as every other failure path after the mkdir() call above
+        # (Codex review, fresh evidence: this call sat between the two
+        # existing try/except blocks, uncovered by either).
+        _cleanup_output_scaffold_dirs()
+        raise
     tmp_path = Path(tmp_name)
     try:
         os.chmod(tmp_path, target_mode)
@@ -908,6 +941,22 @@ def unpack_product_baseline(
                     f"{archive_path}: manifest declares an invalid header "
                     f"root {rel!r} (absolute, escapes the product root, "
                     "or is not an existing directory)"
+                )
+        # LibraryEntry.path carries the identical untrusted-manifest risk
+        # as header_roots above -- it's documented as "relative to the
+        # archive/product root" but from_dict()'s defensive str()
+        # coercion accepts and returns any string unchanged, so an
+        # archive declaring "../../outside.so" or "/tmp/other.so" would
+        # otherwise publish the extraction and hand the caller a manifest
+        # whose advertised library inventory resolves outside the
+        # unpacked baseline entirely (Codex review, fresh evidence).
+        for lib in manifest.libraries:
+            lib_resolved = _resolve_under_root(staging, lib.path)
+            if lib_resolved is None or not lib_resolved.is_file():
+                raise SnapshotError(
+                    f"{archive_path}: manifest declares an invalid library "
+                    f"path {lib.path!r} (absolute, escapes the product "
+                    "root, or is not an existing file)"
                 )
     except BaseException:
         shutil.rmtree(staging, ignore_errors=True)
@@ -1121,7 +1170,22 @@ def _discover_library_map(root: Path, *, include_private: bool) -> dict[str, Pat
         dirnames.sort()
         for fn in sorted(filenames):
             path = Path(dirpath) / fn
-            if not _is_shared_library(fn) and not _is_elf_shared_object(path):
+            if not _is_library_path(path):
+                continue
+            # A GNU ld INPUT()/GROUP() linker script (the conventional
+            # `libfoo.so -> INPUT(libfoo.so.1)` SDK-install pattern) is
+            # library-suffix-named but carries no binary content of its
+            # own -- discovering it alongside its real target (libfoo.so.1,
+            # discovered independently under its own name) previously
+            # produced two DiffResults for the identical library, and if
+            # the target were unavailable a non-library script could abort
+            # the whole comparison as "cannot detect format" (Codex review,
+            # fresh evidence). The real target -- if present in this same
+            # tree -- is already discovered on its own merits by this same
+            # walk, so the script itself is simply excluded, never
+            # resolved to a duplicate entry.
+            _, is_linker_script = resolve_linker_script(path)
+            if is_linker_script:
                 continue
             try:
                 real = path.resolve()
@@ -1429,6 +1493,42 @@ def compare_product_directories(
                     "sibling imports it, but a whole-product comparison must "
                     "still report it."
                 ),
+                provider_library=name,
+            )
+        )
+
+    # Symmetric gap to the removal one above, for the identical reason:
+    # compare_bundle()'s own BUNDLE_LIBRARY_ADDED detection reads new
+    # library names straight off BundleSnapshot.libraries, which
+    # build_bundle_snapshot() only ever populates from *ELF* metadata
+    # (non-ELF inputs are skipped with a warning -- the bundle layer is
+    # Linux/ELF-only by design). A new DLL/dylib added to the product
+    # therefore never reaches that detection at all, regardless of any
+    # sibling-consumer gating -- an empty old directory versus a new
+    # directory containing foo.dll still returned NO_CHANGE with no
+    # findings (Codex review, fresh evidence). Report it directly, the
+    # same format-neutral way the removal fallback already does: any bare
+    # filename present in the new bundle map and absent from the old one,
+    # not already reported and not already paired via the canonical
+    # fallback (a case-only rename/SONAME bump is a paired library, not an
+    # addition).
+    already_reported_added = {
+        f.provider_library
+        for f in bundle_result.bundle_findings
+        if f.kind == ChangeKind.BUNDLE_LIBRARY_ADDED and f.provider_library
+    }
+    paired_new_names = {new_path.name for _, _, _, new_path in pairs}
+    for name in sorted(
+        set(new_bundle_map)
+        - set(old_bundle_map)
+        - already_reported_added
+        - paired_new_names
+    ):
+        bundle_result.bundle_findings.append(
+            BundleFinding(
+                kind=ChangeKind.BUNDLE_LIBRARY_ADDED,
+                symbol=name,
+                description=f"New library {name} appears in the product.",
                 provider_library=name,
             )
         )
