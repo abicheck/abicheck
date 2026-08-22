@@ -11,5 +11,7 @@
   subdirectory) without cluttering the repository root. The file's content,
   schema, and strict-loading rules are unchanged regardless of which of the
   three locations it's found at; an explicit `--config <path>` still
-  overrides discovery entirely. See `docs/reference/config-file.md` § File
-  discovery.
+  overrides discovery entirely. A relative `compile.include_dirs` entry
+  keeps resolving against the *project root* (the directory containing
+  `.github/`), never against `.github/` or `.github/abicheck/` itself. See
+  `docs/reference/config-file.md` § File discovery.

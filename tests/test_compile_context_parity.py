@@ -264,6 +264,40 @@ def test_merge_compile_config_cli_wins_over_config(tmp_path: Path) -> None:
     assert includes == (tmp_path / "include",)
 
 
+def test_merge_compile_config_include_dirs_resolve_against_project_root_for_dot_github_config(
+    tmp_path: Path,
+) -> None:
+    """A config discovered under `.github/` (or `.github/abicheck/`) still
+    resolves a relative `compile.include_dirs` entry against the project
+    root, not against `.github/` itself (Codex review on PR #828 —
+    `merge_compile_config` used to resolve against `cfg.parent`, which is
+    wrong once a config can live somewhere other than the project root)."""
+    from abicheck.cli_scan import _merge_compile_config
+
+    github_dir = tmp_path / ".github"
+    github_dir.mkdir()
+    cfg = github_dir / ".abicheck.yml"
+    cfg.write_text("compile:\n  include_dirs: [include]\n", encoding="utf-8")
+
+    _, includes = _merge_compile_config(CompileContext(), (), cfg)
+    assert includes == (tmp_path / "include",)
+    assert includes != (github_dir / "include",)
+
+
+def test_merge_compile_config_include_dirs_resolve_against_project_root_for_dot_github_abicheck_config(
+    tmp_path: Path,
+) -> None:
+    from abicheck.cli_scan import _merge_compile_config
+
+    subdir = tmp_path / ".github" / "abicheck"
+    subdir.mkdir(parents=True)
+    cfg = subdir / ".abicheck.yml"
+    cfg.write_text("compile:\n  include_dirs: [include]\n", encoding="utf-8")
+
+    _, includes = _merge_compile_config(CompileContext(), (), cfg)
+    assert includes == (tmp_path / "include",)
+
+
 def test_merge_compile_config_cli_token_wins_over_config_std(tmp_path: Path) -> None:
     """CLI --compiler-option tokens must win over a config-
     synthesized -std=/-D, the same way the now-removed --gcc-options scalar

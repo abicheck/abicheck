@@ -226,6 +226,12 @@ e.g. `c++17`), `include_dirs:`/`defines:` (lists), `sysroot:`, and
 > compiler-option atom (a config scalar cannot expand into multiple compiler
 > arguments).
 
+> A relative `compile.include_dirs` entry resolves against the *project
+> root* — the directory containing the discovered config, or the directory
+> containing `.github/` when the config was found under `.github/` or
+> `.github/abicheck/` (see [File discovery](#file-discovery)) — never
+> against `.github/` itself.
+
 ---
 
 ### `debug:`

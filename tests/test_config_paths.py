@@ -17,7 +17,11 @@
 
 from __future__ import annotations
 
-from abicheck.config_paths import CONFIG_RELATIVE_CANDIDATES, find_config_in_dir
+from abicheck.config_paths import (
+    CONFIG_RELATIVE_CANDIDATES,
+    find_config_in_dir,
+    project_root_for_config,
+)
 
 
 def test_no_candidate_present_returns_none(tmp_path):
@@ -69,3 +73,41 @@ def test_a_directory_named_like_the_config_is_not_a_match(tmp_path):
     """`find_config_in_dir` only ever returns a regular file."""
     (tmp_path / ".abicheck.yml").mkdir()
     assert find_config_in_dir(tmp_path) is None
+
+
+# ── project_root_for_config ───────────────────────────────────────────────
+
+
+def test_project_root_for_root_level_config(tmp_path):
+    cfg = tmp_path / ".abicheck.yml"
+    assert project_root_for_config(cfg) == tmp_path
+
+
+def test_project_root_for_dot_github_config(tmp_path):
+    cfg = tmp_path / ".github" / ".abicheck.yml"
+    assert project_root_for_config(cfg) == tmp_path
+
+
+def test_project_root_for_dot_github_abicheck_config(tmp_path):
+    cfg = tmp_path / ".github" / "abicheck" / ".abicheck.yml"
+    assert project_root_for_config(cfg) == tmp_path
+
+
+def test_project_root_falls_back_to_parent_for_an_unrecognized_path(tmp_path):
+    """An explicit --config pointed at a file that doesn't end in one of the
+    recognized suffixes (e.g. an arbitrarily-named file) degrades to the
+    file's own parent directory, matching every discovery site's behavior
+    before the `.github/` locations existed."""
+    cfg = tmp_path / "somewhere" / "my-config.yml"
+    assert project_root_for_config(cfg) == tmp_path / "somewhere"
+
+
+def test_project_root_matches_the_full_suffix_not_just_the_filename(tmp_path):
+    """A file named `.abicheck.yml` sitting directly inside a directory that
+    happens to be named `.github` (not `.github/.abicheck.yml` relative to
+    some other root) is still just a root-level config one level up — the
+    match is on the exact relative suffix, not merely the bare filename."""
+    weird = tmp_path / "not-a-real-github-dir"
+    weird.mkdir()
+    cfg = weird / ".abicheck.yml"
+    assert project_root_for_config(cfg) == weird

@@ -70,6 +70,39 @@ def find_config_in_dir(directory: Path) -> Path | None:
     return None
 
 
+def project_root_for_config(cfg: Path) -> Path:
+    """Return the logical project root a discovered config *cfg* belongs to.
+
+    A config's own file — not necessarily its containing directory — is the
+    project's reviewed contract; a relative path *inside* the config (e.g.
+    ``compile.include_dirs: [include]``) must resolve against the project
+    root, not against wherever within the project the file itself happens
+    to sit. For the root-level spelling those are the same directory
+    (``cfg.parent``), so this degrades to prior behavior exactly — but for
+    ``.github/.abicheck.yml`` or ``.github/abicheck/.abicheck.yml``,
+    ``cfg.parent`` is ``.github`` or ``.github/abicheck``, not the project
+    root, and a relative path resolved against it would land in the wrong
+    place (or nowhere at all).
+
+    Matches *cfg*'s trailing path segments against each entry in
+    :data:`CONFIG_RELATIVE_CANDIDATES` and strips the matched suffix; a
+    *cfg* that doesn't end in one of those exact suffixes (e.g. an explicit
+    ``--config`` pointed at an arbitrarily-named file elsewhere) falls back
+    to ``cfg.parent``, same as every discovery site did before the
+    ``.github/`` locations existed.
+    """
+    cfg_parts = cfg.parts
+    # Longest (most specific) candidate first: every candidate's tail is the
+    # same filename, so the bare root spelling would otherwise match a
+    # deeper path's own trailing segment too.
+    for rel in sorted(CONFIG_RELATIVE_CANDIDATES, key=lambda r: -len(Path(r).parts)):
+        suffix_parts = Path(rel).parts
+        n = len(suffix_parts)
+        if cfg_parts[-n:] == suffix_parts:
+            return cfg.parents[n - 1]
+    return cfg.parent
+
+
 def discover_build_config(source_tree: Path | None) -> Path | None:
     """Return the project config at *source_tree*'s own root, if present.
 
