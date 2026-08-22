@@ -554,6 +554,70 @@ class TestCompareReleaseErrorPaths:
                     bundle_system_providers="",
                 )
 
+    def test_bundle_analysis_forwards_selected_policy(self, tmp_path: Path) -> None:
+        """compare-release's own --policy must reach compare_bundle(), not
+        silently default to strict_abi for bundle-level findings (Codex
+        review, fresh evidence)."""
+        from abicheck.bundle import BundleDiffResult
+        from abicheck.cli_compare_release import _run_bundle_analysis
+
+        fake_snap = type("S", (), {"root": tmp_path})()
+        old_path = tmp_path / "libfoo.so"
+        old_path.write_bytes(b"\x7fELF")
+        captured: dict[str, object] = {}
+
+        def _fake_compare_bundle(*args: object, **kwargs: object) -> BundleDiffResult:
+            captured.update(kwargs)
+            return BundleDiffResult(old_root=tmp_path, new_root=tmp_path)
+
+        with patch(
+            "abicheck.bundle.build_bundle_snapshot",
+            return_value=fake_snap,
+        ), patch(
+            "abicheck.bundle.compare_bundle",
+            side_effect=_fake_compare_bundle,
+        ):
+            _run_bundle_analysis(
+                old_map={"libfoo.so": old_path},
+                new_map={"libfoo.so": old_path},
+                per_lib_results=[],
+                manifest_path=None,
+                bundle_system_providers="",
+                policy="plugin_abi",
+            )
+        assert captured.get("policy") == "plugin_abi"
+
+    def test_collect_bundle_result_forwards_selected_policy(
+        self, tmp_path: Path
+    ) -> None:
+        """_collect_bundle_result() -- the real call site compare-release
+        uses -- must pass its own policy through to _run_bundle_analysis(),
+        not just accept it and drop it (Codex review, fresh evidence)."""
+        from abicheck.cli_compare_release_helpers import _collect_bundle_result
+
+        old_path = tmp_path / "libfoo.so"
+        old_path.write_bytes(b"\x7fELF")
+        captured: dict[str, object] = {}
+
+        def _fake_run_bundle_analysis(*args: object, **kwargs: object) -> None:
+            captured.update(kwargs)
+            return None
+
+        with patch(
+            "abicheck.cli_compare_release_helpers._run_bundle_analysis",
+            side_effect=_fake_run_bundle_analysis,
+        ):
+            _collect_bundle_result(
+                library_results=[],
+                old_map={"libfoo.so": old_path},
+                new_map={"libfoo.so": old_path},
+                worst_verdict="COMPATIBLE",
+                manifest_path=None,
+                bundle_system_providers="",
+                policy="plugin_abi",
+            )
+        assert captured.get("policy") == "plugin_abi"
+
     def test_format_release_summary_junit(self, tmp_path: Path) -> None:
         """JUnit format emits XML with <testsuites>."""
         from abicheck.cli_compare_release import _format_release_summary

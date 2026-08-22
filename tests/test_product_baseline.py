@@ -174,9 +174,8 @@ class TestManifestRoundTrip:
         assert restored == manifest
 
     def test_from_dict_tolerates_missing_and_wrong_shaped_fields(self) -> None:
-        # Mirrors this codebase's established defensive from_dict() contract
-        # ("every dataclass ... defensive .get() parsing so a newer/hand-
-        # edited pack never aborts a load") -- degrades to empty, no raise.
+        # Mirrors this codebase's established defensive from_dict() contract --
+        # degrades to empty, no raise (a newer/hand-edited pack never aborts).
         manifest = ProductBaselineManifest.from_dict(
             {"libraries": "not-a-list", "header_roots": None, "extra": "ignored"}
         )
@@ -186,8 +185,7 @@ class TestManifestRoundTrip:
 
     def test_from_dict_tolerates_non_numeric_size_and_file_count(self) -> None:
         # A hand-edited/corrupt manifest.json could carry a non-numeric
-        # "size"/"file_count" -- must degrade to 0, not raise ValueError
-        # past unpack_product_baseline()'s SnapshotError handling (Codex).
+        # "size"/"file_count" -- must degrade to 0, not raise ValueError (Codex).
         manifest = ProductBaselineManifest.from_dict(
             {
                 "libraries": [{"name": "a.so", "path": "a.so", "size": "not-a-number"}],
@@ -219,8 +217,7 @@ class TestPackProductBaseline:
         self, tmp_path: Path
     ) -> None:
         # _add_member's classification previously used the filename-only
-        # _is_shared_library check -- an extensionless ELF DSO archived
-        # but got no LibraryEntry (Codex).
+        # _is_shared_library check -- an extensionless ELF DSO got no LibraryEntry.
         from tests.test_package import _make_minimal_elf_so
 
         product = _make_product(tmp_path)
@@ -232,9 +229,8 @@ class TestPackProductBaseline:
     def test_pack_does_not_classify_split_debug_companion_as_a_library(
         self, tmp_path: Path
     ) -> None:
-        # "libfoo.so.1.debug" contains the literal substring ".so." (the
-        # dot before "1"), so a naive substring check misclassified a
-        # split-debug companion file as a shared library (Codex).
+        # "libfoo.so.1.debug" contains the literal substring ".so." (the dot
+        # before "1"), so a naive check misclassified a split-debug file (Codex).
         product = _make_product(tmp_path)
         (product / "lib" / "libb.so.1.debug").write_bytes(b"DEBUGINFO")
         manifest = pack_product_baseline(product, tmp_path / "b.tar.zst")
@@ -244,9 +240,8 @@ class TestPackProductBaseline:
     def test_pack_does_not_classify_a_linker_script_as_a_library(
         self, tmp_path: Path
     ) -> None:
-        # A GNU ld INPUT()/GROUP() script is library-suffix-named but
-        # carries no binary content -- used to be advertised as its own
-        # LibraryEntry (Codex). Still archived as a regular file.
+        # A GNU ld INPUT()/GROUP() script is library-suffix-named but carries no
+        # binary content -- used to be advertised as its own LibraryEntry (Codex).
         from tests.test_package import _make_minimal_elf_so
 
         product = _make_product(tmp_path)
@@ -261,17 +256,15 @@ class TestPackProductBaseline:
     def test_pack_does_not_misclassify_a_real_binary_containing_ld_text(
         self, tmp_path: Path
     ) -> None:
-        # resolve_linker_script()'s probe is a regex search over the
-        # first 8KiB with no binary-magic check -- a real binary whose
-        # content happens to contain "INPUT("/"GROUP(" matched too (Codex).
+        # resolve_linker_script()'s probe is a regex search over the first 8KiB
+        # with no binary-magic check -- a real binary containing "INPUT(" matched.
         from tests.test_package import _make_minimal_elf_so
 
         product = _make_product(tmp_path)
         elf_path = product / "lib" / "libreal.so"
         _make_minimal_elf_so(elf_path)
-        # Append linker-script-shaped text after the real ELF header --
-        # models an embedded symbol name a real binary could plausibly
-        # contain, within resolve_linker_script's 8KiB probe window.
+        # Append linker-script-shaped text after the real ELF header -- models an
+        # embedded symbol name within resolve_linker_script's 8KiB probe window.
         with elf_path.open("ab") as fh:
             fh.write(b"\x00INPUT(libdoesnotexist.so)\x00")
 
@@ -299,9 +292,8 @@ class TestPackProductBaseline:
     def test_pack_is_deterministic_across_differing_permission_bits(
         self, tmp_path: Path
     ) -> None:
-        # Two trees differing only in file mode must still produce a
-        # byte-identical archive -- info.mode was left at the on-disk
-        # bits, unlike mtime/uid/gid, which were already pinned (CodeRabbit).
+        # Two trees differing only in file mode must still produce a byte-
+        # identical archive -- unlike mtime/uid/gid, mode wasn't pinned (CodeRabbit).
         product_a = _make_product(tmp_path / "a")
         product_b = _make_product(tmp_path / "b")
         (product_b / "lib" / "libb.so").chmod(0o664)
@@ -363,8 +355,7 @@ class TestPackProductBaseline:
         self, tmp_path: Path
     ) -> None:
         # OUTPUT under a not-yet-existing subdirectory is mkdir()'d before
-        # discovery, but that scaffold carries no real content -- a
-        # genuinely empty SOURCE_DIR must still be rejected (Codex).
+        # discovery, but that scaffold carries no real content (Codex).
         empty = tmp_path / "empty"
         empty.mkdir()
         with pytest.raises(SnapshotError, match="no files found"):
@@ -373,9 +364,8 @@ class TestPackProductBaseline:
     def test_pack_rejects_empty_source_dir_identically_on_repeated_calls(
         self, tmp_path: Path
     ) -> None:
-        # The mkdir() call above leaves the scaffold dir behind on disk
-        # even though pack raised -- an identical second call must not
-        # see that leftover as pre-existing, real content (Codex).
+        # The mkdir() call above leaves the scaffold dir behind on disk even
+        # though pack raised -- a second call must not see it as real content.
         empty = tmp_path / "empty"
         empty.mkdir()
         out = empty / "artifacts" / "base.tar.zst"
@@ -388,9 +378,8 @@ class TestPackProductBaseline:
     def test_pack_rejects_empty_source_dir_with_mixed_relative_absolute_spelling(
         self, tmp_path: Path
     ) -> None:
-        # An absolute SOURCE_DIR paired with a RELATIVE OUTPUT under the
-        # identical tree (differing path spellings, same location) used
-        # to make the lexical containment check spuriously fail (CodeRabbit).
+        # An absolute SOURCE_DIR paired with a RELATIVE OUTPUT under the identical
+        # tree used to make the lexical containment check spuriously fail (CodeRabbit).
         empty = tmp_path / "empty"
         empty.mkdir()
         cwd = Path.cwd()
@@ -405,9 +394,8 @@ class TestPackProductBaseline:
     def test_pack_rejects_empty_source_dir_when_source_is_a_symlink_alias(
         self, tmp_path: Path
     ) -> None:
-        # SOURCE_DIR as a symlink alias, OUTPUT through the real
-        # directory -- a purely lexical comparison never shares a prefix
-        # with the alias, letting an empty SOURCE_DIR bypass rejection.
+        # SOURCE_DIR as a symlink alias, OUTPUT through the real directory -- a
+        # purely lexical comparison never shares a prefix with the alias.
         real = tmp_path / "source"
         real.mkdir()
         alias = tmp_path / "source-link"
@@ -419,9 +407,8 @@ class TestPackProductBaseline:
     def test_pack_skips_a_file_that_vanishes_during_the_walk(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        # os.walk() lists entries first; lstat() runs later -- a file
-        # removed in that window must be skipped, not propagate a bare
-        # FileNotFoundError (CodeRabbit).
+        # os.walk() lists entries first; lstat() runs later -- a file removed
+        # in that window must be skipped, not propagate FileNotFoundError.
         product = _make_product(tmp_path)
         vanished = product / "lib" / "libb.so"
         real_lstat = Path.lstat
@@ -436,8 +423,7 @@ class TestPackProductBaseline:
         assert "libb.so" not in {lib.name for lib in manifest.libraries}
 
     def test_pack_rejects_a_bare_string_header_roots(self, tmp_path: Path) -> None:
-        # header_roots="include" -- a typo for ["include"] -- satisfies
-        # Sequence[str], iterating character-by-character (Codex).
+        # header_roots="include" -- a typo for ["include"] -- satisfies Sequence[str].
         product = _make_product(tmp_path)
         (product / "include").mkdir(exist_ok=True)
         with pytest.raises(SnapshotError, match="bare string"):
@@ -740,6 +726,21 @@ class TestPackProductBaseline:
         (product / "lib" / "dangling.so").symlink_to("does-not-exist-at-all.so")
         manifest = pack_product_baseline(product, tmp_path / "b.tar.zst")
         assert not any(lib.path == "lib/dangling.so" for lib in manifest.libraries)
+
+    def test_pack_rejects_a_symlink_target_case_mismatched_on_an_intermediate_component(
+        self, tmp_path: Path
+    ) -> None:
+        # The case/Unicode-fold check must walk every target component, not
+        # just the basename: `links/libfoo.so -> ../Payload/data` is
+        # dangling here on the *intermediate* `payload` directory, not the
+        # final `data` component (Codex, concrete repro).
+        product = _make_product(tmp_path)
+        (product / "links").mkdir()
+        (product / "Payload").mkdir()
+        (product / "Payload" / "data").write_bytes(b"\x7fELF" + b"\x00" * 20)
+        (product / "links" / "libfoo.so").symlink_to("../payload/data")
+        with pytest.raises(SnapshotError, match="case/Unicode-folded"):
+            pack_product_baseline(product, tmp_path / "b.tar.zst")
 
     def test_pack_skips_a_library_shaped_symlink_targeting_a_directory(
         self, tmp_path: Path

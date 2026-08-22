@@ -196,11 +196,11 @@ def _is_library_path(path: Path) -> bool:
     )
     if not is_library:
         return False
-    # A GNU ld INPUT()/GROUP() linker script is library-suffix-named but
-    # carries no binary content -- centralized here so packing and
-    # comparison share one exclusion instead of drifting (Codex review,
-    # fresh evidence). `resolve_linker_script` itself guards against
-    # misclassifying real binary content (see its own docstring).
+    # A GNU ld INPUT()/GROUP() linker script is library-suffix-named but carries
+    # no binary content -- centralized here so packing and comparison share one
+    # exclusion instead of drifting (Codex review, fresh evidence).
+    # `resolve_linker_script` itself guards against misclassifying real binary
+    # content (see its own docstring).
     _, is_linker_script = resolve_linker_script(path)
     return not is_linker_script
 
@@ -319,23 +319,41 @@ def _relative_posix(path: Path, root: Path) -> str:
     return path.relative_to(root).as_posix()
 
 
-def _case_insensitive_sibling_exists(parent: Path, name: str) -> bool:
-    """True if *parent* holds an entry matching *name* once NFC-normalized
-    and casefolded, but not identical -- a case/Unicode variant that would
-    resolve case-insensitively even though *name* doesn't exist here."""
-    if not parent.is_dir():
-        return False
-    folded = unicodedata.normalize("NFC", name).casefold()
-    try:
-        entries = list(parent.iterdir())
-    except OSError:
-        return False
-    if any(entry.name == name for entry in entries):
-        return False  # an exact match exists; not a case-only mismatch
-    return any(
-        unicodedata.normalize("NFC", entry.name).casefold() == folded
-        for entry in entries
-    )
+def _case_insensitive_target_resolves(parent: Path, target: str) -> bool:
+    """True if dangling *target*, walked component-by-component from
+    *parent*, resolves case-insensitively -- every component, not just the
+    basename (an intermediate one can be the mismatched one) (Codex)."""
+    current = parent
+    used_fold = False
+    for part in target.split("/"):
+        if part in ("", "."):
+            continue
+        if part == "..":
+            current = current.parent
+            continue
+        exact = current / part
+        if exact.exists():
+            current = exact
+            continue
+        if not current.is_dir():
+            return False
+        try:
+            entries = list(current.iterdir())
+        except OSError:
+            return False
+        folded_part = unicodedata.normalize("NFC", part).casefold()
+        match = next(
+            (
+                e
+                for e in entries
+                if unicodedata.normalize("NFC", e.name).casefold() == folded_part
+            ),
+            None,
+        )
+        if match is None:
+            return False
+        used_fold, current = True, match
+    return used_fold
 
 
 _umask_lock = threading.Lock()
@@ -617,32 +635,30 @@ def _add_member(
 
     if info.issym():
         target = info.linkname
-        # An absolute (or Windows-anchored) target can't round-trip --
-        # TarExtractor refuses it at unpack. os.path.isabs() alone
-        # doesn't recognize a Windows drive-absolute/UNC target on
-        # POSIX; PureWindowsPath.is_absolute() isn't enough either --
-        # False for drive="", root="\\" or drive="C:", root="" -- so any
-        # nonempty drive or root is rejected too (Codex).
+        # An absolute (or Windows-anchored) target can't round-trip -- TarExtractor
+        # refuses it at unpack. os.path.isabs() alone doesn't recognize a Windows
+        # drive-absolute/UNC target on POSIX; PureWindowsPath.is_absolute() isn't
+        # enough either -- False for drive="", root="\\" or drive="C:", root="" --
+        # so any nonempty drive or root is rejected too (Codex).
         wpath = PureWindowsPath(target)
         if os.path.isabs(target) or wpath.drive or wpath.root:
             raise SnapshotError(
                 f"symlink {arcname!r} has an absolute target {target!r} -- "
                 "only relative symlink targets can be packed portably"
             )
-        # Same reasoning as _validate_portable_arcname's own check: a
-        # backslash always reinterprets as a Windows separator, even when
-        # it doesn't escape root (Codex).
+        # Same reasoning as _validate_portable_arcname's own check: a backslash
+        # always reinterprets as a Windows separator, even when it doesn't
+        # escape root (Codex).
         if "\\" in target:
             raise SnapshotError(
                 f"symlink {arcname!r} targets {target!r}, which contains "
                 "a backslash Windows always treats as a path separator "
                 "-- refusing to pack it for portability"
             )
-        # A self-referential symlink loop is detected via a raw stat() --
-        # not Path.resolve() raising, which Python 3.13's realpath()-
-        # backed rewrite stopped doing in non-strict mode (CI caught
-        # this). stat() still raises OSError (ELOOP); a dangling target
-        # raises ENOENT instead, left alone.
+        # A self-referential symlink loop is detected via a raw stat() -- not
+        # Path.resolve() raising, which Python 3.13's realpath()-backed rewrite
+        # stopped doing in non-strict mode (CI caught this). stat() still raises
+        # OSError (ELOOP); a dangling target raises ENOENT instead, left alone.
         try:
             target_stat = path.stat()
         except OSError as exc:
@@ -661,24 +677,23 @@ def _add_member(
                 f"symlink {arcname!r} targets {target!r}, which escapes "
                 f"{source_dir} — refusing to pack it"
             ) from exc
-        # No `except RuntimeError` here: the stat() check above already
-        # follows the whole chain from `path` (same location `link_abs`
-        # computes), so any loop is already caught there.
+        # No `except RuntimeError` here: the stat() check above already follows
+        # the whole chain from `path` (same location `link_abs` computes), so
+        # any loop is already caught there.
         if _windows_relative_target_escapes(arcname, target):
             raise SnapshotError(
                 f"symlink {arcname!r} targets {target!r}, which would "
                 f"escape {source_dir} when interpreted with Windows path "
                 "separators -- refusing to pack it for portability"
             )
-        # A dangling target here (case-sensitive host) can still resolve
-        # on a case-insensitive one if a sibling differs only by case/
-        # Unicode form (`libfoo.so -> payload` alongside real `Payload`):
-        # no LibraryEntry recorded here, but live on Windows/macOS, where
-        # unpack's own discovery walk finds it as undeclared and rejects
-        # an honest archive (Codex). Same fold reasoning as the member-
-        # collision check above -- reject rather than resolve two ways.
-        if target_stat is None and _case_insensitive_sibling_exists(
-            link_abs.parent, Path(target).name
+        # A dangling target here (case-sensitive host) can still resolve on a
+        # case-insensitive one via a case/Unicode-fold match somewhere along its
+        # path: no LibraryEntry recorded here, but live on Windows/macOS, where
+        # unpack's own discovery walk finds it as undeclared and rejects an
+        # honest archive (Codex). Same fold reasoning as the member-collision
+        # check above -- reject rather than resolve two ways.
+        if target_stat is None and _case_insensitive_target_resolves(
+            path.parent, target
         ):
             raise SnapshotError(
                 f"symlink {arcname!r} targets {target!r}, which does not "
@@ -686,10 +701,10 @@ def _add_member(
                 "folded -- it would resolve differently on a case-"
                 "insensitive filesystem; refusing to pack it for portability"
             )
-        # A library-shaped symlink whose target isn't independently
-        # library-shaped got no LibraryEntry, rejected as tampered.
-        # `liba.so -> liba.so.1.2.3` is left alone. S_ISREG guards a
-        # directory-targeting symlink (open() would raise IsADirectoryError).
+        # A library-shaped symlink whose target isn't independently library-
+        # shaped got no LibraryEntry, rejected as tampered. `liba.so ->
+        # liba.so.1.2.3` is left alone. S_ISREG guards a directory-targeting
+        # symlink (open() would raise IsADirectoryError).
         entry = None
         if (
             target_stat is not None
@@ -711,12 +726,11 @@ def _add_member(
         return entry
 
     if info.islnk():
-        # gettarinfo() converts a second path sharing an inode into a
-        # hardlink reference -- falling through to "not info.isreg()"
-        # below would silently drop it from the archive. Its own
-        # info.size is 0, so it can't supply a LibraryEntry's size the
-        # way the first-archived copy's does -- hash/stat the real file
-        # directly instead (Codex).
+        # gettarinfo() converts a second path sharing an inode into a hardlink
+        # reference -- falling through to "not info.isreg()" below would silently
+        # drop it from the archive. Its own info.size is 0, so it can't supply a
+        # LibraryEntry's size the way the first-archived copy's does -- hash/stat
+        # the real file directly instead (Codex).
         entry = None
         if _is_library_path(path):
             hasher = hashlib.sha256()
@@ -797,12 +811,11 @@ def pack_product_baseline(
     or is left untouched — a failure partway through never leaves a
     truncated file at the destination path.
     """
-    # Normalized to an absolute path up front: _scaffold_dirs_for_mkdir()'s
-    # own containment check is a plain lexical is_relative_to() -- mixed
-    # spellings would make it spuriously fail (CodeRabbit review, fresh
-    # evidence). os.path.abspath(), not .resolve() -- OUTPUT's own final
-    # component must stay lexical, matching the symlinked-OUTPUT
-    # exclusion logic a few lines down.
+    # Normalized to an absolute path up front: _scaffold_dirs_for_mkdir()'s own
+    # containment check is a plain lexical is_relative_to() -- mixed spellings
+    # would make it spuriously fail (CodeRabbit review, fresh evidence).
+    # os.path.abspath(), not .resolve() -- OUTPUT's own final component must
+    # stay lexical, matching the symlinked-OUTPUT exclusion logic below.
     source_path = Path(os.path.abspath(str(source_dir)))
     if not source_path.is_dir():
         raise SnapshotError(
@@ -815,14 +828,12 @@ def pack_product_baseline(
         raise SnapshotError(
             f"product baseline output must end with '.tar.zst': {output_path}"
         )
-    # Validated before the output-parent scaffold below can fabricate
-    # anything -- else a header root naming the freshly-created chain
-    # would pass on a directory mkdir() just manufactured (Codex review,
-    # fresh evidence).
+    # Validated before the output-parent scaffold below can fabricate anything
+    # -- else a header root naming the freshly-created chain would pass on a
+    # directory mkdir() just manufactured (Codex review, fresh evidence).
     if isinstance(header_roots, str):
-        # A bare str satisfies Sequence[str], so header_roots="include"
-        # would iterate character-by-character (Codex review, fresh
-        # evidence).
+        # A bare str satisfies Sequence[str], so header_roots="include" would
+        # iterate character-by-character (Codex review, fresh evidence).
         raise SnapshotError(
             "header_roots must be a sequence of paths, not a bare string: "
             f"{header_roots!r}"
@@ -830,9 +841,9 @@ def pack_product_baseline(
     resolved_header_roots: list[str] = []
     for rel in header_roots:
         resolved = _resolve_under_root(source_path, rel)
-        # Must be a directory: compare_product_directories() only
-        # includes a header root when `.is_dir()` is true, so one
-        # recorded here as a file would round-trip but never reach a comparison.
+        # Must be a directory: compare_product_directories() only includes a
+        # header root when `.is_dir()` is true, so one recorded here as a file
+        # would round-trip but never reach a comparison.
         if resolved is None or not resolved.is_dir():
             raise SnapshotError(
                 f"header root {rel!r} is absolute, escapes {source_path}, "
@@ -840,15 +851,15 @@ def pack_product_baseline(
             )
         resolved_header_roots.append(Path(rel).as_posix())
 
-    # Created *before* discovery: doing so only after would make a first
-    # pack and a second (already-created dir) disagree on file_count and
-    # archive bytes; also captured before the mkdir call below, for the
-    # same "nothing to pack" reasoning (Codex review, fresh evidence).
-    # Two aliasing concerns, resolved once: OUTPUT itself may be a
-    # symlink (its own lexical name, not target), and SOURCE_DIR itself
-    # may be a symlink alias with OUTPUT spelled through the real
-    # directory (Codex review, both rounds). Resolving *only* OUTPUT's
-    # parent (and SOURCE_DIR in full) fixes both, leaf stays lexical.
+    # Created *before* discovery: doing so only after would make a first pack
+    # and a second (already-created dir) disagree on file_count and archive
+    # bytes; also captured before the mkdir call below, for the same "nothing
+    # to pack" reasoning (Codex review, fresh evidence).
+    # Two aliasing concerns, resolved once: OUTPUT itself may be a symlink (its
+    # own lexical name, not target), and SOURCE_DIR itself may be a symlink
+    # alias with OUTPUT spelled through the real directory (Codex review, both
+    # rounds). Resolving *only* OUTPUT's parent (and SOURCE_DIR in full) fixes
+    # both, leaf stays lexical.
     source_real = source_path.resolve()
     try:
         output_parent_real = output_path.parent.resolve()
@@ -860,11 +871,10 @@ def pack_product_baseline(
     except ValueError:
         output_rel = None
 
-    # _scaffold_dirs_for_mkdir()/_discover_empty_dirs() below both need a
-    # `leaf_parent`/root spelled *lexically* relative to `source_path`
-    # (the same spelling `paths`/`empty_dirs` themselves use), not the
-    # resolved `output_parent_real` -- so the alias is translated back
-    # into source_path's own spelling instead.
+    # _scaffold_dirs_for_mkdir()/_discover_empty_dirs() need a `leaf_parent`/root
+    # spelled *lexically* relative to `source_path` (matching `paths`/`empty_dirs`
+    # themselves), not the resolved `output_parent_real` -- translated back into
+    # source_path's own spelling instead.
     if output_rel is not None:
         output_rel_parent = os.path.dirname(output_rel)
         leaf_parent_lexical = (
@@ -873,33 +883,30 @@ def pack_product_baseline(
     else:
         leaf_parent_lexical = output_path.parent
 
-    # Same reasoning as above, applied to the actual mkdir: capture the
-    # scaffold set *before* creating it, so an originally-empty
-    # SOURCE_DIR whose only content is this output-only chain still
-    # rejects as "nothing to pack" below.
+    # Same reasoning as above, applied to the actual mkdir: capture the scaffold
+    # set *before* creating it, so an originally-empty SOURCE_DIR whose only
+    # content is this output-only chain still rejects as "nothing to pack" below.
     output_scaffold_dirs = _scaffold_dirs_for_mkdir(source_path, leaf_parent_lexical)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     paths = _discover_paths(source_path)
-    # Exclude OUTPUT itself when it lives under SOURCE_DIR — otherwise a
-    # rerun of `pack SOURCE_DIR SOURCE_DIR/baseline.tar.zst` would embed
-    # the *previous* archive as an input member, growing on every
-    # invocation and violating the determinism this format promises.
-    # Computed from the two paths, not existence, so this excludes the
-    # output slot even on a first-ever pack (before the file exists).
+    # Exclude OUTPUT itself when it lives under SOURCE_DIR — otherwise a rerun of
+    # `pack SOURCE_DIR SOURCE_DIR/baseline.tar.zst` would embed the *previous*
+    # archive as an input member, growing on every invocation and violating the
+    # determinism this format promises. Computed from the two paths, not
+    # existence, so this excludes the output slot even on a first-ever pack.
     if output_rel is not None:
         paths = [p for p in paths if _relative_posix(p, source_path) != output_rel]
     empty_dirs = _discover_empty_dirs(source_path, paths)
 
-    # The scaffold directories the mkdir() call above just created must
-    # not survive *any* failure path below that leaves them empty --
-    # otherwise an identical repeat call sees them as already-existing,
-    # pre-existing content (Codex review, fresh evidence; a second round
-    # found one rejection path further down, not just the empty-source
-    # one, needed the identical cleanup). One shared helper so every
-    # failure path after the mkdir() cleans up the same way: deepest-
-    # first, best-effort (an OSError here is a secondary problem, not
-    # worth masking the real error over).
+    # The scaffold directories the mkdir() call above just created must not
+    # survive *any* failure path below that leaves them empty -- otherwise an
+    # identical repeat call sees them as already-existing, pre-existing content
+    # (Codex review, fresh evidence; a second round found one rejection path
+    # further down, not just the empty-source one, needed the identical
+    # cleanup). One shared helper so every failure path after the mkdir() cleans
+    # up the same way: deepest-first, best-effort (an OSError here is a
+    # secondary problem, not worth masking the real error over).
     def _cleanup_output_scaffold_dirs() -> None:
         for scaffold_dir in sorted(
             output_scaffold_dirs, key=lambda d: len(d.parts), reverse=True
@@ -917,12 +924,11 @@ def pack_product_baseline(
         raise SnapshotError(
             f"no files found under {source_path} to pack into a product baseline"
         )
-    # A separate, existence-independent exclusion for what actually gets
-    # archived below -- see _output_parent_chain()'s own docstring. A
-    # declared header root is excluded from this chain: real product
-    # content the manifest promises, not scaffolding (Codex). Built in
-    # the same lexical space empty_dirs/output_parent_chain use, not the
-    # `.resolve()`d dirs above.
+    # A separate, existence-independent exclusion for what actually gets archived
+    # below -- see _output_parent_chain()'s own docstring. A declared header root
+    # is excluded from this chain: real product content the manifest promises,
+    # not scaffolding (Codex). Built in the same lexical space
+    # empty_dirs/output_parent_chain use, not the `.resolve()`d dirs above.
     output_parent_chain = _output_parent_chain(source_path, leaf_parent_lexical)
     declared_header_root_dirs = {source_path / rel for rel in resolved_header_roots}
     archived_empty_dirs = [
@@ -930,22 +936,20 @@ def pack_product_baseline(
         for d in empty_dirs
         if d not in output_parent_chain or d in declared_header_root_dirs
     ]
-    # Known gap (Codex review): an *undeclared*, pre-existing empty dir
-    # holding OUTPUT is still excluded like pure scaffolding --
-    # structurally indistinguishable by content, and existence can't
-    # separate them (OUTPUT's own dir survives after a first pack, so a
-    # rerun would misclassify scaffold as real content, regressing
-    # determinism-across-reruns). Needs a declaration mechanism beyond
-    # header_roots, not another heuristic guess.
+    # Known gap (Codex review): an *undeclared*, pre-existing empty dir holding
+    # OUTPUT is still excluded like pure scaffolding -- structurally
+    # indistinguishable by content, and existence can't separate them (OUTPUT's
+    # own dir survives after a first pack, so a rerun would misclassify scaffold
+    # as real content, regressing determinism-across-reruns). Needs a
+    # declaration mechanism beyond header_roots, not another heuristic guess.
 
-    # MANIFEST_MEMBER_NAME is reserved: a real source entry there would
-    # collide with the generated manifest member, added last, silently
-    # winning on extraction. Must reject a *directory* at the reserved
-    # path too, not just a file: an empty one is never in `paths`, and a
-    # non-empty one's own directory entry never is either, only its
-    # children -- either shape let packing write a tar requiring the
-    # same path to be both a directory and a regular file (Codex review,
-    # fresh evidence).
+    # MANIFEST_MEMBER_NAME is reserved: a real source entry there would collide
+    # with the generated manifest member, added last, silently winning on
+    # extraction. Must reject a *directory* at the reserved path too, not just a
+    # file: an empty one is never in `paths`, and a non-empty one's own
+    # directory entry never is either, only its children -- either shape let
+    # packing write a tar requiring the same path to be both a directory and a
+    # regular file (Codex review, fresh evidence).
     manifest_child_prefix = MANIFEST_MEMBER_NAME + "/"
     collision = next(
         (
@@ -957,9 +961,9 @@ def pack_product_baseline(
         None,
     )
     if collision is None:
-        # Same prefix test as the `paths` scan above: a directory at the
-        # reserved path holding only empty subdirs is absent from both
-        # `paths` and `empty_dirs` -- only its nested empty leaf is.
+        # Same prefix test as the `paths` scan above: a directory at the reserved
+        # path holding only empty subdirs is absent from both `paths` and
+        # `empty_dirs` -- only its nested empty leaf is.
         collision = next(
             (
                 d
@@ -977,11 +981,10 @@ def pack_product_baseline(
             "before packing"
         )
 
-    # A case-sensitive host can archive two names that fold to the same
-    # identity on Windows -- checked per path component (`Lib/a.so` vs
-    # `lib/b.so` unify), NFC-normalized first: NFC vs NFD "café.so"
-    # casefold to different keys on their own, though APFS/HFS+ treat
-    # them as one filename (Codex).
+    # A case-sensitive host can archive two names that fold to the same identity
+    # on Windows -- checked per path component (`Lib/a.so` vs `lib/b.so` unify),
+    # NFC-normalized first: NFC vs NFD "café.so" casefold to different keys on
+    # their own, though APFS/HFS+ treat them as one filename (Codex).
     all_arcnames = [_relative_posix(p, source_path) for p in paths]
     all_arcnames.extend(_relative_posix(d, source_path) for d in archived_empty_dirs)
     all_arcnames.append(MANIFEST_MEMBER_NAME)
@@ -1002,13 +1005,12 @@ def pack_product_baseline(
                 )
             case_folded[folded] = prefix
 
-    # Resolve the compressor before mkstemp() hands out an open descriptor:
-    # an invalid zstd_level must fail before there is a descriptor to leak.
-    # mkstemp() always creates mode 0600, and os.replace() carries that
-    # across -- left alone, a packed archive would be unreadable by
-    # anyone but its creator even under an ordinary 0022 umask (Codex).
-    # Preserve an existing destination's mode when overwriting, else
-    # fall back to the ordinary umask-derived permissions.
+    # Resolve the compressor before mkstemp() hands out an open descriptor: an
+    # invalid zstd_level must fail before there is a descriptor to leak. mkstemp()
+    # always creates mode 0600, and os.replace() carries that across -- left
+    # alone, a packed archive would be unreadable by anyone but its creator even
+    # under an ordinary 0022 umask (Codex). Preserve an existing destination's
+    # mode when overwriting, else fall back to the ordinary umask-derived perms.
     if output_path.exists():
         target_mode = stat_module.S_IMODE(output_path.stat().st_mode)
     else:
@@ -1017,9 +1019,9 @@ def pack_product_baseline(
         zstandard = _zstd_module()
         cctx = zstandard.ZstdCompressor(level=zstd_level, write_checksum=True)
     except BaseException:
-        # Nothing has been written yet (no temp file exists at this
-        # point) -- the same best-effort scaffold cleanup as every other
-        # failure path after the mkdir() call above.
+        # Nothing has been written yet (no temp file exists at this point) --
+        # the same best-effort scaffold cleanup as every other failure path
+        # after the mkdir() call above.
         _cleanup_output_scaffold_dirs()
         raise
     try:
@@ -1450,17 +1452,15 @@ def _iter_discovered_libraries(
             path = Path(dirpath) / fn
             if not _is_library_path(path):
                 continue
-            # A GNU ld INPUT()/GROUP() linker script is library-suffix-
-            # named but carries no binary content of its own -- excluded
-            # by `_is_library_path` itself (the `continue` above), so
-            # every caller shares one exclusion (Codex review, fresh
-            # evidence).
+            # A GNU ld INPUT()/GROUP() linker script is library-suffix-named but
+            # carries no binary content of its own -- excluded by
+            # `_is_library_path` itself (the `continue` above), so every caller
+            # shares one exclusion (Codex review, fresh evidence).
             try:
                 real = path.resolve()
             except (OSError, RuntimeError):
                 # RuntimeError alongside OSError: a symlink loop makes
-                # Path.resolve() raise RuntimeError on some Python
-                # versions (Codex review, fresh evidence).
+                # Path.resolve() raise RuntimeError on some Python versions.
                 real = path
             else:
                 # A library-shaped symlink whose target resolves outside

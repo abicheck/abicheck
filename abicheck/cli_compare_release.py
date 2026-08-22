@@ -1660,6 +1660,7 @@ def compare_release_cmd(
                     manifest_path=manifest_path,
                     bundle_system_providers=bundle_system_providers,
                     bundle_cohorts=bundle_cohorts,
+                    policy=policy,
                 )
 
             # Strip _diff_result from entries and bump verdict for removed libraries.
