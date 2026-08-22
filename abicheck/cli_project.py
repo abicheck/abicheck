@@ -71,6 +71,8 @@ from .buildsource.toolchain_bindings import (
 from .buildsource.toolchain_probe import check_profile_toolchain_identity
 from .cli import _safe_write_output, _setup_verbosity, main
 from .cli_options import output_options, verbose_option
+from .errors import SnapshotError
+from .product_baseline import pack_product_baseline, unpack_product_baseline
 
 
 @main.group("project")
@@ -79,14 +81,33 @@ def project_group() -> None:
 
     \b
     Subcommands:
-      validate        Check .abicheck.yml's targets/bundles/profiles/channels block.
+      validate         Check .abicheck.yml's targets/bundles/profiles/channels block.
       validate-build   Check a project-produced abicheck-build/ directory.
       plan             Derive run-plan.json from .abicheck.yml + build-output.json.
+      baseline pack    Pack a product's whole library directory into one archive.
+      baseline unpack  Extract a product baseline archive back into a directory.
 
     Most libraries never need this group — it exists for projects that check
     several targets/build profiles/baseline channels together, wired through
     the reusable ``check-project.yml`` GitHub Actions workflow. A single
     library checking one artifact just uses ``dump``/``compare``/``scan``.
+    """
+
+
+@project_group.group("baseline")
+def project_baseline_group() -> None:
+    """Pack/unpack a whole-product baseline archive (see
+    :mod:`abicheck.product_baseline`).
+
+    A *product baseline* is a single deterministic ``.tar.zst`` archive of a
+    product's entire library directory (every shared library it ships, plus
+    whatever else sits alongside them — debug info, installed headers) —
+    one release asset for a multi-library product instead of one per-library
+    ``dump`` snapshot each. Unpacking it reproduces a directory
+    ``compare``/``compare-release`` can run against directly, so a
+    multi-library product's whole ABI surface — including cross-library
+    (bundle-level, ADR-023) breakage a per-library ``scan --against`` a
+    header/DWARF snapshot cannot see at all — is checked in one invocation.
     """
 
 
@@ -637,3 +658,133 @@ def project_plan_cmd(
         click.echo(text)
 
     sys.exit(0 if report.ok else 1)
+
+
+# --------------------------------------------------------------------------
+# project baseline pack / unpack
+# --------------------------------------------------------------------------
+
+
+@project_baseline_group.command("pack")
+@click.argument(
+    "source_dir",
+    type=click.Path(exists=True, file_okay=False, path_type=Path),
+)
+@click.argument(
+    "output",
+    type=click.Path(dir_okay=False, path_type=Path),
+)
+@click.option(
+    "--product",
+    default="",
+    help="Product name recorded in the archive's manifest (informational).",
+)
+@click.option(
+    "--header-root",
+    "header_roots",
+    multiple=True,
+    metavar="DIR",
+    help=(
+        "A public-header directory, relative to SOURCE_DIR — recorded in "
+        "the manifest so a later `compare -H` against the unpacked archive "
+        "doesn't have to rediscover it. Repeatable; must exist under "
+        "SOURCE_DIR."
+    ),
+)
+@verbose_option
+def project_baseline_pack_cmd(
+    source_dir: Path,
+    output: Path,
+    product: str,
+    header_roots: tuple[str, ...],
+    verbose: bool,
+) -> None:
+    """Pack SOURCE_DIR (a product's whole library directory) into one
+    deterministic OUTPUT ``.tar.zst`` product baseline archive.
+
+    Every regular file and symlink under SOURCE_DIR is archived — every
+    shared library the product ships, plus whatever else sits alongside
+    them (debug info, installed headers). Two packs of byte-identical
+    content produce a byte-identical archive.
+
+    \b
+    Exit codes:
+      0   Archive written.
+      64  Usage error (SOURCE_DIR is empty, or --header-root is absolute,
+          escapes SOURCE_DIR, or does not exist).
+    """
+    _setup_verbosity(verbose)
+    try:
+        manifest = pack_product_baseline(
+            source_dir, output, product=product, header_roots=header_roots
+        )
+    except SnapshotError as exc:
+        raise click.UsageError(str(exc)) from exc
+
+    click.echo(
+        f"packed {len(manifest.libraries)} librar"
+        f"{'y' if len(manifest.libraries) == 1 else 'ies'} "
+        f"({manifest.file_count} file(s) total) into {output}"
+    )
+
+
+@project_baseline_group.command("unpack")
+@click.argument(
+    "archive",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+)
+@click.argument(
+    "dest_dir",
+    type=click.Path(file_okay=False, path_type=Path),
+)
+@output_options(
+    ["text", "json"],
+    default="text",
+    format_help="Output format for the unpacked manifest summary.",
+)
+@verbose_option
+def project_baseline_unpack_cmd(
+    archive: Path,
+    dest_dir: Path,
+    fmt: str,
+    output: Path | None,
+    verbose: bool,
+) -> None:
+    """Extract ARCHIVE (as written by ``project baseline pack``) into
+    DEST_DIR, and report its manifest.
+
+    DEST_DIR must not already exist, or must be empty. The result is an
+    ordinary directory — pass it directly to ``compare``/``compare-release
+    -H <header-root>`` for a bundle-aware, whole-product comparison.
+
+    \b
+    Exit codes:
+      0   Extracted.
+      64  Usage error (DEST_DIR is non-empty, or ARCHIVE is not a product
+          baseline archive this abicheck build recognizes).
+    """
+    _setup_verbosity(verbose)
+    try:
+        manifest = unpack_product_baseline(archive, dest_dir)
+    except SnapshotError as exc:
+        raise click.UsageError(str(exc)) from exc
+
+    if fmt == "json":
+        text = json.dumps(manifest.to_dict(), indent=2)
+    else:
+        lines = [f"unpacked {archive} -> {dest_dir}"]
+        lines.append(f"product: {manifest.product or '(unnamed)'}")
+        lines.append(
+            f"{len(manifest.libraries)} librar"
+            f"{'y' if len(manifest.libraries) == 1 else 'ies'}:"
+        )
+        lines.extend(f"  - {lib.path}" for lib in manifest.libraries)
+        if manifest.header_roots:
+            lines.append("header roots:")
+            lines.extend(f"  - {root}" for root in manifest.header_roots)
+        text = "\n".join(lines)
+
+    if output is not None:
+        _safe_write_output(output, text)
+    else:
+        click.echo(text)

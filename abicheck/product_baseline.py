@@ -1,0 +1,474 @@
+# Copyright 2026 Nikolay Petrov
+# SPDX-License-Identifier: Apache-2.0
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""Product baseline archive — one file for a whole multi-library product.
+
+Per-library ``dump`` snapshots (``.json.zst``) do not scale to a product
+shipping several interdependent shared libraries: they must be produced and
+stored one per library (three libraries, three release assets), and — the
+part that actually matters — ``scan --against <snapshot>`` compares exactly
+one library against exactly one snapshot, so cross-DSO ABI breakage (a
+symbol one library imports from a sibling library disappearing) is
+structurally invisible to it: no single per-library invocation ever sees
+both sides of that dependency edge. :mod:`abicheck.bundle` (ADR-023) is
+built for precisely this — but it needs *binaries* on both sides (it reads
+``DT_NEEDED``/``.gnu.version_r``/``.gnu.version_d`` straight from the ELF
+files), so a bundle-aware comparison against a stored baseline needs the old
+side's binaries available on disk, not a header/DWARF-derived snapshot.
+
+This module is the storage format for that: :func:`pack_product_baseline`
+archives an entire product directory (every shared library plus whatever
+else ships alongside it — debug info, headers) into one deterministic
+``.tar.zst`` file, with a small JSON manifest (:class:`ProductBaselineManifest`)
+recording which archived files are libraries and which relative directories
+hold the product's public headers. :func:`unpack_product_baseline` reverses
+it, reproducing a directory ``compare``/``compare-release`` can run against
+directly — covering every library, and every cross-library edge between
+them, in one invocation instead of one per library.
+
+This is a storage/transport format only: it packs and unpacks a directory
+tree. It does not itself invoke ``compare``/``compare-release`` — see
+``abicheck project baseline pack``/``unpack`` (:mod:`abicheck.cli_project`)
+for the CLI, and a project's own CI workflow for wiring the unpacked
+directory into ``compare-release`` in place of a per-library ``scan
+--against`` step.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import io
+import json
+import os
+import stat as stat_module
+import tarfile
+import tempfile
+from collections.abc import Sequence
+from dataclasses import dataclass
+from pathlib import Path
+from typing import IO, Any
+
+from .errors import SnapshotError
+from .package import TarExtractor
+from .snapshot_io import ZSTD_LEVEL_BASELINE
+
+#: Name the manifest is stored under inside the archive — deliberately not a
+#: plausible library/header file name, so it can never collide with real
+#: product content.
+MANIFEST_MEMBER_NAME = "abicheck-product-baseline.json"
+
+#: Manifest schema discriminator. Every reader of this format is new code
+#: introduced alongside it (unlike, say, ``run-plan.json``'s own schema
+#: string — see AGENTS.md's "Known gaps" entry on that document — there is
+#: no already-shipped reader this needs to protect against yet), so today
+#: this is purely a self-description; :func:`unpack_product_baseline` still
+#: checks it, so a *future* MAJOR bump has a real rejection point from the
+#: day it's introduced rather than needing one retrofitted later.
+PRODUCT_BASELINE_SCHEMA = "abicheck.product-baseline/v1"
+
+#: File suffixes recognized as a shared library on pack. Informational only
+#: — every regular file under the source directory is archived regardless
+#: of suffix; this only decides which archived files are itemized in
+#: :attr:`ProductBaselineManifest.libraries`.
+_LIBRARY_SUFFIXES = (".so", ".dylib", ".dll")
+
+
+def _is_shared_library(name: str) -> bool:
+    lower = name.lower()
+    if lower.endswith(_LIBRARY_SUFFIXES):
+        return True
+    # A versioned SONAME real file, e.g. "libfoo.so.1.2.3" — no suffix
+    # match above, since ".3" isn't a recognized library extension.
+    return ".so." in lower
+
+
+@dataclass(frozen=True)
+class LibraryEntry:
+    """One shared library recorded in a :class:`ProductBaselineManifest`."""
+
+    name: str
+    path: str  # POSIX-style, relative to the archive/product root
+    sha256: str
+    size: int
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "name": self.name,
+            "path": self.path,
+            "sha256": self.sha256,
+            "size": self.size,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> LibraryEntry:
+        return cls(
+            name=str(data.get("name", "")),
+            path=str(data.get("path", "")),
+            sha256=str(data.get("sha256", "")),
+            size=int(data.get("size") or 0),
+        )
+
+
+@dataclass(frozen=True)
+class ProductBaselineManifest:
+    """Describes one packed product baseline archive."""
+
+    schema: str = PRODUCT_BASELINE_SCHEMA
+    product: str = ""
+    libraries: tuple[LibraryEntry, ...] = ()
+    #: Header roots, relative to the product root, that a follow-on
+    #: ``compare``/``compare-release -H`` invocation should pass — recorded
+    #: here so a single archive carries both sides of the multilib
+    #: comparison's own header contract, rather than requiring the caller
+    #: to remember (or re-derive) it separately per product.
+    header_roots: tuple[str, ...] = ()
+    #: Total number of members in the archive, manifest included — purely
+    #: informational (a quick sanity count), not load-bearing for unpacking.
+    file_count: int = 0
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema": self.schema,
+            "product": self.product,
+            "libraries": [lib.to_dict() for lib in self.libraries],
+            "header_roots": list(self.header_roots),
+            "file_count": self.file_count,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> ProductBaselineManifest:
+        raw_libraries = data.get("libraries")
+        raw_header_roots = data.get("header_roots")
+        return cls(
+            schema=str(data.get("schema", PRODUCT_BASELINE_SCHEMA)),
+            product=str(data.get("product", "")),
+            libraries=tuple(
+                LibraryEntry.from_dict(item)
+                for item in (raw_libraries if isinstance(raw_libraries, list) else [])
+                if isinstance(item, dict)
+            ),
+            header_roots=tuple(
+                str(item)
+                for item in (
+                    raw_header_roots if isinstance(raw_header_roots, list) else []
+                )
+            ),
+            file_count=int(data.get("file_count") or 0),
+        )
+
+
+# ── Local helpers ────────────────────────────────────────────────────────
+#
+# Deliberately not importing snapshot_io._zstd_module/_atomic_write_bytes
+# across the module boundary — both are leading-underscore internals, and
+# this codebase's established convention (see
+# abicheck/buildsource/baseline_publish.py's own
+# ``_resolve_under_root``/docstring) is to duplicate a small safety/utility
+# helper locally rather than reach across a module boundary for one.
+# ZSTD_LEVEL_BASELINE (public) is imported directly.
+
+
+def _zstd_module() -> Any:
+    try:
+        import zstandard
+    except ImportError as exc:  # pragma: no cover - core dependency, see pyproject.toml
+        raise SnapshotError(
+            "product baseline archives require the 'zstandard' package, "
+            "which is a core abicheck dependency (pyproject.toml) — "
+            "reinstall abicheck ('pip install abicheck') to restore it."
+        ) from exc
+    return zstandard
+
+
+def _resolve_under_root(root: Path, rel: str) -> Path | None:
+    """Resolve *rel* under *root*, refusing an absolute path or an escape."""
+    if Path(rel).is_absolute():
+        return None
+    candidate = (root / rel).resolve()
+    root_resolved = root.resolve()
+    if candidate != root_resolved and not candidate.is_relative_to(root_resolved):
+        return None
+    return root / rel
+
+
+def _relative_posix(path: Path, root: Path) -> str:
+    return path.relative_to(root).as_posix()
+
+
+def _discover_paths(source_dir: Path) -> list[Path]:
+    """Every regular file and symlink under *source_dir*, sorted by its
+    archive-relative POSIX path for determinism. A symlinked directory is
+    archived as a symlink leaf, not descended into — matching how it will
+    come back out of :func:`unpack_product_baseline` (the safe extractor
+    restores the symlink itself, then refuses to write anything through
+    it). A device/FIFO/socket entry is silently skipped: it cannot appear
+    in a product baseline meaningfully, and ``TarExtractor``'s own safety
+    checks reject it on the read side anyway."""
+    paths: list[Path] = []
+    for dirpath, dirnames, filenames in os.walk(source_dir, followlinks=False):
+        current = Path(dirpath)
+        kept: list[str] = []
+        for name in dirnames:
+            candidate = current / name
+            if candidate.is_symlink():
+                paths.append(candidate)
+            else:
+                kept.append(name)
+        dirnames[:] = kept
+        for name in filenames:
+            candidate = current / name
+            st = candidate.lstat()
+            if stat_module.S_ISREG(st.st_mode) or stat_module.S_ISLNK(st.st_mode):
+                paths.append(candidate)
+    paths.sort(key=lambda p: _relative_posix(p, source_dir))
+    return paths
+
+
+class _HashingReader:
+    """Wrap a binary file object, updating *hasher* with every byte read —
+    lets :func:`pack_product_baseline` hash a library's content while
+    streaming it into the tar member, instead of reading it twice."""
+
+    def __init__(self, fh: IO[bytes], hasher: Any) -> None:
+        self._fh = fh
+        self._hasher = hasher
+
+    def read(self, size: int = -1) -> bytes:
+        chunk = self._fh.read(size)
+        if chunk:
+            self._hasher.update(chunk)
+        return chunk
+
+
+def _add_member(
+    tf: tarfile.TarFile, path: Path, arcname: str, source_dir: Path
+) -> LibraryEntry | None:
+    info = tf.gettarinfo(str(path), arcname=arcname)
+    # Deterministic metadata: two packs of byte-identical content produce a
+    # byte-identical archive, regardless of who built it or when.
+    info.mtime = 0
+    info.uid = 0
+    info.gid = 0
+    info.uname = ""
+    info.gname = ""
+
+    if info.issym():
+        target = info.linkname
+        link_abs = Path(target) if os.path.isabs(target) else (path.parent / target)
+        try:
+            link_abs.resolve().relative_to(source_dir.resolve())
+        except ValueError as exc:
+            raise SnapshotError(
+                f"symlink {arcname!r} targets {target!r}, which escapes "
+                f"{source_dir} — refusing to pack it"
+            ) from exc
+        tf.addfile(info)
+        return None
+
+    if not info.isreg():  # pragma: no cover - _discover_paths already filters
+        return None
+
+    if _is_shared_library(path.name):
+        hasher = hashlib.sha256()
+        with open(path, "rb") as fh:
+            tf.addfile(info, fileobj=_HashingReader(fh, hasher))
+        return LibraryEntry(
+            name=path.name, path=arcname, sha256=hasher.hexdigest(), size=info.size
+        )
+
+    with open(path, "rb") as fh:
+        tf.addfile(info, fileobj=fh)
+    return None
+
+
+def _add_manifest_member(
+    tf: tarfile.TarFile, manifest: ProductBaselineManifest
+) -> None:
+    payload = (
+        json.dumps(manifest.to_dict(), indent=2, sort_keys=True).encode("utf-8") + b"\n"
+    )
+    info = tarfile.TarInfo(name=MANIFEST_MEMBER_NAME)
+    info.size = len(payload)
+    info.mtime = 0
+    info.uid = 0
+    info.gid = 0
+    info.uname = ""
+    info.gname = ""
+    info.mode = 0o644
+    tf.addfile(info, io.BytesIO(payload))
+
+
+def pack_product_baseline(
+    source_dir: Path | str,
+    output: Path | str,
+    *,
+    product: str = "",
+    header_roots: Sequence[str] = (),
+    zstd_level: int = ZSTD_LEVEL_BASELINE,
+) -> ProductBaselineManifest:
+    """Pack every file under *source_dir* into one deterministic
+    ``.tar.zst`` product baseline archive at *output*.
+
+    *header_roots* names the product's public-header directories, relative
+    to *source_dir* — recorded in the manifest so a later
+    ``compare``/``compare-release -H`` invocation against the unpacked
+    archive doesn't have to rediscover them. Each must resolve under
+    *source_dir* and exist; raises :class:`SnapshotError` otherwise, the
+    same way an escaping/missing header root fails on write elsewhere in
+    this codebase (see ``buildsource.baseline_publish``'s identical guard).
+
+    Writes atomically: *output* either ends up as a complete, valid archive
+    or is left untouched — a failure partway through never leaves a
+    truncated file at the destination path.
+    """
+    source_path = Path(source_dir)
+    if not source_path.is_dir():
+        raise SnapshotError(
+            f"product baseline source is not a directory: {source_path}"
+        )
+    output_path = Path(output)
+    if not output_path.name.lower().endswith(".tar.zst"):
+        # Not merely a naming preference: unpack_product_baseline() (via
+        # TarExtractor.extract()) decides whether to run the archive
+        # through the zstd decompressor purely from this suffix — Python's
+        # stdlib tarfile has no zstd auto-detection the way it does for
+        # gzip/bz2/xz. A different suffix here would silently produce an
+        # archive unpack_product_baseline() can't read back correctly.
+        raise SnapshotError(
+            f"product baseline output must end with '.tar.zst': {output_path}"
+        )
+
+    resolved_header_roots: list[str] = []
+    for rel in header_roots:
+        resolved = _resolve_under_root(source_path, rel)
+        if resolved is None or not resolved.exists():
+            raise SnapshotError(
+                f"header root {rel!r} is absolute, escapes {source_path}, "
+                "or does not exist"
+            )
+        resolved_header_roots.append(Path(rel).as_posix())
+
+    paths = _discover_paths(source_path)
+    if not paths:
+        raise SnapshotError(
+            f"no files found under {source_path} to pack into a product baseline"
+        )
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_name = tempfile.mkstemp(
+        dir=str(output_path.parent), prefix=".abicheck-product-baseline-", suffix=".tmp"
+    )
+    tmp_path = Path(tmp_name)
+    try:
+        libraries: list[LibraryEntry] = []
+        zstandard = _zstd_module()
+        cctx = zstandard.ZstdCompressor(level=zstd_level, write_checksum=True)
+        with os.fdopen(fd, "wb") as raw_out:
+            with cctx.stream_writer(raw_out, closefd=False) as compressor:
+                with tarfile.open(fileobj=compressor, mode="w|") as tf:
+                    for path in paths:
+                        arcname = _relative_posix(path, source_path)
+                        entry = _add_member(tf, path, arcname, source_path)
+                        if entry is not None:
+                            libraries.append(entry)
+                    manifest = ProductBaselineManifest(
+                        product=product,
+                        libraries=tuple(sorted(libraries, key=lambda e: e.path)),
+                        header_roots=tuple(resolved_header_roots),
+                        file_count=len(paths) + 1,
+                    )
+                    _add_manifest_member(tf, manifest)
+        os.replace(tmp_path, output_path)
+    except BaseException:
+        try:
+            tmp_path.unlink(missing_ok=True)
+        except OSError:  # pragma: no cover - best-effort cleanup
+            pass
+        raise
+    return manifest
+
+
+def unpack_product_baseline(
+    archive: Path | str, dest_dir: Path | str
+) -> ProductBaselineManifest:
+    """Extract *archive* (as written by :func:`pack_product_baseline`) into
+    *dest_dir*, and return its manifest.
+
+    *dest_dir* must not already exist, or must be empty — this never merges
+    into or overwrites a directory that might already hold unrelated
+    content. Extraction reuses :class:`abicheck.package.TarExtractor`'s
+    security-validated ``.tar.zst`` extraction (path traversal, symlink
+    escape, and device/FIFO rejection), the same code path package
+    extraction already relies on, rather than a second, independently
+    written unpacker.
+    """
+    archive_path = Path(archive)
+    if not archive_path.is_file():
+        raise SnapshotError(f"product baseline archive not found: {archive_path}")
+    if not archive_path.name.lower().endswith(".tar.zst"):
+        raise SnapshotError(
+            f"product baseline archive must end with '.tar.zst': {archive_path}"
+        )
+    dest_path = Path(dest_dir)
+    if dest_path.exists():
+        if not dest_path.is_dir():
+            raise SnapshotError(f"unpack destination is not a directory: {dest_path}")
+        if any(dest_path.iterdir()):
+            raise SnapshotError(f"unpack destination is not empty: {dest_path}")
+    else:
+        dest_path.mkdir(parents=True)
+
+    TarExtractor().extract(archive_path, dest_path)
+
+    manifest_path = dest_path / MANIFEST_MEMBER_NAME
+    if not manifest_path.is_file():
+        raise SnapshotError(
+            f"{archive_path} does not look like an abicheck product baseline "
+            f"archive (missing {MANIFEST_MEMBER_NAME})"
+        )
+    try:
+        raw = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise SnapshotError(
+            f"{archive_path}: corrupt product baseline manifest"
+        ) from exc
+    if not isinstance(raw, dict):
+        raise SnapshotError(f"{archive_path}: corrupt product baseline manifest")
+
+    manifest = ProductBaselineManifest.from_dict(raw)
+    _check_schema_supported(manifest.schema, archive_path)
+    return manifest
+
+
+def _check_schema_supported(schema: str, archive_path: Path) -> None:
+    prefix = "abicheck.product-baseline/v"
+    if not schema.startswith(prefix):
+        raise SnapshotError(
+            f"{archive_path}: unrecognized product baseline schema {schema!r}"
+        )
+    major_text = schema[len(prefix) :]
+    try:
+        major = int(major_text)
+    except ValueError:
+        raise SnapshotError(
+            f"{archive_path}: unrecognized product baseline schema {schema!r}"
+        ) from None
+    supported_major = int(PRODUCT_BASELINE_SCHEMA.rsplit("/v", 1)[1])
+    if major > supported_major:
+        raise SnapshotError(
+            f"{archive_path}: product baseline schema {schema!r} is newer than "
+            f"this abicheck build supports ({PRODUCT_BASELINE_SCHEMA!r}) — "
+            "upgrade abicheck to read it."
+        )
