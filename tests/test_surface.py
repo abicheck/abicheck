@@ -232,18 +232,32 @@ class TestComputePublicSurface:
             return snap
 
         old = _snap("void")
-        new = _snap("int")  # internal_helper's return type "changed"
-        change = Change(
+        new = _snap("int")  # both public_api_call's and internal_helper's
+        # return types "changed" (both snapshots use the same internal_ret
+        # for both functions via _snap's single argument -- see below).
+        internal_change = Change(
             kind=ChangeKind.FUNC_RETURN_CHANGED,
             symbol="internal_helper",
             description="return type changed",
             old_value="void",
             new_value="int",
         )
+        # A real, publicly-observable break: the exported, default-visibility
+        # public_api_call also had its return type change. This must survive
+        # scoping -- the ELF-visibility fallback must never suppress a real
+        # break on the proxy-public side, only genuine internal-only churn
+        # (false-positive removed / real break preserved).
+        public_change = Change(
+            kind=ChangeKind.FUNC_RETURN_CHANGED,
+            symbol="public_api_call",
+            description="return type changed",
+            old_value="int",
+            new_value="long",
+        )
         ctx = PipelineContext(old=old, new=new, scope_to_public_surface=True)
-        kept = FilterNonPublicSurface().run([change], ctx)
-        assert kept == []
-        assert ctx.out_of_surface == [change]
+        kept = FilterNonPublicSurface().run([internal_change, public_change], ctx)
+        assert kept == [public_change]
+        assert ctx.out_of_surface == [internal_change]
         confidence, notes = surface_scope_confidence(
             old, new, scope_enabled=True, surf_old=ctx.surf_old, surf_new=ctx.surf_new
         )
