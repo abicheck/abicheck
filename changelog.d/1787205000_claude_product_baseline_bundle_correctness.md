@@ -1,6 +1,6 @@
 ### Fixed
 
-- **`abicheck.product_baseline.compare_product_directories`**: four
+- **`abicheck.product_baseline.compare_product_directories`**: five
   correctness findings from review of this same PR.
   - Bundle-level cross-referencing (`bundle_intra_dep_signature_changed`,
     `bundle_intra_type_changed`, `bundle_provider_changed`, and

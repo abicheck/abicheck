@@ -15,7 +15,7 @@
   one deterministic `.tar.zst` file, recording which archived files are
   libraries and which relative directories hold the product's public
   headers. `unpack_product_baseline` reverses it, reproducing a directory
-  `compare`'s directory-mode operand can run against directly. Library-only
+  that directory-mode `compare` can consume directly. Library-only
   surface, no CLI command — see `abicheck/product_baseline.py`'s module
   docstring.
 - **`abicheck.product_baseline.compare_product_directories`** — the
