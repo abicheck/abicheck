@@ -1154,6 +1154,45 @@ class TestUnpackProductBaseline:
             unpack_product_baseline(tampered, dest)
         assert not dest.exists()
 
+    def test_unpack_rejects_an_undeclared_hardlink_alias_masked_by_a_symlink(
+        self, tmp_path: Path
+    ) -> None:
+        # The path-based hardlink check above compared against
+        # _discover_library_map()'s own deduplicated map -- but a symlink
+        # alias sharing the same identity as the declared library, sorted
+        # before an undeclared hardlink alias, survives that map's dedup
+        # as the sole representative for the shared identity, making the
+        # undeclared hardlink invisible to a check that only sees the
+        # deduplicated result (Codex review, fresh evidence: reproduced
+        # with a real symlink 'a.so' sorting before hardlink 'b.so',
+        # both aliasing declared 'z.so').
+        product = _make_product(tmp_path)
+        target = product / "lib" / "z.so"
+        target.write_bytes(b"ELF-CONTENT")
+        (product / "lib" / "a.so").symlink_to("z.so")
+        (product / "lib" / "b.so").hardlink_to(target)
+        archive = tmp_path / "baseline.tar.zst"
+        pack_product_baseline(product, archive)
+
+        import zstandard
+
+        dctx = zstandard.ZstdDecompressor()
+        tar_bytes = dctx.decompress(archive.read_bytes(), max_output_size=1 << 30)
+        with tarfile.open(fileobj=io.BytesIO(tar_bytes), mode="r") as tf:
+            manifest_fh = tf.extractfile(MANIFEST_MEMBER_NAME)
+            assert manifest_fh is not None
+            manifest_raw = json.loads(manifest_fh.read())
+        manifest_raw["libraries"] = [
+            lib for lib in manifest_raw["libraries"] if lib["path"] != "lib/b.so"
+        ]
+        payload = json.dumps(manifest_raw).encode("utf-8") + b"\n"
+        tampered = _rewrite_manifest_member(tmp_path, archive, payload)
+
+        dest = tmp_path / "dest"
+        with pytest.raises(SnapshotError, match="never declared"):
+            unpack_product_baseline(tampered, dest)
+        assert not dest.exists()
+
     def test_unpack_translates_a_symlink_loop_into_snapshot_error(
         self, tmp_path: Path
     ) -> None:

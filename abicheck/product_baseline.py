@@ -202,13 +202,12 @@ def _is_library_path(path: Path) -> bool:
 
     Shared by every place that decides "is this a library" -- packing's own
     manifest-entry classification (:func:`_add_member`) and
-    :func:`_discover_library_map`'s discovery walk (Codex review, fresh
+    :func:`_iter_discovered_libraries`'s walk (Codex review, fresh
     evidence: previously each checked filename suffix alone, and an
     extensionless ELF DSO was archived but produced no ``LibraryEntry``).
 
     The ELF content fallback had no Mach-O/PE counterpart, closed by
-    :func:`_macho_is_library_content`/:func:`_pe_is_dll_content` (Codex
-    review, fresh evidence).
+    :func:`_macho_is_library_content`/:func:`_pe_is_dll_content`.
 
     A ``.debug`` split-debug sidecar is excluded outright, ahead of
     every content check: it retains its original binary's ``ET_DYN``
@@ -480,11 +479,10 @@ def _windows_relative_target_escapes(arcname: str, target: str) -> bool:
     *arcname*) escape the archive root if interpreted with Windows path
     semantics (backslash separators)?
 
-    Purely lexical -- no real Windows filesystem to ``.resolve()``
-    against -- walks a virtual depth counter from *arcname*'s own
+    Purely lexical -- walks a virtual depth counter from *arcname*'s
     directory, decrementing on ``..``, incrementing on a named
     component; negative depth means the target walks above root. Only
-    ever *adds* rejections a POSIX-only check misses: a backslash ``..``
+    *adds* rejections a POSIX-only check misses: a backslash ``..``
     traversal is one opaque filename on POSIX (Codex review, fresh
     evidence).
     """
@@ -523,13 +521,12 @@ def _add_member(
     if info.issym():
         target = info.linkname
         # An absolute (or Windows-anchored) target can't round-trip --
-        # TarExtractor refuses it at unpack time (Codex review, fresh
-        # evidence). os.path.isabs() alone doesn't recognize a Windows
-        # drive-absolute/UNC target on POSIX; PureWindowsPath.is_absolute()
-        # alone isn't enough either -- False for a current-drive-rooted
-        # target (drive="", root="\\") or a drive-relative one (drive="C:",
-        # root="") -- so any nonempty drive or root is rejected (Codex
-        # review, fresh evidence).
+        # TarExtractor refuses it at unpack time. os.path.isabs() alone
+        # doesn't recognize a Windows drive-absolute/UNC target on
+        # POSIX; PureWindowsPath.is_absolute() alone isn't enough either
+        # -- False for drive="", root="\\" or drive="C:", root="" -- so
+        # any nonempty drive or root is rejected (Codex review, fresh
+        # evidence).
         wpath = PureWindowsPath(target)
         if os.path.isabs(target) or wpath.drive or wpath.root:
             raise SnapshotError(
@@ -537,12 +534,11 @@ def _add_member(
                 "only relative symlink targets can be packed portably"
             )
         # A self-referential symlink loop is detected via a raw stat() --
-        # not by catching Path.resolve() raising, which Python 3.13's
-        # realpath()-backed rewrite stopped doing in non-strict mode
-        # (silently returns the unresolved path instead; verified
-        # empirically, CI caught this). stat() still raises
-        # OSError(ELOOP) on every version -- the kernel's own errno; a
-        # dangling target raises ENOENT instead, left alone.
+        # not Path.resolve() raising, which Python 3.13's realpath()-
+        # backed rewrite stopped doing in non-strict mode (verified
+        # empirically, CI caught this). stat() still raises OSError
+        # (ELOOP) on every version; a dangling target raises ENOENT
+        # instead, left alone.
         try:
             path.stat()
         except OSError as exc:
@@ -1209,13 +1205,11 @@ def unpack_product_baseline(
         # drift between packing, this check, and a later comparison.
         #
         # A symlink alias is compared by filesystem identity (dev, ino),
-        # not path string: pack_product_baseline() never gives a
-        # dev-symlink alias (`liba.so -> liba.so.1.2.3`) its own
-        # LibraryEntry, only the real target is declared (self-caught:
-        # the first revision of this fix compared by path string and
-        # failed this module's own round-trip tests). A hardlink alias
-        # is compared by path string instead, below -- it DOES get its
-        # own declared entry, so identity alone can't be trusted for it.
+        # not path string: a dev-symlink alias never gets its own
+        # LibraryEntry (self-caught: an earlier revision compared by
+        # path string and failed this module's own round-trip tests). A
+        # hardlink alias is compared by path string instead, below --
+        # it DOES get its own declared entry.
         declared_identities = set()
         declared_paths = set()
         for lib in manifest.libraries:
@@ -1224,25 +1218,29 @@ def unpack_product_baseline(
             st = lib_resolved.stat()
             declared_identities.add((st.st_dev, st.st_ino))
             declared_paths.add(lib.path)
-        extracted_libraries = _discover_library_map(staging, include_private=True)
+        # Every raw discovered path, not _discover_library_map()'s own
+        # deduplicated map: an undeclared hardlink alias sorting after a
+        # declared library's symlink alias (same identity) is invisible
+        # to that map's dedup, so checking it missed exactly the
+        # undeclared path this check exists to catch (Codex review,
+        # fresh evidence).
         undeclared = []
-        for rel_path, real_path in sorted(extracted_libraries.items()):
-            if real_path.is_symlink():
-                # A symlink alias never gets its own LibraryEntry, so
-                # checked by identity only -- fine if it resolves to a
-                # declared library.
-                try:
-                    st = real_path.stat()
-                except OSError:
-                    continue
-                if (st.st_dev, st.st_ino) not in declared_identities:
+        for rel_path, path, identity in sorted(
+            _iter_discovered_libraries(staging), key=lambda item: item[0]
+        ):
+            if path.is_symlink():
+                # A symlink alias never gets its own LibraryEntry --
+                # checked by identity only. A non-tuple identity means
+                # its own stat() failed for a reason other than ELOOP
+                # (raised above) -- skipped, not flagged, matching the
+                # pre-existing tolerant behavior.
+                if isinstance(identity, tuple) and identity not in declared_identities:
                     undeclared.append(rel_path)
             else:
                 # A hardlink alias DOES get its own LibraryEntry when
-                # honestly packed (_add_member's islnk() branch) --
-                # identity alone can't distinguish "expected alias" from
-                # "unverified extra name for the same content" (Codex
-                # review, fresh evidence). Its own path must be declared.
+                # honestly packed -- identity alone can't distinguish
+                # "expected alias" from "unverified extra name" (Codex
+                # review, fresh evidence). Its path must be declared.
                 if rel_path not in declared_paths:
                     undeclared.append(rel_path)
         if undeclared:
@@ -1411,60 +1409,67 @@ def _discover_library_map(root: Path, *, include_private: bool) -> dict[str, Pat
     collapsed to one entry — the same ``(dev, ino)`` filesystem identity
     :func:`~abicheck.bundle.discover_artifact_set` keys on — so a
     conventional ``libfoo.so -> libfoo.so.1`` dev symlink doesn't
-    double-count. *include_private* is API-symmetry-only, no effect here.
-
-    The directory-walk order is sorted (both ``dirnames`` and
-    ``filenames``, in place), not just filenames within one directory:
-    ``os.walk`` otherwise yields sibling directories in unspecified
-    filesystem order, so a symlink alias and its target in different
-    directories could produce different ``library_map`` keys across two
-    runs over the identical tree (CodeRabbit review).
+    double-count. *include_private* is API-symmetry-only, no effect
+    here. Built from :func:`_iter_discovered_libraries`'s own raw
+    per-path walk (see that function's docstring for the walk-order and
+    dedup-visibility details) -- a caller needing every raw path, not
+    just the deduplicated survivor, should call that directly instead.
     """
     del include_private  # accepted for API symmetry only; see docstring.
 
-    root_resolved = root.resolve()
-    seen_identity: set[Path | tuple[int, int]] = set()
     library_map: dict[str, Path] = {}
+    seen_identity: set[Path | tuple[int, int]] = set()
+    for rel_path, path, identity in _iter_discovered_libraries(root):
+        if identity in seen_identity:
+            continue
+        seen_identity.add(identity)
+        library_map[rel_path] = path
+    return library_map
+
+
+def _iter_discovered_libraries(
+    root: Path,
+) -> Iterable[tuple[str, Path, Path | tuple[int, int]]]:
+    """Yield ``(relative_path, path, identity)`` for every library-shaped
+    file under *root*, *not* deduplicated by identity -- the walk
+    :func:`_discover_library_map` builds its own deduplicated map from.
+
+    A caller needing every path sharing an identity -- not just whichever
+    sorts first and survives dedup -- must iterate this directly: an
+    undeclared hardlink alias sorting after a declared library's own
+    symlink alias is invisible to the deduplicated map (Codex review,
+    fresh evidence).
+
+    Directory-walk order is sorted (``dirnames``/``filenames``): ``os.walk``
+    otherwise yields siblings in unspecified order, so an alias and its
+    target in different directories could vary across runs (CodeRabbit
+    review).
+    """
+    root_resolved = root.resolve()
     for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
         dirnames.sort()
         for fn in sorted(filenames):
             path = Path(dirpath) / fn
             if not _is_library_path(path):
                 continue
-            # A GNU ld INPUT()/GROUP() linker script (the conventional
-            # `libfoo.so -> INPUT(libfoo.so.1)` SDK-install pattern) is
-            # library-suffix-named but carries no binary content of its
-            # own -- discovering it alongside its real target (libfoo.so.1,
-            # discovered independently under its own name) would produce
-            # two DiffResults for the identical library, and if the target
-            # were unavailable a non-library script could abort the whole
-            # comparison as "cannot detect format". The real target -- if
-            # present in this same tree -- is already discovered on its
-            # own merits by this same walk, so the script itself must be
-            # excluded, never resolved to a duplicate entry -- now handled
+            # A GNU ld INPUT()/GROUP() linker script is library-suffix-
+            # named but carries no binary content of its own -- excluded
             # by `_is_library_path` itself (the `continue` above), so
-            # every caller shares one exclusion instead of this walk
-            # re-checking a fact its own dependency already established
-            # (Codex review, fresh evidence: `_add_member`, the packing
-            # path, called `_is_library_path` directly with no equivalent
-            # check of its own, so a linker script was archived as its own
-            # `LibraryEntry` even though this walk already excluded it).
+            # every caller shares one exclusion (Codex review, fresh
+            # evidence).
             try:
                 real = path.resolve()
             except (OSError, RuntimeError):
-                # RuntimeError alongside OSError: a self-referential
-                # symlink loop makes Path.resolve() raise RuntimeError,
-                # treated the same as any other unresolvable path (Codex
-                # review, fresh evidence).
+                # RuntimeError alongside OSError: a symlink loop makes
+                # Path.resolve() raise RuntimeError on some Python
+                # versions (Codex review, fresh evidence).
                 real = path
             else:
                 # A library-shaped symlink whose target resolves outside
                 # root entirely (e.g. `libfoo.so -> /usr/lib/libfoo.so`)
-                # is rejected rather than discovered -- comparing it
-                # would silently analyze a host file that isn't part of
-                # the product at all. Matches the containment discipline
-                # pack/unpack already enforce (Codex review, fresh
-                # evidence). A conventional in-tree dev symlink still
+                # is rejected rather than discovered -- would silently
+                # analyze a host file not part of the product (Codex
+                # review, fresh evidence). An in-tree dev symlink still
                 # resolves within root and is unaffected.
                 if real != root_resolved and not real.is_relative_to(root_resolved):
                     continue
@@ -1475,20 +1480,16 @@ def _discover_library_map(root: Path, *, include_private: bool) -> dict[str, Pat
                 if exc.errno == errno.ELOOP:
                     # A library-shaped self-referential symlink loop is
                     # not a real library -- silently discovering it let a
-                    # product containing nothing but a loop compare as a
-                    # spurious bundle_library_removed/added finding
-                    # instead of being rejected outright (Codex review,
-                    # fresh evidence).
+                    # loop-only product compare as a spurious
+                    # bundle_library_removed/added finding instead of
+                    # being rejected outright (Codex review, fresh
+                    # evidence).
                     raise SnapshotError(
                         f"{root}: {_relative_posix(path, root)!r} is a "
                         "self-referential symlink loop, not a real library"
                     ) from exc
                 identity = real
-            if identity in seen_identity:
-                continue
-            seen_identity.add(identity)
-            library_map[_relative_posix(path, root)] = path
-    return library_map
+            yield _relative_posix(path, root), path, identity
 
 
 def compare_product_directories(
