@@ -644,6 +644,7 @@ def compare_bundle(
     manifest: InstantiationManifest | None = None,
     system_providers: Iterable[str] | None = None,
     cohorts: list[str] | None = None,
+    policy: str = "strict_abi",
 ) -> BundleDiffResult:
     """Compute bundle-level findings from per-library diffs and bundle snapshots.
 
@@ -660,6 +661,18 @@ def compare_bundle(
         cohorts: Explicit co-versioned cohort prefixes (e.g. ``"libfoo_"``)
             for the opt-in ``BUNDLE_SONAME_SKEW`` check. When empty/None the
             skew check is disabled — cohorts are never inferred from filenames.
+        policy: The same policy profile name :func:`abicheck.checker_policy.
+            compute_verdict` accepts, applied to *bundle-level* findings when
+            :attr:`BundleDiffResult.bundle_verdict`/``.verdict`` are read.
+            Previously unparameterized — every caller's bundle verdict was
+            always scored under the hardcoded ``strict_abi`` default even
+            when the caller explicitly selected a different policy for its
+            per-library comparisons, so a policy that reclassifies a bundle
+            kind (e.g. ``plugin_abi`` promoting a risk-classified
+            ``bundle_provider_changed`` to breaking) never reached the
+            aggregate verdict (Codex review, fresh evidence). Defaults to
+            ``strict_abi``, matching every existing caller's prior behavior
+            exactly.
     """
     sys_libs = set(DEFAULT_SYSTEM_PROVIDERS) | set(system_providers or ())
     findings: list[BundleFinding] = []
@@ -714,6 +727,7 @@ def compare_bundle(
         new_root=new.root,
         per_library=list(per_library_results),
         bundle_findings=findings,
+        policy=policy,
     )
 
 

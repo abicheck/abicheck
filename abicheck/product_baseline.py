@@ -963,8 +963,8 @@ def _check_schema_supported(schema: str, archive_path: Path) -> None:
 
 
 def _discover_library_map(root: Path, *, include_private: bool) -> dict[str, Path]:
-    """Discover every shared library under *root*, keyed by its own
-    discovered filename.
+    """Discover every shared library under *root*, keyed by a path relative
+    to *root* (POSIX-style) rather than its bare filename.
 
     Deliberately not :func:`abicheck.bundle.discover_artifact_set`'s
     canonical (SONAME-major-stripped) key: that function exists for the
@@ -977,30 +977,61 @@ def _discover_library_map(root: Path, *, include_private: bool) -> dict[str, Pat
     (Codex review, fresh evidence: a product with parallel majors
     couldn't be compared via :func:`compare_product_directories` at all).
 
+    Keyed by *relative path*, not bare filename: two distinct DSOs sharing
+    a basename in different directories (``plugins/a/plugin.so`` and
+    ``plugins/b/plugin.so`` — an ordinary plugin-host layout) previously
+    collided on the same dict key, silently dropping one of them from
+    both the per-library comparison and either bundle snapshot (Codex
+    review, fresh evidence). A relative-path key disambiguates that case
+    for free while leaving the common case (one library per basename)
+    unaffected, since :func:`~abicheck.bundle.build_bundle_snapshot`'s own
+    resolution graph indexes libraries by their real SONAME/on-disk
+    filename separately from this dict's own key.
+
+    Format-neutral, unlike :func:`abicheck.package.discover_shared_libraries`
+    (ELF-only, via ``_is_elf_shared_object``'s magic-byte sniff): this walks
+    the tree directly and matches by suffix using the same
+    :func:`_is_shared_library` predicate :func:`pack_product_baseline`
+    already uses to classify a :class:`LibraryEntry` — so a PE ``.dll`` or
+    Mach-O ``.dylib`` a product baseline archive genuinely carries is
+    discovered here too, not silently invisible to every comparison this
+    function drives (Codex review, fresh evidence: a Windows/macOS product
+    baseline compared as empty/no-change with no per-library comparisons
+    ever run, despite packing recognizing and archiving those files).
+
     A real hardlink/symlink alias pointing at the identical file is still
     collapsed to one entry — using the same ``(dev, ino)`` filesystem
     identity :func:`~abicheck.bundle.discover_artifact_set` keys on — so a
     conventional ``libfoo.so -> libfoo.so.1`` dev symlink doesn't
-    double-count as two separate libraries.
+    double-count as two separate libraries. *include_private* is accepted
+    for API symmetry with the ELF-only discovery it replaces, but has no
+    effect here: every discovered file already carries a recognizable
+    library suffix, so there is no "real DSO with an unconventional name
+    at a conventional path" case left for a public/private directory
+    split to disambiguate.
     """
-    from .package import discover_shared_libraries
+    del include_private  # accepted for API symmetry only; see docstring.
 
     seen_identity: set[Path | tuple[int, int]] = set()
     library_map: dict[str, Path] = {}
-    for path in discover_shared_libraries(root, include_private=include_private):
-        try:
-            real = path.resolve()
-        except OSError:
-            real = path
-        try:
-            st = real.stat()
-            identity: Path | tuple[int, int] = (st.st_dev, st.st_ino)
-        except OSError:
-            identity = real
-        if identity in seen_identity:
-            continue
-        seen_identity.add(identity)
-        library_map[path.name] = path
+    for dirpath, _dirnames, filenames in os.walk(root, followlinks=False):
+        for fn in sorted(filenames):
+            if not _is_shared_library(fn):
+                continue
+            path = Path(dirpath) / fn
+            try:
+                real = path.resolve()
+            except OSError:
+                real = path
+            try:
+                st = real.stat()
+                identity: Path | tuple[int, int] = (st.st_dev, st.st_ino)
+            except OSError:
+                identity = real
+            if identity in seen_identity:
+                continue
+            seen_identity.add(identity)
+            library_map[_relative_posix(path, root)] = path
     return library_map
 
 
@@ -1066,18 +1097,33 @@ def compare_product_directories(
     when not given, so passing one manifest's roots to *header_roots*
     alone still works for the common case where both sides agree.
 
-    Every library discovered in *both* directories (matched by discovered
-    filename — see :func:`_discover_library_map`, called once per side) is
-    compared; a library present on only one side never reaches the
-    per-library pass, but bundle analysis still reports it via
-    ``bundle_library_added``/``bundle_library_removed``. Unlike the CLI's
-    ``compare-release`` engine, a failure here is never swallowed into a
-    warning — this is a library call, so a per-library compare failure or
-    a bundle-analysis failure propagates directly (whatever the failing
-    step itself raises — :class:`SnapshotError`, ...); a caller wanting
-    the CLI's own "report degradation, keep going" behavior should catch
-    what it needs.
+    Every library discovered in *both* directories (matched by relative
+    path — see :func:`_discover_library_map`, called once per side) is
+    compared. A library whose relative path changed but whose *canonical*
+    name (SONAME major stripped, e.g. a ``lib/libfoo.so.1`` -> ``lib/
+    libfoo.so.2`` bump with no unversioned alias carried across) matches
+    exactly one unmatched candidate on the other side is paired too — a
+    release that only bumps a SONAME major would otherwise never reach
+    :func:`~abicheck.service_compare_pipeline.run_compare` at all (the
+    exact-path intersection is empty), silently losing every symbol/type
+    change between the two versions (Codex review, fresh evidence). This
+    canonical fallback only ever pairs an *unambiguous* match — a
+    canonical name shared by more than one unmatched candidate on either
+    side is left unpaired rather than guessed at, the same
+    ambiguity-safe-fallback discipline this codebase's other identity
+    resolvers already follow (see ``finding_identity.py``'s own
+    docstring). A library present on only one side even after this
+    fallback never reaches the per-library pass, but bundle analysis
+    still reports it via ``bundle_library_added``/``bundle_library_removed``
+    (a genuine SONAME bump also being a structural bundle-level event, not
+    only a per-library ABI question). Unlike the CLI's ``compare-release``
+    engine, a failure here is never swallowed into a warning — this is a
+    library call, so a per-library compare failure or a bundle-analysis
+    failure propagates directly (whatever the failing step itself raises
+    — :class:`SnapshotError`, ...); a caller wanting the CLI's own "report
+    degradation, keep going" behavior should catch what it needs.
     """
+    from .binary_utils import _canonical_library_key
     from .bundle import build_bundle_snapshot, compare_bundle, load_manifest
     from .service_compare_pipeline import run_compare
 
@@ -1099,11 +1145,35 @@ def compare_product_directories(
     old_headers = _resolved_headers(old_root, old_roots)
     new_headers = _resolved_headers(new_root, new_roots)
 
+    exact_matches = sorted(set(old_map) & set(new_map))
+    pairs: list[tuple[Path, Path]] = [(old_map[k], new_map[k]) for k in exact_matches]
+
+    # Canonical (SONAME-major-stripped) fallback for the libraries exact
+    # matching left unpaired -- keyed by canonical name, dropped entirely
+    # (not just left as one candidate) the moment a second contributor
+    # appears, so an ambiguous canonical group never guesses which pair is
+    # "the" match.
+    def _canonical_groups(unmatched: dict[str, Path]) -> dict[str, list[Path]]:
+        groups: dict[str, list[Path]] = {}
+        for path in unmatched.values():
+            groups.setdefault(_canonical_library_key(path), []).append(path)
+        return groups
+
+    old_unmatched = {k: v for k, v in old_map.items() if k not in set(exact_matches)}
+    new_unmatched = {k: v for k, v in new_map.items() if k not in set(exact_matches)}
+    old_canonical = _canonical_groups(old_unmatched)
+    new_canonical = _canonical_groups(new_unmatched)
+    for canonical_key in sorted(set(old_canonical) & set(new_canonical)):
+        old_candidates = old_canonical[canonical_key]
+        new_candidates = new_canonical[canonical_key]
+        if len(old_candidates) == 1 and len(new_candidates) == 1:
+            pairs.append((old_candidates[0], new_candidates[0]))
+
     per_library_results = []
-    for key in sorted(set(old_map) & set(new_map)):
+    for old_path, new_path in pairs:
         result = run_compare(
-            old_map[key],
-            new_map[key],
+            old_path,
+            new_path,
             old_headers=old_headers,
             new_headers=new_headers,
             lang=lang,
@@ -1126,4 +1196,5 @@ def compare_product_directories(
         manifest=manifest,
         system_providers=system_providers,
         cohorts=cohorts,
+        policy=policy,
     )

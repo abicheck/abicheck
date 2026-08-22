@@ -984,3 +984,163 @@ class TestCompareProductDirectoriesHeaderRoots:
         assert len(calls) == 1
         assert calls[0]["old_headers"] == [old_dir / "include"]
         assert calls[0]["new_headers"] == [new_dir / "include"]
+
+
+class TestDiscoverLibraryMap:
+    def test_keys_by_relative_path_not_bare_filename(self, tmp_path: Path) -> None:
+        # Two distinct DSOs sharing a basename in different directories
+        # (an ordinary plugin-host layout) previously collided on the same
+        # bare-filename dict key, silently dropping one of them from both
+        # the per-library comparison and either bundle snapshot (Codex
+        # review, fresh evidence).
+        from abicheck.product_baseline import _discover_library_map
+
+        root = tmp_path / "product"
+        (root / "plugins" / "a").mkdir(parents=True)
+        (root / "plugins" / "b").mkdir(parents=True)
+        (root / "plugins" / "a" / "plugin.so").write_bytes(b"PLUGIN-A")
+        (root / "plugins" / "b" / "plugin.so").write_bytes(b"PLUGIN-B")
+
+        result = _discover_library_map(root, include_private=True)
+        assert set(result) == {"plugins/a/plugin.so", "plugins/b/plugin.so"}
+        assert result["plugins/a/plugin.so"].read_bytes() == b"PLUGIN-A"
+        assert result["plugins/b/plugin.so"].read_bytes() == b"PLUGIN-B"
+
+    def test_discovers_dll_and_dylib_not_just_elf_so(self, tmp_path: Path) -> None:
+        # _discover_library_map previously delegated to
+        # package.discover_shared_libraries(), which only recognizes real
+        # ELF shared objects via a magic-byte sniff -- a Windows/macOS
+        # product's .dll/.dylib files were silently invisible to
+        # compare_product_directories() despite pack_product_baseline()
+        # itself already classifying them as libraries via the same
+        # suffix-based _is_shared_library() predicate (Codex review, fresh
+        # evidence).
+        from abicheck.product_baseline import _discover_library_map
+
+        root = tmp_path / "product"
+        (root / "bin").mkdir(parents=True)
+        (root / "bin" / "foo.dll").write_bytes(b"MZ-not-a-real-pe")
+        (root / "bin" / "libfoo.dylib").write_bytes(b"not-a-real-macho")
+
+        result = _discover_library_map(root, include_private=True)
+        assert set(result) == {"bin/foo.dll", "bin/libfoo.dylib"}
+
+
+class TestCompareProductDirectoriesCanonicalFallbackAndPolicy:
+    def _capture_calls(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
+        from abicheck import bundle as bundle_mod, service_compare_pipeline as scp
+
+        run_compare_calls: list[dict[str, object]] = []
+        compare_bundle_calls: list[dict[str, object]] = []
+
+        class _FakeDiffResult:
+            def __init__(self, library: str) -> None:
+                self.library = library
+
+        class _FakeResult:
+            def __init__(self, library: str) -> None:
+                self.diff = _FakeDiffResult(library)
+
+        def _fake_run_compare(old_lib, new_lib, **kwargs):  # type: ignore[no-untyped-def]
+            run_compare_calls.append({"old": old_lib, "new": new_lib, **kwargs})
+            return _FakeResult(str(new_lib))
+
+        def _fake_build_bundle_snapshot(libraries):  # type: ignore[no-untyped-def]
+            return {"libraries": dict(libraries)}
+
+        def _fake_compare_bundle(old, new, per_library_results, **kwargs):  # type: ignore[no-untyped-def]
+            compare_bundle_calls.append(kwargs)
+            return kwargs
+
+        monkeypatch.setattr(scp, "run_compare", _fake_run_compare)
+        monkeypatch.setattr(
+            bundle_mod, "build_bundle_snapshot", _fake_build_bundle_snapshot
+        )
+        monkeypatch.setattr(bundle_mod, "compare_bundle", _fake_compare_bundle)
+        return run_compare_calls, compare_bundle_calls
+
+    def test_pairs_unmatched_libraries_across_a_soname_major_bump(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # A release that only bumps a SONAME major (libfoo.so.1 ->
+        # libfoo.so.2, no unversioned alias carried across) previously
+        # never reached run_compare() at all -- the exact-path
+        # intersection was empty -- silently losing every symbol/type
+        # change between the two versions (Codex review, fresh evidence).
+        from abicheck.product_baseline import compare_product_directories
+
+        old_dir = tmp_path / "old"
+        new_dir = tmp_path / "new"
+        (old_dir / "lib").mkdir(parents=True)
+        (new_dir / "lib").mkdir(parents=True)
+        (old_dir / "lib" / "libfoo.so.1").write_bytes(b"OLD")
+        (new_dir / "lib" / "libfoo.so.2").write_bytes(b"NEW")
+
+        run_compare_calls, _ = self._capture_calls(monkeypatch)
+        compare_product_directories(old_dir, new_dir)
+
+        assert len(run_compare_calls) == 1
+        assert run_compare_calls[0]["old"] == old_dir / "lib" / "libfoo.so.1"
+        assert run_compare_calls[0]["new"] == new_dir / "lib" / "libfoo.so.2"
+
+    def test_does_not_guess_when_the_canonical_group_is_ambiguous(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Two unmatched candidates sharing one canonical name on the same
+        # side must not be silently paired with a guess -- ambiguity is
+        # left unpaired, not resolved arbitrarily.
+        from abicheck.product_baseline import compare_product_directories
+
+        old_dir = tmp_path / "old"
+        new_dir = tmp_path / "new"
+        (old_dir / "lib").mkdir(parents=True)
+        (new_dir / "lib").mkdir(parents=True)
+        (old_dir / "lib" / "libfoo.so.1").write_bytes(b"OLD1")
+        (old_dir / "lib" / "libfoo.so.3").write_bytes(b"OLD3")
+        (new_dir / "lib" / "libfoo.so.2").write_bytes(b"NEW")
+
+        run_compare_calls, _ = self._capture_calls(monkeypatch)
+        compare_product_directories(old_dir, new_dir)
+
+        assert run_compare_calls == []
+
+    def test_exact_path_match_is_not_reconsidered_by_the_canonical_fallback(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from abicheck.product_baseline import compare_product_directories
+
+        old_dir = tmp_path / "old"
+        new_dir = tmp_path / "new"
+        (old_dir / "lib").mkdir(parents=True)
+        (new_dir / "lib").mkdir(parents=True)
+        (old_dir / "lib" / "libfoo.so.1").write_bytes(b"OLD")
+        (new_dir / "lib" / "libfoo.so.1").write_bytes(b"NEW")
+
+        run_compare_calls, _ = self._capture_calls(monkeypatch)
+        compare_product_directories(old_dir, new_dir)
+
+        assert len(run_compare_calls) == 1
+        assert run_compare_calls[0]["old"] == old_dir / "lib" / "libfoo.so.1"
+        assert run_compare_calls[0]["new"] == new_dir / "lib" / "libfoo.so.1"
+
+    def test_threads_the_selected_policy_into_compare_bundle(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # compare_bundle()'s own bundle-level verdict was previously always
+        # scored under the hardcoded strict_abi default, regardless of what
+        # policy the caller selected for its per-library comparisons
+        # (Codex review, fresh evidence).
+        from abicheck.product_baseline import compare_product_directories
+
+        old_dir = tmp_path / "old"
+        new_dir = tmp_path / "new"
+        old_dir.mkdir(parents=True)
+        new_dir.mkdir(parents=True)
+
+        _, compare_bundle_calls = self._capture_calls(monkeypatch)
+        compare_product_directories(old_dir, new_dir, policy="plugin_abi")
+
+        assert len(compare_bundle_calls) == 1
+        assert compare_bundle_calls[0]["policy"] == "plugin_abi"
