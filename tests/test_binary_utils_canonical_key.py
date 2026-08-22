@@ -80,3 +80,24 @@ class TestCanonicalLibraryKeyCaseFolding:
 
     def test_dylib_stem_case_is_preserved_in_the_key(self) -> None:
         assert _canonical_library_key(Path("libFoo.1.2.dylib")) == "libFoo.dylib"
+
+    def test_pyd_case_only_rename_shares_a_canonical_key(self, tmp_path: Path) -> None:
+        # A PE DLL shipped under a nonstandard extension (a Python .pyd
+        # extension module) is just as case-insensitive on Windows as a
+        # .dll's -- a suffix-only check misses it (Codex review, fresh
+        # evidence). Needs real PE content on disk: unlike the .dll cases
+        # above, there is no suffix to short-circuit on.
+        import struct
+
+        dos_header = bytearray(64)
+        dos_header[0:2] = b"MZ"
+        struct.pack_into("<I", dos_header, 0x3C, 64)
+        coff_header = struct.pack("<HHIIIHH", 0x8664, 0, 0, 0, 0, 0, 0x2000)
+        pe_bytes = bytes(dos_header) + b"PE\x00\x00" + coff_header
+
+        upper = tmp_path / "Foo.pyd"
+        lower = tmp_path / "foo.pyd"
+        upper.write_bytes(pe_bytes)
+        lower.write_bytes(pe_bytes)
+
+        assert _canonical_library_key(upper) == _canonical_library_key(lower)

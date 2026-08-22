@@ -66,7 +66,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import IO, TYPE_CHECKING, Any
 
-from .binary_utils import resolve_linker_script
+from .binary_utils import _pe_is_dll_content, resolve_linker_script
 from .errors import SnapshotError
 from .package import TarExtractor, _is_elf_shared_object
 
@@ -119,10 +119,6 @@ def _is_shared_library(name: str) -> bool:
 #: case this predicate exists to catch). MH_EXECUTE (2) is deliberately
 #: excluded: an executable is not a shared library regardless of content.
 _MACHO_LIBRARY_FILETYPES = frozenset({6, 8, 9})  # MH_DYLIB, MH_BUNDLE, MH_DYLIB_STUB
-
-#: PE/COFF ``IMAGE_FILE_DLL`` bit in the COFF file header's ``Characteristics``
-#: field -- set for a DLL, clear for a plain ``.exe``.
-_PE_IMAGE_FILE_DLL = 0x2000
 
 
 def _macho_is_library_content(path: Path) -> bool:
@@ -191,33 +187,6 @@ def _macho_is_library_content(path: Path) -> bool:
         int(getattr(header.header, "filetype", -1)) in _MACHO_LIBRARY_FILETYPES
         for header in macho.headers
     )
-
-
-def _pe_is_dll_content(path: Path) -> bool:
-    """True when *path* is a PE/COFF image with the ``IMAGE_FILE_DLL`` bit
-    set in its COFF file header, identified from content rather than
-    filename -- the PE counterpart of :func:`_macho_is_library_content`,
-    for a DLL shipped under a nonstandard extension (a Python ``.pyd``
-    extension module) that a suffix check alone never catches (Codex
-    review, fresh evidence).
-    """
-    try:
-        with open(path, "rb") as f:
-            dos_header = f.read(64)
-            if len(dos_header) < 64 or dos_header[0:2] != b"MZ":
-                return False
-            (pe_offset,) = struct.unpack_from("<I", dos_header, 0x3C)
-            f.seek(pe_offset)
-            sig = f.read(4)
-            if sig != b"PE\x00\x00":
-                return False
-            coff_header = f.read(20)
-    except (OSError, struct.error):
-        return False
-    if len(coff_header) < 20:
-        return False
-    (characteristics,) = struct.unpack_from("<H", coff_header, 18)
-    return bool(characteristics & _PE_IMAGE_FILE_DLL)
 
 
 def _is_library_path(path: Path) -> bool:
@@ -1409,9 +1378,15 @@ def compare_product_directories(
     — the exact shape :attr:`ProductBaselineManifest.header_roots` already
     records, so a caller that just unpacked an archive can pass its
     manifest's own ``header_roots`` straight through, applied to *both*
-    sides *and every library*. A root missing for a given library/side is
-    silently skipped, matching this format's own tolerance for a library
-    that ships no public headers.
+    sides *and every library*. A well-formed root (a relative path
+    contained within the product directory) that simply doesn't exist for
+    a given library/side is silently skipped, matching this format's own
+    tolerance for a library that ships no public headers -- but a
+    structurally invalid root (absolute, or escaping the product
+    directory) is a caller/config error and raises :class:`SnapshotError`
+    outright, rather than being silently dropped and running that side's
+    per-library compare with its header evidence quietly missing (Codex
+    review, fresh evidence).
 
     *header_roots* (and *old_header_roots*/*new_header_roots*) also accept
     a ``{library_key: [roots...]}`` mapping instead of a flat list, for a
@@ -1529,8 +1504,29 @@ def compare_product_directories(
         resolved = []
         for rel in roots:
             candidate = _resolve_under_root(root, rel)
-            if candidate is not None and candidate.is_dir():
+            if candidate is None:
+                # A structurally invalid root -- absolute, or escaping
+                # root -- is a caller/config error, not a library that
+                # legitimately ships no public headers: silently dropping
+                # it (the pre-existing behavior) still ran the per-library
+                # compare, just with that side's header evidence quietly
+                # missing, risking a false-green result for an API/
+                # header-only break the header evidence would have caught
+                # (Codex review, fresh evidence). Reject outright, the
+                # same containment discipline pack/unpack already enforce
+                # for a manifest-declared path.
+                raise SnapshotError(
+                    f"header root {rel!r} for library {library_key!r} is "
+                    "absolute or escapes the product directory "
+                    f"({root}) -- header roots must be relative paths "
+                    "contained within the product directory."
+                )
+            if candidate.is_dir():
                 resolved.append(candidate)
+            # A well-formed root that simply doesn't exist (or isn't a
+            # directory) for this library is tolerated -- the library
+            # legitimately ships no public headers here, matching this
+            # function's own docstring.
         return resolved
 
     exact_matches = sorted(set(old_map) & set(new_map))
@@ -1667,6 +1663,27 @@ def compare_product_directories(
     # library plainly vanished (Codex review, fresh evidence).
     paired_old_keys = {old_key for old_key, _, _, _ in pairs}
     paired_new_keys = {new_key for _, _, new_key, _ in pairs}
+
+    def _is_bundle_collapse_survivor(
+        candidate_map: dict[str, Path], bundle_map: dict[str, Path], key: str
+    ) -> bool:
+        """True when *key*'s path is the one that survived
+        old_bundle_map/new_bundle_map's own last-wins bare-filename
+        collapse -- i.e. the one path compare_bundle() actually analyzed
+        for this bare name. Excluding an unmatched key from the
+        standalone-removal/addition fallback is only sound when this is
+        true: `already_reported`/`already_reported_added` are bare-name
+        sets, so when two unmatched libraries share a basename
+        (plugins/a/plugin.so, plugins/b/plugin.so) and only ONE of them
+        actually vanished/appeared, a bare-name membership check alone
+        would suppress BOTH -- including the one compare_bundle() never
+        analyzed at all (the collapse discarded it before compare_bundle()
+        ever saw it), silently losing a real, distinct removal/addition
+        (Codex review, fresh evidence).
+        """
+        path = candidate_map[key]
+        return bundle_map.get(path.name) == path
+
     # One entry per unmatched *key* (relative path), not deduped by bare
     # name -- two distinct unmatched libraries sharing a basename in
     # different directories (plugins/a/plugin.so and plugins/b/plugin.so)
@@ -1678,12 +1695,20 @@ def compare_product_directories(
     unmatched_old_items = sorted(
         (k, old_map[k].name)
         for k in old_map
-        if k not in paired_old_keys and old_map[k].name not in already_reported
+        if k not in paired_old_keys
+        and not (
+            old_map[k].name in already_reported
+            and _is_bundle_collapse_survivor(old_map, old_bundle_map, k)
+        )
     )
     unmatched_new_items = sorted(
         (k, new_map[k].name)
         for k in new_map
-        if k not in paired_new_keys and new_map[k].name not in already_reported_added
+        if k not in paired_new_keys
+        and not (
+            new_map[k].name in already_reported_added
+            and _is_bundle_collapse_survivor(new_map, new_bundle_map, k)
+        )
     )
     # A library matched to a surviving library on the new side -- whether by
     # an exact relative-path match or the canonical (SONAME-major-stripped,

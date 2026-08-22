@@ -380,10 +380,14 @@ class TestCompareProductDirectoriesHeaderRootsContainment:
     def test_absolute_header_root_is_rejected(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        # A caller-supplied absolute or escaping header root must not
-        # resolve outside the product directory -- the same containment
-        # pack/unpack already enforce for header_roots on disk (Codex
-        # review, fresh evidence).
+        # A caller-supplied absolute or escaping header root is a caller/
+        # config error and must be rejected outright -- silently dropping
+        # it and still running the per-library compare without that
+        # side's header evidence risks a false-green result for an API/
+        # header-only break the header evidence would have caught (Codex
+        # review, fresh evidence: this test's own name predates the actual
+        # rejection -- it previously only asserted the silent-drop
+        # behavior it claims to reject).
         from abicheck.product_baseline import compare_product_directories
 
         old_dir = tmp_path / "old"
@@ -402,7 +406,7 @@ class TestCompareProductDirectoriesHeaderRootsContainment:
 
         def _fake_run_compare(old_lib, new_lib, **kwargs):  # type: ignore[no-untyped-def]
             calls.append(kwargs)
-            raise SnapshotError("stop before a real compare runs")
+            raise SnapshotError("run_compare must never be reached")
 
         def _fake_build_bundle_snapshot(libraries):  # type: ignore[no-untyped-def]
             return {"libraries": dict(libraries)}
@@ -412,12 +416,11 @@ class TestCompareProductDirectoriesHeaderRootsContainment:
             bundle_mod, "build_bundle_snapshot", _fake_build_bundle_snapshot
         )
 
-        with pytest.raises(SnapshotError, match="stop before"):
+        with pytest.raises(SnapshotError, match="absolute or escapes"):
             compare_product_directories(old_dir, new_dir, header_roots=[str(outside)])
 
-        assert len(calls) == 1
-        assert calls[0]["old_headers"] == []
-        assert calls[0]["new_headers"] == []
+        # Rejected before the per-library compare loop ever runs.
+        assert calls == []
 
     def test_escaping_relative_header_root_is_rejected(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -440,6 +443,43 @@ class TestCompareProductDirectoriesHeaderRootsContainment:
 
         def _fake_run_compare(old_lib, new_lib, **kwargs):  # type: ignore[no-untyped-def]
             calls.append(kwargs)
+            raise SnapshotError("run_compare must never be reached")
+
+        def _fake_build_bundle_snapshot(libraries):  # type: ignore[no-untyped-def]
+            return {"libraries": dict(libraries)}
+
+        monkeypatch.setattr(scp, "run_compare", _fake_run_compare)
+        monkeypatch.setattr(
+            bundle_mod, "build_bundle_snapshot", _fake_build_bundle_snapshot
+        )
+
+        with pytest.raises(SnapshotError, match="absolute or escapes"):
+            compare_product_directories(old_dir, new_dir, header_roots=["../escaped"])
+
+        assert calls == []
+
+    def test_missing_header_root_is_silently_skipped_not_rejected(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # A well-formed, contained root that simply doesn't exist for a
+        # given library is tolerated -- that library legitimately ships
+        # no public headers here -- distinct from the structurally
+        # invalid (absolute/escaping) case rejected above.
+        from abicheck.product_baseline import compare_product_directories
+
+        old_dir = tmp_path / "old"
+        new_dir = tmp_path / "new"
+        (old_dir / "lib").mkdir(parents=True)
+        (new_dir / "lib").mkdir(parents=True)
+        (old_dir / "lib" / "libfoo.so").write_bytes(b"OLD")
+        (new_dir / "lib" / "libfoo.so").write_bytes(b"NEW")
+
+        from abicheck import bundle as bundle_mod, service_compare_pipeline as scp
+
+        calls: list[dict[str, object]] = []
+
+        def _fake_run_compare(old_lib, new_lib, **kwargs):  # type: ignore[no-untyped-def]
+            calls.append(kwargs)
             raise SnapshotError("stop before a real compare runs")
 
         def _fake_build_bundle_snapshot(libraries):  # type: ignore[no-untyped-def]
@@ -451,7 +491,9 @@ class TestCompareProductDirectoriesHeaderRootsContainment:
         )
 
         with pytest.raises(SnapshotError, match="stop before"):
-            compare_product_directories(old_dir, new_dir, header_roots=["../escaped"])
+            compare_product_directories(
+                old_dir, new_dir, header_roots=["include/nonexistent"]
+            )
 
         assert len(calls) == 1
         assert calls[0]["old_headers"] == []
@@ -695,6 +737,74 @@ class TestCompareProductDirectoriesStandaloneRemoval:
             if f.kind == ChangeKind.BUNDLE_LIBRARY_REMOVED
         ]
         assert len(removed) == 1
+
+    def test_a_real_second_removal_sharing_a_reported_basename_is_not_suppressed(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Two distinct unmatched libraries share a basename
+        # (plugins/a/plugin.so, plugins/b/plugin.so). compare_bundle()'s
+        # own detection reports a removal for the bare name "plugin.so"
+        # (it only ever sees the *survivor* of old_bundle_map's own
+        # last-wins collapse -- here plugins/b/plugin.so, inserted last).
+        # A bare-name membership check alone would suppress BOTH unmatched
+        # keys from the standalone-removal fallback, including
+        # plugins/a/plugin.so, which compare_bundle() never analyzed at
+        # all (the collapse discarded it before compare_bundle() ever saw
+        # it) -- silently losing a real, distinct removal (Codex review,
+        # fresh evidence).
+        from abicheck import bundle as bundle_mod
+        from abicheck.checker_policy import ChangeKind
+        from abicheck.product_baseline import compare_product_directories
+
+        old_dir = tmp_path / "old"
+        new_dir = tmp_path / "new"
+        old_dir.mkdir()
+        new_dir.mkdir()
+
+        class _FakeFinding:
+            def __init__(self, provider_library: str) -> None:
+                self.kind = ChangeKind.BUNDLE_LIBRARY_REMOVED
+                self.provider_library = provider_library
+
+        class _FakeResult:
+            def __init__(self) -> None:
+                # Simulates compare_bundle() reporting a removal for the
+                # bare name -- referring to whichever path survived the
+                # collapse (plugins/b/plugin.so, inserted last below).
+                self.bundle_findings = [_FakeFinding("plugin.so")]
+
+        def _fake_discover_library_map(root, *, include_private):  # type: ignore[no-untyped-def]
+            if Path(root) == old_dir:
+                return {
+                    "plugins/a/plugin.so": root / "plugins" / "a" / "plugin.so",
+                    "plugins/b/plugin.so": root / "plugins" / "b" / "plugin.so",
+                }
+            return {}
+
+        def _fake_build_bundle_snapshot(libraries):  # type: ignore[no-untyped-def]
+            return {"libraries": dict(libraries)}
+
+        def _fake_compare_bundle(old, new, per_library_results, **kwargs):  # type: ignore[no-untyped-def]
+            return _FakeResult()
+
+        from abicheck import product_baseline as pb
+
+        monkeypatch.setattr(pb, "_discover_library_map", _fake_discover_library_map)
+        monkeypatch.setattr(
+            bundle_mod, "build_bundle_snapshot", _fake_build_bundle_snapshot
+        )
+        monkeypatch.setattr(bundle_mod, "compare_bundle", _fake_compare_bundle)
+
+        result = compare_product_directories(old_dir, new_dir)
+
+        removed = [
+            f
+            for f in result.bundle_findings
+            if f.kind == ChangeKind.BUNDLE_LIBRARY_REMOVED
+        ]
+        # One from the compare_bundle() mock (plugins/b's survivor) plus
+        # one standalone finding for plugins/a, which was never reported.
+        assert len(removed) == 2
 
 
 class TestCompareProductDirectoriesStandaloneAddition:

@@ -22,6 +22,7 @@ and mcp_server.py.
 from __future__ import annotations
 
 import re
+import struct
 from pathlib import Path
 
 # Mach-O magic bytes — covers all variants:
@@ -179,6 +180,44 @@ def strip_vendor_hash(name: str) -> str:
 #: :func:`_canonical_library_key`'s own docstring for why.
 _DYLIB_VERSION_RE = re.compile(r"\.(?:\d+\.)*\d+\.dylib$", re.IGNORECASE)
 
+#: PE/COFF ``IMAGE_FILE_DLL`` bit in the COFF file header's ``Characteristics``
+#: field -- set for a DLL, clear for a plain ``.exe``.
+_PE_IMAGE_FILE_DLL = 0x2000
+
+
+def _pe_is_dll_content(path: Path) -> bool:
+    """True when *path* is a PE/COFF image with the ``IMAGE_FILE_DLL`` bit
+    set in its COFF file header, identified from content rather than
+    filename -- lets a DLL shipped under a nonstandard extension (a Python
+    ``.pyd`` extension module) be recognized as a library
+    (`product_baseline.py`'s `_is_library_path`) and case-folded for
+    canonical matching (`_canonical_library_key` below) the same way a
+    conventional ``.dll`` already is, since a suffix check alone never
+    catches either (Codex review, fresh evidence).
+
+    Lives in this leaf module, not `product_baseline.py` (its original
+    home): `_canonical_library_key` needs it too, and `product_baseline.py`
+    already imports `_canonical_library_key` from here -- the reverse
+    import would cycle.
+    """
+    try:
+        with open(path, "rb") as f:
+            dos_header = f.read(64)
+            if len(dos_header) < 64 or dos_header[0:2] != b"MZ":
+                return False
+            (pe_offset,) = struct.unpack_from("<I", dos_header, 0x3C)
+            f.seek(pe_offset)
+            sig = f.read(4)
+            if sig != b"PE\x00\x00":
+                return False
+            coff_header = f.read(20)
+    except (OSError, struct.error):
+        return False
+    if len(coff_header) < 20:
+        return False
+    (characteristics,) = struct.unpack_from("<H", coff_header, 18)
+    return bool(characteristics & _PE_IMAGE_FILE_DLL)
+
 
 def _canonical_library_key(path: Path) -> str:
     """Canonical key used to match libraries across releases.
@@ -207,17 +246,22 @@ def _canonical_library_key(path: Path) -> str:
     snapshot as ``libfoo.abicheck.json.gz`` must still key-match as the same
     library rather than surfacing as an unrelated removal+addition pair.
 
-    Case-folding is restricted to the PE/``.dll`` suffix, matching only
-    the one format whose loader identity is genuinely case-insensitive
-    (Windows). Whole-string lowercasing previously applied to *every*
-    format alike, so an ELF ``libFoo.so`` -> ``libfoo.so`` case-only
-    rename (or the identical Mach-O case) paired via this same canonical
-    fallback and its removal/addition was silently suppressed — but a
-    case-sensitive ELF/Mach-O loader cannot resolve a symbol-table-only
-    case difference the way Windows' loader resolves a `.dll` one: an
-    existing consumer whose ``DT_NEEDED``/``LC_LOAD_DYLIB`` still names
-    the old spelling fails to load the renamed file, a real break this
-    canonical pairing must not hide (Codex review, fresh evidence).
+    Case-folding is restricted to PE images, matching only the one format
+    whose loader identity is genuinely case-insensitive (Windows).
+    Whole-string lowercasing previously applied to *every* format alike,
+    so an ELF ``libFoo.so`` -> ``libfoo.so`` case-only rename (or the
+    identical Mach-O case) paired via this same canonical fallback and its
+    removal/addition was silently suppressed — but a case-sensitive
+    ELF/Mach-O loader cannot resolve a symbol-table-only case difference
+    the way Windows' loader resolves a PE one: an existing consumer whose
+    ``DT_NEEDED``/``LC_LOAD_DYLIB`` still names the old spelling fails to
+    load the renamed file, a real break this canonical pairing must not
+    hide (Codex review, fresh evidence). "Is this a PE image" is answered
+    by content (:func:`_pe_is_dll_content`), not just the ``.dll`` suffix:
+    a case-only rename of a PE library shipped under a nonstandard
+    extension (a Python ``.pyd`` extension module) is just as
+    case-insensitive on Windows as a ``.dll``'s, and a suffix-only check
+    would miss it (Codex review, fresh evidence).
     """
     from .snapshot_io import _COMPRESSED_SUFFIXES
 
@@ -232,7 +276,7 @@ def _canonical_library_key(path: Path) -> str:
             name = name[: -len(trailing_ext)]
             name_lower = name_lower[: -len(trailing_ext)]
             break
-    if name_lower.endswith(".dll"):
+    if name_lower.endswith(".dll") or _pe_is_dll_content(path):
         return name_lower
     m = re.search(r"\.so(?:\.|$)", name, re.IGNORECASE)
     if m:
