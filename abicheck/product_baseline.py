@@ -251,22 +251,22 @@ def _is_library_path(path: Path) -> bool:
         return False
     # A GNU ld INPUT()/GROUP() linker script (the conventional
     # `libfoo.so -> INPUT(libfoo.so.1)` SDK-install pattern) is library-
-    # suffix-named but carries no binary content of its own -- only
-    # `_is_shared_library`'s suffix check can ever classify one as a
-    # library here (it's plain text, so none of the three content probes
-    # above match it). `_discover_library_map` already excludes it via
-    # this same check, applied separately at its own call site -- but
-    # `_add_member` (the packing path) called this predicate directly with
-    # no equivalent exclusion, so a linker script was archived under a
-    # library-suffixed name AND classified as its own `LibraryEntry`,
-    # while `_discover_library_map`/`compare_product_directories` excluded
-    # it -- packing and comparison ended up with contradictory inventories
-    # for the identical tree (Codex review, fresh evidence). Centralizing
-    # the exclusion in this one shared predicate is exactly what this
-    # function's own docstring already promises ("Factored into one
-    # predicate so discovery and manifest classification can never drift
-    # apart on this question again") -- it just hadn't actually happened
-    # for this specific check yet.
+    # suffix-named but carries no binary content of its own. `_discover_
+    # library_map` already excludes it via this same check, applied
+    # separately at its own call site -- but `_add_member` (the packing
+    # path) called this predicate directly with no equivalent exclusion,
+    # so a linker script was archived under a library-suffixed name AND
+    # classified as its own `LibraryEntry`, while `_discover_library_map`/
+    # `compare_product_directories` excluded it -- packing and comparison
+    # ended up with contradictory inventories for the identical tree
+    # (Codex review, fresh evidence). Centralizing the exclusion in this
+    # one shared predicate is exactly what this function's own docstring
+    # already promises ("Factored into one predicate so discovery and
+    # manifest classification can never drift apart on this question
+    # again") -- it just hadn't actually happened for this specific check
+    # yet. `resolve_linker_script` itself guards against misclassifying a
+    # real binary whose content happens to contain linker-script-shaped
+    # text (see its own docstring) -- no need to duplicate that check here.
     _, is_linker_script = resolve_linker_script(path)
     return not is_linker_script
 

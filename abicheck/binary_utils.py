@@ -84,7 +84,20 @@ def resolve_linker_script(path: Path) -> tuple[Path | None, bool]:
 
     Returns ``(target, is_linker_script)``. ``target`` is ``None`` when the file
     is not a linker script, or when no referenced library can be found.
+
+    Real ELF/PE/Mach-O magic bytes are checked first and are a positive,
+    unambiguous binary-content signal: a genuine GNU ld linker script is
+    plain text and never starts with one. Without this guard, a real binary
+    whose first 8KiB happens to contain the literal text ``INPUT(``/
+    ``GROUP(``/``OUTPUT_FORMAT(`` -- embedded strings, symbol names, or
+    plain coincidence -- would be misclassified as a linker script by the
+    regex probe below (Codex review, fresh evidence: reported for a real
+    ELF DSO whose own content happened to contain
+    ``INPUT(libdoesnotexist.so)``, silently excluding it from both
+    :mod:`abicheck.product_baseline` packing and product comparison).
     """
+    if detect_binary_format(path) is not None:
+        return None, False
     try:
         with open(path, "rb") as f:
             raw = f.read(8192)

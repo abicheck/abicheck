@@ -242,6 +242,34 @@ class TestPackProductBaseline:
         assert "libscripted.so.1" in names
         assert "libscripted.so" not in names
 
+    def test_pack_does_not_misclassify_a_real_binary_containing_ld_text(
+        self, tmp_path: Path
+    ) -> None:
+        # resolve_linker_script()'s own probe is a plain regex text search
+        # over a file's first 8KiB, with no check of its own for the
+        # absence of binary magic -- a real ELF/PE/Mach-O binary whose
+        # content happens to contain the literal text "INPUT("/"GROUP("/
+        # "OUTPUT_FORMAT(" (embedded strings, symbol names, or plain
+        # coincidence) matched too, even though it's a genuine library,
+        # not a linker script -- wrongly excluding it from packing (and,
+        # via the same shared _is_library_path predicate, from
+        # comparison) (Codex review, fresh evidence).
+        from tests.test_package import _make_minimal_elf_so
+
+        product = _make_product(tmp_path)
+        elf_path = product / "lib" / "libreal.so"
+        _make_minimal_elf_so(elf_path)
+        # Append linker-script-shaped text after the real ELF header --
+        # models an embedded string/symbol name a real compiled binary
+        # could plausibly contain, well within resolve_linker_script's own
+        # 8KiB probe window.
+        with elf_path.open("ab") as fh:
+            fh.write(b"\x00INPUT(libdoesnotexist.so)\x00")
+
+        manifest = pack_product_baseline(product, tmp_path / "b.tar.zst")
+        names = {lib.name for lib in manifest.libraries}
+        assert "libreal.so" in names
+
     def test_pack_records_correct_hash_and_size(self, tmp_path: Path) -> None:
         product = _make_product(tmp_path)
         manifest = pack_product_baseline(product, tmp_path / "b.tar.zst")
