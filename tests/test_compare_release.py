@@ -397,6 +397,29 @@ class TestFileVsFile:
         assert data["verdict"] == "NO_CHANGE"
         assert "libraries" not in data
 
+    def test_bundle_facts_out_is_rejected_for_a_single_pair(
+        self, tmp_path: Path
+    ) -> None:
+        """G38 Phase 2 (Codex review, fresh evidence): a single-file/
+        snapshot compare has no OLD-side library map to persist, so
+        `--bundle-facts-out` was silently ignored -- reporting success
+        while leaving automation believing a baseline was written when
+        none was. Reject it outright instead."""
+        snap = _snap()
+        old_f = _write_snap(tmp_path / "libfoo.json", snap)
+        new_f = _write_snap(tmp_path / "libfoo2.json", snap)
+        code, out = _invoke(
+            "compare",
+            str(old_f),
+            str(new_f),
+            "--bundle-facts-out",
+            str(tmp_path / "baseline.json"),
+        )
+        assert code == 64
+        assert "Usage:" in out
+        assert "--bundle-facts-out is only supported for directory/package" in out
+        assert not (tmp_path / "baseline.json").exists()
+
 
 # ── dir vs dir ───────────────────────────────────────────────────────────────
 
@@ -482,12 +505,61 @@ class TestDirVsDir:
             "compare",
             str(old_dir),
             str(new_dir),
-            "-o", str(same_path),
-            "--write", f"json={same_path}",
+            "-o",
+            str(same_path),
+            "--write",
+            f"json={same_path}",
         )
         assert code == 64
         assert "Usage:" in out
         assert "--write's PATH must differ from --output/-o" in out
+
+    @pytest.mark.parametrize(
+        "extra_args,facts_name,expected_substr",
+        [
+            (("-o", "{p}"), "out.json", "must differ from --output/-o"),
+            (("--write", "json={p}"), "out.json", "must differ from --write"),
+            (("--output-dir", "{d}"), "summary.json", "summary.json"),
+            (("--output-dir", "{d}"), "libfoo.json", "'libfoo.json'"),
+        ],
+        ids=["output", "write", "output_dir_summary", "output_dir_per_library"],
+    )
+    def test_bundle_facts_out_rejects_output_collisions(
+        self,
+        tmp_path: Path,
+        extra_args: tuple[str, str],
+        facts_name: str,
+        expected_substr: str,
+    ) -> None:
+        """G38 Phase 2 (Codex review, two rounds): `--bundle-facts-out`
+        naming the same path as `--output`/`-o`, `--write`, `--output-dir`'s
+        `summary.json`, or one of its per-library `<stem>.json` files would
+        silently overwrite the requested baseline with the report -- reject
+        each up front, before `--output-dir` is even created."""
+        old_dir = tmp_path / "old"
+        new_dir = tmp_path / "new"
+        old_dir.mkdir()
+        new_dir.mkdir()
+        snap = _snap()
+        _write_snap(old_dir / "libfoo.json", snap)
+        _write_snap(new_dir / "libfoo.json", snap)
+        report_dir = tmp_path / "reports"
+        same_path = tmp_path / "out.json"
+        resolved_extra = [a.format(p=same_path, d=report_dir) for a in extra_args]
+        code, out = _invoke(
+            "compare",
+            str(old_dir),
+            str(new_dir),
+            *resolved_extra,
+            "--bundle-facts-out",
+            str(tmp_path / facts_name)
+            if facts_name == "out.json"
+            else str(report_dir / facts_name),
+        )
+        assert code == 64
+        assert "Usage:" in out
+        assert expected_substr in out
+        assert not report_dir.exists()
 
     def test_json_output_multi(self, tmp_path: Path) -> None:
         old_dir = tmp_path / "old"
@@ -629,6 +701,40 @@ class TestDirVsDir:
         code, out = _invoke("compare", str(old_dir), str(new_dir))
         assert code == 0
         assert "no matching" in out.lower() or "warning" in out.lower()
+
+
+class TestBundleFactsOutStrandedLibraryWarning:
+    """The `--bundle-facts-out` stranded-library fallback warns (rather than
+    silently persisting a lossy entry) when the real resolve itself fails
+    (Codex review, fresh evidence) -- end-to-end through the real CLI, since
+    the warning lives in `compare_release_cmd`'s own nested closure, not in
+    the independently-testable `write_bundle_facts_out()` helper.
+    """
+
+    def test_warns_when_a_stranded_library_cannot_be_fully_resolved(
+        self, tmp_path: Path
+    ) -> None:
+        old_dir = tmp_path / "old"
+        new_dir = tmp_path / "new"
+        old_dir.mkdir()
+        new_dir.mkdir()
+        snap = _snap(library="libfoo.so")
+        _write_snap(old_dir / "libfoo.json", snap)
+        _write_snap(new_dir / "libfoo.json", snap)
+        # Old-only, and not a real ELF/JSON/etc. -- service.resolve_input()
+        # raises on it, so the fallback's own except-and-degrade path (and
+        # its warning) is what gets exercised.
+        (old_dir / "libbroken.so").write_bytes(b"")
+
+        out_path = tmp_path / "old.bundlefacts.json"
+        code, out = _invoke(
+            "compare", str(old_dir), str(new_dir), "--bundle-facts-out", str(out_path)
+        )
+
+        assert code == 0
+        assert "libbroken.so" in out
+        assert "ELF-only" in out
+        assert out_path.exists()
 
 
 # ── unmatched / missing ───────────────────────────────────────────────────────

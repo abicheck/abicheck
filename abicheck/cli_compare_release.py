@@ -67,6 +67,9 @@ from .cli_compare_release_helpers import (  # noqa: F401
     _resolve_release_severity_config,
     _run_bundle_analysis,
     apply_release_gate_pack,
+    reject_bundle_facts_out_collision,
+    reject_bundle_facts_out_dir_collision,
+    write_bundle_facts_out,
 )
 from .cli_options import (
     include_dependencies_option,
@@ -1291,6 +1294,21 @@ def _strip_diff_results_and_adjust_verdict(
     "across DSO boundaries, type drift across siblings, provider "
     "migration, and manifest mismatches.",
 )
+@click.option(
+    "--bundle-facts-out",
+    "bundle_facts_out",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="Persist this run's OLD-side bundle facts (per-library snapshots "
+    "plus the instantiation manifest, if any) to PATH (G38 Phase 2, "
+    "ADR-023 amendment). A later comparison can load this file and pass "
+    "it to abicheck.bundle_facts.compare_bundle_from_facts() (Python API; "
+    "no CLI consumer yet) to get a bundle-level verdict from this stored "
+    "baseline without reopening the old .so files. This is an additive "
+    "output alongside the ordinary live-vs-live comparison this "
+    "invocation already performs -- it does not change any finding or "
+    "exit code. No-op combined with --no-bundle-analysis.",
+)
 @scope_options  # --scope-public-headers/--no- (ADR-037 D3)
 @include_dependencies_option
 @click.option(
@@ -1349,6 +1367,7 @@ def compare_release_cmd(
     bundle_system_providers: str,
     bundle_cohorts: tuple[str, ...],
     no_bundle_analysis: bool,
+    bundle_facts_out: Path | None,
     scope_public_headers: bool,
     include_dependencies: bool,
     probe_matrix_old: Path | None,
@@ -1443,18 +1462,14 @@ def compare_release_cmd(
 
     _setup_verbosity(verbose)
 
-    # CLI cleanup phase two, PR E: --write's own internal coherence (no
-    # secondary aimed at the same file as the primary; this command has no
-    # --dry-run of its own to be incoherent with -- a dry run never reaches
-    # this engine at all, see run_compare's own emit_dry_run() call, which
-    # exits before the directory/package dispatch). Shared with single-pair
-    # `compare` so the two commands' --write validation cannot drift.
+    # CLI cleanup phase two, PR E: shared with `compare` so it can't drift.
     reject_incoherent_secondary_output(
         dry_run=False,
         output=output,
         secondary_fmt=secondary_fmt,
         secondary_output=secondary_output,
     )
+    reject_bundle_facts_out_collision(bundle_facts_out, output, secondary_output)
 
     # Track temporary directory paths for cleanup
     _temp_dir_paths: list[str] = []
@@ -1537,6 +1552,7 @@ def compare_release_cmd(
                 for msg in warning_msgs:
                     click.echo(msg, err=True)
 
+            reject_bundle_facts_out_dir_collision(bundle_facts_out, output_dir, old_map)
             if output_dir:
                 output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -1631,7 +1647,11 @@ def compare_release_cmd(
                 policy,
                 policy_file_path,
                 output_dir,
-                collect_diff_results=(fmt == "junit" or secondary_fmt == "junit"),
+                collect_diff_results=(
+                    fmt == "junit"
+                    or secondary_fmt == "junit"
+                    or (bundle_facts_out is not None and not no_bundle_analysis)
+                ),
                 jobs=jobs,
                 scope_to_public_surface=scope_public_headers,
                 include_dependencies=include_dependencies,
@@ -1641,6 +1661,51 @@ def compare_release_cmd(
                 pack_application=pack_application,
                 compile_context=compile_context,
             )
+
+            if bundle_facts_out is not None and not no_bundle_analysis:
+                # Resolved here, not in the leaf write_bundle_facts_out() (see its docstring).
+                def _resolve_stranded_library(old_path: Path) -> AbiSnapshot:
+                    from .cli_resolve import _resolve_input
+                    from .elf_metadata import parse_elf_metadata
+                    from .header_utils import split_public_header_inputs
+
+                    old_dbg = (
+                        resolve_debug_info(old_path, old_debug_dir)
+                        if old_debug_dir
+                        else None
+                    )
+                    # old_h doubles as the public-header set, matching the
+                    # normal compare path (else origin=UNKNOWN; Codex review).
+                    pub_headers, pub_dirs = split_public_header_inputs(old_h)
+                    try:
+                        return _resolve_input(
+                            old_path,
+                            old_h,
+                            old_inc,
+                            old_version,
+                            lang,
+                            pdb_path=old_dbg,
+                            compile=compile_context,
+                            include_dependencies=include_dependencies,
+                            public_headers=pub_headers,
+                            public_header_dirs=pub_dirs,
+                        )
+                    except Exception as exc:
+                        # Degrade rather than abort, but warn: lossy entry (Codex review).
+                        click.echo(f"{old_path.name}: ELF-only ({exc})", err=True)
+                        return AbiSnapshot(
+                            library=old_path.name,
+                            version="",
+                            elf=parse_elf_metadata(old_path),
+                        )
+
+                write_bundle_facts_out(
+                    bundle_facts_out,
+                    diff_pairs,
+                    manifest_path,
+                    old_map,
+                    resolve_stranded_library=_resolve_stranded_library,
+                )
 
             # ADR-049 Phase 7's orthogonal contract-coverage floor, aggregated
             # across every library with max() -- one library's incomplete

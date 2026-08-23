@@ -142,6 +142,23 @@ class BundleSnapshot:
     libraries: dict[str, Path]  # library_name -> filesystem path
     metadata: dict[str, ElfMetadata]  # library_name -> parsed ELF metadata
     resolution: ResolutionGraph
+    # Whether `.libraries`' paths name real, live files worth resolving
+    # against the filesystem (symlink targets, CWD-relative lookups), or are
+    # synthetic identity-only paths reconstructed from stored facts (G38
+    # Phase 2's `bundle_facts.bundle_snapshot_from_facts()`). Mirrors
+    # `build_bundle_snapshot_from_metadata`'s own `probe_filesystem` --
+    # `bundle._detect_soname_skew()`'s SONAME-major fallback reads this to
+    # decide whether re-resolving a path is safe: for a synthetic path (a
+    # bare `Path("libfoo.so.1")` with no real file behind it),
+    # `Path.resolve()` still succeeds by walking the *current working
+    # directory* -- so if the CWD happens to hold an unrelated real file or
+    # symlink with that same name, resolution would silently substitute its
+    # target for the persisted, already-resolved basename (Codex review,
+    # fresh evidence). Defaults `True` (safe for every pre-existing direct
+    # construction of this dataclass -- real filesystem paths, mostly in
+    # tests -- since the default preserves the prior always-resolve
+    # behavior).
+    filesystem_backed: bool = True
 
     @property
     def library_names(self) -> list[str]:

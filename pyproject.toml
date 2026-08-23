@@ -400,6 +400,19 @@ pytest_add_cli_args = [
     "--deselect=tests/test_ai_readiness.py::test_main_returns_zero_on_clean_tree",
     "--ignore=tests/test_action_check_target.py",
     "--ignore=tests/test_action_collect_facts.py",
+    # Same "subprocess re-enters the mutated tree with no mutmut config"
+    # failure as the two entries above, discovered via this repo's own G38
+    # bundle-facts PR (the first to trigger this path-filtered lane against
+    # a serialization.py change with this test present). Its
+    # TestRealAbicheckAnnotationsReachTheActionLog class shells out to
+    # `action/run.sh`, which execs the real `abicheck` console script from a
+    # scratch `cwd` — mutmut's PYTHONPATH-based redirection into `mutants/`
+    # follows that subprocess, but the mutated tree's import machinery then
+    # calls mutmut's own config loader fresh in that process, which can't
+    # find `pyproject.toml`'s `[tool.mutmut]` section from a temp directory
+    # and aborts with "Could not figure out where the code to mutate is."
+    # before the compare command ever runs — failing the whole `-x` lane.
+    "--ignore=tests/test_action_run_sh_annotate_renderer.py",
     "--ignore=tests/test_publish_baseline_upload_step.py",
     "--ignore=tests/test_publish_baseline_upload_step_evidence.py",
     "--ignore=tests/test_publish_baseline_upload_step_generation.py",
