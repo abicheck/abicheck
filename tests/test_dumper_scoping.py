@@ -747,8 +747,17 @@ class TestWrapRunDumpWithDependencyScope:
 
     def _uncached(self, tagged_snap):
         def _fn(
-            path, binary_fmt, headers=None, includes=None, version="", lang="c++",
-            *, dump_manifest=None, public_headers=None, public_header_dirs=None, **_kw,
+            path,
+            binary_fmt,
+            headers=None,
+            includes=None,
+            version="",
+            lang="c++",
+            *,
+            dump_manifest=None,
+            public_headers=None,
+            public_header_dirs=None,
+            **_kw,
         ):
             return tagged_snap
 
@@ -780,6 +789,67 @@ class TestWrapRunDumpWithDependencyScope:
         run_dump = wrap_run_dump_with_dependency_scope(self._uncached(snap))
         result = run_dump(Path("/lib.so"), "elf")
         assert result.dependency_scope is None
+
+    def test_default_include_dependencies_true_suppresses_streaming_prune(self):
+        """A full/unscoped request (``include_dependencies=True``, the
+        default) must suppress the opt-in streaming pruner
+        (dumper_clang_streaming.py) for the inner call's dynamic extent --
+        otherwise the pruner could silently drop dependency-header
+        functions/variables even though this wrapper was about to keep them
+        (Codex review, PR #840)."""
+        from abicheck.dumper_clang_streaming import streaming_prune_suppressed
+
+        observed: list[bool] = []
+
+        def _fn(
+            path,
+            binary_fmt,
+            headers=None,
+            includes=None,
+            version="",
+            lang="c++",
+            *,
+            dump_manifest=None,
+            public_headers=None,
+            public_header_dirs=None,
+            **_kw,
+        ):
+            observed.append(streaming_prune_suppressed())
+            return AbiSnapshot(library="lib.so", version="1.0", from_headers=True)
+
+        run_dump = wrap_run_dump_with_dependency_scope(_fn)
+        assert not streaming_prune_suppressed()  # not leaked before the call
+        run_dump(Path("/lib.so"), "elf")  # include_dependencies defaults True
+        assert observed == [True]
+        assert not streaming_prune_suppressed()  # not leaked after the call
+
+    def test_include_dependencies_false_does_not_suppress_streaming_prune(self):
+        """A filtered request needs no suppression: the pruner can never be
+        more aggressive than the post-hoc filter this wrapper is about to
+        apply anyway."""
+        from abicheck.dumper_clang_streaming import streaming_prune_suppressed
+
+        observed: list[bool] = []
+
+        def _fn(
+            path,
+            binary_fmt,
+            headers=None,
+            includes=None,
+            version="",
+            lang="c++",
+            *,
+            dump_manifest=None,
+            public_headers=None,
+            public_header_dirs=None,
+            **_kw,
+        ):
+            observed.append(streaming_prune_suppressed())
+            return AbiSnapshot(library="lib.so", version="1.0", from_headers=True)
+
+        run_dump = wrap_run_dump_with_dependency_scope(_fn)
+        run_dump(Path("/lib.so"), "elf", include_dependencies=False)
+        assert observed == [False]
 
     def test_headers_recovered_regardless_of_positional_or_keyword(self):
         """`headers` (the -H root set) must reach resolve_dependency_scope's

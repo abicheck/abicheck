@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from contextlib import nullcontext
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
 
@@ -43,6 +44,7 @@ from .cli_dump_depth import (
     resolve_dump_depth as resolve_dump_depth,
 )
 from .dumper import dump
+from .dumper_clang_streaming import suppress_streaming_prune
 from .dumper_scoping import dump_manifest_header_roots as _dump_manifest_header_roots
 from .errors import AbicheckError
 
@@ -179,7 +181,6 @@ def check_dump_debug_format_error(
             f"not {binary_fmt.upper()}."
         )
     return None
-
 
 
 def evidence_depth_label(
@@ -742,7 +743,9 @@ def _add_dump_manifest_section(result: Any, dump_manifest: Any) -> None:
     result.add("Multi-TU manifest (--dump-manifest)", *manifest_lines)
 
 
-def _add_dump_data_layers(result: Any, so_path: Path, headers: tuple[Path, ...]) -> None:
+def _add_dump_data_layers(
+    result: Any, so_path: Path, headers: tuple[Path, ...]
+) -> None:
     """Report which L0-L2 data layers the artifact actually carries.
 
     Best-effort: a diagnostic section, so any parse failure is downgraded to a
@@ -1079,6 +1082,7 @@ def render_dump_dry_run(
 # imported above under its original name; every existing caller/test is
 # unchanged. See that module for the derivation logic.
 
+
 def handle_non_elf_dump(
     so_path: Path,
     binary_fmt: str,
@@ -1188,7 +1192,8 @@ def handle_non_elf_dump(
             build_info=build_info,
             build_config=build_config,
             build_query=build_query,
-            build_compile_db=build_compile_db, build_targets=build_targets,
+            build_compile_db=build_compile_db,
+            build_targets=build_targets,
             collect_mode=collect_mode,
             gcc_path=getattr(compile_context, "gcc_path", None),
             gcc_prefix=getattr(compile_context, "gcc_prefix", None),
@@ -1206,20 +1211,29 @@ def handle_non_elf_dump(
         # l3_effective_ctx` below hands the merged L3 context to service_
         # header_scoped._try_header_scoped_dump, which derives the identical
         # cache-relevant paths from those tokens itself (Codex review, PR D).
-        snap = dump_native_binary(
-            so_path,
-            binary_fmt,
-            list(headers),
-            list(eff_includes),
-            version,
-            lang,
-            lang_explicit=lang_explicit,
-            pdb_path=pdb_path,
-            public_headers=list(public_headers),
-            public_header_dirs=list(public_header_dirs),
-            header_backend=header_backend,
-            compile=l3_effective_ctx,
-        )
+        #
+        # `include_dependencies` (`dump --include-system-declarations`) means
+        # this invocation wants the full, unscoped declaration set -- suppress
+        # the opt-in streaming pruner for this call the same way, and for the
+        # same reason, as `perform_elf_dump`'s identical guard above (Codex
+        # review, PR #840): it has no visibility into this flag on its own,
+        # and pruning here happens well before `write_snapshot_output`'s
+        # post-hoc filter below.
+        with suppress_streaming_prune() if include_dependencies else nullcontext():
+            snap = dump_native_binary(
+                so_path,
+                binary_fmt,
+                list(headers),
+                list(eff_includes),
+                version,
+                lang,
+                lang_explicit=lang_explicit,
+                pdb_path=pdb_path,
+                public_headers=list(public_headers),
+                public_header_dirs=list(public_header_dirs),
+                header_backend=header_backend,
+                compile=l3_effective_ctx,
+            )
     # A ClickException already carries its user-facing message; it must reach
     # Click as itself rather than be re-wrapped by the handler below.
     except click.ClickException:  # pylint: disable=try-except-raise
@@ -1281,7 +1295,6 @@ def handle_non_elf_dump(
         public_headers=tuple(public_headers),
         public_header_dirs=tuple(public_header_dirs),
     )
-
 
 
 def resolve_dump_compile_context(
@@ -1584,7 +1597,8 @@ def perform_elf_dump(
             build_info=build_info,
             build_config=build_config,
             build_query=build_query,
-            build_compile_db=build_compile_db, build_targets=build_targets,
+            build_compile_db=build_compile_db,
+            build_targets=build_targets,
             collect_mode=collect_mode,
             gcc_path=gcc_path,
             gcc_prefix=gcc_prefix,
@@ -1641,7 +1655,23 @@ def perform_elf_dump(
         # so without its own scope here the primary parse is never memoized
         # and the graph pass re-reads/re-parses the disk cache instead
         # (Codex review).
-        with dumper_cache.ast_memoize_scope():
+        #
+        # `include_dependencies` (`dump --include-system-declarations`) means
+        # this invocation wants the full, unscoped declaration set -- the
+        # opt-in streaming pruner (dumper_clang_streaming.py) has no
+        # visibility into that flag on its own (it prunes deep inside the
+        # clang AST parse, long before `write_snapshot_output`'s post-hoc
+        # filter below ever runs), so without suppressing it here it could
+        # silently drop dependency-header functions/variables the flag
+        # explicitly asked to keep -- a real correctness bug (Codex review,
+        # PR #840), not merely a missing "auto-enable from this flag"
+        # convenience. `False` needs no suppression: the pruner can never be
+        # more aggressive than the filter `write_snapshot_output` is about to
+        # apply anyway.
+        with (
+            dumper_cache.ast_memoize_scope(),
+            suppress_streaming_prune() if include_dependencies else nullcontext(),
+        ):
             snap = dump(
                 so_path=so_path,
                 headers=resolved_headers,
@@ -1920,7 +1950,10 @@ def perform_elf_dump(
         inputs_pack=inputs_pack,
         depth=depth,
         include_dependencies=include_dependencies,
-        header_roots=tuple(headers) + _dump_manifest_header_roots(dump_manifest) + tuple(public_headers) + tuple(public_header_dirs),
+        header_roots=tuple(headers)
+        + _dump_manifest_header_roots(dump_manifest)
+        + tuple(public_headers)
+        + tuple(public_header_dirs),
         clang_bin=resolve_source_frontend_clang_bin(
             gcc_path, gcc_prefix, exclude_cl_style=False
         ),

@@ -96,9 +96,11 @@ import functools
 import inspect
 from collections import deque
 from collections.abc import Callable, Mapping, Sequence, Set as AbstractSet
+from contextlib import nullcontext
 from pathlib import Path
 from typing import Any
 
+from .dumper_clang_streaming import suppress_streaming_prune
 from .dwarf_advanced import AdvancedDwarfMetadata
 from .dwarf_metadata import DwarfMetadata
 from .model import AbiSnapshot, EnumType, Function, RecordType, Variable, Visibility
@@ -279,7 +281,11 @@ def dump_manifest_public_roots(dump_manifest: Any) -> tuple[Path, ...]:
     if dump_manifest is None:
         return ()
     return tuple(
-        (*dump_manifest.roots, *dump_manifest.public_header_paths, *dump_manifest.public_header_dirs)
+        (
+            *dump_manifest.roots,
+            *dump_manifest.public_header_paths,
+            *dump_manifest.public_header_dirs,
+        )
     )
 
 
@@ -372,7 +378,9 @@ def _kept_type_spellings(
     return spellings
 
 
-def _raw_candidate_spellings(candidate: RecordType | EnumType, identity: str) -> set[str]:
+def _raw_candidate_spellings(
+    candidate: RecordType | EnumType, identity: str
+) -> set[str]:
     """Every spelling one dependency candidate could be named by, unguarded.
 
     Full identity, namespace-suffix spellings, the stdlib-stripped form, the
@@ -955,7 +963,9 @@ def _scoped_dwarf_advanced(
     return dataclasses.replace(
         adv,
         calling_conventions={
-            k: v for k, v in adv.calling_conventions.items() if k not in excluded_symbols
+            k: v
+            for k, v in adv.calling_conventions.items()
+            if k not in excluded_symbols
         },
         value_abi_traits={
             k: v for k, v in adv.value_abi_traits.items() if k not in excluded_symbols
@@ -1032,7 +1042,9 @@ def apply_dependency_scope_to_run_dump_result(
     either (Codex review, twice: the first pass only folded in
     ``public_header_dirs``, missing the file-level ``public_headers`` set)."""
     headers = tuple(bound_args.arguments.get("headers") or ())
-    manifest_roots = dump_manifest_header_roots(bound_args.arguments.get("dump_manifest"))
+    manifest_roots = dump_manifest_header_roots(
+        bound_args.arguments.get("dump_manifest")
+    )
     public_headers = tuple(bound_args.arguments.get("public_headers") or ())
     public_header_dirs = tuple(bound_args.arguments.get("public_header_dirs") or ())
     return resolve_dependency_scope(
@@ -1075,7 +1087,11 @@ def wrap_run_dump_with_dependency_scope(
     # valid even against a caller signature that ends in **kwargs (as a test
     # double's does; the real `_run_dump_uncached` has none).
     insert_at = next(
-        (i for i, p in enumerate(old_params) if p.kind is inspect.Parameter.VAR_KEYWORD),
+        (
+            i
+            for i, p in enumerate(old_params)
+            if p.kind is inspect.Parameter.VAR_KEYWORD
+        ),
         len(old_params),
     )
     extended_sig = sig.replace(
@@ -1086,8 +1102,20 @@ def wrap_run_dump_with_dependency_scope(
     def run_dump(
         *args: object, include_dependencies: bool = True, **kwargs: object
     ) -> AbiSnapshot:
+        # A `True` request wants the full, unscoped declaration set -- the
+        # opt-in streaming pruner (dumper_clang_streaming.py) has no
+        # visibility into this parameter at all (it prunes deep inside the
+        # clang AST parse, long before this wrapper's post-hoc filter would
+        # run), so without this it could silently drop dependency-header
+        # functions/variables even though the caller explicitly asked to
+        # keep them -- a real correctness bug (Codex review, PR #840), not
+        # just a missing "auto-enable from this flag" convenience. `False`
+        # needs no suppression: the pruner can never be more aggressive than
+        # this wrapper's own filter is about to apply anyway.
+        with suppress_streaming_prune() if include_dependencies else nullcontext():
+            snap = uncached_fn(*args, **kwargs)
         return apply_dependency_scope_to_run_dump_result(
-            uncached_fn(*args, **kwargs),
+            snap,
             include_dependencies,
             sig.bind_partial(*args, **kwargs),
         )

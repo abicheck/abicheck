@@ -37,7 +37,7 @@ from typing import Any
 
 from . import deadline
 from .dumper_cache import _atomic_copy, _atomic_write_json
-from .dumper_clang_streaming import load_pruned_clang_ast
+from .dumper_clang_streaming import load_pruned_clang_ast, streaming_prune_suppressed
 from .errors import SnapshotError
 from .sycl_context import decode_and_select_frontend_context_from_path
 
@@ -497,18 +497,39 @@ def run_clang_to_ast_file(
 #: ``json.load`` below. Off by default -- matches this codebase's existing
 #: convention for a real, tested, but not-yet-default-wired performance path
 #: (see ``ABICHECK_CLANG_LAYOUT_TOOL``/``ABICHECK_PARALLEL_EXTRACTION``).
-#: Known gap: wiring this to auto-enable from ``dump``/``compare``'s own
-#: ``--include-system-declarations`` opt-out flag needs threading a decision
-#: through two independent call paths (the CLI ``dump`` command's own
-#: ``perform_elf_dump`` and ``service.run_dump``'s
-#: ``wrap_run_dump_with_dependency_scope`` wrapper) that resolve dependency
-#: scoping at two different, already-documented choke points -- see
-#: ``abicheck/dumper_clang_streaming.py``'s module docstring and this PR's
-#: changelog fragment.
+#:
+#: **Correctness, not just convenience (Codex review, PR #840):** this env
+#: var alone has no visibility into whether the *caller* wants a full,
+#: unscoped dump (``dump --include-system-declarations``, or any
+#: ``service.run_dump`` caller relying on its own ``include_dependencies=
+#: True`` default -- most callers other than ``compare``'s live-binary
+#: operand). Both of the choke points that *do* know that
+#: (``cli_dump_helpers.py``'s ``perform_elf_dump``/``handle_non_elf_dump``,
+#: and ``dumper_scoping.wrap_run_dump_with_dependency_scope``) wrap their own
+#: header-AST-parsing call in ``dumper_clang_streaming.
+#: suppress_streaming_prune()`` whenever a full/unscoped dump was requested,
+#: which this env-var check honors via ``streaming_prune_suppressed()``
+#: below -- so enabling this var can never silently drop a declaration an
+#: explicit or default full-scope request asked to keep. Still a real,
+#: narrower residual: a direct, low-level caller of ``dumper.dump()``/
+#: ``_clang_header_dump()`` that bypasses both of those choke points (there
+#: is no third one known today) gets no such protection -- this env var is
+#: deliberately experimental/opt-in specifically because of that kind of gap,
+#: not despite it.
 STREAM_PRUNE_DEPENDENCY_DECLS_ENV_VAR = "ABICHECK_CLANG_PRUNE_DEPENDENCY_DECLS"
 
 
 def _streaming_prune_enabled() -> bool:
+    # `streaming_prune_suppressed()` wins regardless of the env var: it means
+    # the caller (cli_dump_helpers.py's perform_elf_dump/handle_non_elf_dump,
+    # or dumper_scoping.wrap_run_dump_with_dependency_scope) already knows
+    # this request wants the full, unscoped declaration set
+    # (`include_dependencies=True`) and has wrapped this call in
+    # `dumper_clang_streaming.suppress_streaming_prune()` accordingly -- see
+    # that context manager's own docstring for why an ambient signal, not a
+    # threaded parameter, is what closes this gap (Codex review, PR #840).
+    if streaming_prune_suppressed():
+        return False
     return os.environ.get(STREAM_PRUNE_DEPENDENCY_DECLS_ENV_VAR, "").strip() == "1"
 
 

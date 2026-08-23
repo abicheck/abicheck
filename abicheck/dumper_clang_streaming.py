@@ -156,10 +156,71 @@ default or a general performance fix.
 
 from __future__ import annotations
 
+import contextvars
 import json
+from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import Any
 
 from .provenance import is_dependency_header
+
+#: Ambient, per-thread override forcing the pruner off regardless of
+#: ``ABICHECK_CLANG_PRUNE_DEPENDENCY_DECLS`` -- mirrors ``dumper_cache.py``'s
+#: ``_ast_memoize_scope``/``ast_memoize_scope()`` pattern (a wrapper that
+#: knows something a deeply-nested callee doesn't sets an ambient signal
+#: around the call, rather than threading a new parameter through every
+#: intervening function signature).
+#:
+#: Exists because this module's pruning decision and ``dumper_scoping.py``'s
+#: post-hoc ``include_dependencies`` decision are made at two structurally
+#: separate points that do not otherwise share data: this module prunes
+#: *during* the clang AST parse, purely from the env var and the raw AST
+#: content, with no visibility into whether the *caller* actually wants a
+#: full, unscoped dump (``dump --include-system-declarations``, or any
+#: ``service.run_dump`` caller relying on its own ``include_dependencies=True``
+#: default -- which is most callers other than ``compare``'s live-binary
+#: operand, per that parameter's own docstring). Without this, enabling the
+#: opt-in env var would silently violate an explicit or default request for
+#: the full surface -- a real correctness bug (Codex review, PR #840): the
+#: pruner must never be more aggressive than ``dumper_scoping.py``'s own
+#: post-hoc filter, and it cannot be *no* filter at all when that is what was
+#: asked for. The two call sites that already know ``include_dependencies``
+#: (``cli_dump_helpers.py``'s ``perform_elf_dump``/``handle_non_elf_dump``,
+#: and ``dumper_scoping.wrap_run_dump_with_dependency_scope``) each wrap
+#: their own header-AST-parsing call in :func:`suppress_streaming_prune` when
+#: it is ``True`` -- the same "two independent choke points" this module's
+#: sibling known-gap note already names for the *opposite* (auto-enable)
+#: direction.
+_prune_suppressed: contextvars.ContextVar[bool] = contextvars.ContextVar(
+    "_prune_suppressed", default=False
+)
+
+
+@contextmanager
+def suppress_streaming_prune() -> Iterator[None]:
+    """Force the streaming pruner off for the calling thread's dynamic extent,
+    regardless of ``ABICHECK_CLANG_PRUNE_DEPENDENCY_DECLS``.
+
+    Use around a header-AST-parsing call whenever the caller already knows
+    the request wants the full, unscoped declaration set (``include_dependencies
+    =True``) -- see this module's ``_prune_suppressed`` docstring for why this
+    ambient-signal shape, not a threaded parameter, is what closes the gap.
+    Does not cross a ``ThreadPoolExecutor`` boundary on its own (same caveat
+    as ``dumper_cache.ast_memoize_scope``/``deadline``'s own ``ContextVar``s)
+    -- each pooled worker thread needs its own call if it independently needs
+    the full surface.
+    """
+    token = _prune_suppressed.set(True)
+    try:
+        yield
+    finally:
+        _prune_suppressed.reset(token)
+
+
+def streaming_prune_suppressed() -> bool:
+    """Whether :func:`suppress_streaming_prune` is active on this thread."""
+    return _prune_suppressed.get()
+
 
 #: Declaration kinds this module ever prunes. Deliberately excludes every
 #: type/record/enum/typedef kind (``CXXRecordDecl``,
