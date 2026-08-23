@@ -1646,6 +1646,12 @@ def perform_elf_dump(
                 so_path=so_path,
                 headers=resolved_headers,
                 extra_includes=dedup_paths_preserve_order(eff_includes + inc_extra),
+                # Provenance widening gets ONLY the caller's own explicit -I
+                # list, never `eff_includes`/`inc_extra` -- see dump()'s own
+                # docstring note on `public_include_search_dirs` for why
+                # (real regression: `inc_extra`'s auto-added umbrella-header
+                # directory can hold a genuinely private sibling header).
+                public_include_search_dirs=list(includes),
                 version=version,
                 compiler=compiler,
                 gcc_path=gcc_path,

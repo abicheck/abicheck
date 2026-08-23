@@ -29,6 +29,7 @@ from xml.etree.ElementTree import Element, SubElement
 
 from abicheck.diff_helpers import type_map_key
 from abicheck.dumper import _CastxmlParser
+from abicheck.name_classification import strip_anonymous_type_location
 
 
 def _file(root: Element, file_id: str, name: str) -> None:
@@ -136,6 +137,25 @@ class TestDistinctLambdasInOneSnapshotStayDistinct:
         assert len(keys) == 2, "distinct lambdas must not collide on one key"
 
 
+class TestPathContainingALiteralCloseParen:
+    """CodeRabbit review, round 3: the path group was ``[^)]*?``, which by
+    construction cannot match a path containing a literal ``)`` (a real,
+    if unusual, Windows path like ``C:\\release (old)\\foo.hpp``) -- the
+    identical failure mode ``\\S+?`` had for a path containing a space,
+    just from a different character class. Fixed by widening to ``.*?``."""
+
+    def test_windows_path_with_parenthesized_component_is_stripped(self) -> None:
+        name = r"raii_guard<(lambda at C:\release (old)\foo.hpp:4:37)>"
+        assert strip_anonymous_type_location(name) == "raii_guard<(lambda:4:37)>"
+
+    def test_two_checkouts_differing_only_in_a_parenthesized_component_match(
+        self,
+    ) -> None:
+        old = r"guard<(lambda at C:\release (old)\a.hpp:4:37)>"
+        new = r"guard<(lambda at C:\release (new)\a.hpp:4:37)>"
+        assert strip_anonymous_type_location(old) == strip_anonymous_type_location(new)
+
+
 class TestAnonymousEnumLocationStripped:
     def test_enum_name_has_no_embedded_path(self) -> None:
         root = Element("CastXML", attrib={"format": "1.4.0"})
@@ -153,3 +173,85 @@ class TestAnonymousEnumLocationStripped:
         (enum_type,) = parser.parse_enums()
         assert enum_type.name == "(unnamed enum:56:5)"
         assert "/tmp/old" not in enum_type.name
+
+    def test_reference_to_anonymous_enum_matches_its_own_declaration(self) -> None:
+        """Round-3 review finding (Codex + CodeRabbit, independently): a
+        *reference* to an anonymous enum (e.g. a field's type) went through
+        ``_type_name_uncached``'s bare ``el.get("name", "?")`` fallback,
+        never the ``strip_anonymous_type_location`` normalization
+        ``parse_enums()`` applies to the declaration itself -- so the
+        reference and the declaration disagreed on spelling and never
+        matched across two checkouts."""
+        root = Element("CastXML", attrib={"format": "1.4.0"})
+        _file(root, "f1", "/tmp/old/lib.hpp")
+        SubElement(root, "Namespace", attrib={"id": "_1", "name": "::"})
+
+        enum_el = SubElement(root, "Enumeration")
+        enum_el.set("id", "_2")
+        enum_el.set("name", "(unnamed enum at /tmp/old/lib.hpp:56:5)")
+        enum_el.set("context", "_1")
+        enum_el.set("file", "f1")
+        enum_el.set("line", "56")
+
+        parser = _CastxmlParser(root, exported_dynamic=set(), exported_static=set())
+        (enum_type,) = parser.parse_enums()
+        # The reference (a field/param/return naming the same id) goes
+        # through _type_name, not parse_enums -- both must agree.
+        assert parser._type_name("_2") == enum_type.name == "(unnamed enum:56:5)"
+
+
+class TestQualifiedNameNormalizesEnclosingAnonymousScope:
+    """Round-3 review finding (Codex + CodeRabbit, independently):
+    ``_qualified_type_name`` copied an enclosing Struct/Class/Union's raw
+    (unnormalized) ``name`` when building a nested type's ``qualified_name``
+    -- so a type nested inside a lambda-closure-instantiated template (e.g.
+    ``Wrapper<(lambda at /checkout/a.hpp:4:3)>::Inner``) still leaked the
+    checkout path via the enclosing segment, even though the leaf itself was
+    already normalized -- defeating type_map_key's qualified_name-preferred
+    cross-checkout matching for nested declarations."""
+
+    def _nested_struct_root(self, source_path: str) -> Element:
+        root = Element("CastXML", attrib={"format": "1.4.0"})
+        _file(root, "f1", source_path)
+        SubElement(root, "Namespace", attrib={"id": "_1", "name": "::"})
+
+        outer = SubElement(root, "Struct")
+        outer.set("id", "_2")
+        outer.set("name", f"Wrapper<(lambda at {source_path}:4:3)>")
+        outer.set("context", "_1")
+        outer.set("file", "f1")
+        outer.set("line", "4")
+        outer.set("members", "_3")
+
+        inner = SubElement(root, "Struct")
+        inner.set("id", "_3")
+        inner.set("name", "Inner")
+        inner.set("context", "_2")
+        inner.set("file", "f1")
+        inner.set("line", "5")
+        inner.set("members", "")
+
+        return root
+
+    def test_qualified_name_has_no_embedded_path(self) -> None:
+        root = self._nested_struct_root("/tmp/old/lib.hpp")
+        parser = _CastxmlParser(root, exported_dynamic=set(), exported_static=set())
+        types = parser.parse_types()
+        (inner,) = [t for t in types if t.name == "Inner"]
+        assert inner.qualified_name == "Wrapper<(lambda:4:3)>::Inner"
+        assert "/tmp/old" not in (inner.qualified_name or "")
+
+    def test_two_checkout_directories_produce_identical_nested_type_identity(
+        self,
+    ) -> None:
+        old_root = self._nested_struct_root("/tmp/old/lib.hpp")
+        new_root = self._nested_struct_root("/tmp/new/lib.hpp")
+        old_parser = _CastxmlParser(
+            old_root, exported_dynamic=set(), exported_static=set()
+        )
+        new_parser = _CastxmlParser(
+            new_root, exported_dynamic=set(), exported_static=set()
+        )
+        (old_inner,) = [t for t in old_parser.parse_types() if t.name == "Inner"]
+        (new_inner,) = [t for t in new_parser.parse_types() if t.name == "Inner"]
+        assert type_map_key(old_inner) == type_map_key(new_inner)

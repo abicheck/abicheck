@@ -48,6 +48,8 @@ import pytest
 from hypothesis import given, settings, strategies as st
 
 from abicheck.provenance import (
+    _TARGET_TRIPLE_RE,
+    _TOOLCHAIN_VERSION_RE,
     _is_bare_system_dir,
     _is_toolchain_compiler_include_dir,
     _segments,
@@ -70,11 +72,29 @@ _SEGMENT = st.text(
 _PREFIX_SUFFIX = st.lists(_SEGMENT, max_size=4)
 _TRIPLE_OR_VERSION = _SEGMENT
 
+# Compiler-shaped generators (round-3 review, Codex: the earlier revision
+# wildcarded the triple/version components unconditionally, matching a
+# project path like lib/gcc/backend/v1/include too). Built from small
+# integer/word components joined the way a real triple/version actually is,
+# not by importing the module's own regex -- an independent notion of "looks
+# like a real triple/version" for the "recognized" side of the property, the
+# "rejected" side below cross-checks these generators against the module's
+# actual regexes instead of re-deriving a second definition of "shaped".
+_TRIPLE_COMPONENT = st.text(
+    alphabet="abcdefghijklmnopqrstuvwxyz0123456789", min_size=1, max_size=8
+)
+_REAL_TRIPLE = st.lists(_TRIPLE_COMPONENT, min_size=2, max_size=4).map(
+    "-".join
+)
+_REAL_VERSION = st.lists(
+    st.integers(min_value=0, max_value=99), min_size=1, max_size=3
+).map(lambda parts: ".".join(str(p) for p in parts))
+
 
 @given(
     before=_PREFIX_SUFFIX,
-    triple=_TRIPLE_OR_VERSION,
-    version=_TRIPLE_OR_VERSION,
+    triple=_REAL_TRIPLE,
+    version=_REAL_VERSION,
     include_kind=st.sampled_from(("include", "include-fixed")),
     after=_PREFIX_SUFFIX,
 )
@@ -84,7 +104,8 @@ def test_gcc_private_include_recognized_at_any_depth(
 ) -> None:
     """lib/gcc/<triple>/<version>/include[-fixed] is recognized regardless
     of what surrounds it -- an arbitrary environment prefix before, and an
-    arbitrary subdirectory (bits/, ext/, a header filename, ...) after."""
+    arbitrary subdirectory (bits/, ext/, a header filename, ...) after --
+    as long as the triple/version components are actually compiler-shaped."""
     segs = (*before, "lib", "gcc", triple, version, include_kind, *after)
     assert _is_toolchain_compiler_include_dir(segs) is True
     assert _is_bare_system_dir(segs) is True
@@ -92,7 +113,7 @@ def test_gcc_private_include_recognized_at_any_depth(
 
 @given(
     before=_PREFIX_SUFFIX,
-    version=_TRIPLE_OR_VERSION,
+    version=_REAL_VERSION,
     after=_PREFIX_SUFFIX,
 )
 @settings(max_examples=200)
@@ -100,6 +121,37 @@ def test_clang_builtin_include_recognized_at_any_depth(before, version, after) -
     segs = (*before, "lib", "clang", version, "include", *after)
     assert _is_toolchain_compiler_include_dir(segs) is True
     assert _is_bare_system_dir(segs) is True
+
+
+# A segment that is NOT compiler-shaped by either rule (no "-", not
+# all-digits-and-dots) -- generated from letters only, filtered against the
+# module's own regexes so the property below is a genuine cross-check, not
+# a tautology restating the generator's own construction.
+_NON_COMPILER_SHAPED_SEGMENT = st.text(
+    alphabet="abcdefghijklmnopqrstuvwxyz", min_size=1, max_size=10
+).filter(
+    lambda s: not _TARGET_TRIPLE_RE.match(s) and not _TOOLCHAIN_VERSION_RE.match(s)
+)
+
+
+@given(
+    before=_PREFIX_SUFFIX,
+    triple=_NON_COMPILER_SHAPED_SEGMENT,
+    version=_NON_COMPILER_SHAPED_SEGMENT,
+    include_kind=st.sampled_from(("include", "include-fixed")),
+    after=_PREFIX_SUFFIX,
+)
+@settings(max_examples=200)
+def test_gcc_private_include_rejected_when_triple_or_version_not_compiler_shaped(
+    before, triple, version, include_kind, after
+) -> None:
+    """The round-3 review finding, as a property: lib/gcc/<X>/<Y>/include
+    must NOT be recognized when neither X nor Y is a real triple/version
+    shape -- regardless of what the two non-shaped components actually
+    spell (a project directory named "backend"/"v1" is one example among
+    arbitrarily many, not a special case)."""
+    segs = (*before, "lib", "gcc", triple, version, include_kind, *after)
+    assert _is_toolchain_compiler_include_dir(segs) is False
 
 
 @given(

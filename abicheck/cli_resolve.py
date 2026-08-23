@@ -196,16 +196,25 @@ def _apply_native_provenance(
     snap: AbiSnapshot,
     public_headers: list[Path] | None,
     public_header_dirs: list[Path] | None,
+    include_search_dirs: list[Path] | None = None,
 ) -> AbiSnapshot:
     """Tag declaration provenance on a PE/Mach-O snapshot (ADR-024 Phase 1).
 
     Mirrors the ELF path (``dumper.create_snapshot``), which always runs
-    ``apply_provenance``. A no-op when no public-header set is supplied —
-    every origin stays ``UNKNOWN`` and behaviour is unchanged.
+    ``apply_provenance`` and, since the same PR's ELF-side fix, folds the
+    caller's ``-I`` roots in too. A no-op when no public-header set is
+    supplied — every origin stays ``UNKNOWN`` and behaviour is unchanged.
+    See ``service._apply_native_provenance``'s identical parameter for why
+    (Codex review, fresh evidence).
     """
     from .provenance import apply_provenance
 
-    return apply_provenance(snap, public_headers, public_header_dirs)
+    return apply_provenance(
+        snap,
+        public_headers,
+        public_header_dirs,
+        include_search_dirs=include_search_dirs,
+    )
 
 
 def _dump_native_binary(

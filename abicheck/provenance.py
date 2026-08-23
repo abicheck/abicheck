@@ -147,6 +147,15 @@ def _matches_public(
     return any(_contiguous_subsequence(d, parent_segs) for d in public_dir_segs)
 
 
+#: A real GCC/Clang target triple: 2-4 non-empty ``-``-joined components,
+#: each alphanumeric (plus ``_``) -- e.g. ``x86_64-conda-linux-gnu``,
+#: ``x86_64-pc-linux-gnu``, ``aarch64-linux-gnu``, ``arm-none-eabi``.
+_TARGET_TRIPLE_RE = re.compile(r"^[A-Za-z0-9_]+(-[A-Za-z0-9_]+){1,3}$")
+#: A real GCC/Clang version directory: digits, optionally dotted (``14``,
+#: ``14.3``, ``14.3.0``) -- never a bare word like ``v1``/``backend``.
+_TOOLCHAIN_VERSION_RE = re.compile(r"^\d+(\.\d+){0,2}$")
+
+
 def _is_toolchain_compiler_include_dir(header_segs: tuple[str, ...]) -> bool:
     """True when *header_segs* sits inside a compiler's own private include
     tree, recognized *structurally* (with the toolchain's own version /
@@ -162,7 +171,13 @@ def _is_toolchain_compiler_include_dir(header_segs: tuple[str, ...]) -> bool:
     fixed prefix can ever match it. Confirmed against a real conda-forge/
     pixi install layout (a `func_removed` false positive was reported for
     libstdc++'s own ``_Iter_pred`` predicate helper via exactly this path).
-    Recognizes, each with the triple/version component wildcarded:
+    Recognizes, each with the triple/version component validated
+    structurally (Codex review, round 3: an earlier revision wildcarded
+    these two components unconditionally, so ``lib/gcc/backend/v1/include``
+    -- neither ``backend`` nor ``v1`` a real triple/version -- matched too;
+    ``_TARGET_TRIPLE_RE``/``_TOOLCHAIN_VERSION_RE`` require the shapes a
+    real compiler install actually uses instead of accepting any two
+    components):
 
     - ``lib/gcc/<triple>/<version>/include`` or ``.../include-fixed`` --
       GCC's own private (non-libstdc++) headers. conda-forge's own layout
@@ -205,12 +220,15 @@ def _is_toolchain_compiler_include_dir(header_segs: tuple[str, ...]) -> bool:
         if (
             i + 4 < n
             and header_segs[i + 1] == "gcc"
+            and _TARGET_TRIPLE_RE.match(header_segs[i + 2])
+            and _TOOLCHAIN_VERSION_RE.match(header_segs[i + 3])
             and header_segs[i + 4] in ("include", "include-fixed")
         ):
             return True
         if (
             i + 3 < n
             and header_segs[i + 1] == "clang"
+            and _TOOLCHAIN_VERSION_RE.match(header_segs[i + 2])
             and header_segs[i + 3] == "include"
         ):
             return True

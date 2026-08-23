@@ -391,8 +391,11 @@ class _CastxmlParser:
         if el is None:
             return "?"
         tag = el.tag
-        if tag in ("FundamentalType", "Enumeration"):
+        if tag == "FundamentalType":
             return el.get("name", "?")
+        if tag == "Enumeration":
+            # Strip the same marker parse_enums() strips from the declaration.
+            return strip_anonymous_type_location(el.get("name", "?"))
         if tag == "PointerType":
             return self._type_name(el.get("type", ""), depth + 1) + "*"
         if tag == "ReferenceType":
@@ -589,15 +592,11 @@ class _CastxmlParser:
 
     def _qualified_type_name(self, el: Any, leaf_name: str | None = None) -> str | None:
         """Namespace/enclosing-class-qualified name for a Struct/Class/Union
-        element, or ``None`` if it's already at global scope (or a cycle /
-        depth cap was hit).
-
-        Walks castxml's ``context`` chain — each Struct/Class/Union/Namespace
-        element points at its lexical parent via ``context`` — prepending each
-        ancestor's name, stopping at the root ``Namespace`` (``name="::"``,
-        which itself carries no ``context``). Used only where a real namespace
-        path is required (internal-leak detection, SYCL-queue param matching);
-        ``RecordType.name`` itself stays bare (see its docstring in model.py).
+        element, or ``None`` if already at global scope (cycle/depth cap hit).
+        Walks castxml's ``context`` chain, prepending each ancestor's name,
+        stopping at the root ``Namespace``. Used only where a real namespace
+        path is required (internal-leak detection, SYCL-queue param
+        matching); ``RecordType.name`` stays bare (see model.py).
         """
         segments: list[str] = []
         seen_ids: set[str] = set()
@@ -617,13 +616,13 @@ class _CastxmlParser:
                 cur = parent
                 continue
             if parent.tag in ("Struct", "Class", "Union"):
-                pname = parent.get("name", "")
+                pname = strip_anonymous_type_location(parent.get("name", ""))
                 if pname:
                     segments.append(pname)
                 cur = parent
                 continue
             break
-        leaf = leaf_name if leaf_name is not None else el.get("name", "")
+        leaf = strip_anonymous_type_location(leaf_name if leaf_name is not None else el.get("name", ""))
         if not segments or not leaf:
             return None
         segments.reverse()

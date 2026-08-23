@@ -897,7 +897,7 @@ def _finish_native_snapshot(
     (the ``hybrid`` recursion's ``_skip_header_graph_attach``, ``symbols_only``)
     into one flag; the global enablement switches stay this function's business.
     """
-    snap = _apply_native_provenance(snap, public_headers, public_header_dirs)
+    snap = _apply_native_provenance(snap, public_headers, public_header_dirs, includes)
     _try_attach_python_ext_metadata(snap)
     _try_attach_python_api_surface(snap)
     _try_attach_numpy_capi_surface(snap, path)
@@ -930,16 +930,28 @@ def _apply_native_provenance(
     snap: AbiSnapshot,
     public_headers: list[Path] | None,
     public_header_dirs: list[Path] | None,
+    include_search_dirs: list[Path] | None = None,
 ) -> AbiSnapshot:
     """Tag declaration provenance on a PE/Mach-O snapshot (ADR-024 Phase 1).
 
     Mirrors the ELF path (``dumper.create_snapshot``), which always runs
-    ``apply_provenance``. A no-op when no public-header set is supplied — every
-    origin stays ``UNKNOWN`` and behaviour is unchanged.
+    ``apply_provenance`` and, since the same PR's ELF-side fix, folds the
+    caller's ``-I`` roots in too. A no-op when no public-header set is
+    supplied — every origin stays ``UNKNOWN`` and behaviour is unchanged.
+    Without ``include_search_dirs`` here, a declaration reached only
+    transitively through PE/Mach-O's own ``-I`` (never itself named as a
+    root) stayed ``PRIVATE_HEADER`` and could be excluded from the public
+    surface — the exact false-clean result the ELF fix closed, left open on
+    these two formats (Codex review, fresh evidence).
     """
     from .provenance import apply_provenance
 
-    return apply_provenance(snap, public_headers, public_header_dirs)
+    return apply_provenance(
+        snap,
+        public_headers,
+        public_header_dirs,
+        include_search_dirs=include_search_dirs,
+    )
 
 
 def _attach_header_graph(
@@ -1341,6 +1353,12 @@ def _dump_elf(
             so_path=path,
             headers=resolved_headers,
             extra_includes=eff_includes,
+            # Provenance widening gets ONLY the caller's own explicit -I
+            # list -- see dump()'s own docstring note on
+            # `public_include_search_dirs` (real regression: `eff_includes`
+            # also carries `inc_extra`'s auto-added umbrella-header
+            # directory, which can hold a genuinely private sibling header).
+            public_include_search_dirs=list(includes),
             version=version,
             compiler=compiler,
             gcc_path=cc.gcc_path,

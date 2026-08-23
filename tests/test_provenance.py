@@ -32,6 +32,8 @@ from abicheck.model import (
 )
 from abicheck.provenance import (
     _absolutize_header_root,
+    _is_toolchain_compiler_include_dir,
+    _segments,
     apply_provenance,
     build_public_set,
     classify_origin,
@@ -127,6 +129,29 @@ def test_system_header_conda_forge_gcc_private_include():
         public_headers=["include/api.h"],
     )
     assert origin is ScopeOrigin.SYSTEM_HEADER
+
+
+def test_gcc_include_dir_with_non_compiler_shaped_triple_and_version_not_system():
+    # Round-3 review finding (Codex, fresh evidence): the triple/version
+    # components between lib/gcc and include were unconditionally
+    # wildcarded, so a project path that merely happens to have two
+    # components there -- neither a real target triple nor a real GCC
+    # version -- was misclassified as a toolchain system header, which can
+    # silently drop the declarations under it from the public surface.
+    # Tested directly against the primitive (not through classify_origin's
+    # full pipeline, whose basename-fallback public match would otherwise
+    # mask this specific check when the two files share a basename).
+    segs = _segments("/project/lib/gcc/backend/v1/include/api.h")
+    assert _is_toolchain_compiler_include_dir(segs) is False
+
+
+def test_gcc_include_dir_with_compiler_shaped_triple_and_version_is_toolchain():
+    # Positive control for the test above: a real-shaped triple/version
+    # pair must still match (this is the case the fix must not regress).
+    segs = _segments(
+        "/opt/gcc/lib/gcc/x86_64-pc-linux-gnu/13.2.0/include/stddef.h"
+    )
+    assert _is_toolchain_compiler_include_dir(segs) is True
 
 
 def test_system_header_conda_forge_libstdcxx_predefined_ops():
