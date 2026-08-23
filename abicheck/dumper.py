@@ -1396,10 +1396,23 @@ def dump(
     # Tag declaration provenance (source_header + origin). Always derives
     # source_header from the parsed source location; origin is only
     # classified when a public-header set is supplied (ADR-015, D4).
+    #
+    # include_search_dirs=extra_includes (the dump's own -I roots) folds
+    # those directories into the public-directory set once a real -H/
+    # --public-header-dir set already opted classification in: a header-AST
+    # dump only ever parses declarations reachable by #include from its own
+    # -H root(s), so a header living elsewhere under the same include root
+    # that the umbrella header pulled in transitively is not a private
+    # implementation detail merely because it isn't the literal -H file
+    # (defect: every transitively-included header classified private-header,
+    # silently dropping real breaking findings out of the compared surface).
     from .provenance import apply_provenance
 
     return apply_provenance(
-        snapshot, effective_public_headers, effective_public_header_dirs
+        snapshot,
+        effective_public_headers,
+        effective_public_header_dirs,
+        include_search_dirs=extra_includes,
     )
 
 

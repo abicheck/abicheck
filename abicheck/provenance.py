@@ -88,11 +88,28 @@ def _segments(path: str) -> tuple[str, ...]:
     """Path components in posix order, dropping anchors and ``.`` parts.
 
     Backslashes are normalised to forward slashes so Windows-style build
-    paths segment the same way as posix ones.
+    paths segment the same way as posix ones. A ``..`` segment is lexically
+    collapsed against the segment before it (no filesystem access -- this
+    module matches by path *segments*, never by resolving real paths, so
+    normalization has to stay purely textual too): a build-recorded compiler
+    path resolved via something like ``$(dirname "$CC")/..`` routinely
+    carries a literal ``bin/..`` segment (confirmed against a real
+    conda-forge/pixi toolchain path,
+    ``.../envs/scanner/bin/../lib/gcc/x86_64-conda-linux-gnu/14.3.0/include/c++/...``),
+    and every containment/prefix match in this module must recognize that as
+    the same directory its already-collapsed form names -- otherwise a
+    system/toolchain-header exclusion silently fails to match. A leading
+    ``..`` with nothing left to collapse against is kept as-is.
     """
     posix = path.replace("\\", "/")
     parts = [p for p in PurePosixPath(posix).parts if p not in ("/", ".", "")]
-    return tuple(parts)
+    normalized: list[str] = []
+    for p in parts:
+        if p == ".." and normalized and normalized[-1] != "..":
+            normalized.pop()
+        else:
+            normalized.append(p)
+    return tuple(normalized)
 
 
 def _contiguous_subsequence(needle: tuple[str, ...], hay: tuple[str, ...]) -> bool:
@@ -130,7 +147,59 @@ def _matches_public(
     return any(_contiguous_subsequence(d, parent_segs) for d in public_dir_segs)
 
 
+def _is_toolchain_compiler_include_dir(header_segs: tuple[str, ...]) -> bool:
+    """True when *header_segs* sits inside a compiler's own private include
+    tree, recognized *structurally* (with the toolchain's own version /
+    target-triple path component treated as a wildcard) rather than by a
+    fixed literal prefix.
+
+    ``_SYSTEM_HEADER_DIRS`` only matches a handful of fixed, OS-rooted
+    prefixes (``/usr/include``, an Xcode/MSVC SDK root, ...). A relocatable,
+    non-OS-managed toolchain -- notably a conda-forge/pixi GCC, which is
+    what this project's own GitHub Action installs -- puts its private
+    headers under an arbitrary environment prefix instead, e.g.
+    ``<prefix>/lib/gcc/x86_64-conda-linux-gnu/14.3.0/include/c++/...``, so no
+    fixed prefix can ever match it. Confirmed against a real conda-forge/
+    pixi install layout (a `func_removed` false positive was reported for
+    libstdc++'s own ``_Iter_pred`` predicate helper via exactly this path).
+    Recognizes, each with the triple/version component wildcarded:
+
+    - ``lib/gcc/<triple>/<version>/include`` or ``.../include-fixed`` --
+      GCC's own private (non-libstdc++) headers.
+    - ``include/c++/<version>`` -- libstdc++'s per-GCC-version public tree,
+      itself nested under the ``lib/gcc/...`` root above.
+    - ``lib/clang/<version>/include`` -- Clang's private builtin headers
+      (``stddef.h``, the vector-intrinsic headers, ...).
+
+    A caller matching against a raw compiler-reported path should prefer
+    normalizing it first (segments here are matched as given, with no
+    further ``..``-collapsing beyond what :func:`_segments` already does).
+    """
+    n = len(header_segs)
+    for i, seg in enumerate(header_segs):
+        if seg != "lib":
+            continue
+        if (
+            i + 4 < n
+            and header_segs[i + 1] == "gcc"
+            and header_segs[i + 4] in ("include", "include-fixed")
+        ):
+            return True
+        if (
+            i + 3 < n
+            and header_segs[i + 1] == "clang"
+            and header_segs[i + 3] == "include"
+        ):
+            return True
+    return any(
+        header_segs[i] == "include" and header_segs[i + 1] == "c++"
+        for i in range(n - 1)
+    )
+
+
 def _is_system_header(header_segs: tuple[str, ...]) -> bool:
+    if _is_toolchain_compiler_include_dir(header_segs):
+        return True
     return any(_contiguous_subsequence(d, header_segs) for d in _SYSTEM_HEADER_DIRS)
 
 
@@ -150,8 +219,21 @@ def _is_bare_system_dir(dir_segs: tuple[str, ...]) -> bool:
     there (``-H /usr/include/mylib/api.h``, parent ``/usr/include/mylib``
     -- a legitimate project directory that happens to sit under a system
     prefix).
+
+    Also true for a bare toolchain compiler-include root recognized by
+    :func:`_is_toolchain_compiler_include_dir` (``lib/gcc/<triple>/
+    <version>/include[-fixed]``, ``include/c++/<version>``, ``lib/clang/
+    <version>/include``) when the recognized boundary is the *last* thing in
+    *dir_segs* -- the structural analogue of the fixed-prefix suffix check
+    above, for the same "directory itself IS the toolchain root, nothing
+    project-specific appended after" reason.
     """
-    return any(_suffix_match(d, dir_segs) for d in _SYSTEM_HEADER_DIRS)
+    if any(_suffix_match(d, dir_segs) for d in _SYSTEM_HEADER_DIRS):
+        return True
+    if not _is_toolchain_compiler_include_dir(dir_segs):
+        return False
+    last = dir_segs[-1] if dir_segs else ""
+    return last in ("include", "include-fixed", "c++")
 
 
 def _is_generated_header(header_segs: tuple[str, ...]) -> bool:
@@ -344,10 +426,31 @@ def build_public_set(
     return headers, dirs, bool(headers or dirs)
 
 
+def _public_dirs_from_include_roots(
+    include_search_dirs: list[Path] | list[str] | None,
+) -> list[tuple[str, ...]]:
+    """Segment *include_search_dirs* (a header-AST dump's own ``-I`` roots)
+    into public-directory candidates, dropping a bare system-header prefix
+    (``/usr/include``, an MSVC toolchain root, ...) the same way an
+    :func:`is_system_header_path` root already is (Codex review: a stray
+    ``-I /usr/include`` must not make every system header underneath
+    classify as project-owned).
+    """
+    # Resolve first (mirroring the identical reasoning in
+    # _absolutize_header_root / is_system_header_path above): an unresolved
+    # relative root like ``.`` or ``include`` either segments to nothing at
+    # all or becomes a short, generic segment that could spuriously match
+    # unrelated paths sharing that same component elsewhere.
+    segs = [_segments(str(_absolutize_header_root(d))) for d in (include_search_dirs or [])]
+    return [s for s in segs if s and not _is_bare_system_dir(s)]
+
+
 def apply_provenance(
     snapshot: AbiSnapshot,
     public_headers: list[Path] | list[str] | None = None,
     public_header_dirs: list[Path] | list[str] | None = None,
+    *,
+    include_search_dirs: list[Path] | list[str] | None = None,
 ) -> AbiSnapshot:
     """Populate ``source_header`` and ``origin`` on every declaration in
     *snapshot*, in place, and return it.
@@ -356,10 +459,30 @@ def apply_provenance(
     (cheap, additive metadata).  ``origin`` is only classified when a
     public-header set is supplied; otherwise it stays ``UNKNOWN`` so default
     invocations are unaffected (decision D4).
+
+    ``include_search_dirs`` -- the ``-I`` roots a header-AST dump was given --
+    are folded into the public-directory set, but *only* once a real
+    ``-H``/``--public-header-dir`` set already opted classification in (they
+    can never turn opt-in on by themselves). This closes the "every
+    transitively-`#include`d header is private" gap: a header-AST dump only
+    ever parses declarations reachable by `#include` from its own `-H`
+    root(s) in the first place -- there is no other way for a declaration to
+    end up in the snapshot at all -- so a header elsewhere under the same
+    include root that the umbrella header pulled in is exactly as much a
+    dependency of the public surface as the umbrella header itself, not a
+    private implementation detail merely because it isn't the literal `-H`
+    file. Treating it as `PRIVATE_HEADER` let a real, breaking layout change
+    reached only transitively (e.g. a struct defined in a header the public
+    umbrella `#include`s) silently drop out of the compared surface with no
+    disclosure. System/generated headers are unaffected: a bare system-dir
+    root is filtered out before folding, and ``classify_origin`` still checks
+    the system/generated patterns for anything this doesn't match.
     """
     header_segs, dir_segs, have_set = build_public_set(
         public_headers, public_header_dirs
     )
+    if have_set and include_search_dirs:
+        dir_segs = [*dir_segs, *_public_dirs_from_include_roots(include_search_dirs)]
     # A large surface has far fewer distinct declaring headers than
     # declarations (e.g. thousands of oneDAL functions share a handful of
     # umbrella headers) — reuse each header's classification across every

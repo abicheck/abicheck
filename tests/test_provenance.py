@@ -116,6 +116,68 @@ def test_system_header_with_sysroot_prefix():
     assert origin is ScopeOrigin.SYSTEM_HEADER
 
 
+def test_system_header_conda_forge_gcc_private_include():
+    # A conda-forge/pixi GCC's own private headers -- e.g. what this
+    # project's own GitHub Action installs -- sit under an arbitrary
+    # environment prefix, not /usr, so the fixed _SYSTEM_HEADER_DIRS
+    # prefixes never matched. Real conda-forge layout.
+    origin = _classify(
+        "/home/runner/.pixi/envs/scanner/lib/gcc/x86_64-conda-linux-gnu/"
+        "14.3.0/include-fixed/limits.h",
+        public_headers=["include/api.h"],
+    )
+    assert origin is ScopeOrigin.SYSTEM_HEADER
+
+
+def test_system_header_conda_forge_libstdcxx_predefined_ops():
+    # The exact real-world path from a false-positive func_removed report:
+    # abicheck's own GitHub Action reported libstdc++'s internal
+    # _Iter_pred predicate helper as a removed *public* function, because
+    # this path -- with its literal unnormalized `bin/..` segment -- didn't
+    # match any known system-header prefix.
+    origin = _classify(
+        "/home/runner/work/_actions/abicheck/abicheck/main/.pixi/envs/"
+        "scanner/bin/../lib/gcc/x86_64-conda-linux-gnu/14.3.0/include/c++/"
+        "bits/predefined_ops.h",
+        public_headers=["include/api.h"],
+    )
+    assert origin is ScopeOrigin.SYSTEM_HEADER
+
+
+def test_system_header_conda_forge_clang_builtin_include():
+    origin = _classify(
+        "/opt/pixi/envs/scanner/lib/clang/18/include/stddef.h",
+        public_headers=["include/api.h"],
+    )
+    assert origin is ScopeOrigin.SYSTEM_HEADER
+
+
+def test_toolchain_include_dir_path_normalizes_dot_dot_segment():
+    # A `foo/bar/../baz` segment sequence must classify identically to its
+    # already-collapsed `foo/baz` form -- not just for the toolchain-dir
+    # patterns above, but for _segments() generally (basic path-segment
+    # equivalence, unrelated to any specific prefix list).
+    from abicheck.provenance import _segments
+
+    assert _segments("/a/b/../c") == _segments("/a/c")
+    assert _segments("bin/../lib/x") == ("lib", "x")
+    # A leading `..` with nothing to collapse against is kept as-is.
+    assert _segments("../a/b") == ("..", "a", "b")
+
+
+def test_conda_forge_project_header_outside_compiler_tree_stays_project():
+    # A project header that merely happens to live under the same
+    # conda/pixi environment prefix (but not inside the compiler's own
+    # lib/gcc/.../include or include/c++/... tree) must not be swept up by
+    # the structural toolchain-include-dir match.
+    origin = _classify(
+        "/home/runner/.pixi/envs/scanner/include/myproject/api.h",
+        public_headers=["include/api.h"],
+        public_dirs=["include/myproject"],
+    )
+    assert origin is ScopeOrigin.PUBLIC_HEADER
+
+
 def test_private_header_when_not_public_and_not_system():
     origin = _classify(
         "/build/proj/src/internal/impl.h",
@@ -237,6 +299,100 @@ def test_apply_provenance_no_set_keeps_unknown_but_fills_header():
     assert snap.functions[0].source_header == "/build/include/api.h"
     assert snap.functions[0].origin is ScopeOrigin.UNKNOWN
     assert snap.types[0].origin is ScopeOrigin.UNKNOWN
+
+
+# ── include_search_dirs: headers reached transitively from a -H root ─────────
+
+
+def _snapshot_with_transitive_private_header() -> AbiSnapshot:
+    # `priv` mirrors a declaration reached only transitively -- via #include
+    # -- from the -H root (`/build/include/api.h`), but physically living
+    # under a *different* header nested inside the same -I include root
+    # (`/build/include`). A header-AST dump only ever parses declarations
+    # reachable by #include from its own -H root(s), so this is exactly the
+    # shape produced by `dump -H include/api.h -I include`.
+    return AbiSnapshot(
+        library="libfoo.so.1",
+        version="1.0",
+        functions=[
+            Function(
+                name="pub",
+                mangled="pub",
+                return_type="void",
+                source_location="/build/include/api.h:10",
+            ),
+            Function(
+                name="priv",
+                mangled="priv",
+                return_type="void",
+                source_location="/build/include/detail/impl.h:20",
+            ),
+        ],
+    )
+
+
+def test_include_search_dirs_promotes_transitively_included_header_to_public():
+    # Defect: every header reached only transitively from the -H root
+    # (rather than being the literal -H file itself) classified
+    # PRIVATE_HEADER, even when it lives under the same -I include root the
+    # dump was given -- silently dropping real findings out of the compared
+    # surface. include_search_dirs (the dump's own -I roots) fixes this.
+    snap = apply_provenance(
+        _snapshot_with_transitive_private_header(),
+        public_headers=["/build/include/api.h"],
+        include_search_dirs=["/build/include"],
+    )
+    by_name = {f.name: f for f in snap.functions}
+    assert by_name["pub"].origin is ScopeOrigin.PUBLIC_HEADER
+    assert by_name["priv"].origin is ScopeOrigin.PUBLIC_HEADER
+
+
+def test_include_search_dirs_omitted_keeps_prior_private_header_behavior():
+    # Without include_search_dirs (e.g. a caller that never threaded -I
+    # roots through), behavior is unchanged: only the literal -H file(s)
+    # classify public.
+    snap = apply_provenance(
+        _snapshot_with_transitive_private_header(),
+        public_headers=["/build/include/api.h"],
+    )
+    by_name = {f.name: f for f in snap.functions}
+    assert by_name["pub"].origin is ScopeOrigin.PUBLIC_HEADER
+    assert by_name["priv"].origin is ScopeOrigin.PRIVATE_HEADER
+
+
+def test_include_search_dirs_cannot_opt_in_classification_by_itself():
+    # include_search_dirs must never turn provenance classification on when
+    # no real -H/--public-header-dir set was given -- ADR-015 D4's opt-in
+    # contract stays intact.
+    snap = apply_provenance(
+        _snapshot_with_transitive_private_header(),
+        include_search_dirs=["/build/include"],
+    )
+    by_name = {f.name: f for f in snap.functions}
+    assert by_name["pub"].origin is ScopeOrigin.UNKNOWN
+    assert by_name["priv"].origin is ScopeOrigin.UNKNOWN
+
+
+def test_include_search_dirs_does_not_override_bare_system_prefix():
+    # A stray -I /usr/include must not make every system header underneath
+    # classify as project-owned.
+    snap = apply_provenance(
+        AbiSnapshot(
+            library="libfoo.so.1",
+            version="1.0",
+            functions=[
+                Function(
+                    name="sys",
+                    mangled="sys",
+                    return_type="void",
+                    source_location="/usr/include/stdio.h:1",
+                ),
+            ],
+        ),
+        public_headers=["/build/include/api.h"],
+        include_search_dirs=["/usr/include"],
+    )
+    assert snap.functions[0].origin is ScopeOrigin.SYSTEM_HEADER
 
 
 # ── origin_cache (tag_provenance / apply_provenance memoization) ─────────────
@@ -625,3 +781,64 @@ class TestAbsolutizeHeaderRoot:
         root = "/usr/include/mylib/api.h"
         sibling = "/usr/include/mylib/detail/internal.h"
         assert is_dependency_header(sibling, [root]) is False
+
+
+# ── _is_bare_system_dir: conda-forge/pixi toolchain include roots ────────────
+
+
+class TestIsBareSystemDirToolchainIncludeRoots:
+    """A directory root that IS a compiler's own private include tree
+    (nothing project-specific appended after it) must not become a project
+    directory when widened from a flat `-H <file>` root (Codex review, D5)."""
+
+    def test_bare_gcc_private_include_dir(self):
+        from abicheck.provenance import _is_bare_system_dir, _segments
+
+        segs = _segments(
+            "/home/runner/.pixi/envs/scanner/lib/gcc/"
+            "x86_64-conda-linux-gnu/14.3.0/include"
+        )
+        assert _is_bare_system_dir(segs) is True
+
+    def test_bare_gcc_include_fixed_dir(self):
+        from abicheck.provenance import _is_bare_system_dir, _segments
+
+        segs = _segments(
+            "/home/runner/.pixi/envs/scanner/lib/gcc/"
+            "x86_64-conda-linux-gnu/14.3.0/include-fixed"
+        )
+        assert _is_bare_system_dir(segs) is True
+
+    def test_bare_libstdcxx_version_dir(self):
+        from abicheck.provenance import _is_bare_system_dir, _segments
+
+        segs = _segments(
+            "/home/runner/.pixi/envs/scanner/lib/gcc/"
+            "x86_64-conda-linux-gnu/14.3.0/include/c++"
+        )
+        assert _is_bare_system_dir(segs) is True
+
+    def test_bare_clang_builtin_include_dir(self):
+        from abicheck.provenance import _is_bare_system_dir, _segments
+
+        segs = _segments("/opt/pixi/envs/scanner/lib/clang/18/include")
+        assert _is_bare_system_dir(segs) is True
+
+    def test_project_subdirectory_under_libstdcxx_tree_is_not_bare(self):
+        # A project directory nested one level deeper than the recognized
+        # boundary (e.g. libstdc++'s own bits/ subtree) is a legitimate,
+        # non-bare directory once something is appended after the boundary --
+        # mirrors the fixed-prefix _SYSTEM_HEADER_DIRS case one function up.
+        from abicheck.provenance import _is_bare_system_dir, _segments
+
+        segs = _segments(
+            "/home/runner/.pixi/envs/scanner/lib/gcc/"
+            "x86_64-conda-linux-gnu/14.3.0/include/c++/bits"
+        )
+        assert _is_bare_system_dir(segs) is False
+
+    def test_unrelated_project_dir_is_not_bare(self):
+        from abicheck.provenance import _is_bare_system_dir, _segments
+
+        segs = _segments("/home/runner/.pixi/envs/scanner/include/myproject")
+        assert _is_bare_system_dir(segs) is False
