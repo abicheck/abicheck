@@ -132,26 +132,41 @@ def _symbol_evidence_sufficient(symbol: str, snapshot: AbiSnapshot) -> bool:
 
 def _symbol_was_exported(symbol: str, snapshot: AbiSnapshot) -> bool:
     """Did *snapshot*'s own `Function`/`Variable` entry for *symbol* actually
-    reach the binary's export table -- as opposed to merely being *some*
-    declaration, public or private, that `AbiSnapshot` retains?
+    reach the binary's *dynamic* export table (`.dynsym`) -- as opposed to
+    merely being *some* declaration, public or private, that `AbiSnapshot`
+    retains?
 
-    `Visibility.PUBLIC`/`Visibility.ELF_ONLY` both mean "present in the ELF
-    symbol table" (`model.py`'s own docstring); `Visibility.HIDDEN` means
-    `__attribute__((visibility("hidden")))` -- compiled to *not* export,
-    regardless of whether a header declares it. `AbiSnapshot` deliberately
-    retains a library's private/internal declarations alongside its public
-    ones, so mere presence in `function_map`/`variable_map` proves nothing
-    about export status on its own (Codex review) -- this is the one check
-    in this module that actually answers "was this symbol part of this
-    snapshot's binary export surface." A symbol absent from both maps was
-    never declared at all, so it cannot have been exported either.
+    `Visibility.ELF_ONLY` is **not** a reliable "was exported" signal on its
+    own -- it means two different things depending on how the snapshot was
+    produced (Codex review, second round, citing `dumper_elf_symbols.py`'s
+    own `.dynsym`-vs-`.symtab` split): on a snapshot dumped *without*
+    headers at all (`AbiSnapshot.elf_only_mode == True`,
+    `dumper_elf_fallback.py`), `ELF_ONLY` entries are built directly from
+    the observed `.dynsym` set, so it genuinely means "exported, just no
+    header/DWARF corroboration." But on a header-parsed snapshot
+    (`dumper_castxml.py`/`dumper_clang.py`'s shared `_visibility()`
+    policy), a declaration only reaches `ELF_ONLY` when it is present in
+    `.symtab` (every global, including purely internal/static-linkage
+    symbols) but **absent from `.dynsym`** -- i.e. declared, but
+    *not* dynamically exported; only `Visibility.PUBLIC` means "confirmed
+    in `.dynsym`" there. `diff_symbols.py`'s own `elf_only_mode and
+    f_old.visibility == Visibility.ELF_ONLY` gate (its `FUNC_REMOVED_
+    ELF_ONLY` vs. `FUNC_REMOVED` split) is the established precedent for
+    this exact distinction, followed here rather than reinvented.
+
+    `Visibility.HIDDEN` always means `__attribute__((visibility("hidden")))`
+    -- compiled to not export, regardless of provenance -- so it is never
+    treated as exported either way. A symbol absent from both maps was
+    never declared at all, so it cannot have been exported.
     """
     fn = snapshot.function_map.get(symbol)
-    if fn is not None:
-        return fn.visibility is not Visibility.HIDDEN
-    var = snapshot.variable_map.get(symbol)
-    if var is not None:
-        return var.visibility is not Visibility.HIDDEN
+    entry = fn if fn is not None else snapshot.variable_map.get(symbol)
+    if entry is None:
+        return False
+    if entry.visibility is Visibility.PUBLIC:
+        return True
+    if entry.visibility is Visibility.ELF_ONLY:
+        return snapshot.elf_only_mode
     return False
 
 

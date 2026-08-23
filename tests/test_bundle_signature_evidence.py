@@ -82,13 +82,18 @@ def _evidenced_fn(
 
 
 def _snap(
-    library: str, *, functions: list[Function] = (), variables: list[Variable] = ()
+    library: str,
+    *,
+    functions: list[Function] = (),
+    variables: list[Variable] = (),
+    elf_only_mode: bool = False,
 ) -> AbiSnapshot:
     return AbiSnapshot(
         library=library,
         version="1.0",
         functions=list(functions),
         variables=list(variables),
+        elf_only_mode=elf_only_mode,
     )
 
 
@@ -99,6 +104,10 @@ def _snap(
 
 class TestFindUnverifiedSignatureFindings:
     def test_fires_when_both_sides_elf_only(self):
+        # Both sides genuinely dumped without headers at all
+        # (elf_only_mode=True) -- so ELF_ONLY here means "confirmed
+        # dynsym-exported, just no header/DWARF corroboration," per
+        # _symbol_was_exported's own contract.
         new = _snapshot(
             {
                 "libcore.so": _meta(exports=["core_fn"]),
@@ -106,10 +115,18 @@ class TestFindUnverifiedSignatureFindings:
             }
         )
         old_snaps = {
-            "libcore.so": _snap("libcore.so", functions=[_elf_only_fn("core_fn")])
+            "libcore.so": _snap(
+                "libcore.so",
+                functions=[_elf_only_fn("core_fn")],
+                elf_only_mode=True,
+            )
         }
         new_snaps = {
-            "libcore.so": _snap("libcore.so", functions=[_elf_only_fn("core_fn")])
+            "libcore.so": _snap(
+                "libcore.so",
+                functions=[_elf_only_fn("core_fn")],
+                elf_only_mode=True,
+            )
         }
 
         findings = find_unverified_signature_findings(new, [], old_snaps, new_snaps)
@@ -140,8 +157,9 @@ class TestFindUnverifiedSignatureFindings:
         assert find_unverified_signature_findings(new, [], old_snaps, new_snaps) == []
 
     def test_no_finding_when_one_side_insufficient(self):
-        # Sufficient evidence on new, but ELF-only on old -- still
-        # unverified, since agreement can't be confirmed either.
+        # Sufficient evidence on new, but ELF-only (dumped without headers)
+        # on old -- still unverified, since agreement can't be confirmed
+        # either.
         new = _snapshot(
             {
                 "libcore.so": _meta(exports=["core_fn"]),
@@ -149,7 +167,11 @@ class TestFindUnverifiedSignatureFindings:
             }
         )
         old_snaps = {
-            "libcore.so": _snap("libcore.so", functions=[_elf_only_fn("core_fn")])
+            "libcore.so": _snap(
+                "libcore.so",
+                functions=[_elf_only_fn("core_fn")],
+                elf_only_mode=True,
+            )
         }
         new_snaps = {
             "libcore.so": _snap("libcore.so", functions=[_evidenced_fn("core_fn")])
@@ -239,6 +261,45 @@ class TestFindUnverifiedSignatureFindings:
 
         assert find_unverified_signature_findings(new, [], old_snaps, new_snaps) == []
 
+    def test_no_finding_when_old_elf_only_was_header_parsed_and_not_dynamic(self):
+        # Codex review, second round: on a HEADER-parsed snapshot (the
+        # common case -- elf_only_mode=False), Visibility.ELF_ONLY does
+        # NOT mean "confirmed exported" the way it does on a pure
+        # elf_only_mode=True dump. dumper_castxml.py's/dumper_clang.py's
+        # shared _visibility() policy assigns ELF_ONLY to a header-declared
+        # symbol present in .symtab (which includes purely internal,
+        # static-linkage globals) but ABSENT from .dynsym -- i.e. declared,
+        # but never actually dynamically exported. Only Visibility.PUBLIC
+        # means "confirmed in .dynsym" on that path. A symbol newly
+        # exported in `new` that happens to share a name with such an old,
+        # header-declared-but-never-exported symbol must read as a genuine
+        # addition, exactly like the private-declaration (HIDDEN) case
+        # above -- not as "retained, evidence uncertain".
+        new = _snapshot(
+            {
+                "libcore.so": _meta(exports=["core_fn"]),
+                "libconsumer.so": _meta(imports=["core_fn"]),
+            }
+        )
+        symtab_only_old_fn = Function(
+            name="core_fn",
+            mangled="core_fn",
+            return_type="?",
+            visibility=Visibility.ELF_ONLY,
+        )
+        # elf_only_mode left at its default False -- this snapshot was
+        # header-parsed, so ELF_ONLY here means .symtab-but-not-.dynsym.
+        old_snaps = {"libcore.so": _snap("libcore.so", functions=[symtab_only_old_fn])}
+        new_snaps = {
+            "libcore.so": _snap(
+                "libcore.so",
+                functions=[_elf_only_fn("core_fn")],
+                elf_only_mode=True,
+            )
+        }
+
+        assert find_unverified_signature_findings(new, [], old_snaps, new_snaps) == []
+
     def test_no_finding_when_snapshot_missing_for_provider(self):
         new = _snapshot(
             {
@@ -295,7 +356,11 @@ class TestFindUnverifiedSignatureFindings:
             type="?",
             visibility=Visibility.ELF_ONLY,
         )
-        old_snaps = {"libcore.so": _snap("libcore.so", variables=[elf_only_var])}
+        old_snaps = {
+            "libcore.so": _snap(
+                "libcore.so", variables=[elf_only_var], elf_only_mode=True
+            )
+        }
         new_snaps = {"libcore.so": _snap("libcore.so", variables=[elf_only_var])}
 
         findings = find_unverified_signature_findings(new, [], old_snaps, new_snaps)
@@ -328,7 +393,11 @@ class TestFindUnverifiedSignatureFindings:
             }
         )
         old_snaps = {
-            "libcore.so": _snap("libcore.so", functions=[_elf_only_fn("core_fn")])
+            "libcore.so": _snap(
+                "libcore.so",
+                functions=[_elf_only_fn("core_fn")],
+                elf_only_mode=True,
+            )
         }
         new_snaps = {
             "libcore.so": _snap("libcore.so", functions=[_elf_only_fn("core_fn")])
