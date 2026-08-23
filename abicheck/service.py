@@ -750,6 +750,7 @@ def _run_dump_uncached(
             compile,
             public_headers,
             public_header_dirs,
+            include_search_dirs=_includes,
         )
 
     if binary_fmt == "elf":
@@ -807,6 +808,7 @@ def _run_dump_uncached(
             compile,
             public_headers,
             public_header_dirs,
+            include_search_dirs=_includes,
         )
         return attach_clang_layout(
             snap, _headers, _includes, lang=lang, compile=compile
@@ -911,6 +913,7 @@ def _finish_native_snapshot(
         compile,
         public_headers,
         public_header_dirs,
+        include_search_dirs=includes,
     )
     return attach_clang_layout(snap, headers, includes, lang=lang, compile=compile)
 
@@ -964,6 +967,7 @@ def _attach_header_graph(
     compile: CompileContext | None,
     public_headers: list[Path] | None,
     public_header_dirs: list[Path] | None,
+    include_search_dirs: list[Path] | None = None,
 ) -> AbiSnapshot:
     """Build and embed the header-only (L2) semantic graph (ADR-041 addendum).
 
@@ -999,6 +1003,14 @@ def _attach_header_graph(
     a separate opt-in since it costs one extra ``clang -M`` invocation per
     top-level header, not just the one aggregate pass ``header_graph`` alone
     needs.
+
+    ``include_search_dirs`` is forwarded to
+    :func:`build_header_only_graph`'s own parameter of the same name —
+    each caller's raw, explicit ``-I`` list (never an auto-derived one),
+    matching what ``apply_provenance`` already widened *snap*'s own
+    per-declaration ``origin`` with, so the graph's header-level nodes
+    agree with the flat snapshot instead of independently reclassifying
+    the same header ``private_header`` (Codex review, fresh evidence).
     """
     if not header_graph or not headers:
         return snap
@@ -1105,6 +1117,7 @@ def _attach_header_graph(
         public_header_paths=[str(p) for p in (public_headers or [])],
         public_dir_paths=[str(p) for p in (public_header_dirs or [])],
         header_paths=[str(p) for p in resolved_headers],
+        include_search_dirs=[str(p) for p in (include_search_dirs or [])],
         # Real per-declaration provenance for a hybrid merge (empty dict on
         # every other snapshot, a harmless no-op there) — G31 Phase C
         # hybrid-graph provenance-tagging; see build_header_only_graph's own

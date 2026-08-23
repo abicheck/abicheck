@@ -93,7 +93,11 @@ from typing import TYPE_CHECKING, Any
 
 from ..fact_provenance import func_fact_key, var_fact_key
 from ..model import AbiSnapshot, ScopeOrigin
-from ..provenance import build_public_set, classify_origin
+from ..provenance import (
+    _public_dirs_from_include_roots,
+    build_public_set,
+    classify_origin,
+)
 from .call_graph import augment_graph_with_calls, parse_clang_ast_calls
 from .inline_graph_fold import _mark_role_coverage
 from .source_graph import (
@@ -524,6 +528,7 @@ def build_header_only_graph(
     public_dir_paths: list[str] | None = None,
     header_paths: list[str] | None = None,
     fact_provenance: dict[str, str] | None = None,
+    include_search_dirs: list[str] | None = None,
 ) -> SourceGraphSummary:
     """Build a header-only semantic graph from an L2 :class:`AbiSnapshot`.
 
@@ -570,11 +575,25 @@ def build_header_only_graph(
     class of "this finding's evidence, verify it if that matters"
     annotation ``LAYOUT_UNVERIFIABLE`` already provides for layout facts
     (see AGENTS.md's "Findings emitted from absent evidence" entry).
+
+    *include_search_dirs* mirrors ``apply_provenance``'s own parameter of
+    the same name -- a caller's explicit ``-I``/``--include`` roots, folded
+    into the public-directory set the same way, once a real public-header
+    set already opted classification in. Without it, ``header_node()``
+    below (which classifies a header-level graph node fresh from
+    ``public_header_paths``/``public_dir_paths`` alone) could disagree with
+    the per-declaration ``entity.origin`` this snapshot's ``apply_provenance``
+    call already widened -- a transitively-included header reached only
+    under an explicit ``-I`` root would classify ``public_header`` for its
+    own declarations but still ``private_header`` for its own header node
+    (Codex review, fresh evidence).
     """
     graph = SourceGraphSummary()
     header_segs, dir_segs, have_public_set = build_public_set(
         public_header_paths, public_dir_paths
     )
+    if have_public_set and include_search_dirs:
+        dir_segs = [*dir_segs, *_public_dirs_from_include_roots(include_search_dirs)]
 
     def header_node(path: str) -> str:
         node_id = _header_node_id(path)

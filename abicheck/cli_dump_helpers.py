@@ -1870,6 +1870,7 @@ def perform_elf_dump(
             effective_compile_context,
             list(public_headers),
             list(public_header_dirs),
+            include_search_dirs=list(includes),
         )
 
         # G28 Phase 4: same "this ELF dump CLI path reaches dumper.dump
