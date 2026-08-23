@@ -552,8 +552,14 @@ _ANON_TYPE_LOCATION_RE = re.compile(r"\bat\s+\S+:\d+:\d+(?=\s*\))")
 #: captured discriminator instead of discarding it outright — see
 #: strip_anonymous_type_location's docstring for why identity extraction
 #: needs the discriminator kept while a downstream *comparison*
-#: (canonicalize_type_name) does not.
-_ANON_TYPE_LOCATION_PATH_ONLY_RE = re.compile(r"\s*\bat\s+\S+?(:\d+:\d+)(?=\s*\))")
+#: (canonicalize_type_name) does not. The path itself is matched with
+#: ``[^)]*?`` (not ``\S+?``, unlike _ANON_TYPE_LOCATION_RE above) because a
+#: real checkout or Windows path can contain spaces (Codex review: a
+#: checkout directory literally named "release build", or a bare "Program
+#: Files" component) -- \S+? cannot reach the trailing coordinates in that
+#: case, so the substitution silently does nothing and the checkout-
+#: dependent path survives into the type's identity.
+_ANON_TYPE_LOCATION_PATH_ONLY_RE = re.compile(r"\s*\bat\s+[^)]*?(:\d+:\d+)(?=\s*\))")
 
 
 def strip_anonymous_type_location(name: str) -> str:

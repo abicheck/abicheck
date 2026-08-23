@@ -173,16 +173,26 @@ def _is_toolchain_compiler_include_dir(header_segs: tuple[str, ...]) -> bool:
       (``stddef.h``, the vector-intrinsic headers, ...).
 
     Deliberately does NOT match a bare ``include/c++/<version>`` anywhere in
-    the path outside a recognized ``lib/gcc/...``/``lib/clang/...`` root
-    (Codex review): an earlier revision did, unconditionally, which matched
-    an ordinary project path like ``/project/include/c++/api.h`` that has no
-    toolchain prefix at all -- a real false-positive risk this function
-    exists to avoid, not create. The traditional (non-conda-forge)
-    Debian/Ubuntu-style split layout, where libstdc++ lives separately at
-    ``/usr/include/c++/<version>/`` rather than nested under ``lib/gcc/``,
-    is unaffected: that path is already caught by ``_SYSTEM_HEADER_DIRS``'s
-    own ``usr/include`` prefix in :func:`_is_system_header`, so this
-    function does not need to duplicate it.
+    the path with no anchor at all (Codex review): an earlier revision did,
+    unconditionally, which matched an ordinary project path like
+    ``/project/include/c++/api.h`` that has no toolchain prefix -- a real
+    false-positive risk this function exists to avoid, not create. The
+    traditional (non-conda-forge) Debian/Ubuntu-style split layout, where
+    libstdc++ lives separately at ``/usr/include/c++/<version>/`` rather
+    than nested under ``lib/gcc/``, IS still recognized, but only when
+    anchored under one of ``_SYSTEM_HEADER_DIRS``'s own ``.../include``
+    prefixes (``usr/include/c++/...``, ``usr/local/include/c++/...``) --
+    unlike a bare ``include/c++`` with no system prefix at all, "system
+    prefix immediately followed by c++" unambiguously means libstdc++, not
+    a coincidentally-named project directory. This anchored form matters
+    for more than :func:`_is_system_header` (which already independently
+    classifies a *declaration* under this path as ``SYSTEM_HEADER`` via
+    the plain ``usr/include`` prefix regardless): :func:`_is_bare_system_dir`
+    also needs it, so an explicit ``-I /usr/include/c++/12`` given directly
+    (not merely reached transitively) is not promoted to a *public*
+    directory, which would let ``_matches_public``'s directory-containment
+    check outrank the system-header classification for everything under it
+    (Codex review, real finding).
 
     A caller matching against a raw compiler-reported path should prefer
     normalizing it first (segments here are matched as given, with no
@@ -204,7 +214,11 @@ def _is_toolchain_compiler_include_dir(header_segs: tuple[str, ...]) -> bool:
             and header_segs[i + 3] == "include"
         ):
             return True
-    return False
+    return any(
+        _contiguous_subsequence((*prefix, "c++"), header_segs)
+        for prefix in _SYSTEM_HEADER_DIRS
+        if prefix and prefix[-1] == "include"
+    )
 
 
 def _is_system_header(header_segs: tuple[str, ...]) -> bool:
@@ -230,20 +244,29 @@ def _is_bare_system_dir(dir_segs: tuple[str, ...]) -> bool:
     -- a legitimate project directory that happens to sit under a system
     prefix).
 
-    Also true for a bare toolchain compiler-include root recognized by
+    Also true for any directory recognized by
     :func:`_is_toolchain_compiler_include_dir` (``lib/gcc/<triple>/
-    <version>/include[-fixed]``, ``include/c++/<version>``, ``lib/clang/
-    <version>/include``) when the recognized boundary is the *last* thing in
-    *dir_segs* -- the structural analogue of the fixed-prefix suffix check
-    above, for the same "directory itself IS the toolchain root, nothing
-    project-specific appended after" reason.
+    <version>/include[-fixed]``, ``lib/clang/<version>/include``, and
+    libstdc++'s ``c++`` tree nested under either), at *any* depth under that
+    boundary -- not only when the boundary is the exact last segment.
+    Deliberately NOT the same "only the bare boundary, not a subdirectory
+    beneath it" rule the fixed-prefix case above uses: that rule exists
+    because a real project can legitimately live one level under a generic
+    system prefix (``/usr/include/mylib``), but nothing can legitimately
+    live under a compiler's own private include tree -- ``bits/``,
+    ``ext/``, ``backward/``, and every other subdirectory reachable from
+    there are toolchain-owned too, never a project's. An explicit ``-I
+    /usr/include/c++/12`` (or the conda-forge-nested equivalent) must
+    therefore never be promoted to a public directory (Codex review: it
+    previously reached only the exact-bare-boundary check above, which
+    ``.../include/c++/12`` fails since ``c++/12`` is appended after the
+    ``lib/gcc/.../include`` boundary -- letting the whole libstdc++ tree
+    underneath be classified ``PUBLIC_HEADER``, since ``classify_origin``
+    checks the public match before the system-header one).
     """
     if any(_suffix_match(d, dir_segs) for d in _SYSTEM_HEADER_DIRS):
         return True
-    if not _is_toolchain_compiler_include_dir(dir_segs):
-        return False
-    last = dir_segs[-1] if dir_segs else ""
-    return last in ("include", "include-fixed", "c++")
+    return _is_toolchain_compiler_include_dir(dir_segs)
 
 
 def _is_generated_header(header_segs: tuple[str, ...]) -> bool:

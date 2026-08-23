@@ -413,6 +413,34 @@ def test_include_search_dirs_does_not_override_bare_system_prefix():
     assert snap.functions[0].origin is ScopeOrigin.SYSTEM_HEADER
 
 
+def test_include_search_dirs_does_not_promote_nested_toolchain_root():
+    # Codex review, real finding: an explicit -I pointed *below* a system
+    # boundary (e.g. /usr/include/c++/12, or the conda-forge-nested
+    # equivalent) was not excluded by the exact-bare-boundary check, so it
+    # was promoted to a public directory -- letting libstdc++ declarations
+    # beneath it classify PUBLIC_HEADER (since classify_origin checks the
+    # public match before the system-header one) and bypass dependency
+    # exclusion, allowing transitive toolchain changes to produce false ABI
+    # findings.
+    snap = apply_provenance(
+        AbiSnapshot(
+            library="libfoo.so.1",
+            version="1.0",
+            functions=[
+                Function(
+                    name="vec_fn",
+                    mangled="vec_fn",
+                    return_type="void",
+                    source_location="/usr/include/c++/12/vector:10",
+                ),
+            ],
+        ),
+        public_headers=["/build/include/api.h"],
+        include_search_dirs=["/usr/include/c++/12"],
+    )
+    assert snap.functions[0].origin is ScopeOrigin.SYSTEM_HEADER
+
+
 # ── origin_cache (tag_provenance / apply_provenance memoization) ─────────────
 #
 # apply_provenance() and the buildsource castxml extractor share one
@@ -836,24 +864,59 @@ class TestIsBareSystemDirToolchainIncludeRoots:
         )
         assert _is_bare_system_dir(segs) is True
 
+    def test_traditional_debian_style_split_libstdcxx_dir_is_bare(self):
+        # Codex review, real finding: the traditional (non-conda-forge)
+        # Debian/Ubuntu-style layout keeps libstdc++ separately at
+        # /usr/include/c++/<version>/, not nested under lib/gcc/ at all.
+        # An explicit -I /usr/include/c++/12 was NOT excluded by the
+        # exact-bare-boundary check (it isn't a suffix of any
+        # _SYSTEM_HEADER_DIRS entry, and the lib/gcc-anchored toolchain
+        # check doesn't apply since there's no lib/gcc/ prefix here) --
+        # letting the whole libstdc++ tree underneath be promoted to
+        # PUBLIC_HEADER via an explicit -I, since classify_origin checks
+        # the public match before the system-header one.
+        from abicheck.provenance import _is_bare_system_dir, _segments
+
+        segs = _segments("/usr/include/c++/12")
+        assert _is_bare_system_dir(segs) is True
+
+    def test_project_own_include_cxx_dir_with_no_system_prefix_is_not_bare(self):
+        # The anchored usr/include/c++ recognition above must not regress
+        # the false-positive-risk case already covered in
+        # test_bare_include_cxx_with_no_toolchain_prefix_is_not_system_header:
+        # a project's own "include/c++" directory with no system prefix at
+        # all is not swept up.
+        from abicheck.provenance import _is_bare_system_dir, _segments
+
+        segs = _segments("/project/include/c++")
+        assert _is_bare_system_dir(segs) is False
+
     def test_bare_clang_builtin_include_dir(self):
         from abicheck.provenance import _is_bare_system_dir, _segments
 
         segs = _segments("/opt/pixi/envs/scanner/lib/clang/18/include")
         assert _is_bare_system_dir(segs) is True
 
-    def test_project_subdirectory_under_libstdcxx_tree_is_not_bare(self):
-        # A project directory nested one level deeper than the recognized
-        # boundary (e.g. libstdc++'s own bits/ subtree) is a legitimate,
-        # non-bare directory once something is appended after the boundary --
-        # mirrors the fixed-prefix _SYSTEM_HEADER_DIRS case one function up.
+    def test_subdirectory_under_libstdcxx_tree_is_still_toolchain_owned(self):
+        # Codex review, real finding: unlike the fixed-prefix
+        # _SYSTEM_HEADER_DIRS case (where a real project CAN legitimately
+        # live one level under a generic system prefix, e.g.
+        # /usr/include/mylib), nothing can legitimately live under a
+        # compiler's own private include tree -- bits/, ext/, backward/,
+        # and every other subdirectory reachable from
+        # lib/gcc/<triple>/<version>/include/c++/ are toolchain-owned too,
+        # never a project's. An explicit -I pointed at such a subdirectory
+        # must still be excluded from becoming a public directory (an
+        # earlier revision of this fix only excluded the exact bare
+        # boundary, leaving a subdirectory reachable and therefore
+        # promotable to PUBLIC_HEADER).
         from abicheck.provenance import _is_bare_system_dir, _segments
 
         segs = _segments(
             "/home/runner/.pixi/envs/scanner/lib/gcc/"
             "x86_64-conda-linux-gnu/14.3.0/include/c++/bits"
         )
-        assert _is_bare_system_dir(segs) is False
+        assert _is_bare_system_dir(segs) is True
 
     def test_unrelated_project_dir_is_not_bare(self):
         from abicheck.provenance import _is_bare_system_dir, _segments
