@@ -50,10 +50,11 @@ What this module actually does
 :func:`load_pruned_clang_ast` is a drop-in replacement for a bare
 ``json.load(fh)`` of a clang ``-ast-dump=json`` stream. It uses the stdlib
 ``json`` module's ``object_pairs_hook`` -- called once per JSON object, in
-document order, innermost-first -- to collapse a *function- or
-variable-shaped* declaration node (``FunctionDecl``, ``CXXMethodDecl``,
-``CXXConstructorDecl``, ``CXXDestructorDecl``, ``CXXConversionDecl``,
-``VarDecl``) into a tiny placeholder the instant its own subtree is fully
+document order, innermost-first -- to collapse a *free-function- or
+variable-shaped* declaration node (``FunctionDecl``, ``VarDecl`` only --
+see "Never pruned: any C++ method-shaped kind" below for why every
+class-member kind is deliberately excluded, unlike an earlier revision of
+this module) into a tiny placeholder the instant its own subtree is fully
 built, whenever that subtree:
 
 1. has an *explicit* (non-inherited) declaring file recorded on its own
@@ -86,11 +87,47 @@ a kept public declaration (its "direct-reference retention" carve-out). That
 decision can only be made once the *whole* snapshot's public surface is
 known, which is not yet true at streaming-parse time -- pruning a
 dependency-header record here would silently and permanently defeat that
-carve-out for every field/type it might have been retained for. Restricting
-this module to function/variable nodes -- the two categories the post-hoc
-filter drops *unconditionally*, with no such carve-out -- is what keeps this
-purely a performance optimization rather than a second, diverging exclusion
-policy.
+carve-out for every field/type it might have been retained for.
+
+Never pruned: any C++ method-shaped kind (Codex review, PR #840)
+------------------------------------------------------------------
+An earlier revision of this module also pruned ``CXXMethodDecl``/
+``CXXConstructorDecl``/``CXXDestructorDecl``/``CXXConversionDecl`` nodes,
+reasoning that -- like a free ``FunctionDecl`` -- these are one of the two
+categories ``scope_snapshot_excluding_dependencies`` drops *unconditionally*
+with no carve-out. That reasoning held for the post-hoc filter (which runs
+*after* :class:`~abicheck.dumper_clang._ClangAstParser` has already fully
+built every record's vtable) but not for this module, which runs *before*
+that construction ever happens: :mod:`abicheck.dumper_clang_vtable`'s
+``build_vtable`` reconstructs a class's vtable via **base-lookup
+recursion** -- walking up into each base class's own ``CXXMethodDecl``/
+destructor/conversion nodes to find inherited virtual slots, including
+signature-matched overrides that carry neither an explicit ``virtual`` nor
+``override`` keyword on their own node (see ``_virtual_mangled_names()``'s
+own docstring in ``dumper_clang.py`` for why that detection is itself
+already hard-won and non-trivial). A dependency base class's own methods
+pruned away here are erased from the raw AST *before* that recursion ever
+runs -- corrupting the reconstructed vtable for that base **and** for any
+project-owned class deriving from it, even when both would otherwise be
+correctly retained (the base via direct-reference retention, the derived
+class by simply being project-owned). This is a strictly worse failure mode
+than the ones this module already guards against: a silently *wrong*
+vtable (a missed slot, not just a missing declaration) can produce an
+incorrect ``type_vtable_changed``/layout verdict, not merely an incomplete
+one. Detecting "this method can never be virtual" from the JSON node alone
+runs into the identical keyword-less-override ambiguity
+``_virtual_mangled_names()`` exists to resolve, so there is no cheap,
+correct narrower rule here -- pruning **no** C++ method-shaped kind at all
+is the only conservative option available at this module's own
+(pre-model-construction, no cross-class visibility) vantage point. Plain
+``FunctionDecl`` (a free function can never be a vtable slot -- ``virtual``
+only applies to a class member) and ``VarDecl`` (never part of a vtable
+either) remain safely prunable. This does shrink the fraction of a typical
+STL/template-heavy dependency header this module can prune -- member
+functions dominate that content -- but given the measured trade-off below
+was already a net *negative*, trading away more of an already-negative
+optimization for eliminating a real correctness risk is not a difficult
+call.
 
 What this deliberately does NOT attempt
 ----------------------------------------
@@ -133,6 +170,19 @@ rather than assumed:
 * A larger, 20-header repro (~165,000 functions, ~10.2GB baseline peak
   RSS): pruning removed ~2.2% of functions and reduced peak RSS by
   ~1.2%, but wall time was again worse (114.2s -> 129.3s, ~13% slower).
+
+Both measurements above predate the "Never pruned: any C++ method-shaped
+kind" fix and were taken against a broader (incorrect) prunable-kind set
+that also included ``CXXMethodDecl``/``CXXConstructorDecl``/
+``CXXDestructorDecl``/``CXXConversionDecl``. That synthetic repro's
+dependency content (``heavydep::Container``/``Wrap``/``Fixed``) is
+overwhelmingly class *member* functions, not free functions or variables,
+so restricting to the current, correctness-safe kind set prunes
+substantially less of it than these numbers show -- the already-negative
+wall-time trade-off above is, if anything, understated for the shipped
+behavior, not overstated. Not re-measured against the narrower kind set:
+the fix was made for correctness, not to chase a number that was already
+negative before the fix.
 
 Why the prune ratio is so low: clang's own delta/"sticky" location
 encoding means most nodes deep inside one dependency header's content
@@ -226,14 +276,17 @@ def streaming_prune_suppressed() -> bool:
 #: type/record/enum/typedef kind (``CXXRecordDecl``,
 #: ``ClassTemplateSpecializationDecl``, ``EnumDecl``, ``TypedefDecl``,
 #: ``TypeAliasDecl``, ...) -- see the module docstring's "direct-reference
-#: retention" reasoning for why those must never be touched here.
+#: retention" reasoning for why those must never be touched here -- AND
+#: (Codex review, PR #840) every C++ method-shaped kind (``CXXMethodDecl``,
+#: ``CXXConstructorDecl``, ``CXXDestructorDecl``, ``CXXConversionDecl``),
+#: since a dependency base class's own methods can feed vtable
+#: reconstruction for a project-owned derived class -- see the module
+#: docstring's "Never pruned: any C++ method-shaped kind" section. Only a
+#: free ``FunctionDecl`` (never a vtable slot) and ``VarDecl`` (never part
+#: of a vtable) are safe.
 _PRUNABLE_DECL_KINDS: frozenset[str] = frozenset(
     {
         "FunctionDecl",
-        "CXXMethodDecl",
-        "CXXConstructorDecl",
-        "CXXDestructorDecl",
-        "CXXConversionDecl",
         "VarDecl",
     }
 )

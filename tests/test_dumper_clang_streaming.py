@@ -51,7 +51,7 @@ def _func_node(kind: str, name: str, file: str, inner: list | None = None) -> di
 class TestDependencyDeclPruningHook:
     def test_prunes_function_confined_to_dependency_header(self) -> None:
         hook = DependencyDeclPruningHook((_PROJECT_HEADER,))
-        node = _func_node("CXXMethodDecl", "push_back", _DEP_HEADER)
+        node = _func_node("FunctionDecl", "push_back", _DEP_HEADER)
         pruned = hook(list(node.items()))
         assert pruned["kind"] == PRUNED_PLACEHOLDER_KIND
         assert pruned["name"] == "push_back"
@@ -80,22 +80,47 @@ class TestDependencyDeclPruningHook:
             assert kept["kind"] == kind
         assert hook.pruned_count == 0
 
-    def test_keeps_node_with_no_own_location(self) -> None:
-        """No explicit own-location evidence -> conservative keep, never a guess."""
+    def test_never_prunes_any_cxx_method_shaped_kind(self) -> None:
+        """Codex review, PR #840: a class member (method/ctor/dtor/conversion
+        operator) must never be pruned, even when wholly confined to a
+        dependency header with real location evidence -- unlike a free
+        function or variable, a dependency base class's own method can feed
+        ``dumper_clang_vtable.build_vtable``'s base-lookup recursion for a
+        project-owned derived class's vtable. See the module docstring's
+        "Never pruned: any C++ method-shaped kind" section."""
         hook = DependencyDeclPruningHook((_PROJECT_HEADER,))
-        node = {"kind": "CXXMethodDecl", "name": "f"}  # no "loc" at all
+        for kind in (
+            "CXXMethodDecl",
+            "CXXConstructorDecl",
+            "CXXDestructorDecl",
+            "CXXConversionDecl",
+        ):
+            node = _func_node(kind, "member", _DEP_HEADER)
+            kept = hook(list(node.items()))
+            assert kept["kind"] == kind
+        assert hook.pruned_count == 0
+
+    def test_keeps_node_with_no_own_location(self) -> None:
+        """No explicit own-location evidence -> conservative keep, never a
+        guess. Uses ``FunctionDecl`` (not a C++ method-shaped kind) so this
+        actually exercises the location check rather than being kept solely
+        because its kind was never a pruning candidate at all."""
+        hook = DependencyDeclPruningHook((_PROJECT_HEADER,))
+        node = {"kind": "FunctionDecl", "name": "f"}  # no "loc" at all
         kept = hook(list(node.items()))
-        assert kept["kind"] == "CXXMethodDecl"
+        assert kept["kind"] == "FunctionDecl"
         assert hook.pruned_count == 0
 
     def test_safety_net_keeps_subtree_reaching_a_kept_file(self) -> None:
         """A dependency-header-rooted node whose own subtree also mentions a
         kept file anywhere (e.g. a macro-expansion edge) must be kept whole
-        -- pruning must never be more aggressive than the post-hoc filter."""
+        -- pruning must never be more aggressive than the post-hoc filter.
+        Uses ``FunctionDecl`` so this exercises the safety-net re-scan
+        itself, not the (separate) kind exclusion."""
         hook = DependencyDeclPruningHook((_PROJECT_HEADER,))
         node = _func_node(
-            "CXXMethodDecl",
-            "weird_method",
+            "FunctionDecl",
+            "weird_function",
             _DEP_HEADER,
             inner=[
                 {
@@ -106,7 +131,7 @@ class TestDependencyDeclPruningHook:
             ],
         )
         kept = hook(list(node.items()))
-        assert kept["kind"] == "CXXMethodDecl"
+        assert kept["kind"] == "FunctionDecl"
         assert hook.pruned_count == 0
 
     def test_prunes_vardecl(self) -> None:
@@ -144,7 +169,7 @@ class TestLoadPrunedClangAst:
         doc = {
             "kind": "TranslationUnitDecl",
             "inner": [
-                _func_node("CXXMethodDecl", "push_back", _DEP_HEADER),
+                _func_node("FunctionDecl", "push_back", _DEP_HEADER),
                 _func_node("FunctionDecl", "add", _PROJECT_HEADER),
             ],
         }
@@ -172,17 +197,17 @@ class TestLoadPrunedClangAst:
         subtree entirely confined to a dependency header collapses to a
         single small placeholder dict, so nothing downstream (the
         ``_ClangAstParser`` walk) ever visits its many descendants."""
-        # A deeply-nested chain of CXXMethodDecl children, mimicking a
+        # A deeply-nested chain of FunctionDecl children, mimicking a
         # template-instantiation subtree many levels deep.
-        leaf = _func_node("CXXMethodDecl", "leaf", _DEP_HEADER)
+        leaf = _func_node("FunctionDecl", "leaf", _DEP_HEADER)
         node = leaf
         for i in range(50):
-            node = _func_node("CXXMethodDecl", f"wrapper{i}", _DEP_HEADER, inner=[node])
+            node = _func_node("FunctionDecl", f"wrapper{i}", _DEP_HEADER, inner=[node])
         doc = {"kind": "TranslationUnitDecl", "inner": [node]}
         fh = io.BytesIO(json.dumps(doc).encode("utf-8"))
         root, pruned_count = load_pruned_clang_ast(fh, header_roots=(_PROJECT_HEADER,))
         # Every level of the chain is itself an independently-prunable
-        # CXXMethodDecl, so pruning fires bottom-up at each one (51 total:
+        # FunctionDecl, so pruning fires bottom-up at each one (51 total:
         # the leaf plus 50 wrappers) -- the outermost placeholder carries
         # none of its nested descendants any more.
         assert pruned_count == 51

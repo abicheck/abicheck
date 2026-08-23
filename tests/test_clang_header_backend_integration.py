@@ -1512,3 +1512,52 @@ def test_streaming_pruner_reports_a_nonzero_prune_count_on_the_raw_ast(
     fh = io.BytesIO(_json.dumps(root).encode("utf-8"))
     _reloaded, pruned_count = load_pruned_clang_ast(fh, header_roots=(str(header),))
     assert pruned_count == 0  # already-pruned placeholders aren't prunable kinds
+
+
+_METHOD_SHAPED_KINDS = frozenset(
+    {"CXXMethodDecl", "CXXConstructorDecl", "CXXDestructorDecl", "CXXConversionDecl"}
+)
+
+
+def _count_kinds(node: object, kinds: frozenset) -> int:
+    if isinstance(node, dict):
+        n = 1 if node.get("kind") in kinds else 0
+        return n + sum(_count_kinds(v, kinds) for v in node.values())
+    if isinstance(node, list):
+        return sum(_count_kinds(v, kinds) for v in node)
+    return 0
+
+
+def test_streaming_pruner_never_prunes_a_method_shaped_node_end_to_end(
+    stream_prune_lib: tuple[Path, Path],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Codex review, PR #840: even though this repro's raw AST does contain
+    real, prunable placeholder-eligible content (the sibling test above
+    proves a nonzero prune count), no C++ method-shaped node
+    (``CXXMethodDecl``/``CXXConstructorDecl``/``CXXDestructorDecl``/
+    ``CXXConversionDecl``) is ever one of them -- a dependency base class's
+    own methods can feed ``dumper_clang_vtable.build_vtable``'s base-lookup
+    recursion for a project-owned derived class's vtable, so pruning one
+    could silently corrupt a *kept* class's reconstructed vtable, not just
+    drop a declaration. Verified against the real clang AST end to end,
+    not just the unit-level `_PRUNABLE_DECL_KINDS` set."""
+    so, header = stream_prune_lib
+
+    monkeypatch.delenv(_STREAM_PRUNE_ENV_VAR, raising=False)
+    _isolate_ast_cache(monkeypatch, tmp_path)
+    unpruned_root, _, _ = _clang_header_dump(
+        [header], [], compiler="clang", lang="c++", memoize=False
+    )
+
+    monkeypatch.setenv(_STREAM_PRUNE_ENV_VAR, "1")
+    _isolate_ast_cache(monkeypatch, tmp_path)  # a *different*, still-fresh cache dir
+    pruned_root, _, _ = _clang_header_dump(
+        [header], [], compiler="clang", lang="c++", memoize=False
+    )
+
+    unpruned_methods = _count_kinds(unpruned_root, _METHOD_SHAPED_KINDS)
+    pruned_methods = _count_kinds(pruned_root, _METHOD_SHAPED_KINDS)
+    assert unpruned_methods > 0  # this repro's dependency headers do have some
+    assert pruned_methods == unpruned_methods
