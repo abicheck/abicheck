@@ -286,9 +286,18 @@ def manifest_to_dict(manifest: InstantiationManifest) -> dict[str, object]:
     return {"provides": [manifest_entry_to_dict(e) for e in manifest.entries]}
 
 
-def manifest_from_dict(raw: dict[str, object]) -> InstantiationManifest:
-    """Inverse of :func:`manifest_to_dict`."""
-    provides = cast("list[dict[str, object]]", raw.get("provides", []))
+def manifest_from_dict(raw: object) -> InstantiationManifest:
+    """Inverse of :func:`manifest_to_dict`.
+
+    Validates the same top-level shape :func:`load_manifest` requires (a
+    mapping with a list-valued ``provides:``) rather than silently
+    defaulting a malformed/missing field to an empty manifest — a corrupt
+    persisted ``BundleFacts`` file must not silently discard its own
+    manifest promises.
+    """
+    if not isinstance(raw, dict) or not isinstance(raw.get("provides"), list):
+        raise ValueError("bundle facts manifest: missing top-level 'provides:' list")
+    provides = cast("list[dict[str, object]]", raw["provides"])
     return InstantiationManifest(
         entries=tuple(manifest_entry_from_dict(e) for e in provides)
     )

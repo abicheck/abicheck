@@ -16,7 +16,11 @@ from abicheck.bundle_facts import (
     capture_bundle_facts,
     compare_bundle_from_facts,
 )
-from abicheck.bundle_manifest import InstantiationManifest, ManifestEntry
+from abicheck.bundle_manifest import (
+    InstantiationManifest,
+    ManifestEntry,
+    manifest_from_dict,
+)
 from abicheck.bundle_models import BundleSnapshot
 from abicheck.checker_policy import ChangeKind, Verdict
 from abicheck.checker_types import Change, DiffResult
@@ -379,3 +383,105 @@ class TestBundleFactsSerialization:
         )
 
         assert facts_result.bundle_findings == live_result.bundle_findings
+
+
+# ---------------------------------------------------------------------------
+# Malformed manifest data (Codex/CodeRabbit review: reject, don't silently
+# discard the manifest promises a corrupt facts file claims to carry)
+# ---------------------------------------------------------------------------
+
+
+class TestManifestFromDictValidation:
+    def test_missing_provides_key_raises(self) -> None:
+        import pytest
+
+        with pytest.raises(ValueError, match="provides"):
+            manifest_from_dict({})
+
+    def test_non_list_provides_raises(self) -> None:
+        import pytest
+
+        with pytest.raises(ValueError, match="provides"):
+            manifest_from_dict({"provides": "not-a-list"})
+
+    def test_non_dict_raises(self) -> None:
+        import pytest
+
+        with pytest.raises(ValueError, match="provides"):
+            manifest_from_dict([])
+
+    def test_empty_manifest_field_is_not_silently_dropped(self) -> None:
+        """A stored `"manifest": {}` (present but malformed, missing its
+        own `provides:` key) must raise -- not be treated the same as
+        `"manifest": null` (genuinely absent)."""
+        import pytest
+
+        facts_dict = bundle_facts_to_dict(
+            capture_bundle_facts(_per_library_snapshots(_old_metadata()))
+        )
+        facts_dict["manifest"] = {}
+        with pytest.raises(ValueError, match="provides"):
+            bundle_facts_from_dict(facts_dict)
+
+    def test_null_manifest_field_round_trips_to_none(self) -> None:
+        facts_dict = bundle_facts_to_dict(
+            capture_bundle_facts(_per_library_snapshots(_old_metadata()))
+        )
+        facts_dict["manifest"] = None
+        assert bundle_facts_from_dict(facts_dict).manifest is None
+
+
+# ---------------------------------------------------------------------------
+# write_bundle_facts_out (the CLI producer helper) -- usage-error contract
+# ---------------------------------------------------------------------------
+
+
+class TestWriteBundleFactsOut:
+    def _diff_pairs(self) -> list[tuple[DiffResult, AbiSnapshot]]:
+        snapshots = _per_library_snapshots(_old_metadata())
+        return [
+            (_diff(name, verdict=Verdict.COMPATIBLE), snap)
+            for name, snap in snapshots.items()
+        ]
+
+    def test_writes_a_loadable_facts_file(self, tmp_path: Path) -> None:
+        from abicheck.cli_compare_release_helpers import write_bundle_facts_out
+
+        out = tmp_path / "old.bundlefacts.json"
+        write_bundle_facts_out(out, self._diff_pairs(), None)
+
+        loaded = load_bundle_facts(out)
+        assert set(loaded.per_library_snapshots) == {"libcore.so", "libalgo.so"}
+        assert loaded.manifest is None
+
+    def test_malformed_manifest_raises_usage_error(self, tmp_path: Path) -> None:
+        import click
+        import pytest
+
+        from abicheck.cli_compare_release_helpers import write_bundle_facts_out
+
+        bad_manifest = tmp_path / "bad.yaml"
+        bad_manifest.write_text("provides: not-a-list\n")
+        out = tmp_path / "old.bundlefacts.json"
+
+        with pytest.raises(click.UsageError, match="bundle-facts-out"):
+            write_bundle_facts_out(out, self._diff_pairs(), bad_manifest)
+        assert not out.exists()
+
+    def test_unwritable_output_path_raises_usage_error(self, tmp_path: Path) -> None:
+        import click
+        import pytest
+
+        from abicheck.cli_compare_release_helpers import write_bundle_facts_out
+
+        # save_bundle_facts()/write_snapshot_bytes() auto-creates missing
+        # parent directories, so the reliable way to force a real OSError is
+        # a parent path component that already exists as a *file* --
+        # Path.mkdir(parents=True) then raises NotADirectoryError (an OSError
+        # subclass) trying to descend through it.
+        blocking_file = tmp_path / "blocking"
+        blocking_file.write_text("not a directory")
+        out = blocking_file / "old.bundlefacts.json"
+
+        with pytest.raises(click.UsageError, match="bundle-facts-out"):
+            write_bundle_facts_out(out, self._diff_pairs(), None)

@@ -1650,7 +1650,7 @@ def compare_release_cmd(
                 collect_diff_results=(
                     fmt == "junit"
                     or secondary_fmt == "junit"
-                    or bundle_facts_out is not None
+                    or (bundle_facts_out is not None and not no_bundle_analysis)
                 ),
                 jobs=jobs,
                 scope_to_public_surface=scope_public_headers,

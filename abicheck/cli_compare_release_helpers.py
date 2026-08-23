@@ -354,12 +354,15 @@ def write_bundle_facts_out(
     from .bundle_manifest import load_manifest
     from .serialization import save_bundle_facts
 
-    manifest = load_manifest(manifest_path) if manifest_path is not None else None
-    per_library_snapshots: dict[str, AbiSnapshot] = {
-        Path(diff.library).name: old_snapshot for diff, old_snapshot in diff_pairs
-    }
-    facts = capture_bundle_facts(per_library_snapshots, manifest=manifest)
-    save_bundle_facts(facts, bundle_facts_out)
+    try:
+        manifest = load_manifest(manifest_path) if manifest_path is not None else None
+        per_library_snapshots: dict[str, AbiSnapshot] = {
+            Path(diff.library).name: old_snapshot for diff, old_snapshot in diff_pairs
+        }
+        facts = capture_bundle_facts(per_library_snapshots, manifest=manifest)
+        save_bundle_facts(facts, bundle_facts_out)
+    except (OSError, ValueError) as exc:
+        raise click.UsageError(f"--bundle-facts-out {bundle_facts_out}: {exc}") from exc
 
 
 def _collect_bundle_result(

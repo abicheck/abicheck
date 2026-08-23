@@ -1838,7 +1838,7 @@ def bundle_facts_from_dict(d: dict[str, Any]) -> BundleFacts:
             name: snapshot_from_dict(sd)
             for name, sd in d.get("per_library_snapshots", {}).items()
         },
-        manifest=manifest_from_dict(raw_manifest) if raw_manifest else None,
+        manifest=manifest_from_dict(raw_manifest) if raw_manifest is not None else None,
     )
 
 
