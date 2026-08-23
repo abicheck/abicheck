@@ -1663,19 +1663,45 @@ def compare_release_cmd(
             )
 
             if bundle_facts_out is not None and not no_bundle_analysis:
+                # write_bundle_facts_out() is a leaf module and cannot
+                # import cli_resolve itself (see its own docstring) --
+                # this module already belongs to that import cycle, so the
+                # resolve lives here instead.
+                def _resolve_stranded_library(old_path: Path) -> AbiSnapshot:
+                    from .cli_resolve import _resolve_input
+                    from .elf_metadata import parse_elf_metadata
+
+                    old_dbg = (
+                        resolve_debug_info(old_path, old_debug_dir)
+                        if old_debug_dir
+                        else None
+                    )
+                    try:
+                        return _resolve_input(
+                            old_path,
+                            old_h,
+                            old_inc,
+                            old_version,
+                            lang,
+                            pdb_path=old_dbg,
+                            compile=compile_context,
+                            include_dependencies=include_dependencies,
+                        )
+                    except Exception:
+                        # Degrade to bare ElfMetadata (never raises) rather
+                        # than aborting the write over one stranded library.
+                        return AbiSnapshot(
+                            library=old_path.name,
+                            version="",
+                            elf=parse_elf_metadata(old_path),
+                        )
+
                 write_bundle_facts_out(
                     bundle_facts_out,
                     diff_pairs,
                     manifest_path,
                     old_map,
-                    old_headers=old_h,
-                    old_includes=old_inc,
-                    old_version=old_version,
-                    lang=lang,
-                    old_debug_dir=old_debug_dir,
-                    resolve_debug_info=resolve_debug_info,
-                    include_dependencies=include_dependencies,
-                    compile_context=compile_context,
+                    resolve_stranded_library=_resolve_stranded_library,
                 )
 
             # ADR-049 Phase 7's orthogonal contract-coverage floor, aggregated

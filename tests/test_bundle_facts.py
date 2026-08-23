@@ -607,24 +607,37 @@ class TestWriteBundleFactsOut:
         return old_map
 
     def _facts_kwargs(self) -> dict[str, object]:
-        """Default no-op full-dump context for ``write_bundle_facts_out()``'s
-        keyword-only parameters -- every test here cares about the
-        fallback's *key*/*presence* behavior, not the resolved snapshot's
-        own content, so an empty header/include list (which makes
-        ``service.resolve_input()`` fail closed for any non-trivial input,
-        landing on the bare-``ElfMetadata`` degrade path) is the right
-        default throughout.
+        """Default no-op ``resolve_stranded_library`` for
+        ``write_bundle_facts_out()``'s one keyword-only parameter -- every
+        test here cares about the fallback's *key*/*presence* behavior, not
+        the resolved snapshot's own content, so this mirrors the real
+        production closure (``cli_compare_release.py``'s
+        ``_resolve_stranded_library``) with an empty header/include list,
+        which makes ``service.resolve_input()`` fail closed for any
+        non-trivial input, landing on the bare-``ElfMetadata`` degrade path.
         """
-        return {
-            "old_headers": [],
-            "old_includes": [],
-            "old_version": "old",
-            "lang": "c++",
-            "old_debug_dir": None,
-            "resolve_debug_info": lambda *_args: None,
-            "include_dependencies": True,
-            "compile_context": None,
-        }
+
+        def resolve_stranded_library(old_path: Path) -> AbiSnapshot:
+            from abicheck.cli_resolve import _resolve_input
+            from abicheck.elf_metadata import parse_elf_metadata
+
+            try:
+                return _resolve_input(
+                    old_path,
+                    [],
+                    [],
+                    "old",
+                    "c++",
+                    include_dependencies=True,
+                )
+            except Exception:
+                return AbiSnapshot(
+                    library=old_path.name,
+                    version="",
+                    elf=parse_elf_metadata(old_path),
+                )
+
+        return {"resolve_stranded_library": resolve_stranded_library}
 
     def test_writes_a_loadable_facts_file(self, tmp_path: Path) -> None:
         from abicheck.cli_compare_release_helpers import write_bundle_facts_out
@@ -928,20 +941,20 @@ class TestWriteBundleFactsOutCapturesARealSnapshot:
         real_so = self._build_tiny_so(tmp_path)
         old_map = {"libreal.so": real_so}
 
+        def resolve_stranded_library(old_path: Path) -> AbiSnapshot:
+            from abicheck.cli_resolve import _resolve_input
+
+            return _resolve_input(
+                old_path, [], [], "old", "c++", include_dependencies=True
+            )
+
         out = tmp_path / "old.bundlefacts.json"
         write_bundle_facts_out(
             out,
             [],  # no diff_pairs -- libreal.so is entirely "stranded"
             None,
             old_map,
-            old_headers=[],
-            old_includes=[],
-            old_version="old",
-            lang="c++",
-            old_debug_dir=None,
-            resolve_debug_info=lambda *_args: None,
-            include_dependencies=True,
-            compile_context=None,
+            resolve_stranded_library=resolve_stranded_library,
         )
 
         loaded = load_bundle_facts(out)

@@ -39,7 +39,6 @@ from .checker import DiffResult
 from .model import AbiSnapshot
 
 if TYPE_CHECKING:
-    from .compile_context import CompileContext
     from .pack_application import PackApplication
     from .package import PackageExtractor
     from .severity import SeverityConfig
@@ -328,14 +327,7 @@ def write_bundle_facts_out(
     manifest_path: Path | None,
     old_map: dict[str, Path],
     *,
-    old_headers: list[Path],
-    old_includes: list[Path],
-    old_version: str,
-    lang: str,
-    old_debug_dir: Path | None,
-    resolve_debug_info: Callable[[Path, Path], Path | None],
-    include_dependencies: bool,
-    compile_context: CompileContext | None,
+    resolve_stranded_library: Callable[[Path], AbiSnapshot],
 ) -> None:
     """Persist the OLD side's per-library snapshots (plus manifest, if any)
     to *bundle_facts_out* as a :class:`~abicheck.bundle_facts.BundleFacts`
@@ -372,26 +364,36 @@ def write_bundle_facts_out(
     call could never emit ``bundle_library_removed``/dependency-removal/
     version-resolution findings a live comparison of the same old release
     would -- so both are closed the same way: *every* ``old_map`` key not
-    already covered by a successful ``diff_pairs`` entry gets a **real**
-    ``AbiSnapshot`` resolved through :func:`abicheck.cli_resolve._resolve_input`
-    (the CLI-side wrapper over :func:`abicheck.service.resolve_input`, per
-    ADR-037 D1/D10.1's Tier-1/Tier-2 boundary) with the exact same
-    *old_headers*/*old_includes*/*old_version*/*lang*/
-    debug-info/*compile_context* context every other library in this
-    release was dumped with (Codex review, fresh evidence: an earlier
-    revision of this fix only captured bare ``ElfMetadata``, which is
-    sufficient for bundle-level graph resolution but is missing the
+    already covered by a successful ``diff_pairs`` entry is resolved via
+    *resolve_stranded_library*, a caller-supplied callable that produces a
+    **real** ``AbiSnapshot`` (or degrades to a bare-``ElfMetadata`` stand-in
+    on failure) with the exact same extraction context every other library
+    in this release was dumped with (Codex review, fresh evidence: an
+    earlier revision of this fix only captured bare ``ElfMetadata``, which
+    is sufficient for bundle-level graph resolution but is missing the
     functions/types/headers a stored-baseline consumer's own documented
     ``old_facts.per_library_snapshots[name]`` → ``compare_snapshots()``
     workflow needs -- an ELF-only snapshot compared against a real future
     dump would read every declaration as a compatible addition instead of
-    the real diff, hiding a genuine breaking change). Only degrades to the
-    bare-``ElfMetadata`` stand-in (``parse_elf_metadata`` never raises) if
-    the full resolve itself raises -- e.g. no header covers this specific
-    library, or it isn't a real ELF binary -- mirroring
-    ``build_bundle_snapshot()``'s own "only promise what was actually
-    captured" rule for a library that fails to parse, rather than aborting
-    the whole ``--bundle-facts-out`` write over one stranded library.
+    the real diff, hiding a genuine breaking change).
+
+    The resolution itself is deliberately injected rather than performed in
+    this module: this is a **leaf module** (see its own docstring -- it
+    must not import ``cli``/``cli_compare_release``), and a real resolve
+    needs ``abicheck.cli_resolve._resolve_input``/``abicheck.service
+    .resolve_input`` (per ADR-037 D1/D10.1's Tier-1/Tier-2 CLI-contract
+    boundary), both of which already sit inside the large CLI-registration
+    import cycle (``scripts/check_ai_readiness.py``'s
+    ``IMPORT_CYCLE_ALLOWLIST``) -- importing either one *from this module*
+    would pull this otherwise-leaf module into that cycle for the first
+    time, which the ``import-cycle-growth`` gate correctly rejects as
+    *new* SCC membership rather than "reuse of an already-member module"
+    (Codex review, fresh evidence: an earlier revision of this fix called
+    ``cli_resolve._resolve_input`` directly from here and passed
+    ``check_ai_readiness.py``'s ``cli-contract`` check, but failed
+    ``import-cycle-growth`` in CI for exactly this reason).
+    ``cli_compare_release.py`` -- the sole caller, already a member of that
+    cycle -- builds the callable and owns the actual resolve.
 
     *old_map* itself (already canonical-key-keyed) is handed to
     :func:`~abicheck.bundle_facts.capture_bundle_facts` as
@@ -408,8 +410,6 @@ def write_bundle_facts_out(
     """
     from .bundle_facts import capture_bundle_facts
     from .bundle_manifest import load_manifest
-    from .cli_resolve import _resolve_input
-    from .elf_metadata import parse_elf_metadata
     from .serialization import save_bundle_facts
 
     try:
@@ -429,32 +429,7 @@ def write_bundle_facts_out(
         for key, old_path in old_map.items():
             if key in per_library_snapshots:
                 continue
-            old_dbg = (
-                resolve_debug_info(old_path, old_debug_dir) if old_debug_dir else None
-            )
-            try:
-                per_library_snapshots[key] = _resolve_input(
-                    old_path,
-                    old_headers,
-                    old_includes,
-                    old_version,
-                    lang,
-                    pdb_path=old_dbg,
-                    compile=compile_context,
-                    include_dependencies=include_dependencies,
-                )
-            except Exception:
-                # No header covers this specific library, it isn't a real
-                # ELF binary, or some other resolution failure -- degrade to
-                # the bare-ElfMetadata stand-in (parse_elf_metadata never
-                # raises) rather than aborting the whole write over one
-                # stranded library, mirroring build_bundle_snapshot()'s own
-                # "only promise what was actually captured" rule.
-                per_library_snapshots[key] = AbiSnapshot(
-                    library=old_path.name,
-                    version="",
-                    elf=parse_elf_metadata(old_path),
-                )
+            per_library_snapshots[key] = resolve_stranded_library(old_path)
         facts = capture_bundle_facts(
             per_library_snapshots, manifest=manifest, library_paths=dict(old_map)
         )
