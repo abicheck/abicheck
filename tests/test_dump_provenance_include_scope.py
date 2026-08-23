@@ -171,3 +171,74 @@ def test_explicit_include_dir_still_promotes_transitively_reached_header(
         "a header reached transitively under an explicit -I root must "
         "still promote to PUBLIC_HEADER (the original defect-4/5 fix)"
     )
+
+
+def test_compiler_option_include_dir_promotes_transitively_reached_header(
+    tmp_path: Path,
+) -> None:
+    """CodeRabbit review, fresh evidence: an include directory supplied via
+    the repeatable ``--compiler-option -I<dir>``/``-isystem <dir>`` flag is
+    exactly as explicit as a plain ``-I`` -- the L2 seed suppression already
+    trusts it that way (see the "as explicit as -I" comment in
+    ``perform_elf_dump``) -- but it was never folded into
+    ``public_include_search_dirs``, so a header reached ONLY through such a
+    directory stayed ``PRIVATE_HEADER`` even though the caller had named
+    that directory explicitly, just via ``--compiler-option`` rather than a
+    bare ``-I``. Exercised end to end through the real ``abicheck dump`` CLI
+    (the fix lives in ``cli_dump_helpers.py``, one layer above
+    ``dumper.dump()``, so a direct ``dump()`` call cannot reproduce it)."""
+    _require_tools()
+    include_dir = tmp_path / "include"
+    detail_dir = include_dir / "detail"
+    detail_dir.mkdir(parents=True)
+    (detail_dir / "impl.h").write_text(
+        "#pragma once\nvoid dep(void);\n", encoding="utf-8"
+    )
+    (include_dir / "api.h").write_text(
+        '#pragma once\n#include "detail/impl.h"\nvoid pub(void);\n',
+        encoding="utf-8",
+    )
+    src = tmp_path / "lib.cpp"
+    src.write_text(
+        '#include "api.h"\nvoid pub(void) {}\nvoid dep(void) {}\n', encoding="utf-8"
+    )
+    so = tmp_path / "lib.so"
+    subprocess.run(
+        ["g++", "-shared", "-fPIC", "-g", f"-I{include_dir}", "-o", str(so), str(src)],
+        check=True,
+        capture_output=True,
+    )
+
+    from click.testing import CliRunner
+
+    from abicheck.cli import main
+
+    out = tmp_path / "out.json"
+    runner = CliRunner()
+    result = runner.invoke(
+        main,
+        [
+            "dump",
+            str(so),
+            "-H",
+            str(include_dir / "api.h"),
+            "--ast-frontend",
+            "clang",
+            # No plain -I at all -- the only include search path is given
+            # via --compiler-option, which must still count as explicit.
+            "--compiler-option",
+            f"-I{include_dir}",
+            "-o",
+            str(out),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    import json
+
+    snap = json.loads(out.read_text())
+    by_name = {f["name"]: f for f in snap["functions"]}
+    assert by_name["pub"]["origin"] == "public_header"
+    assert by_name["dep"]["origin"] == "public_header", (
+        "a header reached transitively under a --compiler-option -I root "
+        "must promote to PUBLIC_HEADER the same as a plain -I root"
+    )
