@@ -18,13 +18,18 @@ one `abicheck[clang]` optional-dependency story rather than each adding
 `libclang` independently — noted here so a future implementer checks G4's
 status first.
 
-**Effort:** L for the spike alone (a working prototype answering the open
-CPU-cost question below); XL if the spike recommends proceeding to a real
-migration (see "Recommendation"). **Risk:** high — a new native dependency,
-a structurally different traversal API with its own parity burden across
-every one of `dumper_clang.py`'s already-hard-won extraction facts, and (per
-the CPU-cost investigation below) a real, unresolved chance that the
-promised win does not materialize at the layer this document can verify.
+**Effort:** L for the prototype step (a real, model-object-building
+selective walk, per the updated "Recommendation" below — the cursor-count-
+only spike this estimate originally covered has now been run); XL if the
+prototype recommends proceeding to a real migration. **Risk:** high — a new
+native dependency, a structurally different traversal API with its own
+parity burden across every one of `dumper_clang.py`'s already-hard-won
+extraction facts — but the CPU-cost investigation below (updated 2026-08-23
+with a real `clang.cindex` measurement) narrows the risk that was
+previously the biggest unknown: the promised win is real and substantial at
+the cursor-traversal layer this document can now verify; what remains
+unverified is only the per-node semantic-construction cost on libclang's
+native API, not whether the avenue is worth pursuing at all.
 
 ## Problem statement
 
@@ -154,61 +159,89 @@ every JSON object regardless of what the caller's Python code does with it,
 skipping the call means the excluded subtree's Python-visible representation
 is never constructed at all.
 
-**This environment could not install/verify `clang.cindex` (`pip show
-libclang` and `python -c "import clang.cindex"` were not checked against a
-real install in this session — the recommendation below is based on
-documented libclang API semantics and the local presence of `libclang.so`
-via the system `clang`/`llvm` packages, not a verified prototype run.**
-That gap is exactly why this document proposes a spike rather than a
-committed plan.
+**Update — verified with a working `clang.cindex` install (2026-08-23,
+post-streaming-pruner session).** The `libclang` PyPI package installs
+cleanly against this host's real `libclang-18.so.1` (the same Clang 18
+already used for the subprocess-based backend), so the crux question below
+is answered with real measurements, not documented-semantics inference —
+superseding the "not resolved" framing this section originally carried. The
+raw experiment (`Index.parse()` timed alone, then a full `get_children()`
+walk vs. a selective one that never recurses into a dependency-header
+cursor, against the same synthetic 7-types-x-heavy-STL-headers repro used
+throughout this investigation) and a `cProfile` of the *real* `abicheck
+dump()` pipeline on the identical input are both reproducible from this
+session's own scratch scripts; the numbers below are from those runs.
 
 ### The crux: does skipping a cursor's children avoid clang's *own* cost?
 
-This is the question that decides whether libclang closes the *first*
-ceiling too (clang's own subprocess-side parse/instantiate/serialize work),
-or only the second (Python-side visitation cost) — and it was **not
-resolved with a verified local prototype in this session** (no working
-`clang.cindex` install was available to test against). Based on documented
-Clang semantics rather than a local measurement:
+**Short answer: no, that specific cost is not avoidable — but it was never
+the dominant cost to begin with, which changes the recommendation.**
 
-- **Template instantiation happens during Sema (semantic analysis), which
-  runs unconditionally during `Index.parse()`, before any cursor is ever
-  visited.** `-ast-dump=json`'s own cost profile already demonstrates
-  this: clang must fully instantiate `std::vector<Foo>` (build its
-  complete AST, including every member function) to type-check code that
-  uses it, *before* it can even begin serializing that instantiation to
-  JSON — the instantiation cost is not a side effect of the JSON dumper,
-  it is Sema's job regardless of what happens afterward. **This strongly
-  suggests skipping cursor traversal cannot avoid the instantiation cost
-  itself** — that cost is paid the moment `Index.parse()` returns, for
-  every header actually included in the translation unit, independent of
-  what a caller does with the resulting `CXTranslationUnit`.
-- What `Index.parse()` *does* let a caller skip is real and substantial
-  even so: (a) `TranslationUnit.PARSE_SKIP_FUNCTION_BODIES` (and the
-  general shape of `-fsyntax-only`-style parsing already used implicitly
-  today) — but the current `-ast-dump=json` invocation is not shown to
-  already omit bodies wholesale, and this flag's effect on template
-  instantiation depth specifically was not verified; (b) the **JSON
-  serialization pass itself** — clang must walk its own internal AST and
-  emit potentially hundreds of MB to GB of JSON text for content the
-  caller will discard moments later (confirmed real: the measured AST-JSON
-  sizes above), and libclang's cursor API has no equivalent serialization
-  step for a subtree the caller never visits; (c) **Python-side
-  materialization** — the second ceiling above, unconditionally avoided.
-- **Net assessment: libclang very likely eliminates (b) and (c) — the
-  clang-side JSON-text emission and every Python-side cost for an excluded
-  subtree — but very likely does *not* eliminate the Sema/template-
-  instantiation cost itself**, which is probably the single largest
-  contributor to both wall time and peak RSS on a template-heavy header
-  (an instantiated `CXXRecordDecl`'s full AST, not its JSON serialization,
-  is what a compiler's own internal representation is dominated by). If
-  that assessment is right, migrating to libclang should still produce a
-  **real, meaningful reduction in wall time and peak RSS** (no JSON
-  intermediate at all, no Python-side visitation of excluded content) —
-  but it would **not** be the order-of-magnitude "as if the dependency
-  headers were never included" win a reader might expect from "skip
-  parsing them." This distinction should be the *first* thing a spike
-  measures, since it changes how much migration effort is justified.
+- **Confirmed: `Index.parse()`'s own cost is insensitive to what happens
+  afterward**, exactly as Clang's Sema architecture predicts. For the
+  synthetic repro (1 header, then 10 headers — result identical either way
+  since the shared dependency dedups within one TU): `Index.parse()` alone
+  takes ~0.40s regardless of whether anything is ever visited afterward.
+  `TranslationUnit.PARSE_SKIP_FUNCTION_BODIES` genuinely reduces this by
+  ~28–31% (0.40s → ~0.29s) and roughly halves the resulting cursor count
+  (118,801 → 62,015) — a real, previously-unverified, orthogonal win this
+  section only speculated about before. Neither result depends on
+  traversal, confirming the "Sema runs before any cursor is visited"
+  hypothesis directly rather than by inference.
+- **Also confirmed, and this is the load-bearing correction to this
+  section's earlier text: `Index.parse()`'s ~0.40s is a *small* fraction of
+  the current backend's real total cost, not "probably the single largest
+  contributor."** A `cProfile` of the actual `abicheck.dumper.dump()` call
+  on the identical single-header repro (10.55s wall total in this run)
+  attributes it roughly as: clang subprocess (parse *and* emit JSON text)
+  ≈ 1.3s (12%); `json.load()`'s C-accelerated `raw_decode` of the resulting
+  ~280MB text ≈ 3.5s (33% — the single largest identifiable chunk);
+  `_ClangAstParser.__init__`'s id-map construction (resolving clang's
+  string-keyed `id`/`referencedDecl`/`type.qualType` back-references, a
+  workaround the JSON representation needs that a native object graph
+  would not) ≈ 1.9s (18%); the remaining ~30–35% split across
+  `parse_functions`'s own per-declaration walk (a `dict.get()` call was
+  made **6.4 million times** in this one run) and per-node semantic work
+  like initializer-expression fingerprinting. **None of this is clang's
+  own Sema/instantiation cost — every bit of it is Python-side work this
+  backend's JSON-based architecture makes structurally necessary**: parsing
+  a huge text blob, rebuilding a reference-resolution index a native object
+  graph would never need, and walking every declaration (not just the ~10
+  the library actually owns out of 118,801+ cursors) through per-node
+  Python logic.
+- **Selective traversal via libclang's native `Cursor` API achieves close
+  to the theoretical maximum walk-time saving, not merely "some" saving.**
+  A full recursive `get_children()` walk over every cursor took ~0.33s; a
+  selective walk that stops recursing the moment a cursor's own
+  `location.file` is a dependency header — visiting only the ~10 cursors
+  that are actually the library's own — took ~0.004s: a **99% reduction**,
+  because `get_children()` is called *by the traversal code itself*, so a
+  skipped subtree's `Cursor` wrapper objects (and everything downstream
+  that would process them) are never constructed at all. This is
+  structurally different from — and dramatically better than — the
+  streaming JSON pruner's own measured result (13–40% *slower*, ~1% memory
+  win): `object_pairs_hook` is invoked by the C scanner unconditionally for
+  every JSON object regardless of what the caller does with it, so it could
+  never avoid the fixed per-object callback cost the JSON approach is stuck
+  paying. `get_children()` has no such unconditional-invocation problem.
+- **Net assessment, revised from "real but bounded" to "the majority of the
+  current cost is plausibly eliminable":** libclang cannot avoid the ~0.40s
+  Sema/instantiation floor, but that floor is a small slice (roughly a
+  tenth, in this measurement) of what the current backend actually spends.
+  The other ~90% — JSON text parsing, id-map construction, and
+  per-declaration semantic processing for content the library doesn't own
+  — is exactly the class of cost a native, selectively-traversed object
+  graph structurally cannot incur for a skipped subtree. If
+  `_ClangAstParser`'s real per-declaration semantic-construction cost
+  (type resolution, demangling-adjacent lookups, initializer fingerprinting
+  — not just the bare-walk numbers measured here, which only *count*
+  cursors) scales similarly with declaration count, a libclang-based
+  selective walk could plausibly eliminate close to that same ~90% for a
+  header set where dependency content dominates — which is exactly the
+  oneDAL-shaped, template-heavy case this whole investigation started from.
+  This is a materially more optimistic assessment than this section
+  previously offered, and the reason a spike is now better-justified, not
+  less: the ceiling looks real and large, not speculative.
 
 ## Migration shape
 
@@ -331,51 +364,74 @@ suite:
 
 ## Recommendation
 
-**Do not commit to a full migration.** Pursue a narrowly-scoped **spike**
-first, with an explicit go/no-go gate, because the single most important
-question this document raises — whether skipping cursor traversal actually
-avoids clang's own Sema/template-instantiation cost, or only the JSON
-serialization and Python-side visitation cost — was not answered with a
-working prototype in this session (no verified local `clang.cindex`
-install), and the two answers imply very different amounts of migration
-effort are justified.
+**Updated (2026-08-23): proceed to a real prototype, still short of a
+committed migration.** Step (1) of the spike this section originally
+proposed — measure whether `Index.parse()`'s own cost is traversal-
+sensitive, using a real `clang.cindex` install — has now been run (see "The
+crux" above). The answer is more favorable than this section originally
+hedged: `Index.parse()`'s own Sema/instantiation floor (~0.40s) is real and
+not avoidable by traversal, but it is a **small fraction** (roughly a
+tenth, measured) of the current backend's actual cost, not the dominant
+contributor this section previously guessed it probably was. The dominant
+costs — JSON text parsing (~33%), the id-map construction the JSON
+representation's string-keyed references force (~18%), and per-declaration
+semantic processing walking every node rather than just the ~10 the library
+owns — are all Python-side, all structurally tied to this backend's
+JSON-intermediate architecture, and all things a native, selectively-walked
+`Cursor` graph does not need to pay for a skipped subtree (confirmed: a
+selective walk visiting only kept cursors measured ~99% faster than a full
+walk of the same tree, a categorically better result than the streaming
+JSON pruner's own measured *negative* result).
 
-Proposed spike, bounded to answering that one question plus the closely
-related packaging question, without touching any shipped code path:
+This changes the gate from "is there plausibly a win at all" (unresolved,
+as this section originally left it) to "how much of the ~90% non-Sema cost
+does a real, full `_ClangAstParser`-equivalent selective walk actually
+recover, once semantic model-construction work — not just cursor counting —
+is included." That is the one thing this session's spike did **not**
+measure: every number above for "selective walk" only *counts* cursors: it
+does not build `Function`/`RecordType`/`Param` model objects, resolve
+types, or fingerprint initializers the way the real backend must. Given
+`_ClangAstParser`'s own per-node work is substantial (6.4M `dict.get()`
+calls attributed to it in this single profiled run), there's no guarantee
+its *libclang-native* equivalent is cheap per node — only that it would run
+on ~99% fewer nodes for a dependency-content-dominated header set.
 
-1. Install `clang.cindex` (the `libclang` PyPI package or a source build)
-   in a throwaway environment and reproduce this document's synthetic
-   repro (the same `<vector>`/`<map>`/`<unordered_map>`/`<functional>`/
-   `<tuple>`-heavy header, escalating header count) through
-   `Index.parse()` alone — no cursor walk at all — measuring wall time and
-   peak RSS as a function of whether `TranslationUnit.PARSE_SKIP_FUNCTION_
-   BODIES` (and any other relevant `TranslationUnit.PARSE_*` flag) is set.
-   If parse-alone cost does not meaningfully drop between "visit nothing"
-   and "the current full JSON dump," that directly confirms the
-   Sema/instantiation-cost hypothesis above and caps how much benefit any
-   selective-traversal design can ever deliver — win or lose, this is the
-   load-bearing measurement the rest of this plan depends on.
-2. If (1) shows a genuine, substantial reduction is available: prototype
-   the actual selective walk (skip `get_children()` for a cursor whose
-   `location.file` is a dependency header, per the exact criterria
-   `dumper_scoping.is_dependency_header` already implements) over the same
-   repro, and measure wall time/peak RSS end-to-end against both the
-   current subprocess-clang backend and castxml, on the same hardware.
-3. Only if (1) and (2) both show a clear, substantial win should this
-   proceed past spike stage — and even then, as a new opt-in
-   `--ast-frontend` mode maintained alongside (not replacing) the current
-   two backends, with the "What breaks" list above treated as a mandatory,
-   fact-by-fact re-verification checklist (each item needs its own
-   regression test proving parity with the existing backend, mirroring how
-   `test_clang_and_castxml_snapshots_agree_on_public_surface` already
-   holds castxml and the current clang backend to the same bar) rather
-   than an assumed drop-in replacement.
+Proposed prototype step, still bounded and not touching any shipped code
+path, replacing the original step (1)/(2) pair now that (1) is answered:
 
-If (1) shows the instantiation cost dominates and is not avoidable by
-skipping traversal, the honest conclusion is that **this specific
-optimization avenue is not worth its packaging/parity cost**, and the
-remaining lever for this class of pathological header is upstream of
-abicheck entirely (asking users to scope `-H`/`--header` more narrowly, or
-recommending `--include-system-declarations`'s opposite — tighter, not
-looser, header selection — as the actual mitigation) rather than a new
-backend.
+1. Build a genuine (if minimal) libclang-based equivalent of
+   `_ClangAstParser.parse_functions`/`parse_types` — enough to construct
+   real `Function`/`RecordType` model objects (not just count cursors) for
+   the library's own declarations, using `Cursor.type`/`Cursor.spelling`/
+   `Cursor.mangled_name` and skipping `get_children()` recursion into any
+   cursor whose `location.file` is a dependency header per the exact
+   criteria `provenance.is_dependency_header` already implements (reuse,
+   don't re-derive — see the "What breaks" list's closing bullet on the
+   `AbicheckPrunedDependencyDecl` policy transferring directly).
+2. Measure wall time and peak RSS for that real prototype end-to-end
+   against the current subprocess-clang backend, on the same synthetic
+   repro *and* on a header set more representative of the field report this
+   investigation started from (heavier, more distinct per-header dependency
+   content, less `#pragma once`-deduped sharing than this session's
+   synthetic repro exhibits) — the synthetic repro's dependency content is
+   fully shared and deduped across headers, which may understate how much
+   semantic work a real multi-header case forces even under selective
+   traversal.
+3. Only if (1)/(2) confirm the per-node semantic-construction cost is
+   genuinely cheap enough on libclang's native API (not just the cursor
+   *count* reduction measured here) should this proceed past prototype
+   stage — and even then, as a new opt-in `--ast-frontend` mode maintained
+   alongside (not replacing) the current two backends, with the "What
+   breaks" list above treated as a mandatory, fact-by-fact re-verification
+   checklist (each item needs its own regression test proving parity with
+   the existing backend, mirroring how
+   `test_clang_and_castxml_snapshots_agree_on_public_surface` already holds
+   castxml and the current clang backend to the same bar) rather than an
+   assumed drop-in replacement.
+
+The fallback this section originally offered — if the instantiation cost
+turns out to dominate, recommend tighter header scoping instead of a new
+backend — no longer applies as stated, since the instantiation cost was
+measured and does **not** dominate. The live open question is now narrower
+and mechanical (per-node semantic-construction cost on the native API),
+not architectural (whether the whole avenue is worth pursuing at all).
