@@ -233,6 +233,26 @@ design, both discovered during implementation rather than planned up front:
    [Multi-Binary Releases](../../use/multi-binary.md#comparing-against-a-stored-bundle-baseline-g38-phase-2)
    — only the CLI surface to feed it a stored-facts old side is not yet
    wired.
+3. **Three review-driven fixes closed after initial implementation
+   (Codex review, same day).** `write_bundle_facts_out()`'s producer only
+   ever captured `diff_pairs` (matched libraries), silently omitting a
+   library removed in the new release from the persisted baseline — it
+   now also captures every unmatched old library directly via
+   `parse_elf_metadata()`, matching what a live `build_bundle_snapshot()`
+   does for the identical case. `capture_bundle_facts()` gained a
+   `library_paths` parameter that probes and persists real filesystem
+   soname aliases (symlink target basenames, hard-linked siblings) at
+   capture time, and `build_bundle_snapshot_from_metadata()`/
+   `_compute_resolution_graph()` gained a matching `extra_aliases`
+   parameter to replay them at reconstruction time with no filesystem
+   access — closing a gap where a provider without a usable `DT_SONAME`
+   could resolve differently from a stored baseline than from a live
+   comparison. `bundle_facts_from_dict()` now rejects a `schema_version`
+   newer than this reader supports, mirroring `snapshot_from_dict()`'s
+   existing hard rejection for `AbiSnapshot`. The alias-probing helpers
+   live in the pre-existing `abicheck.bundle_soname` leaf module (not
+   `bundle.py` itself, which was already near the AI-readiness file-size
+   hard cap).
 
 The rest of this section is kept as originally written (this plan's own
 amendment convention appends corrections rather than retconning the

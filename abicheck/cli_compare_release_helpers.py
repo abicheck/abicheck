@@ -325,6 +325,8 @@ def write_bundle_facts_out(
     bundle_facts_out: Path,
     diff_pairs: list[tuple[DiffResult, AbiSnapshot]],
     manifest_path: Path | None,
+    old_map: dict[str, Path],
+    removed_keys: list[str],
 ) -> None:
     """Persist the OLD side's per-library snapshots (plus manifest, if any)
     to *bundle_facts_out* as a :class:`~abicheck.bundle_facts.BundleFacts`
@@ -337,11 +339,33 @@ def write_bundle_facts_out(
     :func:`abicheck.bundle.compare_bundle`'s own ``diff_by_library``
     canonicalization (``Path(result.library).name``) exactly, so a later
     :func:`~abicheck.bundle_facts.compare_bundle_from_facts` call resolves
-    the same library identities a live ``compare_bundle()`` run would. A
-    library that never reached a successful per-library compare (e.g. a
-    dump failure) has no entry here -- the same "only promise what was
-    actually captured" rule a live ``build_bundle_snapshot()`` already
-    applies to a library that fails to parse.
+    the same library identities a live ``compare_bundle()`` run would.
+
+    *old_map*/*removed_keys* cover the libraries ``diff_pairs`` alone
+    cannot: ``diff_pairs`` only ever holds an entry for a *matched*
+    library (one present in both releases), so an old-only library
+    (removed in the new release) was previously silently absent from the
+    persisted baseline -- meaning a later ``compare_bundle_from_facts()``
+    call against these facts could never emit
+    ``bundle_library_removed``/dependency-removal/version-resolution
+    findings a live comparison of the same old release would (Codex
+    review, fresh evidence). Each removed library's own ``ElfMetadata`` is
+    parsed directly from *old_map*'s path (mirroring what a live
+    ``build_bundle_snapshot()`` does for exactly this library, since no
+    per-library compare ever ran for it) and wrapped in a bare
+    :class:`~abicheck.model.AbiSnapshot` carrying only ``.elf`` --
+    everything :func:`~abicheck.bundle_facts.bundle_snapshot_from_facts`
+    needs. A library whose old path fails to parse as ELF degrades to an
+    empty ``ElfMetadata`` (``parse_elf_metadata`` never raises), which the
+    bundle layer's own emptiness check already drops -- the same
+    "only promise what was actually captured" rule a live
+    ``build_bundle_snapshot()`` applies to a library that fails to parse.
+
+    Every ``old_map`` path (matched and removed alike) is also handed to
+    :func:`~abicheck.bundle_facts.capture_bundle_facts` as
+    ``library_paths``, so real filesystem aliases (symlink targets,
+    hard-linked siblings) are captured while the files still exist on
+    disk -- see that function's own docstring.
 
     Failure here (a bad *manifest_path*, an unwritable *bundle_facts_out*)
     is a genuine usage error -- unlike bundle *analysis* itself, which
@@ -352,6 +376,7 @@ def write_bundle_facts_out(
     """
     from .bundle_facts import capture_bundle_facts
     from .bundle_manifest import load_manifest
+    from .elf_metadata import parse_elf_metadata
     from .serialization import save_bundle_facts
 
     try:
@@ -359,7 +384,20 @@ def write_bundle_facts_out(
         per_library_snapshots: dict[str, AbiSnapshot] = {
             Path(diff.library).name: old_snapshot for diff, old_snapshot in diff_pairs
         }
-        facts = capture_bundle_facts(per_library_snapshots, manifest=manifest)
+        for key in removed_keys:
+            old_path = old_map[key]
+            name = old_path.name
+            if name in per_library_snapshots:
+                continue
+            per_library_snapshots[name] = AbiSnapshot(
+                library=name,
+                version="",
+                elf=parse_elf_metadata(old_path),
+            )
+        library_paths: dict[str, Path] = {path.name: path for path in old_map.values()}
+        facts = capture_bundle_facts(
+            per_library_snapshots, manifest=manifest, library_paths=library_paths
+        )
         save_bundle_facts(facts, bundle_facts_out)
     except (OSError, ValueError) as exc:
         raise click.UsageError(f"--bundle-facts-out {bundle_facts_out}: {exc}") from exc

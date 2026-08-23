@@ -1667,6 +1667,8 @@ def compare_release_cmd(
                     bundle_facts_out,
                     diff_pairs,
                     manifest_path,
+                    old_map,
+                    removed_keys,
                 )
 
             # ADR-049 Phase 7's orthogonal contract-coverage floor, aggregated

@@ -48,6 +48,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from .bundle_manifest import InstantiationManifest
@@ -89,12 +90,28 @@ class BundleFacts:
     nowhere for :func:`compare_bundle_from_facts` to get those per-library
     diffs from when the *old* side is a stored dump rather than a live
     directory.
+
+    ``filesystem_aliases`` records, per library, the extra soname
+    spellings :func:`abicheck.bundle_soname.filesystem_alias_basenames` recovered
+    from the *real* on-disk file at capture time (a resolved symlink
+    target's basename, hard-linked sibling basenames) -- captured once, up
+    front, so :func:`bundle_snapshot_from_facts`'s later, metadata-only
+    reconstruction can still resolve a ``DT_NEEDED`` edge naming one of
+    those aliases even though it never touches the filesystem itself
+    (Codex review: a live ``build_bundle_snapshot()`` enables filesystem
+    probing for exactly this; a persisted-facts reconstruction otherwise
+    loses it, silently dropping a consumption-gated bundle finding for a
+    provider without a usable ``DT_SONAME``). Empty for a caller that
+    didn't have (or didn't pass) real paths at capture time -- the same
+    "best effort, no aliases on failure" default
+    ``filesystem_alias_basenames`` itself uses.
     """
 
     schema_version: int = BUNDLE_FACTS_SCHEMA_VERSION
     variant_fingerprint: str = DEFAULT_VARIANT_FINGERPRINT
     per_library_snapshots: dict[str, AbiSnapshot] = field(default_factory=dict)
     manifest: InstantiationManifest | None = None
+    filesystem_aliases: dict[str, tuple[str, ...]] = field(default_factory=dict)
 
 
 def capture_bundle_facts(
@@ -102,18 +119,39 @@ def capture_bundle_facts(
     *,
     manifest: InstantiationManifest | None = None,
     variant_fingerprint: str = DEFAULT_VARIANT_FINGERPRINT,
+    library_paths: dict[str, Path] | None = None,
 ) -> BundleFacts:
     """Build a :class:`BundleFacts` from already-dumped per-library snapshots.
 
-    No new extraction happens here -- *per_library_snapshots* is expected to
-    be exactly what a real ``dump``/``compare`` run already produced for
-    each bundle member (each carrying its own ``AbiSnapshot.elf``).
+    No new *ABI* extraction happens here -- *per_library_snapshots* is
+    expected to be exactly what a real ``dump``/``compare`` run already
+    produced for each bundle member (each carrying its own
+    ``AbiSnapshot.elf``).
+
+    *library_paths*, when given, is a ``{library_name: Path}`` map of the
+    real on-disk file each snapshot was dumped from -- used only to probe
+    filesystem aliases (:func:`abicheck.bundle_soname.filesystem_alias_basenames`)
+    while those files still exist, at the one point in this whole flow
+    (capture time, right after a live comparison) they are guaranteed to.
+    A name absent from *library_paths* simply gets no recorded aliases,
+    same as when *library_paths* is omitted entirely.
     """
+    from .bundle_soname import filesystem_alias_basenames
+
+    filesystem_aliases: dict[str, tuple[str, ...]] = {}
+    if library_paths:
+        for name, path in library_paths.items():
+            if name not in per_library_snapshots:
+                continue
+            aliases = filesystem_alias_basenames(path)
+            if aliases:
+                filesystem_aliases[name] = aliases
     return BundleFacts(
         schema_version=BUNDLE_FACTS_SCHEMA_VERSION,
         variant_fingerprint=variant_fingerprint,
         per_library_snapshots=dict(per_library_snapshots),
         manifest=manifest,
+        filesystem_aliases=filesystem_aliases,
     )
 
 
@@ -126,6 +164,15 @@ def bundle_snapshot_from_facts(facts: BundleFacts) -> BundleSnapshot:
     build_bundle_snapshot` drops a file that doesn't parse as ELF -- both
     describe "this bundle member contributes no ELF-level bundle facts",
     not an error.
+
+    ``facts.filesystem_aliases`` (real symlink-target/hard-link basenames
+    captured while the original binaries still existed, see
+    :func:`capture_bundle_facts`) is threaded through as
+    ``build_bundle_snapshot_from_metadata``'s ``extra_aliases`` so this
+    purely metadata-driven reconstruction can still resolve a
+    ``DT_NEEDED`` edge naming one of those aliases -- without probing the
+    filesystem itself, since the persisted facts may outlive the files
+    they were captured from.
     """
     from .bundle import build_bundle_snapshot_from_metadata
 
@@ -139,7 +186,9 @@ def bundle_snapshot_from_facts(facts: BundleFacts) -> BundleSnapshot:
             )
             continue
         metadata[name] = snap.elf
-    return build_bundle_snapshot_from_metadata(metadata)
+    return build_bundle_snapshot_from_metadata(
+        metadata, extra_aliases=facts.filesystem_aliases or None
+    )
 
 
 def compare_bundle_from_facts(

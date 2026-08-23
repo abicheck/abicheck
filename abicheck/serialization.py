@@ -1815,12 +1815,30 @@ def bundle_facts_to_dict(facts: BundleFacts) -> dict[str, Any]:
             name: snapshot_to_dict(snap)
             for name, snap in facts.per_library_snapshots.items()
         },
+        "filesystem_aliases": {
+            name: list(aliases) for name, aliases in facts.filesystem_aliases.items()
+        },
         "manifest": manifest_to_dict(facts.manifest) if facts.manifest else None,
     }
 
 
 def bundle_facts_from_dict(d: dict[str, Any]) -> BundleFacts:
-    """Inverse of :func:`bundle_facts_to_dict`."""
+    """Inverse of :func:`bundle_facts_to_dict`.
+
+    Rejects a container ``schema_version`` newer than this reader's own
+    :data:`~abicheck.bundle_facts.BUNDLE_FACTS_SCHEMA_VERSION` outright,
+    mirroring :func:`snapshot_from_dict`'s hard rejection of a
+    too-new-to-read-safely snapshot. Unlike that function's own
+    warn-below/hard-reject-above-threshold split (justified there by many
+    already-shipped versions with a documented, field-by-field forward-
+    compatible history), ``BundleFacts`` has had exactly one shape so far
+    — there is no "this reader has no code path that looks for a field
+    introduced after some known-safe version" nuance to draw a softer line
+    at yet. Warn-and-continue would silently score a comparison against a
+    newer container whose fields (e.g. a future per-variant comparability
+    gate) this reader's ``compare_bundle_from_facts()`` doesn't know to
+    consult (Codex review).
+    """
     from .bundle_facts import (
         BUNDLE_FACTS_SCHEMA_VERSION,
         DEFAULT_VARIANT_FINGERPRINT,
@@ -1828,15 +1846,27 @@ def bundle_facts_from_dict(d: dict[str, Any]) -> BundleFacts:
     )
     from .bundle_manifest import manifest_from_dict
 
+    schema_version = int(d.get("schema_version", BUNDLE_FACTS_SCHEMA_VERSION))
+    if schema_version > BUNDLE_FACTS_SCHEMA_VERSION:
+        raise IncompatibleSnapshotSchemaError(
+            f"Bundle facts schema_version {schema_version} is newer than this "
+            f"abicheck (supports up to schema_version "
+            f"{BUNDLE_FACTS_SCHEMA_VERSION}). Upgrade abicheck to read this "
+            "bundle facts file."
+        )
     raw_manifest = d.get("manifest")
     return BundleFacts(
-        schema_version=int(d.get("schema_version", BUNDLE_FACTS_SCHEMA_VERSION)),
+        schema_version=schema_version,
         variant_fingerprint=str(
             d.get("variant_fingerprint", DEFAULT_VARIANT_FINGERPRINT)
         ),
         per_library_snapshots={
             name: snapshot_from_dict(sd)
             for name, sd in d.get("per_library_snapshots", {}).items()
+        },
+        filesystem_aliases={
+            name: tuple(aliases)
+            for name, aliases in d.get("filesystem_aliases", {}).items()
         },
         manifest=manifest_from_dict(raw_manifest) if raw_manifest is not None else None,
     )

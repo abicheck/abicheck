@@ -386,6 +386,120 @@ class TestBundleFactsSerialization:
 
 
 # ---------------------------------------------------------------------------
+# Schema-version rejection (Codex review, fresh evidence): a container
+# schema_version newer than this reader's own must be rejected outright,
+# mirroring snapshot_from_dict()'s hard rejection of a too-new snapshot.
+# ---------------------------------------------------------------------------
+
+
+class TestBundleFactsSchemaVersionRejection:
+    def test_current_schema_version_round_trips(self) -> None:
+        facts = capture_bundle_facts(_per_library_snapshots(_old_metadata()))
+        d = bundle_facts_to_dict(facts)
+        assert d["schema_version"] == BUNDLE_FACTS_SCHEMA_VERSION
+        assert bundle_facts_from_dict(d).schema_version == BUNDLE_FACTS_SCHEMA_VERSION
+
+    def test_newer_schema_version_is_rejected(self) -> None:
+        import pytest
+
+        from abicheck.errors import IncompatibleSnapshotSchemaError
+
+        facts = capture_bundle_facts(_per_library_snapshots(_old_metadata()))
+        d = bundle_facts_to_dict(facts)
+        d["schema_version"] = BUNDLE_FACTS_SCHEMA_VERSION + 1
+
+        with pytest.raises(IncompatibleSnapshotSchemaError, match="schema_version"):
+            bundle_facts_from_dict(d)
+
+    def test_missing_schema_version_defaults_to_current(self) -> None:
+        facts = capture_bundle_facts(_per_library_snapshots(_old_metadata()))
+        d = bundle_facts_to_dict(facts)
+        del d["schema_version"]
+        assert bundle_facts_from_dict(d).schema_version == BUNDLE_FACTS_SCHEMA_VERSION
+
+
+# ---------------------------------------------------------------------------
+# Filesystem-alias capture/replay (Codex review, fresh evidence): a provider
+# without a usable DT_SONAME whose real on-disk file is a symlink/hard-link
+# alias must still resolve after a facts round trip, with no filesystem
+# access at load time.
+# ---------------------------------------------------------------------------
+
+
+class TestBundleFactsFilesystemAliases:
+    def test_capture_bundle_facts_records_symlink_target_alias(
+        self, tmp_path: Path
+    ) -> None:
+        real_target = tmp_path / "libcore.so.1.0.0"
+        real_target.write_bytes(b"")
+        symlink_path = tmp_path / "libcore.so"
+        symlink_path.symlink_to(real_target)
+
+        facts = capture_bundle_facts(
+            _per_library_snapshots(_old_metadata()),
+            library_paths={"libcore.so": symlink_path},
+        )
+
+        assert "libcore.so.1.0.0" in facts.filesystem_aliases.get("libcore.so", ())
+
+    def test_no_library_paths_means_no_aliases(self) -> None:
+        facts = capture_bundle_facts(_per_library_snapshots(_old_metadata()))
+        assert facts.filesystem_aliases == {}
+
+    def test_filesystem_aliases_round_trip_through_dict(self, tmp_path: Path) -> None:
+        real_target = tmp_path / "libcore.so.1.0.0"
+        real_target.write_bytes(b"")
+        symlink_path = tmp_path / "libcore.so"
+        symlink_path.symlink_to(real_target)
+
+        facts = capture_bundle_facts(
+            _per_library_snapshots(_old_metadata()),
+            library_paths={"libcore.so": symlink_path},
+        )
+        round_tripped = bundle_facts_from_dict(bundle_facts_to_dict(facts))
+
+        assert round_tripped.filesystem_aliases == facts.filesystem_aliases
+
+    def test_reconstructed_bundle_snapshot_resolves_the_alias(
+        self, tmp_path: Path
+    ) -> None:
+        """The end-to-end point of capturing aliases: a consumer's
+        DT_NEEDED naming the real, versioned filename (not the symlink's
+        own canonical key) must still resolve as intra-bundle once
+        reconstructed from facts alone, with no filesystem access.
+        """
+        real_target = tmp_path / "libcore.so.1.0.0"
+        real_target.write_bytes(b"")
+        symlink_path = tmp_path / "libcore.so"
+        symlink_path.symlink_to(real_target)
+
+        metadata = {
+            # No DT_SONAME -- the only way a sibling can name this
+            # provider is via its on-disk filename or an alias of it.
+            "libcore.so": _meta(exports=["core_mul"]),
+            "libalgo.so": _meta(
+                needed=["libcore.so.1.0.0"],  # names the real target, not the key
+                imports=["core_mul"],
+            ),
+        }
+        facts = capture_bundle_facts(
+            _per_library_snapshots(metadata),
+            library_paths={"libcore.so": symlink_path},
+        )
+        reconstructed = bundle_snapshot_from_facts(facts)
+
+        # Resolved as intra-bundle (via the captured alias), not "extra"
+        # (external/system) -- the classification _compute_resolution_graph
+        # makes at reconstruction time using the persisted alias.
+        assert "libcore.so.1.0.0" in reconstructed.resolution.intra_needed.get(
+            "libalgo.so", []
+        )
+        assert "libcore.so.1.0.0" not in reconstructed.resolution.extra_needed.get(
+            "libalgo.so", []
+        )
+
+
+# ---------------------------------------------------------------------------
 # Malformed manifest data (Codex/CodeRabbit review: reject, don't silently
 # discard the manifest promises a corrupt facts file claims to carry)
 # ---------------------------------------------------------------------------
@@ -444,11 +558,25 @@ class TestWriteBundleFactsOut:
             for name, snap in snapshots.items()
         ]
 
+    def _old_map(self, tmp_path: Path) -> dict[str, Path]:
+        # Real (if empty) files -- parse_elf_metadata degrades to an empty
+        # ElfMetadata on a non-ELF file rather than raising, which is
+        # enough to exercise the removed-library capture path without a
+        # real compiled .so.
+        old_map: dict[str, Path] = {}
+        for name in ("libcore.so", "libalgo.so"):
+            p = tmp_path / name
+            p.write_bytes(b"")
+            old_map[name] = p
+        return old_map
+
     def test_writes_a_loadable_facts_file(self, tmp_path: Path) -> None:
         from abicheck.cli_compare_release_helpers import write_bundle_facts_out
 
         out = tmp_path / "old.bundlefacts.json"
-        write_bundle_facts_out(out, self._diff_pairs(), None)
+        write_bundle_facts_out(
+            out, self._diff_pairs(), None, self._old_map(tmp_path), []
+        )
 
         loaded = load_bundle_facts(out)
         assert set(loaded.per_library_snapshots) == {"libcore.so", "libalgo.so"}
@@ -465,7 +593,9 @@ class TestWriteBundleFactsOut:
         out = tmp_path / "old.bundlefacts.json"
 
         with pytest.raises(click.UsageError, match="bundle-facts-out"):
-            write_bundle_facts_out(out, self._diff_pairs(), bad_manifest)
+            write_bundle_facts_out(
+                out, self._diff_pairs(), bad_manifest, self._old_map(tmp_path), []
+            )
         assert not out.exists()
 
     def test_unwritable_output_path_raises_usage_error(self, tmp_path: Path) -> None:
@@ -484,4 +614,86 @@ class TestWriteBundleFactsOut:
         out = blocking_file / "old.bundlefacts.json"
 
         with pytest.raises(click.UsageError, match="bundle-facts-out"):
-            write_bundle_facts_out(out, self._diff_pairs(), None)
+            write_bundle_facts_out(
+                out, self._diff_pairs(), None, self._old_map(tmp_path), []
+            )
+
+    def test_captures_unmatched_old_library(self, tmp_path: Path) -> None:
+        """P1 (Codex review, fresh evidence): an old-only library (removed
+        in the new release) has no entry in ``diff_pairs`` -- it must still
+        be captured, via ``old_map``/``removed_keys``, so a later
+        ``compare_bundle_from_facts()`` call can still emit
+        ``bundle_library_removed``/dependency-removal/version-resolution
+        findings for it, the same way a live ``compare_bundle()`` run
+        would.
+        """
+        from abicheck.cli_compare_release_helpers import write_bundle_facts_out
+
+        old_map = self._old_map(tmp_path)
+        removed_path = tmp_path / "libremoved.so"
+        removed_path.write_bytes(b"")
+        old_map["libremoved.so"] = removed_path
+
+        out = tmp_path / "old.bundlefacts.json"
+        write_bundle_facts_out(
+            out, self._diff_pairs(), None, old_map, ["libremoved.so"]
+        )
+
+        loaded = load_bundle_facts(out)
+        assert set(loaded.per_library_snapshots) == {
+            "libcore.so",
+            "libalgo.so",
+            "libremoved.so",
+        }
+        # A non-ELF file degrades to an empty (not absent) ElfMetadata --
+        # the entry is still present, mirroring build_bundle_snapshot()'s
+        # own "only promise what was actually captured" rule.
+        assert loaded.per_library_snapshots["libremoved.so"].elf is not None
+
+    def test_does_not_duplicate_an_already_matched_library(
+        self, tmp_path: Path
+    ) -> None:
+        """A key present in both ``diff_pairs`` and (redundantly)
+        ``removed_keys`` keeps the real per-library snapshot from
+        ``diff_pairs`` -- the removed-library fallback must never overwrite
+        an already-captured, fully-dumped snapshot with a bare
+        ELF-metadata-only stand-in.
+        """
+        from abicheck.cli_compare_release_helpers import write_bundle_facts_out
+
+        old_map = self._old_map(tmp_path)
+        out = tmp_path / "old.bundlefacts.json"
+        write_bundle_facts_out(out, self._diff_pairs(), None, old_map, ["libcore.so"])
+
+        loaded = load_bundle_facts(out)
+        # The real dumped snapshot (via _per_library_snapshots) carries the
+        # full exports list; the removed-library fallback would not.
+        assert loaded.per_library_snapshots["libcore.so"].elf is not None
+        assert loaded.per_library_snapshots["libcore.so"].elf.soname == "libcore.so"
+
+    def test_captures_filesystem_aliases(self, tmp_path: Path) -> None:
+        """P2 (Codex review, fresh evidence): a real filesystem alias (a
+        symlink's resolved target basename) is captured at write time --
+        for every ``old_map`` entry, matched and removed alike -- so a
+        later ``bundle_snapshot_from_facts()`` reconstruction can still
+        resolve a ``DT_NEEDED`` edge naming that alias without touching the
+        filesystem itself.
+        """
+        from abicheck.cli_compare_release_helpers import write_bundle_facts_out
+
+        old_map = self._old_map(tmp_path)
+        # The discovered path for "libcore.so" is a symlink named exactly
+        # "libcore.so" (matching the canonical key, as a real release's
+        # unversioned symlink would) pointing at the real, versioned file.
+        real_target = tmp_path / "libcore.so.1.0.0"
+        real_target.write_bytes(b"")
+        symlink_path = tmp_path / "libcore.so"
+        symlink_path.unlink()
+        symlink_path.symlink_to(real_target)
+        old_map["libcore.so"] = symlink_path
+
+        out = tmp_path / "old.bundlefacts.json"
+        write_bundle_facts_out(out, self._diff_pairs(), None, old_map, [])
+
+        loaded = load_bundle_facts(out)
+        assert "libcore.so.1.0.0" in loaded.filesystem_aliases.get("libcore.so", ())

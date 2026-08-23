@@ -80,7 +80,7 @@ from .bundle_models import (  # noqa: F401  (re-exported for back-compat)
     ProviderEntry as ProviderEntry,
     ResolutionGraph as ResolutionGraph,
 )
-from .bundle_soname import soname_matches_providers
+from .bundle_soname import hard_link_alias_basenames, soname_matches_providers
 from .checker_policy import ChangeKind, Verdict, compute_verdict
 from .checker_types import DiffResult
 from .elf_metadata import ElfMetadata, ElfSymbol, SymbolBinding, parse_elf_metadata
@@ -187,6 +187,7 @@ def build_bundle_snapshot_from_metadata(
     paths: dict[str, Path] | None = None,
     root: Path | None = None,
     probe_filesystem: bool = False,
+    extra_aliases: dict[str, tuple[str, ...]] | None = None,
 ) -> BundleSnapshot:
     """Build a :class:`BundleSnapshot` from already-parsed :class:`ElfMetadata`,
     without re-parsing (or even requiring) the underlying binary files.
@@ -265,7 +266,10 @@ def build_bundle_snapshot_from_metadata(
         surviving_paths[name] = paths.get(name, Path(name))
 
     resolution = _compute_resolution_graph(
-        surviving_paths, surviving_metadata, probe_filesystem=probe_filesystem
+        surviving_paths,
+        surviving_metadata,
+        probe_filesystem=probe_filesystem,
+        extra_aliases=extra_aliases,
     )
     # Use the first library's parent as the root if available; otherwise empty path
     resolved_root = (
@@ -600,49 +604,12 @@ def render_bundle_findings_markdown(findings: list[BundleFinding]) -> list[str]:
     return lines
 
 
-def _hard_link_alias_basenames(path: Path) -> list[str]:
-    """Basenames of *other* directory entries hard-linked to ``path``.
-
-    ``discover_artifact_set()`` dedupes candidate paths on filesystem
-    identity (``st_dev``/``st_ino``) and keeps only one representative path
-    per inode -- so if a provider library has multiple hard-linked names
-    (e.g. ``libfoo.so.1`` and ``libfoo.so.1.0.0``), any alias basename other
-    than the representative's own is otherwise discarded entirely and never
-    reaches ``soname_to_name``. Recover them by scanning the representative
-    path's own directory for siblings sharing its identity. Best-effort: a
-    permission error or non-existent path/parent yields no aliases rather
-    than raising, matching this module's existing conservative-on-failure
-    behavior for filesystem probes.
-    """
-    try:
-        target_stat = path.stat()
-    except OSError:
-        return []
-    aliases = []
-    try:
-        entries = list(path.parent.iterdir())
-    except OSError:
-        return []
-    for entry in entries:
-        if entry.name == path.name:
-            continue
-        try:
-            entry_stat = entry.stat()
-        except OSError:
-            continue
-        if (entry_stat.st_dev, entry_stat.st_ino) == (
-            target_stat.st_dev,
-            target_stat.st_ino,
-        ):
-            aliases.append(entry.name)
-    return aliases
-
-
 def _compute_resolution_graph(
     libraries: dict[str, Path],
     metadata: dict[str, ElfMetadata],
     *,
     probe_filesystem: bool = True,
+    extra_aliases: dict[str, tuple[str, ...]] | None = None,
 ) -> ResolutionGraph:
     """Index exports/imports across every library in the bundle.
 
@@ -718,9 +685,11 @@ def _compute_resolution_graph(
                 # too -- self-contained here, no need to thread alias lists
                 # through discover_artifact_set's public dict[str, Path] return
                 # type.
-                for alias in _hard_link_alias_basenames(libraries[name]):
+                for alias in hard_link_alias_basenames(libraries[name]):
                     soname_to_name.setdefault(alias, name)
 
+    for name, aliases in (extra_aliases or {}).items():  # G38 Phase 2 replay
+        soname_to_name.update({a: name for a in aliases if a not in soname_to_name})
     graph.soname_to_name = soname_to_name
 
     # Index exports.
