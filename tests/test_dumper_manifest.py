@@ -382,8 +382,62 @@ def test_run_tu_fragment_pruning_header_roots_includes_project_owned_includes():
     assert str(Path("foo.h")) in roots  # forced_includes
     assert "/usr/include/mylib/priv" in roots  # project_owned include
     assert "/usr/include/vendor" not in roots  # NOT project_owned -- excluded
-    assert "public.h" in roots  # manifest-wide public_header_paths
-    assert "/usr/include/mylib/pub" in roots  # manifest-wide public_dir_paths
+
+
+def test_run_tu_loop_carries_manifest_wide_ownership_roots_into_every_tu():
+    """Codex review, PR #840 (thread bdSMj/bdSjr): a per-TU-only pruning
+    root set misses a root a *different* TU declares ownership of -- e.g. a
+    non-contributing support TU that owns a shared include directory used
+    by another TU's own headers. ``run_tu_loop`` is the one place that sees
+    every TU, so it must fold every TU's own ``project_owned`` includes
+    (and ``forced_includes``) into ONE manifest-wide root set and pass that
+    identical, wider set to every TU's own ``run_tu_fragment`` call -- not
+    let each TU compute (and see) only its own, narrower slice.
+
+    Two TUs: "main" only force-includes "foo.h" and declares no
+    ``project_owned`` includes of its own. "support" is a second,
+    non-contributing TU whose only job is declaring ownership of
+    "/usr/include/mylib/priv" via a ``project_owned`` include entry. A
+    declaration "main"'s own header-AST parse reaches under that shared
+    directory must not be misclassified as a dependency and pruned, even
+    though "main" itself never mentions that directory -- the authoritative
+    post-hoc filter (``dumper_scoping.dump_manifest_header_roots``) unions
+    across the whole manifest, so the streaming pruner's root set must too.
+    """
+    calls: list = []
+    stub = _make_stub_header_ast_parser(calls)
+    main_tu = TranslationUnit(
+        name="main",
+        forced_includes=(Path("foo.h"),),
+        includes=(),
+    )
+    support_tu = TranslationUnit(
+        name="support",
+        forced_includes=(Path("support.h"),),
+        includes=(
+            IncludeEntry(path=Path("/usr/include/mylib/priv"), project_owned=True),
+        ),
+        required=False,
+        contributes_to_abi=False,
+    )
+    run_tu_loop(
+        [main_tu, support_tu],
+        header_ast_parser=stub,
+        roots=[],
+        backend="auto",
+        compiler="c++",
+        exported_dynamic=set(),
+        exported_static=set(),
+    )
+    assert len(calls) == 2
+    main_call = next(c for c in calls if c["headers"] == [Path("foo.h")])
+    support_call = next(c for c in calls if c["headers"] == [Path("support.h")])
+    # "main" never declared this directory itself -- only "support" did --
+    # but the manifest-wide union must still protect it for "main"'s own
+    # parse, matching what the authoritative post-hoc filter would retain.
+    assert "/usr/include/mylib/priv" in main_call["pruning_header_roots"]
+    # Sanity: the same manifest-wide set reaches every TU identically.
+    assert main_call["pruning_header_roots"] == support_call["pruning_header_roots"]
 
 
 def test_run_tu_fragment_ast_producer_defaults_to_castxml_for_non_clang_parser():

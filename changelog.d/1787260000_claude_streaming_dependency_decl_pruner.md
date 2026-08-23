@@ -3,17 +3,25 @@
 - **New, opt-in streaming pruner for the direct-clang L2 backend**
   (`abicheck/dumper_clang_streaming.py`, wired into
   `dumper_clang_errors._parse_clang_ast_result`): a `clang -ast-dump=json`
-  parse can now collapse a `FunctionDecl`/`CXXMethodDecl`/`CXXConstructorDecl`/
-  `CXXDestructorDecl`/`CXXConversionDecl`/`VarDecl` node into a tiny
+  parse can now collapse a free `FunctionDecl`/`VarDecl` node into a tiny
   placeholder the instant its own subtree completes, whenever it is
   confidently and entirely confined to a toolchain/dependency header (the
   same `is_dependency_header` rule `dumper_scoping.py`'s existing post-hoc
   filter already applies to functions/variables unconditionally) — reducing
   retained Python object count and the subsequent `_ClangAstParser`
   model-construction walk for a header pulling in heavy STL/template
-  machinery. Never touches a record/enum/typedef node (those can be
-  retained via `dumper_scoping.py`'s "directly referenced" carve-out, which
-  is only decidable once the whole snapshot's public surface is known).
+  machinery. Every C++ method-shaped kind (`CXXMethodDecl`/
+  `CXXConstructorDecl`/`CXXDestructorDecl`/`CXXConversionDecl`) is
+  deliberately **never** pruned, unlike a free function or variable: a
+  dependency base class's own methods can feed
+  `dumper_clang_vtable.build_vtable`'s base-lookup recursion for a
+  project-owned derived class's vtable, so pruning one could corrupt a
+  retained class's reconstructed vtable rather than just drop a
+  declaration. Never touches a record/enum/typedef node either (those can
+  be retained via `dumper_scoping.py`'s "directly referenced" carve-out,
+  which is only decidable once the whole snapshot's public surface is
+  known), nor a node whose output the always-on semantic header graph
+  (`service._attach_header_graph`) will also consume.
   **Off by default**, enabled only via `ABICHECK_CLANG_PRUNE_DEPENDENCY_DECLS=1`
   — matching this codebase's existing convention for a real, tested, but
   not-yet-default-wired performance path (`ABICHECK_CLANG_LAYOUT_TOOL`,
