@@ -159,6 +159,55 @@ _TARGET_TRIPLE_RE = re.compile(r"^[A-Za-z0-9_]+(-[A-Za-z0-9_][A-Za-z0-9_.]*){1,3
 #: ``14.3``, ``14.3.0``) -- never a bare word like ``v1``/``backend``.
 _TOOLCHAIN_VERSION_RE = re.compile(r"^\d+(\.\d+){0,2}$")
 
+#: A genuine Debian/Ubuntu multiarch tuple always names a real OS or
+#: libc/environment family as one of its hyphen-separated words (``linux``,
+#: ``gnu``/``gnueabihf``/``musl``/...) -- an ordinary project directory that
+#: merely happens to be triple-shaped (``my-lib``) never does.
+#: ``_TARGET_TRIPLE_RE`` alone is deliberately loose (built to validate a
+#: GCC/Clang *toolchain*-controlled triple, where "any 2-4 alnum components"
+#: is a reasonable bar), so reusing it unmodified for a directory reached
+#: under a widely-installable prefix like ``/usr/include`` accepted an
+#: arbitrary two-word project directory too, silently discarding an
+#: explicitly-declared ``-I`` as though it were a system path (Codex
+#: review, round 6). Not a full Debian arch-name enumeration -- just enough
+#: real OS/environment vocabulary to exclude an ordinary project name.
+_MULTIARCH_OS_ENV_MARKERS: frozenset[str] = frozenset(
+    {
+        "linux",
+        "gnu",
+        "gnueabi",
+        "gnueabihf",
+        "gnux32",
+        "gnuabi64",
+        "gnuabin32",
+        "musl",
+        "android",
+        "bsd",
+        "freebsd",
+        "netbsd",
+        "openbsd",
+        "darwin",
+        "windows",
+        "mingw",
+        "mingw32",
+        "msvc",
+        "eabi",
+        "eabihf",
+    }
+)
+
+
+def _looks_like_multiarch_component(component: str) -> bool:
+    """True when *component* is both target-triple-shaped
+    (``_TARGET_TRIPLE_RE``) AND names a real OS/libc-environment family as
+    one of its hyphen-separated words (see ``_MULTIARCH_OS_ENV_MARKERS``'s
+    own docstring for why the shape check alone isn't enough here)."""
+    if not _TARGET_TRIPLE_RE.match(component):
+        return False
+    return any(
+        word in _MULTIARCH_OS_ENV_MARKERS for word in component.lower().split("-")
+    )
+
 
 def _prefix_then_optional_multiarch_cxx(
     prefix: tuple[str, ...], hay: tuple[str, ...]
@@ -173,9 +222,11 @@ def _prefix_then_optional_multiarch_cxx(
     so a genuine libstdc++ header under it was never recognized as system --
     reachable via public-surface promotion the same way the earlier
     ``_is_bare_system_dir`` nested-toolchain-root fix closed for the
-    non-multiarch case). The multiarch component is validated the same way
-    as a real GCC/Clang target triple (``_TARGET_TRIPLE_RE``) rather than
-    wildcarded, for the identical reason round 3's fix required it there.
+    non-multiarch case). The multiarch component is validated via
+    :func:`_looks_like_multiarch_component` -- both target-triple-shaped
+    AND naming a real OS/environment family, not merely wildcarded (round 6
+    fix: a bare shape check alone accepted an ordinary two-word project
+    directory installed directly under a system prefix).
     """
     n = len(prefix)
     if n == 0:
@@ -187,7 +238,7 @@ def _prefix_then_optional_multiarch_cxx(
         j = i + n
         if j < m and hay[j] == "c++":
             return True
-        if j + 1 < m and _TARGET_TRIPLE_RE.match(hay[j]) and hay[j + 1] == "c++":
+        if j + 1 < m and _looks_like_multiarch_component(hay[j]) and hay[j + 1] == "c++":
             return True
     return False
 

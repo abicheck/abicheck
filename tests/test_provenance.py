@@ -190,6 +190,19 @@ def test_gcc_include_dir_debian_multiarch_with_non_triple_component_not_toolchai
     assert _is_toolchain_compiler_include_dir(segs) is False
 
 
+def test_gcc_include_dir_triple_shaped_project_name_not_multiarch():
+    # Round-6 review finding (Codex, fresh evidence): a two-word project
+    # directory name that merely happens to be triple-SHAPED (`my-lib`,
+    # matching _TARGET_TRIPLE_RE's bare "2-4 alnum components" grammar) but
+    # names no real OS/libc-environment family must NOT be accepted as a
+    # multiarch component -- otherwise an explicitly-declared -I under an
+    # installed project layout like `/usr/include/my-lib/c++/api.h` would
+    # be silently treated as a system path, discarding the user's own
+    # public-scoping declaration.
+    segs = _segments("/usr/include/my-lib/c++/api.h")
+    assert _is_toolchain_compiler_include_dir(segs) is False
+
+
 def test_system_header_conda_forge_libstdcxx_predefined_ops():
     # The exact real-world path from a false-positive func_removed report:
     # abicheck's own GitHub Action reported libstdc++'s internal
