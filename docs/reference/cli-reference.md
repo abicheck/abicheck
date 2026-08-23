@@ -58,6 +58,7 @@ Compare two ABI surfaces and report changes.
 | `--devel-pkg` | no | — | Development package with headers, scoped per side with an 'old='/'new=' prefix (e.g. --devel-pkg old=a-dev.rpm --devel-pkg new=b-dev.rpm). Directory/package inputs only (ADR-040). |
 | `--include-private-dso` | no | `False` | Include private (non-public) shared objects from non-standard paths. (directory/package inputs only) |
 | `--keep-extracted` | no | `False` | Keep extracted temporary files for debugging. (directory/package inputs only) |
+| `--bundle-facts-out` | no | — | Persist this run's OLD-side bundle facts (per-library snapshots plus the instantiation manifest, if any) to PATH (G38 Phase 2, ADR-023 amendment) for a later stored-baseline bundle comparison. Additive output alongside the ordinary live-vs-live comparison; no-op with --no-bundle-analysis. (directory/package inputs only) |
 | `--manifest` | no | — | ABI instantiation manifest (YAML/JSON) listing symbols the release publicly promises (ADR-023). (directory/package inputs only) |
 | `--bundle-system-providers` | no | `` | Comma-separated extra sonames to treat as system-provided (extends the built-in libc/libstdc++/libgcc/libtbb allow-list). (directory/package inputs only) |
 | `--bundle-cohort` | no | — | Declare a co-versioned library cohort by name prefix (e.g. 'libfoo\_'). Repeatable. Enables the BUNDLE\_SONAME\_SKEW check. (directory/package inputs only) |

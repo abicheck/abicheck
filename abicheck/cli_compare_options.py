@@ -50,10 +50,12 @@ def _cli_flag(name: str, value: bool) -> bool | None:
     src = click.get_current_context().get_parameter_source(name)
     return value if src == click.core.ParameterSource.COMMANDLINE else None
 
+
 def _param_from_cli(name: str) -> bool:
     """True when parameter *name*'s value came from the command line (not default)."""
     src = click.get_current_context().get_parameter_source(name)
     return bool(src == click.core.ParameterSource.COMMANDLINE)
+
 
 def _merge_cli_debug_format(
     debug_format_opt: str | None,
@@ -75,6 +77,7 @@ def _merge_cli_debug_format(
     if legacy_from_cli:
         return legacy_debug_format
     return None
+
 
 def _reject_set_input_flags(
     exit_code_scheme: str | None,
@@ -192,6 +195,30 @@ def _reject_set_input_flags(
             "P0.6 (run-plan-aware aggregation) for the tracked follow-up."
         )
 
+
+def _reject_bundle_facts_out_for_single_pair(bundle_facts_out: Path | None) -> None:
+    """Reject ``--bundle-facts-out`` on a single-file/snapshot comparison.
+
+    The mirror-image case of :func:`_reject_set_input_flags` above: this is
+    a directory/package-only flag reaching a single-pair compare, rather
+    than the other way around. Rejected outright rather than merged into
+    ``cli._warn_unused_set_flags``'s warn-and-ignore set (G38 Phase 2,
+    Codex review, fresh evidence): it promises to persist an OLD-side
+    baseline artifact, and a single-pair compare has no library map to
+    build one from -- silently accepting it would report success while
+    leaving automation believing a baseline was written when none was,
+    unlike ``--jobs``/``--dso-only``/``--output-dir``, which are merely
+    inert conveniences here.
+    """
+    if bundle_facts_out is not None:
+        raise click.UsageError(
+            "--bundle-facts-out is only supported for directory/package "
+            "(release) comparisons; a single-file/snapshot compare has no "
+            "OLD-side library map to persist. Compare a directory or "
+            "package pair to use it."
+        )
+
+
 class _NormalizedCompareOptions(NamedTuple):
     collect_mode: str
     headers: tuple[Path, ...]
@@ -201,6 +228,7 @@ class _NormalizedCompareOptions(NamedTuple):
     demangle: bool
     report_mode: str
     show_impact: bool
+
 
 def _resolve_demangle(fmt: str, demangle: bool | None) -> bool:
     """Resolve the tri-state ``--demangle`` flag against a specific format.
@@ -218,6 +246,7 @@ def _resolve_demangle(fmt: str, demangle: bool | None) -> bool:
     secondary format (or vice versa) must not inherit the other's default.
     """
     return fmt in {"markdown", "review"} if demangle is None else demangle
+
 
 def _reject_debug_format_for_non_elf(
     effective_debug_format: str | None,
@@ -239,6 +268,7 @@ def _reject_debug_format_for_non_elf(
                 f"for ELF binaries, but the {side} input is {bfmt.upper()}."
             )
 
+
 def _resolve_debug_roots(
     debug_roots: tuple[Path, ...],
     debug_roots_old: tuple[Path, ...],
@@ -249,8 +279,10 @@ def _resolve_debug_roots(
     resolved_new = list(debug_roots_new) if debug_roots_new else list(debug_roots)
     return resolved_old, resolved_new
 
+
 def _warn_force_public_ignored(
-    force_public: object, scope_public_headers: bool,
+    force_public: object,
+    scope_public_headers: bool,
 ) -> None:
     """Warn a ``scope.public_symbols`` overlay needs ``--scope-public-headers``.
 

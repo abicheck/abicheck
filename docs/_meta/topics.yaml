@@ -175,6 +175,16 @@ topics:
       - reference/publish-baseline.md
       - reference/protect-committed-baseline.md
 
+  bundle-analysis:
+    canonical_page: use/multi-binary.md
+    fact_sources:
+      - abicheck/bundle.py
+      - abicheck/bundle_models.py
+      - abicheck/bundle_manifest.py
+      - abicheck/bundle_soname.py
+      - abicheck/bundle_facts.py
+      - abicheck/product_baseline.py
+
   cli-surface:
     canonical_page: use/cli-usage.md
     fact_sources:

@@ -510,6 +510,20 @@ _ACCEPTED_KILL_LOSS = {
             "abicheck.name_classification",
         }
     ),
+    # Drives `action/run.sh`, which execs the real `abicheck` console script
+    # from a scratch `cwd` -- the same subprocess re-entry as the two entries
+    # above, just discovered later (G38 bundle-facts PR, the first to trigger
+    # this lane against a serialization.py change with this test present).
+    "tests/test_action_run_sh_annotate_renderer.py": frozenset(
+        {
+            "abicheck.checker_policy",
+            "abicheck.diff_symbols",
+            "abicheck.finding_identity",
+            "abicheck.name_classification",
+            "abicheck.serialization",
+            "abicheck.snapshot_io",
+        }
+    ),
 }
 
 

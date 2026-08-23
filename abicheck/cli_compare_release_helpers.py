@@ -321,6 +321,186 @@ def _debian_symbols_warning(
     return "Debian symbols contract changed:\n" + format_diff_report(diff)
 
 
+def reject_bundle_facts_out_collision(
+    bundle_facts_out: Path | None,
+    output: Path | None,
+    secondary_output: Path | None,
+) -> None:
+    """Reject ``--bundle-facts-out`` naming the same file as ``--output``/
+    ``--write`` (G38 Phase 2).
+
+    A command-specific extra check, deliberately not
+    ``reject_incoherent_secondary_output()``'s job (see that leaf module's
+    own docstring) -- without it, ``--bundle-facts-out result.json --output
+    result.json`` silently overwrites the requested baseline with the
+    report while still reporting success (Codex review).
+    """
+    if bundle_facts_out is None:
+        return
+    for label, other in (("--output/-o", output), ("--write", secondary_output)):
+        if other is not None and bundle_facts_out.resolve() == other.resolve():
+            raise click.UsageError(
+                f"--bundle-facts-out's PATH must differ from {label}: writing "
+                "both to the same file would silently overwrite the "
+                "requested bundle-facts baseline with the report."
+            )
+
+
+def reject_bundle_facts_out_dir_collision(
+    bundle_facts_out: Path | None,
+    output_dir: Path | None,
+    old_map: dict[str, Path],
+) -> None:
+    """Reject ``--bundle-facts-out`` naming a path ``--output-dir`` will
+    also write (G38 Phase 2, Codex review, fresh evidence).
+
+    ``reject_bundle_facts_out_collision()`` above only knows about
+    ``--output``/``--write`` -- it can't see ``--output-dir``'s own
+    ``summary.json`` or per-library ``<stem>.json`` files, since those
+    paths depend on *output_dir* and (for the per-library case) the
+    resolved OLD-side library map, neither known at that earlier
+    validation point. Called once ``old_map`` is resolved, before
+    ``output_dir`` is created or anything is written into it.
+    """
+    if bundle_facts_out is None or output_dir is None:
+        return
+    resolved = bundle_facts_out.resolve()
+    summary_path = output_dir / "summary.json"
+    if resolved == summary_path.resolve():
+        raise click.UsageError(
+            "--bundle-facts-out's PATH must differ from --output-dir's own "
+            "summary.json: writing both to the same file would silently "
+            "overwrite the requested bundle-facts baseline with the "
+            "per-library summary report."
+        )
+    for name, old_path in old_map.items():
+        lib_path = output_dir / f"{old_path.stem}.json"
+        if resolved == lib_path.resolve():
+            raise click.UsageError(
+                f"--bundle-facts-out's PATH must differ from --output-dir's "
+                f"own per-library report for {name!r} ({lib_path}): writing "
+                "both to the same file would silently overwrite whichever "
+                "was written second."
+            )
+
+
+def write_bundle_facts_out(
+    bundle_facts_out: Path,
+    diff_pairs: list[tuple[DiffResult, AbiSnapshot]],
+    manifest_path: Path | None,
+    old_map: dict[str, Path],
+    *,
+    resolve_stranded_library: Callable[[Path], AbiSnapshot],
+) -> None:
+    """Persist the OLD side's per-library snapshots (plus manifest, if any)
+    to *bundle_facts_out* as a :class:`~abicheck.bundle_facts.BundleFacts`
+    file (G38 Phase 2's ``--bundle-facts-out`` producer).
+
+    *diff_pairs* is ``_compare_release_libraries``'s own
+    ``(DiffResult, old_snapshot)`` collection -- the caller must have
+    passed ``collect_diff_results=True`` for it to be populated.
+    *old_map* is ``_match_release_keys``'s own map: every key is the
+    **canonical** release-matching key
+    (``_canonical_library_key()`` -- e.g. ``libfoo.so`` for a discovered
+    ``libfoo.so.1.2``), the identical keys a live ``build_bundle_snapshot
+    (dict(old_map))`` call uses for its ``BundleSnapshot.libraries``. Each
+    persisted entry is keyed by that same canonical key, not by
+    ``Path(diff.library).name`` (the real, possibly-versioned basename
+    ``DiffResult.library`` carries) -- keying by the basename instead would
+    make a reconstructed old bundle disagree with a live new bundle on a
+    versioned library's very identity, reading as a false
+    ``bundle_library_removed``/``_added`` pair for a library that did not
+    change at all (Codex review, fresh evidence: caught after the P1 fix
+    below already existed, which itself still keyed by the wrong basename).
+
+    *old_map* also covers what ``diff_pairs`` alone cannot -- and not only
+    for an old-only library removed in the new release: ``diff_pairs``
+    only ever holds an entry for a library whose per-library compare
+    actually *succeeded*, so a *matched* library whose compare returned
+    ``ERROR``/``not_comparable`` has no entry there either, even though a
+    live bundle analysis includes it (straight from ``old_map``) same as
+    any other member (Codex review, fresh evidence: caught after an
+    earlier revision of this fix only back-filled ``removed_keys``,
+    missing this second, matched-but-failed case entirely). Both cases are
+    the identical gap -- a real old-release library silently absent from
+    the persisted baseline, so a later ``compare_bundle_from_facts()``
+    call could never emit ``bundle_library_removed``/dependency-removal/
+    version-resolution findings a live comparison of the same old release
+    would -- so both are closed the same way: *every* ``old_map`` key not
+    already covered by a successful ``diff_pairs`` entry is resolved via
+    *resolve_stranded_library*, a caller-supplied callable that produces a
+    **real** ``AbiSnapshot`` (or degrades to a bare-``ElfMetadata`` stand-in
+    on failure) with the exact same extraction context every other library
+    in this release was dumped with (Codex review, fresh evidence: an
+    earlier revision of this fix only captured bare ``ElfMetadata``, which
+    is sufficient for bundle-level graph resolution but is missing the
+    functions/types/headers a stored-baseline consumer's own documented
+    ``old_facts.per_library_snapshots[name]`` → ``compare_snapshots()``
+    workflow needs -- an ELF-only snapshot compared against a real future
+    dump would read every declaration as a compatible addition instead of
+    the real diff, hiding a genuine breaking change).
+
+    The resolution itself is deliberately injected rather than performed in
+    this module: this is a **leaf module** (see its own docstring -- it
+    must not import ``cli``/``cli_compare_release``), and a real resolve
+    needs ``abicheck.cli_resolve._resolve_input``/``abicheck.service
+    .resolve_input`` (per ADR-037 D1/D10.1's Tier-1/Tier-2 CLI-contract
+    boundary), both of which already sit inside the large CLI-registration
+    import cycle (``scripts/check_ai_readiness.py``'s
+    ``IMPORT_CYCLE_ALLOWLIST``) -- importing either one *from this module*
+    would pull this otherwise-leaf module into that cycle for the first
+    time, which the ``import-cycle-growth`` gate correctly rejects as
+    *new* SCC membership rather than "reuse of an already-member module"
+    (Codex review, fresh evidence: an earlier revision of this fix called
+    ``cli_resolve._resolve_input`` directly from here and passed
+    ``check_ai_readiness.py``'s ``cli-contract`` check, but failed
+    ``import-cycle-growth`` in CI for exactly this reason).
+    ``cli_compare_release.py`` -- the sole caller, already a member of that
+    cycle -- builds the callable and owns the actual resolve.
+
+    *old_map* itself (already canonical-key-keyed) is handed to
+    :func:`~abicheck.bundle_facts.capture_bundle_facts` as
+    ``library_paths``, so real filesystem aliases (symlink targets,
+    hard-linked siblings) are captured while the files still exist on
+    disk -- see that function's own docstring.
+
+    Failure here (a bad *manifest_path*, an unwritable *bundle_facts_out*)
+    is a genuine usage error -- unlike bundle *analysis* itself, which
+    degrades to a warning on failure (see ``_run_bundle_analysis``'s own
+    docstring), writing an explicitly-requested output file that silently
+    fails would leave a user believing a baseline was captured when it
+    was not.
+    """
+    from .bundle_facts import capture_bundle_facts
+    from .bundle_manifest import load_manifest
+    from .serialization import save_bundle_facts
+
+    try:
+        manifest = load_manifest(manifest_path) if manifest_path is not None else None
+        # Basename -> canonical key, so a matched pair's DiffResult.library
+        # (the real, possibly-versioned filename) maps back onto the same
+        # key old_map/build_bundle_snapshot() would use for it. Falls back
+        # to the basename itself only if truly unmatched (shouldn't happen
+        # for a genuine diff_pairs entry, but degrades safely either way).
+        basename_to_key = {path.name: key for key, path in old_map.items()}
+        per_library_snapshots: dict[str, AbiSnapshot] = {}
+        for diff, old_snapshot in diff_pairs:
+            basename = Path(diff.library).name
+            per_library_snapshots[basename_to_key.get(basename, basename)] = (
+                old_snapshot
+            )
+        for key, old_path in old_map.items():
+            if key in per_library_snapshots:
+                continue
+            per_library_snapshots[key] = resolve_stranded_library(old_path)
+        facts = capture_bundle_facts(
+            per_library_snapshots, manifest=manifest, library_paths=dict(old_map)
+        )
+        save_bundle_facts(facts, bundle_facts_out)
+    except (OSError, ValueError) as exc:
+        raise click.UsageError(f"--bundle-facts-out {bundle_facts_out}: {exc}") from exc
+
+
 def _collect_bundle_result(
     library_results: list[dict[str, object]],
     old_map: dict[str, Path],

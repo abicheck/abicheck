@@ -63,6 +63,7 @@ from .cli_compare_options import (
     _merge_cli_debug_format,
     _NormalizedCompareOptions,
     _param_from_cli,
+    _reject_bundle_facts_out_for_single_pair,
     _reject_debug_format_for_non_elf,
     _reject_set_input_flags,
     _resolve_debug_roots,
@@ -1308,7 +1309,7 @@ def run_compare(
     devel_pkg1: Path | None, devel_pkg2: Path | None,
     include_private_dso: bool, keep_extracted: bool,
     manifest_path: Path | None, bundle_system_providers: str,
-    bundle_cohorts: tuple[str, ...], no_bundle_analysis: bool,
+    bundle_cohorts: tuple[str, ...], no_bundle_analysis: bool, bundle_facts_out: Path | None,
     headers: tuple[Path, ...], includes: tuple[Path, ...], lang: str,
     header_backend: str,
     sysroot: Path | None, nostdinc: bool,
@@ -1652,7 +1653,7 @@ def run_compare(
             manifest_path=manifest_path,
             bundle_system_providers=bundle_system_providers,
             bundle_cohorts=bundle_cohorts, no_bundle_analysis=no_bundle_analysis,
-            scope_public_headers=scope_public_headers,
+            bundle_facts_out=bundle_facts_out, scope_public_headers=scope_public_headers,
             include_dependencies=include_dependencies,
             severity_preset=resolved_cfg.merged_severity_preset,
             severity_abi_breaking=resolved_cfg.merged_severity_abi_breaking,
@@ -1671,12 +1672,9 @@ def run_compare(
         )
         return
     # Single-file/snapshot inputs: the set-only fan-out flags do not apply.
-    jobs_explicit = (
-        ctx.get_parameter_source("jobs") == click.core.ParameterSource.COMMANDLINE
-    )
-    _warn_unused_set_flags(
-        jobs_explicit=jobs_explicit, dso_only=dso_only, output_dir=output_dir
-    )
+    _reject_bundle_facts_out_for_single_pair(bundle_facts_out)
+    jobs_explicit = ctx.get_parameter_source("jobs") == click.core.ParameterSource.COMMANDLINE
+    _warn_unused_set_flags(jobs_explicit=jobs_explicit, dso_only=dso_only, output_dir=output_dir)
 
     # Preserved before _normalize_compare_options resolves `demangle` against
     # the *primary* fmt below — the secondary render needs the same tri-state
