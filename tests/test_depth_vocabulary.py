@@ -332,6 +332,41 @@ def test_dump_source_only_depth_binary_is_usage_error(tmp_path) -> None:  # type
     assert not out.exists()
 
 
+def test_dump_source_only_header_flag_is_usage_error(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    """A source-only dump (no SO_PATH) dispatches to dump_source_only(),
+    which embeds only L3/L4/L5 build/source facts -- it never even receives
+    `headers`, so -H/--header was previously silently dropped: `dump
+    --sources src -H api.h -o out.json` exited 0 and wrote an empty (0
+    functions/enums), depth="binary" snapshot with no trace the flag was
+    ignored. Must now be rejected as a usage error naming the dropped flag."""
+    src = tmp_path / "src3"
+    src.mkdir()
+    hdr = src / "api.h"
+    hdr.write_text("typedef enum { a = 0, b, c } my_tag_t;\n", encoding="utf-8")
+    out = tmp_path / "out3.json"
+    res = CliRunner().invoke(
+        main,
+        ["dump", "--sources", str(src), "-H", str(hdr), "-o", str(out)],
+    )
+    assert res.exit_code == 64, _all_output(res)
+    assert "-H/--header has no effect on a source-only dump" in _all_output(res)
+    assert not out.exists()
+
+
+def test_dump_source_only_without_header_flag_still_succeeds(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    # The header-flag rejection above must not regress the ordinary,
+    # headers-free source-only dump.
+    src = tmp_path / "src4"
+    src.mkdir()
+    out = tmp_path / "out4.json"
+    res = CliRunner().invoke(
+        main,
+        ["dump", "--sources", str(src), "-o", str(out)],
+    )
+    assert res.exit_code == 0, _all_output(res)
+    assert out.exists()
+
+
 def test_dump_source_only_depth_binary_rejected_in_dry_run_too(tmp_path) -> None:  # type: ignore[no-untyped-def]
     src = tmp_path / "src2b"
     src.mkdir()
