@@ -255,6 +255,7 @@ def _dump_cache_extra_key(
     *,
     uses_ast: bool = True,
     lang_explicit: bool = False,
+    public_include_search_dirs: list[Path] | None = None,
 ) -> str:
     """Build the ``extra`` cache-key material for a cacheable dump — every
     input to ``run_dump`` that affects its output besides the binary content
@@ -319,6 +320,11 @@ def _dump_cache_extra_key(
     genuinely different force-C++-vs-auto-detect decision on a
     language-ambiguous header, and therefore a different parsed AST — folded
     into the key so they can never collide.
+
+    ``public_include_search_dirs`` (round 13): a real, provenance-affecting
+    input on its own (see ``_run_dump_uncached``'s own docstring) — folded
+    in the same way ``public_headers``/``public_header_dirs`` already are,
+    so two calls differing only in it can never share a cache entry.
     """
     from .dumper import _resolve_header_backend
 
@@ -335,6 +341,9 @@ def _dump_cache_extra_key(
                 sep.join(sorted(str(p) for p in (public_headers or []))),
                 sep.join(sorted(str(p) for p in (public_header_dirs or []))),
                 str(lang_explicit),
+                sep.join(
+                    sorted(str(p) for p in (public_include_search_dirs or []))
+                ),
             ]
         )
 
@@ -424,6 +433,7 @@ def _dump_cache_extra_key(
             sep.join(sorted(str(p) for p in (public_headers or []))),
             sep.join(sorted(str(p) for p in (public_header_dirs or []))),
             str(lang_explicit),
+            sep.join(sorted(str(p) for p in (public_include_search_dirs or []))),
         ]
     )
 
@@ -454,6 +464,7 @@ def cached_run_dump(
     include_labels: dict[Path, str] | None = None,
     dump_manifest: object | None = None,
     include_dependencies: bool = True,
+    public_include_search_dirs: list[Path] | None = None,
 ) -> AbiSnapshot:
     """``run_dump(...)``, transparently served from the whole-snapshot cache
     when the call shape is cacheable (:func:`_dump_is_cacheable`) — avoiding a
@@ -525,6 +536,7 @@ def cached_run_dump(
             include_labels=include_labels,
             dump_manifest=dump_manifest,
             include_dependencies=include_dependencies,
+            public_include_search_dirs=public_include_search_dirs,
         )
 
     if not cacheable:
@@ -595,6 +607,7 @@ def cached_run_dump(
             lang,
             uses_ast=_uses_ast,
             lang_explicit=lang_explicit,
+            public_include_search_dirs=public_include_search_dirs,
         )
         # NUL-joined (see _dump_cache_extra_key's own docstring on why NUL,
         # not a printable delimiter, is the only collision-safe choice here

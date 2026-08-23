@@ -327,6 +327,7 @@ def resolve_input(
     include_labels: dict[Path, str] | None = None,
     dump_manifest: DumpManifest | None = None,
     include_dependencies: bool = True,
+    public_include_search_dirs: list[Path] | None = None,
 ) -> AbiSnapshot:
     """Auto-detect input type and return an ABI snapshot.
 
@@ -355,6 +356,13 @@ def resolve_input(
             default server list / ``DEBUGINFOD_URLS`` environment variable.
         public_headers / public_header_dirs: Public-header sets used to tag
             declaration provenance on PE/Mach-O snapshots (ADR-024 Phase 1).
+        public_include_search_dirs: The caller's own genuinely explicit
+            ``-I``/``--include`` list, distinct from ``includes`` (which a
+            caller may have already widened with auto-derived directories --
+            see ``_run_dump_uncached``'s own docstring). When given, used
+            instead of ``includes`` for declaration-provenance widening on
+            all three binary formats. Omitted (the default), every existing
+            caller's behavior is unchanged: ``includes`` itself is used.
         include_labels: Resolved ``path -> label`` map from a labeled
             ``--include old:LABEL=PATH`` CLI entry (ADR-050 D1); forces the
             whole-snapshot cache off when non-empty.
@@ -409,6 +417,7 @@ def resolve_input(
             include_labels=include_labels,
             dump_manifest=dump_manifest,
             include_dependencies=include_dependencies,
+            public_include_search_dirs=public_include_search_dirs,
         )
 
     # Detect binary format from magic bytes
@@ -439,6 +448,7 @@ def resolve_input(
             include_labels=include_labels,
             dump_manifest=dump_manifest,
             include_dependencies=include_dependencies,
+            public_include_search_dirs=public_include_search_dirs,
         )
 
     # Raw kernel type-info blobs (a bare `.BTF` / CTF section extracted with
