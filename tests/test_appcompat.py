@@ -1377,6 +1377,41 @@ class TestCheckAppcompat:
         assert old_call.kwargs["public_headers"] == [old_hdr]
         assert new_call.kwargs["public_headers"] == [new_hdr]
 
+    def test_includes_passed_as_public_include_search_dirs(self, tmp_path):
+        """check_appcompat's own explicit old_includes/new_includes (or the
+        shared includes= fallback) are a genuine, caller-declared -I list --
+        not auto-derived -- so they must reach dump()'s provenance-only
+        public_include_search_dirs the same way perform_elf_dump's/
+        _dump_elf's own explicit -I wiring does (Codex review, PR #839
+        round 7), not just the compile-time extra_includes param."""
+        app = tmp_path / "app"
+        old_lib = tmp_path / "old.so"
+        new_lib = tmp_path / "new.so"
+        old_hdr = tmp_path / "old.h"
+        new_hdr = tmp_path / "new.h"
+        old_inc = tmp_path / "old_include"
+        new_inc = tmp_path / "new_include"
+
+        app_reqs = AppRequirements(undefined_symbols=set())
+        diff = DiffResult(old_version="1", new_version="2", library="libfoo")
+
+        with patch("abicheck.appcompat._get_lib_soname", return_value="libfoo.so.1"), \
+             patch("abicheck.appcompat.parse_app_requirements", return_value=app_reqs), \
+             patch("abicheck.dumper.dump", return_value=MagicMock()) as mock_dump, \
+             patch("abicheck.service.compare_snapshots", return_value=diff), \
+             patch("abicheck.appcompat._get_new_lib_exports", return_value=set()), \
+             patch("abicheck.appcompat._detect_app_format", return_value=None):
+            check_appcompat(
+                app, old_lib, new_lib,
+                old_headers=[old_hdr], new_headers=[new_hdr],
+                old_includes=[old_inc], new_includes=[new_inc],
+            )
+
+        assert mock_dump.call_count == 2
+        old_call, new_call = mock_dump.call_args_list
+        assert old_call.kwargs["public_include_search_dirs"] == [old_inc]
+        assert new_call.kwargs["public_include_search_dirs"] == [new_inc]
+
     def test_missing_symbols_breaking(self, tmp_path):
         app = tmp_path / "app"
         old_lib = tmp_path / "old.so"
