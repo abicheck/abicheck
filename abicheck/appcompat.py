@@ -1604,6 +1604,12 @@ def check_appcompat(
         compiler="c++" if lang == "c++" else "cc",
         lang="c" if lang == "c" else None,
         public_headers=list(_old_h),
+        # _old_inc/_new_inc are this caller's own genuine, explicit -I list
+        # (never auto-derived) -- mirror perform_elf_dump's/_dump_elf's own
+        # public_include_search_dirs wiring so a declaration reached through
+        # an explicit include root is promoted to PUBLIC_HEADER here too,
+        # not just on the CLI's compare/dump/scan frontends.
+        public_include_search_dirs=list(_old_inc),
     )
     new_snap = dump(
         so_path=new_lib_path,
@@ -1613,6 +1619,7 @@ def check_appcompat(
         compiler="c++" if lang == "c++" else "cc",
         lang="c" if lang == "c" else None,
         public_headers=list(_new_h),
+        public_include_search_dirs=list(_new_inc),
     )
 
     # Route through the Tier-2 service (lazy import avoids a

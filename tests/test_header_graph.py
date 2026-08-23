@@ -595,6 +595,70 @@ def test_header_node_visibility_classified_from_declarations_too() -> None:
     assert node.attrs["visibility"] == "private_header"
 
 
+# ── include_search_dirs widening (Codex review, fresh evidence) ─────────────
+
+
+def test_header_node_respects_widened_include_search_dirs() -> None:
+    """A header reached transitively under an explicit -I root (not itself
+    named as -H) is promoted to PUBLIC_HEADER at the per-declaration level
+    by apply_provenance's own include_search_dirs widening -- the header
+    GRAPH must agree, not independently reclassify the same header's own
+    node as private using only the bare public_header_paths/public_dir_paths
+    (the real regression: a type could read public_header for its own
+    declaration but private_header for its own defining header node)."""
+    transitive_header = "/proj/include/detail/impl.h"
+    fn = Function(
+        name="dep",
+        mangled="_Z3depv",
+        return_type="void",
+        source_header=transitive_header,
+        origin=ScopeOrigin.PUBLIC_HEADER,
+    )
+    graph = build_header_only_graph(
+        _snapshot(functions=[fn]),
+        public_header_paths=[PUBLIC_HEADER],
+        include_search_dirs=["/proj/include"],
+    )
+    node = next(n for n in graph.nodes if n.id == f"header://{transitive_header}")
+    assert node.attrs["visibility"] == "public_header"
+
+
+def test_header_node_include_search_dirs_omitted_keeps_prior_behavior() -> None:
+    """Without include_search_dirs (a caller that never threaded -I roots
+    through), the header node's own classification is unchanged -- still
+    only the literal public_header_paths/public_dir_paths, matching
+    test_header_node_visibility_classified_from_declarations_too above."""
+    transitive_header = "/proj/include/detail/impl.h"
+    fn = Function(
+        name="dep",
+        mangled="_Z3depv",
+        return_type="void",
+        source_header=transitive_header,
+        origin=ScopeOrigin.PRIVATE_HEADER,
+    )
+    graph = build_header_only_graph(
+        _snapshot(functions=[fn]), public_header_paths=[PUBLIC_HEADER]
+    )
+    node = next(n for n in graph.nodes if n.id == f"header://{transitive_header}")
+    assert node.attrs["visibility"] == "private_header"
+
+
+def test_include_search_dirs_cannot_opt_in_classification_by_itself() -> None:
+    """ADR-015 D4's opt-in contract: include_search_dirs alone (no real
+    public_header_paths/public_dir_paths) must never turn classification on."""
+    fn = Function(
+        name="dep",
+        mangled="_Z3depv",
+        return_type="void",
+        source_header="/proj/include/detail/impl.h",
+    )
+    graph = build_header_only_graph(
+        _snapshot(functions=[fn]), include_search_dirs=["/proj/include"]
+    )
+    node = next(n for n in graph.nodes if n.id == "decl://_Z3depv")
+    assert "visibility" not in node.attrs
+
+
 # ── ClangHeaderIncludeExtractor ──────────────────────────────────────────────
 
 

@@ -5163,6 +5163,62 @@ def test_folded_enum_value_on_constantexpr_wrapper() -> None:
     assert [(m.name, m.value) for m in enum.members] == [("A", 8), ("B", 9)]
 
 
+def test_enumerator_aliasing_a_sibling_enumerator_keeps_its_real_value() -> None:
+    # `enum { A, B, X = B }`: clang's JSON wraps the DeclRefExpr-to-B
+    # initializer in a ConstantExpr that itself carries the folded value
+    # ("1"), but the ConstantExpr is also a registered wrapper kind that
+    # _unwrap_expr descends straight through into the DeclRefExpr (which has
+    # no "value" of its own). Reading only the original node and the fully
+    # unwrapped leaf (the pre-fix behavior) misses the intermediate
+    # ConstantExpr's value entirely and silently falls back to the wrong,
+    # positional auto-increment number -- and everything after it shifts too.
+    root = _tu(
+        {
+            "kind": "EnumDecl",
+            "name": "E",
+            "loc": {"file": "include/foo.h", "line": 1},
+            "inner": [
+                {"kind": "EnumConstantDecl", "name": "A"},
+                {"kind": "EnumConstantDecl", "name": "B"},
+                {
+                    "kind": "EnumConstantDecl",
+                    "name": "X",
+                    "inner": [
+                        {
+                            "kind": "ImplicitCastExpr",
+                            "inner": [
+                                {
+                                    "kind": "ConstantExpr",
+                                    "value": "1",
+                                    "inner": [
+                                        {
+                                            "kind": "DeclRefExpr",
+                                            "referencedDecl": {
+                                                "kind": "EnumConstantDecl",
+                                                "name": "B",
+                                            },
+                                        }
+                                    ],
+                                }
+                            ],
+                        }
+                    ],
+                },
+                {"kind": "EnumConstantDecl", "name": "Y"},
+            ],
+        }
+    )
+    (enum,) = _ClangAstParser(root, set(), set()).parse_enums()
+    # X aliases B's real value (1), not X's own positional index (2); Y then
+    # auto-increments from X's real value, not from the wrong one.
+    assert [(m.name, m.value) for m in enum.members] == [
+        ("A", 0),
+        ("B", 1),
+        ("X", 1),
+        ("Y", 2),
+    ]
+
+
 def test_folded_bitfield_width_on_constantexpr_wrapper() -> None:
     root = _tu(
         {

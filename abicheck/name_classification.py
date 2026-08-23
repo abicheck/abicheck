@@ -548,6 +548,200 @@ _PTR_REF_SIGIL_RE = re.compile(r"\s*([*&])\s*")
 # "this is anonymous" marker, which is what should actually be compared.
 _ANON_TYPE_LOCATION_RE = re.compile(r"\bat\s+\S+:\d+:\d+(?=\s*\))")
 
+#: Like _ANON_TYPE_LOCATION_RE, but keeps the trailing ``:<line>:<col>`` as a
+#: captured discriminator instead of discarding it outright — see
+#: strip_anonymous_type_location's docstring for why identity extraction
+#: needs the discriminator kept while a downstream *comparison*
+#: (canonicalize_type_name) does not. The path itself is matched with
+#: ``.*?`` (not ``\S+?``, unlike _ANON_TYPE_LOCATION_RE above) because a
+#: real checkout or Windows path can contain spaces (Codex review: a
+#: checkout directory literally named "release build", or a bare "Program
+#: Files" component) -- \S+? cannot reach the trailing coordinates in that
+#: case, so the substitution silently does nothing and the checkout-
+#: dependent path survives into the type's identity. Not ``[^)]*?`` either
+#: (CodeRabbit review, round 3): a real path can itself contain a literal
+#: ``)`` (e.g. ``C:\release (old)\foo.hpp``), which that class excludes by
+#: construction, so it could never reach the trailing coordinates for such
+#: a path either -- the identical failure mode, just from a different
+#: character. ``.*?`` is non-greedy, so it still stops at the *first*
+#: ``:<line>:<col>)`` it finds, same as before.
+#:
+#: Anchored on an actual ``(lambda`` / ``(unnamed <kind>`` marker (round-4
+#: review, Codex, fresh evidence): the previous version matched a bare
+#: ``\bat\s+...`` anywhere in the name, so a C++20 fixed-string NTTP
+#: argument that merely *contains* location-shaped text (e.g.
+#: ``Tag<"at /checkout:1:2)">``) was rewritten too, risking a collision
+#: with a genuinely distinct specialization. Group 1 captures the marker
+#: itself so the substitution can reconstruct it without reproducing the
+#: literal ``at``/path text -- this also means the match never introduces
+#: extra whitespace to clean up afterward (the previous unconditional
+#: multi-space collapse this function used to apply is gone; see its own
+#: past instance of exactly this over-broad-collision failure mode, fixed
+#: two rounds ago, since fixed generically here at the regex level instead).
+_ANON_TYPE_LOCATION_PATH_ONLY_RE = re.compile(
+    r"(\((?:lambda|unnamed\s+\w+))\s+at\s+(.*?)(:\d+:\d+)(?=\s*\))"
+)
+
+
+def _declaring_header_discriminator(path: str) -> str:
+    """Checkout-independent discriminator derived from *path*'s own
+    basename (the declaring header's filename), used alongside
+    ``:<line>:<col>`` to distinguish two anonymous/lambda declarations that
+    share the same coordinates but live in DIFFERENT headers (Codex
+    review, round 8, fresh evidence): keeping only ``:<line>:<col>``
+    collapsed ``guard<(lambda at /src/one.hpp:4:3)>`` and ``guard<(lambda
+    at /src/two.hpp:4:3)>`` onto the identical identity
+    ``guard<(lambda:4:3)>``, since both files can legitimately declare
+    their own lambda at line 4, column 3. The basename alone (not the full
+    path, which embeds the checkout root) is stable across checkouts of
+    the same source tree while still separating two distinctly-named
+    headers -- the only residual collision is two DIFFERENT headers
+    sharing both a basename AND the same line:col, an accepted, narrower
+    limitation than the pre-fix "any two headers" collision.
+    """
+    posix = path.replace("\\", "/")
+    return posix.rsplit("/", 1)[-1]
+
+
+def _quoted_spans(name: str) -> list[tuple[int, int]]:
+    """Return ``[start, end)`` character ranges of every ``"..."`` quoted
+    literal in *name*, respecting backslash-escaped quotes (``\\"``).
+
+    Used by :func:`strip_anonymous_type_location` to avoid rewriting
+    location-shaped text that only *looks* like a real CastXML anonymous/
+    lambda marker because it happens to sit inside a C++20 fixed-string NTTP
+    argument's own quoted value (CodeRabbit review, fresh evidence):
+    ``Tag<"(lambda at /a/foo.hpp:1:2)">`` is a string *literal* naming that
+    exact marker text, not a real anonymous-type location CastXML emitted —
+    rewriting it collapses two otherwise-distinct specializations (one
+    genuinely quoting ``.../a/foo.hpp:1:2)"``, another quoting a different
+    path that happens to share a basename) onto the same identity, exactly
+    the kind of spurious same-identity collision this whole module exists to
+    avoid introducing.
+    """
+    spans: list[tuple[int, int]] = []
+    start: int | None = None
+    i = 0
+    length = len(name)
+    while i < length:
+        ch = name[i]
+        if ch == "\\" and start is not None:
+            # An escaped character inside a quote never ends it -- skip
+            # both the backslash and the escaped character together so an
+            # escaped quote (\") is never mistaken for the closing quote.
+            i += 2
+            continue
+        if ch == '"':
+            if start is None:
+                start = i
+            else:
+                spans.append((start, i + 1))
+                start = None
+        i += 1
+    # An unterminated trailing quote (malformed/truncated input) is not
+    # treated as an open span -- nothing after it is "inside quotes" for
+    # our purposes, so it contributes nothing further to skip.
+    return spans
+
+
+def strip_anonymous_type_location(name: str) -> str:
+    """Strip the checkout-dependent *directory* out of an embedded ``at
+    <path>:<line>:<col>`` in an anonymous-tag or lambda-closure type
+    spelling (``"(unnamed struct at /a/foo.h:56:5)"``, ``"raii_guard<(lambda
+    at /a/foo.h:4:37)>"``), while keeping the declaring header's own
+    basename plus its ``:<line>:<col>`` as a discriminator
+    (``"(unnamed struct:foo.h:56:5)"``, ``"raii_guard<(lambda:foo.h:4:37)>"``).
+
+    A leaf of :func:`canonicalize_type_name` (which additionally normalizes
+    whitespace, elaborated-type-specifier prefixes, and const/pointer
+    spelling — none of which apply to a raw declaration name) so a producer
+    can strip *just* the checkout-dependent path at the point a type's own
+    identity (``RecordType.name``/``.qualified_name``, ``EnumType.name``) is
+    extracted, rather than leaving the raw, location-bearing spelling to
+    flow into old/new type matching (``diff_helpers.type_map_key``) and
+    manufacture a spurious ``type_removed``/``type_added`` pair for two
+    build trees of the identical declaration under different checkout
+    paths.
+
+    The ``:<line>:<col>`` is kept — not dropped the way
+    :func:`canonicalize_type_name`'s own (comparison-only, string-equality)
+    stripping does — because it is the only discriminator two distinct
+    anonymous/lambda declarations in the *same* header have: dropping it
+    entirely would collapse ``guard<(lambda at a.hpp:4:3)>`` and
+    ``guard<(lambda at a.hpp:40:3)>`` (two unrelated lambdas) to the
+    identical key ``guard<(lambda)>``, silently overwriting one entry in
+    ``diff_helpers.TypeMap`` (Codex review). Line/column depends only on the
+    header's own content, not where it's checked out, so it is stable across
+    a checkout-root change for the *same*, *unedited* declaration — the case
+    this function exists to fix.
+
+    Known, accepted limitation (Codex review, second round): this is a
+    genuine tradeoff, not a fully general fix. If an *unrelated* edit
+    earlier in the same header shifts an unchanged anonymous/lambda
+    declaration to a different line, its ``:line:col`` changes too, and
+    old/new matching sees a different identity for a declaration whose own
+    ABI is unchanged — a spurious ``type_removed``/``type_added`` pair in
+    the *other* direction from the collision case above. Dropping the
+    discriminator entirely (what the pre-existing clang-frontend
+    normalizer, ``dumper_clang_expr._normalize_qual_type``, already does)
+    would trade this failure mode for the collision one instead — there is
+    no location-based discriminator that is simultaneously stable under
+    unrelated line movement AND distinguishing between two declarations in
+    one header; a genuinely robust identity would need a structural
+    fingerprint of the declaration itself, not a location string. Accepted
+    as a documented limitation (checkout-root stability was this fix's own
+    motivating bug) rather than a third, unproven heuristic.
+
+    Both header-mode dumpers should apply this at extraction time;
+    :func:`canonicalize_type_name` remains the right tool for a downstream
+    *comparison* that only has the raw spelling to work with (and where a
+    same-snapshot collision risk does not apply).
+
+    No whitespace collapse/strip runs here at all (round-4 review, Codex,
+    fresh evidence, second finding on the same over-broad-rewrite theme):
+    this function is now applied to every castxml record/enum name at
+    extraction time, not just anonymous ones, so even a collapse gated on
+    "the substitution fired somewhere" still touched unrelated whitespace
+    elsewhere in a *composite* name (e.g. a C++20 fixed-string NTTP
+    argument alongside a real lambda marker in the same template argument
+    list, ``Tag<"a  b", (lambda at a.hpp:4:3)>``). The regex above is now
+    anchored and captures its own marker, so the substitution itself never
+    introduces stray whitespace to clean up -- nothing here needs
+    collapsing, so nothing should be attempted.
+
+    The declaring header's own basename is also kept as a discriminator
+    (round 8, Codex review, fresh evidence), alongside ``:line:col``:
+    ``"raii_guard<(lambda at /a/foo.h:4:37)>"`` becomes
+    ``"raii_guard<(lambda:foo.h:4:37)>"``. Line/column alone cannot tell
+    apart two DIFFERENT headers that each declare their own anonymous/
+    lambda type at the identical coordinates -- both a real occurrence in
+    practice and something no fixed test corpus can rule out in general.
+    See :func:`_declaring_header_discriminator`'s own docstring for what
+    this still doesn't cover (two same-named headers, at the same
+    coordinates, in different directories).
+
+    A match that falls inside a ``"..."`` quoted literal is left completely
+    untouched (CodeRabbit review, fresh evidence): a real CastXML anonymous/
+    lambda marker is never itself quoted, so a match starting inside quotes
+    can only be ordinary string-literal *content* that happens to spell
+    location-shaped text -- e.g. a C++20 fixed-string NTTP argument like
+    ``Tag<"(lambda at /a/foo.hpp:1:2)">``. Rewriting that would fabricate a
+    same-identity collision between two distinct literal values. See
+    :func:`_quoted_spans` for the quote-tracking this relies on.
+    """
+    quoted_spans = _quoted_spans(name)
+
+    def _inside_quotes(pos: int) -> bool:
+        return any(start <= pos < end for start, end in quoted_spans)
+
+    def _replace(match: re.Match[str]) -> str:
+        if _inside_quotes(match.start()):
+            return match.group(0)
+        marker, path, coords = match.group(1), match.group(2), match.group(3)
+        return f"{marker}:{_declaring_header_discriminator(path)}{coords}"
+
+    return _ANON_TYPE_LOCATION_PATH_ONLY_RE.sub(_replace, name)
+
 
 def canonicalize_type_name(name: str) -> str:
     """Normalise a C/C++ type name for comparison.

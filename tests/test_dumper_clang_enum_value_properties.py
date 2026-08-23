@@ -1,0 +1,112 @@
+# Copyright 2026 Nikolay Petrov
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""Property-based tests for ``dumper_clang._evaluated_int_value``.
+
+The bug this primitive fixes: clang's JSON AST folds a constant's evaluated
+value onto exactly one node along a chain of single-child "wrapper"
+expressions (``ImplicitCastExpr``, ``ConstantExpr``, ``ParenExpr``, ...) --
+which node varies by what the initializer actually is (a literal wraps the
+value close to the leaf; an enumerator-alias initializer like ``tag_x =
+tag_a`` folds it onto an *intermediate* ``ConstantExpr``, ahead of the
+``DeclRefExpr`` leaf that names the aliased enumerator and carries no value
+of its own). The pre-fix implementation checked only the original node and
+the fully-unwrapped leaf -- correct for the common "value near the leaf"
+shape, silently wrong for the intermediate-node shape.
+
+test_dumper_clang.py pins that exact intermediate-node example (and the
+existing "outermost ConstantExpr wrapper" example it was already correct
+for). This module states the actual contract as an invariant instead: for a
+value folded onto ANY position along the wrapper chain, `_evaluated_int_value`
+must find it -- not just the two shapes anyone happened to think to test.
+"""
+
+from __future__ import annotations
+
+from typing import Any
+
+import pytest
+from hypothesis import given, settings, strategies as st
+
+from abicheck.dumper_clang import _WRAPPER_EXPR_KINDS, _evaluated_int_value
+
+pytestmark = pytest.mark.slow
+
+_WRAPPER_KINDS = sorted(_WRAPPER_EXPR_KINDS)
+
+
+def _build_chain(kinds: list[str], value_at: int, value: int) -> dict[str, Any]:
+    """A single-child wrapper chain of the given *kinds* (outermost first),
+    terminating in a non-wrapper leaf node, with *value* folded onto the
+    node at position *value_at* (0 == the outermost node, ``len(kinds)`` ==
+    the terminal leaf itself)."""
+    # Build innermost-out: start with the terminal leaf (never a wrapper
+    # kind, mirroring a real DeclRefExpr/IntegerLiteral leaf).
+    node: dict[str, Any] = {"kind": "DeclRefExpr"}
+    if value_at == len(kinds):
+        node["value"] = str(value)
+    for i in range(len(kinds) - 1, -1, -1):
+        wrapper: dict[str, Any] = {"kind": kinds[i], "inner": [node]}
+        if value_at == i:
+            wrapper["value"] = str(value)
+        node = wrapper
+    return node
+
+
+@given(
+    kinds=st.lists(st.sampled_from(_WRAPPER_KINDS), min_size=0, max_size=6),
+    value=st.integers(min_value=-1000, max_value=1000),
+    data=st.data(),
+)
+@settings(max_examples=300)
+def test_finds_a_value_folded_at_any_position_along_the_chain(kinds, value, data) -> None:
+    value_at = data.draw(st.integers(min_value=0, max_value=len(kinds)))
+    node = _build_chain(kinds, value_at, value)
+    assert _evaluated_int_value(node) == value
+
+
+@given(kinds=st.lists(st.sampled_from(_WRAPPER_KINDS), min_size=0, max_size=6))
+@settings(max_examples=200)
+def test_no_value_anywhere_returns_none(kinds) -> None:
+    """No node along the chain carries a folded value (the pure-alias case,
+    e.g. a bare DeclRefExpr leaf with nothing evaluated) -> None, not a
+    fabricated positional guess. Auto-increment fallback is the caller's
+    job (dumper_clang.parse_enums), not this primitive's."""
+    node = _build_chain(kinds, value_at=-1, value=0)  # -1: never matches
+    assert _evaluated_int_value(node) is None
+
+
+@given(
+    kinds=st.lists(st.sampled_from(_WRAPPER_KINDS), min_size=1, max_size=6),
+    outer_value=st.integers(min_value=-1000, max_value=1000),
+    inner_value=st.integers(min_value=-1000, max_value=1000),
+)
+@settings(max_examples=200)
+def test_outermost_folded_value_wins_over_a_deeper_one(
+    kinds, outer_value, inner_value
+) -> None:
+    """When more than one node along the chain carries a value (not a real
+    clang shape, but the walk's own tie-break rule should still be
+    deterministic and documented): the outermost one wins, matching the
+    top-down walk order _evaluated_int_value actually implements."""
+    if outer_value == inner_value:
+        return
+    node = _build_chain(kinds, value_at=0, value=outer_value)
+    # Fold a second, different value onto the innermost wrapper too (or the
+    # leaf, if there are no wrapper kinds at all).
+    cur = node
+    while isinstance(cur.get("inner"), list) and cur["inner"]:
+        cur = cur["inner"][0]
+    cur["value"] = str(inner_value)
+    assert _evaluated_int_value(node) == outer_value

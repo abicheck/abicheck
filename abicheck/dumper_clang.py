@@ -71,6 +71,7 @@ from ._compiler_options import split_gcc_options
 from .dumper_clang_attributes import _clang_contract_attributes
 from .dumper_clang_expr import (  # noqa: F401  (some re-exported for tests)
     _SCOPE_NODE_KINDS,
+    _WRAPPER_EXPR_KINDS,
     _canonical_expr,
     _expr_fingerprint,
     _field_initializer_value,
@@ -1801,16 +1802,34 @@ def _evaluated_int_value(node: dict[str, Any]) -> int | None:
     do not. Read the wrapper's value first, then fall back to the unwrapped leaf
     literal — otherwise such bitfield widths / enum values would be lost (Codex/
     CodeRabbit review).
+
+    Checking only the *original* node and the *fully*-unwrapped leaf (what an
+    earlier revision did) misses a ``value`` folded onto an *intermediate*
+    wrapper: an enumerator initialized from a sibling enumerator (``tag_x =
+    tag_a``) wraps a ``ConstantExpr`` — carrying the real, evaluated ``value``
+    (e.g. ``"2"``) — around a ``DeclRefExpr`` naming ``tag_a``, and
+    ``_unwrap_expr`` keeps descending through ``ConstantExpr`` (a registered
+    wrapper kind) straight into that ``DeclRefExpr``, which has no ``value``
+    of its own. The fully-unwrapped leaf alone therefore reported ``None`` —
+    read as "implicit" — silently discarding the real value and mis-numbering
+    every enumerator after it. Walk the same single-child-wrapper chain
+    ``_unwrap_expr`` follows, but check every node passed through, not just
+    the endpoints.
     """
-    for candidate in (node, _unwrap_expr(node)):
-        if not isinstance(candidate, dict):
-            continue
-        val = candidate.get("value")
+    cur: Any = node
+    while isinstance(cur, dict):
+        val = cur.get("value")
         if val is not None:
             try:
                 return int(str(val), 0)
             except ValueError:
-                continue
+                pass
+        if cur.get("kind") not in _WRAPPER_EXPR_KINDS:
+            break
+        inner = [c for c in cur.get("inner", []) or [] if isinstance(c, dict)]
+        if len(inner) != 1:
+            break
+        cur = inner[0]
     return None
 
 

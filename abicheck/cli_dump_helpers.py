@@ -52,6 +52,7 @@ from .errors import AbicheckError
 # unlike the four names in the lazy `__getattr__` shim further down, which
 # nothing in this module calls itself.
 from .header_conditionals import attach_build_context_for_parsed_headers
+from .header_utils import include_operand_dirs
 
 if TYPE_CHECKING:
     from .buildsource.pack import BuildSourcePack
@@ -179,7 +180,6 @@ def check_dump_debug_format_error(
             f"not {binary_fmt.upper()}."
         )
     return None
-
 
 
 def evidence_depth_label(
@@ -742,7 +742,9 @@ def _add_dump_manifest_section(result: Any, dump_manifest: Any) -> None:
     result.add("Multi-TU manifest (--dump-manifest)", *manifest_lines)
 
 
-def _add_dump_data_layers(result: Any, so_path: Path, headers: tuple[Path, ...]) -> None:
+def _add_dump_data_layers(
+    result: Any, so_path: Path, headers: tuple[Path, ...]
+) -> None:
     """Report which L0-L2 data layers the artifact actually carries.
 
     Best-effort: a diagnostic section, so any parse failure is downgraded to a
@@ -1079,6 +1081,7 @@ def render_dump_dry_run(
 # imported above under its original name; every existing caller/test is
 # unchanged. See that module for the derivation logic.
 
+
 def handle_non_elf_dump(
     so_path: Path,
     binary_fmt: str,
@@ -1188,7 +1191,8 @@ def handle_non_elf_dump(
             build_info=build_info,
             build_config=build_config,
             build_query=build_query,
-            build_compile_db=build_compile_db, build_targets=build_targets,
+            build_compile_db=build_compile_db,
+            build_targets=build_targets,
             collect_mode=collect_mode,
             gcc_path=getattr(compile_context, "gcc_path", None),
             gcc_prefix=getattr(compile_context, "gcc_prefix", None),
@@ -1219,6 +1223,21 @@ def handle_non_elf_dump(
             public_header_dirs=list(public_header_dirs),
             header_backend=header_backend,
             compile=l3_effective_ctx,
+            # Provenance widening gets ONLY the caller's own explicit -I
+            # list, never `eff_includes` -- see service.run_dump's own
+            # docstring note on `public_include_search_dirs` for why (same
+            # regression class the ELF perform_elf_dump path already avoids:
+            # an auto-derived umbrella-header directory can hold a
+            # genuinely private sibling header). A `--compiler-option
+            # -I<dir>` operand is exactly as explicit as a plain `-I` (see
+            # the identical rationale on the ELF `perform_elf_dump` path
+            # above) -- `compile_context` is never reassigned on this
+            # PE/Mach-O path, so its own `gcc_option_tokens` is already the
+            # caller's unmodified, explicit set (CodeRabbit review).
+            public_include_search_dirs=list(includes)
+            + list(
+                include_operand_dirs(getattr(compile_context, "gcc_option_tokens", ()))
+            ),
         )
     # A ClickException already carries its user-facing message; it must reach
     # Click as itself rather than be re-wrapped by the handler below.
@@ -1281,7 +1300,6 @@ def handle_non_elf_dump(
         public_headers=tuple(public_headers),
         public_header_dirs=tuple(public_header_dirs),
     )
-
 
 
 def resolve_dump_compile_context(
@@ -1584,7 +1602,8 @@ def perform_elf_dump(
             build_info=build_info,
             build_config=build_config,
             build_query=build_query,
-            build_compile_db=build_compile_db, build_targets=build_targets,
+            build_compile_db=build_compile_db,
+            build_targets=build_targets,
             collect_mode=collect_mode,
             gcc_path=gcc_path,
             gcc_prefix=gcc_prefix,
@@ -1646,6 +1665,23 @@ def perform_elf_dump(
                 so_path=so_path,
                 headers=resolved_headers,
                 extra_includes=dedup_paths_preserve_order(eff_includes + inc_extra),
+                # Provenance widening gets ONLY the caller's own explicit -I
+                # list, never `eff_includes`/`inc_extra` -- see dump()'s own
+                # docstring note on `public_include_search_dirs` for why
+                # (real regression: `inc_extra`'s auto-added umbrella-header
+                # directory can hold a genuinely private sibling header).
+                # A `--compiler-option -I<dir>`/`-isystem <dir>` operand is
+                # exactly as explicit as a plain `-I` (see the "as explicit
+                # as -I" comment on the `seed_includes_and_fold_compile_
+                # context` call above, which already trusts these tokens to
+                # suppress the L2 seed) -- so its directory belongs in the
+                # provenance-widening set too, sourced from
+                # `_user_gcc_option_tokens` (the caller's own tokens,
+                # captured before the L3 fold may have merged in derived
+                # ones the caller never wrote) rather than the possibly
+                # L3-augmented `gcc_option_tokens` local (CodeRabbit review).
+                public_include_search_dirs=list(includes)
+                + list(include_operand_dirs(_user_gcc_option_tokens)),
                 version=version,
                 compiler=compiler,
                 gcc_path=gcc_path,
@@ -1864,6 +1900,7 @@ def perform_elf_dump(
             effective_compile_context,
             list(public_headers),
             list(public_header_dirs),
+            include_search_dirs=list(includes),
         )
 
         # G28 Phase 4: same "this ELF dump CLI path reaches dumper.dump
@@ -1920,7 +1957,10 @@ def perform_elf_dump(
         inputs_pack=inputs_pack,
         depth=depth,
         include_dependencies=include_dependencies,
-        header_roots=tuple(headers) + _dump_manifest_header_roots(dump_manifest) + tuple(public_headers) + tuple(public_header_dirs),
+        header_roots=tuple(headers)
+        + _dump_manifest_header_roots(dump_manifest)
+        + tuple(public_headers)
+        + tuple(public_header_dirs),
         clang_bin=resolve_source_frontend_clang_bin(
             gcc_path, gcc_prefix, exclude_cl_style=False
         ),

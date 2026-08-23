@@ -1659,6 +1659,43 @@ class TestDumpHybridDispatch:
         assert calls[0][0] is dump
         assert calls[0][1] == p
 
+    def test_dump_hybrid_forwards_public_include_search_dirs(self, tmp_path):
+        """A caller's explicit -I/--include roots (ADR-024/ADR-015's
+        declaration-provenance widening -- see
+        ``test_dump_provenance_include_scope.py``) must reach BOTH
+        recursive castxml/clang sub-dumps ``run_hybrid_dump`` performs, not
+        get silently dropped on the hybrid path while the castxml/clang
+        backends fix it individually (Codex review, PR #839 round 6)."""
+        from abicheck.dumper import dump
+
+        p = tmp_path / "lib.so"
+        p.write_bytes(b"\x7fELF" + b"\x00" * 100)
+        sentinel = AbiSnapshot(library="test", version="1.0", ast_producer="hybrid")
+        include_dir = tmp_path / "include"
+        calls = []
+
+        def fake_run_hybrid_dump(dump_fn, so_path, headers, **kwargs):
+            calls.append(kwargs)
+            return sentinel
+
+        with patch(
+            "abicheck.dumper_hybrid.run_hybrid_dump", side_effect=fake_run_hybrid_dump
+        ):
+            result = dump(
+                p,
+                [],
+                header_backend="hybrid",
+                public_include_search_dirs=[include_dir],
+            )
+
+        assert result is sentinel
+        assert len(calls) == 1
+        assert calls[0]["public_include_search_dirs"] == [include_dir], (
+            "an explicit public_include_search_dirs must be forwarded to "
+            "run_hybrid_dump's **kwargs, which passes it unchanged to both "
+            "the castxml and clang recursive dump() calls"
+        )
+
     def test_dump_hybrid_case_insensitive(self, tmp_path):
         from abicheck.dumper import dump
 

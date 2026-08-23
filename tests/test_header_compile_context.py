@@ -1591,6 +1591,53 @@ def test_resolve_side_snapshot_forwards_symbols_only_and_debug_presence_only(
     assert captured["debug_presence_only"] is False
 
 
+def test_resolve_side_snapshot_forwards_only_explicit_includes_as_public_include_search_dirs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Round 13 (Codex review): the shared ``resolve_side_snapshot``/
+    ``_resolve_side_snapshot_impl`` primitive fed its own build-derived,
+    auto-widened ``includes`` local straight into ``service.resolve_input``
+    with no separate ``public_include_search_dirs`` -- so provenance
+    widening picked up an auto-derived seed directory the same way the
+    already-fixed ELF/PE/Mach-O CLI resolvers used to. This primitive is
+    shared by `compare`'s implicit-dump operand and `dump`'s typed
+    `DumpRequest`/`run_dump_request` API, so the gap reached both.
+    """
+    from abicheck import service_input_resolution as sir
+    from abicheck.api_types import InputSpec
+    from abicheck.model import AbiSnapshot
+    from abicheck.service_compare_evidence import SideEvidence
+
+    so = tmp_path / "lib.so"
+    so.write_bytes(b"\x7fELF" + b"\x00" * 100)
+    explicit_dir = tmp_path / "explicit"
+
+    captured: dict[str, object] = {}
+
+    def _fake_resolve_input(*args: object, **kwargs: object) -> AbiSnapshot:
+        captured.update(kwargs)
+        return AbiSnapshot(library="lib", version="1.0", from_headers=False)
+
+    import abicheck.service as service_mod
+
+    monkeypatch.setattr(service_mod, "resolve_input", _fake_resolve_input)
+
+    side = InputSpec(path=so, version="1.0", includes=(explicit_dir,))
+    evidence = SideEvidence(
+        headers=[], compile=None, collect_mode="off", dump_manifest=None
+    )
+    sir.resolve_side_snapshot(
+        side,
+        evidence,
+        lang="c++",
+        header_backend="auto",
+        fmt="elf",
+        public_headers=[],
+        public_header_dirs=[],
+    )
+    assert captured["public_include_search_dirs"] == [explicit_dir]
+
+
 def test_resolve_side_snapshot_omits_conflicting_c_standard_when_cxx_forced(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

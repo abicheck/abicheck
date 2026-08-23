@@ -196,16 +196,25 @@ def _apply_native_provenance(
     snap: AbiSnapshot,
     public_headers: list[Path] | None,
     public_header_dirs: list[Path] | None,
+    include_search_dirs: list[Path] | None = None,
 ) -> AbiSnapshot:
     """Tag declaration provenance on a PE/Mach-O snapshot (ADR-024 Phase 1).
 
     Mirrors the ELF path (``dumper.create_snapshot``), which always runs
-    ``apply_provenance``. A no-op when no public-header set is supplied —
-    every origin stays ``UNKNOWN`` and behaviour is unchanged.
+    ``apply_provenance`` and, since the same PR's ELF-side fix, folds the
+    caller's ``-I`` roots in too. A no-op when no public-header set is
+    supplied — every origin stays ``UNKNOWN`` and behaviour is unchanged.
+    See ``service._apply_native_provenance``'s identical parameter for why
+    (Codex review, fresh evidence).
     """
     from .provenance import apply_provenance
 
-    return apply_provenance(snap, public_headers, public_header_dirs)
+    return apply_provenance(
+        snap,
+        public_headers,
+        public_header_dirs,
+        include_search_dirs=include_search_dirs,
+    )
 
 
 def _dump_native_binary(
@@ -225,6 +234,7 @@ def _dump_native_binary(
     header_backend: str = "auto",
     compile: CompileContext | None = None,
     include_dependencies: bool = True,
+    public_include_search_dirs: list[Path] | None = None,
 ) -> AbiSnapshot:
     """Dump an ABI snapshot from a native binary (ELF, PE, or Mach-O).
 
@@ -238,6 +248,11 @@ def _dump_native_binary(
 
     ``public_headers`` / ``public_header_dirs`` classify declaration provenance
     (ADR-024 Phase 1) on PE/Mach-O snapshots; a no-op for ELF and when empty.
+    ``public_include_search_dirs`` (see ``service.run_dump``'s own docstring)
+    is the caller's own genuinely explicit ``-I`` list, kept distinct from
+    ``includes`` (which a caller may have already widened with auto-derived
+    directories) so provenance widening never picks up a directory the
+    caller didn't actually declare.
     ``compile`` carries the L2 cross-toolchain context (ADR-037 D3); ``run_dump``
     threads it into the PE/Mach-O header-scoping path (``_try_header_scoped_dump``).
     ``run_dump``'s header-only-graph attach (G29 Phase A: always attempted, no
@@ -266,6 +281,7 @@ def _dump_native_binary(
             compile=compile,
             notify=_click_notify,
             include_dependencies=include_dependencies,
+            public_include_search_dirs=public_include_search_dirs,
         )
     except ValidationError as exc:
         raise click.UsageError(str(exc)) from exc

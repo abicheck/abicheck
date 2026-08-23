@@ -503,8 +503,6 @@ def _resolve_single_ast_backend(backend: str, frontend_context: str) -> str:
     return resolved
 
 
-
-
 def _castxml_fallback_reason(
     exc: SnapshotError,
     *,
@@ -1166,6 +1164,7 @@ def dump(
     dump_manifest: DumpManifest | None = None,
     scope_header_dirs: list[Path] | None = None,
     frontend_context: str = "host",
+    public_include_search_dirs: list[Path] | None = None,
 ) -> AbiSnapshot:
     """Create an AbiSnapshot from a shared library + headers.
 
@@ -1251,6 +1250,8 @@ def dump(
             "public_headers": public_headers,
             "public_header_dirs": public_header_dirs,
             "scope_header_dirs": scope_header_dirs,
+            # No per-TU equivalent for a multi-TU manifest (CodeRabbit review).
+            "public_include_search_dirs": public_include_search_dirs,
         }
         if _given := [name for name, value in _conflicts.items() if value]:
             raise ValidationError(
@@ -1298,6 +1299,7 @@ def dump(
             debug_info_path=debug_info_path,
             extra_include_labels=extra_include_labels,
             scope_header_dirs=scope_header_dirs,
+            public_include_search_dirs=public_include_search_dirs,
         )
 
     fmt = _detect_format(so_path)
@@ -1396,10 +1398,38 @@ def dump(
     # Tag declaration provenance (source_header + origin). Always derives
     # source_header from the parsed source location; origin is only
     # classified when a public-header set is supplied (ADR-015, D4).
+    #
+    # include_search_dirs=public_include_search_dirs folds those directories
+    # into the public-directory set once a real -H/--public-header-dir set
+    # already opted classification in: a header-AST dump only ever parses
+    # declarations reachable by #include from its own -H root(s), so a
+    # header living elsewhere under the same include root that the umbrella
+    # header pulled in transitively is not a private implementation detail
+    # merely because it isn't the literal -H file (defect: every
+    # transitively-included header classified private-header, silently
+    # dropping real breaking findings out of the compared surface).
+    #
+    # Deliberately NOT `extra_includes` (Codex review, real regression found
+    # via the example suite): `extra_includes` is the FULL compile include
+    # path, which also carries directories this function (or a caller's own
+    # P3 `resolve_inferred_header_roots` step) auto-derives purely so an
+    # umbrella -H header's own relative #includes resolve -- typically the
+    # umbrella header's own directory. That directory can just as easily
+    # hold a genuinely *private* sibling header (case184_internal_enum_
+    # churn_scoped's own v1_internal.h, next to the public v1.h) -- folding
+    # it into the public-directory set defeated the entire private-header
+    # scoping example that test exists to cover. `public_include_search_
+    # dirs` is a separate, caller-supplied parameter carrying ONLY the
+    # directories the caller can positively attest are a real, explicit
+    # dependency-search declaration (a literal `-I`/`--include`), never an
+    # internal #include-resolution auto-add.
     from .provenance import apply_provenance
 
     return apply_provenance(
-        snapshot, effective_public_headers, effective_public_header_dirs
+        snapshot,
+        effective_public_headers,
+        effective_public_header_dirs,
+        include_search_dirs=public_include_search_dirs,
     )
 
 
