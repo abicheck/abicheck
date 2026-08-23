@@ -45,16 +45,16 @@ First, a terminology note this page relies on throughout: **scoping** and
 **policy** are two separate mechanisms, not two names for the same thing.
 `--scope-public-headers` (on by default) and an explicit surface allowlist
 control whether a `Change` is *removed from* `DiffResult.changes` at all —
-that's the only thing that filters findings. A `--policy` document's
-`overrides:` block never removes a `Change` from `changes`; it only
-reclassifies which `Verdict` a given `ChangeKind` maps to. So "a policy
-profile scoped to the public surface" isn't a real, separate filtering
-mechanism — a private `func_removed` still shows up in the report under any
-`--policy` profile; only `--scope-public-headers` decides whether it's there
-at all.
+unlike a `--policy` document's `overrides:` block, which never removes a
+`Change` from `changes` and only reclassifies which `Verdict` a given
+`ChangeKind` maps to. So "a policy profile scoped to the public surface"
+isn't a real, separate filtering mechanism — a private `func_removed` still
+shows up in the report under any `--policy` profile; only
+`--scope-public-headers` (or suppression, a third, separate mechanism —
+see below) decides whether it's there at all.
 
-**This reclassification is per-library only — it does not reach bundle
-findings at all, not even the three named built-in profiles.**
+**A built-in policy profile name reaches bundle findings; a custom
+`--policy custom.yaml` document does not.**
 `compare_bundle()`'s own `policy` parameter is a bare string, resolved
 through `policy_kind_sets()` — the same three-way switch
 (`strict_abi`/`sdk_vendor`/`plugin_abi`) `compute_verdict()`'s own docstring

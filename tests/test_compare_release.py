@@ -482,8 +482,10 @@ class TestDirVsDir:
             "compare",
             str(old_dir),
             str(new_dir),
-            "-o", str(same_path),
-            "--write", f"json={same_path}",
+            "-o",
+            str(same_path),
+            "--write",
+            f"json={same_path}",
         )
         assert code == 64
         assert "Usage:" in out
@@ -629,6 +631,40 @@ class TestDirVsDir:
         code, out = _invoke("compare", str(old_dir), str(new_dir))
         assert code == 0
         assert "no matching" in out.lower() or "warning" in out.lower()
+
+
+class TestBundleFactsOutStrandedLibraryWarning:
+    """The `--bundle-facts-out` stranded-library fallback warns (rather than
+    silently persisting a lossy entry) when the real resolve itself fails
+    (Codex review, fresh evidence) -- end-to-end through the real CLI, since
+    the warning lives in `compare_release_cmd`'s own nested closure, not in
+    the independently-testable `write_bundle_facts_out()` helper.
+    """
+
+    def test_warns_when_a_stranded_library_cannot_be_fully_resolved(
+        self, tmp_path: Path
+    ) -> None:
+        old_dir = tmp_path / "old"
+        new_dir = tmp_path / "new"
+        old_dir.mkdir()
+        new_dir.mkdir()
+        snap = _snap(library="libfoo.so")
+        _write_snap(old_dir / "libfoo.json", snap)
+        _write_snap(new_dir / "libfoo.json", snap)
+        # Old-only, and not a real ELF/JSON/etc. -- service.resolve_input()
+        # raises on it, so the fallback's own except-and-degrade path (and
+        # its warning) is what gets exercised.
+        (old_dir / "libbroken.so").write_bytes(b"")
+
+        out_path = tmp_path / "old.bundlefacts.json"
+        code, out = _invoke(
+            "compare", str(old_dir), str(new_dir), "--bundle-facts-out", str(out_path)
+        )
+
+        assert code == 0
+        assert "libbroken.so" in out
+        assert "ELF-only" in out
+        assert out_path.exists()
 
 
 # ── unmatched / missing ───────────────────────────────────────────────────────

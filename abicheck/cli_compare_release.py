@@ -1663,9 +1663,7 @@ def compare_release_cmd(
             )
 
             if bundle_facts_out is not None and not no_bundle_analysis:
-                # Resolve here, not in the leaf write_bundle_facts_out()
-                # (see its docstring): cli_resolve already sits inside the
-                # CLI-registration import cycle this module is a member of.
+                # Resolved here, not in the leaf write_bundle_facts_out() (see its docstring).
                 def _resolve_stranded_library(old_path: Path) -> AbiSnapshot:
                     from .cli_resolve import _resolve_input
                     from .elf_metadata import parse_elf_metadata
@@ -1692,8 +1690,9 @@ def compare_release_cmd(
                             public_headers=pub_headers,
                             public_header_dirs=pub_dirs,
                         )
-                    except Exception:
-                        # Degrade to bare ElfMetadata rather than abort.
+                    except Exception as exc:
+                        # Degrade rather than abort, but warn: lossy entry (Codex review).
+                        click.echo(f"{old_path.name}: ELF-only ({exc})", err=True)
                         return AbiSnapshot(
                             library=old_path.name,
                             version="",
