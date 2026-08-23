@@ -1854,6 +1854,25 @@ def bundle_facts_from_dict(d: dict[str, Any]) -> BundleFacts:
             f"{BUNDLE_FACTS_SCHEMA_VERSION}). Upgrade abicheck to read this "
             "bundle facts file."
         )
+    # "per_library_snapshots" is mandatory, not merely defaulted: a
+    # malformed or unrelated JSON object (e.g. ``{}``) omitting it entirely
+    # must not silently load as a valid, current-schema *empty* bundle --
+    # a later compare_bundle_from_facts() would then score every new
+    # library against an invented empty baseline instead of the caller
+    # ever finding out the input was invalid (Codex review, fresh
+    # evidence). A present-but-wrong-shaped value (not a mapping) is
+    # rejected the same way, rather than raising an opaque AttributeError
+    # out of the dict comprehension below.
+    if "per_library_snapshots" not in d:
+        raise ValueError(
+            "bundle facts: missing required top-level 'per_library_snapshots' mapping"
+        )
+    raw_snapshots = d["per_library_snapshots"]
+    if not isinstance(raw_snapshots, dict):
+        raise ValueError(
+            "bundle facts: 'per_library_snapshots' must be a mapping, got "
+            f"{type(raw_snapshots).__name__}"
+        )
     raw_manifest = d.get("manifest")
     return BundleFacts(
         schema_version=schema_version,
@@ -1861,8 +1880,7 @@ def bundle_facts_from_dict(d: dict[str, Any]) -> BundleFacts:
             d.get("variant_fingerprint", DEFAULT_VARIANT_FINGERPRINT)
         ),
         per_library_snapshots={
-            name: snapshot_from_dict(sd)
-            for name, sd in d.get("per_library_snapshots", {}).items()
+            name: snapshot_from_dict(sd) for name, sd in raw_snapshots.items()
         },
         filesystem_aliases={
             name: tuple(aliases)

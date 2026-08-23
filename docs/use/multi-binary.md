@@ -569,11 +569,20 @@ For a stored-baseline comparison (G38 Phase 2 — see above), swap the OLD
 side for a loaded `BundleFacts` and `compare_bundle_from_facts()`:
 
 ```python
+from abicheck.bundle import discover_artifact_set
 from abicheck.bundle_facts import compare_bundle_from_facts
 from abicheck.serialization import load_bundle_facts
 
 old_facts = load_bundle_facts("release-1.0.bundlefacts.json")
-new = build_bundle_snapshot({p.name: p for p in Path("release-3.0/").glob("*.so")})
+
+# discover_artifact_set() canonicalizes each discovered filename the same
+# way write_bundle_facts_out() keyed old_facts.per_library_snapshots -- a
+# plain {p.name: p for p in ...} comprehension would key a versioned
+# runtime DSO (libfoo.so.1, no unversioned dev symlink) as a different
+# library from the persisted "libfoo.so" and misreport it as removed.
+new = build_bundle_snapshot(
+    discover_artifact_set(list(Path("release-3.0/").glob("*.so")), explicit=False)
+)
 
 # per_library_results still comes from diffing each library's stored
 # AbiSnapshot (old_facts.per_library_snapshots[name]) against a freshly

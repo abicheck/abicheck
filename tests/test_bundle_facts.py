@@ -426,6 +426,33 @@ class TestBundleFactsSchemaVersionRejection:
         assert bundle_facts_from_dict(d).schema_version == BUNDLE_FACTS_SCHEMA_VERSION
 
 
+class TestBundleFactsRejectsMissingSnapshotMapping:
+    """``per_library_snapshots`` is mandatory (Codex review, fresh evidence):
+    a malformed or unrelated JSON object omitting it must not silently load
+    as a valid, current-schema *empty* bundle -- that would let a later
+    ``compare_bundle_from_facts()`` score every new library against an
+    invented empty baseline instead of the caller ever finding out the
+    input was invalid."""
+
+    def test_missing_key_is_rejected(self) -> None:
+        import pytest
+
+        with pytest.raises(ValueError, match="per_library_snapshots"):
+            bundle_facts_from_dict({})
+
+    def test_wrong_shaped_value_is_rejected(self) -> None:
+        import pytest
+
+        with pytest.raises(ValueError, match="per_library_snapshots"):
+            bundle_facts_from_dict({"per_library_snapshots": "not-a-mapping"})
+
+    def test_empty_mapping_is_still_accepted(self) -> None:
+        # An explicitly-empty mapping is a legitimate (if useless) bundle
+        # facts document -- distinct from the key being absent entirely.
+        facts = bundle_facts_from_dict({"per_library_snapshots": {}})
+        assert facts.per_library_snapshots == {}
+
+
 # ---------------------------------------------------------------------------
 # Filesystem-alias capture/replay (Codex review, fresh evidence): a provider
 # without a usable DT_SONAME whose real on-disk file is a symlink/hard-link
