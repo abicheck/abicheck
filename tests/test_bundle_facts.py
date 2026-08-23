@@ -733,6 +733,72 @@ class TestBundleFactsLibraryFilenames:
         kinds = {f.kind for f in result.bundle_findings}
         assert ChangeKind.BUNDLE_SONAME_SKEW in kinds
 
+    def test_soname_skew_parity_with_a_symlinked_representative_path(
+        self, tmp_path: Path
+    ) -> None:
+        """Live and reconstructed bundle analysis must agree, even when the
+        OLD side's discovered representative path is an unversioned dev
+        symlink (the common `libfoo_core.so -> libfoo_core.so.1.0.0` layout
+        `discover_artifact_set()` keeps) -- resolving the symlink for the
+        stored-facts side alone, without the identical resolve on the live
+        `_detect_soname_skew()` fallback, would make a stored-baseline
+        comparison report a skew a live comparison of the same on-disk
+        layout would not (Codex review, fresh evidence).
+        """
+        from abicheck.bundle import (
+            _detect_soname_skew,
+            build_bundle_snapshot_from_metadata,
+        )
+
+        real_target = tmp_path / "libfoo_core.so.1"
+        real_target.write_bytes(b"")
+        symlink_path = tmp_path / "libfoo_core.so"
+        symlink_path.symlink_to(real_target)
+
+        old_metadata = {
+            "libfoo_core.so": _meta(exports=["c"]),  # no DT_SONAME
+            "libfoo_thread.so": _meta(soname="libfoo_thread.so.1", exports=["t"]),
+        }
+        new_metadata = {
+            "libfoo_core.so": _meta(exports=["c"]),
+            "libfoo_thread.so": _meta(soname="libfoo_thread.so.1", exports=["t"]),
+        }
+        new_bundle = build_bundle_snapshot_from_metadata(
+            new_metadata,
+            paths={
+                "libfoo_core.so": Path("libfoo_core.so.2"),  # bumped
+                "libfoo_thread.so": Path("libfoo_thread.so.1"),  # lagging
+            },
+        )
+
+        # Live: the OLD side's representative path is the symlink itself,
+        # exactly as directory discovery would keep it.
+        old_live = build_bundle_snapshot_from_metadata(
+            old_metadata,
+            paths={
+                "libfoo_core.so": symlink_path,
+                "libfoo_thread.so": tmp_path / "libfoo_thread.so.1",
+            },
+        )
+        live_kinds = {
+            f.kind for f in _detect_soname_skew(old_live, new_bundle, ["libfoo_"])
+        }
+
+        # Stored-facts: captured from the identical on-disk layout.
+        facts = capture_bundle_facts(
+            _per_library_snapshots(old_metadata),
+            library_paths={
+                "libfoo_core.so": symlink_path,
+                "libfoo_thread.so": tmp_path / "libfoo_thread.so.1",
+            },
+        )
+        reconstructed = bundle_snapshot_from_facts(facts)
+        stored_kinds = {
+            f.kind for f in _detect_soname_skew(reconstructed, new_bundle, ["libfoo_"])
+        }
+
+        assert stored_kinds == live_kinds == {ChangeKind.BUNDLE_SONAME_SKEW}
+
 
 # ---------------------------------------------------------------------------
 # Malformed manifest data (Codex/CodeRabbit review: reject, don't silently
@@ -778,6 +844,38 @@ class TestManifestFromDictValidation:
         )
         facts_dict["manifest"] = None
         assert bundle_facts_from_dict(facts_dict).manifest is None
+
+
+class TestSaveBundleFactsPreservesTemplateInstantiationOrder:
+    """``save_bundle_facts()`` must not reorder a manifest entry's own
+    ``instantiations`` dict -- its iteration order *is* the C++ template
+    argument order (``_expand_instantiations()``'s own documented contract),
+    and a real ``json.dumps(..., sort_keys=True)`` (the pre-fix code)
+    silently re-sorts it alphabetically, corrupting a valid contract into
+    one that matches no real exported symbol (Codex review, fresh
+    evidence).
+    """
+
+    def test_save_and_load_preserves_parameter_order(self, tmp_path: Path) -> None:
+        # Alphabetical order ("Method" < "Precision") differs from the real
+        # declared order here, so a sort_keys=True regression is caught.
+        manifest = InstantiationManifest(
+            entries=(
+                ManifestEntry(
+                    template="acme::train_ops",
+                    instantiations=({"Precision": "float", "Method": "dense"},),
+                ),
+            )
+        )
+        facts = capture_bundle_facts(
+            _per_library_snapshots(_old_metadata()), manifest=manifest
+        )
+        out = tmp_path / "facts.json"
+        save_bundle_facts(facts, out)
+        loaded = load_bundle_facts(out)
+
+        entry = loaded.manifest.entries[0]
+        assert entry.display_name() == "acme::train_ops<float, dense>"
 
 
 # ---------------------------------------------------------------------------

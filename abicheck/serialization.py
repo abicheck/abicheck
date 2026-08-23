@@ -1942,8 +1942,19 @@ def save_bundle_facts(
     inferred from *path*'s suffix, ``"none"``, ``"gzip"``, ``"zstd"``)."""
     from .snapshot_io import SnapshotCompression, write_snapshot_text
 
+    # sort_keys=True (matching no other writer in this module -- see
+    # snapshot_to_json's own plain json.dumps) would recursively re-sort
+    # every dict's keys, including each manifest ManifestEntry's own
+    # instantiations dict -- whose iteration order IS the C++ template
+    # argument order (_expand_instantiations()'s own contract). Sorting it
+    # alphabetically corrupts a valid "T, U" contract into "T, U" reloading
+    # as "T, U" only by coincidence -- a real reorder (e.g. "Method,
+    # Precision" -> alphabetically "Method, Precision" already matches, but
+    # "Precision, Method" would sort back to "Method, Precision") produces
+    # a manifest entry that no longer matches any real symbol, a false
+    # bundle_manifest_instantiation_removed (Codex review, fresh evidence).
     return write_snapshot_text(
-        json.dumps(bundle_facts_to_dict(facts), indent=2, sort_keys=True),
+        json.dumps(bundle_facts_to_dict(facts), indent=2),
         path,
         compression=SnapshotCompression(compression),
     )

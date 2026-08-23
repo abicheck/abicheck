@@ -1531,10 +1531,19 @@ def _detect_soname_skew(
     from .diff_cpp_patterns import BundleMember, _extract_soname_major
 
     def _members(snap: BundleSnapshot) -> list[BundleMember]:
+        from .bundle_soname import resolved_basename
+
         members: list[BundleMember] = []
         for name, path in snap.libraries.items():
             meta = snap.metadata.get(name)
-            soname = (meta.soname if meta and meta.soname else "") or path.name
+            # Resolved target's basename, not path.name -- a bare symlink
+            # name (libfoo_core.so -> libfoo_core.so.1) is unversioned and
+            # undermines this whole fallback. Must match capture_bundle_
+            # facts()'s identical resolved_basename() use, else a
+            # stored-facts replay derives a different major than the live
+            # comparison it's meant to reproduce (Codex review).
+            real_name = resolved_basename(path)
+            soname = (meta.soname if meta and meta.soname else "") or real_name
             # G9 (remaining half): DT_SONAME is read directly off the ELF
             # here, unlike `.library` (the on-disk filename), which the
             # cohort key normalizes via strip_vendor_hash downstream. An
@@ -1549,12 +1558,12 @@ def _detect_soname_skew(
             stripped_soname = strip_vendor_hash(soname)
             major = _extract_soname_major(stripped_soname)
             if major is None:
-                major = _extract_soname_major(strip_vendor_hash(path.name))
+                major = _extract_soname_major(strip_vendor_hash(real_name))
             if major is None:
                 continue
             members.append(
                 BundleMember(
-                    library=path.name,
+                    library=real_name,
                     soname=stripped_soname,
                     soname_major=major,
                 )
