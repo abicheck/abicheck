@@ -1219,6 +1219,13 @@ def handle_non_elf_dump(
             public_header_dirs=list(public_header_dirs),
             header_backend=header_backend,
             compile=l3_effective_ctx,
+            # Provenance widening gets ONLY the caller's own explicit -I
+            # list, never `eff_includes` -- see service.run_dump's own
+            # docstring note on `public_include_search_dirs` for why (same
+            # regression class the ELF perform_elf_dump path already avoids:
+            # an auto-derived umbrella-header directory can hold a
+            # genuinely private sibling header).
+            public_include_search_dirs=list(includes),
         )
     # A ClickException already carries its user-facing message; it must reach
     # Click as itself rather than be re-wrapped by the handler below.

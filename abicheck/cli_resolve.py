@@ -234,6 +234,7 @@ def _dump_native_binary(
     header_backend: str = "auto",
     compile: CompileContext | None = None,
     include_dependencies: bool = True,
+    public_include_search_dirs: list[Path] | None = None,
 ) -> AbiSnapshot:
     """Dump an ABI snapshot from a native binary (ELF, PE, or Mach-O).
 
@@ -247,6 +248,11 @@ def _dump_native_binary(
 
     ``public_headers`` / ``public_header_dirs`` classify declaration provenance
     (ADR-024 Phase 1) on PE/Mach-O snapshots; a no-op for ELF and when empty.
+    ``public_include_search_dirs`` (see ``service.run_dump``'s own docstring)
+    is the caller's own genuinely explicit ``-I`` list, kept distinct from
+    ``includes`` (which a caller may have already widened with auto-derived
+    directories) so provenance widening never picks up a directory the
+    caller didn't actually declare.
     ``compile`` carries the L2 cross-toolchain context (ADR-037 D3); ``run_dump``
     threads it into the PE/Mach-O header-scoping path (``_try_header_scoped_dump``).
     ``run_dump``'s header-only-graph attach (G29 Phase A: always attempted, no
@@ -275,6 +281,7 @@ def _dump_native_binary(
             compile=compile,
             notify=_click_notify,
             include_dependencies=include_dependencies,
+            public_include_search_dirs=public_include_search_dirs,
         )
     except ValidationError as exc:
         raise click.UsageError(str(exc)) from exc

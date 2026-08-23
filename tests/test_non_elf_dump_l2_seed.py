@@ -87,6 +87,71 @@ def test_non_elf_dump_seeds_includes_and_runs_cleanup(monkeypatch, tmp_path):
     assert events == ["seed", "dump", "cleanup"]
 
 
+def test_non_elf_dump_forwards_only_explicit_includes_as_public_include_search_dirs(
+    monkeypatch, tmp_path
+):
+    """The build-derived seed dir must reach the compile path (`includes`)
+    but NOT the provenance-widening path (`public_include_search_dirs`) --
+    same regression class the ELF `perform_elf_dump` path already avoids
+    (Codex review, PR #839 round 9): an auto-derived umbrella-header
+    directory can hold a genuinely private sibling header, and folding it
+    into provenance would silently promote that sibling to PUBLIC_HEADER."""
+    captured: dict = {}
+    seeded_dir = tmp_path / "buildinc"
+    explicit_dir = tmp_path / "explicit"
+
+    def fake_seed_and_fold(**kwargs):
+        kwargs["pending_cleanups"].append(lambda: None)
+        explicit_ctx = CompileContext(
+            gcc_path=kwargs["gcc_path"],
+            gcc_prefix=kwargs["gcc_prefix"],
+            gcc_options=kwargs["gcc_options"],
+            gcc_option_tokens=kwargs["gcc_option_tokens"],
+            sysroot=kwargs["sysroot"],
+            nostdinc=kwargs["nostdinc"],
+            frontend=kwargs["frontend"],
+            frontend_context=kwargs["frontend_context"],
+        )
+        # Widen with a build-derived dir, mirroring the real seed's own
+        # auto-add behavior.
+        return [*kwargs["includes"], seeded_dir], False, explicit_ctx, ()
+
+    def fake_dump_native(so_path, binary_fmt, headers, includes, version, lang, **kw):
+        captured["includes"] = includes
+        captured["public_include_search_dirs"] = kw.get("public_include_search_dirs")
+        return AbiSnapshot(library="l", version=version)
+
+    monkeypatch.setattr(
+        "abicheck.buildsource.l2_seed.seed_includes_and_fold_compile_context",
+        fake_seed_and_fold,
+    )
+
+    handle_non_elf_dump(
+        so_path=tmp_path / "foo.dll",
+        binary_fmt="pe",
+        headers=(tmp_path / "h.h",),
+        includes=(explicit_dir,),
+        version="1",
+        lang="c++",
+        pdb_path=None,
+        follow_deps=False,
+        git_tag=None,
+        build_id=None,
+        no_git=True,
+        output=None,
+        dump_native_binary=fake_dump_native,
+        stamp_provenance=lambda *a, **k: None,
+        write_snapshot_output=lambda *a, **k: None,
+        sources=tmp_path,
+        collect_mode="build",
+    )
+
+    # The compile path sees both the explicit dir and the build-derived one.
+    assert set(captured["includes"]) == {explicit_dir, seeded_dir}
+    # Provenance widening sees ONLY the caller's own explicit dir.
+    assert captured["public_include_search_dirs"] == [explicit_dir]
+
+
 def test_non_elf_dump_header_roots_includes_public_headers_and_dirs(
     monkeypatch, tmp_path
 ):

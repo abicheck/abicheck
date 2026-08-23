@@ -160,6 +160,38 @@ _TARGET_TRIPLE_RE = re.compile(r"^[A-Za-z0-9_]+(-[A-Za-z0-9_][A-Za-z0-9_.]*){1,3
 _TOOLCHAIN_VERSION_RE = re.compile(r"^\d+(\.\d+){0,2}$")
 
 
+def _prefix_then_optional_multiarch_cxx(
+    prefix: tuple[str, ...], hay: tuple[str, ...]
+) -> bool:
+    """True when *prefix* (a system include root) appears contiguously in
+    *hay*, immediately followed by either ``c++`` directly, or a validated
+    multiarch/target-triple component then ``c++`` -- the Debian/Ubuntu
+    multiarch libstdc++ layout (``/usr/include/x86_64-linux-gnu/c++/12/...``),
+    where a real multiarch tuple sits between the system include root and
+    the c++ tree (Codex review, round 5: the existing check required ``c++``
+    immediately after the prefix with no room for this real, common layout,
+    so a genuine libstdc++ header under it was never recognized as system --
+    reachable via public-surface promotion the same way the earlier
+    ``_is_bare_system_dir`` nested-toolchain-root fix closed for the
+    non-multiarch case). The multiarch component is validated the same way
+    as a real GCC/Clang target triple (``_TARGET_TRIPLE_RE``) rather than
+    wildcarded, for the identical reason round 3's fix required it there.
+    """
+    n = len(prefix)
+    if n == 0:
+        return False
+    m = len(hay)
+    for i in range(m - n + 1):
+        if hay[i : i + n] != prefix:
+            continue
+        j = i + n
+        if j < m and hay[j] == "c++":
+            return True
+        if j + 1 < m and _TARGET_TRIPLE_RE.match(hay[j]) and hay[j + 1] == "c++":
+            return True
+    return False
+
+
 def _is_toolchain_compiler_include_dir(header_segs: tuple[str, ...]) -> bool:
     """True when *header_segs* sits inside a compiler's own private include
     tree, recognized *structurally* (with the toolchain's own version /
@@ -237,7 +269,7 @@ def _is_toolchain_compiler_include_dir(header_segs: tuple[str, ...]) -> bool:
         ):
             return True
     return any(
-        _contiguous_subsequence((*prefix, "c++"), header_segs)
+        _prefix_then_optional_multiarch_cxx(prefix, header_segs)
         for prefix in _SYSTEM_HEADER_DIRS
         if prefix and prefix[-1] == "include"
     )

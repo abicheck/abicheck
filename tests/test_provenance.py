@@ -169,6 +169,27 @@ def test_gcc_include_dir_with_dotted_solaris_style_os_component_is_toolchain():
     assert _is_toolchain_compiler_include_dir(segs) is True
 
 
+def test_gcc_include_dir_debian_multiarch_libstdcxx_is_toolchain():
+    # Round-5 review finding (Codex, fresh evidence): the anchored
+    # usr/include/c++ check required "c++" immediately after the system
+    # prefix, with no room for the real Debian/Ubuntu multiarch component
+    # that sits between them for a multiarch-enabled GCC install
+    # (`-I /usr/include/x86_64-linux-gnu/c++/12`). Under this layout,
+    # libstdc++ headers like bits/c++config.h were never recognized as
+    # system, letting them survive dependency exclusion as if they were
+    # project declarations.
+    segs = _segments("/usr/include/x86_64-linux-gnu/c++/12/bits/c++config.h")
+    assert _is_toolchain_compiler_include_dir(segs) is True
+
+
+def test_gcc_include_dir_debian_multiarch_with_non_triple_component_not_toolchain():
+    # Negative control: a non-triple-shaped component between the system
+    # prefix and c++ must NOT be accepted -- otherwise this would reopen
+    # the same wildcarding gap round 3 already closed for lib/gcc.
+    segs = _segments("/usr/include/notarealmultiarch/c++/12/vector")
+    assert _is_toolchain_compiler_include_dir(segs) is False
+
+
 def test_system_header_conda_forge_libstdcxx_predefined_ops():
     # The exact real-world path from a false-positive func_removed report:
     # abicheck's own GitHub Action reported libstdc++'s internal
