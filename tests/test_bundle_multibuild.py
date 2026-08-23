@@ -140,9 +140,8 @@ class TestVariantFingerprint:
     )
     def test_logical_identity_coordinates_are_sensitive(self, kwargs_a, kwargs_b):
         """A build differing in a *logical-identity* coordinate (target
-        triple, compiler family/version, a feature toggle like
-        ONEDAL_DATA_PARALLEL) fingerprints differently -- G38 Phase 3's own
-        acceptance bar."""
+        triple, compiler family, a feature toggle like ONEDAL_DATA_PARALLEL)
+        fingerprints differently -- G38 Phase 3's own acceptance bar."""
         assert variant_fingerprint(**kwargs_a) != variant_fingerprint(**kwargs_b)
 
     def test_no_parameter_exists_for_excluded_coordinates(self):
