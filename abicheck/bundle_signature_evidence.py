@@ -91,6 +91,29 @@ _CONFIRMED_SIGNATURE_CHANGE_KINDS = frozenset(
 _UNKNOWN_TYPE_SENTINEL = "?"
 
 
+#: A parser doesn't only ever emit the bare sentinel above -- when
+#: resolution fails partway through a composite type, the wrapping layer
+#: still runs and produces a *composite* uncertainty marker instead
+#: (Codex review, citing real parser code): `dwarf_snapshot.py`'s
+#: `DW_TAG_reference_type`/`DW_TAG_rvalue_reference_type` handling emits
+#: `"? &"`/`"? &&"` for a reference with no resolvable target;
+#: `dumper_castxml.py`'s `PointerType`/`ReferenceType`/
+#: `RValueReferenceType` handling appends `"*"`/`"&"`/`"&&"` to whatever
+#: `_type_name_uncached` returned for the inner type, so an unresolved
+#: pointee produces `"?*"`/`"?&"`/`"?&&"`. Both backends (plus
+#: `dwarf_metadata.py`, `pdb_parser.py`) separately return the bare
+#: literal `"..."` -- not the sentinel above -- when a type-resolution
+#: recursion depth cap is hit. `"?"` is not a character any real C/C++
+#: type spelling ever contains, so a substring check catches every one of
+#: these composite forms without needing to enumerate each parser's exact
+#: wrapping syntax; `"..."` needs an explicit check since it contains no
+#: `"?"` at all. (`Param.is_variadic`/`Function.is_variadic` are separate
+#: boolean fields -- a real C variadic parameter is never spelled `"..."`
+#: as a `Param.type` value, so this check cannot misfire on one.)
+def _type_spelling_is_unresolved(spelling: str) -> bool:
+    return spelling == "..." or _UNKNOWN_TYPE_SENTINEL in spelling
+
+
 def _symbol_evidence_sufficient(symbol: str, snapshot: AbiSnapshot) -> bool:
     """Does *snapshot* carry real DWARF/header-derived type evidence for
     *symbol*, as opposed to only a bare ELF export with no corroborating
@@ -106,10 +129,14 @@ def _symbol_evidence_sufficient(symbol: str, snapshot: AbiSnapshot) -> bool:
     - `visibility == Visibility.ELF_ONLY` -- an L0-only entry with no
       corroborating declaration at all (`dumper_elf_fallback.py`'s
       construction, or any other backend that degrades to it).
-    - a return/variable type equal to the `"?"` unknown-type sentinel, or
-      (for a function) any parameter whose own type is `"?"` -- evidence
-      that is present in shape but not in content (a symbol crosschecked
-      against *some* declaration whose own type resolution still failed).
+    - a return/variable type that is unresolved per
+      `_type_spelling_is_unresolved` (the bare `"?"` sentinel, a composite
+      form like `"?*"`/`"? &"`, or the recursion-depth-cap `"..."`), or
+      (for a function) any parameter whose own type is unresolved the same
+      way -- evidence that is present in shape but not in content (a
+      symbol crosschecked against *some* declaration whose own type
+      resolution still failed, wholly or partway through a composite
+      type).
 
     A symbol absent from both `function_map` and `variable_map` entirely
     is also treated as insufficient -- absence of any declaration entry is
@@ -119,14 +146,14 @@ def _symbol_evidence_sufficient(symbol: str, snapshot: AbiSnapshot) -> bool:
     if fn is not None:
         if fn.visibility is Visibility.ELF_ONLY:
             return False
-        if fn.return_type == _UNKNOWN_TYPE_SENTINEL:
+        if _type_spelling_is_unresolved(fn.return_type):
             return False
-        return all(p.type != _UNKNOWN_TYPE_SENTINEL for p in fn.params)
+        return all(not _type_spelling_is_unresolved(p.type) for p in fn.params)
     var = snapshot.variable_map.get(symbol)
     if var is not None:
         if var.visibility is Visibility.ELF_ONLY:
             return False
-        return var.type != _UNKNOWN_TYPE_SENTINEL
+        return not _type_spelling_is_unresolved(var.type)
     return False
 
 

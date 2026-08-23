@@ -21,6 +21,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from abicheck.bundle import _compute_resolution_graph
 from abicheck.bundle_models import BundleSnapshot
 from abicheck.bundle_signature_evidence import find_unverified_signature_findings
@@ -380,6 +382,77 @@ class TestFindUnverifiedSignatureFindings:
         fn = _evidenced_fn("core_fn", params=[Param(name="x", type="?")])
         old_snaps = {"libcore.so": _snap("libcore.so", functions=[fn])}
         new_snaps = {"libcore.so": _snap("libcore.so", functions=[fn])}
+
+        findings = find_unverified_signature_findings(new, [], old_snaps, new_snaps)
+        assert len(findings) == 1
+
+    @pytest.mark.parametrize(
+        "unresolved_return_type",
+        [
+            "? &",  # dwarf_snapshot.py: unresolved reference target
+            "? &&",  # dwarf_snapshot.py: unresolved rvalue-reference target
+            "?*",  # dumper_castxml.py: unresolved pointer target
+            "?&",  # dumper_castxml.py: unresolved reference target
+            "?&&",  # dumper_castxml.py: unresolved rvalue-reference target
+            "...",  # dwarf_snapshot.py/dwarf_metadata.py/pdb_parser.py:
+            # type-resolution recursion depth cap
+        ],
+    )
+    def test_composite_unresolved_return_type_is_insufficient_evidence(
+        self, unresolved_return_type
+    ):
+        # Codex review: a parser doesn't only ever emit the bare "?"
+        # sentinel -- when resolution fails partway through a composite
+        # type (a reference/pointer to an unresolved target), the wrapping
+        # layer still runs and produces a composite marker instead. Any of
+        # these must still count as insufficient evidence, exactly like the
+        # bare "?" case.
+        new = _snapshot(
+            {
+                "libcore.so": _meta(exports=["core_fn"]),
+                "libconsumer.so": _meta(imports=["core_fn"]),
+            }
+        )
+        fn = _evidenced_fn("core_fn", return_type=unresolved_return_type)
+        old_snaps = {"libcore.so": _snap("libcore.so", functions=[fn])}
+        new_snaps = {"libcore.so": _snap("libcore.so", functions=[fn])}
+
+        findings = find_unverified_signature_findings(new, [], old_snaps, new_snaps)
+        assert len(findings) == 1
+
+    def test_composite_unresolved_parameter_type_is_insufficient_evidence(self):
+        # Same composite-marker case, but on a parameter type rather than
+        # the return type -- mirrors
+        # test_unresolved_parameter_type_is_insufficient_evidence's own
+        # bare-"?" coverage for the composite forms.
+        new = _snapshot(
+            {
+                "libcore.so": _meta(exports=["core_fn"]),
+                "libconsumer.so": _meta(imports=["core_fn"]),
+            }
+        )
+        fn = _evidenced_fn("core_fn", params=[Param(name="x", type="?*")])
+        old_snaps = {"libcore.so": _snap("libcore.so", functions=[fn])}
+        new_snaps = {"libcore.so": _snap("libcore.so", functions=[fn])}
+
+        findings = find_unverified_signature_findings(new, [], old_snaps, new_snaps)
+        assert len(findings) == 1
+
+    def test_composite_unresolved_variable_type_is_insufficient_evidence(self):
+        new = _snapshot(
+            {
+                "libcore.so": _meta(exports=["core_var"]),
+                "libconsumer.so": _meta(imports=["core_var"]),
+            }
+        )
+        var = Variable(
+            name="core_var",
+            mangled="core_var",
+            type="?*",
+            visibility=Visibility.PUBLIC,
+        )
+        old_snaps = {"libcore.so": _snap("libcore.so", variables=[var])}
+        new_snaps = {"libcore.so": _snap("libcore.so", variables=[var])}
 
         findings = find_unverified_signature_findings(new, [], old_snaps, new_snaps)
         assert len(findings) == 1
