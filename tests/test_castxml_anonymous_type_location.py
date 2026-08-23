@@ -62,14 +62,17 @@ class TestLambdaClosureTypeNameLocationStripped:
     def test_type_name_strips_embedded_source_location(self) -> None:
         root = _lambda_struct_root("/tmp/old/lib.hpp")
         parser = _CastxmlParser(root, exported_dynamic=set(), exported_static=set())
-        assert parser._type_name("_2") == "raii_guard<(lambda)>"
+        # The path is stripped; the :line:col discriminator is kept (Codex
+        # review) so two distinct lambdas in the same header don't collapse
+        # to one identity — see TestDistinctLambdasInOneSnapshotStayDistinct.
+        assert parser._type_name("_2") == "raii_guard<(lambda:4:37)>"
 
-    def test_record_type_own_name_has_no_embedded_location(self) -> None:
+    def test_record_type_own_name_has_no_embedded_path(self) -> None:
         root = _lambda_struct_root("/tmp/old/lib.hpp")
         parser = _CastxmlParser(root, exported_dynamic=set(), exported_static=set())
         types = parser.parse_types()
         (rec,) = [t for t in types if t.name.startswith("raii_guard")]
-        assert rec.name == "raii_guard<(lambda)>"
+        assert rec.name == "raii_guard<(lambda:4:37)>"
         assert "/tmp/old" not in rec.name
 
     def test_two_checkout_directories_produce_identical_type_identity(self) -> None:
@@ -94,8 +97,47 @@ class TestLambdaClosureTypeNameLocationStripped:
         assert type_map_key(old_rec) == type_map_key(new_rec)
 
 
+class TestDistinctLambdasInOneSnapshotStayDistinct:
+    """Codex review, real finding: stripping the *entire* location (path
+    AND line:col) collapsed two distinct lambda closure types declared in
+    the same header into one identical key, so diff_helpers.TypeMap
+    silently overwrote one entry with the other -- changes to the
+    discarded instantiation could be missed or compared against the wrong
+    record. Keeping :line:col as a discriminator fixes this while still
+    matching across checkout roots (the test above)."""
+
+    def test_two_lambdas_in_one_header_produce_distinct_type_map_keys(self) -> None:
+        root = Element("CastXML", attrib={"format": "1.4.0"})
+        _file(root, "f1", "/tmp/old/lib.hpp")
+        SubElement(root, "Namespace", attrib={"id": "_1", "name": "::"})
+
+        first = SubElement(root, "Struct")
+        first.set("id", "_2")
+        first.set("name", "guard<(lambda at /tmp/old/lib.hpp:4:3)>")
+        first.set("context", "_1")
+        first.set("file", "f1")
+        first.set("line", "4")
+        first.set("members", "")
+
+        second = SubElement(root, "Struct")
+        second.set("id", "_3")
+        second.set("name", "guard<(lambda at /tmp/old/lib.hpp:40:3)>")
+        second.set("context", "_1")
+        second.set("file", "f1")
+        second.set("line", "40")
+        second.set("members", "")
+
+        parser = _CastxmlParser(root, exported_dynamic=set(), exported_static=set())
+        types = [t for t in parser.parse_types() if t.name.startswith("guard")]
+        assert len(types) == 2
+        names = {t.name for t in types}
+        assert names == {"guard<(lambda:4:3)>", "guard<(lambda:40:3)>"}
+        keys = {type_map_key(t) for t in types}
+        assert len(keys) == 2, "distinct lambdas must not collide on one key"
+
+
 class TestAnonymousEnumLocationStripped:
-    def test_enum_name_has_no_embedded_location(self) -> None:
+    def test_enum_name_has_no_embedded_path(self) -> None:
         root = Element("CastXML", attrib={"format": "1.4.0"})
         _file(root, "f1", "/tmp/old/lib.hpp")
         SubElement(root, "Namespace", attrib={"id": "_1", "name": "::"})
@@ -109,5 +151,5 @@ class TestAnonymousEnumLocationStripped:
 
         parser = _CastxmlParser(root, exported_dynamic=set(), exported_static=set())
         (enum_type,) = parser.parse_enums()
-        assert enum_type.name == "(unnamed enum)"
+        assert enum_type.name == "(unnamed enum:56:5)"
         assert "/tmp/old" not in enum_type.name

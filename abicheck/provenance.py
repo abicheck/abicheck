@@ -165,11 +165,24 @@ def _is_toolchain_compiler_include_dir(header_segs: tuple[str, ...]) -> bool:
     Recognizes, each with the triple/version component wildcarded:
 
     - ``lib/gcc/<triple>/<version>/include`` or ``.../include-fixed`` --
-      GCC's own private (non-libstdc++) headers.
-    - ``include/c++/<version>`` -- libstdc++'s per-GCC-version public tree,
-      itself nested under the ``lib/gcc/...`` root above.
+      GCC's own private (non-libstdc++) headers. conda-forge's own layout
+      nests libstdc++'s ``c++`` tree directly under this same root (as in
+      the confirmed real-world path above), so this one pattern already
+      covers it -- no separate check is needed for that case.
     - ``lib/clang/<version>/include`` -- Clang's private builtin headers
       (``stddef.h``, the vector-intrinsic headers, ...).
+
+    Deliberately does NOT match a bare ``include/c++/<version>`` anywhere in
+    the path outside a recognized ``lib/gcc/...``/``lib/clang/...`` root
+    (Codex review): an earlier revision did, unconditionally, which matched
+    an ordinary project path like ``/project/include/c++/api.h`` that has no
+    toolchain prefix at all -- a real false-positive risk this function
+    exists to avoid, not create. The traditional (non-conda-forge)
+    Debian/Ubuntu-style split layout, where libstdc++ lives separately at
+    ``/usr/include/c++/<version>/`` rather than nested under ``lib/gcc/``,
+    is unaffected: that path is already caught by ``_SYSTEM_HEADER_DIRS``'s
+    own ``usr/include`` prefix in :func:`_is_system_header`, so this
+    function does not need to duplicate it.
 
     A caller matching against a raw compiler-reported path should prefer
     normalizing it first (segments here are matched as given, with no
@@ -191,10 +204,7 @@ def _is_toolchain_compiler_include_dir(header_segs: tuple[str, ...]) -> bool:
             and header_segs[i + 3] == "include"
         ):
             return True
-    return any(
-        header_segs[i] == "include" and header_segs[i + 1] == "c++"
-        for i in range(n - 1)
-    )
+    return False
 
 
 def _is_system_header(header_segs: tuple[str, ...]) -> bool:

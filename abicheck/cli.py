@@ -670,6 +670,32 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
             "--depth source to produce any evidence."
         )
 
+    # dump_source_only() (the so_path-is-None dispatch below) embeds only
+    # L3/L4/L5 build/source facts into an otherwise-empty snapshot -- it has
+    # no L2 header-AST pass and never even receives `headers`. `-H`/
+    # `--header` was therefore silently dropped with no error, warning, or
+    # trace of the ignored flag: `dump --sources tree -H api.h` exited 0
+    # with an empty (0 functions/enums), depth="binary" snapshot -- a
+    # usability trap, not a documented narrowing. Reject it explicitly
+    # instead of parsing headers as though they mattered (real header-AST
+    # support for this source-only path is a separate, larger feature) or
+    # silently discarding them. Checked here, before the --dry-run branch
+    # (Codex review: emit_dry_run() below raises SystemExit, so a check
+    # placed after it -- or inside the so_path-is-None dispatch further
+    # down, which --dry-run never reaches -- would let `dump --dry-run
+    # --sources tree -H api.h` report a valid invocation while the real run
+    # immediately rejects it) -- both paths must reject the same way,
+    # exactly like the --depth binary check immediately above.
+    if so_path is None and headers:
+        raise click.UsageError(
+            "-H/--header has no effect on a source-only dump (--sources/"
+            "--build-info with no binary/SO_PATH): this path embeds only "
+            "L3/L4/L5 build/source facts, never a header-AST (L2) pass, "
+            "so the header(s) given would be silently ignored. Either "
+            "drop -H/--header, or supply a binary (SO_PATH) so the "
+            "headers are actually parsed."
+        )
+
     # Resolve debug-format and binary-format identity once, shared between
     # the dry-run report and the real run, and raise the same BadParameter a
     # real run would -- unconditionally, before the --dry-run branch, exactly
@@ -778,27 +804,10 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
         )
         emit_dry_run(_dry_result)
 
-    # Source-only dump (no binary) for the parallel-baseline flow.
+    # Source-only dump (no binary) for the parallel-baseline flow. The
+    # -H/--header usage-error check for this path is above, before the
+    # --dry-run branch.
     if so_path is None:
-        # dump_source_only() embeds only L3/L4/L5 build/source facts into an
-        # otherwise-empty snapshot -- it has no L2 header-AST pass and never
-        # even receives `headers` (confirmed: it isn't in the call below).
-        # `-H`/`--header` was therefore silently dropped with no error,
-        # warning, or trace of the ignored flag: `dump --sources tree -H
-        # api.h` exited 0 with an empty (0 functions/enums), depth="binary"
-        # snapshot -- a usability trap, not a documented narrowing. Reject
-        # it explicitly instead of parsing headers as though they mattered
-        # (real header-AST support for this source-only path is a separate,
-        # larger feature) or silently discarding them.
-        if headers:
-            raise click.UsageError(
-                "-H/--header has no effect on a source-only dump (--sources/"
-                "--build-info with no binary/SO_PATH): this path embeds only "
-                "L3/L4/L5 build/source facts, never a header-AST (L2) pass, "
-                "so the header(s) given would be silently ignored. Either "
-                "drop -H/--header, or supply a binary (SO_PATH) so the "
-                "headers are actually parsed."
-            )
         from .cli_buildsource import dump_source_only
         dump_source_only(sources, build_info, version, output, build_config, allow_build_query, git_tag, build_id, no_git, collect_mode, build_query=build_query, build_compile_db=build_compile_db, build_targets=build_targets, extractor=header_backend, depth=depth, include_dependencies=include_dependencies, gcc_path=gcc_path, gcc_prefix=gcc_prefix, snapshot_compression=snapshot_compression)
         return

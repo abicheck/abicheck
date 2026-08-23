@@ -178,6 +178,24 @@ def test_conda_forge_project_header_outside_compiler_tree_stays_project():
     assert origin is ScopeOrigin.PUBLIC_HEADER
 
 
+def test_bare_include_cxx_with_no_toolchain_prefix_is_not_system_header():
+    # Codex review, real finding: an earlier revision matched a bare
+    # "include/c++" *anywhere* in the path, with no requirement that it sit
+    # under a recognized lib/gcc/.../ or lib/clang/.../ toolchain root -- a
+    # project shipping its own "include/c++" directory (an unusual but legal
+    # project layout) would have been misclassified as a system header,
+    # letting default dependency scoping / public-surface evaluation drop
+    # or demote the project's own declarations. Basename deliberately does
+    # NOT match the public header ("vector", not "api.h") -- the basename
+    # fallback in _matches_public would otherwise mask a system-header
+    # misclassification behind a public-header match.
+    origin = _classify(
+        "/project/include/c++/vector",
+        public_headers=["include/api.h"],
+    )
+    assert origin is not ScopeOrigin.SYSTEM_HEADER
+
+
 def test_private_header_when_not_public_and_not_system():
     origin = _classify(
         "/build/proj/src/internal/impl.h",

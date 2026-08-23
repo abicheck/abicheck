@@ -353,6 +353,25 @@ def test_dump_source_only_header_flag_is_usage_error(tmp_path) -> None:  # type:
     assert not out.exists()
 
 
+def test_dump_source_only_header_flag_rejected_in_dry_run_too(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    # Codex review, real finding: emit_dry_run() raises SystemExit, so a
+    # check placed only in the so_path-is-None dispatch (which --dry-run
+    # never reaches) let `dump --dry-run --sources tree -H api.h` report a
+    # valid invocation (exit 0) while the real run immediately rejected it
+    # with exit 64 -- a dry-run/real-run parity gap. Must reject the same
+    # way in both.
+    src = tmp_path / "src3b"
+    src.mkdir()
+    hdr = src / "api.h"
+    hdr.write_text("typedef enum { a = 0, b, c } my_tag_t;\n", encoding="utf-8")
+    res = CliRunner().invoke(
+        main,
+        ["dump", "--dry-run", "--sources", str(src), "-H", str(hdr)],
+    )
+    assert res.exit_code == 64, _all_output(res)
+    assert "-H/--header has no effect on a source-only dump" in _all_output(res)
+
+
 def test_dump_source_only_without_header_flag_still_succeeds(tmp_path) -> None:  # type: ignore[no-untyped-def]
     # The header-flag rejection above must not regress the ordinary,
     # headers-free source-only dump.

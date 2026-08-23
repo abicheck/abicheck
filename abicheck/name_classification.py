@@ -548,34 +548,52 @@ _PTR_REF_SIGIL_RE = re.compile(r"\s*([*&])\s*")
 # "this is anonymous" marker, which is what should actually be compared.
 _ANON_TYPE_LOCATION_RE = re.compile(r"\bat\s+\S+:\d+:\d+(?=\s*\))")
 
+#: Like _ANON_TYPE_LOCATION_RE, but keeps the trailing ``:<line>:<col>`` as a
+#: captured discriminator instead of discarding it outright — see
+#: strip_anonymous_type_location's docstring for why identity extraction
+#: needs the discriminator kept while a downstream *comparison*
+#: (canonicalize_type_name) does not.
+_ANON_TYPE_LOCATION_PATH_ONLY_RE = re.compile(r"\s*\bat\s+\S+?(:\d+:\d+)(?=\s*\))")
+
 
 def strip_anonymous_type_location(name: str) -> str:
-    """Strip an embedded ``at <path>:<line>:<col>`` out of an anonymous-tag
-    or lambda-closure type spelling (``"(unnamed struct at /a/foo.h:56:5)"``,
-    ``"raii_guard<(lambda at /a/foo.h:4:37)>"``), leaving just the
-    "this is anonymous"/"this is a lambda" marker.
+    """Strip the checkout-dependent *path* out of an embedded ``at
+    <path>:<line>:<col>`` in an anonymous-tag or lambda-closure type
+    spelling (``"(unnamed struct at /a/foo.h:56:5)"``, ``"raii_guard<(lambda
+    at /a/foo.h:4:37)>"``), while keeping its ``:<line>:<col>`` as a
+    discriminator (``"(unnamed struct:56:5)"``, ``"raii_guard<(lambda:4:37)>"``).
 
     A leaf of :func:`canonicalize_type_name` (which additionally normalizes
     whitespace, elaborated-type-specifier prefixes, and const/pointer
     spelling — none of which apply to a raw declaration name) so a producer
-    can strip *just* the location at the point a type's own identity
-    (``RecordType.name``/``.qualified_name``, ``EnumType.name``) is
+    can strip *just* the checkout-dependent path at the point a type's own
+    identity (``RecordType.name``/``.qualified_name``, ``EnumType.name``) is
     extracted, rather than leaving the raw, location-bearing spelling to
     flow into old/new type matching (``diff_helpers.type_map_key``) and
     manufacture a spurious ``type_removed``/``type_added`` pair for two
     build trees of the identical declaration under different checkout
-    paths. Both header-mode dumpers should apply this at extraction time;
+    paths.
+
+    The ``:<line>:<col>`` is kept — not dropped the way
+    :func:`canonicalize_type_name`'s own (comparison-only, string-equality)
+    stripping does — because it is the only discriminator two distinct
+    anonymous/lambda declarations in the *same* header have: dropping it
+    entirely would collapse ``guard<(lambda at a.hpp:4:3)>`` and
+    ``guard<(lambda at a.hpp:40:3)>`` (two unrelated lambdas) to the
+    identical key ``guard<(lambda)>``, silently overwriting one entry in
+    ``diff_helpers.TypeMap`` (Codex review). Line/column is stable across a
+    checkout-root change for the *same* declaration (it depends only on the
+    header's own content, not where it's checked out), so this keeps both
+    properties: identical across checkout roots for one declaration, distinct
+    across declarations within one snapshot.
+
+    Both header-mode dumpers should apply this at extraction time;
     :func:`canonicalize_type_name` remains the right tool for a downstream
-    *comparison* that only has the raw spelling to work with.
+    *comparison* that only has the raw spelling to work with (and where a
+    same-snapshot collision risk does not apply).
     """
-    stripped = _ANON_TYPE_LOCATION_RE.sub("", name)
-    # Clean up what stripping the location leaves behind: a run of
-    # whitespace where "at ..." used to sit, and — since the regex's
-    # lookahead only matches immediately before a closing paren — a lone
-    # leftover space directly before that paren ("(lambda )" -> "(lambda)"),
-    # mirroring canonicalize_type_name's own post-strip cleanup.
-    stripped = _MULTI_SPACE_RE.sub(" ", stripped).replace(" )", ")")
-    return stripped.strip()
+    stripped = _ANON_TYPE_LOCATION_PATH_ONLY_RE.sub(r"\1", name)
+    return _MULTI_SPACE_RE.sub(" ", stripped).strip()
 
 
 def canonicalize_type_name(name: str) -> str:
