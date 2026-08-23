@@ -22,7 +22,7 @@ from __future__ import annotations
 import pytest
 from hypothesis import given, settings, strategies as st
 
-from abicheck.bundle_facts import BundleFacts
+from abicheck.bundle_facts import DEFAULT_VARIANT_FINGERPRINT, BundleFacts
 from abicheck.bundle_multibuild import (
     VariantOutcome,
     coverage_regression_findings,
@@ -73,6 +73,39 @@ class TestVariantFingerprint:
         # the same fingerprint, matching BundleFacts.DEFAULT_VARIANT_FINGERPRINT's
         # existing "no multibuild distinction" behaviour.
         assert variant_fingerprint() == variant_fingerprint()
+
+    def test_default_matches_the_literal_legacy_fingerprint(self):
+        # A pre-existing/deserialized BundleFacts with no multibuild
+        # distinction carries the literal "default" string
+        # (bundle_facts.DEFAULT_VARIANT_FINGERPRINT). variant_fingerprint()
+        # with no coordinates must return that *exact* value, not merely
+        # some other constant equal to itself -- otherwise pairing a legacy
+        # unqualified baseline against an equivalently unqualified side
+        # computed through this function reads as OLD_ONLY + NEW_ONLY
+        # instead of one paired variant (Codex review, fresh evidence).
+        assert variant_fingerprint() == DEFAULT_VARIANT_FINGERPRINT
+        legacy = _facts(DEFAULT_VARIANT_FINGERPRINT, ("libcore.so",))
+        computed = _facts(variant_fingerprint(), ("libcore.so",))
+        comparisons = pair_variants({"old": legacy}, {"new": computed})
+        assert [c.outcome for c in comparisons] == [VariantOutcome.PAIRED]
+
+    def test_toggle_encoding_has_no_delimiter_collision(self):
+        # A naive "," / "=" joined encoding lets a delimiter character
+        # embedded in a toggle key/value collide with the encoding's own
+        # separators: {"A": "1,B=2"} and {"A": "1", "B": "2"} must NOT
+        # fingerprint identically (Codex review, fresh evidence -- this
+        # reproduced under the original join-based encoding).
+        fp1 = variant_fingerprint(feature_toggles={"A": "1,B=2"})
+        fp2 = variant_fingerprint(feature_toggles={"A": "1", "B": "2"})
+        assert fp1 != fp2
+
+    def test_coordinate_string_delimiter_does_not_collide_across_fields(self):
+        # A coordinate value containing a character that could plausibly be
+        # used as a field separator must not let two different
+        # (target_triple, compiler_family) splits collide.
+        fp1 = variant_fingerprint(target_triple="a|b", compiler_family="")
+        fp2 = variant_fingerprint(target_triple="a", compiler_family="b")
+        assert fp1 != fp2
 
     @pytest.mark.parametrize(
         ("kwargs_a", "kwargs_b"),

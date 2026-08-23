@@ -50,19 +50,14 @@ compared, not *how*.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from enum import Enum
 
-from .bundle_facts import BundleFacts
+from .bundle_facts import DEFAULT_VARIANT_FINGERPRINT, BundleFacts
 from .bundle_models import BundleFinding
 from .checker_policy import ChangeKind
-
-#: variant_fingerprint()'s own delimiter between coordinate values. Not
-#: intended to be parsed back apart -- callers that need the individual
-#: coordinates should keep them separately (e.g. alongside the caller's own
-#: variant label) rather than splitting the fingerprint string.
-_FP_SEP = "|"
 
 
 def variant_fingerprint(
@@ -127,22 +122,44 @@ def variant_fingerprint(
     and G34 Phase A).
 
     All coordinates degrade to the empty string / empty mapping when unknown
-    — a caller with no real per-variant identity (every caller today) gets
-    the same fingerprint for every "variant", which is exactly
-    :data:`~abicheck.bundle_facts.DEFAULT_VARIANT_FINGERPRINT`'s existing
-    "no multibuild distinction" behaviour, just derived through this function
-    instead of hardcoded.
+    — a caller with no real per-variant identity at all (every caller today)
+    gets exactly :data:`~abicheck.bundle_facts.DEFAULT_VARIANT_FINGERPRINT`
+    back (``"default"``), the same literal value an existing/deserialized
+    ``BundleFacts`` with no multibuild distinction already carries — so
+    pairing a legacy unqualified baseline against an equivalently unqualified
+    side computed through this function still pairs, rather than reading as
+    an old-only-plus-new-only false coverage regression (Codex review, fresh
+    evidence).
+
+    The non-default encoding is JSON, not a hand-joined delimited string:
+    a naive ``"|".join(...)``/``","``-joined encoding lets a delimiter
+    character embedded in a caller-supplied value (a toggle key/value
+    containing ``,``/``=``, or a coordinate string containing ``|``) collide
+    with the encoding's own separators, so two genuinely different inputs
+    could fingerprint identically -- silently reintroducing the very
+    "distinct variants read as the same identity" failure this module exists
+    to prevent (Codex review, fresh evidence: ``{"A": "1,B=2"}`` and
+    ``{"A": "1", "B": "2"}`` collided under the original join-based scheme).
+    JSON's own string escaping and structural (list-of-strings) encoding
+    make that collision impossible regardless of what characters a caller's
+    values contain.
     """
     toggles = feature_toggles or {}
+    if (
+        not target_triple
+        and not compiler_family
+        and not compiler_version
+        and not toggles
+    ):
+        return DEFAULT_VARIANT_FINGERPRINT
     # Sorted so fingerprint order never depends on the caller's mapping
     # iteration order (dict insertion order is not a fact about the build).
-    toggle_part = ",".join(f"{k}={v}" for k, v in sorted(toggles.items()))
-    return _FP_SEP.join(
+    return json.dumps(
         [
-            target_triple or "",
-            compiler_family or "",
-            compiler_version or "",
-            toggle_part,
+            target_triple,
+            compiler_family,
+            compiler_version,
+            sorted(toggles.items()),
         ]
     )
 
