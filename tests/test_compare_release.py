@@ -397,6 +397,29 @@ class TestFileVsFile:
         assert data["verdict"] == "NO_CHANGE"
         assert "libraries" not in data
 
+    def test_bundle_facts_out_is_rejected_for_a_single_pair(
+        self, tmp_path: Path
+    ) -> None:
+        """G38 Phase 2 (Codex review, fresh evidence): a single-file/
+        snapshot compare has no OLD-side library map to persist, so
+        `--bundle-facts-out` was silently ignored -- reporting success
+        while leaving automation believing a baseline was written when
+        none was. Reject it outright instead."""
+        snap = _snap()
+        old_f = _write_snap(tmp_path / "libfoo.json", snap)
+        new_f = _write_snap(tmp_path / "libfoo2.json", snap)
+        code, out = _invoke(
+            "compare",
+            str(old_f),
+            str(new_f),
+            "--bundle-facts-out",
+            str(tmp_path / "baseline.json"),
+        )
+        assert code == 64
+        assert "Usage:" in out
+        assert "--bundle-facts-out is only supported for directory/package" in out
+        assert not (tmp_path / "baseline.json").exists()
+
 
 # ── dir vs dir ───────────────────────────────────────────────────────────────
 

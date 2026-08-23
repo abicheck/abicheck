@@ -63,6 +63,7 @@ from .cli_compare_options import (
     _merge_cli_debug_format,
     _NormalizedCompareOptions,
     _param_from_cli,
+    _reject_bundle_facts_out_for_single_pair,
     _reject_debug_format_for_non_elf,
     _reject_set_input_flags,
     _resolve_debug_roots,
@@ -1671,12 +1672,9 @@ def run_compare(
         )
         return
     # Single-file/snapshot inputs: the set-only fan-out flags do not apply.
-    jobs_explicit = (
-        ctx.get_parameter_source("jobs") == click.core.ParameterSource.COMMANDLINE
-    )
-    _warn_unused_set_flags(
-        jobs_explicit=jobs_explicit, dso_only=dso_only, output_dir=output_dir
-    )
+    _reject_bundle_facts_out_for_single_pair(bundle_facts_out)
+    jobs_explicit = ctx.get_parameter_source("jobs") == click.core.ParameterSource.COMMANDLINE
+    _warn_unused_set_flags(jobs_explicit=jobs_explicit, dso_only=dso_only, output_dir=output_dir)
 
     # Preserved before _normalize_compare_options resolves `demangle` against
     # the *primary* fmt below — the secondary render needs the same tri-state
