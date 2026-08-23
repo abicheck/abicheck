@@ -284,6 +284,9 @@ def build_bundle_snapshot_from_metadata(
         libraries=surviving_paths,
         metadata=surviving_metadata,
         resolution=resolution,
+        # probe_filesystem already means "real, live paths" (see
+        # BundleSnapshot.filesystem_backed's own docstring).
+        filesystem_backed=probe_filesystem,
     )
 
 
@@ -1536,13 +1539,13 @@ def _detect_soname_skew(
         members: list[BundleMember] = []
         for name, path in snap.libraries.items():
             meta = snap.metadata.get(name)
-            # Resolved target's basename, not path.name -- a bare symlink
-            # name (libfoo_core.so -> libfoo_core.so.1) is unversioned and
-            # undermines this whole fallback. Must match capture_bundle_
-            # facts()'s identical resolved_basename() use, else a
-            # stored-facts replay derives a different major than the live
-            # comparison it's meant to reproduce (Codex review).
-            real_name = resolved_basename(path)
+            # Resolved target's basename (matches capture_bundle_facts()'s
+            # identical use) -- but only when filesystem_backed: a facts-
+            # reconstructed snapshot's paths are synthetic (bare
+            # `Path("libfoo.so.1")`), and Path.resolve() would still walk
+            # CWD for those, letting an unrelated same-named CWD entry
+            # override the persisted basename (Codex review). Use it as-is.
+            real_name = resolved_basename(path) if snap.filesystem_backed else path.name
             soname = (meta.soname if meta and meta.soname else "") or real_name
             # G9 (remaining half): DT_SONAME is read directly off the ELF
             # here, unlike `.library` (the on-disk filename), which the

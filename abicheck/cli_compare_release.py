@@ -67,6 +67,7 @@ from .cli_compare_release_helpers import (  # noqa: F401
     _resolve_release_severity_config,
     _run_bundle_analysis,
     apply_release_gate_pack,
+    reject_bundle_facts_out_collision,
     write_bundle_facts_out,
 )
 from .cli_options import (
@@ -1461,17 +1462,16 @@ def compare_release_cmd(
     _setup_verbosity(verbose)
 
     # CLI cleanup phase two, PR E: --write's own internal coherence (no
-    # secondary aimed at the same file as the primary; this command has no
-    # --dry-run of its own to be incoherent with -- a dry run never reaches
-    # this engine at all, see run_compare's own emit_dry_run() call, which
-    # exits before the directory/package dispatch). Shared with single-pair
-    # `compare` so the two commands' --write validation cannot drift.
+    # secondary aimed at the same file as the primary; a dry run never
+    # reaches this engine at all -- see run_compare's own emit_dry_run()).
+    # Shared with single-pair `compare` so --write validation cannot drift.
     reject_incoherent_secondary_output(
         dry_run=False,
         output=output,
         secondary_fmt=secondary_fmt,
         secondary_output=secondary_output,
     )
+    reject_bundle_facts_out_collision(bundle_facts_out, output, secondary_output)
 
     # Track temporary directory paths for cleanup
     _temp_dir_paths: list[str] = []

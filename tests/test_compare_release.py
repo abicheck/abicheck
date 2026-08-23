@@ -491,6 +491,58 @@ class TestDirVsDir:
         assert "Usage:" in out
         assert "--write's PATH must differ from --output/-o" in out
 
+    def test_bundle_facts_out_rejects_collision_with_output(
+        self, tmp_path: Path
+    ) -> None:
+        """G38 Phase 2 (Codex review): `--bundle-facts-out` naming the same
+        path as `--output`/`-o` would silently overwrite the requested
+        baseline with the report -- reject it up front, the same way
+        `--write`/`--output` collisions already are."""
+        old_dir = tmp_path / "old"
+        new_dir = tmp_path / "new"
+        old_dir.mkdir()
+        new_dir.mkdir()
+        snap = _snap()
+        _write_snap(old_dir / "libfoo.json", snap)
+        _write_snap(new_dir / "libfoo.json", snap)
+        same_path = tmp_path / "out.json"
+        code, out = _invoke(
+            "compare",
+            str(old_dir),
+            str(new_dir),
+            "-o",
+            str(same_path),
+            "--bundle-facts-out",
+            str(same_path),
+        )
+        assert code == 64
+        assert "Usage:" in out
+        assert "--bundle-facts-out's PATH must differ from --output/-o" in out
+
+    def test_bundle_facts_out_rejects_collision_with_write(
+        self, tmp_path: Path
+    ) -> None:
+        old_dir = tmp_path / "old"
+        new_dir = tmp_path / "new"
+        old_dir.mkdir()
+        new_dir.mkdir()
+        snap = _snap()
+        _write_snap(old_dir / "libfoo.json", snap)
+        _write_snap(new_dir / "libfoo.json", snap)
+        same_path = tmp_path / "out.json"
+        code, out = _invoke(
+            "compare",
+            str(old_dir),
+            str(new_dir),
+            "--write",
+            f"json={same_path}",
+            "--bundle-facts-out",
+            str(same_path),
+        )
+        assert code == 64
+        assert "Usage:" in out
+        assert "--bundle-facts-out's PATH must differ from --write" in out
+
     def test_json_output_multi(self, tmp_path: Path) -> None:
         old_dir = tmp_path / "old"
         old_dir.mkdir()

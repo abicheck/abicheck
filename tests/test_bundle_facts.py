@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -772,13 +773,18 @@ class TestBundleFactsLibraryFilenames:
         )
 
         # Live: the OLD side's representative path is the symlink itself,
-        # exactly as directory discovery would keep it.
+        # exactly as directory discovery would keep it. probe_filesystem=True
+        # marks this snapshot's paths as real, live filesystem paths (what
+        # build_bundle_snapshot() itself always passes) -- required for
+        # _detect_soname_skew()'s fallback to resolve the symlink at all
+        # (see BundleSnapshot.filesystem_backed's own docstring).
         old_live = build_bundle_snapshot_from_metadata(
             old_metadata,
             paths={
                 "libfoo_core.so": symlink_path,
                 "libfoo_thread.so": tmp_path / "libfoo_thread.so.1",
             },
+            probe_filesystem=True,
         )
         live_kinds = {
             f.kind for f in _detect_soname_skew(old_live, new_bundle, ["libfoo_"])
@@ -798,6 +804,91 @@ class TestBundleFactsLibraryFilenames:
         }
 
         assert stored_kinds == live_kinds == {ChangeKind.BUNDLE_SONAME_SKEW}
+
+    def test_stored_replay_ignores_a_colliding_cwd_entry(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A facts-reconstructed snapshot's paths are synthetic (bare
+        ``Path(persisted_filename)``, no real file behind them) -- the
+        persisted major must be used as-is, never re-resolved against the
+        replay process's current working directory. Without this,
+        an unrelated real symlink in CWD happening to share the persisted
+        basename would silently substitute *its* target's major for the
+        one actually captured, making stored replay depend on CWD (Codex
+        review, fresh evidence).
+        """
+        capture_dir = tmp_path / "capture"
+        capture_dir.mkdir()
+        real_target = capture_dir / "libfoo_core.so.5"
+        real_target.write_bytes(b"")
+        symlink_path = capture_dir / "libfoo_core.so"
+        symlink_path.symlink_to(real_target)
+
+        old_metadata = {
+            "libfoo_core.so": _meta(exports=["c"]),  # no DT_SONAME
+            "libfoo_thread.so": _meta(soname="libfoo_thread.so.1", exports=["t"]),
+        }
+        facts = capture_bundle_facts(
+            _per_library_snapshots(old_metadata),
+            library_paths={
+                "libfoo_core.so": symlink_path,
+                "libfoo_thread.so": capture_dir / "libfoo_thread.so.1",
+            },
+        )
+        assert facts.library_filenames["libfoo_core.so"] == "libfoo_core.so.5"
+
+        # Replay happens in a *different* directory that coincidentally
+        # holds a same-named symlink pointing at a *lower* major -- were the
+        # persisted name re-resolved against this CWD, it would look like a
+        # bump (2 -> 5) happened between old and new, when nothing changed.
+        replay_cwd = tmp_path / "replay"
+        replay_cwd.mkdir()
+        colliding_target = replay_cwd / "libfoo_core.so.2"
+        colliding_target.write_bytes(b"")
+        (replay_cwd / "libfoo_core.so.5").symlink_to(colliding_target)
+        monkeypatch.chdir(replay_cwd)
+
+        # The NEW side is a real, live release directory (unrelated to
+        # replay_cwd) at its own real, unchanged major -- probe_filesystem=
+        # True marks it filesystem_backed, matching build_bundle_snapshot()'s
+        # own real usage, so its own resolution is unaffected by the CWD
+        # collision above.
+        release_dir = tmp_path / "release"
+        release_dir.mkdir()
+        new_real_target = release_dir / "libfoo_core.so.5"
+        new_real_target.write_bytes(b"")
+
+        from abicheck.bundle import (
+            _detect_soname_skew,
+            build_bundle_snapshot_from_metadata,
+        )
+
+        new_metadata = {
+            "libfoo_core.so": _meta(exports=["c"]),
+            "libfoo_thread.so": _meta(soname="libfoo_thread.so.1", exports=["t"]),
+        }
+        new_bundle = build_bundle_snapshot_from_metadata(
+            new_metadata,
+            paths={
+                "libfoo_core.so": new_real_target,  # real file, unchanged major
+                "libfoo_thread.so": release_dir / "libfoo_thread.so.1",
+            },
+            probe_filesystem=True,
+        )
+
+        reconstructed = bundle_snapshot_from_facts(facts)
+
+        # No skew: the persisted major (5) matches the new side's real major
+        # (5), and libfoo_thread stayed at 1 on both sides. A CWD-dependent
+        # re-resolution of the OLD side's synthetic path through the
+        # colliding symlink above would read old major as 2, making
+        # libfoo_core look like it bumped 2 -> 5 while libfoo_thread
+        # stayed -- exactly the pattern detect_bundle_soname_skew() flags --
+        # and spuriously report a skew that never happened.
+        kinds = {
+            f.kind for f in _detect_soname_skew(reconstructed, new_bundle, ["libfoo_"])
+        }
+        assert kinds == set()
 
 
 # ---------------------------------------------------------------------------
@@ -1206,6 +1297,14 @@ class TestWriteBundleFactsOut:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.skipif(
+    sys.platform != "linux",
+    reason="Uses the GNU ld flag -Wl,-soname; Mach-O ld and link.exe don't "
+    "accept it, and gcc/clang -shared produces a non-ELF binary on those "
+    "platforms anyway. Bundle analysis itself is ELF/Linux-only per "
+    "ADR-018 / ADR-023 (matches TestCompareReleaseBundleE2E's identical "
+    "guard in tests/test_bundle.py).",
+)
 @pytest.mark.integration
 class TestWriteBundleFactsOutCapturesARealSnapshot:
     def _build_tiny_so(self, tmp_path: Path) -> Path:

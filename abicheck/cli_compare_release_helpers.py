@@ -321,6 +321,31 @@ def _debian_symbols_warning(
     return "Debian symbols contract changed:\n" + format_diff_report(diff)
 
 
+def reject_bundle_facts_out_collision(
+    bundle_facts_out: Path | None,
+    output: Path | None,
+    secondary_output: Path | None,
+) -> None:
+    """Reject ``--bundle-facts-out`` naming the same file as ``--output``/
+    ``--write`` (G38 Phase 2).
+
+    A command-specific extra check, deliberately not
+    ``reject_incoherent_secondary_output()``'s job (see that leaf module's
+    own docstring) -- without it, ``--bundle-facts-out result.json --output
+    result.json`` silently overwrites the requested baseline with the
+    report while still reporting success (Codex review).
+    """
+    if bundle_facts_out is None:
+        return
+    for label, other in (("--output/-o", output), ("--write", secondary_output)):
+        if other is not None and bundle_facts_out.resolve() == other.resolve():
+            raise click.UsageError(
+                f"--bundle-facts-out's PATH must differ from {label}: writing "
+                "both to the same file would silently overwrite the "
+                "requested bundle-facts baseline with the report."
+            )
+
+
 def write_bundle_facts_out(
     bundle_facts_out: Path,
     diff_pairs: list[tuple[DiffResult, AbiSnapshot]],
