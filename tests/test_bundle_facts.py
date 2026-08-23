@@ -574,9 +574,7 @@ class TestWriteBundleFactsOut:
         from abicheck.cli_compare_release_helpers import write_bundle_facts_out
 
         out = tmp_path / "old.bundlefacts.json"
-        write_bundle_facts_out(
-            out, self._diff_pairs(), None, self._old_map(tmp_path), []
-        )
+        write_bundle_facts_out(out, self._diff_pairs(), None, self._old_map(tmp_path))
 
         loaded = load_bundle_facts(out)
         assert set(loaded.per_library_snapshots) == {"libcore.so", "libalgo.so"}
@@ -594,7 +592,7 @@ class TestWriteBundleFactsOut:
 
         with pytest.raises(click.UsageError, match="bundle-facts-out"):
             write_bundle_facts_out(
-                out, self._diff_pairs(), bad_manifest, self._old_map(tmp_path), []
+                out, self._diff_pairs(), bad_manifest, self._old_map(tmp_path)
             )
         assert not out.exists()
 
@@ -615,13 +613,13 @@ class TestWriteBundleFactsOut:
 
         with pytest.raises(click.UsageError, match="bundle-facts-out"):
             write_bundle_facts_out(
-                out, self._diff_pairs(), None, self._old_map(tmp_path), []
+                out, self._diff_pairs(), None, self._old_map(tmp_path)
             )
 
     def test_captures_unmatched_old_library(self, tmp_path: Path) -> None:
         """P1 (Codex review, fresh evidence): an old-only library (removed
         in the new release) has no entry in ``diff_pairs`` -- it must still
-        be captured, via ``old_map``/``removed_keys``, so a later
+        be captured, via the ``old_map`` fallback, so a later
         ``compare_bundle_from_facts()`` call can still emit
         ``bundle_library_removed``/dependency-removal/version-resolution
         findings for it, the same way a live ``compare_bundle()`` run
@@ -635,9 +633,7 @@ class TestWriteBundleFactsOut:
         old_map["libremoved.so"] = removed_path
 
         out = tmp_path / "old.bundlefacts.json"
-        write_bundle_facts_out(
-            out, self._diff_pairs(), None, old_map, ["libremoved.so"]
-        )
+        write_bundle_facts_out(out, self._diff_pairs(), None, old_map)
 
         loaded = load_bundle_facts(out)
         assert set(loaded.per_library_snapshots) == {
@@ -650,20 +646,53 @@ class TestWriteBundleFactsOut:
         # own "only promise what was actually captured" rule.
         assert loaded.per_library_snapshots["libremoved.so"].elf is not None
 
+    def test_captures_a_matched_library_whose_compare_failed(
+        self, tmp_path: Path
+    ) -> None:
+        """P1 (Codex review, fresh evidence): a library present in *both*
+        releases (present in ``old_map``/``new_map`` alike) whose
+        per-library compare returned ``ERROR``/``not_comparable`` has no
+        entry in ``diff_pairs`` either -- ``_compare_release_libraries()``
+        only stashes a ``(DiffResult, AbiSnapshot)`` pair for a
+        *successful* compare. An earlier revision of this fix only
+        back-filled ``removed_keys`` (an old-only library), missing this
+        second, matched-but-failed case entirely -- a real old-release
+        library was still silently dropped from the persisted baseline
+        even though it wasn't "removed" in the release-matching sense at
+        all. The fallback must cover *any* ``old_map`` key
+        ``diff_pairs`` didn't capture, not just the ones the caller
+        happens to also classify as removed.
+        """
+        from abicheck.cli_compare_release_helpers import write_bundle_facts_out
+
+        old_map = self._old_map(tmp_path)
+        failed_path = tmp_path / "libfailed.so"
+        failed_path.write_bytes(b"")
+        old_map["libfailed.so"] = failed_path  # matched in old_map/new_map,
+        # but absent from diff_pairs (its own compare errored) -- new_map
+        # itself is irrelevant to this producer, which only ever reads
+        # old_map, so it's deliberately not constructed here.
+
+        out = tmp_path / "old.bundlefacts.json"
+        write_bundle_facts_out(out, self._diff_pairs(), None, old_map)
+
+        loaded = load_bundle_facts(out)
+        assert "libfailed.so" in loaded.per_library_snapshots
+        assert loaded.per_library_snapshots["libfailed.so"].elf is not None
+
     def test_does_not_duplicate_an_already_matched_library(
         self, tmp_path: Path
     ) -> None:
-        """A key present in both ``diff_pairs`` and (redundantly)
-        ``removed_keys`` keeps the real per-library snapshot from
-        ``diff_pairs`` -- the removed-library fallback must never overwrite
-        an already-captured, fully-dumped snapshot with a bare
+        """A key already present in ``diff_pairs`` keeps its real
+        per-library snapshot -- the ``old_map`` fallback loop must never
+        overwrite an already-captured, fully-dumped snapshot with a bare
         ELF-metadata-only stand-in.
         """
         from abicheck.cli_compare_release_helpers import write_bundle_facts_out
 
         old_map = self._old_map(tmp_path)
         out = tmp_path / "old.bundlefacts.json"
-        write_bundle_facts_out(out, self._diff_pairs(), None, old_map, ["libcore.so"])
+        write_bundle_facts_out(out, self._diff_pairs(), None, old_map)
 
         loaded = load_bundle_facts(out)
         # The real dumped snapshot (via _per_library_snapshots) carries the
@@ -693,7 +722,7 @@ class TestWriteBundleFactsOut:
         old_map["libcore.so"] = symlink_path
 
         out = tmp_path / "old.bundlefacts.json"
-        write_bundle_facts_out(out, self._diff_pairs(), None, old_map, [])
+        write_bundle_facts_out(out, self._diff_pairs(), None, old_map)
 
         loaded = load_bundle_facts(out)
         assert "libcore.so.1.0.0" in loaded.filesystem_aliases.get("libcore.so", ())
@@ -728,7 +757,7 @@ class TestWriteBundleFactsOut:
         ]
 
         out = tmp_path / "old.bundlefacts.json"
-        write_bundle_facts_out(out, diff_pairs, None, old_map, [])
+        write_bundle_facts_out(out, diff_pairs, None, old_map)
 
         loaded = load_bundle_facts(out)
         assert set(loaded.per_library_snapshots) == {"libfoo.so"}
@@ -755,7 +784,7 @@ class TestWriteBundleFactsOut:
         ]
 
         out = tmp_path / "old.bundlefacts.json"
-        write_bundle_facts_out(out, diff_pairs, None, old_map, [])
+        write_bundle_facts_out(out, diff_pairs, None, old_map)
         loaded_facts = load_bundle_facts(out)
 
         # The "new" bundle, keyed the same canonical way a live

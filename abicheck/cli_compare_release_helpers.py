@@ -326,7 +326,6 @@ def write_bundle_facts_out(
     diff_pairs: list[tuple[DiffResult, AbiSnapshot]],
     manifest_path: Path | None,
     old_map: dict[str, Path],
-    removed_keys: list[str],
 ) -> None:
     """Persist the OLD side's per-library snapshots (plus manifest, if any)
     to *bundle_facts_out* as a :class:`~abicheck.bundle_facts.BundleFacts`
@@ -335,8 +334,8 @@ def write_bundle_facts_out(
     *diff_pairs* is ``_compare_release_libraries``'s own
     ``(DiffResult, old_snapshot)`` collection -- the caller must have
     passed ``collect_diff_results=True`` for it to be populated.
-    *old_map*/*removed_keys* are ``_match_release_keys``'s own maps: every
-    key in *old_map* is the **canonical** release-matching key
+    *old_map* is ``_match_release_keys``'s own map: every key is the
+    **canonical** release-matching key
     (``_canonical_library_key()`` -- e.g. ``libfoo.so`` for a discovered
     ``libfoo.so.1.2``), the identical keys a live ``build_bundle_snapshot
     (dict(old_map))`` call uses for its ``BundleSnapshot.libraries``. Each
@@ -349,19 +348,25 @@ def write_bundle_facts_out(
     change at all (Codex review, fresh evidence: caught after the P1 fix
     below already existed, which itself still keyed by the wrong basename).
 
-    *old_map*/*removed_keys* also cover what ``diff_pairs`` alone cannot:
-    ``diff_pairs`` only ever holds an entry for a *matched* library (one
-    present in both releases), so an old-only library (removed in the new
-    release) was previously silently absent from the persisted baseline --
-    meaning a later ``compare_bundle_from_facts()`` call against these
-    facts could never emit ``bundle_library_removed``/dependency-removal/
+    *old_map* also covers what ``diff_pairs`` alone cannot -- and not only
+    for an old-only library removed in the new release: ``diff_pairs``
+    only ever holds an entry for a library whose per-library compare
+    actually *succeeded*, so a *matched* library whose compare returned
+    ``ERROR``/``not_comparable`` has no entry there either, even though a
+    live bundle analysis includes it (straight from ``old_map``) same as
+    any other member (Codex review, fresh evidence: caught after an
+    earlier revision of this fix only back-filled ``removed_keys``,
+    missing this second, matched-but-failed case entirely). Both cases are
+    the identical gap -- a real old-release library silently absent from
+    the persisted baseline, so a later ``compare_bundle_from_facts()``
+    call could never emit ``bundle_library_removed``/dependency-removal/
     version-resolution findings a live comparison of the same old release
-    would (Codex review, fresh evidence). Each removed library's own
-    ``ElfMetadata`` is parsed directly from *old_map*'s path (mirroring
-    what a live ``build_bundle_snapshot()`` does for exactly this library,
-    since no per-library compare ever ran for it) and wrapped in a bare
-    :class:`~abicheck.model.AbiSnapshot` carrying only ``.elf`` --
-    everything :func:`~abicheck.bundle_facts.bundle_snapshot_from_facts`
+    would -- so both are closed the same way: *every* ``old_map`` key not
+    already covered by a successful ``diff_pairs`` entry gets its
+    ``ElfMetadata`` parsed directly from its path (mirroring what a live
+    ``build_bundle_snapshot()`` does for exactly this library) and wrapped
+    in a bare :class:`~abicheck.model.AbiSnapshot` carrying only ``.elf``
+    -- everything :func:`~abicheck.bundle_facts.bundle_snapshot_from_facts`
     needs. A library whose old path fails to parse as ELF degrades to an
     empty ``ElfMetadata`` (``parse_elf_metadata`` never raises), which the
     bundle layer's own emptiness check already drops -- the same
@@ -400,10 +405,9 @@ def write_bundle_facts_out(
             per_library_snapshots[basename_to_key.get(basename, basename)] = (
                 old_snapshot
             )
-        for key in removed_keys:
+        for key, old_path in old_map.items():
             if key in per_library_snapshots:
                 continue
-            old_path = old_map[key]
             per_library_snapshots[key] = AbiSnapshot(
                 library=old_path.name,
                 version="",
