@@ -221,10 +221,32 @@ def _index_by_fingerprint(
     to prevent, just reached from the input side instead of the pairing
     logic. A caller that genuinely wants two labels to be the same variant
     should give them the same label, not rely on fingerprint collision.
+
+    Also raises on an empty-string ``variant_fingerprint`` (Codex review):
+    :func:`variant_fingerprint` itself never produces one -- the
+    no-coordinates case returns the explicit ``DEFAULT_VARIANT_FINGERPRINT``
+    sentinel, never ``""`` -- so an empty fingerprint here means the
+    ``BundleFacts`` came from somewhere that skipped that function (a
+    malformed or hand-edited serialized pack; ``bundle_facts_from_dict()``
+    only substitutes the default sentinel when the key is entirely
+    *missing*, not when it is present but empty). Pairing two such entries
+    on the shared empty string would treat them as the same variant despite
+    carrying no real identity evidence at all -- exactly the union-style
+    failure this whole module exists to prevent, just reached via malformed
+    input instead of a caller's own fingerprint choice.
     """
     by_fp: dict[str, tuple[str, BundleFacts]] = {}
     for label, facts in variants.items():
         fp = facts.variant_fingerprint
+        if not fp:
+            raise ValueError(
+                f"pair_variants: {side} variant {label!r} has an empty "
+                f"variant_fingerprint -- variant_fingerprint() never "
+                f"produces one (the no-coordinates case is the "
+                f"DEFAULT_VARIANT_FINGERPRINT sentinel, not ''), so this "
+                f"BundleFacts did not come from it; fix the input rather "
+                f"than pairing it on an empty, non-identifying key"
+            )
         if fp in by_fp:
             other_label = by_fp[fp][0]
             raise ValueError(

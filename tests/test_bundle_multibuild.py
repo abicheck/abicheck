@@ -227,6 +227,19 @@ class TestPairVariants:
         with pytest.raises(ValueError, match="fp-shared"):
             pair_variants(old, {})
 
+    def test_empty_fingerprint_raises_rather_than_pairing(self):
+        # Codex review: variant_fingerprint() never produces "" (the
+        # no-coordinates case is the DEFAULT_VARIANT_FINGERPRINT sentinel),
+        # so an empty fingerprint means the BundleFacts skipped that
+        # function entirely -- e.g. a malformed/hand-edited serialized pack.
+        # Two such malformed, genuinely-unrelated entries must not silently
+        # pair as "the same variant" just because they share the empty
+        # string.
+        old = {"malformed": _facts("")}
+        new = {"also-malformed": _facts("")}
+        with pytest.raises(ValueError, match="malformed"):
+            pair_variants(old, new)
+
     def test_empty_inputs_produce_no_comparisons(self):
         assert pair_variants({}, {}) == []
 
