@@ -172,6 +172,36 @@ class TestOrdinaryNameWhitespaceIsPreserved:
         assert b == 'Tag<"a b">'
         assert a != b
 
+    def test_composite_name_with_a_real_lambda_marker_preserves_unrelated_whitespace(
+        self,
+    ) -> None:
+        """Round-4 review, second finding: even the "only collapse when the
+        substitution fired" gate wasn't narrow enough -- a composite name
+        where the substitution legitimately fires in ONE template argument
+        (a real lambda marker) must not touch whitespace in an unrelated
+        SIBLING argument (a fixed-string NTTP literal)."""
+        a = strip_anonymous_type_location('Tag<"a  b", (lambda at /tmp/a.hpp:4:3)>')
+        b = strip_anonymous_type_location('Tag<"a b", (lambda at /tmp/a.hpp:4:3)>')
+        assert a == 'Tag<"a  b", (lambda:4:3)>'
+        assert b == 'Tag<"a b", (lambda:4:3)>'
+        assert a != b
+
+
+class TestAnonymousMarkerRequiredBeforeStripping:
+    """Round-4 review, Codex, fresh evidence: the regex previously matched a
+    bare ``\\bat\\s+...:N:M`` anywhere in the name, so an ordinary
+    specialization whose fixed-string argument merely CONTAINS
+    location-shaped text (no real lambda/unnamed-type marker at all) was
+    incorrectly rewritten, risking a collision with a genuinely distinct
+    type. The regex now requires an actual ``(lambda``/``(unnamed <kind>``
+    marker immediately before ``at``."""
+
+    def test_fixed_string_literal_containing_location_shaped_text_is_untouched(
+        self,
+    ) -> None:
+        name = 'Tag<"at /checkout:1:2)">'
+        assert strip_anonymous_type_location(name) == name
+
 
 class TestAnonymousEnumLocationStripped:
     def test_enum_name_has_no_embedded_path(self) -> None:

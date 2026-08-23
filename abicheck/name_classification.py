@@ -565,7 +565,22 @@ _ANON_TYPE_LOCATION_RE = re.compile(r"\bat\s+\S+:\d+:\d+(?=\s*\))")
 #: a path either -- the identical failure mode, just from a different
 #: character. ``.*?`` is non-greedy, so it still stops at the *first*
 #: ``:<line>:<col>)`` it finds, same as before.
-_ANON_TYPE_LOCATION_PATH_ONLY_RE = re.compile(r"\s*\bat\s+.*?(:\d+:\d+)(?=\s*\))")
+#:
+#: Anchored on an actual ``(lambda`` / ``(unnamed <kind>`` marker (round-4
+#: review, Codex, fresh evidence): the previous version matched a bare
+#: ``\bat\s+...`` anywhere in the name, so a C++20 fixed-string NTTP
+#: argument that merely *contains* location-shaped text (e.g.
+#: ``Tag<"at /checkout:1:2)">``) was rewritten too, risking a collision
+#: with a genuinely distinct specialization. Group 1 captures the marker
+#: itself so the substitution can reconstruct it without reproducing the
+#: literal ``at``/path text -- this also means the match never introduces
+#: extra whitespace to clean up afterward (the previous unconditional
+#: multi-space collapse this function used to apply is gone; see its own
+#: past instance of exactly this over-broad-collision failure mode, fixed
+#: two rounds ago, since fixed generically here at the regex level instead).
+_ANON_TYPE_LOCATION_PATH_ONLY_RE = re.compile(
+    r"(\((?:lambda|unnamed\s+\w+))\s+at\s+.*?(:\d+:\d+)(?=\s*\))"
+)
 
 
 def strip_anonymous_type_location(name: str) -> str:
@@ -620,19 +635,19 @@ def strip_anonymous_type_location(name: str) -> str:
     *comparison* that only has the raw spelling to work with (and where a
     same-snapshot collision risk does not apply).
 
-    The whitespace collapse/strip below runs ONLY when the anonymous-marker
-    substitution actually matched (Codex review, fresh evidence): this
-    function is now applied to every castxml record/enum name at
-    extraction time, not just anonymous ones, so an unconditional collapse
-    would also rewrite meaningful whitespace inside an ordinary name --
-    notably a C++20 fixed-string NTTP template argument, where
-    ``Tag<"a  b">`` and ``Tag<"a b">`` are genuinely distinct
-    specializations that must not collide onto one identity.
+    No whitespace collapse/strip runs here at all (round-4 review, Codex,
+    fresh evidence, second finding on the same over-broad-rewrite theme):
+    this function is now applied to every castxml record/enum name at
+    extraction time, not just anonymous ones, so even a collapse gated on
+    "the substitution fired somewhere" still touched unrelated whitespace
+    elsewhere in a *composite* name (e.g. a C++20 fixed-string NTTP
+    argument alongside a real lambda marker in the same template argument
+    list, ``Tag<"a  b", (lambda at a.hpp:4:3)>``). The regex above is now
+    anchored and captures its own marker, so the substitution itself never
+    introduces stray whitespace to clean up -- nothing here needs
+    collapsing, so nothing should be attempted.
     """
-    stripped = _ANON_TYPE_LOCATION_PATH_ONLY_RE.sub(r"\1", name)
-    if stripped == name:
-        return name
-    return _MULTI_SPACE_RE.sub(" ", stripped).strip()
+    return _ANON_TYPE_LOCATION_PATH_ONLY_RE.sub(r"\1\2", name)
 
 
 def canonicalize_type_name(name: str) -> str:
