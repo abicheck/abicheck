@@ -119,6 +119,30 @@ def test_dump_success_writes_default_json(tmp_path: Path, monkeypatch):
     assert snap.library == "libfoo"
 
 
+def test_dump_suppresses_streaming_prune(tmp_path: Path, monkeypatch):
+    """``compat dump``'s own direct ``dump()`` call has no dependency-scope
+    wrapper downstream either -- it must suppress the opt-in streaming
+    pruner (dumper_clang_streaming.py) itself, the same way
+    ``_snapshot_from_compat_input``'s descriptor/dump path already does
+    (Codex review, PR #840)."""
+    from abicheck.dumper_clang_streaming import streaming_prune_suppressed
+
+    lib = _fake_elf(tmp_path / "libfoo.so")
+    desc = _descriptor(tmp_path / "desc.xml", libs=[lib])
+    observed: list[bool] = []
+
+    def _fake_dump(*_a, **_kw):
+        observed.append(streaming_prune_suppressed())
+        return AbiSnapshot(library="orig-name", version="1.0")
+
+    monkeypatch.setattr("abicheck.compat.cli.dump", _fake_dump)
+    monkeypatch.chdir(tmp_path)
+    assert not streaming_prune_suppressed()  # not leaked before the call
+    _dump_callback(desc_path=desc)
+    assert not streaming_prune_suppressed()  # not leaked after the call
+    assert observed == [True]
+
+
 def test_dump_multiple_libs_emits_warning(tmp_path: Path, monkeypatch, capsys):
     """A descriptor with >1 <libs> entries warns and uses the first (line 302)."""
     lib = _fake_elf(tmp_path / "libfoo.so")

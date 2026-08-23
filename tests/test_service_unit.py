@@ -4203,6 +4203,39 @@ class TestRunDumpHeaderGraphSkippedForDwarfOnly:
 
         assert calls == [(False, False)]
 
+    def test_elf_empty_headers_does_not_open_ast_memoize_scope(self, tmp_path):
+        """Codex review, PR #840: a manifest-driven dump (`dump_manifest`,
+        mutually exclusive with `headers` per api_types.py) reaches
+        `_dump_elf` with an empty `_headers`, so the header-graph attach
+        immediately below always no-ops. Opening `ast_memoize_scope()`
+        unconditionally around this call would protect a memo nothing will
+        ever consume, while silently vetoing the opt-in streaming pruner
+        (gated on `ast_memoize_active()`) for a manifest dump's own TU
+        parses too whenever they share this thread (a single TU, or
+        `ABICHECK_TU_JOBS=1`)."""
+        from abicheck import dumper_cache
+
+        p = tmp_path / "lib.so"
+        p.write_bytes(b"\x7fELF" + b"\x00" * 100)
+        snap = AbiSnapshot(library="lib", version="1.0", from_headers=False)
+        seen_active: dict[str, bool] = {}
+
+        def _fake_dump_elf(*_a, **_k):
+            seen_active["active"] = dumper_cache.ast_memoize_active()
+            return snap
+
+        with (
+            patch("abicheck.service._dump_elf", side_effect=_fake_dump_elf),
+            patch(
+                "abicheck.service.attach_clang_layout", side_effect=lambda s, *a, **k: s
+            ),
+        ):
+            assert not dumper_cache.ast_memoize_active()
+            run_dump(p, "elf", [], [], "1.0", "c++")
+            assert not dumper_cache.ast_memoize_active()
+
+        assert seen_active["active"] is False
+
     def test_pe_symbols_only_does_not_attach_header_graph(self, tmp_path):
         """Codex review, fresh evidence: the ELF fix above added
         `not symbols_only` to the ELF/hybrid attach predicates, but the PE
@@ -4313,6 +4346,46 @@ class TestAttachHeaderGraphDeviceContext:
                 public_header_dirs=None,
             )
         mock_extractor.return_value.extract.assert_called_once()
+
+    def test_streaming_prune_is_suppressed_for_this_call(self, tmp_path, monkeypatch):
+        """Codex review, PR #840: `_attach_header_graph`'s own
+        `_clang_header_dump` call is a real downstream consumer of the raw
+        AST dict (`buildsource.call_graph.parse_clang_ast_calls` walks it
+        directly for call-graph edges), so the opt-in streaming pruner must
+        be force-disabled for this call regardless of the env var --
+        otherwise a pruned dependency function/variable node would degrade
+        or drop call-graph edges the graph is built to capture."""
+        from abicheck.dumper_clang_streaming import streaming_prune_suppressed
+        from abicheck.service import _attach_header_graph
+
+        monkeypatch.setenv("ABICHECK_CLANG_PRUNE_DEPENDENCY_DECLS", "1")
+        header = tmp_path / "pub.h"
+        header.write_text("int f(void);\n")
+        snap = AbiSnapshot(library="lib", version="1.0")
+
+        seen_suppressed: dict[str, bool] = {}
+
+        def _stub_clang_header_dump(*a, **k):
+            seen_suppressed["suppressed"] = streaming_prune_suppressed()
+            return {"kind": "TranslationUnitDecl", "inner": []}, None, False
+
+        monkeypatch.setattr(
+            "abicheck.dumper._clang_header_dump", _stub_clang_header_dump
+        )
+        assert not streaming_prune_suppressed()  # not leaked before the call
+        _attach_header_graph(
+            snap,
+            header_graph=True,
+            header_graph_includes=False,
+            headers=[header],
+            includes=[],
+            lang="c",
+            compile=None,
+            public_headers=None,
+            public_header_dirs=None,
+        )
+        assert seen_suppressed["suppressed"] is True
+        assert not streaming_prune_suppressed()  # not leaked after the call
 
     def test_no_compile_context_defaults_to_host_and_still_uses_extractor(
         self, tmp_path

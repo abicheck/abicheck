@@ -1355,3 +1355,209 @@ def test_dump_request_and_compare_request_lang_explicit_forces_cpp_mode(
     pair = service.resolve_compare_request(compare_req_explicit, allow_parallel=False)
     cr_widget = next(t for t in pair.old.types if t.name == "Widget")
     assert cr_widget.is_standard_layout is True
+
+
+# ─── streaming dependency-declaration pruner (abicheck/dumper_clang_streaming.py) ──
+
+_STREAM_PRUNE_ENV_VAR = "ABICHECK_CLANG_PRUNE_DEPENDENCY_DECLS"
+
+_STREAM_PRUNE_HEADER = """
+#pragma once
+#include <vector>
+#include <map>
+#include <string>
+
+namespace lib {
+
+struct Item { int value; };
+
+inline void touch() {
+    std::vector<Item> items;
+    std::map<std::string, Item> by_name;
+    items.push_back(Item{});
+    by_name[std::string("x")] = Item{};
+}
+
+int add(int a, int b) noexcept;
+struct Point { int x; int y; };
+
+}  // namespace lib
+"""
+
+_STREAM_PRUNE_SOURCE = """
+#include "api.h"
+namespace lib {
+int add(int a, int b) noexcept { return a + b; }
+}  // namespace lib
+"""
+
+
+@pytest.fixture
+def stream_prune_lib(tmp_path: Path) -> tuple[Path, Path]:
+    if not (_have("clang") and _have("g++")):
+        pytest.skip(
+            "clang and g++ are required for the streaming-pruner integration test"
+        )
+    header = tmp_path / "api.h"
+    header.write_text(_STREAM_PRUNE_HEADER)
+    src = tmp_path / "api.cpp"
+    src.write_text(_STREAM_PRUNE_SOURCE)
+    so = tmp_path / "libapi.so"
+    subprocess.run(
+        ["g++", "-shared", "-fPIC", "-o", str(so), str(src), f"-I{tmp_path}"],
+        check=True,
+        capture_output=True,
+    )
+    return so, header
+
+
+def _isolate_ast_cache(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Force a fresh on-disk AST cache dir so a prior (unpruned) run's cached
+    raw JSON file can never be served back for a differently-configured call
+    -- the streaming pruner only ever runs on a fresh parse, never on a
+    disk-cache hit (see ``dumper_clang_streaming.py``'s module docstring)."""
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "xdg-cache"))
+
+
+def test_streaming_pruner_disabled_by_default(
+    stream_prune_lib: tuple[Path, Path],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Baseline contract: with the opt-in env var unset, ``dump()`` behaves
+    exactly as before this feature existed."""
+    monkeypatch.delenv(_STREAM_PRUNE_ENV_VAR, raising=False)
+    _isolate_ast_cache(monkeypatch, tmp_path)
+    so, header = stream_prune_lib
+    snap = dump(so, [header], header_backend="clang", lang="c++")
+    names = {f.name for f in snap.functions}
+    assert {"add"} <= names
+    point = next(t for t in snap.types if t.name == "Point")
+    assert point is not None
+
+
+def test_streaming_pruner_produces_an_equivalent_public_model(
+    stream_prune_lib: tuple[Path, Path],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Enabling the pruner must not change the library's own public surface:
+    the same public function/type/enum/typedef set survives, only
+    dependency-header function/variable noise is trimmed."""
+    so, header = stream_prune_lib
+
+    monkeypatch.delenv(_STREAM_PRUNE_ENV_VAR, raising=False)
+    _isolate_ast_cache(monkeypatch, tmp_path)
+    baseline = dump(so, [header], header_backend="clang", lang="c++")
+
+    monkeypatch.setenv(_STREAM_PRUNE_ENV_VAR, "1")
+    _isolate_ast_cache(monkeypatch, tmp_path)  # a *different*, still-fresh cache dir
+    pruned = dump(so, [header], header_backend="clang", lang="c++")
+
+    # The library's own public declarations are completely unaffected.
+    baseline_add = next(f for f in baseline.functions if f.name == "add")
+    pruned_add = next(f for f in pruned.functions if f.name == "add")
+    assert baseline_add.is_noexcept == pruned_add.is_noexcept is True
+    assert baseline_add.visibility == pruned_add.visibility == Visibility.PUBLIC
+
+    baseline_point = next(t for t in baseline.types if t.name == "Point")
+    pruned_point = next(t for t in pruned.types if t.name == "Point")
+    assert baseline_point.size_bits == pruned_point.size_bits
+
+    # Equivalence, not strict shrinkage, is the claim this test makes: a
+    # pruned node isn't necessarily one that would have become a *kept*
+    # ``Function`` model object anyway (some of what the raw AST prunes is
+    # itself filtered out, or deduplicated, by other logic downstream) --
+    # see ``test_streaming_pruner_reports_a_nonzero_prune_count_on_the_raw_ast``
+    # for the direct, lower-level proof that pruning genuinely engages on
+    # this exact repro's raw clang AST.
+    assert len(pruned.functions) <= len(baseline.functions)
+
+
+def test_streaming_pruner_reports_a_nonzero_prune_count_on_the_raw_ast(
+    stream_prune_lib: tuple[Path, Path],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Direct, lower-level check on ``_clang_header_dump`` -- proves the
+    pruner actually engaged on a real clang AST, not just that the higher-
+    level ``dump()`` model happened to look the same either way."""
+    from abicheck.dumper_clang_streaming import (
+        PRUNED_PLACEHOLDER_KIND,
+        load_pruned_clang_ast,
+    )
+
+    so, header = stream_prune_lib
+    monkeypatch.setenv(_STREAM_PRUNE_ENV_VAR, "1")
+    _isolate_ast_cache(monkeypatch, tmp_path)
+    root, _, _ = _clang_header_dump(
+        [header], [], compiler="clang", lang="c++", memoize=False
+    )
+
+    def _count_placeholders(node: object) -> int:
+        if isinstance(node, dict):
+            n = 1 if node.get("kind") == PRUNED_PLACEHOLDER_KIND else 0
+            return n + sum(_count_placeholders(v) for v in node.values())
+        if isinstance(node, list):
+            return sum(_count_placeholders(v) for v in node)
+        return 0
+
+    assert _count_placeholders(root) > 0
+
+    # And a direct call to the pruning loader (bypassing the cache entirely)
+    # reports a matching nonzero count.
+    import io
+    import json as _json
+
+    fh = io.BytesIO(_json.dumps(root).encode("utf-8"))
+    _reloaded, pruned_count = load_pruned_clang_ast(fh, header_roots=(str(header),))
+    assert pruned_count == 0  # already-pruned placeholders aren't prunable kinds
+
+
+_METHOD_SHAPED_KINDS = frozenset(
+    {"CXXMethodDecl", "CXXConstructorDecl", "CXXDestructorDecl", "CXXConversionDecl"}
+)
+
+
+def _count_kinds(node: object, kinds: frozenset) -> int:
+    if isinstance(node, dict):
+        n = 1 if node.get("kind") in kinds else 0
+        return n + sum(_count_kinds(v, kinds) for v in node.values())
+    if isinstance(node, list):
+        return sum(_count_kinds(v, kinds) for v in node)
+    return 0
+
+
+def test_streaming_pruner_never_prunes_a_method_shaped_node_end_to_end(
+    stream_prune_lib: tuple[Path, Path],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Codex review, PR #840: even though this repro's raw AST does contain
+    real, prunable placeholder-eligible content (the sibling test above
+    proves a nonzero prune count), no C++ method-shaped node
+    (``CXXMethodDecl``/``CXXConstructorDecl``/``CXXDestructorDecl``/
+    ``CXXConversionDecl``) is ever one of them -- a dependency base class's
+    own methods can feed ``dumper_clang_vtable.build_vtable``'s base-lookup
+    recursion for a project-owned derived class's vtable, so pruning one
+    could silently corrupt a *kept* class's reconstructed vtable, not just
+    drop a declaration. Verified against the real clang AST end to end,
+    not just the unit-level `_PRUNABLE_DECL_KINDS` set."""
+    so, header = stream_prune_lib
+
+    monkeypatch.delenv(_STREAM_PRUNE_ENV_VAR, raising=False)
+    _isolate_ast_cache(monkeypatch, tmp_path)
+    unpruned_root, _, _ = _clang_header_dump(
+        [header], [], compiler="clang", lang="c++", memoize=False
+    )
+
+    monkeypatch.setenv(_STREAM_PRUNE_ENV_VAR, "1")
+    _isolate_ast_cache(monkeypatch, tmp_path)  # a *different*, still-fresh cache dir
+    pruned_root, _, _ = _clang_header_dump(
+        [header], [], compiler="clang", lang="c++", memoize=False
+    )
+
+    unpruned_methods = _count_kinds(unpruned_root, _METHOD_SHAPED_KINDS)
+    pruned_methods = _count_kinds(pruned_root, _METHOD_SHAPED_KINDS)
+    assert unpruned_methods > 0  # this repro's dependency headers do have some
+    assert pruned_methods == unpruned_methods

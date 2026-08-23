@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from contextlib import nullcontext
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
 
@@ -43,6 +44,7 @@ from .cli_dump_depth import (
     resolve_dump_depth as resolve_dump_depth,
 )
 from .dumper import dump
+from .dumper_clang_streaming import suppress_streaming_prune
 from .dumper_scoping import dump_manifest_header_roots as _dump_manifest_header_roots
 from .errors import AbicheckError
 
@@ -1210,35 +1212,36 @@ def handle_non_elf_dump(
         # l3_effective_ctx` below hands the merged L3 context to service_
         # header_scoped._try_header_scoped_dump, which derives the identical
         # cache-relevant paths from those tokens itself (Codex review, PR D).
-        snap = dump_native_binary(
-            so_path,
-            binary_fmt,
-            list(headers),
-            list(eff_includes),
-            version,
-            lang,
-            lang_explicit=lang_explicit,
-            pdb_path=pdb_path,
-            public_headers=list(public_headers),
-            public_header_dirs=list(public_header_dirs),
-            header_backend=header_backend,
-            compile=l3_effective_ctx,
-            # Provenance widening gets ONLY the caller's own explicit -I
-            # list, never `eff_includes` -- see service.run_dump's own
-            # docstring note on `public_include_search_dirs` for why (same
-            # regression class the ELF perform_elf_dump path already avoids:
-            # an auto-derived umbrella-header directory can hold a
-            # genuinely private sibling header). A `--compiler-option
-            # -I<dir>` operand is exactly as explicit as a plain `-I` (see
-            # the identical rationale on the ELF `perform_elf_dump` path
-            # above) -- `compile_context` is never reassigned on this
-            # PE/Mach-O path, so its own `gcc_option_tokens` is already the
-            # caller's unmodified, explicit set (CodeRabbit review).
-            public_include_search_dirs=list(includes)
-            + list(
-                include_operand_dirs(getattr(compile_context, "gcc_option_tokens", ()))
-            ),
-        )
+        # `include_dependencies` (`--include-system-declarations`) suppresses
+        # the opt-in streaming pruner here too, same reason as the identical
+        # guard on `perform_elf_dump` above (Codex review, PR #840).
+        with suppress_streaming_prune() if include_dependencies else nullcontext():
+            snap = dump_native_binary(
+                so_path,
+                binary_fmt,
+                list(headers),
+                list(eff_includes),
+                version,
+                lang,
+                lang_explicit=lang_explicit,
+                pdb_path=pdb_path,
+                public_headers=list(public_headers),
+                public_header_dirs=list(public_header_dirs),
+                header_backend=header_backend,
+                compile=l3_effective_ctx,
+                # Provenance widening gets ONLY the caller's own explicit -I
+                # list, never `eff_includes` (same regression class the ELF
+                # `perform_elf_dump` path already avoids) -- `compile_context`
+                # is never reassigned on this PE/Mach-O path, so its own
+                # `gcc_option_tokens` is already the caller's unmodified,
+                # explicit set (CodeRabbit review).
+                public_include_search_dirs=list(includes)
+                + list(
+                    include_operand_dirs(
+                        getattr(compile_context, "gcc_option_tokens", ())
+                    )
+                ),
+            )
     # A ClickException already carries its user-facing message; it must reach
     # Click as itself rather than be re-wrapped by the handler below.
     except click.ClickException:  # pylint: disable=try-except-raise
@@ -1655,12 +1658,24 @@ def perform_elf_dump(
             deferred_dirs = deferred_dirs + l3_include_dirs
 
         # Scoped so a clang primary parse is handed off in-process to the
-        # `_attach_header_graph` pass below (G31 Phase C) -- this ELF `dump`
-        # CLI path reaches `dumper.dump` directly, not `service.run_dump`,
-        # so without its own scope here the primary parse is never memoized
-        # and the graph pass re-reads/re-parses the disk cache instead
-        # (Codex review).
-        with dumper_cache.ast_memoize_scope():
+        # `_attach_header_graph` pass below (Codex review) -- but only when
+        # that pass will actually run: it no-ops on `dwarf_only` and on
+        # empty `headers`, which `--dump-manifest` guarantees (mutually
+        # exclusive with `-H`). Opening it unconditionally would veto the
+        # opt-in streaming pruner for a manifest dump's own TU parses too
+        # whenever they share this thread (single TU / `ABICHECK_TU_JOBS=1`)
+        # -- protecting a memo nothing will ever read (Codex, PR #840).
+        # `include_dependencies` (`--include-system-declarations`) also
+        # suppresses that pruner here, for the same reason as the identical
+        # guard on `handle_non_elf_dump` (Codex, PR #840): it has no
+        # visibility into this flag on its own, and pruning happens well
+        # before `write_snapshot_output`'s post-hoc filter below.
+        with (
+            dumper_cache.ast_memoize_scope()
+            if headers and not dwarf_only
+            else nullcontext(),
+            suppress_streaming_prune() if include_dependencies else nullcontext(),
+        ):
             snap = dump(
                 so_path=so_path,
                 headers=resolved_headers,

@@ -36,7 +36,8 @@ from pathlib import Path
 from typing import Any
 
 from . import deadline
-from .dumper_cache import _atomic_copy, _atomic_write_json
+from .dumper_cache import _atomic_copy, _atomic_write_json, ast_memoize_active
+from .dumper_clang_streaming import load_pruned_clang_ast, streaming_prune_suppressed
 from .errors import SnapshotError
 from .sycl_context import decode_and_select_frontend_context_from_path
 
@@ -491,6 +492,96 @@ def run_clang_to_ast_file(
         )
 
 
+#: Opt-in env var enabling the streaming dependency-declaration pruner
+#: (:mod:`abicheck.dumper_clang_streaming`) for the plain (non-DPC++)
+#: ``json.load`` below. Off by default -- matches this codebase's existing
+#: convention for a real, tested, but not-yet-default-wired performance path
+#: (see ``ABICHECK_CLANG_LAYOUT_TOOL``/``ABICHECK_PARALLEL_EXTRACTION``).
+#:
+#: **Correctness, not just convenience (Codex review, PR #840):** this env
+#: var alone has no visibility into whether the *caller* wants a full,
+#: unscoped dump (``dump --include-system-declarations``, or any
+#: ``service.run_dump`` caller relying on its own ``include_dependencies=
+#: True`` default -- most callers other than ``compare``'s live-binary
+#: operand). Both of the choke points that *do* know that
+#: (``cli_dump_helpers.py``'s ``perform_elf_dump``/``handle_non_elf_dump``,
+#: and ``dumper_scoping.wrap_run_dump_with_dependency_scope``) wrap their own
+#: header-AST-parsing call in ``dumper_clang_streaming.
+#: suppress_streaming_prune()`` whenever a full/unscoped dump was requested,
+#: which this env-var check honors via ``streaming_prune_suppressed()``
+#: below -- so enabling this var can never silently drop a declaration an
+#: explicit or default full-scope request asked to keep.
+#: ``compat/cli.py``'s ABICC-compat dump and ``appcompat.check_appcompat``'s
+#: two dumps (Codex review, PR #840, thread bdSMk) call ``dumper.dump()``
+#: directly with no dependency-scope wrapper of their own at all -- fixed by
+#: wrapping both in ``suppress_streaming_prune()`` themselves, the same
+#: full/unscoped reasoning as the two choke points above, rather than
+#: teaching this module about a third caller shape.
+#:
+#: **A separate, still-open trade-off, not a bug (Codex review, PR #840,
+#: thread bdVPf):** the ``ast_memoize_active()`` check below (needed to
+#: prevent exactly the corruption described there) is active for the
+#: *entire* primary ELF/PE/Mach-O single-header dump call in
+#: ``perform_elf_dump``/``handle_non_elf_dump``/``service.run_dump`` --
+#: not only when ``_attach_header_graph`` will actually hit the in-process
+#: memo afterward -- because ``ast_memoize_scope()`` is opened unconditionally
+#: around that whole call (see its own docstring: "the one shape where
+#: ``_attach_header_graph`` really does follow and consume the memo").
+#: Concretely, this means the pruner never actually fires on that common
+#: single-header path, opt-in env var or not -- only on a
+#: ``--dump-manifest``-driven per-TU parse (``dumper_manifest.run_tu_fragment``,
+#: which has no per-TU memo handoff to protect) or a direct caller with no
+#: header-graph consumption. This is the sound side of a real trade-off, not
+#: an accidental over-broad gate: the memo hands its *exact* stored root to
+#: the graph consumer with no re-parse in between (see
+#: ``dumper_cache.load_cached_ast``'s slot-hit branch), so a pruned root
+#: written there would corrupt the graph regardless of anything this call
+#: itself does afterward -- there is no point in the primary call where
+#: "will the graph actually reuse this" is yet decidable. It also costs
+#: nothing measured: this module's own docstring already found single-header
+#: pruning a net *perf loss* on its own (``object_pairs_hook`` overhead
+#: exceeding the savings), independent of this gate, and this feature's
+#: actual target -- the whole-product/bundle-scan manifest path the original
+#: investigation was about -- is unaffected. A real fix would need the memo
+#: slot to record whether its stored root was pruned and have the graph
+#: consumer force a fresh, unpruned re-parse on a pruned hit instead of
+#: reusing it -- a real, if narrow, change to a shared primitive several
+#: other call sites already depend on, not attempted here given the above.
+STREAM_PRUNE_DEPENDENCY_DECLS_ENV_VAR = "ABICHECK_CLANG_PRUNE_DEPENDENCY_DECLS"
+
+
+def _streaming_prune_enabled() -> bool:
+    # `streaming_prune_suppressed()` wins regardless of the env var: it means
+    # the caller (cli_dump_helpers.py's perform_elf_dump/handle_non_elf_dump,
+    # or dumper_scoping.wrap_run_dump_with_dependency_scope) already knows
+    # this request wants the full, unscoped declaration set
+    # (`include_dependencies=True`) and has wrapped this call in
+    # `dumper_clang_streaming.suppress_streaming_prune()` accordingly -- see
+    # that context manager's own docstring for why an ambient signal, not a
+    # threaded parameter, is what closes this gap (Codex review, PR #840).
+    if streaming_prune_suppressed():
+        return False
+    # `ast_memoize_active()` (Codex review, PR #840): a parse running inside
+    # `dumper_cache.ast_memoize_scope()` is one whose result the in-process
+    # AST memo will hand off to a real downstream consumer afterward --
+    # today, always `service._attach_header_graph`'s always-on (G29 Phase A)
+    # semantic header-graph build, which walks the SAME raw AST dict
+    # directly (`buildsource.call_graph.parse_clang_ast_calls`) to pre-index
+    # every full FunctionDecl/CXXMethodDecl/... node by clang id and
+    # declaring file for call-graph edge resolution -- a placeholder this
+    # module already collapsed a dependency function/variable into loses
+    # exactly that identity/type/file information, degrading or dropping
+    # `DECL_CALLS_DECL` edges the graph is built to capture. Pruning during
+    # the primary pass is therefore unsafe whenever something else will
+    # reuse its output, not just unsafe for the primary pass's own model
+    # construction -- so this check must be independent of (and checked in
+    # addition to) `streaming_prune_suppressed()` above, which only covers
+    # the separate "full/unscoped dump requested" case.
+    if ast_memoize_active():
+        return False
+    return os.environ.get(STREAM_PRUNE_DEPENDENCY_DECLS_ENV_VAR, "").strip() == "1"
+
+
 def _parse_clang_ast_result(
     result: subprocess.CompletedProcess[str],
     cached: Path,
@@ -499,6 +590,7 @@ def _parse_clang_ast_result(
     cache_write: bool = True,
     dpcpp_capable: bool = False,
     frontend_context: str = "host",
+    header_roots: tuple[str, ...] = (),
 ) -> dict[str, Any]:
     """Validate a completed clang AST-dump, parse its JSON, and cache the tree.
 
@@ -562,9 +654,21 @@ def _parse_clang_ast_result(
         )
         root = selected.ast
     else:
+        prune_enabled = _streaming_prune_enabled()
         try:
             with open(ast_path, "rb") as fh:  # bytes: json detects encoding
-                root = json.load(fh)
+                if prune_enabled:
+                    root, pruned_count = load_pruned_clang_ast(
+                        fh, header_roots=header_roots
+                    )
+                    if pruned_count:
+                        log.debug(
+                            "streaming pruner collapsed %d dependency-header "
+                            "function/variable subtree(s) during clang AST parse",
+                            pruned_count,
+                        )
+                else:
+                    root = json.load(fh)
         except ValueError as exc:
             # "Extra data" means a second top-level JSON value follows the
             # first — a driver flag that runs more than one -cc1 pass for

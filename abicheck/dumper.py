@@ -37,7 +37,6 @@ if TYPE_CHECKING:
 from defusedxml import ElementTree as DefusedET
 
 from . import deadline, dumper_cache
-from ._compiler_options import split_gcc_options
 from .castxml_policy import evaluate_castxml_version
 from .dumper_ast_config import (
     _CPP_ONLY_PATTERNS as _CPP_ONLY_PATTERNS,
@@ -136,6 +135,7 @@ from .dumper_toolchain import (
     _ast_fallback_enabled as _ast_fallback_enabled,
     _auto_ast_fallback_eligible as _auto_ast_fallback_eligible,
     _castxml_available as _castxml_available,
+    _configured_target_triple as _configured_target_triple,
     _cplusplus_macro_for_standard as _cplusplus_macro_for_standard,
     _parser_ast_fallback_reason as _parser_ast_fallback_reason,
     _parser_ast_supported as _parser_ast_supported,
@@ -252,6 +252,7 @@ def _clang_header_dump(
     extra_hash_dirs: tuple[Path, ...] = (),
     frontend_context: str = "host",
     memoize: bool | None = None,
+    pruning_header_roots: tuple[str, ...] | None = None,
 ) -> tuple[dict[str, Any], str | None, bool]:
     """Run clang over *headers* and return ``(root, resolved_kind, resolved_force_cpp)``.
 
@@ -458,6 +459,7 @@ def _clang_header_dump(
             cache_write=identities_stable,
             dpcpp_capable=dpcpp_multi_context,
             frontend_context=frontend_context,
+            header_roots=pruning_header_roots if pruning_header_roots is not None else tuple(str(h) for h in headers),
         )
         if identities_stable and _memoize:
             dumper_cache.store_cached_ast(key, "clang", root)
@@ -573,25 +575,6 @@ def _castxml_fallback_reason(
     return "castxml-direct-include-guard"
 
 
-def _configured_target_triple(
-    gcc_options: str | None, gcc_option_tokens: tuple[str, ...], clang_bin: str
-) -> str | None:
-    """Return the target reported by configured Clang and its pass-through flags."""
-    cmd = [clang_bin, *split_gcc_options(gcc_options or ""), *gcc_option_tokens, "-print-target-triple"]
-    try:
-        result = subprocess.run(
-            cmd, capture_output=True, text=True, check=False, timeout=10
-        )
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        log.warning("Could not probe effective Clang target: %s", exc)
-        return None
-    if result.returncode:
-        log.warning("Could not probe effective Clang target: %s", result.stderr.strip())
-        return None
-    target = result.stdout.strip()
-    return target or None
-
-
 def _header_ast_parser(
     headers: list[Path],
     extra_includes: list[Path],
@@ -611,6 +594,7 @@ def _header_ast_parser(
     public_dir_paths: list[str],
     extra_hash_dirs: tuple[Path, ...] = (),
     frontend_context: str = "host",
+    pruning_header_roots: tuple[str, ...] | None = None,
 ) -> _CastxmlParser | _ClangAstParser:
     """Run the resolved L2 backend and return its CastXML/Clang parser.
 
@@ -665,6 +649,7 @@ def _header_ast_parser(
             lang=lang,
             extra_hash_dirs=extra_hash_dirs,
             frontend_context=frontend_context,
+            pruning_header_roots=pruning_header_roots if pruning_header_roots is not None else tuple(public_header_paths + public_dir_paths),
         )
         parser = _ClangAstParser(
             ast_root,

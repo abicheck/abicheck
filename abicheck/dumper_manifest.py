@@ -58,6 +58,10 @@ from typing import TYPE_CHECKING
 from . import deadline, process_resources
 from .dump_manifest import DumpManifest, IncludeEntry, TranslationUnit
 from .dumper_clang import _ClangAstParser
+from .dumper_clang_streaming import (
+    streaming_prune_suppressed,
+    suppress_streaming_prune,
+)
 from .dumper_toolchain import (
     _parser_ast_fallback_reason,
     _parser_ast_supported,
@@ -191,24 +195,49 @@ def run_tu_fragment(
     public_dir_paths: list[str],
     extra_hash_dirs: tuple[Path, ...] = (),
     frontend_context: str = "host",
+    pruning_header_roots: tuple[str, ...] | None = None,
 ) -> TuFragment:
     """Run one castxml/clang invocation for *tu* via *header_ast_parser*
     (``dumper._header_ast_parser``, injected -- see this module's own
     docstring) and normalize its output into a :class:`TuFragment`.
 
     *tu*'s own ``forced_includes`` become the parser's ``headers`` and its
-    own ``includes`` (just the resolved paths -- ``project_owned`` only
-    matters for :func:`abicheck.comparability.compute_extraction_contract`'s
-    ownership classification, not for the parse itself) become
-    ``extra_includes``. *public_header_paths*/*public_dir_paths* are the
-    manifest's own base-profile provenance inputs (``roots`` +
+    own ``includes`` (just the resolved paths) become ``extra_includes``.
+    *public_header_paths*/*public_dir_paths* are the manifest's own
+    base-profile provenance inputs (``roots`` +
     ``public_header_paths``/``public_header_dirs``), passed identically to
     every TU's call -- not derived per-TU from *tu*'s own
     ``forced_includes`` -- since a TU may force-include a private support
     header alongside a public one (:mod:`abicheck.dump_manifest`'s own
     docstring), so only the manifest's declared ``roots`` are the actual
     public surface, regardless of which TU happens to force-include them.
+
+    ``pruning_header_roots`` (Codex review, PR #840): the streaming pruner's
+    root set must match ``dumper_scoping.dump_manifest_header_roots``'s own
+    computation exactly, or it can misclassify (and permanently drop) a
+    declaration the authoritative post-hoc filter would have retained --
+    that function folds in *every* TU's ``forced_includes`` and
+    ``project_owned`` includes, not just this one TU's. When the caller
+    already knows the full manifest (``run_tu_loop``, the only real caller
+    with "other TUs" to union with), it computes that manifest-wide union
+    once and passes it in here directly, and it is used unchanged. Only
+    when no such value is given (``resolve_header_ast_result``'s legacy
+    single-TU call, which has no manifest to see beyond this one TU) does
+    this function fall back to reproducing just its own per-TU contribution
+    (this TU's own ``forced_includes`` + its own ``project_owned``-marked
+    ``includes``, folded with *public_header_paths*/*public_dir_paths*) --
+    correct for that caller since a lone TU has no sibling to omit.
     """
+    if pruning_header_roots is None:
+        pruning_header_roots = tuple(
+            str(p)
+            for p in (
+                *tu.forced_includes,
+                *(entry.path for entry in tu.includes if entry.project_owned),
+                *public_header_paths,
+                *public_dir_paths,
+            )
+        )
     parser = header_ast_parser(
         list(tu.forced_includes),
         [entry.path for entry in tu.includes],
@@ -227,6 +256,7 @@ def run_tu_fragment(
         public_dir_paths=public_dir_paths,
         extra_hash_dirs=extra_hash_dirs,
         frontend_context=frontend_context,
+        pruning_header_roots=pruning_header_roots,
     )
     return TuFragment(
         tu_name=tu.name,
@@ -267,6 +297,7 @@ def _run_tu_fragments(
     public_dir_paths: list[str],
     extra_hash_dirs: tuple[Path, ...],
     frontend_context: str = "host",
+    pruning_header_roots: tuple[str, ...] | None = None,
 ) -> list[TuFragment]:
     """Run :func:`run_tu_fragment` for every TU in *tus*, under a
     RAM-aware thread pool (ADR-050 D6, G32 Phase E) instead of a fully
@@ -324,6 +355,7 @@ def _run_tu_fragments(
             public_dir_paths=public_dir_paths,
             extra_hash_dirs=extra_hash_dirs,
             frontend_context=frontend_context,
+            pruning_header_roots=pruning_header_roots,
         )
 
     def _handle_failure(tu: TranslationUnit, exc: BaseException) -> None:
@@ -366,8 +398,21 @@ def _run_tu_fragments(
     # re-established inside each worker.
     deadline_ts = deadline.current_deadline_ts()
 
+    # Same contextvar-boundary problem, for a second ambient signal (Codex
+    # review, PR #840): `suppress_streaming_prune()` -- set around this
+    # whole call whenever a full/unscoped dump was requested -- would
+    # otherwise be invisible to a pooled worker thread, silently letting the
+    # opt-in streaming pruner drop dependency-header declarations a
+    # full-scope request explicitly asked to keep, exactly the bug this
+    # PR's own suppression mechanism exists to prevent. Captured once here
+    # and re-established inside each worker the same way.
+    prune_suppressed = streaming_prune_suppressed()
+
     def _run_one_with_deadline(tu: TranslationUnit) -> TuFragment:
         with deadline.with_deadline_ts(deadline_ts):
+            if prune_suppressed:
+                with suppress_streaming_prune():
+                    return _run_one(tu)
             return _run_one(tu)
 
     # Deliberately NOT a `with ThreadPoolExecutor(...) as pool:` block: that
@@ -476,6 +521,31 @@ def run_tu_loop(
     explicit_public_paths = [str(p) for p in public_header_paths]
     explicit_public_dirs = [str(d) for d in public_header_dirs]
 
+    # Codex review, PR #840: the streaming pruner's root set must match
+    # `dumper_scoping.dump_manifest_header_roots`'s own computation exactly
+    # -- the *manifest-wide* union across every TU's own `forced_includes`/
+    # `project_owned` includes, not just the one TU currently being parsed.
+    # A per-TU-only slice (this function's own siblings compute one, for
+    # the legacy single-TU call that has no "other TUs" to union with)
+    # misses a root a *different* TU declares ownership of -- e.g. a
+    # non-contributing support TU that owns a shared include directory --
+    # letting the current TU's own declaration under that same directory
+    # be misclassified as a dependency and permanently pruned, even though
+    # the authoritative post-hoc filter would retain it via the real union.
+    # Computed once here (this is the one place that sees every TU) and
+    # passed down unchanged to every TU's own `run_tu_fragment` call.
+    manifest_pruning_roots = tuple(
+        resolved_public_paths
+        + resolved_public_dirs
+        + [str(p) for tu in tus for p in tu.forced_includes]
+        + [
+            str(entry.path)
+            for tu in tus
+            for entry in tu.includes
+            if entry.project_owned
+        ]
+    )
+
     fragments = _run_tu_fragments(
         tus,
         header_ast_parser=header_ast_parser,
@@ -494,6 +564,7 @@ def run_tu_loop(
         public_dir_paths=resolved_public_dirs,
         extra_hash_dirs=extra_hash_dirs,
         frontend_context=frontend_context,
+        pruning_header_roots=manifest_pruning_roots,
     )
 
     # A `contributes_to_abi: false` TU exists purely to satisfy other TUs'

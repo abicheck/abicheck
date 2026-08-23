@@ -1139,6 +1139,87 @@ class TestFromHeadersProvenance:
             snap = dumper._dump_macho(dylib, [], [], "1.0", "c++")
         assert snap.from_headers is False
 
+    def test_pe_pruning_header_roots_includes_public_header_dirs(
+        self, tmp_path: Path
+    ) -> None:
+        """Codex review, PR #840: an ordinary (non-manifest) PE dump's real
+        clang invocation must receive `pruning_header_roots` folding in
+        `public_header_dirs` too, not just `headers` -- matching
+        `dumper_scoping.py`'s own wider post-hoc-filter root set -- or a
+        declaration reached only through a `public_header_dirs` root is
+        misclassified as a dependency and permanently pruned.
+        `_header_ast_parser` computes this internally (no explicit
+        `pruning_header_roots` passed by `_dump_pe`) when its own
+        `_clang_header_dump` call receives none, so this test observes the
+        effect at that call rather than at `_header_ast_parser`'s own args."""
+        from unittest.mock import MagicMock, patch
+
+        import abicheck.pe_metadata as _pe
+        from abicheck import dumper
+
+        dll = tmp_path / "foo.dll"
+        dll.write_bytes(b"MZ\x90\x00")
+        meta = MagicMock(exports=[MagicMock(name="Foo", ordinal=1)])
+        captured: dict[str, object] = {}
+
+        def _fake_clang_header_dump(*a, **k):
+            captured["pruning_header_roots"] = k.get("pruning_header_roots")
+            return {}, None, True
+
+        with (
+            patch.object(_pe, "parse_pe_metadata", return_value=meta),
+            patch.object(dumper, "_clang_header_dump", _fake_clang_header_dump),
+        ):
+            dumper._dump_pe(
+                dll,
+                [tmp_path / "h.h"],
+                [],
+                "1.0",
+                "c++",
+                header_backend="clang",
+                public_header_dirs=[tmp_path / "usr/include/mylib"],
+            )
+        roots = captured["pruning_header_roots"]
+        assert roots is not None
+        assert str(tmp_path / "h.h") in roots
+        assert str(tmp_path / "usr/include/mylib") in roots
+
+    def test_macho_pruning_header_roots_includes_public_header_dirs(
+        self, tmp_path: Path
+    ) -> None:
+        """Same contract as the PE test above, for Mach-O."""
+        from unittest.mock import MagicMock, patch
+
+        import abicheck.macho_metadata as _macho
+        from abicheck import dumper
+
+        dylib = tmp_path / "foo.dylib"
+        dylib.write_bytes(b"\xcf\xfa\xed\xfe")
+        meta = MagicMock(exports=[])
+        captured: dict[str, object] = {}
+
+        def _fake_clang_header_dump(*a, **k):
+            captured["pruning_header_roots"] = k.get("pruning_header_roots")
+            return {}, None, True
+
+        with (
+            patch.object(_macho, "parse_macho_metadata", return_value=meta),
+            patch.object(dumper, "_clang_header_dump", _fake_clang_header_dump),
+        ):
+            dumper._dump_macho(
+                dylib,
+                [tmp_path / "h.h"],
+                [],
+                "1.0",
+                "c++",
+                header_backend="clang",
+                public_header_dirs=[tmp_path / "usr/include/mylib"],
+            )
+        roots = captured["pruning_header_roots"]
+        assert roots is not None
+        assert str(tmp_path / "h.h") in roots
+        assert str(tmp_path / "usr/include/mylib") in roots
+
     def test_elf_with_headers_is_header_parsed(self, tmp_path: Path) -> None:
         from unittest.mock import patch
 

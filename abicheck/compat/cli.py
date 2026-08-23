@@ -33,6 +33,7 @@ import click
 
 from ..checker import compare
 from ..dumper import dump
+from ..dumper_clang_streaming import suppress_streaming_prune
 from ..errors import ProfileMismatchError, ScopeMismatchError, SnapshotError
 from ..html_report import write_html_report
 from ..reporter import to_json, to_markdown
@@ -310,17 +311,20 @@ def compat_dump_cmd(
         sys.exit(2)
 
     try:
-        snap = dump(
-            so_path,
-            headers=desc.headers,
-            version=desc.version,
-            gcc_path=gcc_path,
-            gcc_prefix=gcc_prefix,
-            gcc_options=gcc_options,
-            sysroot=sysroot,
-            nostdinc=nostdinc,
-            lang=lang,
-        )
+        # No dependency-scope wrapper downstream here either (Codex review,
+        # PR #840) -- same reasoning as _snapshot_from_compat_input's call.
+        with suppress_streaming_prune():
+            snap = dump(
+                so_path,
+                headers=desc.headers,
+                version=desc.version,
+                gcc_path=gcc_path,
+                gcc_prefix=gcc_prefix,
+                gcc_options=gcc_options,
+                sysroot=sysroot,
+                nostdinc=nostdinc,
+                lang=lang,
+            )
     except Exception as exc:  # noqa: BLE001
         _compat_fail("during dump", exc)
 
@@ -1151,17 +1155,26 @@ def _snapshot_from_compat_input(
         _compat_fail(
             "accessing input files", FileNotFoundError(f"library not found: {so}")
         )
-    snap = dump(
-        so,
-        headers=hdrs,
-        version=desc.version,
-        gcc_path=gcc_path,
-        gcc_prefix=gcc_prefix,
-        gcc_options=gcc_options,
-        sysroot=sysroot,
-        nostdinc=nostdinc,
-        lang=lang,
-    )
+    # This ABICC-compat dump has no post-hoc dependency-scope filter applied
+    # anywhere downstream (unlike `service.run_dump`'s
+    # `wrap_run_dump_with_dependency_scope`/`compare`'s implicit-dump
+    # operand) -- it's a raw, full-surface dump used directly for descriptor
+    # comparison, so the opt-in streaming pruner (which assumes an
+    # authoritative post-hoc filter will retain what it doesn't prune) must
+    # be suppressed here the same way a full/unscoped request is elsewhere
+    # (Codex review, PR #840, thread bdSMk).
+    with suppress_streaming_prune():
+        snap = dump(
+            so,
+            headers=hdrs,
+            version=desc.version,
+            gcc_path=gcc_path,
+            gcc_prefix=gcc_prefix,
+            gcc_options=gcc_options,
+            sysroot=sysroot,
+            nostdinc=nostdinc,
+            lang=lang,
+        )
     return snap, desc.version
 
 

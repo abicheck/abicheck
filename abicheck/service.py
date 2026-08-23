@@ -28,6 +28,7 @@ import functools
 import hashlib
 import importlib as _importlib
 import logging
+from contextlib import nullcontext
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -788,9 +789,20 @@ def _run_dump_uncached(
         )
 
     if binary_fmt == "elf":
-        # See the hybrid-path scope above: _attach_header_graph below is a
-        # real downstream consumer of this primary pass's AST.
-        with dumper_cache.ast_memoize_scope():
+        # See the hybrid-path scope above -- but only worth opening when
+        # _attach_header_graph below will actually run: it no-ops on
+        # `_skip_header_graph_attach`/`dwarf_only`/`symbols_only` and on
+        # empty `_headers`, which `dump_manifest` guarantees (mutually
+        # exclusive with `headers`, api_types.py). Opening it unconditionally
+        # would veto the opt-in streaming pruner for a manifest dump's own
+        # TU parses too whenever they share this thread (single TU /
+        # `ABICHECK_TU_JOBS=1`) -- protecting a memo nothing will ever read
+        # (Codex review, PR #840).
+        with (
+            dumper_cache.ast_memoize_scope()
+            if _headers and not _skip_header_graph_attach and not dwarf_only and not symbols_only
+            else nullcontext()
+        ):
             snap = _dump_elf(
                 path,
                 _headers,
@@ -1077,6 +1089,7 @@ def _attach_header_graph(
     )
     from .buildsource.pack import BuildSourcePack
     from .dumper import _clang_header_dump, _resolve_clang_bin
+    from .dumper_clang_streaming import suppress_streaming_prune
 
     cc = compile if compile is not None else CompileContext()
     # Case-insensitive, None-safe: PE/Mach-O's own main pass
@@ -1138,26 +1151,39 @@ def _attach_header_graph(
         # declarations with host-only call/type/include edges, feeding
         # crosschecks/diff_source_graph_findings a graph incoherent with
         # what it's describing.
-        ast_root, _resolved_kind, _resolved_force_cpp = _clang_header_dump(
-            resolved_headers,
-            eff_includes,
-            compiler="cc" if _is_c else "c++",
-            gcc_path=cc.gcc_path,
-            gcc_prefix=cc.gcc_prefix,
-            gcc_options=cc.gcc_options,
-            gcc_option_tokens=eff_tokens,
-            sysroot=cc.sysroot,
-            nostdinc=cc.nostdinc,
-            lang=lang,
-            extra_hash_dirs=deferred_dirs,
-            frontend_context=cc.frontend_context,
-            # This is the *final* consumer of this AST -- writing it into
-            # the in-process memo here would have no further same-process
-            # reader to hand off to (Codex review). A memo entry the
-            # primary snapshot pass already wrote is still read (and
-            # popped) above; only the write-back on a miss is suppressed.
-            memoize=False,
-        )
+        #
+        # `suppress_streaming_prune()` (Codex review, PR #840): this call is
+        # a real downstream consumer of the raw AST dict, not just a
+        # dependency-filtered snapshot -- `buildsource.call_graph.
+        # parse_clang_ast_calls` walks it directly to pre-index every full
+        # FunctionDecl/CXXMethodDecl/... node by clang id and declaring file
+        # for call-graph edge resolution, so a placeholder the opt-in
+        # streaming pruner already collapsed a node into would degrade or
+        # drop `DECL_CALLS_DECL` edges. This covers the genuinely-separate-
+        # parse case (a memo-hit is separately covered by
+        # `_streaming_prune_enabled()`'s own `ast_memoize_active()` check,
+        # which applies to the *primary* pass this memo entry came from).
+        with suppress_streaming_prune():
+            ast_root, _resolved_kind, _resolved_force_cpp = _clang_header_dump(
+                resolved_headers,
+                eff_includes,
+                compiler="cc" if _is_c else "c++",
+                gcc_path=cc.gcc_path,
+                gcc_prefix=cc.gcc_prefix,
+                gcc_options=cc.gcc_options,
+                gcc_option_tokens=eff_tokens,
+                sysroot=cc.sysroot,
+                nostdinc=cc.nostdinc,
+                lang=lang,
+                extra_hash_dirs=deferred_dirs,
+                frontend_context=cc.frontend_context,
+                # This is the *final* consumer of this AST -- writing it into
+                # the in-process memo here would have no further same-process
+                # reader to hand off to (Codex review). A memo entry the
+                # primary snapshot pass already wrote is still read (and
+                # popped) above; only the write-back on a miss is suppressed.
+                memoize=False,
+            )
     except (SnapshotError, ValidationError):
         ast_root = None
     graph = build_header_only_graph(
