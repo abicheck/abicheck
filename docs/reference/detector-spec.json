@@ -268,7 +268,7 @@
       "category": "risk",
       "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
-      "min_evidence": "unspecified",
+      "min_evidence": "L0",
       "doc_slug": "bundle_variant_coverage_regressed",
       "examples": ""
     },

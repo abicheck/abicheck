@@ -35,7 +35,7 @@ One row per `ChangeKind` (396 total). Columns fuse the verdict partition (`check
 | `bundle_provider_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L0 | `bundle_provider_changed` | — |
 | `bundle_soname_skew` | breaking | `BREAKING` | `error` | L0 | `bundle_soname_skew` | — |
 | `bundle_unresolved_intra_dependency` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L0 | `bundle_unresolved_intra_dependency` | — |
-| `bundle_variant_coverage_regressed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `bundle_variant_coverage_regressed` | — |
+| `bundle_variant_coverage_regressed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L0 | `bundle_variant_coverage_regressed` | — |
 | `call_graph_public_entry_reachability_changed` | quality | `COMPATIBLE` | `warning` | unspecified | `call_graph_public_entry_reachability_changed` | — |
 | `calling_convention_changed` | breaking | `BREAKING` | `error` | L1 | `calling_convention_changed` | [case64](examples/case64_calling_convention_changed.md) |
 | `cet_protection_improved` | quality | `COMPATIBLE` | `warning` | L0 | `cet_protection_improved` | — |
