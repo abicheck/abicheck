@@ -318,6 +318,73 @@ class TestResolveInput:
         args, _ = mock_attach.call_args
         assert args[5] == "c"
 
+    def test_elf_forwards_explicit_public_include_search_dirs_to_dump_elf(
+        self, tmp_path
+    ):
+        """Codex review, fresh evidence: `_run_dump_uncached()` computed
+        `_public_include_search_dirs` (falling back to the possibly-widened
+        `_includes` only when the caller didn't distinguish the two) but
+        never forwarded it into its own `_dump_elf()` call, which
+        independently re-derived provenance widening from its own
+        `includes` parameter -- silently reintroducing the exact
+        already-widened-includes regression this whole parameter exists to
+        prevent, just one call layer up."""
+        p = tmp_path / "lib.so"
+        p.write_bytes(b"\x7fELF" + b"\x00" * 100)
+        header = tmp_path / "api.h"
+        header.write_text("void f();\n")
+        widened_dir = tmp_path / "widened"
+        explicit_dir = tmp_path / "explicit"
+        snap = AbiSnapshot(library="test", version="1.0")
+        with (
+            patch("abicheck.service._dump_elf", return_value=snap) as mock_dump_elf,
+            patch("abicheck.service._attach_header_graph", return_value=snap),
+        ):
+            run_dump(
+                p,
+                "elf",
+                headers=[header],
+                includes=[widened_dir],
+                lang="c++",
+                public_include_search_dirs=[explicit_dir],
+            )
+        passed = mock_dump_elf.call_args.kwargs["public_include_search_dirs"]
+        assert passed == [explicit_dir]
+        assert widened_dir not in passed
+
+    def test_elf_forwards_explicit_public_include_search_dirs_to_header_graph(
+        self, tmp_path
+    ):
+        """Same finding, the header-graph-attach half: the ELF branch's own
+        `_attach_header_graph` call used `_includes` (possibly widened)
+        for `include_search_dirs` instead of `_public_include_search_dirs`
+        -- disagreeing with the primary parse's own declaration-provenance
+        classification just fixed above (Codex review, fresh evidence)."""
+        p = tmp_path / "lib.so"
+        p.write_bytes(b"\x7fELF" + b"\x00" * 100)
+        header = tmp_path / "api.h"
+        header.write_text("void f();\n")
+        widened_dir = tmp_path / "widened"
+        explicit_dir = tmp_path / "explicit"
+        snap = AbiSnapshot(library="test", version="1.0")
+        with (
+            patch("abicheck.service._dump_elf", return_value=snap),
+            patch(
+                "abicheck.service._attach_header_graph", return_value=snap
+            ) as mock_attach,
+        ):
+            run_dump(
+                p,
+                "elf",
+                headers=[header],
+                includes=[widened_dir],
+                lang="c++",
+                public_include_search_dirs=[explicit_dir],
+            )
+        passed = mock_attach.call_args.kwargs["include_search_dirs"]
+        assert passed == [explicit_dir]
+        assert widened_dir not in passed
+
     def test_header_graph_lang_matches_pe_main_pass_normalization(self, tmp_path):
         """Codex review (second pass): PE/Mach-O's own main pass, reached via
         ``service_header_scoped._try_header_scoped_dump`` whenever headers
@@ -1070,6 +1137,60 @@ class TestDumpElf:
         with patch("abicheck.dumper.dump", return_value=snap) as mock:
             _dump_elf(p, [header], [], "1.0", "c++", compile=cc)
         assert build_inc in mock.call_args.kwargs["extra_hash_dirs"]
+
+    def test_public_include_search_dirs_used_over_widened_includes(self, tmp_path):
+        """Codex review, fresh evidence: this function's own internal
+        dump() call previously derived provenance widening from its own
+        `includes` parameter directly -- but by the time `includes` reaches
+        this function, it can already be build/source-evidence-widened by
+        an upstream caller (`_run_dump_uncached`'s own `_seeded_includes_
+        and_compile_context`-style seeding), so using it directly risked
+        promoting a private sibling header under a build-derived directory
+        to PUBLIC_HEADER. A caller that threads the genuinely explicit list
+        separately via `public_include_search_dirs` must have THAT list
+        reach dump(), not the (possibly wider) `includes`."""
+        from abicheck.service import _dump_elf
+
+        p = tmp_path / "lib.so"
+        p.write_bytes(b"\x7fELF" + b"\x00" * 100)
+        header = tmp_path / "pub.h"
+        header.write_text("int f(void);\n")
+        widened_dir = tmp_path / "widened"
+        widened_dir.mkdir()
+        explicit_dir = tmp_path / "explicit"
+        explicit_dir.mkdir()
+        snap = AbiSnapshot(library="t", version="1.0")
+        with patch("abicheck.dumper.dump", return_value=snap) as mock:
+            _dump_elf(
+                p,
+                [header],
+                [widened_dir],
+                "1.0",
+                "c++",
+                public_include_search_dirs=[explicit_dir],
+            )
+        passed = mock.call_args.kwargs["public_include_search_dirs"]
+        assert passed == [explicit_dir]
+        assert widened_dir not in passed
+
+    def test_public_include_search_dirs_falls_back_to_includes_when_omitted(
+        self, tmp_path
+    ):
+        """Backward-compatible default (Codex review): a caller that hasn't
+        been updated to distinguish the two still gets today's unchanged
+        behavior -- `includes` itself is used."""
+        from abicheck.service import _dump_elf
+
+        p = tmp_path / "lib.so"
+        p.write_bytes(b"\x7fELF" + b"\x00" * 100)
+        header = tmp_path / "pub.h"
+        header.write_text("int f(void);\n")
+        inc = tmp_path / "inc"
+        inc.mkdir()
+        snap = AbiSnapshot(library="t", version="1.0")
+        with patch("abicheck.dumper.dump", return_value=snap) as mock:
+            _dump_elf(p, [header], [inc], "1.0", "c++")
+        assert mock.call_args.kwargs["public_include_search_dirs"] == [inc]
 
     def test_implicit_root_defers_to_isystem_build_context(self, tmp_path):
         # Codex: when the caller's CompileContext supplies includes via -isystem,

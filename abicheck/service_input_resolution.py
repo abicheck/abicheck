@@ -48,6 +48,7 @@ from typing import TYPE_CHECKING
 from .artifact_plan import ResolvedArtifactPlan
 from .errors import SnapshotError, ValidationError
 from .header_conditionals import attach_build_context_for_parsed_headers
+from .header_utils import include_operand_dirs
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -793,8 +794,29 @@ def _resolve_side_snapshot_impl(
                 # already-widened `includes` local -- same regression class
                 # the ELF/PE/Mach-O CLI resolvers already avoid (Codex
                 # review, round 13): an auto-derived seed directory can hold
-                # a genuinely private sibling header.
-                public_include_search_dirs=list(side.includes),
+                # a genuinely private sibling header. A `--compiler-option`/
+                # `InputSpec.compile.gcc_option_tokens` include-search
+                # operand is exactly as explicit as `side.includes` (Codex
+                # review, fresh evidence) -- sourced from `side.compile`,
+                # this side's pre-fold caller-supplied CompileContext (never
+                # `compile_ctx`, the L3-folded result, same distinction the
+                # ADR-039 collector call below already draws). Suppressed
+                # entirely for a manifest dump: `side.compile`'s tokens are
+                # global, applied to every TU regardless of the manifest,
+                # and `dump()`'s own manifest mutual-exclusivity check
+                # rejects any non-empty `public_include_search_dirs` -- see
+                # the identical fix/reasoning in `cli_dump_helpers.
+                # perform_elf_dump`.
+                public_include_search_dirs=(
+                    None
+                    if evidence.dump_manifest is not None
+                    else list(side.includes)
+                    + list(
+                        include_operand_dirs(
+                            side.compile.gcc_option_tokens if side.compile else ()
+                        )
+                    )
+                ),
             )
         finally:
             _artifact_plan.run_cleanups()

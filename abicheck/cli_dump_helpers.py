@@ -1695,8 +1695,21 @@ def perform_elf_dump(
                 # captured before the L3 fold may have merged in derived
                 # ones the caller never wrote) rather than the possibly
                 # L3-augmented `gcc_option_tokens` local (CodeRabbit review).
-                public_include_search_dirs=list(includes)
-                + list(include_operand_dirs(_user_gcc_option_tokens)),
+                # Suppressed entirely for a manifest dump (Codex review,
+                # fresh evidence): `--compiler-option` is a *global* flag
+                # applied to every TU regardless of the manifest, and
+                # `dump()`'s own manifest mutual-exclusivity check rejects
+                # any non-empty `public_include_search_dirs` -- computing
+                # one here would turn a previously-working
+                # `--dump-manifest` + `--compiler-option -I<dir>`
+                # combination into a usage error. `gcc_option_tokens` below
+                # still carries the option through to every TU's parse,
+                # unaffected.
+                public_include_search_dirs=(
+                    None
+                    if dump_manifest is not None
+                    else list(includes) + list(include_operand_dirs(_user_gcc_option_tokens))
+                ),
                 version=version,
                 compiler=compiler,
                 gcc_path=gcc_path,
