@@ -42,6 +42,7 @@ from .model import (
     Variable,
     Visibility,
 )
+from .name_classification import strip_anonymous_type_location
 from .provenance import build_public_set, classify_origin, header_from_location
 
 #: Base names of semantic contract / calling-convention attributes worth
@@ -458,7 +459,8 @@ class _CastxmlParser:
             # "ElaboratedType").
             return self._type_name(el.get("type", ""), depth + 1)
         if tag in ("Struct", "Class", "Union"):
-            return el.get("name", "?")
+            # See strip_anonymous_type_location's docstring.
+            return strip_anonymous_type_location(el.get("name", "?"))
         if tag == "Typedef":
             return el.get("name", "?")
         if tag == "ArrayType":
@@ -1484,7 +1486,7 @@ class _CastxmlParser:
     def _build_record_type(
         self, el: Any, override_name: str | None = None
     ) -> RecordType:
-        name = override_name or el.get("name", "")
+        name = strip_anonymous_type_location(override_name or el.get("name", ""))
         is_opaque = el.get("incomplete") == "1"
         vtable = [] if is_opaque else self._build_vtable(el.get("id", ""))
         # Best-effort layout descriptor (layout-closure work). Direct (non-virtual)
@@ -1891,7 +1893,7 @@ class _CastxmlParser:
     def parse_enums(self) -> list[EnumType]:
         enums = []
         for el in self._enum_els:
-            name = el.get("name", "")
+            name = strip_anonymous_type_location(el.get("name", ""))
             if not name or name.startswith("__"):
                 continue
             if self._is_builtin_element(el):

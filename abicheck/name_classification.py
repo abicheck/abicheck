@@ -549,6 +549,35 @@ _PTR_REF_SIGIL_RE = re.compile(r"\s*([*&])\s*")
 _ANON_TYPE_LOCATION_RE = re.compile(r"\bat\s+\S+:\d+:\d+(?=\s*\))")
 
 
+def strip_anonymous_type_location(name: str) -> str:
+    """Strip an embedded ``at <path>:<line>:<col>`` out of an anonymous-tag
+    or lambda-closure type spelling (``"(unnamed struct at /a/foo.h:56:5)"``,
+    ``"raii_guard<(lambda at /a/foo.h:4:37)>"``), leaving just the
+    "this is anonymous"/"this is a lambda" marker.
+
+    A leaf of :func:`canonicalize_type_name` (which additionally normalizes
+    whitespace, elaborated-type-specifier prefixes, and const/pointer
+    spelling — none of which apply to a raw declaration name) so a producer
+    can strip *just* the location at the point a type's own identity
+    (``RecordType.name``/``.qualified_name``, ``EnumType.name``) is
+    extracted, rather than leaving the raw, location-bearing spelling to
+    flow into old/new type matching (``diff_helpers.type_map_key``) and
+    manufacture a spurious ``type_removed``/``type_added`` pair for two
+    build trees of the identical declaration under different checkout
+    paths. Both header-mode dumpers should apply this at extraction time;
+    :func:`canonicalize_type_name` remains the right tool for a downstream
+    *comparison* that only has the raw spelling to work with.
+    """
+    stripped = _ANON_TYPE_LOCATION_RE.sub("", name)
+    # Clean up what stripping the location leaves behind: a run of
+    # whitespace where "at ..." used to sit, and — since the regex's
+    # lookahead only matches immediately before a closing paren — a lone
+    # leftover space directly before that paren ("(lambda )" -> "(lambda)"),
+    # mirroring canonicalize_type_name's own post-strip cleanup.
+    stripped = _MULTI_SPACE_RE.sub(" ", stripped).replace(" )", ")")
+    return stripped.strip()
+
+
 def canonicalize_type_name(name: str) -> str:
     """Normalise a C/C++ type name for comparison.
 
