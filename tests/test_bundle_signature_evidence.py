@@ -121,6 +121,7 @@ class TestFindUnverifiedSignatureFindings:
         assert f.consumer_library == "libconsumer.so"
         assert f.provider_library == "libcore.so"
         assert f.affected_libraries == ["libconsumer.so"]
+        assert "neither side has" in f.description
 
     def test_no_finding_when_evidence_sufficient_both_sides(self):
         new = _snapshot(
@@ -156,6 +157,32 @@ class TestFindUnverifiedSignatureFindings:
 
         findings = find_unverified_signature_findings(new, [], old_snaps, new_snaps)
         assert len(findings) == 1
+        # The description must name which side actually lacks evidence
+        # (old, here) rather than overclaiming "neither side" when the new
+        # side is in fact fully evidenced.
+        assert "old side lacks" in findings[0].description
+        assert "neither side" not in findings[0].description
+
+    def test_no_finding_when_new_side_insufficient(self):
+        # Mirror of the above with the deficient side flipped: sufficient
+        # evidence on old, ELF-only on new.
+        new = _snapshot(
+            {
+                "libcore.so": _meta(exports=["core_fn"]),
+                "libconsumer.so": _meta(imports=["core_fn"]),
+            }
+        )
+        old_snaps = {
+            "libcore.so": _snap("libcore.so", functions=[_evidenced_fn("core_fn")])
+        }
+        new_snaps = {
+            "libcore.so": _snap("libcore.so", functions=[_elf_only_fn("core_fn")])
+        }
+
+        findings = find_unverified_signature_findings(new, [], old_snaps, new_snaps)
+        assert len(findings) == 1
+        assert "new side lacks" in findings[0].description
+        assert "neither side" not in findings[0].description
 
     def test_no_finding_when_no_consumer(self):
         new = _snapshot({"libcore.so": _meta(exports=["core_fn"])})

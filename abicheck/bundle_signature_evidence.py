@@ -205,10 +205,17 @@ def find_unverified_signature_findings(
             ):
                 continue
 
-            if _symbol_evidence_sufficient(
-                symbol, old_snap
-            ) and _symbol_evidence_sufficient(symbol, new_snap):
+            old_sufficient = _symbol_evidence_sufficient(symbol, old_snap)
+            new_sufficient = _symbol_evidence_sufficient(symbol, new_snap)
+            if old_sufficient and new_sufficient:
                 continue
+
+            if not old_sufficient and not new_sufficient:
+                evidence_gap = "neither side has"
+            elif not old_sufficient:
+                evidence_gap = "the old side lacks"
+            else:
+                evidence_gap = "the new side lacks"
 
             for consumer_lib in consumer_libs:
                 key = (consumer_lib, provider_lib, symbol)
@@ -222,7 +229,7 @@ def find_unverified_signature_findings(
                         description=(
                             f"{consumer_lib} calls {symbol} (mangled name "
                             f"unchanged), which {provider_lib} still exports "
-                            f"by that name -- but neither side has real "
+                            f"by that name -- but {evidence_gap} real "
                             f"DWARF/header type evidence for this symbol, so "
                             f"whether the calling convention actually still "
                             f"agrees cannot be confirmed or denied."
