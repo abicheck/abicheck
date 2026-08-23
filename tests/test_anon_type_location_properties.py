@@ -38,13 +38,19 @@ pytestmark = pytest.mark.slow
 
 # Path text: printable characters INCLUDING spaces and ")" (the two
 # character classes the \S+? and [^)]*? regressions each missed in turn) but
-# excluding ":" so the generated path can never accidentally assemble
-# something that looks like a second, competing "at ...:line:col)" match.
+# excluding ":" and "/" so the generated path can never accidentally
+# assemble something that looks like a second, competing "at
+# ...:line:col)" match, and so it stays a pure basename (no directory
+# separator of its own) when used as one below.
 _PATH_CHARS = st.characters(
     whitelist_categories=("Lu", "Ll", "Nd"),
-    whitelist_characters=" /_.-\\()",
+    whitelist_characters=" _.-\\()",
 )
 _PATH = st.text(alphabet=_PATH_CHARS, min_size=1, max_size=40)
+#: A checkout-root prefix -- deliberately excludes "/" too, joined onto a
+#: basename with an explicit "/" below, so root text can never itself
+#: masquerade as an extra path segment/basename of its own.
+_ROOT = st.text(alphabet=_PATH_CHARS, min_size=0, max_size=30)
 _LINE_COL = st.tuples(
     st.integers(min_value=0, max_value=99999), st.integers(min_value=0, max_value=999)
 )
@@ -56,26 +62,58 @@ def _spelling(kind: str, path: str, line: int, col: int) -> str:
     return f"prefix<({marker} at {path}:{line}:{col})>"
 
 
-@given(kind=_KIND, path_a=_PATH, path_b=_PATH, line_col=_LINE_COL)
+def _rooted_path(root: str, basename: str) -> str:
+    return f"{root}/{basename}" if root else basename
+
+
+@given(kind=_KIND, root_a=_ROOT, root_b=_ROOT, basename=_PATH, line_col=_LINE_COL)
 @settings(max_examples=300)
-def test_same_declaration_different_checkout_paths_match(
-    kind: str, path_a: str, path_b: str, line_col: tuple[int, int]
+def test_same_declaration_different_checkout_roots_match(
+    kind: str, root_a: str, root_b: str, basename: str, line_col: tuple[int, int]
 ) -> None:
     """The actual bug this whole function exists to fix, as a property: the
-    SAME declaration (same kind, same :line:col) compiled from two
-    DIFFERENT checkout paths -- including a path containing spaces or a
-    literal ")", the two character classes the \\S+? -> [^)]*? -> .*?
-    fixes each restore support for in turn -- must strip down to the
-    identical identity, regardless of what either path contains. Stronger
-    than (and replaces) a plain "doesn't contain the injected path" check:
-    that check is vulnerable to a generated path coincidentally colliding
-    with the fixed template text around it (e.g. a single-character path
-    "x" trivially substring-matching "prefix"), whereas this formulation
-    only compares two independently-generated outputs against each other."""
+    SAME declaration (same kind, same basename, same :line:col) compiled
+    from two DIFFERENT checkout roots -- including a root containing
+    spaces or a literal ")", the two character classes the \\S+? ->
+    [^)]*? -> .*? fixes each restore support for in turn -- must strip
+    down to the identical identity, regardless of what either root
+    contains. Only the checkout-dependent ROOT varies here; the
+    declaring header's own basename (now part of the identity, round 8)
+    is held fixed, since that's the actual same-file-different-checkout
+    scenario this function exists to normalize -- see the sibling
+    ``test_different_headers_same_position_stay_distinct`` for the
+    complementary case where the basename itself differs."""
     line, col = line_col
-    a = strip_anonymous_type_location(_spelling(kind, path_a, line, col))
-    b = strip_anonymous_type_location(_spelling(kind, path_b, line, col))
+    a = strip_anonymous_type_location(
+        _spelling(kind, _rooted_path(root_a, basename), line, col)
+    )
+    b = strip_anonymous_type_location(
+        _spelling(kind, _rooted_path(root_b, basename), line, col)
+    )
     assert a == b
+
+
+@given(
+    kind=_KIND,
+    basename_a=_PATH,
+    basename_b=_PATH,
+    line_col=_LINE_COL,
+)
+@settings(max_examples=300)
+def test_different_headers_same_position_stay_distinct(
+    kind: str, basename_a: str, basename_b: str, line_col: tuple[int, int]
+) -> None:
+    """Round-8 review finding, as a property: two declarations of the same
+    kind at the IDENTICAL :line:col but in two DIFFERENTLY-NAMED headers
+    must never strip down to the same identity -- :line:col alone cannot
+    tell them apart, since two distinct files can each legitimately
+    declare their own anonymous/lambda type at the same coordinates."""
+    if basename_a == basename_b:
+        return  # not the case under test
+    line, col = line_col
+    a = strip_anonymous_type_location(_spelling(kind, basename_a, line, col))
+    b = strip_anonymous_type_location(_spelling(kind, basename_b, line, col))
+    assert a != b
 
 
 @given(

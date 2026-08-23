@@ -579,16 +579,37 @@ _ANON_TYPE_LOCATION_RE = re.compile(r"\bat\s+\S+:\d+:\d+(?=\s*\))")
 #: past instance of exactly this over-broad-collision failure mode, fixed
 #: two rounds ago, since fixed generically here at the regex level instead).
 _ANON_TYPE_LOCATION_PATH_ONLY_RE = re.compile(
-    r"(\((?:lambda|unnamed\s+\w+))\s+at\s+.*?(:\d+:\d+)(?=\s*\))"
+    r"(\((?:lambda|unnamed\s+\w+))\s+at\s+(.*?)(:\d+:\d+)(?=\s*\))"
 )
 
 
+def _declaring_header_discriminator(path: str) -> str:
+    """Checkout-independent discriminator derived from *path*'s own
+    basename (the declaring header's filename), used alongside
+    ``:<line>:<col>`` to distinguish two anonymous/lambda declarations that
+    share the same coordinates but live in DIFFERENT headers (Codex
+    review, round 8, fresh evidence): keeping only ``:<line>:<col>``
+    collapsed ``guard<(lambda at /src/one.hpp:4:3)>`` and ``guard<(lambda
+    at /src/two.hpp:4:3)>`` onto the identical identity
+    ``guard<(lambda:4:3)>``, since both files can legitimately declare
+    their own lambda at line 4, column 3. The basename alone (not the full
+    path, which embeds the checkout root) is stable across checkouts of
+    the same source tree while still separating two distinctly-named
+    headers -- the only residual collision is two DIFFERENT headers
+    sharing both a basename AND the same line:col, an accepted, narrower
+    limitation than the pre-fix "any two headers" collision.
+    """
+    posix = path.replace("\\", "/")
+    return posix.rsplit("/", 1)[-1]
+
+
 def strip_anonymous_type_location(name: str) -> str:
-    """Strip the checkout-dependent *path* out of an embedded ``at
+    """Strip the checkout-dependent *directory* out of an embedded ``at
     <path>:<line>:<col>`` in an anonymous-tag or lambda-closure type
     spelling (``"(unnamed struct at /a/foo.h:56:5)"``, ``"raii_guard<(lambda
-    at /a/foo.h:4:37)>"``), while keeping its ``:<line>:<col>`` as a
-    discriminator (``"(unnamed struct:56:5)"``, ``"raii_guard<(lambda:4:37)>"``).
+    at /a/foo.h:4:37)>"``), while keeping the declaring header's own
+    basename plus its ``:<line>:<col>`` as a discriminator
+    (``"(unnamed struct:foo.h:56:5)"``, ``"raii_guard<(lambda:foo.h:4:37)>"``).
 
     A leaf of :func:`canonicalize_type_name` (which additionally normalizes
     whitespace, elaborated-type-specifier prefixes, and const/pointer
@@ -646,8 +667,24 @@ def strip_anonymous_type_location(name: str) -> str:
     anchored and captures its own marker, so the substitution itself never
     introduces stray whitespace to clean up -- nothing here needs
     collapsing, so nothing should be attempted.
+
+    The declaring header's own basename is also kept as a discriminator
+    (round 8, Codex review, fresh evidence), alongside ``:line:col``:
+    ``"raii_guard<(lambda at /a/foo.h:4:37)>"`` becomes
+    ``"raii_guard<(lambda:foo.h:4:37)>"``. Line/column alone cannot tell
+    apart two DIFFERENT headers that each declare their own anonymous/
+    lambda type at the identical coordinates -- both a real occurrence in
+    practice and something no fixed test corpus can rule out in general.
+    See :func:`_declaring_header_discriminator`'s own docstring for what
+    this still doesn't cover (two same-named headers, at the same
+    coordinates, in different directories).
     """
-    return _ANON_TYPE_LOCATION_PATH_ONLY_RE.sub(r"\1\2", name)
+
+    def _replace(match: re.Match[str]) -> str:
+        marker, path, coords = match.group(1), match.group(2), match.group(3)
+        return f"{marker}:{_declaring_header_discriminator(path)}{coords}"
+
+    return _ANON_TYPE_LOCATION_PATH_ONLY_RE.sub(_replace, name)
 
 
 def canonicalize_type_name(name: str) -> str:

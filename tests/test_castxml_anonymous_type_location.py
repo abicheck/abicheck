@@ -66,14 +66,14 @@ class TestLambdaClosureTypeNameLocationStripped:
         # The path is stripped; the :line:col discriminator is kept (Codex
         # review) so two distinct lambdas in the same header don't collapse
         # to one identity — see TestDistinctLambdasInOneSnapshotStayDistinct.
-        assert parser._type_name("_2") == "raii_guard<(lambda:4:37)>"
+        assert parser._type_name("_2") == "raii_guard<(lambda:lib.hpp:4:37)>"
 
     def test_record_type_own_name_has_no_embedded_path(self) -> None:
         root = _lambda_struct_root("/tmp/old/lib.hpp")
         parser = _CastxmlParser(root, exported_dynamic=set(), exported_static=set())
         types = parser.parse_types()
         (rec,) = [t for t in types if t.name.startswith("raii_guard")]
-        assert rec.name == "raii_guard<(lambda:4:37)>"
+        assert rec.name == "raii_guard<(lambda:lib.hpp:4:37)>"
         assert "/tmp/old" not in rec.name
 
     def test_two_checkout_directories_produce_identical_type_identity(self) -> None:
@@ -132,9 +132,53 @@ class TestDistinctLambdasInOneSnapshotStayDistinct:
         types = [t for t in parser.parse_types() if t.name.startswith("guard")]
         assert len(types) == 2
         names = {t.name for t in types}
-        assert names == {"guard<(lambda:4:3)>", "guard<(lambda:40:3)>"}
+        assert names == {"guard<(lambda:lib.hpp:4:3)>", "guard<(lambda:lib.hpp:40:3)>"}
         keys = {type_map_key(t) for t in types}
         assert len(keys) == 2, "distinct lambdas must not collide on one key"
+
+
+class TestDistinctLambdasInDifferentHeadersStayDistinct:
+    """Round-8 review finding (Codex, fresh evidence): keeping only
+    :line:col as a discriminator fixed the same-header collision above, but
+    two distinct lambda closure types declared at the IDENTICAL line:col in
+    two DIFFERENT headers still collided, since neither header's own path
+    survived stripping. The declaring header's own basename is now kept
+    alongside :line:col, distinguishing this case too."""
+
+    def test_two_lambdas_at_same_position_in_different_headers_stay_distinct(
+        self,
+    ) -> None:
+        root = Element("CastXML", attrib={"format": "1.4.0"})
+        _file(root, "f1", "/src/one.hpp")
+        _file(root, "f2", "/src/two.hpp")
+        SubElement(root, "Namespace", attrib={"id": "_1", "name": "::"})
+
+        first = SubElement(root, "Struct")
+        first.set("id", "_2")
+        first.set("name", "guard<(lambda at /src/one.hpp:4:3)>")
+        first.set("context", "_1")
+        first.set("file", "f1")
+        first.set("line", "4")
+        first.set("members", "")
+
+        second = SubElement(root, "Struct")
+        second.set("id", "_3")
+        second.set("name", "guard<(lambda at /src/two.hpp:4:3)>")
+        second.set("context", "_1")
+        second.set("file", "f2")
+        second.set("line", "4")
+        second.set("members", "")
+
+        parser = _CastxmlParser(root, exported_dynamic=set(), exported_static=set())
+        types = [t for t in parser.parse_types() if t.name.startswith("guard")]
+        assert len(types) == 2
+        names = {t.name for t in types}
+        assert names == {"guard<(lambda:one.hpp:4:3)>", "guard<(lambda:two.hpp:4:3)>"}
+        keys = {type_map_key(t) for t in types}
+        assert len(keys) == 2, (
+            "two lambdas at the same line:col in different headers must "
+            "not collide on one key"
+        )
 
 
 class TestPathContainingALiteralCloseParen:
@@ -146,7 +190,7 @@ class TestPathContainingALiteralCloseParen:
 
     def test_windows_path_with_parenthesized_component_is_stripped(self) -> None:
         name = r"raii_guard<(lambda at C:\release (old)\foo.hpp:4:37)>"
-        assert strip_anonymous_type_location(name) == "raii_guard<(lambda:4:37)>"
+        assert strip_anonymous_type_location(name) == "raii_guard<(lambda:foo.hpp:4:37)>"
 
     def test_two_checkouts_differing_only_in_a_parenthesized_component_match(
         self,
@@ -182,8 +226,8 @@ class TestOrdinaryNameWhitespaceIsPreserved:
         SIBLING argument (a fixed-string NTTP literal)."""
         a = strip_anonymous_type_location('Tag<"a  b", (lambda at /tmp/a.hpp:4:3)>')
         b = strip_anonymous_type_location('Tag<"a b", (lambda at /tmp/a.hpp:4:3)>')
-        assert a == 'Tag<"a  b", (lambda:4:3)>'
-        assert b == 'Tag<"a b", (lambda:4:3)>'
+        assert a == 'Tag<"a  b", (lambda:a.hpp:4:3)>'
+        assert b == 'Tag<"a b", (lambda:a.hpp:4:3)>'
         assert a != b
 
 
@@ -218,7 +262,7 @@ class TestAnonymousEnumLocationStripped:
 
         parser = _CastxmlParser(root, exported_dynamic=set(), exported_static=set())
         (enum_type,) = parser.parse_enums()
-        assert enum_type.name == "(unnamed enum:56:5)"
+        assert enum_type.name == "(unnamed enum:lib.hpp:56:5)"
         assert "/tmp/old" not in enum_type.name
 
     def test_reference_to_anonymous_enum_matches_its_own_declaration(self) -> None:
@@ -244,7 +288,7 @@ class TestAnonymousEnumLocationStripped:
         (enum_type,) = parser.parse_enums()
         # The reference (a field/param/return naming the same id) goes
         # through _type_name, not parse_enums -- both must agree.
-        assert parser._type_name("_2") == enum_type.name == "(unnamed enum:56:5)"
+        assert parser._type_name("_2") == enum_type.name == "(unnamed enum:lib.hpp:56:5)"
 
 
 class TestQualifiedNameNormalizesEnclosingAnonymousScope:
@@ -285,7 +329,7 @@ class TestQualifiedNameNormalizesEnclosingAnonymousScope:
         parser = _CastxmlParser(root, exported_dynamic=set(), exported_static=set())
         types = parser.parse_types()
         (inner,) = [t for t in types if t.name == "Inner"]
-        assert inner.qualified_name == "Wrapper<(lambda:4:3)>::Inner"
+        assert inner.qualified_name == "Wrapper<(lambda:lib.hpp:4:3)>::Inner"
         assert "/tmp/old" not in (inner.qualified_name or "")
 
     def test_two_checkout_directories_produce_identical_nested_type_identity(
