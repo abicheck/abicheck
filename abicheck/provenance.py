@@ -149,8 +149,12 @@ def _matches_public(
 
 #: A real GCC/Clang target triple: 2-4 non-empty ``-``-joined components,
 #: each alphanumeric (plus ``_``) -- e.g. ``x86_64-conda-linux-gnu``,
-#: ``x86_64-pc-linux-gnu``, ``aarch64-linux-gnu``, ``arm-none-eabi``.
-_TARGET_TRIPLE_RE = re.compile(r"^[A-Za-z0-9_]+(-[A-Za-z0-9_]+){1,3}$")
+#: ``x86_64-pc-linux-gnu``, ``aarch64-linux-gnu``, ``arm-none-eabi``. A
+#: non-leading component may also carry dots, since a real OS component can
+#: embed a dotted version (Solaris/AIX-style: ``x86_64-pc-solaris2.11``,
+#: matching this same repo's own ``toolchain_probe.py`` recognition of that
+#: shape -- Codex review, round 4).
+_TARGET_TRIPLE_RE = re.compile(r"^[A-Za-z0-9_]+(-[A-Za-z0-9_][A-Za-z0-9_.]*){1,3}$")
 #: A real GCC/Clang version directory: digits, optionally dotted (``14``,
 #: ``14.3``, ``14.3.0``) -- never a bare word like ``v1``/``backend``.
 _TOOLCHAIN_VERSION_RE = re.compile(r"^\d+(\.\d+){0,2}$")

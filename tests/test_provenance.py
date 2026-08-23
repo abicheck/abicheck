@@ -154,6 +154,21 @@ def test_gcc_include_dir_with_compiler_shaped_triple_and_version_is_toolchain():
     assert _is_toolchain_compiler_include_dir(segs) is True
 
 
+def test_gcc_include_dir_with_dotted_solaris_style_os_component_is_toolchain():
+    # Round-4 review finding (Codex, fresh evidence): the triple regex
+    # required every component to be plain alnum/underscore, rejecting a
+    # real Solaris/AIX-style target triple whose OS component embeds a
+    # dotted version (this repo's own toolchain_probe.py already recognizes
+    # "x86_64-pc-solaris2.11" as a real triple). Under a relocatable prefix
+    # not covered by _SYSTEM_HEADER_DIRS, this made a real compiler's own
+    # private headers read as project declarations, reintroducing noisy/
+    # false findings from the toolchain surface.
+    segs = _segments(
+        "/opt/gcc/lib/gcc/x86_64-pc-solaris2.11/13/include/stddef.h"
+    )
+    assert _is_toolchain_compiler_include_dir(segs) is True
+
+
 def test_system_header_conda_forge_libstdcxx_predefined_ops():
     # The exact real-world path from a false-positive func_removed report:
     # abicheck's own GitHub Action reported libstdc++'s internal
