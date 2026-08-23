@@ -571,17 +571,23 @@ side for a loaded `BundleFacts` and `compare_bundle_from_facts()`:
 ```python
 from abicheck.bundle import discover_artifact_set
 from abicheck.bundle_facts import compare_bundle_from_facts
+from abicheck.package import discover_shared_libraries
 from abicheck.serialization import load_bundle_facts
 
 old_facts = load_bundle_facts("release-1.0.bundlefacts.json")
 
-# discover_artifact_set() canonicalizes each discovered filename the same
-# way write_bundle_facts_out() keyed old_facts.per_library_snapshots -- a
-# plain {p.name: p for p in ...} comprehension would key a versioned
-# runtime DSO (libfoo.so.1, no unversioned dev symlink) as a different
-# library from the persisted "libfoo.so" and misreport it as removed.
+# discover_shared_libraries() walks the directory and identifies real ELF
+# shared objects by content -- unlike a plain glob("*.so"), it also finds a
+# runtime-only versioned DSO (libfoo.so.1, no unversioned dev symlink).
+# discover_artifact_set() then canonicalizes each discovered filename the
+# same way write_bundle_facts_out() keyed old_facts.per_library_snapshots --
+# a plain {p.name: p for p in ...} comprehension would key that same
+# libfoo.so.1 as a different library from the persisted "libfoo.so" and
+# misreport it as removed.
 new = build_bundle_snapshot(
-    discover_artifact_set(list(Path("release-3.0/").glob("*.so")), explicit=False)
+    discover_artifact_set(
+        discover_shared_libraries(Path("release-3.0/")), explicit=False
+    )
 )
 
 # per_library_results still comes from diffing each library's stored

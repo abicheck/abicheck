@@ -534,6 +534,100 @@ class TestBundleFactsFilesystemAliases:
         )
 
 
+class TestBundleFactsLibraryFilenames:
+    """SONAME-skew replay needs the real on-disk filename, not the
+    canonical key (Codex review, fresh evidence): a versioned DSO with no
+    ``DT_SONAME`` is identified by ``bundle._detect_soname_skew``'s own
+    ``path.name`` fallback, and without ``library_filenames``,
+    ``bundle_snapshot_from_facts()`` synthesized ``Path(canonical_key)`` --
+    ``"libfoo_core.so"``, never the real ``"libfoo_core.so.1"`` -- so no
+    major was ever derivable from a reconstructed bundle.
+    """
+
+    def test_capture_bundle_facts_records_the_real_filename(
+        self, tmp_path: Path
+    ) -> None:
+        real_path = tmp_path / "libfoo_core.so.1"
+        real_path.write_bytes(b"")
+
+        facts = capture_bundle_facts(
+            _per_library_snapshots(_old_metadata()),
+            library_paths={"libcore.so": real_path},
+        )
+
+        assert facts.library_filenames.get("libcore.so") == "libfoo_core.so.1"
+
+    def test_no_library_paths_means_no_filenames(self) -> None:
+        facts = capture_bundle_facts(_per_library_snapshots(_old_metadata()))
+        assert facts.library_filenames == {}
+
+    def test_library_filenames_round_trip_through_dict(self, tmp_path: Path) -> None:
+        real_path = tmp_path / "libfoo_core.so.1"
+        real_path.write_bytes(b"")
+
+        facts = capture_bundle_facts(
+            _per_library_snapshots(_old_metadata()),
+            library_paths={"libcore.so": real_path},
+        )
+        round_tripped = bundle_facts_from_dict(bundle_facts_to_dict(facts))
+
+        assert round_tripped.library_filenames == facts.library_filenames
+
+    def test_reconstructed_bundle_uses_the_real_filename_not_the_key(
+        self, tmp_path: Path
+    ) -> None:
+        real_path = tmp_path / "libfoo_core.so.1"
+        real_path.write_bytes(b"")
+
+        facts = capture_bundle_facts(
+            _per_library_snapshots(_old_metadata()),
+            library_paths={"libcore.so": real_path},
+        )
+        reconstructed = bundle_snapshot_from_facts(facts)
+
+        assert reconstructed.libraries["libcore.so"].name == "libfoo_core.so.1"
+
+    def test_soname_skew_detected_end_to_end_from_a_stored_baseline(
+        self, tmp_path: Path
+    ) -> None:
+        """The full point: a stored-baseline comparison must catch the
+        identical `bundle_soname_skew` a live comparison would, for a
+        cohort member with no DT_SONAME identified only by filename.
+        """
+        old_core_path = tmp_path / "libfoo_core.so.1"
+        old_core_path.write_bytes(b"")
+        old_metadata = {
+            "libfoo_core.so": _meta(exports=["c"]),  # no DT_SONAME
+            "libfoo_thread.so": _meta(soname="libfoo_thread.so.1", exports=["t"]),
+        }
+        facts = capture_bundle_facts(
+            _per_library_snapshots(old_metadata),
+            library_paths={
+                "libfoo_core.so": old_core_path,
+                "libfoo_thread.so": tmp_path / "libfoo_thread.so.1",
+            },
+        )
+        # New release: core bumps its filename major to .so.2 (still no
+        # DT_SONAME); thread lags at .so.1 -- a real skew within the cohort.
+        new_metadata = {
+            "libfoo_core.so": _meta(exports=["c"]),
+            "libfoo_thread.so": _meta(soname="libfoo_thread.so.1", exports=["t"]),
+        }
+        from abicheck.bundle import build_bundle_snapshot_from_metadata
+
+        new_bundle = build_bundle_snapshot_from_metadata(
+            new_metadata,
+            paths={
+                "libfoo_core.so": Path("libfoo_core.so.2"),
+                "libfoo_thread.so": Path("libfoo_thread.so.1"),
+            },
+        )
+
+        result = compare_bundle_from_facts(facts, new_bundle, [], cohorts=["libfoo_"])
+        kinds = {f.kind for f in result.bundle_findings}
+        assert ChangeKind.BUNDLE_SONAME_SKEW in kinds
+
+
 # ---------------------------------------------------------------------------
 # Malformed manifest data (Codex/CodeRabbit review: reject, don't silently
 # discard the manifest promises a corrupt facts file claims to carry)

@@ -105,6 +105,18 @@ class BundleFacts:
     didn't have (or didn't pass) real paths at capture time -- the same
     "best effort, no aliases on failure" default
     ``filesystem_alias_basenames`` itself uses.
+
+    ``library_filenames`` records, per library, the real on-disk
+    *basename* at capture time (``libfoo_core.so.1``, not the canonical
+    ``libfoo_core.so`` key) -- needed by ``bundle._detect_soname_skew``'s
+    own ``path.name`` fallback for a versioned DSO with no usable
+    ``DT_SONAME``: without it, ``bundle_snapshot_from_facts()`` has no real
+    path to reconstruct and falls back to ``Path(canonical_key)``, whose
+    ``.name`` is the canonical, *unversioned* key -- no derivable major, so
+    ``bundle_soname_skew`` silently goes unreported for a stored-baseline
+    comparison that a live one would have caught (Codex review, fresh
+    evidence). Empty for a caller that didn't pass real paths at capture
+    time, same as ``filesystem_aliases``.
     """
 
     schema_version: int = BUNDLE_FACTS_SCHEMA_VERSION
@@ -112,6 +124,7 @@ class BundleFacts:
     per_library_snapshots: dict[str, AbiSnapshot] = field(default_factory=dict)
     manifest: InstantiationManifest | None = None
     filesystem_aliases: dict[str, tuple[str, ...]] = field(default_factory=dict)
+    library_filenames: dict[str, str] = field(default_factory=dict)
 
 
 def capture_bundle_facts(
@@ -129,20 +142,25 @@ def capture_bundle_facts(
     ``AbiSnapshot.elf``).
 
     *library_paths*, when given, is a ``{library_name: Path}`` map of the
-    real on-disk file each snapshot was dumped from -- used only to probe
+    real on-disk file each snapshot was dumped from -- used both to probe
     filesystem aliases (:func:`abicheck.bundle_soname.filesystem_alias_basenames`)
     while those files still exist, at the one point in this whole flow
-    (capture time, right after a live comparison) they are guaranteed to.
-    A name absent from *library_paths* simply gets no recorded aliases,
-    same as when *library_paths* is omitted entirely.
+    (capture time, right after a live comparison) they are guaranteed to,
+    and to record each library's real on-disk *filename*
+    (``BundleFacts.library_filenames``) for the SONAME-skew fallback (see
+    that field's own docstring). A name absent from *library_paths* simply
+    gets no recorded aliases/filename, same as when *library_paths* is
+    omitted entirely.
     """
     from .bundle_soname import filesystem_alias_basenames
 
     filesystem_aliases: dict[str, tuple[str, ...]] = {}
+    library_filenames: dict[str, str] = {}
     if library_paths:
         for name, path in library_paths.items():
             if name not in per_library_snapshots:
                 continue
+            library_filenames[name] = path.name
             aliases = filesystem_alias_basenames(path)
             if aliases:
                 filesystem_aliases[name] = aliases
@@ -152,6 +170,7 @@ def capture_bundle_facts(
         per_library_snapshots=dict(per_library_snapshots),
         manifest=manifest,
         filesystem_aliases=filesystem_aliases,
+        library_filenames=library_filenames,
     )
 
 
@@ -173,10 +192,22 @@ def bundle_snapshot_from_facts(facts: BundleFacts) -> BundleSnapshot:
     ``DT_NEEDED`` edge naming one of those aliases -- without probing the
     filesystem itself, since the persisted facts may outlive the files
     they were captured from.
+
+    ``facts.library_filenames`` is threaded through as that same function's
+    ``paths`` -- a real on-disk filename (e.g. ``libfoo_core.so.1``)
+    reconstructed as ``Path(filename)`` rather than the default
+    ``Path(canonical_key)`` fallback, so ``bundle._detect_soname_skew``'s
+    own ``path.name`` SONAME-major fallback sees the real, versioned
+    filename instead of the canonical, unversioned key (Codex review, fresh
+    evidence -- see that field's own docstring). A name absent from
+    ``library_filenames`` (no real paths at capture time) falls back to
+    ``build_bundle_snapshot_from_metadata``'s own ``Path(name)`` default,
+    unchanged from before this field existed.
     """
     from .bundle import build_bundle_snapshot_from_metadata
 
     metadata = {}
+    paths = {}
     for name, snap in facts.per_library_snapshots.items():
         if snap.elf is None:
             log.debug(
@@ -186,8 +217,11 @@ def bundle_snapshot_from_facts(facts: BundleFacts) -> BundleSnapshot:
             )
             continue
         metadata[name] = snap.elf
+        filename = facts.library_filenames.get(name)
+        if filename:
+            paths[name] = Path(filename)
     return build_bundle_snapshot_from_metadata(
-        metadata, extra_aliases=facts.filesystem_aliases or None
+        metadata, paths=paths or None, extra_aliases=facts.filesystem_aliases or None
     )
 
 

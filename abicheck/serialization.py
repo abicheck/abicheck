@@ -1818,6 +1818,7 @@ def bundle_facts_to_dict(facts: BundleFacts) -> dict[str, Any]:
         "filesystem_aliases": {
             name: list(aliases) for name, aliases in facts.filesystem_aliases.items()
         },
+        "library_filenames": dict(facts.library_filenames),
         "manifest": manifest_to_dict(facts.manifest) if facts.manifest else None,
     }
 
@@ -1885,6 +1886,10 @@ def bundle_facts_from_dict(d: dict[str, Any]) -> BundleFacts:
         filesystem_aliases={
             name: tuple(aliases)
             for name, aliases in d.get("filesystem_aliases", {}).items()
+        },
+        library_filenames={
+            name: str(filename)
+            for name, filename in d.get("library_filenames", {}).items()
         },
         manifest=manifest_from_dict(raw_manifest) if raw_manifest is not None else None,
     )

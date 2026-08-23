@@ -1663,19 +1663,22 @@ def compare_release_cmd(
             )
 
             if bundle_facts_out is not None and not no_bundle_analysis:
-                # write_bundle_facts_out() is a leaf module and cannot
-                # import cli_resolve itself (see its own docstring) --
-                # this module already belongs to that import cycle, so the
-                # resolve lives here instead.
+                # Resolve here, not in the leaf write_bundle_facts_out()
+                # (see its docstring): cli_resolve already sits inside the
+                # CLI-registration import cycle this module is a member of.
                 def _resolve_stranded_library(old_path: Path) -> AbiSnapshot:
                     from .cli_resolve import _resolve_input
                     from .elf_metadata import parse_elf_metadata
+                    from .header_utils import split_public_header_inputs
 
                     old_dbg = (
                         resolve_debug_info(old_path, old_debug_dir)
                         if old_debug_dir
                         else None
                     )
+                    # old_h doubles as the public-header set, matching the
+                    # normal compare path (else origin=UNKNOWN; Codex review).
+                    pub_headers, pub_dirs = split_public_header_inputs(old_h)
                     try:
                         return _resolve_input(
                             old_path,
@@ -1686,10 +1689,11 @@ def compare_release_cmd(
                             pdb_path=old_dbg,
                             compile=compile_context,
                             include_dependencies=include_dependencies,
+                            public_headers=pub_headers,
+                            public_header_dirs=pub_dirs,
                         )
                     except Exception:
-                        # Degrade to bare ElfMetadata (never raises) rather
-                        # than aborting the write over one stranded library.
+                        # Degrade to bare ElfMetadata rather than abort.
                         return AbiSnapshot(
                             library=old_path.name,
                             version="",
