@@ -1299,6 +1299,7 @@ def dump(
             debug_info_path=debug_info_path,
             extra_include_labels=extra_include_labels,
             scope_header_dirs=scope_header_dirs,
+            public_include_search_dirs=public_include_search_dirs,
         )
 
     fmt = _detect_format(so_path)
