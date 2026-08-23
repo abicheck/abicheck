@@ -1397,9 +1397,15 @@ def compute_analysis_assurance(
     )
     # Evidence states are a closed vocabulary. Any unknown state is unsafe to
     # treat as parsed: it may come from a hand-edited/third-party snapshot and
-    # cannot prove the corresponding detector facts were evaluated.
+    # cannot prove the corresponding detector facts were evaluated. A wholly
+    # unavailable channel is handled separately by ``dwarf_evidence_missing``;
+    # it is not a parse failure for header-only analysis.
+    known_states = {"parsed", "not_available", "presence_only", "partial", "failed"}
     debug_parse_incomplete = any(
-        receipt["basic"] != "parsed" or receipt["advanced"] != "parsed"
+        receipt["basic"] in {"presence_only", "partial", "failed"}
+        or receipt["advanced"] in {"presence_only", "partial", "failed"}
+        or receipt["basic"] not in known_states
+        or receipt["advanced"] not in known_states
         for receipt in debug_evidence.values()
     )
     if advanced_unavailable:

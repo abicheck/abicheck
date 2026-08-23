@@ -37,6 +37,7 @@
     "packaging>=21.0",
     "pefile>=2023.2.7",
     "macholib>=1.16",
+    "tomli>=2.0; python_version < '3.11'",
     "zstandard>=0.21"
   ]
 }
