@@ -152,7 +152,7 @@ def capture_bundle_facts(
     gets no recorded aliases/filename, same as when *library_paths* is
     omitted entirely.
     """
-    from .bundle_soname import filesystem_alias_basenames
+    from .bundle_soname import filesystem_alias_basenames, resolved_basename
 
     filesystem_aliases: dict[str, tuple[str, ...]] = {}
     library_filenames: dict[str, str] = {}
@@ -160,7 +160,12 @@ def capture_bundle_facts(
         for name, path in library_paths.items():
             if name not in per_library_snapshots:
                 continue
-            library_filenames[name] = path.name
+            # The resolved target's basename, not path.name -- library_paths
+            # commonly names a dev symlink (libfoo.so -> libfoo.so.1.2), and
+            # a bare path.name would capture the symlink's own, unversioned
+            # name instead of the real, versioned filename the SONAME-skew
+            # fallback needs (Codex review, fresh evidence).
+            library_filenames[name] = resolved_basename(path)
             aliases = filesystem_alias_basenames(path)
             if aliases:
                 filesystem_aliases[name] = aliases

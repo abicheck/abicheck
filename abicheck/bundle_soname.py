@@ -58,7 +58,8 @@ def soname_matches_providers(soname: str, providers: set[str]) -> bool:
         return True
     stem = soname_stem(soname)
     return any(
-        not _EXPLICIT_MAJOR_VERSION_RE.search(p) and (stem == p or stem == soname_stem(p))
+        not _EXPLICIT_MAJOR_VERSION_RE.search(p)
+        and (stem == p or stem == soname_stem(p))
         for p in providers
     )
 
@@ -101,6 +102,23 @@ def hard_link_alias_basenames(path: Path) -> list[str]:
     return aliases
 
 
+def resolved_basename(path: Path) -> str:
+    """*path*'s resolved-symlink-target basename, or its own basename if
+    resolution fails (a broken symlink, a permissions error, ...).
+
+    Shared by :func:`filesystem_alias_basenames` (below) and
+    :func:`abicheck.bundle_facts.capture_bundle_facts`'s
+    ``library_filenames`` capture: both need "the real, versioned on-disk
+    name" for a library that may itself be a dev symlink (``libfoo.so`` ->
+    ``libfoo.so.1``) -- a bare ``path.name`` would capture the symlink's
+    own, unversioned name instead (Codex review, fresh evidence).
+    """
+    try:
+        return path.resolve().name
+    except OSError:
+        return path.name
+
+
 def filesystem_alias_basenames(path: Path) -> tuple[str, ...]:
     """Real, on-disk alias basenames for *path*: its resolved symlink
     target's basename (if different from *path*'s own) plus any
@@ -118,10 +136,7 @@ def filesystem_alias_basenames(path: Path) -> tuple[str, ...]:
     yields no aliases.
     """
     aliases: list[str] = []
-    try:
-        resolved_name = path.resolve().name
-    except OSError:
-        resolved_name = path.name
+    resolved_name = resolved_basename(path)
     if resolved_name != path.name:
         aliases.append(resolved_name)
     for alias in hard_link_alias_basenames(path):

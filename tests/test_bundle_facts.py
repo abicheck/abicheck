@@ -533,6 +533,53 @@ class TestBundleFactsFilesystemAliases:
             "libalgo.so", []
         )
 
+    def test_alias_for_an_elf_less_provider_is_not_indexed(
+        self, tmp_path: Path
+    ) -> None:
+        """A captured alias for a library whose own snapshot carries no ELF
+        metadata (dropped by ``bundle_snapshot_from_facts()`` before this
+        alias is ever consumed) must not resolve a consumer's DT_NEEDED to
+        a bundle member that doesn't actually exist in the reconstructed
+        snapshot -- a live ``build_bundle_snapshot()`` never has an alias
+        for a provider it didn't parse in the first place (Codex review,
+        fresh evidence).
+        """
+        real_target = tmp_path / "libcore.so.1.0.0"
+        real_target.write_bytes(b"")
+        symlink_path = tmp_path / "libcore.so"
+        symlink_path.symlink_to(real_target)
+
+        per_library_snapshots = {
+            # No ELF metadata at all -- dropped by bundle_snapshot_from_facts().
+            "libcore.so": AbiSnapshot(library="libcore.so", version="old", elf=None),
+            "libalgo.so": AbiSnapshot(
+                library="libalgo.so",
+                version="old",
+                elf=_meta(
+                    needed=["libcore.so.1.0.0"],  # names the (dropped) alias
+                    imports=["core_mul"],
+                ),
+            ),
+        }
+        facts = capture_bundle_facts(
+            per_library_snapshots,
+            library_paths={"libcore.so": symlink_path},
+        )
+        # The alias was captured despite libcore.so having no ELF metadata --
+        # capture_bundle_facts() doesn't know yet that reconstruction will
+        # drop it.
+        assert "libcore.so.1.0.0" in facts.filesystem_aliases.get("libcore.so", ())
+
+        reconstructed = bundle_snapshot_from_facts(facts)
+
+        assert "libcore.so" not in reconstructed.metadata
+        assert "libcore.so.1.0.0" not in reconstructed.resolution.intra_needed.get(
+            "libalgo.so", []
+        )
+        assert "libcore.so.1.0.0" in reconstructed.resolution.extra_needed.get(
+            "libalgo.so", []
+        )
+
 
 class TestBundleFactsRejectsMalformedFilesystemAliases:
     """A string value where a list is documented (Codex review, fresh
@@ -595,6 +642,26 @@ class TestBundleFactsLibraryFilenames:
         )
 
         assert facts.library_filenames.get("libcore.so") == "libfoo_core.so.1"
+
+    def test_records_the_resolved_target_for_a_symlinked_library(
+        self, tmp_path: Path
+    ) -> None:
+        """A dev symlink (libfoo_core.so -> libfoo_core.so.1.0.0) must
+        record the resolved target's basename, not the symlink's own,
+        unversioned name -- else the major is undiscoverable from a
+        reconstructed bundle the same way an unresolved canonical key was
+        (Codex review, fresh evidence)."""
+        real_target = tmp_path / "libfoo_core.so.1.0.0"
+        real_target.write_bytes(b"")
+        symlink_path = tmp_path / "libfoo_core.so"
+        symlink_path.symlink_to(real_target)
+
+        facts = capture_bundle_facts(
+            _per_library_snapshots(_old_metadata()),
+            library_paths={"libcore.so": symlink_path},
+        )
+
+        assert facts.library_filenames.get("libcore.so") == "libfoo_core.so.1.0.0"
 
     def test_no_library_paths_means_no_filenames(self) -> None:
         facts = capture_bundle_facts(_per_library_snapshots(_old_metadata()))

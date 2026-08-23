@@ -689,6 +689,18 @@ def _compute_resolution_graph(
                     soname_to_name.setdefault(alias, name)
 
     for name, aliases in (extra_aliases or {}).items():  # G38 Phase 2 replay
+        # A name whose own snapshot had no ELF metadata (AbiSnapshot.elf is
+        # None -- non-ELF or header-only) is dropped before this function
+        # is ever called (bundle_snapshot_from_facts()), but its captured
+        # aliases still ride along in extra_aliases unconditionally. Indexing
+        # one anyway would resolve a consumer's DT_NEEDED to a bundle member
+        # that doesn't actually exist in this snapshot, misclassifying a
+        # real "extra" (external/unresolved) edge as intra-bundle -- unlike
+        # a live build_bundle_snapshot(), which never has an alias for a
+        # provider it didn't parse in the first place (Codex review, fresh
+        # evidence).
+        if name not in metadata:
+            continue
         soname_to_name.update({a: name for a in aliases if a not in soname_to_name})
     graph.soname_to_name = soname_to_name
 
@@ -946,7 +958,9 @@ def _detect_intra_dep_removed(
             # sibling's identical compatibility rule)?
             if consumer.version:
                 compatible_old = {
-                    p.library for p in old_all_providers if p.version == consumer.version
+                    p.library
+                    for p in old_all_providers
+                    if p.version == consumer.version
                 }
             else:
                 compatible_old = {p.library for p in old_all_providers if p.is_default}
@@ -1858,8 +1872,16 @@ def _looks_system_symbol(name: str) -> bool:
 # This is the version-evidence half of the field-derived oneDAL fix
 # (``syscall@GLIBC_*``, ``stdout@GLIBC_*``, ``_ZdlPvm@CXXABI_*``).
 _SYSTEM_VERSION_PREFIXES: tuple[str, ...] = (
-    "GLIBC_", "GLIBCXX_", "CXXABI_", "GCC_", "LIBGCC_",
-    "LIBC_", "GOMP_", "OMP_", "GFORTRAN_", "GLIBCABI_",
+    "GLIBC_",
+    "GLIBCXX_",
+    "CXXABI_",
+    "GCC_",
+    "LIBGCC_",
+    "LIBC_",
+    "GOMP_",
+    "OMP_",
+    "GFORTRAN_",
+    "GLIBCABI_",
 )
 
 
