@@ -66,8 +66,8 @@ BUILDSOURCE_EXTENSION_ENTRIES: list[ChangeKindMeta] = [
         "both sides lack DWARF/header type evidence for this exact "
         "symbol (a stripped provider, or a provider only ever "
         "dumped at L0). Binary-name-compatible: the linker resolves "
-        "the symbol. Whether the calling convention actually still "
-        "agrees is unconfirmed, not proven safe.",
+        "the symbol. Whether ABI compatibility actually still holds "
+        "is unconfirmed, not proven safe.",
         description_template="{name} calls a symbol {detail} still exports by name, but one or both sides lack type evidence to confirm the signature agrees.",
     ),
     _E(

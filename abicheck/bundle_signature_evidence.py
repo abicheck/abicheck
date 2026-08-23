@@ -20,9 +20,10 @@ and-multibuild-comparability.md``).
 ``abicheck.bundle``'s own ``bundle_intra_dep_signature_changed`` already
 fires correctly when a provider's DWARF/header evidence shows a real
 signature change on a symbol a sibling library imports. What it cannot say
-is the negative case: when *neither* side has that evidence (a stripped
-provider, or a provider only ever dumped at L0), the bundle layer has no
-way to say "this consumer's import still resolves by name, but nothing
+is the negative case: when *at least one* side lacks that evidence (a
+stripped provider, or a provider only ever dumped at L0, on either the old
+or the new snapshot — not necessarily both), the bundle layer has no way
+to say "this consumer's import still resolves by name, but nothing
 establishes the signature agrees" — it silently reports nothing, which
 reads as "compatible" even though compatibility was never actually checked.
 
@@ -231,8 +232,8 @@ def find_unverified_signature_findings(
                             f"unchanged), which {provider_lib} still exports "
                             f"by that name -- but {evidence_gap} real "
                             f"DWARF/header type evidence for this symbol, so "
-                            f"whether the calling convention actually still "
-                            f"agrees cannot be confirmed or denied."
+                            f"whether ABI compatibility actually still holds "
+                            f"cannot be confirmed or denied."
                         ),
                         consumer_library=consumer_lib,
                         provider_library=provider_lib,
