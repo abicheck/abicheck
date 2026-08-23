@@ -30,4 +30,14 @@
   sibling-consumption check, as a deliberate compatibility-gate fallback.
   For the graph-native kinds, which have no per-library `Change` to starve
   upstream, `--no-bundle-analysis` and `--bundle-system-providers` remain the
-  only available levers (G38 Phase 1, an amendment to ADR-023).
+  only available levers. Also documents two scope limits on the mechanisms
+  above: the `--suppress` starvation effect is specific to the directory/
+  package CLI fan-out — `compare_product_directories()` (the whole-product
+  baseline API) has no suppression parameter at all, for either per-library
+  or bundle findings; and `--policy`'s `overrides:` reclassification never
+  reaches bundle-level verdicts regardless of entry point, since
+  `compare_bundle()`'s own `policy` parameter is a bare profile-name string
+  (resolved through the same three-way `strict_abi`/`sdk_vendor`/
+  `plugin_abi` switch `compute_verdict()` documents), never the resolved
+  `PolicyFile` object a `--policy custom.yaml` document produces (G38
+  Phase 1, an amendment to ADR-023).

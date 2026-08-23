@@ -45,14 +45,32 @@ First, a terminology note this page relies on throughout: **scoping** and
 **policy** are two separate mechanisms, not two names for the same thing.
 `--scope-public-headers` (on by default) and an explicit surface allowlist
 control whether a `Change` is *removed from* `DiffResult.changes` at all —
-that's the only thing that filters findings. A `--policy` profile's
+that's the only thing that filters findings. A `--policy` document's
 `overrides:` block never removes a `Change` from `changes`; it only
-reclassifies which `Verdict` a given `ChangeKind` maps to (the underlying
-`PolicyFile` machinery). So "a policy profile scoped to the public surface"
-isn't
-a real, separate filtering mechanism — a private `func_removed` still shows
-up in the report under any `--policy` profile; only `--scope-public-headers`
-decides whether it's there at all.
+reclassifies which `Verdict` a given `ChangeKind` maps to. So "a policy
+profile scoped to the public surface" isn't a real, separate filtering
+mechanism — a private `func_removed` still shows up in the report under any
+`--policy` profile; only `--scope-public-headers` decides whether it's there
+at all.
+
+**This reclassification is per-library only — it does not reach bundle
+findings at all, not even the three named built-in profiles.**
+`compare_bundle()`'s own `policy` parameter is a bare string, resolved
+through `policy_kind_sets()` — the same three-way switch
+(`strict_abi`/`sdk_vendor`/`plugin_abi`) `compute_verdict()`'s own docstring
+describes. It never receives the resolved `PolicyFile` object a `--policy
+custom.yaml` document produces, unlike the per-library path
+(`checker.compare()` calls `policy_file.compute_verdict(...)` directly when
+a real `PolicyFile` was resolved). So a `--policy custom.yaml`'s
+`overrides:` entry for `bundle_intra_dep_removed` has **no effect on the
+bundle verdict** — the CLI passes the raw `--policy` string through
+unconditionally, and an unrecognized name (a YAML path) silently falls back
+to `strict_abi` for bundle-verdict purposes specifically, per
+`compute_verdict()`'s own "Unknown policy names fall back to `strict_abi`"
+contract. Only the three built-in profile *names* can reach a bundle
+finding's classification today, and even then via the same coarse
+kind-family-level rules `compute_verdict()` documents — a *custom* override
+document reaches per-library findings only.
 
 **Graph-native detectors ignore public-surface scoping entirely.**
 `bundle_intra_dep_removed`, `bundle_library_removed`/`bundle_library_added`,
@@ -92,23 +110,34 @@ selected, since policy never removes a finding, only reclassifies its
 verdict.
 
 **No `bundle_*` kind can be suppressed *directly* — but suppression can still
-reach a diff-derived finding indirectly, the same way scoping does.**
-`compare_bundle()` (both the directory/package `compare` fan-out and the
-whole-product baseline compare in `abicheck/product_baseline.py`) is never
-given a suppression ruleset itself, so no [suppression](suppressions.md) rule
-can target a `bundle_*` kind by name — that part holds for every `bundle_*`
-kind, with no exception. But for the three **diff-derived** detectors
+reach a diff-derived finding indirectly, the same way scoping does, on the
+CLI fan-out specifically.** `compare_bundle()` is never given a suppression
+ruleset itself, so no [suppression](suppressions.md) rule can target a
+`bundle_*` kind by name — that part holds for every `bundle_*` kind, with no
+exception, on every entry point. On the directory/package `compare` fan-out,
+`--suppress` is applied to each library's `DiffResult` *before* it reaches
+`compare_bundle()` (the same per-library compare pipeline that applies
+`--scope-public-headers`) — so, for the three **diff-derived** detectors
 (`bundle_intra_dep_signature_changed`, `bundle_intra_type_changed`,
-`bundle_provider_changed`), `--suppress` is applied to each library's
-`DiffResult` *before* it reaches `compare_bundle()` (the same per-library
-compare pipeline that applies `--scope-public-headers`) — so a suppression
-rule targeting the underlying per-library kind (`func_params_changed`,
-`type_size_changed`, `func_removed`/`func_added`) starves the bundle
-detector exactly like a scoping exclusion would, and the `bundle_*` finding
-never fires. This is a side effect of suppressing the per-library finding,
-not a way to suppress the bundle finding on its own terms — you can't write
-a rule that says "ignore `bundle_intra_dep_signature_changed` for symbol X"
-directly. For the remaining, **graph-native** kinds
+`bundle_provider_changed`), a suppression rule targeting the underlying
+per-library kind (`func_params_changed`, `type_size_changed`,
+`func_removed`/`func_added`) starves the bundle detector exactly like a
+scoping exclusion would, and the `bundle_*` finding never fires. This is a
+side effect of suppressing the per-library finding, not a way to suppress
+the bundle finding on its own terms — you can't write a rule that says
+"ignore `bundle_intra_dep_signature_changed` for symbol X" directly.
+
+**The whole-product baseline compare (`abicheck/product_baseline.py`'s
+`compare_product_directories`) has no suppression mechanism at all, for
+either kind of finding.** Its function signature carries no `suppress`
+parameter, and it calls the per-library `run_compare()` unconditionally
+unsuppressed — so the starvation effect described above is specific to the
+directory/package CLI fan-out (and any caller manually constructing already-
+suppressed `DiffResult`s for `compare_bundle()`/`compare_bundle_from_facts()`
+itself); a `compare_product_directories()` caller has no suppression lever
+of any kind, upstream or direct.
+
+For the remaining, **graph-native** kinds
 (`bundle_intra_dep_removed`, `bundle_library_removed`/`_added`, version
 drift, SONAME skew, manifest enforcement), there is no per-library `Change`
 to suppress upstream of them at all, so the only levers are
