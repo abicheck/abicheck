@@ -210,6 +210,35 @@ class TestFindUnverifiedSignatureFindings:
 
         assert find_unverified_signature_findings(new, [], old_snaps, new_snaps) == []
 
+    def test_no_finding_when_old_symbol_was_only_a_private_declaration(self):
+        # Codex review: a symbol present in old_snap.function_map is not by
+        # itself proof the old binary ever exported it -- AbiSnapshot keeps
+        # private/internal declarations too. Visibility.HIDDEN on the old
+        # side means it was compiled to NOT export, so a newly-exported
+        # symbol in `new` that happens to share a name with an old *private*
+        # declaration must read as a genuine addition, not a retained,
+        # evidence-uncertain symbol -- even though the old declaration's own
+        # evidence (deliberately ELF_ONLY here) would otherwise be
+        # insufficient.
+        new = _snapshot(
+            {
+                "libcore.so": _meta(exports=["core_fn"]),
+                "libconsumer.so": _meta(imports=["core_fn"]),
+            }
+        )
+        hidden_old_fn = Function(
+            name="core_fn",
+            mangled="core_fn",
+            return_type="?",
+            visibility=Visibility.HIDDEN,
+        )
+        old_snaps = {"libcore.so": _snap("libcore.so", functions=[hidden_old_fn])}
+        new_snaps = {
+            "libcore.so": _snap("libcore.so", functions=[_elf_only_fn("core_fn")])
+        }
+
+        assert find_unverified_signature_findings(new, [], old_snaps, new_snaps) == []
+
     def test_no_finding_when_snapshot_missing_for_provider(self):
         new = _snapshot(
             {

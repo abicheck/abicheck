@@ -130,6 +130,31 @@ def _symbol_evidence_sufficient(symbol: str, snapshot: AbiSnapshot) -> bool:
     return False
 
 
+def _symbol_was_exported(symbol: str, snapshot: AbiSnapshot) -> bool:
+    """Did *snapshot*'s own `Function`/`Variable` entry for *symbol* actually
+    reach the binary's export table -- as opposed to merely being *some*
+    declaration, public or private, that `AbiSnapshot` retains?
+
+    `Visibility.PUBLIC`/`Visibility.ELF_ONLY` both mean "present in the ELF
+    symbol table" (`model.py`'s own docstring); `Visibility.HIDDEN` means
+    `__attribute__((visibility("hidden")))` -- compiled to *not* export,
+    regardless of whether a header declares it. `AbiSnapshot` deliberately
+    retains a library's private/internal declarations alongside its public
+    ones, so mere presence in `function_map`/`variable_map` proves nothing
+    about export status on its own (Codex review) -- this is the one check
+    in this module that actually answers "was this symbol part of this
+    snapshot's binary export surface." A symbol absent from both maps was
+    never declared at all, so it cannot have been exported either.
+    """
+    fn = snapshot.function_map.get(symbol)
+    if fn is not None:
+        return fn.visibility is not Visibility.HIDDEN
+    var = snapshot.variable_map.get(symbol)
+    if var is not None:
+        return var.visibility is not Visibility.HIDDEN
+    return False
+
+
 def _confirmed_provider_symbols(
     per_library_results: Iterable[DiffResult],
 ) -> set[tuple[str, str]]:
@@ -164,11 +189,19 @@ def find_unverified_signature_findings(
     *old_snapshots*/*new_snapshots* map bundle-relative library name (the
     same canonical key `BundleSnapshot.libraries` uses) to that library's
     own `AbiSnapshot` -- the one input `compare_bundle` itself never
-    receives. A provider absent from either mapping, or whose symbol is
-    absent from the *old* side entirely (a genuine addition, not a
-    same-symbol-unverified case), is skipped for that symbol -- this
-    function only ever compares a symbol that exists as a real declaration
-    on both sides.
+    receives. A provider absent from either mapping, or whose symbol was
+    not actually part of the *old* side's export surface (`_symbol_was_
+    exported`), is skipped for that symbol -- this covers both a genuine
+    addition (no declaration on the old side at all) and a symbol that
+    existed on the old side only as a private/internal declaration
+    (`Visibility.HIDDEN`): `AbiSnapshot` deliberately retains a library's
+    private declarations alongside its public ones, so mere presence in
+    `function_map`/`variable_map` does not by itself mean the old binary
+    ever exported it -- a symbol newly exported in *new* must not inherit
+    "retained, evidence uncertain" status from an unrelated old-side
+    declaration the old export table never actually carried (Codex
+    review). This function only ever compares a symbol that was a real
+    export on both sides.
 
     One finding per (consumer, provider, symbol) triple, mirroring
     `compare_bundle`'s own `BUNDLE_INTRA_DEP_SIGNATURE_CHANGED` granularity
@@ -200,10 +233,15 @@ def find_unverified_signature_findings(
             new_snap = new_snapshots.get(provider_lib)
             if old_snap is None or new_snap is None:
                 continue
-            if (
-                symbol not in old_snap.function_map
-                and symbol not in old_snap.variable_map
-            ):
+            if not _symbol_was_exported(symbol, old_snap):
+                # Not a retained symbol whose evidence is in doubt -- either
+                # entirely new (never declared in the old snapshot at all),
+                # or was only ever a private/internal declaration there
+                # (Visibility.HIDDEN) that this bundle's export table never
+                # actually carried. Either way, the old side has nothing to
+                # be "unverified" about: a genuinely new export doesn't
+                # inherit uncertainty from an unrelated old-side declaration
+                # that was never part of the export surface.
                 continue
 
             old_sufficient = _symbol_evidence_sufficient(symbol, old_snap)
