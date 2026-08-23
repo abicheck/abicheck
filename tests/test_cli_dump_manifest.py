@@ -159,6 +159,73 @@ def test_dump_manifest_end_to_end_merges_two_tus(tmp_path, runner):
     assert {"add_a", "add_b"} <= names
 
 
+@pytest.mark.skipif(
+    not sys.platform.startswith("linux"),
+    reason="gcc -shared -o *.so only produces a real ELF binary on Linux "
+    "(see test_dumper_manifest.py's TestDumpWithManifest for the same gate)",
+)
+def test_dump_manifest_with_compiler_option_include_dir_still_works(tmp_path, runner):
+    """Codex review, fresh evidence: `--compiler-option -I<dir>` is a
+    *global* flag applied to every TU regardless of the manifest, but the
+    fix folding it into `public_include_search_dirs` (for provenance
+    widening) unconditionally would make that flat, non-empty value collide
+    with `dump()`'s own manifest mutual-exclusivity check -- turning this
+    previously-working combination into a usage error. It must keep
+    working, with the compiler option still reaching the TU parse."""
+    if not (_have("clang") and _have("gcc")):
+        pytest.skip("clang and gcc are required for this end-to-end test")
+    include_dir = tmp_path / "include"
+    include_dir.mkdir()
+    (include_dir / "dep.h").write_text("int dep(int a, int b);\n")
+    header_a = tmp_path / "a.h"
+    header_a.write_text('#include "dep.h"\nint add_a(int a, int b);\n')
+    src = tmp_path / "lib.c"
+    src.write_text(
+        "int add_a(int a, int b) { return a + b; }\n"
+        "int dep(int a, int b) { return a - b; }\n"
+    )
+    so = tmp_path / "liblib.so"
+    subprocess.run(
+        [
+            "gcc",
+            "-shared",
+            "-fPIC",
+            f"-I{include_dir}",
+            "-o",
+            str(so),
+            str(src),
+        ],
+        check=True,
+        capture_output=True,
+    )
+    manifest = _write_manifest(
+        tmp_path,
+        "roots: [a.h]\ntranslation_units:\n  - name: tu_a\n    forced_includes: [a.h]\n",
+    )
+    out = tmp_path / "snap.json"
+    result = runner.invoke(
+        main,
+        [
+            "dump",
+            str(so),
+            "--dump-manifest",
+            str(manifest),
+            "--ast-frontend",
+            "clang",
+            "--lang",
+            "c",
+            "--compiler-option",
+            f"-I{include_dir}",
+            "-o",
+            str(out),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    snap = json.loads(out.read_text())
+    names = {f["name"] for f in snap["functions"]}
+    assert {"add_a", "dep"} <= names
+
+
 def test_dump_manifest_rejected_for_pe_binary(tmp_path, runner):
     dll = tmp_path / "foo.dll"
     dll.write_bytes(b"MZ" + b"\x00" * 62)
