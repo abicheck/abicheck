@@ -621,6 +621,45 @@ class TestBundleFactsRejectsMalformedFilesystemAliases:
         assert loaded.filesystem_aliases == {"libcore.so": ("libfoo.so.1", "libfoo.so")}
 
 
+class TestBundleFactsRejectsMalformedLibraryFilenames:
+    """A non-string value (Codex review, fresh evidence): a bare
+    ``str(filename)`` coercion silently turns JSON ``null`` into the
+    invented basename ``"None"`` instead of raising, letting a corrupt
+    baseline derive a fabricated SONAME major on replay."""
+
+    def test_null_valued_filename_is_rejected(self) -> None:
+        facts_dict = bundle_facts_to_dict(
+            capture_bundle_facts(_per_library_snapshots(_old_metadata()))
+        )
+        facts_dict["library_filenames"] = {"libcore.so": None}
+        with pytest.raises(ValueError, match="library_filenames"):
+            bundle_facts_from_dict(facts_dict)
+
+    def test_non_string_element_is_rejected(self) -> None:
+        facts_dict = bundle_facts_to_dict(
+            capture_bundle_facts(_per_library_snapshots(_old_metadata()))
+        )
+        facts_dict["library_filenames"] = {"libcore.so": 42}
+        with pytest.raises(ValueError, match="library_filenames"):
+            bundle_facts_from_dict(facts_dict)
+
+    def test_non_mapping_container_is_rejected(self) -> None:
+        facts_dict = bundle_facts_to_dict(
+            capture_bundle_facts(_per_library_snapshots(_old_metadata()))
+        )
+        facts_dict["library_filenames"] = ["not", "a", "mapping"]
+        with pytest.raises(ValueError, match="library_filenames"):
+            bundle_facts_from_dict(facts_dict)
+
+    def test_well_formed_filenames_still_round_trip(self) -> None:
+        facts_dict = bundle_facts_to_dict(
+            capture_bundle_facts(_per_library_snapshots(_old_metadata()))
+        )
+        facts_dict["library_filenames"] = {"libcore.so": "libfoo_core.so.1"}
+        loaded = bundle_facts_from_dict(facts_dict)
+        assert loaded.library_filenames == {"libcore.so": "libfoo_core.so.1"}
+
+
 class TestBundleFactsLibraryFilenames:
     """SONAME-skew replay needs the real on-disk filename, not the
     canonical key (Codex review, fresh evidence): a versioned DSO with no

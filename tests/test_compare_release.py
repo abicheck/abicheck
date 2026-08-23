@@ -491,13 +491,28 @@ class TestDirVsDir:
         assert "Usage:" in out
         assert "--write's PATH must differ from --output/-o" in out
 
-    def test_bundle_facts_out_rejects_collision_with_output(
-        self, tmp_path: Path
+    @pytest.mark.parametrize(
+        "extra_args,facts_name,expected_substr",
+        [
+            (("-o", "{p}"), "out.json", "must differ from --output/-o"),
+            (("--write", "json={p}"), "out.json", "must differ from --write"),
+            (("--output-dir", "{d}"), "summary.json", "summary.json"),
+            (("--output-dir", "{d}"), "libfoo.json", "'libfoo.json'"),
+        ],
+        ids=["output", "write", "output_dir_summary", "output_dir_per_library"],
+    )
+    def test_bundle_facts_out_rejects_output_collisions(
+        self,
+        tmp_path: Path,
+        extra_args: tuple[str, str],
+        facts_name: str,
+        expected_substr: str,
     ) -> None:
-        """G38 Phase 2 (Codex review): `--bundle-facts-out` naming the same
-        path as `--output`/`-o` would silently overwrite the requested
-        baseline with the report -- reject it up front, the same way
-        `--write`/`--output` collisions already are."""
+        """G38 Phase 2 (Codex review, two rounds): `--bundle-facts-out`
+        naming the same path as `--output`/`-o`, `--write`, `--output-dir`'s
+        `summary.json`, or one of its per-library `<stem>.json` files would
+        silently overwrite the requested baseline with the report -- reject
+        each up front, before `--output-dir` is even created."""
         old_dir = tmp_path / "old"
         new_dir = tmp_path / "new"
         old_dir.mkdir()
@@ -505,43 +520,23 @@ class TestDirVsDir:
         snap = _snap()
         _write_snap(old_dir / "libfoo.json", snap)
         _write_snap(new_dir / "libfoo.json", snap)
+        report_dir = tmp_path / "reports"
         same_path = tmp_path / "out.json"
+        resolved_extra = [a.format(p=same_path, d=report_dir) for a in extra_args]
         code, out = _invoke(
             "compare",
             str(old_dir),
             str(new_dir),
-            "-o",
-            str(same_path),
+            *resolved_extra,
             "--bundle-facts-out",
-            str(same_path),
+            str(tmp_path / facts_name)
+            if facts_name == "out.json"
+            else str(report_dir / facts_name),
         )
         assert code == 64
         assert "Usage:" in out
-        assert "--bundle-facts-out's PATH must differ from --output/-o" in out
-
-    def test_bundle_facts_out_rejects_collision_with_write(
-        self, tmp_path: Path
-    ) -> None:
-        old_dir = tmp_path / "old"
-        new_dir = tmp_path / "new"
-        old_dir.mkdir()
-        new_dir.mkdir()
-        snap = _snap()
-        _write_snap(old_dir / "libfoo.json", snap)
-        _write_snap(new_dir / "libfoo.json", snap)
-        same_path = tmp_path / "out.json"
-        code, out = _invoke(
-            "compare",
-            str(old_dir),
-            str(new_dir),
-            "--write",
-            f"json={same_path}",
-            "--bundle-facts-out",
-            str(same_path),
-        )
-        assert code == 64
-        assert "Usage:" in out
-        assert "--bundle-facts-out's PATH must differ from --write" in out
+        assert expected_substr in out
+        assert not report_dir.exists()
 
     def test_json_output_multi(self, tmp_path: Path) -> None:
         old_dir = tmp_path / "old"

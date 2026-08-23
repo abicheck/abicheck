@@ -1884,10 +1884,7 @@ def bundle_facts_from_dict(d: dict[str, Any]) -> BundleFacts:
             name: snapshot_from_dict(sd) for name, sd in raw_snapshots.items()
         },
         filesystem_aliases=_validated_alias_map(d.get("filesystem_aliases", {})),
-        library_filenames={
-            name: str(filename)
-            for name, filename in d.get("library_filenames", {}).items()
-        },
+        library_filenames=_validated_filename_map(d.get("library_filenames", {})),
         manifest=manifest_from_dict(raw_manifest) if raw_manifest is not None else None,
     )
 
@@ -1919,6 +1916,35 @@ def _validated_alias_map(raw: object) -> dict[str, tuple[str, ...]]:
             )
         aliases[name] = tuple(values)
     return aliases
+
+
+def _validated_filename_map(raw: object) -> dict[str, str]:
+    """Validate and convert a persisted ``library_filenames`` mapping.
+
+    A bare ``str(filename)`` coercion silently accepts a malformed value
+    (JSON ``null`` becomes the invented basename ``"None"``, a number
+    becomes its own string form) instead of rejecting the corrupt baseline
+    -- with a no-``DT_SONAME`` library and cohort checking enabled,
+    ``bundle._detect_soname_skew()``'s replay fallback would then derive a
+    SONAME major from that fabricated name, silently omitting or altering
+    a ``bundle_soname_skew`` finding rather than surfacing the invalid
+    input (Codex review, fresh evidence). Mirrors
+    :func:`_validated_alias_map`'s rejection shape.
+    """
+    if not isinstance(raw, dict):
+        raise ValueError(
+            f"bundle facts: 'library_filenames' must be a mapping, got "
+            f"{type(raw).__name__}"
+        )
+    filenames: dict[str, str] = {}
+    for name, filename in raw.items():
+        if not isinstance(filename, str):
+            raise ValueError(
+                f"bundle facts: 'library_filenames[{name!r}]' must be a string, "
+                f"got {filename!r}"
+            )
+        filenames[name] = filename
+    return filenames
 
 
 def load_bundle_facts(path: str | Path) -> BundleFacts:

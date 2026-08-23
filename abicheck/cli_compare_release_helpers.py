@@ -346,6 +346,44 @@ def reject_bundle_facts_out_collision(
             )
 
 
+def reject_bundle_facts_out_dir_collision(
+    bundle_facts_out: Path | None,
+    output_dir: Path | None,
+    old_map: dict[str, Path],
+) -> None:
+    """Reject ``--bundle-facts-out`` naming a path ``--output-dir`` will
+    also write (G38 Phase 2, Codex review, fresh evidence).
+
+    ``reject_bundle_facts_out_collision()`` above only knows about
+    ``--output``/``--write`` -- it can't see ``--output-dir``'s own
+    ``summary.json`` or per-library ``<stem>.json`` files, since those
+    paths depend on *output_dir* and (for the per-library case) the
+    resolved OLD-side library map, neither known at that earlier
+    validation point. Called once ``old_map`` is resolved, before
+    ``output_dir`` is created or anything is written into it.
+    """
+    if bundle_facts_out is None or output_dir is None:
+        return
+    resolved = bundle_facts_out.resolve()
+    summary_path = output_dir / "summary.json"
+    if resolved == summary_path.resolve():
+        raise click.UsageError(
+            "--bundle-facts-out's PATH must differ from --output-dir's own "
+            "summary.json: writing both to the same file would silently "
+            "overwrite the requested bundle-facts baseline with the "
+            "per-library summary report."
+        )
+    for name, old_path in old_map.items():
+        lib_path = output_dir / f"{old_path.stem}.json"
+        if resolved == lib_path.resolve():
+            raise click.UsageError(
+                f"--bundle-facts-out's PATH must differ from --output-dir's "
+                f"own per-library report for {name!r} ({lib_path}): writing "
+                "both to the same file would silently overwrite whichever "
+                "was written second."
+            )
+
+
 def write_bundle_facts_out(
     bundle_facts_out: Path,
     diff_pairs: list[tuple[DiffResult, AbiSnapshot]],

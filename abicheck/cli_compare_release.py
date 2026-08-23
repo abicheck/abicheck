@@ -68,6 +68,7 @@ from .cli_compare_release_helpers import (  # noqa: F401
     _run_bundle_analysis,
     apply_release_gate_pack,
     reject_bundle_facts_out_collision,
+    reject_bundle_facts_out_dir_collision,
     write_bundle_facts_out,
 )
 from .cli_options import (
@@ -1461,10 +1462,7 @@ def compare_release_cmd(
 
     _setup_verbosity(verbose)
 
-    # CLI cleanup phase two, PR E: --write's own internal coherence (no
-    # secondary aimed at the same file as the primary; a dry run never
-    # reaches this engine at all -- see run_compare's own emit_dry_run()).
-    # Shared with single-pair `compare` so --write validation cannot drift.
+    # CLI cleanup phase two, PR E: shared with `compare` so it can't drift.
     reject_incoherent_secondary_output(
         dry_run=False,
         output=output,
@@ -1554,6 +1552,7 @@ def compare_release_cmd(
                 for msg in warning_msgs:
                     click.echo(msg, err=True)
 
+            reject_bundle_facts_out_dir_collision(bundle_facts_out, output_dir, old_map)
             if output_dir:
                 output_dir.mkdir(parents=True, exist_ok=True)
 
