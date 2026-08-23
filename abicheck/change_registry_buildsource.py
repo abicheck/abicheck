@@ -32,6 +32,22 @@ _R = Verdict.COMPATIBLE_WITH_RISK
 _E = ChangeKindMeta
 
 BUILDSOURCE_EXTENSION_ENTRIES: list[ChangeKindMeta] = [
+    # G38 Phase 3 (docs/contribute/plans/g38-bundle-facts-model-and-
+    # multibuild-comparability.md) — multibuild variant pairing. Grouped
+    # here (rather than change_registry.py, which is at the AI-readiness
+    # 2000-line hard cap) purely for space; the finding itself is sourced
+    # from the bundle layer (abicheck/bundle_multibuild.py), not from the
+    # L3-L5 buildsource evidence layers this module otherwise covers.
+    _E("bundle_variant_coverage_regressed", _R,
+       impact="A build variant present in the old release's variant set "
+              "(e.g. the CPU-only build alongside an ONEDAL_DATA_PARALLEL/"
+              "DPC build) has no matching variant in the new release. This "
+              "is a build-coverage gap, not by itself proof the missing "
+              "variant's ABI broke -- it may have been dropped from the "
+              "release intentionally -- but a consumer pinned to that "
+              "variant can no longer be evaluated and needs to see the "
+              "gap.",
+       description_template="Build variant '{name}' present in the old release has no matching variant in the new release ({detail})."),
     _E("identity_collision_detected", _R,
        impact="Two distinct declarations were linked onto the same L4 identity key "
               "(SourceEntity.identity(): the mangled name, else "

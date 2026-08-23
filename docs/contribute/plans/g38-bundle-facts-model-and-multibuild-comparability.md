@@ -383,6 +383,52 @@ plan, informed by whatever `BundleFacts` looked like in production by then.
 
 ### Phase 3 — Multibuild variant pairing
 
+**Implementation status (2026-08-23): the pairing primitive, the
+`ChangeKind`, and its finding-construction helper are shipped; the CLI/config
+surface that discovers real per-variant `BundleFacts` and feeds them to
+`pair_variants` is deliberately deferred, the same posture Phase 2's own
+implementation-status note already took for its CLI consumer half.**
+
+- `abicheck/bundle_multibuild.py` implements `variant_fingerprint`,
+  `VariantOutcome`, `VariantComparison`, `pair_variants`, and
+  `coverage_regression_findings` per this section's design below, with one
+  real deviation: `variant_fingerprint` takes explicit, named coordinates
+  (`target_triple`, `compiler_family`, `compiler_version`,
+  `feature_toggles`) rather than a raw `BuildEvidence | None` /
+  `EnvironmentMatrix | None` pair. Telling a genuine logical-identity
+  feature toggle (`ONEDAL_DATA_PARALLEL`) apart from build state that
+  legitimately drifts release to release (an ABI-relevant `-D` define, a
+  raised `-std=`) cannot be done reliably from raw build evidence alone —
+  both can appear as an indistinguishable `BuildOption`/`CompileUnit` entry
+  — so that judgement call is pushed to the caller instead of embedded as a
+  heuristic parse, which would risk silently reintroducing the union
+  failure mode from either direction (see the function's own docstring for
+  the full reasoning). The function's own contract (which coordinates are
+  fingerprinted, which are deliberately excluded and why) is otherwise
+  exactly as designed below.
+- `ChangeKind.BUNDLE_VARIANT_COVERAGE_REGRESSED` /
+  `"bundle_variant_coverage_regressed"` is registered in `checker_policy.py`
+  / `change_registry.py` (default verdict `RISK`, per this section's
+  design), classified in `tests/canonical_identity_contract.py`'s
+  `UNVERIFIED` bucket (matching every other pre-existing `bundle_*` kind —
+  none of them have had their construction call sites individually verified
+  against the `TYPE_BEARING`/`VALUE_INSENSITIVE` criteria yet), and covered
+  by `tests/test_bundle_multibuild.py` (determinism/sensitivity cases, the
+  never-union Hypothesis property, the missing-variant case, and
+  `coverage_regression_findings`'s own finding construction).
+- **Not shipped**: `pair_variants`' *new-only* coverage-expansion outcome is
+  modelled (`VariantOutcome.NEW_ONLY`) but, per this section's own design,
+  deliberately never produces a `ChangeKind` — nothing renders it into the
+  reporter's `bundle.json`/`bundle.md` yet (that's this phase's own
+  "Reporter" row in "Files & surfaces", still open). Also not shipped: any
+  CLI/config surface that discovers a release's real build variants,
+  extracts `BundleFacts` per variant, and calls `pair_variants` — that needs
+  the same real, separate design Phase 2's CLI consumer half deferred for
+  (most of `compare`'s release-fan-out option surface loses its per-variant
+  meaning once there is more than one old/new directory pair per release),
+  and `comparability.py`'s bundle-level fingerprint-mismatch refusal is
+  likewise not yet wired to this module's `variant_fingerprint`.
+
 **New module, `abicheck/bundle_multibuild.py`:**
 
 ```python
@@ -563,7 +609,7 @@ table asks for.
 |---|---|
 | `abicheck/bundle_facts.py` | **Shipped (Phase 2).** New leaf module (not `bundle_models.py` — see the implementation-status note above): `BundleFacts`, `capture_bundle_facts()`, `bundle_snapshot_from_facts()`, `compare_bundle_from_facts()` (a thin wrapper delegating to `bundle.compare_bundle()` unchanged, so the parity test holds two calls to one implementation equal) |
 | `abicheck/bundle_manifest.py` | **Shipped (Phase 2).** `manifest_to_dict`/`manifest_from_dict`/`manifest_entry_to_dict`/`manifest_entry_from_dict` — round-trip serialization for `InstantiationManifest`, reusing `_parse_manifest_entry`'s existing validation rather than a second parser |
-| `abicheck/bundle_multibuild.py` | New — `variant_fingerprint`, `pair_variants`, `VariantComparison` (Phase 3) |
+| `abicheck/bundle_multibuild.py` | **Shipped (Phase 3, pairing primitive only).** `variant_fingerprint`, `pair_variants`, `VariantOutcome`, `VariantComparison`, `coverage_regression_findings` |
 | `abicheck/serialization.py` | **Shipped (Phase 2).** `save_bundle_facts`/`load_bundle_facts` plus `bundle_facts_to_dict`/`bundle_facts_from_dict` (the latter two live here, not in `bundle_facts.py`, to avoid the import cycle noted above) |
 | `abicheck/comparability.py` | Bundle-level fingerprint-mismatch refusal, mirroring the existing single-snapshot `ScopeMismatchError` (Phase 3, once `variant_fingerprint` carries real per-variant identity — Phase 2's field is always `"default"`); no change to single-snapshot behavior |
 | `abicheck/checker_policy.py` / `abicheck/change_registry.py` | `bundle_variant_coverage_regressed`, `bundle_intra_dep_signature_unverified` registry entries (Phases 3-4) |
