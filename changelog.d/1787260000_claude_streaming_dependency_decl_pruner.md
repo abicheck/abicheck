@@ -51,3 +51,11 @@
   paths, and `appcompat.check_appcompat`'s two dumps) now also suppress the
   pruner for the same "full/unscoped surface, no post-hoc filter to retain
   what's pruned" reason `cli_dump_helpers.py`'s choke points already do.
+  The placeholder now also retains the pruned declaration's own clang `id`
+  (previously dropped): a sibling declaration's default expression can
+  reference a pruned dependency `VarDecl`/`FunctionDecl` via a compact
+  `referencedDecl` stub carrying only that id and a bare name, and
+  `dumper_clang_expr._index_decl_id_qualified_names` resolves it back to a
+  scope-qualified name by walking the whole (possibly pruned) root --
+  dropping the id would have silently reintroduced the exact
+  `a::VALUE`/`b::VALUE` bare-name collision that index exists to prevent.

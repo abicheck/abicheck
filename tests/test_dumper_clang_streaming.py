@@ -58,6 +58,23 @@ class TestDependencyDeclPruningHook:
         assert pruned["name"] == "push_back"
         assert hook.pruned_count == 1
 
+    def test_prunes_but_retains_original_id(self) -> None:
+        """Codex review, PR #840, thread bdXdB: the placeholder must keep
+        the pruned node's own ``id`` -- ``dumper_clang_expr._index_decl_id_
+        qualified_names`` resolves a sibling declaration's compact
+        ``referencedDecl`` stub (e.g. a default expression's ``a::VALUE``)
+        back to a scope-qualified name via exactly this id, walking the
+        WHOLE root. Dropping it would make that id vanish from the index,
+        reintroducing the bare-name collision
+        (`a::VALUE`/`b::VALUE` both resolving to bare ``"VALUE"``) that
+        index exists to prevent."""
+        hook = DependencyDeclPruningHook((_PROJECT_HEADER,))
+        node = _func_node("VarDecl", "VALUE", _DEP_HEADER)
+        node["id"] = "0x1234"
+        pruned = hook(list(node.items()))
+        assert pruned["kind"] == PRUNED_PLACEHOLDER_KIND
+        assert pruned["id"] == "0x1234"
+
     def test_keeps_function_in_project_header(self) -> None:
         hook = DependencyDeclPruningHook((_PROJECT_HEADER,))
         node = _func_node("FunctionDecl", "add", _PROJECT_HEADER)
@@ -215,6 +232,38 @@ class TestLoadPrunedClangAst:
         (child,) = root["inner"]
         assert child["kind"] == PRUNED_PLACEHOLDER_KIND
         assert "inner" not in child
+
+    def test_pruned_decl_id_still_resolves_to_a_qualified_name(self) -> None:
+        """Codex review, PR #840, thread bdXdB: a namespace-scope dependency
+        ``VarDecl`` that gets pruned must still be resolvable by
+        ``dumper_clang_expr._index_decl_id_qualified_names`` via its own
+        ``id`` -- otherwise a project declaration's default expression
+        referencing it (a compact ``referencedDecl`` stub carrying only that
+        id and the bare name ``"VALUE"``) can no longer distinguish it from
+        an unrelated same-named declaration in a different namespace, the
+        exact ``a::VALUE``/``b::VALUE`` collision that index exists to
+        prevent."""
+        from abicheck.dumper_clang_expr import _index_decl_id_qualified_names
+
+        dep_value = _func_node("VarDecl", "VALUE", _DEP_HEADER)
+        dep_value["id"] = "0xAAA"
+        doc = {
+            "kind": "TranslationUnitDecl",
+            "inner": [
+                {
+                    "kind": "NamespaceDecl",
+                    "name": "a",
+                    "inner": [dep_value],
+                },
+            ],
+        }
+        fh = io.BytesIO(json.dumps(doc).encode("utf-8"))
+        root, pruned_count = load_pruned_clang_ast(fh, header_roots=(_PROJECT_HEADER,))
+        assert pruned_count == 1
+        pruned_node = root["inner"][0]["inner"][0]
+        assert pruned_node["kind"] == PRUNED_PLACEHOLDER_KIND
+        index = _index_decl_id_qualified_names(root)
+        assert index.get("0xAAA") == "a::VALUE"
 
 
 class TestStreamingPruneEnabledRespectsAstMemoization:

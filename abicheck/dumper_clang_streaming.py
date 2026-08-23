@@ -402,11 +402,23 @@ class DependencyDeclPruningHook:
         if _subtree_reaches_a_kept_file(node, self._is_dep):
             return node
         self.pruned_count += 1
-        # Keep just enough for a human/log to identify what was elided;
-        # never consulted by ``_ClangAstParser`` (an unrecognized ``kind``
-        # is simply skipped, the same as any other node it doesn't model).
+        # Keep just enough for a human/log to identify what was elided, PLUS
+        # the original "id" (Codex review, PR #840, thread bdXdB): a sibling
+        # declaration's default expression can reference this exact node via
+        # a compact ``referencedDecl`` stub carrying only that id and a bare,
+        # unqualified name -- ``dumper_clang_expr._index_decl_id_qualified_
+        # names`` resolves that id back to a scope-qualified name (its own
+        # docstring: without it, `a::VALUE`/`b::VALUE` fingerprint
+        # identically) by walking the WHOLE root, including this node in its
+        # real tree position. Dropping "id" here would make that id vanish
+        # from the index, silently reintroducing the exact bare-name
+        # collision that index exists to prevent. Retaining it costs
+        # nothing: `_index_decl_id_qualified_names`'s walk only needs "id"
+        # and "name" (any "kind" indexes), and `_ClangAstParser` itself
+        # still never consults an unrecognized ``kind`` like this one.
         return {
             "kind": PRUNED_PLACEHOLDER_KIND,
+            "id": node.get("id"),
             "name": node.get("name"),
             "loc": loc,
             "abicheck_pruned_original_kind": kind,
