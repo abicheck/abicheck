@@ -503,8 +503,6 @@ def _resolve_single_ast_backend(backend: str, frontend_context: str) -> str:
     return resolved
 
 
-
-
 def _castxml_fallback_reason(
     exc: SnapshotError,
     *,
@@ -1252,6 +1250,8 @@ def dump(
             "public_headers": public_headers,
             "public_header_dirs": public_header_dirs,
             "scope_header_dirs": scope_header_dirs,
+            # No per-TU equivalent for a multi-TU manifest (CodeRabbit review).
+            "public_include_search_dirs": public_include_search_dirs,
         }
         if _given := [name for name, value in _conflicts.items() if value]:
             raise ValidationError(

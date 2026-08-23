@@ -1144,6 +1144,32 @@ class TestDumpWithManifest:
                 dump_manifest=self._manifest(tmp_path),
             )
 
+    def test_dump_rejects_public_include_search_dirs_with_manifest(
+        self, tmp_path: Path
+    ):
+        """CodeRabbit review, fresh evidence: a manifest dump merges several
+        independently resolved TUs, each with its own per-TU include roots
+        -- a single flat `public_include_search_dirs` has no manifest-field
+        equivalent to replace it with (unlike `public_headers`/
+        `public_header_dirs`, which the manifest's own `public_header_paths`/
+        `public_header_dirs` replace). Applying it unconditionally would
+        silently misapply one TU's caller-supplied explicit roots to every
+        other TU's declarations too, rather than being rejected the way
+        every other manifest-incompatible parameter already is."""
+        if not (_have("clang") and _have("gcc")):
+            pytest.skip("clang and gcc are required for this end-to-end test")
+        so = self._build_two_tu_lib(tmp_path)
+        with pytest.raises(ValidationError, match="mutually exclusive"):
+            dump(
+                so,
+                [],
+                version="1.0",
+                compiler="cc",
+                header_backend="clang",
+                dump_manifest=self._manifest(tmp_path),
+                public_include_search_dirs=[tmp_path],
+            )
+
     def test_dump_rejects_manifest_for_hybrid_frontend(self, tmp_path: Path):
         if not (_have("clang") and _have("gcc")):
             pytest.skip("clang and gcc are required for this end-to-end test")
