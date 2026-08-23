@@ -110,6 +110,12 @@ DEFAULT_BASELINE_FILE = REPO_ROOT / "mutation-baseline.json"
 #: ``@@ -old,cnt +new,cnt @@`` — we only need the new-side range.
 _HUNK = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
 
+# Keep the subprocess ceiling aligned with mutation.yml's job timeout. A
+# diff-scoped run over a large detector module can legitimately exceed two
+# hours; a shorter inner timeout turns the workflow's four-hour allowance into
+# a misleading no-op.
+MUTMUT_TIMEOUT_SECONDS = 4 * 60 * 60
+
 
 def _run_mutmut(cmd: list[str]) -> tuple[str, int]:
     """Run a mutmut subcommand, returning ``(output, returncode)``.
@@ -126,7 +132,7 @@ def _run_mutmut(cmd: list[str]) -> tuple[str, int]:
     and let the gate pass on stale results (Codex review).
     """
     proc = subprocess.run(  # noqa: S603 — fixed argv, no shell
-        cmd, capture_output=True, text=True, timeout=7200
+        cmd, capture_output=True, text=True, timeout=MUTMUT_TIMEOUT_SECONDS
     )
     return proc.stdout + proc.stderr, proc.returncode
 

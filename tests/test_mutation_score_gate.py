@@ -856,7 +856,9 @@ def test_an_aborted_mutmut_run_fails_even_with_readable_results(
     output = capsys.readouterr().out
     assert "the run aborted" in output
     assert "saved full mutmut run output" in output
-    assert (tmp_path / "mutmut-run-output.txt").read_text() == "config error: nothing to mutate"
+    assert (
+        tmp_path / "mutmut-run-output.txt"
+    ).read_text() == "config error: nothing to mutate"
 
 
 def test_a_successful_run_with_survivors_is_still_measured(
