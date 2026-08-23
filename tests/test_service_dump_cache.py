@@ -300,6 +300,58 @@ class TestDumpCacheExtraKey:
         )
         assert k_auto != k_explicit
 
+    def test_differs_by_omitted_vs_explicit_empty_public_include_search_dirs(self):
+        # Codex review, fresh evidence: `public_include_search_dirs=None`
+        # (omitted -- the dump falls back to widening off `includes`) and
+        # `public_include_search_dirs=[]` (given explicitly, disables
+        # provenance widening entirely) previously collapsed to the
+        # identical key material via a bare `... or []`, even though the
+        # two produce genuinely different declaration-provenance
+        # classification. A cache entry for one must never be served for
+        # the other.
+        k_omitted = _dump_cache_extra_key("elf", "clang", None, None, "c++")
+        k_explicit_empty = _dump_cache_extra_key(
+            "elf", "clang", None, None, "c++", public_include_search_dirs=[]
+        )
+        assert k_omitted != k_explicit_empty
+
+    def test_differs_by_public_include_search_dirs_content(self, tmp_path):
+        k1 = _dump_cache_extra_key(
+            "elf",
+            "clang",
+            None,
+            None,
+            "c++",
+            public_include_search_dirs=[tmp_path / "a"],
+        )
+        k2 = _dump_cache_extra_key(
+            "elf",
+            "clang",
+            None,
+            None,
+            "c++",
+            public_include_search_dirs=[tmp_path / "b"],
+        )
+        assert k1 != k2
+
+    def test_no_ast_branch_also_differs_by_omitted_vs_explicit_empty(self):
+        # The `uses_ast=False` ("no-ast", binary-only) branch has its own
+        # separate key-construction path -- same finding must be fixed
+        # there too.
+        k_omitted = _dump_cache_extra_key(
+            "elf", "clang", None, None, "c++", uses_ast=False
+        )
+        k_explicit_empty = _dump_cache_extra_key(
+            "elf",
+            "clang",
+            None,
+            None,
+            "c++",
+            uses_ast=False,
+            public_include_search_dirs=[],
+        )
+        assert k_omitted != k_explicit_empty
+
     def test_invalid_frontend_pin_uses_same_fallback_cache_identity(
         self, monkeypatch
     ):

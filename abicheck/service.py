@@ -812,6 +812,7 @@ def _run_dump_uncached(
                 notify=notify,
                 include_labels=include_labels,
                 dump_manifest=dump_manifest,
+                public_include_search_dirs=_public_include_search_dirs,
             )
         _try_attach_sycl_metadata(snap, path)
         _try_attach_python_ext_metadata(snap)
@@ -842,7 +843,13 @@ def _run_dump_uncached(
             compile,
             public_headers,
             public_header_dirs,
-            include_search_dirs=_includes,
+            # `_public_include_search_dirs`, not `_includes` (Codex review,
+            # fresh evidence): `_includes` can already be build/source-
+            # evidence-widened, and this graph attach's own node-visibility
+            # classification must agree with the primary parse's
+            # declaration-provenance classification above, not silently
+            # re-widen it.
+            include_search_dirs=_public_include_search_dirs,
         )
         return attach_clang_layout(
             snap, _headers, _includes, lang=lang, compile=compile
@@ -1308,6 +1315,7 @@ def _dump_elf(
     notify: Callable[[str], None] | None = None,
     include_labels: dict[Path, str] | None = None,
     dump_manifest: DumpManifest | None = None,
+    public_include_search_dirs: list[Path] | None = None,
 ) -> AbiSnapshot:
     """Dump an ELF binary to an ABI snapshot.
 
@@ -1322,6 +1330,12 @@ def _dump_elf(
     *headers* for this dump; threaded straight into :func:`dumper.dump`,
     which enforces the mutual-exclusivity rule against *headers*/
     *public_headers*/*public_header_dirs*.
+
+    ``public_include_search_dirs`` is the caller's genuinely explicit ``-I``
+    list, kept separate from *includes* -- which can already be widened by
+    the time it reaches here (Codex review) -- so provenance widening never
+    uses a build-derived directory. Falls back to ``list(includes)`` when
+    omitted (unchanged prior behavior).
     """
     from .dumper import dump
 
@@ -1420,7 +1434,16 @@ def _dump_elf(
             # `public_include_search_dirs` (real regression: `eff_includes`
             # also carries `inc_extra`'s auto-added umbrella-header
             # directory, which can hold a genuinely private sibling header).
-            public_include_search_dirs=list(includes),
+            # Prefer the caller's own separately-threaded, genuinely
+            # explicit list over this function's own `includes` parameter
+            # (which can already be build/source-evidence-widened by the
+            # time it reaches here -- Codex review, fresh evidence; see
+            # this function's own docstring).
+            public_include_search_dirs=(
+                list(public_include_search_dirs)
+                if public_include_search_dirs is not None
+                else list(includes)
+            ),
             version=version,
             compiler=compiler,
             gcc_path=cc.gcc_path,

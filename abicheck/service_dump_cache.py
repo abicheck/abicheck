@@ -246,6 +246,26 @@ def _manifest_public_headers(dump_manifest: Any) -> tuple[list[Path], list[Path]
     )
 
 
+def _public_include_search_dirs_key_field(
+    public_include_search_dirs: list[Path] | None, sep: str
+) -> str:
+    """Cache-key material for *public_include_search_dirs* that keeps
+    ``None`` (omitted -- the dump falls back to widening off ``includes``)
+    distinct from an explicit ``[]`` (given, and disables widening
+    entirely) -- both previously collapsed to the identical empty-string
+    material via a bare ``... or []``, so two otherwise-identical cacheable
+    dumps differing only in which of the two the caller meant could share a
+    persisted snapshot even though their declarations receive different
+    provenance origins (Codex review, fresh evidence).
+
+    A leading presence marker (``"0"``/``"1"``, never a path character)
+    keeps the two apart regardless of what directories (if any) are given.
+    """
+    if public_include_search_dirs is None:
+        return "0"
+    return "1" + sep + sep.join(sorted(str(p) for p in public_include_search_dirs))
+
+
 def _dump_cache_extra_key(
     binary_fmt: str,
     header_backend: str,
@@ -341,9 +361,7 @@ def _dump_cache_extra_key(
                 sep.join(sorted(str(p) for p in (public_headers or []))),
                 sep.join(sorted(str(p) for p in (public_header_dirs or []))),
                 str(lang_explicit),
-                sep.join(
-                    sorted(str(p) for p in (public_include_search_dirs or []))
-                ),
+                _public_include_search_dirs_key_field(public_include_search_dirs, sep),
             ]
         )
 
@@ -433,7 +451,7 @@ def _dump_cache_extra_key(
             sep.join(sorted(str(p) for p in (public_headers or []))),
             sep.join(sorted(str(p) for p in (public_header_dirs or []))),
             str(lang_explicit),
-            sep.join(sorted(str(p) for p in (public_include_search_dirs or []))),
+            _public_include_search_dirs_key_field(public_include_search_dirs, sep),
         ]
     )
 
