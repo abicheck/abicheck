@@ -1,9 +1,14 @@
 ### Fixed
 
 - **`dump --sources TREE -H hdr` (no binary) silently ignored `-H`/`--header`
-  and wrote an empty, `depth="binary"` snapshot with no trace the flag was
-  dropped.** A source-only `dump` (no `SO_PATH`) dispatches to
-  `dump_source_only()`, which embeds only L3/L4/L5 build/source facts — it
-  has no L2 header-AST pass and never even receives `headers`. This is now
-  rejected as a usage error (exit 64) naming the dropped flag, instead of
-  exiting 0 with a misleadingly "successful" empty snapshot.
+  for the *written snapshot* — it embeds only L3/L4/L5 build/source facts,
+  never an L2 header-AST pass, so the resulting snapshot has an empty
+  (0 functions/enums), `depth="binary"` shape with no trace the flag had no
+  effect there. A CLI warning now names the ignored flag on the real run
+  (`dump`'s own `--dry-run` preview is unaffected — it genuinely resolves
+  and reports on the given headers via the typed `DumpRequest` pipeline, so
+  it was already correct). An initial fix rejected the combination outright
+  as a usage error; that was reverted after it broke a wide, pre-existing
+  test suite that legitimately combines `-H` with a source-only
+  `--dry-run` — `-H` is not dead code for this invocation shape in general,
+  only for what the non-dry-run path actually writes.

@@ -332,13 +332,20 @@ def test_dump_source_only_depth_binary_is_usage_error(tmp_path) -> None:  # type
     assert not out.exists()
 
 
-def test_dump_source_only_header_flag_is_usage_error(tmp_path) -> None:  # type: ignore[no-untyped-def]
+def test_dump_source_only_header_flag_warns_but_still_writes_snapshot(tmp_path) -> None:  # type: ignore[no-untyped-def]
     """A source-only dump (no SO_PATH) dispatches to dump_source_only(),
     which embeds only L3/L4/L5 build/source facts -- it never even receives
-    `headers`, so -H/--header was previously silently dropped: `dump
-    --sources src -H api.h -o out.json` exited 0 and wrote an empty (0
-    functions/enums), depth="binary" snapshot with no trace the flag was
-    ignored. Must now be rejected as a usage error naming the dropped flag."""
+    `headers`, so -H/--header has no effect on the WRITTEN snapshot: `dump
+    --sources src -H api.h -o out.json` exits 0 and writes an empty (0
+    functions/enums), depth="binary" snapshot. Previously this was
+    completely silent, with no trace the flag was ignored; a hard usage
+    error was tried and reverted (Codex review, fresh evidence: -H is NOT
+    dead code for this invocation shape in general -- the --dry-run branch
+    genuinely consults it, exercised by a wide pre-existing test suite a
+    blanket rejection broke). Must now at least warn, on stderr, naming the
+    ignored flag -- and must still write the snapshot (exit 0), matching
+    the pre-existing, still-legitimate behavior everything else here
+    depends on."""
     src = tmp_path / "src3"
     src.mkdir()
     hdr = src / "api.h"
@@ -348,18 +355,17 @@ def test_dump_source_only_header_flag_is_usage_error(tmp_path) -> None:  # type:
         main,
         ["dump", "--sources", str(src), "-H", str(hdr), "-o", str(out)],
     )
-    assert res.exit_code == 64, _all_output(res)
-    assert "-H/--header has no effect on a source-only dump" in _all_output(res)
-    assert not out.exists()
+    assert res.exit_code == 0, _all_output(res)
+    assert "-H/--header has no effect on this source-only dump" in _all_output(res)
+    assert out.exists()
 
 
-def test_dump_source_only_header_flag_rejected_in_dry_run_too(tmp_path) -> None:  # type: ignore[no-untyped-def]
-    # Codex review, real finding: emit_dry_run() raises SystemExit, so a
-    # check placed only in the so_path-is-None dispatch (which --dry-run
-    # never reaches) let `dump --dry-run --sources tree -H api.h` report a
-    # valid invocation (exit 0) while the real run immediately rejected it
-    # with exit 64 -- a dry-run/real-run parity gap. Must reject the same
-    # way in both.
+def test_dump_source_only_header_flag_dry_run_is_unaffected(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    # The written-snapshot warning above must not regress --dry-run, which
+    # genuinely resolves and reports on the given headers (unlike the real
+    # run) -- see test_dry_run_build_query_contract.py and
+    # test_dump_request_from_cli.py for the pre-existing behavior this must
+    # not disturb.
     src = tmp_path / "src3b"
     src.mkdir()
     hdr = src / "api.h"
@@ -368,12 +374,12 @@ def test_dump_source_only_header_flag_rejected_in_dry_run_too(tmp_path) -> None:
         main,
         ["dump", "--dry-run", "--sources", str(src), "-H", str(hdr)],
     )
-    assert res.exit_code == 64, _all_output(res)
-    assert "-H/--header has no effect on a source-only dump" in _all_output(res)
+    assert res.exit_code == 0, _all_output(res)
+    assert "-H/--header has no effect" not in _all_output(res)
 
 
 def test_dump_source_only_without_header_flag_still_succeeds(tmp_path) -> None:  # type: ignore[no-untyped-def]
-    # The header-flag rejection above must not regress the ordinary,
+    # The header-flag warning above must not regress the ordinary,
     # headers-free source-only dump.
     src = tmp_path / "src4"
     src.mkdir()
