@@ -59,3 +59,11 @@
   scope-qualified name by walking the whole (possibly pruned) root --
   dropping the id would have silently reintroduced the exact
   `a::VALUE`/`b::VALUE` bare-name collision that index exists to prevent.
+  A manifest (`--dump-manifest`) dump no longer opens the in-process AST
+  memoization scope for its primary parse: that scope only exists to hand
+  off an AST to the always-on header-graph attach, which is guaranteed to
+  no-op for a manifest dump (its own per-TU header lists are mutually
+  exclusive with `-H`) -- opening it anyway was silently vetoing the
+  pruner for a manifest's own TU parses whenever they shared a thread with
+  the primary call (a single TU, or `ABICHECK_TU_JOBS=1`), protecting a
+  memo nothing would ever read.

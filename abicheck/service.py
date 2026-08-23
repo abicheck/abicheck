@@ -28,6 +28,7 @@ import functools
 import hashlib
 import importlib as _importlib
 import logging
+from contextlib import nullcontext
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -788,9 +789,20 @@ def _run_dump_uncached(
         )
 
     if binary_fmt == "elf":
-        # See the hybrid-path scope above: _attach_header_graph below is a
-        # real downstream consumer of this primary pass's AST.
-        with dumper_cache.ast_memoize_scope():
+        # See the hybrid-path scope above -- but only worth opening when
+        # _attach_header_graph below will actually run: it no-ops on
+        # `_skip_header_graph_attach`/`dwarf_only`/`symbols_only` and on
+        # empty `_headers`, which `dump_manifest` guarantees (mutually
+        # exclusive with `headers`, api_types.py). Opening it unconditionally
+        # would veto the opt-in streaming pruner for a manifest dump's own
+        # TU parses too whenever they share this thread (single TU /
+        # `ABICHECK_TU_JOBS=1`) -- protecting a memo nothing will ever read
+        # (Codex review, PR #840).
+        with (
+            dumper_cache.ast_memoize_scope()
+            if _headers and not _skip_header_graph_attach and not dwarf_only and not symbols_only
+            else nullcontext()
+        ):
             snap = _dump_elf(
                 path,
                 _headers,

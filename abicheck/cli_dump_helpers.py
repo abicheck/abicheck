@@ -1658,26 +1658,22 @@ def perform_elf_dump(
             deferred_dirs = deferred_dirs + l3_include_dirs
 
         # Scoped so a clang primary parse is handed off in-process to the
-        # `_attach_header_graph` pass below (G31 Phase C) -- this ELF `dump`
-        # CLI path reaches `dumper.dump` directly, not `service.run_dump`,
-        # so without its own scope here the primary parse is never memoized
-        # and the graph pass re-reads/re-parses the disk cache instead
-        # (Codex review).
-        #
-        # `include_dependencies` (`dump --include-system-declarations`) means
-        # this invocation wants the full, unscoped declaration set -- the
-        # opt-in streaming pruner (dumper_clang_streaming.py) has no
-        # visibility into that flag on its own (it prunes deep inside the
-        # clang AST parse, long before `write_snapshot_output`'s post-hoc
-        # filter below ever runs), so without suppressing it here it could
-        # silently drop dependency-header functions/variables the flag
-        # explicitly asked to keep -- a real correctness bug (Codex review,
-        # PR #840), not merely a missing "auto-enable from this flag"
-        # convenience. `False` needs no suppression: the pruner can never be
-        # more aggressive than the filter `write_snapshot_output` is about to
-        # apply anyway.
+        # `_attach_header_graph` pass below (Codex review) -- but only when
+        # that pass will actually run: it no-ops on `dwarf_only` and on
+        # empty `headers`, which `--dump-manifest` guarantees (mutually
+        # exclusive with `-H`). Opening it unconditionally would veto the
+        # opt-in streaming pruner for a manifest dump's own TU parses too
+        # whenever they share this thread (single TU / `ABICHECK_TU_JOBS=1`)
+        # -- protecting a memo nothing will ever read (Codex, PR #840).
+        # `include_dependencies` (`--include-system-declarations`) also
+        # suppresses that pruner here, for the same reason as the identical
+        # guard on `handle_non_elf_dump` (Codex, PR #840): it has no
+        # visibility into this flag on its own, and pruning happens well
+        # before `write_snapshot_output`'s post-hoc filter below.
         with (
-            dumper_cache.ast_memoize_scope(),
+            dumper_cache.ast_memoize_scope()
+            if headers and not dwarf_only
+            else nullcontext(),
             suppress_streaming_prune() if include_dependencies else nullcontext(),
         ):
             snap = dump(

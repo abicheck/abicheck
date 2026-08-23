@@ -4203,6 +4203,39 @@ class TestRunDumpHeaderGraphSkippedForDwarfOnly:
 
         assert calls == [(False, False)]
 
+    def test_elf_empty_headers_does_not_open_ast_memoize_scope(self, tmp_path):
+        """Codex review, PR #840: a manifest-driven dump (`dump_manifest`,
+        mutually exclusive with `headers` per api_types.py) reaches
+        `_dump_elf` with an empty `_headers`, so the header-graph attach
+        immediately below always no-ops. Opening `ast_memoize_scope()`
+        unconditionally around this call would protect a memo nothing will
+        ever consume, while silently vetoing the opt-in streaming pruner
+        (gated on `ast_memoize_active()`) for a manifest dump's own TU
+        parses too whenever they share this thread (a single TU, or
+        `ABICHECK_TU_JOBS=1`)."""
+        from abicheck import dumper_cache
+
+        p = tmp_path / "lib.so"
+        p.write_bytes(b"\x7fELF" + b"\x00" * 100)
+        snap = AbiSnapshot(library="lib", version="1.0", from_headers=False)
+        seen_active: dict[str, bool] = {}
+
+        def _fake_dump_elf(*_a, **_k):
+            seen_active["active"] = dumper_cache.ast_memoize_active()
+            return snap
+
+        with (
+            patch("abicheck.service._dump_elf", side_effect=_fake_dump_elf),
+            patch(
+                "abicheck.service.attach_clang_layout", side_effect=lambda s, *a, **k: s
+            ),
+        ):
+            assert not dumper_cache.ast_memoize_active()
+            run_dump(p, "elf", [], [], "1.0", "c++")
+            assert not dumper_cache.ast_memoize_active()
+
+        assert seen_active["active"] is False
+
     def test_pe_symbols_only_does_not_attach_header_graph(self, tmp_path):
         """Codex review, fresh evidence: the ELF fix above added
         `not symbols_only` to the ELF/hybrid attach predicates, but the PE
