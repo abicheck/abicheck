@@ -1,12 +1,20 @@
 """Unit tests for persisted bundle facts (G38 Phase 2, ADR-023 amendment).
 
 Mirrors ``tests/test_bundle.py``'s in-memory ``ElfMetadata`` fixture style
-so these tests need no gcc/castxml and no real compiled binaries.
+so most of these tests need no gcc/castxml and no real compiled binaries --
+one class at the bottom (``@pytest.mark.integration``) is the exception,
+compiling a real tiny ``.so`` to prove the ``write_bundle_facts_out()``
+fallback captures a real, DWARF-derived snapshot, not just bare
+``ElfMetadata``.
 """
 
 from __future__ import annotations
 
+import shutil
+import subprocess
 from pathlib import Path
+
+import pytest
 
 from abicheck.bundle import _compute_resolution_graph, compare_bundle
 from abicheck.bundle_facts import (
@@ -559,10 +567,11 @@ class TestWriteBundleFactsOut:
         ]
 
     def _old_map(self, tmp_path: Path) -> dict[str, Path]:
-        # Real (if empty) files -- parse_elf_metadata degrades to an empty
-        # ElfMetadata on a non-ELF file rather than raising, which is
-        # enough to exercise the removed-library capture path without a
-        # real compiled .so.
+        # Real (if empty) files -- service.resolve_input() raises on a
+        # non-ELF file (no snapshot format matches), so the fallback loop's
+        # own except-and-degrade-to-parse_elf_metadata path (which never
+        # raises) is what actually gets exercised here, without a real
+        # compiled .so.
         old_map: dict[str, Path] = {}
         for name in ("libcore.so", "libalgo.so"):
             p = tmp_path / name
@@ -570,11 +579,37 @@ class TestWriteBundleFactsOut:
             old_map[name] = p
         return old_map
 
+    def _facts_kwargs(self) -> dict[str, object]:
+        """Default no-op full-dump context for ``write_bundle_facts_out()``'s
+        keyword-only parameters -- every test here cares about the
+        fallback's *key*/*presence* behavior, not the resolved snapshot's
+        own content, so an empty header/include list (which makes
+        ``service.resolve_input()`` fail closed for any non-trivial input,
+        landing on the bare-``ElfMetadata`` degrade path) is the right
+        default throughout.
+        """
+        return {
+            "old_headers": [],
+            "old_includes": [],
+            "old_version": "old",
+            "lang": "c++",
+            "old_debug_dir": None,
+            "resolve_debug_info": lambda *_args: None,
+            "include_dependencies": True,
+            "compile_context": None,
+        }
+
     def test_writes_a_loadable_facts_file(self, tmp_path: Path) -> None:
         from abicheck.cli_compare_release_helpers import write_bundle_facts_out
 
         out = tmp_path / "old.bundlefacts.json"
-        write_bundle_facts_out(out, self._diff_pairs(), None, self._old_map(tmp_path))
+        write_bundle_facts_out(
+            out,
+            self._diff_pairs(),
+            None,
+            self._old_map(tmp_path),
+            **self._facts_kwargs(),
+        )
 
         loaded = load_bundle_facts(out)
         assert set(loaded.per_library_snapshots) == {"libcore.so", "libalgo.so"}
@@ -592,7 +627,11 @@ class TestWriteBundleFactsOut:
 
         with pytest.raises(click.UsageError, match="bundle-facts-out"):
             write_bundle_facts_out(
-                out, self._diff_pairs(), bad_manifest, self._old_map(tmp_path)
+                out,
+                self._diff_pairs(),
+                bad_manifest,
+                self._old_map(tmp_path),
+                **self._facts_kwargs(),
             )
         assert not out.exists()
 
@@ -613,7 +652,11 @@ class TestWriteBundleFactsOut:
 
         with pytest.raises(click.UsageError, match="bundle-facts-out"):
             write_bundle_facts_out(
-                out, self._diff_pairs(), None, self._old_map(tmp_path)
+                out,
+                self._diff_pairs(),
+                None,
+                self._old_map(tmp_path),
+                **self._facts_kwargs(),
             )
 
     def test_captures_unmatched_old_library(self, tmp_path: Path) -> None:
@@ -633,7 +676,9 @@ class TestWriteBundleFactsOut:
         old_map["libremoved.so"] = removed_path
 
         out = tmp_path / "old.bundlefacts.json"
-        write_bundle_facts_out(out, self._diff_pairs(), None, old_map)
+        write_bundle_facts_out(
+            out, self._diff_pairs(), None, old_map, **self._facts_kwargs()
+        )
 
         loaded = load_bundle_facts(out)
         assert set(loaded.per_library_snapshots) == {
@@ -674,7 +719,9 @@ class TestWriteBundleFactsOut:
         # old_map, so it's deliberately not constructed here.
 
         out = tmp_path / "old.bundlefacts.json"
-        write_bundle_facts_out(out, self._diff_pairs(), None, old_map)
+        write_bundle_facts_out(
+            out, self._diff_pairs(), None, old_map, **self._facts_kwargs()
+        )
 
         loaded = load_bundle_facts(out)
         assert "libfailed.so" in loaded.per_library_snapshots
@@ -692,7 +739,9 @@ class TestWriteBundleFactsOut:
 
         old_map = self._old_map(tmp_path)
         out = tmp_path / "old.bundlefacts.json"
-        write_bundle_facts_out(out, self._diff_pairs(), None, old_map)
+        write_bundle_facts_out(
+            out, self._diff_pairs(), None, old_map, **self._facts_kwargs()
+        )
 
         loaded = load_bundle_facts(out)
         # The real dumped snapshot (via _per_library_snapshots) carries the
@@ -722,7 +771,9 @@ class TestWriteBundleFactsOut:
         old_map["libcore.so"] = symlink_path
 
         out = tmp_path / "old.bundlefacts.json"
-        write_bundle_facts_out(out, self._diff_pairs(), None, old_map)
+        write_bundle_facts_out(
+            out, self._diff_pairs(), None, old_map, **self._facts_kwargs()
+        )
 
         loaded = load_bundle_facts(out)
         assert "libcore.so.1.0.0" in loaded.filesystem_aliases.get("libcore.so", ())
@@ -757,7 +808,7 @@ class TestWriteBundleFactsOut:
         ]
 
         out = tmp_path / "old.bundlefacts.json"
-        write_bundle_facts_out(out, diff_pairs, None, old_map)
+        write_bundle_facts_out(out, diff_pairs, None, old_map, **self._facts_kwargs())
 
         loaded = load_bundle_facts(out)
         assert set(loaded.per_library_snapshots) == {"libfoo.so"}
@@ -784,7 +835,7 @@ class TestWriteBundleFactsOut:
         ]
 
         out = tmp_path / "old.bundlefacts.json"
-        write_bundle_facts_out(out, diff_pairs, None, old_map)
+        write_bundle_facts_out(out, diff_pairs, None, old_map, **self._facts_kwargs())
         loaded_facts = load_bundle_facts(out)
 
         # The "new" bundle, keyed the same canonical way a live
@@ -804,3 +855,71 @@ class TestWriteBundleFactsOut:
             in (ChangeKind.BUNDLE_LIBRARY_REMOVED, ChangeKind.BUNDLE_LIBRARY_ADDED)
         }
         assert not removed_or_added, result.bundle_findings
+
+
+# ---------------------------------------------------------------------------
+# Real-dump proof for a stranded (removed/matched-but-failed) library
+# (Codex review, fresh evidence): the fallback must capture a real,
+# functions-and-all AbiSnapshot -- the same shape the documented
+# old_facts.per_library_snapshots[name] -> compare_snapshots() workflow
+# needs -- not just bare ElfMetadata, which would read every declaration
+# as a compatible addition instead of the real diff if this library
+# reappears in a future release.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.integration
+class TestWriteBundleFactsOutCapturesARealSnapshot:
+    def _build_tiny_so(self, tmp_path: Path) -> Path:
+        src = tmp_path / "lib.c"
+        src.write_text("int add(int a, int b) { return a + b; }\n")
+        out = tmp_path / "libreal.so"
+        res = subprocess.run(
+            [
+                shutil.which("gcc"),
+                "-shared",
+                "-fPIC",
+                "-g",
+                "-O0",
+                str(src),
+                "-o",
+                str(out),
+                "-Wl,-soname,libreal.so.1",
+            ],
+            capture_output=True,
+            text=True,
+        )
+        if res.returncode != 0:
+            pytest.fail(f"gcc failed: {res.stderr}")
+        return out
+
+    def test_removed_library_gets_a_full_dump_not_bare_elf_metadata(
+        self, tmp_path: Path
+    ) -> None:
+        from abicheck.cli_compare_release_helpers import write_bundle_facts_out
+
+        real_so = self._build_tiny_so(tmp_path)
+        old_map = {"libreal.so": real_so}
+
+        out = tmp_path / "old.bundlefacts.json"
+        write_bundle_facts_out(
+            out,
+            [],  # no diff_pairs -- libreal.so is entirely "stranded"
+            None,
+            old_map,
+            old_headers=[],
+            old_includes=[],
+            old_version="old",
+            lang="c++",
+            old_debug_dir=None,
+            resolve_debug_info=lambda *_args: None,
+            include_dependencies=True,
+            compile_context=None,
+        )
+
+        loaded = load_bundle_facts(out)
+        snap = loaded.per_library_snapshots["libreal.so"]
+        # A bare ElfMetadata fallback would never populate .functions from
+        # DWARF -- this is the whole point of routing through
+        # service.resolve_input() instead of parse_elf_metadata() alone.
+        assert any(f.name == "add" for f in snap.functions), snap.functions
