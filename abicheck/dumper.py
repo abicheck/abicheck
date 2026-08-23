@@ -252,6 +252,7 @@ def _clang_header_dump(
     extra_hash_dirs: tuple[Path, ...] = (),
     frontend_context: str = "host",
     memoize: bool | None = None,
+    pruning_header_roots: tuple[str, ...] | None = None,
 ) -> tuple[dict[str, Any], str | None, bool]:
     """Run clang over *headers* and return ``(root, resolved_kind, resolved_force_cpp)``.
 
@@ -294,6 +295,20 @@ def _clang_header_dump(
     isn't DPC++-capable, or when its own ``gcc_options``/``gcc_option_tokens``
     explicitly disable SYCL (``-fno-sycl``) -- never silently resolved by
     re-enabling SYCL ourselves (Codex review, P2).
+
+    ``pruning_header_roots`` (Codex review, PR #840): the header-root set the
+    opt-in streaming pruner (``dumper_clang_streaming.py``) treats as "this
+    dump's own, never a dependency" -- passed straight through to
+    :func:`abicheck.dumper_clang_errors._parse_clang_ast_result`. Defaults to
+    ``None``, which falls back to bare *headers* (this function's own
+    parameter) for a caller that has no wider root set to offer. A caller
+    that *does* know about a wider authoritative root set --
+    ``public_header_paths``/``public_dir_paths``, or (for a manifest TU) its
+    own ``project_owned`` include directories -- must pass the SAME set the
+    post-hoc filter (``dumper_scoping.scope_snapshot_excluding_dependencies``)
+    uses, via ``dumper_manifest.run_tu_fragment``'s identical computation, or
+    the pruner can misclassify (and permanently drop) a declaration the
+    post-hoc filter would have correctly retained.
     """
     clang_bin = _resolve_clang_bin(compiler, gcc_path, gcc_prefix)
     dpcpp_multi_context = _resolve_dpcpp_multi_context(
@@ -458,7 +473,9 @@ def _clang_header_dump(
             cache_write=identities_stable,
             dpcpp_capable=dpcpp_multi_context,
             frontend_context=frontend_context,
-            header_roots=tuple(str(h) for h in headers),
+            header_roots=pruning_header_roots
+            if pruning_header_roots is not None
+            else tuple(str(h) for h in headers),
         )
         if identities_stable and _memoize:
             dumper_cache.store_cached_ast(key, "clang", root)
@@ -614,6 +631,7 @@ def _header_ast_parser(
     public_dir_paths: list[str],
     extra_hash_dirs: tuple[Path, ...] = (),
     frontend_context: str = "host",
+    pruning_header_roots: tuple[str, ...] | None = None,
 ) -> _CastxmlParser | _ClangAstParser:
     """Run the resolved L2 backend and return its CastXML/Clang parser.
 
@@ -668,6 +686,7 @@ def _header_ast_parser(
             lang=lang,
             extra_hash_dirs=extra_hash_dirs,
             frontend_context=frontend_context,
+            pruning_header_roots=pruning_header_roots,
         )
         parser = _ClangAstParser(
             ast_root,

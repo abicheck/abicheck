@@ -287,6 +287,7 @@ def _make_stub_header_ast_parser(calls: list, *, fail_for: frozenset = frozenset
                 "extra_includes": list(extra_includes),
                 "public_header_paths": list(kwargs["public_header_paths"]),
                 "public_dir_paths": list(kwargs["public_dir_paths"]),
+                "pruning_header_roots": kwargs.get("pruning_header_roots"),
             }
         )
         tu_marker = str(headers[0]) if headers else "<empty>"
@@ -339,6 +340,50 @@ def test_run_tu_fragment_calls_parser_with_tu_own_headers_and_includes():
     assert [fn.name for fn in fragment.functions] == ["foo"]
     assert calls[0]["headers"] == [Path("foo.h")]
     assert calls[0]["extra_includes"] == [Path("vendor")]
+
+
+def test_run_tu_fragment_pruning_header_roots_includes_project_owned_includes():
+    """Codex review, PR #840: the streaming pruner's root set must match
+    ``dumper_scoping.dump_manifest_header_roots``'s own computation -- which
+    folds in every TU's ``project_owned``-marked ``includes``, not just its
+    ``forced_includes`` -- or a declaration reached only via a
+    ``project_owned`` include directory (not force-included directly) is
+    misclassified as a dependency and permanently dropped, even though the
+    authoritative post-hoc filter would have retained it."""
+    calls: list = []
+    stub = _make_stub_header_ast_parser(calls)
+    tu = TranslationUnit(
+        name="main",
+        forced_includes=(Path("foo.h"),),
+        includes=(
+            IncludeEntry(path=Path("/usr/include/mylib/priv"), project_owned=True),
+            IncludeEntry(path=Path("/usr/include/vendor")),  # NOT project_owned
+        ),
+    )
+    run_tu_fragment(
+        tu,
+        header_ast_parser=stub,
+        backend="auto",
+        compiler="c++",
+        gcc_path=None,
+        gcc_prefix=None,
+        gcc_options=None,
+        gcc_option_tokens=(),
+        sysroot=None,
+        nostdinc=False,
+        lang=None,
+        exported_dynamic=set(),
+        exported_static=set(),
+        public_header_paths=["public.h"],
+        public_dir_paths=["/usr/include/mylib/pub"],
+    )
+    roots = calls[0]["pruning_header_roots"]
+    assert roots is not None
+    assert str(Path("foo.h")) in roots  # forced_includes
+    assert "/usr/include/mylib/priv" in roots  # project_owned include
+    assert "/usr/include/vendor" not in roots  # NOT project_owned -- excluded
+    assert "public.h" in roots  # manifest-wide public_header_paths
+    assert "/usr/include/mylib/pub" in roots  # manifest-wide public_dir_paths
 
 
 def test_run_tu_fragment_ast_producer_defaults_to_castxml_for_non_clang_parser():
@@ -772,6 +817,101 @@ def test_run_tu_fragments_propagates_active_deadline_into_pool_workers(monkeypat
     # unbounded "no deadline" None a dropped ContextVar would produce.
     assert 0 < seen_remaining["a"] <= 60.0
     assert 0 < seen_remaining["b"] <= 60.0
+
+
+def test_run_tu_fragments_propagates_prune_suppression_into_pool_workers(
+    monkeypatch,
+):
+    """Codex review, PR #840: the same ``ThreadPoolExecutor``-boundary gap
+    the deadline test above pins, for a second ambient signal --
+    ``suppress_streaming_prune()``, set around the whole manifest dump
+    whenever a full/unscoped request (``include_dependencies=True``) is in
+    effect. Each stub "TU" records what
+    ``dumper_clang_streaming.streaming_prune_suppressed()`` sees on its own
+    (pool worker) thread; if the signal didn't propagate, that's ``False``
+    even though the submitting thread had it active."""
+    from abicheck.dumper_clang_streaming import (
+        streaming_prune_suppressed,
+        suppress_streaming_prune,
+    )
+    from abicheck.dumper_manifest import _run_tu_fragments
+
+    monkeypatch.setenv("ABICHECK_TU_JOBS", "2")
+    monkeypatch.setattr(dm_process_resources, "mem_cap", lambda budget: None)
+
+    seen_suppressed: dict[str, bool] = {}
+
+    def _stub(headers, extra_includes, **kwargs):
+        name = Path(headers[0]).stem
+        seen_suppressed[name] = streaming_prune_suppressed()
+        return _StubParser(functions=(_fn(name),))
+
+    tus = (_tu("a", "a.h"), _tu("b", "b.h"))
+    with suppress_streaming_prune():
+        fragments = _run_tu_fragments(
+            tus,
+            header_ast_parser=_stub,
+            backend="auto",
+            compiler="c++",
+            gcc_path=None,
+            gcc_prefix=None,
+            gcc_options=None,
+            gcc_option_tokens=(),
+            sysroot=None,
+            nostdinc=False,
+            lang=None,
+            exported_dynamic=set(),
+            exported_static=set(),
+            public_header_paths=[],
+            public_dir_paths=[],
+            extra_hash_dirs=(),
+        )
+
+    assert [f.tu_name for f in fragments] == ["a", "b"]
+    assert seen_suppressed == {"a": True, "b": True}
+    # Not active outside the scope, on this (the submitting) thread either.
+    assert not streaming_prune_suppressed()
+
+
+def test_run_tu_fragments_pool_workers_unsuppressed_by_default(monkeypatch):
+    """Negative control for the test above: with no active
+    ``suppress_streaming_prune()`` scope, pool workers see it as inactive --
+    proving the propagation mechanism doesn't leak a `True` value by
+    accident regardless of what the caller does."""
+    from abicheck.dumper_clang_streaming import streaming_prune_suppressed
+    from abicheck.dumper_manifest import _run_tu_fragments
+
+    monkeypatch.setenv("ABICHECK_TU_JOBS", "2")
+    monkeypatch.setattr(dm_process_resources, "mem_cap", lambda budget: None)
+
+    seen_suppressed: dict[str, bool] = {}
+
+    def _stub(headers, extra_includes, **kwargs):
+        name = Path(headers[0]).stem
+        seen_suppressed[name] = streaming_prune_suppressed()
+        return _StubParser(functions=(_fn(name),))
+
+    tus = (_tu("a", "a.h"), _tu("b", "b.h"))
+    _run_tu_fragments(
+        tus,
+        header_ast_parser=_stub,
+        backend="auto",
+        compiler="c++",
+        gcc_path=None,
+        gcc_prefix=None,
+        gcc_options=None,
+        gcc_option_tokens=(),
+        sysroot=None,
+        nostdinc=False,
+        lang=None,
+        exported_dynamic=set(),
+        exported_static=set(),
+        public_header_paths=[],
+        public_dir_paths=[],
+        extra_hash_dirs=(),
+    )
+
+    assert seen_suppressed == {"a": False, "b": False}
 
 
 def test_tu_jobs_env_override_forces_serial(monkeypatch):

@@ -58,6 +58,10 @@ from typing import TYPE_CHECKING
 from . import deadline, process_resources
 from .dump_manifest import DumpManifest, IncludeEntry, TranslationUnit
 from .dumper_clang import _ClangAstParser
+from .dumper_clang_streaming import (
+    streaming_prune_suppressed,
+    suppress_streaming_prune,
+)
 from .dumper_toolchain import (
     _parser_ast_fallback_reason,
     _parser_ast_supported,
@@ -197,18 +201,42 @@ def run_tu_fragment(
     docstring) and normalize its output into a :class:`TuFragment`.
 
     *tu*'s own ``forced_includes`` become the parser's ``headers`` and its
-    own ``includes`` (just the resolved paths -- ``project_owned`` only
-    matters for :func:`abicheck.comparability.compute_extraction_contract`'s
-    ownership classification, not for the parse itself) become
-    ``extra_includes``. *public_header_paths*/*public_dir_paths* are the
-    manifest's own base-profile provenance inputs (``roots`` +
+    own ``includes`` (just the resolved paths) become ``extra_includes``.
+    *public_header_paths*/*public_dir_paths* are the manifest's own
+    base-profile provenance inputs (``roots`` +
     ``public_header_paths``/``public_header_dirs``), passed identically to
     every TU's call -- not derived per-TU from *tu*'s own
     ``forced_includes`` -- since a TU may force-include a private support
     header alongside a public one (:mod:`abicheck.dump_manifest`'s own
     docstring), so only the manifest's declared ``roots`` are the actual
     public surface, regardless of which TU happens to force-include them.
+
+    ``pruning_header_roots`` (Codex review, PR #840): the streaming pruner's
+    root set must match ``dumper_scoping.dump_manifest_header_roots``'s own
+    computation exactly, or it can misclassify (and permanently drop) a
+    declaration the authoritative post-hoc filter would have retained --
+    that function folds in *every* TU's ``forced_includes`` and
+    ``project_owned`` includes, not just this one TU's, but the per-TU
+    contribution is reproduced here directly (this TU's own
+    ``forced_includes`` + its own ``project_owned``-marked ``includes``)
+    rather than requiring the whole manifest object be threaded down to
+    compute the identical union -- both are folded with
+    *public_header_paths*/*public_dir_paths* below, which already carry the
+    manifest-wide ``roots``/``public_header_paths``/``public_header_dirs``
+    contribution unchanged. So `project_owned` now matters for the parse
+    itself, not only for
+    :func:`abicheck.comparability.compute_extraction_contract`'s ownership
+    classification as this docstring previously said.
     """
+    pruning_header_roots = tuple(
+        str(p)
+        for p in (
+            *tu.forced_includes,
+            *(entry.path for entry in tu.includes if entry.project_owned),
+            *public_header_paths,
+            *public_dir_paths,
+        )
+    )
     parser = header_ast_parser(
         list(tu.forced_includes),
         [entry.path for entry in tu.includes],
@@ -227,6 +255,7 @@ def run_tu_fragment(
         public_dir_paths=public_dir_paths,
         extra_hash_dirs=extra_hash_dirs,
         frontend_context=frontend_context,
+        pruning_header_roots=pruning_header_roots,
     )
     return TuFragment(
         tu_name=tu.name,
@@ -366,8 +395,21 @@ def _run_tu_fragments(
     # re-established inside each worker.
     deadline_ts = deadline.current_deadline_ts()
 
+    # Same contextvar-boundary problem, for a second ambient signal (Codex
+    # review, PR #840): `suppress_streaming_prune()` -- set around this
+    # whole call whenever a full/unscoped dump was requested -- would
+    # otherwise be invisible to a pooled worker thread, silently letting the
+    # opt-in streaming pruner drop dependency-header declarations a
+    # full-scope request explicitly asked to keep, exactly the bug this
+    # PR's own suppression mechanism exists to prevent. Captured once here
+    # and re-established inside each worker the same way.
+    prune_suppressed = streaming_prune_suppressed()
+
     def _run_one_with_deadline(tu: TranslationUnit) -> TuFragment:
         with deadline.with_deadline_ts(deadline_ts):
+            if prune_suppressed:
+                with suppress_streaming_prune():
+                    return _run_one(tu)
             return _run_one(tu)
 
     # Deliberately NOT a `with ThreadPoolExecutor(...) as pool:` block: that
