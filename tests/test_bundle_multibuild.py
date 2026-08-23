@@ -52,16 +52,29 @@ class TestVariantFingerprint:
         fp1 = variant_fingerprint(
             target_triple="x86_64-linux-gnu",
             compiler_family="gcc",
-            compiler_version="14",
             feature_toggles={"ONEDAL_DATA_PARALLEL": "ON"},
         )
         fp2 = variant_fingerprint(
             target_triple="x86_64-linux-gnu",
             compiler_family="gcc",
-            compiler_version="14",
             feature_toggles={"ONEDAL_DATA_PARALLEL": "ON"},
         )
         assert fp1 == fp2
+
+    def test_compiler_version_is_not_part_of_identity(self):
+        # A routine toolchain upgrade between releases (GCC 13 -> 14
+        # building the identical variant) must NOT read as a different
+        # variant -- there is no compiler_version parameter at all, so a
+        # caller cannot even accidentally fingerprint it (Codex review,
+        # fresh evidence: an earlier revision of this function did include
+        # it, which would have made pair_variants() report OLD_ONLY +
+        # NEW_ONLY for an ordinary compiler bump, skipping every real
+        # per-library comparison for that variant).
+        import inspect
+
+        assert (
+            "compiler_version" not in inspect.signature(variant_fingerprint).parameters
+        )
 
     def test_feature_toggle_dict_order_does_not_matter(self):
         fp1 = variant_fingerprint(feature_toggles={"A": "1", "B": "2"})
@@ -115,7 +128,6 @@ class TestVariantFingerprint:
                 {"target_triple": "aarch64-linux-gnu"},
             ),
             ({"compiler_family": "gcc"}, {"compiler_family": "clang"}),
-            ({"compiler_version": "13"}, {"compiler_version": "14"}),
             (
                 {"feature_toggles": {"ONEDAL_DATA_PARALLEL": "ON"}},
                 {"feature_toggles": {"ONEDAL_DATA_PARALLEL": "OFF"}},
@@ -134,18 +146,17 @@ class TestVariantFingerprint:
         assert variant_fingerprint(**kwargs_a) != variant_fingerprint(**kwargs_b)
 
     def test_no_parameter_exists_for_excluded_coordinates(self):
-        """variant_fingerprint has no C/C++ standard, define, or artifact-
-        membership parameter at all -- the exclusion is structural (the
-        design's own rationale), not merely "callers happen not to pass
-        it". This test documents the contract: only these four coordinates
-        can ever affect the fingerprint."""
+        """variant_fingerprint has no C/C++ standard, define, compiler-
+        version, or artifact-membership parameter at all -- the exclusion
+        is structural (the design's own rationale), not merely "callers
+        happen not to pass it". This test documents the contract: only
+        these three coordinates can ever affect the fingerprint."""
         import inspect
 
         params = set(inspect.signature(variant_fingerprint).parameters)
         assert params == {
             "target_triple",
             "compiler_family",
-            "compiler_version",
             "feature_toggles",
         }
 

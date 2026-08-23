@@ -64,7 +64,6 @@ def variant_fingerprint(
     *,
     target_triple: str = "",
     compiler_family: str = "",
-    compiler_version: str = "",
     feature_toggles: Mapping[str, str] | None = None,
 ) -> str:
     """Stable fingerprint over LOGICAL VARIANT IDENTITY only.
@@ -110,16 +109,32 @@ def variant_fingerprint(
        and new be compared and classified rather than refused; fingerprinting
        these fields for *pairing* would instead make same-variant,
        drifted-build-state comparisons read as two unmatched variants.
+    4. **Compiler *version*** — a FOURTH instance of the same "drifting
+       build state, not variant identity" class as (3), caught in review
+       (Codex) against an earlier revision of this function that fingerprinted
+       it: a routine toolchain upgrade between releases (GCC 13 -> 14
+       building the identical CPU-only variant, say) would otherwise make
+       :func:`pair_variants` read the old and new release as two *different*,
+       unmatched variants — ``OLD_ONLY`` + ``NEW_ONLY`` — silently skipping
+       every real per-library comparison for that variant and replacing it
+       with a spurious ``bundle_variant_coverage_regressed`` finding, exactly
+       the failure mode exclusion (3) already exists to prevent for
+       ``-std=``/defines. Unlike ``target_triple``/``compiler_family``
+       (below), a compiler version bump has no dedicated classified finding
+       to defer to today, but that is an argument for adding one at the
+       comparability layer if this ever needs to be surfaced, not for
+       reintroducing it into variant *identity*.
 
-    ``target_triple``/``compiler_family``/``compiler_version`` ARE part of
-    the fingerprint (the declared, logical-identity toolchain facts a real
-    cross-target/cross-toolchain multibuild release ships) — this is
-    deliberately narrower than a genuine toolchain-identity *probe*
-    validating a resolved compiler binding's real family/version against
-    these declared coordinates, which is out of scope here (see the plan
-    doc's own "Out of scope" section; already tracked as its own gap in the
-    root ``AGENTS.md``'s "Toolchain-profile compiler-family rendering" entry
-    and G34 Phase A).
+    ``target_triple``/``compiler_family`` ARE part of the fingerprint (the
+    declared, logical-identity toolchain facts a real cross-target/cross-
+    toolchain-family multibuild release ships — a target or compiler-family
+    switch is a real, deliberate distribution-channel decision, not routine
+    build drift the way a version bump is) — this is deliberately narrower
+    than a genuine toolchain-identity *probe* validating a resolved compiler
+    binding's real family/target against these declared coordinates, which is
+    out of scope here (see the plan doc's own "Out of scope" section; already
+    tracked as its own gap in the root ``AGENTS.md``'s "Toolchain-profile
+    compiler-family rendering" entry and G34 Phase A).
 
     All coordinates degrade to the empty string / empty mapping when unknown
     — a caller with no real per-variant identity at all (every caller today)
@@ -145,12 +160,7 @@ def variant_fingerprint(
     values contain.
     """
     toggles = feature_toggles or {}
-    if (
-        not target_triple
-        and not compiler_family
-        and not compiler_version
-        and not toggles
-    ):
+    if not target_triple and not compiler_family and not toggles:
         return DEFAULT_VARIANT_FINGERPRINT
     # Sorted so fingerprint order never depends on the caller's mapping
     # iteration order (dict insertion order is not a fact about the build).
@@ -158,7 +168,6 @@ def variant_fingerprint(
         [
             target_triple,
             compiler_family,
-            compiler_version,
             sorted(toggles.items()),
         ]
     )

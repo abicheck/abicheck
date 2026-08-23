@@ -391,21 +391,33 @@ implementation-status note already took for its CLI consumer half.**
 
 - `abicheck/bundle_multibuild.py` implements `variant_fingerprint`,
   `VariantOutcome`, `VariantComparison`, `pair_variants`, and
-  `coverage_regression_findings` per this section's design below, with one
-  real deviation: `variant_fingerprint` takes explicit, named coordinates
-  (`target_triple`, `compiler_family`, `compiler_version`,
-  `feature_toggles`) rather than a raw `BuildEvidence | None` /
-  `EnvironmentMatrix | None` pair. Telling a genuine logical-identity
-  feature toggle (`ONEDAL_DATA_PARALLEL`) apart from build state that
-  legitimately drifts release to release (an ABI-relevant `-D` define, a
-  raised `-std=`) cannot be done reliably from raw build evidence alone —
-  both can appear as an indistinguishable `BuildOption`/`CompileUnit` entry
-  — so that judgement call is pushed to the caller instead of embedded as a
-  heuristic parse, which would risk silently reintroducing the union
-  failure mode from either direction (see the function's own docstring for
-  the full reasoning). The function's own contract (which coordinates are
-  fingerprinted, which are deliberately excluded and why) is otherwise
-  exactly as designed below.
+  `coverage_regression_findings` per this section's design below, with two
+  real deviations. First: `variant_fingerprint` takes explicit, named
+  coordinates (`target_triple`, `compiler_family`, `feature_toggles`)
+  rather than a raw `BuildEvidence | None` / `EnvironmentMatrix | None`
+  pair. Telling a genuine logical-identity feature toggle
+  (`ONEDAL_DATA_PARALLEL`) apart from build state that legitimately drifts
+  release to release (an ABI-relevant `-D` define, a raised `-std=`) cannot
+  be done reliably from raw build evidence alone — both can appear as an
+  indistinguishable `BuildOption`/`CompileUnit` entry — so that judgement
+  call is pushed to the caller instead of embedded as a heuristic parse,
+  which would risk silently reintroducing the union failure mode from
+  either direction (see the function's own docstring for the full
+  reasoning). Second: `compiler_version` is **not** a parameter at all,
+  unlike the design sketch below — a real gap in that sketch, caught in
+  review (Codex): a routine toolchain upgrade between releases (GCC 13 ->
+  14 building the identical variant) is the same class of legitimately-
+  drifting build state as an ABI-relevant define or a raised `-std=`, not
+  variant identity, so fingerprinting it would make `pair_variants` read
+  an ordinary compiler bump as two different, unmatched variants —
+  `OLD_ONLY` + `NEW_ONLY` — silently skipping every real per-library
+  comparison for that variant and replacing it with a spurious
+  `bundle_variant_coverage_regressed` finding. `target_triple`/
+  `compiler_family` stay in the fingerprint (a target or compiler-family
+  switch is a real, deliberate distribution-channel decision, not routine
+  drift the way a version bump is). The function's own contract (which
+  coordinates are fingerprinted, which are deliberately excluded and why)
+  is otherwise exactly as designed below.
 - `ChangeKind.BUNDLE_VARIANT_COVERAGE_REGRESSED` /
   `"bundle_variant_coverage_regressed"` is registered in `checker_policy.py`
   / `change_registry_buildsource.py` (not `change_registry.py`, which is at
@@ -435,8 +447,9 @@ implementation-status note already took for its CLI consumer half.**
 **Kept as originally written, per this plan's own amendment convention (see
 Phase 2's identical note above)** — the shipped signature is the explicit-
 coordinate one this section's own "Implementation status" note above
-describes (`target_triple`/`compiler_family`/`compiler_version`/
-`feature_toggles`), not the `(evidence, env)` sketch below.
+describes (`target_triple`/`compiler_family`/`feature_toggles` —
+deliberately no `compiler_version`, see that note), not the
+`(evidence, env)` sketch below.
 
 ```python
 def variant_fingerprint(evidence: BuildEvidence | None, env: EnvironmentMatrix | None) -> str:
