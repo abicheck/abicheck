@@ -190,7 +190,9 @@ class TestPathContainingALiteralCloseParen:
 
     def test_windows_path_with_parenthesized_component_is_stripped(self) -> None:
         name = r"raii_guard<(lambda at C:\release (old)\foo.hpp:4:37)>"
-        assert strip_anonymous_type_location(name) == "raii_guard<(lambda:foo.hpp:4:37)>"
+        assert (
+            strip_anonymous_type_location(name) == "raii_guard<(lambda:foo.hpp:4:37)>"
+        )
 
     def test_two_checkouts_differing_only_in_a_parenthesized_component_match(
         self,
@@ -247,6 +249,44 @@ class TestAnonymousMarkerRequiredBeforeStripping:
         assert strip_anonymous_type_location(name) == name
 
 
+class TestQuotedMarkerShapedLiteralIsNotNormalized:
+    """CodeRabbit review, fresh evidence: a fixed-string NTTP argument can
+    quote text that *itself* looks like a real ``(lambda at ...)``/
+    ``(unnamed ... at ...)`` marker -- e.g. ``Tag<"(lambda at
+    /a/foo.hpp:1:2)">`` -- which is a string literal naming that exact text,
+    not a genuine CastXML anonymous-type location. Rewriting it would let
+    two distinct literal values (differing only in a path whose basename
+    happens to collide) collapse onto the same identity."""
+
+    def test_quoted_lambda_marker_value_is_untouched(self) -> None:
+        name = 'Tag<"(lambda at /a/foo.hpp:1:2)">'
+        assert strip_anonymous_type_location(name) == name
+
+    def test_quoted_unnamed_struct_marker_value_is_untouched(self) -> None:
+        name = 'Tag<"(unnamed struct at /a/foo.hpp:1:2)">'
+        assert strip_anonymous_type_location(name) == name
+
+    def test_two_quoted_markers_differing_only_in_directory_stay_distinct(
+        self,
+    ) -> None:
+        one = 'Tag<"(lambda at /one/foo.hpp:1:2)">'
+        two = 'Tag<"(lambda at /two/foo.hpp:1:2)">'
+        assert strip_anonymous_type_location(one) == one
+        assert strip_anonymous_type_location(two) == two
+        assert strip_anonymous_type_location(one) != strip_anonymous_type_location(two)
+
+    def test_real_marker_still_normalized_alongside_a_quoted_lookalike(
+        self,
+    ) -> None:
+        # A genuine (unquoted) marker elsewhere in the same composite name
+        # must still be normalized even when a quoted lookalike sits next
+        # to it -- the quote-span skip must not become an all-or-nothing
+        # bailout for the whole name.
+        name = 'Tag<"(lambda at /a/foo.hpp:1:2)", (lambda at /b/bar.hpp:9:9)>'
+        result = strip_anonymous_type_location(name)
+        assert result == 'Tag<"(lambda at /a/foo.hpp:1:2)", (lambda:bar.hpp:9:9)>'
+
+
 class TestAnonymousEnumLocationStripped:
     def test_enum_name_has_no_embedded_path(self) -> None:
         root = Element("CastXML", attrib={"format": "1.4.0"})
@@ -288,7 +328,9 @@ class TestAnonymousEnumLocationStripped:
         (enum_type,) = parser.parse_enums()
         # The reference (a field/param/return naming the same id) goes
         # through _type_name, not parse_enums -- both must agree.
-        assert parser._type_name("_2") == enum_type.name == "(unnamed enum:lib.hpp:56:5)"
+        assert (
+            parser._type_name("_2") == enum_type.name == "(unnamed enum:lib.hpp:56:5)"
+        )
 
 
 class TestQualifiedNameNormalizesEnclosingAnonymousScope:

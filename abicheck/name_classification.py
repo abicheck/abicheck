@@ -603,6 +603,47 @@ def _declaring_header_discriminator(path: str) -> str:
     return posix.rsplit("/", 1)[-1]
 
 
+def _quoted_spans(name: str) -> list[tuple[int, int]]:
+    """Return ``[start, end)`` character ranges of every ``"..."`` quoted
+    literal in *name*, respecting backslash-escaped quotes (``\\"``).
+
+    Used by :func:`strip_anonymous_type_location` to avoid rewriting
+    location-shaped text that only *looks* like a real CastXML anonymous/
+    lambda marker because it happens to sit inside a C++20 fixed-string NTTP
+    argument's own quoted value (CodeRabbit review, fresh evidence):
+    ``Tag<"(lambda at /a/foo.hpp:1:2)">`` is a string *literal* naming that
+    exact marker text, not a real anonymous-type location CastXML emitted —
+    rewriting it collapses two otherwise-distinct specializations (one
+    genuinely quoting ``.../a/foo.hpp:1:2)"``, another quoting a different
+    path that happens to share a basename) onto the same identity, exactly
+    the kind of spurious same-identity collision this whole module exists to
+    avoid introducing.
+    """
+    spans: list[tuple[int, int]] = []
+    start: int | None = None
+    i = 0
+    length = len(name)
+    while i < length:
+        ch = name[i]
+        if ch == "\\" and start is not None:
+            # An escaped character inside a quote never ends it -- skip
+            # both the backslash and the escaped character together so an
+            # escaped quote (\") is never mistaken for the closing quote.
+            i += 2
+            continue
+        if ch == '"':
+            if start is None:
+                start = i
+            else:
+                spans.append((start, i + 1))
+                start = None
+        i += 1
+    # An unterminated trailing quote (malformed/truncated input) is not
+    # treated as an open span -- nothing after it is "inside quotes" for
+    # our purposes, so it contributes nothing further to skip.
+    return spans
+
+
 def strip_anonymous_type_location(name: str) -> str:
     """Strip the checkout-dependent *directory* out of an embedded ``at
     <path>:<line>:<col>`` in an anonymous-tag or lambda-closure type
@@ -678,9 +719,24 @@ def strip_anonymous_type_location(name: str) -> str:
     See :func:`_declaring_header_discriminator`'s own docstring for what
     this still doesn't cover (two same-named headers, at the same
     coordinates, in different directories).
+
+    A match that falls inside a ``"..."`` quoted literal is left completely
+    untouched (CodeRabbit review, fresh evidence): a real CastXML anonymous/
+    lambda marker is never itself quoted, so a match starting inside quotes
+    can only be ordinary string-literal *content* that happens to spell
+    location-shaped text -- e.g. a C++20 fixed-string NTTP argument like
+    ``Tag<"(lambda at /a/foo.hpp:1:2)">``. Rewriting that would fabricate a
+    same-identity collision between two distinct literal values. See
+    :func:`_quoted_spans` for the quote-tracking this relies on.
     """
+    quoted_spans = _quoted_spans(name)
+
+    def _inside_quotes(pos: int) -> bool:
+        return any(start <= pos < end for start, end in quoted_spans)
 
     def _replace(match: re.Match[str]) -> str:
+        if _inside_quotes(match.start()):
+            return match.group(0)
         marker, path, coords = match.group(1), match.group(2), match.group(3)
         return f"{marker}:{_declaring_header_discriminator(path)}{coords}"
 
