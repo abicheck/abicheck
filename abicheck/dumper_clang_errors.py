@@ -510,12 +510,43 @@ def run_clang_to_ast_file(
 #: suppress_streaming_prune()`` whenever a full/unscoped dump was requested,
 #: which this env-var check honors via ``streaming_prune_suppressed()``
 #: below -- so enabling this var can never silently drop a declaration an
-#: explicit or default full-scope request asked to keep. Still a real,
-#: narrower residual: a direct, low-level caller of ``dumper.dump()``/
-#: ``_clang_header_dump()`` that bypasses both of those choke points (there
-#: is no third one known today) gets no such protection -- this env var is
-#: deliberately experimental/opt-in specifically because of that kind of gap,
-#: not despite it.
+#: explicit or default full-scope request asked to keep.
+#: ``compat/cli.py``'s ABICC-compat dump and ``appcompat.check_appcompat``'s
+#: two dumps (Codex review, PR #840, thread bdSMk) call ``dumper.dump()``
+#: directly with no dependency-scope wrapper of their own at all -- fixed by
+#: wrapping both in ``suppress_streaming_prune()`` themselves, the same
+#: full/unscoped reasoning as the two choke points above, rather than
+#: teaching this module about a third caller shape.
+#:
+#: **A separate, still-open trade-off, not a bug (Codex review, PR #840,
+#: thread bdVPf):** the ``ast_memoize_active()`` check below (needed to
+#: prevent exactly the corruption described there) is active for the
+#: *entire* primary ELF/PE/Mach-O single-header dump call in
+#: ``perform_elf_dump``/``handle_non_elf_dump``/``service.run_dump`` --
+#: not only when ``_attach_header_graph`` will actually hit the in-process
+#: memo afterward -- because ``ast_memoize_scope()`` is opened unconditionally
+#: around that whole call (see its own docstring: "the one shape where
+#: ``_attach_header_graph`` really does follow and consume the memo").
+#: Concretely, this means the pruner never actually fires on that common
+#: single-header path, opt-in env var or not -- only on a
+#: ``--dump-manifest``-driven per-TU parse (``dumper_manifest.run_tu_fragment``,
+#: which has no per-TU memo handoff to protect) or a direct caller with no
+#: header-graph consumption. This is the sound side of a real trade-off, not
+#: an accidental over-broad gate: the memo hands its *exact* stored root to
+#: the graph consumer with no re-parse in between (see
+#: ``dumper_cache.load_cached_ast``'s slot-hit branch), so a pruned root
+#: written there would corrupt the graph regardless of anything this call
+#: itself does afterward -- there is no point in the primary call where
+#: "will the graph actually reuse this" is yet decidable. It also costs
+#: nothing measured: this module's own docstring already found single-header
+#: pruning a net *perf loss* on its own (``object_pairs_hook`` overhead
+#: exceeding the savings), independent of this gate, and this feature's
+#: actual target -- the whole-product/bundle-scan manifest path the original
+#: investigation was about -- is unaffected. A real fix would need the memo
+#: slot to record whether its stored root was pruned and have the graph
+#: consumer force a fresh, unpruned re-parse on a pruned hit instead of
+#: reusing it -- a real, if narrow, change to a shared primitive several
+#: other call sites already depend on, not attempted here given the above.
 STREAM_PRUNE_DEPENDENCY_DECLS_ENV_VAR = "ABICHECK_CLANG_PRUNE_DEPENDENCY_DECLS"
 
 

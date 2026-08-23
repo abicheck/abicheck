@@ -1372,10 +1372,42 @@ class TestCheckAppcompat:
                 old_headers=[old_hdr], new_headers=[new_hdr],
             )
 
-        assert mock_dump.call_count == 2
-        old_call, new_call = mock_dump.call_args_list
-        assert old_call.kwargs["public_headers"] == [old_hdr]
-        assert new_call.kwargs["public_headers"] == [new_hdr]
+            assert mock_dump.call_count == 2
+            old_call, new_call = mock_dump.call_args_list
+            assert old_call.kwargs["public_headers"] == [old_hdr]
+            assert new_call.kwargs["public_headers"] == [new_hdr]
+
+    def test_both_dumps_suppress_streaming_prune(self, tmp_path):
+        """check_appcompat calls dumper.dump() directly for both sides, with
+        no service.run_dump dependency-scope wrapper downstream to retain
+        what the opt-in streaming pruner (dumper_clang_streaming.py) would
+        otherwise drop -- both calls must suppress it themselves (Codex
+        review, PR #840, thread bdSMk)."""
+        from abicheck.dumper_clang_streaming import streaming_prune_suppressed
+
+        app = tmp_path / "app"
+        old_lib = tmp_path / "old.so"
+        new_lib = tmp_path / "new.so"
+
+        app_reqs = AppRequirements(undefined_symbols=set())
+        diff = DiffResult(old_version="1", new_version="2", library="libfoo")
+        observed: list[bool] = []
+
+        def _fake_dump(*_a, **_kw):
+            observed.append(streaming_prune_suppressed())
+            return MagicMock()
+
+        with patch("abicheck.appcompat._get_lib_soname", return_value="libfoo.so.1"), \
+             patch("abicheck.appcompat.parse_app_requirements", return_value=app_reqs), \
+             patch("abicheck.dumper.dump", side_effect=_fake_dump), \
+             patch("abicheck.service.compare_snapshots", return_value=diff), \
+             patch("abicheck.appcompat._get_new_lib_exports", return_value=set()), \
+             patch("abicheck.appcompat._detect_app_format", return_value=None):
+            assert not streaming_prune_suppressed()  # not leaked before the call
+            check_appcompat(app, old_lib, new_lib)
+            assert not streaming_prune_suppressed()  # not leaked after the call
+
+        assert observed == [True, True]
 
     def test_missing_symbols_breaking(self, tmp_path):
         app = tmp_path / "app"

@@ -560,6 +560,49 @@ class TestSnapshotFromCompatInputMultiLib:
         assert ver == "9.9"
         assert out.version == "9.9"
 
+    def test_descriptor_dump_suppresses_streaming_prune(self, tmp_path: Path) -> None:
+        """The ABICC-compat dump path has no service.run_dump
+        dependency-scope wrapper downstream to retain what the opt-in
+        streaming pruner (dumper_clang_streaming.py) would otherwise drop --
+        it must suppress the pruner itself (Codex review, PR #840, thread
+        bdSMk)."""
+        from unittest.mock import patch
+
+        from abicheck.compat.cli import _snapshot_from_compat_input
+        from abicheck.compat.descriptor import CompatDescriptor
+        from abicheck.dumper_clang_streaming import streaming_prune_suppressed
+        from abicheck.model import AbiSnapshot
+
+        so = tmp_path / "a.so"
+        so.write_bytes(b"\x7fELF")
+        desc = CompatDescriptor(version="1.0", headers=[], libs=[so])
+        observed: list[bool] = []
+
+        def _fake_dump(*_a, **_kw):
+            observed.append(streaming_prune_suppressed())
+            return AbiSnapshot(library="a", version="1.0", functions=[], variables=[], types=[])
+
+        with patch("abicheck.compat.cli.dump", side_effect=_fake_dump):
+            assert not streaming_prune_suppressed()  # not leaked before the call
+            _snapshot_from_compat_input(
+                desc,
+                None,
+                tmp_path / "desc.xml",
+                headers_list_path=None,
+                single_header=None,
+                skip_headers_set=set(),
+                quiet=True,
+                gcc_path=None,
+                gcc_prefix=None,
+                gcc_options=None,
+                sysroot=None,
+                nostdinc=False,
+                lang=None,
+            )
+            assert not streaming_prune_suppressed()  # not leaked after the call
+
+        assert observed == [True]
+
 
 class TestBuildCompatSuppressionErrors:
     def test_invalid_skip_internal_regex_exits(self, tmp_path: Path) -> None:
