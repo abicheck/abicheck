@@ -156,6 +156,23 @@ class TestPathContainingALiteralCloseParen:
         assert strip_anonymous_type_location(old) == strip_anonymous_type_location(new)
 
 
+class TestOrdinaryNameWhitespaceIsPreserved:
+    """Codex review, round 4: strip_anonymous_type_location() is now applied
+    to every castxml record/enum name at extraction time (not just
+    anonymous ones), so its whitespace-collapse step used to rewrite
+    meaningful internal whitespace on an ORDINARY name too -- notably a
+    C++20 fixed-string NTTP template argument, where two distinct
+    specializations differing only in embedded whitespace must not
+    collapse onto the same identity."""
+
+    def test_distinct_fixed_string_template_args_stay_distinct(self) -> None:
+        a = strip_anonymous_type_location('Tag<"a  b">')
+        b = strip_anonymous_type_location('Tag<"a b">')
+        assert a == 'Tag<"a  b">'
+        assert b == 'Tag<"a b">'
+        assert a != b
+
+
 class TestAnonymousEnumLocationStripped:
     def test_enum_name_has_no_embedded_path(self) -> None:
         root = Element("CastXML", attrib={"format": "1.4.0"})

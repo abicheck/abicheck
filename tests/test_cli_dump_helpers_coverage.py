@@ -1021,8 +1021,7 @@ def test_perform_elf_dump_attaches_header_graph_by_default(
         lang,
         compile_context,
         public_headers,
-        public_header_dirs,
-        include_search_dirs=None,
+        public_header_dirs, include_search_dirs=None,
     ):
         captured["snap"] = snap
         captured["header_graph"] = header_graph
@@ -1126,8 +1125,7 @@ def test_perform_elf_dump_explicit_lang_reaches_header_graph(
 
     def fake_attach(
         snap, header_graph, header_graph_includes, headers, includes,
-        lang, compile_context, public_headers, public_header_dirs,
-        include_search_dirs=None,
+        lang, compile_context, public_headers, public_header_dirs, include_search_dirs=None,
     ):
         captured_graph["lang"] = lang
         return snap
@@ -1289,8 +1287,7 @@ def test_perform_elf_dump_header_graph_receives_seeded_includes(
 
     def fake_attach(
         snap, header_graph, header_graph_includes, headers, includes,
-        lang, compile_context, public_headers, public_header_dirs,
-        include_search_dirs=None,
+        lang, compile_context, public_headers, public_header_dirs, include_search_dirs=None,
     ):  # noqa: ANN001
         captured["includes"] = includes
         return snap
@@ -1332,8 +1329,7 @@ def test_perform_elf_dump_header_graph_gets_compile_db_flags(
 
     def fake_attach(
         snap, header_graph, header_graph_includes, headers, includes,
-        lang, compile_context, public_headers, public_header_dirs,
-        include_search_dirs=None,
+        lang, compile_context, public_headers, public_header_dirs, include_search_dirs=None,
     ):  # noqa: ANN001
         captured["compile_context"] = compile_context
         return snap
@@ -1382,8 +1378,7 @@ def test_perform_elf_dump_header_graph_builds_context_when_none_given(
 
     def fake_attach(
         snap, header_graph, header_graph_includes, headers, includes,
-        lang, compile_context, public_headers, public_header_dirs,
-        include_search_dirs=None,
+        lang, compile_context, public_headers, public_header_dirs, include_search_dirs=None,
     ):  # noqa: ANN001
         captured["compile_context"] = compile_context
         return snap

@@ -619,8 +619,19 @@ def strip_anonymous_type_location(name: str) -> str:
     :func:`canonicalize_type_name` remains the right tool for a downstream
     *comparison* that only has the raw spelling to work with (and where a
     same-snapshot collision risk does not apply).
+
+    The whitespace collapse/strip below runs ONLY when the anonymous-marker
+    substitution actually matched (Codex review, fresh evidence): this
+    function is now applied to every castxml record/enum name at
+    extraction time, not just anonymous ones, so an unconditional collapse
+    would also rewrite meaningful whitespace inside an ordinary name --
+    notably a C++20 fixed-string NTTP template argument, where
+    ``Tag<"a  b">`` and ``Tag<"a b">`` are genuinely distinct
+    specializations that must not collide onto one identity.
     """
     stripped = _ANON_TYPE_LOCATION_PATH_ONLY_RE.sub(r"\1", name)
+    if stripped == name:
+        return name
     return _MULTI_SPACE_RE.sub(" ", stripped).strip()
 
 

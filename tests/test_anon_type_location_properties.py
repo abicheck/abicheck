@@ -118,7 +118,7 @@ def test_idempotent(kind: str, path: str, line_col: tuple[int, int]) -> None:
 
 @given(
     text=st.text(
-        alphabet=st.characters(whitelist_categories=("Lu", "Ll", "Nd", "P")),
+        alphabet=st.characters(whitelist_categories=("Lu", "Ll", "Nd", "P", "Zs")),
         min_size=1,
         max_size=60,
     )
@@ -126,12 +126,15 @@ def test_idempotent(kind: str, path: str, line_col: tuple[int, int]) -> None:
 @settings(max_examples=300)
 def test_ordinary_name_with_no_anonymous_marker_is_unaffected(text: str) -> None:
     """A type name that never contains the "(kind at path:line:col)" shape
-    at all must pass through completely unchanged. Restricted to an
-    already-whitespace-free alphabet: the function unconditionally collapses
-    internal whitespace and strips the ends (its own normalization step,
-    independent of whether a location was actually found), so a text
-    containing whitespace is not "unaffected" in the literal sense this
-    property checks — that normalization is real, documented behavior, not
-    the property under test here."""
+    at all must pass through completely unchanged -- byte-for-byte,
+    including any internal whitespace it happens to carry. This is the
+    round-3 review fix (Codex, fresh evidence): the whitespace-collapse
+    step below used to run unconditionally, which would also rewrite
+    meaningful whitespace inside an ordinary name (e.g. a C++20
+    fixed-string NTTP template argument, ``Tag<"a  b">`` vs. ``Tag<"a
+    b">``) even when no anonymous-location marker was present at all --
+    now it only runs when the marker substitution actually fired, so an
+    ordinary name (whitespace included) is genuinely a no-op, not just
+    "unaffected modulo normalization"."""
     if " at " not in text or ":" not in text:
         assert strip_anonymous_type_location(text) == text
