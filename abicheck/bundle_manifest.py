@@ -250,3 +250,45 @@ def load_manifest(path: Path) -> InstantiationManifest:
     provides = cast("list[dict[str, object]]", data["provides"])
     entries = [_parse_manifest_entry(path, raw) for raw in provides]
     return InstantiationManifest(entries=tuple(entries))
+
+
+def manifest_entry_to_dict(entry: ManifestEntry) -> dict[str, object]:
+    """Serialize one :class:`ManifestEntry` to the same mapping shape
+    :func:`load_manifest` accepts on a `provides:` list (G38 Phase 2) —
+    round-trips through :func:`manifest_entry_from_dict`/
+    :func:`_parse_manifest_entry` unchanged."""
+    d: dict[str, object] = {"optional_provider": entry.optional_provider}
+    if entry.library is not None:
+        d["library"] = entry.library
+    if entry.symbol is not None:
+        d["symbol"] = entry.symbol
+    elif entry.pattern is not None:
+        d["pattern"] = entry.pattern
+    else:
+        d["template"] = entry.template
+        d["instantiations"] = [dict(inst) for inst in entry.instantiations]
+    return d
+
+
+def manifest_entry_from_dict(raw: dict[str, object]) -> ManifestEntry:
+    """Inverse of :func:`manifest_entry_to_dict`.
+
+    Reuses :func:`_parse_manifest_entry`'s own validation rather than a
+    second, independently-drifting parse — the dict shape is identical to
+    a manifest file's ``provides:`` entry.
+    """
+    return _parse_manifest_entry(Path("<bundle-facts>"), raw)
+
+
+def manifest_to_dict(manifest: InstantiationManifest) -> dict[str, object]:
+    """Serialize an :class:`InstantiationManifest` (G38 Phase 2) — the
+    persisted-facts counterpart to :func:`load_manifest`."""
+    return {"provides": [manifest_entry_to_dict(e) for e in manifest.entries]}
+
+
+def manifest_from_dict(raw: dict[str, object]) -> InstantiationManifest:
+    """Inverse of :func:`manifest_to_dict`."""
+    provides = cast("list[dict[str, object]]", raw.get("provides", []))
+    return InstantiationManifest(
+        entries=tuple(manifest_entry_from_dict(e) for e in provides)
+    )

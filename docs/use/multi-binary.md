@@ -184,7 +184,7 @@ summary and new top-level keys in the JSON output:
     altered its DWARF signature. Calling convention is now mismatched.
 ```
 
-## The three new flags
+## The bundle-analysis flags
 
 ### `--manifest PATH` *(Experimental)*
 
@@ -388,6 +388,15 @@ Skip bundle analysis entirely. Use this when:
 This flag is the explicit opt-out. There is no environment variable
 equivalent; the flag must appear in the command line.
 
+### `--bundle-facts-out PATH`
+
+Persist the OLD side's bundle facts (per-library snapshots plus the
+instantiation manifest, if any) to `PATH` for a later stored-baseline bundle
+comparison (G38 Phase 2). See
+[Comparing against a stored bundle baseline](#comparing-against-a-stored-bundle-baseline-g38-phase-2)
+above. Additive output — it does not change this invocation's own findings
+or exit code, and is a no-op when combined with `--no-bundle-analysis`.
+
 ## JSON output schema additions
 
 `compare --format json` (on a bundle) adds two top-level keys when bundle
@@ -455,6 +464,46 @@ can be silenced with a [suppression](suppressions.md) if it's expected; a
 to fix the intra-bundle contract, or fall back to `--no-bundle-analysis` /
 `--bundle-system-providers` as described below.
 
+## Comparing against a stored bundle baseline (G38 Phase 2)
+
+Every bundle comparison above reopens live `.so` files on both sides. That
+means a stored-baseline workflow — the normal `scan --against`/CI pattern
+every other surface this tool supports — could not get a bundle-level
+verdict at all: there was no persisted form of "what the bundle layer knows
+about a release" to compare a live directory against later.
+
+`--bundle-facts-out PATH` on the directory/package `compare` fan-out closes
+that gap. It persists the OLD side's per-library snapshots (the same
+`AbiSnapshot`s that run already produced) plus the instantiation manifest,
+if any, to `PATH` as a `BundleFacts` file — additive output alongside the
+ordinary live-vs-live comparison the invocation already performs; it changes
+no finding or exit code.
+
+```bash
+# Capture release-1.0's bundle facts while doing an ordinary comparison.
+abicheck compare release-1.0/ release-2.0/ -H include/ \
+    --bundle-facts-out release-1.0.bundlefacts.json
+
+# Later, get a bundle-level verdict for release-1.0 -> release-3.0 without
+# ever reopening release-1.0's binaries.
+```
+
+The stored facts are consumed programmatically via
+`abicheck.bundle_facts.compare_bundle_from_facts()` (see
+[Programmatic API](#programmatic-api) below) — a `compare` CLI flag that
+takes a `BundleFacts` file as its old-side operand is expected to land once
+the CLI-cleanup-phase-two convergence settles on where directory/package
+`compare` should route a non-directory old-side input; this is deliberately
+scoped in this phase to the *producer* half and the tested Python API, not a
+CLI *consumer* half, per G38's own phased design.
+
+`compare_bundle_from_facts()` reconstructs a live-equivalent
+`BundleSnapshot` from the stored per-library `AbiSnapshot.elf` metadata (no
+binaries read) and then delegates to the exact same `compare_bundle()` a
+live-directory comparison uses — so the two entry points can never
+independently drift, and a stored-facts comparison produces byte-identical
+findings to a live one for the same underlying facts.
+
 ## Platform support
 
 Bundle analysis is **ELF/Linux-only** (ADR-018, ADR-023). Mach-O and
@@ -485,6 +534,22 @@ result = compare_bundle(old, new, per_library_results, manifest=manifest)
 print(result.bundle_verdict)        # Verdict.BREAKING / COMPATIBLE / ...
 for f in result.bundle_findings:
     print(f.kind, f.symbol, f.consumer_library)
+```
+
+For a stored-baseline comparison (G38 Phase 2 — see above), swap the OLD
+side for a loaded `BundleFacts` and `compare_bundle_from_facts()`:
+
+```python
+from abicheck.bundle_facts import compare_bundle_from_facts
+from abicheck.serialization import load_bundle_facts
+
+old_facts = load_bundle_facts("release-1.0.bundlefacts.json")
+new = build_bundle_snapshot({p.name: p for p in Path("release-3.0/").glob("*.so")})
+
+# per_library_results still comes from diffing each library's stored
+# AbiSnapshot (old_facts.per_library_snapshots[name]) against a freshly
+# resolved new-side snapshot, e.g. via abicheck.service.compare_snapshots().
+result = compare_bundle_from_facts(old_facts, new, per_library_results)
 ```
 
 ## References

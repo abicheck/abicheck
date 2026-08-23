@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING, Any, TypeVar
 
 if TYPE_CHECKING:
     from .build_mode import BuildMode
+    from .bundle_facts import BundleFacts
     from .snapshot_io import SnapshotWriteResult
 
 from .errors import IncompatibleSnapshotSchemaError, SnapshotError
@@ -1791,4 +1792,79 @@ def write_snapshot(
         path,
         compression=SnapshotCompression(compression),
         zstd_level=zstd_level,
+    )
+
+
+def bundle_facts_to_dict(facts: BundleFacts) -> dict[str, Any]:
+    """Serialize a :class:`~abicheck.bundle_facts.BundleFacts` to a
+    JSON-able dict (G38 Phase 2) — lives here, not in ``bundle_facts.py``
+    itself, the same split :class:`AbiSnapshot`'s own serialization
+    already uses (the model/data-shape module stays a leaf; every
+    snapshot's to_dict/from_dict lives in this module instead). Putting it
+    in ``bundle_facts.py`` would create a real import cycle: this
+    function needs ``snapshot_to_dict`` from here, while this module's own
+    ``save_bundle_facts``/``load_bundle_facts`` need ``BundleFacts`` from
+    there.
+    """
+    from .bundle_manifest import manifest_to_dict
+
+    return {
+        "schema_version": facts.schema_version,
+        "variant_fingerprint": facts.variant_fingerprint,
+        "per_library_snapshots": {
+            name: snapshot_to_dict(snap)
+            for name, snap in facts.per_library_snapshots.items()
+        },
+        "manifest": manifest_to_dict(facts.manifest) if facts.manifest else None,
+    }
+
+
+def bundle_facts_from_dict(d: dict[str, Any]) -> BundleFacts:
+    """Inverse of :func:`bundle_facts_to_dict`."""
+    from .bundle_facts import (
+        BUNDLE_FACTS_SCHEMA_VERSION,
+        DEFAULT_VARIANT_FINGERPRINT,
+        BundleFacts,
+    )
+    from .bundle_manifest import manifest_from_dict
+
+    raw_manifest = d.get("manifest")
+    return BundleFacts(
+        schema_version=int(d.get("schema_version", BUNDLE_FACTS_SCHEMA_VERSION)),
+        variant_fingerprint=str(
+            d.get("variant_fingerprint", DEFAULT_VARIANT_FINGERPRINT)
+        ),
+        per_library_snapshots={
+            name: snapshot_from_dict(sd)
+            for name, sd in d.get("per_library_snapshots", {}).items()
+        },
+        manifest=manifest_from_dict(raw_manifest) if raw_manifest else None,
+    )
+
+
+def load_bundle_facts(path: str | Path) -> BundleFacts:
+    """Load a :class:`~abicheck.bundle_facts.BundleFacts` from *path*,
+    transparently handling plain, gzip, and zstd storage (ADR-059,
+    detected from magic bytes) — the G38 Phase 2 counterpart to
+    :func:`load_snapshot`."""
+    from .snapshot_io import read_snapshot_text
+
+    return bundle_facts_from_dict(json.loads(read_snapshot_text(path)))
+
+
+def save_bundle_facts(
+    facts: BundleFacts,
+    path: str | Path,
+    *,
+    compression: str = "auto",
+) -> SnapshotWriteResult:
+    """Save *facts* to *path* — the G38 Phase 2 counterpart to
+    :func:`write_snapshot`. Same *compression* contract (``"auto"``
+    inferred from *path*'s suffix, ``"none"``, ``"gzip"``, ``"zstd"``)."""
+    from .snapshot_io import SnapshotCompression, write_snapshot_text
+
+    return write_snapshot_text(
+        json.dumps(bundle_facts_to_dict(facts), indent=2, sort_keys=True),
+        path,
+        compression=SnapshotCompression(compression),
     )

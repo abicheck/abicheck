@@ -67,6 +67,7 @@ from .cli_compare_release_helpers import (  # noqa: F401
     _resolve_release_severity_config,
     _run_bundle_analysis,
     apply_release_gate_pack,
+    write_bundle_facts_out,
 )
 from .cli_options import (
     include_dependencies_option,
@@ -1291,6 +1292,20 @@ def _strip_diff_results_and_adjust_verdict(
     "across DSO boundaries, type drift across siblings, provider "
     "migration, and manifest mismatches.",
 )
+@click.option(
+    "--bundle-facts-out",
+    "bundle_facts_out",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="Persist this run's OLD-side bundle facts (per-library snapshots "
+    "plus the instantiation manifest, if any) to PATH (G38 Phase 2, "
+    "ADR-023 amendment). A later 'compare --against-bundle-facts PATH "
+    "new-dir/' can then get a bundle-level verdict from this stored "
+    "baseline without reopening the old .so files. This is an additive "
+    "output alongside the ordinary live-vs-live comparison this "
+    "invocation already performs -- it does not change any finding or "
+    "exit code. No-op combined with --no-bundle-analysis.",
+)
 @scope_options  # --scope-public-headers/--no- (ADR-037 D3)
 @include_dependencies_option
 @click.option(
@@ -1349,6 +1364,7 @@ def compare_release_cmd(
     bundle_system_providers: str,
     bundle_cohorts: tuple[str, ...],
     no_bundle_analysis: bool,
+    bundle_facts_out: Path | None,
     scope_public_headers: bool,
     include_dependencies: bool,
     probe_matrix_old: Path | None,
@@ -1631,7 +1647,11 @@ def compare_release_cmd(
                 policy,
                 policy_file_path,
                 output_dir,
-                collect_diff_results=(fmt == "junit" or secondary_fmt == "junit"),
+                collect_diff_results=(
+                    fmt == "junit"
+                    or secondary_fmt == "junit"
+                    or bundle_facts_out is not None
+                ),
                 jobs=jobs,
                 scope_to_public_surface=scope_public_headers,
                 include_dependencies=include_dependencies,
@@ -1641,6 +1661,13 @@ def compare_release_cmd(
                 pack_application=pack_application,
                 compile_context=compile_context,
             )
+
+            if bundle_facts_out is not None and not no_bundle_analysis:
+                write_bundle_facts_out(
+                    bundle_facts_out,
+                    diff_pairs,
+                    manifest_path,
+                )
 
             # ADR-049 Phase 7's orthogonal contract-coverage floor, aggregated
             # across every library with max() -- one library's incomplete

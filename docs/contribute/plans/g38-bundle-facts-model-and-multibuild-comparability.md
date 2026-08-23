@@ -185,6 +185,61 @@ identified. Lowest risk, do first.
 
 ### Phase 2 — Persisted `BundleFacts` and `compare --against <bundle dump>`
 
+**Implementation status (2026-08-23): the model, the mandatory parity test,
+and the producer (`--bundle-facts-out`) are shipped; the CLI consumer half
+is deliberately deferred.** Two real deviations from this section's original
+design, both discovered during implementation rather than planned up front:
+
+1. **No `BundleArtifactFacts`/persisted `ResolutionGraph`.** The sketch
+   below assumed the resolution graph needed its own serialized form. It
+   doesn't: `abicheck/bundle.py` already has
+   `build_bundle_snapshot_from_metadata()` — a pre-existing primitive (built
+   for a different, still-unshipped snapshot-first product-baseline use
+   case) that reconstructs a fully-functional `BundleSnapshot` (cross-DSO
+   `DT_NEEDED`/version-table resolution included) from bare `ElfMetadata`
+   alone, with no binaries read. Since `AbiSnapshot.elf` already *is* that
+   `ElfMetadata` for every ELF `dump`, `BundleFacts.per_library_snapshots`
+   alone is sufficient to reconstruct everything `BundleArtifactFacts`/
+   `ResolutionGraph` would have stored — persisting them separately would
+   only add a second, redundant representation that could drift from
+   `_compute_resolution_graph()`'s real behavior. Implemented in
+   `abicheck/bundle_facts.py`, not `abicheck/bundle_models.py` (that file
+   stays a leaf with respect to `abicheck.bundle`; `bundle_facts.py` is
+   its own leaf-with-respect-to-`bundle.py` module, importing it only
+   lazily inside function bodies to avoid a real
+   `bundle_facts <-> serialization` import cycle the first draft of this
+   module hit — see that module's own comment for why the `to_dict`/
+   `from_dict` pair had to move to `serialization.py` instead of living
+   next to the dataclass).
+2. **CLI consumer wiring is not attempted.** `compare_release_cmd`'s
+   directory/package fan-out (`_prepare_compare_release_inputs`,
+   `_compare_release_libraries`) is built entirely around resolving *live*
+   binaries on both sides for the per-library diff pass — substituting a
+   `BundleFacts` file for the old side would mean a second, parallel
+   per-library comparison loop (`service.compare_snapshots()` against each
+   stored `AbiSnapshot` instead of `service.run_compare()` against a live
+   path), which is a genuine, separate feature with its own option surface
+   (most of `compare`'s ~40 release-fan-out flags — headers, debug-info,
+   PDB, jobs — lose their old-side meaning once the old side is already a
+   resolved snapshot). This section's own text already anticipated
+   deferring this exact decision ("this plan does not re-litigate the
+   ongoing CLI-cleanup-phase-two convergence, it plugs into whichever entry
+   point that work has converged on"); building it reactively now, without
+   that convergence, risked exactly the kind of drive-by CLI-dispatch
+   change this codebase's own "known gaps over risky reactive patches"
+   convention exists to avoid. `abicheck.bundle_facts.
+   compare_bundle_from_facts()` is fully implemented, tested against the
+   mandatory dump/live parity invariant, and documented as a Python API in
+   [Multi-Binary Releases](../../use/multi-binary.md#comparing-against-a-stored-bundle-baseline-g38-phase-2)
+   — only the CLI surface to feed it a stored-facts old side is not yet
+   wired.
+
+The rest of this section is kept as originally written (this plan's own
+amendment convention appends corrections rather than retconning the
+original text); read `BundleArtifactFacts`/`resolution_graph` below as the
+originally-proposed shape, superseded by the simpler, already-shipped one
+described above.
+
 **New model, additive to `abicheck/bundle_models.py`:**
 
 ```python
@@ -486,13 +541,13 @@ table asks for.
 
 | File | Change |
 |---|---|
-| `abicheck/bundle_models.py` | `BundleFacts`, `BundleArtifactFacts` (Phase 2); `bundle_variant_coverage_regressed`/`bundle_intra_dep_signature_unverified` support types (Phases 3-4) |
-| `abicheck/bundle.py` | `compare_bundle_from_facts()` alongside existing `compare_bundle()`; both delegate to one shared internal comparison function so Phase 2's parity test has something to hold equal |
+| `abicheck/bundle_facts.py` | **Shipped (Phase 2).** New leaf module (not `bundle_models.py` — see the implementation-status note above): `BundleFacts`, `capture_bundle_facts()`, `bundle_snapshot_from_facts()`, `compare_bundle_from_facts()` (a thin wrapper delegating to `bundle.compare_bundle()` unchanged, so the parity test holds two calls to one implementation equal) |
+| `abicheck/bundle_manifest.py` | **Shipped (Phase 2).** `manifest_to_dict`/`manifest_from_dict`/`manifest_entry_to_dict`/`manifest_entry_from_dict` — round-trip serialization for `InstantiationManifest`, reusing `_parse_manifest_entry`'s existing validation rather than a second parser |
 | `abicheck/bundle_multibuild.py` | New — `variant_fingerprint`, `pair_variants`, `VariantComparison` (Phase 3) |
-| `abicheck/serialization.py` | `save_bundle_facts`/`load_bundle_facts` (Phase 2) |
-| `abicheck/comparability.py` | Bundle-level fingerprint-mismatch refusal, mirroring the existing single-snapshot `ScopeMismatchError` (Phase 2); no change to single-snapshot behavior |
+| `abicheck/serialization.py` | **Shipped (Phase 2).** `save_bundle_facts`/`load_bundle_facts` plus `bundle_facts_to_dict`/`bundle_facts_from_dict` (the latter two live here, not in `bundle_facts.py`, to avoid the import cycle noted above) |
+| `abicheck/comparability.py` | Bundle-level fingerprint-mismatch refusal, mirroring the existing single-snapshot `ScopeMismatchError` (Phase 3, once `variant_fingerprint` carries real per-variant identity — Phase 2's field is always `"default"`); no change to single-snapshot behavior |
 | `abicheck/checker_policy.py` / `abicheck/change_registry.py` | `bundle_variant_coverage_regressed`, `bundle_intra_dep_signature_unverified` registry entries (Phases 3-4) |
-| `abicheck/cli_compare_release*.py` | `--bundle-facts-out <path>` on the existing `compare` release fan-out (Phase 2's "Wiring" note — an additive output flag, not a new root command); `compare --against <bundle facts>` wiring (Phase 2); whichever multibuild CLI surface Phase 3 needs — deferred to implementation time pending CLI-cleanup-phase-two's own convergence |
+| `abicheck/cli_options.py` / `abicheck/cli_compare_release*.py` | **Shipped (producer half only).** `--bundle-facts-out <path>` on the existing `compare` release fan-out (`release_options()` in `cli_options.py`, threaded through `run_compare()`/`_dispatch_release_compare`/`compare_release_cmd`, written via `cli_compare_release_helpers.write_bundle_facts_out()`) — an additive output flag, not a new root command. **Not shipped:** `compare --against <bundle facts>` consumer wiring (deferred — see the implementation-status note above) and whichever multibuild CLI surface Phase 3 needs |
 | `abicheck/reporter.py` / `abicheck/report_summary.py` | Render the two new finding shapes; extend `bundle.json`/`bundle.md` (Phases 3-4) |
 | `docs/reference/change-kinds.md` | Phase 1 taxonomy note; new-kind entries for Phases 3-4 |
 | `docs/contribute/adr/023-bundle-aware-multi-binary-analysis.md` | Amendment block linking to this plan (see below) |
@@ -502,11 +557,17 @@ table asks for.
 
 ## Tests
 
-- `tests/test_bundle.py` — extend with `BundleFacts` round-trip
-  (`save_bundle_facts` → `load_bundle_facts` → identical
-  `compare_bundle_from_facts` output), the dump/live parity test from
-  Phase 2's acceptance criterion, and the two new `ChangeKind`s' positive/
-  negative cases.
+- **Shipped:** `tests/test_bundle_facts.py` (new file, not an extension of
+  `test_bundle.py`) — `BundleFacts` round-trip (`save_bundle_facts` →
+  `load_bundle_facts` → identical `compare_bundle_from_facts` output,
+  covering the manifest's three entry shapes and both compressed/
+  uncompressed storage), and the mandatory dump/live parity test from
+  Phase 2's acceptance criterion 6 (a graph-native finding, a diff-derived
+  finding, a negative/no-change control, and manifest override precedence
+  — `compare_bundle_from_facts()`'s findings/verdict compared field-for-field
+  against a live `compare_bundle()` call on the identical underlying facts).
+- Still pending: the two new `ChangeKind`s' positive/negative cases
+  (Phases 3-4, not yet implemented).
 - New `tests/test_bundle_multibuild.py` — `variant_fingerprint` determinism
   and sensitivity: two builds differing only in an ABI-irrelevant flag, or
   only in `-std=`/build-derived defines, fingerprint **identically** (Phase

@@ -321,6 +321,47 @@ def _debian_symbols_warning(
     return "Debian symbols contract changed:\n" + format_diff_report(diff)
 
 
+def write_bundle_facts_out(
+    bundle_facts_out: Path,
+    diff_pairs: list[tuple[DiffResult, AbiSnapshot]],
+    manifest_path: Path | None,
+) -> None:
+    """Persist the OLD side's per-library snapshots (plus manifest, if any)
+    to *bundle_facts_out* as a :class:`~abicheck.bundle_facts.BundleFacts`
+    file (G38 Phase 2's ``--bundle-facts-out`` producer).
+
+    *diff_pairs* is ``_compare_release_libraries``'s own
+    ``(DiffResult, old_snapshot)`` collection -- the caller must have
+    passed ``collect_diff_results=True`` for it to be populated. Keyed by
+    each pair's own :attr:`DiffResult.library` basename, matching
+    :func:`abicheck.bundle.compare_bundle`'s own ``diff_by_library``
+    canonicalization (``Path(result.library).name``) exactly, so a later
+    :func:`~abicheck.bundle_facts.compare_bundle_from_facts` call resolves
+    the same library identities a live ``compare_bundle()`` run would. A
+    library that never reached a successful per-library compare (e.g. a
+    dump failure) has no entry here -- the same "only promise what was
+    actually captured" rule a live ``build_bundle_snapshot()`` already
+    applies to a library that fails to parse.
+
+    Failure here (a bad *manifest_path*, an unwritable *bundle_facts_out*)
+    is a genuine usage error -- unlike bundle *analysis* itself, which
+    degrades to a warning on failure (see ``_run_bundle_analysis``'s own
+    docstring), writing an explicitly-requested output file that silently
+    fails would leave a user believing a baseline was captured when it
+    was not.
+    """
+    from .bundle_facts import capture_bundle_facts
+    from .bundle_manifest import load_manifest
+    from .serialization import save_bundle_facts
+
+    manifest = load_manifest(manifest_path) if manifest_path is not None else None
+    per_library_snapshots: dict[str, AbiSnapshot] = {
+        Path(diff.library).name: old_snapshot for diff, old_snapshot in diff_pairs
+    }
+    facts = capture_bundle_facts(per_library_snapshots, manifest=manifest)
+    save_bundle_facts(facts, bundle_facts_out)
+
+
 def _collect_bundle_result(
     library_results: list[dict[str, object]],
     old_map: dict[str, Path],
