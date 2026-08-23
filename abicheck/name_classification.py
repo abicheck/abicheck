@@ -587,11 +587,27 @@ def strip_anonymous_type_location(name: str) -> str:
     entirely would collapse ``guard<(lambda at a.hpp:4:3)>`` and
     ``guard<(lambda at a.hpp:40:3)>`` (two unrelated lambdas) to the
     identical key ``guard<(lambda)>``, silently overwriting one entry in
-    ``diff_helpers.TypeMap`` (Codex review). Line/column is stable across a
-    checkout-root change for the *same* declaration (it depends only on the
-    header's own content, not where it's checked out), so this keeps both
-    properties: identical across checkout roots for one declaration, distinct
-    across declarations within one snapshot.
+    ``diff_helpers.TypeMap`` (Codex review). Line/column depends only on the
+    header's own content, not where it's checked out, so it is stable across
+    a checkout-root change for the *same*, *unedited* declaration — the case
+    this function exists to fix.
+
+    Known, accepted limitation (Codex review, second round): this is a
+    genuine tradeoff, not a fully general fix. If an *unrelated* edit
+    earlier in the same header shifts an unchanged anonymous/lambda
+    declaration to a different line, its ``:line:col`` changes too, and
+    old/new matching sees a different identity for a declaration whose own
+    ABI is unchanged — a spurious ``type_removed``/``type_added`` pair in
+    the *other* direction from the collision case above. Dropping the
+    discriminator entirely (what the pre-existing clang-frontend
+    normalizer, ``dumper_clang_expr._normalize_qual_type``, already does)
+    would trade this failure mode for the collision one instead — there is
+    no location-based discriminator that is simultaneously stable under
+    unrelated line movement AND distinguishing between two declarations in
+    one header; a genuinely robust identity would need a structural
+    fingerprint of the declaration itself, not a location string. Accepted
+    as a documented limitation (checkout-root stability was this fix's own
+    motivating bug) rather than a third, unproven heuristic.
 
     Both header-mode dumpers should apply this at extraction time;
     :func:`canonicalize_type_name` remains the right tool for a downstream
