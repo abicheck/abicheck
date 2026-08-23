@@ -159,6 +159,80 @@ _TARGET_TRIPLE_RE = re.compile(r"^[A-Za-z0-9_]+(-[A-Za-z0-9_][A-Za-z0-9_.]*){1,3
 #: ``14.3``, ``14.3.0``) -- never a bare word like ``v1``/``backend``.
 _TOOLCHAIN_VERSION_RE = re.compile(r"^\d+(\.\d+){0,2}$")
 
+#: Real GCC single-component target names -- embedded/bare-metal
+#: architectures GCC ships with no vendor/OS/environment components at all
+#: (e.g. ``lib/gcc/avr/12.2.0/include``, no hyphen anywhere), which
+#: ``_TARGET_TRIPLE_RE`` alone rejects since it requires at least one
+#: ``-``-joined pair (Codex review, round 7). Not exhaustive (GCC's own
+#: target list keeps growing) -- deliberately enumerated rather than
+#: accepting any bare word for this position, since round 3's own finding
+#: was exactly an arbitrary single-word project directory (``backend``)
+#: silently promoted to a toolchain path merely by sitting next to a
+#: numeric-looking sibling directory; the version component's own strict
+#: digits-only check (``_TOOLCHAIN_VERSION_RE``) is what keeps that case
+#: rejected even with this widening.
+_SINGLE_COMPONENT_GCC_TARGETS: frozenset[str] = frozenset(
+    {
+        "avr",
+        "bfin",
+        "bpf",
+        "c6x",
+        "cr16",
+        "cris",
+        "csky",
+        "epiphany",
+        "fr30",
+        "frv",
+        "ft32",
+        "gcn",
+        "h8300",
+        "iq2000",
+        "lm32",
+        "m32c",
+        "m32r",
+        "m68k",
+        "mcore",
+        "mep",
+        "microblaze",
+        "mmix",
+        "mn10300",
+        "moxie",
+        "msp430",
+        "nds32",
+        "nios2",
+        "nvptx",
+        "or1k",
+        "pdp11",
+        "picochip",
+        "pru",
+        "riscv32",
+        "riscv64",
+        "rl78",
+        "rx",
+        "s12z",
+        "score",
+        "sh",
+        "spu",
+        "tilegx",
+        "tilepro",
+        "v850",
+        "vax",
+        "visium",
+        "xstormy16",
+        "xtensa",
+    }
+)
+
+
+def _looks_like_gcc_target(component: str) -> bool:
+    """True when *component* is a real GCC target directory name -- either
+    a full target triple (``_TARGET_TRIPLE_RE``) or one of the known
+    single-component bare-metal target names (see that set's own
+    docstring)."""
+    return bool(_TARGET_TRIPLE_RE.match(component)) or (
+        component.lower() in _SINGLE_COMPONENT_GCC_TARGETS
+    )
+
 #: A genuine Debian/Ubuntu multiarch tuple always names a real OS or
 #: libc/environment family as one of its hyphen-separated words (``linux``,
 #: ``gnu``/``gnueabihf``/``musl``/...) -- an ordinary project directory that
@@ -307,7 +381,7 @@ def _is_toolchain_compiler_include_dir(header_segs: tuple[str, ...]) -> bool:
         if (
             i + 4 < n
             and header_segs[i + 1] == "gcc"
-            and _TARGET_TRIPLE_RE.match(header_segs[i + 2])
+            and _looks_like_gcc_target(header_segs[i + 2])
             and _TOOLCHAIN_VERSION_RE.match(header_segs[i + 3])
             and header_segs[i + 4] in ("include", "include-fixed")
         ):

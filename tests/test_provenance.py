@@ -203,6 +203,29 @@ def test_gcc_include_dir_triple_shaped_project_name_not_multiarch():
     assert _is_toolchain_compiler_include_dir(segs) is False
 
 
+def test_gcc_include_dir_single_component_avr_target_is_toolchain():
+    # Round-7 review finding (Codex, fresh evidence): a relocatable GCC
+    # install targeting a single-component machine (AVR, embedded/bare-
+    # metal) has no vendor/OS/environment components at all, so
+    # _TARGET_TRIPLE_RE's own "at least one hyphen" requirement rejected
+    # the real target directory -- these compiler-owned headers then
+    # survived default dependency exclusion, or became public when
+    # supplied via -I, risking false ABI findings from the toolchain
+    # surface.
+    segs = _segments("/opt/toolchain/lib/gcc/avr/12.2.0/include/stdint.h")
+    assert _is_toolchain_compiler_include_dir(segs) is True
+
+
+def test_gcc_include_dir_single_component_non_target_word_not_toolchain():
+    # Positive control for round 3's own original finding: widening to
+    # accept a real single-component GCC target must not reopen the
+    # "any bare word is a target" gap -- an arbitrary project directory
+    # name that is NOT a recognized bare-metal target must still be
+    # rejected, even paired with a numeric-looking sibling directory.
+    segs = _segments("/project/lib/gcc/backend/14/include/api.h")
+    assert _is_toolchain_compiler_include_dir(segs) is False
+
+
 def test_system_header_conda_forge_libstdcxx_predefined_ops():
     # The exact real-world path from a false-positive func_removed report:
     # abicheck's own GitHub Action reported libstdc++'s internal
