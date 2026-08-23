@@ -380,8 +380,8 @@ def test_run_tu_fragment_pruning_header_roots_includes_project_owned_includes():
     roots = calls[0]["pruning_header_roots"]
     assert roots is not None
     assert str(Path("foo.h")) in roots  # forced_includes
-    assert "/usr/include/mylib/priv" in roots  # project_owned include
-    assert "/usr/include/vendor" not in roots  # NOT project_owned -- excluded
+    assert str(Path("/usr/include/mylib/priv")) in roots  # project_owned include
+    assert str(Path("/usr/include/vendor")) not in roots  # NOT project_owned
 
 
 def test_run_tu_loop_carries_manifest_wide_ownership_roots_into_every_tu():
@@ -435,7 +435,7 @@ def test_run_tu_loop_carries_manifest_wide_ownership_roots_into_every_tu():
     # "main" never declared this directory itself -- only "support" did --
     # but the manifest-wide union must still protect it for "main"'s own
     # parse, matching what the authoritative post-hoc filter would retain.
-    assert "/usr/include/mylib/priv" in main_call["pruning_header_roots"]
+    assert str(Path("/usr/include/mylib/priv")) in main_call["pruning_header_roots"]
     # Sanity: the same manifest-wide set reaches every TU identically.
     assert main_call["pruning_header_roots"] == support_call["pruning_header_roots"]
 
