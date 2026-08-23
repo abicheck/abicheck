@@ -549,6 +549,63 @@ never emitted as a finding.
 
 ### Phase 4 — C-boundary signature-evidence gate
 
+**Implementation status (2026-08-23): the detector, the `ChangeKind`, and
+its registry/test-completeness wiring are shipped, as a standalone
+companion module (the same posture Phase 3's `bundle_multibuild.py` took),
+with two real deviations from the design below.**
+
+- `abicheck/bundle_signature_evidence.py` implements
+  `find_unverified_signature_findings(new, per_library_results,
+  old_snapshots, new_snapshots) -> list[BundleFinding]` as a leaf module —
+  it is **not** wired into `bundle.compare_bundle()` itself, because
+  `abicheck/bundle.py` is exactly at the AI-readiness 2000-line hard cap
+  (confirmed via `wc -l`) and cannot accept new code without an offsetting
+  removal. A caller invokes this function separately, alongside
+  `compare_bundle()`, and merges the two `list[BundleFinding]` results —
+  the same standalone-companion shape `bundle_multibuild.py` established
+  for Phase 3's `coverage_regression_findings`. Deliberately does not
+  import `abicheck.bundle` (a small, 3-member
+  `_CONFIRMED_SIGNATURE_CHANGE_KINDS` frozenset is duplicated locally
+  rather than imported, to stay a strict leaf module `bundle.py` — or a
+  future caller — imports, never the reverse).
+- **Deviation from the design text below**: the evidence check is scoped to
+  the **provider's own snapshot only**, not "the consumer, where
+  applicable" as this section's design sketch says. A consumer has no
+  DWARF/header declaration of its own for a symbol it only imports (calls)
+  rather than defines — its own `AbiSnapshot.function_map`/`variable_map`
+  has no entry for an externally-defined symbol at all, so "the consumer's
+  evidence for this symbol" is not a fact that exists to check. The design
+  sketch's parenthetical was read as anticipating a shape this codebase's
+  actual per-library `AbiSnapshot` construction doesn't produce, rather than
+  as a requirement to build a new evidence source; the check below
+  implements the well-founded half (the provider's own declaration
+  evidence) and treats the consumer-side clause as inapplicable rather than
+  approximated.
+- Registered as `ChangeKind.BUNDLE_INTRA_DEP_SIGNATURE_UNVERIFIED` /
+  `"bundle_intra_dep_signature_unverified"` in `checker_policy.py` /
+  `change_registry_buildsource.py` (not `change_registry.py`, at the same
+  2000-line cap Phase 3's kind avoided — default verdict `RISK`, per this
+  section's design), classified in `tests/canonical_identity_contract.py`'s
+  `UNVERIFIED` bucket (matching every other `bundle_*` kind), tiered `L0`
+  in `scripts/evidence_tiers.py` (the detectable-at signal is the same
+  C-linkage resolution match every other `bundle_*` kind uses — the
+  finding's own *content* records that deeper evidence was unavailable,
+  which is a fact about the finding, not about the minimum tier needed to
+  produce it), and covered by `tests/test_bundle_signature_evidence.py`
+  (both-sides-ELF-only fires; sufficient-evidence-both-sides doesn't;
+  one-side-insufficient still fires; no consumer / symbol absent from old
+  (addition) / snapshot missing skip; a confirmed diff-level signature
+  change takes precedence over this kind firing on the same symbol;
+  variable, not just function, symbols; a single unresolved *parameter*
+  type is sufficient insufficiency even with a known return type; one
+  finding per consumer library; no crash on an entirely empty snapshot).
+- **Not shipped**: reporter wiring (`bundle.json`/`bundle.md` rendering for
+  this kind — the "Reporter" row in "Files & surfaces" below is still
+  open, same as Phase 3's), and any caller that actually invokes this
+  function from `compare_bundle()`'s own orchestration or a CLI surface —
+  today it is reachable only by direct import, exactly Phase 3's own
+  "not shipped" posture for its CLI/config discovery surface.
+
 `bundle_intra_dep_signature_changed` already fires correctly when a
 provider's DWARF/header evidence shows a real signature change. This phase
 adds the missing negative case: a new, dedicated `ChangeKind`,
@@ -630,14 +687,15 @@ table asks for.
 | `abicheck/bundle_facts.py` | **Shipped (Phase 2).** New leaf module (not `bundle_models.py` — see the implementation-status note above): `BundleFacts`, `capture_bundle_facts()`, `bundle_snapshot_from_facts()`, `compare_bundle_from_facts()` (a thin wrapper delegating to `bundle.compare_bundle()` unchanged, so the parity test holds two calls to one implementation equal) |
 | `abicheck/bundle_manifest.py` | **Shipped (Phase 2).** `manifest_to_dict`/`manifest_from_dict`/`manifest_entry_to_dict`/`manifest_entry_from_dict` — round-trip serialization for `InstantiationManifest`, reusing `_parse_manifest_entry`'s existing validation rather than a second parser |
 | `abicheck/bundle_multibuild.py` | **Shipped (Phase 3, pairing primitive only).** `variant_fingerprint`, `pair_variants`, `VariantOutcome`, `VariantComparison`, `coverage_regression_findings` |
+| `abicheck/bundle_signature_evidence.py` | **Shipped (Phase 4, detector only).** `find_unverified_signature_findings` — standalone leaf module, not wired into `bundle.compare_bundle()` (see the Phase 4 implementation-status note above) |
 | `abicheck/serialization.py` | **Shipped (Phase 2).** `save_bundle_facts`/`load_bundle_facts` plus `bundle_facts_to_dict`/`bundle_facts_from_dict` (the latter two live here, not in `bundle_facts.py`, to avoid the import cycle noted above) |
 | `abicheck/comparability.py` | Bundle-level fingerprint-mismatch refusal, mirroring the existing single-snapshot `ScopeMismatchError` (Phase 3, once `variant_fingerprint` carries real per-variant identity — Phase 2's field is always `"default"`); no change to single-snapshot behavior |
-| `abicheck/checker_policy.py` / `abicheck/change_registry_buildsource.py` | **Shipped (Phase 3):** `bundle_variant_coverage_regressed` registry entry. **Not shipped (Phase 4):** `bundle_intra_dep_signature_unverified` — its eventual registry home depends on which sibling `change_registry_*.py` module has room when that phase lands |
+| `abicheck/checker_policy.py` / `abicheck/change_registry_buildsource.py` | **Shipped (Phase 3):** `bundle_variant_coverage_regressed` registry entry. **Shipped (Phase 4):** `bundle_intra_dep_signature_unverified` registry entry, in `change_registry_buildsource.py` alongside its Phase 3 sibling |
 | `abicheck/cli_options.py` / `abicheck/cli_compare_release*.py` | **Shipped (producer half only).** `--bundle-facts-out <path>` on the existing `compare` release fan-out (`release_options()` in `cli_options.py`, threaded through `run_compare()`/`_dispatch_release_compare`/`compare_release_cmd`, written via `cli_compare_release_helpers.write_bundle_facts_out()`) — an additive output flag, not a new root command. **Not shipped:** `compare --against <bundle facts>` consumer wiring (deferred — see the implementation-status note above) and whichever multibuild CLI surface Phase 3 needs |
 | `abicheck/reporter.py` / `abicheck/report_summary.py` | Render the two new finding shapes; extend `bundle.json`/`bundle.md` (Phases 3-4) |
 | `docs/reference/change-kinds.md` | Phase 1 taxonomy note; new-kind entries for Phases 3-4 |
 | `docs/contribute/adr/023-bundle-aware-multi-binary-analysis.md` | Amendment block linking to this plan (see below) |
-| `tests/canonical_identity_contract.py` | Classify both new kinds (`bundle_variant_coverage_regressed`, `bundle_intra_dep_signature_unverified`) into exactly one of `TYPE_BEARING`/`VALUE_INSENSITIVE`/`UNVERIFIED` — required by the root `AGENTS.md`'s "Adding a new ChangeKind" step 5; `tests/test_canonical_finding_id_completeness.py` fails until both are classified, same as every other new kind (Phases 3-4) |
+| `tests/canonical_identity_contract.py` | **Shipped.** Both new kinds (`bundle_variant_coverage_regressed`, `bundle_intra_dep_signature_unverified`) classified into `UNVERIFIED` — required by the root `AGENTS.md`'s "Adding a new ChangeKind" step 5; `tests/test_canonical_finding_id_completeness.py` passes for both |
 
 ---
 
@@ -654,8 +712,9 @@ table asks for.
   against a live `compare_bundle()` call on the identical underlying facts).
 - **Shipped:** `bundle_variant_coverage_regressed`'s positive/negative cases
   (Phase 3) — see `tests/test_bundle_multibuild.py` below.
-- Still pending: `bundle_intra_dep_signature_unverified`'s positive/negative
-  cases (Phase 4, not yet implemented).
+- **Shipped:** `bundle_intra_dep_signature_unverified`'s positive/negative
+  cases (Phase 4) — see `tests/test_bundle_signature_evidence.py`, listed in
+  the Phase 4 implementation-status note above.
 - New `tests/test_bundle_multibuild.py` — `variant_fingerprint` determinism
   and sensitivity: two builds differing only in an ABI-irrelevant flag, or
   only in `-std=`/build-derived defines, fingerprint **identically** (Phase

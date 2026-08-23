@@ -2,7 +2,7 @@
 
 # Detector specification matrix
 
-One row per `ChangeKind` (396 total). Columns fuse the verdict partition (`checker_policy`), default policy (`policy_for`), the weakest evidence layer at which the kind becomes detectable (`scripts/evidence_tiers`), and the example case(s) that demonstrate the kind (`examples/ground_truth.json`). The **Examples** column is capped at 4 links per kind; the full mapping is in `detector-spec.json`.
+One row per `ChangeKind` (397 total). Columns fuse the verdict partition (`checker_policy`), default policy (`policy_for`), the weakest evidence layer at which the kind becomes detectable (`scripts/evidence_tiers`), and the example case(s) that demonstrate the kind (`examples/ground_truth.json`). The **Examples** column is capped at 4 links per kind; the full mapping is in `detector-spec.json`.
 
 | ChangeKind | Category | Default verdict | Severity | Min evidence | Doc slug | Examples |
 |---|---|---|---|---|---|---|
@@ -27,6 +27,7 @@ One row per `ChangeKind` (396 total). Columns fuse the verdict partition (`check
 | `bundle_intra_dep_removed` | breaking | `BREAKING` | `error` | L0 | `bundle_intra_dep_removed` | — |
 | `bundle_intra_dep_resolved_to_different_version` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `bundle_intra_dep_resolved_to_different_version` | — |
 | `bundle_intra_dep_signature_changed` | breaking | `BREAKING` | `error` | L0 | `bundle_intra_dep_signature_changed` | — |
+| `bundle_intra_dep_signature_unverified` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L0 | `bundle_intra_dep_signature_unverified` | — |
 | `bundle_intra_type_changed` | breaking | `BREAKING` | `error` | unspecified | `bundle_intra_type_changed` | — |
 | `bundle_library_added` | addition | `COMPATIBLE` | `warning` | unspecified | `bundle_library_added` | — |
 | `bundle_library_removed` | breaking | `BREAKING` | `error` | unspecified | `bundle_library_removed` | — |

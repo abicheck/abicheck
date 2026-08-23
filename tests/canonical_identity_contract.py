@@ -131,6 +131,7 @@ UNVERIFIED = frozenset(
         "bundle_manifest_instantiation_added",
         "bundle_manifest_instantiation_removed",
         "bundle_provider_changed",
+        "bundle_intra_dep_signature_unverified",
         "bundle_soname_skew",
         "bundle_unresolved_intra_dependency",
         "bundle_variant_coverage_regressed",

@@ -48,6 +48,21 @@ BUILDSOURCE_EXTENSION_ENTRIES: list[ChangeKindMeta] = [
               "variant can no longer be evaluated and needs to see the "
               "gap.",
        description_template="Build variant '{name}' present in the old release has no matching variant in the new release ({detail})."),
+    # G38 Phase 4 -- C-boundary signature-evidence gate. Sourced from the
+    # bundle layer (abicheck/bundle_signature_evidence.py), not from the
+    # L3-L5 buildsource evidence layers this module otherwise covers;
+    # grouped here purely for AI-readiness line-count space, alongside its
+    # Phase 3 sibling above.
+    _E("bundle_intra_dep_signature_unverified", _R,
+       impact="A sibling library's undefined import resolves by name to a "
+              "provider's export -- the same C-linkage match that would "
+              "otherwise confirm a real signature change -- but neither "
+              "side has DWARF/header type evidence for this exact symbol "
+              "(a stripped provider, or a provider only ever dumped at "
+              "L0). Binary-name-compatible: the linker resolves the "
+              "symbol. Whether the calling convention actually still "
+              "agrees is unconfirmed, not proven safe.",
+       description_template="{name} calls a symbol {detail} still exports by name, but neither side has type evidence to confirm the signature agrees."),
     _E("identity_collision_detected", _R,
        impact="Two distinct declarations were linked onto the same L4 identity key "
               "(SourceEntity.identity(): the mangled name, else "
