@@ -408,8 +408,9 @@ implementation-status note already took for its CLI consumer half.**
   exactly as designed below.
 - `ChangeKind.BUNDLE_VARIANT_COVERAGE_REGRESSED` /
   `"bundle_variant_coverage_regressed"` is registered in `checker_policy.py`
-  / `change_registry.py` (default verdict `RISK`, per this section's
-  design), classified in `tests/canonical_identity_contract.py`'s
+  / `change_registry_buildsource.py` (not `change_registry.py`, which is at
+  the AI-readiness 2000-line hard cap — default verdict `RISK`, per this
+  section's design), classified in `tests/canonical_identity_contract.py`'s
   `UNVERIFIED` bucket (matching every other pre-existing `bundle_*` kind —
   none of them have had their construction call sites individually verified
   against the `TYPE_BEARING`/`VALUE_INSENSITIVE` criteria yet), and covered
@@ -430,6 +431,12 @@ implementation-status note already took for its CLI consumer half.**
   likewise not yet wired to this module's `variant_fingerprint`.
 
 **New module, `abicheck/bundle_multibuild.py`:**
+
+**Kept as originally written, per this plan's own amendment convention (see
+Phase 2's identical note above)** — the shipped signature is the explicit-
+coordinate one this section's own "Implementation status" note above
+describes (`target_triple`/`compiler_family`/`compiler_version`/
+`feature_toggles`), not the `(evidence, env)` sketch below.
 
 ```python
 def variant_fingerprint(evidence: BuildEvidence | None, env: EnvironmentMatrix | None) -> str:
@@ -612,7 +619,7 @@ table asks for.
 | `abicheck/bundle_multibuild.py` | **Shipped (Phase 3, pairing primitive only).** `variant_fingerprint`, `pair_variants`, `VariantOutcome`, `VariantComparison`, `coverage_regression_findings` |
 | `abicheck/serialization.py` | **Shipped (Phase 2).** `save_bundle_facts`/`load_bundle_facts` plus `bundle_facts_to_dict`/`bundle_facts_from_dict` (the latter two live here, not in `bundle_facts.py`, to avoid the import cycle noted above) |
 | `abicheck/comparability.py` | Bundle-level fingerprint-mismatch refusal, mirroring the existing single-snapshot `ScopeMismatchError` (Phase 3, once `variant_fingerprint` carries real per-variant identity — Phase 2's field is always `"default"`); no change to single-snapshot behavior |
-| `abicheck/checker_policy.py` / `abicheck/change_registry.py` | `bundle_variant_coverage_regressed`, `bundle_intra_dep_signature_unverified` registry entries (Phases 3-4) |
+| `abicheck/checker_policy.py` / `abicheck/change_registry_buildsource.py` | **Shipped (Phase 3):** `bundle_variant_coverage_regressed` registry entry. **Not shipped (Phase 4):** `bundle_intra_dep_signature_unverified` — its eventual registry home depends on which sibling `change_registry_*.py` module has room when that phase lands |
 | `abicheck/cli_options.py` / `abicheck/cli_compare_release*.py` | **Shipped (producer half only).** `--bundle-facts-out <path>` on the existing `compare` release fan-out (`release_options()` in `cli_options.py`, threaded through `run_compare()`/`_dispatch_release_compare`/`compare_release_cmd`, written via `cli_compare_release_helpers.write_bundle_facts_out()`) — an additive output flag, not a new root command. **Not shipped:** `compare --against <bundle facts>` consumer wiring (deferred — see the implementation-status note above) and whichever multibuild CLI surface Phase 3 needs |
 | `abicheck/reporter.py` / `abicheck/report_summary.py` | Render the two new finding shapes; extend `bundle.json`/`bundle.md` (Phases 3-4) |
 | `docs/reference/change-kinds.md` | Phase 1 taxonomy note; new-kind entries for Phases 3-4 |
@@ -632,8 +639,10 @@ table asks for.
   finding, a negative/no-change control, and manifest override precedence
   — `compare_bundle_from_facts()`'s findings/verdict compared field-for-field
   against a live `compare_bundle()` call on the identical underlying facts).
-- Still pending: the two new `ChangeKind`s' positive/negative cases
-  (Phases 3-4, not yet implemented).
+- **Shipped:** `bundle_variant_coverage_regressed`'s positive/negative cases
+  (Phase 3) — see `tests/test_bundle_multibuild.py` below.
+- Still pending: `bundle_intra_dep_signature_unverified`'s positive/negative
+  cases (Phase 4, not yet implemented).
 - New `tests/test_bundle_multibuild.py` — `variant_fingerprint` determinism
   and sensitivity: two builds differing only in an ABI-irrelevant flag, or
   only in `-std=`/build-derived defines, fingerprint **identically** (Phase
