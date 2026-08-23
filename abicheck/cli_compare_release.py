@@ -1299,8 +1299,9 @@ def _strip_diff_results_and_adjust_verdict(
     default=None,
     help="Persist this run's OLD-side bundle facts (per-library snapshots "
     "plus the instantiation manifest, if any) to PATH (G38 Phase 2, "
-    "ADR-023 amendment). A later 'compare --against-bundle-facts PATH "
-    "new-dir/' can then get a bundle-level verdict from this stored "
+    "ADR-023 amendment). A later comparison can load this file and pass "
+    "it to abicheck.bundle_facts.compare_bundle_from_facts() (Python API; "
+    "no CLI consumer yet) to get a bundle-level verdict from this stored "
     "baseline without reopening the old .so files. This is an additive "
     "output alongside the ordinary live-vs-live comparison this "
     "invocation already performs -- it does not change any finding or "
