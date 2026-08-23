@@ -780,6 +780,40 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
 
     # Source-only dump (no binary) for the parallel-baseline flow.
     if so_path is None:
+        # dump_source_only() below embeds only L3/L4/L5 build/source facts
+        # into an otherwise-empty snapshot -- it has no L2 header-AST pass
+        # and never receives `headers` at all, so -H/--header has no effect
+        # on the WRITTEN snapshot here: `dump --sources tree -H api.h`
+        # (no --depth, or --depth binary) exits 0 with an empty (0
+        # functions/enums) snapshot and no visible sign -H was ignored.
+        #
+        # A hard usage error was tried first and reverted (Codex review,
+        # fresh evidence): -H is NOT dead code for this invocation shape in
+        # general -- the --dry-run branch above resolves a real
+        # `DumpRequest` carrying the given headers (see
+        # `test_dump_request_from_cli.py`'s own
+        # `request.input.headers == (header,)` assertion) and
+        # `add_build_query_dry_run_section` genuinely consults `headers`
+        # when reporting whether `build.query` would run, both already
+        # exercised by a wide, pre-existing test suite
+        # (`test_dry_run_build_query_contract.py`) that legitimately passes
+        # `-H` alongside `--sources` with no SO_PATH. A blanket rejection
+        # here broke 20 of those tests. Only the WRITTEN snapshot -- this
+        # code path specifically -- ignores headers; warn rather than
+        # reject, and only once execution has actually committed to this
+        # path (after the --dry-run branch, which already reports the
+        # headers' real effect on the resolved request/build-query
+        # instead).
+        if headers:
+            click.echo(
+                "Warning: -H/--header has no effect on this source-only "
+                "dump (--sources/--build-info with no binary/SO_PATH): "
+                "this path embeds only L3/L4/L5 build/source facts, never "
+                "a header-AST (L2) pass, so the header(s) given are not "
+                "reflected in the written snapshot. Supply a binary "
+                "(SO_PATH) for the headers to actually be parsed.",
+                err=True,
+            )
         from .cli_buildsource import dump_source_only
         dump_source_only(sources, build_info, version, output, build_config, allow_build_query, git_tag, build_id, no_git, collect_mode, build_query=build_query, build_compile_db=build_compile_db, build_targets=build_targets, extractor=header_backend, depth=depth, include_dependencies=include_dependencies, gcc_path=gcc_path, gcc_prefix=gcc_prefix, snapshot_compression=snapshot_compression)
         return

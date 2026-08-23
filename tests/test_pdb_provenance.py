@@ -357,6 +357,34 @@ class TestParsePdbEndToEnd:
         out2 = _apply_native_provenance(snap2, None, None)
         assert out2.types[0].origin == ScopeOrigin.UNKNOWN
 
+    def test_cli_apply_native_provenance_promotes_via_include_search_dirs(
+        self,
+    ) -> None:
+        """Round-3 review finding (Codex, fresh evidence): the CLI/service
+        PE/Mach-O ``_apply_native_provenance`` wrappers never forwarded the
+        caller's ``-I`` roots to ``apply_provenance``, unlike the ELF path
+        (``dumper.dump``) fixed earlier in this PR -- so a declaration
+        reached only transitively through PE/Mach-O's own ``-I`` (never
+        itself named as a ``-H`` root) stayed ``PRIVATE_HEADER`` and could
+        be excluded from the public surface, on these two formats only."""
+        from abicheck.cli import _apply_native_provenance
+        from abicheck.model import AbiSnapshot
+
+        meta = DwarfMetadata(has_dwarf=True)
+        meta.structs["DepType"] = StructLayout(
+            name="DepType", byte_size=8, decl_file="/build/dep/include/dep.h"
+        )
+        records, enums = model_types_from_dwarf_metadata(meta)
+        snap = AbiSnapshot(library="lib.dll", version="1", types=records, enums=enums)
+        # No -H names dep/include/dep.h directly -- only the -I root does.
+        out = _apply_native_provenance(
+            snap,
+            [Path("/build/include/api.h")],
+            None,
+            [Path("/build/dep/include")],
+        )
+        assert out.types[0].origin == ScopeOrigin.PUBLIC_HEADER
+
     def test_bridge_feeds_provenance_classification(self) -> None:
         # The decl_file → source_location bridge lets apply_provenance classify
         # a PDB-derived type's ScopeOrigin against a public-header set — the

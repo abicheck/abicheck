@@ -196,6 +196,16 @@ for tok in split_gcc_options(sys.stdin.read()):
 
 # ADR-040 L1: the per-side header/include inputs map to the side-aware --header/
 # --include flags, prefixing each value with old=/new= (e.g. --header old=inc).
+#
+# A single-line value is word-split on whitespace (one flag per word) so a
+# YAML input like `old-header: "a.h b.h"` still yields two `--header`
+# entries -- this is deliberate for the genuinely *list*-valued inputs this
+# function was written for (headers/includes/paths). It must NOT be used for
+# a value that is a single opaque string that may itself contain spaces (a
+# version label like "1.0 (release build)") -- use add_sided_scalar_flag
+# for those instead, which passes the value through unsplit. Prefer
+# newline-separated values over relying on word-splitting at all when a
+# list input's own entries might contain spaces (e.g. a path).
 add_sided_flag() {
   local flag="$1"
   local side="$2"
@@ -213,6 +223,21 @@ add_sided_flag() {
       CMD+=("$flag" "${side}=${item}")
     done
   fi
+}
+
+# Scalar counterpart of add_sided_flag: the value is a single opaque string
+# (e.g. a version label) that must reach the CLI exactly as given, including
+# any embedded whitespace -- never split into multiple flags. A version
+# label like "1.0 (release build)" previously lost everything but its last
+# whitespace-separated word when routed through add_sided_flag's word-split.
+add_sided_scalar_flag() {
+  local flag="$1"
+  local side="$2"
+  local value="$3"
+  if [[ -z "$value" ]]; then
+    return
+  fi
+  CMD+=("$flag" "${side}=${value}")
 }
 
 add_single_flag() {
@@ -1039,8 +1064,8 @@ elif [[ "$MODE" == "compare" ]]; then
   add_flag "-I" "${INPUT_INCLUDE:-}"
   add_sided_flag "--include" "old" "${INPUT_OLD_INCLUDE:-}"
   add_sided_flag "--include" "new" "${INPUT_NEW_INCLUDE:-}"
-  add_sided_flag "--version" "old" "${INPUT_OLD_VERSION:-}"
-  add_sided_flag "--version" "new" "${INPUT_NEW_VERSION:-}"
+  add_sided_scalar_flag "--version" "old" "${INPUT_OLD_VERSION:-}"
+  add_sided_scalar_flag "--version" "new" "${INPUT_NEW_VERSION:-}"
   add_single_flag "--lang" "${INPUT_LANG:-}"
 
   # The L2 compile-context flags (--ast-frontend/--gcc-*/--sysroot/

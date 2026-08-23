@@ -54,6 +54,7 @@ from .errors import AbicheckError
 # unlike the four names in the lazy `__getattr__` shim further down, which
 # nothing in this module calls itself.
 from .header_conditionals import attach_build_context_for_parsed_headers
+from .header_utils import include_operand_dirs
 
 if TYPE_CHECKING:
     from .buildsource.pack import BuildSourcePack
@@ -1211,14 +1212,9 @@ def handle_non_elf_dump(
         # l3_effective_ctx` below hands the merged L3 context to service_
         # header_scoped._try_header_scoped_dump, which derives the identical
         # cache-relevant paths from those tokens itself (Codex review, PR D).
-        #
-        # `include_dependencies` (`dump --include-system-declarations`) means
-        # this invocation wants the full, unscoped declaration set -- suppress
-        # the opt-in streaming pruner for this call the same way, and for the
-        # same reason, as `perform_elf_dump`'s identical guard above (Codex
-        # review, PR #840): it has no visibility into this flag on its own,
-        # and pruning here happens well before `write_snapshot_output`'s
-        # post-hoc filter below.
+        # `include_dependencies` (`--include-system-declarations`) suppresses
+        # the opt-in streaming pruner here too, same reason as the identical
+        # guard on `perform_elf_dump` above (Codex review, PR #840).
         with suppress_streaming_prune() if include_dependencies else nullcontext():
             snap = dump_native_binary(
                 so_path,
@@ -1233,6 +1229,18 @@ def handle_non_elf_dump(
                 public_header_dirs=list(public_header_dirs),
                 header_backend=header_backend,
                 compile=l3_effective_ctx,
+                # Provenance widening gets ONLY the caller's own explicit -I
+                # list, never `eff_includes` (same regression class the ELF
+                # `perform_elf_dump` path already avoids) -- `compile_context`
+                # is never reassigned on this PE/Mach-O path, so its own
+                # `gcc_option_tokens` is already the caller's unmodified,
+                # explicit set (CodeRabbit review).
+                public_include_search_dirs=list(includes)
+                + list(
+                    include_operand_dirs(
+                        getattr(compile_context, "gcc_option_tokens", ())
+                    )
+                ),
             )
     # A ClickException already carries its user-facing message; it must reach
     # Click as itself rather than be re-wrapped by the handler below.
@@ -1676,6 +1684,23 @@ def perform_elf_dump(
                 so_path=so_path,
                 headers=resolved_headers,
                 extra_includes=dedup_paths_preserve_order(eff_includes + inc_extra),
+                # Provenance widening gets ONLY the caller's own explicit -I
+                # list, never `eff_includes`/`inc_extra` -- see dump()'s own
+                # docstring note on `public_include_search_dirs` for why
+                # (real regression: `inc_extra`'s auto-added umbrella-header
+                # directory can hold a genuinely private sibling header).
+                # A `--compiler-option -I<dir>`/`-isystem <dir>` operand is
+                # exactly as explicit as a plain `-I` (see the "as explicit
+                # as -I" comment on the `seed_includes_and_fold_compile_
+                # context` call above, which already trusts these tokens to
+                # suppress the L2 seed) -- so its directory belongs in the
+                # provenance-widening set too, sourced from
+                # `_user_gcc_option_tokens` (the caller's own tokens,
+                # captured before the L3 fold may have merged in derived
+                # ones the caller never wrote) rather than the possibly
+                # L3-augmented `gcc_option_tokens` local (CodeRabbit review).
+                public_include_search_dirs=list(includes)
+                + list(include_operand_dirs(_user_gcc_option_tokens)),
                 version=version,
                 compiler=compiler,
                 gcc_path=gcc_path,
@@ -1894,6 +1919,7 @@ def perform_elf_dump(
             effective_compile_context,
             list(public_headers),
             list(public_header_dirs),
+            include_search_dirs=list(includes),
         )
 
         # G28 Phase 4: same "this ELF dump CLI path reaches dumper.dump

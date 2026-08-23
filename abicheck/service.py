@@ -327,6 +327,7 @@ def resolve_input(
     include_labels: dict[Path, str] | None = None,
     dump_manifest: DumpManifest | None = None,
     include_dependencies: bool = True,
+    public_include_search_dirs: list[Path] | None = None,
 ) -> AbiSnapshot:
     """Auto-detect input type and return an ABI snapshot.
 
@@ -355,6 +356,13 @@ def resolve_input(
             default server list / ``DEBUGINFOD_URLS`` environment variable.
         public_headers / public_header_dirs: Public-header sets used to tag
             declaration provenance on PE/Mach-O snapshots (ADR-024 Phase 1).
+        public_include_search_dirs: The caller's own genuinely explicit
+            ``-I``/``--include`` list, distinct from ``includes`` (which a
+            caller may have already widened with auto-derived directories --
+            see ``_run_dump_uncached``'s own docstring). When given, used
+            instead of ``includes`` for declaration-provenance widening on
+            all three binary formats. Omitted (the default), every existing
+            caller's behavior is unchanged: ``includes`` itself is used.
         include_labels: Resolved ``path -> label`` map from a labeled
             ``--include old:LABEL=PATH`` CLI entry (ADR-050 D1); forces the
             whole-snapshot cache off when non-empty.
@@ -409,6 +417,7 @@ def resolve_input(
             include_labels=include_labels,
             dump_manifest=dump_manifest,
             include_dependencies=include_dependencies,
+            public_include_search_dirs=public_include_search_dirs,
         )
 
     # Detect binary format from magic bytes
@@ -439,6 +448,7 @@ def resolve_input(
             include_labels=include_labels,
             dump_manifest=dump_manifest,
             include_dependencies=include_dependencies,
+            public_include_search_dirs=public_include_search_dirs,
         )
 
     # Raw kernel type-info blobs (a bare `.BTF` / CTF section extracted with
@@ -573,6 +583,7 @@ def _run_dump_uncached(
     _skip_header_graph_attach: bool = False,
     include_labels: dict[Path, str] | None = None,
     dump_manifest: DumpManifest | None = None,
+    public_include_search_dirs: list[Path] | None = None,
 ) -> AbiSnapshot:
     """Extract an ABI snapshot from a native binary (ELF, PE, or Mach-O).
 
@@ -591,6 +602,20 @@ def _run_dump_uncached(
     via :func:`_apply_native_provenance`. A no-op when no header set is supplied.
     ``debug_format`` forces the ELF debug format. ``notify`` receives
     user-facing progress notes (see :func:`resolve_input`).
+
+    ``public_include_search_dirs`` (PE/Mach-O and the ``hybrid`` merge only;
+    mirrors ``dumper.dump``'s own parameter of the same name for ELF) is the
+    caller's own genuinely explicit ``-I``/``--include`` list, distinct from
+    ``includes`` -- which a caller may have already widened with auto-derived
+    directories (e.g. an umbrella ``-H`` header's own directory, seeded purely
+    so its relative ``#include``s resolve) before calling this function. When
+    given, it -- not the possibly-widened ``includes`` -- is what reaches
+    :func:`_apply_native_provenance`/the header-only graph attach, so an
+    auto-derived directory can never silently promote a private sibling
+    header to ``PUBLIC_HEADER`` on these two formats the way it once did for
+    ELF (Codex review, PR #839 round 9). Omitted (``None``, the default),
+    every existing caller's behavior is unchanged: ``includes`` itself is
+    used, same as before this parameter existed.
 
     The header-only (L2) semantic graph
     (:func:`abicheck.buildsource.header_graph.build_header_only_graph`, ADR-041
@@ -617,6 +642,14 @@ def _run_dump_uncached(
 
     _headers = headers or []
     _includes = includes or []
+    # See this function's own docstring: falls back to `_includes` (today's
+    # unchanged behavior) when the caller doesn't distinguish its genuinely
+    # explicit -I list from an already-widened `includes`.
+    _public_include_search_dirs = (
+        list(public_include_search_dirs)
+        if public_include_search_dirs is not None
+        else _includes
+    )
     # Every format's own main pass normalizes `lang` to only ever force a
     # language explicitly requested, letting auto-detection run otherwise
     # (including for the default "c++") -- `_cache_key` hashes the raw
@@ -698,6 +731,7 @@ def _run_dump_uncached(
             "debug_presence_only": debug_presence_only,
             "public_headers": public_headers,
             "public_header_dirs": public_header_dirs,
+            "public_include_search_dirs": public_include_search_dirs,
             # The header-graph attach is deliberately SKIPPED on either
             # recursive sub-dump below (each would otherwise attach its OWN
             # graph, seeded from only ITS OWN backend's declarations, before
@@ -750,6 +784,7 @@ def _run_dump_uncached(
             compile,
             public_headers,
             public_header_dirs,
+            include_search_dirs=_public_include_search_dirs,
         )
 
     if binary_fmt == "elf":
@@ -807,6 +842,7 @@ def _run_dump_uncached(
             compile,
             public_headers,
             public_header_dirs,
+            include_search_dirs=_includes,
         )
         return attach_clang_layout(
             snap, _headers, _includes, lang=lang, compile=compile
@@ -838,6 +874,7 @@ def _run_dump_uncached(
             public_headers=public_headers,
             public_header_dirs=public_header_dirs,
             skip_header_graph=_skip_header_graph_attach or symbols_only,
+            public_include_search_dirs=_public_include_search_dirs,
         )
     if binary_fmt == "macho":
         with dumper_cache.ast_memoize_scope():
@@ -865,6 +902,7 @@ def _run_dump_uncached(
             public_headers=public_headers,
             public_header_dirs=public_header_dirs,
             skip_header_graph=_skip_header_graph_attach or symbols_only,
+            public_include_search_dirs=_public_include_search_dirs,
         )
     raise ValidationError(f"Unsupported binary format: {binary_fmt}")
 
@@ -881,6 +919,7 @@ def _finish_native_snapshot(
     public_headers: list[Path] | None,
     public_header_dirs: list[Path] | None,
     skip_header_graph: bool,
+    public_include_search_dirs: list[Path] | None = None,
 ) -> AbiSnapshot:
     """Shared post-dump tail for the PE and Mach-O branches of ``run_dump``.
 
@@ -896,8 +935,20 @@ def _finish_native_snapshot(
     ``skip_header_graph`` folds the caller's own reasons to suppress the graph
     (the ``hybrid`` recursion's ``_skip_header_graph_attach``, ``symbols_only``)
     into one flag; the global enablement switches stay this function's business.
+
+    ``public_include_search_dirs`` (see ``_run_dump_uncached``'s own docstring):
+    when given, used instead of ``includes`` for both the flat-snapshot
+    provenance widening and the header-graph attach, so an already-widened
+    ``includes`` (auto-derived directories included) can never leak into
+    either. Defaults to ``includes`` itself, unchanged from before this
+    parameter existed.
     """
-    snap = _apply_native_provenance(snap, public_headers, public_header_dirs)
+    _public_dirs = (
+        public_include_search_dirs
+        if public_include_search_dirs is not None
+        else includes
+    )
+    snap = _apply_native_provenance(snap, public_headers, public_header_dirs, _public_dirs)
     _try_attach_python_ext_metadata(snap)
     _try_attach_python_api_surface(snap)
     _try_attach_numpy_capi_surface(snap, path)
@@ -911,6 +962,7 @@ def _finish_native_snapshot(
         compile,
         public_headers,
         public_header_dirs,
+        include_search_dirs=_public_dirs,
     )
     return attach_clang_layout(snap, headers, includes, lang=lang, compile=compile)
 
@@ -930,16 +982,28 @@ def _apply_native_provenance(
     snap: AbiSnapshot,
     public_headers: list[Path] | None,
     public_header_dirs: list[Path] | None,
+    include_search_dirs: list[Path] | None = None,
 ) -> AbiSnapshot:
     """Tag declaration provenance on a PE/Mach-O snapshot (ADR-024 Phase 1).
 
     Mirrors the ELF path (``dumper.create_snapshot``), which always runs
-    ``apply_provenance``. A no-op when no public-header set is supplied — every
-    origin stays ``UNKNOWN`` and behaviour is unchanged.
+    ``apply_provenance`` and, since the same PR's ELF-side fix, folds the
+    caller's ``-I`` roots in too. A no-op when no public-header set is
+    supplied — every origin stays ``UNKNOWN`` and behaviour is unchanged.
+    Without ``include_search_dirs`` here, a declaration reached only
+    transitively through PE/Mach-O's own ``-I`` (never itself named as a
+    root) stayed ``PRIVATE_HEADER`` and could be excluded from the public
+    surface — the exact false-clean result the ELF fix closed, left open on
+    these two formats (Codex review, fresh evidence).
     """
     from .provenance import apply_provenance
 
-    return apply_provenance(snap, public_headers, public_header_dirs)
+    return apply_provenance(
+        snap,
+        public_headers,
+        public_header_dirs,
+        include_search_dirs=include_search_dirs,
+    )
 
 
 def _attach_header_graph(
@@ -952,6 +1016,7 @@ def _attach_header_graph(
     compile: CompileContext | None,
     public_headers: list[Path] | None,
     public_header_dirs: list[Path] | None,
+    include_search_dirs: list[Path] | None = None,
 ) -> AbiSnapshot:
     """Build and embed the header-only (L2) semantic graph (ADR-041 addendum).
 
@@ -987,6 +1052,14 @@ def _attach_header_graph(
     a separate opt-in since it costs one extra ``clang -M`` invocation per
     top-level header, not just the one aggregate pass ``header_graph`` alone
     needs.
+
+    ``include_search_dirs`` is forwarded to
+    :func:`build_header_only_graph`'s own parameter of the same name —
+    each caller's raw, explicit ``-I`` list (never an auto-derived one),
+    matching what ``apply_provenance`` already widened *snap*'s own
+    per-declaration ``origin`` with, so the graph's header-level nodes
+    agree with the flat snapshot instead of independently reclassifying
+    the same header ``private_header`` (Codex review, fresh evidence).
     """
     if not header_graph or not headers:
         return snap
@@ -1107,6 +1180,7 @@ def _attach_header_graph(
         public_header_paths=[str(p) for p in (public_headers or [])],
         public_dir_paths=[str(p) for p in (public_header_dirs or [])],
         header_paths=[str(p) for p in resolved_headers],
+        include_search_dirs=[str(p) for p in (include_search_dirs or [])],
         # Real per-declaration provenance for a hybrid merge (empty dict on
         # every other snapshot, a harmless no-op there) — G31 Phase C
         # hybrid-graph provenance-tagging; see build_header_only_graph's own
@@ -1355,6 +1429,12 @@ def _dump_elf(
             so_path=path,
             headers=resolved_headers,
             extra_includes=eff_includes,
+            # Provenance widening gets ONLY the caller's own explicit -I
+            # list -- see dump()'s own docstring note on
+            # `public_include_search_dirs` (real regression: `eff_includes`
+            # also carries `inc_extra`'s auto-added umbrella-header
+            # directory, which can hold a genuinely private sibling header).
+            public_include_search_dirs=list(includes),
             version=version,
             compiler=compiler,
             gcc_path=cc.gcc_path,

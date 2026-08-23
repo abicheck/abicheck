@@ -42,6 +42,7 @@ from .model import (
     Variable,
     Visibility,
 )
+from .name_classification import strip_anonymous_type_location
 from .provenance import build_public_set, classify_origin, header_from_location
 
 #: Base names of semantic contract / calling-convention attributes worth
@@ -390,8 +391,11 @@ class _CastxmlParser:
         if el is None:
             return "?"
         tag = el.tag
-        if tag in ("FundamentalType", "Enumeration"):
+        if tag == "FundamentalType":
             return el.get("name", "?")
+        if tag == "Enumeration":
+            # Strip the same marker parse_enums() strips from the declaration.
+            return strip_anonymous_type_location(el.get("name", "?"))
         if tag == "PointerType":
             return self._type_name(el.get("type", ""), depth + 1) + "*"
         if tag == "ReferenceType":
@@ -458,7 +462,8 @@ class _CastxmlParser:
             # "ElaboratedType").
             return self._type_name(el.get("type", ""), depth + 1)
         if tag in ("Struct", "Class", "Union"):
-            return el.get("name", "?")
+            # See strip_anonymous_type_location's docstring.
+            return strip_anonymous_type_location(el.get("name", "?"))
         if tag == "Typedef":
             return el.get("name", "?")
         if tag == "ArrayType":
@@ -587,15 +592,11 @@ class _CastxmlParser:
 
     def _qualified_type_name(self, el: Any, leaf_name: str | None = None) -> str | None:
         """Namespace/enclosing-class-qualified name for a Struct/Class/Union
-        element, or ``None`` if it's already at global scope (or a cycle /
-        depth cap was hit).
-
-        Walks castxml's ``context`` chain — each Struct/Class/Union/Namespace
-        element points at its lexical parent via ``context`` — prepending each
-        ancestor's name, stopping at the root ``Namespace`` (``name="::"``,
-        which itself carries no ``context``). Used only where a real namespace
-        path is required (internal-leak detection, SYCL-queue param matching);
-        ``RecordType.name`` itself stays bare (see its docstring in model.py).
+        element, or ``None`` if already at global scope (cycle/depth cap hit).
+        Walks castxml's ``context`` chain, prepending each ancestor's name,
+        stopping at the root ``Namespace``. Used only where a real namespace
+        path is required (internal-leak detection, SYCL-queue param
+        matching); ``RecordType.name`` stays bare (see model.py).
         """
         segments: list[str] = []
         seen_ids: set[str] = set()
@@ -615,13 +616,13 @@ class _CastxmlParser:
                 cur = parent
                 continue
             if parent.tag in ("Struct", "Class", "Union"):
-                pname = parent.get("name", "")
+                pname = strip_anonymous_type_location(parent.get("name", ""))
                 if pname:
                     segments.append(pname)
                 cur = parent
                 continue
             break
-        leaf = leaf_name if leaf_name is not None else el.get("name", "")
+        leaf = strip_anonymous_type_location(leaf_name if leaf_name is not None else el.get("name", ""))
         if not segments or not leaf:
             return None
         segments.reverse()
@@ -1484,7 +1485,7 @@ class _CastxmlParser:
     def _build_record_type(
         self, el: Any, override_name: str | None = None
     ) -> RecordType:
-        name = override_name or el.get("name", "")
+        name = strip_anonymous_type_location(override_name or el.get("name", ""))
         is_opaque = el.get("incomplete") == "1"
         vtable = [] if is_opaque else self._build_vtable(el.get("id", ""))
         # Best-effort layout descriptor (layout-closure work). Direct (non-virtual)
@@ -1891,7 +1892,7 @@ class _CastxmlParser:
     def parse_enums(self) -> list[EnumType]:
         enums = []
         for el in self._enum_els:
-            name = el.get("name", "")
+            name = strip_anonymous_type_location(el.get("name", ""))
             if not name or name.startswith("__"):
                 continue
             if self._is_builtin_element(el):

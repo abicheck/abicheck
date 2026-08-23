@@ -1388,6 +1388,17 @@ def release_options(func: F) -> F:
         "publicly promises (ADR-023). (directory/package inputs only)",
     )(func)
     func = click.option(
+        "--bundle-facts-out",
+        "bundle_facts_out",
+        type=click.Path(path_type=Path),
+        default=None,
+        help="Persist this run's OLD-side bundle facts (per-library snapshots "
+        "plus the instantiation manifest, if any) to PATH (G38 Phase 2, "
+        "ADR-023 amendment) for a later stored-baseline bundle comparison. "
+        "Additive output alongside the ordinary live-vs-live comparison; "
+        "no-op with --no-bundle-analysis. (directory/package inputs only)",
+    )(func)
+    func = click.option(
         "--keep-extracted",
         "keep_extracted",
         is_flag=True,

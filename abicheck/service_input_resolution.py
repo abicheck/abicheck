@@ -788,6 +788,13 @@ def _resolve_side_snapshot_impl(
                 debug_presence_only=debug_presence_only,
                 include_labels=include_labels,
                 notify=notify,
+                # Provenance widening gets ONLY this side's own explicit -I
+                # list (`side.includes`, pre-seeding), never the fold's
+                # already-widened `includes` local -- same regression class
+                # the ELF/PE/Mach-O CLI resolvers already avoid (Codex
+                # review, round 13): an auto-derived seed directory can hold
+                # a genuinely private sibling header.
+                public_include_search_dirs=list(side.includes),
             )
         finally:
             _artifact_plan.run_cleanups()

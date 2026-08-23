@@ -183,6 +183,40 @@ class TestAddSidedFlagSplitting:
 
 
 @pytest.mark.skipif(not RUN_SH.is_file(), reason="action/run.sh not found")
+class TestAddSidedScalarFlag:
+    """A scalar sided flag (``--version``) must pass its value through
+    unsplit -- a single opaque string, not a list. Regression for a real
+    bug: ``old-version: '1.0 (release build)'`` word-split through
+    ``add_sided_flag`` into three repeated ``--version old=...`` flags
+    (``old=1.0``, ``old=(release``, ``old=build)``); the CLI kept only the
+    last one, so the report rendered ``(release build)`` and the real
+    version, ``1.0``, was silently lost."""
+
+    def test_space_separated_value_is_not_split(self) -> None:
+        out = _run_harness(
+            'add_sided_scalar_flag "--version" "old" "1.0 (release build)"'
+        )
+        assert _cmd_items(out) == ["--version", "old=1.0 (release build)"]
+
+    def test_single_word_value(self) -> None:
+        out = _run_harness('add_sided_scalar_flag "--version" "new" "pr-1"')
+        assert _cmd_items(out) == ["--version", "new=pr-1"]
+
+    def test_empty_value_adds_nothing(self) -> None:
+        out = _run_harness('add_sided_scalar_flag "--version" "old" ""')
+        assert _cmd_items(out) == []
+
+    def test_embedded_newline_is_kept_verbatim(self) -> None:
+        # Unlike add_sided_flag, a scalar flag never treats an embedded
+        # newline as an item separator either -- it is still one opaque
+        # value.
+        out = _run_harness(
+            'add_sided_scalar_flag "--version" "old" $\'line one\\nline two\''
+        )
+        assert _cmd_items(out) == ["--version", "old=line one\nline two"]
+
+
+@pytest.mark.skipif(not RUN_SH.is_file(), reason="action/run.sh not found")
 class TestIsReleaseStyleOperand:
     """``compare`` mode now skips its --write optimization for
     directory/package operands, since the release fan-out engine rejects

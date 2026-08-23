@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import os
 import shutil
 import signal
@@ -31,6 +32,8 @@ from ._compiler_options import has_explicit_cpp_std, has_explicit_std, split_gcc
 from .buildsource.redaction import DEFAULT_REDACTION
 from .dumper_ast_config import _detect_cpp_headers
 from .dumper_ast_config_cpp20 import _detect_cpp20_headers
+
+log = logging.getLogger(__name__)
 
 
 def _safe_mtime(path: Path) -> tuple[float | None, bool]:
@@ -773,3 +776,27 @@ def _ast_compile_provenance(
         "ast_compile_args": tuple(DEFAULT_REDACTION.argv(args)),
         "ast_sysroot": DEFAULT_REDACTION.path(str(sysroot)) if sysroot else None,
     }
+
+
+def _configured_target_triple(
+    gcc_options: str | None, gcc_option_tokens: tuple[str, ...], clang_bin: str
+) -> str | None:
+    """Return the target reported by configured Clang and its pass-through flags."""
+    cmd = [
+        clang_bin,
+        *split_gcc_options(gcc_options or ""),
+        *gcc_option_tokens,
+        "-print-target-triple",
+    ]
+    try:
+        result = subprocess.run(
+            cmd, capture_output=True, text=True, check=False, timeout=10
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        log.warning("Could not probe effective Clang target: %s", exc)
+        return None
+    if result.returncode:
+        log.warning("Could not probe effective Clang target: %s", result.stderr.strip())
+        return None
+    target = result.stdout.strip()
+    return target or None

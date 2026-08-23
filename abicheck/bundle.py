@@ -80,7 +80,7 @@ from .bundle_models import (  # noqa: F401  (re-exported for back-compat)
     ProviderEntry as ProviderEntry,
     ResolutionGraph as ResolutionGraph,
 )
-from .bundle_soname import soname_matches_providers
+from .bundle_soname import hard_link_alias_basenames, soname_matches_providers
 from .checker_policy import ChangeKind, Verdict, compute_verdict
 from .checker_types import DiffResult
 from .elf_metadata import ElfMetadata, ElfSymbol, SymbolBinding, parse_elf_metadata
@@ -187,6 +187,7 @@ def build_bundle_snapshot_from_metadata(
     paths: dict[str, Path] | None = None,
     root: Path | None = None,
     probe_filesystem: bool = False,
+    extra_aliases: dict[str, tuple[str, ...]] | None = None,
 ) -> BundleSnapshot:
     """Build a :class:`BundleSnapshot` from already-parsed :class:`ElfMetadata`,
     without re-parsing (or even requiring) the underlying binary files.
@@ -265,7 +266,10 @@ def build_bundle_snapshot_from_metadata(
         surviving_paths[name] = paths.get(name, Path(name))
 
     resolution = _compute_resolution_graph(
-        surviving_paths, surviving_metadata, probe_filesystem=probe_filesystem
+        surviving_paths,
+        surviving_metadata,
+        probe_filesystem=probe_filesystem,
+        extra_aliases=extra_aliases,
     )
     # Use the first library's parent as the root if available; otherwise empty path
     resolved_root = (
@@ -280,6 +284,9 @@ def build_bundle_snapshot_from_metadata(
         libraries=surviving_paths,
         metadata=surviving_metadata,
         resolution=resolution,
+        # probe_filesystem already means "real, live paths" (see
+        # BundleSnapshot.filesystem_backed's own docstring).
+        filesystem_backed=probe_filesystem,
     )
 
 
@@ -600,49 +607,12 @@ def render_bundle_findings_markdown(findings: list[BundleFinding]) -> list[str]:
     return lines
 
 
-def _hard_link_alias_basenames(path: Path) -> list[str]:
-    """Basenames of *other* directory entries hard-linked to ``path``.
-
-    ``discover_artifact_set()`` dedupes candidate paths on filesystem
-    identity (``st_dev``/``st_ino``) and keeps only one representative path
-    per inode -- so if a provider library has multiple hard-linked names
-    (e.g. ``libfoo.so.1`` and ``libfoo.so.1.0.0``), any alias basename other
-    than the representative's own is otherwise discarded entirely and never
-    reaches ``soname_to_name``. Recover them by scanning the representative
-    path's own directory for siblings sharing its identity. Best-effort: a
-    permission error or non-existent path/parent yields no aliases rather
-    than raising, matching this module's existing conservative-on-failure
-    behavior for filesystem probes.
-    """
-    try:
-        target_stat = path.stat()
-    except OSError:
-        return []
-    aliases = []
-    try:
-        entries = list(path.parent.iterdir())
-    except OSError:
-        return []
-    for entry in entries:
-        if entry.name == path.name:
-            continue
-        try:
-            entry_stat = entry.stat()
-        except OSError:
-            continue
-        if (entry_stat.st_dev, entry_stat.st_ino) == (
-            target_stat.st_dev,
-            target_stat.st_ino,
-        ):
-            aliases.append(entry.name)
-    return aliases
-
-
 def _compute_resolution_graph(
     libraries: dict[str, Path],
     metadata: dict[str, ElfMetadata],
     *,
     probe_filesystem: bool = True,
+    extra_aliases: dict[str, tuple[str, ...]] | None = None,
 ) -> ResolutionGraph:
     """Index exports/imports across every library in the bundle.
 
@@ -718,9 +688,23 @@ def _compute_resolution_graph(
                 # too -- self-contained here, no need to thread alias lists
                 # through discover_artifact_set's public dict[str, Path] return
                 # type.
-                for alias in _hard_link_alias_basenames(libraries[name]):
+                for alias in hard_link_alias_basenames(libraries[name]):
                     soname_to_name.setdefault(alias, name)
 
+    for name, aliases in (extra_aliases or {}).items():  # G38 Phase 2 replay
+        # A name whose own snapshot had no ELF metadata (AbiSnapshot.elf is
+        # None -- non-ELF or header-only) is dropped before this function
+        # is ever called (bundle_snapshot_from_facts()), but its captured
+        # aliases still ride along in extra_aliases unconditionally. Indexing
+        # one anyway would resolve a consumer's DT_NEEDED to a bundle member
+        # that doesn't actually exist in this snapshot, misclassifying a
+        # real "extra" (external/unresolved) edge as intra-bundle -- unlike
+        # a live build_bundle_snapshot(), which never has an alias for a
+        # provider it didn't parse in the first place (Codex review, fresh
+        # evidence).
+        if name not in metadata:
+            continue
+        soname_to_name.update({a: name for a in aliases if a not in soname_to_name})
     graph.soname_to_name = soname_to_name
 
     # Index exports.
@@ -977,7 +961,9 @@ def _detect_intra_dep_removed(
             # sibling's identical compatibility rule)?
             if consumer.version:
                 compatible_old = {
-                    p.library for p in old_all_providers if p.version == consumer.version
+                    p.library
+                    for p in old_all_providers
+                    if p.version == consumer.version
                 }
             else:
                 compatible_old = {p.library for p in old_all_providers if p.is_default}
@@ -1548,10 +1534,19 @@ def _detect_soname_skew(
     from .diff_cpp_patterns import BundleMember, _extract_soname_major
 
     def _members(snap: BundleSnapshot) -> list[BundleMember]:
+        from .bundle_soname import resolved_basename
+
         members: list[BundleMember] = []
         for name, path in snap.libraries.items():
             meta = snap.metadata.get(name)
-            soname = (meta.soname if meta and meta.soname else "") or path.name
+            # Resolved target's basename (matches capture_bundle_facts()'s
+            # identical use) -- but only when filesystem_backed: a facts-
+            # reconstructed snapshot's paths are synthetic (bare
+            # `Path("libfoo.so.1")`), and Path.resolve() would still walk
+            # CWD for those, letting an unrelated same-named CWD entry
+            # override the persisted basename (Codex review). Use it as-is.
+            real_name = resolved_basename(path) if snap.filesystem_backed else path.name
+            soname = (meta.soname if meta and meta.soname else "") or real_name
             # G9 (remaining half): DT_SONAME is read directly off the ELF
             # here, unlike `.library` (the on-disk filename), which the
             # cohort key normalizes via strip_vendor_hash downstream. An
@@ -1566,12 +1561,12 @@ def _detect_soname_skew(
             stripped_soname = strip_vendor_hash(soname)
             major = _extract_soname_major(stripped_soname)
             if major is None:
-                major = _extract_soname_major(strip_vendor_hash(path.name))
+                major = _extract_soname_major(strip_vendor_hash(real_name))
             if major is None:
                 continue
             members.append(
                 BundleMember(
-                    library=path.name,
+                    library=real_name,
                     soname=stripped_soname,
                     soname_major=major,
                 )
@@ -1889,8 +1884,16 @@ def _looks_system_symbol(name: str) -> bool:
 # This is the version-evidence half of the field-derived oneDAL fix
 # (``syscall@GLIBC_*``, ``stdout@GLIBC_*``, ``_ZdlPvm@CXXABI_*``).
 _SYSTEM_VERSION_PREFIXES: tuple[str, ...] = (
-    "GLIBC_", "GLIBCXX_", "CXXABI_", "GCC_", "LIBGCC_",
-    "LIBC_", "GOMP_", "OMP_", "GFORTRAN_", "GLIBCABI_",
+    "GLIBC_",
+    "GLIBCXX_",
+    "CXXABI_",
+    "GCC_",
+    "LIBGCC_",
+    "LIBC_",
+    "GOMP_",
+    "OMP_",
+    "GFORTRAN_",
+    "GLIBCABI_",
 )
 
 

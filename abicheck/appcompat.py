@@ -1594,8 +1594,6 @@ def check_appcompat(
     _old_inc = old_includes if old_includes is not None else (includes or [])
     _new_inc = new_includes if new_includes is not None else (includes or [])
 
-    # appcompat's -H/--header is documented as "Public header file or
-    # directory" (like compare's), so the same paths double as the
     # public-header set for provenance tagging (ADR-024/ADR-015). Neither
     # call below goes through `service.run_dump`'s dependency-scope wrapper,
     # so there is no later post-hoc filter to retain what the opt-in
@@ -1611,6 +1609,13 @@ def check_appcompat(
             compiler="c++" if lang == "c++" else "cc",
             lang="c" if lang == "c" else None,
             public_headers=list(_old_h),
+            # _old_inc/_new_inc are this caller's own genuine, explicit -I
+            # list (never auto-derived) -- mirror perform_elf_dump's/
+            # _dump_elf's own public_include_search_dirs wiring so a
+            # declaration reached through an explicit include root is
+            # promoted to PUBLIC_HEADER here too, not just on the CLI's
+            # compare/dump/scan frontends.
+            public_include_search_dirs=list(_old_inc),
         )
         new_snap = dump(
             so_path=new_lib_path,
@@ -1620,6 +1625,7 @@ def check_appcompat(
             compiler="c++" if lang == "c++" else "cc",
             lang="c" if lang == "c" else None,
             public_headers=list(_new_h),
+            public_include_search_dirs=list(_new_inc),
         )
 
     # Route through the Tier-2 service (lazy import avoids a

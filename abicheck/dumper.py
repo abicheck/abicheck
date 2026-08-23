@@ -37,7 +37,6 @@ if TYPE_CHECKING:
 from defusedxml import ElementTree as DefusedET
 
 from . import deadline, dumper_cache
-from ._compiler_options import split_gcc_options
 from .castxml_policy import evaluate_castxml_version
 from .dumper_ast_config import (
     _CPP_ONLY_PATTERNS as _CPP_ONLY_PATTERNS,
@@ -136,6 +135,7 @@ from .dumper_toolchain import (
     _ast_fallback_enabled as _ast_fallback_enabled,
     _auto_ast_fallback_eligible as _auto_ast_fallback_eligible,
     _castxml_available as _castxml_available,
+    _configured_target_triple as _configured_target_triple,
     _cplusplus_macro_for_standard as _cplusplus_macro_for_standard,
     _parser_ast_fallback_reason as _parser_ast_fallback_reason,
     _parser_ast_supported as _parser_ast_supported,
@@ -295,14 +295,6 @@ def _clang_header_dump(
     isn't DPC++-capable, or when its own ``gcc_options``/``gcc_option_tokens``
     explicitly disable SYCL (``-fno-sycl``) -- never silently resolved by
     re-enabling SYCL ourselves (Codex review, P2).
-
-    ``pruning_header_roots`` (Codex review, PR #840): the header-root set the
-    opt-in streaming pruner treats as "this dump's own, never a dependency".
-    ``None`` falls back to bare *headers*. A caller with a wider
-    authoritative root set (``public_header_paths``/``public_dir_paths``, a
-    manifest TU's own ``project_owned`` includes) must pass the SAME set the
-    post-hoc filter uses (``dumper_manifest.run_tu_fragment``'s computation),
-    or the pruner can misclassify and permanently drop a retained declaration.
     """
     clang_bin = _resolve_clang_bin(compiler, gcc_path, gcc_prefix)
     dpcpp_multi_context = _resolve_dpcpp_multi_context(
@@ -467,9 +459,7 @@ def _clang_header_dump(
             cache_write=identities_stable,
             dpcpp_capable=dpcpp_multi_context,
             frontend_context=frontend_context,
-            header_roots=pruning_header_roots
-            if pruning_header_roots is not None
-            else tuple(str(h) for h in headers),
+            header_roots=pruning_header_roots if pruning_header_roots is not None else tuple(str(h) for h in headers),
         )
         if identities_stable and _memoize:
             dumper_cache.store_cached_ast(key, "clang", root)
@@ -513,8 +503,6 @@ def _resolve_single_ast_backend(backend: str, frontend_context: str) -> str:
             "DPC++ host/device context concept."
         )
     return resolved
-
-
 
 
 def _castxml_fallback_reason(
@@ -585,25 +573,6 @@ def _castxml_fallback_reason(
     if _is_toolchain_version_failure(str(exc)):
         return "castxml-toolchain-version-mismatch"
     return "castxml-direct-include-guard"
-
-
-def _configured_target_triple(
-    gcc_options: str | None, gcc_option_tokens: tuple[str, ...], clang_bin: str
-) -> str | None:
-    """Return the target reported by configured Clang and its pass-through flags."""
-    cmd = [clang_bin, *split_gcc_options(gcc_options or ""), *gcc_option_tokens, "-print-target-triple"]
-    try:
-        result = subprocess.run(
-            cmd, capture_output=True, text=True, check=False, timeout=10
-        )
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        log.warning("Could not probe effective Clang target: %s", exc)
-        return None
-    if result.returncode:
-        log.warning("Could not probe effective Clang target: %s", result.stderr.strip())
-        return None
-    target = result.stdout.strip()
-    return target or None
 
 
 def _header_ast_parser(
@@ -680,7 +649,7 @@ def _header_ast_parser(
             lang=lang,
             extra_hash_dirs=extra_hash_dirs,
             frontend_context=frontend_context,
-            pruning_header_roots=pruning_header_roots,
+            pruning_header_roots=pruning_header_roots if pruning_header_roots is not None else tuple(public_header_paths + public_dir_paths),
         )
         parser = _ClangAstParser(
             ast_root,
@@ -1180,6 +1149,7 @@ def dump(
     dump_manifest: DumpManifest | None = None,
     scope_header_dirs: list[Path] | None = None,
     frontend_context: str = "host",
+    public_include_search_dirs: list[Path] | None = None,
 ) -> AbiSnapshot:
     """Create an AbiSnapshot from a shared library + headers.
 
@@ -1265,6 +1235,8 @@ def dump(
             "public_headers": public_headers,
             "public_header_dirs": public_header_dirs,
             "scope_header_dirs": scope_header_dirs,
+            # No per-TU equivalent for a multi-TU manifest (CodeRabbit review).
+            "public_include_search_dirs": public_include_search_dirs,
         }
         if _given := [name for name, value in _conflicts.items() if value]:
             raise ValidationError(
@@ -1312,6 +1284,7 @@ def dump(
             debug_info_path=debug_info_path,
             extra_include_labels=extra_include_labels,
             scope_header_dirs=scope_header_dirs,
+            public_include_search_dirs=public_include_search_dirs,
         )
 
     fmt = _detect_format(so_path)
@@ -1410,10 +1383,38 @@ def dump(
     # Tag declaration provenance (source_header + origin). Always derives
     # source_header from the parsed source location; origin is only
     # classified when a public-header set is supplied (ADR-015, D4).
+    #
+    # include_search_dirs=public_include_search_dirs folds those directories
+    # into the public-directory set once a real -H/--public-header-dir set
+    # already opted classification in: a header-AST dump only ever parses
+    # declarations reachable by #include from its own -H root(s), so a
+    # header living elsewhere under the same include root that the umbrella
+    # header pulled in transitively is not a private implementation detail
+    # merely because it isn't the literal -H file (defect: every
+    # transitively-included header classified private-header, silently
+    # dropping real breaking findings out of the compared surface).
+    #
+    # Deliberately NOT `extra_includes` (Codex review, real regression found
+    # via the example suite): `extra_includes` is the FULL compile include
+    # path, which also carries directories this function (or a caller's own
+    # P3 `resolve_inferred_header_roots` step) auto-derives purely so an
+    # umbrella -H header's own relative #includes resolve -- typically the
+    # umbrella header's own directory. That directory can just as easily
+    # hold a genuinely *private* sibling header (case184_internal_enum_
+    # churn_scoped's own v1_internal.h, next to the public v1.h) -- folding
+    # it into the public-directory set defeated the entire private-header
+    # scoping example that test exists to cover. `public_include_search_
+    # dirs` is a separate, caller-supplied parameter carrying ONLY the
+    # directories the caller can positively attest are a real, explicit
+    # dependency-search declaration (a literal `-I`/`--include`), never an
+    # internal #include-resolution auto-add.
     from .provenance import apply_provenance
 
     return apply_provenance(
-        snapshot, effective_public_headers, effective_public_header_dirs
+        snapshot,
+        effective_public_headers,
+        effective_public_header_dirs,
+        include_search_dirs=public_include_search_dirs,
     )
 
 
@@ -1788,14 +1789,6 @@ def _dump_macho(
         public_dir_paths=[str(d) for d in (public_header_dirs or [])],
         extra_hash_dirs=extra_hash_dirs,
         frontend_context=frontend_context,
-        # Codex review, PR #840: fold public_headers/public_header_dirs into
-        # the pruner's root set too, matching the wider set the post-hoc
-        # filter already uses (see this function's own docstring param).
-        pruning_header_roots=tuple(
-            [str(h) for h in headers]
-            + [str(h) for h in (public_headers or [])]
-            + [str(d) for d in (public_header_dirs or [])]
-        ),
     )
 
     _dylib_mtime, _dylib_mtime_epoch = _safe_mtime(dylib_path)
@@ -1919,12 +1912,6 @@ def _dump_pe(
         public_dir_paths=[str(d) for d in (public_header_dirs or [])],
         extra_hash_dirs=extra_hash_dirs,
         frontend_context=frontend_context,
-        # Codex review, PR #840: same reasoning as the Mach-O call above.
-        pruning_header_roots=tuple(
-            [str(h) for h in headers]
-            + [str(h) for h in (public_headers or [])]
-            + [str(d) for d in (public_header_dirs or [])]
-        ),
     )
 
     _dll_mtime, _dll_mtime_epoch = _safe_mtime(dll_path)

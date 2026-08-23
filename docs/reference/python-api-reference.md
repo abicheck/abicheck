@@ -439,6 +439,7 @@ Auto-detect input type and return an ABI snapshot.
 | `include_labels` | `dict[Path, str] \| None` | `None` |
 | `dump_manifest` | `DumpManifest \| None` | `None` |
 | `include_dependencies` | `bool` | `True` |
+| `public_include_search_dirs` | `list[Path] \| None` | `None` |
 
 **Returns:** `AbiSnapshot`
 
@@ -530,6 +531,7 @@ Extract an ABI snapshot from a native binary (ELF, PE, or Mach-O).
 | `notify` | `Callable[[str], None] \| None` | `None` |
 | `include_labels` | `dict[Path, str] \| None` | `None` |
 | `dump_manifest` | `DumpManifest \| None` | `None` |
+| `public_include_search_dirs` | `list[Path] \| None` | `None` |
 | `include_dependencies` | `bool` | `True` |
 
 **Returns:** `AbiSnapshot`

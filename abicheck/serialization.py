@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING, Any, TypeVar
 
 if TYPE_CHECKING:
     from .build_mode import BuildMode
+    from .bundle_facts import BundleFacts
     from .snapshot_io import SnapshotWriteResult
 
 from .errors import IncompatibleSnapshotSchemaError, SnapshotError
@@ -1791,4 +1792,195 @@ def write_snapshot(
         path,
         compression=SnapshotCompression(compression),
         zstd_level=zstd_level,
+    )
+
+
+def bundle_facts_to_dict(facts: BundleFacts) -> dict[str, Any]:
+    """Serialize a :class:`~abicheck.bundle_facts.BundleFacts` to a
+    JSON-able dict (G38 Phase 2) — lives here, not in ``bundle_facts.py``
+    itself, the same split :class:`AbiSnapshot`'s own serialization
+    already uses (the model/data-shape module stays a leaf; every
+    snapshot's to_dict/from_dict lives in this module instead). Putting it
+    in ``bundle_facts.py`` would create a real import cycle: this
+    function needs ``snapshot_to_dict`` from here, while this module's own
+    ``save_bundle_facts``/``load_bundle_facts`` need ``BundleFacts`` from
+    there.
+    """
+    from .bundle_manifest import manifest_to_dict
+
+    return {
+        "schema_version": facts.schema_version,
+        "variant_fingerprint": facts.variant_fingerprint,
+        "per_library_snapshots": {
+            name: snapshot_to_dict(snap)
+            for name, snap in facts.per_library_snapshots.items()
+        },
+        "filesystem_aliases": {
+            name: list(aliases) for name, aliases in facts.filesystem_aliases.items()
+        },
+        "library_filenames": dict(facts.library_filenames),
+        "manifest": manifest_to_dict(facts.manifest) if facts.manifest else None,
+    }
+
+
+def bundle_facts_from_dict(d: dict[str, Any]) -> BundleFacts:
+    """Inverse of :func:`bundle_facts_to_dict`.
+
+    Rejects a container ``schema_version`` newer than this reader's own
+    :data:`~abicheck.bundle_facts.BUNDLE_FACTS_SCHEMA_VERSION` outright,
+    mirroring :func:`snapshot_from_dict`'s hard rejection of a
+    too-new-to-read-safely snapshot. Unlike that function's own
+    warn-below/hard-reject-above-threshold split (justified there by many
+    already-shipped versions with a documented, field-by-field forward-
+    compatible history), ``BundleFacts`` has had exactly one shape so far
+    — there is no "this reader has no code path that looks for a field
+    introduced after some known-safe version" nuance to draw a softer line
+    at yet. Warn-and-continue would silently score a comparison against a
+    newer container whose fields (e.g. a future per-variant comparability
+    gate) this reader's ``compare_bundle_from_facts()`` doesn't know to
+    consult (Codex review).
+    """
+    from .bundle_facts import (
+        BUNDLE_FACTS_SCHEMA_VERSION,
+        DEFAULT_VARIANT_FINGERPRINT,
+        BundleFacts,
+    )
+    from .bundle_manifest import manifest_from_dict
+
+    schema_version = int(d.get("schema_version", BUNDLE_FACTS_SCHEMA_VERSION))
+    if schema_version > BUNDLE_FACTS_SCHEMA_VERSION:
+        raise IncompatibleSnapshotSchemaError(
+            f"Bundle facts schema_version {schema_version} is newer than this "
+            f"abicheck (supports up to schema_version "
+            f"{BUNDLE_FACTS_SCHEMA_VERSION}). Upgrade abicheck to read this "
+            "bundle facts file."
+        )
+    # "per_library_snapshots" is mandatory, not merely defaulted: a
+    # malformed or unrelated JSON object (e.g. ``{}``) omitting it entirely
+    # must not silently load as a valid, current-schema *empty* bundle --
+    # a later compare_bundle_from_facts() would then score every new
+    # library against an invented empty baseline instead of the caller
+    # ever finding out the input was invalid (Codex review, fresh
+    # evidence). A present-but-wrong-shaped value (not a mapping) is
+    # rejected the same way, rather than raising an opaque AttributeError
+    # out of the dict comprehension below.
+    if "per_library_snapshots" not in d:
+        raise ValueError(
+            "bundle facts: missing required top-level 'per_library_snapshots' mapping"
+        )
+    raw_snapshots = d["per_library_snapshots"]
+    if not isinstance(raw_snapshots, dict):
+        raise ValueError(
+            "bundle facts: 'per_library_snapshots' must be a mapping, got "
+            f"{type(raw_snapshots).__name__}"
+        )
+    raw_manifest = d.get("manifest")
+    return BundleFacts(
+        schema_version=schema_version,
+        variant_fingerprint=str(
+            d.get("variant_fingerprint", DEFAULT_VARIANT_FINGERPRINT)
+        ),
+        per_library_snapshots={
+            name: snapshot_from_dict(sd) for name, sd in raw_snapshots.items()
+        },
+        filesystem_aliases=_validated_alias_map(d.get("filesystem_aliases", {})),
+        library_filenames=_validated_filename_map(d.get("library_filenames", {})),
+        manifest=manifest_from_dict(raw_manifest) if raw_manifest is not None else None,
+    )
+
+
+def _validated_alias_map(raw: object) -> dict[str, tuple[str, ...]]:
+    """Validate and convert a persisted ``filesystem_aliases`` mapping.
+
+    ``tuple(aliases)`` on a *string* value (e.g. a hand-edited or corrupt
+    ``"libfoo.so": "libfoo.so.1"`` instead of the documented
+    ``"libfoo.so": ["libfoo.so.1"]``) silently iterates its characters
+    instead of raising -- reconstruction then indexes single-letter
+    aliases (``"l"``, ``"i"``, ...) rather than the real alias, so a real
+    ``DT_NEEDED`` edge quietly fails to resolve with no load-time error at
+    all (Codex review, fresh evidence). Rejects a non-mapping container, a
+    non-list value, and a list with a non-string element -- the last of
+    which ``tuple()`` alone would otherwise accept silently too.
+    """
+    if not isinstance(raw, dict):
+        raise ValueError(
+            f"bundle facts: 'filesystem_aliases' must be a mapping, got "
+            f"{type(raw).__name__}"
+        )
+    aliases: dict[str, tuple[str, ...]] = {}
+    for name, values in raw.items():
+        if not isinstance(values, list) or not all(isinstance(v, str) for v in values):
+            raise ValueError(
+                f"bundle facts: 'filesystem_aliases[{name!r}]' must be a list of "
+                f"strings, got {values!r}"
+            )
+        aliases[name] = tuple(values)
+    return aliases
+
+
+def _validated_filename_map(raw: object) -> dict[str, str]:
+    """Validate and convert a persisted ``library_filenames`` mapping.
+
+    A bare ``str(filename)`` coercion silently accepts a malformed value
+    (JSON ``null`` becomes the invented basename ``"None"``, a number
+    becomes its own string form) instead of rejecting the corrupt baseline
+    -- with a no-``DT_SONAME`` library and cohort checking enabled,
+    ``bundle._detect_soname_skew()``'s replay fallback would then derive a
+    SONAME major from that fabricated name, silently omitting or altering
+    a ``bundle_soname_skew`` finding rather than surfacing the invalid
+    input (Codex review, fresh evidence). Mirrors
+    :func:`_validated_alias_map`'s rejection shape.
+    """
+    if not isinstance(raw, dict):
+        raise ValueError(
+            f"bundle facts: 'library_filenames' must be a mapping, got "
+            f"{type(raw).__name__}"
+        )
+    filenames: dict[str, str] = {}
+    for name, filename in raw.items():
+        if not isinstance(filename, str):
+            raise ValueError(
+                f"bundle facts: 'library_filenames[{name!r}]' must be a string, "
+                f"got {filename!r}"
+            )
+        filenames[name] = filename
+    return filenames
+
+
+def load_bundle_facts(path: str | Path) -> BundleFacts:
+    """Load a :class:`~abicheck.bundle_facts.BundleFacts` from *path*,
+    transparently handling plain, gzip, and zstd storage (ADR-059,
+    detected from magic bytes) — the G38 Phase 2 counterpart to
+    :func:`load_snapshot`."""
+    from .snapshot_io import read_snapshot_text
+
+    return bundle_facts_from_dict(json.loads(read_snapshot_text(path)))
+
+
+def save_bundle_facts(
+    facts: BundleFacts,
+    path: str | Path,
+    *,
+    compression: str = "auto",
+) -> SnapshotWriteResult:
+    """Save *facts* to *path* — the G38 Phase 2 counterpart to
+    :func:`write_snapshot`. Same *compression* contract (``"auto"``
+    inferred from *path*'s suffix, ``"none"``, ``"gzip"``, ``"zstd"``)."""
+    from .snapshot_io import SnapshotCompression, write_snapshot_text
+
+    # sort_keys=True (matching no other writer in this module -- see
+    # snapshot_to_json's own plain json.dumps) would recursively re-sort
+    # every dict's keys, including each manifest ManifestEntry's own
+    # instantiations dict -- whose iteration order IS the C++ template
+    # argument order (_expand_instantiations()'s own contract). Sorting it
+    # alphabetically corrupts a valid "T, U" contract into "T, U" reloading
+    # as "T, U" only by coincidence -- a real reorder (e.g. "Method,
+    # Precision" -> alphabetically "Method, Precision" already matches, but
+    # "Precision, Method" would sort back to "Method, Precision") produces
+    # a manifest entry that no longer matches any real symbol, a false
+    # bundle_manifest_instantiation_removed (Codex review, fresh evidence).
+    return write_snapshot_text(
+        json.dumps(bundle_facts_to_dict(facts), indent=2),
+        path,
+        compression=SnapshotCompression(compression),
     )
