@@ -1883,16 +1883,42 @@ def bundle_facts_from_dict(d: dict[str, Any]) -> BundleFacts:
         per_library_snapshots={
             name: snapshot_from_dict(sd) for name, sd in raw_snapshots.items()
         },
-        filesystem_aliases={
-            name: tuple(aliases)
-            for name, aliases in d.get("filesystem_aliases", {}).items()
-        },
+        filesystem_aliases=_validated_alias_map(d.get("filesystem_aliases", {})),
         library_filenames={
             name: str(filename)
             for name, filename in d.get("library_filenames", {}).items()
         },
         manifest=manifest_from_dict(raw_manifest) if raw_manifest is not None else None,
     )
+
+
+def _validated_alias_map(raw: object) -> dict[str, tuple[str, ...]]:
+    """Validate and convert a persisted ``filesystem_aliases`` mapping.
+
+    ``tuple(aliases)`` on a *string* value (e.g. a hand-edited or corrupt
+    ``"libfoo.so": "libfoo.so.1"`` instead of the documented
+    ``"libfoo.so": ["libfoo.so.1"]``) silently iterates its characters
+    instead of raising -- reconstruction then indexes single-letter
+    aliases (``"l"``, ``"i"``, ...) rather than the real alias, so a real
+    ``DT_NEEDED`` edge quietly fails to resolve with no load-time error at
+    all (Codex review, fresh evidence). Rejects a non-mapping container, a
+    non-list value, and a list with a non-string element -- the last of
+    which ``tuple()`` alone would otherwise accept silently too.
+    """
+    if not isinstance(raw, dict):
+        raise ValueError(
+            f"bundle facts: 'filesystem_aliases' must be a mapping, got "
+            f"{type(raw).__name__}"
+        )
+    aliases: dict[str, tuple[str, ...]] = {}
+    for name, values in raw.items():
+        if not isinstance(values, list) or not all(isinstance(v, str) for v in values):
+            raise ValueError(
+                f"bundle facts: 'filesystem_aliases[{name!r}]' must be a list of "
+                f"strings, got {values!r}"
+            )
+        aliases[name] = tuple(values)
+    return aliases
 
 
 def load_bundle_facts(path: str | Path) -> BundleFacts:

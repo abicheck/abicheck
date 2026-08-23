@@ -534,6 +534,45 @@ class TestBundleFactsFilesystemAliases:
         )
 
 
+class TestBundleFactsRejectsMalformedFilesystemAliases:
+    """A string value where a list is documented (Codex review, fresh
+    evidence): ``tuple("libfoo.so.1")`` silently iterates characters
+    (``"l"``, ``"i"``, ...) instead of raising, so a real alias quietly
+    fails to resolve with no load-time error at all."""
+
+    def test_string_valued_alias_list_is_rejected(self) -> None:
+        facts_dict = bundle_facts_to_dict(
+            capture_bundle_facts(_per_library_snapshots(_old_metadata()))
+        )
+        facts_dict["filesystem_aliases"] = {"libcore.so": "libfoo.so.1"}
+        with pytest.raises(ValueError, match="filesystem_aliases"):
+            bundle_facts_from_dict(facts_dict)
+
+    def test_non_string_element_is_rejected(self) -> None:
+        facts_dict = bundle_facts_to_dict(
+            capture_bundle_facts(_per_library_snapshots(_old_metadata()))
+        )
+        facts_dict["filesystem_aliases"] = {"libcore.so": ["ok", 42]}
+        with pytest.raises(ValueError, match="filesystem_aliases"):
+            bundle_facts_from_dict(facts_dict)
+
+    def test_non_mapping_container_is_rejected(self) -> None:
+        facts_dict = bundle_facts_to_dict(
+            capture_bundle_facts(_per_library_snapshots(_old_metadata()))
+        )
+        facts_dict["filesystem_aliases"] = ["not", "a", "mapping"]
+        with pytest.raises(ValueError, match="filesystem_aliases"):
+            bundle_facts_from_dict(facts_dict)
+
+    def test_well_formed_alias_list_still_round_trips(self) -> None:
+        facts_dict = bundle_facts_to_dict(
+            capture_bundle_facts(_per_library_snapshots(_old_metadata()))
+        )
+        facts_dict["filesystem_aliases"] = {"libcore.so": ["libfoo.so.1", "libfoo.so"]}
+        loaded = bundle_facts_from_dict(facts_dict)
+        assert loaded.filesystem_aliases == {"libcore.so": ("libfoo.so.1", "libfoo.so")}
+
+
 class TestBundleFactsLibraryFilenames:
     """SONAME-skew replay needs the real on-disk filename, not the
     canonical key (Codex review, fresh evidence): a versioned DSO with no
