@@ -311,17 +311,20 @@ def compat_dump_cmd(
         sys.exit(2)
 
     try:
-        snap = dump(
-            so_path,
-            headers=desc.headers,
-            version=desc.version,
-            gcc_path=gcc_path,
-            gcc_prefix=gcc_prefix,
-            gcc_options=gcc_options,
-            sysroot=sysroot,
-            nostdinc=nostdinc,
-            lang=lang,
-        )
+        # No dependency-scope wrapper downstream here either (Codex review,
+        # PR #840) -- same reasoning as _snapshot_from_compat_input's call.
+        with suppress_streaming_prune():
+            snap = dump(
+                so_path,
+                headers=desc.headers,
+                version=desc.version,
+                gcc_path=gcc_path,
+                gcc_prefix=gcc_prefix,
+                gcc_options=gcc_options,
+                sysroot=sysroot,
+                nostdinc=nostdinc,
+                lang=lang,
+            )
     except Exception as exc:  # noqa: BLE001
         _compat_fail("during dump", exc)
 

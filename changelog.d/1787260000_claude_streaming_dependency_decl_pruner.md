@@ -45,9 +45,9 @@
   translation unit's own `forced_includes`/`project_owned` includes, rather
   than each TU only seeing its own -- otherwise a declaration reachable
   under a root only a *different*, non-contributing TU declares ownership
-  of could be misclassified as a dependency and permanently pruned. The two
-  remaining direct `dumper.dump()` callers with no dependency-scope wrapper
-  of their own (the ABICC-compat CLI's descriptor/dump path, and
-  `appcompat.check_appcompat`'s two dumps) now also suppress the pruner for
-  the same "full/unscoped surface, no post-hoc filter to retain what's
-  pruned" reason `cli_dump_helpers.py`'s choke points already do.
+  of could be misclassified as a dependency and permanently pruned. All
+  three remaining direct `dumper.dump()` callers with no dependency-scope
+  wrapper of their own (the ABICC-compat CLI's `compat dump`/descriptor
+  paths, and `appcompat.check_appcompat`'s two dumps) now also suppress the
+  pruner for the same "full/unscoped surface, no post-hoc filter to retain
+  what's pruned" reason `cli_dump_helpers.py`'s choke points already do.
