@@ -30,6 +30,7 @@ from abicheck.dumper_clang_streaming import (
     DependencyDeclPruningHook,
     load_pruned_clang_ast,
     make_dependency_header_predicate,
+    suppress_streaming_prune,
 )
 
 _DEP_HEADER = "/usr/include/c++/13/vector"
@@ -214,3 +215,60 @@ class TestLoadPrunedClangAst:
         (child,) = root["inner"]
         assert child["kind"] == PRUNED_PLACEHOLDER_KIND
         assert "inner" not in child
+
+
+class TestStreamingPruneEnabledRespectsAstMemoization:
+    """Codex review, PR #840: a parse running inside
+    ``dumper_cache.ast_memoize_scope()`` is one whose output the in-process
+    AST memo will hand off to a real downstream consumer afterward --
+    ``service._attach_header_graph``'s always-on (G29 Phase A) semantic
+    header-graph build, which walks the raw AST dict directly
+    (``buildsource.call_graph.parse_clang_ast_calls``) to pre-index every
+    full FunctionDecl/CXXMethodDecl/... node for call-graph edge
+    resolution. Pruning during a memoized primary pass would hand that
+    consumer an already-degraded tree -- ``_streaming_prune_enabled()``
+    must refuse regardless of the env var whenever memoization is active,
+    independent of (and in addition to) ``streaming_prune_suppressed()``'s
+    own, differently-scoped check."""
+
+    def test_disabled_inside_an_active_memoize_scope(self, monkeypatch) -> None:
+        from abicheck import dumper_cache
+        from abicheck.dumper_clang_errors import (
+            STREAM_PRUNE_DEPENDENCY_DECLS_ENV_VAR,
+            _streaming_prune_enabled,
+        )
+
+        monkeypatch.setenv(STREAM_PRUNE_DEPENDENCY_DECLS_ENV_VAR, "1")
+        assert _streaming_prune_enabled() is True  # baseline: env var alone enables it
+        with dumper_cache.ast_memoize_scope():
+            assert _streaming_prune_enabled() is False
+        assert _streaming_prune_enabled() is True  # not leaked after the scope exits
+
+    def test_enabled_outside_any_memoize_scope(self, monkeypatch) -> None:
+        from abicheck.dumper_clang_errors import (
+            STREAM_PRUNE_DEPENDENCY_DECLS_ENV_VAR,
+            _streaming_prune_enabled,
+        )
+
+        monkeypatch.setenv(STREAM_PRUNE_DEPENDENCY_DECLS_ENV_VAR, "1")
+        assert _streaming_prune_enabled() is True
+
+    def test_suppress_streaming_prune_and_memoize_scope_are_independent_gates(
+        self, monkeypatch
+    ) -> None:
+        """Both `suppress_streaming_prune()` and an active memoize scope
+        each independently disable the pruner -- neither leaking into, nor
+        depending on, the other."""
+        from abicheck import dumper_cache
+        from abicheck.dumper_clang_errors import (
+            STREAM_PRUNE_DEPENDENCY_DECLS_ENV_VAR,
+            _streaming_prune_enabled,
+        )
+
+        monkeypatch.setenv(STREAM_PRUNE_DEPENDENCY_DECLS_ENV_VAR, "1")
+        with suppress_streaming_prune():
+            assert _streaming_prune_enabled() is False
+            with dumper_cache.ast_memoize_scope():
+                assert _streaming_prune_enabled() is False
+            assert _streaming_prune_enabled() is False
+        assert _streaming_prune_enabled() is True

@@ -4314,6 +4314,46 @@ class TestAttachHeaderGraphDeviceContext:
             )
         mock_extractor.return_value.extract.assert_called_once()
 
+    def test_streaming_prune_is_suppressed_for_this_call(self, tmp_path, monkeypatch):
+        """Codex review, PR #840: `_attach_header_graph`'s own
+        `_clang_header_dump` call is a real downstream consumer of the raw
+        AST dict (`buildsource.call_graph.parse_clang_ast_calls` walks it
+        directly for call-graph edges), so the opt-in streaming pruner must
+        be force-disabled for this call regardless of the env var --
+        otherwise a pruned dependency function/variable node would degrade
+        or drop call-graph edges the graph is built to capture."""
+        from abicheck.dumper_clang_streaming import streaming_prune_suppressed
+        from abicheck.service import _attach_header_graph
+
+        monkeypatch.setenv("ABICHECK_CLANG_PRUNE_DEPENDENCY_DECLS", "1")
+        header = tmp_path / "pub.h"
+        header.write_text("int f(void);\n")
+        snap = AbiSnapshot(library="lib", version="1.0")
+
+        seen_suppressed: dict[str, bool] = {}
+
+        def _stub_clang_header_dump(*a, **k):
+            seen_suppressed["suppressed"] = streaming_prune_suppressed()
+            return {"kind": "TranslationUnitDecl", "inner": []}, None, False
+
+        monkeypatch.setattr(
+            "abicheck.dumper._clang_header_dump", _stub_clang_header_dump
+        )
+        assert not streaming_prune_suppressed()  # not leaked before the call
+        _attach_header_graph(
+            snap,
+            header_graph=True,
+            header_graph_includes=False,
+            headers=[header],
+            includes=[],
+            lang="c",
+            compile=None,
+            public_headers=None,
+            public_header_dirs=None,
+        )
+        assert seen_suppressed["suppressed"] is True
+        assert not streaming_prune_suppressed()  # not leaked after the call
+
     def test_no_compile_context_defaults_to_host_and_still_uses_extractor(
         self, tmp_path
     ):

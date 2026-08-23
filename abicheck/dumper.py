@@ -297,18 +297,12 @@ def _clang_header_dump(
     re-enabling SYCL ourselves (Codex review, P2).
 
     ``pruning_header_roots`` (Codex review, PR #840): the header-root set the
-    opt-in streaming pruner (``dumper_clang_streaming.py``) treats as "this
-    dump's own, never a dependency" -- passed straight through to
-    :func:`abicheck.dumper_clang_errors._parse_clang_ast_result`. Defaults to
-    ``None``, which falls back to bare *headers* (this function's own
-    parameter) for a caller that has no wider root set to offer. A caller
-    that *does* know about a wider authoritative root set --
-    ``public_header_paths``/``public_dir_paths``, or (for a manifest TU) its
-    own ``project_owned`` include directories -- must pass the SAME set the
-    post-hoc filter (``dumper_scoping.scope_snapshot_excluding_dependencies``)
-    uses, via ``dumper_manifest.run_tu_fragment``'s identical computation, or
-    the pruner can misclassify (and permanently drop) a declaration the
-    post-hoc filter would have correctly retained.
+    opt-in streaming pruner treats as "this dump's own, never a dependency".
+    ``None`` falls back to bare *headers*. A caller with a wider
+    authoritative root set (``public_header_paths``/``public_dir_paths``, a
+    manifest TU's own ``project_owned`` includes) must pass the SAME set the
+    post-hoc filter uses (``dumper_manifest.run_tu_fragment``'s computation),
+    or the pruner can misclassify and permanently drop a retained declaration.
     """
     clang_bin = _resolve_clang_bin(compiler, gcc_path, gcc_prefix)
     dpcpp_multi_context = _resolve_dpcpp_multi_context(
@@ -1794,6 +1788,14 @@ def _dump_macho(
         public_dir_paths=[str(d) for d in (public_header_dirs or [])],
         extra_hash_dirs=extra_hash_dirs,
         frontend_context=frontend_context,
+        # Codex review, PR #840: fold public_headers/public_header_dirs into
+        # the pruner's root set too, matching the wider set the post-hoc
+        # filter already uses (see this function's own docstring param).
+        pruning_header_roots=tuple(
+            [str(h) for h in headers]
+            + [str(h) for h in (public_headers or [])]
+            + [str(d) for d in (public_header_dirs or [])]
+        ),
     )
 
     _dylib_mtime, _dylib_mtime_epoch = _safe_mtime(dylib_path)
@@ -1917,6 +1919,12 @@ def _dump_pe(
         public_dir_paths=[str(d) for d in (public_header_dirs or [])],
         extra_hash_dirs=extra_hash_dirs,
         frontend_context=frontend_context,
+        # Codex review, PR #840: same reasoning as the Mach-O call above.
+        pruning_header_roots=tuple(
+            [str(h) for h in headers]
+            + [str(h) for h in (public_headers or [])]
+            + [str(d) for d in (public_header_dirs or [])]
+        ),
     )
 
     _dll_mtime, _dll_mtime_epoch = _safe_mtime(dll_path)

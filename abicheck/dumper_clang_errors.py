@@ -36,7 +36,7 @@ from pathlib import Path
 from typing import Any
 
 from . import deadline
-from .dumper_cache import _atomic_copy, _atomic_write_json
+from .dumper_cache import _atomic_copy, _atomic_write_json, ast_memoize_active
 from .dumper_clang_streaming import load_pruned_clang_ast, streaming_prune_suppressed
 from .errors import SnapshotError
 from .sycl_context import decode_and_select_frontend_context_from_path
@@ -529,6 +529,24 @@ def _streaming_prune_enabled() -> bool:
     # that context manager's own docstring for why an ambient signal, not a
     # threaded parameter, is what closes this gap (Codex review, PR #840).
     if streaming_prune_suppressed():
+        return False
+    # `ast_memoize_active()` (Codex review, PR #840): a parse running inside
+    # `dumper_cache.ast_memoize_scope()` is one whose result the in-process
+    # AST memo will hand off to a real downstream consumer afterward --
+    # today, always `service._attach_header_graph`'s always-on (G29 Phase A)
+    # semantic header-graph build, which walks the SAME raw AST dict
+    # directly (`buildsource.call_graph.parse_clang_ast_calls`) to pre-index
+    # every full FunctionDecl/CXXMethodDecl/... node by clang id and
+    # declaring file for call-graph edge resolution -- a placeholder this
+    # module already collapsed a dependency function/variable into loses
+    # exactly that identity/type/file information, degrading or dropping
+    # `DECL_CALLS_DECL` edges the graph is built to capture. Pruning during
+    # the primary pass is therefore unsafe whenever something else will
+    # reuse its output, not just unsafe for the primary pass's own model
+    # construction -- so this check must be independent of (and checked in
+    # addition to) `streaming_prune_suppressed()` above, which only covers
+    # the separate "full/unscoped dump requested" case.
+    if ast_memoize_active():
         return False
     return os.environ.get(STREAM_PRUNE_DEPENDENCY_DECLS_ENV_VAR, "").strip() == "1"
 
