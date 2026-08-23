@@ -334,25 +334,32 @@ def write_bundle_facts_out(
 
     *diff_pairs* is ``_compare_release_libraries``'s own
     ``(DiffResult, old_snapshot)`` collection -- the caller must have
-    passed ``collect_diff_results=True`` for it to be populated. Keyed by
-    each pair's own :attr:`DiffResult.library` basename, matching
-    :func:`abicheck.bundle.compare_bundle`'s own ``diff_by_library``
-    canonicalization (``Path(result.library).name``) exactly, so a later
-    :func:`~abicheck.bundle_facts.compare_bundle_from_facts` call resolves
-    the same library identities a live ``compare_bundle()`` run would.
+    passed ``collect_diff_results=True`` for it to be populated.
+    *old_map*/*removed_keys* are ``_match_release_keys``'s own maps: every
+    key in *old_map* is the **canonical** release-matching key
+    (``_canonical_library_key()`` -- e.g. ``libfoo.so`` for a discovered
+    ``libfoo.so.1.2``), the identical keys a live ``build_bundle_snapshot
+    (dict(old_map))`` call uses for its ``BundleSnapshot.libraries``. Each
+    persisted entry is keyed by that same canonical key, not by
+    ``Path(diff.library).name`` (the real, possibly-versioned basename
+    ``DiffResult.library`` carries) -- keying by the basename instead would
+    make a reconstructed old bundle disagree with a live new bundle on a
+    versioned library's very identity, reading as a false
+    ``bundle_library_removed``/``_added`` pair for a library that did not
+    change at all (Codex review, fresh evidence: caught after the P1 fix
+    below already existed, which itself still keyed by the wrong basename).
 
-    *old_map*/*removed_keys* cover the libraries ``diff_pairs`` alone
-    cannot: ``diff_pairs`` only ever holds an entry for a *matched*
-    library (one present in both releases), so an old-only library
-    (removed in the new release) was previously silently absent from the
-    persisted baseline -- meaning a later ``compare_bundle_from_facts()``
-    call against these facts could never emit
-    ``bundle_library_removed``/dependency-removal/version-resolution
-    findings a live comparison of the same old release would (Codex
-    review, fresh evidence). Each removed library's own ``ElfMetadata`` is
-    parsed directly from *old_map*'s path (mirroring what a live
-    ``build_bundle_snapshot()`` does for exactly this library, since no
-    per-library compare ever ran for it) and wrapped in a bare
+    *old_map*/*removed_keys* also cover what ``diff_pairs`` alone cannot:
+    ``diff_pairs`` only ever holds an entry for a *matched* library (one
+    present in both releases), so an old-only library (removed in the new
+    release) was previously silently absent from the persisted baseline --
+    meaning a later ``compare_bundle_from_facts()`` call against these
+    facts could never emit ``bundle_library_removed``/dependency-removal/
+    version-resolution findings a live comparison of the same old release
+    would (Codex review, fresh evidence). Each removed library's own
+    ``ElfMetadata`` is parsed directly from *old_map*'s path (mirroring
+    what a live ``build_bundle_snapshot()`` does for exactly this library,
+    since no per-library compare ever ran for it) and wrapped in a bare
     :class:`~abicheck.model.AbiSnapshot` carrying only ``.elf`` --
     everything :func:`~abicheck.bundle_facts.bundle_snapshot_from_facts`
     needs. A library whose old path fails to parse as ELF degrades to an
@@ -361,7 +368,7 @@ def write_bundle_facts_out(
     "only promise what was actually captured" rule a live
     ``build_bundle_snapshot()`` applies to a library that fails to parse.
 
-    Every ``old_map`` path (matched and removed alike) is also handed to
+    *old_map* itself (already canonical-key-keyed) is handed to
     :func:`~abicheck.bundle_facts.capture_bundle_facts` as
     ``library_paths``, so real filesystem aliases (symlink targets,
     hard-linked siblings) are captured while the files still exist on
@@ -381,22 +388,29 @@ def write_bundle_facts_out(
 
     try:
         manifest = load_manifest(manifest_path) if manifest_path is not None else None
-        per_library_snapshots: dict[str, AbiSnapshot] = {
-            Path(diff.library).name: old_snapshot for diff, old_snapshot in diff_pairs
-        }
+        # Basename -> canonical key, so a matched pair's DiffResult.library
+        # (the real, possibly-versioned filename) maps back onto the same
+        # key old_map/build_bundle_snapshot() would use for it. Falls back
+        # to the basename itself only if truly unmatched (shouldn't happen
+        # for a genuine diff_pairs entry, but degrades safely either way).
+        basename_to_key = {path.name: key for key, path in old_map.items()}
+        per_library_snapshots: dict[str, AbiSnapshot] = {}
+        for diff, old_snapshot in diff_pairs:
+            basename = Path(diff.library).name
+            per_library_snapshots[basename_to_key.get(basename, basename)] = (
+                old_snapshot
+            )
         for key in removed_keys:
-            old_path = old_map[key]
-            name = old_path.name
-            if name in per_library_snapshots:
+            if key in per_library_snapshots:
                 continue
-            per_library_snapshots[name] = AbiSnapshot(
-                library=name,
+            old_path = old_map[key]
+            per_library_snapshots[key] = AbiSnapshot(
+                library=old_path.name,
                 version="",
                 elf=parse_elf_metadata(old_path),
             )
-        library_paths: dict[str, Path] = {path.name: path for path in old_map.values()}
         facts = capture_bundle_facts(
-            per_library_snapshots, manifest=manifest, library_paths=library_paths
+            per_library_snapshots, manifest=manifest, library_paths=dict(old_map)
         )
         save_bundle_facts(facts, bundle_facts_out)
     except (OSError, ValueError) as exc:

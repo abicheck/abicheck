@@ -697,3 +697,81 @@ class TestWriteBundleFactsOut:
 
         loaded = load_bundle_facts(out)
         assert "libcore.so.1.0.0" in loaded.filesystem_aliases.get("libcore.so", ())
+
+    def test_keys_a_versioned_library_by_its_canonical_key(
+        self, tmp_path: Path
+    ) -> None:
+        """P1 (Codex review, fresh evidence): a versioned DSO's discovered
+        path (``libfoo.so.1.2``) is a different string from its canonical
+        release-matching key (``libfoo.so``, ``_canonical_library_key()``)
+        -- the key ``old_map``/a live ``build_bundle_snapshot()`` actually
+        use. ``DiffResult.library`` (via ``AbiSnapshot.library``) always
+        carries the real, on-disk basename, never the canonical key -- so
+        keying the persisted facts by ``Path(diff.library).name`` instead
+        of the canonical key would make a reconstructed old bundle
+        disagree with a live new bundle on this library's very identity,
+        reading as a false ``bundle_library_removed``/``_added`` pair for
+        an unchanged library.
+        """
+        from abicheck.cli_compare_release_helpers import write_bundle_facts_out
+
+        real_path = tmp_path / "libfoo.so.1.2"
+        real_path.write_bytes(b"")
+        old_map = {"libfoo.so": real_path}  # canonical key != real basename
+        old_snapshot = AbiSnapshot(
+            library="libfoo.so.1.2",  # AbiSnapshot.library is always path.name
+            version="old",
+            elf=_meta(soname="libfoo.so", exports=["foo_fn"]),
+        )
+        diff_pairs = [
+            (_diff("libfoo.so.1.2", verdict=Verdict.COMPATIBLE), old_snapshot)
+        ]
+
+        out = tmp_path / "old.bundlefacts.json"
+        write_bundle_facts_out(out, diff_pairs, None, old_map, [])
+
+        loaded = load_bundle_facts(out)
+        assert set(loaded.per_library_snapshots) == {"libfoo.so"}
+        assert "libfoo.so.1.2" not in loaded.per_library_snapshots
+
+    def test_no_false_library_removed_for_a_versioned_library(
+        self, tmp_path: Path
+    ) -> None:
+        """End-to-end proof that the canonical-key fix above actually
+        closes the false-positive: comparing a reconstructed old bundle
+        (from a versioned discovered path) against a live-equivalent new
+        bundle (built the same way ``_run_bundle_analysis`` builds one)
+        for the *same* library must not report it removed or added.
+        """
+        from abicheck.cli_compare_release_helpers import write_bundle_facts_out
+
+        real_path = tmp_path / "libfoo.so.1.2"
+        real_path.write_bytes(b"")
+        old_map = {"libfoo.so": real_path}
+        old_meta = _meta(soname="libfoo.so", exports=["foo_fn"])
+        old_snapshot = AbiSnapshot(library="libfoo.so.1.2", version="old", elf=old_meta)
+        diff_pairs = [
+            (_diff("libfoo.so.1.2", verdict=Verdict.COMPATIBLE), old_snapshot)
+        ]
+
+        out = tmp_path / "old.bundlefacts.json"
+        write_bundle_facts_out(out, diff_pairs, None, old_map, [])
+        loaded_facts = load_bundle_facts(out)
+
+        # The "new" bundle, keyed the same canonical way a live
+        # build_bundle_snapshot(dict(new_map)) call would key it.
+        new_snapshot = _snapshot({"libfoo.so": old_meta})
+        old_reconstructed = bundle_snapshot_from_facts(loaded_facts)
+
+        result = compare_bundle(
+            old_reconstructed,
+            new_snapshot,
+            [_diff("libfoo.so", verdict=Verdict.COMPATIBLE)],
+        )
+        removed_or_added = {
+            f.kind
+            for f in result.bundle_findings
+            if f.kind
+            in (ChangeKind.BUNDLE_LIBRARY_REMOVED, ChangeKind.BUNDLE_LIBRARY_ADDED)
+        }
+        assert not removed_or_added, result.bundle_findings
