@@ -458,6 +458,7 @@ def _clang_header_dump(
             cache_write=identities_stable,
             dpcpp_capable=dpcpp_multi_context,
             frontend_context=frontend_context,
+            header_roots=tuple(str(h) for h in headers),
         )
         if identities_stable and _memoize:
             dumper_cache.store_cached_ast(key, "clang", root)
