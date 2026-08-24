@@ -837,8 +837,24 @@ def _compute_occurrences(edge: GraphEdge) -> list[str]:
 #: handles. Anchored the same way (``\b`` word boundary before the marker)
 #: to avoid rewriting unrelated text that merely contains the substring
 #: "at" followed by something colon-shaped.
+#:
+#: The path group is a negative-lookahead-guarded ``.*`` -- greedy, but
+#: refusing to consume across a *later* marker's own ``lambda at``/``unnamed
+#: <kind> at`` trigger -- rather than plain non-greedy ``.*?`` (Codex review,
+#: fresh evidence): a non-greedy path group stops at the FIRST ``:\d+:\d+``
+#: it can find, which is wrong the moment the checkout path itself contains
+#: a colon-digit-colon-digit-shaped segment (a timestamped build directory,
+#: ``/tmp/build-2026T12:34:56/src/foo.hpp:4:37``) -- it silently keeps the
+#: real, checkout-dependent tail (``/src/foo.hpp:4:37``) unmodified past the
+#: truncated match. A plain greedy ``.*`` fixes that (it finds the
+#: *rightmost* valid ``:\d+:\d+``) but then over-matches a string embedding
+#: *two* markers (a quoted lookalike alongside a real one, or two real
+#: markers), swallowing both into one match. The lookahead guard gets both
+#: right: greedy within one marker's own text, but bounded at the next
+#: marker's trigger.
 _BARE_ANON_TYPE_LOCATION_RE = re.compile(
-    r"\b(lambda|unnamed\s+\w+)\s+at\s+(.*?):(\d+):(\d+)\b"
+    r"\b(lambda|unnamed\s+\w+)\s+at\s+"
+    r"((?:(?!(?:lambda|unnamed\s+\w+)\s+at\s).)*):(\d+):(\d+)\b"
 )
 
 

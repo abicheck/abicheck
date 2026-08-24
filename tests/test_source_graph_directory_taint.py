@@ -115,6 +115,19 @@ def test_bare_marker_normalization_skips_quoted_literals() -> None:
     assert "/c/bar.hpp" not in mixed
 
 
+def test_bare_marker_normalization_finds_the_terminal_coordinates() -> None:
+    # A checkout path can itself contain a colon-digit-colon-digit-shaped
+    # segment (a timestamped build directory) that a non-greedy path group
+    # would mistake for the marker's own terminal ":line:col" -- silently
+    # leaving the real, checkout-dependent tail unmodified past the
+    # truncated match (Codex review, fresh evidence, fifth round).
+    old = _type_node_id("lambda at /tmp/build-2026T12:34:56/src/foo.hpp:4:37")
+    new = _type_node_id("lambda at /mnt/build-2026T12:34:56/src/foo.hpp:4:37")
+    assert old == new
+    assert "build-2026T12" not in old
+    assert old.endswith(":4:37")
+
+
 def test_graph_node_from_dict_migrates_pre_normalization_ids() -> None:
     # A build-source pack persisted before this normalization existed
     # carries the old, raw, checkout-path-bearing node id/label -- loading
