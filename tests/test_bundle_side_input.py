@@ -300,6 +300,136 @@ class TestCompareBundleSidesManifestPrecedence:
 
 
 # ---------------------------------------------------------------------------
+# compare_release_against_bundle_facts -- mocked-resolution unit coverage
+# ---------------------------------------------------------------------------
+#
+# These pin the two Codex-review findings below without needing a real
+# compiler/castxml (unlike TestCompareReleaseAgainstBundleFacts, which
+# exercises the identical function end to end but can only reproduce the
+# actual ScopeMismatchError symptom when castxml is available to attach
+# header-derived declarations -- see that class's own docstring). Both
+# findings are about how the function resolves the NEW side, so both are
+# fully observable by mocking `service.resolve_input`/`.compare_snapshots`
+# and inspecting what they were called with -- no header/castxml
+# involvement needed to prove the *threading* is correct.
+
+
+class TestCompareReleaseAgainstBundleFactsResolutionUnit:
+    def _old_facts(self, tmp_path: Path) -> Path:
+        metadata = {"libcore.so": _meta(soname="libcore.so", exports=["core_fn"])}
+        facts = capture_bundle_facts(_per_library_snapshots(metadata))
+        facts_path = tmp_path / "old.bundlefacts.json"
+        save_bundle_facts(facts, facts_path)
+        return facts_path
+
+    def test_include_dependencies_defaults_to_false_and_is_threaded_through(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Codex review (P1): the CLI flow that actually produces a
+        `BundleFacts` file (`compare --bundle-facts-out`) dependency-scopes
+        by default (`--include-system-declarations`'s own Click default is
+        `False` -- cli_options.include_dependencies_option), not
+        `service.resolve_input`'s bare-Python default of `True`. Before the
+        fix, this function's NEW-side `service.resolve_input` call never
+        passed `include_dependencies` at all, so it always resolved
+        unfiltered regardless of how the OLD side's facts were captured --
+        a real, silent scope mismatch for the flow this function exists to
+        support. Pinned here as a call-argument assertion (the only way to
+        observe it without castxml, since `_check_dependency_scope_
+        comparable` only fires when a side carries header-derived
+        declarations, which no plain-ELF fixture has)."""
+        import abicheck.package as package_mod
+        import abicheck.service as service_mod
+
+        facts_path = self._old_facts(tmp_path)
+        new_dir = tmp_path / "new"
+        new_dir.mkdir()
+        new_so = new_dir / "libcore.so"
+        new_so.write_bytes(b"")
+
+        monkeypatch.setattr(
+            package_mod,
+            "discover_shared_libraries",
+            lambda d, include_private=False: [new_so],
+        )
+        captured_kwargs: dict[str, object] = {}
+
+        def _fake_resolve_input(path, **kwargs):
+            captured_kwargs.update(kwargs)
+            return AbiSnapshot(
+                library="libcore.so",
+                version="new",
+                elf=_meta(soname="libcore.so", exports=["core_fn"]),
+            )
+
+        monkeypatch.setattr(service_mod, "resolve_input", _fake_resolve_input)
+        monkeypatch.setattr(
+            service_mod,
+            "compare_snapshots",
+            lambda old, new, policy: _diff("libcore.so", verdict=Verdict.NO_CHANGE),
+        )
+
+        compare_release_against_bundle_facts(facts_path, new_dir)
+
+        assert captured_kwargs["include_dependencies"] is False
+
+        captured_kwargs.clear()
+        compare_release_against_bundle_facts(
+            facts_path, new_dir, include_dependencies=True
+        )
+        assert captured_kwargs["include_dependencies"] is True
+
+    def test_duplicate_new_side_versions_use_version_aware_selection(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Codex review (P2): two versions of one library in *new_dir* must
+        resolve via the same version-aware duplicate resolution the live
+        release fan-out uses (`cli_helpers_compare._build_match_map`), not
+        a plain dict-build that keeps whichever path a directory listing
+        happens to enumerate last. `libcore.so.9` sorts after `libcore.so.10`
+        lexicographically but must lose to it under real version
+        comparison."""
+        import abicheck.package as package_mod
+        import abicheck.service as service_mod
+
+        facts_path = self._old_facts(tmp_path)
+        new_dir = tmp_path / "new"
+        new_dir.mkdir()
+        v9 = new_dir / "libcore.so.9"
+        v10 = new_dir / "libcore.so.10"
+        v9.write_bytes(b"")
+        v10.write_bytes(b"")
+
+        # Enumerate the lower version last, so a naive "last write wins"
+        # dict build would pick the wrong one.
+        monkeypatch.setattr(
+            package_mod,
+            "discover_shared_libraries",
+            lambda d, include_private=False: [v10, v9],
+        )
+        resolved_paths: list[Path] = []
+
+        def _fake_resolve_input(path, **kwargs):
+            resolved_paths.append(path)
+            return AbiSnapshot(
+                library="libcore.so",
+                version="new",
+                elf=_meta(soname="libcore.so", exports=["core_fn"]),
+            )
+
+        monkeypatch.setattr(service_mod, "resolve_input", _fake_resolve_input)
+        monkeypatch.setattr(
+            service_mod,
+            "compare_snapshots",
+            lambda old, new, policy: _diff("libcore.so", verdict=Verdict.NO_CHANGE),
+        )
+
+        compare_release_against_bundle_facts(facts_path, new_dir)
+
+        assert resolved_paths == [v10]
+
+
+# ---------------------------------------------------------------------------
 # compare_release_against_bundle_facts -- real compiled binaries
 # ---------------------------------------------------------------------------
 
@@ -347,7 +477,12 @@ class TestCompareReleaseAgainstBundleFacts:
         facts_path = tmp_path / "old.bundlefacts.json"
         save_bundle_facts(facts, facts_path)
 
-        result = compare_release_against_bundle_facts(facts_path, new_dir)
+        # Must match the OLD side's own dependency scope (Codex review, P1)
+        # -- the function's default is False, matching --bundle-facts-out's
+        # own CLI default, not this fixture's explicit True.
+        result = compare_release_against_bundle_facts(
+            facts_path, new_dir, include_dependencies=True
+        )
 
         assert result.analysis_errors == []
 
@@ -379,7 +514,9 @@ class TestCompareReleaseAgainstBundleFacts:
         facts_path = tmp_path / "old.bundlefacts.json"
         save_bundle_facts(facts, facts_path)
 
-        result = compare_release_against_bundle_facts(facts_path, new_dir)
+        result = compare_release_against_bundle_facts(
+            facts_path, new_dir, include_dependencies=True
+        )
 
         # New-side signature evidence was resolved for real (via
         # service.resolve_input), so a real per-library diff ran; whether

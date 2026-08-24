@@ -226,6 +226,7 @@ def compare_release_against_bundle_facts(
     system_providers: list[str] | None = None,
     cohorts: list[str] | None = None,
     policy: str = "strict_abi",
+    include_dependencies: bool = False,
 ) -> BundleDiffResult:
     """End-to-end driver: a stored OLD-side ``BundleFacts`` file compared
     against a live NEW-side directory/package extraction root (G38 Phase 13).
@@ -259,12 +260,28 @@ def compare_release_against_bundle_facts(
     old-side meaning once the old side is already a resolved snapshot") as
     why this is a genuinely smaller surface than ``compare_release_cmd``,
     not an oversight.
+
+    *include_dependencies* (default ``False``) mirrors ``--include-system-
+    declarations``'s own Click default (``cli_options.
+    include_dependencies_option`` -- ``dumper_scoping.py``'s header-origin
+    filter, unrelated to ``--follow-deps``/DT_NEEDED), not
+    ``service.resolve_input``'s own bare-Python default of ``True``: a
+    ``BundleFacts`` file produced by the ordinary ``compare
+    --bundle-facts-out`` CLI flow is dependency-*scoped* by default, so
+    resolving the NEW side with the library's other default
+    (unfiltered) would give the two sides different
+    ``AbiSnapshot.dependency_scope`` values and
+    ``service.compare_snapshots`` would raise ``ScopeMismatchError`` for
+    every ordinary invocation of this function (Codex review, root
+    AGENTS.md's dependency-scoping entry). Pass ``True`` only when
+    *old_facts_path* was itself captured with ``--include-system-
+    declarations``.
     """
     from . import service
-    from .binary_utils import _canonical_library_key
     from .bundle_facts import compare_bundle_from_facts
     from .bundle_manifest import load_manifest
     from .bundle_models import BundleSignatureEvidence
+    from .cli_helpers_compare import _build_match_map
     from .package import discover_shared_libraries
     from .serialization import load_bundle_facts
 
@@ -274,9 +291,13 @@ def compare_release_against_bundle_facts(
         new_files = discover_shared_libraries(new_dir, include_private=include_private_dso)
     else:
         new_files = [new_dir]
-    new_map: dict[str, Path] = {}
-    for p in new_files:
-        new_map[_canonical_library_key(p)] = p
+    # Version-aware duplicate resolution (the same rule the live release
+    # fan-out uses -- `cli_compare_release.py`'s own `_build_match_map`
+    # call), rather than a plain last-write-wins dict build: a directory
+    # carrying more than one version of a library (e.g. `libfoo.so.9` and
+    # `libfoo.so.10`) must not silently resolve to whichever sorts last
+    # lexicographically (Codex review).
+    new_map, _match_warnings = _build_match_map(new_files)
 
     per_library_results: list[DiffResult] = []
     new_signature_evidence: dict[str, BundleSignatureEvidence] = {}
@@ -290,6 +311,7 @@ def compare_release_against_bundle_facts(
             includes=includes,
             version=new_version,
             lang=lang,
+            include_dependencies=include_dependencies,
         )
         diff = service.compare_snapshots(old_snapshot, new_snapshot, policy=policy)
         per_library_results.append(diff)
