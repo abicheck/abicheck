@@ -843,3 +843,33 @@ def test_constructor_seeded_entity_resolver_is_rebuilt_after_normalization() -> 
     normalized_id = graph.nodes[0].id
     assert normalized_id != raw_id  # sanity: normalization actually happened
     assert graph.entity_resolver.canonical_id_for(normalized_id) is not None
+
+
+def test_vtable_node_id_strips_checkout_directory_and_migrates() -> None:
+    # A vtable's own identity is its owning (possibly anonymous, polymorphic) record's --
+    # vtable:// must join decl://type://template_decl://template_instantiation:// in both
+    # fresh-build normalization and load-time migration, the same choke points every other
+    # decl/type-derived kind already routes through (Codex review, fresh evidence,
+    # nineteenth round).
+    from abicheck.buildsource.graph_facts import GraphEdge, GraphNode
+    from abicheck.buildsource.source_graph import _vtable_node_id
+
+    old = _vtable_node_id("lambda at /old/checkout/lib.hpp:4:37")
+    new = _vtable_node_id("lambda at /new/checkout/lib.hpp:4:37")
+    assert old == new
+    assert "/old/checkout" not in old
+
+    # Load-time migration: a pre-normalization persisted vtable:// node/edge must migrate
+    # to the identical id a fresh build produces.
+    raw_label = "lambda at /old/checkout/lib.hpp:4:37"
+    node = GraphNode.from_dict(
+        {"id": f"vtable://{raw_label}", "kind": "vtable", "label": raw_label}
+    )
+    fresh_id = _vtable_node_id("lambda at /new/checkout/lib.hpp:4:37")
+    assert node.id == fresh_id
+    assert "/old/checkout" not in node.label
+
+    edge = GraphEdge.from_dict(
+        {"src": "decl://foo", "dst": f"vtable://{raw_label}", "edge": "TYPE_HAS_VTABLE"}
+    )
+    assert edge.dst == fresh_id

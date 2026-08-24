@@ -631,7 +631,10 @@ def _option_node_id(flag: str) -> str:
 
 
 def _vtable_node_id(identity: str) -> str:
-    return f"vtable://{identity}"
+    # A vtable's identity is its owning record's, which for a polymorphic anonymous struct
+    # can embed the checkout marker (Codex review) -- no-op for a fresh build's own
+    # already-normalized identity, matters for any other caller and for the migration gate.
+    return f"vtable://{_normalize_graph_identity(identity)}"
 
 
 def function_decl_identity(
@@ -1476,20 +1479,17 @@ def _augment_with_source_abi(
         *surface.reachable_templates,
         *surface.reachable_inline_bodies,
     )
-    # An entity routed to reachable_templates/reachable_inline_bodies shares
-    # its identity() (mangled name, or qualified_name+signature_hash) with the
-    # plain "function"-kind declaration entity clang.py *also* emits for the
-    # same function -- both land on the same node id via _decl_node_id below,
-    # and add_node keeps only the first writer's attrs. reachable_declarations
-    # is iterated first in `declarations` above, so for any function that also
-    # has an inline/template rendition, the winning node's own attrs["decl_kind"]
-    # is always "function"/"method", never "inline"/"template" -- silently
-    # losing the one signal that distinguishes "body compiled into every
-    # consumer TU that includes this header" from "ordinary out-of-line body,
-    # compiled into this library's binary only" (Codex review). Compute the
-    # identity set up front so every entity sharing it gets the *same*
-    # attrs["consumer_compiled_body"] value regardless of which one wins the
-    # node-id race.
+    # An entity routed to reachable_templates/reachable_inline_bodies shares its identity()
+    # (mangled name, or qualified_name+signature_hash) with the plain "function"-kind
+    # declaration entity clang.py *also* emits for the same function -- both land on the same
+    # node id via _decl_node_id below, and add_node keeps only the first writer's attrs.
+    # reachable_declarations is iterated first in `declarations` above, so for any function
+    # that also has an inline/template rendition, the winning node's own
+    # attrs["decl_kind"] is always "function"/"method", never "inline"/"template" -- silently
+    # losing the one signal that distinguishes "body compiled into every consumer TU that
+    # includes this header" from "ordinary out-of-line body, compiled into this library's
+    # binary only" (Codex review). Compute the identity set up front so every entity sharing
+    # it gets the *same* attrs["consumer_compiled_body"] value regardless of which one wins.
     consumer_compiled_identities = {
         ent.identity()
         for ent in (*surface.reachable_templates, *surface.reachable_inline_bodies)

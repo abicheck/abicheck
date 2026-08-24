@@ -1093,6 +1093,7 @@ _DECL_OR_TYPE_ID_PREFIXES = (
     "type://",
     "template_decl://",
     "template_instantiation://",
+    "vtable://",
 )
 
 
