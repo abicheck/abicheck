@@ -79,6 +79,9 @@ def _make_diff(
     suppressed_count: int = 0,
     suppression_file_provided: bool = False,
     suppressed_changes: list[Change] | None = None,
+    scope_to_public_surface: bool = False,
+    out_of_surface_count: int = 0,
+    out_of_surface_changes: list[Change] | None = None,
 ) -> DiffResult:
     """Build a minimal DiffResult for testing."""
     return DiffResult(
@@ -92,6 +95,9 @@ def _make_diff(
         suppressed_count=suppressed_count,
         suppression_file_provided=suppression_file_provided,
         suppressed_changes=suppressed_changes or [],
+        scope_to_public_surface=scope_to_public_surface,
+        out_of_surface_count=out_of_surface_count,
+        out_of_surface_changes=out_of_surface_changes or [],
     )
 
 
@@ -755,6 +761,52 @@ class TestToMarkdownBranches:
         )
         out = to_markdown(result)
         assert "nothing suppressed" in out
+
+    def test_to_markdown_with_out_of_surface_note(self):
+        # Regression: the default/root-cause markdown render (what `compare`
+        # prints to stdout without --show-filtered) had no indication at all
+        # that findings were demoted out of the public-surface verdict --
+        # unlike JSON/SARIF, which always carry out_of_surface_count/
+        # out_of_surface_changes regardless of --show-filtered. A run that
+        # demoted 2 real BREAKING findings to "non-public-type" noise could
+        # read NO_CHANGE/exit 0 with zero visible trace in the human report.
+        excluded = Change(
+            kind=ChangeKind.TYPE_SIZE_CHANGED,
+            symbol="discard_iterator",
+            description="size changed",
+        )
+        result = _make_diff(
+            changes=[],
+            verdict=Verdict.NO_CHANGE,
+            scope_to_public_surface=True,
+            out_of_surface_count=2,
+            out_of_surface_changes=[excluded, excluded],
+        )
+        out = to_markdown(result)
+        assert "2 finding(s) filtered as non-public ABI surface" in out
+        assert "--show-filtered" in out
+
+    def test_to_markdown_no_out_of_surface_note_when_nothing_filtered(self):
+        result = _make_diff(
+            changes=[],
+            verdict=Verdict.NO_CHANGE,
+            scope_to_public_surface=True,
+            out_of_surface_count=0,
+        )
+        out = to_markdown(result)
+        assert "filtered as non-public ABI surface" not in out
+
+    def test_to_markdown_no_out_of_surface_note_when_scoping_disabled(self):
+        # scope_to_public_surface=False -- out_of_surface_count would be
+        # meaningless/unset for a run that never opted into surface scoping.
+        result = _make_diff(
+            changes=[],
+            verdict=Verdict.NO_CHANGE,
+            scope_to_public_surface=False,
+            out_of_surface_count=2,
+        )
+        out = to_markdown(result)
+        assert "filtered as non-public ABI surface" not in out
 
     def test_to_markdown_leaf_with_many_affected_symbols(self):
         """Leaf mode with >10 affected symbols triggers truncation."""

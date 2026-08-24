@@ -388,3 +388,72 @@ class TestQualifiedNameNormalizesEnclosingAnonymousScope:
         (old_inner,) = [t for t in old_parser.parse_types() if t.name == "Inner"]
         (new_inner,) = [t for t in new_parser.parse_types() if t.name == "Inner"]
         assert type_map_key(old_inner) == type_map_key(new_inner)
+
+
+class TestSyntheticCtorDtorKeysNormalizeEnclosingLambdaScope:
+    """Residual half of the same defect (Codex review, follow-up): the
+    class's own template-argument-embedded lambda location is stripped from
+    ``RecordType.name``/``.qualified_name`` (above), but a Constructor's
+    synthesized identity key (``_function_mangled_name``'s
+    ``SYNTHETIC_CTOR_KEY_PREFIX{scope}(...)``) and a Destructor's
+    (``~{scope}``) are built from ``_enclosing_class_qualified_name`` ->
+    ``_qualified_name``, which walked ``context`` copying each ancestor's raw
+    ``name`` verbatim -- so two byte-identical header trees checked out under
+    different paths still synthesized two different ``Function.mangled``
+    keys for a lambda-templated class's own ctor/dtor
+    (``~demo::raii_guard<(lambda at /tmp/old/lib.hpp:4:37)>`` vs.
+    ``~demo::raii_guard<(lambda at /tmp/new/lib.hpp:4:37)>``), fabricating a
+    ``func_removed``/``func_added`` pair even though nothing about the
+    declaration actually changed.
+    """
+
+    def _lambda_class_with_ctor_dtor(self, source_path: str) -> Element:
+        root = Element("CastXML", attrib={"format": "1.4.0"})
+        _file(root, "f1", source_path)
+        SubElement(root, "Namespace", attrib={"id": "_1", "name": "::"})
+        SubElement(root, "Namespace", attrib={"id": "_2", "name": "demo", "context": "_1"})
+
+        struct_el = SubElement(root, "Struct")
+        struct_el.set("id", "_3")
+        struct_el.set("name", f"raii_guard<(lambda at {source_path}:4:37)>")
+        struct_el.set("context", "_2")
+        struct_el.set("file", "f1")
+        struct_el.set("line", "4")
+        struct_el.set("members", "_4 _5")
+
+        ctor = SubElement(root, "Constructor")
+        ctor.set("id", "_4")
+        ctor.set("name", f"raii_guard<(lambda at {source_path}:4:37)>")
+        ctor.set("context", "_3")
+        ctor.set("file", "f1")
+        ctor.set("line", "5")
+
+        dtor = SubElement(root, "Destructor")
+        dtor.set("id", "_5")
+        dtor.set("name", f"raii_guard<(lambda at {source_path}:4:37)>")
+        dtor.set("context", "_3")
+        dtor.set("file", "f1")
+        dtor.set("line", "6")
+
+        return root
+
+    def test_two_checkout_directories_produce_identical_ctor_dtor_keys(self) -> None:
+        old_root = self._lambda_class_with_ctor_dtor("/tmp/d2a/lib.hpp")
+        new_root = self._lambda_class_with_ctor_dtor("/tmp/d2b/lib.hpp")
+        old_parser = _CastxmlParser(
+            old_root, exported_dynamic=set(), exported_static=set()
+        )
+        new_parser = _CastxmlParser(
+            new_root, exported_dynamic=set(), exported_static=set()
+        )
+        old_funcs = {f.mangled: f for f in old_parser.parse_functions()}
+        new_funcs = {f.mangled: f for f in new_parser.parse_functions()}
+        old_dtor = next(k for k in old_funcs if k.startswith("~"))
+        new_dtor = next(k for k in new_funcs if k.startswith("~"))
+        assert old_dtor == new_dtor
+        assert "/tmp/d2a" not in old_dtor and "/tmp/d2b" not in new_dtor
+
+        old_ctor = next(k for k in old_funcs if not k.startswith("~"))
+        new_ctor = next(k for k in new_funcs if not k.startswith("~"))
+        assert old_ctor == new_ctor
+        assert "/tmp/d2a" not in old_ctor and "/tmp/d2b" not in new_ctor

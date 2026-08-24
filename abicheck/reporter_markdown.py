@@ -641,6 +641,7 @@ def _to_markdown_leaf(
 
     _append_redundancy_note(lines, result)
     _append_suppression_note(lines, result)
+    _append_out_of_surface_note(lines, result)
 
     if show_impact:
         lines += _build_impact_table(result, displayed_changes=changes)
@@ -1042,6 +1043,7 @@ def _to_markdown_root_cause(
 
     _append_redundancy_note(lines, result)
     _append_suppression_note(lines, result)
+    _append_out_of_surface_note(lines, result)
 
     if show_impact:
         lines += _build_impact_table(result, displayed_changes=changes)
@@ -1071,6 +1073,31 @@ def _append_redundancy_note(lines: list[str], result: DiffResult) -> None:
             f"> ℹ️ {result.redundant_count} redundant change(s) hidden "
             "(derived from root type changes). Set `scope.show_redundant: true` in\n"
             "> `.abicheck.yml` to show all."
+        )
+
+
+def _append_out_of_surface_note(lines: list[str], result: DiffResult) -> None:
+    """Note when `--scope-public-headers` demoted findings out of the
+    reported surface (ADR-024 §D5 traceability).
+
+    Unlike ``review`` format's headline-table row (``to_review_digest``'s
+    "Filtered (internal/private)"), the default/root-cause markdown render
+    had no indication at all that anything was filtered when
+    ``--show-filtered`` wasn't also passed -- a run demoting real
+    ``BREAKING`` findings to non-public-surface noise could read
+    `NO_CHANGE`/exit 0 with zero visible trace that 2 (or 20) findings were
+    ever excluded from the verdict, unlike JSON/SARIF (which always carry
+    ``out_of_surface_count``/``out_of_surface_changes`` regardless of this
+    flag). This mirrors the redundancy/suppression notes immediately above:
+    a one-line disclosure by default, with the full per-finding ledger still
+    gated behind ``--show-filtered`` (``echo_filtered_surface``, stderr).
+    """
+    if result.scope_to_public_surface and result.out_of_surface_count:
+        n = result.out_of_surface_count
+        lines.append("")
+        lines.append(
+            f"> ℹ️ {n} finding(s) filtered as non-public ABI surface "
+            "(`--scope-public-headers`). Pass `--show-filtered` to list them."
         )
 
 
@@ -1759,6 +1786,7 @@ def to_markdown(
 
     _append_redundancy_note(lines, result)
     _append_suppression_note(lines, result)
+    _append_out_of_surface_note(lines, result)
 
     if show_impact:
         lines.append("")

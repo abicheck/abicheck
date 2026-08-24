@@ -826,6 +826,56 @@ def compute_public_surface(snap: AbiSnapshot) -> PublicSurface:
         if en.source_header and en.origin not in _DEMOTE_ORIGINS
     }
 
+    # A record/class/union declared directly in a public header, but named
+    # by NO exported function/variable signature, is otherwise invisible to
+    # this closure -- it has no root to be reached from -- and gets demoted
+    # as "non-public-type" even though it sits squarely on the public API.
+    # This is the common shape for a header-only/templates-only library
+    # (e.g. oneDPL's `discard_iterator`): the library exports few or no
+    # binary symbols naming the type, since consumers instantiate/construct
+    # it themselves straight from the header; nothing about that makes the
+    # type any less part of the public surface than a class that happens to
+    # also appear in an exported signature.
+    #
+    # `_seed_queue_from_public_types` in `internal_leak.py` already performs
+    # a similar seed for a similar reason ("classes declared in public
+    # headers but never referenced by an exported function symbol
+    # (e.g. inline-only templates)") to drive `DetectInternalLeaks`'s own,
+    # separately-run leak walk -- see this function's `_classify_type_level`
+    # sibling's comment above for why that walk's public-root set has always
+    # been broader than this one's. Reuse the same internal-namespace
+    # exclusion (`is_internal_type`/`DEFAULT_INTERNAL_NAMESPACES`) that walk
+    # already trusts, so a genuine implementation-detail type declared under
+    # a `detail::`/`impl::`/`internal::`-style namespace (even inside an
+    # otherwise-public header) still demotes normally instead of being
+    # promoted merely for sharing a header with real public API.
+    #
+    # Unlike the enum seed above (which also fires for `ScopeOrigin.UNKNOWN`
+    # -- a `source_header` alone), this is deliberately restricted to a
+    # *confirmed* public-header origin (`PUBLIC_HEADER`/`GENERATED`): a
+    # record with unclassified provenance (no `-H`/public-header set was
+    # given, so origin defaults to `UNKNOWN`) has no positive evidence it's
+    # actually on the public surface rather than an unrelated internal type
+    # that merely happens to share a translation unit -- unlike an enum
+    # member (always consumer-visible the instant the header is included),
+    # a struct that is never named by anything else is exactly the
+    # "unreachable, presumably-private helper type" shape this whole
+    # reachability closure exists to demote, so it must not be force-kept
+    # on unclassified provenance alone (confirmed by a real regression: an
+    # isolated, otherwise-unreferenced struct with no public-header set
+    # given was wrongly promoted before this restriction was added).
+    from .internal_leak import DEFAULT_INTERNAL_NAMESPACES, is_internal_type
+
+    seed_types |= {
+        rec.qualified_name or rec.name
+        for rec in snap.types
+        if rec.source_header
+        and rec.origin in (ScopeOrigin.PUBLIC_HEADER, ScopeOrigin.GENERATED)
+        and not is_internal_type(
+            rec.qualified_name or rec.name, DEFAULT_INTERNAL_NAMESPACES
+        )
+    }
+
     # Provenance is available iff some declaration was classified to a real
     # origin (only happens when the snapshot was dumped with a public-header
     # set). Used by the classifier to emit the ``no-provenance`` ledger reason.
