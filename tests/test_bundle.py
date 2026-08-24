@@ -1239,6 +1239,42 @@ class TestIntraDepSignatureChanged:
         assert len(findings) == 1
         assert findings[0].consumer_library == "libalgo.so"
 
+    def test_declines_to_promote_when_the_provider_is_ambiguous(self) -> None:
+        # G38 stabilization (Codex review, fresh evidence, beyond the
+        # reachability fix above): when a consumer directly NEEDs TWO
+        # DSOs that both export a matching (unversioned/default)
+        # definition of the same bare symbol, this model has no notion of
+        # real ELF symbol-search order (DT_NEEDED / global-scope
+        # precedence) to say which one the consumer's unversioned
+        # reference actually binds to -- attributing a signature change on
+        # either one to that consumer would be a guess. Both candidates
+        # must decline (ambiguous), not just avoid attributing to the
+        # unreachable-sibling case the earlier fix covers.
+        new = _snapshot(
+            {
+                "libcore.so": _meta(soname="libcore.so.1", exports=["core_add"]),
+                "libalt.so": _meta(soname="libalt.so.1", exports=["core_add"]),
+                "libalgo.so": _meta(
+                    soname="libalgo.so.1",
+                    needed=["libcore.so.1", "libalt.so.1"],
+                    imports=["core_add"],
+                ),
+            }
+        )
+        diff_libcore = _diff(
+            "libcore.so",
+            Change(
+                kind=ChangeKind.CALLING_CONVENTION_CHANGED,
+                symbol="core_add",
+                description="cdecl->fastcall",
+            ),
+        )
+        result = compare_bundle(new, new, [diff_libcore])
+        assert not any(
+            f.kind == ChangeKind.BUNDLE_INTRA_DEP_SIGNATURE_CHANGED
+            for f in result.bundle_findings
+        )
+
     def test_plugin_abi_policy_suppresses_calling_convention_promotion(self) -> None:
         # G38 stabilization (Codex review, fresh evidence): CALLING_
         # CONVENTION_CHANGED is COMPATIBLE under the plugin_abi policy

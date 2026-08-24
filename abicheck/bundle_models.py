@@ -371,6 +371,7 @@ def consumer_resolves_via_provider(
     """
     if provider_lib not in reachable:
         return False
+    all_entries = new.resolution.providers_for(symbol)
     # A single provider library can legitimately export several *versioned*
     # definitions of the same bare symbol name (e.g. compat-symbol pattern
     # `foo@V1` alongside `foo@@V2`) -- check every one of this provider's
@@ -378,20 +379,39 @@ def consumer_resolves_via_provider(
     # own matching), not just the first one found (Codex review): picking
     # only the first could test a non-matching V1 entry while the real
     # match is a later V2 one from the same provider.
-    candidates = [
-        p for p in new.resolution.providers_for(symbol) if p.library == provider_lib
-    ]
+    candidates = [p for p in all_entries if p.library == provider_lib]
     if not candidates:
         return False
-    if not consumer.version:
-        # An unversioned reference can only be satisfied by an unversioned
-        # or default-version ("@@default") provider definition.
-        return any(c.is_default for c in candidates)
-    if consumer.version_soname:
+
+    if consumer.version and consumer.version_soname:
+        # The per-symbol verneed provider pins resolution to one specific
+        # library by construction (GNU symbol versioning) -- no
+        # interposition ambiguity applies to this branch.
         target_lib = new.resolution.soname_to_name.get(consumer.version_soname)
         if target_lib != provider_lib:
             return False
-    return any(c.version == consumer.version for c in candidates)
+        return any(c.version == consumer.version for c in candidates)
+
+    # No per-symbol version pin (an unversioned reference, or a versioned
+    # one whose verneed soname wasn't captured): two reachable bundle
+    # siblings can each independently define a matching entry for this
+    # bare symbol, and this model has no notion of real ELF symbol-search
+    # order (DT_NEEDED / global-scope precedence) to say which one a
+    # consumer's unversioned reference actually binds to (Codex review,
+    # G38 stabilization -- fresh evidence beyond the reachability fix
+    # above). Attributing to any one of several equally-plausible
+    # providers would be a guess, so decline (ambiguous) rather than
+    # fabricate an attribution -- a missed promotion is the safe
+    # direction here, not a false one.
+    def _matches(p: ProviderEntry) -> bool:
+        if p.library not in reachable:
+            return False
+        if not consumer.version:
+            return p.is_default
+        return p.version == consumer.version
+
+    matching_libs = {p.library for p in all_entries if _matches(p)}
+    return matching_libs == {provider_lib}
 
 
 def diff_change_is_breaking(
