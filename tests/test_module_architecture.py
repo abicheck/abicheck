@@ -58,6 +58,18 @@ class ModuleArchitectureUnitTests(unittest.TestCase):
             "top-level-overflow-module", {finding.check for finding in findings}
         )
 
+    def test_new_top_level_overflow_package_is_rejected(self) -> None:
+        findings = gate.check_size(
+            path="abicheck/cli_more/__init__.py",
+            current="",
+            base=None,
+            is_new=True,
+            config=self.config,
+        )
+        self.assertIn(
+            "top-level-overflow-module", {finding.check for finding in findings}
+        )
+
     def test_new_production_module_over_800_lines_is_rejected(self) -> None:
         findings = gate.check_size(
             path="abicheck/evidence/oversized.py",
@@ -140,6 +152,34 @@ class ModuleArchitectureUnitTests(unittest.TestCase):
             )
         self.assertEqual(len(findings), 1)
         self.assertIn("domain imports interfaces", findings[0].message)
+
+    def test_non_dumper_evidence_import_is_classified(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            path = root / "abicheck" / "domain" / "bad.py"
+            path.parent.mkdir(parents=True)
+            path.write_text("from abicheck import elf_metadata\n", encoding="utf-8")
+            findings = gate.check_imports(
+                root, ["abicheck/domain/bad.py"], self.config
+            )
+        self.assertEqual(len(findings), 1)
+        self.assertIn("domain imports evidence", findings[0].message)
+
+    def test_unclassified_first_party_import_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            path = root / "abicheck" / "domain" / "bad.py"
+            path.parent.mkdir(parents=True)
+            path.write_text(
+                "from abicheck import unclassified_legacy\n", encoding="utf-8"
+            )
+            findings = gate.check_imports(
+                root, ["abicheck/domain/bad.py"], self.config
+            )
+        self.assertEqual(len(findings), 1)
+        self.assertEqual(
+            findings[0].check, "architecture-unclassified-first-party-import"
+        )
 
     def test_legacy_same_layer_dependency_is_allowed(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

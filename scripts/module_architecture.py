@@ -167,6 +167,15 @@ def _top_level_module(path: str) -> bool:
     return len(parts) == 2 and parts[0] == "abicheck" and path.endswith(".py")
 
 
+def _top_level_name(path: str) -> str | None:
+    """Return the module/package name directly below ``abicheck/``."""
+    parts = Path(path).parts
+    if len(parts) < 2 or parts[0] != "abicheck":
+        return None
+    first = parts[1]
+    return Path(first).stem if first.endswith(".py") else first
+
+
 def check_size(
     *,
     path: str,
@@ -181,27 +190,27 @@ def check_size(
     findings: list[Finding] = []
     now = count_lines(current)
 
-    if is_new and _top_level_module(path):
-        stem = Path(path).stem
+    if is_new:
+        top_level_name = _top_level_name(path)
         target_package_names = {
             Path(str(layer["path"])).name
             for layer in config["target_layers"].values()
         }
-        if stem in target_package_names:
+        if _top_level_module(path) and top_level_name in target_package_names:
             findings.append(
                 Finding(
                     "error",
                     "target-layer-must-be-package",
                     path,
-                    f"{stem} is a target package; create abicheck/{stem}/ "
-                    "with real code",
+                    f"{top_level_name} is a target package; create "
+                    f"abicheck/{top_level_name}/ with real code",
                 )
             )
         prefix = next(
             (
                 p
                 for p in config.get("forbidden_new_top_level_prefixes", [])
-                if stem.startswith(p)
+                if top_level_name and top_level_name.startswith(p)
             ),
             None,
         )
@@ -211,7 +220,8 @@ def check_size(
                     "error",
                     "top-level-overflow-module",
                     path,
-                    f"new top-level {prefix}* module is frozen; use a bounded package",
+                    f"new top-level {prefix}* module/package is frozen; "
+                    "use a bounded package",
                 )
             )
 
@@ -354,8 +364,28 @@ def check_imports(
             continue
         allowed = set(config["target_layers"][source]["may_import_layers"])
         seen_forbidden_targets: set[str] = set()
+        seen_unclassified: set[str] = set()
         for module in imports:
             target = _layer_for_module(module, config)
+            if (
+                target is None
+                and config.get("first_party_imports_must_be_classified", False)
+                and module.startswith("abicheck.")
+            ):
+                import_root = ".".join(module.split(".")[:2])
+                if import_root not in seen_unclassified:
+                    seen_unclassified.add(import_root)
+                    findings.append(
+                        Finding(
+                            "error",
+                            "architecture-unclassified-first-party-import",
+                            rel,
+                            f"{source} imports unclassified first-party module "
+                            f"{import_root}; add it to legacy_import_layers or "
+                            "move it into a target package",
+                        )
+                    )
+                continue
             if (
                 target
                 and target != source

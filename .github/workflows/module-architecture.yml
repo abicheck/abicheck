@@ -3,12 +3,6 @@ name: Module Architecture
 on:
   pull_request:
     branches: [main]
-    paths:
-      - 'abicheck/**/*.py'
-      - 'scripts/**/*.py'
-      - 'tests/**/*.py'
-      - 'architecture/module-boundaries.json'
-      - '.github/workflows/module-architecture.yml'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}

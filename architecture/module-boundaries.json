@@ -4,21 +4,30 @@
   "line_policies": [
     {
       "name": "production",
-      "globs": ["abicheck/**/*.py", "abicheck/*.py"],
+      "globs": [
+        "abicheck/**/*.py",
+        "abicheck/*.py"
+      ],
       "warning_lines": 500,
       "new_file_max_lines": 800,
       "legacy_no_growth_above_lines": 800
     },
     {
       "name": "scripts",
-      "globs": ["scripts/**/*.py", "scripts/*.py"],
+      "globs": [
+        "scripts/**/*.py",
+        "scripts/*.py"
+      ],
       "warning_lines": 600,
       "new_file_max_lines": 1000,
       "legacy_no_growth_above_lines": 1000
     },
     {
       "name": "tests",
-      "globs": ["tests/**/*.py", "tests/*.py"],
+      "globs": [
+        "tests/**/*.py",
+        "tests/*.py"
+      ],
       "warning_lines": 900,
       "new_file_max_lines": 1200,
       "legacy_no_growth_above_lines": 1200
@@ -50,43 +59,73 @@
     "evidence": {
       "path": "abicheck/evidence",
       "responsibility": "Binary, debug, header, build and source fact extraction. Produces facts; never classifies severity or renders output.",
-      "may_import_layers": ["domain", "storage"]
+      "may_import_layers": [
+        "domain",
+        "storage"
+      ]
     },
     "compare": {
       "path": "abicheck/compare",
       "responsibility": "Old/new matching, diff detectors, comparability and impact analysis. Emits typed findings without applying user policy.",
-      "may_import_layers": ["domain"]
+      "may_import_layers": [
+        "domain"
+      ]
     },
     "evaluate": {
       "path": "abicheck/evaluate",
       "responsibility": "Suppression, contract relevance, compatibility classification, severity and gate decisions.",
-      "may_import_layers": ["domain", "compare"]
+      "may_import_layers": [
+        "domain",
+        "compare"
+      ]
     },
     "storage": {
       "path": "abicheck/storage",
       "responsibility": "Snapshot/report schemas, serialization, caches and persisted envelopes.",
-      "may_import_layers": ["domain"]
+      "may_import_layers": [
+        "domain"
+      ]
     },
     "workflows": {
       "path": "abicheck/workflows",
       "responsibility": "Typed orchestration for dump, compare, scan, bundle/release, aggregate, deps and project operations.",
-      "may_import_layers": ["domain", "evidence", "compare", "evaluate", "storage"]
+      "may_import_layers": [
+        "domain",
+        "evidence",
+        "compare",
+        "evaluate",
+        "storage"
+      ]
     },
     "report": {
       "path": "abicheck/report",
       "responsibility": "Pure projections and format renderers over immutable typed results. No extraction, policy mutation or CLI behavior.",
-      "may_import_layers": ["domain", "compare", "evaluate"]
+      "may_import_layers": [
+        "domain",
+        "compare",
+        "evaluate"
+      ]
     },
     "interfaces": {
       "path": "abicheck/interfaces",
       "responsibility": "Click CLI, typed Python façade and compatibility adapters. Translate inputs to requests and project results; no domain implementation.",
-      "may_import_layers": ["domain", "workflows", "report"]
+      "may_import_layers": [
+        "domain",
+        "workflows",
+        "report"
+      ]
     }
   },
+  "first_party_imports_must_be_classified": true,
   "legacy_import_layers": [
     {
       "layer": "interfaces",
-      "patterns": ["abicheck.cli", "abicheck.cli_*", "abicheck.compat.cli"]
+      "patterns": [
+        "abicheck.cli",
+        "abicheck.cli_*",
+        "abicheck.compat.cli",
+        "abicheck.api"
+      ]
     },
     {
       "layer": "workflows",
@@ -96,7 +135,8 @@
         "abicheck.scan_engine",
         "abicheck.aggregate",
         "abicheck.aggregate_*",
-        "abicheck.bundle_analysis"
+        "abicheck.bundle_analysis",
+        "abicheck.project_scan*"
       ]
     },
     {
@@ -105,7 +145,14 @@
         "abicheck.dumper",
         "abicheck.dumper_*",
         "abicheck.buildsource.inline",
-        "abicheck.buildsource.extract*"
+        "abicheck.buildsource.extract*",
+        "abicheck.elf_metadata",
+        "abicheck.pe_metadata",
+        "abicheck.pdb_parser",
+        "abicheck.macho_metadata",
+        "abicheck.dwarf*",
+        "abicheck.debug_info*",
+        "abicheck.symbol_versions"
       ]
     },
     {
@@ -116,7 +163,10 @@
         "abicheck.reachability*",
         "abicheck.bundle",
         "abicheck.bundle_*",
-        "abicheck.buildsource.source_graph*"
+        "abicheck.buildsource.source_graph*",
+        "abicheck.checker",
+        "abicheck.type_comparator*",
+        "abicheck.impact*"
       ]
     },
     {
@@ -125,12 +175,19 @@
         "abicheck.suppression*",
         "abicheck.policy*",
         "abicheck.severity",
-        "abicheck.contract_*"
+        "abicheck.contract_*",
+        "abicheck.profile*",
+        "abicheck.analysis_assurance*",
+        "abicheck.risk*"
       ]
     },
     {
       "layer": "report",
-      "patterns": ["abicheck.reporter", "abicheck.reporter_*"]
+      "patterns": [
+        "abicheck.reporter",
+        "abicheck.reporter_*",
+        "abicheck.format_*"
+      ]
     },
     {
       "layer": "storage",
@@ -138,7 +195,9 @@
         "abicheck.serialization",
         "abicheck.snapshot_io",
         "abicheck.cache*",
-        "abicheck.schema*"
+        "abicheck.schema*",
+        "abicheck.baseline*",
+        "abicheck.report_schema*"
       ]
     },
     {
@@ -147,7 +206,11 @@
         "abicheck.models",
         "abicheck.change_registry",
         "abicheck.change_registry_*",
-        "abicheck.finding_identity"
+        "abicheck.finding_identity",
+        "abicheck.model",
+        "abicheck.api_types",
+        "abicheck.checker_types",
+        "abicheck.findings"
       ]
     }
   ],
@@ -163,17 +226,65 @@
     "abicheck/serialization.py, snapshot_io.py, schemas and caches": "abicheck/storage"
   },
   "seed_debt_inventory": {
-    "abicheck/aggregate.py": {"lines": 2000, "kind": "workflow monolith", "target": "workflows/aggregate"},
-    "abicheck/bundle.py": {"lines": 2000, "kind": "analysis plus loading plus compatibility façade", "target": "compare/bundle and workflows/release"},
-    "abicheck/buildsource/inline.py": {"lines": 2000, "kind": "configuration plus extraction orchestration", "target": "evidence/build and evaluate/config"},
-    "abicheck/buildsource/source_graph.py": {"lines": 2000, "kind": "graph model plus build plus diff compatibility façade", "target": "compare/source_graph"},
-    "abicheck/change_registry.py": {"lines": 2000, "kind": "declarative catalog", "target": "domain/change_catalog"},
-    "abicheck/dumper_castxml.py": {"lines": 2000, "kind": "backend parser", "target": "evidence/header/castxml"},
-    "abicheck/reporter.py": {"lines": 2000, "kind": "report construction plus compatibility façade", "target": "report/model and report/json"},
-    "abicheck/reporter_markdown.py": {"lines": 2000, "kind": "format renderer", "target": "report/markdown"},
-    "abicheck/cli_compare_helpers.py": {"lines": 1998, "kind": "frontend plus workflow logic", "target": "interfaces/cli/compare and workflows/compare"},
-    "abicheck/cli_compare_release.py": {"lines": 1998, "kind": "frontend plus release workflow", "target": "interfaces/cli/release and workflows/release"},
-    "abicheck/cli_options.py": {"lines": 1977, "kind": "cross-command option registry", "target": "interfaces/cli/options"},
-    "abicheck/cli.py": {"lines": 1959, "kind": "root frontend plus helpers plus compatibility re-exports", "target": "interfaces/cli with a thin compatibility façade"}
+    "abicheck/aggregate.py": {
+      "lines": 2000,
+      "kind": "workflow monolith",
+      "target": "workflows/aggregate"
+    },
+    "abicheck/bundle.py": {
+      "lines": 2000,
+      "kind": "analysis plus loading plus compatibility façade",
+      "target": "compare/bundle and workflows/release"
+    },
+    "abicheck/buildsource/inline.py": {
+      "lines": 2000,
+      "kind": "configuration plus extraction orchestration",
+      "target": "evidence/build and evaluate/config"
+    },
+    "abicheck/buildsource/source_graph.py": {
+      "lines": 2000,
+      "kind": "graph model plus build plus diff compatibility façade",
+      "target": "compare/source_graph"
+    },
+    "abicheck/change_registry.py": {
+      "lines": 2000,
+      "kind": "declarative catalog",
+      "target": "domain/change_catalog"
+    },
+    "abicheck/dumper_castxml.py": {
+      "lines": 2000,
+      "kind": "backend parser",
+      "target": "evidence/header/castxml"
+    },
+    "abicheck/reporter.py": {
+      "lines": 2000,
+      "kind": "report construction plus compatibility façade",
+      "target": "report/model and report/json"
+    },
+    "abicheck/reporter_markdown.py": {
+      "lines": 2000,
+      "kind": "format renderer",
+      "target": "report/markdown"
+    },
+    "abicheck/cli_compare_helpers.py": {
+      "lines": 1998,
+      "kind": "frontend plus workflow logic",
+      "target": "interfaces/cli/compare and workflows/compare"
+    },
+    "abicheck/cli_compare_release.py": {
+      "lines": 1998,
+      "kind": "frontend plus release workflow",
+      "target": "interfaces/cli/release and workflows/release"
+    },
+    "abicheck/cli_options.py": {
+      "lines": 1977,
+      "kind": "cross-command option registry",
+      "target": "interfaces/cli/options"
+    },
+    "abicheck/cli.py": {
+      "lines": 1959,
+      "kind": "root frontend plus helpers plus compatibility re-exports",
+      "target": "interfaces/cli with a thin compatibility façade"
+    }
   }
 }
