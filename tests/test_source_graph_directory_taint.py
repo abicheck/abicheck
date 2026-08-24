@@ -618,3 +618,28 @@ def test_bare_marker_normalization_known_limitation_marker_text_in_path() -> Non
     result = _strip_bare_anonymous_type_location(name)
     # Known-bad: the real, checkout-dependent "/tmp/" prefix survives.
     assert "/tmp/" in result
+
+
+def test_source_graph_summary_from_dict_preserves_unrecognized_nested_coverage_fields() -> (
+    None
+):
+    # finalize()'s forward-compat merge must reach every nesting level, not
+    # only the top-level coverage keys: a newer/third-party producer's own
+    # additive metadata *inside* a recognized section (e.g. call_edges) must
+    # survive a load too, since a top-level-only spread still replaces each
+    # nested section wholesale (Codex review, fresh evidence).
+    from abicheck.buildsource.source_graph import SourceGraphSummary
+
+    pack = {
+        "nodes": [],
+        "edges": [],
+        "coverage": {
+            "call_edges": {"collected": False, "count": 0, "future_detail": "keep"},
+        },
+    }
+    graph = SourceGraphSummary.from_dict(pack)
+    assert graph.coverage["call_edges"]["future_detail"] == "keep"
+    # The recognized nested keys are still recomputed from the actual
+    # (empty) edge set, not trusted from the persisted payload.
+    assert graph.coverage["call_edges"]["collected"] is False
+    assert graph.coverage["call_edges"]["count"] == 0
