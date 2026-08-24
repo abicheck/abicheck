@@ -34,7 +34,7 @@ from abicheck.bundle_models import BundleSnapshot
 from abicheck.checker_policy import ChangeKind, Verdict
 from abicheck.checker_types import Change, DiffResult
 from abicheck.elf_metadata import ElfImport, ElfMetadata, ElfSymbol
-from abicheck.model import AbiSnapshot
+from abicheck.model import AbiSnapshot, Function, Visibility
 from abicheck.serialization import (
     bundle_facts_from_dict,
     bundle_facts_to_dict,
@@ -262,6 +262,147 @@ class TestCompareBundleFromFactsParity:
             manifest=empty_manifest,
         )
         assert result.bundle_findings == []
+
+
+# ---------------------------------------------------------------------------
+# G38 stabilization Phase 12: live/stored Phase-4 parity.
+#
+# Before Phase 12, compare_bundle_from_facts() delegated only to
+# compare_bundle() -- find_unverified_signature_findings() (the Phase 4
+# C-boundary signature-evidence gate) was a separate companion the live
+# `compare --release` CLI path called directly, so a stored-facts
+# comparison never ran it at all. This is the mandatory acceptance test
+# extended to that gap: a stored-old-vs-live-new comparison given both
+# sides' signature evidence must produce the identical
+# BUNDLE_INTRA_DEP_SIGNATURE_UNVERIFIED findings a live analyze_bundle()
+# call over the same underlying evidence would -- not just the graph-native
+# findings compare_bundle() alone covers (already pinned by the parity
+# class above, which predates Phase 12 and deliberately never passed any
+# signature evidence at all).
+# ---------------------------------------------------------------------------
+
+
+def _elf_only_fn(symbol: str) -> Function:
+    return Function(
+        name=symbol, mangled=symbol, return_type="?", visibility=Visibility.ELF_ONLY
+    )
+
+
+class TestCompareBundleFromFactsPhase4Parity:
+    def _bundle_metadata(self) -> dict[str, ElfMetadata]:
+        return {
+            "libcore.so": _meta(soname="libcore.so", exports=["core_fn"]),
+            "libconsumer.so": _meta(
+                soname="libconsumer.so", needed=["libcore.so"], imports=["core_fn"]
+            ),
+        }
+
+    def _signature_evidence(self, version: str) -> dict[str, AbiSnapshot]:
+        # elf_only_mode=True on both sides -- no header evidence at all for
+        # this symbol, so find_unverified_signature_findings() cannot
+        # confirm or deny the signature actually agrees between old and
+        # new, which is exactly the "unverified" (not "no change", not a
+        # confirmed BREAKING change) finding this gate exists to raise.
+        return {
+            "libcore.so": AbiSnapshot(
+                library="libcore.so",
+                version=version,
+                functions=[_elf_only_fn("core_fn")],
+                elf_only_mode=True,
+            )
+        }
+
+    def test_signature_unverified_matches_live_analyze_bundle(self) -> None:
+        from abicheck.bundle_analysis import analyze_bundle
+
+        metadata = self._bundle_metadata()
+        old_live = _snapshot(metadata)
+        new_snapshot = _snapshot(metadata)  # unchanged at the ELF/graph level
+        per_lib_results = [
+            _diff("libcore.so", verdict=Verdict.NO_CHANGE),
+            _diff("libconsumer.so", verdict=Verdict.NO_CHANGE),
+        ]
+        old_evidence = self._signature_evidence("old")
+        new_evidence = self._signature_evidence("new")
+
+        live_result = analyze_bundle(
+            old_live,
+            new_snapshot,
+            per_lib_results,
+            old_signature_evidence=old_evidence,
+            new_signature_evidence=new_evidence,
+        )
+
+        # capture_bundle_facts() needs a full metadata-carrying snapshot map
+        # (for bundle_snapshot_from_facts()'s own graph reconstruction), not
+        # only the signature-evidence one -- but old_evidence's own
+        # AbiSnapshot for libcore.so already carries no `.elf`, so build the
+        # facts source from the real per-library snapshots (mirroring every
+        # other test in this module) while reusing old_evidence as the
+        # signature-evidence map passed alongside it, exactly the shape
+        # `BundleFacts.per_library_snapshots` itself is (a real
+        # `AbiSnapshot` map doubling as both).
+        facts_snapshots = {
+            "libcore.so": AbiSnapshot(
+                library="libcore.so",
+                version="old",
+                elf=metadata["libcore.so"],
+                functions=[_elf_only_fn("core_fn")],
+                elf_only_mode=True,
+            ),
+            "libconsumer.so": AbiSnapshot(
+                library="libconsumer.so",
+                version="old",
+                elf=metadata["libconsumer.so"],
+            ),
+        }
+        facts = capture_bundle_facts(facts_snapshots)
+        facts_result = compare_bundle_from_facts(
+            facts,
+            new_snapshot,
+            per_lib_results,
+            new_signature_evidence=new_evidence,
+        )
+
+        assert facts_result.bundle_findings == live_result.bundle_findings
+        assert any(
+            f.kind == ChangeKind.BUNDLE_INTRA_DEP_SIGNATURE_UNVERIFIED
+            for f in live_result.bundle_findings
+        )
+
+    def test_no_new_signature_evidence_means_phase4_does_not_run(self) -> None:
+        """Omitting `new_signature_evidence` (today's only real caller
+        shape -- G38 Phase 13's stored-facts CLI consumer doesn't exist
+        yet) must behave exactly like every pre-Phase-12 caller: no
+        BUNDLE_INTRA_DEP_SIGNATURE_UNVERIFIED finding, even though the OLD
+        side's own `per_library_snapshots` would otherwise be usable
+        evidence."""
+        metadata = self._bundle_metadata()
+        new_snapshot = _snapshot(metadata)
+        per_lib_results = [
+            _diff("libcore.so", verdict=Verdict.NO_CHANGE),
+            _diff("libconsumer.so", verdict=Verdict.NO_CHANGE),
+        ]
+        facts_snapshots = {
+            "libcore.so": AbiSnapshot(
+                library="libcore.so",
+                version="old",
+                elf=metadata["libcore.so"],
+                functions=[_elf_only_fn("core_fn")],
+                elf_only_mode=True,
+            ),
+            "libconsumer.so": AbiSnapshot(
+                library="libconsumer.so", version="old", elf=metadata["libconsumer.so"]
+            ),
+        }
+        facts = capture_bundle_facts(facts_snapshots)
+
+        result = compare_bundle_from_facts(facts, new_snapshot, per_lib_results)
+
+        assert not any(
+            f.kind == ChangeKind.BUNDLE_INTRA_DEP_SIGNATURE_UNVERIFIED
+            for f in result.bundle_findings
+        )
 
 
 # ---------------------------------------------------------------------------
