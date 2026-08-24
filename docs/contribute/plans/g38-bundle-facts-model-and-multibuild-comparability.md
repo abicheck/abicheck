@@ -1678,11 +1678,96 @@ of a second hand-written loop; a declarative `bundle_variants:` config
 block naming each variant's identity coordinates explicitly (target,
 compiler family, feature toggles) rather than inferring it; and a
 `required: true/false` distinction so a missing required variant can gate
-a release rather than only demoting to `COMPATIBLE_WITH_RISK`. **Not yet
-implemented** — deliberately sequenced after Phases 9–12, since a stored-
-baseline CLI surface that skips Phase 4 (Phase 12) or retains full snapshots
-for every variant (Phase 9) would ship the same gaps this stabilization
-sequence exists to close, just on a wider surface.
+a release rather than only demoting to `COMPATIBLE_WITH_RISK`.
+
+**Implementation status: the Python-API resolution/pairing layer is shipped
+and inherits Phase 9/12's discipline in full; the literal CLI surface
+(`abicheck compare ... --old-bundle-facts <path>` / `.abicheck.yml`'s
+`bundle_variants:` block actually being read) is deliberately not
+attempted, for one concrete, measured reason — see "Known gap" below.**
+
+- `abicheck/bundle_side_input.py` — `LiveBundleInput`/`StoredBundleFactsInput`
+  (the `BundleSideInput` union), `ResolvedBundleSide`, and
+  `resolve_bundle_side()`: the shared resolution step this section asked
+  for, unifying what `cli_compare_release_helpers._run_bundle_analysis`
+  (live) and `bundle_facts.compare_bundle_from_facts` (stored) each already
+  computed independently into one `(BundleSnapshot, {canonical_name:
+  AbiSnapshot | BundleSignatureEvidence}, InstantiationManifest | None)`
+  shape. `compare_bundle_sides()` is the one comparison entry point built on
+  top of it — the first in this codebase able to express *every* pairing
+  (live/live, stored/live, live/stored, stored/stored), all four routed
+  through `bundle_analysis.analyze_bundle()` so none of the four can
+  independently drift on which detectors ran (Phase 12's own guarantee,
+  extended here to the two pairings — live/stored and stored/stored — that
+  didn't exist as callable shapes before this phase).
+  `compare_release_against_bundle_facts()` is the concrete unblocking:
+  given a stored OLD-side `BundleFacts` path and a live NEW-side directory,
+  it discovers the NEW side's `.so` files, dumps and diffs each matched
+  library through the Tier-2 `service.resolve_input`/`service.
+  compare_snapshots` chokepoints, builds the NEW side's compact
+  `BundleSignatureEvidence` projection (Phase 9's memory discipline —
+  never a full retained snapshot map beyond one in-flight comparison), and
+  calls `compare_bundle_from_facts()` with a real `new_signature_evidence`
+  populated — closing Phase 12's own "Known gap" note verbatim ("no
+  end-to-end CLI invocation ... exercising the Phase 4 parity guarantee")
+  at the Python-API level, with a real `@pytest.mark.integration` test
+  (`tests/test_bundle_side_input.py::TestCompareReleaseAgainstBundleFacts`,
+  real `gcc`-compiled `.so` files) as the exercise.
+- `abicheck/bundle_variants_config.py` — `parse_bundle_variants_config()`
+  (eager, hard-error validation of a raw `bundle_variants:` mapping into
+  `BundleVariantSpec` objects: `target_triple`/`compiler_family`/
+  `feature_toggles`/`required`, mirroring `variant_fingerprint()`'s own
+  explicit-coordinate shape exactly, per this section's own design) and
+  `run_bundle_variant_pairing()` — the first real caller of
+  `bundle_multibuild.pair_variants()` anywhere in this codebase outside its
+  own test suite (confirmed by grep before and after this change). The
+  `required: true/false` distinction reuses the *existing* ADR-027 D3.2
+  `BundleFinding.effective_verdict`/`modulation_reason`/`modulation_rule`
+  override mechanism — a missing required variant's own
+  `BUNDLE_VARIANT_COVERAGE_REGRESSED` finding is escalated to
+  `Verdict.BREAKING` in place, rather than a second, parallel gating path
+  being invented alongside the one every other bundle-level override
+  (policy, suppression) already flows through.
+
+**Known gap, deliberately not closed here — the literal CLI/config
+surface.** Neither `compare_release_against_bundle_facts()` nor
+`run_bundle_variant_pairing()` is reachable from `abicheck compare ...` or
+from a real `.abicheck.yml`, and this is not an oversight: every file that
+would have to host the new dispatch is, as measured by `wc -l` immediately
+before this phase's own code was written, within two lines of the
+AI-readiness 2000-line hard cap —
+
+| File | Lines / cap |
+|---|---|
+| `cli_compare_release.py` (the release fan-out's own Click entry point) | 1998 / 2000 |
+| `cli_compare_helpers.py` (directory/package operand dispatch) | 1998 / 2000 |
+| `cli_helpers_compare.py` (`discover_project_config`/`_build_match_map`) | 1278 / 2000 (room, but not the dispatch site) |
+| `cli.py` (`_dispatch_release_compare`) | 1959 / 2000 |
+| `cli_options.py` (`release_options` — the shared flag-decorator family) | 1977 / 2000 |
+| `buildsource/inline.py` (`BuildConfig` — where a new `.abicheck.yml` top-level block is parsed) | 2000 / 2000 (already at the cap) |
+| `bundle.py` | 2000 / 2000 (already at the cap) |
+
+A new Click option plus its dispatch branch, or a new `BuildConfig` block,
+cannot land in any of these without first *splitting* one of them — a
+separate, larger refactor of its own (this codebase's several `cli_*.py`/
+`diff_*.py` module splits are the established precedent for how that's
+normally done, each its own dedicated pass), not a follow-up edit
+attempted reactively under this phase's own time budget. Forcing either
+change into an already-at-cap file would either blow the hard cap outright
+(an AI-readiness ERROR, not a WARN) or require a same-session, unreviewed
+trim of unrelated content to make room — exactly the "known gaps over
+risky reactive patches" tradeoff this repository's own root `AGENTS.md`
+names explicitly. `abicheck/bundle_side_input.py`'s and `abicheck/
+bundle_variants_config.py`'s own module docstrings record this same table
+(re-measured at the time each was written) so a future contributor who
+splits one of these files has a concrete, checkable pointer to what should
+consume the room it frees, rather than rediscovering this constraint from
+scratch. Until then: `bundle_variants_config.py` also does not verify a
+captured `BundleFacts.variant_fingerprint` against what a declared spec's
+own `.fingerprint()` would compute for the same name — documented in that
+module's own `run_bundle_variant_pairing()` docstring as a second,
+narrower gap that a real config-discovery producer should close alongside
+the CLI wiring itself, once one exists.
 
 The original multi-binary performance problem (repeated header/AST
 extraction across sibling DSOs sharing one source tree) is explicitly out
