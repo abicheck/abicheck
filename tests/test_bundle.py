@@ -1131,6 +1131,61 @@ class TestIntraDepSignatureChanged:
         assert findings[0].consumer_library == "libalgo.so"
         assert findings[0].provider_library == "libcore.so"  # canonical, not versioned
 
+    def test_promotes_when_the_versioned_basename_changed_between_old_and_new(
+        self,
+    ) -> None:
+        # G38 stabilization (Codex review, fresh evidence): checker.compare()
+        # sets DiffResult.library from the OLD side, so a provider whose
+        # versioned on-disk basename changed between old and new
+        # (libcore.so.1.2 -> libcore.so.1.3) has a DiffResult.library that
+        # only the OLD bundle's own basename map can resolve -- looking it
+        # up only against the NEW map (as the single-snapshot test above
+        # can't distinguish from a same-snapshot-both-sides lookup) left it
+        # unresolved and the promotion silently never fired.
+        old_libraries = {
+            "libcore.so": Path("/fake/libcore.so.1.2"),
+            "libalgo.so": Path("/fake/libalgo.so.1"),
+        }
+        new_libraries = {
+            "libcore.so": Path("/fake/libcore.so.1.3"),
+            "libalgo.so": Path("/fake/libalgo.so.1"),
+        }
+        metadata = {
+            "libcore.so": _meta(soname="libcore.so.1", exports=["core_add"]),
+            "libalgo.so": _meta(
+                soname="libalgo.so.1", needed=["libcore.so.1"], imports=["core_add"]
+            ),
+        }
+        old = BundleSnapshot(
+            root=Path("/fake"),
+            libraries=old_libraries,
+            metadata=metadata,
+            resolution=_compute_resolution_graph(old_libraries, metadata),
+        )
+        new = BundleSnapshot(
+            root=Path("/fake"),
+            libraries=new_libraries,
+            metadata=metadata,
+            resolution=_compute_resolution_graph(new_libraries, metadata),
+        )
+        diff_libcore = _diff(
+            "libcore.so.1.2",  # the OLD side's real, versioned basename
+            Change(
+                kind=ChangeKind.CALLING_CONVENTION_CHANGED,
+                symbol="core_add",
+                description="cdecl->fastcall",
+            ),
+        )
+        result = compare_bundle(old, new, [diff_libcore])
+        findings = [
+            f
+            for f in result.bundle_findings
+            if f.kind == ChangeKind.BUNDLE_INTRA_DEP_SIGNATURE_CHANGED
+        ]
+        assert len(findings) == 1
+        assert findings[0].consumer_library == "libalgo.so"
+        assert findings[0].provider_library == "libcore.so"
+
     def test_plugin_abi_policy_suppresses_calling_convention_promotion(self) -> None:
         # G38 stabilization (Codex review, fresh evidence): CALLING_
         # CONVENTION_CHANGED is COMPATIBLE under the plugin_abi policy

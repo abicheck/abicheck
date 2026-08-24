@@ -800,10 +800,14 @@ def compare_bundle(
     # Index per-library diff results by the resolution graph's own
     # bundle-canonical key, not the raw (possibly SONAME-versioned)
     # on-disk basename -- see `basename_to_bundle_key`'s own docstring
-    # (G38 plan doc Phase 5). Canonicalise once instead of double-indexing
-    # — double-indexing caused detectors to iterate the same DiffResult
-    # twice when DiffResult.library happened to differ from its basename.
-    basename_to_key = basename_to_bundle_key(new)
+    # (G38 plan doc Phase 5). Canonicalise once instead of double-indexing.
+    #
+    # Merge OLD+NEW maps (Codex review): `checker.compare()` sets
+    # `DiffResult.library = old.library`, so a versioned basename that
+    # changed between old and new (`libcore.so.1.2` -> `.1.3`) only
+    # resolves through `old`'s own map. New wins a collision -- it's what
+    # the resolution graph these keys feed into was built from.
+    basename_to_key = {**basename_to_bundle_key(old), **basename_to_bundle_key(new)}
     diff_by_library: dict[str, DiffResult] = {}
     for result in per_library_results:
         basename = Path(result.library).name
@@ -1166,12 +1170,9 @@ def _detect_intra_dep_signature_changed(
     KINDS`, a strict subset of ``CONFIRMED_C_BOUNDARY_SIGNATURE_BREAK_
     KINDS`` -- G38 plan doc Phase 5), find siblings that import the symbol
     *and actually resolve it against this provider*
-    (:func:`_consumer_resolves_via_provider`), and emit one finding per
-    (consumer, symbol) pair (multiple kinds against one symbol collapse
-    into one finding).
-
-    *policy*: both a named-policy demotion and a ``--policy-file``
-    override on the originating diff are honored, via
+    (:func:`_consumer_resolves_via_provider`), emitting one finding per
+    (consumer, symbol) pair. *policy*: both a named-policy demotion and a
+    ``--policy-file`` override on the diff are honored, via
     :func:`_diff_change_is_breaking`.
     """
     findings: list[BundleFinding] = []
