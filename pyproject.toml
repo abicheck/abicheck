@@ -413,6 +413,15 @@ pytest_add_cli_args = [
     # and aborts with "Could not figure out where the code to mutate is."
     # before the compare command ever runs — failing the whole `-x` lane.
     "--ignore=tests/test_action_run_sh_annotate_renderer.py",
+    # Same failure class as the entry immediately above, one more real
+    # `action/run.sh` + real `abicheck` binary subprocess test tripped by
+    # this same G38 bundle-facts PR once it touched a second
+    # mutation-scoped module (bundle_signature_evidence.py):
+    # TestRealAbicheckWritesPersistedAnnotationsForADirectoryOperand shells
+    # out to a real `abicheck compare` from a scratch cwd the identical way,
+    # and the mutant tree's re-entrant subprocess can't find
+    # `pyproject.toml`'s `[tool.mutmut]` section from there either.
+    "--ignore=tests/test_action_run_sh_compare_pr_json_write.py",
     "--ignore=tests/test_publish_baseline_upload_step.py",
     "--ignore=tests/test_publish_baseline_upload_step_evidence.py",
     "--ignore=tests/test_publish_baseline_upload_step_generation.py",

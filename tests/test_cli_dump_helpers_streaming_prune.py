@@ -18,7 +18,8 @@ from __future__ import annotations
 from pathlib import Path
 
 from abicheck import dumper_cache
-from abicheck.cli_dump_helpers import handle_non_elf_dump, perform_elf_dump
+from abicheck.cli_dump_helpers import perform_elf_dump
+from abicheck.cli_dump_non_elf import handle_non_elf_dump
 from abicheck.dumper_clang_streaming import streaming_prune_suppressed
 from abicheck.model import AbiSnapshot
 from tests.test_cli_dump_helpers_coverage import _elf_dump_callables

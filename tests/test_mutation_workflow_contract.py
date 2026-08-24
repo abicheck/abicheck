@@ -524,6 +524,22 @@ _ACCEPTED_KILL_LOSS = {
             "abicheck.snapshot_io",
         }
     ),
+    # Same subprocess re-entry as the entry immediately above, tripped by
+    # this same G38 bundle-facts PR once it touched a second mutation-scoped
+    # module (bundle_signature_evidence.py):
+    # TestRealAbicheckWritesPersistedAnnotationsForADirectoryOperand shells
+    # out to a real `abicheck compare` via `action/run.sh` from a scratch
+    # `cwd` the identical way.
+    "tests/test_action_run_sh_compare_pr_json_write.py": frozenset(
+        {
+            "abicheck.checker_policy",
+            "abicheck.diff_symbols",
+            "abicheck.finding_identity",
+            "abicheck.name_classification",
+            "abicheck.serialization",
+            "abicheck.snapshot_io",
+        }
+    ),
 }
 
 

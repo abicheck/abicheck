@@ -27,12 +27,12 @@ from abicheck.cli_dump_helpers import (
     _dump_manifest_header_roots,
     check_dump_debug_format_error,
     compile_db_from_build_info,
-    handle_non_elf_dump,
     perform_elf_dump,
     resolve_dump_collect_context,
     resolve_dump_compile_context,
     resolve_dump_debug_format,
 )
+from abicheck.cli_dump_non_elf import handle_non_elf_dump
 from abicheck.errors import AbicheckError
 from abicheck.model import AbiSnapshot
 

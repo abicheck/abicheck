@@ -157,6 +157,8 @@ def _run_bundle_analysis(
     bundle_system_providers: str,
     bundle_cohorts: tuple[str, ...] = (),
     policy: str = "strict_abi",
+    old_snapshots: dict[str, AbiSnapshot] | None = None,
+    new_snapshots: dict[str, AbiSnapshot] | None = None,
 ) -> BundleDiffResult | None:
     """Run bundle-level (ADR-023) analysis on a compare-release run.
 
@@ -166,6 +168,16 @@ def _run_bundle_analysis(
     Returns None when there is nothing to analyze (e.g. all libraries
     failed to dump). Errors during analysis are caught and reported as a
     warning rather than aborting; bundle analysis is additive.
+
+    *old_snapshots*/*new_snapshots* (G38 Phase 4), when both given and
+    non-empty, additionally run
+    :func:`~abicheck.bundle_signature_evidence.find_unverified_signature_findings`
+    and fold its output into the returned ``bundle_findings`` list, the
+    same additive-degradation-on-error philosophy as the rest of this
+    function. Keyed by each library's bundle-canonical key (``_bundle_key``
+    on the stashed release entry, the same key ``old_map``/``new_map`` use
+    -- *not* the library's file basename), matching what
+    ``BundleSnapshot.resolution`` itself keys providers/consumers by.
     """
     from .bundle import (
         BundleDiffResult,
@@ -173,6 +185,7 @@ def _run_bundle_analysis(
         compare_bundle,
         load_manifest,
     )
+    from .bundle_signature_evidence import find_unverified_signature_findings
 
     if not old_map and not new_map:
         return None
@@ -204,7 +217,7 @@ def _run_bundle_analysis(
         s.strip() for s in bundle_system_providers.split(",") if s.strip()
     ]
     try:
-        return compare_bundle(
+        result = compare_bundle(
             old_snap,
             new_snap,
             per_lib_results,
@@ -219,6 +232,31 @@ def _run_bundle_analysis(
         # in the JSON output so downstream CI can detect degradation.
         click.echo(f"Warning: bundle analysis raised: {exc}", err=True)
         return BundleDiffResult(old_root=old_snap.root, new_root=new_snap.root)
+
+    if old_snapshots and new_snapshots:
+        # G38 Phase 4: run separately from compare_bundle() itself (a
+        # leaf, generic diff/graph function with no notion of per-library
+        # AbiSnapshots) and folded in here, the one caller that actually
+        # has both. Same additive-degradation contract as compare_bundle
+        # above -- a bug in this newer detector must not blank out the
+        # bundle findings compare_bundle already computed successfully.
+        try:
+            result.bundle_findings.extend(
+                find_unverified_signature_findings(
+                    old_snap,
+                    new_snap,
+                    per_lib_results,
+                    old_snapshots,
+                    new_snapshots,
+                )
+            )
+        except Exception as exc:
+            click.echo(
+                f"Warning: bundle signature-evidence check raised: {exc}",
+                err=True,
+            )
+
+    return result
 
 
 def _extract_if_package(
@@ -513,10 +551,24 @@ def _collect_bundle_result(
 ) -> tuple[BundleDiffResult | None, str]:
     """Extract stashed DiffResults, run bundle analysis, update worst verdict."""
     stashed_diffs: list[DiffResult] = []
+    old_snapshots: dict[str, AbiSnapshot] = {}
+    new_snapshots: dict[str, AbiSnapshot] = {}
     for entry in library_results:
-        diff = entry.get("_diff_result") if isinstance(entry, dict) else None
+        if not isinstance(entry, dict):
+            continue
+        diff = entry.get("_diff_result")
         if isinstance(diff, DiffResult):
             stashed_diffs.append(diff)
+        bundle_key = entry.get("_bundle_key")
+        old_snap = entry.get("_old_snapshot")
+        new_snap = entry.get("_new_snapshot")
+        if (
+            isinstance(bundle_key, str)
+            and isinstance(old_snap, AbiSnapshot)
+            and isinstance(new_snap, AbiSnapshot)
+        ):
+            old_snapshots[bundle_key] = old_snap
+            new_snapshots[bundle_key] = new_snap
     bundle_result = _run_bundle_analysis(
         old_map,
         new_map,
@@ -525,6 +577,8 @@ def _collect_bundle_result(
         bundle_system_providers=bundle_system_providers,
         bundle_cohorts=bundle_cohorts,
         policy=policy,
+        old_snapshots=old_snapshots,
+        new_snapshots=new_snapshots,
     )
     if bundle_result is not None:
         bv = bundle_result.bundle_verdict.value

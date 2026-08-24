@@ -467,6 +467,22 @@ class ChangeKind(str, Enum):
     # Deliberately distinct from BUNDLE_INTRA_DEP_REMOVED, which implies a
     # diff-confirmed removal; this fires from a single-side resolution graph.
     BUNDLE_UNRESOLVED_INTRA_DEPENDENCY = "bundle_unresolved_intra_dependency"
+    # G38 Phase 3 (docs/contribute/plans/g38-bundle-facts-model-and-
+    # multibuild-comparability.md): a build variant (e.g. the CPU-only build
+    # of a bundle that also ships an ONEDAL_DATA_PARALLEL/DPC build) present
+    # in the old release's variant set has no matching variant in the new
+    # release. RISK, not BREAKING: the variant may simply have been dropped
+    # from the release intentionally, but a consumer pinned to it needs to
+    # see the coverage gap. See abicheck/bundle_multibuild.py.
+    BUNDLE_VARIANT_COVERAGE_REGRESSED = "bundle_variant_coverage_regressed"
+    # G38 Phase 4: a sibling library's import resolves by name to a
+    # provider's export (the same C-linkage match BUNDLE_INTRA_DEP_
+    # SIGNATURE_CHANGED uses), but neither side has DWARF/header evidence
+    # for that exact symbol, so agreement can be neither confirmed nor
+    # denied. RISK, distinct from both "no change" (evidence agrees) and
+    # the confirmed BREAKING BUNDLE_INTRA_DEP_SIGNATURE_CHANGED (evidence
+    # disagrees). See abicheck/bundle_signature_evidence.py.
+    BUNDLE_INTRA_DEP_SIGNATURE_UNVERIFIED = "bundle_intra_dep_signature_unverified"
 
     # ── Explicit specifier transitions on constructors / conversion ops ─
     # Source-level contract: an `explicit` specifier added to a previously-

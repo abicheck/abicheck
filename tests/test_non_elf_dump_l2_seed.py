@@ -23,7 +23,8 @@ from typing import Any
 
 import pytest
 
-from abicheck.cli_dump_helpers import handle_non_elf_dump, perform_elf_dump
+from abicheck.cli_dump_helpers import perform_elf_dump
+from abicheck.cli_dump_non_elf import handle_non_elf_dump
 from abicheck.compile_context import CompileContext
 from abicheck.errors import HeaderCompileContextAmbiguousError
 from abicheck.model import AbiSnapshot

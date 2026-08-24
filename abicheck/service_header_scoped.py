@@ -148,7 +148,7 @@ def _try_header_scoped_dump(
         # cache keys (AGENTS.md's tenth and seventeenth L3->L2-fold findings),
         # applied here so PE/Mach-O cannot disagree with ELF about staleness
         # for the same tokens (Codex review, PR D). ``cc`` is the *merged* L3
-        # context on the ``dump`` path (``cli_dump_helpers.handle_non_elf_dump``
+        # context on the ``dump`` path (``cli_dump_non_elf.handle_non_elf_dump``
         # passes ``compile=l3_effective_ctx``), so a build-derived
         # ``-I``/``-include`` is covered without threading a separate
         # ``extra_hash_dirs`` channel down through ``run_dump``/``resolve_input``

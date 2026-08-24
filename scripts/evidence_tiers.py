@@ -247,6 +247,16 @@ EVIDENCE_TIER_BY_KIND: dict[str, str] = {
     "bundle_manifest_instantiation_removed": "L0",
     "bundle_provider_changed": "L0",
     "bundle_soname_skew": "L0",
+    # G38 Phase 3: pairs BundleFacts (derived from ElfMetadata alone, the
+    # same L0 evidence every other bundle_* kind above rests on).
+    "bundle_variant_coverage_regressed": "L0",
+    # G38 Phase 4: tiered L0 to match its confirmed sibling
+    # bundle_intra_dep_signature_changed above -- the detectable-at signal
+    # is the C-linkage resolution match (ElfMetadata), same as every other
+    # bundle_* kind; the finding's own content records that *deeper*
+    # (DWARF) evidence was unavailable, which is a fact about the finding,
+    # not about the minimum tier needed to produce it.
+    "bundle_intra_dep_signature_unverified": "L0",
     # ── L1: needs debug info (layout, offsets, sizes, enum values, calling conv) ──
     "suppression_would_hide_public_break": "L1",  # ADR-044: needs struct/field layout (internal_leak.compute_leak_paths) to judge public reachability
     "suppression_reachability_unknown": "L1",  # impact-analysis-layer P0: same reachability walk as suppression_would_hide_public_break, refined by the optional L5 call/type graph's coverage flags

@@ -383,7 +383,73 @@ plan, informed by whatever `BundleFacts` looked like in production by then.
 
 ### Phase 3 — Multibuild variant pairing
 
+**Implementation status (2026-08-23): the pairing primitive, the
+`ChangeKind`, and its finding-construction helper are shipped; the CLI/config
+surface that discovers real per-variant `BundleFacts` and feeds them to
+`pair_variants` is deliberately deferred, the same posture Phase 2's own
+implementation-status note already took for its CLI consumer half.**
+
+- `abicheck/bundle_multibuild.py` implements `variant_fingerprint`,
+  `VariantOutcome`, `VariantComparison`, `pair_variants`, and
+  `coverage_regression_findings` per this section's design below, with two
+  real deviations. First: `variant_fingerprint` takes explicit, named
+  coordinates (`target_triple`, `compiler_family`, `feature_toggles`)
+  rather than a raw `BuildEvidence | None` / `EnvironmentMatrix | None`
+  pair. Telling a genuine logical-identity feature toggle
+  (`ONEDAL_DATA_PARALLEL`) apart from build state that legitimately drifts
+  release to release (an ABI-relevant `-D` define, a raised `-std=`) cannot
+  be done reliably from raw build evidence alone — both can appear as an
+  indistinguishable `BuildOption`/`CompileUnit` entry — so that judgement
+  call is pushed to the caller instead of embedded as a heuristic parse,
+  which would risk silently reintroducing the union failure mode from
+  either direction (see the function's own docstring for the full
+  reasoning). Second: `compiler_version` is **not** a parameter at all,
+  unlike the design sketch below — a real gap in that sketch, caught in
+  review (Codex): a routine toolchain upgrade between releases (GCC 13 ->
+  14 building the identical variant) is the same class of legitimately-
+  drifting build state as an ABI-relevant define or a raised `-std=`, not
+  variant identity, so fingerprinting it would make `pair_variants` read
+  an ordinary compiler bump as two different, unmatched variants —
+  `OLD_ONLY` + `NEW_ONLY` — silently skipping every real per-library
+  comparison for that variant and replacing it with a spurious
+  `bundle_variant_coverage_regressed` finding. `target_triple`/
+  `compiler_family` stay in the fingerprint (a target or compiler-family
+  switch is a real, deliberate distribution-channel decision, not routine
+  drift the way a version bump is). The function's own contract (which
+  coordinates are fingerprinted, which are deliberately excluded and why)
+  is otherwise exactly as designed below.
+- `ChangeKind.BUNDLE_VARIANT_COVERAGE_REGRESSED` /
+  `"bundle_variant_coverage_regressed"` is registered in `checker_policy.py`
+  / `change_registry_buildsource.py` (not `change_registry.py`, which is at
+  the AI-readiness 2000-line hard cap — default verdict `RISK`, per this
+  section's design), classified in `tests/canonical_identity_contract.py`'s
+  `UNVERIFIED` bucket (matching every other pre-existing `bundle_*` kind —
+  none of them have had their construction call sites individually verified
+  against the `TYPE_BEARING`/`VALUE_INSENSITIVE` criteria yet), and covered
+  by `tests/test_bundle_multibuild.py` (determinism/sensitivity cases, the
+  never-union Hypothesis property, the missing-variant case, and
+  `coverage_regression_findings`'s own finding construction).
+- **Not shipped**: `pair_variants`' *new-only* coverage-expansion outcome is
+  modelled (`VariantOutcome.NEW_ONLY`) but, per this section's own design,
+  deliberately never produces a `ChangeKind` — nothing renders it into the
+  reporter's `bundle.json`/`bundle.md` yet (that's this phase's own
+  "Reporter" row in "Files & surfaces", still open). Also not shipped: any
+  CLI/config surface that discovers a release's real build variants,
+  extracts `BundleFacts` per variant, and calls `pair_variants` — that needs
+  the same real, separate design Phase 2's CLI consumer half deferred for
+  (most of `compare`'s release-fan-out option surface loses its per-variant
+  meaning once there is more than one old/new directory pair per release),
+  and `comparability.py`'s bundle-level fingerprint-mismatch refusal is
+  likewise not yet wired to this module's `variant_fingerprint`.
+
 **New module, `abicheck/bundle_multibuild.py`:**
+
+**Kept as originally written, per this plan's own amendment convention (see
+Phase 2's identical note above)** — the shipped signature is the explicit-
+coordinate one this section's own "Implementation status" note above
+describes (`target_triple`/`compiler_family`/`feature_toggles` —
+deliberately no `compiler_version`, see that note), not the
+`(evidence, env)` sketch below.
 
 ```python
 def variant_fingerprint(evidence: BuildEvidence | None, env: EnvironmentMatrix | None) -> str:
@@ -483,6 +549,410 @@ never emitted as a finding.
 
 ### Phase 4 — C-boundary signature-evidence gate
 
+**Implementation status (2026-08-23): the detector, the `ChangeKind`, and
+its registry/test-completeness wiring are shipped, as a standalone
+companion module (the same posture Phase 3's `bundle_multibuild.py` took),
+with two real deviations from the design below.**
+
+- `abicheck/bundle_signature_evidence.py` implements
+  `find_unverified_signature_findings(old, new, per_library_results,
+  old_snapshots, new_snapshots) -> list[BundleFinding]` (signature widened
+  2026-08-24, see the "Update" note below) as a leaf module —
+  it is **not** wired into `bundle.compare_bundle()` itself, because
+  `abicheck/bundle.py` is exactly at the AI-readiness 2000-line hard cap
+  (confirmed via `wc -l`) and cannot accept new code without an offsetting
+  removal. A caller invokes this function separately, alongside
+  `compare_bundle()`, and merges the two `list[BundleFinding]` results —
+  the same standalone-companion shape `bundle_multibuild.py` established
+  for Phase 3's `coverage_regression_findings`. Deliberately does not
+  import `abicheck.bundle` (a small, 3-member
+  `_CONFIRMED_SIGNATURE_CHANGE_KINDS` frozenset is duplicated locally
+  rather than imported, to stay a strict leaf module `bundle.py` — or a
+  future caller — imports, never the reverse).
+- **Deviation from the design text below**: the evidence check is scoped to
+  the **provider's own snapshot only**, not "the consumer, where
+  applicable" as this section's design sketch says. A consumer has no
+  DWARF/header declaration of its own for a symbol it only imports (calls)
+  rather than defines — its own `AbiSnapshot.function_map`/`variable_map`
+  has no entry for an externally-defined symbol at all, so "the consumer's
+  evidence for this symbol" is not a fact that exists to check. The design
+  sketch's parenthetical was read as anticipating a shape this codebase's
+  actual per-library `AbiSnapshot` construction doesn't produce, rather than
+  as a requirement to build a new evidence source; the check below
+  implements the well-founded half (the provider's own declaration
+  evidence) and treats the consumer-side clause as inapplicable rather than
+  approximated.
+- Registered as `ChangeKind.BUNDLE_INTRA_DEP_SIGNATURE_UNVERIFIED` /
+  `"bundle_intra_dep_signature_unverified"` in `checker_policy.py` /
+  `change_registry_buildsource.py` (not `change_registry.py`, at the same
+  2000-line cap Phase 3's kind avoided — default verdict `RISK`, per this
+  section's design), classified in `tests/canonical_identity_contract.py`'s
+  `UNVERIFIED` bucket (matching every other `bundle_*` kind), tiered `L0`
+  in `scripts/evidence_tiers.py` (the detectable-at signal is the same
+  C-linkage resolution match every other `bundle_*` kind uses — the
+  finding's own *content* records that deeper evidence was unavailable,
+  which is a fact about the finding, not about the minimum tier needed to
+  produce it), and covered by `tests/test_bundle_signature_evidence.py`
+  (both-sides-ELF-only fires; sufficient-evidence-both-sides doesn't;
+  one-side-insufficient still fires; no consumer / symbol absent from old
+  (addition) / snapshot missing skip; a confirmed diff-level signature
+  change takes precedence over this kind firing on the same symbol;
+  variable, not just function, symbols; a single unresolved *parameter*
+  type is sufficient insufficiency even with a known return type; one
+  finding per consumer library; no crash on an entirely empty snapshot).
+
+**Update (2026-08-24): wired into the real `compare --release` CLI path —
+superseding the "Not shipped: reporter wiring / any real caller" line this
+note replaces.** `find_unverified_signature_findings` previously had no
+caller outside its own test module — the standalone-companion posture
+above described where the detector *lived*, not that anything invoked it.
+`_run_bundle_analysis`/`_collect_bundle_result` (`cli_compare_release_
+helpers.py`, the real `compare_bundle()` call site for `compare --release`,
+bundle analysis on by default) now accept `old_snapshots`/`new_snapshots:
+dict[str, AbiSnapshot]` and, when both are non-empty, call the detector and
+fold its output into the same `bundle_findings` list `compare_bundle()`
+already populates — the pre-existing `BundleFinding.to_change()`/
+`render_bundle_findings_markdown()` rendering already handles it
+generically, no reporter changes needed (an earlier accounting of this
+plan's own remaining gaps had incorrectly listed reporter wiring as a
+separate missing piece; it was not — see this note). The maps are built
+from a new per-library stash: `_compare_one_library` (`cli_compare_
+release.py`) now also captures the *new*-side `AbiSnapshot` (alongside the
+pre-existing old-side one) and each library's own bundle-canonical key
+under `_new_snapshot`/`_bundle_key`, gated behind the same `collect_diff_
+results` flag the old-side stash already used — now triggered whenever
+bundle analysis is enabled (the default), not only for `--bundle-facts-
+out`/`--format junit`. Accepted tradeoff, stated in that gate's own
+docstring: both sides' `AbiSnapshot`s are now held in memory for every
+default release compare, not only the old side for the narrower
+pre-existing cases — the same memory-conscious gate mechanism, now paying
+that cost more often because the feature this phase describes needs it.
+Regression coverage: `tests/test_cli_compare_release_bundle_signature_
+wiring.py` (both `_run_bundle_analysis` and `_collect_bundle_result`
+directly, with a monkeypatched `build_bundle_snapshot` mirroring
+`tests/test_bundle.py`'s own established pattern; confirmed to fail
+against the pre-wiring code).
+
+**A CodeRabbit review on the wiring PR caught a real, pre-existing key-
+mismatch bug this new caller made reachable for the first time.**
+`_confirmed_provider_symbols` (the "a real, diff-confirmed change outranks
+an unverified one" precedence check) keyed its set by `Path(result.library
+).name` — `DiffResult.library`'s raw on-disk basename — while the main
+loop's own `provider_lib` comes from `new.resolution.provides`, keyed by
+the bundle-canonical name (`libfoo.so`, `binary_utils._canonical_library_
+key`, version-stripped). For any normally-versioned real SONAME (e.g.
+`libfoo.so.1.2.3`) the two never match, so the precedence check silently
+never fired — invisible in every existing unit test, which deliberately
+uses matching bare names throughout (`"libcore.so"` everywhere), but live
+for the very first real caller this update introduces. Fixed by widening
+the function's signature to `(old, new, per_library_results, old_
+snapshots, new_snapshots)` and resolving each `DiffResult`'s basename back
+to its bundle-canonical key via a new `_basename_to_bundle_key(old)`
+helper (built from `old.libraries`) before comparing. Regression coverage:
+`tests/test_bundle_signature_evidence.py::TestFindUnverifiedSignature
+Findings::test_no_finding_when_confirmed_change_present_for_a_versioned_
+library` (a genuinely versioned on-disk path alongside a bare-name
+`DiffResult.library`, mirroring what a real `compare --release` stashes;
+confirmed to fail — reproducing the spurious duplicate finding — against
+the pre-fix code).
+
+**Two further Codex review findings, both fixed.** (1) The exact-equality
+check for the recursion-depth-cap sentinel (`spelling == "..."`) missed
+composite wrapped forms (`"... *"`/`"... &"`/`"... &&"`, from
+`pdb_parser.py`/`dwarf_snapshot.py` wrapping a depth-capped inner type in a
+pointer/reference) — fixed by switching to the same substring check
+`"?"` already uses. (2) `consumer_libs` was computed from a bare,
+name-only, set-wide `consumers_of(symbol)` lookup, the same limitation
+`bundle._detect_unresolved_intra_dependency`'s own docstring documents for
+its own naive alternative — two unrelated libraries sharing a same-named
+export could pair a consumer with a provider it has no real `DT_NEEDED`
+path to. Fixed by restricting to reachable consumers, via a new shared
+leaf module, `abicheck/bundle_resolution_reachability.py` (the `DT_NEEDED`
+BFS extracted out of `bundle.py`, which both modules now import — this
+also dropped `bundle.py` from exactly the 2000-line hard cap to 1975,
+creating headroom rather than costing it). Deliberately narrower than
+`_detect_unresolved_intra_dependency`'s full contract: symbol-version/
+default-binding matching is not attempted, since that needs a
+per-consumer resolution shape (iterate consumers, resolve each one's own
+specific requirement) rather than this function's provider-centric one
+(iterate providers, gather their consumers) — folding it in would be a
+real restructuring of the main loop, left open rather than attempted as
+an extension of the same review-driven patch. Both regressions confirmed
+to fail against the pre-fix code.
+
+**A third finding on the same recursion-sentinel area, correcting the
+previous fix's own reasoning.** That fix's substring check on `"..."` was
+itself unsafe, unlike the sibling `"?"` check it was modeled after
+(Codex review, fresh evidence): a real, complete C/C++ type spelling can
+legitimately contain the literal substring `"..."` — a variadic
+function-pointer parameter type like `"void (*)(int, ...)"` is
+fully-resolved evidence, not truncated. Fixed by matching only the
+sentinel's own finite shape via an anchored regex (the bare sentinel,
+optionally followed by one or more space-prefixed `*`/`&`/`&&` wrapper
+suffixes for nested pointer/reference wrapping) instead of a blanket
+substring check. Confirmed to fail against the pre-fix substring-check
+code.
+
+**A fourth finding, on a gap in `_symbol_evidence_sufficient()` unrelated
+to type-spelling parsing: unknown variadicness read as sufficient
+evidence** (Codex review, fresh evidence). `Function.is_variadic` is a
+real tri-state field (`bool | None`), and `diff_symbols._check_variadic_
+change()` itself skips (`skip_none=True`) whenever either side is `None`
+— an older snapshot/dumper that never populated it is indistinguishable
+from one that positively determined "not variadic". Without this module
+also treating unknown variadicness as insufficient, a real fixed-arity/
+variadic transition landing on an unknown side produced neither a
+confirmed diff-level finding nor this module's own risk finding — total
+silence on a real, calling-ABI-relevant unknown. Fixed by also requiring
+`is_variadic is not None`. Confirmed to fail against the pre-fix code.
+
+**A fifth finding, the identical shape as the fourth for a different
+tri-state field.** `Function.contract_attributes` (calling-convention
+attributes such as `stdcall`/`ms_abi`/`vectorcall`, `list[str] | None`)
+had the same gap: `diff_symbols._check_contract_attributes_change()`
+itself skips whenever either side is `None`, so a real calling-convention
+transition landing on an unknown side produced neither a confirmed
+diff-level finding nor this module's own risk finding. Fixed by also
+requiring `contract_attributes is not None`. Confirmed to fail against
+the pre-fix code.
+
+**A sixth finding, back on the recursion-sentinel regex -- two more real
+composite forms, plus a wholly separate, unconditional placeholder**
+(Codex review, fresh evidence). `pdb_parser.py`'s qualifier wrapping
+renders the depth-capped sentinel with a *prefix*, not a suffix
+(`"const ..."`), and its array wrapping appends `"[]"` (`"...[]"`,
+possibly further wrapped, e.g. `"...[] *"`) -- neither matched the
+regex from the third finding. Separately, `dwarf_snapshot.py`'s
+`DW_TAG_subroutine_type` handling and `pdb_parser.py`'s procedure/
+member-function branches both render *any* function/subroutine type as
+the fixed literal `"fn(...)"`, unconditionally, regardless of recursion
+depth -- a placeholder the sentinel-only regex could never match by
+construction, since it isn't a wrapped sentinel at all. Fixed by
+widening the regex to accept an optional `const `/`volatile ` prefix
+and `[]` among the suffix forms, and by separately recognizing the
+exact `"fn(...)"` literal. Confirmed all four new cases fail against
+the pre-fix code.
+
+**A seventh finding closed the module's own previously-documented
+"deliberately narrower" residual gap: symbol-version/default-binding
+matching, which turned out not to need the feared restructuring**
+(Codex review, fresh evidence). `consumers_of(symbol)` matches by bare
+name only, so a consumer requiring `foo@V2` could still pair with a
+`ProviderEntry` whose only definition is `foo@V1` -- a provider that
+cannot actually satisfy that consumer at all (a real resolution
+failure, not a signature-mismatch risk this module exists to flag). An
+earlier revision of this docstring assumed closing this needed
+`_detect_unresolved_intra_dependency`'s own per-consumer resolution
+shape (iterate consumers, resolve each one's own specific requirement)
+rather than this module's provider-centric one; on closer look it does
+not -- a new `_consumer_matches_provider()` predicate, evaluated per
+(consumer, provider_entry) pair inside the existing provider-centric
+loop, mirrors the sibling function's version/`version_soname`/
+`is_default` rules without restructuring anything. Confirmed to fail
+against the pre-fix code, using the exact `foo@V2`-vs-`foo@V1` example
+from the review comment.
+
+**An eighth finding closed the last gap the fourth/fifth findings'
+`is_variadic`/`contract_attributes` sufficiency checks opened without
+noticing** (Codex review, fresh evidence). `_CONFIRMED_SIGNATURE_
+CHANGE_KINDS` still only covered `FUNC_PARAMS_CHANGED`/`FUNC_RETURN_
+CHANGED`/`VAR_TYPE_CHANGED` -- so a symbol with a real, diff-confirmed
+`FUNC_VARIADIC_ADDED`/`FUNC_VARIADIC_REMOVED`/`CALLING_CONVENTION_
+CHANGED` that also happened to carry an unrelated unresolved field
+still produced a redundant, contradictory "cannot be confirmed or
+denied" finding alongside the already-proven break. Fixed by adding all
+three kinds to the set. `bundle._detect_intra_dep_signature_changed`'s
+own `relevant_kinds` does not (yet) include these two either -- noted
+as a pre-existing, narrower gap in that sibling function's own
+docstring update, not something this fix needed to wait on. Confirmed
+to fail against the pre-fix code, parametrized over all three kinds.
+
+**A ninth finding closed a version-blindness gap in the old-side
+retained-export check itself** (Codex review, fresh evidence, filed once
+this Phase 4 detector had a real caller on `compare --release` and was
+exercised against realistic versioned-symbol scenarios for the first
+time). `_symbol_was_exported(symbol, old_snap)` reads only
+`AbiSnapshot.function_map`/`variable_map` -- both keyed by bare symbol
+name, with no per-GNU-version distinction (the same limitation this
+repo's own root `AGENTS.md` already documents for `ElfMetadata.
+symbol_map`'s "last-entry-wins" collapse of versioned aliases). So when a
+provider previously exported only `foo@V1` and the new release adds
+`foo@V2` for a consumer requiring exactly V2, the old-side check answered
+"yes, `foo` was exported" purely from the unrelated `foo@V1` entry, and
+the detector reported the brand-new `foo@V2` as a retained-signature risk
+even though V2 has no old-side counterpart to be uncertain about at all.
+Fixed by adding `_provider_entry_retained_from_old()`, which checks
+`old.resolution.provides[symbol]` -- the bundle-resolution layer, built
+from real per-symbol GNU version data, unlike the `AbiSnapshot`-layer
+check -- for a same-library, same-`ProviderEntry.version` old-side
+provider before treating the new one as retained. Two regression tests:
+one confirming the false positive is gone for a genuinely fresh version,
+one confirming the finding still fires when the version genuinely was
+retained from the old side. Confirmed the positive-control test fails
+against the pre-fix code.
+
+**A tenth finding, from the same Codex review round as the ninth, widened
+the confirmed-kinds allowlist rather than continuing to add one kind at a
+time.** `_CONFIRMED_SIGNATURE_CHANGE_KINDS` (the eighth finding's own set)
+still omitted every `Function`-level fact `diff_symbols.py` can confirm
+independently of the four fields `_symbol_evidence_sufficient` itself
+inspects (`return_type`/`params`/`is_variadic`/`contract_attributes`) --
+concretely, a real, diff-confirmed `FUNC_NOEXCEPT_ADDED` on a symbol that
+also carried an unrelated unresolved field still produced a redundant,
+contradictory "cannot be confirmed or denied" finding alongside the
+already-proven break, the identical shape the eighth finding fixed for
+`FUNC_VARIADIC_ADDED`/`FUNC_VARIADIC_REMOVED`/`CALLING_CONVENTION_
+CHANGED`. Rather than adding one more kind reactively (what the eighth
+finding's own review round was, by the reviewer's own framing, at risk of
+becoming), the fix was widened to every kind in that same shape:
+`FUNC_NOEXCEPT_ADDED`/`FUNC_NOEXCEPT_REMOVED` (`is_noexcept`, a plain
+bool, always confidently comparable), `FUNC_EXCEPTION_SPEC_CHANGED`/
+`CTOR_EXPLICIT_ADDED`/`CTOR_EXPLICIT_REMOVED` (`exception_spec`/
+`is_explicit`, tri-state fields whose own `diff_symbols` checks already
+skip on `None` the identical way `is_variadic`/`contract_attributes` do),
+`FUNC_REF_QUAL_CHANGED` (`ref_qualifier`, a plain string field), and
+`FUNC_VIRTUAL_ADDED`/`FUNC_VIRTUAL_REMOVED` (`is_virtual`, a plain bool).
+Deliberately excluded, with the reasoning recorded in the module's own
+docstring: `FUNC_LANGUAGE_LINKAGE_CHANGED` (an `extern "C"` transition
+changes the mangled name itself, so old and new sides can't share the
+`symbol` key this module matches on in the first place) and the
+vtable-slot/inline-transition kinds (facts about virtual-dispatch layout
+and definition placement, not the calling-signature-agreement question
+this module exists to answer). Nine regression tests (parametrized over
+all eight added kinds), each confirmed to fail against the pre-fix
+six-kind set.
+
+**An eleventh finding, from the same review round, closed a deeper
+version-blindness gap one layer past the ninth finding's own fix.** Even
+a symbol the ninth finding correctly identifies as *retained* from the old
+side can have multiple co-existing GNU versions live on one or both sides
+(`foo@V1` and `foo@@V2` both still exported -- an entirely ordinary shape
+for a provider that has never broken ABI compatibility across a versioned
+release) -- and `AbiSnapshot.function_map`/`variable_map` keep exactly one
+bare-name-keyed `Function`/`Variable` entry regardless of how many real
+GNU-versioned definitions exist. `_symbol_evidence_sufficient()` evaluates
+that single entry without any way to know which version it actually
+reflects, so a consumer requiring specifically V1 could be told evidence
+was fully sufficient purely because the collapsed entry happened to look
+complete -- even though no V1-specific signature was ever actually
+captured; the "sufficient evidence" answer could silently be borrowed from
+an entirely different version. Fixed by adding
+`_bare_name_version_collapsed()`, which detects the collapse using the
+bundle-resolution layer's own per-version `ProviderEntry` list for that
+`(provider_lib, symbol)` pair (a signal `AbiSnapshot` itself does not
+carry) and forces both sides' sufficiency to `False` when detected, so the
+"unverified" finding correctly fires (fail-closed) rather than trusting
+ambiguous evidence. Two regression tests: one confirming the finding fires
+when the old/new bare-name entry is version-collapsed (confirmed to fail
+against the pre-fix code), one confirming a genuinely single-version
+provider (even one flagged `is_default=True`) is unaffected.
+
+**A twelfth finding, from the same review round as the tenth and
+eleventh, found the eleventh finding's own fix was reachable only some of
+the time -- the confirmed-change precedence check one step earlier in the
+same loop could suppress a provider entry before the version-collapse
+guard ever ran.** `find_unverified_signature_findings()`'s main loop
+checks `(provider_lib, symbol) in confirmed` and `continue`s past the
+entire rest of the per-provider-entry body -- including the eleventh
+finding's own `_bare_name_version_collapsed()` check -- the moment ANY
+diff-confirmed change exists for that bare-name pair. But `confirmed` is
+itself built from `DiffResult.changes`, which are computed against the
+identical version-blind, bare-name-keyed `AbiSnapshot` entries the
+eleventh finding's fix already distrusts for evidence-sufficiency
+purposes -- so a diff-confirmed `FUNC_PARAMS_CHANGED` on a collapsed
+bare name `foo` (retaining both `foo@V1` and `foo@@V2`) is itself only
+ever describing whichever version the model happened to keep, not
+necessarily both. Pre-fix, this silently suppressed the unverified
+finding for *every* consumer of that bare name, version-blind, even
+though only one version's evidence was ever actually confirmed. Fixed by
+computing `version_collapsed` once per `provider_entry` before the
+confirmed-precedence check, and gating that check on `not
+version_collapsed` -- confirmed-change precedence still applies normally
+to the overwhelming majority (non-collapsed) case, and only yields to the
+fail-closed "unverified" treatment when the bare name is genuinely
+ambiguous. Two regression tests: two consumers pinned to each of two
+collapsed versions with one confirmed change on the shared bare name
+(confirmed to fail against the pre-fix code -- zero findings for either
+consumer, when two were expected), and a non-collapsed sibling control
+confirming precedence is otherwise unaffected.
+
+**A thirteenth finding, from the same review round, closed a gap in
+`_type_spelling_is_unresolved()` unrelated to symbol versioning.**
+`dwarf_snapshot.py`'s `_compute_type_name` fallback branch -- reached for
+any DWARF type-DIE tag with no dedicated handling (e.g.
+`DW_TAG_ptr_to_member_type`) -- returns `name or tag or "unknown"`. When
+the DIE carries no `DW_AT_name` (the common case for an obscure,
+unhandled tag), this leaks either the bare literal `"unknown"` or the raw,
+unresolved DWARF tag spelling itself into `Function.return_type`/
+`Param.type`/`Variable.type` as though it were a genuine type name --
+neither is one, and the previous sentinel set (`"?"`, the recursion-cap
+`"..."`, `"fn(...)"`) recognized none of them. Since both leaked forms
+pass through the identical `_resolve_inner_info`/`_resolve_inner_name`
+wrapping layer the recursion-cap sentinel already accounts for, they can
+also appear composited with pointer/reference/array suffixes and
+qualifier prefixes (`"unknown *"`, `"DW_TAG_ptr_to_member_type[]"`).
+Fixed by widening the existing recursion-cap regex -- renamed
+`_UNRESOLVED_WRAPPED_SENTINEL_RE` to reflect its now-broader scope -- to
+alternate over `\.\.\.|unknown|DW_TAG_\w+` as the wrapped base, rather
+than only `\.\.\.`. Four new parametrized regression cases (the two bare
+forms and one wrapped instance of each), confirmed to fail against the
+pre-fix regex.
+
+**A fourteenth finding, from a further Codex review round, showed
+retention is not actually a uniform, per-`ProviderEntry` fact -- it can
+vary by *which consumer* is asking.** `_provider_entry_retained_from_old`
+(the ninth finding) matches purely on `ProviderEntry.version`, which is
+correct for "does this exact version have any old-side counterpart at
+all" but says nothing about whether a *specific* consumer could actually
+have reached that old-side counterpart. Concretely: a provider previously
+exporting only `foo@V1` (`is_default=False`) that marks the identical
+`foo@@V1` default in the new release presents a genuinely new capability
+to an *unversioned* consumer (which binds only to a default definition,
+per `_consumer_matches_provider`'s own rule) -- that consumer could not
+have resolved `foo` from this provider before at all, so there is no
+old-side signature for it specifically to be "unverified" against, even
+though the bare version string "V1" checks out. A version-specific
+consumer requiring `foo@V1` explicitly is unaffected either way, since
+its own match rule never inspects `is_default`. Fixed by adding
+`_consumer_retained_from_old()`, folded into the `consumer_libs` filter
+alongside `_consumer_matches_provider` rather than into the existing
+per-provider-entry check -- deliberately additive, not a replacement:
+removing the original check in favor of only the per-consumer one would
+reopen the ninth finding's own bug, since an unversioned consumer's match
+rule ignores symbol version entirely and would treat *any* old default
+entry (of a completely different version) as satisfying retention for a
+provider entry whose version never existed in old at all. Both checks
+answer genuinely different questions and both must hold. Regression test
+with two sibling consumers (unversioned, version-specific) against the
+identical default-binding-flip scenario, confirmed to fail against the
+pre-fix code (the unversioned consumer's library appeared in the findings
+when it should not have).
+
+**A fifteenth finding, from the same review round, was investigated and
+deliberately declined rather than fixed reactively.** `_compare_one_
+library`'s `collect_diff_results` gate (widened earlier in this same PR
+to also trigger whenever bundle analysis is enabled -- the default) means
+every ordinary, non-JUnit release comparison now retains both full
+`AbiSnapshot` objects for every library until the whole release finishes
+and bundle reporting completes -- changing peak memory from roughly the
+active worker set to the sum of every old/new snapshot pair, a real
+concern for a release with many header-backed libraries. This was already
+called out as an accepted tradeoff in this PR's own first changelog entry
+(see this fragment's "Added" section), and investigating a fix confirmed
+why it isn't a same-pass patch: `entry["_old_snapshot"]` is shared with a
+*pre-existing* JUnit rendering path in `cli_compare_release.py` (predating
+this PR, per PR #798) that requires a real `AbiSnapshot`
+(`isinstance(old_snap, AbiSnapshot)`-gated) -- it cannot simply be
+replaced with the compact `function_map`/`variable_map`/`elf_only_mode`
+structure `find_unverified_signature_findings` actually needs. A safe fix
+needs the stashing code in `_compare_one_library` to know *why*
+`collect_diff_results` was triggered for a given run (JUnit vs.
+bundle-analysis-only vs. both) and store a full snapshot only when JUnit
+genuinely needs one -- a real control-flow change to already-reviewed,
+working code, not something to attempt under continued review pressure
+in this pass. Left as a known, accepted gap per this file's own "known
+gaps over risky reactive patches" convention.
+
 `bundle_intra_dep_signature_changed` already fires correctly when a
 provider's DWARF/header evidence shows a real signature change. This phase
 adds the missing negative case: a new, dedicated `ChangeKind`,
@@ -563,15 +1033,16 @@ table asks for.
 |---|---|
 | `abicheck/bundle_facts.py` | **Shipped (Phase 2).** New leaf module (not `bundle_models.py` — see the implementation-status note above): `BundleFacts`, `capture_bundle_facts()`, `bundle_snapshot_from_facts()`, `compare_bundle_from_facts()` (a thin wrapper delegating to `bundle.compare_bundle()` unchanged, so the parity test holds two calls to one implementation equal) |
 | `abicheck/bundle_manifest.py` | **Shipped (Phase 2).** `manifest_to_dict`/`manifest_from_dict`/`manifest_entry_to_dict`/`manifest_entry_from_dict` — round-trip serialization for `InstantiationManifest`, reusing `_parse_manifest_entry`'s existing validation rather than a second parser |
-| `abicheck/bundle_multibuild.py` | New — `variant_fingerprint`, `pair_variants`, `VariantComparison` (Phase 3) |
+| `abicheck/bundle_multibuild.py` | **Shipped (Phase 3, pairing primitive only).** `variant_fingerprint`, `pair_variants`, `VariantOutcome`, `VariantComparison`, `coverage_regression_findings` |
+| `abicheck/bundle_signature_evidence.py` | **Shipped (Phase 4, detector only).** `find_unverified_signature_findings` — standalone leaf module, not wired into `bundle.compare_bundle()` (see the Phase 4 implementation-status note above) |
 | `abicheck/serialization.py` | **Shipped (Phase 2).** `save_bundle_facts`/`load_bundle_facts` plus `bundle_facts_to_dict`/`bundle_facts_from_dict` (the latter two live here, not in `bundle_facts.py`, to avoid the import cycle noted above) |
 | `abicheck/comparability.py` | Bundle-level fingerprint-mismatch refusal, mirroring the existing single-snapshot `ScopeMismatchError` (Phase 3, once `variant_fingerprint` carries real per-variant identity — Phase 2's field is always `"default"`); no change to single-snapshot behavior |
-| `abicheck/checker_policy.py` / `abicheck/change_registry.py` | `bundle_variant_coverage_regressed`, `bundle_intra_dep_signature_unverified` registry entries (Phases 3-4) |
+| `abicheck/checker_policy.py` / `abicheck/change_registry_buildsource.py` | **Shipped (Phase 3):** `bundle_variant_coverage_regressed` registry entry. **Shipped (Phase 4):** `bundle_intra_dep_signature_unverified` registry entry, in `change_registry_buildsource.py` alongside its Phase 3 sibling |
 | `abicheck/cli_options.py` / `abicheck/cli_compare_release*.py` | **Shipped (producer half only).** `--bundle-facts-out <path>` on the existing `compare` release fan-out (`release_options()` in `cli_options.py`, threaded through `run_compare()`/`_dispatch_release_compare`/`compare_release_cmd`, written via `cli_compare_release_helpers.write_bundle_facts_out()`) — an additive output flag, not a new root command. **Not shipped:** `compare --against <bundle facts>` consumer wiring (deferred — see the implementation-status note above) and whichever multibuild CLI surface Phase 3 needs |
 | `abicheck/reporter.py` / `abicheck/report_summary.py` | Render the two new finding shapes; extend `bundle.json`/`bundle.md` (Phases 3-4) |
 | `docs/reference/change-kinds.md` | Phase 1 taxonomy note; new-kind entries for Phases 3-4 |
 | `docs/contribute/adr/023-bundle-aware-multi-binary-analysis.md` | Amendment block linking to this plan (see below) |
-| `tests/canonical_identity_contract.py` | Classify both new kinds (`bundle_variant_coverage_regressed`, `bundle_intra_dep_signature_unverified`) into exactly one of `TYPE_BEARING`/`VALUE_INSENSITIVE`/`UNVERIFIED` — required by the root `AGENTS.md`'s "Adding a new ChangeKind" step 5; `tests/test_canonical_finding_id_completeness.py` fails until both are classified, same as every other new kind (Phases 3-4) |
+| `tests/canonical_identity_contract.py` | **Shipped.** Both new kinds (`bundle_variant_coverage_regressed`, `bundle_intra_dep_signature_unverified`) classified into `UNVERIFIED` — required by the root `AGENTS.md`'s "Adding a new ChangeKind" step 5; `tests/test_canonical_finding_id_completeness.py` passes for both |
 
 ---
 
@@ -586,8 +1057,11 @@ table asks for.
   finding, a negative/no-change control, and manifest override precedence
   — `compare_bundle_from_facts()`'s findings/verdict compared field-for-field
   against a live `compare_bundle()` call on the identical underlying facts).
-- Still pending: the two new `ChangeKind`s' positive/negative cases
-  (Phases 3-4, not yet implemented).
+- **Shipped:** `bundle_variant_coverage_regressed`'s positive/negative cases
+  (Phase 3) — see `tests/test_bundle_multibuild.py` below.
+- **Shipped:** `bundle_intra_dep_signature_unverified`'s positive/negative
+  cases (Phase 4) — see `tests/test_bundle_signature_evidence.py`, listed in
+  the Phase 4 implementation-status note above.
 - New `tests/test_bundle_multibuild.py` — `variant_fingerprint` determinism
   and sensitivity: two builds differing only in an ABI-irrelevant flag, or
   only in `-std=`/build-derived defines, fingerprint **identically** (Phase
