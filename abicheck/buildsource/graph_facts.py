@@ -1011,7 +1011,26 @@ def _normalize_graph_identity(identity: str) -> str:
     primitive rather than inventing a second, differently-limited one. A
     fix would be a real, cross-cutting redesign of a primitive shared with
     the L2 backend, not a scoped change to this L5-specific caller.
+
+    Fast-pathed on a plain ``"at" in identity`` check (Codex review,
+    fresh evidence -- a real header-graph attach-cost CI regression,
+    ~31% at 400 declarations/castxml, traced to this function running on
+    every id/label/attrs pair for every decl/type node several times
+    over, across the several rounds this whole mechanism accreted through
+    -- not a hypothetical). Both underlying regexes require the literal
+    substring ``"at"`` (``strip_anonymous_type_location``'s own
+    ``\\bat\\s+...``, this module's own ``\\s+at\\s+...`` bare-marker
+    pattern) immediately before the location text, so a string that
+    doesn't contain it at all cannot match either one -- a cheap,
+    substring-only necessary condition with no regex engine involved,
+    correct for every input (never skips a string that could actually
+    match), not just the realistic ones. Ordinary identifiers containing
+    "at" as a substring (``"Category"``, ``"static_cast"``) still pay
+    the full regex cost -- this only eliminates the (typically dominant)
+    fraction of identities with no "at" substring anywhere.
     """
+    if "at" not in identity:
+        return identity
     return _strip_bare_anonymous_type_location(strip_anonymous_type_location(identity))
 
 

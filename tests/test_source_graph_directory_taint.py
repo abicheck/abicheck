@@ -792,3 +792,29 @@ def test_add_node_and_add_edge_normalize_a_hand_built_id_directly() -> None:
     assert old_graph.nodes[0].id == new_graph.nodes[0].id
     assert old_graph.edges[0].dst == new_graph.edges[0].dst
     assert old_graph.finalize().graph_id == new_graph.finalize().graph_id
+
+
+def test_normalize_graph_identity_fast_path_is_safe_and_effective() -> None:
+    # A real header-graph attach-cost CI regression (~31% at 400 decls/castxml) traced
+    # to _normalize_graph_identity's two chained regex passes running on every id/
+    # label/attrs pair for every decl/type node, several times over, across the
+    # several rounds this whole mechanism accreted through. Both underlying regexes
+    # require the literal substring "at" before the location text, so a string
+    # without it can never match either one -- a plain substring check short-circuits
+    # the expensive path with no correctness cost.
+    from abicheck.buildsource.graph_facts import _normalize_graph_identity
+
+    # No "at" substring anywhere: fast-pathed, unchanged.
+    no_at = "my_namespace::WidgetFactory"
+    assert "at" not in no_at
+    assert _normalize_graph_identity(no_at) == no_at
+
+    # An "at" substring that isn't part of a real marker: not fast-pathed, but still
+    # correctly returned unchanged (no spurious match).
+    assert _normalize_graph_identity("Category") == "Category"
+
+    # A real marker (contains "at") still normalizes correctly through the full path.
+    old = _normalize_graph_identity("lambda at /old/checkout/lib.hpp:4:37")
+    new = _normalize_graph_identity("lambda at /new/checkout/lib.hpp:4:37")
+    assert old == new
+    assert "/old/checkout" not in old
