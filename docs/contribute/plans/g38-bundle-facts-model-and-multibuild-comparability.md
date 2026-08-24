@@ -705,6 +705,16 @@ confirmed diff-level finding nor this module's own risk finding — total
 silence on a real, calling-ABI-relevant unknown. Fixed by also requiring
 `is_variadic is not None`. Confirmed to fail against the pre-fix code.
 
+**A fifth finding, the identical shape as the fourth for a different
+tri-state field.** `Function.contract_attributes` (calling-convention
+attributes such as `stdcall`/`ms_abi`/`vectorcall`, `list[str] | None`)
+had the same gap: `diff_symbols._check_contract_attributes_change()`
+itself skips whenever either side is `None`, so a real calling-convention
+transition landing on an unknown side produced neither a confirmed
+diff-level finding nor this module's own risk finding. Fixed by also
+requiring `contract_attributes is not None`. Confirmed to fail against
+the pre-fix code.
+
 `bundle_intra_dep_signature_changed` already fires correctly when a
 provider's DWARF/header evidence shows a real signature change. This phase
 adds the missing negative case: a new, dedicated `ChangeKind`,

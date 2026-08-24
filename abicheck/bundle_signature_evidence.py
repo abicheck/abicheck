@@ -188,13 +188,17 @@ def _symbol_evidence_sufficient(symbol: str, snapshot: AbiSnapshot) -> bool:
       symbol crosschecked against *some* declaration whose own type
       resolution still failed, wholly or partway through a composite
       type).
-    - (for a function) `is_variadic is None` -- unknown, tri-state, not a
-      negative determination. `diff_symbols._check_variadic_change` itself
-      skips (`skip_none=True`) whenever either side's value is unknown, so
-      treating an unknown value as "the rest of the signature looks fine,
-      therefore sufficient" would let a real fixed-arity<->variadic
-      transition produce neither a confirmed diff-level finding nor this
-      module's own risk finding.
+    - (for a function) `is_variadic is None` or `contract_attributes is
+      None` -- both real tri-state fields where `None` means "not
+      captured by this backend" rather than a negative determination
+      (`is_variadic=False`/`contract_attributes=[]` are the corresponding
+      "captured, and it's not/there are none" states).
+      `diff_symbols._check_variadic_change`/`_check_contract_attributes_
+      change` themselves skip whenever either side's value is `None`, so
+      treating an unknown value here as "the rest of the signature looks
+      fine, therefore sufficient" would let a real fixed-arity<->variadic
+      or calling-convention transition produce neither a confirmed
+      diff-level finding nor this module's own risk finding.
 
     A symbol absent from both `function_map` and `variable_map` entirely
     is also treated as insufficient -- absence of any declaration entry is
@@ -217,6 +221,20 @@ def _symbol_evidence_sufficient(symbol: str, snapshot: AbiSnapshot) -> bool:
             # transition produce neither a confirmed diff-level finding
             # nor this module's own unverified-risk one -- total silence
             # on a real ABI-relevant unknown.
+            return False
+        if fn.contract_attributes is None:
+            # Codex review, fresh evidence: the identical shape as the
+            # is_variadic gap above, for a different tri-state field.
+            # `contract_attributes` (calling-convention attributes such as
+            # `stdcall`/`ms_abi`/`vectorcall`) is `list[str] | None` --
+            # `None` means "not captured by this backend" (an older
+            # snapshot, or a dumper that never populates it), `[]` means
+            # "captured, and there are none". `diff_symbols._check_
+            # contract_attributes_change` itself skips whenever either side
+            # is `None`, so treating an unknown value as sufficient would
+            # let a real calling-convention transition produce neither a
+            # confirmed diff-level finding nor this module's own risk
+            # finding.
             return False
         if _type_spelling_is_unresolved(fn.return_type):
             return False

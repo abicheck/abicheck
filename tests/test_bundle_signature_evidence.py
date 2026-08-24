@@ -82,6 +82,7 @@ def _evidenced_fn(
     return_type: str = "int",
     params: list[Param] | None = None,
     is_variadic: bool | None = False,
+    contract_attributes: list[str] | None = (),
 ) -> Function:
     return Function(
         name=symbol,
@@ -90,6 +91,9 @@ def _evidenced_fn(
         params=params or [],
         visibility=Visibility.PUBLIC,
         is_variadic=is_variadic,
+        contract_attributes=(
+            list(contract_attributes) if contract_attributes is not None else None
+        ),
     )
 
 
@@ -196,6 +200,39 @@ class TestFindUnverifiedSignatureFindings:
         new_snaps = {
             "libcore.so": _snap(
                 "libcore.so", functions=[_evidenced_fn("core_fn", is_variadic=False)]
+            )
+        }
+
+        findings = find_unverified_signature_findings(
+            new, new, [], old_snaps, new_snaps
+        )
+        assert len(findings) == 1
+        assert "old side lacks" in findings[0].description
+
+    def test_fires_when_contract_attributes_are_unknown_on_either_side(self):
+        # Codex review, fresh evidence: the identical shape as the
+        # is_variadic gap above, for Function.contract_attributes
+        # (calling-convention attributes like stdcall/ms_abi/vectorcall) --
+        # a real tri-state field (list[str] | None). diff_symbols._check_
+        # contract_attributes_change() itself skips whenever either side is
+        # None, so a real calling-convention transition landing on an
+        # unknown side must not read as sufficient evidence here either.
+        new = _snapshot(
+            {
+                "libcore.so": _meta(exports=["core_fn"]),
+                "libconsumer.so": _meta(imports=["core_fn"], needed=["libcore.so"]),
+            }
+        )
+        old_snaps = {
+            "libcore.so": _snap(
+                "libcore.so",
+                functions=[_evidenced_fn("core_fn", contract_attributes=None)],
+            )
+        }
+        new_snaps = {
+            "libcore.so": _snap(
+                "libcore.so",
+                functions=[_evidenced_fn("core_fn", contract_attributes=[])],
             )
         }
 

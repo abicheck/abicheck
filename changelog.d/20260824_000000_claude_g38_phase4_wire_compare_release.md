@@ -92,3 +92,13 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   risk finding: total silence on a real, calling-ABI-relevant unknown.
   Fixed by also requiring `is_variadic is not None` for a function's
   evidence to count as sufficient.
+- **`_symbol_evidence_sufficient()` also treated unknown calling-convention
+  attributes (`Function.contract_attributes is None`) as sufficient
+  evidence** (Codex review, fresh evidence) -- the identical shape as the
+  `is_variadic` gap above, for a different tri-state field
+  (`list[str] | None`; calling-convention attributes such as `stdcall`/
+  `ms_abi`/`vectorcall`). `diff_symbols._check_contract_attributes_change()`
+  itself skips whenever either side is `None`, so a real calling-convention
+  transition landing on an unknown side previously produced neither a
+  confirmed diff-level finding nor this module's own risk finding. Fixed
+  by also requiring `contract_attributes is not None`.
