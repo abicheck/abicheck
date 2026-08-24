@@ -1407,40 +1407,61 @@ rather than correctness:
   from producing a real baseline-comparable exit code instead of an
   audit-only one.
 
-### Phase 9 — Compact per-library signature evidence (memory regression fix)
+### Phase 9 — Compact per-library signature evidence (memory regression fix, shipped)
 
 **Finding:** wiring Phase 4 into the live `compare --release`/bundle-
 analysis path (the "Phase 4" changelog entry above) made
 `collect_diff_results=True` the default for *every* directory/package
 comparison, not only when `--bundle-facts-out`/JUnit was requested — so
 every completed library's full old+new `AbiSnapshot` (functions, types,
-layouts, source graph, build-source evidence, everything) is now retained
-until the whole release finishes and bundle analysis runs.
-`_collect_bundle_result()` then builds complete old/new snapshot maps from
-those retained objects. For an N-library release, peak memory approaches
+layouts, source graph, build-source evidence, everything) was retained
+until the whole release finished and bundle analysis ran.
+`_collect_bundle_result()` then built complete old/new snapshot maps from
+those retained objects. For an N-library release, peak memory approached
 the sum of every completed library's full snapshot pair plus whatever
-active parallel workers are still extracting — a real regression relative
+active parallel workers were still extracting — a real regression relative
 to the pre-Phase-4 default, where only JUnit/`--bundle-facts-out` paid that
 cost.
 
-**Planned fix:** a new, frozen `BundleSignatureEvidence` projection
-(`library_key`, `exported_symbols`, per-symbol function/variable signature
-evidence, confirmed-boundary-change keys) built immediately after each
-per-library comparison finishes and immune to the source `AbiSnapshot`'s own
-size — the full snapshot is then released unless something *else* still
-needs it (JUnit rendering, `--bundle-facts-out`). Three independent
-retention reasons currently collapse into one `collect_diff_results` flag;
-they need to become three (JUnit, `--bundle-facts-out`, compact evidence),
-so "bundle analysis is enabled" stops implying "retain every full
-snapshot." Acceptance criterion: a default `compare --release` over N
-libraries retains zero full old/new `AbiSnapshot` objects once each
-library's own comparison completes, verified by asserting retained-object
-counts (not just wall time) in a dedicated regression test. **Not yet
-implemented** — filed here as the top-priority next phase rather than
-attempted in the same change as Phase 5, since it touches the release
-fan-out's own memory-lifetime contract and needs its own careful,
-independently-verified design (per this repo's "known gaps over risky
-reactive patches" convention in the root `AGENTS.md`).
+**Fix (shipped):** a new, frozen `bundle_models.BundleSignatureEvidence`
+projection carrying only the three fields
+`find_unverified_signature_findings` actually reads
+(`function_map`/`variable_map`/`elf_only_mode` — confirmed by reading
+every attribute access that function's own helpers make on a snapshot),
+built immediately in `_compare_one_library` right after each per-library
+comparison finishes, holding references to the *same* `Function`/
+`Variable` objects rather than deep-copying — the rest of the snapshot
+(types, source graph, build-source evidence, everything not referenced
+from the compact projection) becomes eligible for garbage collection the
+moment the caller drops its own reference to the full `AbiSnapshot`,
+rather than staying alive until `_collect_bundle_result` runs. The single
+`collect_diff_results` flag split into two: `collect_diff_results` (stash
+*something* for the bundle layer) and a new `need_full_snapshots`
+(JUnit/`--bundle-facts-out` — the two reasons that genuinely need the
+real `AbiSnapshot`), so a default `compare --release` with bundle
+analysis on but neither of those stashes only the compact projection
+under `"_old_bundle_evidence"`/`"_new_bundle_evidence"` instead of
+`"_old_snapshot"`/`"_new_snapshot"`. `_collect_bundle_result`/
+`_run_bundle_analysis` and `find_unverified_signature_findings` itself
+accept either type interchangeably (duck-type compatible — both expose
+the same three fields), so neither JUnit/`--bundle-facts-out`'s full-
+snapshot path nor the detector's own logic needed to change.
+
+Regression coverage: `tests/test_compare_release_contract_coverage.py::
+test_compare_one_library_stashes_old_snapshot_only_when_requested`
+(pins that `collect_diff_results=True` alone stashes the compact
+projection referencing the *same* `function_map`/`variable_map` objects,
+never a full `AbiSnapshot`, and that `need_full_snapshots=True` restores
+the old full-snapshot behavior) and
+`tests/test_cli_compare_release_bundle_signature_wiring.py::
+TestCollectBundleResultAcceptsCompactBundleEvidence` (the compact and
+full-snapshot paths reach `find_unverified_signature_findings` and
+produce identical finding kinds end to end). The acceptance criterion
+this phase was filed against — "a default `compare --release` retains
+zero full `AbiSnapshot` objects once each library's own comparison
+completes" — now holds by construction: nothing downstream of
+`_compare_one_library` in the default (no-JUnit, no-`--bundle-facts-out`)
+path ever receives a full `AbiSnapshot` reference at all.
 
 ### Phase 10 — Bundle-finding policy/severity/exit-code consistency
 

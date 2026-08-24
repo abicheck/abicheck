@@ -32,7 +32,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import abicheck.bundle as bundle_mod
-from abicheck.bundle_models import BundleSnapshot
+from abicheck.bundle_models import BundleSignatureEvidence, BundleSnapshot
 from abicheck.checker_policy import ChangeKind, Verdict
 from abicheck.checker_types import DiffResult
 from abicheck.cli_compare_release_helpers import (
@@ -229,3 +229,93 @@ class TestCollectBundleResultBuildsSnapshotMapsFromBundleKey:
         # Entries carrying no _bundle_key (the second library above) must
         # not raise or contribute a spurious mapping entry.
         assert isinstance(worst_verdict, str)
+
+
+class TestCollectBundleResultAcceptsCompactBundleEvidence:
+    """G38 stabilization Phase 9 (memory regression fix): a default
+    ``compare --release`` (bundle analysis on, no JUnit/
+    ``--bundle-facts-out``) stashes ``_old_bundle_evidence``/
+    ``_new_bundle_evidence`` (:class:`~abicheck.bundle_models.
+    BundleSignatureEvidence`) instead of the full ``_old_snapshot``/
+    ``_new_snapshot`` -- ``_collect_bundle_result`` must read either and
+    reach the identical detector output, and no `AbiSnapshot` may leak
+    into the returned entries either way."""
+
+    def test_compact_evidence_reaches_the_detector_identically(
+        self, monkeypatch
+    ) -> None:
+        def _fake_snapshot(libs: dict[str, Path]) -> BundleSnapshot:
+            return _snapshot(
+                {
+                    "libcore.so": _meta(exports=["core_fn"]),
+                    "libconsumer.so": _meta(imports=["core_fn"], needed=["libcore.so"]),
+                }
+            )
+
+        monkeypatch.setattr(bundle_mod, "build_bundle_snapshot", _fake_snapshot)
+
+        old_map = {
+            "libcore.so": Path("libcore.so"),
+            "libconsumer.so": Path("libconsumer.so"),
+        }
+        new_map = dict(old_map)
+
+        old_snap = _snap(
+            "libcore.so", functions=[_elf_only_fn("core_fn")], elf_only_mode=True
+        )
+        new_snap = _snap(
+            "libcore.so", functions=[_elf_only_fn("core_fn")], elf_only_mode=True
+        )
+
+        def _entries(
+            old_evidence: object, new_evidence: object
+        ) -> list[dict[str, object]]:
+            return [
+                {
+                    "library": "libcore.so",
+                    "verdict": "NO_CHANGE",
+                    "_diff_result": _diff("libcore.so"),
+                    "_old_bundle_evidence": old_evidence,
+                    "_new_bundle_evidence": new_evidence,
+                    "_bundle_key": "libcore.so",
+                },
+                {
+                    "library": "libconsumer.so",
+                    "verdict": "NO_CHANGE",
+                    "_diff_result": _diff("libconsumer.so"),
+                },
+            ]
+
+        compact_old = BundleSignatureEvidence.from_snapshot(old_snap)
+        compact_new = BundleSignatureEvidence.from_snapshot(new_snap)
+
+        compact_result, _ = _collect_bundle_result(
+            _entries(compact_old, compact_new),
+            old_map,
+            new_map,
+            "NO_CHANGE",
+            manifest_path=None,
+            bundle_system_providers="",
+        )
+        full_result, _ = _collect_bundle_result(
+            _entries(old_snap, new_snap),
+            old_map,
+            new_map,
+            "NO_CHANGE",
+            manifest_path=None,
+            bundle_system_providers="",
+        )
+
+        assert compact_result is not None and full_result is not None
+        compact_kinds = sorted(f.kind.value for f in compact_result.bundle_findings)
+        full_kinds = sorted(f.kind.value for f in full_result.bundle_findings)
+        assert compact_kinds == full_kinds
+        assert ChangeKind.BUNDLE_INTRA_DEP_SIGNATURE_UNVERIFIED.value in compact_kinds
+
+        # No AbiSnapshot -- full or otherwise -- leaks through the compact
+        # path's own entries into the result of a later JSON-serialising
+        # step (this is what the CLI-level strip already guards; this pins
+        # the underlying object graph directly).
+        for entry in _entries(compact_old, compact_new):
+            assert not isinstance(entry.get("_old_bundle_evidence"), AbiSnapshot)
+            assert not isinstance(entry.get("_new_bundle_evidence"), AbiSnapshot)

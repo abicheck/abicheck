@@ -108,6 +108,7 @@ from pathlib import Path
 from .bundle_models import (
     CONFIRMED_C_BOUNDARY_SIGNATURE_BREAK_KINDS,
     BundleFinding,
+    BundleSignatureEvidence,
     BundleSnapshot,
     ConsumerEntry,
     ProviderEntry,
@@ -246,7 +247,9 @@ def _type_spelling_is_unresolved(spelling: str) -> bool:
     )
 
 
-def _symbol_evidence_sufficient(symbol: str, snapshot: AbiSnapshot) -> bool:
+def _symbol_evidence_sufficient(
+    symbol: str, snapshot: AbiSnapshot | BundleSignatureEvidence
+) -> bool:
     """Does *snapshot* carry real DWARF/header-derived type evidence for
     *symbol*, as opposed to only a bare ELF export with no corroborating
     declaration?
@@ -328,7 +331,9 @@ def _symbol_evidence_sufficient(symbol: str, snapshot: AbiSnapshot) -> bool:
     return False
 
 
-def _symbol_was_exported(symbol: str, snapshot: AbiSnapshot) -> bool:
+def _symbol_was_exported(
+    symbol: str, snapshot: AbiSnapshot | BundleSignatureEvidence
+) -> bool:
     """Did *snapshot*'s own `Function`/`Variable` entry for *symbol* actually
     reach the binary's *dynamic* export table (`.dynsym`) -- as opposed to
     merely being *some* declaration, public or private, that `AbiSnapshot`
@@ -547,8 +552,8 @@ def find_unverified_signature_findings(
     old: BundleSnapshot,
     new: BundleSnapshot,
     per_library_results: Iterable[DiffResult],
-    old_snapshots: Mapping[str, AbiSnapshot],
-    new_snapshots: Mapping[str, AbiSnapshot],
+    old_snapshots: Mapping[str, AbiSnapshot | BundleSignatureEvidence],
+    new_snapshots: Mapping[str, AbiSnapshot | BundleSignatureEvidence],
 ) -> list[BundleFinding]:
     """`BUNDLE_INTRA_DEP_SIGNATURE_UNVERIFIED` findings: a sibling library's
     undefined import resolves by name to a provider's export in *new* (the
@@ -572,8 +577,12 @@ def find_unverified_signature_findings(
 
     *old_snapshots*/*new_snapshots* map bundle-relative library name (the
     same canonical key `BundleSnapshot.libraries` uses) to that library's
-    own `AbiSnapshot` -- the one input `compare_bundle` itself never
-    receives. A provider absent from either mapping, or whose symbol was
+    own `AbiSnapshot` -- or, since G38 stabilization Phase 9, the
+    cheaper `BundleSignatureEvidence` projection of one (see that type's
+    own docstring); both are accepted since this function reads only the
+    three fields the projection carries. Either way this is the one input
+    `compare_bundle` itself never receives. A provider absent from either
+    mapping, or whose symbol was
     not actually part of the *old* side's export surface (`_symbol_was_
     exported`), is skipped for that symbol -- this covers both a genuine
     addition (no declaration on the old side at all) and a symbol that

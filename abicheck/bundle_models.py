@@ -26,12 +26,14 @@ types here are re-exported from :mod:`abicheck.bundle` so the historical
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from .checker_policy import ChangeKind, Verdict, compute_verdict
 from .checker_types import Change, DiffResult
 from .elf_metadata import ElfMetadata
+from .model import AbiSnapshot, Function, Variable
 
 # Symbols imported by virtually every C/C++ shared library that are
 # provided by the system loader, not by the bundle. Resolution against the
@@ -342,6 +344,60 @@ def basename_to_bundle_key(snapshot: BundleSnapshot) -> dict[str, str]:
     caller degrades to comparing the raw basename, rather than raising.
     """
     return {path.name: key for key, path in snapshot.libraries.items()}
+
+
+@dataclass(frozen=True)
+class BundleSignatureEvidence:
+    """Compact, per-library stand-in for an :class:`~abicheck.model.
+    AbiSnapshot`, carrying only what
+    :func:`abicheck.bundle_signature_evidence.find_unverified_signature_
+    findings` actually reads from one (G38 stabilization Phase 9, memory
+    regression fix).
+
+    Wiring Phase 4 into the live ``compare --release`` path made every
+    directory/package comparison retain each library's full old+new
+    ``AbiSnapshot`` (functions, types, layouts, source graph, build-source
+    evidence -- everything) until the whole release finished and bundle
+    analysis ran, even when neither JUnit nor ``--bundle-facts-out`` needed
+    it. Confirmed by reading every attribute
+    ``find_unverified_signature_findings``'s own helpers touch on a
+    snapshot: exactly ``function_map``, ``variable_map``, and
+    ``elf_only_mode`` -- never a type, a record, the source graph, or any
+    other field. This type exposes only those three, built once right
+    after a per-library comparison completes
+    (:meth:`from_snapshot`), so the caller can drop its reference to the
+    full ``AbiSnapshot`` and let the rest of it (the part that actually
+    dominates memory for a template-heavy C++ library) be garbage
+    collected instead of retained for the whole release.
+
+    Deliberately duck-type compatible with ``AbiSnapshot`` for this one
+    consumer's purposes rather than a narrower ``Protocol`` -- both this
+    type and ``AbiSnapshot`` are accepted anywhere
+    ``find_unverified_signature_findings`` takes an
+    ``old_snapshots``/``new_snapshots`` mapping, so a caller that *does*
+    need the full snapshot for another reason (JUnit, ``--bundle-facts-
+    out``) can keep passing the real thing with no special-casing on the
+    receiving end.
+    """
+
+    function_map: Mapping[str, Function]
+    variable_map: Mapping[str, Variable]
+    elf_only_mode: bool
+
+    @classmethod
+    def from_snapshot(cls, snapshot: AbiSnapshot) -> BundleSignatureEvidence:
+        """Project *snapshot* down to its bundle-signature-evidence-relevant
+        fields. Holds references to the same ``Function``/``Variable``
+        objects (no deep copy) -- correct because those are exactly what
+        the caller wants to keep alive; everything else *not* referenced
+        from here becomes eligible for garbage collection once the caller
+        drops its own reference to ``snapshot``.
+        """
+        return cls(
+            function_map=snapshot.function_map,
+            variable_map=snapshot.variable_map,
+            elf_only_mode=snapshot.elf_only_mode,
+        )
 
 
 @dataclass

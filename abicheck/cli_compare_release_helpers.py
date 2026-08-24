@@ -35,6 +35,7 @@ from typing import TYPE_CHECKING
 import click
 
 from .bundle import BundleDiffResult, render_bundle_findings_markdown
+from .bundle_models import BundleSignatureEvidence
 from .checker import DiffResult
 from .model import AbiSnapshot
 
@@ -157,8 +158,8 @@ def _run_bundle_analysis(
     bundle_system_providers: str,
     bundle_cohorts: tuple[str, ...] = (),
     policy: str = "strict_abi",
-    old_snapshots: dict[str, AbiSnapshot] | None = None,
-    new_snapshots: dict[str, AbiSnapshot] | None = None,
+    old_snapshots: dict[str, AbiSnapshot | BundleSignatureEvidence] | None = None,
+    new_snapshots: dict[str, AbiSnapshot | BundleSignatureEvidence] | None = None,
 ) -> BundleDiffResult | None:
     """Run bundle-level (ADR-023) analysis on a compare-release run.
 
@@ -549,10 +550,22 @@ def _collect_bundle_result(
     bundle_cohorts: tuple[str, ...] = (),
     policy: str = "strict_abi",
 ) -> tuple[BundleDiffResult | None, str]:
-    """Extract stashed DiffResults, run bundle analysis, update worst verdict."""
+    """Extract stashed DiffResults, run bundle analysis, update worst verdict.
+
+    Each entry carries *either* the full ``_old_snapshot``/``_new_snapshot``
+    (JUnit/``--bundle-facts-out`` in effect) *or* the much smaller
+    ``_old_bundle_evidence``/``_new_bundle_evidence`` (G38 stabilization
+    Phase 9's memory fix — see :class:`~abicheck.bundle_models.
+    BundleSignatureEvidence`) — never both, per
+    ``cli_compare_release._compare_one_library``'s own stash logic. Either
+    is duck-type compatible with what
+    :func:`~abicheck.bundle_signature_evidence.find_unverified_signature_
+    findings` reads, so both are folded into the same ``old_snapshots``/
+    ``new_snapshots`` mapping this function has always built.
+    """
     stashed_diffs: list[DiffResult] = []
-    old_snapshots: dict[str, AbiSnapshot] = {}
-    new_snapshots: dict[str, AbiSnapshot] = {}
+    old_snapshots: dict[str, AbiSnapshot | BundleSignatureEvidence] = {}
+    new_snapshots: dict[str, AbiSnapshot | BundleSignatureEvidence] = {}
     for entry in library_results:
         if not isinstance(entry, dict):
             continue
@@ -560,12 +573,12 @@ def _collect_bundle_result(
         if isinstance(diff, DiffResult):
             stashed_diffs.append(diff)
         bundle_key = entry.get("_bundle_key")
-        old_snap = entry.get("_old_snapshot")
-        new_snap = entry.get("_new_snapshot")
+        old_snap = entry.get("_old_snapshot") or entry.get("_old_bundle_evidence")
+        new_snap = entry.get("_new_snapshot") or entry.get("_new_bundle_evidence")
         if (
             isinstance(bundle_key, str)
-            and isinstance(old_snap, AbiSnapshot)
-            and isinstance(new_snap, AbiSnapshot)
+            and isinstance(old_snap, (AbiSnapshot, BundleSignatureEvidence))
+            and isinstance(new_snap, (AbiSnapshot, BundleSignatureEvidence))
         ):
             old_snapshots[bundle_key] = old_snap
             new_snapshots[bundle_key] = new_snap
