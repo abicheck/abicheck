@@ -357,6 +357,34 @@ def build_type_map(types: Iterable[Q]) -> TypeMap[Q]:
     return TypeMap(types)
 
 
+def typedef_diff_maps(
+    old: AbiSnapshot, new: AbiSnapshot
+) -> tuple[dict[str, str], dict[str, str]]:
+    """Return the ``(old, new)`` alias->underlying-type maps to diff typedefs
+    over, preferring the qualified-name-keyed twin when both sides carry one.
+
+    ``AbiSnapshot.typedefs`` is keyed by *bare* (unqualified) name on both
+    header backends, so two distinct member/nested typedefs that happen to
+    share a bare spelling in different classes/namespaces (e.g. two unrelated
+    ``impl_value_t`` member aliases on different classes) silently collapse
+    onto one dict entry, whichever declaration the backend visits last
+    winning (see that field's own docstring in ``model.py`` for the full
+    incident history). Diffing that collapsed dict directly means an
+    unrelated class gaining or losing its own same-named alias can flip the
+    surviving entry's recorded value, fabricating a spurious
+    ``TYPEDEF_BASE_CHANGED`` for a typedef that never itself changed.
+
+    ``AbiSnapshot.typedefs_qualified`` (schema v25) carries the identical set
+    of typedef declarations keyed by qualified name instead, unique per
+    declaration and therefore immune to this collision. Used whenever both
+    sides populate it; falls back to the legacy bare maps otherwise (a
+    DWARF-only or pre-v25 snapshot) so that comparison path is unaffected.
+    """
+    if old.typedefs_qualified and new.typedefs_qualified:
+        return old.typedefs_qualified, new.typedefs_qualified
+    return old.typedefs, new.typedefs
+
+
 def lookup_matched_type(own: TypeMap[Q], other: TypeMap[Q], t: Q) -> Q | None:
     """Look up *t*'s counterpart in *other* (the opposite old/new ``TypeMap``
     from the one *t* itself came from, ``own``), trying both *t*'s own

@@ -1078,6 +1078,46 @@ def test_parse_types_sets_qualified_name_for_namespaced_record() -> None:
     assert types["Global"].qualified_name is None
 
 
+def test_parse_types_strips_anonymous_type_location_from_qualified_name() -> None:
+    """Mirrors dumper_castxml.py's identical fix (commit 3aca095): a
+    record's own name (or an enclosing scope segment) can embed an absolute
+    source path/line/column the same way castxml's lambda/anonymous-type
+    spelling does, and it must not leak into RecordType.name/.qualified_name
+    -- two checkout directories of the identical, unchanged declaration would
+    otherwise produce two different type identities and manufacture a
+    spurious type_removed/type_added pair.
+    """
+    root = _tu(
+        {
+            "kind": "NamespaceDecl",
+            "name": "ns",
+            "loc": {"file": "include/foo.h", "line": 1},
+            "inner": [
+                {
+                    "kind": "CXXRecordDecl",
+                    "name": "raii_guard<(lambda at /a/foo.h:4:37)>",
+                    "tagUsed": "struct",
+                    "loc": {"line": 2},
+                    "completeDefinition": True,
+                    "inner": [
+                        {"kind": "FieldDecl", "name": "a", "type": {"qualType": "int"}},
+                    ],
+                },
+            ],
+        },
+    )
+    types = list(_ClangAstParser(root, set(), set()).parse_types())
+    assert len(types) == 1
+    rec = types[0]
+    # See strip_anonymous_type_location's docstring: line/column and the
+    # declaring header's own basename are kept as discriminators -- only the
+    # absolute, checkout-dependent directory prefix is stripped.
+    assert rec.name == "raii_guard<(lambda:foo.h:4:37)>"
+    assert rec.qualified_name == "ns::raii_guard<(lambda:foo.h:4:37)>"
+    assert "/a/foo.h" not in (rec.name or "")
+    assert "/a/foo.h" not in (rec.qualified_name or "")
+
+
 def test_parse_enums_sets_qualified_name_for_namespaced_enum() -> None:
     # Mirrors test_parse_types_sets_qualified_name_for_namespaced_record --
     # EnumType.qualified_name (PR #608 follow-up) uses the same scope-derived

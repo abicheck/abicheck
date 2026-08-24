@@ -31,6 +31,7 @@ from .diff_helpers import (
     lookup_matched_type as _lookup_matched_type,
     make_change,
     type_map_key,
+    typedef_diff_maps as _typedef_diff_maps,
 )
 from .diff_symbols import (
     _PUBLIC_VIS,
@@ -1945,10 +1946,15 @@ def _diff_typedefs(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     excl = _exclude_stdlib_namespaces(old, new)
     # RD2-5: don't manufacture phantom TYPEDEF_REMOVED when the new side is stripped.
     suppress_removed = _removals_are_unconfirmed(old, new)
-    for alias, old_type in old.typedefs.items():
-        if _is_non_abi_surface_type(alias, exclude_stdlib_namespaces=excl):
+    old_typedefs, new_typedefs = _typedef_diff_maps(old, new)
+    for alias, old_type in old_typedefs.items():
+        # is_non_abi_surface_type's stdlib/anonymous check is defined over a
+        # bare spelling -- use just the trailing component so the qualified
+        # map above doesn't change what this filter excludes.
+        bare_alias = alias.rsplit("::", 1)[-1]
+        if _is_non_abi_surface_type(bare_alias, exclude_stdlib_namespaces=excl):
             continue
-        new_type = new.typedefs.get(alias)
+        new_type = new_typedefs.get(alias)
         if new_type is None and suppress_removed:
             continue
         if new_type is None:
@@ -1960,7 +1966,7 @@ def _diff_typedefs(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
             # genuine TYPEDEF_REMOVED breaks for names that merely match the
             # version-stamp pattern.
             if _is_version_stamped_typedef(alias) and _has_version_family_successor(
-                alias, new.typedefs
+                alias, new_typedefs
             ):
                 changes.append(
                     make_change(
