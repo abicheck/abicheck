@@ -32,6 +32,7 @@ from abicheck.checker import compare
 from abicheck.checker_policy import ChangeKind
 from abicheck.diff_helpers import build_type_map, lookup_matched_type
 from abicheck.model import AbiSnapshot, EnumType, RecordType, TypeField
+from abicheck.qualified_name_segments import strip_inline_abi_namespaces
 
 
 def _rec(
@@ -102,10 +103,61 @@ class TestDistinctNamespacesNeverMatch:
         assert ChangeKind.TYPE_ADDED in kinds
 
     def test_enums_share_the_same_matching_primitive(self) -> None:
-        old = EnumType(name="reduction", qualified_name="ccl::v1::reduction")
-        new = EnumType(name="reduction", qualified_name="ccl::v2::reduction")
+        old = EnumType(name="reduction", qualified_name="ccl::detail::d1::reduction")
+        new = EnumType(name="reduction", qualified_name="ccl::detail::d2::reduction")
         old_map, new_map = build_type_map([old]), build_type_map([new])
         assert lookup_matched_type(old_map, new_map, old) is None
+
+    def test_an_enclosing_templates_arguments_are_not_dropped(self) -> None:
+        """The inline-namespace equivalence below splits on ``::`` keeping
+        template arguments: two nested types under different instantiations of
+        the same outer template are different types."""
+        old = _rec("Inner", "ns::Outer<int>::Inner")
+        new = _rec("Inner", "ns::Outer<float>::Inner")
+        assert (
+            lookup_matched_type(build_type_map([old]), build_type_map([new]), old)
+            is None
+        )
+
+
+class TestInlineAbiTagNamespacesStillMatch:
+    """An inline namespace is transparent for name lookup, so a declaration
+    gaining or losing one is the same entity spelled two ways — the libstdc++
+    dual-ABI (``std::`` <-> ``std::__cxx11::``) case, where the layout really
+    does change and the correct finding is a mutation, not remove+add."""
+
+    _STR = "basic_string<char, std::char_traits<char>, std::allocator<char> >"
+
+    def test_dual_abi_spelling_matches(self) -> None:
+        old = _rec(self._STR, f"std::{self._STR}", size_bits=32)
+        new = _rec(self._STR, f"std::__cxx11::{self._STR}", size_bits=40)
+        assert (
+            lookup_matched_type(build_type_map([old]), build_type_map([new]), old)
+            is new
+        )
+
+    def test_versioned_inline_namespace_matches(self) -> None:
+        old = _rec("Handle", "ns::v1::Handle")
+        new = _rec("Handle", "ns::Handle", size_bits=128)
+        assert (
+            lookup_matched_type(build_type_map([old]), build_type_map([new]), old)
+            is new
+        )
+
+    def test_an_ordinary_implementation_namespace_is_not_an_abi_tag(self) -> None:
+        """``detail``/``impl``/``d1`` are ordinary namespaces: renaming one
+        really does move every declaration inside it."""
+        for old_ns, new_ns in (
+            ("ns::detail", "ns::impl"),
+            ("tbb::detail::d1", "tbb::detail::d2"),
+            ("ns::internal", "ns"),
+        ):
+            old = _rec("Handle", f"{old_ns}::Handle")
+            new = _rec("Handle", f"{new_ns}::Handle")
+            assert (
+                lookup_matched_type(build_type_map([old]), build_type_map([new]), old)
+                is None
+            ), f"{old_ns} -> {new_ns} must not match"
 
 
 class TestGenuineMutationsStillMatch:
@@ -167,7 +219,9 @@ class TestLegacySchemaCompatibilityIsPreserved:
 
 # ── Property-level contract of the matching primitive ─────────────────────
 
-_NS = st.sampled_from(["", "a", "b", "a::b", "x::y::z", "tbb::detail::d1"])
+_NS = st.sampled_from(
+    ["", "a", "b", "a::b", "x::y::z", "tbb::detail::d1", "a::v1", "a::__cxx11"]
+)
 _LEAF = st.sampled_from(["Foo", "graph", "Impl", "value_type"])
 
 
@@ -181,13 +235,16 @@ def test_a_match_never_crosses_two_recorded_qualified_identities(
     ns_old: str, ns_new: str, leaf: str
 ) -> None:
     """The invariant: when *both* sides recorded a qualified identity, a match
-    implies those identities are equal. A bare-name coincidence is never
+    implies those identities are equal *modulo inline ABI-tag namespaces*,
+    which are transparent for name lookup. A bare-name coincidence is never
     sufficient — which is exactly what the oneTBB namespace move exposed."""
     old = _rec(leaf, _qualified(ns_old, leaf))
     new = _rec(leaf, _qualified(ns_new, leaf))
     matched = lookup_matched_type(build_type_map([old]), build_type_map([new]), old)
     if matched is not None and old.qualified_name and new.qualified_name:
-        assert old.qualified_name == new.qualified_name
+        assert strip_inline_abi_namespaces(
+            old.qualified_name
+        ) == strip_inline_abi_namespaces(new.qualified_name)
 
 
 @settings(max_examples=250, deadline=None)
@@ -222,3 +279,44 @@ def test_identical_snapshots_always_match_every_type_to_itself(
         matched = lookup_matched_type(own, other, t)
         assert matched is not None
         assert (matched.qualified_name or matched.name) == (t.qualified_name or t.name)
+
+
+# ── The stripping primitive's own contract ────────────────────────────────
+
+_SEGMENT = st.sampled_from(
+    ["ns", "detail", "d1", "impl", "v1", "__1", "_V2", "__cxx11", "__ndk1", "internal"]
+)
+
+
+@settings(max_examples=300, deadline=None)
+@given(segs=st.lists(_SEGMENT, min_size=1, max_size=5), leaf=_LEAF)
+def test_stripping_never_removes_the_leaf_and_is_idempotent(
+    segs: list[str], leaf: str
+) -> None:
+    """Two invariants of the primitive itself: the declaration's own name
+    always survives (a type may legitimately *be* named ``v1``), and stripping
+    an already-stripped name is a no-op."""
+    qualified = "::".join([*segs, leaf])
+    stripped = strip_inline_abi_namespaces(qualified)
+    assert stripped[-1] == leaf
+    assert strip_inline_abi_namespaces("::".join(stripped)) == stripped
+
+
+@settings(max_examples=300, deadline=None)
+@given(segs=st.lists(_SEGMENT, min_size=1, max_size=5), leaf=_LEAF)
+def test_only_abi_tag_segments_are_ever_removed(segs: list[str], leaf: str) -> None:
+    """Whatever is dropped is an ABI tag, and whatever is ordinary is kept in
+    its original relative order — an ordinary namespace rename must remain
+    visible."""
+    from abicheck.qualified_name_segments import is_inline_abi_namespace_segment
+
+    qualified = "::".join([*segs, leaf])
+    stripped = strip_inline_abi_namespaces(qualified)
+    assert list(stripped) == [
+        s for s in segs if not is_inline_abi_namespace_segment(s)
+    ] + [leaf]
+
+
+def test_a_single_segment_name_is_returned_unchanged() -> None:
+    assert strip_inline_abi_namespaces("v1") == ("v1",)
+    assert strip_inline_abi_namespaces("") == ()

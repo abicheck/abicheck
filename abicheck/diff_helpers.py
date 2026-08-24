@@ -46,6 +46,7 @@ from .fact_provenance import (
     same_producer_backed_fact_qualified,
 )
 from .model import AbiSnapshot
+from .qualified_name_segments import strip_inline_abi_namespaces
 
 K = TypeVar("K")
 V = TypeVar("V")
@@ -444,12 +445,27 @@ def lookup_matched_type(own: TypeMap[Q], other: TypeMap[Q], t: Q) -> Q | None:
     claimed once here", never "did the other side actually fail to record a
     qualified name".
 
-    So the candidate the retry finds is accepted only when it is itself
-    *legacy-shaped* — its own matching key equals its bare declaration name,
-    i.e. it carries no distinct qualified identity of its own. That is
-    exactly the schema-evolution case the alias was introduced for and
-    nothing else: a side that DID record ``ns::Foo`` and simply does not
-    contain *t* is reported as a non-match, which is the truth.
+    So the candidate the retry finds is accepted in exactly two shapes:
+
+    * the candidate is *legacy-shaped* — its own matching key equals its bare
+      declaration name, i.e. it carries no distinct qualified identity. That
+      is the schema-evolution case the alias was introduced for.
+    * the two qualified identities are equal once *inline ABI-tag
+      namespaces* are stripped from both
+      (:func:`qualified_name_segments.strip_inline_abi_namespaces`) —
+      ``std::basic_string<...>`` vs. libstdc++'s dual-ABI
+      ``std::__cxx11::basic_string<...>``, or a versioned ``ns::v1::X``
+      vs. ``ns::X``. An inline namespace is transparent for name lookup, so
+      the two spellings name one entity and a real layout change between
+      them (the dual-ABI size change) is a mutation, not a removal plus an
+      addition. The stripping is deliberately narrow: only the version-shaped
+      (``v1``/``__1``) and named toolchain (``__cxx11``/``__ndk1``) tags
+      qualify, never an ordinary implementation namespace such as
+      ``detail``, ``impl`` or oneTBB's ``d1`` — renaming one of those really
+      does move every declaration inside it.
+
+    Anything else — a side that DID record ``ns::Foo`` and simply does not
+    contain *t* — is reported as a non-match, which is the truth.
     """
     key = type_map_key(t)
     found = other.get(key)
@@ -457,7 +473,12 @@ def lookup_matched_type(own: TypeMap[Q], other: TypeMap[Q], t: Q) -> Q | None:
         return found
     if t.name != key and own.bare_name_is_unambiguous(t.name):
         candidate = other.get(t.name)
-        if candidate is not None and type_map_key(candidate) == candidate.name:
+        if candidate is None:
+            return None
+        candidate_key = type_map_key(candidate)
+        if candidate_key == candidate.name or strip_inline_abi_namespaces(
+            key
+        ) == strip_inline_abi_namespaces(candidate_key):
             return candidate
     return None
 

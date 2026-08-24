@@ -7,9 +7,12 @@
   `tbb::detail::d1::graph` → `tbb::detail::d2::graph`) paired two distinct
   types and produced phantom `type_size_changed` /
   `type_field_offset_changed` / `type_vtable_changed` findings instead of a
-  removal plus an addition. The bare-name retry now applies only to the
-  schema-evolution case it exists for — a side that genuinely never recorded
-  `qualified_name`.
+  removal plus an addition. The bare-name retry now applies only to the two
+  cases it exists for — a side that genuinely never recorded
+  `qualified_name`, and two spellings that differ only by an inline ABI-tag
+  namespace (`std::` vs. libstdc++'s dual-ABI `std::__cxx11::`, or a
+  versioned `ns::v1::`), which name one entity. An ordinary implementation
+  namespace (`detail`, `impl`, `d1`) is never treated as such a tag.
 
 - **A whole-namespace move is recognized as one `symbol_renamed_batch`** —
   the batch-rename detector only understood a *prepended prefix*, so a set
