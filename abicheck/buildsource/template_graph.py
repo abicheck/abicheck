@@ -199,7 +199,13 @@ from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any
 
 from .. import diff_cxx_rules
-from .graph_facts import CONF_HIGH, CONF_REDUCED, GraphEdge, GraphNode
+from .graph_facts import (
+    CONF_HIGH,
+    CONF_REDUCED,
+    GraphEdge,
+    GraphNode,
+    _normalize_graph_identity,
+)
 from .template_graph_value_decls import (
     arg_label_spelling,
     disambiguated_specialization_qname,
@@ -436,25 +442,22 @@ def _index_type_decls(
     node_id = str(node.get("id") or "")
     if node_id:
         if f:
-            # This node carries its own explicit loc.file -- authoritative
-            # for this exact id, so it always wins over whatever an earlier
-            # occurrence of the same id recorded (Codex review, fresh
-            # evidence): the explicit-instantiation/specialization
-            # detachment quirk means the same id can appear twice -- an
-            # empty, loc-less stub nested under the primary ClassTemplateDecl
-            # (which inherits the *header*'s sticky file, since the header's
-            # own top-level declarations are visited first) and a detached
-            # full-content sibling elsewhere that DOES carry its own loc
-            # (the actual .cpp where the specialization/instantiation is
-            # written). A plain setdefault let whichever occurrence was
-            # visited first win — for this exact shape, the loc-less stub
-            # always wins, permanently misattributing the specialization to
-            # the header. project_source_files() then excludes it (public
-            # headers aren't "project" sources), silently dropping the
-            # instantiation's own defined_in_project provenance. An inherited
-            # (non-own) file still only sets if absent, so a later
-            # loc-less occurrence of an id already resolved by an explicit
-            # one can't un-set it.
+            # This node carries its own explicit loc.file -- authoritative for this exact
+            # id, so it always wins over whatever an earlier occurrence of the same id
+            # recorded (Codex review, fresh evidence): the explicit-instantiation/
+            # specialization detachment quirk means the same id can appear twice -- an
+            # empty, loc-less stub nested under the primary ClassTemplateDecl (which
+            # inherits the *header*'s sticky file, since the header's own top-level
+            # declarations are visited first) and a detached full-content sibling
+            # elsewhere that DOES carry its own loc (the actual .cpp where the
+            # specialization/instantiation is written). A plain setdefault let whichever
+            # occurrence was visited first win — for this exact shape, the loc-less stub
+            # always wins, permanently misattributing the specialization to the header.
+            # project_source_files() then excludes it (public headers aren't "project"
+            # sources), silently dropping the instantiation's own defined_in_project
+            # provenance. An inherited (non-own) file still only sets if absent, so a
+            # later loc-less occurrence of an id already resolved by an explicit one
+            # can't un-set it.
             id_to_file[node_id] = cur_file
         else:
             id_to_file.setdefault(node_id, cur_file)
@@ -464,19 +467,17 @@ def _index_type_decls(
             id_to_qname.setdefault(node_id, "::".join([*scope, name]))
             id_to_decl_kind.setdefault(node_id, kind)
         # A ClassTemplateSpecializationDecl's own *nested* declarations (e.g.
-        # `Wrapper<int>::Nested`) must scope under the specialization's own
-        # arguments, not its bare, unparameterized name -- otherwise two
-        # distinct specializations' nested types (`Wrapper<int>::Nested` vs.
-        # `Wrapper<double>::Nested`) both index as the identical bare
-        # "Wrapper::Nested" and collide onto one type node (Codex review,
-        # empirically confirmed against real clang AST output). Builds the
-        # disambiguated scope name directly from this node's own
-        # TemplateArgument children's raw spellings (mirrors
-        # _instantiation_label) -- deliberately not a
-        # _resolve_specialization_qname-style resolved qname: that helper
-        # needs id_to_qname/full_by_id/id_to_template_qname, none of which
-        # exist yet at this point in the "index first, resolve second"
-        # pipeline (this call *is* the pass building id_to_qname).
+        # `Wrapper<int>::Nested`) must scope under the specialization's own arguments,
+        # not its bare, unparameterized name -- otherwise two distinct specializations'
+        # nested types (`Wrapper<int>::Nested` vs. `Wrapper<double>::Nested`) both index
+        # as the identical bare "Wrapper::Nested" and collide onto one type node (Codex
+        # review, empirically confirmed against real clang AST output). Builds the
+        # disambiguated scope name directly from this node's own TemplateArgument
+        # children's raw spellings (mirrors _instantiation_label) -- deliberately not a
+        # _resolve_specialization_qname-style resolved qname: that helper needs
+        # id_to_qname/full_by_id/id_to_template_qname, none of which exist yet at this
+        # point in the "index first, resolve second" pipeline (this call *is* the pass
+        # building id_to_qname).
         child_scope = [*scope, _specialization_scope_name(node, name)]
         for child in node.get("inner", []) or []:
             cur_file = _index_type_decls(
@@ -963,23 +964,20 @@ def _resolve_specialization_qname(
     args = _flatten_template_args(full.get("inner", []) or [])
     if args is None:
         # An opaque argument (e.g. a template-template argument -- see
-        # _is_opaque_template_argument) means this specialization's own
-        # disambiguated label can't be trusted. Return unresolved (None)
-        # rather than the bare, unparameterized qname (Codex review, fresh
-        # evidence, verified empirically against real clang AST output): an
-        # earlier revision's bare-qname fallback let two genuinely distinct
-        # nested specializations -- Outer<Use<A>> and Outer<Use<B>>, where
-        # Use<A>/Use<B> both take an opaque template-template argument --
-        # both resolve their outer argument's target_qname to the identical
-        # ambiguous "Use", so both TEMPLATE_USES_TYPE edges landed on the
-        # same type://Use node, falsely merging dependencies on two
-        # concrete specializations. The outer instantiation *nodes*
-        # themselves stayed correctly distinct (each keeps its own full
-        # spelling, "Use<A>"/"Use<B>"), so only this edge target was wrong.
-        # None here means _resolve_arg_targets' caller sees an unresolved
-        # target_qname and (per its own docstring) omits the
-        # TEMPLATE_USES_TYPE edge entirely -- a missed edge, not a merged
-        # one, matching this module's usual "never guess" discipline.
+        # _is_opaque_template_argument) means this specialization's own disambiguated
+        # label can't be trusted. Return unresolved (None) rather than the bare,
+        # unparameterized qname (Codex review, verified empirically against real clang
+        # AST output): an earlier revision's bare-qname fallback let two genuinely
+        # distinct nested specializations -- Outer<Use<A>> and Outer<Use<B>>, where
+        # Use<A>/Use<B> both take an opaque template-template argument -- both resolve
+        # their outer argument's target_qname to the identical ambiguous "Use", so both
+        # TEMPLATE_USES_TYPE edges landed on the same type://Use node, falsely merging
+        # dependencies on two concrete specializations. The outer instantiation *nodes*
+        # themselves stayed correctly distinct (each keeps its own full spelling,
+        # "Use<A>"/"Use<B>"), so only this edge target was wrong. None here means
+        # _resolve_arg_targets' caller sees an unresolved target_qname and (per its own
+        # docstring) omits the TEMPLATE_USES_TYPE edge entirely -- a missed edge, not a
+        # merged one, matching this module's usual "never guess" discipline.
         return None
     resolved_args = _resolve_arg_targets(
         args,
@@ -1269,18 +1267,16 @@ def _walk_function_templates(
 
     if kind == _FUNCTION_TEMPLATE_KIND:
         name = str(node.get("name") or "")
-        # An out-of-line member-template *definition* (`template <class T>
-        # void C::f(T) {}`) detaches as a separate, top-level
-        # FunctionTemplateDecl -- not nested inside CXXRecordDecl:C at all
-        # (confirmed empirically, Codex review) -- so this node's own
-        # structural `scope` is `[]`, computing a bare "f" that could
-        # coincidentally merge with an unrelated global template also
-        # named "f", duplicating the graph's own correctly-scoped "C::f"
-        # instantiation. `parentDeclContextId` (absent on an ordinary
-        # in-class declaration) names the *real* semantic owner,
-        # resolvable through id_to_qname the same way a template
-        # argument's `decl` cross-reference already is -- preferred
-        # unconditionally when present.
+        # An out-of-line member-template *definition* (`template <class T> void
+        # C::f(T) {}`) detaches as a separate, top-level FunctionTemplateDecl -- not
+        # nested inside CXXRecordDecl:C at all (confirmed empirically, Codex review) --
+        # so this node's own structural `scope` is `[]`, computing a bare "f" that could
+        # coincidentally merge with an unrelated global template also named "f",
+        # duplicating the graph's own correctly-scoped "C::f" instantiation.
+        # `parentDeclContextId` (absent on an ordinary in-class declaration) names the
+        # *real* semantic owner, resolvable through id_to_qname the same way a template
+        # argument's `decl` cross-reference already is -- preferred unconditionally when
+        # present.
         owner_id = str(node.get("parentDeclContextId") or "")
         owner_kind = id_to_decl_kind.get(owner_id)
         owner_qname = disambiguated_specialization_qname(
@@ -1665,15 +1661,14 @@ def parse_clang_ast_templates(ast: dict[str, Any]) -> list[TemplateInstantiation
         )
         if args is None:
             # An opaque argument (e.g. a template-template argument -- see
-            # _is_opaque_template_argument) means this instantiation's own
-            # identity can't be trusted -- two genuinely distinct
-            # instantiations differing only in that argument (Use<A> vs.
-            # Use<B>) would otherwise collide onto one shared label/node,
-            # merging their real, distinct emitted-symbol/type-dependency
-            # edges (Codex review, empirically confirmed against real clang
-            # AST output: clang's -ast-dump=json serializes zero
-            # identifying information for a template-template argument).
-            # Skip rather than record a wrong identity.
+            # _is_opaque_template_argument) means this instantiation's own identity
+            # can't be trusted -- two genuinely distinct instantiations differing only
+            # in that argument (Use<A> vs. Use<B>) would otherwise collide onto one
+            # shared label/node, merging their real, distinct emitted-symbol/type-
+            # dependency edges (Codex review, empirically confirmed against real clang
+            # AST output: clang's -ast-dump=json serializes zero identifying
+            # information for a template-template argument). Skip rather than record a
+            # wrong identity.
             continue
         resolved_args = _resolve_arg_targets(
             args, id_to_qname, id_to_decl_kind, id_to_template_qname, full_by_id
@@ -1739,8 +1734,10 @@ def template_decl_node_id(qname: str, signature: str | None = None) -> str:
     ``template_decl://C`` node despite instantiating distinct declared
     patterns (Codex review, fresh evidence, confirmed against real clang 18
     AST output)."""
+    # Normalized like _decl_node_id/_type_node_id: a signature can embed a checkout marker.
+    qname = _normalize_graph_identity(qname)
     if signature:
-        return f"template_decl://{qname}#{signature}"
+        return f"template_decl://{qname}#{_normalize_graph_identity(signature)}"
     return f"template_decl://{qname}"
 
 
@@ -1762,7 +1759,10 @@ def template_instantiation_node_id(label: str, mangled: str | None = None) -> st
     it's the correct, collision-free identity for this kind."""
     if mangled:
         return f"template_instantiation://{mangled}"
-    return f"template_instantiation://{label}"
+    # A class instantiation's own label (built from its args' spellings) can embed the
+    # identical checkout-dependent lambda marker for a lambda-typed argument (Codex
+    # review, confirmed against real clang output); a mangled name never does.
+    return f"template_instantiation://{_normalize_graph_identity(label)}"
 
 
 def _symbol_node_ids(graph: SourceGraphSummary) -> frozenset[str]:

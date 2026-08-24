@@ -1037,9 +1037,25 @@ def _normalize_identity_attrs(attrs: dict[str, Any]) -> None:
 #: involved at all. Every caller that applies the normalization to an
 #: arbitrary node/edge string (as opposed to a value already known to be a
 #: decl/type identity, like ``_decl_node_id``'s own argument) gates on this
-#: first, restricting the effect to the ``decl://``/``type://`` id space
-#: this whole mechanism exists for.
-_DECL_OR_TYPE_ID_PREFIXES = ("decl://", "type://")
+#: first, restricting the effect to the id-space this whole mechanism exists
+#: for: every node kind whose own id is genuinely built from a declaration/
+#: type spelling that can embed the marker, not merely a filesystem path or
+#: an opaque symbol/flag name. ``template_decl://``/``template_instantiation://``
+#: joined ``decl://``/``type://`` here (Codex review, twelfth round, fresh
+#: evidence): a class template instantiated with a lambda-closure-typed
+#: argument has clang print that argument's spelling as the identical
+#: ``"(lambda at <path>:<line>:<col>)"`` marker
+#: :func:`~abicheck.buildsource.template_graph._instantiation_label` then
+#: folds straight into ``template_instantiation://``'s own node id --
+#: confirmed against real clang output, the same false rename this whole
+#: mechanism exists to close, just reached from a template-instantiation
+#: node instead of a bare decl/type one.
+_DECL_OR_TYPE_ID_PREFIXES = (
+    "decl://",
+    "type://",
+    "template_decl://",
+    "template_instantiation://",
+)
 
 
 def _is_decl_or_type_node_id(node_id: str) -> bool:

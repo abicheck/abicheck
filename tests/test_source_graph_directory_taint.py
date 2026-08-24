@@ -643,3 +643,71 @@ def test_source_graph_summary_from_dict_preserves_unrecognized_nested_coverage_f
     # (empty) edge set, not trusted from the persisted payload.
     assert graph.coverage["call_edges"]["collected"] is False
     assert graph.coverage["call_edges"]["count"] == 0
+
+
+def test_template_instantiation_node_id_strips_checkout_directory_from_lambda_argument() -> (
+    None
+):
+    # A class template instantiated with a lambda-closure-typed argument has clang
+    # print that argument's spelling as the identical checkout-dependent "(lambda at
+    # <path>:<line>:<col>)" marker decl/type identities already get normalized against
+    # (Codex review, fresh evidence, twelfth round) -- template_instantiation:// was
+    # excluded from the normalization gate entirely, so two builds of the identical
+    # instantiation under different checkout roots still produced different node ids.
+    from abicheck.buildsource.template_graph import template_instantiation_node_id
+
+    old = template_instantiation_node_id(
+        "Wrapper<(lambda at /old/checkout/foo.cpp:2:20)>"
+    )
+    new = template_instantiation_node_id(
+        "Wrapper<(lambda at /new/checkout/foo.cpp:2:20)>"
+    )
+    assert old == new
+    assert "/old/checkout" not in old
+    assert "/new/checkout" not in new
+
+    # A mangled function-instantiation identity is untouched either way (it never
+    # embeds this marker, and mustn't be run through path-stripping regardless).
+    mangled_id = template_instantiation_node_id("f<int>", "_Z1fIiEvT_")
+    assert mangled_id == "template_instantiation://_Z1fIiEvT_"
+
+
+def test_template_decl_node_id_strips_checkout_directory_from_default_argument() -> (
+    None
+):
+    from abicheck.buildsource.template_graph import template_decl_node_id
+
+    old = template_decl_node_id(
+        "Outer", "type-parameter-0-0 (lambda at /old/checkout/foo.cpp:2:20)"
+    )
+    new = template_decl_node_id(
+        "Outer", "type-parameter-0-0 (lambda at /new/checkout/foo.cpp:2:20)"
+    )
+    assert old == new
+    assert "/old/checkout" not in old
+
+
+def test_template_instantiation_node_loaded_from_persisted_pack_migrates_and_normalizes_label() -> (
+    None
+):
+    # End-to-end through the same load path a real build-source pack takes:
+    # template_instantiation:// must join decl://type:// in both the load-time id
+    # migration (GraphNode.from_dict) and the label normalization
+    # (ensure_facts_and_resolve), the same choke points every other decl/type kind
+    # already routes through.
+    from abicheck.buildsource.graph_facts import GraphNode
+    from abicheck.buildsource.template_graph import template_instantiation_node_id
+
+    raw_label = "Wrapper<(lambda at /old/checkout/foo.cpp:2:20)>"
+    node = GraphNode.from_dict(
+        {
+            "id": f"template_instantiation://{raw_label}",
+            "kind": "template_instantiation",
+            "label": raw_label,
+        }
+    )
+    fresh_id = template_instantiation_node_id(
+        "Wrapper<(lambda at /new/checkout/foo.cpp:2:20)>"
+    )
+    assert node.id == fresh_id
+    assert "/old/checkout" not in node.label
