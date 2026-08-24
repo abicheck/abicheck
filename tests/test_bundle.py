@@ -1186,6 +1186,59 @@ class TestIntraDepSignatureChanged:
         assert findings[0].consumer_library == "libalgo.so"
         assert findings[0].provider_library == "libcore.so"
 
+    def test_checks_every_versioned_definition_from_the_same_provider(self) -> None:
+        # G38 stabilization (Codex review, fresh evidence): a single
+        # provider can legitimately export multiple versioned definitions
+        # of one bare symbol (the compat-symbol pattern core_add@V1
+        # alongside core_add@@V2) -- consumer_resolves_via_provider must
+        # check every one of that provider's own entries, not just the
+        # first providers_for() happens to return. Picking only the first
+        # (a non-default V1 entry) would test it against a consumer
+        # explicitly requiring V2 and wrongly conclude no match, even
+        # though the same provider's V2 entry does match.
+        libcore_meta = ElfMetadata(
+            soname="libcore.so.1",
+            needed=[],
+            symbols=[
+                ElfSymbol(
+                    name="core_add",
+                    visibility="default",
+                    version="V1",
+                    is_default=False,
+                ),
+                ElfSymbol(
+                    name="core_add",
+                    visibility="default",
+                    version="V2",
+                    is_default=True,
+                ),
+            ],
+            imports=[],
+        )
+        libalgo_meta = _meta(
+            soname="libalgo.so.1",
+            needed=["libcore.so.1"],
+            imports=["core_add"],
+            import_versions={"core_add": "V2"},
+        )
+        new = _snapshot({"libcore.so": libcore_meta, "libalgo.so": libalgo_meta})
+        diff_libcore = _diff(
+            "libcore.so",
+            Change(
+                kind=ChangeKind.CALLING_CONVENTION_CHANGED,
+                symbol="core_add",
+                description="cdecl->fastcall",
+            ),
+        )
+        result = compare_bundle(new, new, [diff_libcore])
+        findings = [
+            f
+            for f in result.bundle_findings
+            if f.kind == ChangeKind.BUNDLE_INTRA_DEP_SIGNATURE_CHANGED
+        ]
+        assert len(findings) == 1
+        assert findings[0].consumer_library == "libalgo.so"
+
     def test_plugin_abi_policy_suppresses_calling_convention_promotion(self) -> None:
         # G38 stabilization (Codex review, fresh evidence): CALLING_
         # CONVENTION_CHANGED is COMPATIBLE under the plugin_abi policy

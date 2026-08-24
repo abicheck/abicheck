@@ -371,21 +371,27 @@ def consumer_resolves_via_provider(
     """
     if provider_lib not in reachable:
         return False
-    candidate = next(
-        (p for p in new.resolution.providers_for(symbol) if p.library == provider_lib),
-        None,
-    )
-    if candidate is None:
+    # A single provider library can legitimately export several *versioned*
+    # definitions of the same bare symbol name (e.g. compat-symbol pattern
+    # `foo@V1` alongside `foo@@V2`) -- check every one of this provider's
+    # own entries (`any`, mirroring `_detect_unresolved_intra_dependency`'s
+    # own matching), not just the first one found (Codex review): picking
+    # only the first could test a non-matching V1 entry while the real
+    # match is a later V2 one from the same provider.
+    candidates = [
+        p for p in new.resolution.providers_for(symbol) if p.library == provider_lib
+    ]
+    if not candidates:
         return False
     if not consumer.version:
         # An unversioned reference can only be satisfied by an unversioned
         # or default-version ("@@default") provider definition.
-        return candidate.is_default
+        return any(c.is_default for c in candidates)
     if consumer.version_soname:
         target_lib = new.resolution.soname_to_name.get(consumer.version_soname)
         if target_lib != provider_lib:
             return False
-    return candidate.version == consumer.version
+    return any(c.version == consumer.version for c in candidates)
 
 
 def diff_change_is_breaking(
