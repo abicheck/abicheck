@@ -28,8 +28,8 @@ Profiles:
            The everyday inner-loop command.
     pr     The exact always-required CI-equivalent checks: everything `fast`
            runs, plus golden tests, coverage floor, and the ai-readiness /
-           FP-rate / tier-accuracy / doc-sync / schema/FAIR-metadata gates
-           the `ai-readiness` and `fair-metadata` CI jobs run on every PR.
+           module-architecture / FP-rate / tier-accuracy / doc-sync /
+           schema/FAIR-metadata gates that required workflows run on every PR.
     full   Everything in `pr`, plus external-tool, parity, performance,
            packaging, and changelog-fragment lanes — each skipped (not
            failed) when the environment lacks the tool it needs (or, for
@@ -320,6 +320,26 @@ STEPS: tuple[Step, ...] = (
         _pyscript("scripts/check_ai_readiness.py"),
         frozenset({PR, FULL}),
         description="Structural readiness gate (file size, ChangeKind partition, import cycles, mypy drift, ...)",
+    ),
+    Step(
+        "module-architecture-tests",
+        _py(
+            "unittest",
+            "discover",
+            "-s",
+            "tests",
+            "-p",
+            "test_module_architecture.py",
+            "-v",
+        ),
+        frozenset({PR, FULL}),
+        description="Focused tests for the bounded-module architecture gate",
+    ),
+    Step(
+        "module-architecture",
+        _pyscript("scripts/module_architecture.py"),
+        frozenset({PR, FULL}),
+        description="Delta-based module size and dependency-direction gate",
     ),
     Step(
         "unit-pr",
