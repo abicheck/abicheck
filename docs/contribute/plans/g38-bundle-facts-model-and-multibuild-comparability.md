@@ -1777,6 +1777,68 @@ per-binary extraction cost. That remains its own, separately-scoped
 initiative (shared/content-addressed evidence storage, memory-aware
 scan scheduling), not additional G38 phase surface.
 
+### Phase 13 follow-up — real-world assessment of the driver, two of three gaps closed
+
+A follow-up assessment, exercising `compare_release_against_bundle_facts()`
+against a real, mixed-toolchain oneDAL-shaped release (a `-fsycl`/`icpx`
+`dpc` library alongside plain-C++ `daal`/`oneapi::dal` libraries sharing one
+umbrella header tree), reported three gaps. All three are now small and
+precisely specified rather than architectural — two are fixed, the third
+remains the already-documented Known-gap above:
+
+1. **No CLI surface.** Unchanged from the "Known gap" note above: adoption
+   still needs a committed Python step calling
+   `compare_release_against_bundle_facts(...)` directly, not
+   `uses: abicheck/abicheck@sha` with a bare CLI flag — every file that
+   would host the dispatch is still within two lines of (or already at)
+   the 2000-line hard cap.
+2. **Fixed.** The driver's `service.resolve_input()` call never forwarded
+   `header_backend`/`compile`, so a header-scoped NEW side always resolved
+   under the library's own `header_backend="auto"` default — absent a real
+   castxml on the host, `resolve_input` still picks castxml first and dies
+   in seconds on a clang/icpx-only host rather than falling back. The
+   assessment's own monkeypatch injecting
+   `CompileContext(gcc_path="icpx", gcc_option_tokens=("-fsycl",
+   "-DONEDAL_DATA_PARALLEL", "-std=c++17"), frontend="clang")` directly into
+   `service.resolve_input` is what produced its one successful (35-minute,
+   10.2 GB peak RSS) header-scoped run — proof the fix works, not a
+   supported way to reach it. Both kwargs are now real, forwarded
+   parameters on `compare_release_against_bundle_facts()` itself; no
+   monkeypatch needed.
+3. **Fixed, additively.** `headers`/`includes`/`compile` applied uniformly
+   to every matched library — correct only when every library in the
+   bundle shares one header tree and one compile configuration, which does
+   not hold for oneDAL's own mix (plain C++ `daal`/`oneapi::dal` alongside
+   `-fsycl`/`icpx` `dpc`): the assessment's header-scoped run in practice
+   parsed the `daal` library's headers under the `dpc` library's own
+   SYCL/DPC++ flags, since there was no way to say otherwise. That run is
+   therefore correctly characterized as a **cost proof** (the driver
+   completes end to end in bounded time/memory against a real multi-library
+   release) rather than a **correctness proof** (every library's headers
+   parsed under its own real compile configuration) — the two are
+   different claims, and only the former was actually demonstrated. New
+   optional `per_library_headers`/`per_library_includes`/
+   `per_library_compile` `{canonical_name: ...}` maps are now consulted
+   before the uniform fallback per matched library, so a caller can give
+   `dpc` its own SYCL flags while `daal`/`oneapi::dal` fall back to the
+   plain-C++ uniform default (or vice versa) — a library absent from a
+   given override map still falls back to that map's own uniform sibling,
+   so only the libraries that actually differ need naming. The function's
+   own docstring states the cost-proof-vs-correctness-proof distinction
+   explicitly, so a future caller running with only the uniform fallback
+   against a mixed-toolchain bundle cannot mistake the resulting exit code
+   for a per-library-correct comparison.
+
+Regression coverage for both fixes:
+`tests/test_bundle_side_input.py::TestCompareReleaseAgainstBundleFactsResolutionUnit::
+test_header_backend_and_compile_are_forwarded` (pins that both kwargs reach
+`service.resolve_input` unchanged, replacing the need for the assessment's
+own monkeypatch) and
+`::test_per_library_overrides_win_over_the_uniform_fallback` (a two-library
+fixture confirming a `per_library_*` entry for one library doesn't leak onto
+a library absent from that same map, which still receives the uniform
+`headers`/`compile` default).
+
 ---
 
 ## Out of scope
