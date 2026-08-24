@@ -1948,11 +1948,10 @@ def _diff_typedefs(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     suppress_removed = _removals_are_unconfirmed(old, new)
     old_typedefs, new_typedefs = _typedef_diff_maps(old, new)
     for alias, old_type in old_typedefs.items():
-        # is_non_abi_surface_type's stdlib/anonymous check is defined over a
-        # bare spelling -- use just the trailing component so the qualified
-        # map above doesn't change what this filter excludes.
-        bare_alias = alias.rsplit("::", 1)[-1]
-        if _is_non_abi_surface_type(bare_alias, exclude_stdlib_namespaces=excl):
+        # Checked against the full alias -- the legacy (DWARF) map already
+        # keys typedefs by their fully-qualified spelling, and the qualified
+        # map above is at least as correct for the same std::-prefix check.
+        if _is_non_abi_surface_type(alias, exclude_stdlib_namespaces=excl):
             continue
         new_type = new_typedefs.get(alias)
         if new_type is None and suppress_removed:

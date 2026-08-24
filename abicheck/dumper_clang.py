@@ -1404,22 +1404,16 @@ class _ClangAstParser:
     ) -> RecordType:
         node = entry.node
         kind = override_kind if is_opaque and override_kind else _record_kind(node)
-        # See strip_anonymous_type_location's docstring: clang, like castxml,
-        # can spell a lambda closure/anonymous type's own name with an
-        # embedded absolute source path (e.g. inside a template argument
-        # list), which must not leak into RecordType.name/.qualified_name --
-        # mirrors dumper_castxml.py's identical stripping at the equivalent
-        # extraction point.
-        own_name = strip_anonymous_type_location(
-            override_name or str(node.get("name", ""))
-        )
+        own_name = override_name or str(node.get("name", ""))
         deprecated = dep_msg if dep_msg is not None else _clang_deprecated_message(node)
         if is_opaque:
             # Mirrors dumper_castxml.py's `incomplete="1"` branch.
             return RecordType(
                 name=own_name,
                 kind=kind,
-                qualified_name=_clang_qualified_name(entry.scope, own_name),
+                qualified_name=(
+                    "::".join([*entry.scope, own_name]) if entry.scope else None
+                ),
                 size_bits=None,
                 alignment_bits=None,
                 fields=[],
@@ -1463,7 +1457,9 @@ class _ClangAstParser:
             # a lookup keyed on the tool's own fully-qualified
             # getQualifiedNameAsString() spelling (e.g. "ns::Foo") fell back
             # to the bare "Foo" and never matched (Codex review, G28 Phase 4).
-            qualified_name=_clang_qualified_name(entry.scope, own_name),
+            qualified_name=(
+                "::".join([*entry.scope, own_name]) if entry.scope else None
+            ),
             # clang's JSON AST does not compute layout — size/align/offsets are
             # left None so the layout detectors skip an unknown-vs-unknown
             # comparison (DWARF remains the layout authority on this host).
@@ -1607,9 +1603,8 @@ class _ClangAstParser:
             node = entry.node
             if _is_builtin_file(entry.file):
                 continue
-            name = strip_anonymous_type_location(
-                str(node.get("name", ""))
-                or typedef_names_by_enum_id.get(str(node.get("id", "")), "")
+            name = str(node.get("name", "")) or typedef_names_by_enum_id.get(
+                str(node.get("id", "")), ""
             )
             if not name or name.startswith("__"):
                 continue
@@ -1637,7 +1632,9 @@ class _ClangAstParser:
                     source_location=self._source_location(entry),
                     # See RecordType.qualified_name (_build_record) for why
                     # this is only set when it differs from the bare name.
-                    qualified_name=_clang_qualified_name(entry.scope, name),
+                    qualified_name=(
+                        "::".join([*entry.scope, name]) if entry.scope else None
+                    ),
                     # G31 Phase C: clang's EnumDecl carries a "scopedEnumTag"
                     # key ("class"/"struct") only for an `enum class`/`enum
                     # struct` -- absent (not merely false) for a plain C-style
@@ -1737,9 +1734,34 @@ class _Decl:
 
 
 def _qualtype(node: dict[str, Any]) -> str:
+    """A declaration's own ``type.qualType`` spelling -- the single choke
+    point every field/param/variable/function type string in this module is
+    built from (`_parse_fields`, `_parse_functions`'s own signature and
+    param loop, `parse_variables`, `parse_constants`).
+
+    Stripped via :func:`strip_anonymous_type_location`: verified against
+    real Clang 18 (``-ast-dump=json``) that a lambda closure type embedded in
+    a type spelling -- e.g. a class-template specialization instantiated
+    with a lambda argument, ``Guard<decltype([]{})>`` -- prints its
+    ``qualType`` as ``"(lambda at <path>:<line>:<col>)"`` (Clang's
+    TypePrinter, the same diagnostic-style spelling castxml's own XML `name`
+    attribute uses, confirmed on a `FieldDecl` whose declared type IS the
+    lambda type parameter). Left unstripped, that absolute, checkout-
+    dependent path leaks into `TypeField.type`/`Param.type`/`Variable.type`/
+    `Function.return_type`, so two checkouts of the identical, unchanged
+    declaration would produce two different type spellings and could
+    manufacture a spurious finding on the field/param/variable/function
+    carrying it -- the same class of bug `dumper_castxml.py`'s own
+    `strip_anonymous_type_location` calls guard against for its `name`/
+    `qualified_name` fields, just reached through this backend's type-string
+    printer rather than its declaration-name attribute (which, unlike
+    castxml's, never itself embeds a location -- confirmed empirically: a
+    template specialization's own `name` node stays the bare template name,
+    e.g. ``"Guard"``, never ``"Guard<(lambda at ...)>"``).
+    """
     type_obj = node.get("type")
     if isinstance(type_obj, dict):
-        return str(type_obj.get("qualType", ""))
+        return strip_anonymous_type_location(str(type_obj.get("qualType", "")))
     return ""
 
 
@@ -1886,23 +1908,6 @@ def _parse_bases(node: dict[str, Any]) -> tuple[list[str], list[str], dict[str, 
             bases.append(bname)
         access[bname] = str(b.get("access", "public"))
     return bases, virtual_bases, access
-
-
-def _clang_qualified_name(scope: tuple[str, ...], own_name: str) -> str | None:
-    """Namespace/enclosing-class-qualified spelling for a RecordType/EnumType,
-    set only when it actually differs from the bare name (mirrors castxml's
-    own ``RecordType.qualified_name`` convention -- see ``_build_record``'s
-    docstring). Each *scope* segment is stripped via
-    :func:`strip_anonymous_type_location` before joining, the same
-    normalization already applied to *own_name* itself at every call site --
-    an enclosing scope can itself be a lambda's local/closure scope, whose
-    clang-spelled name would otherwise leak an embedded absolute source path
-    into the joined qualified name.
-    """
-    if not scope:
-        return None
-    stripped_scope = [strip_anonymous_type_location(s) for s in scope]
-    return "::".join([*stripped_scope, own_name])
 
 
 def _enum_underlying(node: dict[str, Any]) -> str:

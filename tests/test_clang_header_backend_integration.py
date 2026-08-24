@@ -110,6 +110,47 @@ def test_clang_ast_does_not_assign_returned_callback_abi_to_factory(tmp_path: Pa
     assert factory.contract_attributes == []
 
 
+def test_clang_ast_strips_lambda_location_from_instantiated_param_type(
+    tmp_path: Path,
+) -> None:
+    """Use Clang's real ``qualType`` spelling for a lambda closure type, not a
+    hand-written fixture -- confirms the fix at `dumper_clang._qualtype`
+    against real Clang 18 output, not a guessed AST shape.
+
+    A function template instantiated with a lambda argument prints that
+    instantiation's own parameter `type.qualType` as ``"(lambda at
+    <path>:<line>:<col>)"`` (confirmed empirically: unlike a `decltype(...)`-
+    or typedef-sugared spelling, which clang keeps sugared in `qualType` and
+    only desugars into this form in the separate `desugaredQualType` key, a
+    template parameter substituted directly with the deduced lambda type has
+    no sugar to keep). The absolute header path leaking into a parameter's
+    own recorded type would make two checkouts of the identical, unchanged
+    declaration disagree.
+    """
+    if shutil.which("clang") is None or platform.machine().lower() not in {
+        "x86_64",
+        "amd64",
+    }:
+        pytest.skip("requires an x86-64 clang frontend")
+    header = tmp_path / "call_with.h"
+    header.write_text(
+        "template <typename F>\n"
+        "inline void call_with(F f) {}\n"
+        "inline void invoke() { call_with([]{}); }\n",
+        encoding="utf-8",
+    )
+
+    root, _, _ = _clang_header_dump(
+        [header], [], compiler="clang", lang="c++", gcc_options="-std=c++20"
+    )
+    funcs = _ClangAstParser(root, {"invoke"}, set()).parse_functions()
+    (specialization,) = [
+        f for f in funcs if f.name == "call_with" and f.mangled != "call_with"
+    ]
+    assert str(tmp_path) not in specialization.params[0].type
+    assert specialization.params[0].type.startswith("(lambda")
+
+
 def _have(tool: str) -> bool:
     return shutil.which(tool) is not None
 

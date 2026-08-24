@@ -15,10 +15,17 @@
   whenever both sides populate it, falling back to the legacy bare-keyed
   diff for a DWARF-only or pre-v25 snapshot.
 - **The direct-clang header-AST backend now strips an embedded absolute
-  source path out of `RecordType`/`EnumType` `name`/`qualified_name` the
-  same way `dumper_castxml.py` already does.** A lambda closure/anonymous
-  type's own spelling (or an enclosing scope segment) can carry
-  `"(lambda at <path>:<line>:<col>)"`-shaped text; left unstripped on the
-  clang backend, two checkout directories of the identical, unchanged
-  declaration produced two different type identities and could manufacture
-  a spurious `type_removed`/`type_added` pair.
+  source path out of a field/parameter/variable/function's own recorded
+  type spelling.** A lambda closure type used directly as a template
+  argument (e.g. a function template instantiated with a lambda,
+  `call_with([]{})`) makes clang print that instantiation's own parameter
+  type as `"(lambda at <path>:<line>:<col>)"` — confirmed against real
+  Clang 18 output. Left unstripped, that absolute, checkout-dependent path
+  leaked into `TypeField.type`/`Param.type`/`Variable.type`/
+  `Function.return_type`, so two checkouts of the identical, unchanged
+  declaration could disagree and manufacture a spurious finding on the
+  field/parameter/variable/function carrying it — the same class of bug
+  `dumper_castxml.py`'s own `strip_anonymous_type_location` (commit
+  3aca095) guards against for its `RecordType`/`EnumType` `name`/
+  `qualified_name`, reached here through the clang backend's shared
+  `qualType`-spelling choke point instead.
