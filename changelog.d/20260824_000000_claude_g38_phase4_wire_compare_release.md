@@ -261,6 +261,21 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   specific consumer that genuinely could reach the old, non-default
   definition. Regression test with two consumers (unversioned,
   version-specific) confirmed to fail against the pre-fix code.
+- **Fixed: `CTOR_EXPLICIT_ADDED`/`CTOR_EXPLICIT_REMOVED` incorrectly included
+  in `_CONFIRMED_SIGNATURE_CHANGE_KINDS`** (Codex review, fresh evidence).
+  Unlike every other kind in that set, an `explicit` specifier transition is
+  a purely source-level fact -- `checker_policy.py`'s own `ChangeKind`
+  comment for these two kinds states "neither change alters the mangled
+  name," so a confirmed transition proves nothing about whether the
+  *binary* calling signature (params/return/variadic/calling-convention)
+  actually still agrees. Including it let a confirmed, unrelated
+  source-level fact silently suppress this module's own "cannot be
+  confirmed or denied" risk finding for a still-genuinely-unresolved binary
+  signature. Removed both kinds from the set; the existing suppression test
+  no longer parametrizes over them, and a new, opposite-direction test
+  (`test_confirmed_ctor_explicit_change_does_not_suppress_unverified_finding`)
+  pins that a confirmed `CTOR_EXPLICIT_*` change does *not* suppress the
+  finding, confirmed to fail against the pre-fix (inclusive) set.
 - **Declined: retaining every library's full old+new `AbiSnapshot` for the
   whole release comparison, now that bundle analysis is enabled by
   default** (Codex review, fresh evidence expanding on this PR's own
