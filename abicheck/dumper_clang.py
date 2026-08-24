@@ -121,6 +121,7 @@ from .model import (
     Variable,
     Visibility,
 )
+from .name_classification import strip_anonymous_type_location
 from .provenance import (
     build_public_set,
     classify_origin,
@@ -1733,9 +1734,34 @@ class _Decl:
 
 
 def _qualtype(node: dict[str, Any]) -> str:
+    """A declaration's own ``type.qualType`` spelling -- the single choke
+    point every field/param/variable/function type string in this module is
+    built from (`_parse_fields`, `_parse_functions`'s own signature and
+    param loop, `parse_variables`, `parse_constants`).
+
+    Stripped via :func:`strip_anonymous_type_location`: verified against
+    real Clang 18 (``-ast-dump=json``) that a lambda closure type embedded in
+    a type spelling -- e.g. a class-template specialization instantiated
+    with a lambda argument, ``Guard<decltype([]{})>`` -- prints its
+    ``qualType`` as ``"(lambda at <path>:<line>:<col>)"`` (Clang's
+    TypePrinter, the same diagnostic-style spelling castxml's own XML `name`
+    attribute uses, confirmed on a `FieldDecl` whose declared type IS the
+    lambda type parameter). Left unstripped, that absolute, checkout-
+    dependent path leaks into `TypeField.type`/`Param.type`/`Variable.type`/
+    `Function.return_type`, so two checkouts of the identical, unchanged
+    declaration would produce two different type spellings and could
+    manufacture a spurious finding on the field/param/variable/function
+    carrying it -- the same class of bug `dumper_castxml.py`'s own
+    `strip_anonymous_type_location` calls guard against for its `name`/
+    `qualified_name` fields, just reached through this backend's type-string
+    printer rather than its declaration-name attribute (which, unlike
+    castxml's, never itself embeds a location -- confirmed empirically: a
+    template specialization's own `name` node stays the bare template name,
+    e.g. ``"Guard"``, never ``"Guard<(lambda at ...)>"``).
+    """
     type_obj = node.get("type")
     if isinstance(type_obj, dict):
-        return str(type_obj.get("qualType", ""))
+        return strip_anonymous_type_location(str(type_obj.get("qualType", "")))
     return ""
 
 
