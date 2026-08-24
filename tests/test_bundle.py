@@ -1168,6 +1168,121 @@ class TestIntraDepSignatureChanged:
             for f in result_strict.bundle_findings
         )
 
+    def test_does_not_promote_when_consumer_reaches_a_different_provider(self) -> None:
+        # G38 stabilization (CodeRabbit review, fresh evidence): libcore.so
+        # and libalt.so both export core_add; libalgo.so needs only
+        # libcore.so (never libalt.so). libalt.so's own signature change
+        # must not attribute a promoted finding to libalgo.so -- that
+        # consumer never actually resolves core_add against libalt.so.
+        new = _snapshot(
+            {
+                "libcore.so": _meta(soname="libcore.so.1", exports=["core_add"]),
+                "libalt.so": _meta(soname="libalt.so.1", exports=["core_add"]),
+                "libalgo.so": _meta(
+                    soname="libalgo.so.1", needed=["libcore.so.1"], imports=["core_add"]
+                ),
+            }
+        )
+        diff_libalt = _diff(
+            "libalt.so",
+            Change(
+                kind=ChangeKind.CALLING_CONVENTION_CHANGED,
+                symbol="core_add",
+                description="cdecl->fastcall",
+            ),
+        )
+        result = compare_bundle(new, new, [diff_libalt])
+        assert not any(
+            f.kind == ChangeKind.BUNDLE_INTRA_DEP_SIGNATURE_CHANGED
+            for f in result.bundle_findings
+        )
+
+    def test_promotes_only_to_the_consumer_reaching_the_changed_provider(
+        self,
+    ) -> None:
+        # Sibling of the negative case above: when a consumer genuinely
+        # NEEDs the provider whose signature changed, promotion still
+        # fires for that consumer, even with an unrelated same-named
+        # export sitting elsewhere in the bundle.
+        new = _snapshot(
+            {
+                "libcore.so": _meta(soname="libcore.so.1", exports=["core_add"]),
+                "libalt.so": _meta(soname="libalt.so.1", exports=["core_add"]),
+                "libalgo.so": _meta(
+                    soname="libalgo.so.1", needed=["libcore.so.1"], imports=["core_add"]
+                ),
+            }
+        )
+        diff_libcore = _diff(
+            "libcore.so",
+            Change(
+                kind=ChangeKind.CALLING_CONVENTION_CHANGED,
+                symbol="core_add",
+                description="cdecl->fastcall",
+            ),
+        )
+        result = compare_bundle(new, new, [diff_libcore])
+        findings = [
+            f
+            for f in result.bundle_findings
+            if f.kind == ChangeKind.BUNDLE_INTRA_DEP_SIGNATURE_CHANGED
+        ]
+        assert len(findings) == 1
+        assert findings[0].consumer_library == "libalgo.so"
+        assert findings[0].provider_library == "libcore.so"
+
+    def test_honors_policy_file_override_before_promotion(self) -> None:
+        # G38 stabilization (Codex review, fresh evidence): a custom
+        # PolicyFile override demoting a promotable kind is resolved
+        # through a separate path from a named base policy
+        # (PolicyFile.compute_verdict, not Change.effective_verdict), so
+        # policy_kind_sets(policy) alone can't see it -- promotion must
+        # consult the originating diff's own policy_file too.
+        from abicheck.policy_file import PolicyFile
+
+        new = _snapshot(
+            {
+                "libcore.so": _meta(soname="libcore.so.1", exports=["core_add"]),
+                "libalgo.so": _meta(
+                    soname="libalgo.so.1", needed=["libcore.so.1"], imports=["core_add"]
+                ),
+            }
+        )
+        policy_file = PolicyFile(
+            overrides={ChangeKind.FUNC_VARIADIC_ADDED: Verdict.COMPATIBLE}
+        )
+        change = Change(
+            kind=ChangeKind.FUNC_VARIADIC_ADDED,
+            symbol="core_add",
+            description="gained ...",
+        )
+        diff_libcore = DiffResult(
+            old_version="old",
+            new_version="new",
+            library="libcore.so",
+            changes=[change],
+            verdict=Verdict.COMPATIBLE,
+            policy_file=policy_file,
+        )
+        result = compare_bundle(new, new, [diff_libcore])
+        assert not any(
+            f.kind == ChangeKind.BUNDLE_INTRA_DEP_SIGNATURE_CHANGED
+            for f in result.bundle_findings
+        )
+        # Without the override, the same kind promotes under strict_abi.
+        diff_libcore_no_override = DiffResult(
+            old_version="old",
+            new_version="new",
+            library="libcore.so",
+            changes=[change],
+            verdict=Verdict.BREAKING,
+        )
+        result_no_override = compare_bundle(new, new, [diff_libcore_no_override])
+        assert any(
+            f.kind == ChangeKind.BUNDLE_INTRA_DEP_SIGNATURE_CHANGED
+            for f in result_no_override.bundle_findings
+        )
+
 
 # ---------------------------------------------------------------------------
 # bundle_provider_changed

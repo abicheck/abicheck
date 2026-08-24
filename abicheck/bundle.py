@@ -81,18 +81,14 @@ from .bundle_models import (  # noqa: F401  (re-exported for back-compat)
     ProviderEntry as ProviderEntry,
     ResolutionGraph as ResolutionGraph,
     basename_to_bundle_key,
+    consumer_resolves_via_provider as _consumer_resolves_via_provider,
+    diff_change_is_breaking as _diff_change_is_breaking,
 )
 from .bundle_resolution_reachability import (
     reachable_intra_libraries as _reachable_intra_libraries,
 )
 from .bundle_soname import hard_link_alias_basenames, soname_matches_providers
-from .checker_policy import (
-    ChangeKind,
-    Verdict,
-    compute_verdict,
-    effective_category,
-    policy_kind_sets,
-)
+from .checker_policy import ChangeKind, Verdict, compute_verdict, policy_kind_sets
 from .checker_types import DiffResult
 from .elf_metadata import ElfMetadata, ElfSymbol, SymbolBinding, parse_elf_metadata
 
@@ -1165,38 +1161,44 @@ def _detect_intra_dep_signature_changed(
 ) -> list[BundleFinding]:
     """Promote provider-side signature changes to consumer-side findings.
 
-    For each per-library confirmed, *promotable* C-boundary signature break
-    (:data:`abicheck.bundle_models.PROMOTABLE_C_BOUNDARY_SIGNATURE_BREAK_
-    KINDS` — a strict, verdict-checked subset of
-    :data:`~abicheck.bundle_models.CONFIRMED_C_BOUNDARY_SIGNATURE_BREAK_
-    KINDS`; see that constant's own docstring for why the two sets must
-    stay distinct, G38 plan doc Phase 5 for the incident), look up which
-    siblings import that symbol in the new bundle and emit one finding per
-    (consumer, symbol) pair. Multiple change kinds against the same symbol
-    collapse into one finding to avoid double-counting, e.g. params+return
-    changing together.
+    For each confirmed *promotable* C-boundary signature break
+    (:data:`~abicheck.bundle_models.PROMOTABLE_C_BOUNDARY_SIGNATURE_BREAK_
+    KINDS`, a strict subset of ``CONFIRMED_C_BOUNDARY_SIGNATURE_BREAK_
+    KINDS`` -- G38 plan doc Phase 5), find siblings that import the symbol
+    *and actually resolve it against this provider*
+    (:func:`_consumer_resolves_via_provider`), and emit one finding per
+    (consumer, symbol) pair (multiple kinds against one symbol collapse
+    into one finding).
 
-    *policy* (G38 plan doc Phase 5, Codex review): a promoted kind's own
-    registry entry can carry a ``policy_overrides`` demotion —
-    ``CALLING_CONVENTION_CHANGED`` is ``COMPATIBLE`` under ``plugin_abi``.
-    A change whose effective category under this policy is not
-    ``BREAKING`` is skipped, so promotion can't defeat an override
-    ``compute_verdict(policy=...)`` already honors for the originating
-    per-library finding.
+    *policy*: both a named-policy demotion and a ``--policy-file``
+    override on the originating diff are honored, via
+    :func:`_diff_change_is_breaking`.
     """
     findings: list[BundleFinding] = []
     seen: set[tuple[str, str, str]] = set()
     relevant_kinds = PROMOTABLE_C_BOUNDARY_SIGNATURE_BREAK_KINDS
     policy_sets = policy_kind_sets(policy)
+    reachable_cache: dict[str, set[str]] = {}
+
+    def _reachable(lib: str) -> set[str]:
+        return reachable_cache.setdefault(lib, _reachable_intra_libraries(new, lib))
+
     for provider_lib, diff in diff_by_library.items():
         for change in diff.changes:
             if change.kind not in relevant_kinds:
                 continue
-            if effective_category(change, *policy_sets) != Verdict.BREAKING:
+            if not _diff_change_is_breaking(diff, change, policy_sets):
                 continue
             consumers = new.resolution.consumers_of(change.symbol)
             consumer_libs = sorted(
-                {c.library for c in consumers if c.library != provider_lib}
+                {
+                    c.library
+                    for c in consumers
+                    if c.library != provider_lib
+                    and _consumer_resolves_via_provider(
+                        new, c, provider_lib, change.symbol, _reachable(c.library)
+                    )
+                }
             )
             if not consumer_libs:
                 continue

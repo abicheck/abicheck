@@ -30,7 +30,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .checker_policy import ChangeKind, Verdict, compute_verdict
+from .checker_policy import ChangeKind, Verdict, compute_verdict, effective_category
 from .checker_types import Change, DiffResult
 from .elf_metadata import ElfMetadata
 from .model import AbiSnapshot, Function, Variable
@@ -344,6 +344,77 @@ def basename_to_bundle_key(snapshot: BundleSnapshot) -> dict[str, str]:
     caller degrades to comparing the raw basename, rather than raising.
     """
     return {path.name: key for key, path in snapshot.libraries.items()}
+
+
+def consumer_resolves_via_provider(
+    new: BundleSnapshot,
+    consumer: ConsumerEntry,
+    provider_lib: str,
+    symbol: str,
+    reachable: set[str],
+) -> bool:
+    """Whether *consumer*'s import of *symbol* actually resolves against
+    *provider_lib* specifically, not merely "some library in the bundle
+    happens to export a same-named symbol."
+
+    Mirrors ``bundle._detect_unresolved_intra_dependency``'s version-aware,
+    reachability-constrained provider matching (see that function's own
+    docstring for the full contract, including the unversioned
+    ``is_default`` subtlety) -- narrowed here to check one specific
+    candidate provider rather than "does this consumer resolve *anywhere*."
+    Two same-named exports across unrelated bundle siblings is a real, if
+    unusual, shape (CodeRabbit review, G38 stabilization): without this
+    check, a promoted signature-change finding could attribute a consumer
+    to a provider it never actually links against. Lives here rather than
+    in ``bundle.py`` purely to keep that module under its AI-readiness
+    file-size cap -- no other reason for the split.
+    """
+    if provider_lib not in reachable:
+        return False
+    candidate = next(
+        (p for p in new.resolution.providers_for(symbol) if p.library == provider_lib),
+        None,
+    )
+    if candidate is None:
+        return False
+    if not consumer.version:
+        # An unversioned reference can only be satisfied by an unversioned
+        # or default-version ("@@default") provider definition.
+        return candidate.is_default
+    if consumer.version_soname:
+        target_lib = new.resolution.soname_to_name.get(consumer.version_soname)
+        if target_lib != provider_lib:
+            return False
+    return candidate.version == consumer.version
+
+
+def diff_change_is_breaking(
+    diff: DiffResult,
+    change: Change,
+    policy_sets: tuple[
+        frozenset[ChangeKind],
+        frozenset[ChangeKind],
+        frozenset[ChangeKind],
+        frozenset[ChangeKind],
+    ],
+) -> bool:
+    """Whether *change* classifies as ``BREAKING`` under the policy that
+    actually scored *diff* (Codex review, G38 stabilization).
+
+    ``policy_kind_sets(policy)`` alone only knows a *named* base policy
+    (``strict_abi``/``plugin_abi``/...) -- a ``--policy-file`` demotion is
+    resolved through a completely separate path
+    (``PolicyFile.compute_verdict``) that does **not** populate
+    ``Change.effective_verdict``, so ``checker_policy.effective_category``
+    alone cannot see it. When the originating diff carries a resolved
+    ``PolicyFile``, defer to its own per-change classification instead --
+    the same one that already scored the per-library finding -- so a
+    policy-file override can't be defeated by promotion the way the
+    named-policy override already couldn't be.
+    """
+    if diff.policy_file is not None:
+        return diff.policy_file.compute_verdict([change]) == Verdict.BREAKING
+    return effective_category(change, *policy_sets) == Verdict.BREAKING
 
 
 @dataclass(frozen=True)
