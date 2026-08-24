@@ -543,6 +543,51 @@ class TestFindUnverifiedSignatureFindings:
             == []
         )
 
+    @pytest.mark.parametrize(
+        "confirmed_kind",
+        [
+            ChangeKind.FUNC_VARIADIC_ADDED,
+            ChangeKind.FUNC_VARIADIC_REMOVED,
+            ChangeKind.CALLING_CONVENTION_CHANGED,
+        ],
+    )
+    def test_no_finding_when_confirmed_change_present_on_a_different_axis(
+        self, confirmed_kind
+    ):
+        # Codex review, fresh evidence: a symbol with a real, diff-confirmed
+        # variadicness/calling-convention change (this module's own
+        # is_variadic/contract_attributes sufficiency checks' positive
+        # counterparts) that *also* carries an unrelated unresolved field
+        # (an unresolved parameter type here) must not additionally produce
+        # a redundant, contradictory "cannot be confirmed or denied" risk
+        # finding alongside the already-proven break.
+        new = _snapshot(
+            {
+                "libcore.so": _meta(exports=["core_fn"]),
+                "libconsumer.so": _meta(imports=["core_fn"], needed=["libcore.so"]),
+            }
+        )
+        fn = _evidenced_fn("core_fn", params=[Param(name="x", type="?")])
+        old_snaps = {"libcore.so": _snap("libcore.so", functions=[fn])}
+        new_snaps = {"libcore.so": _snap("libcore.so", functions=[fn])}
+        confirmed_diff = [
+            _diff(
+                "libcore.so",
+                Change(
+                    kind=confirmed_kind,
+                    symbol="core_fn",
+                    description="signature changed",
+                ),
+            )
+        ]
+
+        assert (
+            find_unverified_signature_findings(
+                new, new, confirmed_diff, old_snaps, new_snaps
+            )
+            == []
+        )
+
     def test_no_finding_when_confirmed_change_present_for_a_versioned_library(self):
         # Codex review, fresh evidence: DiffResult.library is always the raw
         # on-disk basename (`path.name`), which for a normally-versioned

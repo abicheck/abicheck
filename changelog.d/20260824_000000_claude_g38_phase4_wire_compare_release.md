@@ -129,3 +129,13 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   `bundle._detect_unresolved_intra_dependency`'s own version/
   `version_soname`/`is_default` compatibility rules, evaluated per
   (consumer, provider) pair.
+- **`_CONFIRMED_SIGNATURE_CHANGE_KINDS` didn't include the two change
+  kinds this module's own new `is_variadic`/`contract_attributes`
+  sufficiency checks introduced positive counterparts for** (Codex
+  review, fresh evidence). A symbol with a real, diff-confirmed
+  `FUNC_VARIADIC_ADDED`/`FUNC_VARIADIC_REMOVED`/`CALLING_CONVENTION_
+  CHANGED` that also happened to carry an unrelated unresolved field
+  (an unresolved parameter type, say) still produced a redundant,
+  contradictory "cannot be confirmed or denied" risk finding alongside
+  the already-proven break. Fixed by adding all three kinds to the
+  confirmed-kinds set.

@@ -85,20 +85,37 @@ from .checker_policy import ChangeKind
 from .checker_types import DiffResult
 from .model import AbiSnapshot, Visibility
 
-#: The same three per-symbol diff kinds `bundle._detect_intra_dep_signature_
-#: changed` promotes to `BUNDLE_INTRA_DEP_SIGNATURE_CHANGED` -- duplicated
-#: here (three enum members) rather than imported from `bundle.py`, since
-#: that module must not import this leaf-module's own detector (see this
-#: module's own docstring on why it stays leaf-only) and a shared constant
-#: would need a home neither module owns. A confirmed change for a symbol
+#: Every per-symbol diff kind this module's own evidence-sufficiency check
+#: (`_symbol_evidence_sufficient`) can itself detect the *positive* side
+#: of. The first three (`FUNC_PARAMS_CHANGED`/`FUNC_RETURN_CHANGED`/
+#: `VAR_TYPE_CHANGED`) are the same three `bundle._detect_intra_dep_
+#: signature_changed` promotes to `BUNDLE_INTRA_DEP_SIGNATURE_CHANGED`;
+#: duplicated here (rather than imported from `bundle.py`) since that
+#: module must not import this leaf-module's own detector (see this
+#: module's own docstring on why it stays leaf-only) and a shared
+#: constant would need a home neither module owns. `FUNC_VARIADIC_ADDED`/
+#: `FUNC_VARIADIC_REMOVED`/`CALLING_CONVENTION_CHANGED` were added
+#: alongside this module's own `is_variadic`/`contract_attributes`
+#: sufficiency checks (Codex review, fresh evidence): without them, a
+#: symbol that diff_symbols already confirmed changed on one of *those*
+#: two axes, but which also happens to carry an unrelated unresolved
+#: field (an unresolved parameter type, say), would still produce a
+#: redundant, contradictory "cannot be confirmed or denied" finding
+#: alongside the already-proven break. A confirmed change for a symbol
 #: always takes precedence over the unverified kind this module emits --
 #: real evidence of a break is strictly more informative than "couldn't
-#: tell either way".
+#: tell either way". `bundle._detect_intra_dep_signature_changed`'s own
+#: `relevant_kinds` set does not (yet) include these two -- a
+#: pre-existing, narrower gap in that sibling function, not something
+#: this module's own precedence check needs to wait on.
 _CONFIRMED_SIGNATURE_CHANGE_KINDS = frozenset(
     {
         ChangeKind.FUNC_PARAMS_CHANGED,
         ChangeKind.FUNC_RETURN_CHANGED,
         ChangeKind.VAR_TYPE_CHANGED,
+        ChangeKind.FUNC_VARIADIC_ADDED,
+        ChangeKind.FUNC_VARIADIC_REMOVED,
+        ChangeKind.CALLING_CONVENTION_CHANGED,
     }
 )
 

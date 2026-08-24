@@ -751,6 +751,21 @@ loop, mirrors the sibling function's version/`version_soname`/
 against the pre-fix code, using the exact `foo@V2`-vs-`foo@V1` example
 from the review comment.
 
+**An eighth finding closed the last gap the fourth/fifth findings'
+`is_variadic`/`contract_attributes` sufficiency checks opened without
+noticing** (Codex review, fresh evidence). `_CONFIRMED_SIGNATURE_
+CHANGE_KINDS` still only covered `FUNC_PARAMS_CHANGED`/`FUNC_RETURN_
+CHANGED`/`VAR_TYPE_CHANGED` -- so a symbol with a real, diff-confirmed
+`FUNC_VARIADIC_ADDED`/`FUNC_VARIADIC_REMOVED`/`CALLING_CONVENTION_
+CHANGED` that also happened to carry an unrelated unresolved field
+still produced a redundant, contradictory "cannot be confirmed or
+denied" finding alongside the already-proven break. Fixed by adding all
+three kinds to the set. `bundle._detect_intra_dep_signature_changed`'s
+own `relevant_kinds` does not (yet) include these two either -- noted
+as a pre-existing, narrower gap in that sibling function's own
+docstring update, not something this fix needed to wait on. Confirmed
+to fail against the pre-fix code, parametrized over all three kinds.
+
 `bundle_intra_dep_signature_changed` already fires correctly when a
 provider's DWARF/header evidence shows a real signature change. This phase
 adds the missing negative case: a new, dedicated `ChangeKind`,
