@@ -135,6 +135,37 @@ def test_failed_debug_parse_is_preserved_in_receipt() -> None:
     assert aa.status == "partial"
 
 
+def test_debug_provenance_fields_round_trip_without_loss() -> None:
+    snapshot = _debug_snapshot(
+        "1.0",
+        DwarfMetadata(
+            has_dwarf=True,
+            evidence_source="elf_dwarf",
+            evidence_state="parsed",
+            cu_total=7,
+            cu_failed=2,
+        ),
+        AdvancedDwarfMetadata(
+            has_dwarf=True,
+            evidence_state="parsed",
+            cu_total=7,
+            cu_failed=2,
+        ),
+    )
+
+    restored = snapshot_from_dict(json.loads(snapshot_to_json(snapshot)))
+
+    assert restored.dwarf is not None
+    assert restored.dwarf.evidence_source == "elf_dwarf"
+    assert restored.dwarf.evidence_state == "parsed"
+    assert restored.dwarf.cu_total == 7
+    assert restored.dwarf.cu_failed == 2
+    assert restored.dwarf_advanced is not None
+    assert restored.dwarf_advanced.evidence_state == "parsed"
+    assert restored.dwarf_advanced.cu_total == 7
+    assert restored.dwarf_advanced.cu_failed == 2
+
+
 def test_legacy_debug_blocks_are_presence_only_not_claimed_parsed() -> None:
     raw = json.loads(
         snapshot_to_json(
