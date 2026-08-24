@@ -292,11 +292,8 @@ from .model import (
 # doesn't hit any producer-specific threshold above stays silent, since every
 # CI baseline is *always* some number of versions behind and warning
 # regardless of relevance would just be noise.
-# v26 adds debug-evidence provenance (source/state and CU accounting) to the
-# serialized DWARF channels.  Older readers must reject rather than discard
-# these fields and later re-save an assurance-changing snapshot.
+# v26 persists debug-evidence provenance; older readers must not discard it.
 SCHEMA_VERSION: int = 26
-
 # Schema version at which CastXML field CV facts became reliable (see v9 above).
 _MIN_SCHEMA_VERSION_FOR_CV_FACTS = 9
 
@@ -664,9 +661,7 @@ def _dwarf_from_dict(d: dict[str, Any]) -> Any:
         enums=enums,
         base_types={k: int(v) for k, v in d.get("base_types", {}).items()},
         has_dwarf=d.get("has_dwarf", False),
-        # Pre-provenance snapshots only prove that a DWARF-shaped block was
-        # serialized; they do not prove which producer parsed it or that both
-        # detector channels completed.  Fail closed in assurance receipts.
+        # Legacy DWARF blocks lack provenance; fail closed in assurance receipts.
         evidence_source=d.get("evidence_source", "unknown"),
         evidence_state=d.get(
             "evidence_state",
