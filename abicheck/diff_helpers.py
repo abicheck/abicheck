@@ -425,13 +425,40 @@ def lookup_matched_type(own: TypeMap[Q], other: TypeMap[Q], t: Q) -> Q | None:
     short/leaf-name collision ``type_map_key`` was introduced to fix, this
     time through the compatibility fallback instead of naive bare matching
     (Codex review, PR #608, second round).
+
+    That unambiguity check is necessary but **not sufficient**, and the
+    missing half is what this function's second fix closes. The retry exists
+    for exactly one situation — *other* is a legacy side that never recorded
+    a qualified identity for this type — but it used to fire whenever the
+    qualified lookup missed, *including* when both sides carry full,
+    genuinely different qualified identities. A real namespace move
+    (oneTBB 2022's flow graph, ``tbb::detail::d1::graph`` ->
+    ``tbb::detail::d2::graph``: distinct types, distinct mangled vtable
+    symbols, no declaration in common) is precisely that shape: each side
+    holds exactly one type whose bare name is ``graph``, so both bare names
+    are "unambiguous" within their own snapshot, the retry hits the other
+    side's bare alias, and two unrelated types are diffed against each other
+    — manufacturing ``TYPE_SIZE_CHANGED`` / ``TYPE_FIELD_OFFSET_CHANGED`` /
+    ``TYPE_VTABLE_CHANGED`` for a pair that is really one removal plus one
+    addition. Unambiguity cannot see this: it answers "is this bare spelling
+    claimed once here", never "did the other side actually fail to record a
+    qualified name".
+
+    So the candidate the retry finds is accepted only when it is itself
+    *legacy-shaped* — its own matching key equals its bare declaration name,
+    i.e. it carries no distinct qualified identity of its own. That is
+    exactly the schema-evolution case the alias was introduced for and
+    nothing else: a side that DID record ``ns::Foo`` and simply does not
+    contain *t* is reported as a non-match, which is the truth.
     """
     key = type_map_key(t)
     found = other.get(key)
     if found is not None:
         return found
     if t.name != key and own.bare_name_is_unambiguous(t.name):
-        return other.get(t.name)
+        candidate = other.get(t.name)
+        if candidate is not None and type_map_key(candidate) == candidate.name:
+            return candidate
     return None
 
 
