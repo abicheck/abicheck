@@ -279,7 +279,21 @@ def _module_parts(path: Path, root: Path) -> list[str]:
     return parts
 
 
-def imported_modules(path: Path, root: Path) -> list[str]:
+def _candidate_is_module(
+    candidate: str, root: Path, config: dict[str, Any]
+) -> bool:
+    """Return whether an imported alias names a module rather than an attribute."""
+    if _layer_for_module(candidate, config) is not None:
+        return True
+    module_path = root.joinpath(*candidate.split("."))
+    return module_path.with_suffix(".py").is_file() or (
+        module_path / "__init__.py"
+    ).is_file()
+
+
+def imported_modules(
+    path: Path, root: Path, config: dict[str, Any]
+) -> list[str]:
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
     current = _module_parts(path, root)
     package = current if path.name == "__init__.py" else current[:-1]
@@ -301,11 +315,14 @@ def imported_modules(path: Path, root: Path) -> list[str]:
                 base = ".".join(resolved_package)
             if base:
                 modules.append(base)
-            # ``from abicheck import interfaces`` names the target layer in the
-            # imported alias rather than ``node.module``. Recording both forms
-            # is conservative but safe: only configured layer prefixes are
-            # interpreted by the dependency checker.
-            modules.extend(f"{base}.{a.name}".strip(".") for a in node.names)
+            # In ``from abicheck import interfaces``, the imported layer is in
+            # the alias. Do not treat ordinary attributes such as
+            # ``abicheck.__version__`` as modules merely because they share
+            # this syntax.
+            for alias in node.names:
+                candidate = f"{base}.{alias.name}".strip(".")
+                if _candidate_is_module(candidate, root, config):
+                    modules.append(candidate)
     return list(dict.fromkeys(modules))
 
 
@@ -356,7 +373,7 @@ def check_imports(
         if source is None or not path.is_file() or path.suffix != ".py":
             continue
         try:
-            imports = imported_modules(path, root)
+            imports = imported_modules(path, root, config)
         except (OSError, SyntaxError) as exc:
             findings.append(
                 Finding("error", "architecture-import-parse", rel, str(exc))
