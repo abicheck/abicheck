@@ -1096,6 +1096,172 @@ table asks for.
 
 ---
 
+## Stabilization phases (post-Phase-4 external review)
+
+An external review of the state after Phase 4 landed (PR #842/#844, main at
+`c370aed`/`42da2d2`) found Phases 1–4 to be good foundational work that is
+*not yet* a complete, safe-by-default product feature: Phase 2's stored
+facts have no CLI consumer, Phase 3's pairing primitive has no production
+caller, and Phase 4 — now wired into the live `compare --release` path —
+carries a real correctness bug, a policy/severity inconsistency, a
+stored-baseline parity gap, and a memory regression. That review is the
+origin of the phases below; each restates one of its numbered findings as
+a scoped, independently-landable change rather than one large PR. Numbering
+continues from Phase 4 rather than restarting, since these are direct
+continuations of the same initiative, not a new one.
+
+### Phase 5 — Shared confirmed-boundary-break kind set (shipped)
+
+**Finding:** `bundle._detect_intra_dep_signature_changed`'s promoted-kinds
+set (3 kinds: params/return/var-type) and
+`bundle_signature_evidence`'s suppression set (12 kinds) were two
+independently maintained lists that had already drifted apart — a confirmed
+`CALLING_CONVENTION_CHANGED` (and eight other kinds) correctly suppressed
+`BUNDLE_INTRA_DEP_SIGNATURE_UNVERIFIED` but was never promoted to a
+consumer-attributed `BUNDLE_INTRA_DEP_SIGNATURE_CHANGED`, silently losing
+cross-library causality for exactly the kinds Phase 4 added confirmed-change
+detection for.
+
+**Fix (shipped):** one shared
+`bundle_models.CONFIRMED_C_BOUNDARY_SIGNATURE_BREAK_KINDS` frozenset,
+imported by both `bundle.py` and `bundle_signature_evidence.py` — living in
+`bundle_models.py` (a leaf module both already import) rather than either
+consumer module, matching this codebase's "one shared leaf-owned set, not
+two independently drifting lists" convention (see `AGENTS.md`'s discussion
+of the identical CTOR_EXPLICIT finding this set also fixed, in an earlier
+commit on this same branch). Regression coverage:
+`tests/test_bundle.py::TestIntraDepSignatureChanged::
+test_promotion_set_matches_shared_confirmed_boundary_kinds` (pins the two
+modules' sets to be the same object) and
+`test_promotes_calling_convention_change_to_consumer` (an end-to-end case
+that reproduces and closes the exact `CALLING_CONVENTION_CHANGED` gap named
+above).
+
+### Phase 6 — Compact per-library signature evidence (memory regression fix)
+
+**Finding:** wiring Phase 4 into the live `compare --release`/bundle-
+analysis path (the "Phase 4" changelog entry above) made
+`collect_diff_results=True` the default for *every* directory/package
+comparison, not only when `--bundle-facts-out`/JUnit was requested — so
+every completed library's full old+new `AbiSnapshot` (functions, types,
+layouts, source graph, build-source evidence, everything) is now retained
+until the whole release finishes and bundle analysis runs.
+`_collect_bundle_result()` then builds complete old/new snapshot maps from
+those retained objects. For an N-library release, peak memory approaches
+the sum of every completed library's full snapshot pair plus whatever
+active parallel workers are still extracting — a real regression relative
+to the pre-Phase-4 default, where only JUnit/`--bundle-facts-out` paid that
+cost.
+
+**Planned fix:** a new, frozen `BundleSignatureEvidence` projection
+(`library_key`, `exported_symbols`, per-symbol function/variable signature
+evidence, confirmed-boundary-change keys) built immediately after each
+per-library comparison finishes and immune to the source `AbiSnapshot`'s own
+size — the full snapshot is then released unless something *else* still
+needs it (JUnit rendering, `--bundle-facts-out`). Three independent
+retention reasons currently collapse into one `collect_diff_results` flag;
+they need to become three (JUnit, `--bundle-facts-out`, compact evidence),
+so "bundle analysis is enabled" stops implying "retain every full
+snapshot." Acceptance criterion: a default `compare --release` over N
+libraries retains zero full old/new `AbiSnapshot` objects once each
+library's own comparison completes, verified by asserting retained-object
+counts (not just wall time) in a dedicated regression test. **Not yet
+implemented** — filed here as the top-priority next phase rather than
+attempted in the same change as Phase 5, since it touches the release
+fan-out's own memory-lifetime contract and needs its own careful,
+independently-verified design (per this repo's "known gaps over risky
+reactive patches" convention in the root `AGENTS.md`).
+
+### Phase 7 — Bundle-finding policy/severity/exit-code consistency
+
+**Finding:** `BundleDiffResult.bundle_verdict` is computed from a bare
+policy-profile string (`checker_policy.compute_verdict`), so a built-in
+profile name (`strict_abi`/`sdk_vendor`/`plugin_abi`) reaches bundle
+findings but a custom `--policy-file`, a `kind: policy` pack override, or
+direct suppression of a `bundle_*` kind does not — and the severity
+exit-code fold converts bundle findings to `Change`s and calls
+`compute_exit_code()` without threading the resolved policy/severity
+config through at all. The displayed verdict and the process exit code can
+therefore disagree for any non-default policy/severity combination.
+
+**Planned fix:** resolve bundle policy once into a typed
+`ResolvedBundlePolicy` (profile, `PolicyFile | None`, per-kind pack
+overrides, suppression, severity config) and thread that single object
+through bundle-finding classification, the aggregate bundle verdict,
+JSON/Markdown rendering, and both the severity-aware and legacy exit-code
+paths — so a custom policy demoting `bundle_intra_dep_signature_unverified`
+changes the report and the exit code together, never just one. **Not yet
+implemented.**
+
+### Phase 8 — Structured bundle-analysis coverage/degradation
+
+**Finding:** bundle snapshot construction failures, `find_unverified_
+signature_findings` exceptions, and a provider missing from either
+snapshot map are all caught and reported as stderr warnings only — a
+report's `"bundle_findings": []` cannot be distinguished from "analysis
+ran cleanly and found nothing" versus "analysis partially failed."
+
+**Planned fix:** a structured `bundle_analysis` coverage block in the JSON
+report (mirroring the existing `contract_coverage_ledger`/`analysis_
+assurance` pattern already used for the contract-evaluation axis), naming
+per-sub-analysis status (`complete`/`partial`/`not_requested`) and any
+missing libraries/errors, with a strict policy able to escalate incomplete
+bundle coverage to `NOT_COMPARABLE` rather than silently accepting a clean
+result built on partial evidence. **Not yet implemented.**
+
+### Phase 9 — Live/stored Phase-4 parity (one bundle-analysis orchestrator)
+
+**Finding:** `compare_bundle_from_facts()` (the stored-baseline path)
+delegates only to `compare_bundle()`; `find_unverified_signature_findings()`
+is a separate companion the live `compare --release` CLI path calls
+directly (Phase 4's own wiring). A stored-facts comparison therefore never
+runs the C-boundary signature-evidence gate at all, so "live vs. live" and
+"stored old vs. live new" bundle analysis can disagree on findings for the
+identical underlying evidence — the parity Phase 2's own design section
+promised does not (yet) extend to Phase 4.
+
+**Planned fix:** one `analyze_bundle()` orchestrator both the live release
+path and `compare_bundle_from_facts()` call, taking optional per-library
+signature-evidence maps (Phase 6's compact projection) so a stored side
+with no retained `AbiSnapshot` can still participate. `compare_bundle()`
+stays the core graph-native/diff-derived detector implementation; it is no
+longer presented as the complete bundle-analysis surface. **Not yet
+implemented** — depends on Phase 6's compact evidence existing first, since
+a stored `BundleFacts` side has no full `AbiSnapshot` to build one from
+otherwise.
+
+### Phase 10 — Stored-facts CLI consumer and multibuild wiring
+
+**Finding:** Phase 2's `BundleFacts` are producible (`--bundle-facts-out`)
+but not consumable — there is no `compare old.bundlefacts.json new-release/`
+CLI path, only a documented programmatic API. Phase 3's `pair_variants()`
+has no CLI/config caller and no producer populates a real (non-`"default"`)
+variant fingerprint, so two same-side captures collide as identical
+identity today.
+
+**Planned fix:** a `BundleSideInput` abstraction (`LiveBundleInput` |
+`StoredBundleFactsInput`) resolving into one `ResolvedBundleSide`, so live/
+live, stored/live, and stored/stored share one comparison pipeline instead
+of a second hand-written loop; a declarative `bundle_variants:` config
+block naming each variant's identity coordinates explicitly (target,
+compiler family, feature toggles) rather than inferring it; and a
+`required: true/false` distinction so a missing required variant can gate
+a release rather than only demoting to `COMPATIBLE_WITH_RISK`. **Not yet
+implemented** — deliberately sequenced after Phases 6–9, since a stored-
+baseline CLI surface that skips Phase 4 (Phase 9) or retains full snapshots
+for every variant (Phase 6) would ship the same gaps this stabilization
+sequence exists to close, just on a wider surface.
+
+The original multi-binary performance problem (repeated header/AST
+extraction across sibling DSOs sharing one source tree) is explicitly out
+of scope for all of Phases 6–10 above — Phase 6 stops a *new* regression
+Phase 4's wiring introduced, it does not address the pre-existing
+per-binary extraction cost. That remains its own, separately-scoped
+initiative (shared/content-addressed evidence storage, memory-aware
+scan scheduling), not additional G38 phase surface.
+
+---
+
 ## Out of scope
 
 Restated from the originating review, explicitly deferred rather than

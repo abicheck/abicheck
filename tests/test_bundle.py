@@ -538,8 +538,7 @@ class TestIntraDepRemoved:
         # so this must still be reported regardless of the migration guard.
         result = compare_bundle(old, new, per_library_results=[])
         assert any(
-            f.kind == ChangeKind.BUNDLE_INTRA_DEP_REMOVED
-            and f.symbol == "vendor_op"
+            f.kind == ChangeKind.BUNDLE_INTRA_DEP_REMOVED and f.symbol == "vendor_op"
             for f in result.bundle_findings
         )
 
@@ -582,7 +581,8 @@ class TestIntraDepRemoved:
         # the built-in DEFAULT_SYSTEM_PROVIDERS allow-list alone.
         result = compare_bundle(old, new, per_library_results=[])
         assert not any(
-            f.kind == ChangeKind.BUNDLE_INTRA_DEP_REMOVED and f.consumer_library == "libb.so"
+            f.kind == ChangeKind.BUNDLE_INTRA_DEP_REMOVED
+            and f.consumer_library == "libb.so"
             for f in result.bundle_findings
         )
 
@@ -599,7 +599,9 @@ class TestIntraDepRemoved:
         import must not be vetoed by a provider that was never compatible."""
         old_core = _meta(soname="libcore.so.1")
         old_core.symbols.append(
-            ElfSymbol(name="vendor_op", visibility="default", version="V1", is_default=False)
+            ElfSymbol(
+                name="vendor_op", visibility="default", version="V1", is_default=False
+            )
         )
         old = _snapshot(
             {
@@ -965,6 +967,67 @@ class TestIntraDepSignatureChanged:
             f.kind == ChangeKind.BUNDLE_INTRA_DEP_SIGNATURE_CHANGED
             for f in result.bundle_findings
         )
+
+    def test_promotion_set_matches_shared_confirmed_boundary_kinds(self) -> None:
+        # G38 stabilization: `_detect_intra_dep_signature_changed`'s own
+        # promoted-kinds set and `bundle_signature_evidence`'s suppression
+        # set must be the *same* object, not two independently maintained
+        # lists — see `bundle_models.CONFIRMED_C_BOUNDARY_SIGNATURE_BREAK_
+        # KINDS`'s own docstring for the incident this pins against
+        # regressing (CALLING_CONVENTION_CHANGED and eight others used to
+        # suppress the "unverified" finding without ever promoting a
+        # consumer-attributed break).
+        from abicheck.bundle_models import CONFIRMED_C_BOUNDARY_SIGNATURE_BREAK_KINDS
+        from abicheck.bundle_signature_evidence import (
+            _CONFIRMED_SIGNATURE_CHANGE_KINDS,
+        )
+
+        assert (
+            CONFIRMED_C_BOUNDARY_SIGNATURE_BREAK_KINDS
+            == _CONFIRMED_SIGNATURE_CHANGE_KINDS
+        )
+        # And every kind not in this set must never have been silently
+        # forgotten — ctor-explicit stays excluded on purpose.
+        assert (
+            ChangeKind.CTOR_EXPLICIT_ADDED
+            not in CONFIRMED_C_BOUNDARY_SIGNATURE_BREAK_KINDS
+        )
+        assert (
+            ChangeKind.CTOR_EXPLICIT_REMOVED
+            not in CONFIRMED_C_BOUNDARY_SIGNATURE_BREAK_KINDS
+        )
+
+    def test_promotes_calling_convention_change_to_consumer(self) -> None:
+        # Previously `relevant_kinds` only covered params/return/var-type,
+        # so a confirmed CALLING_CONVENTION_CHANGED suppressed
+        # bundle_signature_evidence's "unverified" finding but was never
+        # itself promoted to a consumer-attributed bundle break. Fixed by
+        # sharing one kind set between the two consumers.
+        new = _snapshot(
+            {
+                "libcore.so": _meta(soname="libcore.so.1", exports=["core_add"]),
+                "libalgo.so": _meta(
+                    soname="libalgo.so.1", needed=["libcore.so.1"], imports=["core_add"]
+                ),
+            }
+        )
+        diff_libcore = _diff(
+            "libcore.so",
+            Change(
+                kind=ChangeKind.CALLING_CONVENTION_CHANGED,
+                symbol="core_add",
+                description="cdecl->fastcall",
+            ),
+        )
+        result = compare_bundle(new, new, [diff_libcore])
+        findings = [
+            f
+            for f in result.bundle_findings
+            if f.kind == ChangeKind.BUNDLE_INTRA_DEP_SIGNATURE_CHANGED
+        ]
+        assert len(findings) == 1
+        assert findings[0].consumer_library == "libalgo.so"
+        assert findings[0].provider_library == "libcore.so"
 
 
 # ---------------------------------------------------------------------------

@@ -62,6 +62,62 @@ DEFAULT_SYSTEM_PROVIDERS: frozenset[str] = frozenset(
     }
 )
 
+#: G38 stabilization (post-Phase-4): the single source of truth for "which
+#: confirmed per-symbol ``ChangeKind``s prove a sibling library's direct C
+#: calling-boundary contract changed." Two independent consumers must agree
+#: on this set, and previously did not:
+#:
+#: - :func:`abicheck.bundle._detect_intra_dep_signature_changed` — promotes
+#:   a confirmed change of one of these kinds on a provider's own export to
+#:   a consumer-attributed ``BUNDLE_INTRA_DEP_SIGNATURE_CHANGED`` finding.
+#: - :mod:`abicheck.bundle_signature_evidence` — treats a confirmed change
+#:   of one of these kinds as proof that *something* concrete is known
+#:   about the symbol, and therefore suppresses its own
+#:   ``BUNDLE_INTRA_DEP_SIGNATURE_UNVERIFIED`` "couldn't tell either way"
+#:   finding for it.
+#:
+#: Before this constant existed, `bundle.py` promoted only three kinds
+#: (``FUNC_PARAMS_CHANGED``/``FUNC_RETURN_CHANGED``/``VAR_TYPE_CHANGED``)
+#: while `bundle_signature_evidence.py` independently suppressed on twelve
+#: — so a confirmed ``CALLING_CONVENTION_CHANGED`` (say) correctly
+#: suppressed the "unverified" finding but was silently *not* promoted to
+#: a consumer-attributed break, losing the cross-library causality the
+#: bundle report exists to surface. Living here (not in either consumer
+#: module) matches this module's own leaf-module contract: `bundle.py`
+#: imports it directly, and `bundle_signature_evidence.py` — which must
+#: not import `bundle.py` (see that module's own docstring on why it stays
+#: leaf-only) — already imports this module for `BundleFinding`/
+#: `BundleSnapshot`/`ConsumerEntry`/`ProviderEntry`, so this adds no new
+#: import edge either direction.
+#:
+#: Deliberately excludes ``CTOR_EXPLICIT_ADDED``/``CTOR_EXPLICIT_REMOVED``:
+#: an ``explicit`` specifier transition is a purely source-level fact that
+#: never alters the mangled name (see `checker_policy.py`'s own
+#: `ChangeKind` comment for these two kinds) and therefore proves nothing
+#: about whether the binary calling signature — params, return type,
+#: variadicness, calling convention, ... — this set exists to police still
+#: agrees. Also excludes ``FUNC_LANGUAGE_LINKAGE_CHANGED`` (an
+#: ``extern "C"`` transition changes the mangled name itself, so old/new
+#: can't share the symbol key either consumer matches on) and the
+#: vtable-slot/inline-transition kinds (about virtual-dispatch layout and
+#: definition placement, not calling-signature agreement).
+CONFIRMED_C_BOUNDARY_SIGNATURE_BREAK_KINDS: frozenset[ChangeKind] = frozenset(
+    {
+        ChangeKind.FUNC_PARAMS_CHANGED,
+        ChangeKind.FUNC_RETURN_CHANGED,
+        ChangeKind.VAR_TYPE_CHANGED,
+        ChangeKind.FUNC_VARIADIC_ADDED,
+        ChangeKind.FUNC_VARIADIC_REMOVED,
+        ChangeKind.CALLING_CONVENTION_CHANGED,
+        ChangeKind.FUNC_NOEXCEPT_ADDED,
+        ChangeKind.FUNC_NOEXCEPT_REMOVED,
+        ChangeKind.FUNC_EXCEPTION_SPEC_CHANGED,
+        ChangeKind.FUNC_REF_QUAL_CHANGED,
+        ChangeKind.FUNC_VIRTUAL_ADDED,
+        ChangeKind.FUNC_VIRTUAL_REMOVED,
+    }
+)
+
 
 @dataclass(frozen=True)
 class ProviderEntry:

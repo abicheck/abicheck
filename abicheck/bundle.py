@@ -72,6 +72,7 @@ from .bundle_manifest import (  # noqa: F401  (re-exported for back-compat)
     load_manifest as load_manifest,
 )
 from .bundle_models import (  # noqa: F401  (re-exported for back-compat)
+    CONFIRMED_C_BOUNDARY_SIGNATURE_BREAK_KINDS,
     DEFAULT_SYSTEM_PROVIDERS as DEFAULT_SYSTEM_PROVIDERS,
     BundleDiffResult as BundleDiffResult,
     BundleFinding as BundleFinding,
@@ -1155,19 +1156,24 @@ def _detect_intra_dep_signature_changed(
 ) -> list[BundleFinding]:
     """Promote provider-side signature changes to consumer-side findings.
 
-    For each per-library ``func_params_changed`` / ``func_return_changed``
-    / ``var_type_changed``, look up which siblings import that symbol in
-    the new bundle and emit one finding per (consumer, symbol) pair.
-    Multiple change kinds against the same symbol collapse into one
-    finding to avoid double-counting params+return changes.
+    For each per-library confirmed C-boundary signature break (see
+    :data:`abicheck.bundle_models.CONFIRMED_C_BOUNDARY_SIGNATURE_BREAK_KINDS`
+    — params/return/variable type, variadicness, calling convention,
+    noexcept, exception spec, ref-qualifier, virtual-ness), look up which
+    siblings import that symbol in the new bundle and emit one finding per
+    (consumer, symbol) pair. Multiple change kinds against the same symbol
+    collapse into one finding to avoid double-counting, e.g. params+return
+    changing together.
+
+    This set is shared with :mod:`abicheck.bundle_signature_evidence`'s own
+    suppression check for ``BUNDLE_INTRA_DEP_SIGNATURE_UNVERIFIED`` — the
+    two must never independently disagree on "which confirmed changes prove
+    the C boundary broke" (G38 stabilization; see the shared constant's own
+    docstring for the incident this closes).
     """
     findings: list[BundleFinding] = []
     seen: set[tuple[str, str, str]] = set()
-    relevant_kinds = {
-        ChangeKind.FUNC_PARAMS_CHANGED,
-        ChangeKind.FUNC_RETURN_CHANGED,
-        ChangeKind.VAR_TYPE_CHANGED,
-    }
+    relevant_kinds = CONFIRMED_C_BOUNDARY_SIGNATURE_BREAK_KINDS
     for provider_lib, diff in diff_by_library.items():
         for change in diff.changes:
             if change.kind not in relevant_kinds:
