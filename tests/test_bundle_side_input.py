@@ -437,12 +437,15 @@ class TestCompareReleaseAgainstBundleFactsResolutionUnit:
 @pytest.mark.integration
 class TestCompareReleaseAgainstBundleFacts:
     def _build_so(self, tmp_path: Path, name: str, body: str) -> Path:
+        gcc = shutil.which("gcc")
+        if gcc is None:
+            pytest.skip("gcc is not available")
         src = tmp_path / f"{name}.c"
         src.write_text(body)
         out = tmp_path / name
         res = subprocess.run(
             [
-                shutil.which("gcc"),
+                gcc,
                 "-shared",
                 "-fPIC",
                 "-g",
