@@ -892,6 +892,37 @@ def _compute_occurrences(edge: GraphEdge) -> list[str]:
 #: edge case matching this whole heuristic's existing "approximate,
 #: degrade rather than risk a wrong merge" discipline (see this module's
 #: own docstring).
+#: **Accepted, deliberately-unfixed limitation** (Codex review, fresh
+#: evidence, fourth round on this same regex): the negative lookahead exists
+#: to bound a marker's greedy path group at a *later, real* marker's own
+#: trigger -- but it cannot distinguish that from a checkout path whose own
+#: directory name is, by pure textual coincidence, spelled exactly like a
+#: trigger (e.g. a directory literally named ``lambda at``, as in
+#: ``lambda at /tmp/lambda at build/foo.hpp:4:37``). For that shape the
+#: lookahead treats the coincidental path segment as a second marker
+#: boundary, the outer match fails to find any valid ``:\d+:\d+`` within its
+#: bounded region, and ``re.sub`` falls through to matching the *inner*
+#: "lambda at build/..." text instead -- leaving the real, checkout-
+#: dependent ``/tmp/`` prefix completely untouched. Unlike the two prior
+#: rounds this regex has already been hardened against (a timestamped build
+#: directory, ADR-031/ADR-048's own real-world CI convention; a quoted C++20
+#: fixed-string NTTP literal, real language syntax), a directory component
+#: that spells the literal English words "lambda at"/"unnamed <kind> at" is
+#: not a realistic checkout-root or build-directory naming convention any
+#: real toolchain produces -- it requires the marker text itself to be
+#: reproduced verbatim as a path segment, which is adversarial construction,
+#: not a plausible input this heuristic needs to defend against. Closing it
+#: soundly would need the lookahead to distinguish "this is the START of a
+#: declaration-shaped marker" from "this text merely spells the same words"
+#: -- i.e. real declaration-syntax awareness a regex over free-form path
+#: text cannot express, the same fundamental ceiling this whole heuristic
+#: already operates under (see this module's own docstring: "approximate,
+#: degrade rather than risk a wrong merge"). Left as a documented residual
+#: rather than attempted a fourth time under continued review pressure, per
+#: this repository's own "known gaps over risky reactive patches"
+#: convention (root ``AGENTS.md``) -- pinned by
+#: ``test_bare_marker_normalization_known_limitation_marker_text_in_path``
+#: rather than silently left unrecorded.
 _BARE_ANON_TYPE_LOCATION_RE = re.compile(
     r"\b(lambda|unnamed\s+\w+)\s+at\s+"
     r"((?:(?!(?:lambda|unnamed\s+\w+)\s+at\s)[^\"])*):(\d+):(\d+)\b"

@@ -597,3 +597,24 @@ def test_source_graph_summary_from_dict_preserves_unrecognized_coverage_fields()
     # The recognized structural keys are still recomputed from the actual
     # (empty) node/edge set, not trusted from the persisted payload.
     assert graph.coverage["source_decls"] == 0
+
+
+def test_bare_marker_normalization_known_limitation_marker_text_in_path() -> None:
+    # Accepted, deliberately-unfixed limitation (Codex review, fresh
+    # evidence, fourth round on this same regex -- see
+    # _BARE_ANON_TYPE_LOCATION_RE's own docstring for the full reasoning):
+    # a checkout path whose own directory name is, by pure textual
+    # coincidence, spelled exactly like the "lambda at"/"unnamed <kind> at"
+    # trigger defeats the negative-lookahead marker boundary, leaving the
+    # real checkout-dependent prefix untouched. This is adversarial,
+    # deliberately-constructed input (no real toolchain names a directory
+    # "lambda at") -- pinned here as a known limitation, not a passing
+    # correctness guarantee, so a future attempt to "fix" this regex a
+    # fourth time doesn't rediscover the same shape from scratch without
+    # this record of why it was left alone.
+    from abicheck.buildsource.graph_facts import _strip_bare_anonymous_type_location
+
+    name = "lambda at /tmp/lambda at build/foo.hpp:4:37"
+    result = _strip_bare_anonymous_type_location(name)
+    # Known-bad: the real, checkout-dependent "/tmp/" prefix survives.
+    assert "/tmp/" in result
