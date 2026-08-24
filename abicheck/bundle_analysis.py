@@ -166,6 +166,14 @@ def analyze_bundle(
         result = BundleDiffResult(
             old_root=old.root,
             new_root=new.root,
+            # Preserve every already-computed per-library verdict even
+            # though the bundle-level detector itself failed -- otherwise
+            # `.verdict`/`.per_library_verdict` silently read NO_CHANGE for
+            # a library that was, e.g., BREAKING, which is a false-green
+            # aggregate a caller (including `compare_bundle_from_facts`,
+            # which used to propagate this exception rather than swallow
+            # it) could act on directly (Codex review).
+            per_library=list(per_library_results),
             policy=policy,
             analysis_errors=[f"bundle analysis raised: {exc}"],
         )

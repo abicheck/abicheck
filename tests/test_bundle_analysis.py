@@ -268,6 +268,15 @@ class TestAnalyzeBundleDegradesAdditivelyOnFailure:
             f.kind == ChangeKind.BUNDLE_INTRA_DEP_SIGNATURE_UNVERIFIED
             for f in result.bundle_findings
         )
+        # Codex review (P1): a compare_bundle() failure must not discard
+        # already-computed per-library verdicts, or `.verdict`/
+        # `.per_library_verdict` silently read NO_CHANGE for a library that
+        # was e.g. BREAKING -- a false-green aggregate.
+        assert len(result.per_library) == 2
+        assert {r.library for r in result.per_library} == {
+            "libcore.so",
+            "libconsumer.so",
+        }
 
     def test_signature_evidence_failure_does_not_lose_compare_bundle_findings(
         self, monkeypatch
