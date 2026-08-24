@@ -554,3 +554,46 @@ def test_facts_normalize_before_merge_so_checkout_taint_never_becomes_a_conflict
     blob = str(d["facts"])
     assert "/old/checkout" not in blob
     assert "/new/checkout" not in blob
+
+
+def test_bare_marker_normalization_does_not_cross_into_a_later_quoted_literal() -> None:
+    # A real, unquoted marker followed later in the same string by an
+    # unrelated quoted coordinate-shaped literal must not have its greedy
+    # path group wander past its own real terminator and into the quoted
+    # text -- the "inside quotes" guard only checks where a match STARTS,
+    # not whether it crosses into a quoted span it never started inside of
+    # (Codex review, fresh evidence).
+    from abicheck.buildsource.graph_facts import _strip_bare_anonymous_type_location
+
+    name = 'Wrapper<lambda at /a/foo.hpp:4:37, Tag<"/literal/path:9:9">>'
+    result = _strip_bare_anonymous_type_location(name)
+
+    # The real marker normalizes correctly (checkout dir stripped, real
+    # coordinates 4:37 kept).
+    assert "lambda:foo.hpp:4:37" in result
+    # The quoted literal survives completely untouched -- its own
+    # coordinate-shaped content is not consumed by the real marker's match.
+    assert '"/literal/path:9:9"' in result
+
+
+def test_source_graph_summary_from_dict_preserves_unrecognized_coverage_fields() -> (
+    None
+):
+    # finalize() (called unconditionally by from_dict() to recompute
+    # graph_id/coverage post-migration) must not silently discard an
+    # additive coverage field a newer/third-party producer wrote that this
+    # build doesn't recognize -- the same forward-compat rule every other
+    # dataclass field in this module already follows (Codex review, fresh
+    # evidence).
+    from abicheck.buildsource.source_graph import SourceGraphSummary
+
+    pack = {
+        "nodes": [],
+        "edges": [],
+        "coverage": {"future_metric": {"x": 1}},
+    }
+    graph = SourceGraphSummary.from_dict(pack)
+    assert graph.coverage["future_metric"] == {"x": 1}
+    # The recognized structural keys are still recomputed from the actual
+    # (empty) node/edge set, not trusted from the persisted payload.
+    assert graph.coverage["source_decls"] == 0

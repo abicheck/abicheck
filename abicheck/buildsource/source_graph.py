@@ -456,7 +456,7 @@ class SourceGraphSummary:
         return self
 
     def finalize(self) -> SourceGraphSummary:
-        """Fill ``graph_id`` and the structural ``coverage`` counts; return self."""
+        """Fill ``graph_id``/``coverage``; merges onto (never replaces) the latter so a persisted unrecognized field survives; return self."""
         self.graph_id = self.compute_graph_id()
         kinds: dict[str, int] = {}
         for n in self.nodes:
@@ -494,8 +494,7 @@ class SourceGraphSummary:
         # confirmed pass with zero edges (a leaf header with no #includes of
         # its own) is a genuine zero, not "never collected" (Codex review:
         # this mirrors ``has_calls``/``has_type_edges`` below, which already
-        # credit a confirmed-but-empty pass; ``has_includes`` previously
-        # looked at edge presence alone).
+        # credit a confirmed-but-empty pass; ``has_includes`` previously looked at edge presence alone).
         include_pass_ran = self.extractor_passes.get("include_graph", False)
         header_include_pass_ran = self.extractor_passes.get(
             "header_include_graph", False
@@ -520,6 +519,7 @@ class SourceGraphSummary:
             e.kind == "DECL_REFERENCES_DECL" for e in self.edges
         )
         self.coverage = {
+            **self.coverage,  # forward-compat: keep any unrecognized field
             "targets": kinds.get("target", 0),
             "compile_units": kinds.get("compile_unit", 0),
             "source_decls": kinds.get("source_decl", 0),

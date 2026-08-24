@@ -869,9 +869,32 @@ def _compute_occurrences(edge: GraphEdge) -> list[str]:
 #: markers), swallowing both into one match. The lookahead guard gets both
 #: right: greedy within one marker's own text, but bounded at the next
 #: marker's trigger.
+#:
+#: The path group also excludes the ``"`` character outright, not just via
+#: the "inside quotes" guard in :func:`_strip_bare_anonymous_type_location`
+#: (Codex review, fresh evidence): that guard only checks where a *match*
+#: **starts**, not whether its greedy tail wanders *into* a later quoted
+#: span it never started inside of. A real, unquoted marker followed later
+#: in the same string by an unrelated quoted coordinate-shaped literal --
+#: e.g. ``Wrapper<lambda at /a/foo.hpp:4:37, Tag<"/literal/path:9:9">>`` --
+#: has no second ``lambda at``/``unnamed <kind> at`` trigger for the
+#: negative lookahead above to bound against, so the greedy path group would
+#: otherwise consume straight through the real marker's own terminator and
+#: into the quoted literal, matching the quoted text's own ``:9:9`` instead
+#: of the real ``:4:37``. Excluding ``"`` from the path characters bounds
+#: the greedy match at the opening quote it would otherwise cross into --
+#: the real terminator (a valid ``:\d+:\d+\b`` immediately before that
+#: point) is still found correctly by the same backtracking the timestamped-
+#: directory case above already relies on, since nothing between the
+#: marker's own trigger and the first ``"`` can accidentally look like a
+#: *second*, later ``:\d+:\d+`` occurrence unless the checkout path itself
+#: contains a literal double-quote character -- an accepted, documented
+#: edge case matching this whole heuristic's existing "approximate,
+#: degrade rather than risk a wrong merge" discipline (see this module's
+#: own docstring).
 _BARE_ANON_TYPE_LOCATION_RE = re.compile(
     r"\b(lambda|unnamed\s+\w+)\s+at\s+"
-    r"((?:(?!(?:lambda|unnamed\s+\w+)\s+at\s).)*):(\d+):(\d+)\b"
+    r"((?:(?!(?:lambda|unnamed\s+\w+)\s+at\s)[^\"])*):(\d+):(\d+)\b"
 )
 
 
