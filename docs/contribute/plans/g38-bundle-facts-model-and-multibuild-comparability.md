@@ -1579,10 +1579,88 @@ path and `compare_bundle_from_facts()` call, taking optional per-library
 signature-evidence maps (Phase 9's compact projection) so a stored side
 with no retained `AbiSnapshot` can still participate. `compare_bundle()`
 stays the core graph-native/diff-derived detector implementation; it is no
-longer presented as the complete bundle-analysis surface. **Not yet
-implemented** — depends on Phase 9's compact evidence existing first, since
-a stored `BundleFacts` side has no full `AbiSnapshot` to build one from
-otherwise.
+longer presented as the complete bundle-analysis surface.
+
+**Implementation status (shipped).** A new leaf module,
+`abicheck/bundle_analysis.py`, provides `analyze_bundle()`: it runs
+`compare_bundle()`, then -- when `old_signature_evidence` and
+`new_signature_evidence` are both given and non-empty -- runs
+`find_unverified_signature_findings()` and folds its output into the same
+`bundle_findings` list, with either stage's own exception recorded
+additively in `BundleDiffResult.analysis_errors` (Phase 11's contract)
+rather than discarding the other stage's results. Both real callers were
+migrated onto it:
+
+- `cli_compare_release_helpers._run_bundle_analysis` (the live
+  `compare --release` path) now builds the two live `BundleSnapshot`s,
+  loads an explicit `--manifest`, calls `analyze_bundle()` once, and
+  re-surfaces its `analysis_errors` as the same `click.echo(...,
+  err=True)` warnings it always emitted -- `analyze_bundle()` itself is a
+  pure/leaf function with no CLI-echoing concerns, since it's shared with
+  the stored-facts path, which has no `click` context to echo into.
+- `bundle_facts.compare_bundle_from_facts()` now calls `analyze_bundle()`
+  instead of `compare_bundle()` directly, passing
+  `old_facts.per_library_snapshots` (always a real, mandatory
+  `dict[str, AbiSnapshot]` -- see `BundleFacts`'s own docstring) as
+  `old_signature_evidence`. It gained a new optional
+  `new_signature_evidence` parameter for the NEW side's counterpart map;
+  omitted (every pre-existing caller's shape), the Phase 4 gate simply does
+  not run, identical to every caller's behavior before this phase.
+
+Confirmed the duck-type-compatibility claim Phase 9 made (`AbiSnapshot` and
+`BundleSignatureEvidence` both accepted anywhere
+`find_unverified_signature_findings` takes an evidence mapping) by reading
+that function's own signature and docstring directly -- it already declares
+`Mapping[str, AbiSnapshot | BundleSignatureEvidence]` for both sides, so no
+blocking gap existed here; `analyze_bundle()`'s own parameters are typed the
+same way.
+
+One design note worth recording: `analyze_bundle()` imports
+`compare_bundle`/`find_unverified_signature_findings` *inside* its own
+function body (a lazy, per-call import) rather than at module scope, even
+though this module is a genuine leaf with no cycle to avoid. This is
+deliberate, not an oversight -- the pre-existing bundle-analysis tests
+(`tests/test_cli_compare_release_bundle_signature_wiring.py`) monkeypatch
+`abicheck.bundle.compare_bundle`/`abicheck.bundle_signature_evidence.
+find_unverified_signature_findings` as module attributes, the way this
+codebase's bundle tests already do throughout; a module-scope `from .bundle
+import compare_bundle` would bind a name once at import time that a later
+`monkeypatch.setattr(bundle_mod, "compare_bundle", ...)` could no longer
+reach, silently breaking every one of those pre-existing tests' patch
+targets without a single one raising an error (they'd just observe the
+real function running instead of the fake). The lazy import mirrors
+exactly what the two pre-Phase-12 call sites already did for the same
+reason.
+
+Regression coverage: `tests/test_bundle_analysis.py` (`analyze_bundle()`
+tested directly, per this repo's "primitive-level property tests"
+convention -- both stages succeeding, only one side of evidence given
+(the gate correctly does not run), policy threading through the new
+orchestrator (Phase 10), full-vs-compact-vs-mixed evidence shape
+interchangeability, and each stage's failure recorded additively without
+losing the other stage's findings, including both stages failing at once);
+`tests/test_bundle_facts.py`'s new `TestCompareBundleFromFactsPhase4Parity`
+(the mandatory acceptance test extended to Phase 4: a stored-old-vs-
+live-new comparison given both sides' signature evidence produces the
+identical `BUNDLE_INTRA_DEP_SIGNATURE_UNVERIFIED` finding a live
+`analyze_bundle()` call over the same evidence does, plus a negative
+control confirming the gate stays silent when `new_signature_evidence` is
+omitted); and the pre-existing
+`tests/test_cli_compare_release_bundle_signature_wiring.py` suite, which
+exercises `_run_bundle_analysis`'s migrated implementation unchanged and
+passed without modification, confirming the live path's observable
+behavior (finding kinds, `analysis_errors`, JSON/Markdown surfacing) is
+unaffected by routing through the shared orchestrator.
+
+**Known gap, deliberately not closed here:** Phase 13 (the stored-facts
+CLI consumer) still doesn't exist, so `new_signature_evidence` has no real
+producer yet -- `compare_bundle_from_facts()`'s Phase 4 parity is verified
+today only by a Python-API-level test passing that map by hand, not by any
+end-to-end CLI invocation. This is the correct, minimal scope for Phase 12
+on its own (Phase 13's own plan section already says it is deliberately
+sequenced *after* this phase, precisely so the future CLI surface inherits
+parity rather than needing to re-establish it) -- but it means Phase 12's
+parity guarantee has no live CLI path exercising it until Phase 13 lands.
 
 ### Phase 13 — Stored-facts CLI consumer and multibuild wiring
 

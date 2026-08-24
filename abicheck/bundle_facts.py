@@ -239,6 +239,7 @@ def compare_bundle_from_facts(
     system_providers: Any = None,
     cohorts: list[str] | None = None,
     policy: str = "strict_abi",
+    new_signature_evidence: dict[str, Any] | None = None,
 ) -> BundleDiffResult:
     """Bundle-level comparison with the *old* side loaded from a stored
     :class:`BundleFacts` instead of live ``.so`` files (G38 Phase 2).
@@ -246,21 +247,37 @@ def compare_bundle_from_facts(
     A thin wrapper, deliberately: it reconstructs the old-side
     :class:`~abicheck.bundle_models.BundleSnapshot` via
     :func:`bundle_snapshot_from_facts` and then delegates to
-    :func:`abicheck.bundle.compare_bundle` unchanged -- the same function a
-    live-directory-vs-live-directory ``compare`` uses -- so the two entry
-    points share one detection implementation and can never independently
+    :func:`abicheck.bundle_analysis.analyze_bundle` -- the same orchestrator
+    a live-directory-vs-live-directory ``compare --release`` uses -- so the
+    two entry points share one detection implementation (both the core
+    graph-native/diff-derived suite and, since G38 stabilization Phase 12,
+    the C-boundary signature-evidence gate) and can never independently
     drift. This is what the mandatory dump/live parity test asserts.
 
     *manifest*, given explicitly, overrides *old_facts.manifest* (mirroring
     ``compare_bundle()``'s own ``manifest=`` parameter, which always wins
     over whatever a stored baseline recorded); otherwise the manifest
     captured in *old_facts* is reused.
+
+    *new_signature_evidence* (G38 stabilization Phase 12), when given and
+    non-empty, is the NEW side's bundle-canonical-key -> ``AbiSnapshot`` (or
+    the compact ``BundleSignatureEvidence`` projection) map for
+    ``find_unverified_signature_findings`` -- the OLD side's own map is
+    always *old_facts.per_library_snapshots* itself, which is already
+    exactly this shape (a real, mandatory ``dict[str, AbiSnapshot]`` -- see
+    ``BundleFacts``'s own docstring for why it's mandatory). Omitted (the
+    default): the Phase 4 gate does not run, matching every pre-Phase-12
+    caller of this function exactly -- there is not yet a CLI producer for
+    a live NEW-side evidence map here (G38 Phase 13, "stored-facts CLI
+    consumer", is a separate, not-yet-implemented phase), so this parameter
+    exists for a caller that already has one (a Python-API caller, or a
+    future Phase 13 CLI path) rather than being wired to anything today.
     """
-    from .bundle import compare_bundle
+    from .bundle_analysis import analyze_bundle
 
     old_snapshot = bundle_snapshot_from_facts(old_facts)
     effective_manifest = manifest if manifest is not None else old_facts.manifest
-    return compare_bundle(
+    return analyze_bundle(
         old_snapshot,
         new_snapshot,
         per_library_results,
@@ -268,6 +285,8 @@ def compare_bundle_from_facts(
         system_providers=system_providers,
         cohorts=cohorts,
         policy=policy,
+        old_signature_evidence=old_facts.per_library_snapshots,
+        new_signature_evidence=new_signature_evidence,
     )
 
 
