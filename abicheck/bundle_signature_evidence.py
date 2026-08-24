@@ -110,8 +110,20 @@ _UNKNOWN_TYPE_SENTINEL = "?"
 #: `"?"` at all. (`Param.is_variadic`/`Function.is_variadic` are separate
 #: boolean fields -- a real C variadic parameter is never spelled `"..."`
 #: as a `Param.type` value, so this check cannot misfire on one.)
+#:
+#: Codex review, fresh evidence: the recursion-depth-cap sentinel is not
+#: always emitted bare either -- `pdb_parser.py`'s `type_name()` returns
+#: `"..."` at the depth cap, but a pointer/reference wrapper one level up
+#: (`f"{ref_name} *"`/`f"{ref_name} &"`/`f"{ref_name} &&"`) then wraps that
+#: into `"... *"`/`"... &"`/`"... &&"`; `dwarf_snapshot.py`'s own
+#: `DW_TAG_pointer_type`/`DW_TAG_reference_type`/`DW_TAG_rvalue_reference_
+#: type` handling does the identical wrap. A substring check on `"..."` is
+#: as safe as the one on `"?"` above: no valid C/C++ identifier can contain
+#: a `.` at all, so `"..."` never appears in a real type spelling except as
+#: this sentinel -- and, per the note above, a genuine variadic parameter
+#: is never spelled into `Param.type` as the literal string `"..."` either.
 def _type_spelling_is_unresolved(spelling: str) -> bool:
-    return spelling == "..." or _UNKNOWN_TYPE_SENTINEL in spelling
+    return "..." in spelling or _UNKNOWN_TYPE_SENTINEL in spelling
 
 
 def _symbol_evidence_sufficient(symbol: str, snapshot: AbiSnapshot) -> bool:

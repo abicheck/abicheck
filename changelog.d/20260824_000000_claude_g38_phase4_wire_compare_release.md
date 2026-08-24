@@ -44,3 +44,12 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   via a new `_basename_to_bundle_key()` helper (built from the bundle's
   own `old.libraries` mapping) before comparing. The function's own
   signature gained a leading `old: BundleSnapshot` parameter for this.
+- **`bundle_signature_evidence._type_spelling_is_unresolved()` missed a
+  wrapped form of the recursion-depth-cap sentinel** (Codex review). A
+  parser's type-resolution recursion cap emits the bare `"..."` sentinel,
+  but a pointer/reference wrapper one level up (`pdb_parser.py`,
+  `dwarf_snapshot.py`) then wraps it into `"... *"`/`"... &"`/`"... &&"` --
+  the exact-equality check (`spelling == "..."`) missed these composite
+  forms, so a symbol whose evidence was genuinely insufficient could read
+  as sufficient. Fixed by switching to a substring check on `"..."`, the
+  same way the existing `"?"` sentinel is already checked.

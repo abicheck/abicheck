@@ -480,6 +480,11 @@ class TestFindUnverifiedSignatureFindings:
             "?&&",  # dumper_castxml.py: unresolved rvalue-reference target
             "...",  # dwarf_snapshot.py/dwarf_metadata.py/pdb_parser.py:
             # type-resolution recursion depth cap
+            "... *",  # pdb_parser.py: pointer wrapping a depth-capped target
+            "... &",  # dwarf_snapshot.py: reference wrapping a depth-capped
+            # target
+            "... &&",  # dwarf_snapshot.py: rvalue-reference wrapping a
+            # depth-capped target
         ],
     )
     def test_composite_unresolved_return_type_is_insufficient_evidence(
