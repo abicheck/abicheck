@@ -12,6 +12,7 @@ Not every workflow here blocks a merge. Before assuming a red check means
 | Workflow | Required on every PR? | Notes |
 |----------|------------------------|-------|
 | `ci.yml` | **Yes** — `ai-readiness`, `fair-metadata`, `lint-and-types`, `unit-tests` (canonical Linux/3.13 lane), `packaging` jobs | The core gate. `unit-tests`' `integration-tests`/`windows-msvc` sibling jobs in the same workflow have their own rules below. |
+| `module-architecture.yml` | **Yes** — `module-architecture` | Unconditional bounded-module growth and dependency-direction gate; invokes the canonical `verify.py` catalog against the PR head and merge base. |
 | `changelog-check.yml` | Yes, only when the diff touches `abicheck/**/*.py` | Bypass with the `skip-changelog` label |
 | `cli-interface-check.yml` | Yes, when the CLI surface changes | Diffs `dump_cli_surface.py` output old vs. new |
 | `dependency-review.yml` | Yes | GitHub's built-in dependency-review action |
@@ -49,7 +50,8 @@ phase-two plan's own PR 0B section for that history):
    changes"), read its own `on: pull_request:` block.
 2. **No `paths:` filter** (the workflow always runs on a PR against `main`;
    an internal diff check or label decides applicability instead) → require
-   its own check name directly. `changelog-check.yml`/`cli-interface-check.yml`/
+   its own check name directly. `module-architecture.yml`/
+   `changelog-check.yml`/`cli-interface-check.yml`/
    `bugfix-test-contract.yml`/`dependency-review.yml`/`security.yml`/`ci.yml`
    are all in this bucket.
 3. **Has a `paths:` filter** (the workflow may not run at all on an
@@ -85,12 +87,13 @@ phase-two plan's own PR 0B section for that history):
 `unit-tests (ubuntu-latest, 3.13, false)` (the canonical Linux/3.13 lane —
 not every matrix leg, see "one stable aggregate check" below),
 `packaging (ubuntu-latest)`, `packaging (windows-latest)`,
-`changelog-fragment`, `cli-interface-diff`, `test-contract`,
-`Dependency Review`, `Security Scan`, `CodeQL Analysis (python)`,
-`docs-pr (required)`, `test-action (required)` (the `name:` values of
-`ci.yml`'s `docs-pr-required`/`test-action-required` jobs — see the note in
-rule step 3 above on why the check name, not the job id, is what a Ruleset
-actually requires).
+`module-architecture`, `changelog-fragment`, `cli-interface-diff`,
+`test-contract`, `Dependency Review`, `Security Scan`,
+`CodeQL Analysis (python)`, `docs-pr (required)`, `test-action (required)`
+(the `name:` values of `ci.yml`'s
+`docs-pr-required`/`test-action-required` jobs — see the note in rule step 3
+above on why the check name, not the job id, is what a Ruleset actually
+requires).
 
 **This document states the rule and the resulting list; it does not itself
 turn the list into an enforced Ruleset.** That configuration step is a
@@ -115,16 +118,16 @@ every push to `main` and looks up the PR GitHub associates with that commit
 already-recorded *tested head SHA* — not the new merge commit, which most of
 the required workflows above never re-run against (`pull_request`-only
 triggers) and which wouldn't prove anything about what was reviewed even if
-they did — against the required-check list above, including the two
-neutral-aggregate gate checks themselves (`docs-pr (required)`/
-`test-action (required)`, which are unconditioned and so exist on every PR
-head SHA); only the *path-filtered* checks those gates wrap (`build-docs`,
-`test-action summary`) are deliberately excluded from this second pass, since
-whether those exist at all depends on the same path filter the gate job
-already re-evaluated as a required check on the PR itself — see the
-workflow's own header comment for the full reasoning. It cannot block an
-already-completed merge; it fails loudly on `main`'s own Actions tab instead,
-which is what makes a merge that slipped through a misconfigured or
+they did — against the required-check list above, including
+`module-architecture` and the two neutral-aggregate gate checks themselves
+(`docs-pr (required)`/`test-action (required)`, which are unconditioned and
+so exist on every PR head SHA); only the *path-filtered* checks those gates
+wrap (`build-docs`, `test-action summary`) are deliberately excluded from
+this second pass, since whether those exist at all depends on the same path
+filter the gate job already re-evaluated as a required check on the PR itself
+— see the workflow's own header comment for the full reasoning. It cannot
+block an already-completed merge; it fails loudly on `main`'s own Actions tab
+instead, which is what makes a merge that slipped through a misconfigured or
 momentarily-disabled Ruleset *detectable* rather than invisible — the exact
 gap that let the PR #782 merge SHA go out with no full `ci.yml` sweep having
 run against it.
@@ -132,13 +135,14 @@ run against it.
 ## Local equivalence (CLAUDE.md "M0-3")
 
 `ci.yml`'s always-required jobs (`ai-readiness`, `fair-metadata`,
-`lint-and-types`, and the canonical `unit-tests` Linux/3.13 lane) are exactly
-what `python scripts/verify.py --profile pr` runs locally —
-`tests/test_verify_profiles.py` asserts the two stay in sync. **Don't add a
-new required check to `ci.yml` without adding the matching `Step` to
-`scripts/verify.py`'s catalog** — an agent that only runs the local `pr`
-profile and gets a clean result should never be surprised by a required CI
-job it had no way to reproduce.
+`lint-and-types`, and the canonical `unit-tests` Linux/3.13 lane), plus the
+unconditional `module-architecture.yml` job, are reproducible through
+`python scripts/verify.py --profile pr` — `tests/test_verify_profiles.py`
+asserts the core `ci.yml` catalog stays in sync, and the architecture workflow
+selects its two named catalog entries directly. **Don't add a new required
+check without adding the matching `Step` to `scripts/verify.py`'s catalog** —
+an agent that only runs the local `pr` profile and gets a clean result should
+never be surprised by a required CI job it had no way to reproduce.
 
 ## Editing a workflow
 
