@@ -847,6 +847,57 @@ when the old/new bare-name entry is version-collapsed (confirmed to fail
 against the pre-fix code), one confirming a genuinely single-version
 provider (even one flagged `is_default=True`) is unaffected.
 
+**A twelfth finding, from the same review round as the tenth and
+eleventh, found the eleventh finding's own fix was reachable only some of
+the time -- the confirmed-change precedence check one step earlier in the
+same loop could suppress a provider entry before the version-collapse
+guard ever ran.** `find_unverified_signature_findings()`'s main loop
+checks `(provider_lib, symbol) in confirmed` and `continue`s past the
+entire rest of the per-provider-entry body -- including the eleventh
+finding's own `_bare_name_version_collapsed()` check -- the moment ANY
+diff-confirmed change exists for that bare-name pair. But `confirmed` is
+itself built from `DiffResult.changes`, which are computed against the
+identical version-blind, bare-name-keyed `AbiSnapshot` entries the
+eleventh finding's fix already distrusts for evidence-sufficiency
+purposes -- so a diff-confirmed `FUNC_PARAMS_CHANGED` on a collapsed
+bare name `foo` (retaining both `foo@V1` and `foo@@V2`) is itself only
+ever describing whichever version the model happened to keep, not
+necessarily both. Pre-fix, this silently suppressed the unverified
+finding for *every* consumer of that bare name, version-blind, even
+though only one version's evidence was ever actually confirmed. Fixed by
+computing `version_collapsed` once per `provider_entry` before the
+confirmed-precedence check, and gating that check on `not
+version_collapsed` -- confirmed-change precedence still applies normally
+to the overwhelming majority (non-collapsed) case, and only yields to the
+fail-closed "unverified" treatment when the bare name is genuinely
+ambiguous. Two regression tests: two consumers pinned to each of two
+collapsed versions with one confirmed change on the shared bare name
+(confirmed to fail against the pre-fix code -- zero findings for either
+consumer, when two were expected), and a non-collapsed sibling control
+confirming precedence is otherwise unaffected.
+
+**A thirteenth finding, from the same review round, closed a gap in
+`_type_spelling_is_unresolved()` unrelated to symbol versioning.**
+`dwarf_snapshot.py`'s `_compute_type_name` fallback branch -- reached for
+any DWARF type-DIE tag with no dedicated handling (e.g.
+`DW_TAG_ptr_to_member_type`) -- returns `name or tag or "unknown"`. When
+the DIE carries no `DW_AT_name` (the common case for an obscure,
+unhandled tag), this leaks either the bare literal `"unknown"` or the raw,
+unresolved DWARF tag spelling itself into `Function.return_type`/
+`Param.type`/`Variable.type` as though it were a genuine type name --
+neither is one, and the previous sentinel set (`"?"`, the recursion-cap
+`"..."`, `"fn(...)"`) recognized none of them. Since both leaked forms
+pass through the identical `_resolve_inner_info`/`_resolve_inner_name`
+wrapping layer the recursion-cap sentinel already accounts for, they can
+also appear composited with pointer/reference/array suffixes and
+qualifier prefixes (`"unknown *"`, `"DW_TAG_ptr_to_member_type[]"`).
+Fixed by widening the existing recursion-cap regex -- renamed
+`_UNRESOLVED_WRAPPED_SENTINEL_RE` to reflect its now-broader scope -- to
+alternate over `\.\.\.|unknown|DW_TAG_\w+` as the wrapped base, rather
+than only `\.\.\.`. Four new parametrized regression cases (the two bare
+forms and one wrapped instance of each), confirmed to fail against the
+pre-fix regex.
+
 `bundle_intra_dep_signature_changed` already fires correctly when a
 provider's DWARF/header evidence shows a real signature change. This phase
 adds the missing negative case: a new, dedicated `ChangeKind`,

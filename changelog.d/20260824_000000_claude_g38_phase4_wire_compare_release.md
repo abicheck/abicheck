@@ -203,3 +203,35 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   `AbiSnapshot` does not carry) and fails evidence sufficiency closed
   when detected, so the "unverified" finding correctly fires instead of
   silently trusting ambiguous evidence.
+- **The version-collapse fix above did not close the identical gap in the
+  earlier "a confirmed change already exists" precedence check, which ran
+  before it** (Codex review, fresh evidence). `find_unverified_signature_
+  findings()`'s main loop checked `(provider_lib, symbol) in confirmed`
+  and skipped the provider entry entirely before ever reaching the new
+  `_bare_name_version_collapsed()` guard -- so when a provider retained
+  both `foo@V1` and `foo@@V2` and a diff-confirmed change landed on the
+  bare-name symbol `foo` (itself only ever describing whichever version
+  the model's own bare-name collapse happened to keep), *both* provider
+  entries were silently suppressed, dropping the unverified finding for
+  whichever consumer's version the confirmed diff did not actually cover.
+  Fixed by computing the version-collapse condition once per
+  `provider_entry` up front and only honoring the confirmed-precedence
+  skip when the bare name is not collapsed. Two regression tests: one
+  with two consumers pinned to each of two collapsed versions (confirmed
+  to fail against the pre-fix code, which produced zero findings for
+  either), one confirming precedence is unaffected for an ordinary,
+  non-collapsed provider.
+- **`_type_spelling_is_unresolved()` did not recognize `dwarf_snapshot.py`'s
+  own fallback placeholder for an unsupported DWARF type-DIE tag** (Codex
+  review, fresh evidence). `_compute_type_name`'s fallback branch (reached
+  for a tag with no dedicated handling, e.g. `DW_TAG_ptr_to_member_type`)
+  returns `name or tag or "unknown"` -- when the DIE carries no
+  `DW_AT_name`, this leaks either the bare literal `"unknown"` or the raw,
+  unresolved DWARF tag spelling itself as though it were a real type name,
+  and (via the same wrapping layer the recursion-depth-cap sentinel
+  already accounts for) can appear composited with pointer/reference/array
+  suffixes and qualifier prefixes too. Fixed by widening the existing
+  recursion-cap regex (renamed `_UNRESOLVED_WRAPPED_SENTINEL_RE`) to also
+  match the bare `"unknown"` literal and any `DW_TAG_\w+`-shaped spelling,
+  wrapped the identical way. Four new parametrized regression cases,
+  confirmed to fail against the pre-fix regex.

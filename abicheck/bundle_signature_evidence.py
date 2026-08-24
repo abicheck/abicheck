@@ -228,8 +228,24 @@ _UNKNOWN_TYPE_SENTINEL = "?"
 #: `"...[] *"` for a pointer to an array of depth-capped elements --
 #: rather than treating any appearance of the substring anywhere in the
 #: spelling as evidence of truncation.
-_RECURSION_CAP_SENTINEL_RE = re.compile(
-    r"^(?:const |volatile )*\.\.\.(?: \*| &&| &|\[\])*$"
+#:
+#: A third, unrelated base joined this same alternation (Codex review,
+#: fresh evidence): `dwarf_snapshot.py`'s `_compute_type_name` fallback
+#: branch -- reached for any DWARF type-DIE tag it has no dedicated
+#: handling for (e.g. `DW_TAG_ptr_to_member_type`) -- returns
+#: ``name or tag or "unknown"``. When the DIE carries no `DW_AT_name`
+#: (the common case for such a tag), this leaks either the bare literal
+#: `"unknown"` or the raw, unresolved DWARF tag spelling itself (e.g.
+#: `"DW_TAG_ptr_to_member_type"`) as though it were a real type name --
+#: neither is one, and both are subject to the identical qualifier-
+#: prefix/pointer-reference-array-suffix wrapping the recursion-depth-cap
+#: sentinel already is, since they pass through the same
+#: `_resolve_inner_info`/`_resolve_inner_name` wrapping layer. Recognizing
+#: only the bare forms would miss `"unknown *"`, `"DW_TAG_ptr_to_member_
+#: type[]"`, and so on -- the same gap a bare-substring check on `"..."`
+#: was already rejected for.
+_UNRESOLVED_WRAPPED_SENTINEL_RE = re.compile(
+    r"^(?:const |volatile )*(?:\.\.\.|unknown|DW_TAG_\w+)(?: \*| &&| &|\[\])*$"
 )
 
 #: A second, unrelated placeholder both backends emit -- not a recursion-
@@ -247,7 +263,7 @@ _SUBROUTINE_TYPE_PLACEHOLDER = "fn(...)"
 def _type_spelling_is_unresolved(spelling: str) -> bool:
     return (
         spelling == _SUBROUTINE_TYPE_PLACEHOLDER
-        or bool(_RECURSION_CAP_SENTINEL_RE.match(spelling))
+        or bool(_UNRESOLVED_WRAPPED_SENTINEL_RE.match(spelling))
         or _UNKNOWN_TYPE_SENTINEL in spelling
     )
 
@@ -584,7 +600,18 @@ def find_unverified_signature_findings(
     for symbol, providers in new.resolution.provides.items():
         for provider_entry in providers:
             provider_lib = provider_entry.library
-            if (provider_lib, symbol) in confirmed:
+            version_collapsed = _bare_name_version_collapsed(
+                old, provider_lib, symbol
+            ) or _bare_name_version_collapsed(new, provider_lib, symbol)
+            if (provider_lib, symbol) in confirmed and not version_collapsed:
+                # A version-blind confirmed change is only trustworthy
+                # precedence when there is no version ambiguity to begin
+                # with -- when the bare name has collapsed onto multiple
+                # co-existing versions, `confirmed`'s own (provider_lib,
+                # symbol) key can't tell which version the diff-confirmed
+                # change actually describes, so it must not silently
+                # suppress the unverified finding for a *different*
+                # version pinned to the same bare name.
                 continue
 
             # Restricted to consumers that can actually reach *provider_lib*
@@ -645,9 +672,7 @@ def find_unverified_signature_findings(
                 # "unverified" against.
                 continue
 
-            if _bare_name_version_collapsed(
-                old, provider_lib, symbol
-            ) or _bare_name_version_collapsed(new, provider_lib, symbol):
+            if version_collapsed:
                 # The single bare-name-keyed AbiSnapshot entry can't be
                 # attributed to this specific version -- fail closed
                 # rather than trust evidence that may belong to a

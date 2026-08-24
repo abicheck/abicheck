@@ -43,13 +43,13 @@ from .cli_dump_helpers import (
     compile_db_filter_scope_error,
     compile_db_for_filter_scope_check,
     compile_db_from_build_info,
-    handle_non_elf_dump,
     perform_elf_dump,
     reject_snapshot_compression_conflict,
     resolve_dump_collect_context,
     resolve_dump_compile_context,
     resolve_dump_debug_format,
 )
+from .cli_dump_non_elf import handle_non_elf_dump
 from .cli_help import compare_help_options, configure_rich_help, dump_help_options
 from .cli_helpers_compare import (  # noqa: F401  — re-exported to keep cli import sites stable
     _build_match_map as _build_match_map,

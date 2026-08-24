@@ -722,6 +722,14 @@ class TestFindUnverifiedSignatureFindings:
             "fn(...)",  # dwarf_snapshot.py/pdb_parser.py: the fixed,
             # unconditional subroutine-type placeholder -- never carries
             # real return/parameter types regardless of depth
+            "unknown",  # dwarf_snapshot.py: _compute_type_name's fallback
+            # branch for an unsupported DIE tag with no DW_AT_name
+            "DW_TAG_ptr_to_member_type",  # dwarf_snapshot.py: the same
+            # fallback branch when the DIE has no name but does carry a
+            # (leaked, raw) tag
+            "unknown *",  # the "unknown" fallback wrapped by a pointer
+            "DW_TAG_ptr_to_member_type[]",  # the raw-tag fallback wrapped
+            # by an array suffix
         ],
     )
     def test_composite_unresolved_return_type_is_insufficient_evidence(
@@ -1076,4 +1084,111 @@ class TestFindUnverifiedSignatureFindings:
 
         assert (
             find_unverified_signature_findings(old, new, [], old_snaps, new_snaps) == []
+        )
+
+    def test_confirmed_precedence_does_not_suppress_a_version_collapsed_pair(self):
+        # Codex review, fresh evidence: libcore.so retains both core_fn@V1
+        # and core_fn@@V2 (a version collapse), and a real, diff-confirmed
+        # FUNC_PARAMS_CHANGED lands on the bare-name symbol "core_fn" --
+        # but a version-blind (provider_lib, symbol) confirmed-precedence
+        # check can't tell which of the two versions that diff actually
+        # describes. Pre-fix, this early-returned for *both* provider
+        # entries before the version-collapse check ever ran, silently
+        # dropping the unverified finding for whichever consumer's version
+        # the confirmed diff did NOT actually cover. Two consumers, one
+        # pinned to each version, must each still get their own finding.
+        from abicheck.elf_metadata import ElfImport
+
+        old = _snapshot(
+            {
+                "libcore.so": ElfMetadata(
+                    soname="",
+                    needed=[],
+                    symbols=[
+                        ElfSymbol(name="core_fn", version="V1", is_default=False),
+                        ElfSymbol(name="core_fn", version="V2", is_default=True),
+                    ],
+                ),
+                "libconsumer1.so": _meta(needed=["libcore.so"]),
+                "libconsumer2.so": _meta(needed=["libcore.so"]),
+            }
+        )
+        new = _snapshot(
+            {
+                "libcore.so": ElfMetadata(
+                    soname="",
+                    needed=[],
+                    symbols=[
+                        ElfSymbol(name="core_fn", version="V1", is_default=False),
+                        ElfSymbol(name="core_fn", version="V2", is_default=True),
+                    ],
+                ),
+                "libconsumer1.so": ElfMetadata(
+                    soname="",
+                    needed=["libcore.so"],
+                    symbols=[],
+                    imports=[ElfImport(name="core_fn", version="V1", is_default=False)],
+                ),
+                "libconsumer2.so": ElfMetadata(
+                    soname="",
+                    needed=["libcore.so"],
+                    symbols=[],
+                    imports=[ElfImport(name="core_fn", version="V2", is_default=True)],
+                ),
+            }
+        )
+        old_snaps = {
+            "libcore.so": _snap("libcore.so", functions=[_evidenced_fn("core_fn")])
+        }
+        new_snaps = {
+            "libcore.so": _snap("libcore.so", functions=[_evidenced_fn("core_fn")])
+        }
+        results = [
+            _diff(
+                "libcore.so",
+                Change(
+                    kind=ChangeKind.FUNC_PARAMS_CHANGED,
+                    symbol="core_fn",
+                    description="confirmed change",
+                ),
+            )
+        ]
+
+        findings = find_unverified_signature_findings(
+            old, new, results, old_snaps, new_snaps
+        )
+        assert sorted(f.consumer_library for f in findings) == [
+            "libconsumer1.so",
+            "libconsumer2.so",
+        ]
+
+    def test_confirmed_precedence_still_suppresses_when_not_version_collapsed(self):
+        # Sibling negative control: a single-version provider is unaffected
+        # -- confirmed-change precedence still applies normally.
+        new = _snapshot(
+            {
+                "libcore.so": _meta(exports=["core_fn"]),
+                "libconsumer.so": _meta(imports=["core_fn"], needed=["libcore.so"]),
+            }
+        )
+        old_snaps = {
+            "libcore.so": _snap("libcore.so", functions=[_evidenced_fn("core_fn")])
+        }
+        new_snaps = {
+            "libcore.so": _snap("libcore.so", functions=[_evidenced_fn("core_fn")])
+        }
+        results = [
+            _diff(
+                "libcore.so",
+                Change(
+                    kind=ChangeKind.FUNC_PARAMS_CHANGED,
+                    symbol="core_fn",
+                    description="confirmed change",
+                ),
+            )
+        ]
+
+        assert (
+            find_unverified_signature_findings(new, new, results, old_snaps, new_snaps)
+            == []
         )
