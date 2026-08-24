@@ -669,11 +669,16 @@ def ensure_facts_and_resolve(entity: GraphNode | GraphEdge) -> None:
             )
         ]
     entity.resolved, entity.conflicts = merge_graph_facts(entity.facts)
+    is_decl_or_type_node = isinstance(entity, GraphNode) and _is_decl_or_type_node_id(
+        entity.id
+    )
+    if is_decl_or_type_node:
+        _normalize_identity_attrs(entity.resolved)
     entity.attrs = dict(entity.resolved)
     top = min(entity.facts, key=_precedence_key)
     entity.confidence = top.confidence
     entity.provenance = top.producer
-    if isinstance(entity, GraphNode) and _is_decl_or_type_node_id(entity.id):
+    if is_decl_or_type_node and isinstance(entity, GraphNode):
         entity.label = _normalize_graph_identity(entity.label)
     if isinstance(entity, GraphEdge):
         entity.occurrences = _compute_occurrences(entity)
@@ -922,6 +927,36 @@ def _normalize_graph_identity(identity: str) -> str:
     carries by the time it reaches this package.
     """
     return _strip_bare_anonymous_type_location(strip_anonymous_type_location(identity))
+
+
+#: ``attrs`` keys carrying a raw declaration/qualified-name spelling that can
+#: embed the identical checkout-dependent anonymous/lambda location marker a
+#: decl/type node's own ``label``/``id`` already get normalized against
+#: (Codex review, fresh evidence). ``entity_identity.resolve_identity_for_node``
+#: (ADR-048's canonical-identity resolver) prefers ``attrs["name"]``/
+#: ``attrs["qualified_name"]`` over ``node.label`` when both are present, so
+#: normalizing only the label left the richer ADR-048 identity computed from
+#: these attrs still checkout-tainted -- two nodes with an identical,
+#: normalized id/label could still resolve to two different canonical ids
+#: purely from directory taint surviving in ``attrs``, and reloading a pack
+#: (``SourceGraphSummary.from_dict``'s ``resolve_entities()`` rebuild) would
+#: silently reintroduce the taint into a freshly-computed ``EntityResolver``
+#: even after ``EntityResolver.from_dict``'s own ``remap_node_ids`` had
+#: already cleaned the *persisted* aliases.
+_IDENTITY_ATTR_KEYS = ("name", "qualified_name")
+
+
+def _normalize_identity_attrs(attrs: dict[str, Any]) -> None:
+    """Normalize every :data:`_IDENTITY_ATTR_KEYS` string value in *attrs* in
+    place, the same way :func:`_normalize_graph_identity` normalizes a
+    decl/type node's own ``label``/``id``. A no-op for any other key, and for
+    a value that isn't a non-empty string (an absent/None/non-str attr is
+    left exactly as a producer supplied it -- never fabricated).
+    """
+    for key in _IDENTITY_ATTR_KEYS:
+        value = attrs.get(key)
+        if isinstance(value, str) and value:
+            attrs[key] = _normalize_graph_identity(value)
 
 
 #: ``_normalize_graph_identity`` is deliberately blind to *why* it might

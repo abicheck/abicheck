@@ -401,3 +401,107 @@ def test_normalization_never_touches_non_decl_or_type_node_ids() -> None:
     d = GraphNode.from_dict({"id": decl_id, "kind": "source_decl", "label": decl_id})
     assert d.id != decl_id
     assert "/old/checkout" not in d.id
+
+
+def test_identity_attrs_are_normalized_alongside_label() -> None:
+    # A decl/type node's attrs["name"]/attrs["qualified_name"] can carry the
+    # identical raw, checkout-path-bearing spelling as its label -- both
+    # producer fields are populated from the same declaration identity.
+    # entity_identity.resolve_identity_for_node() prefers these attrs over
+    # node.label, so leaving them un-normalized would let two
+    # checkout-equivalent nodes -- identical id/label after normalization --
+    # still resolve to two different ADR-048 canonical identities purely
+    # from directory taint surviving in attrs (Codex review, fresh evidence).
+    from abicheck.buildsource.graph_facts import GraphNode, _decl_node_id
+
+    old_qn = "raii_guard<(lambda at /old/checkout/lib.hpp:4:37)>"
+    new_qn = "raii_guard<(lambda at /new/checkout/lib.hpp:4:37)>"
+
+    # A real producer always builds a decl/type node's own id via
+    # _decl_node_id/_type_node_id (already normalized) -- this test's
+    # subject is specifically whether attrs["name"]/["qualified_name"] get
+    # the same treatment, not id normalization itself.
+    old_node = GraphNode(
+        id=_decl_node_id(old_qn),
+        kind="source_decl",
+        label=old_qn,
+        attrs={"name": old_qn, "qualified_name": old_qn, "usr": None},
+    )
+    new_node = GraphNode(
+        id=_decl_node_id(new_qn),
+        kind="source_decl",
+        label=new_qn,
+        attrs={"name": new_qn, "qualified_name": new_qn, "usr": None},
+    )
+
+    # ensure_facts_and_resolve already runs in GraphNode's own __post_init__
+    # path is not automatic for a bare construction -- route both through
+    # the same choke point add_node uses.
+    from abicheck.buildsource.graph_facts import ensure_facts_and_resolve
+
+    ensure_facts_and_resolve(old_node)
+    ensure_facts_and_resolve(new_node)
+
+    assert old_node.id == new_node.id
+    assert old_node.label == new_node.label
+    assert "/old/checkout" not in old_node.attrs["name"]
+    assert "/new/checkout" not in new_node.attrs["name"]
+    assert old_node.attrs["name"] == new_node.attrs["name"]
+    assert old_node.attrs["qualified_name"] == new_node.attrs["qualified_name"]
+
+    from abicheck.buildsource import entity_identity
+
+    old_identity = entity_identity.resolve_identity_for_node(old_node)
+    new_identity = entity_identity.resolve_identity_for_node(new_node)
+    assert old_identity.primary_id == new_identity.primary_id
+
+
+def test_resolve_entities_rebuild_does_not_reintroduce_taint_from_loaded_pack() -> None:
+    # SourceGraphSummary.from_dict() rebuilds entity_resolver from the
+    # loaded nodes' own (now-normalized) attrs via resolve_entities() --
+    # confirming the rebuild reads already-normalized attrs rather than
+    # reintroducing checkout taint EntityResolver.from_dict()'s own
+    # remap_node_ids() already cleaned out of the persisted aliases.
+    from abicheck.buildsource.source_graph import SourceGraphSummary
+
+    old_qn = "raii_guard<(lambda at /old/checkout/lib.hpp:4:37)>"
+    new_qn = "raii_guard<(lambda at /new/checkout/lib.hpp:4:37)>"
+
+    old_pack = {
+        "nodes": [
+            {
+                "id": f"decl://{old_qn}",
+                "kind": "source_decl",
+                "label": old_qn,
+                "attrs": {"name": old_qn, "qualified_name": old_qn},
+            }
+        ],
+        "edges": [],
+        "entity_resolver": {"aliases": {f"decl://{old_qn}": f"sig:{old_qn}\x1f\x1f0"}},
+    }
+    new_pack = {
+        "nodes": [
+            {
+                "id": f"decl://{new_qn}",
+                "kind": "source_decl",
+                "label": new_qn,
+                "attrs": {"name": new_qn, "qualified_name": new_qn},
+            }
+        ],
+        "edges": [],
+        "entity_resolver": {"aliases": {f"decl://{new_qn}": f"sig:{new_qn}\x1f\x1f0"}},
+    }
+
+    old_graph = SourceGraphSummary.from_dict(old_pack)
+    new_graph = SourceGraphSummary.from_dict(new_pack)
+
+    old_v1 = old_graph.nodes[0].id
+    new_v1 = new_graph.nodes[0].id
+    assert old_v1 == new_v1
+
+    old_canonical = old_graph.entity_resolver.canonical_id_for(old_v1)
+    new_canonical = new_graph.entity_resolver.canonical_id_for(new_v1)
+    assert old_canonical is not None
+    assert "/old/checkout" not in old_canonical
+    assert "/new/checkout" not in new_canonical
+    assert old_canonical == new_canonical
