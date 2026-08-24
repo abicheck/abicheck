@@ -571,11 +571,9 @@ class SourceGraphSummary:
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> SourceGraphSummary:
         # Defensive ``.get`` parsing so a newer/hand-edited summary never aborts
-        # a load (evidence/CLAUDE.md forward-compat rule). ``indexes`` are derived
-        # and intentionally not read back — they are recomputed from nodes/edges.
-        # ``extractor_passes`` defaults to {} for a pre-slice-2 pack (additive
-        # field, no schema_version bump needed — same "unknown edge kinds/
-        # fields are ignored/defaulted" forward-compat rule as ADR-041 P0 slice 1).
+        # a load (evidence/CLAUDE.md forward-compat rule); ``indexes`` are
+        # derived and intentionally not read back. ``extractor_passes``
+        # defaults to {} for a pre-slice-2 pack (ADR-041 P0 slice 1).
         raw_entity_resolver = d.get("entity_resolver")
         _raw_entity_resolver: dict[str, Any] = (
             raw_entity_resolver if isinstance(raw_entity_resolver, dict) else {}
@@ -600,12 +598,14 @@ class SourceGraphSummary:
             },
             entity_resolver=EntityResolver.from_dict(_raw_entity_resolver),
         )
-        # add_node/add_edge coalesce ids colliding after migration (Codex review).
+        # add_node/add_edge coalesce migration-colliding ids (Codex review).
         for raw_node in d.get("nodes", []):
             obj.add_node(GraphNode.from_dict(raw_node))
         for raw_edge in d.get("edges", []):
             obj.add_edge(GraphEdge.from_dict(raw_edge))
-        obj.graph_id = obj.compute_graph_id()  # never trust a stale loaded value
+        if _raw_entity_resolver:
+            obj.resolve_entities()  # rebuild from coalesced facts (Codex review)
+        obj.finalize()  # recomputes graph_id + coverage post-migration
         return obj
 
 

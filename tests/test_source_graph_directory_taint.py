@@ -177,14 +177,26 @@ def test_source_graph_summary_from_dict_migrates_entity_resolver_aliases() -> No
     # An EntityResolver persisted alongside a pre-normalization graph is
     # keyed by the OLD, pre-migration node id -- canonical_id_for(node.id)
     # must still resolve after load, or a persisted canonical identity goes
-    # silently unreachable (Codex review, fresh evidence).
+    # silently unreachable (Codex review, fresh evidence). The node carries
+    # the same "usr" attr resolve_identity_for_node() would have read when
+    # the persisted canonical id was first computed -- from_dict() rebuilds
+    # the resolver from current (coalesced) node facts (a later Codex
+    # finding) rather than trust the remap alone, so this is what actually
+    # makes the rebuilt canonical id agree with the persisted one.
     from abicheck.buildsource.source_graph import SourceGraphSummary
 
     old_id = "type://lambda at /old/checkout/lib.hpp:4:37"
     g = SourceGraphSummary.from_dict(
         {
             "schema_version": 2,
-            "nodes": [{"id": old_id, "kind": "record_type", "label": old_id}],
+            "nodes": [
+                {
+                    "id": old_id,
+                    "kind": "record_type",
+                    "label": old_id,
+                    "attrs": {"usr": "c:@S@Widget"},
+                }
+            ],
             "edges": [],
             "entity_resolver": {
                 "aliases": {old_id: "usr:c:@S@Widget"},
@@ -269,3 +281,67 @@ def test_entity_resolver_remap_normalizes_canonical_values_too() -> None:
     (canonical,) = r.aliases.values()
     assert "/old/checkout" not in canonical
     assert canonical == "sig:lambda:lib.hpp:4:37\x1frecord\x1f0"
+
+
+def test_source_graph_summary_from_dict_rebuilds_resolver_from_coalesced_node() -> None:
+    # Two persisted nodes for the same declaration under different checkout
+    # roots can have been resolved to weaker/stronger canonical ids
+    # independently -- once they coalesce into one node (merge_entity_facts),
+    # the resolver must be rebuilt from the coalesced node's own merged
+    # attrs, not keep whichever pre-merge alias a dict comprehension happened
+    # to keep last (Codex review, fresh evidence, third round).
+    from abicheck.buildsource.source_graph import SourceGraphSummary
+
+    old_id = "type://lambda at /old/checkout/lib.hpp:4:37"
+    new_id_raw = "type://lambda at /new/checkout/lib.hpp:4:37"
+    g = SourceGraphSummary.from_dict(
+        {
+            "schema_version": 2,
+            "nodes": [
+                # No usr -- would resolve to a weaker sig:-tier canonical id.
+                {"id": old_id, "kind": "record_type", "label": old_id},
+                # Carries a usr -- the coalesced node inherits it via
+                # merge_entity_facts, so the rebuilt resolver must reflect it.
+                {
+                    "id": new_id_raw,
+                    "kind": "record_type",
+                    "label": new_id_raw,
+                    "attrs": {"usr": "c:@S@Widget"},
+                },
+            ],
+            "edges": [],
+            "entity_resolver": {"aliases": {}, "conflicts": []},
+        }
+    )
+    assert len(g.nodes) == 1
+    assert g.entity_resolver.canonical_id_for(g.nodes[0].id) == "usr:c:@S@Widget"
+
+
+def test_source_graph_summary_from_dict_recomputes_coverage_after_coalescing() -> None:
+    # coverage's node_kinds/source_decls counts are stale the moment
+    # migration coalesces two persisted nodes into one -- from_dict() must
+    # recompute them (via finalize()), not copy the pre-migration payload
+    # verbatim (Codex review, fresh evidence, third round).
+    from abicheck.buildsource.source_graph import SourceGraphSummary
+
+    g = SourceGraphSummary.from_dict(
+        {
+            "schema_version": 2,
+            "coverage": {"source_decls": 99, "node_kinds": {"record_type": 99}},
+            "nodes": [
+                {
+                    "id": "type://lambda at /old/checkout/lib.hpp:4:37",
+                    "kind": "record_type",
+                    "label": "lambda at /old/checkout/lib.hpp:4:37",
+                },
+                {
+                    "id": "type://lambda at /new/checkout/lib.hpp:4:37",
+                    "kind": "record_type",
+                    "label": "lambda at /new/checkout/lib.hpp:4:37",
+                },
+            ],
+            "edges": [],
+        }
+    )
+    assert len(g.nodes) == 1
+    assert g.coverage["node_kinds"] == {"record_type": 1}
