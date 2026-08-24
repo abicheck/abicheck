@@ -135,28 +135,38 @@ from .model import AbiSnapshot, Visibility
 #: pre-existing, narrower gap in that sibling function, not something
 #: this module's own precedence check needs to wait on.
 #:
-#: The remaining eight kinds (Codex review, fresh evidence, filed after the
-#: three above already went in) close the same coexistence gap for every
-#: *other* `Function`-level fact `diff_symbols.py` can independently
-#: confirm or deny with certainty, none of which `_symbol_evidence_
-#: sufficient` itself inspects (it only ever reads `return_type`/`params`/
-#: `is_variadic`/`contract_attributes`): `is_noexcept`/`is_virtual`/
-#: `ref_qualifier` are plain (non-tri-state) `Function` fields, always
-#: confidently comparable regardless of any other field's resolution
-#: state; `exception_spec`/`is_explicit` are tri-state fields whose own
-#: `diff_symbols._check_exception_spec_change`/`_check_explicit_change`
-#: already skip on `None` the identical way `_check_variadic_change`/
-#: `_check_contract_attributes_change` do. Any one of these being
-#: genuinely confirmed for a symbol is exactly as informative as a
-#: confirmed params/return/variadic/calling-convention change -- "we know
-#: something concrete changed (or didn't) here," not "we couldn't tell" --
-#: so it must suppress this module's own risk finding the same way.
+#: The next six kinds (Codex review, fresh evidence, filed after the three
+#: above already went in) close the same coexistence gap for every *other*
+#: `Function`-level fact `diff_symbols.py` can independently confirm or deny
+#: with certainty, none of which `_symbol_evidence_sufficient` itself
+#: inspects (it only ever reads `return_type`/`params`/`is_variadic`/
+#: `contract_attributes`): `is_noexcept`/`is_virtual`/`ref_qualifier` are
+#: plain (non-tri-state) `Function` fields, always confidently comparable
+#: regardless of any other field's resolution state; `exception_spec` is a
+#: tri-state field whose own `diff_symbols._check_exception_spec_change`
+#: already skips on `None` the identical way `_check_variadic_change`/
+#: `_check_contract_attributes_change` do. Any one of these being genuinely
+#: confirmed for a symbol is exactly as informative as a confirmed
+#: params/return/variadic/calling-convention change -- "we know something
+#: concrete changed (or didn't) here," not "we couldn't tell" -- so it must
+#: suppress this module's own risk finding the same way.
+#:
 #: Deliberately excluded: `FUNC_LANGUAGE_LINKAGE_CHANGED` (an `extern "C"`
 #: transition changes the mangled name itself, so old/new can't share the
-#: `symbol` key this module matches on in the first place) and the
+#: `symbol` key this module matches on in the first place); the
 #: vtable-slot/inline-transition kinds (about virtual-dispatch layout and
 #: definition placement, not the calling-signature-agreement question this
-#: module exists to answer).
+#: module exists to answer); and `CTOR_EXPLICIT_ADDED`/`CTOR_EXPLICIT_
+#: REMOVED` (Codex review, fresh evidence -- tried once, reverted). Unlike
+#: every kind actually included above, an `explicit` specifier transition
+#: is a purely source-level fact: `checker_policy.py`'s own `ChangeKind`
+#: comment for these two kinds states plainly "neither change alters the
+#: mangled name," meaning it proves nothing about whether the *binary*
+#: calling signature this module exists to verify (params/return/
+#: variadic/calling-convention/...) actually still agrees. Including it in
+#: this set let a confirmed, unrelated source-level fact silently suppress
+#: a real, still-unresolved binary-signature-agreement question for the
+#: same symbol.
 _CONFIRMED_SIGNATURE_CHANGE_KINDS = frozenset(
     {
         ChangeKind.FUNC_PARAMS_CHANGED,
@@ -171,8 +181,6 @@ _CONFIRMED_SIGNATURE_CHANGE_KINDS = frozenset(
         ChangeKind.FUNC_REF_QUAL_CHANGED,
         ChangeKind.FUNC_VIRTUAL_ADDED,
         ChangeKind.FUNC_VIRTUAL_REMOVED,
-        ChangeKind.CTOR_EXPLICIT_ADDED,
-        ChangeKind.CTOR_EXPLICIT_REMOVED,
     }
 )
 

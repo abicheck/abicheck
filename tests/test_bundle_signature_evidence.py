@@ -963,8 +963,6 @@ class TestFindUnverifiedSignatureFindings:
             ChangeKind.FUNC_REF_QUAL_CHANGED,
             ChangeKind.FUNC_VIRTUAL_ADDED,
             ChangeKind.FUNC_VIRTUAL_REMOVED,
-            ChangeKind.CTOR_EXPLICIT_ADDED,
-            ChangeKind.CTOR_EXPLICIT_REMOVED,
         ],
     )
     def test_no_finding_when_confirmed_change_present_on_a_wider_axis(self, kind):
@@ -1000,6 +998,52 @@ class TestFindUnverifiedSignatureFindings:
             find_unverified_signature_findings(new, new, results, old_snaps, new_snaps)
             == []
         )
+
+    @pytest.mark.parametrize(
+        "kind",
+        [ChangeKind.CTOR_EXPLICIT_ADDED, ChangeKind.CTOR_EXPLICIT_REMOVED],
+    )
+    def test_confirmed_ctor_explicit_change_does_not_suppress_unverified_finding(
+        self, kind
+    ):
+        # Codex review, fresh evidence: unlike every kind in
+        # _CONFIRMED_SIGNATURE_CHANGE_KINDS, an `explicit` specifier
+        # transition is a purely source-level fact -- checker_policy.py's
+        # own ChangeKind comment for CTOR_EXPLICIT_ADDED/REMOVED states
+        # "neither change alters the mangled name." It proves nothing about
+        # whether the *binary* calling signature (the unresolved
+        # return_type="?" here) actually still agrees, so it must NOT
+        # suppress this module's own "cannot be confirmed or denied" risk
+        # finding for the same symbol -- the opposite of every kind in the
+        # sibling test above.
+        new = _snapshot(
+            {
+                "libcore.so": _meta(exports=["core_fn"]),
+                "libconsumer.so": _meta(imports=["core_fn"], needed=["libcore.so"]),
+            }
+        )
+        old_snaps = {
+            "libcore.so": _snap(
+                "libcore.so", functions=[_evidenced_fn("core_fn", return_type="?")]
+            )
+        }
+        new_snaps = {
+            "libcore.so": _snap(
+                "libcore.so", functions=[_evidenced_fn("core_fn", return_type="?")]
+            )
+        }
+        results = [
+            _diff(
+                "libcore.so",
+                Change(kind=kind, symbol="core_fn", description="confirmed change"),
+            )
+        ]
+
+        findings = find_unverified_signature_findings(
+            new, new, results, old_snaps, new_snaps
+        )
+        assert len(findings) == 1
+        assert findings[0].symbol == "core_fn"
 
     def test_fires_when_bare_name_version_collapsed_on_old_side(self):
         # Codex review, fresh evidence: libcore.so retains two live versions
