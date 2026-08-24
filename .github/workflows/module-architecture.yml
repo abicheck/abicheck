@@ -17,6 +17,11 @@ jobs:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
+          # pull_request normally checks out GitHub's synthetic merge commit.
+          # The architecture delta belongs to the PR branch only; otherwise
+          # base-side changes included in that merge are misreported as PR
+          # growth against the event's base SHA.
+          ref: ${{ github.event.pull_request.head.sha }}
 
       - uses: actions/setup-python@v6
         with:
