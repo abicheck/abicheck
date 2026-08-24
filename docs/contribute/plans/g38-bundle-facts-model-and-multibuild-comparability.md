@@ -766,6 +766,30 @@ as a pre-existing, narrower gap in that sibling function's own
 docstring update, not something this fix needed to wait on. Confirmed
 to fail against the pre-fix code, parametrized over all three kinds.
 
+**A ninth finding closed a version-blindness gap in the old-side
+retained-export check itself** (Codex review, fresh evidence, filed once
+this Phase 4 detector had a real caller on `compare --release` and was
+exercised against realistic versioned-symbol scenarios for the first
+time). `_symbol_was_exported(symbol, old_snap)` reads only
+`AbiSnapshot.function_map`/`variable_map` -- both keyed by bare symbol
+name, with no per-GNU-version distinction (the same limitation this
+repo's own root `AGENTS.md` already documents for `ElfMetadata.
+symbol_map`'s "last-entry-wins" collapse of versioned aliases). So when a
+provider previously exported only `foo@V1` and the new release adds
+`foo@V2` for a consumer requiring exactly V2, the old-side check answered
+"yes, `foo` was exported" purely from the unrelated `foo@V1` entry, and
+the detector reported the brand-new `foo@V2` as a retained-signature risk
+even though V2 has no old-side counterpart to be uncertain about at all.
+Fixed by adding `_provider_entry_retained_from_old()`, which checks
+`old.resolution.provides[symbol]` -- the bundle-resolution layer, built
+from real per-symbol GNU version data, unlike the `AbiSnapshot`-layer
+check -- for a same-library, same-`ProviderEntry.version` old-side
+provider before treating the new one as retained. Two regression tests:
+one confirming the false positive is gone for a genuinely fresh version,
+one confirming the finding still fires when the version genuinely was
+retained from the old side. Confirmed the positive-control test fails
+against the pre-fix code.
+
 `bundle_intra_dep_signature_changed` already fires correctly when a
 provider's DWARF/header evidence shows a real signature change. This phase
 adds the missing negative case: a new, dedicated `ChangeKind`,

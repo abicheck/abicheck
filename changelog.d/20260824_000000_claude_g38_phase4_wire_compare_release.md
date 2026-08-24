@@ -139,3 +139,36 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   contradictory "cannot be confirmed or denied" risk finding alongside
   the already-proven break. Fixed by adding all three kinds to the
   confirmed-kinds set.
+- **`find_unverified_signature_findings()` treated any old-side symbol
+  sharing a provider's bare name as "the same export retained across the
+  release," even when it was a different GNU symbol version** (Codex
+  review, fresh evidence). When a provider previously exported only
+  `foo@V1` and the new release adds `foo@V2` for a consumer requiring
+  V2, the old-side check (`_symbol_was_exported`) only ever reads
+  `AbiSnapshot.function_map`/`variable_map` -- both keyed by bare name,
+  with no per-version distinction -- so it answered "yes, `foo` was
+  exported" purely from the unrelated `foo@V1` entry, and the detector
+  reported V2 as a retained-signature risk even though V2 has no old-side
+  counterpart to compare against at all. Fixed by adding
+  `_provider_entry_retained_from_old()`, which checks
+  `old.resolution.provides[symbol]` (the bundle-resolution layer, which
+  *is* version-aware) for a same-library, same-version `ProviderEntry`
+  before treating the new provider entry as retained.
+- **The `mutmut (detector core)` CI lane could no longer run at all once
+  this PR touched a second mutation-scoped module
+  (`bundle_signature_evidence.py`)** -- a real, already-known failure
+  class (see the two pre-existing `pyproject.toml` `pytest_add_cli_args`
+  entries this joins), not new to this PR's own code:
+  `tests/test_action_run_sh_compare_pr_json_write.py`'s
+  `TestRealAbicheckWritesPersistedAnnotationsForADirectoryOperand` shells
+  out to a real `abicheck compare` via `action/run.sh` from a scratch
+  `cwd`, and mutmut's PYTHONPATH-based redirection into `mutants/` follows
+  that subprocess into a tree whose config loader can't find
+  `pyproject.toml`'s `[tool.mutmut]` section, aborting the whole `-x`
+  lane before a single mutant is measured. Fixed by adding this test file
+  to the same `--ignore=` list the two prior instances of this failure
+  already use, with a matching `_ACCEPTED_KILL_LOSS` entry in
+  `tests/test_mutation_workflow_contract.py` recording the real, non-zero
+  mutation-kill coverage this exclusion gives up (per that test's own
+  "an exclusion is free only if the file reaches no mutated module"
+  contract).

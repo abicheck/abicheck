@@ -71,6 +71,18 @@ question, since this module's main loop already iterates one concrete
 ``provider_entry`` at a time -- it did not, in the end, need that
 sibling's per-consumer resolution shape, contrary to an earlier revision
 of this docstring.
+
+A third check (Codex review, fresh evidence) guards the *old* side the
+same way: a bare-name "was this symbol exported in the old snapshot"
+check (:func:`_symbol_was_exported`) cannot tell a genuinely fresh symbol
+*version* apart from an unrelated old-side version sharing the same bare
+name -- a provider that previously exported only ``foo@V1`` and now adds
+``foo@V2`` would otherwise read as "retained, evidence uncertain" for
+V2 purely because *some* ``foo`` existed before.
+:func:`_provider_entry_retained_from_old` closes this by matching on
+``ProviderEntry.version`` at the bundle-resolution layer, which is
+version-aware, rather than the version-blind ``AbiSnapshot.function_map``/
+``variable_map`` layer ``_symbol_was_exported`` reads.
 """
 
 from __future__ import annotations
@@ -398,6 +410,38 @@ def _consumer_matches_provider(
     return provider_entry.is_default
 
 
+def _provider_entry_retained_from_old(
+    provider_entry: ProviderEntry, old: BundleSnapshot, symbol: str
+) -> bool:
+    """Did *old*'s own bundle resolution graph already carry a provider
+    definition of *symbol* from the same library, at the same GNU symbol
+    version, as *provider_entry*?
+
+    ``new.resolution.provides[symbol]`` can gain a fresh ``ProviderEntry``
+    across a release the same way a symbol table can gain a fresh
+    ``foo@V2`` definition alongside a pre-existing ``foo@V1`` one -- both
+    entries share the bare *symbol* name, but only one of them is actually
+    the *retained* export whose old-side signature evidence is worth
+    asking about. A name-only check (``_symbol_was_exported``, which reads
+    only ``AbiSnapshot.function_map``/``variable_map`` -- themselves keyed
+    by bare name, with no per-version distinction) cannot tell these apart
+    (Codex review, fresh evidence): it would treat a brand-new ``foo@V2``
+    as "retained, evidence uncertain" purely because an unrelated
+    ``foo@V1`` happened to exist on the old side, even though ``foo@V2``
+    is a genuinely new export with no old-side counterpart to compare
+    against. Matching on ``ProviderEntry.version`` (``""`` for an
+    unversioned symbol, so two unversioned entries still match each other)
+    is what actually answers "is this the same export, not just the same
+    bare name" -- the same version-aware granularity
+    ``_consumer_matches_provider`` already applies one layer up.
+    """
+    return any(
+        old_pe.version == provider_entry.version
+        for old_pe in old.resolution.provides.get(symbol, [])
+        if old_pe.library == provider_entry.library
+    )
+
+
 def find_unverified_signature_findings(
     old: BundleSnapshot,
     new: BundleSnapshot,
@@ -512,6 +556,12 @@ def find_unverified_signature_findings(
                 # be "unverified" about: a genuinely new export doesn't
                 # inherit uncertainty from an unrelated old-side declaration
                 # that was never part of the export surface.
+                continue
+            if not _provider_entry_retained_from_old(provider_entry, old, symbol):
+                # Not the same export retained across the release -- a
+                # different, freshly-added version of this bare-named
+                # symbol, so there is no old-side signature for it to be
+                # "unverified" against.
                 continue
 
             old_sufficient = _symbol_evidence_sufficient(symbol, old_snap)

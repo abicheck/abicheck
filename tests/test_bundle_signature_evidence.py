@@ -833,3 +833,115 @@ class TestFindUnverifiedSignatureFindings:
         assert (
             find_unverified_signature_findings(new, new, [], old_snaps, new_snaps) == []
         )
+
+    def test_no_finding_when_provider_version_is_a_fresh_export_not_retained(self):
+        # Codex review, fresh evidence: a name-only old-side "was it
+        # exported" check (_symbol_was_exported) can't tell a genuinely new
+        # symbol *version* apart from an unrelated old-side version sharing
+        # the same bare name. libcore.so previously exported only
+        # core_fn@V1; the new release adds core_fn@V2 (a distinct,
+        # brand-new export -- not a retained one) and a consumer requires
+        # exactly V2. Pre-fix, this fired an "unverified" finding for V2
+        # purely because *some* core_fn (V1) existed in the old snapshot;
+        # V2 has no old-side counterpart to be uncertain about at all.
+        from abicheck.elf_metadata import ElfImport
+
+        old = _snapshot(
+            {
+                "libcore.so": ElfMetadata(
+                    soname="",
+                    needed=[],
+                    symbols=[ElfSymbol(name="core_fn", version="V1", is_default=False)],
+                ),
+                "libconsumer.so": _meta(needed=["libcore.so"]),
+            }
+        )
+        new = _snapshot(
+            {
+                "libcore.so": ElfMetadata(
+                    soname="",
+                    needed=[],
+                    symbols=[
+                        ElfSymbol(name="core_fn", version="V1", is_default=False),
+                        ElfSymbol(name="core_fn", version="V2", is_default=False),
+                    ],
+                ),
+                "libconsumer.so": ElfMetadata(
+                    soname="",
+                    needed=["libcore.so"],
+                    symbols=[],
+                    imports=[ElfImport(name="core_fn", version="V2", is_default=False)],
+                ),
+            }
+        )
+        old_snaps = {
+            "libcore.so": _snap(
+                "libcore.so",
+                functions=[_elf_only_fn("core_fn")],
+                elf_only_mode=True,
+            )
+        }
+        new_snaps = {
+            "libcore.so": _snap(
+                "libcore.so",
+                functions=[_elf_only_fn("core_fn")],
+                elf_only_mode=True,
+            )
+        }
+
+        assert (
+            find_unverified_signature_findings(old, new, [], old_snaps, new_snaps) == []
+        )
+
+    def test_fires_when_provider_version_was_genuinely_retained_from_old(self):
+        # Sibling positive control for the fix above: core_fn@V2 already
+        # existed on the old side too (not a fresh export), so the
+        # "unverified" finding must still fire when evidence is
+        # insufficient on either side.
+        from abicheck.elf_metadata import ElfImport
+
+        old = _snapshot(
+            {
+                "libcore.so": ElfMetadata(
+                    soname="",
+                    needed=[],
+                    symbols=[ElfSymbol(name="core_fn", version="V2", is_default=False)],
+                ),
+                "libconsumer.so": _meta(needed=["libcore.so"]),
+            }
+        )
+        new = _snapshot(
+            {
+                "libcore.so": ElfMetadata(
+                    soname="",
+                    needed=[],
+                    symbols=[ElfSymbol(name="core_fn", version="V2", is_default=False)],
+                ),
+                "libconsumer.so": ElfMetadata(
+                    soname="",
+                    needed=["libcore.so"],
+                    symbols=[],
+                    imports=[ElfImport(name="core_fn", version="V2", is_default=False)],
+                ),
+            }
+        )
+        old_snaps = {
+            "libcore.so": _snap(
+                "libcore.so",
+                functions=[_elf_only_fn("core_fn")],
+                elf_only_mode=True,
+            )
+        }
+        new_snaps = {
+            "libcore.so": _snap(
+                "libcore.so",
+                functions=[_elf_only_fn("core_fn")],
+                elf_only_mode=True,
+            )
+        }
+
+        findings = find_unverified_signature_findings(
+            old, new, [], old_snaps, new_snaps
+        )
+        assert len(findings) == 1
+        assert findings[0].symbol == "core_fn"
