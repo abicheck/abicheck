@@ -555,8 +555,9 @@ companion module (the same posture Phase 3's `bundle_multibuild.py` took),
 with two real deviations from the design below.**
 
 - `abicheck/bundle_signature_evidence.py` implements
-  `find_unverified_signature_findings(new, per_library_results,
-  old_snapshots, new_snapshots) -> list[BundleFinding]` as a leaf module —
+  `find_unverified_signature_findings(old, new, per_library_results,
+  old_snapshots, new_snapshots) -> list[BundleFinding]` (signature widened
+  2026-08-24, see the "Update" note below) as a leaf module —
   it is **not** wired into `bundle.compare_bundle()` itself, because
   `abicheck/bundle.py` is exactly at the AI-readiness 2000-line hard cap
   (confirmed via `wc -l`) and cannot accept new code without an offsetting
@@ -592,36 +593,6 @@ with two real deviations from the design below.**
   finding's own *content* records that deeper evidence was unavailable,
   which is a fact about the finding, not about the minimum tier needed to
   produce it), and covered by `tests/test_bundle_signature_evidence.py`
-
-**Update (2026-08-24): wired into the real `compare --release` CLI path.**
-`find_unverified_signature_findings` previously had no caller outside its
-own test module — the standalone-companion posture above described where
-the detector *lived*, not that anything invoked it. `_run_bundle_analysis`/
-`_collect_bundle_result` (`cli_compare_release_helpers.py`, the real
-`compare_bundle()` call site for `compare --release`, bundle analysis on by
-default) now accept `old_snapshots`/`new_snapshots: dict[str, AbiSnapshot]`
-and, when both are non-empty, call the detector and fold its output into
-the same `bundle_findings` list `compare_bundle()` already populates — the
-pre-existing `BundleFinding.to_change()`/`render_bundle_findings_markdown()`
-rendering already handles it generically, no reporter changes needed (an
-earlier accounting of this plan's own remaining gaps had incorrectly listed
-reporter wiring as a separate missing piece; it was not — see this note).
-The maps are built from a new per-library stash: `_compare_one_library`
-(`cli_compare_release.py`) now also captures the *new*-side `AbiSnapshot`
-(alongside the pre-existing old-side one) and each library's own
-bundle-canonical key under `_new_snapshot`/`_bundle_key`, gated behind the
-same `collect_diff_results` flag the old-side stash already used — now
-triggered whenever bundle analysis is enabled (the default), not only for
-`--bundle-facts-out`/`--format junit`. Accepted tradeoff, stated in that
-gate's own docstring: both sides' `AbiSnapshot`s are now held in memory for
-every default release compare, not only the old side for the narrower
-pre-existing cases — the same memory-conscious gate mechanism, now paying
-that cost more often because the feature this phase describes needs it.
-Regression coverage:
-`tests/test_cli_compare_release_bundle_signature_wiring.py` (both
-`_run_bundle_analysis` and `_collect_bundle_result` directly, with a
-monkeypatched `build_bundle_snapshot` mirroring `tests/test_bundle.py`'s
-own established pattern; confirmed to fail against the pre-wiring code).
   (both-sides-ELF-only fires; sufficient-evidence-both-sides doesn't;
   one-side-insufficient still fires; no consumer / symbol absent from old
   (addition) / snapshot missing skip; a confirmed diff-level signature
@@ -629,12 +600,61 @@ own established pattern; confirmed to fail against the pre-wiring code).
   variable, not just function, symbols; a single unresolved *parameter*
   type is sufficient insufficiency even with a known return type; one
   finding per consumer library; no crash on an entirely empty snapshot).
-- **Not shipped**: reporter wiring (`bundle.json`/`bundle.md` rendering for
-  this kind — the "Reporter" row in "Files & surfaces" below is still
-  open, same as Phase 3's), and any caller that actually invokes this
-  function from `compare_bundle()`'s own orchestration or a CLI surface —
-  today it is reachable only by direct import, exactly Phase 3's own
-  "not shipped" posture for its CLI/config discovery surface.
+
+**Update (2026-08-24): wired into the real `compare --release` CLI path —
+superseding the "Not shipped: reporter wiring / any real caller" line this
+note replaces.** `find_unverified_signature_findings` previously had no
+caller outside its own test module — the standalone-companion posture
+above described where the detector *lived*, not that anything invoked it.
+`_run_bundle_analysis`/`_collect_bundle_result` (`cli_compare_release_
+helpers.py`, the real `compare_bundle()` call site for `compare --release`,
+bundle analysis on by default) now accept `old_snapshots`/`new_snapshots:
+dict[str, AbiSnapshot]` and, when both are non-empty, call the detector and
+fold its output into the same `bundle_findings` list `compare_bundle()`
+already populates — the pre-existing `BundleFinding.to_change()`/
+`render_bundle_findings_markdown()` rendering already handles it
+generically, no reporter changes needed (an earlier accounting of this
+plan's own remaining gaps had incorrectly listed reporter wiring as a
+separate missing piece; it was not — see this note). The maps are built
+from a new per-library stash: `_compare_one_library` (`cli_compare_
+release.py`) now also captures the *new*-side `AbiSnapshot` (alongside the
+pre-existing old-side one) and each library's own bundle-canonical key
+under `_new_snapshot`/`_bundle_key`, gated behind the same `collect_diff_
+results` flag the old-side stash already used — now triggered whenever
+bundle analysis is enabled (the default), not only for `--bundle-facts-
+out`/`--format junit`. Accepted tradeoff, stated in that gate's own
+docstring: both sides' `AbiSnapshot`s are now held in memory for every
+default release compare, not only the old side for the narrower
+pre-existing cases — the same memory-conscious gate mechanism, now paying
+that cost more often because the feature this phase describes needs it.
+Regression coverage: `tests/test_cli_compare_release_bundle_signature_
+wiring.py` (both `_run_bundle_analysis` and `_collect_bundle_result`
+directly, with a monkeypatched `build_bundle_snapshot` mirroring
+`tests/test_bundle.py`'s own established pattern; confirmed to fail
+against the pre-wiring code).
+
+**A CodeRabbit review on the wiring PR caught a real, pre-existing key-
+mismatch bug this new caller made reachable for the first time.**
+`_confirmed_provider_symbols` (the "a real, diff-confirmed change outranks
+an unverified one" precedence check) keyed its set by `Path(result.library
+).name` — `DiffResult.library`'s raw on-disk basename — while the main
+loop's own `provider_lib` comes from `new.resolution.provides`, keyed by
+the bundle-canonical name (`libfoo.so`, `binary_utils._canonical_library_
+key`, version-stripped). For any normally-versioned real SONAME (e.g.
+`libfoo.so.1.2.3`) the two never match, so the precedence check silently
+never fired — invisible in every existing unit test, which deliberately
+uses matching bare names throughout (`"libcore.so"` everywhere), but live
+for the very first real caller this update introduces. Fixed by widening
+the function's signature to `(old, new, per_library_results, old_
+snapshots, new_snapshots)` and resolving each `DiffResult`'s basename back
+to its bundle-canonical key via a new `_basename_to_bundle_key(old)`
+helper (built from `old.libraries`) before comparing. Regression coverage:
+`tests/test_bundle_signature_evidence.py::TestFindUnverifiedSignature
+Findings::test_no_finding_when_confirmed_change_present_for_a_versioned_
+library` (a genuinely versioned on-disk path alongside a bare-name
+`DiffResult.library`, mirroring what a real `compare --release` stashes;
+confirmed to fail — reproducing the spurious duplicate finding — against
+the pre-fix code).
 
 `bundle_intra_dep_signature_changed` already fires correctly when a
 provider's DWARF/header evidence shows a real signature change. This phase

@@ -25,3 +25,22 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   memory-conscious gate this module's own docstring already documents,
   now paying that cost for every default release compare rather than
   only `--bundle-facts-out`/`--format junit`.
+
+### Fixed
+
+- **`bundle_signature_evidence.find_unverified_signature_findings()` could
+  emit a spurious `BUNDLE_INTRA_DEP_SIGNATURE_UNVERIFIED` finding alongside
+  an already-confirmed, `BREAKING` `BUNDLE_INTRA_DEP_SIGNATURE_CHANGED`
+  finding for a normally-versioned library** (CodeRabbit review, caught
+  once this Phase 4 detector gained a real caller in the `compare
+  --release` path). `DiffResult.library` is always the raw on-disk
+  filename (`path.name`), which for a real versioned SONAME (e.g.
+  `libfoo.so.1.2.3`) differs from the bundle-canonical key
+  (`libfoo.so`, `binary_utils._canonical_library_key`) the resolution
+  graph itself keys providers by — so the "a confirmed signature change
+  already exists, don't also report it as merely unverified" precedence
+  check never matched for any realistically-versioned library. Fixed by
+  resolving each `DiffResult`'s basename back to its bundle-canonical key
+  via a new `_basename_to_bundle_key()` helper (built from the bundle's
+  own `old.libraries` mapping) before comparing. The function's own
+  signature gained a leading `old: BundleSnapshot` parameter for this.

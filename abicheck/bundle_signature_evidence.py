@@ -197,16 +197,48 @@ def _symbol_was_exported(symbol: str, snapshot: AbiSnapshot) -> bool:
     return False
 
 
+def _basename_to_bundle_key(old: BundleSnapshot) -> dict[str, str]:
+    """Map each library's real on-disk file basename to its bundle-canonical
+    key (``old.libraries``' own keys -- the same version-stripped key
+    :func:`~abicheck.binary_utils._canonical_library_key` produces, e.g.
+    ``libfoo.so`` for a real ``libfoo.so.1.2.3``).
+
+    :class:`~abicheck.checker_types.DiffResult.library` is always set from
+    ``path.name`` (`abicheck/service.py`/`abicheck/dumper.py`, every ELF/PE/
+    Mach-O dump site) -- the literal on-disk filename, not the bundle's
+    canonical key -- so for any normally-versioned SONAME the two differ
+    (Codex review, fresh evidence: `_confirmed_provider_symbols` previously
+    compared a `DiffResult`'s raw basename directly against
+    `BundleSnapshot.resolution`'s canonical keys, which never match for a
+    realistically-versioned library, silently defeating the "a confirmed
+    change outranks unverified" precedence for the overwhelmingly common
+    case). A basename with no matching bundle entry is left unmapped --
+    the caller degrades to comparing the raw basename, same as before this
+    fix, rather than raising.
+    """
+    return {path.name: key for key, path in old.libraries.items()}
+
+
 def _confirmed_provider_symbols(
+    old: BundleSnapshot,
     per_library_results: Iterable[DiffResult],
 ) -> set[tuple[str, str]]:
     """`(provider_library, symbol)` pairs already carrying a real, diff-
     confirmed signature change -- these must never also produce an
     "unverified" finding (real evidence of a break outranks "couldn't tell
-    either way")."""
+    either way").
+
+    *provider_library* here is the bundle-canonical key (see
+    :func:`_basename_to_bundle_key`), matching the key space
+    `find_unverified_signature_findings`'s own main loop compares against
+    (``new.resolution.provides``) -- not the raw ``DiffResult.library``
+    basename this set was previously (incorrectly) keyed by.
+    """
+    basename_to_key = _basename_to_bundle_key(old)
     confirmed: set[tuple[str, str]] = set()
     for result in per_library_results:
-        provider_lib = Path(result.library).name
+        basename = Path(result.library).name
+        provider_lib = basename_to_key.get(basename, basename)
         for change in result.changes:
             if change.kind in _CONFIRMED_SIGNATURE_CHANGE_KINDS:
                 confirmed.add((provider_lib, change.symbol))
@@ -214,6 +246,7 @@ def _confirmed_provider_symbols(
 
 
 def find_unverified_signature_findings(
+    old: BundleSnapshot,
     new: BundleSnapshot,
     per_library_results: Iterable[DiffResult],
     old_snapshots: Mapping[str, AbiSnapshot],
@@ -227,6 +260,15 @@ def find_unverified_signature_findings(
     between *old* and *new* -- distinct from both "no change" (evidence
     agrees) and the confirmed, `BREAKING` `BUNDLE_INTRA_DEP_SIGNATURE_
     CHANGED` (evidence disagrees).
+
+    *old* is used only to resolve each `DiffResult.library` (a real on-disk
+    basename) back to its bundle-canonical key via
+    :func:`_basename_to_bundle_key`, for the "a confirmed change already
+    exists" precedence check below -- it plays no role in the evidence
+    check itself, which is why `compare_bundle`'s own signature doesn't
+    need it for this same purpose (it, too, actually keys `diff_by_library`
+    by raw basename; see this module's own `_basename_to_bundle_key`
+    docstring).
 
     *old_snapshots*/*new_snapshots* map bundle-relative library name (the
     same canonical key `BundleSnapshot.libraries` uses) to that library's
@@ -251,7 +293,7 @@ def find_unverified_signature_findings(
     regardless of which of the two kinds a given triple produced.
     """
     results = list(per_library_results)
-    confirmed = _confirmed_provider_symbols(results)
+    confirmed = _confirmed_provider_symbols(old, results)
     findings: list[BundleFinding] = []
     seen: set[tuple[str, str, str]] = set()
 

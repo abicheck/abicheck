@@ -131,7 +131,9 @@ class TestFindUnverifiedSignatureFindings:
             )
         }
 
-        findings = find_unverified_signature_findings(new, [], old_snaps, new_snaps)
+        findings = find_unverified_signature_findings(
+            new, new, [], old_snaps, new_snaps
+        )
 
         assert len(findings) == 1
         (f,) = findings
@@ -156,7 +158,9 @@ class TestFindUnverifiedSignatureFindings:
             "libcore.so": _snap("libcore.so", functions=[_evidenced_fn("core_fn")])
         }
 
-        assert find_unverified_signature_findings(new, [], old_snaps, new_snaps) == []
+        assert (
+            find_unverified_signature_findings(new, new, [], old_snaps, new_snaps) == []
+        )
 
     def test_no_finding_when_one_side_insufficient(self):
         # Sufficient evidence on new, but ELF-only (dumped without headers)
@@ -179,7 +183,9 @@ class TestFindUnverifiedSignatureFindings:
             "libcore.so": _snap("libcore.so", functions=[_evidenced_fn("core_fn")])
         }
 
-        findings = find_unverified_signature_findings(new, [], old_snaps, new_snaps)
+        findings = find_unverified_signature_findings(
+            new, new, [], old_snaps, new_snaps
+        )
         assert len(findings) == 1
         # The description must name which side actually lacks evidence
         # (old, here) rather than overclaiming "neither side" when the new
@@ -203,7 +209,9 @@ class TestFindUnverifiedSignatureFindings:
             "libcore.so": _snap("libcore.so", functions=[_elf_only_fn("core_fn")])
         }
 
-        findings = find_unverified_signature_findings(new, [], old_snaps, new_snaps)
+        findings = find_unverified_signature_findings(
+            new, new, [], old_snaps, new_snaps
+        )
         assert len(findings) == 1
         assert "new side lacks" in findings[0].description
         assert "neither side" not in findings[0].description
@@ -217,7 +225,9 @@ class TestFindUnverifiedSignatureFindings:
             "libcore.so": _snap("libcore.so", functions=[_elf_only_fn("core_fn")])
         }
 
-        assert find_unverified_signature_findings(new, [], old_snaps, new_snaps) == []
+        assert (
+            find_unverified_signature_findings(new, new, [], old_snaps, new_snaps) == []
+        )
 
     def test_no_finding_when_symbol_absent_from_old_snapshot(self):
         # A brand-new export (addition), not a same-symbol unverified case.
@@ -232,7 +242,9 @@ class TestFindUnverifiedSignatureFindings:
             "libcore.so": _snap("libcore.so", functions=[_elf_only_fn("core_fn")])
         }
 
-        assert find_unverified_signature_findings(new, [], old_snaps, new_snaps) == []
+        assert (
+            find_unverified_signature_findings(new, new, [], old_snaps, new_snaps) == []
+        )
 
     def test_no_finding_when_old_symbol_was_only_a_private_declaration(self):
         # Codex review: a symbol present in old_snap.function_map is not by
@@ -261,7 +273,9 @@ class TestFindUnverifiedSignatureFindings:
             "libcore.so": _snap("libcore.so", functions=[_elf_only_fn("core_fn")])
         }
 
-        assert find_unverified_signature_findings(new, [], old_snaps, new_snaps) == []
+        assert (
+            find_unverified_signature_findings(new, new, [], old_snaps, new_snaps) == []
+        )
 
     def test_no_finding_when_old_elf_only_was_header_parsed_and_not_dynamic(self):
         # Codex review, second round: on a HEADER-parsed snapshot (the
@@ -300,7 +314,9 @@ class TestFindUnverifiedSignatureFindings:
             )
         }
 
-        assert find_unverified_signature_findings(new, [], old_snaps, new_snaps) == []
+        assert (
+            find_unverified_signature_findings(new, new, [], old_snaps, new_snaps) == []
+        )
 
     def test_no_finding_when_snapshot_missing_for_provider(self):
         new = _snapshot(
@@ -309,7 +325,7 @@ class TestFindUnverifiedSignatureFindings:
                 "libconsumer.so": _meta(imports=["core_fn"]),
             }
         )
-        assert find_unverified_signature_findings(new, [], {}, {}) == []
+        assert find_unverified_signature_findings(new, new, [], {}, {}) == []
 
     def test_no_finding_when_confirmed_signature_change_present(self):
         # A real, diff-confirmed signature change outranks "couldn't tell
@@ -340,7 +356,71 @@ class TestFindUnverifiedSignatureFindings:
 
         assert (
             find_unverified_signature_findings(
-                new, confirmed_diff, old_snaps, new_snaps
+                new, new, confirmed_diff, old_snaps, new_snaps
+            )
+            == []
+        )
+
+    def test_no_finding_when_confirmed_change_present_for_a_versioned_library(self):
+        # Codex review, fresh evidence: DiffResult.library is always the raw
+        # on-disk basename (`path.name`), which for a normally-versioned
+        # SONAME (e.g. "libcore.so.1.2.3") differs from the bundle-canonical
+        # key ("libcore.so", binary_utils._canonical_library_key) the
+        # resolution graph itself keys providers by. The sibling test above
+        # uses matching bare names throughout, which coincidentally hid this
+        # -- _confirmed_provider_symbols must resolve the basename back to
+        # the canonical key via *old*'s own `.libraries` mapping, or a real,
+        # confirmed signature-changed finding fails to suppress the
+        # unverified duplicate for the overwhelmingly common versioned case.
+        old = _snapshot(
+            {
+                "libcore.so": _meta(exports=["core_fn"]),
+                "libconsumer.so": _meta(imports=["core_fn"]),
+            }
+        )
+        # A real bundle build: build_bundle_snapshot's own `libraries` dict
+        # is keyed by the canonical name but points at the real, versioned
+        # on-disk path -- mirror that shape directly rather than going
+        # through _snapshot()'s uniform fake-path helper.
+        old.libraries["libcore.so"] = Path("/fake/libcore.so.1.2.3")
+        new = _snapshot(
+            {
+                "libcore.so": _meta(exports=["core_fn"]),
+                "libconsumer.so": _meta(imports=["core_fn"]),
+            }
+        )
+        # elf_only_mode=True (unlike the sibling test above) so this
+        # actually reaches and depends on the confirmed-precedence check --
+        # without it, _symbol_was_exported's own ELF_ONLY/elf_only_mode
+        # gate already returns False and short-circuits the whole
+        # evidence-sufficiency path before the confirmed check's effect
+        # (or absence of it) could be observed at all.
+        old_snaps = {
+            "libcore.so": _snap(
+                "libcore.so", functions=[_elf_only_fn("core_fn")], elf_only_mode=True
+            )
+        }
+        new_snaps = {
+            "libcore.so": _snap(
+                "libcore.so", functions=[_elf_only_fn("core_fn")], elf_only_mode=True
+            )
+        }
+        # DiffResult.library carries the real, versioned on-disk basename --
+        # exactly what a real compare-release run stashes (Path(old_path).name).
+        confirmed_diff = [
+            _diff(
+                "libcore.so.1.2.3",
+                Change(
+                    kind=ChangeKind.FUNC_PARAMS_CHANGED,
+                    symbol="core_fn",
+                    description="params changed",
+                ),
+            )
+        ]
+
+        assert (
+            find_unverified_signature_findings(
+                old, new, confirmed_diff, old_snaps, new_snaps
             )
             == []
         )
@@ -365,7 +445,9 @@ class TestFindUnverifiedSignatureFindings:
         }
         new_snaps = {"libcore.so": _snap("libcore.so", variables=[elf_only_var])}
 
-        findings = find_unverified_signature_findings(new, [], old_snaps, new_snaps)
+        findings = find_unverified_signature_findings(
+            new, new, [], old_snaps, new_snaps
+        )
         assert len(findings) == 1
         assert findings[0].symbol == "core_var"
 
@@ -383,7 +465,9 @@ class TestFindUnverifiedSignatureFindings:
         old_snaps = {"libcore.so": _snap("libcore.so", functions=[fn])}
         new_snaps = {"libcore.so": _snap("libcore.so", functions=[fn])}
 
-        findings = find_unverified_signature_findings(new, [], old_snaps, new_snaps)
+        findings = find_unverified_signature_findings(
+            new, new, [], old_snaps, new_snaps
+        )
         assert len(findings) == 1
 
     @pytest.mark.parametrize(
@@ -417,7 +501,9 @@ class TestFindUnverifiedSignatureFindings:
         old_snaps = {"libcore.so": _snap("libcore.so", functions=[fn])}
         new_snaps = {"libcore.so": _snap("libcore.so", functions=[fn])}
 
-        findings = find_unverified_signature_findings(new, [], old_snaps, new_snaps)
+        findings = find_unverified_signature_findings(
+            new, new, [], old_snaps, new_snaps
+        )
         assert len(findings) == 1
 
     def test_composite_unresolved_parameter_type_is_insufficient_evidence(self):
@@ -435,7 +521,9 @@ class TestFindUnverifiedSignatureFindings:
         old_snaps = {"libcore.so": _snap("libcore.so", functions=[fn])}
         new_snaps = {"libcore.so": _snap("libcore.so", functions=[fn])}
 
-        findings = find_unverified_signature_findings(new, [], old_snaps, new_snaps)
+        findings = find_unverified_signature_findings(
+            new, new, [], old_snaps, new_snaps
+        )
         assert len(findings) == 1
 
     def test_composite_unresolved_variable_type_is_insufficient_evidence(self):
@@ -454,7 +542,9 @@ class TestFindUnverifiedSignatureFindings:
         old_snaps = {"libcore.so": _snap("libcore.so", variables=[var])}
         new_snaps = {"libcore.so": _snap("libcore.so", variables=[var])}
 
-        findings = find_unverified_signature_findings(new, [], old_snaps, new_snaps)
+        findings = find_unverified_signature_findings(
+            new, new, [], old_snaps, new_snaps
+        )
         assert len(findings) == 1
 
     def test_one_finding_per_consumer(self):
@@ -476,7 +566,9 @@ class TestFindUnverifiedSignatureFindings:
             "libcore.so": _snap("libcore.so", functions=[_elf_only_fn("core_fn")])
         }
 
-        findings = find_unverified_signature_findings(new, [], old_snaps, new_snaps)
+        findings = find_unverified_signature_findings(
+            new, new, [], old_snaps, new_snaps
+        )
         assert sorted(f.consumer_library for f in findings) == ["liba.so", "libb.so"]
 
     def test_no_finding_when_symbol_absent_from_either_map_entirely(self):
@@ -496,4 +588,6 @@ class TestFindUnverifiedSignatureFindings:
         old_snaps = {"libcore.so": _snap("libcore.so")}
         new_snaps = {"libcore.so": _snap("libcore.so")}
 
-        assert find_unverified_signature_findings(new, [], old_snaps, new_snaps) == []
+        assert (
+            find_unverified_signature_findings(new, new, [], old_snaps, new_snaps) == []
+        )

@@ -243,6 +243,7 @@ def _run_bundle_analysis(
         try:
             result.bundle_findings.extend(
                 find_unverified_signature_findings(
+                    old_snap,
                     new_snap,
                     per_lib_results,
                     old_snapshots,
