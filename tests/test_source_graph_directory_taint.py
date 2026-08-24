@@ -146,3 +146,73 @@ def test_graph_edge_from_dict_migrates_pre_normalization_endpoints() -> None:
         }
     )
     assert old_edge.dst == _type_node_id("lambda at /new/checkout/lib.hpp:4:37")
+
+
+def test_source_graph_summary_from_dict_recomputes_stale_graph_id() -> None:
+    # A persisted graph_id was only ever trustworthy for the exact,
+    # pre-migration content it was computed over -- to_dict() reuses a
+    # truthy self.graph_id as-is, so a stale value must not survive a load
+    # that changed node ids underneath it (Codex review, fresh evidence).
+    from abicheck.buildsource.source_graph import SourceGraphSummary
+
+    g = SourceGraphSummary.from_dict(
+        {
+            "schema_version": 2,
+            "graph_id": "sha256:deliberately-stale",
+            "nodes": [
+                {
+                    "id": "type://lambda at /old/checkout/lib.hpp:4:37",
+                    "kind": "record_type",
+                    "label": "lambda at /old/checkout/lib.hpp:4:37",
+                }
+            ],
+            "edges": [],
+        }
+    )
+    assert g.graph_id != "sha256:deliberately-stale"
+    assert g.graph_id == g.compute_graph_id()
+
+
+def test_source_graph_summary_from_dict_migrates_entity_resolver_aliases() -> None:
+    # An EntityResolver persisted alongside a pre-normalization graph is
+    # keyed by the OLD, pre-migration node id -- canonical_id_for(node.id)
+    # must still resolve after load, or a persisted canonical identity goes
+    # silently unreachable (Codex review, fresh evidence).
+    from abicheck.buildsource.source_graph import SourceGraphSummary
+
+    old_id = "type://lambda at /old/checkout/lib.hpp:4:37"
+    g = SourceGraphSummary.from_dict(
+        {
+            "schema_version": 2,
+            "nodes": [{"id": old_id, "kind": "record_type", "label": old_id}],
+            "edges": [],
+            "entity_resolver": {
+                "aliases": {old_id: "usr:c:@S@Widget"},
+                "conflicts": [],
+            },
+        }
+    )
+    migrated_id = g.nodes[0].id
+    assert migrated_id != old_id
+    assert g.entity_resolver.canonical_id_for(migrated_id) == "usr:c:@S@Widget"
+    assert g.entity_resolver.canonical_id_for(old_id) is None
+
+
+def test_add_node_normalizes_label_for_any_producer() -> None:
+    # Label normalization is centralized in ensure_facts_and_resolve (Codex
+    # review, fresh evidence) so it covers every decl/type producer that
+    # calls SourceGraphSummary.add_node -- not just the two that happened to
+    # build GraphNodes directly in source_graph.py/type_graph.py.
+    from abicheck.buildsource.graph_facts import GraphNode
+    from abicheck.buildsource.source_graph import SourceGraphSummary
+
+    g = SourceGraphSummary()
+    g.add_node(
+        GraphNode(
+            id="decl://x",
+            kind="source_decl",
+            label="lambda at /some/checkout/foo.hpp:9:1",
+            provenance="call_graph",
+        )
+    )
+    assert g.nodes[0].label == "lambda:foo.hpp:9:1"

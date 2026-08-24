@@ -40,10 +40,12 @@ predicted, rather than a second, independent identity computation.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from . import entity_identity
+from .graph_facts import _normalize_graph_identity
 
 if TYPE_CHECKING:
     from .graph_facts import GraphNode
@@ -113,6 +115,38 @@ class EntityResolver:
             self.conflicts.append(EntityConflict(canonical, (existing_v1, node.id)))
         return canonical
 
+    def remap_node_ids(self, remap: Callable[[str], str]) -> None:
+        """Rewrite every v1 node id this resolver references through *remap*
+        (Codex review, fresh evidence).
+
+        ``SourceGraphSummary.from_dict()`` normalizes a loaded
+        ``GraphNode.id`` (see ``graph_facts._normalize_graph_identity``, the
+        checkout-directory-taint fix) *after* this resolver was already
+        built from the persisted JSON — so without this remap,
+        ``aliases``/``_canonical_to_v1``/``conflicts`` would still be keyed
+        by the OLD, pre-migration id, and ``canonical_id_for(node.id)``
+        would silently return ``None`` for a node whose canonical identity
+        was already resolved and persisted, forcing a spurious re-resolve
+        (:meth:`resolve`'s idempotence never triggers, and a fresh
+        ``resolve()`` on a possibly-weaker signal set can add a second,
+        redundant alias instead of returning the persisted one).
+
+        Two distinct old ids collapsing onto the same new id after *remap*
+        (the directory-taint fix's own intended effect — two ids that only
+        differed by checkout path now agree) is not specially reconciled
+        here: a dict comprehension keeps whichever entry is last, which is
+        harmless in practice since both old ids named the identical
+        declaration and therefore already agreed on ``canonical_id``, but is
+        not a fully general collision merge. Idempotent for an id *remap*
+        does not change.
+        """
+        self.aliases = {remap(k): v for k, v in self.aliases.items()}
+        self._canonical_to_v1 = {c: remap(v) for c, v in self._canonical_to_v1.items()}
+        self.conflicts = [
+            EntityConflict(c.canonical_id, tuple(remap(nid) for nid in c.node_ids))
+            for c in self.conflicts
+        ]
+
     def canonical_id_for(self, v1_id: str) -> str | None:
         """The canonical identity *v1_id* resolved to, or ``None`` if
         :meth:`resolve` was never called for it."""
@@ -147,8 +181,12 @@ class EntityResolver:
             for c in (raw_conflicts if isinstance(raw_conflicts, (list, tuple)) else ())
             if isinstance(c, dict)
         ]
-        return cls(
+        obj = cls(
             aliases=aliases,
             conflicts=conflicts,
             _canonical_to_v1=canonical_to_v1,
         )
+        # Self-heal against source_graph.py's own GraphNode/GraphEdge id
+        # migration (Codex review) -- see remap_node_ids's own docstring.
+        obj.remap_node_ids(_normalize_graph_identity)
+        return obj

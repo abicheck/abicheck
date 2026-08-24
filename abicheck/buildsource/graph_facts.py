@@ -520,25 +520,28 @@ class GraphNode:
         # "resolved"/"conflicts" is never trusted — always recomputed, so a
         # hand-edited pack self-heals instead of persisting a stale merge.
         #
-        # id/label pass through _normalize_graph_identity on load (Codex
-        # review, fresh evidence) so a pack persisted before that
-        # normalization existed self-heals the same way: without this, an
-        # old pack's raw, checkout-path-bearing decl/type node id would
-        # never match the normalized id a freshly-built graph now produces
-        # for the identical declaration, and diff_source_graph's direct id
-        # comparison would read it as removed+added rather than unchanged
-        # (the exact false positive this whole normalization exists to
-        # close, just reached from a stale-pack angle instead of a
-        # fresh-vs-fresh one). Safe unconditionally: the substitution only
-        # ever touches an embedded "(unnamed .../lambda at ...)"/"lambda at
-        # ...:line:col" marker, so it is a no-op for every other node id
-        # (source://, header://, build_option://, symbol://, target://,
-        # vtable://, ...) and idempotent for an id a current build already
-        # normalized.
+        # id passes through _normalize_graph_identity on load (Codex review,
+        # fresh evidence) so a pack persisted before that normalization
+        # existed self-heals the same way: without this, an old pack's raw,
+        # checkout-path-bearing decl/type node id would never match the
+        # normalized id a freshly-built graph now produces for the identical
+        # declaration, and diff_source_graph's direct id comparison would
+        # read it as removed+added rather than unchanged (the exact false
+        # positive this whole normalization exists to close, just reached
+        # from a stale-pack angle instead of a fresh-vs-fresh one). Safe
+        # unconditionally: the substitution only ever touches an embedded
+        # "(unnamed .../lambda at ...)"/"lambda at ...:line:col" marker, so
+        # it is a no-op for every other node id (source://, header://,
+        # build_option://, symbol://, target://, vtable://, ...) and
+        # idempotent for an id a current build already normalized. ``label``
+        # needs no explicit normalization here — ensure_facts_and_resolve
+        # below (called unconditionally for every loaded node) already
+        # covers it, the same single choke point a freshly-added node's
+        # label goes through via SourceGraphSummary.add_node.
         node = cls(
             id=_normalize_graph_identity(str(d["id"])),
             kind=str(d.get("kind", "file")),
-            label=_normalize_graph_identity(str(d.get("label", ""))),
+            label=str(d.get("label", "")),
             attrs=dict(d.get("attrs", {})),
             provenance=str(d.get("provenance", "")),
             confidence=str(d.get("confidence", CONF_UNKNOWN)),
@@ -639,6 +642,24 @@ def ensure_facts_and_resolve(entity: GraphNode | GraphEdge) -> None:
     ``confidence``/``provenance`` from the top-precedence fact — so a
     hand-edited or stale stored ``resolved`` value in a loaded pack never
     silently persists; it self-heals to what the facts actually support.
+
+    Also normalizes a :class:`GraphNode`'s own ``label`` (Codex review, fresh
+    evidence): this is the one choke point every decl/type producer already
+    routes a fresh node through, on first registration, via
+    ``SourceGraphSummary.add_node`` — the merge path for an
+    already-registered node's *second* registration never touches ``label``
+    at all ("kind/label keep the first registration's value" — see
+    :meth:`SourceGraphSummary.add_node`'s own docstring), so normalizing
+    here covers every producer's label the same way ``source_graph.
+    _decl_node_id``/``_type_node_id`` already cover every producer's node
+    id, rather than needing an explicit ``_normalize_graph_identity(...)``
+    call duplicated at each producer's own node-construction site (a prior
+    revision of this fix normalized only the two call sites that happened to
+    build ``GraphNode``s directly in ``source_graph.py``/``type_graph.py``,
+    silently leaving every other producer's label unnormalized). Safe
+    unconditionally, same reasoning as :func:`_normalize_graph_identity`
+    itself: the substitution only ever touches an embedded anonymous/lambda
+    location marker, so it is a no-op for any other label.
     """
     if not entity.facts:
         entity.facts = [
@@ -653,6 +674,8 @@ def ensure_facts_and_resolve(entity: GraphNode | GraphEdge) -> None:
     top = min(entity.facts, key=_precedence_key)
     entity.confidence = top.confidence
     entity.provenance = top.producer
+    if isinstance(entity, GraphNode):
+        entity.label = _normalize_graph_identity(entity.label)
     if isinstance(entity, GraphEdge):
         entity.occurrences = _compute_occurrences(entity)
 

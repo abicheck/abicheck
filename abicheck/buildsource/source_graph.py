@@ -580,7 +580,7 @@ class SourceGraphSummary:
         _raw_entity_resolver: dict[str, Any] = (
             raw_entity_resolver if isinstance(raw_entity_resolver, dict) else {}
         )
-        return cls(
+        obj = cls(
             schema_version=int(d.get("schema_version", SOURCE_GRAPH_VERSION)),
             graph_id=str(d.get("graph_id", "")),
             nodes=[GraphNode.from_dict(n) for n in d.get("nodes", [])],
@@ -602,6 +602,11 @@ class SourceGraphSummary:
             },
             entity_resolver=EntityResolver.from_dict(_raw_entity_resolver),
         )
+        # Recompute rather than trust the loaded graph_id: id migration above
+        # can change content, and to_dict() reuses a truthy self.graph_id
+        # as-is (Codex review) -- cheap, no-op when migration touched nothing.
+        obj.graph_id = obj.compute_graph_id()
+        return obj
 
 
 # ── node-id helpers ───────────────────────────────────────────────────────
@@ -1496,7 +1501,7 @@ def _augment_with_source_abi(
             GraphNode(
                 id=did,
                 kind="source_decl",
-                label=_normalize_graph_identity(ent.qualified_name or ent.identity()),
+                label=ent.qualified_name or ent.identity(),
                 provenance="source_abi",
                 confidence=conf,
                 attrs={
@@ -1531,7 +1536,7 @@ def _augment_with_source_abi(
             GraphNode(
                 id=tid,
                 kind=_type_node_kind(ent.kind),
-                label=_normalize_graph_identity(ent.qualified_name or ent.identity()),
+                label=ent.qualified_name or ent.identity(),
                 provenance="source_abi",
                 confidence=conf,
                 attrs={"decl_kind": ent.kind, "visibility": ent.visibility},
@@ -1567,7 +1572,7 @@ def _augment_with_source_abi(
             GraphNode(
                 id=mid,
                 kind="macro",
-                label=_normalize_graph_identity(ent.qualified_name or ent.identity()),
+                label=ent.qualified_name or ent.identity(),
                 provenance="source_abi",
                 confidence=conf,
             )
@@ -1691,7 +1696,7 @@ def fold_source_edges(
                 node = GraphNode(
                     id=node_id,
                     kind=node_kind,
-                    label=_normalize_graph_identity(ident),
+                    label=ident,
                     provenance=provenance,
                     confidence=confidence,
                     attrs=node_attrs,
