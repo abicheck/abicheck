@@ -102,3 +102,17 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   transition landing on an unknown side previously produced neither a
   confirmed diff-level finding nor this module's own risk finding. Fixed
   by also requiring `contract_attributes is not None`.
+- **The recursion-sentinel regex missed two more real composite forms,
+  and a wholly separate, unconditional placeholder** (Codex review,
+  fresh evidence). `pdb_parser.py`'s qualifier wrapping renders the
+  depth-capped sentinel with a *prefix*, not a suffix (`"const ..."`),
+  and its array wrapping appends `"[]"` (`"...[]"`, possibly further
+  wrapped, e.g. `"...[] *"`) -- neither matched the previous regex.
+  Separately, `dwarf_snapshot.py`'s `DW_TAG_subroutine_type` handling and
+  `pdb_parser.py`'s procedure/member-function branches both render *any*
+  function/subroutine type as the fixed literal `"fn(...)"`,
+  unconditionally -- never the real return/parameter types, regardless
+  of recursion depth -- which the sentinel-only regex could never match
+  by construction. Fixed by widening the regex to accept an optional
+  `const `/`volatile ` prefix and `[]` among the suffix forms, and by
+  separately recognizing the exact `"fn(...)"` literal.

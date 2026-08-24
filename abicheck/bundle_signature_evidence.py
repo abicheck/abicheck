@@ -150,18 +150,36 @@ _UNKNOWN_TYPE_SENTINEL = "?"
 #: docstring that claimed otherwise): a real, unrelated C/C++ type
 #: spelling genuinely CAN contain the literal substring `"..."` -- a
 #: variadic function-pointer parameter type like `"void (*)(int, ...)"`
-#: is legitimate, complete, real evidence, not a truncated one. The
-#: regex below only matches the sentinel's own finite shape (the bare
-#: sentinel, optionally followed by one or more ` *`/` &`/` &&`
-#: wrapper suffixes, anchored at both ends) rather than treating any
-#: appearance of the substring anywhere in the spelling as evidence of
-#: truncation.
-_RECURSION_CAP_SENTINEL_RE = re.compile(r"^\.\.\.(?: (?:\*|&&|&))*$")
+#: is legitimate, complete, real evidence, not a truncated one. The regex
+#: below matches only the sentinel's own finite shape: an optional
+#: `const `/`volatile ` qualifier prefix (`pdb_parser.py`'s modifier
+#: wrapping renders qualifiers *before* the base type, e.g. `"const
+#: ..."`), the bare sentinel, then zero or more ` *`/` &`/` &&`/`[]`
+#: pointer/reference/array wrapper suffixes in any combination -- e.g.
+#: `"...[] *"` for a pointer to an array of depth-capped elements --
+#: rather than treating any appearance of the substring anywhere in the
+#: spelling as evidence of truncation.
+_RECURSION_CAP_SENTINEL_RE = re.compile(
+    r"^(?:const |volatile )*\.\.\.(?: \*| &&| &|\[\])*$"
+)
+
+#: A second, unrelated placeholder both backends emit -- not a recursion-
+#: depth-cap artifact at all, but `dwarf_snapshot.py`'s `DW_TAG_
+#: subroutine_type` handling and `pdb_parser.py`'s procedure/member-
+#: function `type_name()` branches both render *any* function/subroutine
+#: type (e.g. what a function-pointer field points to) as this exact,
+#: fixed literal, unconditionally -- never the real return/parameter
+#: types, regardless of depth (Codex review, fresh evidence). A field or
+#: parameter carrying this spelling therefore never carries real
+#: signature evidence for the type it names, on either backend.
+_SUBROUTINE_TYPE_PLACEHOLDER = "fn(...)"
 
 
 def _type_spelling_is_unresolved(spelling: str) -> bool:
-    return bool(_RECURSION_CAP_SENTINEL_RE.match(spelling)) or (
-        _UNKNOWN_TYPE_SENTINEL in spelling
+    return (
+        spelling == _SUBROUTINE_TYPE_PLACEHOLDER
+        or bool(_RECURSION_CAP_SENTINEL_RE.match(spelling))
+        or _UNKNOWN_TYPE_SENTINEL in spelling
     )
 
 

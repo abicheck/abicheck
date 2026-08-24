@@ -715,6 +715,23 @@ diff-level finding nor this module's own risk finding. Fixed by also
 requiring `contract_attributes is not None`. Confirmed to fail against
 the pre-fix code.
 
+**A sixth finding, back on the recursion-sentinel regex -- two more real
+composite forms, plus a wholly separate, unconditional placeholder**
+(Codex review, fresh evidence). `pdb_parser.py`'s qualifier wrapping
+renders the depth-capped sentinel with a *prefix*, not a suffix
+(`"const ..."`), and its array wrapping appends `"[]"` (`"...[]"`,
+possibly further wrapped, e.g. `"...[] *"`) -- neither matched the
+regex from the third finding. Separately, `dwarf_snapshot.py`'s
+`DW_TAG_subroutine_type` handling and `pdb_parser.py`'s procedure/
+member-function branches both render *any* function/subroutine type as
+the fixed literal `"fn(...)"`, unconditionally, regardless of recursion
+depth -- a placeholder the sentinel-only regex could never match by
+construction, since it isn't a wrapped sentinel at all. Fixed by
+widening the regex to accept an optional `const `/`volatile ` prefix
+and `[]` among the suffix forms, and by separately recognizing the
+exact `"fn(...)"` literal. Confirmed all four new cases fail against
+the pre-fix code.
+
 `bundle_intra_dep_signature_changed` already fires correctly when a
 provider's DWARF/header evidence shows a real signature change. This phase
 adds the missing negative case: a new, dedicated `ChangeKind`,

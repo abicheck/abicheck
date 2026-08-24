@@ -626,6 +626,14 @@ class TestFindUnverifiedSignatureFindings:
             # depth-capped target
             "... * *",  # pointer to pointer, both wrapping a depth-capped
             # target (multi-level nesting)
+            "const ...",  # pdb_parser.py: a const-qualified depth-capped
+            # target (qualifier wraps as a *prefix*, not a suffix)
+            "...[]",  # pdb_parser.py: an array of depth-capped elements
+            "...[] *",  # pdb_parser.py: a pointer to an array of
+            # depth-capped elements (mixed suffix wrapping)
+            "fn(...)",  # dwarf_snapshot.py/pdb_parser.py: the fixed,
+            # unconditional subroutine-type placeholder -- never carries
+            # real return/parameter types regardless of depth
         ],
     )
     def test_composite_unresolved_return_type_is_insufficient_evidence(
