@@ -283,16 +283,12 @@ def _compare_one_library(
     bundle layer, JUnit aggregation) pop it from the entry before
     JSON-serialising — keeps the per-library compare a single-pass.
 
-    *collect_diff_results* additionally stashes the old
-    :class:`AbiSnapshot` under ``"_old_snapshot"`` -- needed only for a
-    JUnit render (``--format junit``/``--write junit=...``), which is the
-    one output shape that needs the pair, not just the diff. Gated behind
-    this flag (Codex review, fresh evidence) rather than stashed
-    unconditionally: an `AbiSnapshot` can be large, and every entry in
-    ``library_results`` is held until the whole release finishes, so an
-    unconditional stash would grow a large release's peak memory by the
-    combined size of every library's old snapshot even for the common
-    markdown/JSON-only case that never reads it.
+    *collect_diff_results* additionally stashes old+new
+    :class:`AbiSnapshot`\\ s and this library's bundle-canonical key under
+    ``"_old_snapshot"``/``"_new_snapshot"``/``"_bundle_key"`` -- gated
+    (Codex review) since an `AbiSnapshot` is large. Feeds
+    `find_unverified_signature_findings` from ``_collect_bundle_result``
+    (G38 Phase 4 -- see its plan doc's "Update (2026-08-24)" note).
 
     *severity_config* is forwarded to the per-library ``--output-dir`` JSON
     write below (Codex review, fresh evidence): without it, that write
@@ -362,6 +358,8 @@ def _compare_one_library(
             # complete primary one). Gated on the flag (Codex review,
             # fresh evidence) -- see this function's own docstring for why.
             entry["_old_snapshot"] = compare_result.old_snapshot
+            entry["_new_snapshot"] = compare_result.new_snapshot
+            entry["_bundle_key"] = key
         if contract_evaluation:
             # ADR-049 Phase 7's orthogonal contract-coverage floor (0/1),
             # read off this library's own persisted contract context --
@@ -1155,6 +1153,8 @@ def _strip_diff_results_and_adjust_verdict(
                 )
         entry.pop("_diff_result", None)
         entry.pop("_old_snapshot", None)
+        entry.pop("_new_snapshot", None)
+        entry.pop("_bundle_key", None)
     if removed_keys and _RELEASE_VERDICT_ORDER.get(
         worst_verdict, 0
     ) < _RELEASE_VERDICT_ORDER.get("COMPATIBLE_WITH_RISK", 0):
@@ -1650,7 +1650,8 @@ def compare_release_cmd(
                 collect_diff_results=(
                     fmt == "junit"
                     or secondary_fmt == "junit"
-                    or (bundle_facts_out is not None and not no_bundle_analysis)
+                    # G38 Phase 4 (_compare_one_library's docstring):
+                    or not no_bundle_analysis
                 ),
                 jobs=jobs,
                 scope_to_public_surface=scope_public_headers,

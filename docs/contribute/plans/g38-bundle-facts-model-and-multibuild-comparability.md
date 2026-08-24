@@ -592,6 +592,36 @@ with two real deviations from the design below.**
   finding's own *content* records that deeper evidence was unavailable,
   which is a fact about the finding, not about the minimum tier needed to
   produce it), and covered by `tests/test_bundle_signature_evidence.py`
+
+**Update (2026-08-24): wired into the real `compare --release` CLI path.**
+`find_unverified_signature_findings` previously had no caller outside its
+own test module — the standalone-companion posture above described where
+the detector *lived*, not that anything invoked it. `_run_bundle_analysis`/
+`_collect_bundle_result` (`cli_compare_release_helpers.py`, the real
+`compare_bundle()` call site for `compare --release`, bundle analysis on by
+default) now accept `old_snapshots`/`new_snapshots: dict[str, AbiSnapshot]`
+and, when both are non-empty, call the detector and fold its output into
+the same `bundle_findings` list `compare_bundle()` already populates — the
+pre-existing `BundleFinding.to_change()`/`render_bundle_findings_markdown()`
+rendering already handles it generically, no reporter changes needed (an
+earlier accounting of this plan's own remaining gaps had incorrectly listed
+reporter wiring as a separate missing piece; it was not — see this note).
+The maps are built from a new per-library stash: `_compare_one_library`
+(`cli_compare_release.py`) now also captures the *new*-side `AbiSnapshot`
+(alongside the pre-existing old-side one) and each library's own
+bundle-canonical key under `_new_snapshot`/`_bundle_key`, gated behind the
+same `collect_diff_results` flag the old-side stash already used — now
+triggered whenever bundle analysis is enabled (the default), not only for
+`--bundle-facts-out`/`--format junit`. Accepted tradeoff, stated in that
+gate's own docstring: both sides' `AbiSnapshot`s are now held in memory for
+every default release compare, not only the old side for the narrower
+pre-existing cases — the same memory-conscious gate mechanism, now paying
+that cost more often because the feature this phase describes needs it.
+Regression coverage:
+`tests/test_cli_compare_release_bundle_signature_wiring.py` (both
+`_run_bundle_analysis` and `_collect_bundle_result` directly, with a
+monkeypatched `build_bundle_snapshot` mirroring `tests/test_bundle.py`'s
+own established pattern; confirmed to fail against the pre-wiring code).
   (both-sides-ELF-only fires; sufficient-evidence-both-sides doesn't;
   one-side-insufficient still fires; no consumer / symbol absent from old
   (addition) / snapshot missing skip; a confirmed diff-level signature
