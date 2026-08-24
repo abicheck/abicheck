@@ -1275,6 +1275,119 @@ class TestIntraDepSignatureChanged:
             for f in result.bundle_findings
         )
 
+    def test_does_not_promote_a_not_evaluated_finding(self) -> None:
+        # G38 stabilization (Codex review, fresh evidence): under
+        # `compare --contract ...`, a finding outside the selected
+        # contract's scope is stamped `compatibility_evaluation_status=
+        # NOT_EVALUATED` and stays in `diff.changes`, but is excluded from
+        # the per-library verdict/exit code (ADR-049). Promoting it to a
+        # bundle-level BREAKING finding would contradict that already-
+        # scored result.
+        from abicheck.contract_relevance_types import CompatibilityEvaluationStatus
+
+        new = _snapshot(
+            {
+                "libcore.so": _meta(soname="libcore.so.1", exports=["core_add"]),
+                "libalgo.so": _meta(
+                    soname="libalgo.so.1", needed=["libcore.so.1"], imports=["core_add"]
+                ),
+            }
+        )
+        change = Change(
+            kind=ChangeKind.CALLING_CONVENTION_CHANGED,
+            symbol="core_add",
+            description="cdecl->fastcall",
+            compatibility_evaluation_status=CompatibilityEvaluationStatus.NOT_EVALUATED,
+        )
+        diff_libcore = DiffResult(
+            old_version="old",
+            new_version="new",
+            library="libcore.so",
+            changes=[change],
+            verdict=Verdict.NO_CHANGE,
+        )
+        result = compare_bundle(new, new, [diff_libcore])
+        assert not any(
+            f.kind == ChangeKind.BUNDLE_INTRA_DEP_SIGNATURE_CHANGED
+            for f in result.bundle_findings
+        )
+        # An unstamped finding (no --contract in effect) is unaffected.
+        diff_libcore_unstamped = _diff(
+            "libcore.so",
+            Change(
+                kind=ChangeKind.CALLING_CONVENTION_CHANGED,
+                symbol="core_add",
+                description="cdecl->fastcall",
+            ),
+        )
+        result_unstamped = compare_bundle(new, new, [diff_libcore_unstamped])
+        assert any(
+            f.kind == ChangeKind.BUNDLE_INTRA_DEP_SIGNATURE_CHANGED
+            for f in result_unstamped.bundle_findings
+        )
+
+    def test_reachable_cache_is_not_recomputed_on_a_hit(self, monkeypatch) -> None:
+        # G38 stabilization (Codex review, fresh evidence): the earlier
+        # `reachable_cache.setdefault(lib, _reachable_intra_libraries(...))`
+        # form evaluates the BFS unconditionally regardless of cache hit
+        # (Python evaluates setdefault's default-value argument eagerly),
+        # defeating the point of caching. Two changes against the same
+        # provider, both reaching the same consumer, must trigger the BFS
+        # at most once per distinct library.
+        new = _snapshot(
+            {
+                "libcore.so": _meta(
+                    soname="libcore.so.1", exports=["core_add", "core_sub"]
+                ),
+                "libalgo.so": _meta(
+                    soname="libalgo.so.1",
+                    needed=["libcore.so.1"],
+                    imports=["core_add", "core_sub"],
+                ),
+            }
+        )
+        diff_libcore = _diff(
+            "libcore.so",
+            Change(
+                kind=ChangeKind.CALLING_CONVENTION_CHANGED,
+                symbol="core_add",
+                description="cdecl->fastcall",
+            ),
+            Change(
+                kind=ChangeKind.CALLING_CONVENTION_CHANGED,
+                symbol="core_sub",
+                description="cdecl->fastcall",
+            ),
+        )
+
+        import abicheck.bundle_resolution_reachability as reachability_mod
+
+        call_count = 0
+        real_reachable = reachability_mod.reachable_intra_libraries
+
+        def _counting_reachable(snapshot, root):
+            nonlocal call_count
+            call_count += 1
+            return real_reachable(snapshot, root)
+
+        monkeypatch.setattr(
+            reachability_mod, "reachable_intra_libraries", _counting_reachable
+        )
+
+        result = compare_bundle(new, new, [diff_libcore])
+        assert (
+            len(
+                [
+                    f
+                    for f in result.bundle_findings
+                    if f.kind == ChangeKind.BUNDLE_INTRA_DEP_SIGNATURE_CHANGED
+                ]
+            )
+            == 2
+        )
+        # One BFS per distinct library, not per (change, consumer) pair.
+        assert call_count == 1
+
     def test_plugin_abi_policy_suppresses_calling_convention_promotion(self) -> None:
         # G38 stabilization (Codex review, fresh evidence): CALLING_
         # CONVENTION_CHANGED is COMPATIBLE under the plugin_abi policy

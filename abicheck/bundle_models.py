@@ -32,6 +32,7 @@ from pathlib import Path
 
 from .checker_policy import ChangeKind, Verdict, compute_verdict, effective_category
 from .checker_types import Change, DiffResult
+from .contract_gating import is_evaluated
 from .elf_metadata import ElfMetadata
 from .model import AbiSnapshot, Function, Variable
 
@@ -437,7 +438,16 @@ def diff_change_is_breaking(
     the same one that already scored the per-library finding -- so a
     policy-file override can't be defeated by promotion the way the
     named-policy override already couldn't be.
+
+    Also checks ADR-049 contract-relevance status first (Codex review):
+    a ``NOT_EVALUATED`` (out-of-contract-scope) finding stays in
+    ``diff.changes`` but is excluded from the per-library verdict/exit
+    code, so promoting it here would contradict that already-scored
+    result -- ``is_evaluated`` defaults ``True`` for an unstamped finding,
+    so a run with no ``--contract`` is unaffected.
     """
+    if not is_evaluated(change):
+        return False
     if diff.policy_file is not None:
         return diff.policy_file.compute_verdict([change]) == Verdict.BREAKING
     return effective_category(change, *policy_sets) == Verdict.BREAKING

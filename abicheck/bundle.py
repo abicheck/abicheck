@@ -85,6 +85,7 @@ from .bundle_models import (  # noqa: F401  (re-exported for back-compat)
     diff_change_is_breaking as _diff_change_is_breaking,
 )
 from .bundle_resolution_reachability import (
+    cached_reachable_intra_libraries as _cached_reachable_intra_libraries,
     reachable_intra_libraries as _reachable_intra_libraries,
 )
 from .bundle_soname import hard_link_alias_basenames, soname_matches_providers
@@ -1168,12 +1169,11 @@ def _detect_intra_dep_signature_changed(
     For each confirmed *promotable* C-boundary signature break
     (:data:`~abicheck.bundle_models.PROMOTABLE_C_BOUNDARY_SIGNATURE_BREAK_
     KINDS`, a strict subset of ``CONFIRMED_C_BOUNDARY_SIGNATURE_BREAK_
-    KINDS`` -- G38 plan doc Phase 5), find siblings that import the symbol
-    *and actually resolve it against this provider*
-    (:func:`_consumer_resolves_via_provider`), emitting one finding per
-    (consumer, symbol) pair. *policy*: both a named-policy demotion and a
-    ``--policy-file`` override on the diff are honored, via
-    :func:`_diff_change_is_breaking`.
+    KINDS``), find siblings importing the symbol that *actually resolve it
+    against this provider* (:func:`_consumer_resolves_via_provider`),
+    emitting one finding per (consumer, symbol) pair. *policy*: a
+    named-policy demotion and a ``--policy-file`` override on the diff are
+    both honored, via :func:`_diff_change_is_breaking`.
     """
     findings: list[BundleFinding] = []
     seen: set[tuple[str, str, str]] = set()
@@ -1182,7 +1182,7 @@ def _detect_intra_dep_signature_changed(
     reachable_cache: dict[str, set[str]] = {}
 
     def _reachable(lib: str) -> set[str]:
-        return reachable_cache.setdefault(lib, _reachable_intra_libraries(new, lib))
+        return _cached_reachable_intra_libraries(new, reachable_cache, lib)
 
     for provider_lib, diff in diff_by_library.items():
         for change in diff.changes:
