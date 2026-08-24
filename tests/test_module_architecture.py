@@ -170,6 +170,9 @@ class ModuleArchitectureUnitTests(unittest.TestCase):
             root = Path(tmp)
             path = root / "abicheck" / "domain" / "bad.py"
             path.parent.mkdir(parents=True)
+            (root / "abicheck" / "unclassified_legacy.py").write_text(
+                "", encoding="utf-8"
+            )
             path.write_text(
                 "from abicheck import unclassified_legacy\n", encoding="utf-8"
             )
@@ -180,6 +183,19 @@ class ModuleArchitectureUnitTests(unittest.TestCase):
         self.assertEqual(
             findings[0].check, "architecture-unclassified-first-party-import"
         )
+
+    def test_imported_package_attribute_is_not_treated_as_module(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            path = root / "abicheck" / "domain" / "version.py"
+            path.parent.mkdir(parents=True)
+            path.write_text(
+                "from abicheck import __version__\n", encoding="utf-8"
+            )
+            findings = gate.check_imports(
+                root, ["abicheck/domain/version.py"], self.config
+            )
+        self.assertEqual(findings, [])
 
     def test_legacy_same_layer_dependency_is_allowed(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
