@@ -505,3 +505,52 @@ def test_resolve_entities_rebuild_does_not_reintroduce_taint_from_loaded_pack() 
     assert "/old/checkout" not in old_canonical
     assert "/new/checkout" not in new_canonical
     assert old_canonical == new_canonical
+
+
+def test_facts_normalize_before_merge_so_checkout_taint_never_becomes_a_conflict() -> (
+    None
+):
+    # Two facts for the same decl/type node -- e.g. two producers, or two
+    # pre-migration nodes that coalesced onto one id -- reporting an
+    # identical declaration under two different checkout roots must merge
+    # without a spurious FactConflict, and the raw checkout-tainted spelling
+    # must not survive anywhere in the persisted facts list either (Codex
+    # review, fresh evidence).
+    from abicheck.buildsource.graph_facts import GraphFact, GraphNode, _decl_node_id
+
+    qn_template = "raii_guard<(lambda at {}/lib.hpp:4:37)>"
+    old_qn = qn_template.format("/old/checkout")
+    new_qn = qn_template.format("/new/checkout")
+
+    node = GraphNode(
+        id=_decl_node_id(old_qn),
+        kind="source_decl",
+        label=old_qn,
+        facts=[
+            GraphFact(
+                producer="header_graph",
+                confidence="high",
+                attrs={"name": old_qn, "qualified_name": old_qn},
+            ),
+            GraphFact(
+                producer="call_graph",
+                confidence="high",
+                attrs={"name": new_qn, "qualified_name": new_qn},
+            ),
+        ],
+    )
+
+    from abicheck.buildsource.graph_facts import ensure_facts_and_resolve
+
+    ensure_facts_and_resolve(node)
+
+    # No conflict: the two facts agree once directory taint is stripped.
+    assert node.conflicts == []
+    assert "/old/checkout" not in node.attrs["name"]
+    assert "/new/checkout" not in node.attrs["name"]
+
+    # The persisted facts list itself must not leak either checkout root.
+    d = node.to_dict()
+    blob = str(d["facts"])
+    assert "/old/checkout" not in blob
+    assert "/new/checkout" not in blob

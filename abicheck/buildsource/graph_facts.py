@@ -668,12 +668,25 @@ def ensure_facts_and_resolve(entity: GraphNode | GraphEdge) -> None:
                 attrs=dict(entity.attrs),
             )
         ]
-    entity.resolved, entity.conflicts = merge_graph_facts(entity.facts)
     is_decl_or_type_node = isinstance(entity, GraphNode) and _is_decl_or_type_node_id(
         entity.id
     )
     if is_decl_or_type_node:
-        _normalize_identity_attrs(entity.resolved)
+        # Normalize each fact's own identity attrs *before* merging (Codex
+        # review, fresh evidence): merge_graph_facts() compares raw attrs
+        # values for equality, so two facts differing only by checkout root
+        # (e.g. two producers, or two coalesced pre-migration nodes, each
+        # reporting name="raii_guard<(lambda at /a/lib.hpp:4:37)>" vs.
+        # ".../b/lib.hpp...") would otherwise record a spurious FactConflict
+        # over evidence that is actually identical once directory-taint is
+        # stripped. Mutating entity.facts in place (not just the merged
+        # ``resolved`` view) also keeps to_dict()'s persisted "facts" list
+        # clean -- the same "never preserve the raw, checkout-tainted
+        # spelling anywhere in the emitted graph" rule id/label/attrs
+        # already follow, extended to the per-producer evidence trail too.
+        for fact in entity.facts:
+            _normalize_identity_attrs(fact.attrs)
+    entity.resolved, entity.conflicts = merge_graph_facts(entity.facts)
     entity.attrs = dict(entity.resolved)
     top = min(entity.facts, key=_precedence_key)
     entity.confidence = top.confidence
