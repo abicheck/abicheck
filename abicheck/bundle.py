@@ -80,6 +80,9 @@ from .bundle_models import (  # noqa: F401  (re-exported for back-compat)
     ProviderEntry as ProviderEntry,
     ResolutionGraph as ResolutionGraph,
 )
+from .bundle_resolution_reachability import (
+    reachable_intra_libraries as _reachable_intra_libraries,
+)
 from .bundle_soname import hard_link_alias_basenames, soname_matches_providers
 from .checker_policy import ChangeKind, Verdict, compute_verdict
 from .checker_types import DiffResult
@@ -1018,34 +1021,6 @@ def _detect_intra_dep_removed(
                 ),
             )
     return findings
-
-
-def _reachable_intra_libraries(snapshot: BundleSnapshot, root: str) -> set[str]:
-    """BFS over intra-bundle ``DT_NEEDED`` edges starting at ``root``.
-
-    Returns every library transitively reachable from ``root`` through the
-    bundle's own resolution graph (i.e. what would actually be loaded when
-    ``root`` is loaded) — not including ``root`` itself. Used by
-    :func:`_detect_unresolved_intra_dependency` and
-    :func:`_detect_intra_dep_removed` so a symbol is only considered
-    resolved (or previously reached) by a provider the consumer can
-    actually reach, not merely one present somewhere else in the snapshot.
-    """
-    seen: set[str] = set()
-    queue = [root]
-    while queue:
-        lib = queue.pop()
-        for soname in snapshot.resolution.intra_needed.get(lib, []):
-            # Resolve via the same soname_to_name map
-            # _compute_resolution_graph() used to classify this edge as
-            # intra in the first place, so the two agree even for a library
-            # discovered via a differently-named symlink alias.
-            target = snapshot.resolution.soname_to_name.get(soname)
-            if target is None or target == lib or target in seen:
-                continue
-            seen.add(target)
-            queue.append(target)
-    return seen
 
 
 def _detect_unresolved_intra_dependency(

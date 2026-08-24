@@ -53,3 +53,20 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   forms, so a symbol whose evidence was genuinely insufficient could read
   as sufficient. Fixed by switching to a substring check on `"..."`, the
   same way the existing `"?"` sentinel is already checked.
+- **`find_unverified_signature_findings()` did not restrict a provider's
+  affected consumers to ones that can actually reach it** (Codex review).
+  A bare `consumers_of(symbol)` lookup is name-only and set-wide -- two
+  unrelated libraries can each export a same-named symbol without either
+  being loadable together with a given consumer, the same limitation
+  `bundle._detect_unresolved_intra_dependency`'s own docstring already
+  documents for its own naive alternative. Fixed by restricting
+  `consumer_libs` to consumers with a real `DT_NEEDED` path to the
+  provider, using a new shared leaf module,
+  `abicheck/bundle_resolution_reachability.py` (the `DT_NEEDED`-BFS
+  primitive extracted out of `bundle.py`, which both modules now import --
+  `bundle.py` re-imports it under its original private name so none of
+  its own call sites needed to change; extracting it also dropped
+  `bundle.py` from exactly the AI-readiness 2000-line hard cap to 1975).
+  Deliberately narrower than `_detect_unresolved_intra_dependency`'s full
+  contract: symbol-version/default-binding matching is not attempted here,
+  documented as a remaining, narrower gap in the module's own docstring.

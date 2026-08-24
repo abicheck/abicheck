@@ -36,12 +36,17 @@ from abicheck.model import AbiSnapshot, Function, Param, Variable, Visibility
 # ---------------------------------------------------------------------------
 
 
-def _meta(*, exports: list[str] = (), imports: list[str] = ()) -> ElfMetadata:
+def _meta(
+    *,
+    exports: list[str] = (),
+    imports: list[str] = (),
+    needed: list[str] = (),
+) -> ElfMetadata:
     from abicheck.elf_metadata import ElfImport
 
     return ElfMetadata(
         soname="",
-        needed=[],
+        needed=list(needed),
         symbols=[ElfSymbol(name=n, visibility="default") for n in exports],
         imports=[ElfImport(name=n) for n in imports],
     )
@@ -113,7 +118,7 @@ class TestFindUnverifiedSignatureFindings:
         new = _snapshot(
             {
                 "libcore.so": _meta(exports=["core_fn"]),
-                "libconsumer.so": _meta(imports=["core_fn"]),
+                "libconsumer.so": _meta(imports=["core_fn"], needed=["libcore.so"]),
             }
         )
         old_snaps = {
@@ -148,7 +153,7 @@ class TestFindUnverifiedSignatureFindings:
         new = _snapshot(
             {
                 "libcore.so": _meta(exports=["core_fn"]),
-                "libconsumer.so": _meta(imports=["core_fn"]),
+                "libconsumer.so": _meta(imports=["core_fn"], needed=["libcore.so"]),
             }
         )
         old_snaps = {
@@ -169,7 +174,7 @@ class TestFindUnverifiedSignatureFindings:
         new = _snapshot(
             {
                 "libcore.so": _meta(exports=["core_fn"]),
-                "libconsumer.so": _meta(imports=["core_fn"]),
+                "libconsumer.so": _meta(imports=["core_fn"], needed=["libcore.so"]),
             }
         )
         old_snaps = {
@@ -199,7 +204,7 @@ class TestFindUnverifiedSignatureFindings:
         new = _snapshot(
             {
                 "libcore.so": _meta(exports=["core_fn"]),
-                "libconsumer.so": _meta(imports=["core_fn"]),
+                "libconsumer.so": _meta(imports=["core_fn"], needed=["libcore.so"]),
             }
         )
         old_snaps = {
@@ -229,12 +234,46 @@ class TestFindUnverifiedSignatureFindings:
             find_unverified_signature_findings(new, new, [], old_snaps, new_snaps) == []
         )
 
+    def test_no_finding_when_provider_is_unreachable_from_the_consumer(self):
+        # Codex review, fresh evidence: two unrelated libraries can each
+        # export a same-named symbol without either being loadable
+        # together with a given consumer -- a bare consumers_of(symbol)
+        # (name-only, set-wide) would still pair them. libconsumer.so here
+        # has *no* DT_NEEDED edge to libcore.so at all (its own `needed`
+        # list is empty), so libcore.so's export of core_fn is unreachable
+        # from it and must not produce a finding, even though the bare
+        # symbol name matches.
+        new = _snapshot(
+            {
+                "libcore.so": _meta(exports=["core_fn"]),
+                "libconsumer.so": _meta(imports=["core_fn"]),  # no `needed`
+            }
+        )
+        old_snaps = {
+            "libcore.so": _snap(
+                "libcore.so",
+                functions=[_elf_only_fn("core_fn")],
+                elf_only_mode=True,
+            )
+        }
+        new_snaps = {
+            "libcore.so": _snap(
+                "libcore.so",
+                functions=[_elf_only_fn("core_fn")],
+                elf_only_mode=True,
+            )
+        }
+
+        assert (
+            find_unverified_signature_findings(new, new, [], old_snaps, new_snaps) == []
+        )
+
     def test_no_finding_when_symbol_absent_from_old_snapshot(self):
         # A brand-new export (addition), not a same-symbol unverified case.
         new = _snapshot(
             {
                 "libcore.so": _meta(exports=["core_fn"]),
-                "libconsumer.so": _meta(imports=["core_fn"]),
+                "libconsumer.so": _meta(imports=["core_fn"], needed=["libcore.so"]),
             }
         )
         old_snaps = {"libcore.so": _snap("libcore.so", functions=[])}
@@ -259,7 +298,7 @@ class TestFindUnverifiedSignatureFindings:
         new = _snapshot(
             {
                 "libcore.so": _meta(exports=["core_fn"]),
-                "libconsumer.so": _meta(imports=["core_fn"]),
+                "libconsumer.so": _meta(imports=["core_fn"], needed=["libcore.so"]),
             }
         )
         hidden_old_fn = Function(
@@ -294,7 +333,7 @@ class TestFindUnverifiedSignatureFindings:
         new = _snapshot(
             {
                 "libcore.so": _meta(exports=["core_fn"]),
-                "libconsumer.so": _meta(imports=["core_fn"]),
+                "libconsumer.so": _meta(imports=["core_fn"], needed=["libcore.so"]),
             }
         )
         symtab_only_old_fn = Function(
@@ -322,7 +361,7 @@ class TestFindUnverifiedSignatureFindings:
         new = _snapshot(
             {
                 "libcore.so": _meta(exports=["core_fn"]),
-                "libconsumer.so": _meta(imports=["core_fn"]),
+                "libconsumer.so": _meta(imports=["core_fn"], needed=["libcore.so"]),
             }
         )
         assert find_unverified_signature_findings(new, new, [], {}, {}) == []
@@ -334,7 +373,7 @@ class TestFindUnverifiedSignatureFindings:
         new = _snapshot(
             {
                 "libcore.so": _meta(exports=["core_fn"]),
-                "libconsumer.so": _meta(imports=["core_fn"]),
+                "libconsumer.so": _meta(imports=["core_fn"], needed=["libcore.so"]),
             }
         )
         old_snaps = {
@@ -375,7 +414,7 @@ class TestFindUnverifiedSignatureFindings:
         old = _snapshot(
             {
                 "libcore.so": _meta(exports=["core_fn"]),
-                "libconsumer.so": _meta(imports=["core_fn"]),
+                "libconsumer.so": _meta(imports=["core_fn"], needed=["libcore.so"]),
             }
         )
         # A real bundle build: build_bundle_snapshot's own `libraries` dict
@@ -386,7 +425,7 @@ class TestFindUnverifiedSignatureFindings:
         new = _snapshot(
             {
                 "libcore.so": _meta(exports=["core_fn"]),
-                "libconsumer.so": _meta(imports=["core_fn"]),
+                "libconsumer.so": _meta(imports=["core_fn"], needed=["libcore.so"]),
             }
         )
         # elf_only_mode=True (unlike the sibling test above) so this
@@ -429,7 +468,7 @@ class TestFindUnverifiedSignatureFindings:
         new = _snapshot(
             {
                 "libcore.so": _meta(exports=["core_var"]),
-                "libconsumer.so": _meta(imports=["core_var"]),
+                "libconsumer.so": _meta(imports=["core_var"], needed=["libcore.so"]),
             }
         )
         elf_only_var = Variable(
@@ -458,7 +497,7 @@ class TestFindUnverifiedSignatureFindings:
         new = _snapshot(
             {
                 "libcore.so": _meta(exports=["core_fn"]),
-                "libconsumer.so": _meta(imports=["core_fn"]),
+                "libconsumer.so": _meta(imports=["core_fn"], needed=["libcore.so"]),
             }
         )
         fn = _evidenced_fn("core_fn", params=[Param(name="x", type="?")])
@@ -499,7 +538,7 @@ class TestFindUnverifiedSignatureFindings:
         new = _snapshot(
             {
                 "libcore.so": _meta(exports=["core_fn"]),
-                "libconsumer.so": _meta(imports=["core_fn"]),
+                "libconsumer.so": _meta(imports=["core_fn"], needed=["libcore.so"]),
             }
         )
         fn = _evidenced_fn("core_fn", return_type=unresolved_return_type)
@@ -519,7 +558,7 @@ class TestFindUnverifiedSignatureFindings:
         new = _snapshot(
             {
                 "libcore.so": _meta(exports=["core_fn"]),
-                "libconsumer.so": _meta(imports=["core_fn"]),
+                "libconsumer.so": _meta(imports=["core_fn"], needed=["libcore.so"]),
             }
         )
         fn = _evidenced_fn("core_fn", params=[Param(name="x", type="?*")])
@@ -535,7 +574,7 @@ class TestFindUnverifiedSignatureFindings:
         new = _snapshot(
             {
                 "libcore.so": _meta(exports=["core_var"]),
-                "libconsumer.so": _meta(imports=["core_var"]),
+                "libconsumer.so": _meta(imports=["core_var"], needed=["libcore.so"]),
             }
         )
         var = Variable(
@@ -556,8 +595,8 @@ class TestFindUnverifiedSignatureFindings:
         new = _snapshot(
             {
                 "libcore.so": _meta(exports=["core_fn"]),
-                "liba.so": _meta(imports=["core_fn"]),
-                "libb.so": _meta(imports=["core_fn"]),
+                "liba.so": _meta(imports=["core_fn"], needed=["libcore.so"]),
+                "libb.so": _meta(imports=["core_fn"], needed=["libcore.so"]),
             }
         )
         old_snaps = {
@@ -587,7 +626,7 @@ class TestFindUnverifiedSignatureFindings:
         new = _snapshot(
             {
                 "libcore.so": _meta(exports=["core_fn"]),
-                "libconsumer.so": _meta(imports=["core_fn"]),
+                "libconsumer.so": _meta(imports=["core_fn"], needed=["libcore.so"]),
             }
         )
         old_snaps = {"libcore.so": _snap("libcore.so")}

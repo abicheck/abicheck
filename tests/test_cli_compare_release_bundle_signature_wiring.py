@@ -43,10 +43,15 @@ from abicheck.elf_metadata import ElfImport, ElfMetadata, ElfSymbol
 from abicheck.model import AbiSnapshot, Function, Visibility
 
 
-def _meta(*, exports: list[str] = (), imports: list[str] = ()) -> ElfMetadata:
+def _meta(
+    *,
+    exports: list[str] = (),
+    imports: list[str] = (),
+    needed: list[str] = (),
+) -> ElfMetadata:
     return ElfMetadata(
         soname="",
-        needed=[],
+        needed=list(needed),
         symbols=[ElfSymbol(name=n, visibility="default") for n in exports],
         imports=[ElfImport(name=n) for n in imports],
     )
@@ -89,7 +94,7 @@ class TestRunBundleAnalysisSignatureEvidenceWiring:
         return _snapshot(
             {
                 "libcore.so": _meta(exports=["core_fn"]),
-                "libconsumer.so": _meta(imports=["core_fn"]),
+                "libconsumer.so": _meta(imports=["core_fn"], needed=["libcore.so"]),
             }
         )
 
@@ -173,7 +178,7 @@ class TestCollectBundleResultBuildsSnapshotMapsFromBundleKey:
             return _snapshot(
                 {
                     "libcore.so": _meta(exports=["core_fn"]),
-                    "libconsumer.so": _meta(imports=["core_fn"]),
+                    "libconsumer.so": _meta(imports=["core_fn"], needed=["libcore.so"]),
                 }
             )
 

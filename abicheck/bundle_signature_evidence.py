@@ -52,8 +52,30 @@ function either; see this phase's status note in the plan doc.
 
 This is a leaf module with respect to :mod:`abicheck.bundle`: it does not
 import that module (only :mod:`abicheck.bundle_models` for ``BundleFinding``/
-``BundleSnapshot``, which ``bundle.py`` itself already depends on), so
-there is no import-cycle risk either direction.
+``BundleSnapshot``, and :mod:`abicheck.bundle_resolution_reachability` for
+the ``DT_NEEDED``-reachability BFS both this module and ``bundle.py`` need
+-- extracted into its own tiny leaf module for exactly this reason, see
+its own docstring), so there is no import-cycle risk either direction.
+
+**Provider-edge filtering (Codex review, fresh evidence):** a consumer is
+only counted for a given provider when the provider is actually reachable
+from that consumer via a real ``DT_NEEDED`` path
+(:func:`~abicheck.bundle_resolution_reachability.reachable_intra_libraries`)
+-- the same reachability constraint
+``bundle._detect_unresolved_intra_dependency`` already applies to its own,
+more elaborate provider matching. **Deliberately narrower than that
+sibling's full contract**: this module does not consult
+``ConsumerEntry.version``/``ProviderEntry.version``/``is_default`` at all,
+so a symbol-version mismatch or a non-default-only provider definition can
+still produce a finding here that a full version-aware match would rule
+out. Reachability closes the "reachable but genuinely unrelated" false
+positive this review comment named; the narrower version-matching gap is
+left open rather than attempted as an extension of the same review-driven
+patch -- it needs the per-consumer resolution shape
+``_detect_unresolved_intra_dependency`` uses (iterate consumers, resolve
+each one's own specific requirement), not this function's provider-centric
+one (iterate providers, gather their consumers), so folding it in is a
+real restructuring of the main loop below, not a further filter clause.
 """
 
 from __future__ import annotations
@@ -62,6 +84,7 @@ from collections.abc import Iterable, Mapping
 from pathlib import Path
 
 from .bundle_models import BundleFinding, BundleSnapshot
+from .bundle_resolution_reachability import reachable_intra_libraries
 from .checker_policy import ChangeKind
 from .checker_types import DiffResult
 from .model import AbiSnapshot, Visibility
@@ -308,6 +331,12 @@ def find_unverified_signature_findings(
     confirmed = _confirmed_provider_symbols(old, results)
     findings: list[BundleFinding] = []
     seen: set[tuple[str, str, str]] = set()
+    reachable_cache: dict[str, set[str]] = {}
+
+    def _reachable(lib: str) -> set[str]:
+        if lib not in reachable_cache:
+            reachable_cache[lib] = reachable_intra_libraries(new, lib)
+        return reachable_cache[lib]
 
     for symbol, providers in new.resolution.provides.items():
         for provider_entry in providers:
@@ -315,11 +344,21 @@ def find_unverified_signature_findings(
             if (provider_lib, symbol) in confirmed:
                 continue
 
+            # Restricted to consumers that can actually reach *provider_lib*
+            # via a real DT_NEEDED path (Codex review, fresh evidence): a
+            # bare `consumers_of(symbol)` is name-only and set-wide, the
+            # same limitation `bundle._detect_unresolved_intra_dependency`'s
+            # own docstring documents for its own naive alternative -- two
+            # unrelated libraries can each export a same-named symbol
+            # without either one being loadable together with a given
+            # consumer, and this loop's "which consumers does this provider
+            # affect" question is exactly the one reachability answers.
             consumer_libs = sorted(
                 {
                     c.library
                     for c in new.resolution.consumers_of(symbol)
                     if c.library != provider_lib
+                    and provider_lib in _reachable(c.library)
                 }
             )
             if not consumer_libs:

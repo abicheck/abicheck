@@ -656,6 +656,30 @@ library` (a genuinely versioned on-disk path alongside a bare-name
 confirmed to fail — reproducing the spurious duplicate finding — against
 the pre-fix code).
 
+**Two further Codex review findings, both fixed.** (1) The exact-equality
+check for the recursion-depth-cap sentinel (`spelling == "..."`) missed
+composite wrapped forms (`"... *"`/`"... &"`/`"... &&"`, from
+`pdb_parser.py`/`dwarf_snapshot.py` wrapping a depth-capped inner type in a
+pointer/reference) — fixed by switching to the same substring check
+`"?"` already uses. (2) `consumer_libs` was computed from a bare,
+name-only, set-wide `consumers_of(symbol)` lookup, the same limitation
+`bundle._detect_unresolved_intra_dependency`'s own docstring documents for
+its own naive alternative — two unrelated libraries sharing a same-named
+export could pair a consumer with a provider it has no real `DT_NEEDED`
+path to. Fixed by restricting to reachable consumers, via a new shared
+leaf module, `abicheck/bundle_resolution_reachability.py` (the `DT_NEEDED`
+BFS extracted out of `bundle.py`, which both modules now import — this
+also dropped `bundle.py` from exactly the 2000-line hard cap to 1975,
+creating headroom rather than costing it). Deliberately narrower than
+`_detect_unresolved_intra_dependency`'s full contract: symbol-version/
+default-binding matching is not attempted, since that needs a
+per-consumer resolution shape (iterate consumers, resolve each one's own
+specific requirement) rather than this function's provider-centric one
+(iterate providers, gather their consumers) — folding it in would be a
+real restructuring of the main loop, left open rather than attempted as
+an extension of the same review-driven patch. Both regressions confirmed
+to fail against the pre-fix code.
+
 `bundle_intra_dep_signature_changed` already fires correctly when a
 provider's DWARF/header evidence shows a real signature change. This phase
 adds the missing negative case: a new, dedicated `ChangeKind`,
