@@ -181,8 +181,19 @@ def test_legacy_debug_blocks_are_presence_only_not_claimed_parsed() -> None:
     raw["schema_version"] = 25
     del raw["dwarf"]["evidence_source"]
     del raw["dwarf"]["evidence_state"]
+    del raw["dwarf"]["cu_total"]
+    del raw["dwarf"]["cu_failed"]
     del raw["dwarf_advanced"]["evidence_state"]
+    del raw["dwarf_advanced"]["cu_total"]
+    del raw["dwarf_advanced"]["cu_failed"]
     restored = snapshot_from_dict(raw)
+
+    assert restored.dwarf is not None
+    assert restored.dwarf.cu_total == 0
+    assert restored.dwarf.cu_failed == 0
+    assert restored.dwarf_advanced is not None
+    assert restored.dwarf_advanced.cu_total == 0
+    assert restored.dwarf_advanced.cu_failed == 0
 
     aa = checker.compare(
         restored, restored, scope_to_public_surface=False
