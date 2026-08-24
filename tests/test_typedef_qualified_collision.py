@@ -17,15 +17,16 @@ sides populate it.
 from __future__ import annotations
 
 from abicheck.checker import ChangeKind, compare
-from abicheck.model import AbiSnapshot
+from abicheck.model import AbiSnapshot, Function, Visibility
 
 
-def _snap(typedefs, typedefs_qualified):
+def _snap(typedefs, typedefs_qualified, functions=None):
     return AbiSnapshot(
         library="libtest.so.1",
         version="1.0",
         typedefs=typedefs,
         typedefs_qualified=typedefs_qualified,
+        functions=functions or [],
     )
 
 
@@ -66,7 +67,12 @@ class TestTypedefQualifiedCollision:
         r = compare(old, new)
         changed = [c for c in r.changes if c.kind == ChangeKind.TYPEDEF_BASE_CHANGED]
         assert len(changed) == 1
-        assert changed[0].symbol == "A::impl_value_t"
+        # The emitted symbol stays the bare alias -- matching how a header
+        # backend spells a *reference* to the typedef in a function
+        # signature -- even though matching used the qualified key
+        # internally (Codex review: a qualified symbol here would silently
+        # break diff_filtering._enrich_affected_symbols' bare-name matching).
+        assert changed[0].symbol == "impl_value_t"
 
     def test_genuine_qualified_removal_is_still_reported(self):
         # Both sides still carry an (unrelated) qualified typedef so the
@@ -90,7 +96,7 @@ class TestTypedefQualifiedCollision:
         r = compare(old, new)
         removed = [c for c in r.changes if c.kind == ChangeKind.TYPEDEF_REMOVED]
         assert len(removed) == 1
-        assert removed[0].symbol == "A::impl_value_t"
+        assert removed[0].symbol == "impl_value_t"
 
     def test_all_qualified_typedefs_removed_are_each_reported(self):
         """When every typedef is removed, the new side's typedefs_qualified
@@ -107,10 +113,52 @@ class TestTypedefQualifiedCollision:
         )
         new = _snap(typedefs={}, typedefs_qualified={})
         r = compare(old, new)
-        removed = {
-            c.symbol for c in r.changes if c.kind == ChangeKind.TYPEDEF_REMOVED
+        removed = [c for c in r.changes if c.kind == ChangeKind.TYPEDEF_REMOVED]
+        # Both collide on the same emitted (bare) symbol, but each
+        # declaration's own removal is still reported -- not collapsed to
+        # one, which was the bug (see the module docstring and the bare-vs-
+        # qualified matching note on test_genuine_qualified_change_is_still_
+        # reported above).
+        assert len(removed) == 2
+        assert {c.symbol for c in removed} == {"impl_value_t"}
+        assert {c.old_value for c in removed} == {
+            "shared_ptr<A_impl>",
+            "shared_ptr<B_impl>",
         }
-        assert removed == {"A::impl_value_t", "B::impl_value_t"}
+
+    def test_qualified_diff_still_attributes_to_the_bare_referencing_function(self):
+        """A namespaced typedef change must still be attributed to the
+        exported function that names it -- but a header dumper spells a
+        *reference* to a typedef bare (``ns::Alias`` is written as ``Alias``
+        in a function's own return/param type, matching castxml's ``Typedef``
+        branch), so the emitted Change.symbol must stay bare too, even while
+        old/new matching uses the qualified key internally (Codex review:
+        `diff_filtering._enrich_affected_symbols`' substring match against
+        function signatures would otherwise silently stop finding the
+        namespaced typedef's own reference).
+        """
+        old = _snap(
+            typedefs={"impl_value_t": "shared_ptr<A_impl>"},
+            typedefs_qualified={"A::impl_value_t": "shared_ptr<A_impl>"},
+            functions=[
+                Function(
+                    name="use_impl",
+                    mangled="use_impl",
+                    return_type="impl_value_t",
+                    params=[],
+                    visibility=Visibility.PUBLIC,
+                )
+            ],
+        )
+        new = _snap(
+            typedefs={"impl_value_t": "shared_ptr<A_impl2>"},
+            typedefs_qualified={"A::impl_value_t": "shared_ptr<A_impl2>"},
+        )
+        r = compare(old, new)
+        changed = [c for c in r.changes if c.kind == ChangeKind.TYPEDEF_BASE_CHANGED]
+        assert len(changed) == 1
+        assert changed[0].symbol == "impl_value_t"
+        assert changed[0].affected_symbols == ["use_impl"]
 
     def test_legacy_bare_only_snapshot_is_unaffected(self):
         """Neither side populates typedefs_qualified (DWARF-only / legacy

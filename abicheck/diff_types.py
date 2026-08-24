@@ -1948,30 +1948,30 @@ def _diff_typedefs(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     suppress_removed = _removals_are_unconfirmed(old, new)
     old_typedefs, new_typedefs = _typedef_diff_maps(old, new)
     for alias, old_type in old_typedefs.items():
-        # Checked against the full alias -- the legacy (DWARF) map already
-        # keys typedefs by their fully-qualified spelling, and the qualified
-        # map above is at least as correct for the same std::-prefix check.
+        # Full alias: correct for both legacy-DWARF's and the qualified map's keys.
         if _is_non_abi_surface_type(alias, exclude_stdlib_namespaces=excl):
             continue
+        # symbol/name stay bare like _diff_types (else _enrich_affected_symbols
+        # breaks); qualified_suffix disambiguates description so dedup can't collapse collisions.
+        bare_alias = alias.rsplit("::", 1)[-1]
+        qualified_suffix = f" ({alias})" if alias != bare_alias else ""
         new_type = new_typedefs.get(alias)
         if new_type is None and suppress_removed:
             continue
         if new_type is None:
             # Version-stamped typedefs (e.g. png_libpng_version_1_6_46) are
-            # compile-time sentinels — their name encodes the version and
-            # changes every release intentionally.  They are never exported as
-            # ELF symbols, so their removal is NOT a binary ABI break.
-            # Require a same-family successor in new_typedefs to avoid hiding
-            # genuine TYPEDEF_REMOVED breaks for names that merely match the
-            # version-stamp pattern.
+            # compile-time sentinels that change every release by design and
+            # are never exported as ELF symbols -- not a binary ABI break.
+            # Require a same-family successor to avoid hiding a genuine
+            # TYPEDEF_REMOVED for a name that merely matches the pattern.
             if _is_version_stamped_typedef(alias) and _has_version_family_successor(
                 alias, new_typedefs
             ):
                 changes.append(
                     make_change(
                         ChangeKind.TYPEDEF_VERSION_SENTINEL,
-                        symbol=alias,
-                        name=alias,
+                        symbol=bare_alias,
+                        name=bare_alias,
                         old_value=old_type,
                     )
                 )
@@ -1980,19 +1980,21 @@ def _diff_typedefs(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
             changes.append(
                 make_change(
                     ChangeKind.TYPEDEF_REMOVED,
-                    symbol=alias,
-                    name=alias,
+                    symbol=bare_alias,
+                    name=bare_alias,
                     old_value=old_type,
+                    description=f"Typedef removed: {bare_alias}{qualified_suffix}",
                 )
             )
         elif new_type != old_type:
             changes.append(
                 make_change(
                     ChangeKind.TYPEDEF_BASE_CHANGED,
-                    symbol=alias,
-                    name=alias,
+                    symbol=bare_alias,
+                    name=bare_alias,
                     old_value=old_type,
                     new_value=new_type,
+                    description=f"Typedef base type changed: {bare_alias}{qualified_suffix}",
                 )
             )
     return changes
