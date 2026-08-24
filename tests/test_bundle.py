@@ -1088,6 +1088,86 @@ class TestIntraDepSignatureChanged:
         assert findings[0].consumer_library == "libalgo.so"
         assert findings[0].provider_library == "libcore.so"
 
+    def test_promotes_using_canonical_provider_key_for_a_versioned_basename(
+        self,
+    ) -> None:
+        # G38 stabilization (CodeRabbit review, fresh evidence, concrete
+        # repro traced through cli_compare_release.py's own _bundle_key/
+        # DiffResult.library split): DiffResult.library is always the real,
+        # possibly SONAME-versioned on-disk filename, not the bundle's
+        # canonical key -- so a promoted finding's own diff_by_library
+        # lookup must canonicalize it the same way BundleSnapshot.resolution
+        # does, or the promotion silently never fires (the versioned key
+        # never matches any provider the resolution graph actually knows).
+        libraries = {
+            "libcore.so": Path("/fake/libcore.so.1.2.3"),
+            "libalgo.so": Path("/fake/libalgo.so.1"),
+        }
+        metadata = {
+            "libcore.so": _meta(soname="libcore.so.1", exports=["core_add"]),
+            "libalgo.so": _meta(
+                soname="libalgo.so.1", needed=["libcore.so.1"], imports=["core_add"]
+            ),
+        }
+        graph = _compute_resolution_graph(libraries, metadata)
+        new = BundleSnapshot(
+            root=Path("/fake"), libraries=libraries, metadata=metadata, resolution=graph
+        )
+        diff_libcore = _diff(
+            "libcore.so.1.2.3",  # the real, versioned on-disk basename
+            Change(
+                kind=ChangeKind.CALLING_CONVENTION_CHANGED,
+                symbol="core_add",
+                description="cdecl->fastcall",
+            ),
+        )
+        result = compare_bundle(new, new, [diff_libcore])
+        findings = [
+            f
+            for f in result.bundle_findings
+            if f.kind == ChangeKind.BUNDLE_INTRA_DEP_SIGNATURE_CHANGED
+        ]
+        assert len(findings) == 1
+        assert findings[0].consumer_library == "libalgo.so"
+        assert findings[0].provider_library == "libcore.so"  # canonical, not versioned
+
+    def test_plugin_abi_policy_suppresses_calling_convention_promotion(self) -> None:
+        # G38 stabilization (Codex review, fresh evidence): CALLING_
+        # CONVENTION_CHANGED is COMPATIBLE under the plugin_abi policy
+        # (change_registry.py's own policy_overrides), but the original
+        # fix promoted it to an unconditionally-BREAKING
+        # BUNDLE_INTRA_DEP_SIGNATURE_CHANGED regardless of policy --
+        # defeating the exact override compute_verdict(policy="plugin_abi")
+        # already honors for the originating per-library finding.
+        new = _snapshot(
+            {
+                "libcore.so": _meta(soname="libcore.so.1", exports=["core_add"]),
+                "libalgo.so": _meta(
+                    soname="libalgo.so.1", needed=["libcore.so.1"], imports=["core_add"]
+                ),
+            }
+        )
+        diff_libcore = _diff(
+            "libcore.so",
+            Change(
+                kind=ChangeKind.CALLING_CONVENTION_CHANGED,
+                symbol="core_add",
+                description="cdecl->fastcall",
+            ),
+        )
+        result = compare_bundle(new, new, [diff_libcore], policy="plugin_abi")
+        assert not any(
+            f.kind == ChangeKind.BUNDLE_INTRA_DEP_SIGNATURE_CHANGED
+            for f in result.bundle_findings
+        )
+        # The default (strict_abi) policy still promotes -- this isn't a
+        # blanket regression of the Phase 5 fix, just policy-sensitive.
+        result_strict = compare_bundle(new, new, [diff_libcore])
+        assert any(
+            f.kind == ChangeKind.BUNDLE_INTRA_DEP_SIGNATURE_CHANGED
+            for f in result_strict.bundle_findings
+        )
+
 
 # ---------------------------------------------------------------------------
 # bundle_provider_changed

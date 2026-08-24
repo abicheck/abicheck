@@ -80,12 +80,19 @@ from .bundle_models import (  # noqa: F401  (re-exported for back-compat)
     ConsumerEntry as ConsumerEntry,
     ProviderEntry as ProviderEntry,
     ResolutionGraph as ResolutionGraph,
+    basename_to_bundle_key,
 )
 from .bundle_resolution_reachability import (
     reachable_intra_libraries as _reachable_intra_libraries,
 )
 from .bundle_soname import hard_link_alias_basenames, soname_matches_providers
-from .checker_policy import ChangeKind, Verdict, compute_verdict
+from .checker_policy import (
+    ChangeKind,
+    Verdict,
+    compute_verdict,
+    effective_category,
+    policy_kind_sets,
+)
 from .checker_types import DiffResult
 from .elf_metadata import ElfMetadata, ElfSymbol, SymbolBinding, parse_elf_metadata
 
@@ -794,15 +801,17 @@ def compare_bundle(
     sys_libs = set(DEFAULT_SYSTEM_PROVIDERS) | explicit_providers
     findings: list[BundleFinding] = []
 
-    # Index per-library diff results by canonical basename. This is the
-    # same key the resolution graph uses for libraries (see
-    # build_bundle_snapshot's `libraries` dict), so look-ups in the
-    # detectors agree. We canonicalise once instead of double-indexing —
-    # double-indexing caused detectors to iterate the same DiffResult
+    # Index per-library diff results by the resolution graph's own
+    # bundle-canonical key, not the raw (possibly SONAME-versioned)
+    # on-disk basename -- see `basename_to_bundle_key`'s own docstring
+    # (G38 plan doc Phase 5). Canonicalise once instead of double-indexing
+    # — double-indexing caused detectors to iterate the same DiffResult
     # twice when DiffResult.library happened to differ from its basename.
+    basename_to_key = basename_to_bundle_key(new)
     diff_by_library: dict[str, DiffResult] = {}
     for result in per_library_results:
-        canonical = Path(result.library).name
+        basename = Path(result.library).name
+        canonical = basename_to_key.get(basename, basename)
         diff_by_library.setdefault(canonical, result)
 
     # 1. bundle_library_removed / bundle_library_added (structural)
@@ -811,10 +820,9 @@ def compare_bundle(
     # 2. bundle_intra_dep_removed: an import in the new bundle has no provider.
     findings.extend(_detect_intra_dep_removed(old, new, sys_libs, explicit_providers))
 
-    # 3. bundle_intra_dep_signature_changed: provider's per-library diff
-    #    flagged func_params_changed / func_return_changed / var_type_changed
-    #    on a symbol some sibling imports.
-    findings.extend(_detect_intra_dep_signature_changed(new, diff_by_library))
+    # 3. bundle_intra_dep_signature_changed: a promotable confirmed change
+    #    on a symbol some sibling imports (see that function's docstring).
+    findings.extend(_detect_intra_dep_signature_changed(new, diff_by_library, policy))
 
     # 4. bundle_intra_type_changed: a type_*_changed touches a type that
     #    appears in a public symbol of a sibling library.
@@ -1153,41 +1161,38 @@ def _detect_unresolved_intra_dependency(
 def _detect_intra_dep_signature_changed(
     new: BundleSnapshot,
     diff_by_library: dict[str, DiffResult],
+    policy: str = "strict_abi",
 ) -> list[BundleFinding]:
     """Promote provider-side signature changes to consumer-side findings.
 
     For each per-library confirmed, *promotable* C-boundary signature break
-    (see :data:`abicheck.bundle_models.
-    PROMOTABLE_C_BOUNDARY_SIGNATURE_BREAK_KINDS` — params/return/variable
-    type, variadicness, calling convention; deliberately narrower than
-    :data:`abicheck.bundle_models.CONFIRMED_C_BOUNDARY_SIGNATURE_BREAK_KINDS`,
-    which also covers noexcept/exception-spec/ref-qualifier/virtual-ness
-    for a *weaker* claim elsewhere — see that constant's own docstring),
-    look up which siblings import that symbol in the new bundle and emit
-    one finding per (consumer, symbol) pair. Multiple change kinds against
-    the same symbol collapse into one finding to avoid double-counting,
-    e.g. params+return changing together.
+    (:data:`abicheck.bundle_models.PROMOTABLE_C_BOUNDARY_SIGNATURE_BREAK_
+    KINDS` — a strict, verdict-checked subset of
+    :data:`~abicheck.bundle_models.CONFIRMED_C_BOUNDARY_SIGNATURE_BREAK_
+    KINDS`; see that constant's own docstring for why the two sets must
+    stay distinct, G38 plan doc Phase 5 for the incident), look up which
+    siblings import that symbol in the new bundle and emit one finding per
+    (consumer, symbol) pair. Multiple change kinds against the same symbol
+    collapse into one finding to avoid double-counting, e.g. params+return
+    changing together.
 
-    G38 stabilization: this used to share the *broad* set with
-    :mod:`abicheck.bundle_signature_evidence`'s own suppression check for
-    ``BUNDLE_INTRA_DEP_SIGNATURE_UNVERIFIED`` — reviewed and reverted
-    (Codex review, fresh evidence): the broad set includes
-    ``FUNC_NOEXCEPT_ADDED`` (``default_verdict=COMPATIBLE`` in
-    ``change_registry.py``) and ``FUNC_NOEXCEPT_REMOVED``/
-    ``FUNC_EXCEPTION_SPEC_CHANGED`` (``COMPATIBLE_WITH_RISK``, explicitly
-    "not a binary break"), so sharing it here would have promoted a
-    same-or-lower-severity per-library change into a fabricated BREAKING
-    cross-library finding. The narrow set is a strict subset of the broad
-    one (asserted in `bundle_models.py`), so the two still cannot
-    independently drift on which of *these* kinds counts as a confirmed
-    boundary break — they simply answer two different questions now.
+    *policy* (G38 plan doc Phase 5, Codex review): a promoted kind's own
+    registry entry can carry a ``policy_overrides`` demotion —
+    ``CALLING_CONVENTION_CHANGED`` is ``COMPATIBLE`` under ``plugin_abi``.
+    A change whose effective category under this policy is not
+    ``BREAKING`` is skipped, so promotion can't defeat an override
+    ``compute_verdict(policy=...)`` already honors for the originating
+    per-library finding.
     """
     findings: list[BundleFinding] = []
     seen: set[tuple[str, str, str]] = set()
     relevant_kinds = PROMOTABLE_C_BOUNDARY_SIGNATURE_BREAK_KINDS
+    policy_sets = policy_kind_sets(policy)
     for provider_lib, diff in diff_by_library.items():
         for change in diff.changes:
             if change.kind not in relevant_kinds:
+                continue
+            if effective_category(change, *policy_sets) != Verdict.BREAKING:
                 continue
             consumers = new.resolution.consumers_of(change.symbol)
             consumer_libs = sorted(

@@ -308,6 +308,42 @@ class BundleSnapshot:
         return None
 
 
+def basename_to_bundle_key(snapshot: BundleSnapshot) -> dict[str, str]:
+    """Map each library's real on-disk file basename to its bundle-canonical
+    key (``snapshot.libraries``' own keys -- the same version-stripped key
+    :func:`~abicheck.binary_utils._canonical_library_key` produces, e.g.
+    ``libfoo.so`` for a real ``libfoo.so.1.2.3``).
+
+    G38 stabilization (Codex/CodeRabbit review on PR #845, fresh evidence,
+    with a concrete repro traced through the wired ``compare --release``
+    path): :class:`~abicheck.checker_types.DiffResult.library` is always set
+    from ``path.name`` (`abicheck/service.py`/`abicheck/dumper.py`, every
+    ELF/PE/Mach-O dump site) -- the literal on-disk filename, not the
+    bundle's canonical key -- so for any normally-versioned SONAME the two
+    differ. `bundle_signature_evidence.py`'s own `_confirmed_provider_
+    symbols` needed this exact fix once already (see that module's git
+    history); `bundle.py`'s `diff_by_library` construction had the
+    identical bug independently, confirmed via `cli_compare_release.py`'s
+    own `_bundle_key`/`DiffResult.library` split: the release fan-out
+    stores the canonical key separately and leaves `DiffResult.library` as
+    the real, possibly-versioned filename, so `compare_bundle()`'s
+    `_detect_intra_dep_signature_changed`/`_detect_intra_type_changed`/
+    `_detect_provider_changed` could attribute a promoted finding to
+    ``provider_library="libcore.so.1.2.3"`` while `BundleSnapshot.
+    resolution` keys the same provider as ``"libcore.so"`` -- silently
+    breaking the ``consumer.library != provider_lib``/lookup comparisons
+    those detectors depend on. Living here (not duplicated in each
+    consumer module) is exactly what this module's own leaf-module
+    contract exists for -- see :data:`CONFIRMED_C_BOUNDARY_SIGNATURE_
+    BREAK_KINDS`'s docstring for the identical reasoning applied to a
+    shared constant instead of a shared function.
+
+    A basename with no matching bundle entry is left unmapped -- the
+    caller degrades to comparing the raw basename, rather than raising.
+    """
+    return {path.name: key for key, path in snapshot.libraries.items()}
+
+
 @dataclass
 class BundleFinding:
     """A single bundle-level finding.

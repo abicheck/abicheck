@@ -111,6 +111,7 @@ from .bundle_models import (
     BundleSnapshot,
     ConsumerEntry,
     ProviderEntry,
+    basename_to_bundle_key,
 )
 from .bundle_resolution_reachability import reachable_intra_libraries
 from .checker_policy import ChangeKind
@@ -367,26 +368,13 @@ def _symbol_was_exported(symbol: str, snapshot: AbiSnapshot) -> bool:
     return False
 
 
-def _basename_to_bundle_key(old: BundleSnapshot) -> dict[str, str]:
-    """Map each library's real on-disk file basename to its bundle-canonical
-    key (``old.libraries``' own keys -- the same version-stripped key
-    :func:`~abicheck.binary_utils._canonical_library_key` produces, e.g.
-    ``libfoo.so`` for a real ``libfoo.so.1.2.3``).
-
-    :class:`~abicheck.checker_types.DiffResult.library` is always set from
-    ``path.name`` (`abicheck/service.py`/`abicheck/dumper.py`, every ELF/PE/
-    Mach-O dump site) -- the literal on-disk filename, not the bundle's
-    canonical key -- so for any normally-versioned SONAME the two differ
-    (Codex review, fresh evidence: `_confirmed_provider_symbols` previously
-    compared a `DiffResult`'s raw basename directly against
-    `BundleSnapshot.resolution`'s canonical keys, which never match for a
-    realistically-versioned library, silently defeating the "a confirmed
-    change outranks unverified" precedence for the overwhelmingly common
-    case). A basename with no matching bundle entry is left unmapped --
-    the caller degrades to comparing the raw basename, same as before this
-    fix, rather than raising.
-    """
-    return {path.name: key for key, path in old.libraries.items()}
+#: G38 stabilization: this used to be a locally-duplicated function
+#: (`_basename_to_bundle_key`, original docstring's own history preserved
+#: in `bundle_models.basename_to_bundle_key` now) -- `bundle.py`'s own
+#: `diff_by_library` construction had the identical bug independently
+#: (Codex/CodeRabbit review on PR #845), so the fix moved to the one
+#: shared leaf module both already import from.
+_basename_to_bundle_key = basename_to_bundle_key
 
 
 def _confirmed_provider_symbols(
