@@ -852,28 +852,64 @@ def compute_public_surface(snap: AbiSnapshot) -> PublicSurface:
     #
     # Unlike the enum seed above (which also fires for `ScopeOrigin.UNKNOWN`
     # -- a `source_header` alone), this is deliberately restricted to a
-    # *confirmed* public-header origin (`PUBLIC_HEADER`/`GENERATED`): a
-    # record with unclassified provenance (no `-H`/public-header set was
-    # given, so origin defaults to `UNKNOWN`) has no positive evidence it's
-    # actually on the public surface rather than an unrelated internal type
-    # that merely happens to share a translation unit -- unlike an enum
-    # member (always consumer-visible the instant the header is included),
-    # a struct that is never named by anything else is exactly the
-    # "unreachable, presumably-private helper type" shape this whole
-    # reachability closure exists to demote, so it must not be force-kept
-    # on unclassified provenance alone (confirmed by a real regression: an
-    # isolated, otherwise-unreferenced struct with no public-header set
-    # given was wrongly promoted before this restriction was added).
+    # *confirmed* public-header origin: a record with unclassified
+    # provenance (no `-H`/public-header set was given, so origin defaults to
+    # `UNKNOWN`) has no positive evidence it's actually on the public
+    # surface rather than an unrelated internal type that merely happens to
+    # share a translation unit -- unlike an enum member (always
+    # consumer-visible the instant the header is included), a struct that is
+    # never named by anything else is exactly the "unreachable,
+    # presumably-private helper type" shape this whole reachability closure
+    # exists to demote, so it must not be force-kept on unclassified
+    # provenance alone (confirmed by a real regression: an isolated,
+    # otherwise-unreferenced struct with no public-header set given was
+    # wrongly promoted before this restriction was added).
+    #
+    # `ScopeOrigin.GENERATED` is deliberately excluded from the confirmed set
+    # here (Codex review, fresh evidence): unlike the docstring's naive
+    # reading, `classify_origin()` only ever returns `GENERATED` for a header
+    # that did **not** match the given public-header set (see its own
+    # docstring) -- a genuinely public, public-header-matching generated
+    # header (e.g. a `moc_*.h` under the public set) classifies as
+    # `PUBLIC_HEADER` directly, never `GENERATED`. So `GENERATED` here always
+    # means "outside the public boundary, but generated-looking" -- seeding
+    # on it would promote unrelated types from a path like
+    # `build/generated/internal_config.h`, the exact internal-noise shape
+    # this whole reachability closure exists to keep demoted.
     from .internal_leak import DEFAULT_INTERNAL_NAMESPACES, is_internal_type
+
+    def _nested_in_a_record(qname: str) -> bool:
+        """True when *qname*'s immediate enclosing scope is itself a known
+        record (a class/struct/union member), as opposed to a namespace
+        (Codex review, fresh evidence): access control (private/protected)
+        applies only to a class's own members, never to namespace scope, and
+        `RecordType` carries no access-level field at all -- castxml's
+        `parse_types()` retains a named nested record regardless of its own
+        access, so a private/protected nested type in an otherwise-public
+        header would otherwise be promoted here purely because it shares the
+        enclosing header's origin. There is no way to positively confirm
+        such a nested type IS public from the model alone, so this
+        conservatively declines to seed any record nested inside another
+        known record, falling back to ordinary reachability (a nested type
+        genuinely reachable from a public signature/field is still marked
+        public the normal way) -- the safe direction: never seed a type this
+        can't prove is consumer-nameable, rather than promote one that
+        might not be.
+        """
+        if "::" not in qname:
+            return False
+        owner = qname.rsplit("::", 1)[0]
+        return owner in record_by_name
 
     seed_types |= {
         rec.qualified_name or rec.name
         for rec in snap.types
         if rec.source_header
-        and rec.origin in (ScopeOrigin.PUBLIC_HEADER, ScopeOrigin.GENERATED)
+        and rec.origin is ScopeOrigin.PUBLIC_HEADER
         and not is_internal_type(
             rec.qualified_name or rec.name, DEFAULT_INTERNAL_NAMESPACES
         )
+        and not _nested_in_a_record(rec.qualified_name or rec.name)
     }
 
     # Provenance is available iff some declaration was classified to a real

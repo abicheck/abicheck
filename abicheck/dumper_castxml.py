@@ -1388,21 +1388,8 @@ class _CastxmlParser:
 
     def _qualified_name(self, el: Any) -> str:
         """Namespace/class-qualified name by walking ``context`` (bare name
-        for a global; stops at the castxml global-namespace name ``"::"``).
-
-        Each segment is passed through :func:`strip_anonymous_type_location`
-        (round covering `_enclosing_class_qualified_name`'s ctor/dtor
-        synthetic-key use, Codex review): a class/struct/union own ``name``
-        attribute can itself embed a checkout-dependent ``(lambda at
-        /abs/path:line:col)`` marker (a lambda used as a template argument,
-        e.g. ``raii_guard<(lambda at /tmp/d2a/lib.hpp:4:37)>``). Left
-        unstripped here, two byte-identical header trees checked out under
-        different paths synthesize two different ctor/dtor keys
-        (`SYNTHETIC_CTOR_KEY_PREFIX`-prefixed or ``~qualified_scope``, see
-        `_function_mangled_name`), fabricating a `func_removed`/`func_added`
-        pair even though `RecordType.name`/`.qualified_name` themselves
-        already normalize identically via `_qualified_type_name`.
-        """
+        for a global; stops at ``"::"``). Segments are stripped via
+        `strip_anonymous_type_location`, matching `_qualified_type_name`."""
         parts = [strip_anonymous_type_location(el.get("name", ""))]
         ctx_id = el.get("context", "")
         seen: set[str] = set()

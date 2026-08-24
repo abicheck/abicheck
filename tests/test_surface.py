@@ -667,6 +667,71 @@ class TestSurfaceExclusionReason:
         )
         assert classify_change_surface(c, s, s) == (False, REASON_NON_PUBLIC_TYPE)
 
+    def test_generated_origin_type_still_demoted(self):
+        """``ScopeOrigin.GENERATED`` is not a confirmed-public origin --
+        ``classify_origin()`` only ever returns it for a header that did
+        NOT match the given public-header set (a genuinely public generated
+        header classifies as ``PUBLIC_HEADER`` directly). Seeding on it
+        would promote unrelated types from a path like
+        ``build/generated/internal_config.h`` (Codex review, fresh
+        evidence: an earlier revision of this fix included ``GENERATED`` in
+        the confirmed-origin set)."""
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("api", origin=ScopeOrigin.PUBLIC_HEADER)],
+            types=[
+                _rec(
+                    "InternalConfig",
+                    origin=ScopeOrigin.GENERATED,
+                    source_header="build/generated/internal_config.h",
+                )
+            ],
+        )
+        s = self._surf(snap)
+        c = Change(
+            kind=ChangeKind.TYPE_SIZE_CHANGED,
+            symbol="InternalConfig",
+            description="",
+        )
+        assert classify_change_surface(c, s, s) == (False, REASON_NON_PUBLIC_TYPE)
+
+    def test_nested_private_record_in_a_public_header_still_demotes(self):
+        """``RecordType`` carries no access-level field, and castxml's
+        ``parse_types()`` retains a named nested record regardless of its
+        own private/protected access -- so a private/protected nested class
+        declared inside an otherwise-public class must not be promoted
+        merely because it shares that public header's origin (Codex
+        review, fresh evidence). The owning record (``Outer``) is itself
+        seeded and reachable the normal way; its private nested member
+        (``Outer::Secret``) is not, and must still demote unless something
+        else actually reaches it."""
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("api", ret="Outer", origin=ScopeOrigin.PUBLIC_HEADER)],
+            types=[
+                _rec(
+                    "Outer",
+                    origin=ScopeOrigin.PUBLIC_HEADER,
+                    source_header="api.h",
+                ),
+                _rec(
+                    "Outer::Secret",
+                    origin=ScopeOrigin.PUBLIC_HEADER,
+                    source_header="api.h",
+                    qualified_name="Outer::Secret",
+                ),
+            ],
+        )
+        s = self._surf(snap)
+        c = Change(
+            kind=ChangeKind.TYPE_SIZE_CHANGED,
+            symbol="Outer::Secret",
+            description="",
+        )
+        assert classify_change_surface(c, s, s) == (False, REASON_NON_PUBLIC_TYPE)
+
     @pytest.mark.parametrize("sym", ["api", "internal"])
     def test_change_in_public_surface_matches_classifier(self, sym):
         # The boolean wrapper must agree with the tuple classifier.
