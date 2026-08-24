@@ -785,6 +785,102 @@ def _walk_exact_type_closure(
                     queue.append(ident)
 
 
+def _record_exact_identities(snap: AbiSnapshot) -> set[str]:
+    """The exact qualified spelling of every record in *snap* -- never a
+    tail alias. `.qualified_name` is the canonical fully-qualified spelling
+    on castxml/clang-produced records (whose `.name` is deliberately the
+    bare leaf); DWARF leaves `.qualified_name` unset and instead bakes the
+    qualified string directly into `.name` (see `_index_surface_types`'s
+    own docstring for this backend convention). So a record's own identity
+    is `rec.qualified_name or rec.name` on either backend -- deliberately
+    NOT `_index_surface_types`'s own `record_by_name` index, which also
+    registers each record under an ambiguous trailing-segment *alias* (for
+    unqualified-reference resolution) that can collide with an unrelated
+    record's bare leaf name (e.g. a record `other::api` registers `api` as
+    an alias key, which must never be mistaken for the *namespace* `api`
+    when checking whether some other type is nested inside a class).
+    """
+    return {rec.qualified_name or rec.name for rec in snap.types}
+
+
+def _record_nested_in_known_record(qname: str, record_identities: set[str]) -> bool:
+    """True when *qname*'s immediate enclosing scope is itself a known
+    record (a class/struct/union member), as opposed to a namespace: access
+    control (private/protected) applies only to a class's own members, never
+    to namespace scope, and `RecordType` carries no access-level field at
+    all -- castxml's `parse_types()` retains a named nested record
+    regardless of its own access. *record_identities* must hold only exact
+    qualified record identities (`_record_exact_identities`), never an
+    alias index -- an alias-keyed lookup can misread an unrelated record's
+    own trailing-segment alias as a namespace owner being a class (Codex
+    review, fresh evidence: `other::api` registering alias key `api` wrongly
+    nested every `api::*` type). A pure, string-based approximation
+    (owner-prefix lookup, no depth limit): a template-argument `"::"` (e.g.
+    `Wrapper<ns::Foo>`) can produce a false "nested" reading, which only
+    ever makes this MORE conservative (declines to seed), never less --
+    the accepted direction of error for a predicate whose only job is
+    "never promote a type this can't prove is consumer-nameable".
+    """
+    if "::" not in qname:
+        return False
+    owner = qname.rsplit("::", 1)[0]
+    return owner in record_identities
+
+
+def _record_is_confirmed_public_seed(
+    rec: RecordType, record_identities: set[str]
+) -> bool:
+    """True when *rec* should be seeded into the public-surface closure on
+    its own confirmed public-header origin alone, independent of whether any
+    exported function/variable signature reaches it (the oneDPL
+    `discard_iterator` shape -- see `compute_public_surface`'s own inline
+    comment for the full rationale). The complete, single-source-of-truth
+    eligibility predicate: every one of the five conditions below has its
+    own regression test guarding against a real, previously-shipped gap in
+    an earlier draft of this fix, and each is independently necessary --
+    dropping any one reintroduces that gap:
+
+    1. ``rec.source_header`` -- must have been parsed from a real header
+       at all (a DWARF-only/symbols-only record has none).
+    2. ``rec.origin is ScopeOrigin.PUBLIC_HEADER`` -- a *confirmed* match
+       against the given public-header set, not merely "not private/
+       system" (`ScopeOrigin.UNKNOWN`, no `-H` set given, is excluded; so
+       is `ScopeOrigin.GENERATED`, which -- despite a naive reading --
+       `classify_origin()` only ever returns for a header that did NOT
+       match the public set at all).
+    3. ``rec.qualified_name`` must be non-``None`` -- deliberately does
+       NOT fall back to the bare ``rec.name`` the way the enum seed does.
+       `_qualified_type_name()` (`dumper_castxml.py`) returns ``None`` both
+       for a genuinely global-scope record with no enclosing namespace at
+       all AND for a record local to a function/method body (its ancestor
+       walk stops the instant it crosses a non-Namespace/Struct/Class/
+       Union context, i.e. a Function) -- the two cases are indistinguishable
+       from the string alone, so this deliberately excludes both rather
+       than risk promoting a function-local implementation type that
+       happens to be castxml-visible (`_is_public_record_type` accepts any
+       named, non-artificial record with no scope-kind check at all). A
+       narrower seed than "every global-scope record" -- but a header-only
+       library's own public utility types (the shape this seed exists for)
+       are essentially always namespaced in practice.
+    4. Not `is_internal_type(...)` -- a `detail::`/`impl::`/`internal::`
+       -style namespace segment anywhere in the qualified name.
+    5. Not `_record_nested_in_known_record(...)` -- not a member of
+       another known record, where a private/protected access level
+       cannot be ruled out (`RecordType` carries no access field).
+    """
+    from .internal_leak import DEFAULT_INTERNAL_NAMESPACES, is_internal_type
+
+    qname = rec.qualified_name
+    if not qname:
+        return False
+    return bool(
+        rec.source_header
+        and rec.origin is ScopeOrigin.PUBLIC_HEADER
+        and not is_internal_type(qname, DEFAULT_INTERNAL_NAMESPACES)
+        and not _record_nested_in_known_record(qname, record_identities)
+    )
+
+
 def compute_public_surface(snap: AbiSnapshot) -> PublicSurface:
     """Compute the public-ABI surface of *snap*.
 
@@ -824,6 +920,34 @@ def compute_public_surface(snap: AbiSnapshot) -> PublicSurface:
         en.name
         for en in snap.enums
         if en.source_header and en.origin not in _DEMOTE_ORIGINS
+    }
+
+    # A record/class/union declared directly in a public header, but named
+    # by NO exported function/variable signature, is otherwise invisible to
+    # this closure -- it has no root to be reached from -- and gets demoted
+    # as "non-public-type" even though it sits squarely on the public API.
+    # This is the common shape for a header-only/templates-only library
+    # (e.g. oneDPL's `discard_iterator`): the library exports few or no
+    # binary symbols naming the type, since consumers instantiate/construct
+    # it themselves straight from the header; nothing about that makes the
+    # type any less part of the public surface than a class that happens to
+    # also appear in an exported signature.
+    #
+    # `_seed_queue_from_public_types` in `internal_leak.py` already performs
+    # a similar, broader seed for `DetectInternalLeaks`'s own separately-run
+    # walk -- see this function's `_classify_type_level` sibling's comment
+    # above for why that walk's public-root set has always been broader than
+    # this one's. The full eligibility predicate, and why each of its five
+    # conditions is independently necessary, lives on
+    # `_record_is_confirmed_public_seed` itself -- read there rather than
+    # duplicating the rationale here. (Eligibility requires `qualified_name`
+    # truthy, so `or rec.name` below is unreachable in practice -- kept
+    # only so the comprehension's static type is `str`, not `str | None`.)
+    record_identities = _record_exact_identities(snap)
+    seed_types |= {
+        rec.qualified_name or rec.name
+        for rec in snap.types
+        if _record_is_confirmed_public_seed(rec, record_identities)
     }
 
     # Provenance is available iff some declaration was classified to a real

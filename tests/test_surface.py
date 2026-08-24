@@ -56,7 +56,13 @@ def _fn(
 
 
 def _rec(
-    name, fields=(), bases=(), size=64, origin=ScopeOrigin.UNKNOWN, qualified_name=None
+    name,
+    fields=(),
+    bases=(),
+    size=64,
+    origin=ScopeOrigin.UNKNOWN,
+    qualified_name=None,
+    source_header=None,
 ):
     return RecordType(
         name=name,
@@ -66,6 +72,7 @@ def _rec(
         bases=list(bases),
         origin=origin,
         qualified_name=qualified_name,
+        source_header=source_header,
     )
 
 
@@ -577,6 +584,159 @@ class TestSurfaceExclusionReason:
         )
         assert classify_change_surface(c, s, s) == (False, REASON_NON_PUBLIC_TYPE)
 
+    def test_confirmed_public_header_type_stays_in_surface_even_if_unreachable(self):
+        """A header-only library (e.g. oneDPL's ``discard_iterator``) exports
+        few or no binary symbols naming its own public utility types --
+        consumers instantiate/construct them straight from the header, so
+        no function/variable signature ever seeds them into the reachability
+        closure. A type whose *own* origin confirms it came from the given
+        public-header set must not be demoted to ``non-public-type`` just
+        because reachability alone can't find it (Codex review, oneDPL
+        canary). ``qualified_name`` is set to a realistic namespaced spelling
+        (``oneapi::dpl::discard_iterator``) -- the seed requires it truthy
+        (see ``_record_is_confirmed_public_seed``'s own function-local-record
+        guard), matching what a real castxml dump of a namespaced type
+        always populates."""
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("api", origin=ScopeOrigin.PUBLIC_HEADER)],
+            types=[
+                _rec(
+                    "discard_iterator",
+                    origin=ScopeOrigin.PUBLIC_HEADER,
+                    source_header="oneapi/dpl/iterator.h",
+                    qualified_name="oneapi::dpl::discard_iterator",
+                )
+            ],
+        )
+        s = self._surf(snap)
+        c = Change(
+            kind=ChangeKind.TYPE_SIZE_CHANGED,
+            symbol="discard_iterator",
+            description="",
+        )
+        assert classify_change_surface(c, s, s) == (True, None)
+
+    def test_internal_namespace_type_in_a_public_header_still_demotes(self):
+        """The same unreachable-header-type promotion above must not swallow
+        a genuine implementation-detail type merely because it shares a
+        public header with real public API -- ``is_internal_type`` still
+        gates it, mirroring the analogous internal-namespace exception
+        ``_classify_type_level`` already applies for the reachability
+        closure itself."""
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("api", origin=ScopeOrigin.PUBLIC_HEADER)],
+            types=[
+                _rec(
+                    "ns::detail::Pimpl",
+                    origin=ScopeOrigin.PUBLIC_HEADER,
+                    source_header="ns/api.h",
+                    qualified_name="ns::detail::Pimpl",
+                )
+            ],
+        )
+        s = self._surf(snap)
+        c = Change(
+            kind=ChangeKind.TYPE_SIZE_CHANGED,
+            symbol="ns::detail::Pimpl",
+            description="",
+        )
+        # `is_internal_type` short-circuits this to (True, None) via the
+        # anti-hiding rule in `_classify_type_level` -- never filtered, but
+        # NOT via the new "confirmed public header" promotion this test
+        # guards against; either way the finding is kept, so the assertion
+        # here is really about `test_non_public_type_reason` staying paired
+        # with a type genuinely unreachable AND non-internal.
+        assert classify_change_surface(c, s, s) == (True, None)
+
+    def test_unclassified_origin_unreachable_type_still_demoted(self):
+        """Unlike the enum seed, the record seed requires a *confirmed*
+        public-header origin -- a record whose provenance was never
+        classified (no ``-H``/public-header set given, ``ScopeOrigin.
+        UNKNOWN``) has no positive evidence it's part of the public surface,
+        so an isolated, unreferenced one must still demote as
+        ``non-public-type`` (regression: an earlier revision of this fix
+        seeded on ``source_header`` alone and wrongly promoted this case)."""
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("api")],
+            types=[_rec("Island", source_header="extra.h")],
+        )
+        s = self._surf(snap)
+        c = Change(
+            kind=ChangeKind.TYPE_SIZE_CHANGED, symbol="Island", description=""
+        )
+        assert classify_change_surface(c, s, s) == (False, REASON_NON_PUBLIC_TYPE)
+
+    def test_generated_origin_type_still_demoted(self):
+        """``ScopeOrigin.GENERATED`` is not a confirmed-public origin --
+        ``classify_origin()`` only ever returns it for a header that did
+        NOT match the given public-header set (a genuinely public generated
+        header classifies as ``PUBLIC_HEADER`` directly). Seeding on it
+        would promote unrelated types from a path like
+        ``build/generated/internal_config.h`` (Codex review, fresh
+        evidence: an earlier revision of this fix included ``GENERATED`` in
+        the confirmed-origin set)."""
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("api", origin=ScopeOrigin.PUBLIC_HEADER)],
+            types=[
+                _rec(
+                    "InternalConfig",
+                    origin=ScopeOrigin.GENERATED,
+                    source_header="build/generated/internal_config.h",
+                )
+            ],
+        )
+        s = self._surf(snap)
+        c = Change(
+            kind=ChangeKind.TYPE_SIZE_CHANGED,
+            symbol="InternalConfig",
+            description="",
+        )
+        assert classify_change_surface(c, s, s) == (False, REASON_NON_PUBLIC_TYPE)
+
+    def test_nested_private_record_in_a_public_header_still_demotes(self):
+        """``RecordType`` carries no access-level field, and castxml's
+        ``parse_types()`` retains a named nested record regardless of its
+        own private/protected access -- so a private/protected nested class
+        declared inside an otherwise-public class must not be promoted
+        merely because it shares that public header's origin (Codex
+        review, fresh evidence). The owning record (``Outer``) is itself
+        seeded and reachable the normal way; its private nested member
+        (``Outer::Secret``) is not, and must still demote unless something
+        else actually reaches it."""
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("api", ret="Outer", origin=ScopeOrigin.PUBLIC_HEADER)],
+            types=[
+                _rec(
+                    "Outer",
+                    origin=ScopeOrigin.PUBLIC_HEADER,
+                    source_header="api.h",
+                ),
+                _rec(
+                    "Outer::Secret",
+                    origin=ScopeOrigin.PUBLIC_HEADER,
+                    source_header="api.h",
+                    qualified_name="Outer::Secret",
+                ),
+            ],
+        )
+        s = self._surf(snap)
+        c = Change(
+            kind=ChangeKind.TYPE_SIZE_CHANGED,
+            symbol="Outer::Secret",
+            description="",
+        )
+        assert classify_change_surface(c, s, s) == (False, REASON_NON_PUBLIC_TYPE)
+
     @pytest.mark.parametrize("sym", ["api", "internal"])
     def test_change_in_public_surface_matches_classifier(self, sym):
         # The boolean wrapper must agree with the tuple classifier.
@@ -591,6 +751,12 @@ class TestSurfaceExclusionReason:
 
 
 # ── end-to-end via compare(scope_to_public_surface=...) ──────────────────────
+#
+# Primitive-level property tests for `_record_nested_in_known_record` /
+# `_record_is_confirmed_public_seed` (the confirmed-public-header record
+# seed's own load-bearing primitives) live in a sibling file,
+# `test_surface_seed_predicate_properties.py`, split out purely to keep this
+# file under the AI-readiness file-size cap.
 
 
 class TestScopedCompareNoFalsePositives:

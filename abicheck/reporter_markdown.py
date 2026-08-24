@@ -641,6 +641,7 @@ def _to_markdown_leaf(
 
     _append_redundancy_note(lines, result)
     _append_suppression_note(lines, result)
+    _append_out_of_surface_note(lines, result)
 
     if show_impact:
         lines += _build_impact_table(result, displayed_changes=changes)
@@ -1042,6 +1043,7 @@ def _to_markdown_root_cause(
 
     _append_redundancy_note(lines, result)
     _append_suppression_note(lines, result)
+    _append_out_of_surface_note(lines, result)
 
     if show_impact:
         lines += _build_impact_table(result, displayed_changes=changes)
@@ -1072,6 +1074,11 @@ def _append_redundancy_note(lines: list[str], result: DiffResult) -> None:
             "(derived from root type changes). Set `scope.show_redundant: true` in\n"
             "> `.abicheck.yml` to show all."
         )
+
+
+def _append_out_of_surface_note(lines: list[str], result: DiffResult) -> None:
+    if result.scope_to_public_surface and result.out_of_surface_count:
+        lines += ["", f"> ℹ️ {result.out_of_surface_count} finding(s) filtered as non-public ABI surface (`--scope-public-headers`). Pass `--show-filtered` to list them."]
 
 
 def _append_suppression_note(lines: list[str], result: DiffResult) -> None:
@@ -1759,6 +1766,7 @@ def to_markdown(
 
     _append_redundancy_note(lines, result)
     _append_suppression_note(lines, result)
+    _append_out_of_surface_note(lines, result)
 
     if show_impact:
         lines.append("")

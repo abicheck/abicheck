@@ -1388,8 +1388,9 @@ class _CastxmlParser:
 
     def _qualified_name(self, el: Any) -> str:
         """Namespace/class-qualified name by walking ``context`` (bare name
-        for a global; stops at the castxml global-namespace name ``"::"``)."""
-        parts = [el.get("name", "")]
+        for a global; stops at ``"::"``). Segments are stripped via
+        `strip_anonymous_type_location`, matching `_qualified_type_name`."""
+        parts = [strip_anonymous_type_location(el.get("name", ""))]
         ctx_id = el.get("context", "")
         seen: set[str] = set()
         while ctx_id and ctx_id not in seen:
@@ -1397,7 +1398,7 @@ class _CastxmlParser:
             ctx = self._id_map.get(ctx_id)
             if ctx is None:
                 break
-            cname = ctx.get("name", "")
+            cname = strip_anonymous_type_location(ctx.get("name", ""))
             if cname and cname != "::":
                 parts.append(cname)
             ctx_id = ctx.get("context", "")
