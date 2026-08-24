@@ -111,12 +111,16 @@ class TestRecordNestedInKnownRecordProperties:
 
 class TestRecordIsConfirmedPublicSeedExhaustive:
     """`_record_is_confirmed_public_seed` is a finite boolean predicate over
-    four independent conditions (source_header presence, origin, internal-
-    namespace membership, nested-in-a-record) -- small enough to check
-    EVERY combination exhaustively rather than sample it, so a future edit
-    that silently drops or inverts one condition fails immediately instead
-    of needing a new bug report to notice: each of the four conditions here
-    was independently the subject of a real, previously-shipped gap."""
+    five independent conditions (source_header presence, origin, a truthy
+    qualified_name, internal-namespace membership, nested-in-a-record) --
+    small enough to check EVERY combination exhaustively rather than sample
+    it, so a future edit that silently drops or inverts one condition fails
+    immediately instead of needing a new bug report to notice: each of the
+    five conditions here was independently the subject of a real,
+    previously-shipped gap (the qualified_name condition specifically
+    closes the function-local-record gap -- see
+    ``TestFunctionLocalRecordExcluded`` below for why ``None`` is
+    indistinguishable from a legitimate global-scope record without it)."""
 
     _ORIGINS = (
         ScopeOrigin.PUBLIC_HEADER,
@@ -129,24 +133,53 @@ class TestRecordIsConfirmedPublicSeedExhaustive:
 
     @pytest.mark.parametrize("origin", _ORIGINS)
     @pytest.mark.parametrize("has_header", [True, False])
+    @pytest.mark.parametrize("has_qualified_name", [True, False])
     @pytest.mark.parametrize("internal_namespace", [True, False])
     @pytest.mark.parametrize("nested", [True, False])
     def test_exhaustive_truth_table(
-        self, origin, has_header, internal_namespace, nested
+        self, origin, has_header, has_qualified_name, internal_namespace, nested
     ) -> None:
         name = "ns::detail::Type" if internal_namespace else "ns::Type"
         rec = _rec(
-            name,
+            "Type",
             origin=origin,
             source_header="a.h" if has_header else None,
-            qualified_name=name,
+            qualified_name=name if has_qualified_name else None,
         )
         owner_key = "ns::detail" if internal_namespace else "ns"
         record_by_name = {owner_key: [_rec("owner")]} if nested else {}
         expected = (
             has_header
             and origin is ScopeOrigin.PUBLIC_HEADER
+            and has_qualified_name
             and not internal_namespace
             and not nested
         )
         assert _record_is_confirmed_public_seed(rec, record_by_name) is expected
+
+
+class TestFunctionLocalRecordExcluded:
+    """Regression for the third review finding (Codex, fresh evidence): a
+    named class local to a function/method body (e.g. a helper struct
+    declared inside an inline function's body) is retained by castxml's
+    `parse_types()` with no scope-kind filter at all, while
+    `_qualified_type_name()`'s ancestor walk stops the instant it crosses a
+    non-Namespace/Struct/Class/Union context -- so a function-local record's
+    `qualified_name` is `None`, the identical value a genuinely global-scope
+    (no enclosing namespace) record also produces. Requiring
+    `qualified_name` truthy therefore excludes BOTH -- a real, accepted
+    trade-off (see `_record_is_confirmed_public_seed`'s own docstring),
+    since a header-only library's public utility types are essentially
+    always namespaced in practice."""
+
+    def test_qualified_name_none_is_never_seeded_regardless_of_bare_name(self) -> None:
+        # `rec.name` alone ("Local") looks exactly like an ordinary,
+        # unnamespaced public type -- only `qualified_name is None` signals
+        # the ambiguous (global-scope-or-function-local) case.
+        rec = _rec(
+            "Local",
+            origin=ScopeOrigin.PUBLIC_HEADER,
+            source_header="a.h",
+            qualified_name=None,
+        )
+        assert _record_is_confirmed_public_seed(rec, {}) is False

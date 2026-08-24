@@ -814,7 +814,7 @@ def _record_is_confirmed_public_seed(
     exported function/variable signature reaches it (the oneDPL
     `discard_iterator` shape -- see `compute_public_surface`'s own inline
     comment for the full rationale). The complete, single-source-of-truth
-    eligibility predicate: every one of the four conditions below has its
+    eligibility predicate: every one of the five conditions below has its
     own regression test guarding against a real, previously-shipped gap in
     an earlier draft of this fix, and each is independently necessary --
     dropping any one reintroduces that gap:
@@ -827,15 +827,31 @@ def _record_is_confirmed_public_seed(
        is `ScopeOrigin.GENERATED`, which -- despite a naive reading --
        `classify_origin()` only ever returns for a header that did NOT
        match the public set at all).
-    3. Not `is_internal_type(...)` -- a `detail::`/`impl::`/`internal::`
+    3. ``rec.qualified_name`` must be non-``None`` -- deliberately does
+       NOT fall back to the bare ``rec.name`` the way the enum seed does.
+       `_qualified_type_name()` (`dumper_castxml.py`) returns ``None`` both
+       for a genuinely global-scope record with no enclosing namespace at
+       all AND for a record local to a function/method body (its ancestor
+       walk stops the instant it crosses a non-Namespace/Struct/Class/
+       Union context, i.e. a Function) -- the two cases are indistinguishable
+       from the string alone, so this deliberately excludes both rather
+       than risk promoting a function-local implementation type that
+       happens to be castxml-visible (`_is_public_record_type` accepts any
+       named, non-artificial record with no scope-kind check at all). A
+       narrower seed than "every global-scope record" -- but a header-only
+       library's own public utility types (the shape this seed exists for)
+       are essentially always namespaced in practice.
+    4. Not `is_internal_type(...)` -- a `detail::`/`impl::`/`internal::`
        -style namespace segment anywhere in the qualified name.
-    4. Not `_record_nested_in_known_record(...)` -- not a member of
+    5. Not `_record_nested_in_known_record(...)` -- not a member of
        another known record, where a private/protected access level
        cannot be ruled out (`RecordType` carries no access field).
     """
     from .internal_leak import DEFAULT_INTERNAL_NAMESPACES, is_internal_type
 
-    qname = rec.qualified_name or rec.name
+    qname = rec.qualified_name
+    if not qname:
+        return False
     return bool(
         rec.source_header
         and rec.origin is ScopeOrigin.PUBLIC_HEADER
@@ -900,10 +916,12 @@ def compute_public_surface(snap: AbiSnapshot) -> PublicSurface:
     # a similar, broader seed for `DetectInternalLeaks`'s own separately-run
     # walk -- see this function's `_classify_type_level` sibling's comment
     # above for why that walk's public-root set has always been broader than
-    # this one's. The full eligibility predicate, and why each of its four
+    # this one's. The full eligibility predicate, and why each of its five
     # conditions is independently necessary, lives on
     # `_record_is_confirmed_public_seed` itself -- read there rather than
-    # duplicating the rationale here.
+    # duplicating the rationale here. (Eligibility requires `qualified_name`
+    # truthy, so `or rec.name` below is unreachable in practice -- kept
+    # only so the comprehension's static type is `str`, not `str | None`.)
     seed_types |= {
         rec.qualified_name or rec.name
         for rec in snap.types

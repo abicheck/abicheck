@@ -592,7 +592,11 @@ class TestSurfaceExclusionReason:
         closure. A type whose *own* origin confirms it came from the given
         public-header set must not be demoted to ``non-public-type`` just
         because reachability alone can't find it (Codex review, oneDPL
-        canary)."""
+        canary). ``qualified_name`` is set to a realistic namespaced spelling
+        (``oneapi::dpl::discard_iterator``) -- the seed requires it truthy
+        (see ``_record_is_confirmed_public_seed``'s own function-local-record
+        guard), matching what a real castxml dump of a namespaced type
+        always populates."""
         snap = AbiSnapshot(
             library="l",
             version="1",
@@ -602,6 +606,7 @@ class TestSurfaceExclusionReason:
                     "discard_iterator",
                     origin=ScopeOrigin.PUBLIC_HEADER,
                     source_header="oneapi/dpl/iterator.h",
+                    qualified_name="oneapi::dpl::discard_iterator",
                 )
             ],
         )
