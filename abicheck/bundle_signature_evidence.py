@@ -58,24 +58,19 @@ the ``DT_NEEDED``-reachability BFS both this module and ``bundle.py`` need
 its own docstring), so there is no import-cycle risk either direction.
 
 **Provider-edge filtering (Codex review, fresh evidence):** a consumer is
-only counted for a given provider when the provider is actually reachable
-from that consumer via a real ``DT_NEEDED`` path
+only counted for a given provider when (1) the provider is actually
+reachable from that consumer via a real ``DT_NEEDED`` path
 (:func:`~abicheck.bundle_resolution_reachability.reachable_intra_libraries`)
--- the same reachability constraint
-``bundle._detect_unresolved_intra_dependency`` already applies to its own,
-more elaborate provider matching. **Deliberately narrower than that
-sibling's full contract**: this module does not consult
-``ConsumerEntry.version``/``ProviderEntry.version``/``is_default`` at all,
-so a symbol-version mismatch or a non-default-only provider definition can
-still produce a finding here that a full version-aware match would rule
-out. Reachability closes the "reachable but genuinely unrelated" false
-positive this review comment named; the narrower version-matching gap is
-left open rather than attempted as an extension of the same review-driven
-patch -- it needs the per-consumer resolution shape
-``_detect_unresolved_intra_dependency`` uses (iterate consumers, resolve
-each one's own specific requirement), not this function's provider-centric
-one (iterate providers, gather their consumers), so folding it in is a
-real restructuring of the main loop below, not a further filter clause.
+and (2) the provider actually satisfies that consumer's own version/
+default-binding requirement (:func:`_consumer_matches_provider`) -- both
+the same constraints ``bundle._detect_unresolved_intra_dependency``
+already applies to its own, more elaborate provider matching. The version
+check is evaluated per (consumer, provider_entry) pair rather than that
+sibling function's "does *some* provider in the whole set resolve this"
+question, since this module's main loop already iterates one concrete
+``provider_entry`` at a time -- it did not, in the end, need that
+sibling's per-consumer resolution shape, contrary to an earlier revision
+of this docstring.
 """
 
 from __future__ import annotations
@@ -84,7 +79,7 @@ import re
 from collections.abc import Iterable, Mapping
 from pathlib import Path
 
-from .bundle_models import BundleFinding, BundleSnapshot
+from .bundle_models import BundleFinding, BundleSnapshot, ConsumerEntry, ProviderEntry
 from .bundle_resolution_reachability import reachable_intra_libraries
 from .checker_policy import ChangeKind
 from .checker_types import DiffResult
@@ -353,6 +348,39 @@ def _confirmed_provider_symbols(
     return confirmed
 
 
+def _consumer_matches_provider(
+    consumer: ConsumerEntry, provider_entry: ProviderEntry, new: BundleSnapshot
+) -> bool:
+    """Does *provider_entry* actually satisfy *consumer*'s own version/
+    default-binding requirement for the symbol they share?
+
+    Mirrors ``bundle._detect_unresolved_intra_dependency``'s own
+    version-aware provider matching:
+
+    - A consumer requiring a specific version (``ConsumerEntry.version``)
+      can only be satisfied by a provider definition carrying that exact
+      version. When the precise ``version_soname`` is known, the match is
+      further pinned to the provider library that soname actually
+      resolves to (GNU version *labels* are not globally unique across
+      providers).
+    - An unversioned consumer reference can only be satisfied by an
+      unversioned or default-version (``@@default``) provider definition
+      (``ProviderEntry.is_default``) -- a provider whose only definition
+      of this symbol is a non-default versioned one (``foo@V1``, not
+      ``foo@@V1``) cannot satisfy it, even though the bare symbol name
+      matches.
+    """
+    if consumer.version:
+        if consumer.version_soname:
+            target_lib = new.resolution.soname_to_name.get(consumer.version_soname)
+            return (
+                target_lib == provider_entry.library
+                and provider_entry.version == consumer.version
+            )
+        return provider_entry.version == consumer.version
+    return provider_entry.is_default
+
+
 def find_unverified_signature_findings(
     old: BundleSnapshot,
     new: BundleSnapshot,
@@ -426,12 +454,29 @@ def find_unverified_signature_findings(
             # without either one being loadable together with a given
             # consumer, and this loop's "which consumers does this provider
             # affect" question is exactly the one reachability answers.
+            #
+            # Also restricted to consumers whose own version/default-binding
+            # requirement *this exact provider_entry* actually satisfies
+            # (Codex review, fresh evidence): `consumers_of(symbol)` matches
+            # by bare name only, so a consumer requiring `foo@V2` previously
+            # still paired with a `provider_entry` whose only definition is
+            # `foo@V1` -- a provider that cannot actually satisfy that
+            # consumer at all (a real resolution failure, already covered
+            # by `BUNDLE_UNRESOLVED_INTRA_DEPENDENCY`/
+            # `BUNDLE_INTRA_DEP_REMOVED`, not a signature-mismatch risk
+            # this module exists to flag). Mirrors `_detect_unresolved_
+            # intra_dependency`'s own version/`version_soname`/`is_default`
+            # compatibility rules, evaluated per (consumer, provider_entry)
+            # pair rather than that function's "does *some* provider in the
+            # whole set resolve this" question, since this loop already
+            # iterates one concrete provider_entry at a time.
             consumer_libs = sorted(
                 {
                     c.library
                     for c in new.resolution.consumers_of(symbol)
                     if c.library != provider_lib
                     and provider_lib in _reachable(c.library)
+                    and _consumer_matches_provider(c, provider_entry, new)
                 }
             )
             if not consumer_libs:

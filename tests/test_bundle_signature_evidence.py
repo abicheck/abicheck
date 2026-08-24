@@ -368,6 +368,49 @@ class TestFindUnverifiedSignatureFindings:
             find_unverified_signature_findings(new, new, [], old_snaps, new_snaps) == []
         )
 
+    def test_no_finding_when_provider_version_does_not_satisfy_the_consumer(self):
+        # Codex review, fresh evidence: consumers_of(symbol) matches by
+        # bare name only, so a consumer requiring core_fn@V2 previously
+        # still paired with a provider_entry whose only definition is
+        # core_fn@V1 -- a provider that cannot actually satisfy that
+        # consumer at all (a real resolution failure, not a signature-
+        # mismatch risk this module exists to flag).
+        from abicheck.elf_metadata import ElfImport
+
+        new = _snapshot(
+            {
+                "libcore.so": ElfMetadata(
+                    soname="",
+                    needed=[],
+                    symbols=[ElfSymbol(name="core_fn", version="V1", is_default=False)],
+                ),
+                "libconsumer.so": ElfMetadata(
+                    soname="",
+                    needed=["libcore.so"],
+                    symbols=[],
+                    imports=[ElfImport(name="core_fn", version="V2", is_default=False)],
+                ),
+            }
+        )
+        old_snaps = {
+            "libcore.so": _snap(
+                "libcore.so",
+                functions=[_elf_only_fn("core_fn")],
+                elf_only_mode=True,
+            )
+        }
+        new_snaps = {
+            "libcore.so": _snap(
+                "libcore.so",
+                functions=[_elf_only_fn("core_fn")],
+                elf_only_mode=True,
+            )
+        }
+
+        assert (
+            find_unverified_signature_findings(new, new, [], old_snaps, new_snaps) == []
+        )
+
     def test_no_finding_when_symbol_absent_from_old_snapshot(self):
         # A brand-new export (addition), not a same-symbol unverified case.
         new = _snapshot(

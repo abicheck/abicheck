@@ -732,6 +732,25 @@ and `[]` among the suffix forms, and by separately recognizing the
 exact `"fn(...)"` literal. Confirmed all four new cases fail against
 the pre-fix code.
 
+**A seventh finding closed the module's own previously-documented
+"deliberately narrower" residual gap: symbol-version/default-binding
+matching, which turned out not to need the feared restructuring**
+(Codex review, fresh evidence). `consumers_of(symbol)` matches by bare
+name only, so a consumer requiring `foo@V2` could still pair with a
+`ProviderEntry` whose only definition is `foo@V1` -- a provider that
+cannot actually satisfy that consumer at all (a real resolution
+failure, not a signature-mismatch risk this module exists to flag). An
+earlier revision of this docstring assumed closing this needed
+`_detect_unresolved_intra_dependency`'s own per-consumer resolution
+shape (iterate consumers, resolve each one's own specific requirement)
+rather than this module's provider-centric one; on closer look it does
+not -- a new `_consumer_matches_provider()` predicate, evaluated per
+(consumer, provider_entry) pair inside the existing provider-centric
+loop, mirrors the sibling function's version/`version_soname`/
+`is_default` rules without restructuring anything. Confirmed to fail
+against the pre-fix code, using the exact `foo@V2`-vs-`foo@V1` example
+from the review comment.
+
 `bundle_intra_dep_signature_changed` already fires correctly when a
 provider's DWARF/header evidence shows a real signature change. This phase
 adds the missing negative case: a new, dedicated `ChangeKind`,

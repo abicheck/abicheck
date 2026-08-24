@@ -116,3 +116,16 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   by construction. Fixed by widening the regex to accept an optional
   `const `/`volatile ` prefix and `[]` among the suffix forms, and by
   separately recognizing the exact `"fn(...)"` literal.
+- **`find_unverified_signature_findings()` never checked symbol-version/
+  default-binding compatibility before pairing a consumer with a
+  provider** (Codex review, fresh evidence). `consumers_of(symbol)`
+  matches by bare name only, so a consumer requiring `foo@V2` could still
+  pair with a `ProviderEntry` whose only definition is `foo@V1` -- a
+  provider that cannot actually satisfy that consumer at all (a real
+  resolution failure, already covered by
+  `BUNDLE_UNRESOLVED_INTRA_DEPENDENCY`/`BUNDLE_INTRA_DEP_REMOVED`, not a
+  signature-mismatch risk this module exists to flag). Fixed by adding a
+  new `_consumer_matches_provider()` predicate, mirroring
+  `bundle._detect_unresolved_intra_dependency`'s own version/
+  `version_soname`/`is_default` compatibility rules, evaluated per
+  (consumer, provider) pair.
