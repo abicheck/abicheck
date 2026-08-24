@@ -538,8 +538,7 @@ class TestIntraDepRemoved:
         # so this must still be reported regardless of the migration guard.
         result = compare_bundle(old, new, per_library_results=[])
         assert any(
-            f.kind == ChangeKind.BUNDLE_INTRA_DEP_REMOVED
-            and f.symbol == "vendor_op"
+            f.kind == ChangeKind.BUNDLE_INTRA_DEP_REMOVED and f.symbol == "vendor_op"
             for f in result.bundle_findings
         )
 
@@ -582,7 +581,8 @@ class TestIntraDepRemoved:
         # the built-in DEFAULT_SYSTEM_PROVIDERS allow-list alone.
         result = compare_bundle(old, new, per_library_results=[])
         assert not any(
-            f.kind == ChangeKind.BUNDLE_INTRA_DEP_REMOVED and f.consumer_library == "libb.so"
+            f.kind == ChangeKind.BUNDLE_INTRA_DEP_REMOVED
+            and f.consumer_library == "libb.so"
             for f in result.bundle_findings
         )
 
@@ -599,7 +599,9 @@ class TestIntraDepRemoved:
         import must not be vetoed by a provider that was never compatible."""
         old_core = _meta(soname="libcore.so.1")
         old_core.symbols.append(
-            ElfSymbol(name="vendor_op", visibility="default", version="V1", is_default=False)
+            ElfSymbol(
+                name="vendor_op", visibility="default", version="V1", is_default=False
+            )
         )
         old = _snapshot(
             {
@@ -964,6 +966,578 @@ class TestIntraDepSignatureChanged:
         assert not any(
             f.kind == ChangeKind.BUNDLE_INTRA_DEP_SIGNATURE_CHANGED
             for f in result.bundle_findings
+        )
+
+    def test_promotable_kinds_are_a_strict_subset_of_confirmed_kinds(self) -> None:
+        # G38 stabilization, revised after a Codex review round: promotion
+        # ("confirmed severely enough to fabricate a consumer-attributed
+        # BREAKING bundle finding") and suppression ("confirmed enough to
+        # withhold the 'couldn't tell either way' finding") are two
+        # different bars, not one -- an earlier revision of this test
+        # asserted the two sets were *equal*, which was itself the bug:
+        # it would have required promoting FUNC_NOEXCEPT_ADDED
+        # (default_verdict=COMPATIBLE) and FUNC_NOEXCEPT_REMOVED/
+        # FUNC_EXCEPTION_SPEC_CHANGED (COMPATIBLE_WITH_RISK) to a fabricated
+        # BREAKING bundle finding. The promotable set must be a strict,
+        # proper subset of the confirmed set (bundle_signature_evidence's
+        # own suppression set), and every kind promoted to BREAKING must
+        # itself carry default_verdict=BREAKING in change_registry.py.
+        from abicheck.bundle_models import (
+            CONFIRMED_C_BOUNDARY_SIGNATURE_BREAK_KINDS,
+            PROMOTABLE_C_BOUNDARY_SIGNATURE_BREAK_KINDS,
+        )
+        from abicheck.bundle_signature_evidence import (
+            _CONFIRMED_SIGNATURE_CHANGE_KINDS,
+        )
+        from abicheck.change_registry import REGISTRY
+        from abicheck.checker_policy import Verdict
+
+        assert PROMOTABLE_C_BOUNDARY_SIGNATURE_BREAK_KINDS < (
+            CONFIRMED_C_BOUNDARY_SIGNATURE_BREAK_KINDS
+        )
+        assert (
+            CONFIRMED_C_BOUNDARY_SIGNATURE_BREAK_KINDS
+            == _CONFIRMED_SIGNATURE_CHANGE_KINDS
+        )
+        for kind in PROMOTABLE_C_BOUNDARY_SIGNATURE_BREAK_KINDS:
+            meta = REGISTRY.get(kind.value)
+            assert meta is not None and meta.default_verdict == Verdict.BREAKING, (
+                f"{kind} is promotable to a BREAKING bundle finding but its "
+                f"own default_verdict is not BREAKING"
+            )
+        # The specific fabrication this test guards against: noexcept
+        # changes must never be promotable, regardless of their presence
+        # in the (correctly broader) suppression-only confirmed set.
+        assert (
+            ChangeKind.FUNC_NOEXCEPT_ADDED
+            not in PROMOTABLE_C_BOUNDARY_SIGNATURE_BREAK_KINDS
+        )
+        assert (
+            ChangeKind.FUNC_NOEXCEPT_REMOVED
+            not in PROMOTABLE_C_BOUNDARY_SIGNATURE_BREAK_KINDS
+        )
+        assert (
+            ChangeKind.FUNC_NOEXCEPT_ADDED in CONFIRMED_C_BOUNDARY_SIGNATURE_BREAK_KINDS
+        )
+        # ctor-explicit stays excluded on purpose from both sets.
+        assert (
+            ChangeKind.CTOR_EXPLICIT_ADDED
+            not in CONFIRMED_C_BOUNDARY_SIGNATURE_BREAK_KINDS
+        )
+        assert (
+            ChangeKind.CTOR_EXPLICIT_REMOVED
+            not in CONFIRMED_C_BOUNDARY_SIGNATURE_BREAK_KINDS
+        )
+
+    def test_does_not_promote_noexcept_added_to_a_breaking_finding(self) -> None:
+        # Regression for the fabrication above: FUNC_NOEXCEPT_ADDED is
+        # confirmed (suppresses bundle_signature_evidence's "unverified"
+        # finding) but must never itself promote to
+        # BUNDLE_INTRA_DEP_SIGNATURE_CHANGED -- that would turn a
+        # default_verdict=COMPATIBLE per-library change into a fabricated
+        # BREAKING cross-library one.
+        new = _snapshot(
+            {
+                "libcore.so": _meta(soname="libcore.so.1", exports=["core_add"]),
+                "libalgo.so": _meta(
+                    soname="libalgo.so.1", needed=["libcore.so.1"], imports=["core_add"]
+                ),
+            }
+        )
+        diff_libcore = _diff(
+            "libcore.so",
+            Change(
+                kind=ChangeKind.FUNC_NOEXCEPT_ADDED,
+                symbol="core_add",
+                description="gained noexcept",
+            ),
+        )
+        result = compare_bundle(new, new, [diff_libcore])
+        assert not any(
+            f.kind == ChangeKind.BUNDLE_INTRA_DEP_SIGNATURE_CHANGED
+            for f in result.bundle_findings
+        )
+
+    def test_promotes_calling_convention_change_to_consumer(self) -> None:
+        # CALLING_CONVENTION_CHANGED is in both the confirmed (suppression)
+        # and promotable sets -- it's a genuine, BREAKING, direct
+        # call-boundary mismatch, unlike noexcept/exception-spec above.
+        new = _snapshot(
+            {
+                "libcore.so": _meta(soname="libcore.so.1", exports=["core_add"]),
+                "libalgo.so": _meta(
+                    soname="libalgo.so.1", needed=["libcore.so.1"], imports=["core_add"]
+                ),
+            }
+        )
+        diff_libcore = _diff(
+            "libcore.so",
+            Change(
+                kind=ChangeKind.CALLING_CONVENTION_CHANGED,
+                symbol="core_add",
+                description="cdecl->fastcall",
+            ),
+        )
+        result = compare_bundle(new, new, [diff_libcore])
+        findings = [
+            f
+            for f in result.bundle_findings
+            if f.kind == ChangeKind.BUNDLE_INTRA_DEP_SIGNATURE_CHANGED
+        ]
+        assert len(findings) == 1
+        assert findings[0].consumer_library == "libalgo.so"
+        assert findings[0].provider_library == "libcore.so"
+
+    def test_promotes_using_canonical_provider_key_for_a_versioned_basename(
+        self,
+    ) -> None:
+        # G38 stabilization (CodeRabbit review, fresh evidence, concrete
+        # repro traced through cli_compare_release.py's own _bundle_key/
+        # DiffResult.library split): DiffResult.library is always the real,
+        # possibly SONAME-versioned on-disk filename, not the bundle's
+        # canonical key -- so a promoted finding's own diff_by_library
+        # lookup must canonicalize it the same way BundleSnapshot.resolution
+        # does, or the promotion silently never fires (the versioned key
+        # never matches any provider the resolution graph actually knows).
+        libraries = {
+            "libcore.so": Path("/fake/libcore.so.1.2.3"),
+            "libalgo.so": Path("/fake/libalgo.so.1"),
+        }
+        metadata = {
+            "libcore.so": _meta(soname="libcore.so.1", exports=["core_add"]),
+            "libalgo.so": _meta(
+                soname="libalgo.so.1", needed=["libcore.so.1"], imports=["core_add"]
+            ),
+        }
+        graph = _compute_resolution_graph(libraries, metadata)
+        new = BundleSnapshot(
+            root=Path("/fake"), libraries=libraries, metadata=metadata, resolution=graph
+        )
+        diff_libcore = _diff(
+            "libcore.so.1.2.3",  # the real, versioned on-disk basename
+            Change(
+                kind=ChangeKind.CALLING_CONVENTION_CHANGED,
+                symbol="core_add",
+                description="cdecl->fastcall",
+            ),
+        )
+        result = compare_bundle(new, new, [diff_libcore])
+        findings = [
+            f
+            for f in result.bundle_findings
+            if f.kind == ChangeKind.BUNDLE_INTRA_DEP_SIGNATURE_CHANGED
+        ]
+        assert len(findings) == 1
+        assert findings[0].consumer_library == "libalgo.so"
+        assert findings[0].provider_library == "libcore.so"  # canonical, not versioned
+
+    def test_promotes_when_the_versioned_basename_changed_between_old_and_new(
+        self,
+    ) -> None:
+        # G38 stabilization (Codex review, fresh evidence): checker.compare()
+        # sets DiffResult.library from the OLD side, so a provider whose
+        # versioned on-disk basename changed between old and new
+        # (libcore.so.1.2 -> libcore.so.1.3) has a DiffResult.library that
+        # only the OLD bundle's own basename map can resolve -- looking it
+        # up only against the NEW map (as the single-snapshot test above
+        # can't distinguish from a same-snapshot-both-sides lookup) left it
+        # unresolved and the promotion silently never fired.
+        old_libraries = {
+            "libcore.so": Path("/fake/libcore.so.1.2"),
+            "libalgo.so": Path("/fake/libalgo.so.1"),
+        }
+        new_libraries = {
+            "libcore.so": Path("/fake/libcore.so.1.3"),
+            "libalgo.so": Path("/fake/libalgo.so.1"),
+        }
+        metadata = {
+            "libcore.so": _meta(soname="libcore.so.1", exports=["core_add"]),
+            "libalgo.so": _meta(
+                soname="libalgo.so.1", needed=["libcore.so.1"], imports=["core_add"]
+            ),
+        }
+        old = BundleSnapshot(
+            root=Path("/fake"),
+            libraries=old_libraries,
+            metadata=metadata,
+            resolution=_compute_resolution_graph(old_libraries, metadata),
+        )
+        new = BundleSnapshot(
+            root=Path("/fake"),
+            libraries=new_libraries,
+            metadata=metadata,
+            resolution=_compute_resolution_graph(new_libraries, metadata),
+        )
+        diff_libcore = _diff(
+            "libcore.so.1.2",  # the OLD side's real, versioned basename
+            Change(
+                kind=ChangeKind.CALLING_CONVENTION_CHANGED,
+                symbol="core_add",
+                description="cdecl->fastcall",
+            ),
+        )
+        result = compare_bundle(old, new, [diff_libcore])
+        findings = [
+            f
+            for f in result.bundle_findings
+            if f.kind == ChangeKind.BUNDLE_INTRA_DEP_SIGNATURE_CHANGED
+        ]
+        assert len(findings) == 1
+        assert findings[0].consumer_library == "libalgo.so"
+        assert findings[0].provider_library == "libcore.so"
+
+    def test_checks_every_versioned_definition_from_the_same_provider(self) -> None:
+        # G38 stabilization (Codex review, fresh evidence): a single
+        # provider can legitimately export multiple versioned definitions
+        # of one bare symbol (the compat-symbol pattern core_add@V1
+        # alongside core_add@@V2) -- consumer_resolves_via_provider must
+        # check every one of that provider's own entries, not just the
+        # first providers_for() happens to return. Picking only the first
+        # (a non-default V1 entry) would test it against a consumer
+        # explicitly requiring V2 and wrongly conclude no match, even
+        # though the same provider's V2 entry does match.
+        libcore_meta = ElfMetadata(
+            soname="libcore.so.1",
+            needed=[],
+            symbols=[
+                ElfSymbol(
+                    name="core_add",
+                    visibility="default",
+                    version="V1",
+                    is_default=False,
+                ),
+                ElfSymbol(
+                    name="core_add",
+                    visibility="default",
+                    version="V2",
+                    is_default=True,
+                ),
+            ],
+            imports=[],
+        )
+        libalgo_meta = _meta(
+            soname="libalgo.so.1",
+            needed=["libcore.so.1"],
+            imports=["core_add"],
+            import_versions={"core_add": "V2"},
+        )
+        new = _snapshot({"libcore.so": libcore_meta, "libalgo.so": libalgo_meta})
+        diff_libcore = _diff(
+            "libcore.so",
+            Change(
+                kind=ChangeKind.CALLING_CONVENTION_CHANGED,
+                symbol="core_add",
+                description="cdecl->fastcall",
+            ),
+        )
+        result = compare_bundle(new, new, [diff_libcore])
+        findings = [
+            f
+            for f in result.bundle_findings
+            if f.kind == ChangeKind.BUNDLE_INTRA_DEP_SIGNATURE_CHANGED
+        ]
+        assert len(findings) == 1
+        assert findings[0].consumer_library == "libalgo.so"
+
+    def test_declines_to_promote_when_the_provider_is_ambiguous(self) -> None:
+        # G38 stabilization (Codex review, fresh evidence, beyond the
+        # reachability fix above): when a consumer directly NEEDs TWO
+        # DSOs that both export a matching (unversioned/default)
+        # definition of the same bare symbol, this model has no notion of
+        # real ELF symbol-search order (DT_NEEDED / global-scope
+        # precedence) to say which one the consumer's unversioned
+        # reference actually binds to -- attributing a signature change on
+        # either one to that consumer would be a guess. Both candidates
+        # must decline (ambiguous), not just avoid attributing to the
+        # unreachable-sibling case the earlier fix covers.
+        new = _snapshot(
+            {
+                "libcore.so": _meta(soname="libcore.so.1", exports=["core_add"]),
+                "libalt.so": _meta(soname="libalt.so.1", exports=["core_add"]),
+                "libalgo.so": _meta(
+                    soname="libalgo.so.1",
+                    needed=["libcore.so.1", "libalt.so.1"],
+                    imports=["core_add"],
+                ),
+            }
+        )
+        diff_libcore = _diff(
+            "libcore.so",
+            Change(
+                kind=ChangeKind.CALLING_CONVENTION_CHANGED,
+                symbol="core_add",
+                description="cdecl->fastcall",
+            ),
+        )
+        result = compare_bundle(new, new, [diff_libcore])
+        assert not any(
+            f.kind == ChangeKind.BUNDLE_INTRA_DEP_SIGNATURE_CHANGED
+            for f in result.bundle_findings
+        )
+
+    def test_does_not_promote_a_not_evaluated_finding(self) -> None:
+        # G38 stabilization (Codex review, fresh evidence): under
+        # `compare --contract ...`, a finding outside the selected
+        # contract's scope is stamped `compatibility_evaluation_status=
+        # NOT_EVALUATED` and stays in `diff.changes`, but is excluded from
+        # the per-library verdict/exit code (ADR-049). Promoting it to a
+        # bundle-level BREAKING finding would contradict that already-
+        # scored result.
+        from abicheck.contract_relevance_types import CompatibilityEvaluationStatus
+
+        new = _snapshot(
+            {
+                "libcore.so": _meta(soname="libcore.so.1", exports=["core_add"]),
+                "libalgo.so": _meta(
+                    soname="libalgo.so.1", needed=["libcore.so.1"], imports=["core_add"]
+                ),
+            }
+        )
+        change = Change(
+            kind=ChangeKind.CALLING_CONVENTION_CHANGED,
+            symbol="core_add",
+            description="cdecl->fastcall",
+            compatibility_evaluation_status=CompatibilityEvaluationStatus.NOT_EVALUATED,
+        )
+        diff_libcore = DiffResult(
+            old_version="old",
+            new_version="new",
+            library="libcore.so",
+            changes=[change],
+            verdict=Verdict.NO_CHANGE,
+        )
+        result = compare_bundle(new, new, [diff_libcore])
+        assert not any(
+            f.kind == ChangeKind.BUNDLE_INTRA_DEP_SIGNATURE_CHANGED
+            for f in result.bundle_findings
+        )
+        # An unstamped finding (no --contract in effect) is unaffected.
+        diff_libcore_unstamped = _diff(
+            "libcore.so",
+            Change(
+                kind=ChangeKind.CALLING_CONVENTION_CHANGED,
+                symbol="core_add",
+                description="cdecl->fastcall",
+            ),
+        )
+        result_unstamped = compare_bundle(new, new, [diff_libcore_unstamped])
+        assert any(
+            f.kind == ChangeKind.BUNDLE_INTRA_DEP_SIGNATURE_CHANGED
+            for f in result_unstamped.bundle_findings
+        )
+
+    def test_reachable_cache_is_not_recomputed_on_a_hit(self, monkeypatch) -> None:
+        # G38 stabilization (Codex review, fresh evidence): the earlier
+        # `reachable_cache.setdefault(lib, _reachable_intra_libraries(...))`
+        # form evaluates the BFS unconditionally regardless of cache hit
+        # (Python evaluates setdefault's default-value argument eagerly),
+        # defeating the point of caching. Two changes against the same
+        # provider, both reaching the same consumer, must trigger the BFS
+        # at most once per distinct library.
+        new = _snapshot(
+            {
+                "libcore.so": _meta(
+                    soname="libcore.so.1", exports=["core_add", "core_sub"]
+                ),
+                "libalgo.so": _meta(
+                    soname="libalgo.so.1",
+                    needed=["libcore.so.1"],
+                    imports=["core_add", "core_sub"],
+                ),
+            }
+        )
+        diff_libcore = _diff(
+            "libcore.so",
+            Change(
+                kind=ChangeKind.CALLING_CONVENTION_CHANGED,
+                symbol="core_add",
+                description="cdecl->fastcall",
+            ),
+            Change(
+                kind=ChangeKind.CALLING_CONVENTION_CHANGED,
+                symbol="core_sub",
+                description="cdecl->fastcall",
+            ),
+        )
+
+        import abicheck.bundle_resolution_reachability as reachability_mod
+
+        call_count = 0
+        real_reachable = reachability_mod.reachable_intra_libraries
+
+        def _counting_reachable(snapshot, root):
+            nonlocal call_count
+            call_count += 1
+            return real_reachable(snapshot, root)
+
+        monkeypatch.setattr(
+            reachability_mod, "reachable_intra_libraries", _counting_reachable
+        )
+
+        result = compare_bundle(new, new, [diff_libcore])
+        assert (
+            len(
+                [
+                    f
+                    for f in result.bundle_findings
+                    if f.kind == ChangeKind.BUNDLE_INTRA_DEP_SIGNATURE_CHANGED
+                ]
+            )
+            == 2
+        )
+        # One BFS per distinct library, not per (change, consumer) pair.
+        assert call_count == 1
+
+    def test_plugin_abi_policy_suppresses_calling_convention_promotion(self) -> None:
+        # G38 stabilization (Codex review, fresh evidence): CALLING_
+        # CONVENTION_CHANGED is COMPATIBLE under the plugin_abi policy
+        # (change_registry.py's own policy_overrides), but the original
+        # fix promoted it to an unconditionally-BREAKING
+        # BUNDLE_INTRA_DEP_SIGNATURE_CHANGED regardless of policy --
+        # defeating the exact override compute_verdict(policy="plugin_abi")
+        # already honors for the originating per-library finding.
+        new = _snapshot(
+            {
+                "libcore.so": _meta(soname="libcore.so.1", exports=["core_add"]),
+                "libalgo.so": _meta(
+                    soname="libalgo.so.1", needed=["libcore.so.1"], imports=["core_add"]
+                ),
+            }
+        )
+        diff_libcore = _diff(
+            "libcore.so",
+            Change(
+                kind=ChangeKind.CALLING_CONVENTION_CHANGED,
+                symbol="core_add",
+                description="cdecl->fastcall",
+            ),
+        )
+        result = compare_bundle(new, new, [diff_libcore], policy="plugin_abi")
+        assert not any(
+            f.kind == ChangeKind.BUNDLE_INTRA_DEP_SIGNATURE_CHANGED
+            for f in result.bundle_findings
+        )
+        # The default (strict_abi) policy still promotes -- this isn't a
+        # blanket regression of the Phase 5 fix, just policy-sensitive.
+        result_strict = compare_bundle(new, new, [diff_libcore])
+        assert any(
+            f.kind == ChangeKind.BUNDLE_INTRA_DEP_SIGNATURE_CHANGED
+            for f in result_strict.bundle_findings
+        )
+
+    def test_does_not_promote_when_consumer_reaches_a_different_provider(self) -> None:
+        # G38 stabilization (CodeRabbit review, fresh evidence): libcore.so
+        # and libalt.so both export core_add; libalgo.so needs only
+        # libcore.so (never libalt.so). libalt.so's own signature change
+        # must not attribute a promoted finding to libalgo.so -- that
+        # consumer never actually resolves core_add against libalt.so.
+        new = _snapshot(
+            {
+                "libcore.so": _meta(soname="libcore.so.1", exports=["core_add"]),
+                "libalt.so": _meta(soname="libalt.so.1", exports=["core_add"]),
+                "libalgo.so": _meta(
+                    soname="libalgo.so.1", needed=["libcore.so.1"], imports=["core_add"]
+                ),
+            }
+        )
+        diff_libalt = _diff(
+            "libalt.so",
+            Change(
+                kind=ChangeKind.CALLING_CONVENTION_CHANGED,
+                symbol="core_add",
+                description="cdecl->fastcall",
+            ),
+        )
+        result = compare_bundle(new, new, [diff_libalt])
+        assert not any(
+            f.kind == ChangeKind.BUNDLE_INTRA_DEP_SIGNATURE_CHANGED
+            for f in result.bundle_findings
+        )
+
+    def test_promotes_only_to_the_consumer_reaching_the_changed_provider(
+        self,
+    ) -> None:
+        # Sibling of the negative case above: when a consumer genuinely
+        # NEEDs the provider whose signature changed, promotion still
+        # fires for that consumer, even with an unrelated same-named
+        # export sitting elsewhere in the bundle.
+        new = _snapshot(
+            {
+                "libcore.so": _meta(soname="libcore.so.1", exports=["core_add"]),
+                "libalt.so": _meta(soname="libalt.so.1", exports=["core_add"]),
+                "libalgo.so": _meta(
+                    soname="libalgo.so.1", needed=["libcore.so.1"], imports=["core_add"]
+                ),
+            }
+        )
+        diff_libcore = _diff(
+            "libcore.so",
+            Change(
+                kind=ChangeKind.CALLING_CONVENTION_CHANGED,
+                symbol="core_add",
+                description="cdecl->fastcall",
+            ),
+        )
+        result = compare_bundle(new, new, [diff_libcore])
+        findings = [
+            f
+            for f in result.bundle_findings
+            if f.kind == ChangeKind.BUNDLE_INTRA_DEP_SIGNATURE_CHANGED
+        ]
+        assert len(findings) == 1
+        assert findings[0].consumer_library == "libalgo.so"
+        assert findings[0].provider_library == "libcore.so"
+
+    def test_honors_policy_file_override_before_promotion(self) -> None:
+        # G38 stabilization (Codex review, fresh evidence): a custom
+        # PolicyFile override demoting a promotable kind is resolved
+        # through a separate path from a named base policy
+        # (PolicyFile.compute_verdict, not Change.effective_verdict), so
+        # policy_kind_sets(policy) alone can't see it -- promotion must
+        # consult the originating diff's own policy_file too.
+        from abicheck.policy_file import PolicyFile
+
+        new = _snapshot(
+            {
+                "libcore.so": _meta(soname="libcore.so.1", exports=["core_add"]),
+                "libalgo.so": _meta(
+                    soname="libalgo.so.1", needed=["libcore.so.1"], imports=["core_add"]
+                ),
+            }
+        )
+        policy_file = PolicyFile(
+            overrides={ChangeKind.FUNC_VARIADIC_ADDED: Verdict.COMPATIBLE}
+        )
+        change = Change(
+            kind=ChangeKind.FUNC_VARIADIC_ADDED,
+            symbol="core_add",
+            description="gained ...",
+        )
+        diff_libcore = DiffResult(
+            old_version="old",
+            new_version="new",
+            library="libcore.so",
+            changes=[change],
+            verdict=Verdict.COMPATIBLE,
+            policy_file=policy_file,
+        )
+        result = compare_bundle(new, new, [diff_libcore])
+        assert not any(
+            f.kind == ChangeKind.BUNDLE_INTRA_DEP_SIGNATURE_CHANGED
+            for f in result.bundle_findings
+        )
+        # Without the override, the same kind promotes under strict_abi.
+        diff_libcore_no_override = DiffResult(
+            old_version="old",
+            new_version="new",
+            library="libcore.so",
+            changes=[change],
+            verdict=Verdict.BREAKING,
+        )
+        result_no_override = compare_bundle(new, new, [diff_libcore_no_override])
+        assert any(
+            f.kind == ChangeKind.BUNDLE_INTRA_DEP_SIGNATURE_CHANGED
+            for f in result_no_override.bundle_findings
         )
 
 

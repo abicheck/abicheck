@@ -73,18 +73,23 @@ from .bundle_manifest import (  # noqa: F401  (re-exported for back-compat)
 )
 from .bundle_models import (  # noqa: F401  (re-exported for back-compat)
     DEFAULT_SYSTEM_PROVIDERS as DEFAULT_SYSTEM_PROVIDERS,
+    PROMOTABLE_C_BOUNDARY_SIGNATURE_BREAK_KINDS,
     BundleDiffResult as BundleDiffResult,
     BundleFinding as BundleFinding,
     BundleSnapshot as BundleSnapshot,
     ConsumerEntry as ConsumerEntry,
     ProviderEntry as ProviderEntry,
     ResolutionGraph as ResolutionGraph,
+    basename_to_bundle_key,
+    consumer_resolves_via_provider as _consumer_resolves_via_provider,
+    diff_change_is_breaking as _diff_change_is_breaking,
 )
 from .bundle_resolution_reachability import (
+    cached_reachable_intra_libraries as _cached_reachable_intra_libraries,
     reachable_intra_libraries as _reachable_intra_libraries,
 )
 from .bundle_soname import hard_link_alias_basenames, soname_matches_providers
-from .checker_policy import ChangeKind, Verdict, compute_verdict
+from .checker_policy import ChangeKind, Verdict, compute_verdict, policy_kind_sets
 from .checker_types import DiffResult
 from .elf_metadata import ElfMetadata, ElfSymbol, SymbolBinding, parse_elf_metadata
 
@@ -793,15 +798,21 @@ def compare_bundle(
     sys_libs = set(DEFAULT_SYSTEM_PROVIDERS) | explicit_providers
     findings: list[BundleFinding] = []
 
-    # Index per-library diff results by canonical basename. This is the
-    # same key the resolution graph uses for libraries (see
-    # build_bundle_snapshot's `libraries` dict), so look-ups in the
-    # detectors agree. We canonicalise once instead of double-indexing —
-    # double-indexing caused detectors to iterate the same DiffResult
-    # twice when DiffResult.library happened to differ from its basename.
+    # Index per-library diff results by the resolution graph's own
+    # bundle-canonical key, not the raw (possibly SONAME-versioned)
+    # on-disk basename -- see `basename_to_bundle_key`'s own docstring
+    # (G38 plan doc Phase 5). Canonicalise once instead of double-indexing.
+    #
+    # Merge OLD+NEW maps (Codex review): `checker.compare()` sets
+    # `DiffResult.library = old.library`, so a versioned basename that
+    # changed between old and new (`libcore.so.1.2` -> `.1.3`) only
+    # resolves through `old`'s own map. New wins a collision -- it's what
+    # the resolution graph these keys feed into was built from.
+    basename_to_key = {**basename_to_bundle_key(old), **basename_to_bundle_key(new)}
     diff_by_library: dict[str, DiffResult] = {}
     for result in per_library_results:
-        canonical = Path(result.library).name
+        basename = Path(result.library).name
+        canonical = basename_to_key.get(basename, basename)
         diff_by_library.setdefault(canonical, result)
 
     # 1. bundle_library_removed / bundle_library_added (structural)
@@ -810,10 +821,9 @@ def compare_bundle(
     # 2. bundle_intra_dep_removed: an import in the new bundle has no provider.
     findings.extend(_detect_intra_dep_removed(old, new, sys_libs, explicit_providers))
 
-    # 3. bundle_intra_dep_signature_changed: provider's per-library diff
-    #    flagged func_params_changed / func_return_changed / var_type_changed
-    #    on a symbol some sibling imports.
-    findings.extend(_detect_intra_dep_signature_changed(new, diff_by_library))
+    # 3. bundle_intra_dep_signature_changed: a promotable confirmed change
+    #    on a symbol some sibling imports (see that function's docstring).
+    findings.extend(_detect_intra_dep_signature_changed(new, diff_by_library, policy))
 
     # 4. bundle_intra_type_changed: a type_*_changed touches a type that
     #    appears in a public symbol of a sibling library.
@@ -1152,29 +1162,44 @@ def _detect_unresolved_intra_dependency(
 def _detect_intra_dep_signature_changed(
     new: BundleSnapshot,
     diff_by_library: dict[str, DiffResult],
+    policy: str = "strict_abi",
 ) -> list[BundleFinding]:
     """Promote provider-side signature changes to consumer-side findings.
 
-    For each per-library ``func_params_changed`` / ``func_return_changed``
-    / ``var_type_changed``, look up which siblings import that symbol in
-    the new bundle and emit one finding per (consumer, symbol) pair.
-    Multiple change kinds against the same symbol collapse into one
-    finding to avoid double-counting params+return changes.
+    For each confirmed *promotable* C-boundary signature break
+    (:data:`~abicheck.bundle_models.PROMOTABLE_C_BOUNDARY_SIGNATURE_BREAK_
+    KINDS`, a strict subset of ``CONFIRMED_C_BOUNDARY_SIGNATURE_BREAK_
+    KINDS``), find siblings importing the symbol that *actually resolve it
+    against this provider* (:func:`_consumer_resolves_via_provider`),
+    emitting one finding per (consumer, symbol) pair. *policy*: a
+    named-policy demotion and a ``--policy-file`` override on the diff are
+    both honored, via :func:`_diff_change_is_breaking`.
     """
     findings: list[BundleFinding] = []
     seen: set[tuple[str, str, str]] = set()
-    relevant_kinds = {
-        ChangeKind.FUNC_PARAMS_CHANGED,
-        ChangeKind.FUNC_RETURN_CHANGED,
-        ChangeKind.VAR_TYPE_CHANGED,
-    }
+    relevant_kinds = PROMOTABLE_C_BOUNDARY_SIGNATURE_BREAK_KINDS
+    policy_sets = policy_kind_sets(policy)
+    reachable_cache: dict[str, set[str]] = {}
+
+    def _reachable(lib: str) -> set[str]:
+        return _cached_reachable_intra_libraries(new, reachable_cache, lib)
+
     for provider_lib, diff in diff_by_library.items():
         for change in diff.changes:
             if change.kind not in relevant_kinds:
                 continue
+            if not _diff_change_is_breaking(diff, change, policy_sets):
+                continue
             consumers = new.resolution.consumers_of(change.symbol)
             consumer_libs = sorted(
-                {c.library for c in consumers if c.library != provider_lib}
+                {
+                    c.library
+                    for c in consumers
+                    if c.library != provider_lib
+                    and _consumer_resolves_via_provider(
+                        new, c, provider_lib, change.symbol, _reachable(c.library)
+                    )
+                }
             )
             if not consumer_libs:
                 continue

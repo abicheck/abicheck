@@ -61,3 +61,20 @@ def reachable_intra_libraries(snapshot: BundleSnapshot, root: str) -> set[str]:
             seen.add(target)
             queue.append(target)
     return seen
+
+
+def cached_reachable_intra_libraries(
+    snapshot: BundleSnapshot, cache: dict[str, set[str]], root: str
+) -> set[str]:
+    """Memoized :func:`reachable_intra_libraries`, using *cache* as the
+    memo table (one BFS per distinct *root* across repeated calls).
+
+    Deliberately **not** ``cache.setdefault(root, reachable_intra_libraries(...))``
+    (Codex review, fresh evidence): a `dict.setdefault` call's default-value
+    argument is evaluated unconditionally by Python, before the key
+    membership check -- that would run the full BFS on every call
+    regardless of cache hit, defeating the memoization entirely.
+    """
+    if root not in cache:
+        cache[root] = reachable_intra_libraries(snapshot, root)
+    return cache[root]

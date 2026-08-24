@@ -35,6 +35,7 @@ from typing import TYPE_CHECKING
 import click
 
 from .bundle import BundleDiffResult, render_bundle_findings_markdown
+from .bundle_models import BundleSignatureEvidence
 from .checker import DiffResult
 from .model import AbiSnapshot
 
@@ -157,8 +158,8 @@ def _run_bundle_analysis(
     bundle_system_providers: str,
     bundle_cohorts: tuple[str, ...] = (),
     policy: str = "strict_abi",
-    old_snapshots: dict[str, AbiSnapshot] | None = None,
-    new_snapshots: dict[str, AbiSnapshot] | None = None,
+    old_snapshots: dict[str, AbiSnapshot | BundleSignatureEvidence] | None = None,
+    new_snapshots: dict[str, AbiSnapshot | BundleSignatureEvidence] | None = None,
 ) -> BundleDiffResult | None:
     """Run bundle-level (ADR-023) analysis on a compare-release run.
 
@@ -166,8 +167,16 @@ def _run_bundle_analysis(
     :func:`_compare_release_libraries` — no second per-pair compare pass.
 
     Returns None when there is nothing to analyze (e.g. all libraries
-    failed to dump). Errors during analysis are caught and reported as a
-    warning rather than aborting; bundle analysis is additive.
+    failed to dump, or the bundle snapshot itself could not be built --
+    the two cases a caller has no meaningful ``BundleDiffResult`` to
+    inspect regardless). Errors during analysis are caught and reported
+    as a warning rather than aborting; bundle analysis is additive. A
+    failure in ``compare_bundle()`` itself or in the Phase 4
+    signature-evidence check is additionally recorded structurally, in
+    the returned result's own ``analysis_errors`` (G38 stabilization
+    Phase 11 / P0-D), so a JSON/Markdown report consumer can tell
+    "bundle analysis ran clean" apart from "ran, but degraded" without
+    grepping stderr.
 
     *old_snapshots*/*new_snapshots* (G38 Phase 4), when both given and
     non-empty, additionally run
@@ -228,10 +237,16 @@ def _run_bundle_analysis(
         )
     except Exception as exc:
         # Analysis-engine bugs should not block the per-library report;
-        # surface as a warning. Future work: surface as a coverage_warning
-        # in the JSON output so downstream CI can detect degradation.
+        # surface as a warning *and* structurally, in the returned result's
+        # own `analysis_errors` (G38 stabilization Phase 11), so a JSON
+        # report consumer isn't limited to grepping stderr to tell "clean"
+        # apart from "degraded".
         click.echo(f"Warning: bundle analysis raised: {exc}", err=True)
-        return BundleDiffResult(old_root=old_snap.root, new_root=new_snap.root)
+        return BundleDiffResult(
+            old_root=old_snap.root,
+            new_root=new_snap.root,
+            analysis_errors=[f"bundle analysis raised: {exc}"],
+        )
 
     if old_snapshots and new_snapshots:
         # G38 Phase 4: run separately from compare_bundle() itself (a
@@ -254,6 +269,9 @@ def _run_bundle_analysis(
             click.echo(
                 f"Warning: bundle signature-evidence check raised: {exc}",
                 err=True,
+            )
+            result.analysis_errors.append(
+                f"bundle signature-evidence check raised: {exc}"
             )
 
     return result
@@ -549,10 +567,22 @@ def _collect_bundle_result(
     bundle_cohorts: tuple[str, ...] = (),
     policy: str = "strict_abi",
 ) -> tuple[BundleDiffResult | None, str]:
-    """Extract stashed DiffResults, run bundle analysis, update worst verdict."""
+    """Extract stashed DiffResults, run bundle analysis, update worst verdict.
+
+    Each entry carries *either* the full ``_old_snapshot``/``_new_snapshot``
+    (JUnit/``--bundle-facts-out`` in effect) *or* the much smaller
+    ``_old_bundle_evidence``/``_new_bundle_evidence`` (G38 stabilization
+    Phase 9's memory fix — see :class:`~abicheck.bundle_models.
+    BundleSignatureEvidence`) — never both, per
+    ``cli_compare_release._compare_one_library``'s own stash logic. Either
+    is duck-type compatible with what
+    :func:`~abicheck.bundle_signature_evidence.find_unverified_signature_
+    findings` reads, so both are folded into the same ``old_snapshots``/
+    ``new_snapshots`` mapping this function has always built.
+    """
     stashed_diffs: list[DiffResult] = []
-    old_snapshots: dict[str, AbiSnapshot] = {}
-    new_snapshots: dict[str, AbiSnapshot] = {}
+    old_snapshots: dict[str, AbiSnapshot | BundleSignatureEvidence] = {}
+    new_snapshots: dict[str, AbiSnapshot | BundleSignatureEvidence] = {}
     for entry in library_results:
         if not isinstance(entry, dict):
             continue
@@ -560,12 +590,12 @@ def _collect_bundle_result(
         if isinstance(diff, DiffResult):
             stashed_diffs.append(diff)
         bundle_key = entry.get("_bundle_key")
-        old_snap = entry.get("_old_snapshot")
-        new_snap = entry.get("_new_snapshot")
+        old_snap = entry.get("_old_snapshot") or entry.get("_old_bundle_evidence")
+        new_snap = entry.get("_new_snapshot") or entry.get("_new_bundle_evidence")
         if (
             isinstance(bundle_key, str)
-            and isinstance(old_snap, AbiSnapshot)
-            and isinstance(new_snap, AbiSnapshot)
+            and isinstance(old_snap, (AbiSnapshot, BundleSignatureEvidence))
+            and isinstance(new_snap, (AbiSnapshot, BundleSignatureEvidence))
         ):
             old_snapshots[bundle_key] = old_snap
             new_snapshots[bundle_key] = new_snap
@@ -802,8 +832,18 @@ def _fold_release_global_severity(
     worst = base_code
     if bundle_result is not None and bundle_result.bundle_findings:
         # Bundle findings carry canonical (partitioned) ChangeKinds.
+        # G38 stabilization Phase 10 (Codex review, fresh evidence): this
+        # omitted `policy=` entirely, unlike the matrix_result branch right
+        # below it -- so a policy that reclassifies a bundle kind (e.g.
+        # `plugin_abi` demoting `calling_convention_changed`, which
+        # `BundleDiffResult.bundle_verdict` already honors via its own
+        # `.policy` field) never reached the severity-aware exit code,
+        # letting the displayed verdict and the process exit disagree.
         bundle_changes = [f.to_change() for f in bundle_result.bundle_findings]
-        worst = max(worst, compute_exit_code(bundle_changes, config))
+        worst = max(
+            worst,
+            compute_exit_code(bundle_changes, config, policy=bundle_result.policy),
+        )
     if matrix_result is not None and matrix_result.changes:
         worst = max(
             worst,
@@ -1087,6 +1127,16 @@ def _format_release_json(
             }
             for f in bundle_result.bundle_findings
         ]
+        # G38 P0-D: surface a bundle-analysis-step failure structurally
+        # instead of only as a stderr `click.echo`, so a JSON-consuming
+        # caller (CI gate, PR-comment renderer) can tell "bundle analysis
+        # ran clean" apart from "bundle analysis partially failed, treat
+        # bundle_verdict/bundle_findings as a possibly-incomplete view" --
+        # present only when non-empty, matching this file's established
+        # "present only when active" convention for the other optional
+        # summary keys above.
+        if bundle_result.analysis_errors:
+            summary["bundle_analysis_errors"] = list(bundle_result.analysis_errors)
     if matrix_result is not None:
         # Release-global build-configuration findings (G2: probe matrix).
         # `.changes` is post-suppression, so suppressed findings are
@@ -1249,15 +1299,26 @@ def _release_md_changed_libraries(
 
 
 def _release_md_bundle_findings(bundle_result: BundleDiffResult | None) -> list[str]:
-    """Markdown section for cross-library (bundle) findings."""
+    """Markdown section for cross-library (bundle) findings.
+
+    G38 P0-D: a partial ``analysis_errors`` warning is rendered even when
+    ``bundle_findings`` is empty -- an empty finding list after a raised
+    exception means "nothing was checked", not "nothing was found", and a
+    reader must not conflate the two.
+    """
+    lines: list[str] = []
+    if bundle_result is not None and bundle_result.analysis_errors:
+        lines += ["", "## ⚠️ Bundle Analysis Warnings", ""]
+        lines += [f"- {msg}" for msg in bundle_result.analysis_errors]
     if bundle_result is None or not bundle_result.bundle_findings:
-        return []
-    return [
+        return lines
+    lines += [
         "",
         "## 🔗 Bundle (Cross-Library) Findings",
         "",
         *render_bundle_findings_markdown(bundle_result.bundle_findings),
     ]
+    return lines
 
 
 def _release_md_matrix_findings(matrix_result: DiffResult | None) -> list[str]:
