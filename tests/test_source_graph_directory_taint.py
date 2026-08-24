@@ -728,3 +728,40 @@ def test_normalization_known_limitation_same_basename_different_directory() -> N
     new = _type_node_id("lambda at /repo/include/v2/config.hpp:4:37")
     # Known-bad: two genuinely distinct declarations collide onto one node id.
     assert old == new
+
+
+def test_constructor_seeded_graph_normalizes_ids_and_endpoints() -> None:
+    # SourceGraphSummary(nodes=..., edges=...) built directly (bypassing
+    # add_node/add_edge, and never routing through _decl_node_id/_type_node_id) must
+    # normalize a hand-built decl/type id/endpoint the same way GraphNode/GraphEdge.
+    # from_dict() already migrate a persisted one (Codex review, fresh evidence,
+    # fourteenth round) -- otherwise two checkout-equivalent nodes built this way get
+    # different ids/graph ids and their labels misleadingly become identical (only the
+    # label was normalized, not the id).
+    from abicheck.buildsource.graph_facts import GraphEdge, GraphNode
+    from abicheck.buildsource.source_graph import SourceGraphSummary
+
+    old_id = "type://lambda at /old/checkout/lib.hpp:4:37"
+    new_id = "type://lambda at /new/checkout/lib.hpp:4:37"
+    old_graph = SourceGraphSummary(
+        nodes=[GraphNode(id=old_id, kind="record_type", label=old_id)],
+        edges=[GraphEdge(src="decl://foo", dst=old_id, kind="DECL_HAS_TYPE")],
+    )
+    new_graph = SourceGraphSummary(
+        nodes=[GraphNode(id=new_id, kind="record_type", label=new_id)],
+        edges=[GraphEdge(src="decl://foo", dst=new_id, kind="DECL_HAS_TYPE")],
+    )
+    assert old_graph.nodes[0].id == new_graph.nodes[0].id
+    assert old_graph.edges[0].dst == new_graph.edges[0].dst
+    assert old_graph.compute_graph_id() == new_graph.compute_graph_id()
+
+    # Two constructor-seeded nodes colliding only after normalization coalesce into
+    # one, rather than desyncing the id index from len(self.nodes).
+    collided = SourceGraphSummary(
+        nodes=[
+            GraphNode(id=old_id, kind="record_type", label=old_id),
+            GraphNode(id=new_id, kind="record_type", label=new_id),
+        ]
+    )
+    assert len(collided.nodes) == 1
+    assert collided.has_node(collided.nodes[0].id)

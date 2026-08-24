@@ -70,6 +70,7 @@ from .graph_facts import (
     GraphNode as GraphNode,
     _decl_node_id as _decl_node_id,
     _normalize_graph_identity as _normalize_graph_identity,
+    _normalize_if_decl_or_type,
     _type_node_id as _type_node_id,
     ensure_facts_and_resolve,
     merge_entity_facts,
@@ -282,34 +283,34 @@ class SourceGraphSummary:
     entity_resolver: EntityResolver = field(default_factory=EntityResolver)
 
     def __post_init__(self) -> None:
-        # ADR-046 D2: backfill/re-derive facts/resolved for anything constructed directly
-        # (bypassing add_node/add_edge), so every node reachable from this summary satisfies
-        # "facts is never empty, resolved is derived from facts". Must run *before* the
-        # de-dup indexes below (Codex review, fresh evidence): a constructor-seeded edge
-        # whose role lives only in `facts` (not yet mirrored into `attrs`) would otherwise
-        # have its `relation_key()` computed against an empty `attrs`/`resolved` view,
-        # indexing it under the wrong (blank-role) key before resolution ever populates it.
+        # Normalize a constructor-seeded node id/edge endpoint the same way GraphNode/
+        # GraphEdge.from_dict() already migrate a persisted one (Codex review): a caller
+        # building SourceGraphSummary(nodes=..., edges=...) directly never routes through
+        # _decl_node_id/_type_node_id either, so a hand-built id can carry the identical
+        # checkout-dependent marker. No-op for every non-decl/type id (its own gate).
         for n in self.nodes:
-            ensure_facts_and_resolve(n)
+            n.id = _normalize_if_decl_or_type(n.id)
         for e in self.edges:
-            ensure_facts_and_resolve(e)
-        # De-dup indexes for O(1) add_node/add_edge, seeded from whatever the constructor
-        # (or from_dict) provided. Edges dedup on relation_key() (src, dst, kind, role), not
-        # the coarser key() (ADR-046 D1, Codex review on PR #620): deduping on key() alone
-        # silently folded two real, role-distinct relations -- e.g. a function that both
-        # returns and takes the same private type, two DECL_HAS_TYPE edges -- into one edge
-        # object, so only one role ever survived to be found via relation_key() by anything
-        # walking graph.edges. key() itself is untouched (still (src, dst, kind));
-        # diff_source_graph's coarser edge-set comparison keeps its pre-existing "one
-        # representative edge per (src, dst, kind)" precision either way.
-        self._node_ids: set[str] = {n.id for n in self.nodes}
-        self._edge_keys: set[tuple[str, str, str, str]] = {
-            e.relation_key() for e in self.edges
-        }
-        self._node_by_id: dict[str, GraphNode] = {n.id: n for n in self.nodes}
-        self._edge_by_key: dict[tuple[str, str, str, str], GraphEdge] = {
-            e.relation_key(): e for e in self.edges
-        }
+            e.src = _normalize_if_decl_or_type(e.src)
+            e.dst = _normalize_if_decl_or_type(e.dst)
+        # Re-register through add_node()/add_edge() rather than building the de-dup indexes
+        # directly (same round): normalization above can make two originally-distinct ids
+        # collide, and a plain set/dict comprehension would then disagree with
+        # len(self.nodes)/len(self.edges) -- the same "index vs list" desync from_dict()
+        # already fixed by routing every loaded entity through this coalescing path (also
+        # resolves facts, and computes an edge's relation_key() only after resolution, not
+        # against an empty view). A no-op for the common case: on a fresh id this just
+        # resolves+appends, identical to a direct index construction.
+        seeded_nodes, seeded_edges = self.nodes, self.edges
+        self.nodes, self.edges = [], []
+        self._node_ids: set[str] = set()
+        self._edge_keys: set[tuple[str, str, str, str]] = set()
+        self._node_by_id: dict[str, GraphNode] = {}
+        self._edge_by_key: dict[tuple[str, str, str, str], GraphEdge] = {}
+        for n in seeded_nodes:
+            self.add_node(n)
+        for e in seeded_edges:
+            self.add_edge(e)
 
     # -- mutation helpers ---------------------------------------------------
 
