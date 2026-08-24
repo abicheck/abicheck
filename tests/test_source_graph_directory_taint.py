@@ -711,3 +711,20 @@ def test_template_instantiation_node_loaded_from_persisted_pack_migrates_and_nor
     )
     assert node.id == fresh_id
     assert "/old/checkout" not in node.label
+
+
+def test_normalization_known_limitation_same_basename_different_directory() -> None:
+    # Accepted, pre-existing residual (Codex review, fresh evidence, thirteenth
+    # round -- see _normalize_graph_identity's own docstring for the full
+    # reasoning): two DIFFERENT headers sharing both a basename and the identical
+    # coordinates collapse onto the same discriminator, since the discriminator is
+    # basename-only (no checkout-relative path information is available to a pure
+    # string-pattern normalizer). This is a pre-existing limitation of
+    # name_classification._declaring_header_discriminator, inherited here rather
+    # than introduced by this module -- pinned as a known limitation, not a
+    # passing correctness guarantee, so a future redesign of that shared
+    # primitive doesn't have to rediscover this shape from scratch.
+    old = _type_node_id("lambda at /repo/include/v1/config.hpp:4:37")
+    new = _type_node_id("lambda at /repo/include/v2/config.hpp:4:37")
+    # Known-bad: two genuinely distinct declarations collide onto one node id.
+    assert old == new

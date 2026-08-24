@@ -992,6 +992,25 @@ def _normalize_graph_identity(identity: str) -> str:
     real-world evidence -- not either producer's own documented output
     contract -- tells us which one a given decl/type identity actually
     carries by the time it reaches this package.
+
+    **Accepted, pre-existing residual (Codex review, fresh evidence,
+    thirteenth round)**: the marker's own discriminator (basename +
+    ``:line:col``, via ``name_classification._declaring_header_discriminator``
+    -- see that function's own docstring) cannot distinguish two DIFFERENT
+    headers that share both a basename and the identical coordinates (e.g.
+    ``include/v1/config.hpp:4:37`` vs. ``include/v2/config.hpp:4:37``). For
+    L5 this is a materially sharper consequence than for the pre-existing L2
+    caller: ``SourceGraphSummary.add_node`` dedups strictly by id, so a
+    genuine collision here merges two structurally distinct declarations
+    into one node/edge set, not merely a display-string coincidence. Not
+    fixed here: closing it needs real, checkout-relative path information
+    (a known project/source root to relativize against) that a pure
+    string-pattern normalizer has no way to obtain -- the identical
+    structural ceiling ``_declaring_header_discriminator``'s own docstring
+    already accepts for its L2 caller, and this module reuses that same
+    primitive rather than inventing a second, differently-limited one. A
+    fix would be a real, cross-cutting redesign of a primitive shared with
+    the L2 backend, not a scoped change to this L5-specific caller.
     """
     return _strip_bare_anonymous_type_location(strip_anonymous_type_location(identity))
 
