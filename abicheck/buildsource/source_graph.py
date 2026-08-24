@@ -218,32 +218,28 @@ class SourceGraphSummary:
     edges: list[GraphEdge] = field(default_factory=list)
     coverage: dict[str, Any] = field(default_factory=dict)
     external_graph_refs: list[dict[str, Any]] = field(default_factory=list)
-    #: Which named extractor passes ran to completion (``"call_graph"`` /
-    #: ``"type_graph"``), independent of how many edges they produced (ADR-041
-    #: P0 slice 2 follow-up, second Codex review). Edge *presence* alone cannot
-    #: distinguish "the pass ran and found nothing" from "the pass never ran" —
-    #: a project where no public struct happens to have a private field would
-    #: look identical to one whose type-graph pass never executed, even though
-    #: only the second is actually missing evidence. Set by
-    #: ``inline._fold_call_graph``/``_fold_type_graph`` right after a
-    #: successful extraction (regardless of edge count); absent/``False`` means
-    #: "unknown whether it ran" (e.g. a hand-built or pre-slice-2 graph), so
-    #: readers fall back to edge-presence inference for those.
+    #: Which named extractor passes ran to completion (``"call_graph"`` / ``"type_graph"``),
+    #: independent of how many edges they produced (ADR-041 P0 slice 2 follow-up, second Codex
+    #: review). Edge *presence* alone cannot distinguish "the pass ran and found nothing" from
+    #: "the pass never ran" — a project where no public struct happens to have a private field
+    #: would look identical to one whose type-graph pass never executed, even though only the
+    #: second is actually missing evidence. Set by ``inline._fold_call_graph``/
+    #: ``_fold_type_graph`` right after a successful extraction (regardless of edge count);
+    #: absent/``False`` means "unknown whether it ran" (e.g. a hand-built or pre-slice-2
+    #: graph), so readers fall back to edge-presence inference for those.
     extractor_passes: dict[str, bool] = field(default_factory=dict)
     #: Which named extractor passes ran, but only over a *narrowed* scope
-    #: (``changed_paths``/``scoped_units`` restricting ``_fold_call_graph``/
-    #: ``_fold_type_graph`` to a subset of compile units — eleventh Codex
-    #: review). A narrowed pass never sets ``extractor_passes`` for that name
-    #: (it did not examine the whole project), but it still serializes
-    #: whatever edges it *did* collect from the subset it saw. Those edges
-    #: must not be treated as full-family coverage when compared against a
-    #: side that ran a confirmed *full* pass — a baseline scoped to a few
-    #: changed TUs having one ``TYPE_HAS_FIELD_TYPE`` edge says nothing about
-    #: whether the rest of the project's dependencies were ever inspected, so
-    #: comparing it as if that kind were fully covered lets unrelated,
-    #: never-examined dependencies read as "newly added". Set alongside (in
-    #: place of) ``extractor_passes`` by ``inline._fold_call_graph``/
-    #: ``_fold_type_graph`` when the local ``narrowed`` flag is ``True``.
+    #: (``changed_paths``/``scoped_units`` restricting ``_fold_call_graph``/``_fold_type_graph``
+    #: to a subset of compile units — eleventh Codex review). A narrowed pass never sets
+    #: ``extractor_passes`` for that name (it did not examine the whole project), but it still
+    #: serializes whatever edges it *did* collect from the subset it saw. Those edges must not
+    #: be treated as full-family coverage when compared against a side that ran a confirmed
+    #: *full* pass — a baseline scoped to a few changed TUs having one ``TYPE_HAS_FIELD_TYPE``
+    #: edge says nothing about whether the rest of the project's dependencies were ever
+    #: inspected, so comparing it as if that kind were fully covered lets unrelated, never-
+    #: examined dependencies read as "newly added". Set alongside (in place of)
+    #: ``extractor_passes`` by ``inline._fold_call_graph``/``_fold_type_graph`` when the local
+    #: ``narrowed`` flag is ``True``.
     narrowed_passes: dict[str, bool] = field(default_factory=dict)
     #: The actual scope a narrowed pass was restricted to — the ``changed_paths``
     #: tuple, or the examined compile units' source paths for an unseeded
@@ -258,13 +254,12 @@ class SourceGraphSummary:
     #: narrowed to this *identical* (non-empty) scope; set alongside
     #: ``narrowed_passes`` by ``inline._fold_call_graph``/``_fold_type_graph``.
     narrowed_scope: dict[str, frozenset[str]] = field(default_factory=dict)
-    #: Which named extractor passes hit per-TU diagnostics — a clang crash/
-    #: timeout/degenerate AST on some subset (sixteenth Codex review). Such a
-    #: run (narrowed or not) still folds edges from the TUs that *did* parse,
-    #: but those edges must not vouch for "this kind was examined" over
-    #: whatever scope the pass claims: the failed TUs are an unknown,
-    #: untracked gap (unlike ``narrowed_scope``, which knows exactly which TUs
-    #: a deliberately-scoped run examined). Set by ``inline._fold_call_graph``/
+    #: Which named extractor passes hit per-TU diagnostics — a clang crash/timeout/degenerate
+    #: AST on some subset (sixteenth Codex review). Such a run (narrowed or not) still folds
+    #: edges from the TUs that *did* parse, but those edges must not vouch for "this kind was
+    #: examined" over whatever scope the pass claims: the failed TUs are an unknown, untracked
+    #: gap (unlike ``narrowed_scope``, which knows exactly which TUs a deliberately-scoped run
+    #: examined). Set by ``inline._fold_call_graph``/
     #: ``_fold_type_graph``/``cli_buildsource_helpers._collect_call_graph``
     #: whenever the pass examined units but ``extractor.diagnostics`` was
     #: non-empty (mutually exclusive with ``extractor_passes``/``narrowed_passes``,
@@ -302,6 +297,13 @@ class SourceGraphSummary:
             self.add_node(n)
         for e in seeded_edges:
             self.add_edge(e)
+        # A caller-supplied entity_resolver (Codex review) is still keyed by pre-normalization
+        # ids here -- a plain remap alone was already insufficient for the identical
+        # from_dict() case (a stale value can survive node coalescing), so this rebuilds it
+        # the same way, from the now-registered nodes. Gated on non-empty so a caller passing
+        # none doesn't pay for it by default.
+        if self.entity_resolver.aliases:
+            self.resolve_entities()
 
     # -- mutation helpers ---------------------------------------------------
 
@@ -859,15 +861,13 @@ def is_consumer_compiled_public_entry(
     return is_consumer_compiled_node(node_id, node_by_id)
 
 
-#: ``provenance`` tag ``augment_graph_with_calls`` (``call_graph.py``) stamps
-#: on a fallback node it creates for a caller/callee identity with no other
-#: declaration node backing it — the one node shape known to lack a
-#: ``consumer_compiled_body`` attr while still representing a genuine,
-#: build-integrated (out-of-line, not-necessarily-consumer-compiled) project
-#: declaration, as opposed to "no signal available" (header-graph/type nodes,
-#: synthetic test fixtures, …) which stays permissive by default. Mirrored as
-#: a literal string rather than imported from ``call_graph.py`` to avoid
-#: coupling this module to that one's internal constant.
+#: ``provenance`` tag ``augment_graph_with_calls`` (``call_graph.py``) stamps on a fallback
+#: node it creates for a caller/callee identity with no other declaration node backing it —
+#: the one node shape known to lack a ``consumer_compiled_body`` attr while still representing
+#: a genuine, build-integrated (out-of-line, not-necessarily-consumer-compiled) project
+#: declaration, as opposed to "no signal available" (header-graph/type nodes, synthetic test
+#: fixtures, …) which stays permissive by default. Mirrored as a literal string rather than
+#: imported from ``call_graph.py`` to avoid coupling this module to that one's own constant.
 _CALL_GRAPH_FALLBACK_PROVENANCE = "call_graph"
 
 #: Same shape as :data:`_CALL_GRAPH_FALLBACK_PROVENANCE`, for external

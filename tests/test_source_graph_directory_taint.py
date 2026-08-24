@@ -818,3 +818,28 @@ def test_normalize_graph_identity_fast_path_is_safe_and_effective() -> None:
     new = _normalize_graph_identity("lambda at /new/checkout/lib.hpp:4:37")
     assert old == new
     assert "/old/checkout" not in old
+
+
+def test_constructor_seeded_entity_resolver_is_rebuilt_after_normalization() -> None:
+    # SourceGraphSummary(nodes=..., entity_resolver=...) built directly with a
+    # caller-supplied resolver must have that resolver rebuilt against the
+    # normalized/coalesced nodes, the same way from_dict() already rebuilds a
+    # persisted resolver after migration (Codex review, fresh evidence, eighteenth
+    # round) -- otherwise the resolver stays keyed by the pre-normalization id and
+    # canonical_id_for() on the real (normalized) node id returns None.
+    from abicheck.buildsource.entity_resolver import EntityResolver
+    from abicheck.buildsource.graph_facts import GraphNode
+    from abicheck.buildsource.source_graph import SourceGraphSummary
+
+    raw_id = "type://lambda at /old/checkout/lib.hpp:4:37"
+    stale_resolver = EntityResolver(aliases={raw_id: "some-stale-canonical-id"})
+
+    graph = SourceGraphSummary(
+        nodes=[
+            GraphNode(id=raw_id, kind="record_type", label=raw_id, attrs={"usr": "u1"})
+        ],
+        entity_resolver=stale_resolver,
+    )
+    normalized_id = graph.nodes[0].id
+    assert normalized_id != raw_id  # sanity: normalization actually happened
+    assert graph.entity_resolver.canonical_id_for(normalized_id) is not None
