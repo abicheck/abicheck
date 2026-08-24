@@ -785,15 +785,36 @@ def _walk_exact_type_closure(
                     queue.append(ident)
 
 
-def _record_nested_in_known_record(
-    qname: str, record_by_name: dict[str, list[RecordType]]
-) -> bool:
+def _record_exact_identities(snap: AbiSnapshot) -> set[str]:
+    """The exact qualified spelling of every record in *snap* -- never a
+    tail alias. `.qualified_name` is the canonical fully-qualified spelling
+    on castxml/clang-produced records (whose `.name` is deliberately the
+    bare leaf); DWARF leaves `.qualified_name` unset and instead bakes the
+    qualified string directly into `.name` (see `_index_surface_types`'s
+    own docstring for this backend convention). So a record's own identity
+    is `rec.qualified_name or rec.name` on either backend -- deliberately
+    NOT `_index_surface_types`'s own `record_by_name` index, which also
+    registers each record under an ambiguous trailing-segment *alias* (for
+    unqualified-reference resolution) that can collide with an unrelated
+    record's bare leaf name (e.g. a record `other::api` registers `api` as
+    an alias key, which must never be mistaken for the *namespace* `api`
+    when checking whether some other type is nested inside a class).
+    """
+    return {rec.qualified_name or rec.name for rec in snap.types}
+
+
+def _record_nested_in_known_record(qname: str, record_identities: set[str]) -> bool:
     """True when *qname*'s immediate enclosing scope is itself a known
     record (a class/struct/union member), as opposed to a namespace: access
     control (private/protected) applies only to a class's own members, never
     to namespace scope, and `RecordType` carries no access-level field at
     all -- castxml's `parse_types()` retains a named nested record
-    regardless of its own access. A pure, string-based approximation
+    regardless of its own access. *record_identities* must hold only exact
+    qualified record identities (`_record_exact_identities`), never an
+    alias index -- an alias-keyed lookup can misread an unrelated record's
+    own trailing-segment alias as a namespace owner being a class (Codex
+    review, fresh evidence: `other::api` registering alias key `api` wrongly
+    nested every `api::*` type). A pure, string-based approximation
     (owner-prefix lookup, no depth limit): a template-argument `"::"` (e.g.
     `Wrapper<ns::Foo>`) can produce a false "nested" reading, which only
     ever makes this MORE conservative (declines to seed), never less --
@@ -803,11 +824,11 @@ def _record_nested_in_known_record(
     if "::" not in qname:
         return False
     owner = qname.rsplit("::", 1)[0]
-    return owner in record_by_name
+    return owner in record_identities
 
 
 def _record_is_confirmed_public_seed(
-    rec: RecordType, record_by_name: dict[str, list[RecordType]]
+    rec: RecordType, record_identities: set[str]
 ) -> bool:
     """True when *rec* should be seeded into the public-surface closure on
     its own confirmed public-header origin alone, independent of whether any
@@ -856,7 +877,7 @@ def _record_is_confirmed_public_seed(
         rec.source_header
         and rec.origin is ScopeOrigin.PUBLIC_HEADER
         and not is_internal_type(qname, DEFAULT_INTERNAL_NAMESPACES)
-        and not _record_nested_in_known_record(qname, record_by_name)
+        and not _record_nested_in_known_record(qname, record_identities)
     )
 
 
@@ -922,10 +943,11 @@ def compute_public_surface(snap: AbiSnapshot) -> PublicSurface:
     # duplicating the rationale here. (Eligibility requires `qualified_name`
     # truthy, so `or rec.name` below is unreachable in practice -- kept
     # only so the comprehension's static type is `str`, not `str | None`.)
+    record_identities = _record_exact_identities(snap)
     seed_types |= {
         rec.qualified_name or rec.name
         for rec in snap.types
-        if _record_is_confirmed_public_seed(rec, record_by_name)
+        if _record_is_confirmed_public_seed(rec, record_identities)
     }
 
     # Provenance is available iff some declaration was classified to a real
