@@ -583,8 +583,6 @@ class SourceGraphSummary:
         obj = cls(
             schema_version=int(d.get("schema_version", SOURCE_GRAPH_VERSION)),
             graph_id=str(d.get("graph_id", "")),
-            nodes=[GraphNode.from_dict(n) for n in d.get("nodes", [])],
-            edges=[GraphEdge.from_dict(e) for e in d.get("edges", [])],
             coverage=dict(d.get("coverage", {})),
             external_graph_refs=[dict(r) for r in d.get("external_graph_refs", [])],
             extractor_passes={
@@ -602,10 +600,12 @@ class SourceGraphSummary:
             },
             entity_resolver=EntityResolver.from_dict(_raw_entity_resolver),
         )
-        # Recompute rather than trust the loaded graph_id: id migration above
-        # can change content, and to_dict() reuses a truthy self.graph_id
-        # as-is (Codex review) -- cheap, no-op when migration touched nothing.
-        obj.graph_id = obj.compute_graph_id()
+        # add_node/add_edge coalesce ids colliding after migration (Codex review).
+        for raw_node in d.get("nodes", []):
+            obj.add_node(GraphNode.from_dict(raw_node))
+        for raw_edge in d.get("edges", []):
+            obj.add_edge(GraphEdge.from_dict(raw_edge))
+        obj.graph_id = obj.compute_graph_id()  # never trust a stale loaded value
         return obj
 
 

@@ -216,3 +216,56 @@ def test_add_node_normalizes_label_for_any_producer() -> None:
         )
     )
     assert g.nodes[0].label == "lambda:foo.hpp:9:1"
+
+
+def test_source_graph_summary_from_dict_coalesces_ids_colliding_after_migration() -> (
+    None
+):
+    # Two persisted nodes that only differ by checkout root normalize to the
+    # SAME id -- from_dict() must route them through add_node() so they
+    # coalesce into one entry, not leave both objects in self.nodes under
+    # one shared id with self._node_ids/_node_by_id silently disagreeing
+    # about the count (Codex review, fresh evidence).
+    from abicheck.buildsource.source_graph import SourceGraphSummary
+
+    g = SourceGraphSummary.from_dict(
+        {
+            "schema_version": 2,
+            "nodes": [
+                {
+                    "id": "type://lambda at /old/checkout/lib.hpp:4:37",
+                    "kind": "record_type",
+                    "label": "lambda at /old/checkout/lib.hpp:4:37",
+                },
+                {
+                    "id": "type://lambda at /new/checkout/lib.hpp:4:37",
+                    "kind": "record_type",
+                    "label": "lambda at /new/checkout/lib.hpp:4:37",
+                },
+            ],
+            "edges": [],
+        }
+    )
+    assert len(g.nodes) == 1
+    assert len(g._node_ids) == len(g.nodes)
+    assert len(g._node_by_id) == len(g.nodes)
+
+
+def test_entity_resolver_remap_normalizes_canonical_values_too() -> None:
+    # A canonical id with no USR/mangled name available falls back to
+    # entity_identity.normalized_signature's "sig:<qualified_name>..." form,
+    # which embeds the raw, checkout-path-bearing qualified name verbatim --
+    # remap_node_ids must normalize that VALUE, not just the v1-id KEY, or
+    # canonical_id_for() keeps returning a directory-tainted id that never
+    # matches a freshly-resolved graph's canonical id (Codex review, fresh
+    # evidence, second round).
+    from abicheck.buildsource.entity_resolver import EntityResolver
+
+    old_id = "type://lambda at /old/checkout/lib.hpp:4:37"
+    stale_canonical = "sig:lambda at /old/checkout/lib.hpp:4:37\x1frecord\x1f0"
+    r = EntityResolver.from_dict(
+        {"aliases": {old_id: stale_canonical}, "conflicts": []}
+    )
+    (canonical,) = r.aliases.values()
+    assert "/old/checkout" not in canonical
+    assert canonical == "sig:lambda:lib.hpp:4:37\x1frecord\x1f0"

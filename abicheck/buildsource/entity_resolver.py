@@ -116,8 +116,9 @@ class EntityResolver:
         return canonical
 
     def remap_node_ids(self, remap: Callable[[str], str]) -> None:
-        """Rewrite every v1 node id this resolver references through *remap*
-        (Codex review, fresh evidence).
+        """Rewrite every identity string this resolver references — v1 node
+        ids *and* canonical ids alike — through *remap* (Codex review, fresh
+        evidence, two rounds).
 
         ``SourceGraphSummary.from_dict()`` normalizes a loaded
         ``GraphNode.id`` (see ``graph_facts._normalize_graph_identity``, the
@@ -131,19 +132,36 @@ class EntityResolver:
         ``resolve()`` on a possibly-weaker signal set can add a second,
         redundant alias instead of returning the persisted one).
 
-        Two distinct old ids collapsing onto the same new id after *remap*
-        (the directory-taint fix's own intended effect — two ids that only
-        differed by checkout path now agree) is not specially reconciled
-        here: a dict comprehension keeps whichever entry is last, which is
-        harmless in practice since both old ids named the identical
-        declaration and therefore already agreed on ``canonical_id``, but is
+        A *canonical* id itself can carry the identical taint when no
+        USR/mangled name was available at resolve time —
+        ``entity_identity.normalized_signature``'s ``"sig:<qualified_name>..."``
+        fallback embeds the qualified name verbatim, which is exactly
+        ``node.label``'s own raw, checkout-path-bearing spelling before this
+        fix existed. A first revision of this method only remapped v1-id
+        *keys*, leaving that persisted canonical *value* untouched -- so
+        ``canonical_id_for()`` still returned a checkout-dependent id that
+        would never match a freshly-resolved graph's canonical id for the
+        identical declaration. ``remap`` is applied to every string in this
+        structure that could be either kind (it is a no-op for a
+        ``usr:``/``mangled:``/``synthetic:sha256:`` id, which never embeds a
+        qualified name literally).
+
+        Two distinct old entries collapsing onto the same new key after
+        *remap* (the directory-taint fix's own intended effect) is not
+        specially reconciled here: a dict comprehension keeps whichever
+        entry is last, which is harmless when both named the identical
+        declaration (they now agree on both id and canonical value), but is
         not a fully general collision merge. Idempotent for an id *remap*
         does not change.
         """
-        self.aliases = {remap(k): v for k, v in self.aliases.items()}
-        self._canonical_to_v1 = {c: remap(v) for c, v in self._canonical_to_v1.items()}
+        self.aliases = {remap(k): remap(v) for k, v in self.aliases.items()}
+        self._canonical_to_v1 = {
+            remap(c): remap(v) for c, v in self._canonical_to_v1.items()
+        }
         self.conflicts = [
-            EntityConflict(c.canonical_id, tuple(remap(nid) for nid in c.node_ids))
+            EntityConflict(
+                remap(c.canonical_id), tuple(remap(nid) for nid in c.node_ids)
+            )
             for c in self.conflicts
         ]
 
