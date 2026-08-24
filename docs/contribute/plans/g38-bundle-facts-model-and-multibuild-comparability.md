@@ -1346,6 +1346,18 @@ added to `DEFAULT_SYSTEM_PROVIDERS` with real provenance, mirroring how the
 existing entries (`libtbb.so.12`, `libsycl.so`, ...) already cover the
 same product family.
 
+**Re-confirmed, still not fixed (2026-08-24, pin `c370aed07a5` re-scan):**
+a follow-up validation pass against a bumped abicheck pin (see this
+section's own scan-cost table below) reproduced the identical 862 → 58
+split for the same six-library oneDAL set at effectively zero added cost
+(`scan --artifact-set` still 10.8s/383MB), and re-identified the missing
+family in the same shape as before — TBB malloc, MKL, and the Intel
+runtime loaders — without supplying the literal SONAME strings this
+section's "actionable next step" still asks for. The corpus and the
+family are consistent across two independent runs; only the exact,
+`ldd`/`readelf`-sourced spellings remain the missing input to actually
+land the `DEFAULT_SYSTEM_PROVIDERS` entries.
+
 **Finding, part 2 (a documented design tradeoff, re-examined, not
 reversed):** even after naming every system provider, 58 residual audit
 findings remained, traced to `_detect_unresolved_intra_dependency`'s own
