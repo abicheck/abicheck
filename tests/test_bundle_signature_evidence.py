@@ -945,3 +945,135 @@ class TestFindUnverifiedSignatureFindings:
         )
         assert len(findings) == 1
         assert findings[0].symbol == "core_fn"
+
+    @pytest.mark.parametrize(
+        "kind",
+        [
+            ChangeKind.FUNC_NOEXCEPT_ADDED,
+            ChangeKind.FUNC_NOEXCEPT_REMOVED,
+            ChangeKind.FUNC_EXCEPTION_SPEC_CHANGED,
+            ChangeKind.FUNC_REF_QUAL_CHANGED,
+            ChangeKind.FUNC_VIRTUAL_ADDED,
+            ChangeKind.FUNC_VIRTUAL_REMOVED,
+            ChangeKind.CTOR_EXPLICIT_ADDED,
+            ChangeKind.CTOR_EXPLICIT_REMOVED,
+        ],
+    )
+    def test_no_finding_when_confirmed_change_present_on_a_wider_axis(self, kind):
+        # Codex review, fresh evidence: a real, diff-confirmed change on any
+        # of these axes (none of which _symbol_evidence_sufficient itself
+        # inspects) must suppress this module's own "cannot be confirmed or
+        # denied" finding for the same symbol, even though the symbol also
+        # carries an unrelated unresolved field (return_type="?").
+        new = _snapshot(
+            {
+                "libcore.so": _meta(exports=["core_fn"]),
+                "libconsumer.so": _meta(imports=["core_fn"], needed=["libcore.so"]),
+            }
+        )
+        old_snaps = {
+            "libcore.so": _snap(
+                "libcore.so", functions=[_evidenced_fn("core_fn", return_type="?")]
+            )
+        }
+        new_snaps = {
+            "libcore.so": _snap(
+                "libcore.so", functions=[_evidenced_fn("core_fn", return_type="?")]
+            )
+        }
+        results = [
+            _diff(
+                "libcore.so",
+                Change(kind=kind, symbol="core_fn", description="confirmed change"),
+            )
+        ]
+
+        assert (
+            find_unverified_signature_findings(new, new, results, old_snaps, new_snaps)
+            == []
+        )
+
+    def test_fires_when_bare_name_version_collapsed_on_old_side(self):
+        # Codex review, fresh evidence: libcore.so retains two live versions
+        # of core_fn (V1 and the default V2) -- an ordinary shape for a
+        # provider that never broke ABI. AbiSnapshot.function_map keeps only
+        # one bare-name entry for "core_fn", which cannot be attributed to
+        # either version specifically. A consumer requiring V1 must not be
+        # told evidence is sufficient just because the single collapsed
+        # model entry happens to look fully evidenced.
+        from abicheck.elf_metadata import ElfImport
+
+        old = _snapshot(
+            {
+                "libcore.so": ElfMetadata(
+                    soname="",
+                    needed=[],
+                    symbols=[
+                        ElfSymbol(name="core_fn", version="V1", is_default=False),
+                        ElfSymbol(name="core_fn", version="V2", is_default=True),
+                    ],
+                ),
+                "libconsumer.so": _meta(needed=["libcore.so"]),
+            }
+        )
+        new = _snapshot(
+            {
+                "libcore.so": ElfMetadata(
+                    soname="",
+                    needed=[],
+                    symbols=[
+                        ElfSymbol(name="core_fn", version="V1", is_default=False),
+                        ElfSymbol(name="core_fn", version="V2", is_default=True),
+                    ],
+                ),
+                "libconsumer.so": ElfMetadata(
+                    soname="",
+                    needed=["libcore.so"],
+                    symbols=[],
+                    imports=[ElfImport(name="core_fn", version="V1", is_default=False)],
+                ),
+            }
+        )
+        # Fully evidenced on its face -- but ambiguous which version it
+        # actually reflects, since both V1 and V2 collapse onto this one
+        # bare-name entry.
+        old_snaps = {
+            "libcore.so": _snap("libcore.so", functions=[_evidenced_fn("core_fn")])
+        }
+        new_snaps = {
+            "libcore.so": _snap("libcore.so", functions=[_evidenced_fn("core_fn")])
+        }
+
+        findings = find_unverified_signature_findings(
+            old, new, [], old_snaps, new_snaps
+        )
+        assert len(findings) == 1
+        assert findings[0].symbol == "core_fn"
+        assert "neither side has" in findings[0].description
+
+    def test_no_finding_when_provider_has_only_one_version_despite_default_flag(self):
+        # Sibling negative control: a single version tagged is_default=True
+        # is not a collapse -- only one distinct version exists, so the
+        # bare-name model entry is unambiguous.
+        old = _snapshot(
+            {
+                "libcore.so": _meta(exports=["core_fn"]),
+                "libconsumer.so": _meta(needed=["libcore.so"]),
+            }
+        )
+        new = _snapshot(
+            {
+                "libcore.so": _meta(exports=["core_fn"]),
+                "libconsumer.so": _meta(imports=["core_fn"], needed=["libcore.so"]),
+            }
+        )
+        old_snaps = {
+            "libcore.so": _snap("libcore.so", functions=[_evidenced_fn("core_fn")])
+        }
+        new_snaps = {
+            "libcore.so": _snap("libcore.so", functions=[_evidenced_fn("core_fn")])
+        }
+
+        assert (
+            find_unverified_signature_findings(old, new, [], old_snaps, new_snaps) == []
+        )

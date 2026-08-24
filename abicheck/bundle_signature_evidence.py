@@ -83,6 +83,20 @@ V2 purely because *some* ``foo`` existed before.
 ``ProviderEntry.version`` at the bundle-resolution layer, which is
 version-aware, rather than the version-blind ``AbiSnapshot.function_map``/
 ``variable_map`` layer ``_symbol_was_exported`` reads.
+
+A fourth check (Codex review, fresh evidence) guards the evidence-
+sufficiency lookup itself against the same version-blindness one layer
+deeper: even a *retained* symbol (the third check above) can have
+multiple co-existing GNU versions on one or both sides (``foo@V1`` and
+``foo@@V2`` both still live -- an ordinary shape for a provider that has
+never broken ABI compatibility), and ``AbiSnapshot.function_map``/
+``variable_map`` keep only one bare-name-keyed entry regardless. Asking
+whether *that* entry is "sufficient evidence" for one specific
+``ProviderEntry.version`` risks silently borrowing a different version's
+signature. :func:`_bare_name_version_collapsed` detects the collapse via
+the bundle-resolution layer's own per-version ``ProviderEntry`` list
+(which the ``AbiSnapshot`` layer does not carry) and fails the
+sufficiency check closed rather than trusting the ambiguous entry.
 """
 
 from __future__ import annotations
@@ -120,6 +134,29 @@ from .model import AbiSnapshot, Visibility
 #: `relevant_kinds` set does not (yet) include these two -- a
 #: pre-existing, narrower gap in that sibling function, not something
 #: this module's own precedence check needs to wait on.
+#:
+#: The remaining eight kinds (Codex review, fresh evidence, filed after the
+#: three above already went in) close the same coexistence gap for every
+#: *other* `Function`-level fact `diff_symbols.py` can independently
+#: confirm or deny with certainty, none of which `_symbol_evidence_
+#: sufficient` itself inspects (it only ever reads `return_type`/`params`/
+#: `is_variadic`/`contract_attributes`): `is_noexcept`/`is_virtual`/
+#: `ref_qualifier` are plain (non-tri-state) `Function` fields, always
+#: confidently comparable regardless of any other field's resolution
+#: state; `exception_spec`/`is_explicit` are tri-state fields whose own
+#: `diff_symbols._check_exception_spec_change`/`_check_explicit_change`
+#: already skip on `None` the identical way `_check_variadic_change`/
+#: `_check_contract_attributes_change` do. Any one of these being
+#: genuinely confirmed for a symbol is exactly as informative as a
+#: confirmed params/return/variadic/calling-convention change -- "we know
+#: something concrete changed (or didn't) here," not "we couldn't tell" --
+#: so it must suppress this module's own risk finding the same way.
+#: Deliberately excluded: `FUNC_LANGUAGE_LINKAGE_CHANGED` (an `extern "C"`
+#: transition changes the mangled name itself, so old/new can't share the
+#: `symbol` key this module matches on in the first place) and the
+#: vtable-slot/inline-transition kinds (about virtual-dispatch layout and
+#: definition placement, not the calling-signature-agreement question this
+#: module exists to answer).
 _CONFIRMED_SIGNATURE_CHANGE_KINDS = frozenset(
     {
         ChangeKind.FUNC_PARAMS_CHANGED,
@@ -128,6 +165,14 @@ _CONFIRMED_SIGNATURE_CHANGE_KINDS = frozenset(
         ChangeKind.FUNC_VARIADIC_ADDED,
         ChangeKind.FUNC_VARIADIC_REMOVED,
         ChangeKind.CALLING_CONVENTION_CHANGED,
+        ChangeKind.FUNC_NOEXCEPT_ADDED,
+        ChangeKind.FUNC_NOEXCEPT_REMOVED,
+        ChangeKind.FUNC_EXCEPTION_SPEC_CHANGED,
+        ChangeKind.FUNC_REF_QUAL_CHANGED,
+        ChangeKind.FUNC_VIRTUAL_ADDED,
+        ChangeKind.FUNC_VIRTUAL_REMOVED,
+        ChangeKind.CTOR_EXPLICIT_ADDED,
+        ChangeKind.CTOR_EXPLICIT_REMOVED,
     }
 )
 
@@ -442,6 +487,40 @@ def _provider_entry_retained_from_old(
     )
 
 
+def _bare_name_version_collapsed(
+    snapshot: BundleSnapshot, provider_lib: str, symbol: str
+) -> bool:
+    """Does *snapshot*'s own bundle resolution graph record more than one
+    distinct GNU symbol version of *symbol* exported by *provider_lib*?
+
+    ``AbiSnapshot.function_map``/``variable_map`` carry exactly one
+    ``Function``/``Variable`` entry per bare symbol name -- an ordinary
+    provider that has never broken ABI compatibility across a versioned
+    release routinely retains multiple live definitions of the same bare
+    name (``foo@V1`` *and* ``foo@@V2``), and that single model entry
+    cannot be attributed to any one specific version; it reflects
+    whichever definition the header/DWARF parser happened to associate
+    with the bare name (Codex review, fresh evidence -- the same
+    last-entry-wins collapse this repo's own root ``AGENTS.md`` already
+    documents for ``ElfMetadata.symbol_map``). Evaluating
+    ``_symbol_evidence_sufficient`` against that single entry for a
+    *specific* ``ProviderEntry.version`` would silently borrow whichever
+    version's signature the model happened to keep, reading as "fully
+    evidenced" for a version that was never actually captured. The bundle
+    resolution graph, unlike ``AbiSnapshot``, keeps one ``ProviderEntry``
+    per version -- exactly the granularity needed to detect the collapse,
+    even though it cannot recover the lost per-version signature data
+    itself. When collapsed, evidence sufficiency must fail closed rather
+    than trust the ambiguous single entry.
+    """
+    versions = {
+        pe.version
+        for pe in snapshot.resolution.provides.get(symbol, [])
+        if pe.library == provider_lib
+    }
+    return len(versions) > 1
+
+
 def find_unverified_signature_findings(
     old: BundleSnapshot,
     new: BundleSnapshot,
@@ -458,14 +537,16 @@ def find_unverified_signature_findings(
     agrees) and the confirmed, `BREAKING` `BUNDLE_INTRA_DEP_SIGNATURE_
     CHANGED` (evidence disagrees).
 
-    *old* is used only to resolve each `DiffResult.library` (a real on-disk
-    basename) back to its bundle-canonical key via
+    *old* is used for two things: it resolves each `DiffResult.library` (a
+    real on-disk basename) back to its bundle-canonical key via
     :func:`_basename_to_bundle_key`, for the "a confirmed change already
-    exists" precedence check below -- it plays no role in the evidence
-    check itself, which is why `compare_bundle`'s own signature doesn't
-    need it for this same purpose (it, too, actually keys `diff_by_library`
-    by raw basename; see this module's own `_basename_to_bundle_key`
-    docstring).
+    exists" precedence check below (see that function's docstring for why
+    `compare_bundle`'s own signature does not need this), and it supplies
+    the version-aware retained-export check
+    (:func:`_provider_entry_retained_from_old`) that skips a freshly-added
+    symbol *version* sharing an old bare name. It plays no role in the
+    per-side evidence-sufficiency check itself, which reads only
+    *old_snapshots*/*new_snapshots*.
 
     *old_snapshots*/*new_snapshots* map bundle-relative library name (the
     same canonical key `BundleSnapshot.libraries` uses) to that library's
@@ -564,8 +645,17 @@ def find_unverified_signature_findings(
                 # "unverified" against.
                 continue
 
-            old_sufficient = _symbol_evidence_sufficient(symbol, old_snap)
-            new_sufficient = _symbol_evidence_sufficient(symbol, new_snap)
+            if _bare_name_version_collapsed(
+                old, provider_lib, symbol
+            ) or _bare_name_version_collapsed(new, provider_lib, symbol):
+                # The single bare-name-keyed AbiSnapshot entry can't be
+                # attributed to this specific version -- fail closed
+                # rather than trust evidence that may belong to a
+                # different co-existing version of this symbol.
+                old_sufficient = new_sufficient = False
+            else:
+                old_sufficient = _symbol_evidence_sufficient(symbol, old_snap)
+                new_sufficient = _symbol_evidence_sufficient(symbol, new_snap)
             if old_sufficient and new_sufficient:
                 continue
 

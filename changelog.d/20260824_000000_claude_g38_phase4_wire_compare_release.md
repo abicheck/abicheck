@@ -78,9 +78,9 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   not a truncated one, but the blanket substring check misclassified it
   as insufficient. Fixed by matching only the recursion-depth-cap
   sentinel's own finite shape (the bare sentinel, optionally followed by
-  one or more ` *`/` &`/` &&` wrapper suffixes for nested pointer/
-  reference wrapping, anchored at both ends) via a regex, rather than a
-  substring check.
+  one or more space-prefixed `*`/`&`/`&&` wrapper suffixes for nested
+  pointer/reference wrapping, anchored at both ends) via a regex, rather
+  than a substring check.
 - **`_symbol_evidence_sufficient()` treated unknown variadicness
   (`Function.is_variadic is None`) as sufficient evidence** (Codex
   review, fresh evidence). `diff_symbols._check_variadic_change()` itself
@@ -172,3 +172,34 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   mutation-kill coverage this exclusion gives up (per that test's own
   "an exclusion is free only if the file reaches no mutated module"
   contract).
+- **`_CONFIRMED_SIGNATURE_CHANGE_KINDS` still omitted most `Function`-level
+  facts `diff_symbols.py` can confirm independently of `return_type`/
+  `params`/`is_variadic`/`contract_attributes`** (Codex review, fresh
+  evidence). A real, diff-confirmed `FUNC_NOEXCEPT_ADDED` (or seven other
+  kinds: `FUNC_NOEXCEPT_REMOVED`/`FUNC_EXCEPTION_SPEC_CHANGED`/
+  `FUNC_REF_QUAL_CHANGED`/`FUNC_VIRTUAL_ADDED`/`FUNC_VIRTUAL_REMOVED`/
+  `CTOR_EXPLICIT_ADDED`/`CTOR_EXPLICIT_REMOVED`) on a symbol that also
+  happened to carry an unrelated unresolved field (an unresolved parameter
+  type, say) still produced a redundant, contradictory "cannot be
+  confirmed or denied" risk finding alongside the already-proven change.
+  Fixed by adding all eight kinds to the confirmed-kinds set, with the
+  module's own docstring now explaining which kinds are deliberately
+  excluded (`FUNC_LANGUAGE_LINKAGE_CHANGED`, since it changes the mangled
+  name itself; vtable-slot/inline-transition kinds, which are layout facts
+  rather than calling-signature-agreement facts) and why.
+- **`find_unverified_signature_findings()` evaluated evidence sufficiency
+  against a version-blind `AbiSnapshot.function_map`/`variable_map` entry
+  even when a provider retained multiple live GNU versions of the same
+  bare symbol name** (Codex review, fresh evidence). `AbiSnapshot` keeps
+  exactly one `Function`/`Variable` entry per bare name, so when a
+  provider exports both `foo@V1` and `foo@@V2` (an ordinary shape for a
+  library that has never broken ABI compatibility), that single entry
+  cannot be attributed to either version specifically — a consumer
+  requiring V1 could be told evidence was fully sufficient purely because
+  the collapsed entry happened to look complete, even though no
+  V1-specific signature was ever actually captured. Fixed by adding
+  `_bare_name_version_collapsed()`, which detects the collapse via the
+  bundle-resolution layer's own per-version `ProviderEntry` list (which
+  `AbiSnapshot` does not carry) and fails evidence sufficiency closed
+  when detected, so the "unverified" finding correctly fires instead of
+  silently trusting ambiguous evidence.

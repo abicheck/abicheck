@@ -688,9 +688,10 @@ legitimately contain the literal substring `"..."` — a variadic
 function-pointer parameter type like `"void (*)(int, ...)"` is
 fully-resolved evidence, not truncated. Fixed by matching only the
 sentinel's own finite shape via an anchored regex (the bare sentinel,
-optionally followed by one or more ` *`/` &`/` &&` wrapper suffixes for
-nested pointer/reference wrapping) instead of a blanket substring check.
-Confirmed to fail against the pre-fix substring-check code.
+optionally followed by one or more space-prefixed `*`/`&`/`&&` wrapper
+suffixes for nested pointer/reference wrapping) instead of a blanket
+substring check. Confirmed to fail against the pre-fix substring-check
+code.
 
 **A fourth finding, on a gap in `_symbol_evidence_sufficient()` unrelated
 to type-spelling parsing: unknown variadicness read as sufficient
@@ -789,6 +790,62 @@ one confirming the false positive is gone for a genuinely fresh version,
 one confirming the finding still fires when the version genuinely was
 retained from the old side. Confirmed the positive-control test fails
 against the pre-fix code.
+
+**A tenth finding, from the same Codex review round as the ninth, widened
+the confirmed-kinds allowlist rather than continuing to add one kind at a
+time.** `_CONFIRMED_SIGNATURE_CHANGE_KINDS` (the eighth finding's own set)
+still omitted every `Function`-level fact `diff_symbols.py` can confirm
+independently of the four fields `_symbol_evidence_sufficient` itself
+inspects (`return_type`/`params`/`is_variadic`/`contract_attributes`) --
+concretely, a real, diff-confirmed `FUNC_NOEXCEPT_ADDED` on a symbol that
+also carried an unrelated unresolved field still produced a redundant,
+contradictory "cannot be confirmed or denied" finding alongside the
+already-proven break, the identical shape the eighth finding fixed for
+`FUNC_VARIADIC_ADDED`/`FUNC_VARIADIC_REMOVED`/`CALLING_CONVENTION_
+CHANGED`. Rather than adding one more kind reactively (what the eighth
+finding's own review round was, by the reviewer's own framing, at risk of
+becoming), the fix was widened to every kind in that same shape:
+`FUNC_NOEXCEPT_ADDED`/`FUNC_NOEXCEPT_REMOVED` (`is_noexcept`, a plain
+bool, always confidently comparable), `FUNC_EXCEPTION_SPEC_CHANGED`/
+`CTOR_EXPLICIT_ADDED`/`CTOR_EXPLICIT_REMOVED` (`exception_spec`/
+`is_explicit`, tri-state fields whose own `diff_symbols` checks already
+skip on `None` the identical way `is_variadic`/`contract_attributes` do),
+`FUNC_REF_QUAL_CHANGED` (`ref_qualifier`, a plain string field), and
+`FUNC_VIRTUAL_ADDED`/`FUNC_VIRTUAL_REMOVED` (`is_virtual`, a plain bool).
+Deliberately excluded, with the reasoning recorded in the module's own
+docstring: `FUNC_LANGUAGE_LINKAGE_CHANGED` (an `extern "C"` transition
+changes the mangled name itself, so old and new sides can't share the
+`symbol` key this module matches on in the first place) and the
+vtable-slot/inline-transition kinds (facts about virtual-dispatch layout
+and definition placement, not the calling-signature-agreement question
+this module exists to answer). Nine regression tests (parametrized over
+all eight added kinds), each confirmed to fail against the pre-fix
+six-kind set.
+
+**An eleventh finding, from the same review round, closed a deeper
+version-blindness gap one layer past the ninth finding's own fix.** Even
+a symbol the ninth finding correctly identifies as *retained* from the old
+side can have multiple co-existing GNU versions live on one or both sides
+(`foo@V1` and `foo@@V2` both still exported -- an entirely ordinary shape
+for a provider that has never broken ABI compatibility across a versioned
+release) -- and `AbiSnapshot.function_map`/`variable_map` keep exactly one
+bare-name-keyed `Function`/`Variable` entry regardless of how many real
+GNU-versioned definitions exist. `_symbol_evidence_sufficient()` evaluates
+that single entry without any way to know which version it actually
+reflects, so a consumer requiring specifically V1 could be told evidence
+was fully sufficient purely because the collapsed entry happened to look
+complete -- even though no V1-specific signature was ever actually
+captured; the "sufficient evidence" answer could silently be borrowed from
+an entirely different version. Fixed by adding
+`_bare_name_version_collapsed()`, which detects the collapse using the
+bundle-resolution layer's own per-version `ProviderEntry` list for that
+`(provider_lib, symbol)` pair (a signal `AbiSnapshot` itself does not
+carry) and forces both sides' sufficiency to `False` when detected, so the
+"unverified" finding correctly fires (fail-closed) rather than trusting
+ambiguous evidence. Two regression tests: one confirming the finding fires
+when the old/new bare-name entry is version-collapsed (confirmed to fail
+against the pre-fix code), one confirming a genuinely single-version
+provider (even one flagged `is_default=True`) is unaffected.
 
 `bundle_intra_dep_signature_changed` already fires correctly when a
 provider's DWARF/header evidence shows a real signature change. This phase
