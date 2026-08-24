@@ -62,45 +62,74 @@ DEFAULT_SYSTEM_PROVIDERS: frozenset[str] = frozenset(
     }
 )
 
-#: G38 stabilization (post-Phase-4): the single source of truth for "which
-#: confirmed per-symbol ``ChangeKind``s prove a sibling library's direct C
-#: calling-boundary contract changed." Two independent consumers must agree
-#: on this set, and previously did not:
+#: G38 stabilization (post-Phase-4, revised after a Codex review round on
+#: PR #845): "confirmed, so don't claim total ignorance about this symbol"
+#: (suppression) and "confirmed severely enough to promote a per-library
+#: change to a consumer-attributed BREAKING bundle finding" (promotion) are
+#: two different bars, not one. An earlier revision of this constant tried
+#: to serve both with a single 12-kind set shared by `bundle.py`'s
+#: promotion path and `bundle_signature_evidence.py`'s suppression path —
+#: which was wrong in a concrete, checkable way: `FUNC_NOEXCEPT_ADDED`'s
+#: own registry entry (`change_registry.py`) has `default_verdict=
+#: COMPATIBLE`, and `FUNC_NOEXCEPT_REMOVED`/`FUNC_EXCEPTION_SPEC_CHANGED`
+#: are `COMPATIBLE_WITH_RISK` with an explicit "not a binary break"
+#: rationale — promoting either to a BREAKING
+#: `BUNDLE_INTRA_DEP_SIGNATURE_CHANGED` would have fabricated a
+#: release-blocking cross-library break out of a change the tool's own
+#: policy layer says is not one. `FUNC_VIRTUAL_ADDED`/`FUNC_VIRTUAL_REMOVED`
+#: are genuinely `BREAKING`, but about vtable-slot layout, not a direct
+#: mismatched call boundary — a different failure mode than what
+#: `BUNDLE_INTRA_DEP_SIGNATURE_CHANGED`'s own description ("Calling
+#: convention is now mismatched") claims. This module therefore keeps two
+#: sets, one a strict subset of the other (see the test asserting that
+#: relationship in `tests/test_bundle.py`):
 #:
-#: - :func:`abicheck.bundle._detect_intra_dep_signature_changed` — promotes
-#:   a confirmed change of one of these kinds on a provider's own export to
-#:   a consumer-attributed ``BUNDLE_INTRA_DEP_SIGNATURE_CHANGED`` finding.
-#: - :mod:`abicheck.bundle_signature_evidence` — treats a confirmed change
-#:   of one of these kinds as proof that *something* concrete is known
-#:   about the symbol, and therefore suppresses its own
-#:   ``BUNDLE_INTRA_DEP_SIGNATURE_UNVERIFIED`` "couldn't tell either way"
-#:   finding for it.
+#: - :data:`CONFIRMED_C_BOUNDARY_SIGNATURE_BREAK_KINDS` (broad) — used only
+#:   by :mod:`abicheck.bundle_signature_evidence` for suppression: any one
+#:   of these being confirmed means *something* concrete is known about the
+#:   symbol, which is enough to withhold the "couldn't tell either way"
+#:   `BUNDLE_INTRA_DEP_SIGNATURE_UNVERIFIED` finding, without that
+#:   confirmed fact itself needing to be a proven binary break.
+#: - :data:`PROMOTABLE_C_BOUNDARY_SIGNATURE_BREAK_KINDS` (narrow) — used
+#:   only by :func:`abicheck.bundle._detect_intra_dep_signature_changed`
+#:   for promotion: a confirmed change of one of *these* kinds on a
+#:   provider's own export is promoted to a consumer-attributed
+#:   `BUNDLE_INTRA_DEP_SIGNATURE_CHANGED` finding. Every member is both
+#:   `default_verdict=BREAKING` on its own and describes a genuine,
+#:   direct call-boundary mismatch (parameter/return/variable type,
+#:   variadicness, calling convention) rather than a vtable-layout or
+#:   policy-adjustable source-level concern.
 #:
-#: Before this constant existed, `bundle.py` promoted only three kinds
-#: (``FUNC_PARAMS_CHANGED``/``FUNC_RETURN_CHANGED``/``VAR_TYPE_CHANGED``)
-#: while `bundle_signature_evidence.py` independently suppressed on twelve
-#: — so a confirmed ``CALLING_CONVENTION_CHANGED`` (say) correctly
-#: suppressed the "unverified" finding but was silently *not* promoted to
-#: a consumer-attributed break, losing the cross-library causality the
-#: bundle report exists to surface. Living here (not in either consumer
-#: module) matches this module's own leaf-module contract: `bundle.py`
-#: imports it directly, and `bundle_signature_evidence.py` — which must
-#: not import `bundle.py` (see that module's own docstring on why it stays
-#: leaf-only) — already imports this module for `BundleFinding`/
-#: `BundleSnapshot`/`ConsumerEntry`/`ProviderEntry`, so this adds no new
-#: import edge either direction.
+#: Before the broad set existed, `bundle.py` promoted only three kinds
+#: (`FUNC_PARAMS_CHANGED`/`FUNC_RETURN_CHANGED`/`VAR_TYPE_CHANGED`) while
+#: `bundle_signature_evidence.py` independently suppressed on twelve — a
+#: confirmed `CALLING_CONVENTION_CHANGED` correctly suppressed the
+#: "unverified" finding but was never promoted, losing cross-library
+#: causality. The narrow set closes exactly that gap (adding
+#: `FUNC_VARIADIC_ADDED`/`FUNC_VARIADIC_REMOVED`/`CALLING_CONVENTION_
+#: CHANGED` to the original three) without also promoting the nine kinds
+#: that are correctly suppression-only evidence.
 #:
-#: Deliberately excludes ``CTOR_EXPLICIT_ADDED``/``CTOR_EXPLICIT_REMOVED``:
-#: an ``explicit`` specifier transition is a purely source-level fact that
-#: never alters the mangled name (see `checker_policy.py`'s own
-#: `ChangeKind` comment for these two kinds) and therefore proves nothing
-#: about whether the binary calling signature — params, return type,
-#: variadicness, calling convention, ... — this set exists to police still
-#: agrees. Also excludes ``FUNC_LANGUAGE_LINKAGE_CHANGED`` (an
-#: ``extern "C"`` transition changes the mangled name itself, so old/new
-#: can't share the symbol key either consumer matches on) and the
-#: vtable-slot/inline-transition kinds (about virtual-dispatch layout and
-#: definition placement, not calling-signature agreement).
+#: Living here (not in either consumer module) matches this module's own
+#: leaf-module contract: `bundle.py` imports it directly, and
+#: `bundle_signature_evidence.py` — which must not import `bundle.py` (see
+#: that module's own docstring on why it stays leaf-only) — already
+#: imports this module for `BundleFinding`/`BundleSnapshot`/
+#: `ConsumerEntry`/`ProviderEntry`, so this adds no new import edge either
+#: direction.
+#:
+#: `CONFIRMED_C_BOUNDARY_SIGNATURE_BREAK_KINDS` deliberately excludes
+#: `CTOR_EXPLICIT_ADDED`/`CTOR_EXPLICIT_REMOVED`: an `explicit` specifier
+#: transition is a purely source-level fact that never alters the mangled
+#: name (see `checker_policy.py`'s own `ChangeKind` comment for these two
+#: kinds) and therefore proves nothing about whether the binary calling
+#: signature — params, return type, variadicness, calling convention, ...
+#: — this set exists to police still agrees. Also excludes
+#: `FUNC_LANGUAGE_LINKAGE_CHANGED` (an `extern "C"` transition changes the
+#: mangled name itself, so old/new can't share the symbol key either
+#: consumer matches on) and the vtable-slot/inline-transition kinds (about
+#: virtual-dispatch layout and definition placement, not calling-signature
+#: agreement).
 CONFIRMED_C_BOUNDARY_SIGNATURE_BREAK_KINDS: frozenset[ChangeKind] = frozenset(
     {
         ChangeKind.FUNC_PARAMS_CHANGED,
@@ -117,6 +146,34 @@ CONFIRMED_C_BOUNDARY_SIGNATURE_BREAK_KINDS: frozenset[ChangeKind] = frozenset(
         ChangeKind.FUNC_VIRTUAL_REMOVED,
     }
 )
+
+#: The narrow, promotion-only subset of the set above — see that constant's
+#: own docstring for the full reasoning. Every member has
+#: `default_verdict=BREAKING` in `change_registry.py` *and* describes a
+#: direct call-boundary mismatch, not a vtable-layout or policy-adjustable
+#: source-level concern. `FUNC_NOEXCEPT_ADDED`/`FUNC_NOEXCEPT_REMOVED`/
+#: `FUNC_EXCEPTION_SPEC_CHANGED` (COMPATIBLE/RISK, explicitly "not a binary
+#: break" per their own registry comments) and `FUNC_VIRTUAL_ADDED`/
+#: `FUNC_VIRTUAL_REMOVED`/`FUNC_REF_QUAL_CHANGED` (BREAKING, but about
+#: vtable-slot layout or overload-resolution mangling rather than a plain
+#: mismatched calling boundary on an otherwise-identical symbol) are
+#: deliberately excluded — promoting any of them would fabricate a
+#: release-blocking cross-library finding from a change that is not one,
+#: or not one of *this* shape.
+PROMOTABLE_C_BOUNDARY_SIGNATURE_BREAK_KINDS: frozenset[ChangeKind] = frozenset(
+    {
+        ChangeKind.FUNC_PARAMS_CHANGED,
+        ChangeKind.FUNC_RETURN_CHANGED,
+        ChangeKind.VAR_TYPE_CHANGED,
+        ChangeKind.FUNC_VARIADIC_ADDED,
+        ChangeKind.FUNC_VARIADIC_REMOVED,
+        ChangeKind.CALLING_CONVENTION_CHANGED,
+    }
+)
+
+assert PROMOTABLE_C_BOUNDARY_SIGNATURE_BREAK_KINDS.issubset(
+    CONFIRMED_C_BOUNDARY_SIGNATURE_BREAK_KINDS
+), "every promotable kind must also count as confirmed evidence for suppression"
 
 
 @dataclass(frozen=True)

@@ -72,8 +72,8 @@ from .bundle_manifest import (  # noqa: F401  (re-exported for back-compat)
     load_manifest as load_manifest,
 )
 from .bundle_models import (  # noqa: F401  (re-exported for back-compat)
-    CONFIRMED_C_BOUNDARY_SIGNATURE_BREAK_KINDS,
     DEFAULT_SYSTEM_PROVIDERS as DEFAULT_SYSTEM_PROVIDERS,
+    PROMOTABLE_C_BOUNDARY_SIGNATURE_BREAK_KINDS,
     BundleDiffResult as BundleDiffResult,
     BundleFinding as BundleFinding,
     BundleSnapshot as BundleSnapshot,
@@ -1156,24 +1156,35 @@ def _detect_intra_dep_signature_changed(
 ) -> list[BundleFinding]:
     """Promote provider-side signature changes to consumer-side findings.
 
-    For each per-library confirmed C-boundary signature break (see
-    :data:`abicheck.bundle_models.CONFIRMED_C_BOUNDARY_SIGNATURE_BREAK_KINDS`
-    — params/return/variable type, variadicness, calling convention,
-    noexcept, exception spec, ref-qualifier, virtual-ness), look up which
-    siblings import that symbol in the new bundle and emit one finding per
-    (consumer, symbol) pair. Multiple change kinds against the same symbol
-    collapse into one finding to avoid double-counting, e.g. params+return
-    changing together.
+    For each per-library confirmed, *promotable* C-boundary signature break
+    (see :data:`abicheck.bundle_models.
+    PROMOTABLE_C_BOUNDARY_SIGNATURE_BREAK_KINDS` — params/return/variable
+    type, variadicness, calling convention; deliberately narrower than
+    :data:`abicheck.bundle_models.CONFIRMED_C_BOUNDARY_SIGNATURE_BREAK_KINDS`,
+    which also covers noexcept/exception-spec/ref-qualifier/virtual-ness
+    for a *weaker* claim elsewhere — see that constant's own docstring),
+    look up which siblings import that symbol in the new bundle and emit
+    one finding per (consumer, symbol) pair. Multiple change kinds against
+    the same symbol collapse into one finding to avoid double-counting,
+    e.g. params+return changing together.
 
-    This set is shared with :mod:`abicheck.bundle_signature_evidence`'s own
-    suppression check for ``BUNDLE_INTRA_DEP_SIGNATURE_UNVERIFIED`` — the
-    two must never independently disagree on "which confirmed changes prove
-    the C boundary broke" (G38 stabilization; see the shared constant's own
-    docstring for the incident this closes).
+    G38 stabilization: this used to share the *broad* set with
+    :mod:`abicheck.bundle_signature_evidence`'s own suppression check for
+    ``BUNDLE_INTRA_DEP_SIGNATURE_UNVERIFIED`` — reviewed and reverted
+    (Codex review, fresh evidence): the broad set includes
+    ``FUNC_NOEXCEPT_ADDED`` (``default_verdict=COMPATIBLE`` in
+    ``change_registry.py``) and ``FUNC_NOEXCEPT_REMOVED``/
+    ``FUNC_EXCEPTION_SPEC_CHANGED`` (``COMPATIBLE_WITH_RISK``, explicitly
+    "not a binary break"), so sharing it here would have promoted a
+    same-or-lower-severity per-library change into a fabricated BREAKING
+    cross-library finding. The narrow set is a strict subset of the broad
+    one (asserted in `bundle_models.py`), so the two still cannot
+    independently drift on which of *these* kinds counts as a confirmed
+    boundary break — they simply answer two different questions now.
     """
     findings: list[BundleFinding] = []
     seen: set[tuple[str, str, str]] = set()
-    relevant_kinds = CONFIRMED_C_BOUNDARY_SIGNATURE_BREAK_KINDS
+    relevant_kinds = PROMOTABLE_C_BOUNDARY_SIGNATURE_BREAK_KINDS
     for provider_lib, diff in diff_by_library.items():
         for change in diff.changes:
             if change.kind not in relevant_kinds:

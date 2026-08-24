@@ -968,26 +968,58 @@ class TestIntraDepSignatureChanged:
             for f in result.bundle_findings
         )
 
-    def test_promotion_set_matches_shared_confirmed_boundary_kinds(self) -> None:
-        # G38 stabilization: `_detect_intra_dep_signature_changed`'s own
-        # promoted-kinds set and `bundle_signature_evidence`'s suppression
-        # set must be the *same* object, not two independently maintained
-        # lists — see `bundle_models.CONFIRMED_C_BOUNDARY_SIGNATURE_BREAK_
-        # KINDS`'s own docstring for the incident this pins against
-        # regressing (CALLING_CONVENTION_CHANGED and eight others used to
-        # suppress the "unverified" finding without ever promoting a
-        # consumer-attributed break).
-        from abicheck.bundle_models import CONFIRMED_C_BOUNDARY_SIGNATURE_BREAK_KINDS
+    def test_promotable_kinds_are_a_strict_subset_of_confirmed_kinds(self) -> None:
+        # G38 stabilization, revised after a Codex review round: promotion
+        # ("confirmed severely enough to fabricate a consumer-attributed
+        # BREAKING bundle finding") and suppression ("confirmed enough to
+        # withhold the 'couldn't tell either way' finding") are two
+        # different bars, not one -- an earlier revision of this test
+        # asserted the two sets were *equal*, which was itself the bug:
+        # it would have required promoting FUNC_NOEXCEPT_ADDED
+        # (default_verdict=COMPATIBLE) and FUNC_NOEXCEPT_REMOVED/
+        # FUNC_EXCEPTION_SPEC_CHANGED (COMPATIBLE_WITH_RISK) to a fabricated
+        # BREAKING bundle finding. The promotable set must be a strict,
+        # proper subset of the confirmed set (bundle_signature_evidence's
+        # own suppression set), and every kind promoted to BREAKING must
+        # itself carry default_verdict=BREAKING in change_registry.py.
+        from abicheck.bundle_models import (
+            CONFIRMED_C_BOUNDARY_SIGNATURE_BREAK_KINDS,
+            PROMOTABLE_C_BOUNDARY_SIGNATURE_BREAK_KINDS,
+        )
         from abicheck.bundle_signature_evidence import (
             _CONFIRMED_SIGNATURE_CHANGE_KINDS,
         )
+        from abicheck.change_registry import REGISTRY
+        from abicheck.checker_policy import Verdict
 
+        assert PROMOTABLE_C_BOUNDARY_SIGNATURE_BREAK_KINDS < (
+            CONFIRMED_C_BOUNDARY_SIGNATURE_BREAK_KINDS
+        )
         assert (
             CONFIRMED_C_BOUNDARY_SIGNATURE_BREAK_KINDS
             == _CONFIRMED_SIGNATURE_CHANGE_KINDS
         )
-        # And every kind not in this set must never have been silently
-        # forgotten — ctor-explicit stays excluded on purpose.
+        for kind in PROMOTABLE_C_BOUNDARY_SIGNATURE_BREAK_KINDS:
+            meta = REGISTRY.get(kind.value)
+            assert meta is not None and meta.default_verdict == Verdict.BREAKING, (
+                f"{kind} is promotable to a BREAKING bundle finding but its "
+                f"own default_verdict is not BREAKING"
+            )
+        # The specific fabrication this test guards against: noexcept
+        # changes must never be promotable, regardless of their presence
+        # in the (correctly broader) suppression-only confirmed set.
+        assert (
+            ChangeKind.FUNC_NOEXCEPT_ADDED
+            not in PROMOTABLE_C_BOUNDARY_SIGNATURE_BREAK_KINDS
+        )
+        assert (
+            ChangeKind.FUNC_NOEXCEPT_REMOVED
+            not in PROMOTABLE_C_BOUNDARY_SIGNATURE_BREAK_KINDS
+        )
+        assert (
+            ChangeKind.FUNC_NOEXCEPT_ADDED in CONFIRMED_C_BOUNDARY_SIGNATURE_BREAK_KINDS
+        )
+        # ctor-explicit stays excluded on purpose from both sets.
         assert (
             ChangeKind.CTOR_EXPLICIT_ADDED
             not in CONFIRMED_C_BOUNDARY_SIGNATURE_BREAK_KINDS
@@ -997,12 +1029,39 @@ class TestIntraDepSignatureChanged:
             not in CONFIRMED_C_BOUNDARY_SIGNATURE_BREAK_KINDS
         )
 
+    def test_does_not_promote_noexcept_added_to_a_breaking_finding(self) -> None:
+        # Regression for the fabrication above: FUNC_NOEXCEPT_ADDED is
+        # confirmed (suppresses bundle_signature_evidence's "unverified"
+        # finding) but must never itself promote to
+        # BUNDLE_INTRA_DEP_SIGNATURE_CHANGED -- that would turn a
+        # default_verdict=COMPATIBLE per-library change into a fabricated
+        # BREAKING cross-library one.
+        new = _snapshot(
+            {
+                "libcore.so": _meta(soname="libcore.so.1", exports=["core_add"]),
+                "libalgo.so": _meta(
+                    soname="libalgo.so.1", needed=["libcore.so.1"], imports=["core_add"]
+                ),
+            }
+        )
+        diff_libcore = _diff(
+            "libcore.so",
+            Change(
+                kind=ChangeKind.FUNC_NOEXCEPT_ADDED,
+                symbol="core_add",
+                description="gained noexcept",
+            ),
+        )
+        result = compare_bundle(new, new, [diff_libcore])
+        assert not any(
+            f.kind == ChangeKind.BUNDLE_INTRA_DEP_SIGNATURE_CHANGED
+            for f in result.bundle_findings
+        )
+
     def test_promotes_calling_convention_change_to_consumer(self) -> None:
-        # Previously `relevant_kinds` only covered params/return/var-type,
-        # so a confirmed CALLING_CONVENTION_CHANGED suppressed
-        # bundle_signature_evidence's "unverified" finding but was never
-        # itself promoted to a consumer-attributed bundle break. Fixed by
-        # sharing one kind set between the two consumers.
+        # CALLING_CONVENTION_CHANGED is in both the confirmed (suppression)
+        # and promotable sets -- it's a genuine, BREAKING, direct
+        # call-boundary mismatch, unlike noexcept/exception-spec above.
         new = _snapshot(
             {
                 "libcore.so": _meta(soname="libcore.so.1", exports=["core_add"]),

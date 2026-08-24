@@ -1110,7 +1110,7 @@ a scoped, independently-landable change rather than one large PR. Numbering
 continues from Phase 4 rather than restarting, since these are direct
 continuations of the same initiative, not a new one.
 
-### Phase 5 — Shared confirmed-boundary-break kind set (shipped)
+### Phase 5 — Confirmed vs. promotable boundary-break kind sets (shipped)
 
 **Finding:** `bundle._detect_intra_dep_signature_changed`'s promoted-kinds
 set (3 kinds: params/return/var-type) and
@@ -1122,20 +1122,88 @@ consumer-attributed `BUNDLE_INTRA_DEP_SIGNATURE_CHANGED`, silently losing
 cross-library causality for exactly the kinds Phase 4 added confirmed-change
 detection for.
 
-**Fix (shipped):** one shared
-`bundle_models.CONFIRMED_C_BOUNDARY_SIGNATURE_BREAK_KINDS` frozenset,
-imported by both `bundle.py` and `bundle_signature_evidence.py` — living in
-`bundle_models.py` (a leaf module both already import) rather than either
-consumer module, matching this codebase's "one shared leaf-owned set, not
-two independently drifting lists" convention (see `AGENTS.md`'s discussion
-of the identical CTOR_EXPLICIT finding this set also fixed, in an earlier
-commit on this same branch). Regression coverage:
+**First fix attempt, reverted the same PR after a Codex review round (fresh
+evidence): sharing one 12-entry set for both purposes is itself wrong.**
+"Confirmed, so don't claim total ignorance about this symbol" (suppression)
+and "confirmed severely enough to fabricate a consumer-attributed BREAKING
+bundle finding" (promotion) are two different bars — `change_registry.py`'s
+own entries prove it: `FUNC_NOEXCEPT_ADDED` has `default_verdict=COMPATIBLE`,
+and `FUNC_NOEXCEPT_REMOVED`/`FUNC_EXCEPTION_SPEC_CHANGED` are
+`COMPATIBLE_WITH_RISK` with an explicit "not a binary break" rationale in
+their own registry comments. A single shared 12-entry set would have made
+`_detect_intra_dep_signature_changed` promote any of those three to a
+BREAKING `BUNDLE_INTRA_DEP_SIGNATURE_CHANGED` — fabricating a
+release-blocking cross-library finding out of a change the tool's own policy
+layer says is not a binary break at all. `FUNC_VIRTUAL_ADDED`/
+`FUNC_VIRTUAL_REMOVED` are genuinely `BREAKING` but describe vtable-slot
+layout, not a direct calling-boundary mismatch — a different failure mode
+than `BUNDLE_INTRA_DEP_SIGNATURE_CHANGED`'s own "calling convention is now
+mismatched" description.
+
+**Fix (shipped):** two sets in `bundle_models.py`, one a strict subset of
+the other (asserted at import time and pinned by
 `tests/test_bundle.py::TestIntraDepSignatureChanged::
-test_promotion_set_matches_shared_confirmed_boundary_kinds` (pins the two
-modules' sets to be the same object) and
-`test_promotes_calling_convention_change_to_consumer` (an end-to-end case
-that reproduces and closes the exact `CALLING_CONVENTION_CHANGED` gap named
-above).
+test_promotable_kinds_are_a_strict_subset_of_confirmed_kinds`, which also
+asserts every promotable kind's own `default_verdict` is `BREAKING` via
+`change_registry.REGISTRY`):
+
+- `CONFIRMED_C_BOUNDARY_SIGNATURE_BREAK_KINDS` (broad, 12 kinds) — used only
+  by `bundle_signature_evidence.py` for suppression, unchanged from the
+  first attempt.
+- `PROMOTABLE_C_BOUNDARY_SIGNATURE_BREAK_KINDS` (narrow, 6 kinds: the
+  original params/return/var-type plus `FUNC_VARIADIC_ADDED`/
+  `FUNC_VARIADIC_REMOVED`/`CALLING_CONVENTION_CHANGED`) — used only by
+  `bundle._detect_intra_dep_signature_changed` for promotion. This is the
+  actual fix for the finding above: it closes the real gap
+  (`CALLING_CONVENTION_CHANGED` and the two variadic kinds now promote)
+  without also promoting the six kinds that are correctly suppression-only
+  evidence.
+
+Regression coverage: the subset/verdict test above, plus
+`test_does_not_promote_noexcept_added_to_a_breaking_finding` (an end-to-end
+case pinning the exact fabrication the first attempt would have shipped)
+and `test_promotes_calling_convention_change_to_consumer` (the genuine gap
+this phase closes).
+
+**Lesson for future phases in this sequence:** "these two consumers read
+the same underlying fact, so they should share one constant" is not
+sufficient justification on its own — check whether the two consumers are
+actually answering the *same question* at the *same confidence bar* before
+unifying. Phase 7 (bundle policy/severity threading) will face a structurally
+similar temptation (one policy object feeding multiple decision points) and
+should verify each consumer's bar independently rather than assuming a
+single resolved object is automatically correct for all of them.
+
+**Known residual gap, not fixed in this phase (Codex/CodeRabbit review,
+fresh evidence, filed rather than rushed):**
+`_detect_intra_dep_signature_changed`'s consumer lookup
+(`new.resolution.consumers_of(change.symbol)`) is a bare, name-only match
+with no reachability or version/default-binding filtering — unlike
+`bundle_signature_evidence.find_unverified_signature_findings`, which
+already gates on `reachable_intra_libraries()` (the consumer must actually
+be able to load the provider through a real `DT_NEEDED` path) and
+`_consumer_matches_provider()` (a GNU symbol-version match, not just a bare
+name match) before attributing a finding. This predates Phase 5 — widening
+`relevant_kinds` from 3 to 6 kinds increases how often the pre-existing
+imprecision is reached, but does not introduce the imprecision itself. A
+related concern raised in the same review round: `diff_by_library`'s keys
+(`Path(result.library).name`, a "canonical basename" per that code's own
+comment) are asserted, not verified, to always agree with the resolution
+graph's own library-naming convention for every caller of
+`compare_bundle()` — plausible for the wired `compare --release` path
+(both derive from one directory-discovery pass) but not independently
+confirmed for every caller. Not fixed here: `bundle.py` is at the
+AI-readiness 2000-line hard cap (1992/2000 after Phase 5's own docstring
+additions), so borrowing `bundle_signature_evidence.py`'s reachability/
+version-matching logic needs either a shared leaf-module extraction (the
+two private helpers would need to become public, tested primitives with
+their own home) or an equal-or-greater removal elsewhere in `bundle.py` —
+a real, separately-scoped change, not a follow-up edit to the same
+function under review pressure. Until then, a `compare --release` bundle
+report can attribute a promoted finding to a provider a consumer cannot
+actually reach, or across a version mismatch, for the six promotable kinds
+— the same class of imprecision the pre-existing three kinds already
+carried, now reachable by twice as many kinds.
 
 ### Phase 6 — Compact per-library signature evidence (memory regression fix)
 
