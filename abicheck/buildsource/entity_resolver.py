@@ -40,10 +40,12 @@ predicted, rather than a second, independent identity computation.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from . import entity_identity
+from .graph_facts import _is_decl_or_type_node_id, _normalize_graph_identity
 
 if TYPE_CHECKING:
     from .graph_facts import GraphNode
@@ -113,6 +115,78 @@ class EntityResolver:
             self.conflicts.append(EntityConflict(canonical, (existing_v1, node.id)))
         return canonical
 
+    def remap_node_ids(self, remap: Callable[[str], str]) -> None:
+        """Rewrite every identity string this resolver references — v1 node
+        ids *and* canonical ids alike — through *remap* (Codex review, fresh
+        evidence, two rounds).
+
+        ``SourceGraphSummary.from_dict()`` normalizes a loaded
+        ``GraphNode.id`` (see ``graph_facts._normalize_graph_identity``, the
+        checkout-directory-taint fix) *after* this resolver was already
+        built from the persisted JSON — so without this remap,
+        ``aliases``/``_canonical_to_v1``/``conflicts`` would still be keyed
+        by the OLD, pre-migration id, and ``canonical_id_for(node.id)``
+        would silently return ``None`` for a node whose canonical identity
+        was already resolved and persisted, forcing a spurious re-resolve
+        (:meth:`resolve`'s idempotence never triggers, and a fresh
+        ``resolve()`` on a possibly-weaker signal set can add a second,
+        redundant alias instead of returning the persisted one).
+
+        A *canonical* id itself can carry the identical taint when no
+        USR/mangled name was available at resolve time —
+        ``entity_identity.normalized_signature``'s ``"sig:<qualified_name>..."``
+        fallback embeds the qualified name verbatim, which is exactly
+        ``node.label``'s own raw, checkout-path-bearing spelling before this
+        fix existed. A first revision of this method only remapped v1-id
+        *keys*, leaving that persisted canonical *value* untouched -- so
+        ``canonical_id_for()`` still returned a checkout-dependent id that
+        would never match a freshly-resolved graph's canonical id for the
+        identical declaration. ``remap`` is applied to every string in this
+        structure that could be either kind (it is a no-op for a
+        ``usr:``/``mangled:``/``synthetic:sha256:`` id, which never embeds a
+        qualified name literally).
+
+        Two distinct old entries collapsing onto the same new key after
+        *remap* (the directory-taint fix's own intended effect) is not
+        specially reconciled here: a dict comprehension keeps whichever
+        entry is last, which is harmless when both named the identical
+        declaration (they now agree on both id and canonical value), but is
+        not a fully general collision merge. Idempotent for an id *remap*
+        does not change.
+
+        Every string is gated by :func:`graph_facts._is_decl_or_type_node_id`
+        first (Codex review, fresh evidence, sixth round): ``resolve_entities()``
+        resolves *every* node in a graph, not just decl/type ones, so
+        ``aliases``/``_canonical_to_v1``/``conflicts`` can legitimately hold
+        a v1 id for a ``source://``/``header://``/... node too -- applying
+        *remap* to that id (or the canonical id it resolved to) regardless
+        of kind risked rewriting marker-shaped text that has nothing to do
+        with an anonymous/lambda declaration. A pairing (an alias's v1-id
+        key and canonical-id value, or a conflict's ``node_ids``) is only
+        remapped when the v1-id side of it is itself a decl/type id.
+        """
+
+        def _gated(node_id: str) -> str:
+            return remap(node_id) if _is_decl_or_type_node_id(node_id) else node_id
+
+        self.aliases = {
+            _gated(k): (remap(v) if _is_decl_or_type_node_id(k) else v)
+            for k, v in self.aliases.items()
+        }
+        self._canonical_to_v1 = {
+            (remap(c) if _is_decl_or_type_node_id(v) else c): _gated(v)
+            for c, v in self._canonical_to_v1.items()
+        }
+        self.conflicts = [
+            EntityConflict(
+                remap(c.canonical_id)
+                if all(_is_decl_or_type_node_id(nid) for nid in c.node_ids)
+                else c.canonical_id,
+                tuple(_gated(nid) for nid in c.node_ids),
+            )
+            for c in self.conflicts
+        ]
+
     def canonical_id_for(self, v1_id: str) -> str | None:
         """The canonical identity *v1_id* resolved to, or ``None`` if
         :meth:`resolve` was never called for it."""
@@ -147,8 +221,12 @@ class EntityResolver:
             for c in (raw_conflicts if isinstance(raw_conflicts, (list, tuple)) else ())
             if isinstance(c, dict)
         ]
-        return cls(
+        obj = cls(
             aliases=aliases,
             conflicts=conflicts,
             _canonical_to_v1=canonical_to_v1,
         )
+        # Self-heal against source_graph.py's own GraphNode/GraphEdge id
+        # migration (Codex review) -- see remap_node_ids's own docstring.
+        obj.remap_node_ids(_normalize_graph_identity)
+        return obj

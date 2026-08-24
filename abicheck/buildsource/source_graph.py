@@ -68,6 +68,10 @@ from .graph_facts import (
     GraphEdge as GraphEdge,
     GraphFact as GraphFact,
     GraphNode as GraphNode,
+    _decl_node_id as _decl_node_id,
+    _normalize_graph_identity as _normalize_graph_identity,
+    _normalize_if_decl_or_type,
+    _type_node_id as _type_node_id,
     ensure_facts_and_resolve,
     merge_entity_facts,
     register_fact,
@@ -214,32 +218,28 @@ class SourceGraphSummary:
     edges: list[GraphEdge] = field(default_factory=list)
     coverage: dict[str, Any] = field(default_factory=dict)
     external_graph_refs: list[dict[str, Any]] = field(default_factory=list)
-    #: Which named extractor passes ran to completion (``"call_graph"`` /
-    #: ``"type_graph"``), independent of how many edges they produced (ADR-041
-    #: P0 slice 2 follow-up, second Codex review). Edge *presence* alone cannot
-    #: distinguish "the pass ran and found nothing" from "the pass never ran" —
-    #: a project where no public struct happens to have a private field would
-    #: look identical to one whose type-graph pass never executed, even though
-    #: only the second is actually missing evidence. Set by
-    #: ``inline._fold_call_graph``/``_fold_type_graph`` right after a
-    #: successful extraction (regardless of edge count); absent/``False`` means
-    #: "unknown whether it ran" (e.g. a hand-built or pre-slice-2 graph), so
-    #: readers fall back to edge-presence inference for those.
+    #: Which named extractor passes ran to completion (``"call_graph"`` / ``"type_graph"``),
+    #: independent of how many edges they produced (ADR-041 P0 slice 2 follow-up, second Codex
+    #: review). Edge *presence* alone cannot distinguish "the pass ran and found nothing" from
+    #: "the pass never ran" — a project where no public struct happens to have a private field
+    #: would look identical to one whose type-graph pass never executed, even though only the
+    #: second is actually missing evidence. Set by ``inline._fold_call_graph``/
+    #: ``_fold_type_graph`` right after a successful extraction (regardless of edge count);
+    #: absent/``False`` means "unknown whether it ran" (e.g. a hand-built or pre-slice-2
+    #: graph), so readers fall back to edge-presence inference for those.
     extractor_passes: dict[str, bool] = field(default_factory=dict)
     #: Which named extractor passes ran, but only over a *narrowed* scope
-    #: (``changed_paths``/``scoped_units`` restricting ``_fold_call_graph``/
-    #: ``_fold_type_graph`` to a subset of compile units — eleventh Codex
-    #: review). A narrowed pass never sets ``extractor_passes`` for that name
-    #: (it did not examine the whole project), but it still serializes
-    #: whatever edges it *did* collect from the subset it saw. Those edges
-    #: must not be treated as full-family coverage when compared against a
-    #: side that ran a confirmed *full* pass — a baseline scoped to a few
-    #: changed TUs having one ``TYPE_HAS_FIELD_TYPE`` edge says nothing about
-    #: whether the rest of the project's dependencies were ever inspected, so
-    #: comparing it as if that kind were fully covered lets unrelated,
-    #: never-examined dependencies read as "newly added". Set alongside (in
-    #: place of) ``extractor_passes`` by ``inline._fold_call_graph``/
-    #: ``_fold_type_graph`` when the local ``narrowed`` flag is ``True``.
+    #: (``changed_paths``/``scoped_units`` restricting ``_fold_call_graph``/``_fold_type_graph``
+    #: to a subset of compile units — eleventh Codex review). A narrowed pass never sets
+    #: ``extractor_passes`` for that name (it did not examine the whole project), but it still
+    #: serializes whatever edges it *did* collect from the subset it saw. Those edges must not
+    #: be treated as full-family coverage when compared against a side that ran a confirmed
+    #: *full* pass — a baseline scoped to a few changed TUs having one ``TYPE_HAS_FIELD_TYPE``
+    #: edge says nothing about whether the rest of the project's dependencies were ever
+    #: inspected, so comparing it as if that kind were fully covered lets unrelated, never-
+    #: examined dependencies read as "newly added". Set alongside (in place of)
+    #: ``extractor_passes`` by ``inline._fold_call_graph``/``_fold_type_graph`` when the local
+    #: ``narrowed`` flag is ``True``.
     narrowed_passes: dict[str, bool] = field(default_factory=dict)
     #: The actual scope a narrowed pass was restricted to — the ``changed_paths``
     #: tuple, or the examined compile units' source paths for an unseeded
@@ -254,13 +254,12 @@ class SourceGraphSummary:
     #: narrowed to this *identical* (non-empty) scope; set alongside
     #: ``narrowed_passes`` by ``inline._fold_call_graph``/``_fold_type_graph``.
     narrowed_scope: dict[str, frozenset[str]] = field(default_factory=dict)
-    #: Which named extractor passes hit per-TU diagnostics — a clang crash/
-    #: timeout/degenerate AST on some subset (sixteenth Codex review). Such a
-    #: run (narrowed or not) still folds edges from the TUs that *did* parse,
-    #: but those edges must not vouch for "this kind was examined" over
-    #: whatever scope the pass claims: the failed TUs are an unknown,
-    #: untracked gap (unlike ``narrowed_scope``, which knows exactly which TUs
-    #: a deliberately-scoped run examined). Set by ``inline._fold_call_graph``/
+    #: Which named extractor passes hit per-TU diagnostics — a clang crash/timeout/degenerate
+    #: AST on some subset (sixteenth Codex review). Such a run (narrowed or not) still folds
+    #: edges from the TUs that *did* parse, but those edges must not vouch for "this kind was
+    #: examined" over whatever scope the pass claims: the failed TUs are an unknown, untracked
+    #: gap (unlike ``narrowed_scope``, which knows exactly which TUs a deliberately-scoped run
+    #: examined). Set by ``inline._fold_call_graph``/
     #: ``_fold_type_graph``/``cli_buildsource_helpers._collect_call_graph``
     #: whenever the pass examined units but ``extractor.diagnostics`` was
     #: non-empty (mutually exclusive with ``extractor_passes``/``narrowed_passes``,
@@ -279,38 +278,32 @@ class SourceGraphSummary:
     entity_resolver: EntityResolver = field(default_factory=EntityResolver)
 
     def __post_init__(self) -> None:
-        # ADR-046 D2: backfill/re-derive facts/resolved for anything
-        # constructed directly (bypassing add_node/add_edge), so every node
-        # reachable from this summary satisfies "facts is never empty,
-        # resolved is derived from facts". Must run *before* the de-dup
-        # indexes below (Codex review, fresh evidence): a constructor-seeded
-        # edge whose role lives only in `facts` (not yet mirrored into
-        # `attrs`) would otherwise have its `relation_key()` computed against
-        # an empty `attrs`/`resolved` view, indexing it under the wrong
-        # (blank-role) key before resolution ever populates the real one.
-        for n in self.nodes:
-            ensure_facts_and_resolve(n)
-        for e in self.edges:
-            ensure_facts_and_resolve(e)
-        # De-dup indexes for O(1) add_node/add_edge, seeded from whatever the
-        # constructor (or from_dict) provided. Edges dedup on relation_key()
-        # (src, dst, kind, role), not the coarser key() (ADR-046 D1, Codex
-        # review on PR #620): deduping on key() alone silently folded two
-        # real, role-distinct relations -- e.g. a function that both returns
-        # and takes the same private type, two DECL_HAS_TYPE edges -- into
-        # one edge object, so only one role ever survived to be found via
-        # relation_key() by anything walking graph.edges. key() itself is
-        # untouched (still (src, dst, kind)); diff_source_graph's coarser
-        # edge-set comparison keeps its pre-existing "one representative
-        # edge per (src, dst, kind)" precision either way.
-        self._node_ids: set[str] = {n.id for n in self.nodes}
-        self._edge_keys: set[tuple[str, str, str, str]] = {
-            e.relation_key() for e in self.edges
-        }
-        self._node_by_id: dict[str, GraphNode] = {n.id: n for n in self.nodes}
-        self._edge_by_key: dict[tuple[str, str, str, str], GraphEdge] = {
-            e.relation_key(): e for e in self.edges
-        }
+        # Re-register through add_node()/add_edge() rather than building the de-dup indexes
+        # directly (Codex review): a caller building SourceGraphSummary(nodes=..., edges=...)
+        # directly never routes through _decl_node_id/_type_node_id, so a hand-built id/
+        # endpoint can carry a checkout-dependent marker -- add_node()/add_edge() normalize it
+        # themselves now (their own docstrings), which can make two originally-distinct
+        # constructor-seeded ids collide; a plain set/dict comprehension would then disagree
+        # with len(self.nodes)/len(self.edges), the same "index vs list" desync from_dict()
+        # already fixed the identical way. A no-op for the common case: on a fresh,
+        # already-normalized id this just resolves+appends, identical to a direct index build.
+        seeded_nodes, seeded_edges = self.nodes, self.edges
+        self.nodes, self.edges = [], []
+        self._node_ids: set[str] = set()
+        self._edge_keys: set[tuple[str, str, str, str]] = set()
+        self._node_by_id: dict[str, GraphNode] = {}
+        self._edge_by_key: dict[tuple[str, str, str, str], GraphEdge] = {}
+        for n in seeded_nodes:
+            self.add_node(n)
+        for e in seeded_edges:
+            self.add_edge(e)
+        # A caller-supplied entity_resolver (Codex review) is still keyed by pre-normalization
+        # ids here -- a plain remap alone was already insufficient for the identical
+        # from_dict() case (a stale value can survive node coalescing), so this rebuilds it
+        # the same way, from the now-registered nodes. Gated on non-empty so a caller passing
+        # none doesn't pay for it by default.
+        if self.entity_resolver.aliases:
+            self.resolve_entities()
 
     # -- mutation helpers ---------------------------------------------------
 
@@ -326,7 +319,12 @@ class SourceGraphSummary:
         otherwise have its whole fact history collapsed into one flattened
         fact, discarding the individual per-producer facts and any
         ``conflicts`` it already recorded.
+
+        Normalizes ``node.id`` first (Codex review): the one true choke point every insertion
+        path funnels through, catching a hand-built id even if its own producer forgot
+        ``_decl_node_id``/``_type_node_id``. A no-op for every other id.
         """
+        node.id = _normalize_if_decl_or_type(node.id)
         if node.id not in self._node_ids:
             ensure_facts_and_resolve(node)
             self.nodes.append(node)
@@ -348,7 +346,11 @@ class SourceGraphSummary:
         mirrored into ``attrs``) would otherwise have ``relation_key()``
         computed against an empty ``attrs``/``resolved`` view and dedup on
         the wrong (blank-role) key instead of its true, post-resolution one.
+
+        Normalizes ``edge.src``/``edge.dst`` first, same reasoning as :meth:`add_node`.
         """
+        edge.src = _normalize_if_decl_or_type(edge.src)
+        edge.dst = _normalize_if_decl_or_type(edge.dst)
         ensure_facts_and_resolve(edge)
         rkey = edge.relation_key()
         if rkey not in self._edge_keys:
@@ -453,7 +455,12 @@ class SourceGraphSummary:
         return self
 
     def finalize(self) -> SourceGraphSummary:
-        """Fill ``graph_id`` and the structural ``coverage`` counts; return self."""
+        """Fill ``graph_id``/``coverage``; merges onto (never replaces) the latter, at every nesting level, so a persisted unrecognized field survives; return self."""
+
+        def _section(key: str, **new: Any) -> dict[str, Any]:
+            old = self.coverage.get(key)
+            return {**(old if isinstance(old, dict) else {}), **new}
+
         self.graph_id = self.compute_graph_id()
         kinds: dict[str, int] = {}
         for n in self.nodes:
@@ -461,38 +468,32 @@ class SourceGraphSummary:
         edge_kinds: dict[str, int] = {}
         for e in self.edges:
             edge_kinds[e.kind] = edge_kinds.get(e.kind, 0) + 1
-        # A pass that ran but found zero edges is still "collected" (ADR-041 P0
-        # slice 2 follow-up): edge presence alone reads identically to "the
-        # pass never ran", which is the exact coverage-honesty gap
-        # ``extractor_passes`` closes. Fall back to edge presence alone when
-        # the flag is absent (a hand-built or pre-slice-2 graph).
-        # ``header_call_graph``/``header_type_graph`` are the header-only graph
-        # builder's own pass names (ADR-041 header-only-graph addendum) — a
-        # distinct AST-walk shape (one synthetic header-aggregate TU, no build
-        # integration) from the build-integrated ``call_graph``/``type_graph``
-        # passes. Only ``header_type_graph`` grants "ran, zero found still
-        # collected" credit here, and only for the *structural* kinds
-        # (TYPE_INHERITS/TYPE_HAS_FIELD_TYPE/DECL_HAS_TYPE): a header-only pass
-        # has true project-wide visibility of those (declaration-level facts,
-        # no body needed). ``DECL_CALLS_DECL``/``DECL_REFERENCES_DECL`` need a
-        # function body a header-only pass only sees when it happens to be
-        # written *in the header* — its "ran" is not evidence of project-wide
-        # call/reference coverage the way a build-integrated pass's is, so
-        # neither ``call_edges.collected`` nor ``reference_edges.collected``
-        # may be granted from ``header_call_graph``/``header_type_graph``
-        # alone (Codex review; mirrors ``source_graph_findings.
-        # _pass_trusted_kinds``'s structural-vs-body-dependent split).
+        # A pass that ran but found zero edges is still "collected" (ADR-041 P0 slice 2
+        # follow-up): edge presence alone reads identically to "the pass never ran", which
+        # is the exact coverage-honesty gap ``extractor_passes`` closes. Fall back to edge
+        # presence alone when the flag is absent (a hand-built or pre-slice-2 graph).
+        # ``header_call_graph``/``header_type_graph`` are the header-only graph builder's
+        # own pass names (ADR-041 header-only-graph addendum) — a distinct AST-walk shape
+        # (one synthetic header-aggregate TU, no build integration) from the build-integrated
+        # ``call_graph``/``type_graph`` passes. Only ``header_type_graph`` grants "ran, zero
+        # found still collected" credit here, and only for the *structural* kinds
+        # (TYPE_INHERITS/TYPE_HAS_FIELD_TYPE/DECL_HAS_TYPE): a header-only pass has true
+        # project-wide visibility of those (declaration-level facts, no body needed).
+        # ``DECL_CALLS_DECL``/``DECL_REFERENCES_DECL`` need a function body a header-only
+        # pass only sees when it happens to be written *in the header* — its "ran" is not
+        # evidence of project-wide call/reference coverage the way a build-integrated pass's
+        # is, so neither ``call_edges.collected`` nor ``reference_edges.collected`` may be
+        # granted from ``header_call_graph``/``header_type_graph`` alone (Codex review;
+        # mirrors ``source_graph_findings._pass_trusted_kinds``'s structural-vs-body split).
         call_pass_ran = self.extractor_passes.get("call_graph", False)
         type_pass_ran = self.extractor_passes.get("type_graph", False)
         header_type_pass_ran = self.extractor_passes.get("header_type_graph", False)
-        # ``include_graph``/``header_include_graph`` (build-integrated and
-        # header-only-graph builder respectively) are pure file-inclusion
-        # facts with no body-dependent gap the way calls/references have — a
-        # confirmed pass with zero edges (a leaf header with no #includes of
-        # its own) is a genuine zero, not "never collected" (Codex review:
-        # this mirrors ``has_calls``/``has_type_edges`` below, which already
-        # credit a confirmed-but-empty pass; ``has_includes`` previously
-        # looked at edge presence alone).
+        # ``include_graph``/``header_include_graph`` (build-integrated and header-only-graph
+        # builder respectively) are pure file-inclusion facts with no body-dependent gap the
+        # way calls/references have — a confirmed pass with zero edges (a leaf header with no
+        # #includes of its own) is a genuine zero, not "never collected" (Codex review: this
+        # mirrors ``has_calls``/``has_type_edges`` below, which already credit a
+        # confirmed-but-empty pass; ``has_includes`` previously looked at edge presence alone).
         include_pass_ran = self.extractor_passes.get("include_graph", False)
         header_include_pass_ran = self.extractor_passes.get(
             "header_include_graph", False
@@ -503,12 +504,11 @@ class SourceGraphSummary:
         has_includes = (include_pass_ran or header_include_pass_ran) or any(
             e.kind == "COMPILE_UNIT_INCLUDES_FILE" for e in self.edges
         )
-        #: ADR-041 P0: TYPE_INHERITS/TYPE_HAS_FIELD_TYPE/DECL_HAS_TYPE describe
-        #: type-level dependencies; DECL_REFERENCES_DECL a non-call decl reference.
-        #: Both come from ``type_graph.py`` (folded alongside the call graph) or an
-        #: external backend (``graph_backends.py``), so "collected" is tracked
-        #: separately from the call graph — a graph can have calls but no type
-        #: edges (e.g. an older pack) and coverage must say so honestly.
+        #: ADR-041 P0: TYPE_INHERITS/TYPE_HAS_FIELD_TYPE/DECL_HAS_TYPE describe type-level
+        #: dependencies; DECL_REFERENCES_DECL a non-call decl reference. Both come from
+        #: ``type_graph.py`` (folded alongside the call graph) or an external backend
+        #: (``graph_backends.py``), so "collected" is tracked separately — a graph can have
+        #: calls but no type edges (e.g. an older pack), and coverage must say so honestly.
         type_edge_kinds = ("TYPE_INHERITS", "TYPE_HAS_FIELD_TYPE", "DECL_HAS_TYPE")
         has_type_edges = (type_pass_ran or header_type_pass_ran) or any(
             e.kind in type_edge_kinds for e in self.edges
@@ -517,26 +517,31 @@ class SourceGraphSummary:
             e.kind == "DECL_REFERENCES_DECL" for e in self.edges
         )
         self.coverage = {
+            **self.coverage,  # forward-compat: keep any unrecognized field
             "targets": kinds.get("target", 0),
             "compile_units": kinds.get("compile_unit", 0),
             "source_decls": kinds.get("source_decl", 0),
             "binary_symbol_mappings": edge_kinds.get("SOURCE_DECL_MAPS_TO_SYMBOL", 0),
-            "include_edges": {
-                "collected": has_includes,
-                "count": edge_kinds.get("COMPILE_UNIT_INCLUDES_FILE", 0),
-            },
-            "call_edges": {
-                "collected": has_calls,
-                "count": edge_kinds.get("DECL_CALLS_DECL", 0),
-            },
-            "type_edges": {
-                "collected": has_type_edges,
-                "count": sum(edge_kinds.get(k, 0) for k in type_edge_kinds),
-            },
-            "reference_edges": {
-                "collected": has_reference_edges,
-                "count": edge_kinds.get("DECL_REFERENCES_DECL", 0),
-            },
+            "include_edges": _section(
+                "include_edges",
+                collected=has_includes,
+                count=edge_kinds.get("COMPILE_UNIT_INCLUDES_FILE", 0),
+            ),
+            "call_edges": _section(
+                "call_edges",
+                collected=has_calls,
+                count=edge_kinds.get("DECL_CALLS_DECL", 0),
+            ),
+            "type_edges": _section(
+                "type_edges",
+                collected=has_type_edges,
+                count=sum(edge_kinds.get(k, 0) for k in type_edge_kinds),
+            ),
+            "reference_edges": _section(
+                "reference_edges",
+                collected=has_reference_edges,
+                count=edge_kinds.get("DECL_REFERENCES_DECL", 0),
+            ),
             "node_kinds": dict(sorted(kinds.items())),
             "edge_kinds": dict(sorted(edge_kinds.items())),
         }
@@ -568,20 +573,16 @@ class SourceGraphSummary:
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> SourceGraphSummary:
         # Defensive ``.get`` parsing so a newer/hand-edited summary never aborts
-        # a load (evidence/CLAUDE.md forward-compat rule). ``indexes`` are derived
-        # and intentionally not read back — they are recomputed from nodes/edges.
-        # ``extractor_passes`` defaults to {} for a pre-slice-2 pack (additive
-        # field, no schema_version bump needed — same "unknown edge kinds/
-        # fields are ignored/defaulted" forward-compat rule as ADR-041 P0 slice 1).
+        # a load (evidence/CLAUDE.md forward-compat rule); ``indexes`` are
+        # derived and intentionally not read back. ``extractor_passes``
+        # defaults to {} for a pre-slice-2 pack (ADR-041 P0 slice 1).
         raw_entity_resolver = d.get("entity_resolver")
         _raw_entity_resolver: dict[str, Any] = (
             raw_entity_resolver if isinstance(raw_entity_resolver, dict) else {}
         )
-        return cls(
+        obj = cls(
             schema_version=int(d.get("schema_version", SOURCE_GRAPH_VERSION)),
             graph_id=str(d.get("graph_id", "")),
-            nodes=[GraphNode.from_dict(n) for n in d.get("nodes", [])],
-            edges=[GraphEdge.from_dict(e) for e in d.get("edges", [])],
             coverage=dict(d.get("coverage", {})),
             external_graph_refs=[dict(r) for r in d.get("external_graph_refs", [])],
             extractor_passes={
@@ -599,6 +600,15 @@ class SourceGraphSummary:
             },
             entity_resolver=EntityResolver.from_dict(_raw_entity_resolver),
         )
+        # add_node/add_edge coalesce migration-colliding ids (Codex review).
+        for raw_node in d.get("nodes", []):
+            obj.add_node(GraphNode.from_dict(raw_node))
+        for raw_edge in d.get("edges", []):
+            obj.add_edge(GraphEdge.from_dict(raw_edge))
+        if _raw_entity_resolver:
+            obj.resolve_entities()  # rebuild from coalesced facts (Codex review)
+        obj.finalize()  # recomputes graph_id + coverage post-migration
+        return obj
 
 
 # ── node-id helpers ───────────────────────────────────────────────────────
@@ -620,16 +630,11 @@ def _option_node_id(flag: str) -> str:
     return f"build_option://{flag}"
 
 
-def _decl_node_id(identity: str) -> str:
-    return f"decl://{identity}"
-
-
-def _type_node_id(identity: str) -> str:
-    return f"type://{identity}"
-
-
 def _vtable_node_id(identity: str) -> str:
-    return f"vtable://{identity}"
+    # A vtable's identity is its owning record's, which for a polymorphic anonymous struct
+    # can embed the checkout marker (Codex review) -- no-op for a fresh build's own
+    # already-normalized identity, matters for any other caller and for the migration gate.
+    return f"vtable://{_normalize_graph_identity(identity)}"
 
 
 def function_decl_identity(
@@ -859,15 +864,13 @@ def is_consumer_compiled_public_entry(
     return is_consumer_compiled_node(node_id, node_by_id)
 
 
-#: ``provenance`` tag ``augment_graph_with_calls`` (``call_graph.py``) stamps
-#: on a fallback node it creates for a caller/callee identity with no other
-#: declaration node backing it — the one node shape known to lack a
-#: ``consumer_compiled_body`` attr while still representing a genuine,
-#: build-integrated (out-of-line, not-necessarily-consumer-compiled) project
-#: declaration, as opposed to "no signal available" (header-graph/type nodes,
-#: synthetic test fixtures, …) which stays permissive by default. Mirrored as
-#: a literal string rather than imported from ``call_graph.py`` to avoid
-#: coupling this module to that one's internal constant.
+#: ``provenance`` tag ``augment_graph_with_calls`` (``call_graph.py``) stamps on a fallback
+#: node it creates for a caller/callee identity with no other declaration node backing it —
+#: the one node shape known to lack a ``consumer_compiled_body`` attr while still representing
+#: a genuine, build-integrated (out-of-line, not-necessarily-consumer-compiled) project
+#: declaration, as opposed to "no signal available" (header-graph/type nodes, synthetic test
+#: fixtures, …) which stays permissive by default. Mirrored as a literal string rather than
+#: imported from ``call_graph.py`` to avoid coupling this module to that one's own constant.
 _CALL_GRAPH_FALLBACK_PROVENANCE = "call_graph"
 
 #: Same shape as :data:`_CALL_GRAPH_FALLBACK_PROVENANCE`, for external
@@ -1476,20 +1479,17 @@ def _augment_with_source_abi(
         *surface.reachable_templates,
         *surface.reachable_inline_bodies,
     )
-    # An entity routed to reachable_templates/reachable_inline_bodies shares
-    # its identity() (mangled name, or qualified_name+signature_hash) with the
-    # plain "function"-kind declaration entity clang.py *also* emits for the
-    # same function -- both land on the same node id via _decl_node_id below,
-    # and add_node keeps only the first writer's attrs. reachable_declarations
-    # is iterated first in `declarations` above, so for any function that also
-    # has an inline/template rendition, the winning node's own attrs["decl_kind"]
-    # is always "function"/"method", never "inline"/"template" -- silently
-    # losing the one signal that distinguishes "body compiled into every
-    # consumer TU that includes this header" from "ordinary out-of-line body,
-    # compiled into this library's binary only" (Codex review). Compute the
-    # identity set up front so every entity sharing it gets the *same*
-    # attrs["consumer_compiled_body"] value regardless of which one wins the
-    # node-id race.
+    # An entity routed to reachable_templates/reachable_inline_bodies shares its identity()
+    # (mangled name, or qualified_name+signature_hash) with the plain "function"-kind
+    # declaration entity clang.py *also* emits for the same function -- both land on the same
+    # node id via _decl_node_id below, and add_node keeps only the first writer's attrs.
+    # reachable_declarations is iterated first in `declarations` above, so for any function
+    # that also has an inline/template rendition, the winning node's own
+    # attrs["decl_kind"] is always "function"/"method", never "inline"/"template" -- silently
+    # losing the one signal that distinguishes "body compiled into every consumer TU that
+    # includes this header" from "ordinary out-of-line body, compiled into this library's
+    # binary only" (Codex review). Compute the identity set up front so every entity sharing
+    # it gets the *same* attrs["consumer_compiled_body"] value regardless of which one wins.
     consumer_compiled_identities = {
         ent.identity()
         for ent in (*surface.reachable_templates, *surface.reachable_inline_bodies)
