@@ -434,6 +434,29 @@ STDLIB_TYPE_NAMESPACE_PREFIXES: tuple[str, ...] = (
 _ANONYMOUS_TYPE_MARKERS: tuple[str, ...] = (
     "<lambda",
     "{lambda",
+    # Clang's own closure spelling is ``(lambda at <path>:<line>:<col>)`` --
+    # and after :func:`strip_anonymous_type_location` normalizes it, simply
+    # ``(lambda:<file>:<line>:<col>)``. Neither form starts the marker with
+    # ``<`` or ``{``, so a template instantiation over a closure type
+    # (``raii_guard<(lambda:task_group.h:522:26)>``) matched none of the
+    # markers above and was treated as ordinary ABI surface -- even though
+    # the *same* module already parses this exact spelling one screen down
+    # (``_ANON_LOCATION_RE``), i.e. the omission was in this list, not in
+    # what the codebase knows about clang's spelling. The consequence is a
+    # type whose identity carries a source *line number*: an unrelated edit
+    # earlier in the header shifts it, and the shifted spelling reads as a
+    # whole type removed and a whole type added, at BREAKING severity, for a
+    # closure class that has no user-nameable identity to break in the first
+    # place. GCC/DWARF's ``{lambda(...)#1}`` spelling matched all along,
+    # which is why this only ever showed up on clang-derived spellings.
+    #
+    # Like its two siblings this is a substring test, so it also matches a
+    # type whose name merely *contains* the text (the documented
+    # ``Tag<"(lambda at a.hpp:1:2)">`` string-NTTP shape). That exposure is
+    # identical in kind to what ``<lambda``/``{lambda`` already carry, and
+    # errs toward excluding a synthetic-looking type rather than admitting a
+    # line-number-keyed one.
+    "(lambda",
     "(anonymous",
     "(unnamed",
     "<unnamed",
