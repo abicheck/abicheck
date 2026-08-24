@@ -70,3 +70,14 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   Deliberately narrower than `_detect_unresolved_intra_dependency`'s full
   contract: symbol-version/default-binding matching is not attempted here,
   documented as a remaining, narrower gap in the module's own docstring.
+- **`_type_spelling_is_unresolved()`'s substring check on `"..."` was
+  unsafe, unlike the sibling check on `"?"`** (Codex review, fresh
+  evidence). A real, complete C/C++ type spelling can legitimately
+  contain the literal substring `"..."` -- a variadic function-pointer
+  parameter type like `"void (*)(int, ...)"` is fully-resolved evidence,
+  not a truncated one, but the blanket substring check misclassified it
+  as insufficient. Fixed by matching only the recursion-depth-cap
+  sentinel's own finite shape (the bare sentinel, optionally followed by
+  one or more ` *`/` &`/` &&` wrapper suffixes for nested pointer/
+  reference wrapping, anchored at both ends) via a regex, rather than a
+  substring check.

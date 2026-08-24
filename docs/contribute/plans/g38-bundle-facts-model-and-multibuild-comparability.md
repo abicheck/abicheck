@@ -680,6 +680,18 @@ real restructuring of the main loop, left open rather than attempted as
 an extension of the same review-driven patch. Both regressions confirmed
 to fail against the pre-fix code.
 
+**A third finding on the same recursion-sentinel area, correcting the
+previous fix's own reasoning.** That fix's substring check on `"..."` was
+itself unsafe, unlike the sibling `"?"` check it was modeled after
+(Codex review, fresh evidence): a real, complete C/C++ type spelling can
+legitimately contain the literal substring `"..."` — a variadic
+function-pointer parameter type like `"void (*)(int, ...)"` is
+fully-resolved evidence, not truncated. Fixed by matching only the
+sentinel's own finite shape via an anchored regex (the bare sentinel,
+optionally followed by one or more ` *`/` &`/` &&` wrapper suffixes for
+nested pointer/reference wrapping) instead of a blanket substring check.
+Confirmed to fail against the pre-fix substring-check code.
+
 `bundle_intra_dep_signature_changed` already fires correctly when a
 provider's DWARF/header evidence shows a real signature change. This phase
 adds the missing negative case: a new, dedicated `ChangeKind`,

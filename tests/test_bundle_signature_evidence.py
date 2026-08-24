@@ -167,6 +167,31 @@ class TestFindUnverifiedSignatureFindings:
             find_unverified_signature_findings(new, new, [], old_snaps, new_snaps) == []
         )
 
+    def test_variadic_function_pointer_type_is_not_treated_as_unresolved(self):
+        # Codex review, fresh evidence: a real, complete variadic
+        # function-pointer parameter type (e.g. a printf-style callback)
+        # legitimately spells its own textual type as
+        # "void (*)(int, ...)" -- the literal substring "..." appears
+        # inside real, fully-resolved evidence here, not as the
+        # recursion-depth-cap sentinel. A bare substring check on "..."
+        # would misclassify this as insufficient evidence.
+        new = _snapshot(
+            {
+                "libcore.so": _meta(exports=["core_fn"]),
+                "libconsumer.so": _meta(imports=["core_fn"], needed=["libcore.so"]),
+            }
+        )
+        fn = _evidenced_fn(
+            "core_fn",
+            params=[Param(name="cb", type="void (*)(int, ...)")],
+        )
+        old_snaps = {"libcore.so": _snap("libcore.so", functions=[fn])}
+        new_snaps = {"libcore.so": _snap("libcore.so", functions=[fn])}
+
+        assert (
+            find_unverified_signature_findings(new, new, [], old_snaps, new_snaps) == []
+        )
+
     def test_no_finding_when_one_side_insufficient(self):
         # Sufficient evidence on new, but ELF-only (dumped without headers)
         # on old -- still unverified, since agreement can't be confirmed
@@ -524,6 +549,8 @@ class TestFindUnverifiedSignatureFindings:
             # target
             "... &&",  # dwarf_snapshot.py: rvalue-reference wrapping a
             # depth-capped target
+            "... * *",  # pointer to pointer, both wrapping a depth-capped
+            # target (multi-level nesting)
         ],
     )
     def test_composite_unresolved_return_type_is_insufficient_evidence(

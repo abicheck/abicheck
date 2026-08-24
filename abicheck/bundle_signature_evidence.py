@@ -80,6 +80,7 @@ real restructuring of the main loop below, not a further filter clause.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable, Mapping
 from pathlib import Path
 
@@ -129,24 +130,39 @@ _UNKNOWN_TYPE_SENTINEL = "?"
 #: recursion depth cap is hit. `"?"` is not a character any real C/C++
 #: type spelling ever contains, so a substring check catches every one of
 #: these composite forms without needing to enumerate each parser's exact
-#: wrapping syntax; `"..."` needs an explicit check since it contains no
-#: `"?"` at all. (`Param.is_variadic`/`Function.is_variadic` are separate
+#: wrapping syntax. (`Param.is_variadic`/`Function.is_variadic` are separate
 #: boolean fields -- a real C variadic parameter is never spelled `"..."`
-#: as a `Param.type` value, so this check cannot misfire on one.)
+#: as a bare `Param.type` value, so a substring check on the bare `"?"`
+#: sentinel cannot misfire on one.)
 #:
-#: Codex review, fresh evidence: the recursion-depth-cap sentinel is not
-#: always emitted bare either -- `pdb_parser.py`'s `type_name()` returns
-#: `"..."` at the depth cap, but a pointer/reference wrapper one level up
-#: (`f"{ref_name} *"`/`f"{ref_name} &"`/`f"{ref_name} &&"`) then wraps that
-#: into `"... *"`/`"... &"`/`"... &&"`; `dwarf_snapshot.py`'s own
-#: `DW_TAG_pointer_type`/`DW_TAG_reference_type`/`DW_TAG_rvalue_reference_
-#: type` handling does the identical wrap. A substring check on `"..."` is
-#: as safe as the one on `"?"` above: no valid C/C++ identifier can contain
-#: a `.` at all, so `"..."` never appears in a real type spelling except as
-#: this sentinel -- and, per the note above, a genuine variadic parameter
-#: is never spelled into `Param.type` as the literal string `"..."` either.
+#: The recursion-depth-cap sentinel is not always emitted bare either --
+#: `pdb_parser.py`'s `type_name()` returns `"..."` at the depth cap, but a
+#: pointer/reference wrapper one level up (`f"{ref_name} *"`/
+#: `f"{ref_name} &"`/`f"{ref_name} &&"`) then wraps that into
+#: `"... *"`/`"... &"`/`"... &&"`, and a chain of such wrappers (pointer to
+#: pointer to a depth-capped target, say) can nest further into
+#: `"... * *"` and so on; `dwarf_snapshot.py`'s own `DW_TAG_pointer_type`/
+#: `DW_TAG_reference_type`/`DW_TAG_rvalue_reference_type` handling does the
+#: identical wrap.
+#:
+#: **Unlike `"?"`, a bare substring check on `"..."` is unsafe** (Codex
+#: review, fresh evidence, correcting an earlier revision of this
+#: docstring that claimed otherwise): a real, unrelated C/C++ type
+#: spelling genuinely CAN contain the literal substring `"..."` -- a
+#: variadic function-pointer parameter type like `"void (*)(int, ...)"`
+#: is legitimate, complete, real evidence, not a truncated one. The
+#: regex below only matches the sentinel's own finite shape (the bare
+#: sentinel, optionally followed by one or more ` *`/` &`/` &&`
+#: wrapper suffixes, anchored at both ends) rather than treating any
+#: appearance of the substring anywhere in the spelling as evidence of
+#: truncation.
+_RECURSION_CAP_SENTINEL_RE = re.compile(r"^\.\.\.(?: (?:\*|&&|&))*$")
+
+
 def _type_spelling_is_unresolved(spelling: str) -> bool:
-    return "..." in spelling or _UNKNOWN_TYPE_SENTINEL in spelling
+    return bool(_RECURSION_CAP_SENTINEL_RE.match(spelling)) or (
+        _UNKNOWN_TYPE_SENTINEL in spelling
+    )
 
 
 def _symbol_evidence_sufficient(symbol: str, snapshot: AbiSnapshot) -> bool:
