@@ -187,14 +187,21 @@ def _run_bundle_analysis(
     on the stashed release entry, the same key ``old_map``/``new_map`` use
     -- *not* the library's file basename), matching what
     ``BundleSnapshot.resolution`` itself keys providers/consumers by.
+
+    G38 stabilization Phase 12: both stages (the core
+    ``compare_bundle()`` suite and the Phase 4 signature-evidence gate)
+    now run through the single :func:`abicheck.bundle_analysis.
+    analyze_bundle` orchestrator -- the same one
+    :func:`abicheck.bundle_facts.compare_bundle_from_facts` calls for a
+    stored-baseline comparison -- rather than being sequenced by hand here.
+    This function's own job narrows to what only the live release path
+    needs: building the two live ``BundleSnapshot``\\ s, loading an
+    explicit ``--manifest``, and re-surfacing ``analyze_bundle``'s
+    structured ``analysis_errors`` as the same ``click.echo(...,
+    err=True)`` warnings this function has always emitted.
     """
-    from .bundle import (
-        BundleDiffResult,
-        build_bundle_snapshot,
-        compare_bundle,
-        load_manifest,
-    )
-    from .bundle_signature_evidence import find_unverified_signature_findings
+    from .bundle import build_bundle_snapshot, load_manifest
+    from .bundle_analysis import analyze_bundle
 
     if not old_map and not new_map:
         return None
@@ -225,54 +232,24 @@ def _run_bundle_analysis(
     system_extra: list[str] = [
         s.strip() for s in bundle_system_providers.split(",") if s.strip()
     ]
-    try:
-        result = compare_bundle(
-            old_snap,
-            new_snap,
-            per_lib_results,
-            manifest=manifest,
-            system_providers=system_extra or None,
-            cohorts=list(bundle_cohorts) or None,
-            policy=policy,
-        )
-    except Exception as exc:
-        # Analysis-engine bugs should not block the per-library report;
-        # surface as a warning *and* structurally, in the returned result's
-        # own `analysis_errors` (G38 stabilization Phase 11), so a JSON
-        # report consumer isn't limited to grepping stderr to tell "clean"
-        # apart from "degraded".
-        click.echo(f"Warning: bundle analysis raised: {exc}", err=True)
-        return BundleDiffResult(
-            old_root=old_snap.root,
-            new_root=new_snap.root,
-            analysis_errors=[f"bundle analysis raised: {exc}"],
-        )
-
-    if old_snapshots and new_snapshots:
-        # G38 Phase 4: run separately from compare_bundle() itself (a
-        # leaf, generic diff/graph function with no notion of per-library
-        # AbiSnapshots) and folded in here, the one caller that actually
-        # has both. Same additive-degradation contract as compare_bundle
-        # above -- a bug in this newer detector must not blank out the
-        # bundle findings compare_bundle already computed successfully.
-        try:
-            result.bundle_findings.extend(
-                find_unverified_signature_findings(
-                    old_snap,
-                    new_snap,
-                    per_lib_results,
-                    old_snapshots,
-                    new_snapshots,
-                )
-            )
-        except Exception as exc:
-            click.echo(
-                f"Warning: bundle signature-evidence check raised: {exc}",
-                err=True,
-            )
-            result.analysis_errors.append(
-                f"bundle signature-evidence check raised: {exc}"
-            )
+    result = analyze_bundle(
+        old_snap,
+        new_snap,
+        per_lib_results,
+        manifest=manifest,
+        system_providers=system_extra or None,
+        cohorts=list(bundle_cohorts) or None,
+        policy=policy,
+        old_signature_evidence=old_snapshots or None,
+        new_signature_evidence=new_snapshots or None,
+    )
+    # Re-surface analyze_bundle()'s structured `analysis_errors` as the
+    # same stderr warnings this function has always emitted -- the
+    # orchestrator itself is a pure/leaf function with no CLI-echoing
+    # concerns of its own (it's shared with the stored-facts path, which
+    # has no `click` context to echo into).
+    for err in result.analysis_errors:
+        click.echo(f"Warning: {err}", err=True)
 
     return result
 
