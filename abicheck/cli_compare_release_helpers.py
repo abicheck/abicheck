@@ -815,8 +815,18 @@ def _fold_release_global_severity(
     worst = base_code
     if bundle_result is not None and bundle_result.bundle_findings:
         # Bundle findings carry canonical (partitioned) ChangeKinds.
+        # G38 stabilization Phase 10 (Codex review, fresh evidence): this
+        # omitted `policy=` entirely, unlike the matrix_result branch right
+        # below it -- so a policy that reclassifies a bundle kind (e.g.
+        # `plugin_abi` demoting `calling_convention_changed`, which
+        # `BundleDiffResult.bundle_verdict` already honors via its own
+        # `.policy` field) never reached the severity-aware exit code,
+        # letting the displayed verdict and the process exit disagree.
         bundle_changes = [f.to_change() for f in bundle_result.bundle_findings]
-        worst = max(worst, compute_exit_code(bundle_changes, config))
+        worst = max(
+            worst,
+            compute_exit_code(bundle_changes, config, policy=bundle_result.policy),
+        )
     if matrix_result is not None and matrix_result.changes:
         worst = max(
             worst,

@@ -1475,14 +1475,35 @@ exit-code fold converts bundle findings to `Change`s and calls
 config through at all. The displayed verdict and the process exit code can
 therefore disagree for any non-default policy/severity combination.
 
-**Planned fix:** resolve bundle policy once into a typed
-`ResolvedBundlePolicy` (profile, `PolicyFile | None`, per-kind pack
-overrides, suppression, severity config) and thread that single object
-through bundle-finding classification, the aggregate bundle verdict,
-JSON/Markdown rendering, and both the severity-aware and legacy exit-code
-paths — so a custom policy demoting `bundle_intra_dep_signature_unverified`
-changes the report and the exit code together, never just one. **Not yet
-implemented.**
+**Fix, partial (shipped):** the severity exit-code fold
+(`_fold_release_global_severity`) omitted `policy=` entirely when scoring
+bundle findings — unlike the sibling `matrix_result` branch two lines
+below it, which already threads `policy`/`kind_sets`/`policy_file`
+through correctly. Confirmed the exact disagreement this caused: a
+`plugin_abi`-demoted `CALLING_CONVENTION_CHANGED`-derived bundle finding
+already read `COMPATIBLE` in `bundle_verdict` (the displayed verdict,
+which does read `BundleDiffResult.policy`) but still forced a nonzero
+severity-aware exit code, since the fold scored it under an implicit
+`policy=None`. Fixed by passing `policy=bundle_result.policy` — the same
+resolved policy name `bundle_verdict` already uses — so the two agree for
+every **built-in policy profile name** (`strict_abi`/`sdk_vendor`/
+`plugin_abi`). Regression:
+`tests/test_config_review.py::TestReleaseSeverityPolicyAndGlobal::
+test_fold_bundle_honors_the_bundle_result_own_policy` (the identical
+bundle finding scores exit 4 under `strict_abi`, exit 0 under
+`plugin_abi`).
+
+**Still open, deliberately not attempted in the same fix:** `BundleDiffResult`
+has no `policy_file`/pack-override/suppression fields at all today (only the
+bare `policy: str`), so a custom `--policy-file`, a `kind: policy` pack
+override, or direct suppression of a `bundle_*` kind still don't reach
+bundle findings anywhere — not the verdict, not the exit code, not
+rendering. Closing that needs the full `ResolvedBundlePolicy` design this
+phase originally proposed (profile, `PolicyFile | None`, per-kind pack
+overrides, suppression, severity config, threaded through classification/
+verdict/rendering/exit-code uniformly) — a real, separately-scoped
+feature addition to `BundleDiffResult`'s own data model, not a follow-up
+to the one-line `policy=` fix above.
 
 ### Phase 11 — Structured bundle-analysis coverage/degradation
 
