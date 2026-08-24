@@ -78,6 +78,7 @@ if TYPE_CHECKING:
     from .bundle_manifest import InstantiationManifest
     from .bundle_models import BundleDiffResult, BundleSignatureEvidence, BundleSnapshot
     from .checker_types import DiffResult
+    from .compile_context import CompileContext
     from .model import AbiSnapshot
 
 
@@ -219,6 +220,11 @@ def compare_release_against_bundle_facts(
     *,
     headers: list[Path] | None = None,
     includes: list[Path] | None = None,
+    header_backend: str = "auto",
+    compile: CompileContext | None = None,
+    per_library_headers: dict[str, list[Path]] | None = None,
+    per_library_includes: dict[str, list[Path]] | None = None,
+    per_library_compile: dict[str, CompileContext] | None = None,
     new_version: str = "",
     lang: str = "c++",
     include_private_dso: bool = False,
@@ -253,13 +259,45 @@ def compare_release_against_bundle_facts(
     accounting, which stays a CLI-only concern.
 
     Only the ELF-only per-library evidence a bundle comparison actually
-    needs is resolved (no debug-info package resolution, no PDB, no header
-    scoping beyond *headers*/*includes* applied uniformly to every matched
-    library) -- the plan's own Phase 2 status note names exactly this
-    narrowing ("most of compare's ~40 release-fan-out flags ... lose their
-    old-side meaning once the old side is already a resolved snapshot") as
-    why this is a genuinely smaller surface than ``compare_release_cmd``,
-    not an oversight.
+    needs is resolved (no debug-info package resolution, no PDB) -- the
+    plan's own Phase 2 status note names exactly this narrowing ("most of
+    compare's ~40 release-fan-out flags ... lose their old-side meaning
+    once the old side is already a resolved snapshot") as why this is a
+    genuinely smaller surface than ``compare_release_cmd``, not an
+    oversight.
+
+    *header_backend*/*compile* forward straight to ``service.resolve_input``
+    (both were previously silently dropped: this driver called
+    ``resolve_input`` without either kwarg, so a header-scoped NEW side always
+    resolved under ``header_backend="auto"`` -- which, absent a real castxml
+    on the host, means ``resolve_input`` picks castxml anyway and dies on a
+    clang/icpx-only host rather than falling back). A caller with a
+    resolved, working ``CompileContext`` (compiler binding, frontend,
+    extra flags -- e.g. a SYCL/DPC++ host that needs
+    ``CompileContext(gcc_path="icpx", frontend="clang", ...)``) can now pass
+    it directly instead of monkeypatching this module.
+
+    *headers*/*includes*/*compile* are the **uniform** fallback applied to
+    every matched library -- correct only when every library in the bundle
+    shares one header tree and one compile configuration, which does not
+    hold for a mixed-toolchain release (e.g. oneDAL's ``daal``/``oneapi::dal``
+    libraries built as plain C++ alongside a ``dpc`` library built
+    ``-fsycl``/``icpx``): resolving *every* library with the same
+    ``headers``/``includes``/``compile`` in that case parses each library's
+    headers under whichever single configuration was supplied, which is
+    correct for at most one of them. *per_library_headers*/
+    *per_library_includes*/*per_library_compile* are optional
+    ``{canonical_name: ...}`` overrides, consulted before the uniform
+    fallback for each matched library -- a library with no entry in a given
+    per-library map still falls back to that map's uniform sibling
+    (*headers*/*includes*/*compile* respectively), so a caller only needs to
+    override the libraries that actually differ. A comparison run entirely
+    with the uniform fallback (no per-library overrides) remains a **cost
+    proof**, not a **correctness proof**, for a mixed-toolchain bundle: it
+    demonstrates the driver runs to completion in reasonable time/memory,
+    not that every library was parsed under its own real compile
+    configuration -- use the per-library maps once any library's headers
+    need flags another library's don't.
 
     *include_dependencies* (default ``False``) mirrors ``--include-system-
     declarations``'s own Click default (``cli_options.
@@ -305,12 +343,23 @@ def compare_release_against_bundle_facts(
         new_path = new_map.get(key)
         if new_path is None:
             continue
+        # Per-library overrides win over the uniform fallback -- a library
+        # absent from a given override map still falls back to that map's
+        # own uniform sibling (headers/includes/compile respectively), so a
+        # caller only needs to name the libraries that actually differ. See
+        # the docstring above for why a uniform-only invocation is a cost
+        # proof, not a correctness proof, for a mixed-toolchain bundle.
+        lib_headers = (per_library_headers or {}).get(key, headers)
+        lib_includes = (per_library_includes or {}).get(key, includes)
+        lib_compile = (per_library_compile or {}).get(key, compile)
         new_snapshot = service.resolve_input(
             new_path,
-            headers=headers,
-            includes=includes,
+            headers=lib_headers,
+            includes=lib_includes,
             version=new_version,
             lang=lang,
+            header_backend=header_backend,
+            compile=lib_compile,
             include_dependencies=include_dependencies,
         )
         diff = service.compare_snapshots(old_snapshot, new_snapshot, policy=policy)

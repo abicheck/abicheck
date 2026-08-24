@@ -429,6 +429,133 @@ class TestCompareReleaseAgainstBundleFactsResolutionUnit:
 
         assert resolved_paths == [v10]
 
+    def test_header_backend_and_compile_are_forwarded(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Prior to this fix, ``header_backend``/``compile`` were silently
+        dropped -- the NEW side always resolved under
+        ``header_backend="auto"`` with no ``CompileContext``, so a
+        header-scoped comparison on a host with no working castxml (a
+        clang/icpx-only host) died rather than using the caller's own
+        resolved compiler binding/frontend."""
+        import abicheck.package as package_mod
+        import abicheck.service as service_mod
+        from abicheck.compile_context import CompileContext
+
+        facts_path = self._old_facts(tmp_path)
+        new_dir = tmp_path / "new"
+        new_dir.mkdir()
+        new_so = new_dir / "libcore.so"
+        new_so.write_bytes(b"")
+
+        monkeypatch.setattr(
+            package_mod,
+            "discover_shared_libraries",
+            lambda d, include_private=False: [new_so],
+        )
+        captured_kwargs: dict[str, object] = {}
+
+        def _fake_resolve_input(path, **kwargs):
+            captured_kwargs.update(kwargs)
+            return AbiSnapshot(
+                library="libcore.so",
+                version="new",
+                elf=_meta(soname="libcore.so", exports=["core_fn"]),
+            )
+
+        monkeypatch.setattr(service_mod, "resolve_input", _fake_resolve_input)
+        monkeypatch.setattr(
+            service_mod,
+            "compare_snapshots",
+            lambda old, new, policy: _diff("libcore.so", verdict=Verdict.NO_CHANGE),
+        )
+
+        ctx = CompileContext(
+            gcc_path="icpx",
+            gcc_option_tokens=("-fsycl", "-DONEDAL_DATA_PARALLEL", "-std=c++17"),
+            frontend="clang",
+        )
+        compare_release_against_bundle_facts(
+            facts_path, new_dir, header_backend="clang", compile=ctx
+        )
+
+        assert captured_kwargs["header_backend"] == "clang"
+        assert captured_kwargs["compile"] is ctx
+
+    def test_per_library_overrides_win_over_the_uniform_fallback(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """``headers``/``includes``/``compile`` apply uniformly to every
+        matched library by default -- correct only when every library in the
+        bundle shares one header tree/compile configuration, which does not
+        hold for a mixed-toolchain release (e.g. a plain-C++ library
+        alongside a ``-fsycl``/``icpx`` one). A per-library override for one
+        library must not leak onto a library with no entry in that map, which
+        must keep falling back to the uniform default."""
+        import abicheck.package as package_mod
+        import abicheck.service as service_mod
+        from abicheck.compile_context import CompileContext
+
+        metadata = {
+            "libcore.so": _meta(soname="libcore.so", exports=["core_fn"]),
+            "libdpc.so": _meta(soname="libdpc.so", exports=["dpc_fn"]),
+        }
+        facts = capture_bundle_facts(_per_library_snapshots(metadata))
+        facts_path = tmp_path / "old.bundlefacts.json"
+        save_bundle_facts(facts, facts_path)
+
+        new_dir = tmp_path / "new"
+        new_dir.mkdir()
+        core_so = new_dir / "libcore.so"
+        dpc_so = new_dir / "libdpc.so"
+        core_so.write_bytes(b"")
+        dpc_so.write_bytes(b"")
+
+        monkeypatch.setattr(
+            package_mod,
+            "discover_shared_libraries",
+            lambda d, include_private=False: [core_so, dpc_so],
+        )
+        captured_kwargs: dict[Path, dict[str, object]] = {}
+
+        def _fake_resolve_input(path, **kwargs):
+            captured_kwargs[path] = kwargs
+            return AbiSnapshot(
+                library=path.name,
+                version="new",
+                elf=_meta(soname=path.name, exports=["fn"]),
+            )
+
+        monkeypatch.setattr(service_mod, "resolve_input", _fake_resolve_input)
+        monkeypatch.setattr(
+            service_mod,
+            "compare_snapshots",
+            lambda old, new, policy: _diff(new.library, verdict=Verdict.NO_CHANGE),
+        )
+
+        uniform_headers = [Path("/include/common")]
+        uniform_includes = [Path("/include/common/sys")]
+        dpc_headers = [Path("/include/dpc")]
+        dpc_includes = [Path("/include/dpc/sys")]
+        dpc_ctx = CompileContext(gcc_path="icpx", frontend="clang")
+
+        compare_release_against_bundle_facts(
+            facts_path,
+            new_dir,
+            headers=uniform_headers,
+            includes=uniform_includes,
+            per_library_headers={"libdpc.so": dpc_headers},
+            per_library_includes={"libdpc.so": dpc_includes},
+            per_library_compile={"libdpc.so": dpc_ctx},
+        )
+
+        assert captured_kwargs[core_so]["headers"] == uniform_headers
+        assert captured_kwargs[core_so]["includes"] == uniform_includes
+        assert captured_kwargs[core_so]["compile"] is None
+        assert captured_kwargs[dpc_so]["headers"] == dpc_headers
+        assert captured_kwargs[dpc_so]["includes"] == dpc_includes
+        assert captured_kwargs[dpc_so]["compile"] is dpc_ctx
+
 
 # ---------------------------------------------------------------------------
 # compare_release_against_bundle_facts -- real compiled binaries
