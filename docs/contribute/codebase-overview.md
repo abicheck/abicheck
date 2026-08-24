@@ -14,6 +14,7 @@ and the [implementation plans](plans/index.md).
 > backlog and plans linked above, they include the
 > [config-key review](config-key-review.md),
 > [architecture-deepening plan](architecture-deepening-plan.md),
+> [bounded-module and file-health convergence plan](plans/module-boundaries-and-file-health.md),
 > [user scenarios & flows](user-scenarios.md), and the archived
 > [data-source process remediation plan](archive/data-source-process-remediation-plan.md).
 
@@ -26,6 +27,10 @@ libraries, shared objects, platform binaries, snapshots, package extracts, and
 selected workflow topologies. The implementation is intentionally layered so
 ELF/PE/Mach-O metadata, debug formats, header ASTs, policy, filtering, and report
 rendering can evolve independently.
+
+The table below describes the current flat module layout. New and migrated code
+follows the bounded-package responsibilities and dependency direction in the
+[bounded-module and file-health convergence plan](plans/module-boundaries-and-file-health.md).
 
 | Area | Primary modules | Role |
 |---|---|---|
