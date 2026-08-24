@@ -1330,6 +1330,171 @@ scan scheduling), not additional G38 phase surface.
 
 ---
 
+## Real-world validation and further phases (napetrov/abicheck-bazel-lab, real oneDAL)
+
+An external contributor ran a full real-oneDAL validation pass (`daal`,
+`oneapi::dal`, and `dpc` scans; three `dump` baselines) against a pin bump
+from `7cf8adf83` to `c370aed07a` (101 commits). This is the first evidence
+in this plan sourced from a real, at-scale binary rather than a synthetic
+fixture, and it both confirms Phase 4 works correctly in production and
+surfaces real gaps this section turns into phases. Headline results:
+
+- **Cost-neutral pin bump.** All three scans and three dumps landed within
+  noise of the old pin (22m40s → 22m44s total scan time across the three
+  libraries; snapshot sizes unchanged). All three scans exit 0,
+  `COMPATIBLE_WITH_RISK`, with identical risk scores (78/27/47) to the old
+  pin — the bump changed correctness, not behavior, for this codebase.
+- **A real dumper correctness fix, already shipped, with an operational
+  lesson for this plan.** The bump also picked up a fix for an enumerator-
+  initializer value getting lost when folded on an intermediate clang AST
+  wrapper node (a positional auto-increment silently replaced the real
+  value — e.g. `csrArray = 1 << 4` recorded as `3` instead of `16`). This is
+  a general dumper bug, not specific to bundle analysis, and is not part of
+  G38 — but re-running the *same* source tree against stale, pre-fix
+  baselines produced 280 false `enum_member_value_changed` `BREAKING`
+  findings (155 `daal` + 125 `dpc`) with `schema_version=25` on both sides
+  and *nothing in the report naming which baseline caused it*. Re-dumping
+  the baselines at the new pin took all 280 to zero. The operational
+  lesson — "`schema_version` unchanged does not imply a baseline is still
+  valid across a core pin bump; any pin bump needs baselines re-dispatched"
+  — belongs in the repo's release/CI process documentation, not this plan,
+  but is recorded here since it was found by exercising this plan's own
+  Phase 2 stored-facts model at scale. A structured coverage block (Phase 8)
+  naming *which* baseline a mismatch traces to would have made this
+  diagnosable without a bisection.
+- **Phase 4 confirmed correct at production scale.** The cheap, headerless
+  bundle path (34s / 240MB for the full oneDAL bundle) correctly produced
+  `bundle_verdict=COMPATIBLE_WITH_RISK` with 156 advisory
+  `bundle_intra_dep_signature_unverified` findings — not spurious
+  `BREAKING` findings — validating both the C-boundary signature-evidence
+  gate's design and (retroactively) the Phase 5 promotion/suppression
+  split above: a headerless scan has essentially no DWARF/header evidence
+  for its stripped internal C symbols, so every one of the 156 correctly
+  landed as the advisory "unverified" finding rather than a fabricated
+  break.
+- **Bundle blockers: three of four now understood, two already fixed.**
+  Independently confirms `#831`'s two landed fixes (header analysis in
+  directory-scoped bundle compare; SONAME-stem matching eliminating 379
+  false `bundle_intra_dep_removed` findings on external providers, → 0) and
+  identifies two more, detailed as Phases 11–13 below.
+
+### Phase 11 — Headerless-bundle public-surface scoping
+
+**Finding:** a headerless directory/package bundle compare has no header
+evidence to scope by, so `FilterNonPublicSurface` (or its bundle-analysis
+equivalent) has nothing to restrict findings to the library's actual public
+API — every ELF-visible symbol, including ones with no public header at
+all, is treated as in-scope. Measured on real oneDAL libraries: 1414/237/272
+unscoped `BREAKING` findings across the three headerless scans, an order of
+magnitude more than a header-scoped compare of the same libraries would
+report. An earlier upstream attempt to scope this from ELF visibility alone
+(no headers) was reverted — ELF visibility (`GLOBAL`/hidden) answers "is
+this symbol exported," not "is this symbol part of the documented public
+API," and the two diverge for exactly the internal-but-exported C symbols
+this whole initiative's own oneDAL repro (ADR-023's own origin story) is
+built around.
+
+**Not yet designed.** A correct fix needs a public-surface signal that
+does not depend on parsing headers — candidates worth evaluating rather
+than assuming one is right: (a) a version-script/export-map-derived
+allowlist, when the library's build already produces one (oneDAL's own
+CMake does, for several of its libraries); (b) `--public-header-dir`/an
+explicit `-H`/include-scoping flag threaded through the headerless bundle
+path specifically so a *cheap* partial header set (just the public
+umbrella headers, not the full transitive include graph a header-scoped
+compare pays for) can scope without paying Phase 13's full cost; (c) a
+documented, opt-in "no public-surface scoping available" flag on the
+finding set itself (mirroring Phase 8's structured coverage idea) so a
+headerless bundle report is honest about running unscoped rather than
+silently over-reporting. Given the ELF-visibility attempt's own revert,
+whichever design is chosen needs validation against the same real oneDAL
+corpus before landing, not just synthetic fixtures.
+
+### Phase 12 — Audit-mode (`scan --artifact-set`) system-provider coverage and friction
+
+**Finding, part 1 (additive, low-risk):** `scan --artifact-set`'s cheap
+audit path (10.8s / 383MB for the full six-library oneDAL set, no baseline
+required) is blocked in practice by `bundle_models.DEFAULT_SYSTEM_PROVIDERS`
+having no entries for the Intel oneAPI/TBB/MKL runtime libraries oneDAL
+links against — 862 audit findings collapsed to 58 once the missing
+sonames were supplied via the existing `--bundle-system-providers` escape
+hatch. **Not fixed in this pass**: the exact SONAMEs (`libtbbmalloc.so.2`,
+`libiomp5.so`, the MKL runtime family, the oneAPI Level Zero/Unified
+Runtime loaders, ...) were not independently re-verified against a real
+Intel oneAPI install in this environment, and this codebase's own
+"known gaps over risky reactive patches" convention argues against
+committing unverified SONAME strings to a shared, curated default list —
+a wrong entry here silently under-reports, which is worse than the
+current, honest "you must name it yourself" default. The actionable next
+step is for whoever ran this validation to supply the exact SONAME list
+(from `ldd`/`readelf` output against the real libraries) so it can be
+added to `DEFAULT_SYSTEM_PROVIDERS` with real provenance, mirroring how the
+existing entries (`libtbb.so.12`, `libsycl.so`, ...) already cover the
+same product family.
+
+**Finding, part 2 (a documented design tradeoff, re-examined, not
+reversed):** even after naming every system provider, 58 residual audit
+findings remained, traced to `_detect_unresolved_intra_dependency`'s own
+docstring — it deliberately has **no** `_looks_system_symbol` name-shape
+fallback, unlike its diff-driven sibling `_detect_intra_dep_removed`,
+specifically so a legitimate, non-system-shaped custom export (the
+docstring's own example: `vendor_init`) is never silently swallowed by a
+shape heuristic. That design choice is sound in the abstract and is not
+reversed here — but real usage shows it creates real friction: a fully-
+correct `--bundle-system-providers` list still needs to separately name
+every Intel-runtime-internal mangled symbol the loader resolves, since
+`DEFAULT_SYSTEM_SYMBOLS`/`_looks_system_symbol` are consulted only by the
+diff-driven detector, not the audit one. Worth a scoped follow-up (not
+attempted here, since it needs the same real Intel runtime evidence Part 1
+does): let `--bundle-system-providers` optionally accept a symbol-name
+*pattern*, not only a SONAME, so a real distinguishing signal for exactly
+the Intel-runtime-internal symbols this audit path can't otherwise resolve
+is available without reopening the `vendor_init` false-negative risk the
+original design decision correctly avoided.
+
+### Phase 13 — Cross-pair header/source-context cache for the bundle layer
+
+**Finding:** the fourth, most expensive blocker — a header-scoped
+directory/package bundle compare independently re-parses the shared header
+tree for every library pair, rather than once per unique compile context —
+measured at 2.5+ hours / 38.3GB peak RSS for a 12-union-header-parse oneDAL
+bundle compare (6 libraries × old+new), a cost that makes the header-scoped
+path effectively unusable for a bundle this size in CI. This is the same
+"original multi-binary performance problem" this plan's own Phases 6–10
+section already declares out of scope for G38 proper — this finding does
+not change that scoping decision, it sharpens it with a real, measured
+number rather than a hypothetical one, and confirms (independently of this
+plan) that the streaming JSON pruner AGENTS.md documents as a negative
+result (~1.2% peak-RSS reduction, ~13% slower) is not a viable point fix
+for this cost. The real fix — a shared, content-addressed header/AST cache
+keyed by compile context rather than by library — remains its own,
+separately-scoped initiative per the existing "Out of scope" text above,
+not additional G38 phase surface; this entry exists so that initiative
+inherits a concrete, real-world acceptance target (12 union header parses
+→ however many *unique* compile contexts the bundle actually has, which
+for a single-source-tree product like oneDAL should be closer to 1–2 than
+12) instead of starting from nothing.
+
+### Deferred CLI/API surface asks (not yet filed as phases)
+
+Three smaller, concrete asks came out of the same validation pass that
+don't yet have a phase of their own, each blocking a specific workflow
+rather than correctness:
+
+- **`dump --public-header-dir`** and **per-library header roots on the
+  CLI** — both needed for Phase 11's option (b) above (a cheap, partial
+  header set for headerless-bundle scoping) and for a cleaner Phase 10
+  stored-baseline producer invocation against a multi-library release
+  whose libraries don't all share one umbrella header directory.
+- **`--bundle-facts-out`'s consumer half** — already tracked as Phase 10
+  above; this validation pass is independent confirmation that it's the
+  single highest-value remaining ask, since it's the one gap keeping
+  `scan --artifact-set`'s otherwise-working 10.8s/383MB cheap audit path
+  from producing a real baseline-comparable exit code instead of an
+  audit-only one.
+
+---
+
 ## Out of scope
 
 Restated from the originating review, explicitly deferred rather than
