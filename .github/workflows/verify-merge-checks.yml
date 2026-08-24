@@ -67,6 +67,7 @@ jobs:
               'unit-tests (ubuntu-latest, 3.13, false)',
               'packaging (ubuntu-latest)',
               'packaging (windows-latest)',
+              'module-architecture',
               'changelog-fragment',
               'cli-interface-diff',
               'test-contract',
