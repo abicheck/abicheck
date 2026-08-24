@@ -182,12 +182,19 @@ def _symbol_evidence_sufficient(symbol: str, snapshot: AbiSnapshot) -> bool:
       construction, or any other backend that degrades to it).
     - a return/variable type that is unresolved per
       `_type_spelling_is_unresolved` (the bare `"?"` sentinel, a composite
-      form like `"?*"`/`"? &"`, or the recursion-depth-cap `"..."`), or
+      form like `"?*"`/`"? &"`, or the recursion-depth-cap sentinel), or
       (for a function) any parameter whose own type is unresolved the same
       way -- evidence that is present in shape but not in content (a
       symbol crosschecked against *some* declaration whose own type
       resolution still failed, wholly or partway through a composite
       type).
+    - (for a function) `is_variadic is None` -- unknown, tri-state, not a
+      negative determination. `diff_symbols._check_variadic_change` itself
+      skips (`skip_none=True`) whenever either side's value is unknown, so
+      treating an unknown value as "the rest of the signature looks fine,
+      therefore sufficient" would let a real fixed-arity<->variadic
+      transition produce neither a confirmed diff-level finding nor this
+      module's own risk finding.
 
     A symbol absent from both `function_map` and `variable_map` entirely
     is also treated as insufficient -- absence of any declaration entry is
@@ -196,6 +203,20 @@ def _symbol_evidence_sufficient(symbol: str, snapshot: AbiSnapshot) -> bool:
     fn = snapshot.function_map.get(symbol)
     if fn is not None:
         if fn.visibility is Visibility.ELF_ONLY:
+            return False
+        if fn.is_variadic is None:
+            # Codex review, fresh evidence: diff_symbols._check_variadic_
+            # change() itself skips (skip_none=True) whenever either side's
+            # is_variadic is unknown -- a real, tri-state field, not merely
+            # absent, since an older snapshot/dumper that never populated
+            # it is indistinguishable here from one that positively
+            # determined "not variadic". A fixed-arity<->variadic
+            # transition changes the calling ABI on the platforms that
+            # care, so treating unknown variadicness as "the rest of the
+            # signature looks fine, therefore sufficient" would let that
+            # transition produce neither a confirmed diff-level finding
+            # nor this module's own unverified-risk one -- total silence
+            # on a real ABI-relevant unknown.
             return False
         if _type_spelling_is_unresolved(fn.return_type):
             return False

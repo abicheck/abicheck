@@ -77,7 +77,11 @@ def _elf_only_fn(symbol: str) -> Function:
 
 
 def _evidenced_fn(
-    symbol: str, *, return_type: str = "int", params: list[Param] | None = None
+    symbol: str,
+    *,
+    return_type: str = "int",
+    params: list[Param] | None = None,
+    is_variadic: bool | None = False,
 ) -> Function:
     return Function(
         name=symbol,
@@ -85,6 +89,7 @@ def _evidenced_fn(
         return_type=return_type,
         params=params or [],
         visibility=Visibility.PUBLIC,
+        is_variadic=is_variadic,
     )
 
 
@@ -166,6 +171,39 @@ class TestFindUnverifiedSignatureFindings:
         assert (
             find_unverified_signature_findings(new, new, [], old_snaps, new_snaps) == []
         )
+
+    def test_fires_when_variadicness_is_unknown_on_either_side(self):
+        # Codex review, fresh evidence: diff_symbols._check_variadic_
+        # change() itself skips (skip_none=True) whenever either side's
+        # is_variadic is unknown (None) -- an older snapshot/dumper that
+        # never populated the field is otherwise indistinguishable from
+        # one that positively determined "not variadic". Without this
+        # module also treating unknown variadicness as insufficient
+        # evidence, a real fixed-arity<->variadic transition landing on
+        # an unknown side would produce neither a confirmed diff-level
+        # finding nor this module's own risk finding -- total silence.
+        new = _snapshot(
+            {
+                "libcore.so": _meta(exports=["core_fn"]),
+                "libconsumer.so": _meta(imports=["core_fn"], needed=["libcore.so"]),
+            }
+        )
+        old_snaps = {
+            "libcore.so": _snap(
+                "libcore.so", functions=[_evidenced_fn("core_fn", is_variadic=None)]
+            )
+        }
+        new_snaps = {
+            "libcore.so": _snap(
+                "libcore.so", functions=[_evidenced_fn("core_fn", is_variadic=False)]
+            )
+        }
+
+        findings = find_unverified_signature_findings(
+            new, new, [], old_snaps, new_snaps
+        )
+        assert len(findings) == 1
+        assert "old side lacks" in findings[0].description
 
     def test_variadic_function_pointer_type_is_not_treated_as_unresolved(self):
         # Codex review, fresh evidence: a real, complete variadic

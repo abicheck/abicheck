@@ -81,3 +81,14 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   one or more ` *`/` &`/` &&` wrapper suffixes for nested pointer/
   reference wrapping, anchored at both ends) via a regex, rather than a
   substring check.
+- **`_symbol_evidence_sufficient()` treated unknown variadicness
+  (`Function.is_variadic is None`) as sufficient evidence** (Codex
+  review, fresh evidence). `diff_symbols._check_variadic_change()` itself
+  skips (`skip_none=True`) whenever either side's value is unknown -- an
+  older snapshot/dumper that never populated the field is indistinguishable
+  from one that positively determined "not variadic" -- so a real
+  fixed-arity/variadic transition landing on an unknown side previously
+  produced neither a confirmed diff-level finding nor this module's own
+  risk finding: total silence on a real, calling-ABI-relevant unknown.
+  Fixed by also requiring `is_variadic is not None` for a function's
+  evidence to count as sufficient.

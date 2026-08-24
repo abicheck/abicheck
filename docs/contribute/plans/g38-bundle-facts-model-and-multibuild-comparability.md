@@ -692,6 +692,19 @@ optionally followed by one or more ` *`/` &`/` &&` wrapper suffixes for
 nested pointer/reference wrapping) instead of a blanket substring check.
 Confirmed to fail against the pre-fix substring-check code.
 
+**A fourth finding, on a gap in `_symbol_evidence_sufficient()` unrelated
+to type-spelling parsing: unknown variadicness read as sufficient
+evidence** (Codex review, fresh evidence). `Function.is_variadic` is a
+real tri-state field (`bool | None`), and `diff_symbols._check_variadic_
+change()` itself skips (`skip_none=True`) whenever either side is `None`
+— an older snapshot/dumper that never populated it is indistinguishable
+from one that positively determined "not variadic". Without this module
+also treating unknown variadicness as insufficient, a real fixed-arity/
+variadic transition landing on an unknown side produced neither a
+confirmed diff-level finding nor this module's own risk finding — total
+silence on a real, calling-ABI-relevant unknown. Fixed by also requiring
+`is_variadic is not None`. Confirmed to fail against the pre-fix code.
+
 `bundle_intra_dep_signature_changed` already fires correctly when a
 provider's DWARF/header evidence shows a real signature change. This phase
 adds the missing negative case: a new, dedicated `ChangeKind`,
