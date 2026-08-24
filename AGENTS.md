@@ -5272,6 +5272,65 @@ Once a root command genuinely clears the bar above, pick the right home:
   emptying that test's own `headers` list, since its actual subject is
   `public_headers`/`public_header_dirs`'s own expansion, not `headers`'s.
 
+- **Lambda-closure churn survives at the *function* level after the type-level
+  fix — investigated, deliberately not patched (oneTBB flow-graph report,
+  fresh evidence).** `name_classification._ANONYMOUS_TYPE_MARKERS` did not
+  recognize clang's own closure spelling (`(lambda at <path>:<line>:<col>)`,
+  or the `(lambda:<file>:<line>:<col>)` form
+  `strip_anonymous_type_location` normalizes it to), so a template
+  instantiated over a closure —
+  `raii_guard<(lambda:task_group.h:522:26)>` — was treated as ordinary ABI
+  surface. That half is fixed: the marker list now covers it, and an
+  unrelated edit that merely shifts the lambda's line no longer produces a
+  `type_removed`/`type_added` pair. **Two residuals were reproduced and are
+  not closed.**
+
+  (1) *Function-level findings on closure-parameterized symbols.* A
+  destructor of that instantiation is still reported as a BREAKING
+  `func_removed` (plus `func_added` for the shifted spelling), and a public
+  function taking the closure-parameterized type by value still produces
+  `func_params_changed`/`template_param_type_changed`, because the
+  *mangled symbol* and the *parameter type spelling* both embed the
+  closure's source coordinates. Reproduced directly through `compare()`
+  with the two spellings differing only in the line number.
+  `is_non_abi_surface_type` is a *type*-name predicate and is not consulted
+  on either path, so the marker fix cannot reach them. **Demoting the
+  removal is not the fix, and the reason matters**: this codebase already
+  states the correct reading in `change_registry`'s own
+  `unnamed_type_in_public_abi` entry ("the Itanium mangling of unnamed
+  types is per-translation-unit and compiler-ordering dependent ... so
+  exporting one is an ABI time bomb: a rebuilt consumer can fail to resolve
+  the symbol"). A consumer *already linked* against the old numbering
+  really does fail at load when the numbering shifts — so the removal is a
+  genuine break, and softening it would hide a real one. That is the same
+  direction of error the linkage-blind-removal entry above was reverted
+  twice for. Nor is "strip `:<line>:<col>` before comparing two spellings"
+  a free win: `strip_anonymous_type_location`'s own docstring records why
+  the coordinates are kept (two unrelated lambdas in one header collapse to
+  one key, silently overwriting an entry in every name-keyed map that
+  consumes the spelling), and this pass has no real oneTBB snapshot to
+  check a narrower "normalize only for pairwise spelling comparison, never
+  for keys" variant against. What a correct fix needs is the annotation
+  route ADR-style precedent already establishes elsewhere in this file
+  ("Annotate; never remove"): correlate such a finding with the existing
+  `unnamed_type_in_public_abi` RISK signal so a reader can see *why* the
+  symbol churned, rather than removing it from `changes` or lowering its
+  verdict. That is a new correlation pass with its own identity question
+  (which finding covers which), not a marker-list edit.
+
+  (2) *A constructor key rendering a literal `?` parameter.* Traced to two
+  legitimate "type not recoverable" sentinels rather than to a formatting
+  bug: `dwarf_snapshot._process_param` returns `Param(type="?")` for a
+  `DW_TAG_formal_parameter` carrying no `DW_AT_type`, and
+  `dumper_castxml._type_name` returns `"?"` when a referenced type id does
+  not resolve in the XML (a closure class declared inside a function body
+  is exactly the shape that goes unemitted). Both are honest unknowns, and
+  which one produced the reported key cannot be determined without the
+  original snapshot, which this pass does not have. Guessing a
+  substitution here would replace a visible unknown with a fabricated
+  spelling, which is strictly worse; closing it needs the real artifact (or
+  a live castxml/DWARF repro of a closure-parameterized ctor) first.
+
 - Don't hand-edit `CHANGELOG.md`'s `## [Unreleased]` section directly — add a `changelog.d/` fragment instead (see Conventions above); CI enforces this
 - Don't modify `examples/` test cases without understanding the ground truth they encode
 - Don't add dependencies without strong justification (this is a lightweight tool)
