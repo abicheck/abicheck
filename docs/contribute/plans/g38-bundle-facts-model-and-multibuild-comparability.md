@@ -1513,13 +1513,43 @@ snapshot map are all caught and reported as stderr warnings only — a
 report's `"bundle_findings": []` cannot be distinguished from "analysis
 ran cleanly and found nothing" versus "analysis partially failed."
 
-**Planned fix:** a structured `bundle_analysis` coverage block in the JSON
-report (mirroring the existing `contract_coverage_ledger`/`analysis_
-assurance` pattern already used for the contract-evaluation axis), naming
-per-sub-analysis status (`complete`/`partial`/`not_requested`) and any
-missing libraries/errors, with a strict policy able to escalate incomplete
-bundle coverage to `NOT_COMPARABLE` rather than silently accepting a clean
-result built on partial evidence. **Not yet implemented.**
+**Fix, partial (shipped, P0-D).** `BundleDiffResult` gained
+`analysis_errors: list[str]`. Two of the three degradation points named
+above now record into it instead of only echoing to stderr:
+
+- `compare_bundle()` raising inside `_run_bundle_analysis` — the returned
+  stub `BundleDiffResult` now carries
+  `analysis_errors=["bundle analysis raised: <exc>"]` instead of losing the
+  detail (previously only the per-library report survived; `bundle_findings`
+  degraded silently to empty).
+- `find_unverified_signature_findings()` raising — appended to the
+  already-populated result's `analysis_errors` the same way, additive to
+  whatever `compare_bundle()` already found.
+
+`analysis_errors` is surfaced to both report formats: `_format_release_
+json`'s `summary["bundle_analysis_errors"]` (present only when non-empty,
+matching this file's established "present only when active" convention for
+optional summary keys), and a new "⚠️ Bundle Analysis Warnings" Markdown
+section, rendered even when `bundle_findings` is empty — an empty finding
+list after a raised exception means "nothing was checked," not "nothing was
+found," and a reader must not conflate the two.
+
+**Still open:** the third degradation point — `build_bundle_snapshot()`
+raising inside `_run_bundle_analysis`, before any `BundleDiffResult` exists
+to attach errors to — still returns bare `None` with only a stderr echo, so
+a caller distinguishing "bundle analysis was never attempted" from "bundle
+analysis ran and found nothing" still can't do so from the JSON/Markdown
+report alone for that one failure mode. Closing it needs
+`_run_bundle_analysis`'s return type to widen (e.g. always return a
+`BundleDiffResult`, with a dedicated "snapshot construction failed" status
+rather than `None`), which changes every caller's `is not None` check — a
+real, if narrow, follow-up, not bundled into this fix to keep it additive
+and low-risk. The richer, `contract_coverage_ledger`-style structured
+coverage block (per-sub-analysis `complete`/`partial`/`not_requested`
+status, a strict policy able to escalate incomplete bundle coverage to
+`NOT_COMPARABLE`) also remains **not implemented** — `analysis_errors` is a
+flat, additive error list, not a coverage ledger with its own gating
+semantics.
 
 ### Phase 12 — Live/stored Phase-4 parity (one bundle-analysis orchestrator)
 

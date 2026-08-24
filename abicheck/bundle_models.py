@@ -474,6 +474,21 @@ class BundleDiffResult:
     #: parameter). Defaults to ``strict_abi`` — every caller that predates
     #: this field behaves exactly as before.
     policy: str = "strict_abi"
+    #: G38 stabilization Phase 11: structured record of a partial-analysis
+    #: degradation (``compare_bundle`` itself raising, or
+    #: ``find_unverified_signature_findings`` raising) that
+    #: `cli_compare_release_helpers._run_bundle_analysis` previously only
+    #: ever reported as a stderr warning -- an empty list here is a real,
+    #: positive claim that analysis completed cleanly, not merely "nothing
+    #: to say"; a report consumer (CI, a downstream tool) can now
+    #: distinguish "bundle_findings is empty because nothing broke" from
+    #: "bundle_findings is empty because analysis degraded partway
+    #: through" by checking this field instead of grepping the run's own
+    #: stderr. Deliberately plain strings, not a richer per-error type --
+    #: see this phase's own plan-doc entry for what a fuller structured
+    #: coverage ledger (mirroring `contract_coverage_ledger.py`) would add
+    #: beyond this.
+    analysis_errors: list[str] = field(default_factory=list)
 
     @property
     def bundle_verdict(self) -> Verdict:

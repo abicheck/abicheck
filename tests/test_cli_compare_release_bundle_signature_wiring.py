@@ -29,6 +29,7 @@ detector's own logic -- fails here.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import abicheck.bundle as bundle_mod
@@ -37,6 +38,8 @@ from abicheck.checker_policy import ChangeKind, Verdict
 from abicheck.checker_types import DiffResult
 from abicheck.cli_compare_release_helpers import (
     _collect_bundle_result,
+    _format_release_json,
+    _release_md_bundle_findings,
     _run_bundle_analysis,
 )
 from abicheck.elf_metadata import ElfImport, ElfMetadata, ElfSymbol
@@ -319,3 +322,164 @@ class TestCollectBundleResultAcceptsCompactBundleEvidence:
         for entry in _entries(compact_old, compact_new):
             assert not isinstance(entry.get("_old_bundle_evidence"), AbiSnapshot)
             assert not isinstance(entry.get("_new_bundle_evidence"), AbiSnapshot)
+
+
+class TestBundleAnalysisErrorsAreStructural:
+    """G38 stabilization Phase 11 / P0-D: a failure inside bundle analysis
+    (``compare_bundle()`` itself, or the Phase 4 signature-evidence check)
+    must be recorded in ``BundleDiffResult.analysis_errors``, not only
+    echoed to stderr -- so a JSON/Markdown report consumer can tell "ran
+    clean" apart from "ran, but degraded" without grepping logs."""
+
+    def _fake_snapshot(self, libs: dict[str, Path]) -> BundleSnapshot:
+        return _snapshot(
+            {
+                "libcore.so": _meta(exports=["core_fn"]),
+                "libconsumer.so": _meta(imports=["core_fn"], needed=["libcore.so"]),
+            }
+        )
+
+    def test_compare_bundle_failure_is_recorded_in_analysis_errors(
+        self, monkeypatch
+    ) -> None:
+        monkeypatch.setattr(bundle_mod, "build_bundle_snapshot", self._fake_snapshot)
+
+        def _boom(*args, **kwargs):
+            raise RuntimeError("synthetic compare_bundle failure")
+
+        monkeypatch.setattr(bundle_mod, "compare_bundle", _boom)
+
+        old_map = {
+            "libcore.so": Path("libcore.so"),
+            "libconsumer.so": Path("libconsumer.so"),
+        }
+        new_map = dict(old_map)
+
+        result = _run_bundle_analysis(
+            old_map,
+            new_map,
+            [_diff("libcore.so"), _diff("libconsumer.so")],
+            manifest_path=None,
+            bundle_system_providers="",
+        )
+
+        assert result is not None
+        assert result.bundle_findings == []
+        assert len(result.analysis_errors) == 1
+        assert "synthetic compare_bundle failure" in result.analysis_errors[0]
+
+    def test_signature_evidence_failure_is_appended_to_analysis_errors(
+        self, monkeypatch
+    ) -> None:
+        monkeypatch.setattr(bundle_mod, "build_bundle_snapshot", self._fake_snapshot)
+
+        def _boom(*args, **kwargs):
+            raise RuntimeError("synthetic signature-evidence failure")
+
+        # The real call site does `from .bundle_signature_evidence import
+        # find_unverified_signature_findings` *inside* the function body,
+        # so the patch target is the source module's own attribute, not a
+        # name re-exported by `cli_compare_release_helpers`.
+        import abicheck.bundle_signature_evidence as sig_mod
+
+        monkeypatch.setattr(sig_mod, "find_unverified_signature_findings", _boom)
+
+        old_map = {
+            "libcore.so": Path("libcore.so"),
+            "libconsumer.so": Path("libconsumer.so"),
+        }
+        new_map = dict(old_map)
+        old_snapshots = {
+            "libcore.so": _snap(
+                "libcore.so", functions=[_elf_only_fn("core_fn")], elf_only_mode=True
+            )
+        }
+        new_snapshots = {
+            "libcore.so": _snap(
+                "libcore.so", functions=[_elf_only_fn("core_fn")], elf_only_mode=True
+            )
+        }
+
+        result = _run_bundle_analysis(
+            old_map,
+            new_map,
+            [_diff("libcore.so"), _diff("libconsumer.so")],
+            manifest_path=None,
+            bundle_system_providers="",
+            old_snapshots=old_snapshots,
+            new_snapshots=new_snapshots,
+        )
+
+        assert result is not None
+        assert len(result.analysis_errors) == 1
+        assert "synthetic signature-evidence failure" in result.analysis_errors[0]
+
+    def test_analysis_errors_surface_in_json_summary(self, monkeypatch) -> None:
+        monkeypatch.setattr(bundle_mod, "build_bundle_snapshot", self._fake_snapshot)
+
+        def _boom(*args, **kwargs):
+            raise RuntimeError("synthetic failure")
+
+        monkeypatch.setattr(bundle_mod, "compare_bundle", _boom)
+
+        old_map = {"libcore.so": Path("libcore.so")}
+        new_map = dict(old_map)
+        result = _run_bundle_analysis(
+            old_map,
+            new_map,
+            [_diff("libcore.so")],
+            manifest_path=None,
+            bundle_system_providers="",
+        )
+        assert result is not None
+
+        doc = _format_release_json(
+            "COMPATIBLE",
+            Path("/old"),
+            Path("/new"),
+            [],
+            [],
+            [],
+            {},
+            {},
+            [],
+            bundle_result=result,
+            matrix_result=None,
+        )
+        payload = json.loads(doc)
+        assert payload["bundle_analysis_errors"] == [
+            "bundle analysis raised: synthetic failure"
+        ]
+
+    def test_no_analysis_errors_key_when_bundle_analysis_is_clean(self) -> None:
+        from abicheck.bundle import BundleDiffResult
+
+        clean_result = BundleDiffResult(old_root=Path("/old"), new_root=Path("/new"))
+        doc = _format_release_json(
+            "COMPATIBLE",
+            Path("/old"),
+            Path("/new"),
+            [],
+            [],
+            [],
+            {},
+            {},
+            [],
+            bundle_result=clean_result,
+            matrix_result=None,
+        )
+        payload = json.loads(doc)
+        assert "bundle_analysis_errors" not in payload
+
+    def test_analysis_errors_surface_in_markdown_even_with_no_findings(self) -> None:
+        from abicheck.bundle import BundleDiffResult
+
+        degraded_result = BundleDiffResult(
+            old_root=Path("/old"),
+            new_root=Path("/new"),
+            analysis_errors=["synthetic failure"],
+        )
+        lines = _release_md_bundle_findings(degraded_result)
+        text = "\n".join(lines)
+        assert "Bundle Analysis Warnings" in text
+        assert "synthetic failure" in text
