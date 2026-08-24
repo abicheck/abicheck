@@ -283,24 +283,15 @@ class SourceGraphSummary:
     entity_resolver: EntityResolver = field(default_factory=EntityResolver)
 
     def __post_init__(self) -> None:
-        # Normalize a constructor-seeded node id/edge endpoint the same way GraphNode/
-        # GraphEdge.from_dict() already migrate a persisted one (Codex review): a caller
-        # building SourceGraphSummary(nodes=..., edges=...) directly never routes through
-        # _decl_node_id/_type_node_id either, so a hand-built id can carry the identical
-        # checkout-dependent marker. No-op for every non-decl/type id (its own gate).
-        for n in self.nodes:
-            n.id = _normalize_if_decl_or_type(n.id)
-        for e in self.edges:
-            e.src = _normalize_if_decl_or_type(e.src)
-            e.dst = _normalize_if_decl_or_type(e.dst)
         # Re-register through add_node()/add_edge() rather than building the de-dup indexes
-        # directly (same round): normalization above can make two originally-distinct ids
-        # collide, and a plain set/dict comprehension would then disagree with
-        # len(self.nodes)/len(self.edges) -- the same "index vs list" desync from_dict()
-        # already fixed by routing every loaded entity through this coalescing path (also
-        # resolves facts, and computes an edge's relation_key() only after resolution, not
-        # against an empty view). A no-op for the common case: on a fresh id this just
-        # resolves+appends, identical to a direct index construction.
+        # directly (Codex review): a caller building SourceGraphSummary(nodes=..., edges=...)
+        # directly never routes through _decl_node_id/_type_node_id, so a hand-built id/
+        # endpoint can carry a checkout-dependent marker -- add_node()/add_edge() normalize it
+        # themselves now (their own docstrings), which can make two originally-distinct
+        # constructor-seeded ids collide; a plain set/dict comprehension would then disagree
+        # with len(self.nodes)/len(self.edges), the same "index vs list" desync from_dict()
+        # already fixed the identical way. A no-op for the common case: on a fresh,
+        # already-normalized id this just resolves+appends, identical to a direct index build.
         seeded_nodes, seeded_edges = self.nodes, self.edges
         self.nodes, self.edges = [], []
         self._node_ids: set[str] = set()
@@ -326,7 +317,12 @@ class SourceGraphSummary:
         otherwise have its whole fact history collapsed into one flattened
         fact, discarding the individual per-producer facts and any
         ``conflicts`` it already recorded.
+
+        Normalizes ``node.id`` first (Codex review): the one true choke point every insertion
+        path funnels through, catching a hand-built id even if its own producer forgot
+        ``_decl_node_id``/``_type_node_id``. A no-op for every other id.
         """
+        node.id = _normalize_if_decl_or_type(node.id)
         if node.id not in self._node_ids:
             ensure_facts_and_resolve(node)
             self.nodes.append(node)
@@ -348,7 +344,11 @@ class SourceGraphSummary:
         mirrored into ``attrs``) would otherwise have ``relation_key()``
         computed against an empty ``attrs``/``resolved`` view and dedup on
         the wrong (blank-role) key instead of its true, post-resolution one.
+
+        Normalizes ``edge.src``/``edge.dst`` first, same reasoning as :meth:`add_node`.
         """
+        edge.src = _normalize_if_decl_or_type(edge.src)
+        edge.dst = _normalize_if_decl_or_type(edge.dst)
         ensure_facts_and_resolve(edge)
         rkey = edge.relation_key()
         if rkey not in self._edge_keys:

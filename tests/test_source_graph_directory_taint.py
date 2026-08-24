@@ -765,3 +765,30 @@ def test_constructor_seeded_graph_normalizes_ids_and_endpoints() -> None:
     )
     assert len(collided.nodes) == 1
     assert collided.has_node(collided.nodes[0].id)
+
+
+def test_add_node_and_add_edge_normalize_a_hand_built_id_directly() -> None:
+    # A hand-built or custom producer calling add_node()/add_edge() directly on an
+    # empty SourceGraphSummary() -- the most common real construction shape, used by
+    # every producer in abicheck/buildsource/ -- must have its id/endpoint normalized
+    # even when the caller forgot to route it through _decl_node_id/_type_node_id
+    # itself (Codex review, fresh evidence, sixteenth round): otherwise two
+    # checkout-equivalent graphs built this way still get different node ids and
+    # graph ids.
+    from abicheck.buildsource.graph_facts import GraphEdge, GraphNode
+    from abicheck.buildsource.source_graph import SourceGraphSummary
+
+    old_id = "type://lambda at /old/checkout/lib.hpp:4:37"
+    new_id = "type://lambda at /new/checkout/lib.hpp:4:37"
+
+    old_graph = SourceGraphSummary()
+    old_graph.add_node(GraphNode(id=old_id, kind="record_type", label=old_id))
+    old_graph.add_edge(GraphEdge(src="decl://foo", dst=old_id, kind="DECL_HAS_TYPE"))
+
+    new_graph = SourceGraphSummary()
+    new_graph.add_node(GraphNode(id=new_id, kind="record_type", label=new_id))
+    new_graph.add_edge(GraphEdge(src="decl://foo", dst=new_id, kind="DECL_HAS_TYPE"))
+
+    assert old_graph.nodes[0].id == new_graph.nodes[0].id
+    assert old_graph.edges[0].dst == new_graph.edges[0].dst
+    assert old_graph.finalize().graph_id == new_graph.finalize().graph_id
