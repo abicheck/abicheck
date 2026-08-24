@@ -1778,7 +1778,7 @@ def augment_graph_with_types(
     Returns the number of edges added.
     """
     from .call_graph import _file_in_project
-    from .source_graph import _decl_node_id, _type_node_id
+    from .source_graph import _decl_node_id, _normalize_graph_identity, _type_node_id
 
     node_by_id: dict[str, GraphNode] = {n.id: n for n in graph.nodes}
 
@@ -1810,7 +1810,7 @@ def augment_graph_with_types(
                 node = GraphNode(
                     id=node_id,
                     kind=node_kind,
-                    label=ident,
+                    label=_normalize_graph_identity(ident),
                     provenance="type_graph",
                     confidence=e.confidence,
                     attrs=attrs,

@@ -68,6 +68,9 @@ from .graph_facts import (
     GraphEdge as GraphEdge,
     GraphFact as GraphFact,
     GraphNode as GraphNode,
+    _decl_node_id as _decl_node_id,
+    _normalize_graph_identity as _normalize_graph_identity,
+    _type_node_id as _type_node_id,
     ensure_facts_and_resolve,
     merge_entity_facts,
     register_fact,
@@ -618,14 +621,6 @@ def _header_node_id(path: str) -> str:
 
 def _option_node_id(flag: str) -> str:
     return f"build_option://{flag}"
-
-
-def _decl_node_id(identity: str) -> str:
-    return f"decl://{identity}"
-
-
-def _type_node_id(identity: str) -> str:
-    return f"type://{identity}"
 
 
 def _vtable_node_id(identity: str) -> str:
@@ -1501,7 +1496,7 @@ def _augment_with_source_abi(
             GraphNode(
                 id=did,
                 kind="source_decl",
-                label=ent.qualified_name or ent.identity(),
+                label=_normalize_graph_identity(ent.qualified_name or ent.identity()),
                 provenance="source_abi",
                 confidence=conf,
                 attrs={
@@ -1536,7 +1531,7 @@ def _augment_with_source_abi(
             GraphNode(
                 id=tid,
                 kind=_type_node_kind(ent.kind),
-                label=ent.qualified_name or ent.identity(),
+                label=_normalize_graph_identity(ent.qualified_name or ent.identity()),
                 provenance="source_abi",
                 confidence=conf,
                 attrs={"decl_kind": ent.kind, "visibility": ent.visibility},
@@ -1572,7 +1567,7 @@ def _augment_with_source_abi(
             GraphNode(
                 id=mid,
                 kind="macro",
-                label=ent.qualified_name or ent.identity(),
+                label=_normalize_graph_identity(ent.qualified_name or ent.identity()),
                 provenance="source_abi",
                 confidence=conf,
             )
@@ -1696,7 +1691,7 @@ def fold_source_edges(
                 node = GraphNode(
                     id=node_id,
                     kind=node_kind,
-                    label=ident,
+                    label=_normalize_graph_identity(ident),
                     provenance=provenance,
                     confidence=confidence,
                     attrs=node_attrs,

@@ -35,8 +35,14 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from dataclasses import dataclass, field
 from typing import Any
+
+from ..name_classification import (
+    _declaring_header_discriminator,
+    strip_anonymous_type_location,
+)
 
 #: Confidence labels (ADR-031 D9). Mirrors the evidence-model vocabulary so the
 #: coverage report and graph speak the same language. Canonical home of these
@@ -768,3 +774,84 @@ def _compute_occurrences(edge: GraphEdge) -> list[str]:
         if oid is not None and oid not in seen:
             seen.append(oid)
     return sorted(seen)
+
+
+# ── decl/type identity normalization (ADR-031/ADR-048) ─────────────────────
+#
+# Split out here (rather than kept in source_graph.py, where the choke-point
+# functions that consume this live) purely to stay under source_graph.py's
+# AI-readiness line-count cap -- see this module's own docstring for the
+# established precedent of moving content here for exactly that reason.
+
+#: Same location-shaped text :func:`strip_anonymous_type_location` strips,
+#: but *without* the leading ``(`` that function anchors on. clang's own
+#: declaration-name spelling for a lambda closure's implicit record (as
+#: opposed to the *type* printer's ``"(lambda at ...)"`` qualType spelling
+#: `strip_anonymous_type_location` targets) has been observed reaching the
+#: L5 source-graph pipeline bare -- e.g. a ``SourceEntity.identity()``/
+#: ``qualified_name`` of exactly ``"lambda at /a/foo.hpp:4:37"``, no
+#: wrapping parens at all -- so a real fix here needs both shapes covered,
+#: not just the parenthesized one `strip_anonymous_type_location` already
+#: handles. Anchored the same way (``\b`` word boundary before the marker)
+#: to avoid rewriting unrelated text that merely contains the substring
+#: "at" followed by something colon-shaped.
+_BARE_ANON_TYPE_LOCATION_RE = re.compile(
+    r"\b(lambda|unnamed\s+\w+)\s+at\s+(.*?):(\d+):(\d+)\b"
+)
+
+
+def _strip_bare_anonymous_type_location(name: str) -> str:
+    """Strip the checkout-dependent directory out of a *bare* (unparenthesized)
+    ``lambda at <path>:<line>:<col>``/``unnamed <kind> at <path>:<line>:<col>``
+    spelling, mirroring :func:`strip_anonymous_type_location`'s contract
+    (keep the declaring header's own basename + ``:<line>:<col>`` as a
+    discriminator, drop only the checkout-dependent directory) for the shape
+    that function's own paren-anchored regex does not match. See
+    :func:`_normalize_graph_identity`.
+    """
+
+    def _replace(match: re.Match[str]) -> str:
+        marker, path, line, col = match.groups()
+        return f"{marker}:{_declaring_header_discriminator(path)}:{line}:{col}"
+
+    return _BARE_ANON_TYPE_LOCATION_RE.sub(_replace, name)
+
+
+def _normalize_graph_identity(identity: str) -> str:
+    """Strip a checkout-dependent directory out of *identity* before it
+    becomes (part of) an L5 decl/type node id (ADR-031/ADR-048).
+
+    A ``SourceEntity``'s ``identity()``/``qualified_name`` falls back to the
+    raw declaration spelling clang/castxml emit for an anonymous-tag or
+    lambda-closure type -- ``"(unnamed struct at /a/foo.h:56:5)"``,
+    ``"raii_guard<(lambda at /a/foo.h:4:37)>"``, or (observed directly in a
+    real L5 graph, with no wrapping parens at all) a bare ``"lambda at
+    /a/foo.h:4:37"`` -- which embeds an *absolute* path. ``dumper_castxml.py``'s
+    L2 header-AST backend already strips the parenthesized form at
+    extraction time (see :func:`strip_anonymous_type_location`'s own
+    docstring), but nothing under ``abicheck/buildsource/`` did: two builds
+    of the identical, unedited declaration under different checkout roots
+    produced two different L5 node ids for it, which
+    ``graph_reconcile``/``diff_source_graph`` then read as a real rename
+    (``declaration_renamed``) purely from directory taint. ``source_graph.
+    _decl_node_id``/``_type_node_id`` are the one choke point every producer
+    in ``abicheck/buildsource/`` (``type_graph.py``, ``call_graph.py``,
+    ``override_graph.py``, ``callback_graph.py``, ``template_graph.py``,
+    ``header_graph.py``, ``macro_graph.py``, ``source_graph.py`` itself)
+    routes a decl/type identity through -- for both a node's own id and
+    every edge endpoint naming it -- so normalizing here closes the whole
+    class at once rather than one producer at a time. Both the
+    parenthesized (L2-style) and bare shapes are stripped, since only
+    real-world evidence -- not either producer's own documented output
+    contract -- tells us which one a given decl/type identity actually
+    carries by the time it reaches this package.
+    """
+    return _strip_bare_anonymous_type_location(strip_anonymous_type_location(identity))
+
+
+def _decl_node_id(identity: str) -> str:
+    return f"decl://{_normalize_graph_identity(identity)}"
+
+
+def _type_node_id(identity: str) -> str:
+    return f"type://{_normalize_graph_identity(identity)}"
