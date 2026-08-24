@@ -92,6 +92,26 @@ class TestTypedefQualifiedCollision:
         assert len(removed) == 1
         assert removed[0].symbol == "A::impl_value_t"
 
+    def test_all_qualified_typedefs_removed_are_each_reported(self):
+        """When every typedef is removed, the new side's typedefs_qualified
+        is legitimately empty -- indistinguishable, by non-emptiness alone,
+        from "field not populated". Both colliding old-side declarations must
+        still be reported individually rather than collapsing to whichever
+        one the legacy bare map happened to retain (Codex review)."""
+        old = _snap(
+            typedefs={"impl_value_t": "shared_ptr<B_impl>"},
+            typedefs_qualified={
+                "A::impl_value_t": "shared_ptr<A_impl>",
+                "B::impl_value_t": "shared_ptr<B_impl>",
+            },
+        )
+        new = _snap(typedefs={}, typedefs_qualified={})
+        r = compare(old, new)
+        removed = {
+            c.symbol for c in r.changes if c.kind == ChangeKind.TYPEDEF_REMOVED
+        }
+        assert removed == {"A::impl_value_t", "B::impl_value_t"}
+
     def test_legacy_bare_only_snapshot_is_unaffected(self):
         """Neither side populates typedefs_qualified (DWARF-only / legacy
         schema) -- diffing must fall back to the pre-existing bare-key

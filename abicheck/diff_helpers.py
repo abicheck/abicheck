@@ -376,11 +376,24 @@ def typedef_diff_maps(
 
     ``AbiSnapshot.typedefs_qualified`` (schema v25) carries the identical set
     of typedef declarations keyed by qualified name instead, unique per
-    declaration and therefore immune to this collision. Used whenever both
-    sides populate it; falls back to the legacy bare maps otherwise (a
-    DWARF-only or pre-v25 snapshot) so that comparison path is unaffected.
+    declaration and therefore immune to this collision. A side "trusts" its
+    own qualified map when that map is non-empty, OR its legacy bare map is
+    itself empty (a side with zero typedefs total loses nothing by reporting
+    zero qualified ones either, whether or not it actually populates the
+    field) -- this is what lets an old side with real qualified typedefs
+    still enumerate every one of them as removed when the new side has
+    genuinely stripped all typedefs (rather than merely never populating the
+    field), instead of collapsing to the legacy bare map and losing
+    per-declaration granularity purely because the empty side's qualified
+    dict is indistinguishable, by non-emptiness alone, from "unsupported"
+    (Codex review). Used only when *both* sides trust their own map this
+    way; falls back to the legacy bare maps otherwise (a DWARF-only or
+    pre-v25 snapshot with real typedefs) so that comparison path is
+    unaffected.
     """
-    if old.typedefs_qualified and new.typedefs_qualified:
+    old_trusts_qualified = bool(old.typedefs_qualified) or not old.typedefs
+    new_trusts_qualified = bool(new.typedefs_qualified) or not new.typedefs
+    if old_trusts_qualified and new_trusts_qualified:
         return old.typedefs_qualified, new.typedefs_qualified
     return old.typedefs, new.typedefs
 
