@@ -898,6 +898,61 @@ than only `\.\.\.`. Four new parametrized regression cases (the two bare
 forms and one wrapped instance of each), confirmed to fail against the
 pre-fix regex.
 
+**A fourteenth finding, from a further Codex review round, showed
+retention is not actually a uniform, per-`ProviderEntry` fact -- it can
+vary by *which consumer* is asking.** `_provider_entry_retained_from_old`
+(the ninth finding) matches purely on `ProviderEntry.version`, which is
+correct for "does this exact version have any old-side counterpart at
+all" but says nothing about whether a *specific* consumer could actually
+have reached that old-side counterpart. Concretely: a provider previously
+exporting only `foo@V1` (`is_default=False`) that marks the identical
+`foo@@V1` default in the new release presents a genuinely new capability
+to an *unversioned* consumer (which binds only to a default definition,
+per `_consumer_matches_provider`'s own rule) -- that consumer could not
+have resolved `foo` from this provider before at all, so there is no
+old-side signature for it specifically to be "unverified" against, even
+though the bare version string "V1" checks out. A version-specific
+consumer requiring `foo@V1` explicitly is unaffected either way, since
+its own match rule never inspects `is_default`. Fixed by adding
+`_consumer_retained_from_old()`, folded into the `consumer_libs` filter
+alongside `_consumer_matches_provider` rather than into the existing
+per-provider-entry check -- deliberately additive, not a replacement:
+removing the original check in favor of only the per-consumer one would
+reopen the ninth finding's own bug, since an unversioned consumer's match
+rule ignores symbol version entirely and would treat *any* old default
+entry (of a completely different version) as satisfying retention for a
+provider entry whose version never existed in old at all. Both checks
+answer genuinely different questions and both must hold. Regression test
+with two sibling consumers (unversioned, version-specific) against the
+identical default-binding-flip scenario, confirmed to fail against the
+pre-fix code (the unversioned consumer's library appeared in the findings
+when it should not have).
+
+**A fifteenth finding, from the same review round, was investigated and
+deliberately declined rather than fixed reactively.** `_compare_one_
+library`'s `collect_diff_results` gate (widened earlier in this same PR
+to also trigger whenever bundle analysis is enabled -- the default) means
+every ordinary, non-JUnit release comparison now retains both full
+`AbiSnapshot` objects for every library until the whole release finishes
+and bundle reporting completes -- changing peak memory from roughly the
+active worker set to the sum of every old/new snapshot pair, a real
+concern for a release with many header-backed libraries. This was already
+called out as an accepted tradeoff in this PR's own first changelog entry
+(see this fragment's "Added" section), and investigating a fix confirmed
+why it isn't a same-pass patch: `entry["_old_snapshot"]` is shared with a
+*pre-existing* JUnit rendering path in `cli_compare_release.py` (predating
+this PR, per PR #798) that requires a real `AbiSnapshot`
+(`isinstance(old_snap, AbiSnapshot)`-gated) -- it cannot simply be
+replaced with the compact `function_map`/`variable_map`/`elf_only_mode`
+structure `find_unverified_signature_findings` actually needs. A safe fix
+needs the stashing code in `_compare_one_library` to know *why*
+`collect_diff_results` was triggered for a given run (JUnit vs.
+bundle-analysis-only vs. both) and store a full snapshot only when JUnit
+genuinely needs one -- a real control-flow change to already-reviewed,
+working code, not something to attempt under continued review pressure
+in this pass. Left as a known, accepted gap per this file's own "known
+gaps over risky reactive patches" convention.
+
 `bundle_intra_dep_signature_changed` already fires correctly when a
 provider's DWARF/header evidence shows a real signature change. This phase
 adds the missing negative case: a new, dedicated `ChangeKind`,

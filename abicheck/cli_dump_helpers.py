@@ -19,7 +19,7 @@ from __future__ import annotations
 
 from contextlib import nullcontext
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Any
 
 import click
 
@@ -42,6 +42,22 @@ from .cli_dump_depth import (
     resolve_dump_collect_context as resolve_dump_collect_context,
     resolve_dump_depth as resolve_dump_depth,
 )
+
+# The shared `Protocol` types describing the callables `cli.py`'s `dump_cmd`
+# passes into `perform_elf_dump` (this module) and `handle_non_elf_dump`
+# (`cli_dump_non_elf.py`) live in their own standalone leaf module -- see
+# `cli_dump_protocols.py`'s own docstring for why: keeping them here and
+# having `cli_dump_non_elf.py` import them back would join that module to
+# the pre-existing CLI-registration import-cycle SCC for no structural
+# reason (Codex review, fresh evidence). Re-aliased back to the original
+# private names since every use site in this module (e.g.
+# `perform_elf_dump`'s own signature) already spells them that way.
+from .cli_dump_protocols import (
+    ExpandHeaderInputs as _ExpandHeaderInputs,
+    PopulateDependencyInfo as _PopulateDependencyInfo,
+    StampProvenance as _StampProvenance,
+    WriteSnapshotOutput as _WriteSnapshotOutput,
+)
 from .dumper import dump
 from .dumper_clang_streaming import suppress_streaming_prune
 from .dumper_scoping import dump_manifest_header_roots as _dump_manifest_header_roots
@@ -59,57 +75,6 @@ if TYPE_CHECKING:
     from .buildsource.pack import BuildSourcePack
     from .model import AbiSnapshot
     from .service_scan import CompileContext
-
-
-class _ExpandHeaderInputs(Protocol):
-    def __call__(self, inputs: list[Path]) -> list[Path]: ...
-
-
-class _PopulateDependencyInfo(Protocol):
-    def __call__(
-        self,
-        snap: AbiSnapshot,
-        so_path: Path,
-        search_paths: list[Path],
-        sysroot: Path | None,
-        ld_library_path: str,
-    ) -> None: ...
-
-
-class _StampProvenance(Protocol):
-    def __call__(
-        self,
-        snap: AbiSnapshot,
-        *,
-        git_tag: str | None,
-        build_id: str | None,
-        no_git: bool,
-    ) -> None: ...
-
-
-class _WriteSnapshotOutput(Protocol):
-    def __call__(
-        self,
-        snap: AbiSnapshot,
-        output: Path | None,
-        build_info: Path | None,
-        sources: Path | None,
-        build_config: Path | None,
-        allow_build_query: bool,
-        collect_mode: str,
-        build_query: str | None = ...,
-        build_compile_db: str | None = ...,
-        build_targets: tuple[str, ...] = ...,
-        extractor: str = ...,
-        inputs_pack: Path | None = ...,
-        depth: str | None = ...,
-        include_dependencies: bool = ...,
-        header_roots: tuple[Path, ...] = ...,
-        clang_bin: str = ...,
-        snapshot_compression: str = ...,
-        public_headers: tuple[Path, ...] = ...,
-        public_header_dirs: tuple[Path, ...] = ...,
-    ) -> None: ...
 
 
 # ── Back-compat re-export shim (lazy, per AGENTS.md's moved-helper

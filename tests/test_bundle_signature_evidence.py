@@ -1192,3 +1192,101 @@ class TestFindUnverifiedSignatureFindings:
             find_unverified_signature_findings(new, new, results, old_snaps, new_snaps)
             == []
         )
+
+    def test_default_binding_change_is_not_retained_for_unversioned_consumer(self):
+        # Codex review, fresh evidence: libcore.so exported only core_fn@V1
+        # (is_default=False) in the old release; the new release marks the
+        # identical version core_fn@@V1 as default. An unversioned consumer
+        # binds only to a default definition (_consumer_matches_provider's
+        # own rule), so it could NOT have resolved core_fn from libcore.so
+        # in the old release at all -- for that consumer this is a
+        # genuinely new capability, not a retained edge whose signature
+        # could have silently changed, and must not produce an "unverified"
+        # finding. A sibling consumer requiring the specific version V1
+        # explicitly is unaffected either way (its own match rule never
+        # inspects is_default) and must still get a finding.
+        from abicheck.elf_metadata import ElfImport
+
+        old = _snapshot(
+            {
+                "libcore.so": ElfMetadata(
+                    soname="",
+                    needed=[],
+                    symbols=[ElfSymbol(name="core_fn", version="V1", is_default=False)],
+                ),
+                "libunversioned.so": _meta(needed=["libcore.so"]),
+                "libversioned.so": _meta(needed=["libcore.so"]),
+            }
+        )
+        new = _snapshot(
+            {
+                "libcore.so": ElfMetadata(
+                    soname="",
+                    needed=[],
+                    symbols=[ElfSymbol(name="core_fn", version="V1", is_default=True)],
+                ),
+                "libunversioned.so": ElfMetadata(
+                    soname="",
+                    needed=["libcore.so"],
+                    symbols=[],
+                    imports=[ElfImport(name="core_fn")],
+                ),
+                "libversioned.so": ElfMetadata(
+                    soname="",
+                    needed=["libcore.so"],
+                    symbols=[],
+                    imports=[ElfImport(name="core_fn", version="V1", is_default=False)],
+                ),
+            }
+        )
+        old_snaps = {
+            "libcore.so": _snap(
+                "libcore.so",
+                functions=[_elf_only_fn("core_fn")],
+                elf_only_mode=True,
+            )
+        }
+        new_snaps = {
+            "libcore.so": _snap(
+                "libcore.so",
+                functions=[_elf_only_fn("core_fn")],
+                elf_only_mode=True,
+            )
+        }
+
+        findings = find_unverified_signature_findings(
+            old, new, [], old_snaps, new_snaps
+        )
+        assert [f.consumer_library for f in findings] == ["libversioned.so"]
+
+    @pytest.mark.parametrize(
+        "unresolved_type",
+        [
+            "restrict ...",
+            "_Atomic ...",
+            "_Atomic unknown",
+            "restrict DW_TAG_ptr_to_member_type",
+        ],
+    )
+    def test_restrict_and_atomic_wrapped_sentinels_are_insufficient_evidence(
+        self, unresolved_type
+    ):
+        # Codex review, fresh evidence: dwarf_snapshot.py's identical
+        # qualifier-prefix wrapping branch also renders DW_TAG_restrict_type
+        # as "restrict " and DW_TAG_atomic_type as "_Atomic " -- not just
+        # const/volatile -- so these composite forms must be recognized as
+        # unresolved too.
+        new = _snapshot(
+            {
+                "libcore.so": _meta(exports=["core_fn"]),
+                "libconsumer.so": _meta(imports=["core_fn"], needed=["libcore.so"]),
+            }
+        )
+        fn = _evidenced_fn("core_fn", return_type=unresolved_type)
+        old_snaps = {"libcore.so": _snap("libcore.so", functions=[fn])}
+        new_snaps = {"libcore.so": _snap("libcore.so", functions=[fn])}
+
+        findings = find_unverified_signature_findings(
+            new, new, [], old_snaps, new_snaps
+        )
+        assert len(findings) == 1

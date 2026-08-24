@@ -1282,20 +1282,6 @@ IMPORT_CYCLE_ALLOWLIST: frozenset[frozenset[str]] = frozenset(
                 "cli_debian_symbols",
                 "cli_doctor",
                 "cli_dump_helpers",
-                # `cli_dump_non_elf` joins the same SCC on exactly the terms
-                # `service_header_graph_attach` above was signed off under --
-                # a *split* of an existing member, not a new dependency
-                # direction. `handle_non_elf_dump` was previously defined
-                # directly in `cli_dump_helpers.py` (purely for the file-size
-                # cap, mirroring `resolve_dump_depth`/`resolve_dump_collect_
-                # context`'s earlier split into `cli_dump_depth.py`); it
-                # imports `_StampProvenance`/`_WriteSnapshotOutput` from
-                # `cli_dump_helpers` at module load (an edge internal to this
-                # already-allowlisted cluster, not a new one), and `cli`
-                # imports it back at module load in place of its former
-                # `cli_dump_helpers` import for the same name. No init
-                # deadlock -- the package still imports cleanly.
-                "cli_dump_non_elf",
                 "cli_graph",
                 "cli_helpers_compare",
                 "cli_inputs",
@@ -2214,7 +2200,7 @@ CLI_CONTRACT_ALLOWLIST: frozenset[str] = frozenset(
         # Native ELF CLI dump (P0 item 2): calls `dumper.dump()` directly
         # rather than through `service_dump_pipeline.run_dump_request` —
         # tracked as Phase 1 item 1 of the convergence plan.
-        "abicheck/cli_dump_helpers.py:1457:19:dumper.dump",
+        "abicheck/cli_dump_helpers.py:1422:19:dumper.dump",
         # Standalone application-compatibility (P0 item 6): dumps both
         # sides directly rather than through any of the other paths.
         "abicheck/appcompat.py:1604:19:dumper.dump",

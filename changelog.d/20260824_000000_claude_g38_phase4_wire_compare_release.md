@@ -235,3 +235,44 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   match the bare `"unknown"` literal and any `DW_TAG_\w+`-shaped spelling,
   wrapped the identical way. Four new parametrized regression cases,
   confirmed to fail against the pre-fix regex.
+- **`find_unverified_signature_findings()`'s retained-export check was a
+  uniform, per-`ProviderEntry` fact, but retention is not actually uniform
+  across consumers when a symbol's default binding changes** (Codex
+  review, fresh evidence). When a provider previously exported only
+  `foo@V1` (`is_default=False`) and the new release marks the identical
+  version `foo@@V1` as default, an unversioned consumer -- which binds
+  only to a default definition, per `_consumer_matches_provider`'s own
+  rule -- could not have resolved `foo` from this provider in the old
+  release at all; for that consumer specifically, the new binding is a
+  genuinely new capability, not a retained edge whose signature could
+  have silently changed. The existing `_provider_entry_retained_from_old`
+  check (version-string-only) still correctly reported this provider
+  entry as retained overall, so an "unverified" finding could fire for a
+  consumer with no old-side counterpart to compare against. Fixed by
+  adding `_consumer_retained_from_old()`, evaluated per (consumer,
+  provider) pair in the `consumer_libs` filter rather than folded into
+  the existing per-provider-entry check -- the two answer genuinely
+  different questions and both must hold (a consumer requiring the
+  specific version `V1` explicitly is unaffected either way, since its
+  own match rule never inspects `is_default`, and still gets a finding).
+  Deliberately not implemented as "add `is_default` to the existing
+  per-provider check," which would have been strictly wrong in the
+  other direction: it would also suppress the finding for a version-
+  specific consumer that genuinely could reach the old, non-default
+  definition. Regression test with two consumers (unversioned,
+  version-specific) confirmed to fail against the pre-fix code.
+- **Declined: retaining every library's full old+new `AbiSnapshot` for the
+  whole release comparison, now that bundle analysis is enabled by
+  default** (Codex review, fresh evidence expanding on this PR's own
+  already-documented tradeoff -- see this fragment's "Added" section
+  above). `_old_snapshot` cannot simply be shrunk to a compact
+  evidence-only structure: it is shared with a pre-existing JUnit
+  rendering path (`cli_compare_release.py`'s `collect_diff_results`
+  handling, predating this PR) that requires a real `AbiSnapshot`
+  (`isinstance(old_snap, AbiSnapshot)`-gated). A safe fix needs the
+  stashing code to know *why* `collect_diff_results` was triggered (JUnit
+  vs. bundle-analysis-only vs. both) and store a full snapshot only when
+  JUnit needs one -- a genuine, if narrow, control-flow change to
+  already-reviewed, working code, not a same-pass patch under continued
+  review pressure. Left as a known, accepted gap per this file's own
+  "known gaps over risky reactive patches" convention.

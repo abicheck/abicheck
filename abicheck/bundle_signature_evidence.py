@@ -244,8 +244,18 @@ _UNKNOWN_TYPE_SENTINEL = "?"
 #: only the bare forms would miss `"unknown *"`, `"DW_TAG_ptr_to_member_
 #: type[]"`, and so on -- the same gap a bare-substring check on `"..."`
 #: was already rejected for.
+#:
+#: The qualifier-prefix alternation only covered `const`/`volatile`, but
+#: `dwarf_snapshot.py`'s identical prefix-wrapping branch also renders
+#: `DW_TAG_restrict_type` as `"restrict "` and `DW_TAG_atomic_type` as
+#: `"_Atomic "` (Codex review, fresh evidence) -- so `"restrict ..."`,
+#: `"_Atomic unknown"`, `"restrict DW_TAG_ptr_to_member_type"` all leaked
+#: through unrecognized the same way `"restrict *"`-shaped composites
+#: would. Extended to every qualifier that module's own wrapping branch
+#: emits, rather than only the two already-encountered examples.
 _UNRESOLVED_WRAPPED_SENTINEL_RE = re.compile(
-    r"^(?:const |volatile )*(?:\.\.\.|unknown|DW_TAG_\w+)(?: \*| &&| &|\[\])*$"
+    r"^(?:const |volatile |restrict |_Atomic )*"
+    r"(?:\.\.\.|unknown|DW_TAG_\w+)(?: \*| &&| &|\[\])*$"
 )
 
 #: A second, unrelated placeholder both backends emit -- not a recursion-
@@ -503,6 +513,47 @@ def _provider_entry_retained_from_old(
     )
 
 
+def _consumer_retained_from_old(
+    consumer: ConsumerEntry, old: BundleSnapshot, provider_lib: str, symbol: str
+) -> bool:
+    """Would *consumer* have resolved *symbol* from *provider_lib* against
+    *old*'s own bundle resolution graph too -- i.e. is this genuinely a
+    retained edge for *this specific consumer*, not one only newly made
+    reachable by a default-binding change?
+
+    Retention is not a uniform fact about the new provider entry alone
+    (Codex review, fresh evidence): matching purely on
+    ``ProviderEntry.version`` (:func:`_provider_entry_retained_from_old`)
+    can hold while the *binding* that actually makes the new entry
+    reachable to a given consumer did not exist on the old side. A
+    concrete example: old exports only ``foo@V1`` (``is_default=False``);
+    new exports the identical ``foo@@V1``, now marked default. An
+    unversioned consumer binds only to a default definition
+    (``_consumer_matches_provider``'s own rule) -- it could not have
+    resolved ``foo`` from this provider in *old* at all, so for that
+    consumer specifically the new binding is a genuinely new capability,
+    not a retained one whose signature could have silently changed. A
+    consumer requiring the specific version ``V1`` is unaffected either
+    way: its own match rule never inspects ``is_default``, so it was
+    already reachable to the identical old definition and stays counted.
+
+    Deliberately does *not* replace :func:`_provider_entry_retained_from_
+    old` -- an unversioned consumer's own match rule ignores symbol
+    version entirely, so checking only per-consumer reachability would
+    treat a provider entry with a genuinely new, never-before-existing
+    version as "retained" merely because *some* old default entry (of a
+    different version) satisfies an unversioned consumer. The two checks
+    answer different questions and both must hold: does this exact
+    version/entry have old-side evidence at all, and would this specific
+    consumer have been able to reach *a* compatible old-side entry.
+    """
+    return any(
+        _consumer_matches_provider(consumer, old_pe, old)
+        for old_pe in old.resolution.provides.get(symbol, [])
+        if old_pe.library == provider_lib
+    )
+
+
 def _bare_name_version_collapsed(
     snapshot: BundleSnapshot, provider_lib: str, symbol: str
 ) -> bool:
@@ -646,6 +697,17 @@ def find_unverified_signature_findings(
                     if c.library != provider_lib
                     and provider_lib in _reachable(c.library)
                     and _consumer_matches_provider(c, provider_entry, new)
+                    # A consumer that could not have resolved this exact
+                    # symbol from this provider under *old*'s own bindings
+                    # (e.g. a default-binding change just made it newly
+                    # reachable) has no old-side signature to be
+                    # "unverified" against for this edge specifically
+                    # (Codex review, fresh evidence) -- see
+                    # _consumer_retained_from_old's own docstring for why
+                    # this is a per-consumer question, not subsumed by the
+                    # per-provider-entry _provider_entry_retained_from_old
+                    # check below.
+                    and _consumer_retained_from_old(c, old, provider_lib, symbol)
                 }
             )
             if not consumer_libs:

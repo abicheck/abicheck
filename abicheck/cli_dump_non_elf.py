@@ -20,9 +20,12 @@ moved to `cli_dump_depth.py` (see that module's own docstring for the
 precedent this follows). No behavior change: this is the same function body,
 same signature, same call site (`cli.py`'s `dump_cmd`).
 
-``_StampProvenance``/``_WriteSnapshotOutput`` stay defined in
-``cli_dump_helpers.py`` (``perform_elf_dump``, which stays there, uses them
-too) and are imported here rather than duplicated.
+``_StampProvenance``/``_WriteSnapshotOutput`` are shared with
+``perform_elf_dump`` (``cli_dump_helpers.py``); both modules import them from
+the standalone leaf module ``cli_dump_protocols.py`` rather than one
+importing them from the other -- see that module's own docstring for why
+(importing them back from ``cli_dump_helpers.py`` would join this module to
+the pre-existing CLI-registration import-cycle SCC for no structural reason).
 """
 
 from __future__ import annotations
@@ -35,7 +38,10 @@ from typing import TYPE_CHECKING, Any
 import click
 
 from .artifact_plan import ResolvedArtifactPlan
-from .cli_dump_helpers import _StampProvenance, _WriteSnapshotOutput
+from .cli_dump_protocols import (
+    StampProvenance as _StampProvenance,
+    WriteSnapshotOutput as _WriteSnapshotOutput,
+)
 from .dumper_clang_streaming import suppress_streaming_prune
 from .errors import AbicheckError
 from .header_utils import include_operand_dirs
