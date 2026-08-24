@@ -358,3 +358,46 @@ def test_source_graph_summary_from_dict_recomputes_coverage_after_coalescing() -
     )
     assert len(g.nodes) == 1
     assert g.coverage["node_kinds"] == {"record_type": 1}
+
+
+def test_normalization_never_touches_non_decl_or_type_node_ids() -> None:
+    # A non-declaration node whose id/label happens to spell marker-shaped
+    # text -- e.g. a source:// node at a real path literally containing
+    # "lambda at ...:1:2" -- must not be rewritten just because the text
+    # coincidentally matches; the normalization is gated to decl://type://
+    # ids only (Codex review, fresh evidence, sixth round). Only a genuine
+    # decl/type node still normalizes.
+    from abicheck.buildsource.graph_facts import GraphEdge, GraphNode
+
+    raw_source_id = "source:///tmp/lambda at build/foo.hpp:1:2"
+    raw_source_label = "/tmp/lambda at build/foo.hpp:1:2"
+    n = GraphNode.from_dict(
+        {"id": raw_source_id, "kind": "source", "label": raw_source_label}
+    )
+    assert n.id == raw_source_id
+    assert n.label == raw_source_label
+
+    e = GraphEdge.from_dict(
+        {
+            "src": raw_source_id,
+            "dst": raw_source_id,
+            "edge": "COMPILE_UNIT_INCLUDES_FILE",
+        }
+    )
+    assert e.src == raw_source_id
+    assert e.dst == raw_source_id
+
+    # ensure_facts_and_resolve's own label normalization (add_node's path,
+    # not from_dict) is gated the same way.
+    from abicheck.buildsource.source_graph import SourceGraphSummary
+
+    g = SourceGraphSummary()
+    g.add_node(GraphNode(id=raw_source_id, kind="source", label=raw_source_label))
+    assert g.nodes[0].label == raw_source_label
+
+    # A genuine decl/type node under the identical marker text still
+    # normalizes correctly -- the gate doesn't just disable everything.
+    decl_id = "decl://lambda at /old/checkout/foo.hpp:1:2"
+    d = GraphNode.from_dict({"id": decl_id, "kind": "source_decl", "label": decl_id})
+    assert d.id != decl_id
+    assert "/old/checkout" not in d.id

@@ -520,26 +520,25 @@ class GraphNode:
         # "resolved"/"conflicts" is never trusted — always recomputed, so a
         # hand-edited pack self-heals instead of persisting a stale merge.
         #
-        # id passes through _normalize_graph_identity on load (Codex review,
-        # fresh evidence) so a pack persisted before that normalization
-        # existed self-heals the same way: without this, an old pack's raw,
-        # checkout-path-bearing decl/type node id would never match the
-        # normalized id a freshly-built graph now produces for the identical
-        # declaration, and diff_source_graph's direct id comparison would
-        # read it as removed+added rather than unchanged (the exact false
-        # positive this whole normalization exists to close, just reached
-        # from a stale-pack angle instead of a fresh-vs-fresh one). Safe
-        # unconditionally: the substitution only ever touches an embedded
-        # "(unnamed .../lambda at ...)"/"lambda at ...:line:col" marker, so
-        # it is a no-op for every other node id (source://, header://,
-        # build_option://, symbol://, target://, vtable://, ...) and
-        # idempotent for an id a current build already normalized. ``label``
-        # needs no explicit normalization here — ensure_facts_and_resolve
-        # below (called unconditionally for every loaded node) already
-        # covers it, the same single choke point a freshly-added node's
-        # label goes through via SourceGraphSummary.add_node.
+        # id passes through _normalize_if_decl_or_type on load (Codex
+        # review, fresh evidence) so a pack persisted before that
+        # normalization existed self-heals the same way: without this, an
+        # old pack's raw, checkout-path-bearing decl/type node id would
+        # never match the normalized id a freshly-built graph now produces
+        # for the identical declaration, and diff_source_graph's direct id
+        # comparison would read it as removed+added rather than unchanged
+        # (the exact false positive this whole normalization exists to
+        # close, just reached from a stale-pack angle instead of a
+        # fresh-vs-fresh one). Gated to decl://type:// ids only -- a no-op
+        # for every other kind (source://, header://, build_option://,
+        # symbol://, target://, vtable://, ...), idempotent for an id a
+        # current build already normalized. ``label`` needs no explicit
+        # normalization here — ensure_facts_and_resolve below (called
+        # unconditionally for every loaded node) already covers it, the
+        # same single choke point a freshly-added node's label goes through
+        # via SourceGraphSummary.add_node.
         node = cls(
-            id=_normalize_graph_identity(str(d["id"])),
+            id=_normalize_if_decl_or_type(str(d["id"])),
             kind=str(d.get("kind", "file")),
             label=str(d.get("label", "")),
             attrs=dict(d.get("attrs", {})),
@@ -616,8 +615,8 @@ class GraphEdge:
         # migration for a pack persisted before decl/type node ids were
         # checkout-directory-normalized.
         edge = cls(
-            src=_normalize_graph_identity(str(d["src"])),
-            dst=_normalize_graph_identity(str(d["dst"])),
+            src=_normalize_if_decl_or_type(str(d["src"])),
+            dst=_normalize_if_decl_or_type(str(d["dst"])),
             kind=str(d.get("edge", d.get("kind", ""))),
             provenance=str(d.get("provenance", "")),
             confidence=str(d.get("confidence", CONF_UNKNOWN)),
@@ -674,7 +673,7 @@ def ensure_facts_and_resolve(entity: GraphNode | GraphEdge) -> None:
     top = min(entity.facts, key=_precedence_key)
     entity.confidence = top.confidence
     entity.provenance = top.producer
-    if isinstance(entity, GraphNode):
+    if isinstance(entity, GraphNode) and _is_decl_or_type_node_id(entity.id):
         entity.label = _normalize_graph_identity(entity.label)
     if isinstance(entity, GraphEdge):
         entity.occurrences = _compute_occurrences(entity)
@@ -923,6 +922,40 @@ def _normalize_graph_identity(identity: str) -> str:
     carries by the time it reaches this package.
     """
     return _strip_bare_anonymous_type_location(strip_anonymous_type_location(identity))
+
+
+#: ``_normalize_graph_identity`` is deliberately blind to *why* it might
+#: match -- it only ever touches an embedded anonymous/lambda location
+#: marker, which is safe for a real decl/type identity. But applied
+#: unconditionally to *every* graph node id/label regardless of kind (Codex
+#: review, fresh evidence, sixth round), a non-declaration id that happens
+#: to spell marker-shaped text -- e.g. a ``source://`` node whose path
+#: literally contains ``"lambda at ...:1:2"`` -- would be silently rewritten
+#: too, changing a node's id/label/``graph_id`` with no directory taint
+#: involved at all. Every caller that applies the normalization to an
+#: arbitrary node/edge string (as opposed to a value already known to be a
+#: decl/type identity, like ``_decl_node_id``'s own argument) gates on this
+#: first, restricting the effect to the ``decl://``/``type://`` id space
+#: this whole mechanism exists for.
+_DECL_OR_TYPE_ID_PREFIXES = ("decl://", "type://")
+
+
+def _is_decl_or_type_node_id(node_id: str) -> bool:
+    return node_id.startswith(_DECL_OR_TYPE_ID_PREFIXES)
+
+
+def _normalize_if_decl_or_type(node_id: str) -> str:
+    """``_normalize_graph_identity(node_id)``, gated by
+    :func:`_is_decl_or_type_node_id` -- the shared shape every load-time
+    migration call site (``GraphNode``/``GraphEdge.from_dict``) uses so a
+    ``source://``/``header://``/... id can never be mistaken for a decl/type
+    one just because it happens to spell marker-shaped text.
+    """
+    return (
+        _normalize_graph_identity(node_id)
+        if _is_decl_or_type_node_id(node_id)
+        else node_id
+    )
 
 
 def _decl_node_id(identity: str) -> str:

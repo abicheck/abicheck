@@ -45,7 +45,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from . import entity_identity
-from .graph_facts import _normalize_graph_identity
+from .graph_facts import _is_decl_or_type_node_id, _normalize_graph_identity
 
 if TYPE_CHECKING:
     from .graph_facts import GraphNode
@@ -153,14 +153,36 @@ class EntityResolver:
         declaration (they now agree on both id and canonical value), but is
         not a fully general collision merge. Idempotent for an id *remap*
         does not change.
+
+        Every string is gated by :func:`graph_facts._is_decl_or_type_node_id`
+        first (Codex review, fresh evidence, sixth round): ``resolve_entities()``
+        resolves *every* node in a graph, not just decl/type ones, so
+        ``aliases``/``_canonical_to_v1``/``conflicts`` can legitimately hold
+        a v1 id for a ``source://``/``header://``/... node too -- applying
+        *remap* to that id (or the canonical id it resolved to) regardless
+        of kind risked rewriting marker-shaped text that has nothing to do
+        with an anonymous/lambda declaration. A pairing (an alias's v1-id
+        key and canonical-id value, or a conflict's ``node_ids``) is only
+        remapped when the v1-id side of it is itself a decl/type id.
         """
-        self.aliases = {remap(k): remap(v) for k, v in self.aliases.items()}
+
+        def _gated(node_id: str) -> str:
+            return remap(node_id) if _is_decl_or_type_node_id(node_id) else node_id
+
+        self.aliases = {
+            _gated(k): (remap(v) if _is_decl_or_type_node_id(k) else v)
+            for k, v in self.aliases.items()
+        }
         self._canonical_to_v1 = {
-            remap(c): remap(v) for c, v in self._canonical_to_v1.items()
+            (remap(c) if _is_decl_or_type_node_id(v) else c): _gated(v)
+            for c, v in self._canonical_to_v1.items()
         }
         self.conflicts = [
             EntityConflict(
-                remap(c.canonical_id), tuple(remap(nid) for nid in c.node_ids)
+                remap(c.canonical_id)
+                if all(_is_decl_or_type_node_id(nid) for nid in c.node_ids)
+                else c.canonical_id,
+                tuple(_gated(nid) for nid in c.node_ids),
             )
             for c in self.conflicts
         ]
