@@ -746,6 +746,12 @@ class TestSurfaceExclusionReason:
 
 
 # ── end-to-end via compare(scope_to_public_surface=...) ──────────────────────
+#
+# Primitive-level property tests for `_record_nested_in_known_record` /
+# `_record_is_confirmed_public_seed` (the confirmed-public-header record
+# seed's own load-bearing primitives) live in a sibling file,
+# `test_surface_seed_predicate_properties.py`, split out purely to keep this
+# file under the AI-readiness file-size cap.
 
 
 class TestScopedCompareNoFalsePositives:

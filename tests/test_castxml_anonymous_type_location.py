@@ -27,6 +27,8 @@ from __future__ import annotations
 
 from xml.etree.ElementTree import Element, SubElement
 
+from hypothesis import given, strategies as st
+
 from abicheck.diff_helpers import type_map_key
 from abicheck.dumper import _CastxmlParser
 from abicheck.name_classification import strip_anonymous_type_location
@@ -456,4 +458,108 @@ class TestSyntheticCtorDtorKeysNormalizeEnclosingLambdaScope:
         old_ctor = next(k for k in old_funcs if not k.startswith("~"))
         new_ctor = next(k for k in new_funcs if not k.startswith("~"))
         assert old_ctor == new_ctor
-        assert "/tmp/d2a" not in old_ctor and "/tmp/d2b" not in new_ctor
+
+
+# ── generalized property test ─────────────────────────────────────────────
+#
+# The bug this whole module's tests defend against, restated: an existing
+# checkout-path-normalization helper (``strip_anonymous_type_location``) was
+# applied to SOME name-building code paths (``_qualified_type_name``,
+# ``RecordType.name``) but not a SIBLING one (``_qualified_name``) with the
+# identical shape -- an inconsistently-applied fix, not a missing one. Every
+# hand-written example test above pins one specific reported nesting shape
+# (a two-level namespace+class chain, one lambda location). This property
+# generalizes ``_qualified_name``'s contract itself -- "checkout-path-
+# independent for ANY scope chain" -- across arbitrary nesting depth,
+# arbitrary namespace/class mix, and an arbitrary (or absent) lambda-marker
+# placement, per this repo's "Primitive-level property tests" convention
+# (AGENTS.md): a primitive's contract stated as an invariant catches the
+# next sibling code path that forgets this same normalization, not just the
+# one this session happened to find.
+
+_IDENT = st.text(
+    alphabet=st.characters(whitelist_categories=("Ll", "Lu"), max_codepoint=0x7A),
+    min_size=1,
+    max_size=6,
+).filter(lambda s: "::" not in s and s not in ("", "::"))
+
+
+class TestQualifiedNameCheckoutIndependenceProperty:
+    """Generalizes ``TestSyntheticCtorDtorKeysNormalizeEnclosingLambdaScope``
+    above from one hard-coded two-level shape to arbitrary nesting depth and
+    an arbitrary (or absent) lambda-marker placement, calling
+    ``_qualified_name`` directly rather than only through
+    ``parse_functions()``'s ctor/dtor synthesis -- so this catches a
+    regression in the primitive itself, not only in its one documented
+    caller."""
+
+    @staticmethod
+    def _build_chain(
+        names: list[str], tags: list[str], source_path: str, lambda_level: int
+    ) -> tuple[Element, str]:
+        """Build a castxml scope chain ``names[0]`` (outermost) through
+        ``names[-1]`` (innermost), alternating Namespace/Struct/Class tags,
+        topped by a leaf ``Function`` whose ``context`` points at the
+        innermost ancestor. ``lambda_level`` (or ``-1`` for none) selects
+        which ancestor embeds a checkout-dependent ``(lambda at
+        <path>:L:C)`` marker in its own ``name`` -- exactly the shape a
+        lambda used as a class template argument produces in real castxml
+        output. Returns ``(root, leaf_element_id)``.
+        """
+        root = Element("CastXML", attrib={"format": "1.4.0"})
+        _file(root, "f1", source_path)
+        prev_id: str | None = None
+        for i, (name, tag) in enumerate(zip(names, tags)):
+            el = SubElement(root, tag)
+            el_id = f"_{i + 1}"
+            el.set("id", el_id)
+            spelling = (
+                f"{name}<(lambda at {source_path}:{i + 1}:1)>"
+                if i == lambda_level
+                else name
+            )
+            el.set("name", spelling)
+            if prev_id is not None:
+                el.set("context", prev_id)
+            prev_id = el_id
+        leaf = SubElement(root, "Function")
+        leaf.set("id", "_leaf")
+        leaf.set("name", "f")
+        if prev_id is not None:
+            leaf.set("context", prev_id)
+        return root, "_leaf"
+
+    @given(
+        names=st.lists(_IDENT, min_size=1, max_size=4, unique=True),
+        lambda_level=st.integers(min_value=-1, max_value=3),
+    )
+    def test_checkout_root_independence_for_arbitrary_nesting(
+        self, names: list[str], lambda_level: int
+    ) -> None:
+        depth = len(names)
+        if lambda_level >= depth:
+            lambda_level = -1
+        tags = ["Namespace" if i % 2 == 0 else "Struct" for i in range(depth)]
+        old_root, leaf_id = self._build_chain(
+            names, tags, "/tmp/checkout_a/lib.hpp", lambda_level
+        )
+        new_root, _ = self._build_chain(
+            names, tags, "/tmp/checkout_b_longer_path/lib.hpp", lambda_level
+        )
+        old_parser = _CastxmlParser(
+            old_root, exported_dynamic=set(), exported_static=set()
+        )
+        new_parser = _CastxmlParser(
+            new_root, exported_dynamic=set(), exported_static=set()
+        )
+        old_qn = old_parser._qualified_name(old_parser._id_map[leaf_id])
+        new_qn = new_parser._qualified_name(new_parser._id_map[leaf_id])
+        # The core property: two checkouts differing ONLY in their absolute
+        # root path always produce byte-identical qualified names, for any
+        # nesting depth and any placement (or absence) of the lambda marker.
+        assert old_qn == new_qn
+        if lambda_level >= 0:
+            # And the checkout root itself must actually be gone, not just
+            # coincidentally matched between the two sides.
+            assert "/tmp/checkout_a" not in old_qn
+            assert "/tmp/checkout_b_longer_path" not in new_qn

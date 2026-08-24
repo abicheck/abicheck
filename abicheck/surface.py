@@ -785,6 +785,65 @@ def _walk_exact_type_closure(
                     queue.append(ident)
 
 
+def _record_nested_in_known_record(
+    qname: str, record_by_name: dict[str, list[RecordType]]
+) -> bool:
+    """True when *qname*'s immediate enclosing scope is itself a known
+    record (a class/struct/union member), as opposed to a namespace: access
+    control (private/protected) applies only to a class's own members, never
+    to namespace scope, and `RecordType` carries no access-level field at
+    all -- castxml's `parse_types()` retains a named nested record
+    regardless of its own access. A pure, string-based approximation
+    (owner-prefix lookup, no depth limit): a template-argument `"::"` (e.g.
+    `Wrapper<ns::Foo>`) can produce a false "nested" reading, which only
+    ever makes this MORE conservative (declines to seed), never less --
+    the accepted direction of error for a predicate whose only job is
+    "never promote a type this can't prove is consumer-nameable".
+    """
+    if "::" not in qname:
+        return False
+    owner = qname.rsplit("::", 1)[0]
+    return owner in record_by_name
+
+
+def _record_is_confirmed_public_seed(
+    rec: RecordType, record_by_name: dict[str, list[RecordType]]
+) -> bool:
+    """True when *rec* should be seeded into the public-surface closure on
+    its own confirmed public-header origin alone, independent of whether any
+    exported function/variable signature reaches it (the oneDPL
+    `discard_iterator` shape -- see `compute_public_surface`'s own inline
+    comment for the full rationale). The complete, single-source-of-truth
+    eligibility predicate: every one of the four conditions below has its
+    own regression test guarding against a real, previously-shipped gap in
+    an earlier draft of this fix, and each is independently necessary --
+    dropping any one reintroduces that gap:
+
+    1. ``rec.source_header`` -- must have been parsed from a real header
+       at all (a DWARF-only/symbols-only record has none).
+    2. ``rec.origin is ScopeOrigin.PUBLIC_HEADER`` -- a *confirmed* match
+       against the given public-header set, not merely "not private/
+       system" (`ScopeOrigin.UNKNOWN`, no `-H` set given, is excluded; so
+       is `ScopeOrigin.GENERATED`, which -- despite a naive reading --
+       `classify_origin()` only ever returns for a header that did NOT
+       match the public set at all).
+    3. Not `is_internal_type(...)` -- a `detail::`/`impl::`/`internal::`
+       -style namespace segment anywhere in the qualified name.
+    4. Not `_record_nested_in_known_record(...)` -- not a member of
+       another known record, where a private/protected access level
+       cannot be ruled out (`RecordType` carries no access field).
+    """
+    from .internal_leak import DEFAULT_INTERNAL_NAMESPACES, is_internal_type
+
+    qname = rec.qualified_name or rec.name
+    return bool(
+        rec.source_header
+        and rec.origin is ScopeOrigin.PUBLIC_HEADER
+        and not is_internal_type(qname, DEFAULT_INTERNAL_NAMESPACES)
+        and not _record_nested_in_known_record(qname, record_by_name)
+    )
+
+
 def compute_public_surface(snap: AbiSnapshot) -> PublicSurface:
     """Compute the public-ABI surface of *snap*.
 
@@ -838,78 +897,17 @@ def compute_public_surface(snap: AbiSnapshot) -> PublicSurface:
     # also appear in an exported signature.
     #
     # `_seed_queue_from_public_types` in `internal_leak.py` already performs
-    # a similar seed for a similar reason ("classes declared in public
-    # headers but never referenced by an exported function symbol
-    # (e.g. inline-only templates)") to drive `DetectInternalLeaks`'s own,
-    # separately-run leak walk -- see this function's `_classify_type_level`
-    # sibling's comment above for why that walk's public-root set has always
-    # been broader than this one's. Reuse the same internal-namespace
-    # exclusion (`is_internal_type`/`DEFAULT_INTERNAL_NAMESPACES`) that walk
-    # already trusts, so a genuine implementation-detail type declared under
-    # a `detail::`/`impl::`/`internal::`-style namespace (even inside an
-    # otherwise-public header) still demotes normally instead of being
-    # promoted merely for sharing a header with real public API.
-    #
-    # Unlike the enum seed above (which also fires for `ScopeOrigin.UNKNOWN`
-    # -- a `source_header` alone), this is deliberately restricted to a
-    # *confirmed* public-header origin: a record with unclassified
-    # provenance (no `-H`/public-header set was given, so origin defaults to
-    # `UNKNOWN`) has no positive evidence it's actually on the public
-    # surface rather than an unrelated internal type that merely happens to
-    # share a translation unit -- unlike an enum member (always
-    # consumer-visible the instant the header is included), a struct that is
-    # never named by anything else is exactly the "unreachable,
-    # presumably-private helper type" shape this whole reachability closure
-    # exists to demote, so it must not be force-kept on unclassified
-    # provenance alone (confirmed by a real regression: an isolated,
-    # otherwise-unreferenced struct with no public-header set given was
-    # wrongly promoted before this restriction was added).
-    #
-    # `ScopeOrigin.GENERATED` is deliberately excluded from the confirmed set
-    # here (Codex review, fresh evidence): unlike the docstring's naive
-    # reading, `classify_origin()` only ever returns `GENERATED` for a header
-    # that did **not** match the given public-header set (see its own
-    # docstring) -- a genuinely public, public-header-matching generated
-    # header (e.g. a `moc_*.h` under the public set) classifies as
-    # `PUBLIC_HEADER` directly, never `GENERATED`. So `GENERATED` here always
-    # means "outside the public boundary, but generated-looking" -- seeding
-    # on it would promote unrelated types from a path like
-    # `build/generated/internal_config.h`, the exact internal-noise shape
-    # this whole reachability closure exists to keep demoted.
-    from .internal_leak import DEFAULT_INTERNAL_NAMESPACES, is_internal_type
-
-    def _nested_in_a_record(qname: str) -> bool:
-        """True when *qname*'s immediate enclosing scope is itself a known
-        record (a class/struct/union member), as opposed to a namespace
-        (Codex review, fresh evidence): access control (private/protected)
-        applies only to a class's own members, never to namespace scope, and
-        `RecordType` carries no access-level field at all -- castxml's
-        `parse_types()` retains a named nested record regardless of its own
-        access, so a private/protected nested type in an otherwise-public
-        header would otherwise be promoted here purely because it shares the
-        enclosing header's origin. There is no way to positively confirm
-        such a nested type IS public from the model alone, so this
-        conservatively declines to seed any record nested inside another
-        known record, falling back to ordinary reachability (a nested type
-        genuinely reachable from a public signature/field is still marked
-        public the normal way) -- the safe direction: never seed a type this
-        can't prove is consumer-nameable, rather than promote one that
-        might not be.
-        """
-        if "::" not in qname:
-            return False
-        owner = qname.rsplit("::", 1)[0]
-        return owner in record_by_name
-
+    # a similar, broader seed for `DetectInternalLeaks`'s own separately-run
+    # walk -- see this function's `_classify_type_level` sibling's comment
+    # above for why that walk's public-root set has always been broader than
+    # this one's. The full eligibility predicate, and why each of its four
+    # conditions is independently necessary, lives on
+    # `_record_is_confirmed_public_seed` itself -- read there rather than
+    # duplicating the rationale here.
     seed_types |= {
         rec.qualified_name or rec.name
         for rec in snap.types
-        if rec.source_header
-        and rec.origin is ScopeOrigin.PUBLIC_HEADER
-        and not is_internal_type(
-            rec.qualified_name or rec.name, DEFAULT_INTERNAL_NAMESPACES
-        )
-        and not _nested_in_a_record(rec.qualified_name or rec.name)
+        if _record_is_confirmed_public_seed(rec, record_by_name)
     }
 
     # Provenance is available iff some declaration was classified to a real
