@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -434,6 +435,15 @@ class TestCompareReleaseAgainstBundleFactsResolutionUnit:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.skipif(
+    sys.platform != "linux",
+    reason="Uses the GNU ld flag -Wl,-soname; Mach-O ld and link.exe don't "
+    "accept it, and gcc/clang -shared produces a non-ELF binary on those "
+    "platforms anyway. Bundle analysis itself is ELF/Linux-only per "
+    "ADR-018 / ADR-023 (matches TestWriteBundleFactsOutCapturesARealSnapshot's "
+    "identical guard in tests/test_bundle_facts.py, which this class's own "
+    "_build_so fixture is otherwise a near-duplicate of).",
+)
 @pytest.mark.integration
 class TestCompareReleaseAgainstBundleFacts:
     def _build_so(self, tmp_path: Path, name: str, body: str) -> Path:
