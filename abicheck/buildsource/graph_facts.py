@@ -41,6 +41,7 @@ from typing import Any
 
 from ..name_classification import (
     _declaring_header_discriminator,
+    _quoted_spans,
     strip_anonymous_type_location,
 )
 
@@ -518,10 +519,26 @@ class GraphNode:
         # from attrs/provenance/confidence (no forced re-collection). A stored
         # "resolved"/"conflicts" is never trusted — always recomputed, so a
         # hand-edited pack self-heals instead of persisting a stale merge.
+        #
+        # id/label pass through _normalize_graph_identity on load (Codex
+        # review, fresh evidence) so a pack persisted before that
+        # normalization existed self-heals the same way: without this, an
+        # old pack's raw, checkout-path-bearing decl/type node id would
+        # never match the normalized id a freshly-built graph now produces
+        # for the identical declaration, and diff_source_graph's direct id
+        # comparison would read it as removed+added rather than unchanged
+        # (the exact false positive this whole normalization exists to
+        # close, just reached from a stale-pack angle instead of a
+        # fresh-vs-fresh one). Safe unconditionally: the substitution only
+        # ever touches an embedded "(unnamed .../lambda at ...)"/"lambda at
+        # ...:line:col" marker, so it is a no-op for every other node id
+        # (source://, header://, build_option://, symbol://, target://,
+        # vtable://, ...) and idempotent for an id a current build already
+        # normalized.
         node = cls(
-            id=str(d["id"]),
+            id=_normalize_graph_identity(str(d["id"])),
             kind=str(d.get("kind", "file")),
-            label=str(d.get("label", "")),
+            label=_normalize_graph_identity(str(d.get("label", ""))),
             attrs=dict(d.get("attrs", {})),
             provenance=str(d.get("provenance", "")),
             confidence=str(d.get("confidence", CONF_UNKNOWN)),
@@ -592,10 +609,12 @@ class GraphEdge:
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> GraphEdge:
         # See GraphNode.from_dict: v1-pack compat + always-recompute-from-facts
-        # apply identically here.
+        # apply identically here, including the src/dst normalize-on-load
+        # migration for a pack persisted before decl/type node ids were
+        # checkout-directory-normalized.
         edge = cls(
-            src=str(d["src"]),
-            dst=str(d["dst"]),
+            src=_normalize_graph_identity(str(d["src"])),
+            dst=_normalize_graph_identity(str(d["dst"])),
             kind=str(d.get("edge", d.get("kind", ""))),
             provenance=str(d.get("provenance", "")),
             confidence=str(d.get("confidence", CONF_UNKNOWN)),
@@ -808,9 +827,27 @@ def _strip_bare_anonymous_type_location(name: str) -> str:
     discriminator, drop only the checkout-dependent directory) for the shape
     that function's own paren-anchored regex does not match. See
     :func:`_normalize_graph_identity`.
+
+    A match that falls inside a ``"..."`` quoted literal is left completely
+    untouched, mirroring `strip_anonymous_type_location`'s own protection
+    (Codex review, fresh evidence): a real anonymous/lambda marker is never
+    itself quoted, so a match starting inside quotes can only be ordinary
+    string-literal *content* that happens to spell location-shaped text --
+    e.g. a C++20 fixed-string NTTP argument like ``Tag<"lambda at
+    /a/foo.hpp:1:2">``. Without this guard, two distinct specializations
+    quoting *different* paths (``Tag<"lambda at /a/foo.hpp:1:2">`` vs.
+    ``Tag<"lambda at /b/foo.hpp:1:2">``) would collapse onto the identical
+    normalized identity, fabricating a same-identity collision between two
+    genuinely different declarations.
     """
+    quoted_spans = _quoted_spans(name)
+
+    def _inside_quotes(pos: int) -> bool:
+        return any(start <= pos < end for start, end in quoted_spans)
 
     def _replace(match: re.Match[str]) -> str:
+        if _inside_quotes(match.start()):
+            return match.group(0)
         marker, path, line, col = match.groups()
         return f"{marker}:{_declaring_header_discriminator(path)}:{line}:{col}"
 
