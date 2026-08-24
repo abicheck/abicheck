@@ -534,20 +534,26 @@ class TestCompareReleaseAgainstBundleFactsResolutionUnit:
         )
 
         uniform_headers = [Path("/include/common")]
+        uniform_includes = [Path("/include/common/sys")]
         dpc_headers = [Path("/include/dpc")]
+        dpc_includes = [Path("/include/dpc/sys")]
         dpc_ctx = CompileContext(gcc_path="icpx", frontend="clang")
 
         compare_release_against_bundle_facts(
             facts_path,
             new_dir,
             headers=uniform_headers,
+            includes=uniform_includes,
             per_library_headers={"libdpc.so": dpc_headers},
+            per_library_includes={"libdpc.so": dpc_includes},
             per_library_compile={"libdpc.so": dpc_ctx},
         )
 
         assert captured_kwargs[core_so]["headers"] == uniform_headers
+        assert captured_kwargs[core_so]["includes"] == uniform_includes
         assert captured_kwargs[core_so]["compile"] is None
         assert captured_kwargs[dpc_so]["headers"] == dpc_headers
+        assert captured_kwargs[dpc_so]["includes"] == dpc_includes
         assert captured_kwargs[dpc_so]["compile"] is dpc_ctx
 
 

@@ -8,9 +8,9 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   forwards `header_backend`/`compile`, and accepts per-library header/
   compile overrides.**
 
-  Two gaps surfaced by an external validation pass against `compare_release_
-  against_bundle_facts()` (the Phase 13 stored-vs-live bundle driver,
-  `abicheck/bundle_side_input.py`), both real and both fixed:
+  Two gaps surfaced by an external validation pass against
+  `compare_release_against_bundle_facts()` (the Phase 13 stored-vs-live
+  bundle driver, `abicheck/bundle_side_input.py`), both real and both fixed:
 
   1. The driver's `service.resolve_input()` call for the NEW side never
      passed `header_backend`/`compile` at all, so a header-scoped

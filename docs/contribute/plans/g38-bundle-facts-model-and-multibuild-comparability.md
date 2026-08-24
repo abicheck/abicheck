@@ -1829,15 +1829,14 @@ remains the already-documented Known-gap above:
    against a mixed-toolchain bundle cannot mistake the resulting exit code
    for a per-library-correct comparison.
 
-Regression coverage for both fixes:
-`tests/test_bundle_side_input.py::TestCompareReleaseAgainstBundleFactsResolutionUnit::
-test_header_backend_and_compile_are_forwarded` (pins that both kwargs reach
+Regression coverage for both fixes, in
+`tests/test_bundle_side_input.py::TestCompareReleaseAgainstBundleFactsResolutionUnit`:
+`test_header_backend_and_compile_are_forwarded` (pins that both kwargs reach
 `service.resolve_input` unchanged, replacing the need for the assessment's
-own monkeypatch) and
-`::test_per_library_overrides_win_over_the_uniform_fallback` (a two-library
-fixture confirming a `per_library_*` entry for one library doesn't leak onto
-a library absent from that same map, which still receives the uniform
-`headers`/`compile` default).
+own monkeypatch) and `test_per_library_overrides_win_over_the_uniform_fallback`
+(a two-library fixture confirming a `per_library_*` entry for one library
+doesn't leak onto a library absent from that same map, which still receives
+the uniform `headers`/`compile` default).
 
 ---
 
