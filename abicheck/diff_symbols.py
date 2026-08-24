@@ -17,7 +17,6 @@
 
 from __future__ import annotations
 
-import bisect
 import re
 from collections.abc import Mapping
 from typing import Any
@@ -70,6 +69,10 @@ from .diff_symbols_renames import (  # noqa: F401  (public-surface re-exports)
     _unqualified_name as _unqualified_name,
     _unqualified_name_of as _unqualified_name_of,
     _unwrap_funcptr_declarator as _unwrap_funcptr_declarator,
+    emit_namespace_move_batches as emit_namespace_move_batches,
+    emit_prefix_batch_rename as emit_prefix_batch_rename,
+    find_namespace_move_groups as find_namespace_move_groups,
+    find_prefix_rename_pairs as find_prefix_rename_pairs,
 )
 from .diff_symbols_scalar import (  # noqa: F401  (public-surface re-exports)
     _abi_equivalent_scalar as _abi_equivalent_scalar,
@@ -1606,77 +1609,26 @@ def _diff_anon_fields(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     return changes
 
 
-def _find_rename_pairs(
-    removed: set[str],
-    added: set[str],
-    old_map: dict[str, Function],
-    new_map: dict[str, Function],
-) -> list[tuple[str, str]]:
-    """Return (old_name, new_name) pairs where new_name has a common prefix added to old_name.
-
-    The match condition is ``a_name.endswith(r_name)`` with ``a_name`` strictly
-    longer (a prefix was prepended). The old ``endswith("_" + r_name)`` branch
-    was redundant — any name ending with ``"_" + r_name`` already ends with
-    ``r_name``. To avoid the O(removed × added) cross-product, index the added
-    names *reversed* so the suffix test becomes a prefix lookup: a binary search
-    locates the contiguous block of reversed added names that start with the
-    reversed removed name. Both ``removed`` and the reversed index are iterated
-    in sorted order, so the result is deterministic.
-    """
-    rev_index = sorted(
-        (new_map[a_sym].name[::-1], new_map[a_sym].name) for a_sym in added
-    )
-    rev_keys = [k for k, _ in rev_index]
-    pairs: list[tuple[str, str]] = []
-    for r_sym in sorted(removed):
-        r_name = old_map[r_sym].name
-        rk = r_name[::-1]
-        i = bisect.bisect_left(rev_keys, rk)
-        while i < len(rev_keys) and rev_keys[i].startswith(rk):
-            a_name = rev_index[i][1]
-            if len(a_name) > len(r_name):
-                pairs.append((r_name, a_name))
-                break
-            i += 1
-    return pairs
-
-
-def _emit_batch_rename(rename_pairs: list[tuple[str, str]]) -> list[Change]:
-    """Emit a SYMBOL_RENAMED_BATCH change if all pairs share a single common prefix."""
-    if len(rename_pairs) < 2:
-        return []
-    prefixes = {
-        new_name[: new_name.rfind(old_name)] for old_name, new_name in rename_pairs
-    }
-    if len(prefixes) != 1:
-        return []
-    prefix = prefixes.pop()
-    pair_desc = ", ".join(f"{o} → {n}" for o, n in rename_pairs[:5])
-    if len(rename_pairs) > 5:
-        pair_desc += f", ... ({len(rename_pairs)} total)"
-    return [
-        make_change(
-            ChangeKind.SYMBOL_RENAMED_BATCH,
-            symbol=f"batch_rename:{prefix}*",
-            name=prefix,
-            detail=f"{len(rename_pairs)} symbols ({pair_desc})",
-            old_value=", ".join(o for o, _ in rename_pairs),
-            new_value=", ".join(n for _, n in rename_pairs),
-        )
-    ]
-
-
 @registry.detector("symbol_renames")
 def _diff_symbol_renames(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     """Detect batch symbol renames (namespace refactoring).
 
-    When multiple symbols are removed and corresponding prefixed versions are
-    added (e.g. ``init`` → ``mylib_init``), this indicates a namespace
-    refactoring that breaks all existing consumers.
+    Two independent shapes, both rolled up into ``SYMBOL_RENAMED_BATCH`` and
+    both implemented in the leaf ``diff_symbols_renames`` module:
 
-    Heuristic: if 2+ removed symbols each have a matching added symbol where
-    the added name ends with the removed name (common prefix pattern), emit
-    a SYMBOL_RENAMED_BATCH change.
+    * a common *prefix* prepended to many leaf names (``init`` ->
+      ``mylib_init``) — :func:`find_prefix_rename_pairs`;
+    * a namespace *segment substitution* shared by many symbols
+      (``tbb::detail::d1::X`` -> ``tbb::detail::d2::X`` for every ``X``) —
+      :func:`find_namespace_move_groups`. A namespace move is neither a
+      prefix nor a suffix of the old name, so the prefix shape above cannot
+      see it and every moved symbol was reported as an unpaired
+      ``func_removed``/``func_added`` with nothing tying the two halves
+      together.
+
+    The roll-up is additive: the per-symbol removals stay, because a moved
+    symbol really is gone from the old name and a consumer linked against it
+    really does fail to resolve.
     """
     old_map = _public_functions(old)
     new_map = _public_functions(new)
@@ -1687,8 +1639,13 @@ def _diff_symbol_renames(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     if len(removed) < 2 or not added:
         return []
 
-    rename_pairs = _find_rename_pairs(removed, added, old_map, new_map)
-    return _emit_batch_rename(rename_pairs)
+    changes = emit_prefix_batch_rename(
+        find_prefix_rename_pairs(removed, added, old_map, new_map)
+    )
+    changes.extend(
+        emit_namespace_move_batches(find_namespace_move_groups(removed, added))
+    )
+    return changes
 
 
 @registry.detector("param_restrict")

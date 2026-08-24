@@ -46,6 +46,7 @@ from .fact_provenance import (
     same_producer_backed_fact_qualified,
 )
 from .model import AbiSnapshot
+from .qualified_name_segments import strip_inline_abi_namespaces
 
 K = TypeVar("K")
 V = TypeVar("V")
@@ -425,13 +426,60 @@ def lookup_matched_type(own: TypeMap[Q], other: TypeMap[Q], t: Q) -> Q | None:
     short/leaf-name collision ``type_map_key`` was introduced to fix, this
     time through the compatibility fallback instead of naive bare matching
     (Codex review, PR #608, second round).
+
+    That unambiguity check is necessary but **not sufficient**, and the
+    missing half is what this function's second fix closes. The retry exists
+    for exactly one situation — *other* is a legacy side that never recorded
+    a qualified identity for this type — but it used to fire whenever the
+    qualified lookup missed, *including* when both sides carry full,
+    genuinely different qualified identities. A real namespace move
+    (oneTBB 2022's flow graph, ``tbb::detail::d1::graph`` ->
+    ``tbb::detail::d2::graph``: distinct types, distinct mangled vtable
+    symbols, no declaration in common) is precisely that shape: each side
+    holds exactly one type whose bare name is ``graph``, so both bare names
+    are "unambiguous" within their own snapshot, the retry hits the other
+    side's bare alias, and two unrelated types are diffed against each other
+    — manufacturing ``TYPE_SIZE_CHANGED`` / ``TYPE_FIELD_OFFSET_CHANGED`` /
+    ``TYPE_VTABLE_CHANGED`` for a pair that is really one removal plus one
+    addition. Unambiguity cannot see this: it answers "is this bare spelling
+    claimed once here", never "did the other side actually fail to record a
+    qualified name".
+
+    So the candidate the retry finds is accepted in exactly two shapes:
+
+    * the candidate is *legacy-shaped* — its own matching key equals its bare
+      declaration name, i.e. it carries no distinct qualified identity. That
+      is the schema-evolution case the alias was introduced for.
+    * the two qualified identities are equal once *inline ABI-tag
+      namespaces* are stripped from both
+      (:func:`qualified_name_segments.strip_inline_abi_namespaces`) —
+      ``std::basic_string<...>`` vs. libstdc++'s dual-ABI
+      ``std::__cxx11::basic_string<...>``, or a versioned ``ns::v1::X``
+      vs. ``ns::X``. An inline namespace is transparent for name lookup, so
+      the two spellings name one entity and a real layout change between
+      them (the dual-ABI size change) is a mutation, not a removal plus an
+      addition. The stripping is deliberately narrow: only the version-shaped
+      (``v1``/``__1``) and named toolchain (``__cxx11``/``__ndk1``) tags
+      qualify, never an ordinary implementation namespace such as
+      ``detail``, ``impl`` or oneTBB's ``d1`` — renaming one of those really
+      does move every declaration inside it.
+
+    Anything else — a side that DID record ``ns::Foo`` and simply does not
+    contain *t* — is reported as a non-match, which is the truth.
     """
     key = type_map_key(t)
     found = other.get(key)
     if found is not None:
         return found
     if t.name != key and own.bare_name_is_unambiguous(t.name):
-        return other.get(t.name)
+        candidate = other.get(t.name)
+        if candidate is None:
+            return None
+        candidate_key = type_map_key(candidate)
+        if candidate_key == candidate.name or strip_inline_abi_namespaces(
+            key
+        ) == strip_inline_abi_namespaces(candidate_key):
+            return candidate
     return None
 
 

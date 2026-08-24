@@ -140,3 +140,91 @@ def version_strip_segments(segs: list[str]) -> tuple[tuple[str, ...], int | None
         if v is not None:
             return tuple(segs[:i] + segs[i + 1 :]), v
     return tuple(segs), None
+
+
+#: Toolchain *ABI-tag* inline namespaces that are not version-number-shaped
+#: and therefore invisible to :func:`version_suffix`: libstdc++'s dual-ABI
+#: ``std::__cxx11`` and the Android NDK's ``std::__ndk1``. Both are inline
+#: namespaces — transparent for name lookup — so a declaration gaining or
+#: losing one is the *same* entity spelled two ways, exactly like the
+#: ``v1``/``__1`` family ``version_suffix`` already recognizes.
+_ABI_TAG_NS_RE = _re.compile(r"^__(?:cxx|ndk)\d+$")
+
+
+def is_inline_abi_namespace_segment(segment: str) -> bool:
+    """True when *segment* names an inline namespace used as an ABI tag.
+
+    Union of the version-number family (``v1``, ``__1``, ``_V2`` — see
+    :func:`version_suffix`) and the named toolchain tags (``__cxx11``,
+    ``__ndk1``). Deliberately not a general "looks like an implementation
+    detail" test: a segment such as ``detail``, ``impl`` or oneTBB's ``d1``
+    is an *ordinary* namespace whose rename is a real move of the
+    declarations inside it, so it must not be stripped.
+    """
+    return version_suffix(segment) is not None or bool(_ABI_TAG_NS_RE.match(segment))
+
+
+def strip_inline_abi_namespaces(qualified: str) -> tuple[str, ...]:
+    """Return *qualified*'s segments with every inline ABI-tag namespace removed.
+
+    Two spellings that reduce to the same tuple name the same entity through
+    a transparent inline namespace (``std::basic_string`` vs.
+    ``std::__cxx11::basic_string``); two that do not are genuinely different
+    scopes (``tbb::detail::d1::graph`` vs. ``tbb::detail::d2::graph``).
+
+    The leaf segment is never stripped, for the same reason
+    :func:`version_strip_segments` never scans it: a declaration may
+    legitimately *be* named ``v1``, and stripping its own name would collapse
+    it onto its enclosing scope.
+
+    Splitting keeps each segment's template arguments, unlike
+    :func:`segments`: two spellings that differ only inside an *enclosing*
+    segment's argument list (``ns::Outer<int>::Inner`` vs.
+    ``ns::Outer<float>::Inner``) name different entities, and dropping the
+    arguments would reduce both to the same tuple.
+    """
+    segs = raw_segments(qualified)
+    if len(segs) < 2:
+        return tuple(segs)
+    leaf = len(segs) - 1
+    return tuple(
+        s
+        for i, s in enumerate(segs)
+        if i == leaf or not is_inline_abi_namespace_segment(s)
+    )
+
+
+def raw_segments(qualified: str) -> list[str]:
+    """:func:`segments`, but keeping each segment's template arguments.
+
+    Splits on ``::`` at template-nesting depth zero only, so
+    ``ns::Map<std::pair<int, int>>::iterator`` yields three segments and the
+    ``::`` inside the argument list is not a separator.
+    """
+    if not qualified:
+        return []
+    if "::" not in qualified and "<" not in qualified:
+        return [qualified]
+    out: list[str] = []
+    buf: list[str] = []
+    depth = 0
+    i = 0
+    n = len(qualified)
+    while i < n:
+        ch = qualified[i]
+        if ch == "<":
+            depth += 1
+        elif ch == ">":
+            if depth > 0:
+                depth -= 1
+        elif depth == 0 and ch == ":" and i + 1 < n and qualified[i + 1] == ":":
+            if buf:
+                out.append("".join(buf).strip())
+                buf = []
+            i += 2
+            continue
+        buf.append(ch)
+        i += 1
+    if buf:
+        out.append("".join(buf).strip())
+    return [s for s in out if s]

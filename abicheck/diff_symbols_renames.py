@@ -23,8 +23,10 @@ The symbol-level public surface re-exports these names back from
 
 from __future__ import annotations
 
+import bisect
 import logging
 import re
+from collections.abc import Mapping
 from functools import lru_cache
 
 from .binary_fingerprint import (
@@ -36,10 +38,11 @@ from .checker_policy import ChangeKind
 from .checker_types import Change
 from .demangle import demangle, demangle_batch
 from .detector_registry import registry
+from .diff_cxx_rules import itanium_scope_components, msvc_scope_components
 from .diff_helpers import make_change
 from .elf_metadata import SymbolType
 from .elf_symbol_filter import is_abi_relevant_elf_symbol
-from .model import AbiSnapshot, is_cxx_runtime_library
+from .model import AbiSnapshot, Function, is_cxx_runtime_library
 
 _log = logging.getLogger(__name__)
 
@@ -677,4 +680,236 @@ def _diff_fingerprint_renames(old: AbiSnapshot, new: AbiSnapshot) -> list[Change
             len(candidates),
         )
 
+    return changes
+
+
+# ── Batch rename / namespace-move roll-up (SYMBOL_RENAMED_BATCH) ──────────
+#
+# Moved here from ``diff_symbols`` (which sits at the 2000-line hard cap) so
+# both batch shapes live next to the rest of the rename machinery.
+
+
+def _is_destructor_leaf(name: str) -> bool:
+    """True when *name*'s own leaf component names a destructor.
+
+    Splitting on the *last* ``"::"`` is enough for this predicate: a
+    destructor's ``~`` is always the first character of the leaf component,
+    and any ``"::"`` inside a template argument only ever appears *before*
+    the leaf's ``~`` would, never between it and the end.
+    """
+    return name.rsplit("::", 1)[-1].startswith("~")
+
+
+def _prefix_ends_at_a_name_boundary(prefix: str) -> bool:
+    """True when *prefix* is a plausible *prepended* naming prefix.
+
+    A batch rename prepends a namespace or library prefix to an existing
+    leaf name, so the added text ends where a name legitimately starts: at a
+    scope separator (``ns::foo``) or an underscore (``mylib_foo``). Anything
+    else means the "prefix" cuts into the middle of an identifier or is a
+    declarator sigil rather than a name — the ``~`` of a destructor being the
+    case this rule exists for (``Wrapper`` -> ``~Wrapper`` is not a rename of
+    ``Wrapper``, it is a different declaration that happens to end with the
+    same spelling).
+    """
+    return prefix.endswith(("::", "_"))
+
+
+def find_prefix_rename_pairs(
+    removed: set[str],
+    added: set[str],
+    old_map: Mapping[str, Function],
+    new_map: Mapping[str, Function],
+) -> list[tuple[str, str]]:
+    """Return (old_name, new_name) pairs where new_name has a common prefix added to old_name.
+
+    The match condition is ``a_name.endswith(r_name)`` with ``a_name`` strictly
+    longer (a prefix was prepended). The old ``endswith("_" + r_name)`` branch
+    was redundant — any name ending with ``"_" + r_name`` already ends with
+    ``r_name``. To avoid the O(removed × added) cross-product, index the added
+    names *reversed* so the suffix test becomes a prefix lookup: a binary search
+    locates the contiguous block of reversed added names that start with the
+    reversed removed name. Both ``removed`` and the reversed index are iterated
+    in sorted order, so the result is deterministic.
+
+    Two gates keep the raw suffix test from manufacturing pairs out of
+    unrelated declarations that merely share a trailing spelling:
+
+    * the two names must agree on being a destructor
+      (:func:`_is_destructor_leaf`), and
+    * the prepended text must end at a name boundary
+      (:func:`_prefix_ends_at_a_name_boundary`).
+
+    Either one alone rejects the reported ``Wrapper`` -> ``~Wrapper`` /
+    ``graph`` -> ``~graph`` noise; both are kept because they state
+    independent facts. The destructor rule is about *what the two
+    declarations are* and holds no matter how the prefix is spelled (it also
+    rejects ``~Foo`` -> ``ns::Foo``, where the prefix is perfectly
+    well-formed); the boundary rule is about *where the added text stops*
+    and rejects mid-identifier cuts that have nothing to do with
+    destructors.
+    """
+    rev_index = sorted(
+        (new_map[a_sym].name[::-1], new_map[a_sym].name) for a_sym in added
+    )
+    rev_keys = [k for k, _ in rev_index]
+    pairs: list[tuple[str, str]] = []
+    for r_sym in sorted(removed):
+        r_name = old_map[r_sym].name
+        rk = r_name[::-1]
+        i = bisect.bisect_left(rev_keys, rk)
+        while i < len(rev_keys) and rev_keys[i].startswith(rk):
+            a_name = rev_index[i][1]
+            if len(a_name) > len(r_name):
+                prefix = a_name[: len(a_name) - len(r_name)]
+                if _is_destructor_leaf(a_name) == _is_destructor_leaf(
+                    r_name
+                ) and _prefix_ends_at_a_name_boundary(prefix):
+                    pairs.append((r_name, a_name))
+                break
+            i += 1
+    return pairs
+
+
+def emit_prefix_batch_rename(rename_pairs: list[tuple[str, str]]) -> list[Change]:
+    """Emit a SYMBOL_RENAMED_BATCH change if all pairs share a single common prefix."""
+    if len(rename_pairs) < 2:
+        return []
+    prefixes = {
+        new_name[: new_name.rfind(old_name)] for old_name, new_name in rename_pairs
+    }
+    if len(prefixes) != 1:
+        return []
+    prefix = prefixes.pop()
+    pair_desc = ", ".join(f"{o} → {n}" for o, n in rename_pairs[:5])
+    if len(rename_pairs) > 5:
+        pair_desc += f", ... ({len(rename_pairs)} total)"
+    return [
+        make_change(
+            ChangeKind.SYMBOL_RENAMED_BATCH,
+            symbol=f"batch_rename:{prefix}*",
+            name=prefix,
+            detail=f"{len(rename_pairs)} symbols ({pair_desc})",
+            old_value=", ".join(o for o, _ in rename_pairs),
+            new_value=", ".join(n for _, n in rename_pairs),
+        )
+    ]
+
+
+#: Sentinel standing in for the one scope component a candidate namespace
+#: substitution replaces. A real Itanium component can never contain a NUL,
+#: so it cannot collide with one.
+_MASKED = "\x00"
+
+
+def _scope_components(mangled: str) -> list[str] | None:
+    """Return *mangled*'s scope chain (namespaces + class path + leaf), or None.
+
+    Itanium first, MSVC second — the two prefixes (``_Z``/``__Z`` vs. ``?``)
+    are mutually exclusive, so trying both in order is unambiguous, and it is
+    the same order :func:`diff_cxx_rules.owner_class_of` already uses. A
+    component list shorter than two carries no namespace to substitute, so it
+    is reported as "no usable chain" rather than as a one-element chain.
+    """
+    comps = itanium_scope_components(mangled) or msvc_scope_components(mangled)
+    if comps is None or len(comps) < 2:
+        return None
+    return comps
+
+
+def find_namespace_move_groups(
+    removed: set[str],
+    added: set[str],
+) -> dict[tuple[str, str], list[tuple[str, str]]]:
+    """Group removed/added symbols by a *shared namespace-segment substitution*.
+
+    A namespace move (oneTBB 2022's flow graph: every ``tbb::detail::d1::X``
+    became ``tbb::detail::d2::X``) is neither a prefix nor a suffix of the old
+    name, so :func:`find_prefix_rename_pairs` structurally cannot see it —
+    every moved symbol was reported as an unpaired ``func_removed`` next to an
+    unpaired ``func_added`` with nothing recording that the two halves are the
+    same declaration under a new scope.
+
+    Matching is on the *mangled* names' parsed scope chains
+    (:func:`_scope_components`), not on demangled text: the chain is exactly
+    the sequence of namespace/class components plus the leaf, with ctor/dtor
+    markers already normalized, so "differs in exactly one component" is a
+    statement about scoping rather than about string spelling.
+
+    A pair is recorded when the two chains have the same length, differ at
+    exactly one position, and that position is **not** the leaf — a differing
+    leaf is a renamed *declaration*, which is a different claim from a moved
+    scope and is what the prefix shape above is for. Pairs are grouped by the
+    ``(old_segment, new_segment)`` substitution they support, so unrelated
+    coincidental one-component differences never accumulate into one group;
+    the caller requires a group to have at least two supporting pairs before
+    reporting anything.
+
+    Deliberately *not* keyed on the position index as well: the same rename
+    of a namespace can legitimately show up at different depths (a nested
+    class in one symbol, a free function in another), and requiring an equal
+    index would split one real move into several under-supported groups.
+
+    Returns ``{(old_segment, new_segment): [(old_qualified, new_qualified)]}``
+    with deterministic ordering (both sides iterated sorted).
+    """
+    added_index: dict[tuple[str, ...], list[tuple[str, list[str]]]] = {}
+    for a_sym in sorted(added):
+        comps = _scope_components(a_sym)
+        if comps is None:
+            continue
+        for i in range(len(comps) - 1):
+            masked = tuple(comps[:i]) + (_MASKED,) + tuple(comps[i + 1 :])
+            added_index.setdefault(masked, []).append((a_sym, comps))
+
+    groups: dict[tuple[str, str], list[tuple[str, str]]] = {}
+    for r_sym in sorted(removed):
+        r_comps = _scope_components(r_sym)
+        if r_comps is None:
+            continue
+        seen_here: set[tuple[str, str]] = set()
+        for i in range(len(r_comps) - 1):
+            masked = tuple(r_comps[:i]) + (_MASKED,) + tuple(r_comps[i + 1 :])
+            for a_sym, a_comps in added_index.get(masked, ()):
+                key = (r_comps[i], a_comps[i])
+                if key[0] == key[1] or key in seen_here:
+                    continue
+                seen_here.add(key)
+                groups.setdefault(key, []).append(
+                    ("::".join(r_comps), "::".join(a_comps))
+                )
+    return groups
+
+
+def emit_namespace_move_batches(
+    groups: dict[tuple[str, str], list[tuple[str, str]]],
+) -> list[Change]:
+    """Emit one SYMBOL_RENAMED_BATCH per namespace substitution with 2+ pairs.
+
+    Ordered by support (most-supported substitution first, then by the
+    substitution itself) so the report is stable across runs and the dominant
+    move leads.
+    """
+    changes: list[Change] = []
+    for (old_seg, new_seg), pairs in sorted(
+        groups.items(), key=lambda kv: (-len(kv[1]), kv[0])
+    ):
+        if len(pairs) < 2:
+            continue
+        pair_desc = ", ".join(f"{o} → {n}" for o, n in pairs[:5])
+        if len(pairs) > 5:
+            pair_desc += f", ... ({len(pairs)} total)"
+        changes.append(
+            make_change(
+                ChangeKind.SYMBOL_RENAMED_BATCH,
+                symbol=f"batch_rename:{old_seg}→{new_seg}",
+                description=(
+                    "Batch symbol rename detected (namespace refactoring): "
+                    f"namespace segment '{old_seg}' → '{new_seg}' on "
+                    f"{len(pairs)} symbols ({pair_desc})"
+                ),
+                old_value=", ".join(o for o, _ in pairs),
+                new_value=", ".join(n for _, n in pairs),
+            )
+        )
     return changes
