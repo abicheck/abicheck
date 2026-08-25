@@ -490,6 +490,26 @@ class TestQualifiedNameScopeComponentsKeepsConversionTargetsWhole:
     def test_bare_conversion_operator_with_no_owner_has_no_scope(self) -> None:
         assert qualified_name_scope_components("operator old::X") == ["operator old::X"]
 
+    def test_malformed_target_with_unclosed_template_is_rejected(self) -> None:
+        """CodeRabbit review, fresh evidence: an earlier revision stopped
+        scanning the instant the ``"::operator "`` marker was found, so
+        nothing past it was ever validated for balanced nesting -- a
+        malformed target like ``operator old::X<`` (an unclosed template
+        argument) was silently accepted instead of rejected."""
+        assert qualified_name_scope_components("api::C::operator old::X<") is None
+
+    def test_malformed_target_with_stray_closing_paren_is_rejected(self) -> None:
+        assert qualified_name_scope_components("api::C::operator old::X)") is None
+
+    def test_well_formed_template_target_is_still_accepted(self) -> None:
+        """The balance check must not reject a genuinely well-formed
+        target that merely contains its own template arguments."""
+        assert qualified_name_scope_components("api::C::operator Foo<int>") == [
+            "api",
+            "C",
+            "operator Foo<int>",
+        ]
+
     def test_two_conversion_operator_removals_and_additions_still_pair_correctly(
         self,
     ) -> None:

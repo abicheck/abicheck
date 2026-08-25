@@ -603,7 +603,9 @@ def _operator_keyword_precedes(qualified: str, i: int) -> bool:
     if qualified[i - 8 : i] != "operator":
         return False
     before = i - 8
-    return before == 0 or not (qualified[before - 1].isalnum() or qualified[before - 1] == "_")
+    return before == 0 or not (
+        qualified[before - 1].isalnum() or qualified[before - 1] == "_"
+    )
 
 
 def qualified_name_scope_components(qualified: str) -> list[str] | None:
@@ -654,7 +656,14 @@ def qualified_name_scope_components(qualified: str) -> list[str] | None:
     top-level ``"::"``, e.g. ``"::foo"`` or ``"foo::::bar"``), or unbalanced
     bracket/paren nesting, rather than silently dropping or fabricating a
     component, mirroring the "return ``None``, let the caller fall back"
-    contract the mangled-name parsers above use.
+    contract the mangled-name parsers above use. That conservatism applies
+    to the WHOLE string, including a conversion operator's own target past
+    the ``"::operator "`` marker -- the scan below keeps tracking depth
+    through the opaque leaf and rejects the whole input if it ends
+    unbalanced, rather than stopping at the marker and silently accepting a
+    malformed target like ``"api::C::operator old::X<"`` (CodeRabbit
+    review, fresh evidence: the earlier revision broke out of the loop the
+    moment the marker was found, so nothing past it was ever validated).
     """
     if not qualified:
         return None
@@ -676,10 +685,13 @@ def qualified_name_scope_components(qualified: str) -> list[str] | None:
             depth -= 1
             if depth < 0:
                 return None
-        elif depth == 0 and qualified[i : i + len(marker)] == marker:
+        elif (
+            depth == 0 and marker_idx == -1 and qualified[i : i + len(marker)] == marker
+        ):
             marker_idx = i
-            break
         i += 1
+    if depth != 0:
+        return None
     if marker_idx != -1:
         head = qualified[:marker_idx]
         leaf = qualified[marker_idx + 2 :]  # keep the "operator ..." target whole
