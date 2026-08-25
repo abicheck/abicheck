@@ -75,9 +75,38 @@ def test_resolved_evidence_pack_also_reaches_build_info_for_every_producer() -> 
     )
     expr = run_step["with"]["build-info"]
     assert "steps.candidate.outputs.evidence-pack" in expr
-    assert "inputs.evidence-producer != 'wrapper'" in expr
-    assert "inputs.evidence-producer != 'clang-plugin'" in expr
+    assert "steps.candidate.outputs.evidence-producer" in expr
+    assert "inputs.evidence-producer) != 'wrapper'" in expr
+    assert "inputs.evidence-producer) != 'clang-plugin'" in expr
     assert expr.rstrip().endswith("|| inputs.build-info }}")
+
+
+def test_build_info_routing_tests_the_resolved_producer_not_the_legacy_input() -> None:
+    """Codex review (P2): the evidence-producer field this same step sets
+
+    (two lines below) resolves as `steps.candidate.outputs.evidence-producer
+    || inputs.evidence-producer` -- a target whose build-output.json names
+    'replay' while the caller's legacy workflow-global input still defaults
+    to 'wrapper'/'clang-plugin' must be tested against that SAME resolved
+    value here, or this cell's resolved pack silently never reaches
+    build-info even though check-target itself received 'replay'.
+    """
+    project = _load(CHECK_PROJECT)
+    run_step = next(
+        step
+        for step in _steps(project["jobs"]["check"])
+        if step.get("name") == "Run check-target"
+    )
+    build_info_expr = run_step["with"]["build-info"]
+    producer_expr = run_step["with"]["evidence-producer"]
+    assert (
+        "steps.candidate.outputs.evidence-producer || inputs.evidence-producer"
+        in producer_expr
+    )
+    assert (
+        "(steps.candidate.outputs.evidence-producer || inputs.evidence-producer)"
+        in build_info_expr
+    )
 
 
 def test_consumer_dump_prefers_new_side_over_shared_header_and_include() -> None:
@@ -470,6 +499,86 @@ def test_resolver_rejects_evidence_whose_manifest_names_another_target(
     result, outputs = _run_resolver(resolver["run"], tmp_path, "math")
     assert result.returncode != 0
     assert "does not match the target referencing it" in result.stderr
+    assert "evidence-pack" not in outputs
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="requires POSIX bash")
+def test_resolver_rejects_inferred_projection_evidence(tmp_path: Path) -> None:
+    """Codex review (P1): a 'declared' pack is exclusive to one target
+
+    (validate_build_output() already rejects sharing it), but an
+    'inferred' pack is deliberately build-wide and relies on
+    evidence.attribution_path + this target's id to filter which TUs
+    actually belong to it -- filtering nothing in this workflow (or any
+    real dump/compare CLI caller of ingest_inputs_pack()) currently
+    performs. Forwarding a genuinely valid (per validate_build_output())
+    'inferred' pack unfiltered would let this target's build/source check
+    silently incorporate every other target sharing the same pack, so the
+    resolver must reject it outright rather than treat it as scoped.
+    """
+    from test_build_output import BUILD_OUTPUT_SCHEMA, _binary, _write_attribution
+
+    from abicheck.buildsource.build_evidence import BuildEvidence, Target, TargetKind
+
+    project = _load(CHECK_PROJECT)
+    resolver = next(
+        step
+        for step in _steps(project["jobs"]["check"])
+        if step.get("name") == "Resolve candidate binary/binaries"
+    )
+    build_root = tmp_path / "build-output"
+    digest = _binary(build_root, "artifacts/libmath.so")
+    pack_dir = build_root / "evidence" / "abicheck_inputs"
+    (pack_dir / "source_facts").mkdir(parents=True)
+    (pack_dir / "manifest.json").write_text(json.dumps({"kind": "abicheck_inputs"}))
+    (pack_dir / "source_facts" / "tu0.jsonl").write_text(
+        json.dumps({"tu_id": "cu://src/math.cpp", "source": "src/math.cpp"}) + "\n"
+    )
+    _write_attribution(
+        build_root,
+        "evidence/attribution.json",
+        BuildEvidence(
+            targets=[
+                Target(
+                    id="target://math",
+                    kind=TargetKind.SHARED_LIBRARY,
+                    source_files=["src/math.cpp"],
+                )
+            ]
+        ),
+    )
+    (build_root / "build-output.json").write_text(
+        json.dumps(
+            {
+                "schema": BUILD_OUTPUT_SCHEMA,
+                "targets": [
+                    {
+                        "id": "math",
+                        "binary": "artifacts/libmath.so",
+                        "evidence": {
+                            "kind": "source-facts",
+                            "path": "evidence/abicheck_inputs",
+                            "projection": "inferred",
+                            "attribution_path": "evidence/attribution.json",
+                        },
+                    }
+                ],
+                "digests": {"artifacts/libmath.so": f"sha256:{digest}"},
+                "evidence_producer": {"kind": "wrapper"},
+            }
+        )
+    )
+    # Confirm the fixture is genuinely valid per validate_build_output()
+    # itself -- otherwise this test would pass for the wrong reason (a
+    # pre-existing validation error, not the new projection: inferred
+    # rejection).
+    from abicheck.buildsource.build_output import validate_build_output
+
+    assert validate_build_output(build_root).ok
+
+    result, outputs = _run_resolver(resolver["run"], tmp_path, "math")
+    assert result.returncode != 0
+    assert "'inferred'" in result.stderr
     assert "evidence-pack" not in outputs
 
 

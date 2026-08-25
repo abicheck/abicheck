@@ -794,6 +794,25 @@ jobs:
                   if validation_errors:
                       print(f'::error::target {target_id!r}: build-output.json failed validation, so its evidence.path cannot be trusted as scoped to this target: {\"; \".join(validation_errors)}', file=sys.stderr)
                       sys.exit(1)
+                  # A 'declared' claim means the build itself asserts this
+                  # pack belongs to exactly this target -- validate_build_output()
+                  # above already confirmed it is not shared with another
+                  # 'declared' target. An 'inferred' claim is different: two
+                  # targets legitimately reference the SAME build-wide pack
+                  # and rely on evidence.attribution_path plus this target's
+                  # id to filter which TUs actually belong to it. Nothing in
+                  # this workflow -- nor any real dump/compare CLI caller of
+                  # inputs_pack.ingest_inputs_pack() -- currently threads that
+                  # attribution/target-id filtering through, so forwarding an
+                  # inferred pack unfiltered would let one target's build/
+                  # source check silently incorporate every other target
+                  # sharing the same pack (Codex review). Reject rather than
+                  # analyze it as if it were scoped, until that filtering is
+                  # actually wired up end to end.
+                  projection = (target or {}).get('evidence', {}).get('projection', '')
+                  if projection == 'inferred':
+                      print(f'::error::target {target_id!r}: evidence.projection is \'inferred\', but no dump/compare entry point yet filters an inferred packs TUs by attribution_path/target id before analysis -- forwarding it here would let this target incorporate every other targets evidence too. Rejecting until attribution-based filtering is wired end to end; use a per-target \'declared\' evidence pack instead', file=sys.stderr)
+                      sys.exit(1)
                   if os.path.isabs(evidence_path) or '..' in evidence_path.replace('\\\\', '/').split('/'):
                       print(f'::error::target {target_id!r}: evidence.path {evidence_path!r} is absolute or escapes the build-output artifact', file=sys.stderr)
                       sys.exit(1)
@@ -1073,11 +1092,18 @@ jobs:
           # reach dump/compare, silently losing source-only evidence for
           # exactly the build/source-depth cells this resolution exists for
           # (Codex review). build-info's own docs already cover this case
-          # ("set it directly ... for a producer-less build/source-depth
+          # ("set it directly ... for a producer-first build/source-depth
           # check that already has an out-of-band pack") -- forward the
           # resolved pack there directly rather than widening check-target's
-          # own evidence-producer-gated conversion.
-          build-info: ${{ (inputs.evidence-producer != 'wrapper' && inputs.evidence-producer != 'clang-plugin' && steps.candidate.outputs.evidence-pack != '') && steps.candidate.outputs.evidence-pack || inputs.build-info }}
+          # own evidence-producer-gated conversion. Must test the SAME
+          # resolved producer the evidence-producer field below actually
+          # forwards (steps.candidate.outputs.evidence-producer, falling
+          # back to the legacy workflow-global input only when this cell
+          # resolved none) -- testing the bare global input here let a
+          # target whose build-output.json names 'replay' but whose caller
+          # still passes the legacy wrapper/clang-plugin default silently
+          # skip forwarding its resolved pack at all (Codex review).
+          build-info: ${{ ((steps.candidate.outputs.evidence-producer || inputs.evidence-producer) != 'wrapper' && (steps.candidate.outputs.evidence-producer || inputs.evidence-producer) != 'clang-plugin' && steps.candidate.outputs.evidence-pack != '') && steps.candidate.outputs.evidence-pack || inputs.build-info }}
           compile-db: ${{ inputs.compile-db }}
           build-config: ${{ inputs.build-config }}
           policy: ${{ inputs.policy }}
