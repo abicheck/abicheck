@@ -235,7 +235,7 @@ def _parse_run_plan_gate(d: dict[str, Any]) -> tuple[str | None, str | None]:
     if "gate" not in d:
         return None, None
     gate_raw = d["gate"]
-    from ..aggregate_manifest import (
+    from ..workflows.aggregate import (
         AggregateError,
         OnMissingRequired,
         OnUnexpectedTarget,
@@ -549,7 +549,7 @@ class RunPlan:
         validation previously only ran on the read path, so a hand-built
         plan's bad value reached disk unchecked and only failed later, on
         whatever consumer read it back)."""
-        from ..aggregate_manifest import (
+        from ..workflows.aggregate import (
             AggregateError,
             OnMissingRequired,
             OnUnexpectedTarget,
@@ -610,7 +610,7 @@ class RunPlan:
         schema = _opt_str(d.get("schema"), RUN_PLAN_SCHEMA)
         version = _run_plan_schema_version(schema)
         if version is not None and version > _RUN_PLAN_SCHEMA_MAX_SUPPORTED:
-            from ..aggregate_manifest import AggregateError
+            from ..workflows.aggregate import AggregateError
 
             raise AggregateError(
                 f"run-plan 'schema' {schema!r} is newer than this tool "
@@ -619,7 +619,7 @@ class RunPlan:
             )
         gate_missing_required, gate_unexpected_target = _parse_run_plan_gate(d)
         if "gate" in d and (version is None or version < 2):
-            from ..aggregate_manifest import AggregateError
+            from ..workflows.aggregate import AggregateError
 
             raise AggregateError(
                 "run-plan 'gate' requires 'schema' >= 'abicheck.run-plan/v2' "
@@ -1091,7 +1091,7 @@ def to_aggregate_manifest(
     S17/S21's multi-profile/multi-channel same-target checks against each
     other in ``aggregate``'s duplicate-target-id check.
     """
-    from ..aggregate import AGGREGATE_MANIFEST_VERSION
+    from ..workflows.aggregate import AGGREGATE_MANIFEST_VERSION
 
     manifest: dict[str, Any] = {
         "aggregate_manifest_version": AGGREGATE_MANIFEST_VERSION,

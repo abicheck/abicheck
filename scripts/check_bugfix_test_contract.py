@@ -523,8 +523,22 @@ def commit_subjects(base: str, head: str) -> list[str]:
 
 
 def is_bugfix(subjects: list[str], title: str | None) -> bool:
-    candidates = [*subjects, title or ""]
-    return any(_FIX_SUBJECT.match(s.strip()) for s in candidates if s)
+    """Classify the proposed change by its authoritative public subject.
+
+    CI always supplies the pull-request title. That title is the subject users
+    review and the squash-merge commit GitHub will create, so it is
+    authoritative there. Looking through every intermediate commit as well
+    made a feature/refactor PR suddenly require a bug-fix declaration after a
+    routine ``fix: address review`` follow-up, even though neither the public
+    PR classification nor the proposed squash commit changed.
+
+    Local runs have no PR title and therefore fall back to commit subjects.
+    This retains useful enforcement for a standalone ``fix:`` commit while
+    making CI classification stable over a PR's review history.
+    """
+    if title is not None:
+        return bool(_FIX_SUBJECT.match(title.strip()))
+    return any(_FIX_SUBJECT.match(subject.strip()) for subject in subjects)
 
 
 def touches_shipped_code(paths: list[str]) -> bool:

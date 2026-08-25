@@ -1,0 +1,60 @@
+# AGENTS.md — `abicheck/report/`
+
+## Purpose
+
+This package owns immutable report documents, report schemas, grouping, and
+pure output projections. A renderer consumes completed workflow facts and
+returns text or structured data without changing compatibility decisions.
+
+## Permitted imports
+
+Report code may import model, compare, policy, and workflow result contracts.
+It may not import frontend modules or invoke extraction/comparison operations.
+Use explicit implementation modules rather than broad compatibility facades.
+
+## Canonical entry points
+
+During ADR-061 migration, each moved projection names its workflow result in
+the module name. `aggregate.py` projects `AggregateResult` to JSON-compatible
+mapping or text. Phase 2 will establish the shared immutable
+`ReportDocument` used by every output format.
+
+## Tests
+
+Report unit tests migrate to `tests/unit/report/`; stable format contracts stay
+in `tests/golden/reports/`. Existing aggregate report assertions remain in
+`tests/test_aggregate*.py` until their production projection fully migrates.
+
+## Prohibited responsibilities
+
+A renderer cannot filter findings, change severity, reconstruct a verdict,
+calculate a new gate decision, repair a workflow omission, or mutate its
+input. It must not read binaries, snapshots, manifests, or CLI configuration.
+
+If a projection needs a fact that the workflow result does not contain, add
+the fact at its real owner and carry it through the result contract. Never
+infer it from display strings or duplicate the workflow algorithm here.
+
+## Change checklist
+
+Start from an immutable workflow result. Define one projection function with a
+fully typed input, preserve ordering and omission rules, and add semantic
+assertions in addition to golden output. If the public JSON shape changes,
+update its schema owner and version in the same change.
+
+Keep format-specific code independent: JSON, Markdown, HTML, SARIF, and JUnit
+must not call one another to recover missing decisions. Shared grouping belongs
+in report-owned document construction rather than a renderer.
+
+When moving a legacy renderer, switch internal callers immediately, retain a
+facade only for documented imports, update `architecture/debt.yaml`, and prove
+the old path delegates without recomputing output.
+
+## Public compatibility
+
+A report schema is a public contract. Additive and incompatible changes follow
+the repository's schema-version discipline; a physical module move alone must
+remain byte-for-byte compatible. Renderers do not own process exit behavior.
+
+Run focused renderer tests and schema synchronization before the PR profile.
+Treat a projection-side policy decision as an ownership regression.

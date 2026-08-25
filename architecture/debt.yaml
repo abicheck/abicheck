@@ -1,0 +1,2355 @@
+{
+  "schema_version": 1,
+  "files": [
+    {
+      "path": "abicheck/analysis_assurance.py",
+      "baseline_lines": 1545,
+      "target": "see ADR-061 ownership map",
+      "rule": "no_growth",
+      "category": "legacy_oversized_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "abicheck/api_types.py",
+      "baseline_lines": 1008,
+      "target": "model",
+      "rule": "no_growth",
+      "category": "legacy_model_or_catalog_monolith",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "abicheck/appcompat.py",
+      "baseline_lines": 1818,
+      "target": "see ADR-061 ownership map",
+      "rule": "no_growth",
+      "category": "legacy_oversized_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "abicheck/build_context.py",
+      "baseline_lines": 1449,
+      "target": "see ADR-061 ownership map",
+      "rule": "no_growth",
+      "category": "legacy_oversized_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "abicheck/buildsource/adapters/base.py",
+      "baseline_lines": 1234,
+      "target": "extract/build-or-source",
+      "rule": "no_growth",
+      "category": "legacy_extraction_monolith",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "abicheck/buildsource/archive_graph.py",
+      "baseline_lines": 1373,
+      "target": "extract/build-or-source",
+      "rule": "no_growth",
+      "category": "legacy_extraction_monolith",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "abicheck/buildsource/baseline_set.py",
+      "baseline_lines": 1270,
+      "target": "extract/build-or-source",
+      "rule": "no_growth",
+      "category": "legacy_extraction_monolith",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "abicheck/buildsource/build_query.py",
+      "baseline_lines": 1047,
+      "target": "extract/build-or-source",
+      "rule": "no_growth",
+      "category": "legacy_extraction_monolith",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "abicheck/buildsource/call_graph.py",
+      "baseline_lines": 1324,
+      "target": "extract/build-or-source",
+      "rule": "no_growth",
+      "category": "legacy_extraction_monolith",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "abicheck/buildsource/callback_graph.py",
+      "baseline_lines": 1067,
+      "target": "extract/build-or-source",
+      "rule": "no_growth",
+      "category": "legacy_extraction_monolith",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "abicheck/buildsource/crosscheck.py",
+      "baseline_lines": 1773,
+      "target": "extract/build-or-source",
+      "rule": "no_growth",
+      "category": "legacy_extraction_monolith",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "abicheck/buildsource/extractor_manifest.py",
+      "baseline_lines": 857,
+      "target": "extract/build-or-source",
+      "rule": "no_growth",
+      "category": "legacy_extraction_monolith",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "abicheck/buildsource/graph_facts.py",
+      "baseline_lines": 1123,
+      "target": "extract/build-or-source",
+      "rule": "no_growth",
+      "category": "legacy_extraction_monolith",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "abicheck/buildsource/graph_reconcile.py",
+      "baseline_lines": 870,
+      "target": "extract/build-or-source",
+      "rule": "no_growth",
+      "category": "legacy_extraction_monolith",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "abicheck/buildsource/header_compile_context.py",
+      "baseline_lines": 1765,
+      "target": "extract/build-or-source",
+      "rule": "no_growth",
+      "category": "legacy_extraction_monolith",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "abicheck/buildsource/inline.py",
+      "baseline_lines": 2000,
+      "target": "extract/build-or-source",
+      "rule": "no_growth",
+      "category": "legacy_extraction_monolith",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "abicheck/buildsource/inline_graph_fold.py",
+      "baseline_lines": 1083,
+      "target": "extract/build-or-source",
+      "rule": "no_growth",
+      "category": "legacy_extraction_monolith",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "abicheck/buildsource/l2_seed.py",
+      "baseline_lines": 1036,
+      "target": "extract/build-or-source",
+      "rule": "no_growth",
+      "category": "legacy_extraction_monolith",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "abicheck/buildsource/macro_graph.py",
+      "baseline_lines": 1140,
+      "target": "extract/build-or-source",
+      "rule": "no_growth",
+      "category": "legacy_extraction_monolith",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "abicheck/buildsource/override_graph.py",
+      "baseline_lines": 822,
+      "target": "extract/build-or-source",
+      "rule": "no_growth",
+      "category": "legacy_extraction_monolith",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "abicheck/buildsource/pattern_scan.py",
+      "baseline_lines": 941,
+      "target": "extract/build-or-source",
+      "rule": "no_growth",
+      "category": "legacy_extraction_monolith",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "abicheck/buildsource/preprocessor_scan.py",
+      "baseline_lines": 900,
+      "target": "extract/build-or-source",
+      "rule": "no_growth",
+      "category": "legacy_extraction_monolith",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "abicheck/buildsource/project_targets.py",
+      "baseline_lines": 1698,
+      "target": "extract/build-or-source",
+      "rule": "no_growth",
+      "category": "legacy_extraction_monolith",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "abicheck/buildsource/run_plan.py",
+      "baseline_lines": 1118,
+      "target": "extract/build-or-source",
+      "rule": "no_growth",
+      "category": "legacy_extraction_monolith",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "abicheck/buildsource/source_diff.py",
+      "baseline_lines": 1091,
+      "target": "extract/build-or-source",
+      "rule": "no_growth",
+      "category": "legacy_extraction_monolith",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "abicheck/buildsource/source_extractors/_argv.py",
+      "baseline_lines": 1689,
+      "target": "extract/build-or-source",
+      "rule": "no_growth",
+      "category": "legacy_extraction_monolith",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "abicheck/buildsource/source_extractors/clang.py",
+      "baseline_lines": 1879,
+      "target": "extract/build-or-source",
+      "rule": "no_growth",
+      "category": "legacy_extraction_monolith",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "abicheck/buildsource/source_graph.py",
+      "baseline_lines": 2000,
+      "target": "extract/build-or-source",
+      "rule": "no_growth",
+      "category": "legacy_extraction_monolith",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "abicheck/buildsource/source_graph_findings.py",
+      "baseline_lines": 1812,
+      "target": "extract/build-or-source",
+      "rule": "no_growth",
+      "category": "legacy_extraction_monolith",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "abicheck/buildsource/source_link.py",
+      "baseline_lines": 1652,
+      "target": "extract/build-or-source",
+      "rule": "no_growth",
+      "category": "legacy_extraction_monolith",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "abicheck/buildsource/source_replay.py",
+      "baseline_lines": 1408,
+      "target": "extract/build-or-source",
+      "rule": "no_growth",
+      "category": "legacy_extraction_monolith",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "abicheck/buildsource/template_graph.py",
+      "baseline_lines": 2000,
+      "target": "extract/build-or-source",
+      "rule": "no_growth",
+      "category": "legacy_extraction_monolith",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "abicheck/buildsource/toolchain_probe.py",
+      "baseline_lines": 966,
+      "target": "extract/build-or-source",
+      "rule": "no_growth",
+      "category": "legacy_extraction_monolith",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "abicheck/buildsource/type_graph.py",
+      "baseline_lines": 2000,
+      "target": "extract/build-or-source",
+      "rule": "no_growth",
+      "category": "legacy_extraction_monolith",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "abicheck/bundle.py",
+      "baseline_lines": 2000,
+      "target": "compare",
+      "rule": "no_growth",
+      "category": "legacy_compare_monolith",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "abicheck/change_registry.py",
+      "baseline_lines": 2000,
+      "target": "model",
+      "rule": "no_growth",
+      "category": "legacy_model_or_catalog_monolith",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "abicheck/checker.py",
+      "baseline_lines": 1286,
+      "target": "compare",
+      "rule": "no_growth",
+      "category": "legacy_compare_monolith",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "abicheck/checker_policy.py",
+      "baseline_lines": 1559,
+      "target": "compare",
+      "rule": "no_growth",
+      "category": "legacy_compare_monolith",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "abicheck/checker_types.py",
+      "baseline_lines": 807,
+      "target": "compare",
+      "rule": "no_growth",
+      "category": "legacy_compare_monolith",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "abicheck/cli.py",
+      "baseline_lines": 1959,
+      "target": "workflows-or-frontends",
+      "rule": "no_growth",
+      "category": "legacy_workflow_or_frontend_monolith",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "abicheck/cli_buildsource_helpers.py",
+      "baseline_lines": 1408,
+      "target": "workflows-or-frontends",
+      "rule": "no_growth",
+      "category": "legacy_workflow_or_frontend_monolith",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "abicheck/cli_compare_fold.py",
+      "baseline_lines": 1134,
+      "target": "workflows-or-frontends",
+      "rule": "no_growth",
+      "category": "legacy_workflow_or_frontend_monolith",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "abicheck/cli_compare_helpers.py",
+      "baseline_lines": 1998,
+      "target": "workflows-or-frontends",
+      "rule": "no_growth",
+      "category": "legacy_workflow_or_frontend_monolith",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "abicheck/cli_compare_release.py",
+      "baseline_lines": 1998,
+      "target": "workflows-or-frontends",
+      "rule": "no_growth",
+      "category": "legacy_workflow_or_frontend_monolith",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "abicheck/cli_compare_release_helpers.py",
+      "baseline_lines": 1311,
+      "target": "workflows-or-frontends",
+      "rule": "no_growth",
+      "category": "legacy_workflow_or_frontend_monolith",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "abicheck/cli_dump_dry_run_build_query.py",
+      "baseline_lines": 1391,
+      "target": "workflows-or-frontends",
+      "rule": "no_growth",
+      "category": "legacy_workflow_or_frontend_monolith",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "abicheck/cli_dump_helpers.py",
+      "baseline_lines": 1745,
+      "target": "workflows-or-frontends",
+      "rule": "no_growth",
+      "category": "legacy_workflow_or_frontend_monolith",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "abicheck/cli_helpers_compare.py",
+      "baseline_lines": 1278,
+      "target": "workflows-or-frontends",
+      "rule": "no_growth",
+      "category": "legacy_workflow_or_frontend_monolith",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "abicheck/cli_options.py",
+      "baseline_lines": 1977,
+      "target": "workflows-or-frontends",
+      "rule": "no_growth",
+      "category": "legacy_workflow_or_frontend_monolith",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "abicheck/cli_resolve.py",
+      "baseline_lines": 809,
+      "target": "workflows-or-frontends",
+      "rule": "no_growth",
+      "category": "legacy_workflow_or_frontend_monolith",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "abicheck/cli_scan.py",
+      "baseline_lines": 1993,
+      "target": "workflows-or-frontends",
+      "rule": "no_growth",
+      "category": "legacy_workflow_or_frontend_monolith",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "abicheck/cli_scan_baseline.py",
+      "baseline_lines": 1362,
+      "target": "workflows-or-frontends",
+      "rule": "no_growth",
+      "category": "legacy_workflow_or_frontend_monolith",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "abicheck/comparability.py",
+      "baseline_lines": 1524,
+      "target": "compare",
+      "rule": "no_growth",
+      "category": "legacy_compare_monolith",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "abicheck/compat/cli.py",
+      "baseline_lines": 1518,
+      "target": "workflows-or-frontends",
+      "rule": "no_growth",
+      "category": "legacy_workflow_or_frontend_monolith",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "abicheck/compatibility_evaluation_config.py",
+      "baseline_lines": 1023,
+      "target": "see ADR-061 ownership map",
+      "rule": "no_growth",
+      "category": "legacy_oversized_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "abicheck/compatibility_evaluation_frontend.py",
+      "baseline_lines": 1996,
+      "target": "see ADR-061 ownership map",
+      "rule": "no_growth",
+      "category": "legacy_oversized_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "abicheck/compatibility_evaluation_wiring.py",
+      "baseline_lines": 929,
+      "target": "see ADR-061 ownership map",
+      "rule": "no_growth",
+      "category": "legacy_oversized_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "abicheck/contract_context.py",
+      "baseline_lines": 818,
+      "target": "see ADR-061 ownership map",
+      "rule": "no_growth",
+      "category": "legacy_oversized_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "abicheck/contract_context_io.py",
+      "baseline_lines": 852,
+      "target": "see ADR-061 ownership map",
+      "rule": "no_growth",
+      "category": "legacy_oversized_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "abicheck/contract_evaluation.py",
+      "baseline_lines": 1733,
+      "target": "see ADR-061 ownership map",
+      "rule": "no_growth",
+      "category": "legacy_oversized_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "abicheck/contract_evidence_collect.py",
+      "baseline_lines": 1183,
+      "target": "see ADR-061 ownership map",
+      "rule": "no_growth",
+      "category": "legacy_oversized_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "abicheck/contract_replay.py",
+      "baseline_lines": 845,
+      "target": "see ADR-061 ownership map",
+      "rule": "no_growth",
+      "category": "legacy_oversized_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "abicheck/diff_cpp_patterns.py",
+      "baseline_lines": 1382,
+      "target": "compare",
+      "rule": "no_growth",
+      "category": "legacy_compare_monolith",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "abicheck/diff_cxx_rules.py",
+      "baseline_lines": 1492,
+      "target": "compare",
+      "rule": "no_growth",
+      "category": "legacy_compare_monolith",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing implementation and concurrent pre-adoption changes predate ADR-061; migrate it as a behavior-preserving compare-package slice.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "abicheck/diff_filtering.py",
+      "baseline_lines": 1787,
+      "target": "compare",
+      "rule": "no_growth",
+      "category": "legacy_compare_monolith",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "abicheck/diff_namespaces.py",
+      "baseline_lines": 1247,
+      "target": "compare",
+      "rule": "no_growth",
+      "category": "legacy_compare_monolith",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "abicheck/diff_platform.py",
+      "baseline_lines": 1935,
+      "target": "compare",
+      "rule": "no_growth",
+      "category": "legacy_compare_monolith",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "abicheck/diff_platform_elf_dynamic.py",
+      "baseline_lines": 1009,
+      "target": "compare",
+      "rule": "no_growth",
+      "category": "legacy_compare_monolith",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "abicheck/diff_platform_elf_symbols.py",
+      "baseline_lines": 836,
+      "target": "compare",
+      "rule": "no_growth",
+      "category": "legacy_compare_monolith",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "abicheck/diff_symbols.py",
+      "baseline_lines": 1957,
+      "target": "compare",
+      "rule": "no_growth",
+      "category": "legacy_compare_monolith",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "abicheck/diff_symbols_renames.py",
+      "baseline_lines": 1187,
+      "target": "compare",
+      "rule": "no_growth",
+      "category": "legacy_compare_monolith",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing implementation and concurrent pre-adoption changes predate ADR-061; migrate it as a behavior-preserving compare-package slice.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "abicheck/diff_templates.py",
+      "baseline_lines": 1422,
+      "target": "compare",
+      "rule": "no_growth",
+      "category": "legacy_compare_monolith",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "abicheck/diff_types.py",
+      "baseline_lines": 2000,
+      "target": "compare",
+      "rule": "no_growth",
+      "category": "legacy_compare_monolith",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "abicheck/diff_versioning.py",
+      "baseline_lines": 845,
+      "target": "compare",
+      "rule": "no_growth",
+      "category": "legacy_compare_monolith",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "abicheck/dumper.py",
+      "baseline_lines": 1985,
+      "target": "see ADR-061 ownership map",
+      "rule": "no_growth",
+      "category": "legacy_oversized_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "abicheck/dumper_ast_config_cpp20.py",
+      "baseline_lines": 1443,
+      "target": "see ADR-061 ownership map",
+      "rule": "no_growth",
+      "category": "legacy_oversized_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "abicheck/dumper_castxml.py",
+      "baseline_lines": 2000,
+      "target": "see ADR-061 ownership map",
+      "rule": "no_growth",
+      "category": "legacy_oversized_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "abicheck/dumper_clang.py",
+      "baseline_lines": 1961,
+      "target": "see ADR-061 ownership map",
+      "rule": "no_growth",
+      "category": "legacy_oversized_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "abicheck/dumper_clang_vtable.py",
+      "baseline_lines": 1273,
+      "target": "see ADR-061 ownership map",
+      "rule": "no_growth",
+      "category": "legacy_oversized_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "abicheck/dumper_hybrid.py",
+      "baseline_lines": 979,
+      "target": "see ADR-061 ownership map",
+      "rule": "no_growth",
+      "category": "legacy_oversized_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "abicheck/dumper_scoping.py",
+      "baseline_lines": 1290,
+      "target": "see ADR-061 ownership map",
+      "rule": "no_growth",
+      "category": "legacy_oversized_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "abicheck/dumper_toolchain.py",
+      "baseline_lines": 802,
+      "target": "see ADR-061 ownership map",
+      "rule": "no_growth",
+      "category": "legacy_oversized_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "abicheck/dwarf_advanced.py",
+      "baseline_lines": 1300,
+      "target": "see ADR-061 ownership map",
+      "rule": "no_growth",
+      "category": "legacy_oversized_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "abicheck/dwarf_snapshot.py",
+      "baseline_lines": 1994,
+      "target": "see ADR-061 ownership map",
+      "rule": "no_growth",
+      "category": "legacy_oversized_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "abicheck/elf_metadata.py",
+      "baseline_lines": 1366,
+      "target": "see ADR-061 ownership map",
+      "rule": "no_growth",
+      "category": "legacy_oversized_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "abicheck/export_surface.py",
+      "baseline_lines": 1312,
+      "target": "see ADR-061 ownership map",
+      "rule": "no_growth",
+      "category": "legacy_oversized_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "abicheck/finding_identity.py",
+      "baseline_lines": 1923,
+      "target": "compare",
+      "rule": "no_growth",
+      "category": "legacy_compare_monolith",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "abicheck/header_conditionals.py",
+      "baseline_lines": 1373,
+      "target": "see ADR-061 ownership map",
+      "rule": "no_growth",
+      "category": "legacy_oversized_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "abicheck/header_utils.py",
+      "baseline_lines": 1085,
+      "target": "see ADR-061 ownership map",
+      "rule": "no_growth",
+      "category": "legacy_oversized_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "abicheck/html_report.py",
+      "baseline_lines": 1244,
+      "target": "report",
+      "rule": "no_growth",
+      "category": "legacy_report_monolith",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "abicheck/impact/use_cases.py",
+      "baseline_lines": 886,
+      "target": "see ADR-061 ownership map",
+      "rule": "no_growth",
+      "category": "legacy_oversized_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "abicheck/internal_leak.py",
+      "baseline_lines": 1650,
+      "target": "see ADR-061 ownership map",
+      "rule": "no_growth",
+      "category": "legacy_oversized_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "abicheck/junit_report.py",
+      "baseline_lines": 1165,
+      "target": "report",
+      "rule": "no_growth",
+      "category": "legacy_report_monolith",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "abicheck/model.py",
+      "baseline_lines": 1208,
+      "target": "model",
+      "rule": "no_growth",
+      "category": "legacy_model_or_catalog_monolith",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "abicheck/name_classification.py",
+      "baseline_lines": 1258,
+      "target": "see ADR-061 ownership map",
+      "rule": "no_growth",
+      "category": "legacy_oversized_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "abicheck/package.py",
+      "baseline_lines": 1993,
+      "target": "storage",
+      "rule": "no_growth",
+      "category": "legacy_storage_monolith",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "abicheck/pdb_parser.py",
+      "baseline_lines": 1346,
+      "target": "see ADR-061 ownership map",
+      "rule": "no_growth",
+      "category": "legacy_oversized_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "abicheck/policy_file.py",
+      "baseline_lines": 990,
+      "target": "see ADR-061 ownership map",
+      "rule": "no_growth",
+      "category": "legacy_oversized_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "abicheck/post_processing.py",
+      "baseline_lines": 1606,
+      "target": "see ADR-061 ownership map",
+      "rule": "no_growth",
+      "category": "legacy_oversized_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "abicheck/pr_comment.py",
+      "baseline_lines": 1545,
+      "target": "report",
+      "rule": "no_growth",
+      "category": "legacy_report_monolith",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "abicheck/pr_comment_scan.py",
+      "baseline_lines": 1186,
+      "target": "report",
+      "rule": "no_growth",
+      "category": "legacy_report_monolith",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "abicheck/product_baseline.py",
+      "baseline_lines": 1901,
+      "target": "storage",
+      "rule": "no_growth",
+      "category": "legacy_storage_monolith",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "abicheck/reporter.py",
+      "baseline_lines": 2000,
+      "target": "report",
+      "rule": "no_growth",
+      "category": "legacy_report_monolith",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "abicheck/reporter_markdown.py",
+      "baseline_lines": 2000,
+      "target": "report",
+      "rule": "no_growth",
+      "category": "legacy_report_monolith",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "abicheck/sarif.py",
+      "baseline_lines": 1284,
+      "target": "report",
+      "rule": "no_growth",
+      "category": "legacy_report_monolith",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "abicheck/scan_engine.py",
+      "baseline_lines": 1485,
+      "target": "workflows-or-frontends",
+      "rule": "no_growth",
+      "category": "legacy_workflow_or_frontend_monolith",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "abicheck/schemas/__init__.py",
+      "baseline_lines": 1111,
+      "target": "see ADR-061 ownership map",
+      "rule": "no_growth",
+      "category": "legacy_oversized_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "abicheck/serialization.py",
+      "baseline_lines": 1986,
+      "target": "storage",
+      "rule": "no_growth",
+      "category": "legacy_storage_monolith",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "abicheck/service.py",
+      "baseline_lines": 1763,
+      "target": "workflows-or-frontends",
+      "rule": "no_growth",
+      "category": "legacy_workflow_or_frontend_monolith",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "abicheck/service_input_resolution.py",
+      "baseline_lines": 1167,
+      "target": "workflows-or-frontends",
+      "rule": "no_growth",
+      "category": "legacy_workflow_or_frontend_monolith",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "abicheck/service_scan.py",
+      "baseline_lines": 1993,
+      "target": "workflows-or-frontends",
+      "rule": "no_growth",
+      "category": "legacy_workflow_or_frontend_monolith",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "abicheck/severity.py",
+      "baseline_lines": 1023,
+      "target": "see ADR-061 ownership map",
+      "rule": "no_growth",
+      "category": "legacy_oversized_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "abicheck/snapshot_io.py",
+      "baseline_lines": 1042,
+      "target": "storage",
+      "rule": "no_growth",
+      "category": "legacy_storage_monolith",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "abicheck/stable_abi_data.py",
+      "baseline_lines": 1006,
+      "target": "model",
+      "rule": "no_growth",
+      "category": "legacy_model_or_catalog_monolith",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "abicheck/suppression.py",
+      "baseline_lines": 1993,
+      "target": "see ADR-061 ownership map",
+      "rule": "no_growth",
+      "category": "legacy_oversized_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "abicheck/surface.py",
+      "baseline_lines": 1507,
+      "target": "see ADR-061 ownership map",
+      "rule": "no_growth",
+      "category": "legacy_oversized_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "abicheck/tu_merge.py",
+      "baseline_lines": 1552,
+      "target": "see ADR-061 ownership map",
+      "rule": "no_growth",
+      "category": "legacy_oversized_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "abicheck/type_reachability.py",
+      "baseline_lines": 1504,
+      "target": "see ADR-061 ownership map",
+      "rule": "no_growth",
+      "category": "legacy_oversized_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "abicheck/type_reachability_spelling.py",
+      "baseline_lines": 826,
+      "target": "see ADR-061 ownership map",
+      "rule": "no_growth",
+      "category": "legacy_oversized_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "tests/test_abicc_parity_extended.py",
+      "baseline_lines": 1279,
+      "target": "tests/unit-or-contract ownership matching production migration",
+      "rule": "no_growth",
+      "category": "legacy_oversized_test_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "tests/test_action_check_target.py",
+      "baseline_lines": 1226,
+      "target": "tests/unit-or-contract ownership matching production migration",
+      "rule": "no_growth",
+      "category": "legacy_oversized_test_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "tests/test_action_collect_facts.py",
+      "baseline_lines": 1905,
+      "target": "tests/unit-or-contract ownership matching production migration",
+      "rule": "no_growth",
+      "category": "legacy_oversized_test_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "tests/test_action_coverage_verdict.py",
+      "baseline_lines": 1613,
+      "target": "tests/unit-or-contract ownership matching production migration",
+      "rule": "no_growth",
+      "category": "legacy_oversized_test_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "tests/test_action_resolve_baseline.py",
+      "baseline_lines": 1218,
+      "target": "tests/unit-or-contract ownership matching production migration",
+      "rule": "no_growth",
+      "category": "legacy_oversized_test_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "tests/test_action_validate_inputs.py",
+      "baseline_lines": 1326,
+      "target": "tests/unit-or-contract ownership matching production migration",
+      "rule": "no_growth",
+      "category": "legacy_oversized_test_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "tests/test_aggregate.py",
+      "baseline_lines": 1982,
+      "target": "tests/unit-or-contract ownership matching production migration",
+      "rule": "no_growth",
+      "category": "legacy_oversized_test_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "tests/test_aggregate_findings.py",
+      "baseline_lines": 1544,
+      "target": "tests/unit-or-contract ownership matching production migration",
+      "rule": "no_growth",
+      "category": "legacy_oversized_test_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "tests/test_ai_readiness.py",
+      "baseline_lines": 1931,
+      "target": "tests/unit-or-contract ownership matching production migration",
+      "rule": "no_growth",
+      "category": "legacy_oversized_test_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "tests/test_analysis_assurance.py",
+      "baseline_lines": 1993,
+      "target": "tests/unit-or-contract ownership matching production migration",
+      "rule": "no_growth",
+      "category": "legacy_oversized_test_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "tests/test_appcompat.py",
+      "baseline_lines": 2779,
+      "target": "tests/unit-or-contract ownership matching production migration",
+      "rule": "no_growth",
+      "category": "legacy_oversized_test_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "tests/test_archive_graph.py",
+      "baseline_lines": 1465,
+      "target": "tests/unit-or-contract ownership matching production migration",
+      "rule": "no_growth",
+      "category": "legacy_oversized_test_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "tests/test_baseline_manifest.py",
+      "baseline_lines": 1639,
+      "target": "tests/unit-or-contract ownership matching production migration",
+      "rule": "no_growth",
+      "category": "legacy_oversized_test_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "tests/test_baseline_set.py",
+      "baseline_lines": 1935,
+      "target": "tests/unit-or-contract ownership matching production migration",
+      "rule": "no_growth",
+      "category": "legacy_oversized_test_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "tests/test_batch_rename_namespace_move.py",
+      "baseline_lines": 1460,
+      "target": "tests/unit/compare alongside namespace/rename comparison migration",
+      "rule": "no_growth",
+      "category": "legacy_oversized_test_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Concurrent pre-adoption rename and namespace-move coverage made this an oversized legacy test; split it by contract axis with the compare migration.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "tests/test_binary_fingerprint.py",
+      "baseline_lines": 1470,
+      "target": "tests/unit-or-contract ownership matching production migration",
+      "rule": "no_growth",
+      "category": "legacy_oversized_test_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "tests/test_bugfix_test_contract.py",
+      "baseline_lines": 1289,
+      "target": "tests/unit-or-contract ownership matching production migration",
+      "rule": "no_growth",
+      "category": "legacy_oversized_test_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "tests/test_build_context.py",
+      "baseline_lines": 1313,
+      "target": "tests/unit-or-contract ownership matching production migration",
+      "rule": "no_growth",
+      "category": "legacy_oversized_test_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "tests/test_build_output.py",
+      "baseline_lines": 1352,
+      "target": "tests/unit-or-contract ownership matching production migration",
+      "rule": "no_growth",
+      "category": "legacy_oversized_test_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "tests/test_build_query_inference.py",
+      "baseline_lines": 1463,
+      "target": "tests/unit-or-contract ownership matching production migration",
+      "rule": "no_growth",
+      "category": "legacy_oversized_test_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "tests/test_build_source_cli.py",
+      "baseline_lines": 4163,
+      "target": "tests/unit-or-contract ownership matching production migration",
+      "rule": "no_growth",
+      "category": "legacy_oversized_test_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "tests/test_build_source_pack.py",
+      "baseline_lines": 1953,
+      "target": "tests/unit-or-contract ownership matching production migration",
+      "rule": "no_growth",
+      "category": "legacy_oversized_test_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "tests/test_bundle.py",
+      "baseline_lines": 4119,
+      "target": "tests/unit-or-contract ownership matching production migration",
+      "rule": "no_growth",
+      "category": "legacy_oversized_test_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "tests/test_bundle_facts.py",
+      "baseline_lines": 1542,
+      "target": "tests/unit-or-contract ownership matching production migration",
+      "rule": "no_growth",
+      "category": "legacy_oversized_test_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "tests/test_bundle_signature_evidence.py",
+      "baseline_lines": 1336,
+      "target": "tests/unit-or-contract ownership matching production migration",
+      "rule": "no_growth",
+      "category": "legacy_oversized_test_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "tests/test_call_graph.py",
+      "baseline_lines": 1949,
+      "target": "tests/unit-or-contract ownership matching production migration",
+      "rule": "no_growth",
+      "category": "legacy_oversized_test_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "tests/test_callback_graph.py",
+      "baseline_lines": 1211,
+      "target": "tests/unit-or-contract ownership matching production migration",
+      "rule": "no_growth",
+      "category": "legacy_oversized_test_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "tests/test_check_report.py",
+      "baseline_lines": 1224,
+      "target": "tests/unit-or-contract ownership matching production migration",
+      "rule": "no_growth",
+      "category": "legacy_oversized_test_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "tests/test_checker_reporter_branches.py",
+      "baseline_lines": 1519,
+      "target": "tests/unit-or-contract ownership matching production migration",
+      "rule": "no_growth",
+      "category": "legacy_oversized_test_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "tests/test_clang_header_backend_integration.py",
+      "baseline_lines": 1604,
+      "target": "tests/unit-or-contract ownership matching production migration",
+      "rule": "no_growth",
+      "category": "legacy_oversized_test_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "tests/test_cli_contract.py",
+      "baseline_lines": 1540,
+      "target": "tests/unit-or-contract ownership matching production migration",
+      "rule": "no_growth",
+      "category": "legacy_oversized_test_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "tests/test_cli_dump_helpers_coverage.py",
+      "baseline_lines": 2000,
+      "target": "tests/unit-or-contract ownership matching production migration",
+      "rule": "no_growth",
+      "category": "legacy_oversized_test_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "tests/test_cli_scan.py",
+      "baseline_lines": 3276,
+      "target": "tests/unit-or-contract ownership matching production migration",
+      "rule": "no_growth",
+      "category": "legacy_oversized_test_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "tests/test_comparability.py",
+      "baseline_lines": 1468,
+      "target": "tests/unit-or-contract ownership matching production migration",
+      "rule": "no_growth",
+      "category": "legacy_oversized_test_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "tests/test_comparability_gate.py",
+      "baseline_lines": 1988,
+      "target": "tests/unit-or-contract ownership matching production migration",
+      "rule": "no_growth",
+      "category": "legacy_oversized_test_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "tests/test_comparability_gate_probe_upgrade.py",
+      "baseline_lines": 1736,
+      "target": "tests/unit-or-contract ownership matching production migration",
+      "rule": "no_growth",
+      "category": "legacy_oversized_test_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "tests/test_compare_dispatch.py",
+      "baseline_lines": 1507,
+      "target": "tests/unit-or-contract ownership matching production migration",
+      "rule": "no_growth",
+      "category": "legacy_oversized_test_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "tests/test_compare_release.py",
+      "baseline_lines": 1992,
+      "target": "tests/unit-or-contract ownership matching production migration",
+      "rule": "no_growth",
+      "category": "legacy_oversized_test_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "tests/test_compatibility_evaluation_frontend.py",
+      "baseline_lines": 1447,
+      "target": "tests/unit-or-contract ownership matching production migration",
+      "rule": "no_growth",
+      "category": "legacy_oversized_test_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "tests/test_compile_context_parity.py",
+      "baseline_lines": 1779,
+      "target": "tests/unit-or-contract ownership matching production migration",
+      "rule": "no_growth",
+      "category": "legacy_oversized_test_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "tests/test_compile_db_filter_scope.py",
+      "baseline_lines": 1228,
+      "target": "tests/unit-or-contract ownership matching production migration",
+      "rule": "no_growth",
+      "category": "legacy_oversized_test_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "tests/test_contract_authoritative_pipeline.py",
+      "baseline_lines": 1472,
+      "target": "tests/unit-or-contract ownership matching production migration",
+      "rule": "no_growth",
+      "category": "legacy_oversized_test_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "tests/test_contract_evaluation.py",
+      "baseline_lines": 1625,
+      "target": "tests/unit-or-contract ownership matching production migration",
+      "rule": "no_growth",
+      "category": "legacy_oversized_test_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "tests/test_contract_replay.py",
+      "baseline_lines": 1247,
+      "target": "tests/unit-or-contract ownership matching production migration",
+      "rule": "no_growth",
+      "category": "legacy_oversized_test_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "tests/test_cov95_cli.py",
+      "baseline_lines": 3018,
+      "target": "tests/unit-or-contract ownership matching production migration",
+      "rule": "no_growth",
+      "category": "legacy_oversized_test_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "tests/test_cpp_pattern_detectors.py",
+      "baseline_lines": 1253,
+      "target": "tests/unit-or-contract ownership matching production migration",
+      "rule": "no_growth",
+      "category": "legacy_oversized_test_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "tests/test_crosscheck.py",
+      "baseline_lines": 2666,
+      "target": "tests/unit-or-contract ownership matching production migration",
+      "rule": "no_growth",
+      "category": "legacy_oversized_test_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "tests/test_ctf_metadata.py",
+      "baseline_lines": 1364,
+      "target": "tests/unit-or-contract ownership matching production migration",
+      "rule": "no_growth",
+      "category": "legacy_oversized_test_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "tests/test_diff_namespaces.py",
+      "baseline_lines": 1556,
+      "target": "tests/unit-or-contract ownership matching production migration",
+      "rule": "no_growth",
+      "category": "legacy_oversized_test_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "tests/test_diff_symbols_deep.py",
+      "baseline_lines": 1652,
+      "target": "tests/unit-or-contract ownership matching production migration",
+      "rule": "no_growth",
+      "category": "legacy_oversized_test_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "tests/test_diff_types_deep.py",
+      "baseline_lines": 1976,
+      "target": "tests/unit-or-contract ownership matching production migration",
+      "rule": "no_growth",
+      "category": "legacy_oversized_test_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "tests/test_docs_contract.py",
+      "baseline_lines": 1809,
+      "target": "tests/unit-or-contract ownership matching production migration",
+      "rule": "no_growth",
+      "category": "legacy_oversized_test_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "tests/test_dry_run_build_query_contract.py",
+      "baseline_lines": 1673,
+      "target": "tests/unit-or-contract ownership matching production migration",
+      "rule": "no_growth",
+      "category": "legacy_oversized_test_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "tests/test_dumper_ast_config_cpp20.py",
+      "baseline_lines": 1673,
+      "target": "tests/unit-or-contract ownership matching production migration",
+      "rule": "no_growth",
+      "category": "legacy_oversized_test_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "tests/test_dumper_ast_config_cpp20_pp_guards.py",
+      "baseline_lines": 1275,
+      "target": "tests/unit-or-contract ownership matching production migration",
+      "rule": "no_growth",
+      "category": "legacy_oversized_test_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "tests/test_dumper_clang.py",
+      "baseline_lines": 6282,
+      "target": "tests/unit-or-contract ownership matching production migration",
+      "rule": "no_growth",
+      "category": "legacy_oversized_test_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "tests/test_dumper_clang_vtable.py",
+      "baseline_lines": 1447,
+      "target": "tests/unit-or-contract ownership matching production migration",
+      "rule": "no_growth",
+      "category": "legacy_oversized_test_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "tests/test_dumper_coverage.py",
+      "baseline_lines": 1587,
+      "target": "tests/unit-or-contract ownership matching production migration",
+      "rule": "no_growth",
+      "category": "legacy_oversized_test_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "tests/test_dumper_hybrid.py",
+      "baseline_lines": 1712,
+      "target": "tests/unit-or-contract ownership matching production migration",
+      "rule": "no_growth",
+      "category": "legacy_oversized_test_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "tests/test_dumper_manifest.py",
+      "baseline_lines": 1765,
+      "target": "tests/unit-or-contract ownership matching production migration",
+      "rule": "no_growth",
+      "category": "legacy_oversized_test_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "tests/test_dumper_scoping_dependency_retention.py",
+      "baseline_lines": 1589,
+      "target": "tests/unit-or-contract ownership matching production migration",
+      "rule": "no_growth",
+      "category": "legacy_oversized_test_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "tests/test_dumper_unit.py",
+      "baseline_lines": 2000,
+      "target": "tests/unit-or-contract ownership matching production migration",
+      "rule": "no_growth",
+      "category": "legacy_oversized_test_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "tests/test_dwarf_coverage_gaps.py",
+      "baseline_lines": 2326,
+      "target": "tests/unit-or-contract ownership matching production migration",
+      "rule": "no_growth",
+      "category": "legacy_oversized_test_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "tests/test_dwarf_snapshot.py",
+      "baseline_lines": 1723,
+      "target": "tests/unit-or-contract ownership matching production migration",
+      "rule": "no_growth",
+      "category": "legacy_oversized_test_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "tests/test_effective_config_digest.py",
+      "baseline_lines": 1676,
+      "target": "tests/unit-or-contract ownership matching production migration",
+      "rule": "no_growth",
+      "category": "legacy_oversized_test_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "tests/test_environment_drift.py",
+      "baseline_lines": 1639,
+      "target": "tests/unit-or-contract ownership matching production migration",
+      "rule": "no_growth",
+      "category": "legacy_oversized_test_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "tests/test_export_surface.py",
+      "baseline_lines": 1460,
+      "target": "tests/unit-or-contract ownership matching production migration",
+      "rule": "no_growth",
+      "category": "legacy_oversized_test_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "tests/test_fact_set.py",
+      "baseline_lines": 1329,
+      "target": "tests/unit-or-contract ownership matching production migration",
+      "rule": "no_growth",
+      "category": "legacy_oversized_test_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "tests/test_finding_identity.py",
+      "baseline_lines": 1620,
+      "target": "tests/unit-or-contract ownership matching production migration",
+      "rule": "no_growth",
+      "category": "legacy_oversized_test_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "tests/test_header_compile_context.py",
+      "baseline_lines": 1995,
+      "target": "tests/unit-or-contract ownership matching production migration",
+      "rule": "no_growth",
+      "category": "legacy_oversized_test_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "tests/test_header_compile_context_gcc_path.py",
+      "baseline_lines": 1201,
+      "target": "tests/unit-or-contract ownership matching production migration",
+      "rule": "no_growth",
+      "category": "legacy_oversized_test_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "tests/test_inline_changed_paths.py",
+      "baseline_lines": 1291,
+      "target": "tests/unit-or-contract ownership matching production migration",
+      "rule": "no_growth",
+      "category": "legacy_oversized_test_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "tests/test_inputs_emit.py",
+      "baseline_lines": 1849,
+      "target": "tests/unit-or-contract ownership matching production migration",
+      "rule": "no_growth",
+      "category": "legacy_oversized_test_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "tests/test_internal_leak.py",
+      "baseline_lines": 1982,
+      "target": "tests/unit-or-contract ownership matching production migration",
+      "rule": "no_growth",
+      "category": "legacy_oversized_test_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "tests/test_junit_report.py",
+      "baseline_lines": 1962,
+      "target": "tests/unit-or-contract ownership matching production migration",
+      "rule": "no_growth",
+      "category": "legacy_oversized_test_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "tests/test_l3l4l5_new_kinds.py",
+      "baseline_lines": 2367,
+      "target": "tests/unit-or-contract ownership matching production migration",
+      "rule": "no_growth",
+      "category": "legacy_oversized_test_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "tests/test_mutation_score_gate.py",
+      "baseline_lines": 1532,
+      "target": "tests/unit-or-contract ownership matching production migration",
+      "rule": "no_growth",
+      "category": "legacy_oversized_test_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "tests/test_pack_application.py",
+      "baseline_lines": 1604,
+      "target": "tests/unit-or-contract ownership matching production migration",
+      "rule": "no_growth",
+      "category": "legacy_oversized_test_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "tests/test_package.py",
+      "baseline_lines": 4406,
+      "target": "tests/unit-or-contract ownership matching production migration",
+      "rule": "no_growth",
+      "category": "legacy_oversized_test_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "tests/test_pdb_parser.py",
+      "baseline_lines": 1322,
+      "target": "tests/unit-or-contract ownership matching production migration",
+      "rule": "no_growth",
+      "category": "legacy_oversized_test_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "tests/test_platform_coverage_gaps.py",
+      "baseline_lines": 1341,
+      "target": "tests/unit-or-contract ownership matching production migration",
+      "rule": "no_growth",
+      "category": "legacy_oversized_test_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "tests/test_pr_comment.py",
+      "baseline_lines": 1671,
+      "target": "tests/unit-or-contract ownership matching production migration",
+      "rule": "no_growth",
+      "category": "legacy_oversized_test_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "tests/test_pr_comment_scan.py",
+      "baseline_lines": 1679,
+      "target": "tests/unit-or-contract ownership matching production migration",
+      "rule": "no_growth",
+      "category": "legacy_oversized_test_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "tests/test_product_baseline.py",
+      "baseline_lines": 1999,
+      "target": "tests/unit-or-contract ownership matching production migration",
+      "rule": "no_growth",
+      "category": "legacy_oversized_test_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "tests/test_product_baseline_compare.py",
+      "baseline_lines": 1577,
+      "target": "tests/unit-or-contract ownership matching production migration",
+      "rule": "no_growth",
+      "category": "legacy_oversized_test_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "tests/test_project_targets.py",
+      "baseline_lines": 1963,
+      "target": "tests/unit-or-contract ownership matching production migration",
+      "rule": "no_growth",
+      "category": "legacy_oversized_test_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "tests/test_publish_baseline_upload_step.py",
+      "baseline_lines": 1892,
+      "target": "tests/unit-or-contract ownership matching production migration",
+      "rule": "no_growth",
+      "category": "legacy_oversized_test_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "tests/test_reachability_aware_suppression.py",
+      "baseline_lines": 1599,
+      "target": "tests/unit-or-contract ownership matching production migration",
+      "rule": "no_growth",
+      "category": "legacy_oversized_test_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "tests/test_reachability_state.py",
+      "baseline_lines": 1539,
+      "target": "tests/unit-or-contract ownership matching production migration",
+      "rule": "no_growth",
+      "category": "legacy_oversized_test_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "tests/test_reclassify.py",
+      "baseline_lines": 1781,
+      "target": "tests/unit-or-contract ownership matching production migration",
+      "rule": "no_growth",
+      "category": "legacy_oversized_test_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "tests/test_reporter.py",
+      "baseline_lines": 1817,
+      "target": "tests/unit-or-contract ownership matching production migration",
+      "rule": "no_growth",
+      "category": "legacy_oversized_test_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "tests/test_reusable_workflows.py",
+      "baseline_lines": 1957,
+      "target": "tests/unit-or-contract ownership matching production migration",
+      "rule": "no_growth",
+      "category": "legacy_oversized_test_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "tests/test_run_plan.py",
+      "baseline_lines": 1943,
+      "target": "tests/unit-or-contract ownership matching production migration",
+      "rule": "no_growth",
+      "category": "legacy_oversized_test_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "tests/test_sarif.py",
+      "baseline_lines": 1408,
+      "target": "tests/unit-or-contract ownership matching production migration",
+      "rule": "no_growth",
+      "category": "legacy_oversized_test_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "tests/test_scan_artifact_set.py",
+      "baseline_lines": 1368,
+      "target": "tests/unit-or-contract ownership matching production migration",
+      "rule": "no_growth",
+      "category": "legacy_oversized_test_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "tests/test_scan_compare_parity.py",
+      "baseline_lines": 1697,
+      "target": "tests/unit-or-contract ownership matching production migration",
+      "rule": "no_growth",
+      "category": "legacy_oversized_test_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "tests/test_service_unit.py",
+      "baseline_lines": 5636,
+      "target": "tests/unit-or-contract ownership matching production migration",
+      "rule": "no_growth",
+      "category": "legacy_oversized_test_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "tests/test_skill_eval_graders.py",
+      "baseline_lines": 1478,
+      "target": "tests/unit-or-contract ownership matching production migration",
+      "rule": "no_growth",
+      "category": "legacy_oversized_test_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "tests/test_snapshot_compression.py",
+      "baseline_lines": 1499,
+      "target": "tests/unit-or-contract ownership matching production migration",
+      "rule": "no_growth",
+      "category": "legacy_oversized_test_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "tests/test_source_abi.py",
+      "baseline_lines": 2167,
+      "target": "tests/unit-or-contract ownership matching production migration",
+      "rule": "no_growth",
+      "category": "legacy_oversized_test_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "tests/test_source_extractors.py",
+      "baseline_lines": 1976,
+      "target": "tests/unit-or-contract ownership matching production migration",
+      "rule": "no_growth",
+      "category": "legacy_oversized_test_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "tests/test_source_extractors_clang.py",
+      "baseline_lines": 3486,
+      "target": "tests/unit-or-contract ownership matching production migration",
+      "rule": "no_growth",
+      "category": "legacy_oversized_test_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "tests/test_source_extractors_env.py",
+      "baseline_lines": 1417,
+      "target": "tests/unit-or-contract ownership matching production migration",
+      "rule": "no_growth",
+      "category": "legacy_oversized_test_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "tests/test_source_graph.py",
+      "baseline_lines": 1996,
+      "target": "tests/unit-or-contract ownership matching production migration",
+      "rule": "no_growth",
+      "category": "legacy_oversized_test_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "tests/test_source_replay.py",
+      "baseline_lines": 1271,
+      "target": "tests/unit-or-contract ownership matching production migration",
+      "rule": "no_growth",
+      "category": "legacy_oversized_test_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "tests/test_surface.py",
+      "baseline_lines": 1989,
+      "target": "tests/unit-or-contract ownership matching production migration",
+      "rule": "no_growth",
+      "category": "legacy_oversized_test_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "tests/test_template_graph.py",
+      "baseline_lines": 1998,
+      "target": "tests/unit-or-contract ownership matching production migration",
+      "rule": "no_growth",
+      "category": "legacy_oversized_test_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "tests/test_toolchain_probe.py",
+      "baseline_lines": 1767,
+      "target": "tests/unit-or-contract ownership matching production migration",
+      "rule": "no_growth",
+      "category": "legacy_oversized_test_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "tests/test_tu_merge.py",
+      "baseline_lines": 1888,
+      "target": "tests/unit-or-contract ownership matching production migration",
+      "rule": "no_growth",
+      "category": "legacy_oversized_test_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "tests/test_type_graph.py",
+      "baseline_lines": 2136,
+      "target": "tests/unit-or-contract ownership matching production migration",
+      "rule": "no_growth",
+      "category": "legacy_oversized_test_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "tests/test_type_graph_roles.py",
+      "baseline_lines": 1237,
+      "target": "tests/unit-or-contract ownership matching production migration",
+      "rule": "no_growth",
+      "category": "legacy_oversized_test_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "tests/test_type_reachability.py",
+      "baseline_lines": 1998,
+      "target": "tests/unit-or-contract ownership matching production migration",
+      "rule": "no_growth",
+      "category": "legacy_oversized_test_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "tests/test_type_reachability_stdlib_spellings.py",
+      "baseline_lines": 1730,
+      "target": "tests/unit-or-contract ownership matching production migration",
+      "rule": "no_growth",
+      "category": "legacy_oversized_test_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "tests/test_typed_dump_request.py",
+      "baseline_lines": 1978,
+      "target": "tests/unit-or-contract ownership matching production migration",
+      "rule": "no_growth",
+      "category": "legacy_oversized_test_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "tests/test_vtable_severity.py",
+      "baseline_lines": 1472,
+      "target": "tests/unit-or-contract ownership matching production migration",
+      "rule": "no_growth",
+      "category": "legacy_oversized_test_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "tests/validate_examples.py",
+      "baseline_lines": 1700,
+      "target": "tests/unit-or-contract ownership matching production migration",
+      "rule": "no_growth",
+      "category": "legacy_oversized_test_module",
+      "owner": "abicheck maintainers",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "review_by": "2026-11-30"
+    }
+  ]
+}

@@ -322,6 +322,12 @@ STEPS: tuple[Step, ...] = (
         description="Structural readiness gate (file size, ChangeKind partition, import cycles, mypy drift, ...)",
     ),
     Step(
+        "architecture",
+        _pyscript("scripts/check_architecture.py"),
+        frozenset({PR, FULL}),
+        description="ADR-061 responsibility packages, dependency direction, and debt no-growth gate",
+    ),
+    Step(
         "unit-pr",
         _py(
             "pytest",

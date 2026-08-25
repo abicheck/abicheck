@@ -13,11 +13,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Unit tests for abicheck.aggregate_findings — per-finding cross-profile
-reconciliation (G34 Phase D).
+"""Cross-profile aggregate-finding reconciliation tests (G34 Phase D).
 
-Sibling of ``test_aggregate.py``, mirroring the source split. The rule under
-test throughout: a profile may be reported *unaffected* by a finding only
+The governing rule: a profile may be reported *unaffected* by a finding only
 when its reports enumerated their findings in full. Anything short of that
 — a missing, unreadable, not-comparable, or partially-unparseable report, or
 a ``compare-release`` report, which lists bundle/matrix findings but only
@@ -39,17 +37,19 @@ from pathlib import Path
 import pytest
 
 from abicheck.aggregate import ExpectedTargets, aggregate_reports_dir
-from abicheck.aggregate_findings import (
-    _CONFORMANT_CHANGE_FIELDS,
+from abicheck.workflows.aggregate.matrix import (
     ProfileContractState,
+    build_finding_matrix,
+    render_finding_matrix_lines,
+)
+from abicheck.workflows.aggregate.reconcile import (
+    _CONFORMANT_CHANGE_FIELDS,
     ReportFinding,
     ReportFindings,
-    build_finding_matrix,
     comparable_mangled_symbol,
     cross_abi_declaration,
     mangling_scheme,
     parse_report_findings,
-    render_finding_matrix_lines,
     resolve_cross_abi_identity,
     resolve_report_change_identity,
 )
