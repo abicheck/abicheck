@@ -33,4 +33,3 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   with a bare/qualified name bridge in `diff_filtering` plus adding the four
   enum kinds to `_deduplicate_cross_detector`'s own dedup-category table,
   which had never attempted identity resolution for them at all.
-</content>

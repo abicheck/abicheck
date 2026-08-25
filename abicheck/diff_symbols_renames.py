@@ -42,6 +42,7 @@ from .diff_cxx_rules import (
     itanium_scope_components,
     msvc_scope_components,
     qualified_name_scope_components,
+    strip_trailing_top_level_parameter_list,
 )
 from .diff_helpers import make_change
 from .dumper_castxml import (
@@ -854,10 +855,9 @@ def _qualified_key_scope_components(key: str) -> list[str] | None:
     unmodelled mangled form would.
     """
     if is_synthetic_ctor_key(key):
-        scope = key[len(SYNTHETIC_CTOR_KEY_PREFIX) :]
-        paren = scope.find("(")
-        if paren != -1:
-            scope = scope[:paren]
+        scope = strip_trailing_top_level_parameter_list(
+            key[len(SYNTHETIC_CTOR_KEY_PREFIX) :]
+        )
         comps = qualified_name_scope_components(scope)
         return [*comps, "{ctor}"] if comps else None
     if is_synthetic_dtor_key(key):

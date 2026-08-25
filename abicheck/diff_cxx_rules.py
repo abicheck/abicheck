@@ -622,6 +622,38 @@ def qualified_name_scope_components(qualified: str) -> list[str] | None:
     return comps
 
 
+def strip_trailing_top_level_parameter_list(text: str) -> str:
+    """Strip a trailing ``(...)`` parameter list, at TOP-LEVEL template
+    nesting only.
+
+    A synthesized constructor key (``__abicheck_ctor__<scope>(<params>)``)
+    needs its parameter-list suffix removed before the ``<scope>`` prefix is
+    handed to :func:`qualified_name_scope_components` — but a naive
+    ``text.find("(")`` matches the FIRST ``(`` anywhere, including one
+    belonging to a function-type template argument nested inside the scope
+    itself (e.g. ``ns::Holder<void(int)>``), truncating the scope at that
+    inner paren instead of the real, top-level parameter list (Codex/
+    CodeRabbit review, fresh evidence). Tracks ``<``/``>`` nesting depth —
+    mirroring :func:`qualified_name_scope_components`'s own concern — and
+    only treats a ``(`` at depth 0 as the parameter list's start::
+
+        "ns::Holder<void(int)>(int)" -> "ns::Holder<void(int)>"
+        "ns::graph"                  -> "ns::graph"              (no paren at all)
+
+    Returns *text* unchanged when no top-level ``(`` is found (e.g. unbalanced
+    nesting, or genuinely no parameter list) rather than guessing.
+    """
+    depth = 0
+    for i, ch in enumerate(text):
+        if ch == "<":
+            depth += 1
+        elif ch == ">":
+            depth = max(0, depth - 1)
+        elif ch == "(" and depth == 0:
+            return text[:i]
+    return text
+
+
 def owner_class_of(f: Function) -> str | None:
     """The enclosing class/struct of a method.
 

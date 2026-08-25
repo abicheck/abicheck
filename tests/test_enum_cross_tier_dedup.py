@@ -286,9 +286,21 @@ class TestEndToEndOnlyOneFindingSurvives:
         ]
         assert len(changed) == 1
 
-    def test_enum_underlying_size_changed_across_both_tiers_collapses_to_one(
+    def test_enum_underlying_size_changed_has_no_header_tier_counterpart_to_dedupe(
         self,
     ) -> None:
+        """Unlike the member-level kinds above, ``ENUM_UNDERLYING_SIZE_CHANGED``
+        is emitted ONLY by the DWARF/L1 tier (`diff_platform._diff_enum_layouts`)
+        -- `diff_types._diff_enums` (L2/header) never computes or reports an
+        underlying-type byte-size change at all (CodeRabbit review, fresh
+        evidence: confirmed by reading `_diff_enums`, which has no
+        `ChangeKind.ENUM_UNDERLYING_SIZE_CHANGED` emission site anywhere).
+        There is therefore no genuine two-tier duplicate to collapse for this
+        one kind -- this test instead pins that the sole DWARF-tier finding
+        still survives unharmed (not silently dropped) now that the kind is
+        wired into `_DEDUP_CATEGORIES` and its bare/qualified identity is
+        resolvable, since a change that is wired for dedup but never actually
+        collides must remain exactly as reported."""
         old = _snap("1", [("SUM", 0)], underlying_byte_size=4)
         new = _snap("2", [("SUM", 0)], underlying_byte_size=8)
         result = compare(old, new)

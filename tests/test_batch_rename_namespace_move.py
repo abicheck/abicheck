@@ -34,7 +34,10 @@ from hypothesis import given, settings, strategies as st
 
 from abicheck.checker import compare
 from abicheck.checker_policy import ChangeKind
-from abicheck.diff_cxx_rules import qualified_name_scope_components
+from abicheck.diff_cxx_rules import (
+    qualified_name_scope_components,
+    strip_trailing_top_level_parameter_list,
+)
 from abicheck.diff_symbols_renames import (
     emit_namespace_move_batches,
     find_namespace_move_groups,
@@ -382,3 +385,37 @@ class TestQualifiedNameScopeComponentsRespectsTemplateNesting:
         assert qualified_name_scope_components("") is None
         assert qualified_name_scope_components("::foo") is None
         assert qualified_name_scope_components("foo::::bar") is None
+
+
+class TestStripTrailingTopLevelParameterList:
+    """CodeRabbit review, fresh evidence: a synthesized ctor key's
+    parameter-list suffix (``__abicheck_ctor__<scope>(<params>)``) was
+    stripped via a naive ``scope.find("(")``, which matches the FIRST
+    ``(`` anywhere -- including one belonging to a function-type template
+    argument nested inside the scope itself, truncating the scope well
+    before the real parameter list and losing everything after it."""
+
+    def test_strips_the_real_top_level_parameter_list(self) -> None:
+        assert (
+            strip_trailing_top_level_parameter_list("ns::Holder<void(int)>(int)")
+            == "ns::Holder<void(int)>"
+        )
+
+    def test_no_parameter_list_is_unchanged(self) -> None:
+        assert strip_trailing_top_level_parameter_list("ns::graph") == "ns::graph"
+
+    def test_a_synthetic_ctor_key_with_a_function_type_template_argument_still_pairs(
+        self,
+    ) -> None:
+        """The exact repro shape from review: a class template holding a
+        function-type argument, moving namespace the same way plain
+        ``tbb::detail::d1`` -> ``tbb::detail::d2`` does elsewhere in this
+        file. Confirmed to return ``{}`` (or a corrupted group keyed on a
+        truncated/mismatched scope) before the fix."""
+        removed = {"__abicheck_ctor__ns::d1::Holder<void(int)>(int)"}
+        added = {"__abicheck_ctor__ns::d2::Holder<void(int)>(int)"}
+        groups = find_namespace_move_groups(removed, added)
+        assert ("d1", "d2") in groups
+        (old_q, new_q) = groups[("d1", "d2")][0]
+        assert old_q == "ns::d1::Holder<void(int)>::{ctor}"
+        assert new_q == "ns::d2::Holder<void(int)>::{ctor}"
