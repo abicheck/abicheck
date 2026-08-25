@@ -20,11 +20,15 @@ exported symbol table, is demoted (never removed) via the ADR-025
 ``effective_verdict``/``modulation_reason``/``modulation_rule`` hook --
 mirroring ``diff_versioning.demote_internal_version_node_findings``.
 
-A genuinely-exported symbol of the identical shape, and a castxml-
-synthesized ctor/dtor key (never a real export by construction, so absence
-there is vacuous, not confirmed), must both stay untouched -- see
-AGENTS.md's "Lambda-closure churn survives at the function level" entry for
-the investigation this closes.
+A genuinely-exported symbol of the identical shape must stay untouched. A
+castxml-synthesized ctor/dtor key (never itself a real export by
+construction) is handled differently: its OWNING class/class-template is
+checked for export under any instantiation at all (see
+``_synthetic_ctor_dtor_template_base_name``/``_itanium_source_name_token``),
+since the exact per-instantiation mangling embedding a closure's own
+compiler-internal unnamed-type encoding can't be reconstructed from the
+snapshot text -- see AGENTS.md's "Lambda-closure churn survives at the
+function level" entry, item 1, for the investigation this closes.
 """
 
 from __future__ import annotations
@@ -175,15 +179,18 @@ class TestGenuinelyExportedSymbolStaysBreaking:
             assert c.modulation_rule is None
 
 
-class TestSyntheticCtorDtorKeysAreNeverDemoted:
+class TestSyntheticCtorDtorKeysDemotedWhenTemplateNeverExported:
     """A castxml-synthesized ctor/dtor key can never equal a real exported
-    symbol by construction, so "absent from the export table" is vacuous
-    for it -- demoting on that basis would be an unverified, unsafe
-    over-demotion. These must stay exactly as severe as the detector made
-    them, regardless of how much ELF evidence says nothing about the real,
-    castxml-omitted mangled name."""
+    symbol by construction (see ``dumper_castxml._function_mangled_name``),
+    so the OWNING class/class-template is checked instead: if it has zero
+    exported members under ANY instantiation on either side, no consumer
+    could ever have linked against this instantiation's ctor/dtor either --
+    the exact real-world shape reported for oneTBB's
+    ``tbb::detail::raii_guard``/``try_call_proxy``/``delegated_function``/
+    ``task_arena_function`` (all confirmed, via ``nm -D --defined-only``,
+    to export zero symbols under any instantiation)."""
 
-    def test_synthetic_dtor_key_with_lambda_marker_is_untouched(self) -> None:
+    def test_synthetic_dtor_key_is_demoted_when_template_never_exported(self) -> None:
         from abicheck.checker_types import Change
 
         symbol = f"~raii_guard<{_OLD_PARAM[len('raii_guard'):]}"  # "~raii_guard<(lambda:...)>"
@@ -193,15 +200,15 @@ class TestSyntheticCtorDtorKeysAreNeverDemoted:
             description="d",
             old_value="~raii_guard",
         )
-        old = _snap("1", _fn(_MANGLED, _OLD_PARAM), _elf("process"))
-        new = _snap("2", _fn(_MANGLED, _NEW_PARAM), _elf("process"))
+        old = _snap("1", _fn(_MANGLED, _OLD_PARAM), _elf("unrelated_symbol"))
+        new = _snap("2", _fn(_MANGLED, _NEW_PARAM), _elf("unrelated_symbol"))
 
         demote_lambda_closure_unexported_findings([change], old, new)
 
-        assert change.effective_verdict is None
-        assert change.modulation_rule is None
+        assert change.effective_verdict is Verdict.COMPATIBLE_WITH_RISK
+        assert change.modulation_rule == "lambda_closure_never_exported"
 
-    def test_synthetic_ctor_key_with_lambda_marker_is_untouched(self) -> None:
+    def test_synthetic_ctor_key_is_demoted_when_template_never_exported(self) -> None:
         from abicheck.checker_types import Change
 
         symbol = f"__abicheck_ctor__raii_guard<{_OLD_PARAM[len('raii_guard<') :]}()"
@@ -211,8 +218,87 @@ class TestSyntheticCtorDtorKeysAreNeverDemoted:
             description="d",
             old_value="raii_guard",
         )
-        old = _snap("1", _fn(_MANGLED, _OLD_PARAM), _elf("process"))
-        new = _snap("2", _fn(_MANGLED, _NEW_PARAM), _elf("process"))
+        old = _snap("1", _fn(_MANGLED, _OLD_PARAM), _elf("unrelated_symbol"))
+        new = _snap("2", _fn(_MANGLED, _NEW_PARAM), _elf("unrelated_symbol"))
+
+        demote_lambda_closure_unexported_findings([change], old, new)
+
+        assert change.effective_verdict is Verdict.COMPATIBLE_WITH_RISK
+        assert change.modulation_rule == "lambda_closure_never_exported"
+
+
+class TestSyntheticCtorDtorKeysNotDemotedWhenTemplateIsExported:
+    """The owning class/class-template genuinely exports SOME instantiation
+    on at least one side -- this check cannot rule out that the specific
+    closure-parameterized instantiation was the one a consumer actually
+    linked against, so the finding must stay exactly as severe as the
+    detector made it (fails closed)."""
+
+    def test_synthetic_ctor_key_untouched_when_another_instantiation_is_exported(
+        self,
+    ) -> None:
+        from abicheck.checker_types import Change
+
+        symbol = f"__abicheck_ctor__raii_guard<{_OLD_PARAM[len('raii_guard<') :]}()"
+        change = Change(
+            kind=ChangeKind.FUNC_REMOVED,
+            symbol=symbol,
+            description="d",
+            old_value="raii_guard",
+        )
+        # A real exported ctor of a DIFFERENT raii_guard<...> instantiation
+        # (raii_guard<int>) -- the Itanium <source-name> encoding
+        # "10raii_guard" embedded in it is exactly what this check searches
+        # for, so this proves the class template does have linkable
+        # consumers under some instantiation.
+        other_instantiation_ctor = "_ZN3tbb6detail10raii_guardIiEC1Ev"
+        old = _snap("1", _fn(_MANGLED, _OLD_PARAM), _elf(other_instantiation_ctor))
+        new = _snap("2", _fn(_MANGLED, _NEW_PARAM), _elf(other_instantiation_ctor))
+
+        demote_lambda_closure_unexported_findings([change], old, new)
+
+        assert change.effective_verdict is None
+        assert change.modulation_rule is None
+
+    def test_synthetic_dtor_key_untouched_when_another_instantiation_is_exported(
+        self,
+    ) -> None:
+        from abicheck.checker_types import Change
+
+        symbol = f"~raii_guard<{_OLD_PARAM[len('raii_guard'):]}"
+        change = Change(
+            kind=ChangeKind.FUNC_REMOVED,
+            symbol=symbol,
+            description="d",
+            old_value="~raii_guard",
+        )
+        other_instantiation_dtor = "_ZN3tbb6detail10raii_guardIiED1Ev"
+        old = _snap("1", _fn(_MANGLED, _OLD_PARAM), _elf(other_instantiation_dtor))
+        new = _snap("2", _fn(_MANGLED, _NEW_PARAM), _elf(other_instantiation_dtor))
+
+        demote_lambda_closure_unexported_findings([change], old, new)
+
+        assert change.effective_verdict is None
+        assert change.modulation_rule is None
+
+    def test_malformed_synthetic_ctor_key_scope_unrecoverable_is_not_demoted(
+        self,
+    ) -> None:
+        """``synthetic_ctor_scope`` returns ``None`` for a key with no
+        recoverable ``(params)`` suffix -- fails closed, same as any other
+        evidence gap in this function."""
+        from abicheck.checker_types import Change
+        from abicheck.dumper_castxml import SYNTHETIC_CTOR_KEY_PREFIX
+
+        symbol = f"{SYNTHETIC_CTOR_KEY_PREFIX}Foo"  # missing "(params)" suffix
+        change = Change(
+            kind=ChangeKind.FUNC_REMOVED,
+            symbol=symbol,
+            description="d",
+            old_value=_OLD_PARAM,
+        )
+        old = _snap("1", _fn(_MANGLED, _OLD_PARAM), _elf("unrelated_symbol"))
+        new = _snap("2", _fn(_MANGLED, _NEW_PARAM), _elf("unrelated_symbol"))
 
         demote_lambda_closure_unexported_findings([change], old, new)
 

@@ -1258,6 +1258,74 @@ def _change_mentions_lambda_closure(change: Change) -> bool:
     )
 
 
+def _synthetic_ctor_dtor_template_base_name(symbol: str) -> str | None:
+    """The bare (namespace- and template-argument-stripped) name of the
+    class/class-template a castxml synthetic ctor/dtor key
+    (``dumper_castxml.SYNTHETIC_CTOR_KEY_PREFIX``/``is_synthetic_dtor_key``)
+    names as its owner, or ``None`` if *symbol* is not such a key or its
+    scope cannot be recovered.
+
+    This answers "was this class template ever exported under ANY
+    instantiation", not "was THIS EXACT instantiation (lambda-closure
+    argument included) exported": the real, per-instantiation Itanium
+    mangling of a closure-type template argument uses the compiler's own
+    unnamed-type encoding (``Ul<parameter-types>E_``), never castxml's
+    ``(lambda:file:line:col)`` spelling, so there is no way to reconstruct
+    the exact mangled substring for one specific instantiation from the
+    snapshot text alone. Checking the template's own bare name instead is
+    a safe, strictly more conservative substitute for
+    :func:`demote_lambda_closure_unexported_findings`'s purposes: a class
+    template with zero exported members under *any* instantiation, on
+    either side, cannot have been linked against by any consumer under
+    this instantiation either — while a template that *does* export some
+    other instantiation correctly leaves the demotion unconfirmed (fails
+    closed) rather than risking a false negative on the one that matters.
+    """
+    from .dumper_castxml import (
+        _SYNTHETIC_DTOR_KEY_PREFIX,
+        is_synthetic_ctor_key,
+        is_synthetic_dtor_key,
+    )
+    from .finding_identity_ctor_dtor import synthetic_ctor_scope
+    from .type_reachability import _bare_type_name
+
+    if is_synthetic_ctor_key(symbol):
+        scope = synthetic_ctor_scope(symbol)
+    elif is_synthetic_dtor_key(symbol):
+        scope = symbol[len(_SYNTHETIC_DTOR_KEY_PREFIX) :]
+    else:
+        return None
+    if not scope:
+        return None
+    bare = _bare_type_name(scope)
+    depth = 0
+    for i, ch in enumerate(bare):
+        if ch == "<":
+            if depth == 0:
+                base = bare[:i]
+                return base or None
+            depth += 1
+        elif ch == ">":
+            depth = max(0, depth - 1)
+    return bare or None
+
+
+def _itanium_source_name_token(name: str) -> str:
+    """The Itanium ``<source-name>`` encoding of a plain identifier: its
+    decimal length immediately followed by the identifier text, e.g.
+    ``"raii_guard"`` → ``"10raii_guard"``.
+
+    Every real Itanium-mangled symbol naming *name* as a namespace/class/
+    template component embeds this exact substring (Itanium C++ ABI
+    §5.1.1), so a substring search for it is a dependency-free way to ask
+    "does any real exported symbol reference this identifier" without
+    invoking an external demangler — the same "structural, not textual"
+    preference this codebase's mangled-name parsers (``diff_cxx_rules.
+    itanium_scope_components`` and friends) already follow.
+    """
+    return f"{len(name)}{name}"
+
+
 def demote_lambda_closure_unexported_findings(
     changes: list[Change],
     old: AbiSnapshot,
@@ -1301,18 +1369,29 @@ def demote_lambda_closure_unexported_findings(
 
     A castxml-synthesized ctor/dtor key
     (``dumper_castxml.is_synthetic_ctor_key``/``is_synthetic_dtor_key``) is
-    deliberately excluded even when it embeds the marker: such a key is
-    *never* a real exported symbol by construction (see
-    ``dumper_castxml._function_mangled_name``'s own comment), so a bare
-    membership check against it would always report "confirmed absent"
-    regardless of whether the real, castxml-omitted mangled symbol was
-    actually exported — a vacuous, unsafe confirmation this function must
-    not act on. Demotion is therefore reachable only for a finding whose
-    ``symbol`` is a real (possibly still-changing) mangled/exported name,
-    which in practice is the ``FUNC_PARAMS_CHANGED``/
-    ``TEMPLATE_PARAM_TYPE_CHANGED``/``TEMPLATE_RETURN_TYPE_CHANGED`` shape
-    (the same function persists — same mangled key both sides — only its
-    recorded parameter/return spelling shifted).
+    itself *never* a real exported symbol by construction (see
+    ``dumper_castxml._function_mangled_name``'s own comment) — castxml
+    synthesizes the key precisely because it could not produce a real
+    mangled name for this constructor/destructor overload, typically
+    because one of its (or its enclosing template's) arguments is an
+    unnameable local lambda closure type. A bare membership check of the
+    key text itself against the export tables would therefore always
+    report "confirmed absent" regardless of whether the real,
+    castxml-omitted mangled symbol was actually exported — a vacuous,
+    unsafe confirmation this function must not act on. Rather than skip
+    every such finding outright (which left every ctor/dtor of a
+    closure-parameterized instantiation permanently undemoted — see
+    AGENTS.md's "Lambda-closure churn survives at the function level"
+    entry, item 1), this asks the binary a question the key text itself
+    *can* answer honestly: is the owning class/class-template exported
+    under *any* instantiation at all, on either side
+    (:func:`_synthetic_ctor_dtor_template_base_name` +
+    :func:`_itanium_source_name_token`)? A class template with zero
+    exported members under any instantiation cannot have been linked
+    against under this instantiation either — while a template that does
+    export some other instantiation correctly leaves the demotion
+    unconfirmed, since this check cannot rule out that the *specific*
+    closure-parameterized instantiation was the one exported.
 
     Like :func:`abicheck.diff_versioning.demote_internal_version_node_findings`,
     this uses the per-finding ``effective_verdict`` modulation hook
@@ -1370,11 +1449,35 @@ def demote_lambda_closure_unexported_findings(
         symbol = change.symbol or ""
         if not symbol:
             continue
-        if is_synthetic_ctor_key(symbol) or is_synthetic_dtor_key(symbol):
-            # Never a real export by construction -- absence here is
-            # vacuous, not confirmed. See the docstring above.
-            continue
         if not _change_mentions_lambda_closure(change):
+            continue
+        if is_synthetic_ctor_key(symbol) or is_synthetic_dtor_key(symbol):
+            base_name = _synthetic_ctor_dtor_template_base_name(symbol)
+            if base_name is None:
+                # Scope could not be recovered from the key text -- fail
+                # closed, same as an evidence gap elsewhere in this function.
+                continue
+            token = _itanium_source_name_token(base_name)
+            if any(token in exported for exported in old_exported) or any(
+                token in exported for exported in new_exported
+            ):
+                # The owning class/class-template is exported under SOME
+                # instantiation on at least one side -- this check cannot
+                # rule out that the specific closure-parameterized
+                # instantiation was the one a consumer actually linked
+                # against, so the finding stays exactly as severe as the
+                # detector made it.
+                continue
+            change.effective_verdict = Verdict.COMPATIBLE_WITH_RISK
+            change.modulation_reason = (
+                "subject is a constructor/destructor of a template "
+                "instantiated over a local lambda closure type, and the "
+                "owning class/class-template is confirmed absent from both "
+                "the old and new binary's exported symbol table under any "
+                "instantiation -- no consumer, past or present, could have "
+                "linked against it"
+            )
+            change.modulation_rule = "lambda_closure_never_exported"
             continue
         candidate_spellings = {symbol}
         old_fn = old_map.get(symbol)
