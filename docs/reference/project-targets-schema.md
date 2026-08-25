@@ -288,6 +288,21 @@ its public headers with the consumer overlay's frontend, compiler binding,
 and options; the comparison then consumes that materialized snapshot instead
 of parsing the candidate headers again under the producer context.
 
+**Known gap:** only the *candidate* side is dumped under the consumer
+context today. The baseline (old) side of a real (non-`none`)
+`baseline-channel` comparison is produced hours or days earlier by
+`publish-baseline.yml`/`update-main-baseline.yml`, which read only
+`build-output.json` and have no way to apply a `consumer_compile:` overlay
+to that dump. Comparing a consumer-context candidate against a
+producer-context baseline usually differs enough in extraction-profile
+fingerprint that `compare`'s own comparability gate refuses the pair as
+`NOT_COMPARABLE`/`ProfileMismatchError` rather than silently comparing
+mismatched contexts — so `consumer_compile:` combined with a real baseline
+channel does not yet work end to end. It is unaffected when
+`baseline-channel: none` (an audit-only scan has no baseline snapshot to
+mismatch against). See `abicheck/buildsource/run_plan.py`'s own docstring
+and the G34 plan doc's Phase 0 for what closing this needs.
+
 ### `os:` and `dependency_source:` — how a profile schedules its own check cell (G34 Phase C)
 
 These two decide *where* a profile's `check-project.yml` check cell runs and

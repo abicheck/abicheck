@@ -495,6 +495,59 @@ runs:
         sources: ${{ inputs.sources }}
         python-version: ${{ inputs.python-version }}
 
+    # A consumer_compile overlay describes the client header context, not
+    # the toolchain that produced the library.  Materialize the candidate
+    # snapshot in a distinct dump invocation so the producer binary remains
+    # unchanged while its public headers are interpreted by that client.
+    # Placed before "Clean stale analysis output" (not after) so that step
+    # still runs immediately before "Run analysis" -- this step never
+    # writes check-target-analysis.json itself (its own output-file is
+    # check-target-consumer.abi.json), so nothing is lost by running it
+    # earlier, and the stale-cleanup invariant that step's own comment
+    # documents stays exactly as simple to audit as before this step
+    # existed (Codex review / test_action_check_target.py's
+    # TestStaleAnalysisOutputIsCleanedBeforeEachRun).
+    - name: Extract candidate consumer context
+      id: consumer_context
+      if: |
+        inputs.kind == 'target' &&
+        (inputs.consumer-ast-frontend != '' || inputs.consumer-gcc-path != '' || inputs.consumer-gcc-options != '') &&
+        (inputs.baseline-channel == 'none' || steps.resolve.outputs.outcome == 'resolved') &&
+        steps.collect_verify.outcome != 'failure' &&
+        steps.collect_replay.outcome != 'failure'
+      continue-on-error: true
+      uses: ./.abicheck-check-target-src
+      with:
+        mode: dump
+        new-library: ${{ inputs.new-library }}
+        # mode: dump has no old/new distinction -- root action/run.sh's dump
+        # path adds -H/-I for *both* `header`/`new-header` (and
+        # `include`/`new-include`) unconditionally, so passing both here
+        # would union them into one parse instead of letting the candidate-
+        # specific value replace the shared one the way `compare` mode does
+        # for its own new side. A stale shared header can then retain
+        # declarations the candidate header set actually removed (Codex
+        # review). Select the candidate-specific value when the caller gave
+        # one, falling back to the shared value otherwise -- exactly
+        # `compare`'s own new-side precedent.
+        header: ${{ inputs.new-header != '' && inputs.new-header || inputs.header }}
+        include: ${{ inputs.new-include != '' && inputs.new-include || inputs.include }}
+        lang: ${{ inputs.lang }}
+        ast-frontend: ${{ inputs.consumer-ast-frontend }}
+        gcc-path: ${{ inputs.consumer-gcc-path }}
+        gcc-prefix: ${{ inputs.gcc-prefix }}
+        gcc-options: ${{ inputs.consumer-gcc-options }}
+        sysroot: ${{ inputs.sysroot }}
+        sources: ${{ inputs.sources != '' && inputs.sources || (inputs.evidence-producer == 'replay' && '.' || '') }}
+        build-info: ${{ (inputs.evidence-producer == 'wrapper' || inputs.evidence-producer == 'clang-plugin') && inputs.evidence-pack-path || inputs.build-info }}
+        compile-db: ${{ inputs.compile-db }}
+        build-config: ${{ inputs.build-config }}
+        depth: ${{ inputs.requested-depth }}
+        output-file: check-target-consumer.abi.json
+        add-job-summary: 'false'
+        install-deps: ${{ inputs.install-deps }}
+        dependency-source: ${{ inputs.dependency-source }}
+
     # ── Analysis: compare against the resolved baseline, or (baseline: ─────
     # none) a scan audit with no --against -- continue-on-error so the ─────
     # report-envelope step below always runs, per ADR-047 §7's required ─────
@@ -523,42 +576,6 @@ runs:
     - name: Clean stale analysis output
       shell: bash
       run: rm -f check-target-analysis.json
-
-    # A consumer_compile overlay describes the client header context, not
-    # the toolchain that produced the library.  Materialize the candidate
-    # snapshot in a distinct dump invocation so the producer binary remains
-    # unchanged while its public headers are interpreted by that client.
-    - name: Extract candidate consumer context
-      id: consumer_context
-      if: |
-        inputs.kind == 'target' &&
-        (inputs.consumer-ast-frontend != '' || inputs.consumer-gcc-path != '' || inputs.consumer-gcc-options != '') &&
-        (inputs.baseline-channel == 'none' || steps.resolve.outputs.outcome == 'resolved') &&
-        steps.collect_verify.outcome != 'failure' &&
-        steps.collect_replay.outcome != 'failure'
-      continue-on-error: true
-      uses: ./.abicheck-check-target-src
-      with:
-        mode: dump
-        new-library: ${{ inputs.new-library }}
-        header: ${{ inputs.header }}
-        new-header: ${{ inputs.new-header }}
-        include: ${{ inputs.include }}
-        new-include: ${{ inputs.new-include }}
-        lang: ${{ inputs.lang }}
-        ast-frontend: ${{ inputs.consumer-ast-frontend }}
-        gcc-path: ${{ inputs.consumer-gcc-path }}
-        gcc-options: ${{ inputs.consumer-gcc-options }}
-        sysroot: ${{ inputs.sysroot }}
-        sources: ${{ inputs.sources != '' && inputs.sources || (inputs.evidence-producer == 'replay' && '.' || '') }}
-        build-info: ${{ (inputs.evidence-producer == 'wrapper' || inputs.evidence-producer == 'clang-plugin') && inputs.evidence-pack-path || inputs.build-info }}
-        compile-db: ${{ inputs.compile-db }}
-        build-config: ${{ inputs.build-config }}
-        depth: ${{ inputs.requested-depth }}
-        output-file: check-target-consumer.abi.json
-        add-job-summary: 'false'
-        install-deps: ${{ inputs.install-deps }}
-        dependency-source: ${{ inputs.dependency-source }}
 
     - name: Run analysis
       id: analysis

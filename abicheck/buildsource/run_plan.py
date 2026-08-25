@@ -119,6 +119,34 @@ are meant to look the same to a caller either way. The native ``check-project`` 
 candidate dump: it reads the unchanged producer binary while interpreting
 headers under the consumer context, then compares the materialized snapshot.
 
+**Known gap: only the candidate side gets this treatment.** The baseline
+(old) side of a ``baseline-channel`` comparison is produced by a
+completely different workflow, at a completely different time --
+``publish-baseline.yml``/``update-main-baseline.yml``, via ``actions/
+baseline`` -- which reads only ``build-output.json`` (no per-profile
+compile-context fields at all: see :class:`~.build_output.BuildOutputTarget`)
+and never consults ``run-plan.json``, so it has no way to know a profile
+declared a ``consumer_compile:`` overlay, let alone dump that profile's
+baseline snapshot under the same consumer toolchain. A ``consumer_compile``-
+active check compared against a real (non-``none``) baseline channel
+therefore compares two snapshots produced under two different header-AST
+contexts -- the candidate under the consumer's, the baseline under the
+producer's (or the CLI default, if the producer profile sets no ``compile:``
+overlay either). ``compare``'s own comparability gate (ADR-050 D2) is what
+keeps this from silently misreporting: a resulting extraction-profile
+fingerprint mismatch is refused outright as ``NOT_COMPARABLE``/
+``ProfileMismatchError`` rather than compared -- so the failure mode here is
+"the feature doesn't work with a real baseline yet," not "the feature lies."
+Closing this needs ``actions/baseline`` (and the ``libraries`` JSON schema
+:func:`~.baseline_publish.derive_baseline_libraries` produces) to gain the
+same per-library ``ast-frontend``/``gcc-path``/``gcc-options`` -- and their
+``consumer_compile`` counterparts -- that ``check-target`` already resolves
+per cell here, sourced from a real per-target run-plan resolution neither
+baseline workflow reads today. That is a new, cross-cutting feature
+spanning ``abicheck/buildsource/baseline_publish.py``, ``actions/baseline``,
+and both baseline-publishing workflows, not a follow-up to this module's own
+projection -- see the G34 plan doc's Phase 0 for where this belongs.
+
 **``compile.frontend``/``consumer_compile.frontend`` (G34 Phase B) project
 the same way**, into :attr:`RunPlanCheck.compile_ast_frontend`/
 :attr:`RunPlanCheck.consumer_compile_ast_frontend` -- one of the same four
@@ -425,6 +453,17 @@ class RunPlanCheck:
     #: ``CheckSpec.allow_new_target``'s own docstring for why a bundle check
     #: can never support this lifecycle state).
     allow_new_target: bool = False
+    #: Whether this cell's profile declares a ``consumer_compile:`` overlay
+    #: at all (G34 Phase 0/B), independent of what that overlay's own
+    #: fields resolve to. A caller must gate any workflow-global fallback
+    #: for :attr:`consumer_compile_ast_frontend`/:attr:`consumer_compile_gcc_path`/
+    #: :attr:`consumer_compile_gcc_options` on this flag rather than on
+    #: whether the resolved field itself is non-empty -- falling back
+    #: whenever *any* global `--ast-frontend`/`--gcc-path`/`--gcc-options`
+    #: is set would otherwise activate the separate consumer-context dump
+    #: for every cell of a profile that has no ``consumer_compile:``
+    #: overlay at all, not just the ones that declare one (Codex review).
+    consumer_compile_active: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {
@@ -470,6 +509,8 @@ class RunPlanCheck:
             d["dependency_source"] = self.dependency_source
         if self.allow_new_target:
             d["allow_new_target"] = True
+        if self.consumer_compile_active:
+            d["consumer_compile_active"] = True
         return d
 
     @classmethod
@@ -511,6 +552,7 @@ class RunPlanCheck:
             runs_on=_opt_str(d.get("runs_on"), DEFAULT_PROFILE_RUNNER_LABEL),
             dependency_source=_opt_str(d.get("dependency_source")),
             allow_new_target=bool(d.get("allow_new_target", False)),
+            consumer_compile_active=bool(d.get("consumer_compile_active", False)),
         )
 
 
@@ -728,6 +770,28 @@ def _compile_ast_frontend_for_profile(
     return compile_spec.frontend if compile_spec is not None else ""
 
 
+def _consumer_compile_active_for_profile(
+    config: ProjectTargetsConfig, profile_id: str
+) -> bool:
+    """Whether *profile_id* declares a ``consumer_compile:`` overlay at all
+
+    (G34 Phase 0/B) -- independent of whether that overlay's own resolved
+    *output* fields (gcc_path/gcc_options/frontend) are non-empty (an
+    overlay declaring only ``binding:`` with no matching *resolved_bindings*
+    entry still counts as active). An *empty* ``consumer_compile: {}``
+    overlay is excluded, matching :class:`~.project_targets.
+    ProfileCompileSpec`'s own documented rule that an empty overlay is
+    indistinguishable from an absent one -- ``ProfileSpec.to_dict()``
+    already drops it for exactly this reason, so treating it as active here
+    would make a project's behavior depend on whether its config had been
+    round-tripped through to_dict/from_dict (Codex review).
+    """
+    profile = config.profiles.get(profile_id)
+    if profile is None or profile.consumer_compile is None:
+        return False
+    return not profile.consumer_compile.is_empty
+
+
 def _consumer_compile_ast_frontend_for_profile(
     config: ProjectTargetsConfig, profile_id: str
 ) -> str:
@@ -872,6 +936,9 @@ def _generate_target_checks(
                     consumer_compile_ast_frontend=(
                         _consumer_compile_ast_frontend_for_profile(config, profile_id)
                     ),
+                    consumer_compile_active=_consumer_compile_active_for_profile(
+                        config, profile_id
+                    ),
                     runs_on=runs_on,
                     dependency_source=dependency_source,
                     allow_new_target=check.allow_new_target,
@@ -973,6 +1040,9 @@ def _generate_bundle_checks(
                     ),
                     consumer_compile_ast_frontend=(
                         _consumer_compile_ast_frontend_for_profile(config, profile_id)
+                    ),
+                    consumer_compile_active=_consumer_compile_active_for_profile(
+                        config, profile_id
                     ),
                     runs_on=runs_on,
                     dependency_source=dependency_source,

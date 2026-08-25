@@ -913,6 +913,46 @@ class TestConsumerCompileOverlayProjection:
         assert check.consumer_compile_gcc_options == ""
         assert "consumer_compile_gcc_path" not in check.to_dict()
         assert "consumer_compile_gcc_options" not in check.to_dict()
+        assert check.consumer_compile_active is False
+        assert "consumer_compile_active" not in check.to_dict()
+
+    def test_consumer_compile_active_is_true_only_with_a_real_overlay(self) -> None:
+        config = _parsed(self._RAW)
+        plan, report = generate_run_plan(
+            config,
+            {"gcc14-build-clang20-client": _bo("libfoo"), "plain": _bo("libfoo")},
+        )
+        assert report.ok
+        [with_overlay] = [
+            c for c in plan.checks if c.profile_id == "gcc14-build-clang20-client"
+        ]
+        [without_overlay] = [c for c in plan.checks if c.profile_id == "plain"]
+        assert with_overlay.consumer_compile_active is True
+        assert with_overlay.to_dict()["consumer_compile_active"] is True
+        assert without_overlay.consumer_compile_active is False
+
+    def test_empty_consumer_compile_overlay_is_not_active(self) -> None:
+        """An empty ``consumer_compile: {}`` is documented as
+
+        indistinguishable from an absent ``consumer_compile:`` block
+        (``ProfileCompileSpec.is_empty``, and ``ProfileSpec.to_dict()``
+        already drops it for exactly this reason) -- ``consumer_compile_
+        active`` must agree, or a project's behavior would depend on
+        whether its config had been round-tripped through to_dict/from_dict
+        (Codex review).
+        """
+        raw = {
+            "targets": self._RAW["targets"],
+            "profiles": {
+                "empty-overlay": {"contract": True, "consumer_compile": {}},
+            },
+            "baseline": self._RAW["baseline"],
+        }
+        config = _parsed(raw)
+        plan, report = generate_run_plan(config, {"empty-overlay": _bo("libfoo")})
+        assert report.ok
+        [check] = plan.checks
+        assert check.consumer_compile_active is False
 
     def test_consumer_compile_overlay_projects_independently_of_producer(
         self,
