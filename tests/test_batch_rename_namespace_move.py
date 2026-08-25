@@ -1690,6 +1690,24 @@ class TestItaniumScopeComponentsWithTemplatePositions:
         assert result is not None
         assert result[0] == itanium_scope_components(mangled)
 
+    def test_an_unbalanced_directly_attached_template_args_list_returns_none(
+        self,
+    ) -> None:
+        """A class name followed by an opened but never-closed ``I`` template-
+        args list (no matching ``E`` anywhere) must degrade to ``None`` --
+        the same "unparseable, let the caller fall back" contract every
+        other malformed-input branch in this module uses -- rather than
+        raising or fabricating a component."""
+        assert itanium_scope_components_with_template_positions("_ZN3FooI") is None
+        assert itanium_scope_components("_ZN3FooI") is None
+
+    def test_an_empty_nested_name_body_returns_none(self) -> None:
+        """``N…E`` immediately closed with no component in between (no
+        ``std::`` prefix, nothing parsed before the terminator) must
+        degrade to ``None`` rather than an empty, unusable component list."""
+        assert itanium_scope_components_with_template_positions("_ZNEi") is None
+        assert itanium_scope_components("_ZNEi") is None
+
 
 class TestFindNamespaceMoveGroupsDoesNotSkipACoincidentallyTemplateShapedName:
     """End-to-end regression for the same fix, through the real detector
