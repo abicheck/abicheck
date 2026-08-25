@@ -927,6 +927,39 @@ def find_namespace_move_groups(
 
     Returns ``{(old_segment, new_segment): [(old_qualified, new_qualified)]}``
     with deterministic ordering (both sides iterated sorted).
+
+    Known, accepted limitation (Codex review, fresh evidence): matching is
+    on the *scope chain only* -- :func:`_scope_components` deliberately
+    discards a function's own parameter-type signature, since two overloads
+    of the same declaration share an identical scope chain and are not
+    "different declarations" for this detector's purpose. This means the
+    reciprocal many-to-one rejection above cannot distinguish a genuine
+    collision (two unrelated old namespaces both proposing themselves as
+    the source of the identical target, e.g. ``old1::f``/``old2::f`` both
+    matching a single ``new::f``) from a legitimate consolidation where two
+    old namespaces contribute *different overloads* of the same name to one
+    new namespace (``old1::f(int)``/``old2::f(double)`` both genuinely
+    moving into ``new::{f(int), f(double)}``) -- both shapes look identical
+    once the parameter types are stripped, so the rejection fires on the
+    overload-consolidation case too, even though the mangled symbols
+    themselves *do* carry the disambiguating parameter-type suffix that
+    would resolve it. This is not a new gap this function's many-to-one
+    check introduced: the whole primitive was already signature-blind
+    before that check existed (a pre-existing overload pair collapses to
+    one identical ``pair`` string via the same ``_scope_components`` chain,
+    and the pre-existing one-to-many check has the mirror-image blind spot
+    from the other side) -- the new check simply makes an already-ambiguous
+    shape resolve to REJECT (no roll-up; the individual
+    ``func_removed``/``func_added`` findings are still reported
+    individually) rather than to arbitrarily ACCEPT one specific pairing
+    that might be wrong, which is the same false-negative-over-false-
+    positive default this module's other ambiguity guards already use (see
+    the many-to-many/local-ambiguity comments above). A correct fix needs
+    real parameter-signature matching threaded through the whole primitive
+    (``_scope_components``, ``added_index``, candidate resolution, and the
+    ``(old_segment, new_segment)`` key itself) -- a genuine redesign of a
+    primitive several other things in this module already depend on being
+    signature-blind, not a scoped patch to the many-to-one check alone.
     """
     added_index: dict[tuple[str, ...], list[tuple[str, list[str]]]] = {}
     for a_sym in sorted(added):
@@ -938,25 +971,63 @@ def find_namespace_move_groups(
             added_index.setdefault(masked, []).append((a_sym, comps))
 
     groups: dict[tuple[str, str], list[tuple[str, str]]] = {}
-    # Tracks which (old_qualified, new_qualified) pairs have already been
-    # recorded per substitution key, so the SAME declaration reported under
-    # two different `removed` string identities (a real mangled symbol and
-    # a header-tier synthetic key that normalize to the identical
-    # scope-component list -- see the co-matching comment below) is only
-    # ever counted once toward the 2+-pairs support threshold
-    # (Codex review, fresh evidence: without this, one moved declaration
-    # reported both ways produced two identical list entries, passing
-    # emit_namespace_move_batches' threshold and reporting a false
-    # BREAKING batch for what was really a single symbol).
-    recorded_pairs: dict[tuple[str, str], set[tuple[str, str]]] = {}
+
+    # Phase 1: for every (removed symbol, masking position) pair, resolve at
+    # most one unambiguous-on-the-target-side candidate (the existing
+    # one-to-many rejection below), and record which OLD segment value it
+    # came from under that masked context. This also builds
+    # `masked_to_old_segments`, the reciprocal (many-to-one) signal Phase 2
+    # needs: a masked context claimed by more than one distinct old segment
+    # value means several different removed namespaces are each proposing
+    # themselves as the source of the SAME added symbol -- e.g. removed
+    # old1::{f,g}/old2::{f,g} vs. added only new::{f,g}: `old1::f` and
+    # `old2::f` masked at their differing position both resolve to the
+    # single candidate `new::f` (no one-to-many ambiguity on the target
+    # side at all), yet there is no evidence which of old1/old2 actually
+    # moved -- the other was simply deleted. Without this check both
+    # `old1 -> new` and `old2 -> new` would independently clear the 2+-pair
+    # threshold and emit two contradictory SYMBOL_RENAMED_BATCH findings
+    # (Codex review, fresh evidence).
+    entries: list[tuple[tuple[str, ...], list[str], int, list[str]]] = []
+    masked_to_old_segments: dict[tuple[str, ...], set[str]] = {}
+    # `added_id_to_removed_symbols`/`removed_id_to_added_symbols`: the two
+    # cross-position collision signals Phase 2 below needs, built from
+    # EVERY raw candidacy below -- including one a masking position's own
+    # LOCAL one-to-many check (a few lines down) is about to discard
+    # entirely from `entries` (Codex review, fresh evidence: an earlier
+    # revision built these two dicts only from `entries`, i.e. only from
+    # candidacies that already survived the local filter -- removed
+    # `p1::old::{f,g}` and `new::p2::{f,g}`, added `new::old::{f,g}` and
+    # `x::old::{f,g}`: `p1::old::f` masked at position 0 matches BOTH
+    # `new::old::f` and `x::old::f`, so the local one-to-many check
+    # discards that entry before it ever reaches `entries` -- but
+    # discarding it as unusable EVIDENCE FOR A SPECIFIC PAIRING does not
+    # mean `new::old::f` stops being a real, live alternative explanation
+    # for `p1::old::f`. `new::p2::f` (masking position 1) then matched
+    # `new::old::f` uniquely and, with `p1::old::f`'s own claim invisible
+    # to the tracking built only from `entries`, appeared uncontested --
+    # wrongly emitting a `p2 -> old` batch even though `p1::old::f` is
+    # just as plausibly `new::old::f`'s real source). Built here, in the
+    # SAME loop that computes `candidates`, before the local filter runs,
+    # so every raw candidacy -- ambiguous-at-its-own-position or not --
+    # counts as evidence contesting/claiming its target, matching this
+    # function's own stated false-negative-over-false-positive default.
+    added_id_to_removed_symbols: dict[str, set[str]] = {}
+    removed_id_to_added_symbols: dict[str, set[str]] = {}
     for r_sym in sorted(removed):
         r_comps = _scope_components(r_sym)
         if r_comps is None:
             continue
-        seen_here: set[tuple[str, str]] = set()
+        symbol_id = "::".join(r_comps)
         for i in range(len(r_comps) - 1):
             masked = tuple(r_comps[:i]) + (_MASKED,) + tuple(r_comps[i + 1 :])
             candidates = added_index.get(masked, [])
+            for _cand_sym, cand_comps in candidates:
+                if r_comps[i] == cand_comps[i]:
+                    continue
+                cand_id = "::".join(cand_comps)
+                added_id_to_removed_symbols.setdefault(cand_id, set()).add(symbol_id)
+                removed_id_to_added_symbols.setdefault(symbol_id, set()).add(cand_id)
             # Reject an AMBIGUOUS substitution at the source (Codex review,
             # fresh evidence): when the SAME masked context (this removed
             # symbol's scope chain with position `i` blanked out) matches
@@ -992,17 +1063,93 @@ def find_namespace_move_groups(
             distinct_targets = {a_comps[i] for _a_sym, a_comps in candidates}
             if len(distinct_targets) != 1:
                 continue
-            a_sym, a_comps = candidates[0]
-            key = (r_comps[i], a_comps[i])
-            if key[0] == key[1] or key in seen_here:
+            _a_sym, a_comps = candidates[0]
+            if r_comps[i] == a_comps[i]:
                 continue
-            seen_here.add(key)
-            pair = ("::".join(r_comps), "::".join(a_comps))
-            already_recorded = recorded_pairs.setdefault(key, set())
-            if pair in already_recorded:
-                continue
-            already_recorded.add(pair)
-            groups.setdefault(key, []).append(pair)
+            masked_to_old_segments.setdefault(masked, set()).add(r_comps[i])
+            entries.append((masked, r_comps, i, a_comps))
+
+    # `added_id_to_removed_symbols`/`removed_id_to_added_symbols` were
+    # already fully built above, alongside `entries` -- from every raw
+    # candidacy at every masking position, independent of whether that
+    # position's own local one-to-many check passed. See the comment on
+    # their declaration above for the full history of why this
+    # construction is the sound one: three review rounds each found a
+    # different way of scoping these two dicts to be unsound --
+    # building them only from `entries` (missing evidence discarded by the
+    # LOCAL one-to-many filter before it ever reached `entries`), filtering
+    # by `masked_to_old_segments` (preferring whichever of a removed
+    # symbol's two candidacies happened to be locally clean over one that's
+    # merely contested, when a collision proves the contested claimant
+    # unconfirmable, not the alternate explanation impossible) -- and the
+    # construction above, from every raw candidacy with no filtering at
+    # all, is what survived all three.
+    #
+    # `added_id_to_removed_symbols` answers: is this added declaration
+    # claimed by more than one distinct removed identity, whether they
+    # collide at the SAME masking position (already caught by
+    # `masked_to_old_segments` above) or at DIFFERENT ones (e.g. removed
+    # `p1::old::{f,g}` and `new::p2::{f,g}` vs. added only
+    # `new::old::{f,g}` -- masking positions 0 and 1 respectively, masked
+    # contexts differ, so `masked_to_old_segments` alone sees no collision,
+    # yet the same added declaration cannot simultaneously be evidence for
+    # both `p1 -> new` and `p2 -> old`). Tracked by distinct CLAIMING
+    # REMOVED-SYMBOL IDENTITY, not by distinct substitution key text --
+    # removing `old::new::f` and `new::old::f` while adding only
+    # `new::new::f` has both claims spell the identical key `('old',
+    # 'new')`, so a key-text set would collapse them to size one even
+    # though they are two genuinely different removed originals.
+    #
+    # `removed_id_to_added_symbols` answers the symmetric question: does
+    # this removed symbol resolve to more than one distinct added
+    # declaration across its masking positions -- e.g. removed
+    # `p1::old::{f,g}` with added `new::old::{f,g}` AND `p1::new::{f,g}`,
+    # where `p1::old::f` matches `new::old::f` (masking position 0,
+    # implying `p1 -> new`) and ALSO matches `p1::new::f` (masking
+    # position 1, implying `old -> new`) -- two mutually exclusive
+    # substitutions, both backed by the identical removed symbol.
+
+    # Phase 2: record only the entries whose masked context was claimed by
+    # exactly one distinct old segment value (the position-scoped
+    # many-to-one rejection), whose added declaration was claimed by
+    # exactly one distinct removed-symbol identity (the cross-position
+    # many-to-one rejection), AND whose removed symbol was itself resolved
+    # to exactly one distinct added declaration across all its masking
+    # positions (the symmetric cross-position one-to-many rejection) --
+    # then apply the pre-existing per-symbol/per-key/per-pair dedup exactly
+    # as before.
+    seen_here: dict[str, set[tuple[str, str]]] = {}
+    # Tracks which (old_qualified, new_qualified) pairs have already been
+    # recorded per substitution key, so the SAME declaration reported under
+    # two different `removed` string identities (a real mangled symbol and
+    # a header-tier synthetic key that normalize to the identical
+    # scope-component list -- see the co-matching comment above) is only
+    # ever counted once toward the 2+-pairs support threshold
+    # (Codex review, fresh evidence: without this, one moved declaration
+    # reported both ways produced two identical list entries, passing
+    # emit_namespace_move_batches' threshold and reporting a false
+    # BREAKING batch for what was really a single symbol).
+    recorded_pairs: dict[tuple[str, str], set[tuple[str, str]]] = {}
+    for masked, r_comps, i, a_comps in entries:
+        if len(masked_to_old_segments[masked]) != 1:
+            continue
+        added_id = "::".join(a_comps)
+        symbol_id = "::".join(r_comps)
+        if len(added_id_to_removed_symbols[added_id]) != 1:
+            continue
+        if len(removed_id_to_added_symbols[symbol_id]) != 1:
+            continue
+        key = (r_comps[i], a_comps[i])
+        symbol_seen = seen_here.setdefault(symbol_id, set())
+        if key in symbol_seen:
+            continue
+        symbol_seen.add(key)
+        pair = (symbol_id, "::".join(a_comps))
+        already_recorded = recorded_pairs.setdefault(key, set())
+        if pair in already_recorded:
+            continue
+        already_recorded.add(pair)
+        groups.setdefault(key, []).append(pair)
     return groups
 
 

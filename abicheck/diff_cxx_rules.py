@@ -603,7 +603,58 @@ def _operator_keyword_precedes(qualified: str, i: int) -> bool:
     if qualified[i - 8 : i] != "operator":
         return False
     before = i - 8
-    return before == 0 or not (qualified[before - 1].isalnum() or qualified[before - 1] == "_")
+    return before == 0 or not (
+        qualified[before - 1].isalnum() or qualified[before - 1] == "_"
+    )
+
+
+def _is_template_opening_angle(qualified: str, i: int) -> bool:
+    """Whether ``qualified[i] == "<"`` is a real template-opening delimiter,
+    as opposed to an unparenthesized ``<`` comparison in a dependent
+    non-type template argument.
+
+    Unlike ``>`` (see :func:`qualified_name_scope_components`'s own
+    docstring -- a bare ``>`` there is a genuine, unparenthesized-forbidden
+    compile error), a bare ``<`` comparison is legal C++ and a real
+    compiler's parser disambiguates it via name lookup, which this scanner
+    has no access to. Falls back to a spacing signal instead, confirmed
+    against real clang output: a template-opening ``<`` is always rendered
+    immediately after its name with no preceding space, while a binary
+    comparison operator is always rendered with a space on both sides
+    regardless of the original source's own spacing.
+    """
+    return i == 0 or not qualified[i - 1].isspace()
+
+
+#: Multi-character ``<``-led expression-operator tokens (as opposed to a
+#: lone ``<``, which needs :func:`_is_template_opening_angle`'s spacing
+#: signal). Longest-first so ``<<=`` matches before ``<<``.
+_LESS_THAN_LED_OPERATOR_TOKENS = ("<<=", "<=>", "<<", "<=")
+
+
+def _less_than_led_operator_token_len(qualified: str, i: int) -> int:
+    """Length of a multi-character ``<``-led expression-operator token
+    (``<<=``, ``<=>``, ``<<``, ``<=``) at ``qualified[i:]``, or 0.
+
+    Unlike a lone ``<`` (see :func:`_is_template_opening_angle`), ANY
+    multi-character ``<``-led token is structurally guaranteed to be a
+    real operator, never two adjacent template-opening delimiters: a
+    template-argument-list can never begin with a bare ``<`` or ``=`` (no
+    expression or type-id starts with either), so two consecutive ``<``
+    characters, or a ``<`` immediately followed by ``=``, cannot be two
+    independent delimiters -- they can only be this operator's own
+    spelling. Confirmed against real clang: ``operator B<N << M>``
+    compiles and is pretty-printed verbatim for an uninstantiated member
+    (Codex review, fresh evidence -- the second ``<`` of ``<<`` is not
+    preceded by whitespace, so :func:`_is_template_opening_angle`'s
+    per-character spacing signal alone misclassified it as a template
+    opener). No whitespace check needed here, unlike the lone-``<`` case:
+    the grammar guarantee is unconditional.
+    """
+    for tok in _LESS_THAN_LED_OPERATOR_TOKENS:
+        if qualified.startswith(tok, i):
+            return len(tok)
+    return 0
 
 
 def qualified_name_scope_components(qualified: str) -> list[str] | None:
@@ -654,32 +705,239 @@ def qualified_name_scope_components(qualified: str) -> list[str] | None:
     top-level ``"::"``, e.g. ``"::foo"`` or ``"foo::::bar"``), or unbalanced
     bracket/paren nesting, rather than silently dropping or fabricating a
     component, mirroring the "return ``None``, let the caller fall back"
-    contract the mangled-name parsers above use.
+    contract the mangled-name parsers above use. That conservatism applies
+    to the WHOLE string, including a conversion operator's own target past
+    the ``"::operator "`` marker -- the scan below keeps tracking depth
+    through the opaque leaf and rejects the whole input if it ends
+    unbalanced, rather than stopping at the marker and silently accepting a
+    malformed target like ``"api::C::operator old::X<"`` (CodeRabbit
+    review, fresh evidence: the earlier revision broke out of the loop the
+    moment the marker was found, so nothing past it was ever validated).
+
+    Angle-bracket (``<``/``>``) and paren (``(``/``)``) nesting are tracked
+    as two INDEPENDENT counters, not one shared ``depth`` -- a real,
+    demangled non-type template argument can legitimately contain a bare
+    ``<``/``>`` comparison, e.g. ``operator
+    std::integral_constant<bool, (sizeof(T) > 1)>`` for
+    ``std::integral_constant<bool, (sizeof(T) > 1)>`` (Codex review, fresh
+    evidence: an earlier revision used one shared counter for both bracket
+    kinds, so the comparison's ``>`` was miscounted as closing the
+    ``integral_constant<`` template, driving the counter negative and
+    rejecting a perfectly well-formed target). This is not a heuristic: the
+    C++ grammar itself requires such a comparison to be parenthesized
+    wherever it appears as a non-type template argument, specifically to
+    remove this exact ambiguity for any parser -- so a compiler's own
+    demangled/pretty-printed text is guaranteed to already carry the
+    disambiguating parens around it. A ``>`` character can therefore only be
+    a REAL template-closing delimiter while no paren is currently open
+    (``paren_depth == 0``); while a paren is open, it is guaranteed by that
+    same grammar rule to be part of an expression, never a delimiter, so it
+    is left untouched rather than folded into a bracket-kind-blind counter.
+
+    That grammar guarantee is ONE-SIDED, though: only a ``>``-bearing
+    expression must be parenthesized as a non-type template argument (a
+    bare, unparenthesized ``>`` there is a genuine, confirmed compile
+    error) -- an unparenthesized ``<`` comparison is perfectly legal and
+    unambiguous to a real parser, which disambiguates it via *name lookup*
+    (is the identifier immediately to its left a known template name?), not
+    via any textual rule this scanner could replicate. Confirmed directly
+    against real clang: ``template<int N, int M> struct C { operator
+    B<N < M>() const; };`` compiles cleanly, and clang's own AST dump
+    prints the *unparenthesized* comparison verbatim as ``operator B<N <
+    M>`` for the uninstantiated (template-parameter-dependent) member --
+    exactly the shape :func:`qualified_name_scope_components` receives from
+    this codebase's own castxml/clang-derived declaration names (Codex
+    review, fresh evidence: an earlier revision treated every ``<`` at
+    ``paren_depth == 0`` as a real template opener unconditionally, so this
+    exact input drove ``angle_depth`` one too high and never came back
+    down, rejecting valid input). Since a `<` cannot be soundly resolved by
+    grammar alone, a ``<`` at ``paren_depth == 0`` is instead treated as a
+    real template-opening delimiter only when it is NOT preceded by
+    whitespace -- confirmed, empirically, against real clang output: a
+    template-opening ``<`` is always rendered immediately after its name
+    with no space (``Other<D>``, ``B<N < M>``'s own leading ``<``), while a
+    binary comparison operator is always rendered with a space on both
+    sides (``N < M``) REGARDLESS of the source's own spacing (confirmed by
+    compiling the identical construct spelled ``N<M`` with no spaces at
+    all -- clang's pretty-printer still re-inserts them). This is not
+    airtight for arbitrary hand-crafted text, but it is sound for every
+    real input this function actually receives, which originates from a
+    compiler's own canonical printer, never from hand-written source.
+
+    Brace (``{``/``}``) nesting is tracked as a THIRD independent counter,
+    for a different reason than the ``<``/``>``/``(``/``)`` cases above:
+    C++20 allows a captureless lambda closure as a non-type template
+    argument, and its body is a full, self-contained statement grammar --
+    a ``>``/``<`` inside it is not required to be parenthesized the way a
+    bare comparison directly in the template-argument-list is, because it
+    is not at that grammar production at all. Confirmed directly against
+    real clang: ``operator B<[]{ return N > M; }>()`` (a lambda-typed
+    conversion target) compiles under ``-std=c++20`` and is pretty-printed
+    verbatim, unparenthesized comparison included, sometimes spanning
+    multiple lines (Codex review, fresh evidence). Unlike the angle-bracket
+    cases, this needs no heuristic at all: braces always balance
+    unconditionally in valid C++ (no ambiguity like ``<``/``>`` ever
+    applies to them), so once a brace opens, every character up to its
+    matching close -- regardless of what it looks like -- is treated as
+    fully opaque interior, untouched by any other counter in this
+    function.
+
+    Bracket (``[``/``]``) nesting is tracked as a FOURTH independent
+    counter, for the same reason: a subscript expression used inside a
+    non-type template argument (e.g. ``operator B<A[N > M]>()``, confirmed
+    to compile) carries a ``>`` that needs no parenthesization either --
+    ``]``, not ``>``, closes the subscript, so it carries none of the
+    top-level template-argument ambiguity a bare ``>`` would (Codex review,
+    fresh evidence). Treated exactly like a brace: once a bracket opens,
+    its entire interior is opaque, and this needs no heuristic either,
+    since ``[``/``]`` always balance unconditionally in valid C++ too.
+
+    A lambda's trailing-return-type arrow (``[]() -> bool { ... }``,
+    confirmed to compile and pretty-print verbatim as a non-type template
+    argument) needs its own check, unrelated to brace/bracket tracking:
+    the ``->`` sits in the lambda's OWN declarator, between its parameter
+    list and its body, so it is not inside any brace/bracket this function
+    already tracks as opaque. Unlike every other ``>`` case above, this
+    one needs no heuristic and no depth-awareness at all: by the C++
+    lexical grammar's own maximal-munch rule, a ``-`` immediately adjacent
+    to a ``>`` can ONLY ever tokenize as the single ``->`` token, never as
+    two separate ``-`` and ``>`` tokens -- if the source meant a
+    subtraction immediately followed by a separate closing ``>`` with
+    zero characters between them, the compiler's own lexer would already
+    have misread that as ``->`` too, so this exact adjacency cannot
+    represent two separate tokens in any valid, compiled C++ program
+    (Codex review, fresh evidence). A ``>`` immediately preceded by ``-``
+    is therefore always skipped as part of ``->``, unconditionally.
+
+    Known, accepted limitation (Codex review, fresh evidence): the brace/
+    bracket "opaque interior" scan above is a raw character count, not a
+    real tokenizer -- it does not skip over string/char-literal content or
+    comments, so a brace, bracket, paren, or angle-bracket CHARACTER
+    embedded inside a string literal within a lambda body (e.g. ``operator
+    B<[]{ return sizeof("}"); }>()``, confirmed to compile and to be
+    pretty-printed verbatim by clang) desynchronizes the corresponding
+    counter and this function rejects otherwise-valid input. Closing this
+    for real needs an actual lexical scanner for the brace/bracket
+    interior -- string/char-literal quoting and escape-sequence handling
+    (including raw string literals, ``R"delim(...)delim"``, whose
+    terminator is itself data-dependent), plus line (``//``) and block
+    (``/* */``) comment recognition -- which is a materially different,
+    larger piece of work than "track one more independently-balancing
+    bracket kind" (the pattern every fix in this function's history above
+    has been). Deliberately not attempted here: this is the sixth
+    consecutive real-but-increasingly-exotic C++ grammar shape found in
+    this function across as many review rounds, and a string/char literal
+    containing bracket-like characters *inside a lambda body used as a
+    conversion-operator's own non-type template argument* is deep into
+    adversarially-constructed territory -- vanishingly unlikely to appear
+    in any real-world header this tool would actually be pointed at,
+    unlike every shape fixed above (each was a plain, if less common,
+    construct a real codebase could plausibly contain). Per this
+    codebase's own "known gaps over risky reactive patches" convention:
+    the input this function was built to defend against in the first
+    place is a genuinely MALFORMED synthetic key, and no valid, real-world
+    header-tier declaration this codebase has ever actually needed to
+    parse has required this. A caller reaching this gap gets the existing,
+    documented conservative fallback (``None``, no namespace-move pairing
+    for that one declaration) -- a missed roll-up for one input, not a
+    wrong one.
     """
     if not qualified:
         return None
     marker = "::operator "
-    depth = 0
+    angle_depth = 0
+    paren_depth = 0
+    brace_depth = 0
+    bracket_depth = 0
     i = 0
     n = len(qualified)
     marker_idx = -1
     while i < n:
         ch = qualified[i]
+        if ch == "{":
+            brace_depth += 1
+            i += 1
+            continue
+        if ch == "}":
+            brace_depth -= 1
+            if brace_depth < 0:
+                return None
+            i += 1
+            continue
+        if ch == "[":
+            bracket_depth += 1
+            i += 1
+            continue
+        if ch == "]":
+            bracket_depth -= 1
+            if bracket_depth < 0:
+                return None
+            i += 1
+            continue
+        if brace_depth > 0 or bracket_depth > 0:
+            # Opaque interior of a brace-delimited lambda body (a legal
+            # C++20 non-type template argument, e.g. "B<[]{ return N > M;
+            # }>") or a bracketed subscript expression (e.g. "B<A[N >
+            # M]>", confirmed to compile: a ">" nested inside "[...]" is
+            # unambiguous to the parser -- "]", not ">", closes the
+            # subscript, so it carries none of the top-level
+            # template-argument ambiguity a bare ">" would). Both are a
+            # full expression/statement grammar unrelated to the
+            # enclosing template-argument-list's own bracket balance. See
+            # this function's own docstring for why braces/brackets need
+            # no whitespace heuristic, unlike angle brackets.
+            i += 1
+            continue
+        if ch == ">" and i > 0 and qualified[i - 1] == "-":
+            # A lambda's trailing-return-type arrow ("[]() -> bool {...}",
+            # confirmed to compile as a non-type template argument and be
+            # pretty-printed verbatim) -- unlike the other ">" cases, this
+            # needs no heuristic or brace/bracket-depth awareness at all:
+            # by the C++ lexical grammar's own maximal-munch rule, a "-"
+            # character immediately adjacent to a ">" can ONLY ever
+            # tokenize as the single "->" token, never as two separate
+            # "-" and ">" tokens -- if the source meant a subtraction
+            # immediately followed by a separate closing ">" with zero
+            # characters between them, the compiler's own lexer would
+            # already have misread THAT as "->" too, so this adjacency
+            # cannot represent two separate tokens in any valid, compiled
+            # C++ program (Codex review, fresh evidence).
+            i += 1
+            continue
         if ch in "<>" and _operator_keyword_precedes(qualified, i):
             tok_len = _operator_angle_token_len(qualified, i)
             if tok_len:
                 i += tok_len
                 continue
-        if ch in "<(":
-            depth += 1
-        elif ch in ">)":
-            depth -= 1
-            if depth < 0:
+        if ch == "<":
+            lt_tok_len = _less_than_led_operator_token_len(qualified, i)
+            if lt_tok_len:
+                i += lt_tok_len
+                continue
+        if ch == "(":
+            paren_depth += 1
+        elif ch == ")":
+            paren_depth -= 1
+            if paren_depth < 0:
                 return None
-        elif depth == 0 and qualified[i : i + len(marker)] == marker:
+        elif (
+            ch == "<" and paren_depth == 0 and _is_template_opening_angle(qualified, i)
+        ):
+            angle_depth += 1
+        elif ch == ">" and paren_depth == 0:
+            angle_depth -= 1
+            if angle_depth < 0:
+                return None
+        elif (
+            angle_depth == 0
+            and paren_depth == 0
+            and marker_idx == -1
+            and qualified[i : i + len(marker)] == marker
+        ):
             marker_idx = i
-            break
         i += 1
+    if angle_depth != 0 or paren_depth != 0 or brace_depth != 0 or bracket_depth != 0:
+        return None
     if marker_idx != -1:
         head = qualified[:marker_idx]
         leaf = qualified[marker_idx + 2 :]  # keep the "operator ..." target whole
@@ -696,29 +954,74 @@ def qualified_name_scope_components(qualified: str) -> list[str] | None:
         # whole thing as one leaf rather than guessing at a split.
         return [qualified]
     comps: list[str] = []
-    depth = 0
+    angle_depth = 0
+    paren_depth = 0
+    brace_depth = 0
+    bracket_depth = 0
     start = 0
     i = 0
     while i < n:
         ch = qualified[i]
+        if ch == "{":
+            brace_depth += 1
+            i += 1
+            continue
+        if ch == "}":
+            brace_depth -= 1
+            if brace_depth < 0:
+                return None
+            i += 1
+            continue
+        if ch == "[":
+            bracket_depth += 1
+            i += 1
+            continue
+        if ch == "]":
+            bracket_depth -= 1
+            if bracket_depth < 0:
+                return None
+            i += 1
+            continue
+        if brace_depth > 0 or bracket_depth > 0:
+            i += 1
+            continue
+        if ch == ">" and i > 0 and qualified[i - 1] == "-":
+            # A lambda's trailing-return-type arrow -- see this function's
+            # own docstring / the sibling scan above for why this needs
+            # no heuristic at all.
+            i += 1
+            continue
         if ch in "<>" and _operator_keyword_precedes(qualified, i):
             tok_len = _operator_angle_token_len(qualified, i)
             if tok_len:
                 i += tok_len
                 continue
-        if ch in "<(":
-            depth += 1
-        elif ch in ">)":
-            depth -= 1
-            if depth < 0:
+        if ch == "<":
+            lt_tok_len = _less_than_led_operator_token_len(qualified, i)
+            if lt_tok_len:
+                i += lt_tok_len
+                continue
+        if ch == "(":
+            paren_depth += 1
+        elif ch == ")":
+            paren_depth -= 1
+            if paren_depth < 0:
                 return None
-        elif depth == 0 and qualified[i : i + 2] == "::":
+        elif (
+            ch == "<" and paren_depth == 0 and _is_template_opening_angle(qualified, i)
+        ):
+            angle_depth += 1
+        elif ch == ">" and paren_depth == 0:
+            angle_depth -= 1
+            if angle_depth < 0:
+                return None
+        elif angle_depth == 0 and paren_depth == 0 and qualified[i : i + 2] == "::":
             comps.append(qualified[start:i])
             i += 2
             start = i
             continue
         i += 1
-    if depth != 0:
+    if angle_depth != 0 or paren_depth != 0 or brace_depth != 0 or bracket_depth != 0:
         return None
     comps.append(qualified[start:])
     if any(not c for c in comps):
@@ -746,15 +1049,75 @@ def strip_trailing_top_level_parameter_list(text: str) -> str:
 
     Returns *text* unchanged when no top-level ``(`` is found (e.g. unbalanced
     nesting, or genuinely no parameter list) rather than guessing.
+
+    Angle-bracket depth is only tracked while no paren is currently open —
+    the identical concern :func:`qualified_name_scope_components` documents
+    for the same reason: a non-type template argument can legitimately
+    contain a parenthesized ``<``/``>`` comparison (``Holder<(A > B),
+    void(int)>``), and the C++ grammar itself guarantees a ``>``-bearing
+    comparison must be parenthesized wherever it appears as a template
+    argument. A ``>`` seen while a paren is open is therefore guaranteed to
+    be part of that expression, never a real template delimiter, so folding
+    it into the angle-bracket counter would close the enclosing template
+    one character too early and let a later, still-nested ``(`` (a
+    function-type template argument's own parameter list, not the real
+    trailing one) be mistaken for the top-level split point. That grammar
+    guarantee does NOT cover ``<``, though -- an unparenthesized ``<``
+    comparison is legal C++ (e.g. a class template's own scope carrying an
+    uninstantiated ``Holder<N < M>``), so a ``<`` is only counted as a real
+    template opener via :func:`_is_template_opening_angle`'s spacing signal,
+    the same one :func:`qualified_name_scope_components` uses.
     """
     depth = 0
-    for i, ch in enumerate(text):
+    paren_depth = 0
+    brace_depth = 0
+    bracket_depth = 0
+    i = 0
+    n = len(text)
+    while i < n:
+        ch = text[i]
+        if ch == "{":
+            brace_depth += 1
+            i += 1
+            continue
+        if ch == "}":
+            brace_depth = max(0, brace_depth - 1)
+            i += 1
+            continue
+        if ch == "[":
+            bracket_depth += 1
+            i += 1
+            continue
+        if ch == "]":
+            bracket_depth = max(0, bracket_depth - 1)
+            i += 1
+            continue
+        if brace_depth > 0 or bracket_depth > 0:
+            # Opaque lambda-body/subscript interior -- see
+            # qualified_name_scope_components's identical concern.
+            i += 1
+            continue
+        if ch == ">" and i > 0 and text[i - 1] == "-":
+            # A lambda's trailing-return-type arrow -- see
+            # qualified_name_scope_components's identical concern.
+            i += 1
+            continue
         if ch == "<":
+            lt_tok_len = _less_than_led_operator_token_len(text, i)
+            if lt_tok_len:
+                i += lt_tok_len
+                continue
+        if ch == "(":
+            if depth == 0 and paren_depth == 0:
+                return text[:i]
+            paren_depth += 1
+        elif ch == ")":
+            paren_depth = max(0, paren_depth - 1)
+        elif ch == "<" and paren_depth == 0 and _is_template_opening_angle(text, i):
             depth += 1
-        elif ch == ">":
+        elif ch == ">" and paren_depth == 0:
             depth = max(0, depth - 1)
-        elif ch == "(" and depth == 0:
-            return text[:i]
+        i += 1
     return text
 
 

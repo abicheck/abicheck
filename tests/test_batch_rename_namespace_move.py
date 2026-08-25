@@ -145,8 +145,18 @@ class TestNamespaceMoveIsRecognizedAsOneBatch:
         still be reported -- rejecting the ambiguous segments must not
         collateral-damage a real, resolvable move that shares no segment
         with them."""
-        removed = set(_D1) | {"_ZN4old11fEv", "_ZN4old11gEv", "_ZN4old21fEv", "_ZN4old21gEv"}
-        added = set(_D2) | {"_ZN4new11fEv", "_ZN4new11gEv", "_ZN4new21fEv", "_ZN4new21gEv"}
+        removed = set(_D1) | {
+            "_ZN4old11fEv",
+            "_ZN4old11gEv",
+            "_ZN4old21fEv",
+            "_ZN4old21gEv",
+        }
+        added = set(_D2) | {
+            "_ZN4new11fEv",
+            "_ZN4new11gEv",
+            "_ZN4new21fEv",
+            "_ZN4new21gEv",
+        }
         groups = find_namespace_move_groups(removed, added)
         assert ("d1", "d2") in groups
         assert len(groups[("d1", "d2")]) == len(_D1)
@@ -216,9 +226,7 @@ class TestHeaderTierKeysAlsoJoinTheNamespaceMove:
         return ``{}`` before the qualified-name fallback (neither
         ``itanium_scope_components`` nor ``msvc_scope_components`` recognizes
         either key shape)."""
-        groups = find_namespace_move_groups(
-            set(_D1_HEADER_TIER), set(_D2_HEADER_TIER)
-        )
+        groups = find_namespace_move_groups(set(_D1_HEADER_TIER), set(_D2_HEADER_TIER))
         assert ("d1", "d2") in groups
         assert len(groups[("d1", "d2")]) == 2
 
@@ -244,12 +252,10 @@ class TestHeaderTierKeysAlsoJoinTheNamespaceMove:
         assert ("d1", "d2") in groups
         pairs = dict(groups[("d1", "d2")])
         assert (
-            pairs["tbb::detail::d1::graph::{ctor}"]
-            == "tbb::detail::d2::graph::{ctor}"
+            pairs["tbb::detail::d1::graph::{ctor}"] == "tbb::detail::d2::graph::{ctor}"
         )
         assert (
-            pairs["tbb::detail::d1::graph::{dtor}"]
-            == "tbb::detail::d2::graph::{dtor}"
+            pairs["tbb::detail::d1::graph::{dtor}"] == "tbb::detail::d2::graph::{dtor}"
         )
         assert len(groups[("d1", "d2")]) == len(_D1)
 
@@ -257,9 +263,7 @@ class TestHeaderTierKeysAlsoJoinTheNamespaceMove:
         old = _snap("2021", [_fn("graph", m) for m in _D1_HEADER_TIER])
         new = _snap("2022", [_fn("graph", m) for m in _D2_HEADER_TIER])
         result = compare(old, new)
-        batch = [
-            c for c in result.changes if c.kind is ChangeKind.SYMBOL_RENAMED_BATCH
-        ]
+        batch = [c for c in result.changes if c.kind is ChangeKind.SYMBOL_RENAMED_BATCH]
         assert batch, "namespace move via header-tier keys produced no batch roll-up"
 
     def test_qualified_function_name_without_any_mangling_also_pairs(self) -> None:
@@ -484,8 +488,26 @@ class TestQualifiedNameScopeComponentsKeepsConversionTargetsWhole:
         ]
 
     def test_bare_conversion_operator_with_no_owner_has_no_scope(self) -> None:
-        assert qualified_name_scope_components("operator old::X") == [
-            "operator old::X"
+        assert qualified_name_scope_components("operator old::X") == ["operator old::X"]
+
+    def test_malformed_target_with_unclosed_template_is_rejected(self) -> None:
+        """CodeRabbit review, fresh evidence: an earlier revision stopped
+        scanning the instant the ``"::operator "`` marker was found, so
+        nothing past it was ever validated for balanced nesting -- a
+        malformed target like ``operator old::X<`` (an unclosed template
+        argument) was silently accepted instead of rejected."""
+        assert qualified_name_scope_components("api::C::operator old::X<") is None
+
+    def test_malformed_target_with_stray_closing_paren_is_rejected(self) -> None:
+        assert qualified_name_scope_components("api::C::operator old::X)") is None
+
+    def test_well_formed_template_target_is_still_accepted(self) -> None:
+        """The balance check must not reject a genuinely well-formed
+        target that merely contains its own template arguments."""
+        assert qualified_name_scope_components("api::C::operator Foo<int>") == [
+            "api",
+            "C",
+            "operator Foo<int>",
         ]
 
     def test_two_conversion_operator_removals_and_additions_still_pair_correctly(
@@ -514,6 +536,435 @@ class TestQualifiedNameScopeComponentsKeepsConversionTargetsWhole:
         # substitutable (a differing leaf is a renamed declaration, not a
         # moved scope -- see this function's own docstring).
         assert groups == {}
+
+
+class TestQualifiedNameScopeComponentsAcceptsExpressionBearingTargets:
+    """Codex review, fresh evidence: an earlier revision of the balanced-
+    nesting check (added to close the malformed-target gap above) used one
+    shared depth counter for both ``<``/``>`` and ``(``/``)`` -- but a real,
+    demangled non-type template argument can legitimately contain a bare
+    ``<``/``>`` comparison, e.g. ``operator
+    std::integral_constant<bool, (sizeof(T) > 1)>``. The comparison's own
+    ``>`` was miscounted as closing the ``integral_constant<`` template,
+    driving the counter negative and rejecting perfectly well-formed input.
+    C++'s own grammar requires such a comparison to be parenthesized
+    wherever it appears as a template argument specifically to remove this
+    ambiguity, so a compiler's pretty-printed text always carries the
+    disambiguating parens -- angle-bracket and paren nesting are now
+    tracked as two independent counters, and a ``<``/``>`` is only ever
+    treated as a real template delimiter while no paren is open."""
+
+    def test_comparison_inside_a_non_type_template_argument_is_accepted(self) -> None:
+        target = "operator std::integral_constant<bool, (sizeof(T) > 1)>"
+        assert qualified_name_scope_components(f"api::C::{target}") == [
+            "api",
+            "C",
+            target,
+        ]
+
+    def test_less_than_comparison_inside_a_non_type_template_argument_is_accepted(
+        self,
+    ) -> None:
+        target = "operator Array<bool, (N < M)>"
+        assert qualified_name_scope_components(f"api::C::{target}") == [
+            "api",
+            "C",
+            target,
+        ]
+
+    def test_nested_template_argument_alongside_a_parenthesized_comparison_is_accepted(
+        self,
+    ) -> None:
+        """A comparison AND a genuinely nested template argument in the same
+        argument list -- the paren-open/close bracket the comparison sits in
+        must not desynchronize the angle-bracket counter for the sibling
+        template argument that follows it."""
+        target = "operator Holder<(A > B), Other<C>>"
+        assert qualified_name_scope_components(f"api::C::{target}") == [
+            "api",
+            "C",
+            target,
+        ]
+
+    def test_still_rejects_genuinely_unbalanced_nesting_alongside_a_comparison(
+        self,
+    ) -> None:
+        """The two-counter fix must not become blind to real malformation --
+        an unclosed template past a parenthesized comparison is still
+        rejected."""
+        assert (
+            qualified_name_scope_components("api::C::operator Holder<(A > B), Other<C>")
+            is None
+        )
+
+    def test_ordinary_qualified_name_with_a_comparison_template_argument_splits_correctly(
+        self,
+    ) -> None:
+        """The same fix applies to the main top-level ``"::"`` split loop,
+        not just the conversion-operator scan -- a plain (non-conversion-
+        operator) qualified name can carry the identical non-type template
+        argument shape anywhere in its scope chain."""
+        assert qualified_name_scope_components("ns::Array<bool, (N > M)>::method") == [
+            "ns",
+            "Array<bool, (N > M)>",
+            "method",
+        ]
+
+
+class TestQualifiedNameScopeComponentsAcceptsUnparenthesizedLessThan:
+    """Codex review, fresh evidence: unlike ``>``, a bare, UNPARENTHESIZED
+    ``<`` comparison as a non-type template argument is legal C++ -- a real
+    parser disambiguates it via name lookup (is the identifier immediately
+    to its left a known template name?), which this text-only scanner has
+    no access to. Confirmed directly against real clang: ``template<int N,
+    int M> struct C { operator B<N < M>() const; };`` compiles cleanly, and
+    clang's own AST dump prints the unparenthesized comparison verbatim as
+    ``operator B<N < M>`` for the uninstantiated member -- exactly the
+    shape this function receives from this codebase's own castxml/clang-
+    derived declaration names. An earlier revision treated every ``<`` at
+    ``paren_depth == 0`` as a real template opener unconditionally, driving
+    ``angle_depth`` one too high with nothing to bring it back down,
+    rejecting this valid input."""
+
+    def test_unparenthesized_less_than_comparison_target_is_accepted(self) -> None:
+        target = "operator B<N < M>"
+        assert qualified_name_scope_components(f"api::C::{target}") == [
+            "api",
+            "C",
+            target,
+        ]
+
+    def test_unparenthesized_less_than_in_an_ordinary_qualified_name_splits_correctly(
+        self,
+    ) -> None:
+        assert qualified_name_scope_components("ns::B<N < M>::method") == [
+            "ns",
+            "B<N < M>",
+            "method",
+        ]
+
+    def test_a_real_template_open_immediately_after_a_name_is_still_recognized(
+        self,
+    ) -> None:
+        """The spacing signal must not become blind to genuine nested
+        templates -- a real template-opening ``<`` (no preceding space)
+        alongside an unparenthesized comparison in a sibling argument."""
+        target = "operator Holder<N < M, Other<C>>"
+        assert qualified_name_scope_components(f"api::C::{target}") == [
+            "api",
+            "C",
+            target,
+        ]
+
+    def test_still_rejects_genuinely_unbalanced_nesting_alongside_the_comparison(
+        self,
+    ) -> None:
+        assert qualified_name_scope_components("api::C::operator B<N < M") is None
+
+
+class TestStripTrailingTopLevelParameterListAcceptsUnparenthesizedLessThan:
+    """The identical spacing-based fix, applied to
+    :func:`strip_trailing_top_level_parameter_list`'s own angle-bracket
+    tracking."""
+
+    def test_unparenthesized_less_than_scope_splits_correctly(self) -> None:
+        assert (
+            strip_trailing_top_level_parameter_list("ns::Holder<N < M>(int)")
+            == "ns::Holder<N < M>"
+        )
+
+
+class TestQualifiedNameScopeComponentsAcceptsLeftShiftExpressionOperators:
+    """Codex review, fresh evidence: a lone ``<`` was correctly distinguished
+    from a template opener via the spacing signal
+    (:func:`_is_template_opening_angle`), but that signal examines each
+    character independently -- the SECOND ``<`` of a genuine ``<<``
+    left-shift expression operator (e.g. ``operator B<N << M>``) is
+    preceded by the FIRST ``<``, not whitespace, so it was still
+    misclassified as a template opener. Confirmed directly against real
+    clang: ``template<int N, int M> struct C { operator B<N << M>() const;
+    };`` compiles cleanly, and clang's AST dump prints the comparison
+    verbatim as ``operator B<N << M>``. Fixed by tokenizing multi-character
+    ``<``-led expression operators (``<<``, ``<=``, ``<<=``, ``<=>``)
+    atomically via :func:`_less_than_led_operator_token_len` BEFORE
+    considering either character individually -- structurally sound
+    without any whitespace signal, since a template-argument-list can
+    never begin with a bare ``<`` or ``=``, so two adjacent ``<``
+    characters (or a ``<`` immediately followed by ``=``) can only ever be
+    this operator's own spelling, never two independent delimiters."""
+
+    def test_left_shift_comparison_target_is_accepted(self) -> None:
+        target = "operator B<N << M>"
+        assert qualified_name_scope_components(f"api::C::{target}") == [
+            "api",
+            "C",
+            target,
+        ]
+
+    def test_less_than_or_equal_comparison_target_is_accepted(self) -> None:
+        """A second multi-character `<`-led token, confirmed against real
+        clang (``operator B<N <= M>`` compiles and prints verbatim)."""
+        target = "operator B<N <= M>"
+        assert qualified_name_scope_components(f"api::C::{target}") == [
+            "api",
+            "C",
+            target,
+        ]
+
+    def test_left_shift_in_an_ordinary_qualified_name_splits_correctly(self) -> None:
+        assert qualified_name_scope_components("ns::B<N << M>::method") == [
+            "ns",
+            "B<N << M>",
+            "method",
+        ]
+
+    def test_a_real_nested_template_after_a_left_shift_sibling_is_still_recognized(
+        self,
+    ) -> None:
+        """The multi-char-token skip must not desynchronize angle-bracket
+        tracking for a genuinely nested template argument that follows."""
+        target = "operator Foo<N << M, Other<C>>"
+        assert qualified_name_scope_components(f"api::C::{target}") == [
+            "api",
+            "C",
+            target,
+        ]
+
+    def test_still_rejects_genuinely_unbalanced_nesting_alongside_left_shift(
+        self,
+    ) -> None:
+        assert qualified_name_scope_components("api::C::operator B<N << M") is None
+
+
+class TestStripTrailingTopLevelParameterListAcceptsLeftShiftExpressionOperators:
+    """The identical multi-character-token fix, applied to
+    :func:`strip_trailing_top_level_parameter_list`'s own angle-bracket
+    tracking."""
+
+    def test_left_shift_scope_splits_correctly(self) -> None:
+        assert (
+            strip_trailing_top_level_parameter_list("ns::Holder<N << M>(int)")
+            == "ns::Holder<N << M>"
+        )
+
+
+class TestQualifiedNameScopeComponentsAcceptsLambdaBodyTemplateArguments:
+    """Codex review, fresh evidence: C++20 allows a captureless lambda
+    closure as a non-type template argument, and its BODY is a full,
+    self-contained statement grammar -- a comparison inside it is not
+    required to be parenthesized the way a bare comparison directly in the
+    template-argument-list is, since it isn't at that grammar production at
+    all. Confirmed directly against real clang: ``operator B<[]{ return N
+    > M; }>() const`` (a lambda-typed conversion target) compiles under
+    ``-std=c++20`` and is pretty-printed verbatim, unparenthesized
+    comparison included, sometimes spanning multiple lines. An earlier
+    revision treated every ``>`` at ``paren_depth == 0`` as a real
+    template-closing delimiter unconditionally, so this comparison's ``>``
+    closed the outer template early and the real closing ``>`` drove the
+    counter negative, rejecting valid input."""
+
+    def test_lambda_body_comparison_target_is_accepted(self) -> None:
+        target = "operator B<[]{ return N > M; }>"
+        assert qualified_name_scope_components(f"api::C::{target}") == [
+            "api",
+            "C",
+            target,
+        ]
+
+    def test_multi_line_lambda_body_target_confirmed_against_real_clang_output(
+        self,
+    ) -> None:
+        """The exact spelling confirmed by ``clang -ast-dump`` for
+        ``operator B<[]{ return N > M; }>()`` under ``-std=c++20`` --
+        clang's pretty-printer wraps the lambda body across lines."""
+        target = "operator B<[] {\n    return N > M;\n}>"
+        assert qualified_name_scope_components(f"api::C::{target}") == [
+            "api",
+            "C",
+            target,
+        ]
+
+    def test_a_real_nested_template_after_a_lambda_body_sibling_is_still_recognized(
+        self,
+    ) -> None:
+        target = "operator Foo<[]{ return N > M; }, Other<C>>"
+        assert qualified_name_scope_components(f"api::C::{target}") == [
+            "api",
+            "C",
+            target,
+        ]
+
+    def test_still_rejects_genuinely_unbalanced_braces(self) -> None:
+        assert (
+            qualified_name_scope_components("api::C::operator B<[]{ return N > M; >")
+            is None
+        )
+
+    def test_still_rejects_genuinely_unbalanced_nesting_after_a_closed_lambda_body(
+        self,
+    ) -> None:
+        assert (
+            qualified_name_scope_components("api::C::operator B<[]{ return N > M; }")
+            is None
+        )
+
+
+class TestStripTrailingTopLevelParameterListAcceptsLambdaBodyTemplateArguments:
+    """The identical brace-tracking fix, applied to
+    :func:`strip_trailing_top_level_parameter_list`'s own angle-bracket
+    tracking."""
+
+    def test_lambda_body_scope_splits_correctly(self) -> None:
+        assert (
+            strip_trailing_top_level_parameter_list(
+                "ns::Holder<[]{ return N > M; }>(int)"
+            )
+            == "ns::Holder<[]{ return N > M; }>"
+        )
+
+
+class TestQualifiedNameScopeComponentsAcceptsSubscriptTemplateArguments:
+    """Codex review, fresh evidence: a subscript expression used as (or
+    within) a non-type template argument carries a ``>`` that needs no
+    parenthesization either -- ``]``, not ``>``, closes the subscript, so
+    it carries none of the top-level template-argument ambiguity a bare
+    ``>`` would. Confirmed directly against real clang:
+    ``operator B<A[N > M]>()`` compiles cleanly (with ``constexpr int
+    A[10]``) and is pretty-printed verbatim. An earlier revision treated
+    every ``>`` at ``paren_depth == 0`` as a real template-closing
+    delimiter unconditionally, so the comparison's own ``>`` closed the
+    outer template early and the real closing ``>`` drove the counter
+    negative, rejecting valid input."""
+
+    def test_subscript_comparison_target_is_accepted(self) -> None:
+        target = "operator B<A[N > M]>"
+        assert qualified_name_scope_components(f"api::C::{target}") == [
+            "api",
+            "C",
+            target,
+        ]
+
+    def test_subscript_in_an_ordinary_qualified_name_splits_correctly(self) -> None:
+        assert qualified_name_scope_components("ns::B<A[N > M]>::method") == [
+            "ns",
+            "B<A[N > M]>",
+            "method",
+        ]
+
+    def test_a_real_nested_template_after_a_subscript_sibling_is_still_recognized(
+        self,
+    ) -> None:
+        target = "operator Foo<A[N > M], Other<C>>"
+        assert qualified_name_scope_components(f"api::C::{target}") == [
+            "api",
+            "C",
+            target,
+        ]
+
+    def test_still_rejects_genuinely_unbalanced_brackets(self) -> None:
+        assert qualified_name_scope_components("api::C::operator B<A[N > M>") is None
+
+    def test_still_rejects_genuinely_unbalanced_nesting_after_a_closed_subscript(
+        self,
+    ) -> None:
+        assert qualified_name_scope_components("api::C::operator B<A[N > M]") is None
+
+
+class TestStripTrailingTopLevelParameterListAcceptsSubscriptTemplateArguments:
+    """The identical bracket-tracking fix, applied to
+    :func:`strip_trailing_top_level_parameter_list`'s own angle-bracket
+    tracking."""
+
+    def test_subscript_scope_splits_correctly(self) -> None:
+        assert (
+            strip_trailing_top_level_parameter_list("ns::Holder<A[N > M]>(int)")
+            == "ns::Holder<A[N > M]>"
+        )
+
+
+class TestQualifiedNameScopeComponentsAcceptsLambdaTrailingReturnArrows:
+    """Codex review, fresh evidence: a lambda's trailing-return-type arrow
+    (``[]() -> bool { ... }``) sits in the lambda's OWN declarator, between
+    its parameter list and its body -- not inside any brace/bracket the
+    earlier fixes already track as opaque. Confirmed directly against real
+    clang: ``operator B<[]() -> bool { return N > 0; }>()`` compiles under
+    ``-std=c++20`` and is pretty-printed verbatim. Unlike every other ``>``
+    case, this needs no heuristic at all: by the C++ lexical grammar's own
+    maximal-munch rule, a ``-`` immediately adjacent to a ``>`` can only
+    ever tokenize as the single ``->`` token, never as two separate
+    tokens."""
+
+    def test_lambda_trailing_return_arrow_target_is_accepted(self) -> None:
+        target = "operator B<[]() -> bool { return N > 0; }>"
+        assert qualified_name_scope_components(f"api::C::{target}") == [
+            "api",
+            "C",
+            target,
+        ]
+
+    def test_multi_line_trailing_return_arrow_confirmed_against_real_clang_output(
+        self,
+    ) -> None:
+        """The exact spelling confirmed by ``clang -ast-dump`` for
+        ``operator B<[]() -> bool { return N > 0; }>()`` under
+        ``-std=c++20``."""
+        target = "operator B<[]() -> bool {\n    return N > 0;\n}>"
+        assert qualified_name_scope_components(f"api::C::{target}") == [
+            "api",
+            "C",
+            target,
+        ]
+
+    def test_trailing_return_arrow_in_an_ordinary_qualified_name_splits_correctly(
+        self,
+    ) -> None:
+        assert qualified_name_scope_components(
+            "ns::B<[]() -> bool { return N > 0; }>::method"
+        ) == ["ns", "B<[]() -> bool { return N > 0; }>", "method"]
+
+    def test_still_rejects_genuinely_unbalanced_nesting_alongside_the_arrow(
+        self,
+    ) -> None:
+        assert (
+            qualified_name_scope_components(
+                "api::C::operator B<[]() -> bool { return N > 0; }"
+            )
+            is None
+        )
+
+
+class TestStripTrailingTopLevelParameterListAcceptsLambdaTrailingReturnArrows:
+    """The identical arrow-token fix, applied to
+    :func:`strip_trailing_top_level_parameter_list`'s own angle-bracket
+    tracking."""
+
+    def test_lambda_trailing_return_arrow_scope_splits_correctly(self) -> None:
+        assert (
+            strip_trailing_top_level_parameter_list(
+                "ns::Holder<[]() -> bool { return N > 0; }>(int)"
+            )
+            == "ns::Holder<[]() -> bool { return N > 0; }>"
+        )
+
+
+class TestStripTrailingTopLevelParameterListAcceptsExpressionBearingScopes:
+    """The identical bracket-kind-blind depth bug as the class above, in
+    :func:`strip_trailing_top_level_parameter_list`'s own angle-bracket
+    tracking: a comparison inside a parenthesized non-type template
+    argument, followed by a genuinely nested function-type template
+    argument, could make the counter close the enclosing template one
+    character early and mistake the nested function type's own parameter
+    list for the real, top-level one."""
+
+    def test_comparison_alongside_a_nested_function_type_argument_splits_correctly(
+        self,
+    ) -> None:
+        assert (
+            strip_trailing_top_level_parameter_list(
+                "ns::Holder<(A > B), int(int)>(really)"
+            )
+            == "ns::Holder<(A > B), int(int)>"
+        )
 
 
 class TestStripTrailingTopLevelParameterList:
@@ -675,3 +1126,335 @@ class TestFindNamespaceMoveGroupsCountsEachDeclarationOnce:
         # Below the 2-pairs threshold -- a single declaration reported
         # twice must not manufacture a batch finding on its own.
         assert emit_namespace_move_batches(groups) == []
+
+
+class TestFindNamespaceMoveGroupsRejectsManyToOnePairings:
+    """Codex review, fresh evidence: the one-to-many ambiguity guard (see
+    ``test_ambiguous_many_to_many_pairing_is_rejected`` above) checks
+    whether a REMOVED symbol's masked context matches more than one added
+    candidate, but says nothing about the RECIPROCAL shape -- more than one
+    DISTINCT removed segment value converging on the identical masked
+    context. When ``old1::{f,g}`` and ``old2::{f,g}`` are both removed
+    while only ``new::{f,g}`` is added, each removed symbol's masked lookup
+    has exactly one candidate (``new::f``/``new::g``), so the one-to-many
+    check alone accepts BOTH ``old1 -> new`` and ``old2 -> new`` and each
+    independently clears the 2+-pairs threshold -- two contradictory
+    SYMBOL_RENAMED_BATCH findings for evidence that cannot say which of
+    old1/old2 actually moved (the other was simply deleted)."""
+
+    def test_two_old_namespaces_converging_on_one_new_namespace_is_rejected(
+        self,
+    ) -> None:
+        removed = {
+            "_ZN4old11fEv",
+            "_ZN4old11gEv",
+            "_ZN4old21fEv",
+            "_ZN4old21gEv",
+        }
+        added = {"_ZN3new1fEv", "_ZN3new1gEv"}
+        assert find_namespace_move_groups(removed, added) == {}
+
+    def test_an_unambiguous_group_survives_alongside_an_unrelated_many_to_one_one(
+        self,
+    ) -> None:
+        """The rejection must be scoped to the colliding masked context,
+        not collateral-damage a real, resolvable move sharing no segment
+        with it."""
+        removed = set(_D1) | {
+            "_ZN4old11fEv",
+            "_ZN4old11gEv",
+            "_ZN4old21fEv",
+            "_ZN4old21gEv",
+        }
+        added = set(_D2) | {"_ZN3new1fEv", "_ZN3new1gEv"}
+        groups = find_namespace_move_groups(removed, added)
+        assert ("d1", "d2") in groups
+        assert len(groups[("d1", "d2")]) == len(_D1)
+        assert ("old1", "new") not in groups
+        assert ("old2", "new") not in groups
+
+    def test_independent_moves_reusing_a_bare_target_name_are_not_rejected(
+        self,
+    ) -> None:
+        """Two genuinely independent, unambiguous moves that happen to
+        reuse the same bare TARGET segment name in different scopes
+        (``p1::old1::{f,g} -> p1::new::{f,g}`` alongside the unrelated
+        ``p2::old2::{h,i} -> p2::new::{h,i}``) must still both be
+        reported: each masked context is scoped by its own unmasked
+        siblings (``p1`` vs. ``p2``), so the two moves never collide on
+        the same masked key even though both target a segment spelled
+        ``new``."""
+        removed = {
+            "_ZN2p14old11fEv",
+            "_ZN2p14old11gEv",
+            "_ZN2p24old21hEv",
+            "_ZN2p24old21iEv",
+        }
+        added = {
+            "_ZN2p13new1fEv",
+            "_ZN2p13new1gEv",
+            "_ZN2p23new1hEv",
+            "_ZN2p23new1iEv",
+        }
+        groups = find_namespace_move_groups(removed, added)
+        assert groups[("old1", "new")] == [
+            ("p1::old1::f", "p1::new::f"),
+            ("p1::old1::g", "p1::new::g"),
+        ]
+        assert groups[("old2", "new")] == [
+            ("p2::old2::h", "p2::new::h"),
+            ("p2::old2::i", "p2::new::i"),
+        ]
+
+
+class TestFindNamespaceMoveGroupsRejectsCrossPositionManyToOnePairings:
+    """Codex review, fresh evidence: the position-scoped many-to-one guard
+    above (``TestFindNamespaceMoveGroupsRejectsManyToOnePairings``) only
+    catches two old segment values competing for the SAME masked context --
+    i.e. differing at the SAME component position. When removed candidates
+    differ from the same added symbol at DIFFERENT positions, their masked
+    contexts differ too, so that check sees no collision and both
+    contradictory pairings survive. Concretely: removing ``p1::old::{f,g}``
+    (masking position 0 -> candidate ``new::old::{f,g}``) and
+    ``new::p2::{f,g}`` (masking position 1 -> the SAME candidate
+    ``new::old::{f,g}``) while adding only ``new::old::{f,g}`` lets both
+    ``p1 -> new`` and ``p2 -> old`` independently clear the 2+-pairs
+    threshold, over the identical added declarations -- the same added
+    symbol cannot simultaneously be evidence that ``p1`` moved to ``new``
+    (with ``old`` unchanged) AND that ``p2`` moved to ``old`` (with ``new``
+    unchanged)."""
+
+    def test_cross_position_collision_on_one_added_declaration_is_rejected(
+        self,
+    ) -> None:
+        removed = {
+            "_ZN2p13old1fEv",
+            "_ZN2p13old1gEv",
+            "_ZN3new2p21fEv",
+            "_ZN3new2p21gEv",
+        }
+        added = {"_ZN3new3old1fEv", "_ZN3new3old1gEv"}
+        assert find_namespace_move_groups(removed, added) == {}
+
+    def test_ns_symbol_sharing_the_collision_at_one_position_is_also_rejected(
+        self,
+    ) -> None:
+        """Codex review, fresh evidence (round 3): an earlier revision of
+        this fix treated `ns::old::f`/`ns::old::g` as an unambiguous
+        "unrelated" survivor here, on the reasoning that its OWN masking
+        position (masking `old`, matching `ns::new::f`) is collision-free
+        even though its OTHER position (masking `ns`, matching
+        `new::old::f`) collides with `p1`/`p2` there. That reasoning is
+        unsound: `ns::old::f` genuinely has TWO live, structurally possible
+        fates here -- `ns -> new` (contested with `p1`, unconfirmable) or
+        `old -> new` (its own, otherwise-clean candidacy) -- and a
+        collision at one position proves the CONTESTED half is
+        unconfirmable, not that the OTHER half is thereby confirmed.
+        `ns::old::f`'s fate is exactly as undecided as `p1::old::f`'s or
+        `new::p2::f`'s, so nothing here should be reported at all -- see
+        `test_an_unambiguous_move_with_no_second_candidacy_still_survives`
+        below for what a GENUINELY unambiguous unrelated move (only one
+        candidacy total, not merely one collision-free position) looks
+        like, and that it does still survive alongside this rejection."""
+        removed = {
+            "_ZN2p13old1fEv",
+            "_ZN2p13old1gEv",
+            "_ZN3new2p21fEv",
+            "_ZN3new2p21gEv",
+            "_ZN2ns3old1fEv",
+            "_ZN2ns3old1gEv",
+        }
+        added = {
+            "_ZN3new3old1fEv",
+            "_ZN3new3old1gEv",
+            "_ZN2ns3new1fEv",
+            "_ZN2ns3new1gEv",
+        }
+        assert find_namespace_move_groups(removed, added) == {}
+
+    def test_an_unambiguous_move_with_no_second_candidacy_still_survives(
+        self,
+    ) -> None:
+        """The rejection must be scoped to a removed symbol that genuinely
+        has more than one raw candidacy, not collateral-damage a real,
+        resolvable move that has only ONE candidacy in total (no second
+        masking position produces any candidate at all) -- unlike
+        `ns::old::f` above, whose own second position DOES produce a
+        (contested) candidate."""
+        removed = {
+            "_ZN2p13old1fEv",
+            "_ZN2p13old1gEv",
+            "_ZN3new2p21fEv",
+            "_ZN3new2p21gEv",
+            "_ZN2ns3old1fEv",
+            "_ZN2ns3old1gEv",
+            "_ZN2a34old31hEv",
+            "_ZN2a34old31iEv",
+        }
+        added = {
+            "_ZN3new3old1fEv",
+            "_ZN3new3old1gEv",
+            "_ZN2ns3new1fEv",
+            "_ZN2ns3new1gEv",
+            "_ZN2a34new31hEv",
+            "_ZN2a34new31iEv",
+        }
+        groups = find_namespace_move_groups(removed, added)
+        assert groups == {
+            ("old3", "new3"): [
+                ("a3::old3::h", "a3::new3::h"),
+                ("a3::old3::i", "a3::new3::i"),
+            ]
+        }
+        assert ("old", "new") not in groups
+        assert ("p1", "new") not in groups
+        assert ("p2", "old") not in groups
+
+    def test_cross_position_collision_sharing_identical_key_text_is_rejected(
+        self,
+    ) -> None:
+        """Codex review, fresh evidence: the fix above tracked distinct
+        claiming removed-symbol identities per added declaration -- an
+        earlier revision tracked distinct ``(old_segment, new_segment)``
+        KEY TEXT instead, which is insufficient. Removing ``old::new::f``
+        and ``new::old::f`` while adding only ``new::new::f`` has BOTH
+        claims spell the identical key ``('old', 'new')`` (``old::new::f``
+        masked at position 0 gives ``old -> new``; ``new::old::f`` masked
+        at position 1 also gives ``old -> new``), so a key-text-only guard
+        wrongly saw one distinct key and accepted both -- even though they
+        are two genuinely different removed originals both claiming the
+        SAME single added declaration as their target, which cannot
+        actually be the result of two different historical moves at once."""
+        removed = {"_ZN3old3new1fEv", "_ZN3new3old1fEv"}
+        added = {"_ZN3new3new1fEv"}
+        assert find_namespace_move_groups(removed, added) == {}
+
+
+class TestFindNamespaceMoveGroupsRejectsCrossPositionOneToManyPairings:
+    """Codex review, fresh evidence: the previous fixes catch several
+    removed symbols converging on one added declaration; they say nothing
+    about the SYMMETRIC shape -- the SAME removed symbol resolving to
+    DIFFERENT added declarations at its different masking positions.
+    Removing ``p1::old::{f,g}`` while adding ``new::old::{f,g}`` AND
+    ``p1::new::{f,g}`` makes each removed symbol match TWO candidates: at
+    masking position 0 (hiding ``p1``) it matches ``new::old::{f,g}``
+    (implying ``p1 -> new``); at masking position 1 (hiding ``old``) it
+    matches ``p1::new::{f,g}`` (implying ``old -> new``). Both
+    substitutions are individually unambiguous by every other check, yet
+    the identical removed symbol is being counted as evidence for two
+    mutually exclusive moves at once."""
+
+    def test_one_removed_symbol_matching_two_targets_across_positions_is_rejected(
+        self,
+    ) -> None:
+        removed = {"_ZN2p13old1fEv", "_ZN2p13old1gEv"}
+        added = {
+            "_ZN3new3old1fEv",
+            "_ZN3new3old1gEv",
+            "_ZN2p13new1fEv",
+            "_ZN2p13new1gEv",
+        }
+        assert find_namespace_move_groups(removed, added) == {}
+
+    def test_unrelated_same_position_collision_also_rejects_the_shared_symbol(
+        self,
+    ) -> None:
+        """This is the identical scenario as
+        `TestFindNamespaceMoveGroupsRejectsCrossPositionManyToOnePairings.
+        test_ns_symbol_sharing_the_collision_at_one_position_is_also_rejected`
+        above, pinned here too since it's the concrete counterexample that
+        proved an earlier revision of THIS class's own guard unsound (see
+        the round-3 note on `removed_id_to_added_symbols`'s construction):
+        `ns::old::f`/`ns::old::g` genuinely have two live candidacies here
+        (`ns -> new`, contested with `p1`/`p2`; `old -> new`, its own
+        otherwise-clean candidacy) and must be rejected entirely, not
+        merely have the contested half discarded in favor of the clean
+        half. See `TestFindNamespaceMoveGroupsRejectsCrossPositionManyToOnePairings.
+        test_an_unambiguous_move_with_no_second_candidacy_still_survives`
+        for what a genuinely single-candidacy unrelated move looks like."""
+        removed = {
+            "_ZN2p13old1fEv",
+            "_ZN2p13old1gEv",
+            "_ZN3new2p21fEv",
+            "_ZN3new2p21gEv",
+            "_ZN2ns3old1fEv",
+            "_ZN2ns3old1gEv",
+        }
+        added = {
+            "_ZN3new3old1fEv",
+            "_ZN3new3old1gEv",
+            "_ZN2ns3new1fEv",
+            "_ZN2ns3new1gEv",
+        }
+        assert find_namespace_move_groups(removed, added) == {}
+
+
+class TestFindNamespaceMoveGroupsRejectsContestedAlternateCandidacies:
+    """Codex review, fresh evidence (round 3) -- the mirror image of
+    `TestFindNamespaceMoveGroupsRejectsCrossPositionOneToManyPairings`'s own
+    counterexample, found on review of that fix. A removed symbol with two
+    raw candidacies must be rejected even when only ONE of its two
+    candidacies is itself independently ambiguous (contested by an
+    unrelated third symbol at that position) -- the OTHER, locally-clean
+    candidacy is not thereby confirmed; it remains merely one of two
+    unconfirmed hypotheses. Removing ``ns::old::{f,g}`` and ``ns::q::{f,g}``
+    while adding ``new::old::{f,g}`` and ``ns::new::{f,g}``: `ns::old::f`
+    matches `new::old::f` cleanly via one masking position (implying
+    `ns -> new`) and matches `ns::new::f` via its other masking position
+    (implying `old -> new`), but that second candidacy collides with
+    `ns::q::f`'s own identical claim on `ns::new::f` (was it `old` or `q`
+    that became `new`?). An earlier revision of this fix discarded the
+    colliding candidacy and let the clean one survive uncontested, emitting
+    a false `ns -> new` batch backed only by `ns::old::f`/`ns::old::g`."""
+
+    def test_alternate_candidacy_contested_by_a_third_symbol_is_still_rejected(
+        self,
+    ) -> None:
+        removed = {
+            "_ZN2ns3old1fEv",
+            "_ZN2ns3old1gEv",
+            "_ZN2ns1q1fEv",
+            "_ZN2ns1q1gEv",
+        }
+        added = {
+            "_ZN3new3old1fEv",
+            "_ZN3new3old1gEv",
+            "_ZN2ns3new1fEv",
+            "_ZN2ns3new1gEv",
+        }
+        assert find_namespace_move_groups(removed, added) == {}
+
+
+class TestFindNamespaceMoveGroupsRetainsLocallyAmbiguousCandidatesGlobally:
+    """Codex review, fresh evidence (round 4) -- a candidacy discarded by
+    the LOCAL one-to-many check (a removed symbol's masked context matching
+    more than one distinct added target AT THAT POSITION) never entered
+    `entries` at all, so it never contributed to the global
+    `added_id_to_removed_symbols`/`removed_id_to_added_symbols` collision
+    tracking either -- even though discarding it as unusable evidence for
+    ONE SPECIFIC pairing does not mean the added declaration it ambiguously
+    matched stops being a real, live alternative explanation. Removing
+    ``p1::old::{f,g}`` and ``new::p2::{f,g}`` while adding
+    ``new::old::{f,g}`` and ``x::old::{f,g}``: `p1::old::f` masked at
+    position 0 matches BOTH `new::old::f` and `x::old::f` (locally
+    ambiguous, discarded from `entries`), so `new::p2::f` (masking position
+    1, matching `new::old::f` uniquely) appeared uncontested and emitted a
+    false `p2 -> old` batch, even though `p1::old::f` is just as plausibly
+    `new::old::f`'s real source."""
+
+    def test_locally_discarded_candidacy_still_contests_its_target(
+        self,
+    ) -> None:
+        removed = {
+            "_ZN2p13old1fEv",
+            "_ZN2p13old1gEv",
+            "_ZN3new2p21fEv",
+            "_ZN3new2p21gEv",
+        }
+        added = {
+            "_ZN3new3old1fEv",
+            "_ZN3new3old1gEv",
+            "_ZN1x3old1fEv",
+            "_ZN1x3old1gEv",
+        }
+        assert find_namespace_move_groups(removed, added) == {}
