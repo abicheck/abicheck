@@ -309,7 +309,7 @@ def _neutralize_gate(report: dict[str, Any]) -> None:
     # module's documented "*report* itself is never mutated" contract (Codex
     # review). Copying per path is cheap and, unlike a blanket deepcopy,
     # leaves the report's large `changes` payload untouched.
-    from ..aggregate import contract_coverage_block_paths
+    from ..workflows.aggregate import contract_coverage_block_paths
 
     for path in contract_coverage_block_paths(report):
         node: dict[str, Any] = report
@@ -388,7 +388,7 @@ def _zero_nested_severity_gates(report: dict[str, Any]) -> None:
     published gate must say so outright, exactly as the root ``severity``
     branch above already does for a ``compare`` report.
     """
-    from ..aggregate import scan_severity_gate_paths
+    from ..workflows.aggregate import scan_severity_gate_paths
 
     for path in scan_severity_gate_paths(report):
         node: dict[str, Any] = report

@@ -1155,7 +1155,7 @@ class AggregateGateSpec:
         identical key/value distinction for the projected ``run-plan.json``
         ``gate`` block this class feeds.
         """
-        from ..aggregate_manifest import OnMissingRequired, OnUnexpectedTarget
+        from ..workflows.aggregate import OnMissingRequired, OnUnexpectedTarget
 
         where = "aggregate.gate"
         if not isinstance(d, dict):

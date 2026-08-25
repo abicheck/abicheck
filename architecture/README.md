@@ -28,8 +28,11 @@ mapping. Every layer record requires a repository-relative `path` and a
 direction can be enforced before their own physical move. Paths must be unique; imports
 must name real layers; and the resulting graph must be acyclic. The remaining
 lists classify public root surfaces, compatibility facades, parser/catalog
-exception roots, frozen root filename families, pre-adoption root directories,
-and pre-adoption generic module names.
+exception roots, frozen root filename families, the complete pre-adoption flat
+root-module inventory, pre-adoption root directories, and pre-adoption generic
+module names. Files outside those inventories must be created under a declared
+responsibility package. Scoped package `AGENTS.md` files are also checked
+against `limits.package_agents`.
 
 `debt.yaml` has `schema_version: 1` and a `files` list. Every record requires
 `path`, positive `baseline_lines`, `target`, `rule: no_growth`, `category`,
@@ -46,6 +49,10 @@ base are not attributed to the architecture PR, while any additional growth
 on the branch still fails. When the base predates this contract entirely, the
 run is the adoption run and records the merged tree rather than treating
 concurrent pre-adoption work as new debt.
+After adoption, an ordinary file absent from the PR base cannot add itself to
+the ledger; only files below a declared parser/catalog exception root may use
+that mechanism. This keeps the hard file-size ceiling from becoming an
+opt-in exception.
 
 ## Updating the contract
 

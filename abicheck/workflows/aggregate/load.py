@@ -264,6 +264,7 @@ def _load_report_file(path: Path, *, prefix: str) -> _LoadedReport:
                 path=path,
                 contract_coverage_exit=_contract_coverage_exit(data),
                 contract_coverage_incomplete=_contract_coverage_incomplete(data),
+                contract_coverage_declared=_contract_coverage_declared(data),
                 analysis_assurance_exit=_analysis_assurance_exit(data),
                 effective_config_digest=effective_config_digest,
             )

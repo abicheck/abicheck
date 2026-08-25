@@ -338,7 +338,9 @@ def _imports(
             )
         )
         return ()
-    package = module.split(".")[:-1]
+    package = (
+        module.split(".") if path.name == "__init__.py" else module.split(".")[:-1]
+    )
     result: list[tuple[int, str]] = []
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
@@ -357,12 +359,16 @@ def _imports(
     return result
 
 
-def _layer_for(module: str, layers: Mapping[str, dict[str, Any]]) -> str | None:
+def _layer_for(
+    module: str, root: Path, layers: Mapping[str, dict[str, Any]]
+) -> str | None:
     for name, layer in layers.items():
         path = layer.get("path")
         if isinstance(path, str):
             prefix = path.replace("/", ".")
-            if module == prefix or module.startswith(prefix + "."):
+            if (root / path).is_dir() and (
+                module == prefix or module.startswith(prefix + ".")
+            ):
                 return name
         for legacy_path in layer.get("legacy_paths", []):
             legacy_module = legacy_path.removesuffix(".py").replace("/", ".")
@@ -380,7 +386,20 @@ def _source_layer_for(
         prefix = layer.get("path")
         if isinstance(prefix, str) and relative.startswith(prefix.rstrip("/") + "/"):
             return name
+        if relative in layer.get("legacy_paths", []):
+            return name
     return None
+
+
+def _inert_facade_value(node: ast.expr | None) -> bool:
+    """Return whether an assignment value binds data or an alias without executing."""
+    if node is None or isinstance(node, (ast.Constant, ast.Name, ast.Attribute)):
+        return True
+    if isinstance(node, (ast.List, ast.Tuple, ast.Set)):
+        return all(_inert_facade_value(item) for item in node.elts)
+    if isinstance(node, ast.Dict):
+        return all(_inert_facade_value(item) for item in [*node.keys, *node.values])
+    return False
 
 
 def _check_facade(path: Path, name: str, limit: int, findings: list[Finding]) -> None:
@@ -422,9 +441,30 @@ def _check_facade(path: Path, name: str, limit: int, findings: list[Finding]) ->
                         f"{path}:{node.lineno}: facade contains executable expression",
                     )
                 )
-        elif not isinstance(node, ast.If) or not any(
-            isinstance(child, ast.ImportFrom) and child.module == "__future__"
-            for child in ast.walk(node)
+            elif isinstance(node, ast.Assign) and not _inert_facade_value(node.value):
+                findings.append(
+                    Finding(
+                        "facade-logic",
+                        f"{path}:{node.lineno}: facade assignment executes logic",
+                    )
+                )
+            elif isinstance(node, ast.AnnAssign) and not _inert_facade_value(
+                node.value
+            ):
+                findings.append(
+                    Finding(
+                        "facade-logic",
+                        f"{path}:{node.lineno}: facade assignment executes logic",
+                    )
+                )
+        elif not (
+            isinstance(node, ast.If)
+            and isinstance(node.test, ast.Name)
+            and node.test.id == "TYPE_CHECKING"
+            and not node.orelse
+            and all(
+                isinstance(child, (ast.Import, ast.ImportFrom)) for child in node.body
+            )
         ):
             findings.append(
                 Finding(
@@ -445,6 +485,9 @@ def check_repository(root: Path, *, base_revision: str | None = None) -> list[Fi
         limits.get("production", 800) if isinstance(limits, dict) else 800
     )
     test_limit = limits.get("test", 1200) if isinstance(limits, dict) else 1200
+    package_agents_limit = (
+        limits.get("package_agents", 150) if isinstance(limits, dict) else 150
+    )
     if not isinstance(production_limit, int) or production_limit <= 0:
         findings.append(
             Finding("schema", "limits.production must be a positive integer")
@@ -453,6 +496,11 @@ def check_repository(root: Path, *, base_revision: str | None = None) -> list[Fi
     if not isinstance(test_limit, int) or test_limit <= 0:
         findings.append(Finding("schema", "limits.test must be a positive integer"))
         test_limit = 1200
+    if not isinstance(package_agents_limit, int) or package_agents_limit <= 0:
+        findings.append(
+            Finding("schema", "limits.package_agents must be a positive integer")
+        )
+        package_agents_limit = 150
     baselines = _validate_debt(debt, production_limit, test_limit, findings)
 
     base_has_contract = (
@@ -466,6 +514,11 @@ def check_repository(root: Path, *, base_revision: str | None = None) -> list[Fi
             )
         )
     adopting_contract = bool(base_revision and base_has_contract is False)
+    exception_roots = _string_list(
+        modules.get("parser_or_catalog_roots", []),
+        "parser_or_catalog_roots",
+        findings,
+    )
     for relative, baseline in baselines.items():
         path = root / relative
         if not path.is_file():
@@ -482,6 +535,21 @@ def check_repository(root: Path, *, base_revision: str | None = None) -> list[Fi
             if base_revision and not adopting_contract
             else None
         )
+        if (
+            base_revision
+            and base_has_contract
+            and base_lines is None
+            and not any(
+                relative == prefix or relative.startswith(prefix.rstrip("/") + "/")
+                for prefix in exception_roots
+            )
+        ):
+            findings.append(
+                Finding(
+                    "debt-exemption",
+                    f"{relative}: new ordinary files cannot be added to the adoption debt ledger",
+                )
+            )
         if (
             lines > baseline
             and not adopting_contract
@@ -540,6 +608,42 @@ def check_repository(root: Path, *, base_revision: str | None = None) -> list[Fi
                         )
                     )
 
+    public_root_files = {
+        module.removeprefix("abicheck.").replace(".", "/") + ".py"
+        for module in _string_list(
+            modules.get("public_root_surfaces", []), "public_root_surfaces", findings
+        )
+    }
+    facade_root_files = {
+        module.removeprefix("abicheck.").replace(".", "/") + ".py"
+        for module in _string_list(modules.get("facades", []), "facades", findings)
+    }
+    legacy_root_modules = set(
+        _string_list(
+            modules.get("legacy_root_modules", []), "legacy_root_modules", findings
+        )
+    )
+    layer_legacy_root_files = {
+        PurePosixPath(path).name
+        for layer in layers.values()
+        for path in layer.get("legacy_paths", [])
+        if PurePosixPath(path).parent == PurePosixPath("abicheck")
+    }
+    allowed_root_modules = (
+        legacy_root_modules
+        | layer_legacy_root_files
+        | public_root_files
+        | facade_root_files
+    )
+    for path in sorted((root / "abicheck").glob("*.py")):
+        if path.name not in allowed_root_modules:
+            findings.append(
+                Finding(
+                    "root-module",
+                    f"{path.relative_to(root)}: undeclared flat root module; create a responsibility-package owner",
+                )
+            )
+
     legacy_dirs = set(
         _string_list(
             modules.get("legacy_root_directories", []),
@@ -552,6 +656,16 @@ def check_repository(root: Path, *, base_revision: str | None = None) -> list[Fi
         for layer in layers.values()
         if layer.get("path")
     }
+    for layer in layers.values():
+        package_path = root / layer["path"]
+        flat_path = package_path.with_suffix(".py")
+        if package_path.is_dir() and flat_path.is_file():
+            findings.append(
+                Finding(
+                    "module-package-collision",
+                    f"{flat_path.relative_to(root)} and {package_path.relative_to(root)}/ both resolve to the same import name",
+                )
+            )
     for path in sorted((root / "abicheck").iterdir()):
         if path.is_dir() and path.name not in legacy_dirs | layer_dir_names | {
             "__pycache__"
@@ -560,6 +674,16 @@ def check_repository(root: Path, *, base_revision: str | None = None) -> list[Fi
                 Finding(
                     "root-package",
                     f"{path.relative_to(root)}/: undeclared root implementation package; assign it to an ADR-061 responsibility",
+                )
+            )
+
+    for layer in layers.values():
+        agents = root / layer["path"] / "AGENTS.md"
+        if agents.is_file() and _line_count(agents) > package_agents_limit:
+            findings.append(
+                Finding(
+                    "agents-size",
+                    f"{agents.relative_to(root)}: {_line_count(agents)} lines exceeds package instructions maximum {package_agents_limit}",
                 )
             )
 
@@ -593,8 +717,12 @@ def check_repository(root: Path, *, base_revision: str | None = None) -> list[Fi
         source_layer = _source_layer_for(path, root, layers)
         if source_layer is None:
             continue
-        agents = root / layers[source_layer]["path"] / "AGENTS.md"
-        if not agents.is_file():
+        owner_path = layers[source_layer]["path"]
+        migrated_source = (
+            path.relative_to(root).as_posix().startswith(owner_path.rstrip("/") + "/")
+        )
+        agents = root / owner_path / "AGENTS.md"
+        if migrated_source and not agents.is_file():
             findings.append(
                 Finding(
                     "scoped-instructions",
@@ -602,13 +730,13 @@ def check_repository(root: Path, *, base_revision: str | None = None) -> list[Fi
                 )
             )
         for lineno, target in _imports(path, module, findings):
-            if not target.startswith("abicheck"):
+            if target != "abicheck" and not target.startswith("abicheck."):
                 continue
-            target_layer = _layer_for(target, layers)
+            target_layer = _layer_for(target, root, layers)
             if target_layer == source_layer:
                 continue
             if target_layer is None:
-                if not any(
+                if migrated_source and not any(
                     target == surface or target.startswith(surface + ".")
                     for surface in public_roots
                 ):

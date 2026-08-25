@@ -47,13 +47,13 @@ def _tree(tmp_path: Path) -> Path:
             "test": 12,
             "facade": 6,
             "package_agents": 15,
-            "root_agents": 35,
         },
         "layers": layers,
         "public_root_surfaces": ["abicheck.errors"],
         "facades": [],
         "frozen_root_families": {"cli_": ["cli_old.py"]},
         "legacy_root_directories": [],
+        "legacy_root_modules": ["__init__.py"],
         "legacy_generic_modules": [],
         "parser_or_catalog_roots": [],
     }
@@ -81,6 +81,32 @@ def test_valid_miniature_tree_passes(tmp_path: Path) -> None:
     _add_package(root, "compare", "from abicheck.model import VALUE\n")
 
     assert check_repository(root) == []
+
+
+def test_package_initializer_relative_import_stays_in_package(tmp_path: Path) -> None:
+    root = _tree(tmp_path)
+    _add_package(root, "model", "from .facts import VALUE\n")
+    _write(root / "abicheck/model/facts.py", "VALUE = 1\n")
+
+    assert check_repository(root) == []
+
+
+def test_flat_module_package_collision_is_rejected(tmp_path: Path) -> None:
+    root = _tree(tmp_path)
+    _add_package(root, "model")
+    _write(root / "abicheck/model.py", "VALUE = 1\n")
+    config = json.loads((root / "architecture/modules.yaml").read_text())
+    config["legacy_root_modules"].append("model.py")
+    _write(root / "architecture/modules.yaml", json.dumps(config))
+
+    assert "module-package-collision" in _rules(root)
+
+
+def test_unlisted_flat_root_module_is_rejected(tmp_path: Path) -> None:
+    root = _tree(tmp_path)
+    _write(root / "abicheck/orchestration.py", "VALUE = 1\n")
+
+    assert "root-module" in _rules(root)
 
 
 def test_new_forbidden_prefix_sibling_is_actionable(tmp_path: Path) -> None:
@@ -238,6 +264,40 @@ def test_unresolvable_base_cannot_bypass_no_growth(tmp_path: Path, monkeypatch) 
     assert "base-revision" in {finding.rule for finding in findings}
 
 
+def test_new_ordinary_file_cannot_claim_adoption_debt(
+    tmp_path: Path, monkeypatch
+) -> None:
+    root = _tree(tmp_path)
+    _write(root / "abicheck/legacy.py", "VALUE = 1\n" * 10)
+    config = json.loads((root / "architecture/modules.yaml").read_text())
+    config["legacy_root_modules"].append("legacy.py")
+    _write(root / "architecture/modules.yaml", json.dumps(config))
+    debt = {
+        "schema_version": 1,
+        "files": [
+            {
+                "path": "abicheck/legacy.py",
+                "baseline_lines": 10,
+                "target": "model",
+                "rule": "no_growth",
+                "category": "legacy_monolith",
+                "owner": "maintainers",
+                "rationale": "Not actually adoption-era debt.",
+                "review_by": "2026-11-30",
+            }
+        ],
+    }
+    _write(root / "architecture/debt.yaml", json.dumps(debt))
+    monkeypatch.setattr(
+        architecture, "_base_has_architecture_contract", lambda *_: True
+    )
+    monkeypatch.setattr(architecture, "_git_file_line_count", lambda *_: None)
+
+    findings = check_repository(root, base_revision="base")
+
+    assert "debt-exemption" in {finding.rule for finding in findings}
+
+
 def test_undeclared_cross_package_import_fails(tmp_path: Path) -> None:
     root = _tree(tmp_path)
     _add_package(root, "model")
@@ -328,6 +388,50 @@ def test_facade_requires_explicit_exports_and_delegation_only(tmp_path: Path) ->
     rules = _rules(root)
 
     assert {"facade-exports", "facade-logic"} <= rules
+
+
+def test_facade_rejects_executable_assignment(tmp_path: Path) -> None:
+    root = _tree(tmp_path)
+    config = json.loads((root / "architecture/modules.yaml").read_text())
+    config["facades"] = ["abicheck.legacy_api"]
+    _write(root / "architecture/modules.yaml", json.dumps(config))
+    _write(root / "abicheck/legacy_api.py", "__all__ = []\nIMPL = build_impl()\n")
+
+    assert "facade-logic" in _rules(root)
+
+
+def test_facade_allows_import_only_type_checking_block(tmp_path: Path) -> None:
+    root = _tree(tmp_path)
+    config = json.loads((root / "architecture/modules.yaml").read_text())
+    config["facades"] = ["abicheck.legacy_api"]
+    _write(root / "architecture/modules.yaml", json.dumps(config))
+    _write(
+        root / "abicheck/legacy_api.py",
+        "from typing import TYPE_CHECKING\n__all__ = []\nif TYPE_CHECKING:\n    from abicheck.errors import Error\n",
+    )
+
+    assert "facade-logic" not in _rules(root)
+
+
+def test_oversized_package_instructions_are_rejected(tmp_path: Path) -> None:
+    root = _tree(tmp_path)
+    _add_package(root, "model")
+    _write(root / "abicheck/model/AGENTS.md", "instruction\n" * 16)
+
+    assert "agents-size" in _rules(root)
+
+
+def test_legacy_source_import_direction_is_enforced(tmp_path: Path) -> None:
+    root = _tree(tmp_path)
+    config = json.loads((root / "architecture/modules.yaml").read_text())
+    config["layers"]["model"]["legacy_paths"] = ["abicheck/legacy_model.py"]
+    _write(root / "architecture/modules.yaml", json.dumps(config))
+    _write(root / "abicheck/legacy_model.py", "from abicheck.workflows import run\n")
+    config["legacy_root_modules"].append("legacy_model.py")
+    _write(root / "architecture/modules.yaml", json.dumps(config))
+    _add_package(root, "workflows")
+
+    assert "dependency-direction" in _rules(root)
 
 
 def test_invalid_debt_path_and_review_date_fail_schema(tmp_path: Path) -> None:

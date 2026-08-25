@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from .workflows.aggregate.matrix import (
     FindingMatrixEntry,
+    ProfileCheckFindings,
     ProfileContractState,
     build_finding_matrix,
     render_finding_matrix_lines,
@@ -16,6 +17,8 @@ from .workflows.aggregate.reconcile import (
     FINDING_SCOPE_PARTIAL,
     FINDING_SCOPE_PROFILE_SPECIFIC,
     FINDING_SCOPE_UNDETERMINED,
+    MANGLING_ITANIUM,
+    MANGLING_MSVC,
     ReportFinding,
     ReportFindings,
     comparable_mangled_symbol,
@@ -32,7 +35,10 @@ __all__ = [
     "FINDING_SCOPE_PROFILE_SPECIFIC",
     "FINDING_SCOPE_UNDETERMINED",
     "FindingMatrixEntry",
+    "MANGLING_ITANIUM",
+    "MANGLING_MSVC",
     "ProfileContractState",
+    "ProfileCheckFindings",
     "ReportFinding",
     "ReportFindings",
     "build_finding_matrix",

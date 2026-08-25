@@ -1077,7 +1077,7 @@ def current(name: str) -> str | int:
     if name == "scan":
         return SCAN_SCHEMA_VERSION
     if name == "aggregate":
-        from ..aggregate import AGGREGATE_SCHEMA_VERSION
+        from ..workflows.aggregate import AGGREGATE_SCHEMA_VERSION
 
         return AGGREGATE_SCHEMA_VERSION
     if name == "build-output":

@@ -15,7 +15,7 @@
 """Build the cross-profile matrix from parsed aggregate findings.
 
 This module owns profile-level reconciliation, not report JSON parsing or gate
-folding. Its public names are re-exported by :mod:`.reconcile`.
+folding. Its public names are re-exported by :mod:`.contracts`.
 """
 
 from __future__ import annotations

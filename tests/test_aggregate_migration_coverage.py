@@ -46,3 +46,23 @@ def test_null_verdict_without_structured_reason_is_not_not_comparable(
 
     assert loaded.verdict is None
     assert loaded.reason == "report carried no ABI verdict"
+
+
+def test_not_comparable_report_preserves_declared_contract_coverage(
+    tmp_path: Path,
+) -> None:
+    report = tmp_path / "abi-report-linux.json"
+    report.write_text(
+        json.dumps(
+            {
+                "verdict": None,
+                "reason": {"kind": "scope_mismatch"},
+                "contract_coverage_exit_contribution": 0,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    loaded = _load_report_file(report, prefix="abi-report-")
+
+    assert loaded.contract_coverage_declared
