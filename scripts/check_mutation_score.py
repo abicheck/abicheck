@@ -107,6 +107,11 @@ SURVIVOR_BASELINE: int | None = None
 #: Default per-module baseline, committed alongside the code.
 DEFAULT_BASELINE_FILE = REPO_ROOT / "mutation-baseline.json"
 
+# Must match the 240-minute GitHub Actions job limit in mutation.yml.  The
+# subprocess cap formerly stayed at 7,200 seconds, silently aborting the run
+# at 120 minutes even after the job itself was given more time.
+MUTMUT_RUN_TIMEOUT_SECONDS = 14_400
+
 #: ``@@ -old,cnt +new,cnt @@`` — we only need the new-side range.
 _HUNK = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
 
@@ -126,7 +131,7 @@ def _run_mutmut(cmd: list[str]) -> tuple[str, int]:
     and let the gate pass on stale results (Codex review).
     """
     proc = subprocess.run(  # noqa: S603 — fixed argv, no shell
-        cmd, capture_output=True, text=True, timeout=7200
+        cmd, capture_output=True, text=True, timeout=MUTMUT_RUN_TIMEOUT_SECONDS
     )
     return proc.stdout + proc.stderr, proc.returncode
 
@@ -147,6 +152,11 @@ def render_baseline(records: list[MutantRecord]) -> dict[str, object]:
     can see which mutants were accepted.
     """
     by_module = survivors_by_module(records)
+    functions: dict[str, dict[str, int]] = {}
+    for record in records:
+        if record.is_survivor:
+            functions.setdefault(record.module_path, {}).setdefault(record.function, 0)
+            functions[record.module_path][record.function] += 1
     return {
         "_comment": (
             "Per-module surviving-mutant baseline. Regenerate with "
@@ -156,7 +166,14 @@ def render_baseline(records: list[MutantRecord]) -> dict[str, object]:
         ),
         "total_survivors": sum(len(v) for v in by_module.values()),
         "modules": {
-            module: {"survivors": len(keys), "keys": keys}
+            module: {
+                "survivors": len(keys),
+                "keys": keys,
+                # Counts, rather than mutant keys: mutmut renumbers a function
+                # when it is edited. This is the baseline needed to score a
+                # changed legacy function for *new* survivors only.
+                "functions": functions.get(module, {}),
+            }
             for module, keys in by_module.items()
         },
     }
@@ -178,6 +195,32 @@ def load_baseline(path: Path) -> dict[str, int] | None:
             out[module] = entry["survivors"]
         elif isinstance(entry, int):
             out[module] = entry
+    return out
+
+
+def load_function_baseline(path: Path) -> dict[tuple[str, str], int]:
+    """Read per-function survivor counts from a current baseline document.
+
+    Old baselines intentionally yield no entries: treating their module total
+    as a function total would hide a regression in one function paid for by an
+    improvement in another.
+    """
+    try:
+        with open(path, encoding="utf-8") as fh:
+            doc = json.load(fh)
+    except (OSError, json.JSONDecodeError):
+        return {}
+    modules = doc.get("modules") if isinstance(doc, dict) else None
+    if not isinstance(modules, dict):
+        return {}
+    out: dict[tuple[str, str], int] = {}
+    for module, entry in modules.items():
+        funcs = entry.get("functions") if isinstance(entry, dict) else None
+        if not isinstance(funcs, dict):
+            continue
+        for function, survivors in funcs.items():
+            if isinstance(function, str) and isinstance(survivors, int):
+                out[(module, function)] = survivors
     return out
 
 
@@ -407,24 +450,32 @@ def _base_reader(base_ref: str) -> Callable[[str], str | None] | None:
 
 
 def check_diff_scoped(
-    records: list[MutantRecord], touched: dict[str, set[str]]
+    records: list[MutantRecord],
+    touched: dict[str, set[str]],
+    baseline: dict[tuple[str, str], int] | None = None,
 ) -> list[str]:
     """Survivors living in a function this branch changed.
 
-    Absolute: there is no baseline to be under. If you edited a function and a
-    mutation of it still passes the suite, the edit is not verified.
+    A function recorded in a baseline is delta-scored: existing survivor debt
+    must not make every edit impossible, but its count may not rise. Functions
+    without a recorded baseline remain absolute. Module-scope edits are scored
+    by the per-module drift gate below; mutmut has no module-scope mutant to
+    attribute precisely.
     """
+    baseline = baseline or {}
+    current: dict[tuple[str, str], list[str]] = {}
+    for r in records:
+        if r.is_survivor and r.function in touched.get(r.module_path, set()):
+            current.setdefault((r.module_path, r.function), []).append(r.key)
     failures = []
-    for r in sorted(records, key=lambda r: r.key):
-        if not r.is_survivor:
-            continue
-        module_touched = touched.get(r.module_path, set())
-        if MODULE_SCOPE in module_touched:
+    for (module, function), keys in sorted(current.items()):
+        was = baseline.get((module, function))
+        if was is None:
+            failures.extend(f"  {module}::{function}  [{key}]" for key in sorted(keys))
+        elif len(keys) > was:
             failures.append(
-                f"  {r.module_path}::{r.function}  [{r.key}]  (module-scope change)"
+                f"  {module}::{function}: {was} -> {len(keys)} (+{len(keys) - was})"
             )
-        elif r.function in module_touched:
-            failures.append(f"  {r.module_path}::{r.function}  [{r.key}]")
     return failures
 
 
@@ -679,6 +730,7 @@ def main(argv: list[str] | None = None) -> int:
 
     exit_code = 0
     baseline_modules = load_baseline(Path(args.baseline_file))
+    function_baseline = load_function_baseline(Path(args.baseline_file))
     total_baseline = args.baseline if args.baseline is not None else SURVIVOR_BASELINE
     #: Is there a *drift* reference — the only thing that can answer "did the
     #: survivor set grow", for any function, changed or not?
@@ -844,7 +896,7 @@ def main(argv: list[str] | None = None) -> int:
             # survivors — so this is set before the pass/fail split, not
             # inside the "no survivors" arm.
             gated = True
-        failures = check_diff_scoped(records, touched)
+        failures = check_diff_scoped(records, touched, function_baseline)
         if failures:
             print(
                 "ERROR: surviving mutants in functions this branch changed — a "
