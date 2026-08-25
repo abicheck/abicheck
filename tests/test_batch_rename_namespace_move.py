@@ -1423,3 +1423,38 @@ class TestFindNamespaceMoveGroupsRejectsContestedAlternateCandidacies:
             "_ZN2ns3new1gEv",
         }
         assert find_namespace_move_groups(removed, added) == {}
+
+
+class TestFindNamespaceMoveGroupsRetainsLocallyAmbiguousCandidatesGlobally:
+    """Codex review, fresh evidence (round 4) -- a candidacy discarded by
+    the LOCAL one-to-many check (a removed symbol's masked context matching
+    more than one distinct added target AT THAT POSITION) never entered
+    `entries` at all, so it never contributed to the global
+    `added_id_to_removed_symbols`/`removed_id_to_added_symbols` collision
+    tracking either -- even though discarding it as unusable evidence for
+    ONE SPECIFIC pairing does not mean the added declaration it ambiguously
+    matched stops being a real, live alternative explanation. Removing
+    ``p1::old::{f,g}`` and ``new::p2::{f,g}`` while adding
+    ``new::old::{f,g}`` and ``x::old::{f,g}``: `p1::old::f` masked at
+    position 0 matches BOTH `new::old::f` and `x::old::f` (locally
+    ambiguous, discarded from `entries`), so `new::p2::f` (masking position
+    1, matching `new::old::f` uniquely) appeared uncontested and emitted a
+    false `p2 -> old` batch, even though `p1::old::f` is just as plausibly
+    `new::old::f`'s real source."""
+
+    def test_locally_discarded_candidacy_still_contests_its_target(
+        self,
+    ) -> None:
+        removed = {
+            "_ZN2p13old1fEv",
+            "_ZN2p13old1gEv",
+            "_ZN3new2p21fEv",
+            "_ZN3new2p21gEv",
+        }
+        added = {
+            "_ZN3new3old1fEv",
+            "_ZN3new3old1gEv",
+            "_ZN1x3old1fEv",
+            "_ZN1x3old1gEv",
+        }
+        assert find_namespace_move_groups(removed, added) == {}

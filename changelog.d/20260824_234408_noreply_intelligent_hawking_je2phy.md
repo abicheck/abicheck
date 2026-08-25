@@ -132,6 +132,18 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   function's own stated false-negative-over-false-positive default: a
   removed symbol with any second raw candidacy at all — confirmed-contested
   or not — is now treated as genuinely undecidable and reported nowhere.
+  A fourth round found one more gap in the SAME construction: a candidacy
+  a removed symbol's own masking position discarded via the pre-existing
+  LOCAL one-to-many check (that position's masked context matching more
+  than one distinct added target) never entered the shared `entries` list
+  at all, so it never contributed to either cross-position tracking dict
+  either — even though discarding it as unusable evidence for one specific
+  pairing doesn't mean the added declaration it ambiguously matched stops
+  being a real, live alternative explanation for a DIFFERENT removed
+  symbol's own claim on it. Fixed by moving both tracking dicts' construction
+  earlier, into the same loop that computes each masking position's raw
+  candidate list, so every raw candidacy is registered before the local
+  one-to-many filter ever discards it.
 - **Cross-tier enum findings now dedupe correctly.** The L2 header-tier
   enum detector (`diff_types._diff_enums`, bare `EnumType.name`) and the L1
   DWARF-tier detector (`diff_platform._diff_enum_layouts`, fully-qualified
