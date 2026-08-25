@@ -79,6 +79,16 @@ class TestApplicability:
     def test_no_signal_anywhere_is_out_of_scope(self) -> None:
         assert not gate.is_bugfix(["chore: wip"], "Update docs")
 
+    def test_non_fix_pr_title_is_authoritative_over_review_fixups(self) -> None:
+        """A fixup commit must not reclassify a feature PR behind its title."""
+        assert not gate.is_bugfix(
+            ["feat: add architecture gate", "fix: address review feedback"],
+            "ADR-061 Phase 1: migrate aggregation ownership",
+        )
+
+    def test_local_run_still_classifies_fixup_commit_without_pr_title(self) -> None:
+        assert gate.is_bugfix(["fix: address review feedback"], None)
+
 
 class TestStructuralRequirement:
     def test_shipped_code_without_a_test_is_detected(self) -> None:
