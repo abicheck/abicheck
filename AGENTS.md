@@ -5372,21 +5372,40 @@ Once a root command genuinely clears the bar above, pick the right home:
   Fixed by asking the binary a question the synthetic key's *text* can
   answer honestly, even though the key itself is not a real symbol: is
   the owning class/class-template exported under ANY instantiation at
-  all, on either side? `_synthetic_ctor_dtor_template_base_name` recovers
-  the owning scope from the key (`finding_identity_ctor_dtor.
-  synthetic_ctor_scope` for a ctor key's depth-aware `scope(params)`
-  split; a plain prefix strip for a dtor key), reduces it to the bare,
-  template-argument-stripped template name via `type_reachability.
-  _bare_type_name` plus a top-level `<` scan (`raii_guard<(lambda:...)>`
-  → `raii_guard`), and `_itanium_source_name_token` renders that name as
-  its Itanium `<source-name>` encoding (`"raii_guard"` → `"10raii_guard"`)
-  — a literal substring every real mangled symbol naming that class as a
-  scope component must contain (Itanium C++ ABI §5.1.1), checked directly
-  against the raw exported names with no external demangler invoked, the
-  same "structural, not textual" preference `diff_cxx_rules.
-  itanium_scope_components` already established for this codebase. A
-  template with zero exported members under any instantiation on either
-  side is demoted (`Verdict.COMPATIBLE_WITH_RISK`,
+  all, on either side? `finding_identity_ctor_dtor.
+  synthetic_ctor_dtor_template_base_name` recovers the owning scope from
+  the key (that same module's own `synthetic_ctor_scope` for a ctor key's
+  depth-aware `scope(params)` split; a plain prefix strip for a dtor key),
+  reduces it to the bare, template-argument-stripped template name via
+  `type_reachability._bare_type_name` plus a top-level `<` scan
+  (`raii_guard<(lambda:...)>` → `raii_guard`), and
+  `finding_identity_ctor_dtor.itanium_source_name_token` renders that name
+  as its Itanium `<source-name>` encoding (`"raii_guard"` → `"10raii_guard"`,
+  keyed on the identifier's encoded UTF-8 **byte** length rather than its
+  Python character count, so a non-ASCII class name still produces the
+  correct token) — a literal substring every real mangled symbol naming
+  that class as a scope component must contain (Itanium C++ ABI §5.1.1),
+  checked directly against the raw exported names with no external
+  demangler invoked, the same "structural, not textual" preference
+  `diff_cxx_rules.itanium_scope_components` already established for this
+  codebase. Both helpers live in `finding_identity_ctor_dtor.py`, not
+  `diff_templates.py` itself (which only keeps the classification/
+  modulation entry point, `demote_lambda_closure_unexported_findings`):
+  `diff_templates.py` is one of ADR-061's `debt.yaml`-tracked
+  no-growth-baselined legacy files, `finding_identity_ctor_dtor.py` already
+  owns every other castxml synthetic-ctor/dtor-key helper and had headroom
+  under the flat 800-line production limit, and a brand-new flat `diff_*`
+  sibling module is explicitly rejected by `scripts/check_architecture.py`'s
+  `frozen_root_families` list (confirmed by trying it — `[frozen-root-family]`
+  and `[root-module]` findings) — while a real `policy/` package migration
+  for just this one function was investigated and found to cascade into
+  `unclassified-import` findings for every one of its ~8 currently-flat,
+  not-yet-layer-classified dependencies (`checker_policy`, `diff_symbols`,
+  `dumper_castxml`, `elf_symbol_filter`, `type_reachability`,
+  `name_classification`, ...), which is its own separate, much larger
+  ADR-061 migration slice, not a follow-up to this fix. A template with
+  zero exported members under any instantiation on either side is demoted
+  (`Verdict.COMPATIBLE_WITH_RISK`,
   `modulation_rule="lambda_closure_never_exported"`, same ADR-025 hook,
   never removed); a template that *does* export some other instantiation
   is left exactly as severe as the detector made it, since this check

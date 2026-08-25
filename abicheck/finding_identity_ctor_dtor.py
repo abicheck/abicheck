@@ -302,6 +302,60 @@ def synthetic_ctor_scope(mangled: str) -> str | None:
     return split[0] if split is not None else None
 
 
+def synthetic_ctor_dtor_template_base_name(symbol: str) -> str | None:
+    """The bare (namespace- and template-argument-stripped) name of the
+    class/class-template a castxml synthetic ctor/dtor key names as its
+    owner, or ``None`` if *symbol* is not such a key or its scope cannot be
+    recovered. Sits alongside this module's other synthetic-key helpers
+    (used by ``diff_templates.demote_lambda_closure_unexported_findings``
+    to ask "was this class template ever exported under ANY
+    instantiation" via a binary-export substring check, rather than "was
+    THIS EXACT instantiation exported" — the real, per-instantiation
+    Itanium mangling of a closure-type template argument uses the
+    compiler's own unnamed-type encoding (``Ul<parameter-types>E_``),
+    never castxml's ``(lambda:file:line:col)`` spelling, so the exact
+    mangled substring for one specific instantiation can't be reconstructed
+    from the snapshot text alone).
+    """
+    if is_synthetic_ctor_key(symbol):
+        scope = synthetic_ctor_scope(symbol)
+    elif is_synthetic_dtor_key(symbol):
+        scope = symbol[len(_SYNTHETIC_DTOR_KEY_PREFIX) :]
+    else:
+        return None
+    if not scope:
+        return None
+    bare = _bare_type_name(scope)
+    depth = 0
+    for i, ch in enumerate(bare):
+        if ch == "<":
+            if depth == 0:
+                base = bare[:i]
+                return base or None
+            depth += 1
+        elif ch == ">":
+            depth = max(0, depth - 1)
+    return bare or None
+
+
+def itanium_source_name_token(name: str) -> str:
+    """The Itanium ``<source-name>`` encoding of a plain identifier: its
+    encoded byte length immediately followed by the identifier text, e.g.
+    ``"raii_guard"`` → ``"10raii_guard"``. Every real Itanium-mangled symbol
+    naming *name* as a namespace/class/template component embeds this exact
+    substring (Itanium C++ ABI §5.1.1), so a substring search for it is a
+    dependency-free way to ask "does any real exported symbol reference
+    this identifier" without invoking an external demangler.
+
+    The length is the identifier's encoded **byte** count, not its Python
+    ``len()`` (character count): a non-ASCII identifier (GCC/Clang mangle a
+    UTF-8 source encoding) has a longer byte length than its character
+    count, e.g. ``"Café"`` mangles with length prefix ``5`` (4 characters,
+    one of them 2 bytes), not ``4``.
+    """
+    return f"{len(name.encode('utf-8'))}{name}"
+
+
 def _canonicalize_ctor_param_sig(param_sig: str) -> tuple[str, ...]:
     """Canonicalized parameter-type tuple from a synthetic ctor key's
     comma-joined ``param_sig`` portion.

@@ -24,11 +24,12 @@ A genuinely-exported symbol of the identical shape must stay untouched. A
 castxml-synthesized ctor/dtor key (never itself a real export by
 construction) is handled differently: its OWNING class/class-template is
 checked for export under any instantiation at all (see
-``_synthetic_ctor_dtor_template_base_name``/``_itanium_source_name_token``),
-since the exact per-instantiation mangling embedding a closure's own
-compiler-internal unnamed-type encoding can't be reconstructed from the
-snapshot text -- see AGENTS.md's "Lambda-closure churn survives at the
-function level" entry, item 1, for the investigation this closes.
+``finding_identity_ctor_dtor.synthetic_ctor_dtor_template_base_name``/
+``itanium_source_name_token``), since the exact per-instantiation mangling
+embedding a closure's own compiler-internal unnamed-type encoding can't be
+reconstructed from the snapshot text -- see AGENTS.md's "Lambda-closure
+churn survives at the function level" entry, item 1, for the investigation
+this closes.
 """
 
 from __future__ import annotations
@@ -402,3 +403,51 @@ class TestNonLambdaFindingsAreNeverTouched:
         demote_lambda_closure_unexported_findings([change], old, new)
 
         assert change.effective_verdict is None
+
+
+class TestItaniumSourceNameTokenUsesEncodedByteLength:
+    """Itanium ``<source-name>`` length prefixes count encoded **bytes**, not
+    Python characters -- a non-ASCII identifier (GCC/Clang mangle a UTF-8
+    source encoding) has a byte length longer than its character count, so
+    using ``len(name)`` directly would under-count and search for a token
+    that never appears in the real mangled symbol, silently defeating the
+    "is this template exported anywhere" check for such a name."""
+
+    def test_multi_byte_identifier_uses_byte_length_not_char_length(self) -> None:
+        from abicheck.finding_identity_ctor_dtor import itanium_source_name_token
+
+        # "Café" is 4 Python characters but 5 UTF-8 bytes (the "é" is 2
+        # bytes) -- the real Itanium encoding is "5Café", not "4Café".
+        assert itanium_source_name_token("Café") == "5Café"
+        assert len("Café") == 4
+
+    def test_ascii_identifier_byte_length_equals_char_length(self) -> None:
+        from abicheck.finding_identity_ctor_dtor import itanium_source_name_token
+
+        assert itanium_source_name_token("raii_guard") == "10raii_guard"
+
+    def test_multi_byte_class_name_is_found_when_exported(self) -> None:
+        """End-to-end through the primitive: a synthetic ctor key naming a
+        non-ASCII class must still be recognized as exported when the real
+        mangled symbol (using the correct UTF-8 byte-length encoding) is
+        present -- proving the fix, not just the helper in isolation."""
+        from abicheck.checker_types import Change
+        from abicheck.dumper_castxml import SYNTHETIC_CTOR_KEY_PREFIX
+
+        symbol = f"{SYNTHETIC_CTOR_KEY_PREFIX}Café<(lambda:f.h:1:1)>()"
+        change = Change(
+            kind=ChangeKind.FUNC_REMOVED,
+            symbol=symbol,
+            description="d",
+            old_value="Café",
+        )
+        # Real Itanium mangling of Café<...>::Café() uses the byte length 5,
+        # not the Python character count 4.
+        real_export = "_ZN5CaféIiEC1Ev"
+        old = _snap("1", _fn(_MANGLED, _OLD_PARAM), _elf(real_export))
+        new = _snap("2", _fn(_MANGLED, _NEW_PARAM), _elf(real_export))
+
+        demote_lambda_closure_unexported_findings([change], old, new)
+
+        assert change.effective_verdict is None
+        assert change.modulation_rule is None
