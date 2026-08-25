@@ -405,6 +405,43 @@ class TestNonLambdaFindingsAreNeverTouched:
         assert change.effective_verdict is None
 
 
+class TestSyntheticCtorDtorTemplateBaseNamePrimitive:
+    """Direct, primitive-level coverage for ``synthetic_ctor_dtor_template_
+    base_name`` (per this repo's own "Primitive-level property tests"
+    convention) -- the demotion pipeline only ever calls it already knowing
+    *some* synthetic key is present, so these branches (non-key input, a
+    scope with no template args at all, and a scope with nested template
+    brackets) are otherwise unreached from that one call site."""
+
+    def test_non_synthetic_symbol_returns_none(self) -> None:
+        from abicheck.finding_identity_ctor_dtor import (
+            synthetic_ctor_dtor_template_base_name,
+        )
+
+        assert synthetic_ctor_dtor_template_base_name("_ZN3Foo3barEv") is None
+
+    def test_scope_with_no_template_args_returns_the_bare_name(self) -> None:
+        from abicheck.finding_identity_ctor_dtor import (
+            synthetic_ctor_dtor_template_base_name,
+        )
+
+        assert (
+            synthetic_ctor_dtor_template_base_name("~ns::PlainClass") == "PlainClass"
+        )
+
+    def test_nested_template_brackets_stop_at_the_outermost_open_bracket(
+        self,
+    ) -> None:
+        from abicheck.finding_identity_ctor_dtor import (
+            synthetic_ctor_dtor_template_base_name,
+        )
+
+        assert (
+            synthetic_ctor_dtor_template_base_name("~Wrapper<Inner<int>>")
+            == "Wrapper"
+        )
+
+
 class TestItaniumSourceNameTokenUsesEncodedByteLength:
     """Itanium ``<source-name>`` length prefixes count encoded **bytes**, not
     Python characters -- a non-ASCII identifier (GCC/Clang mangle a UTF-8

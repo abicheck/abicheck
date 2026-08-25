@@ -326,16 +326,14 @@ def synthetic_ctor_dtor_template_base_name(symbol: str) -> str | None:
     if not scope:
         return None
     bare = _bare_type_name(scope)
-    depth = 0
-    for i, ch in enumerate(bare):
-        if ch == "<":
-            if depth == 0:
-                base = bare[:i]
-                return base or None
-            depth += 1
-        elif ch == ">":
-            depth = max(0, depth - 1)
-    return bare or None
+    # Only the OUTERMOST template-argument list's opening bracket matters --
+    # once found, everything from it onward (nested brackets included) is
+    # dropped in one slice, so no depth tracking is needed here (unlike
+    # `_bare_type_name`'s own namespace-suffix splitting, which must find
+    # every "::" at depth zero, not just the first "<").
+    idx = bare.find("<")
+    base = bare[:idx] if idx != -1 else bare
+    return base or None
 
 
 def itanium_source_name_token(name: str) -> str:
