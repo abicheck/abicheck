@@ -1236,12 +1236,26 @@ class TestFindNamespaceMoveGroupsRejectsCrossPositionManyToOnePairings:
         added = {"_ZN3new3old1fEv", "_ZN3new3old1gEv"}
         assert find_namespace_move_groups(removed, added) == {}
 
-    def test_an_unambiguous_group_survives_alongside_a_cross_position_collision(
+    def test_ns_symbol_sharing_the_collision_at_one_position_is_also_rejected(
         self,
     ) -> None:
-        """The rejection must be scoped to the colliding added declarations,
-        not collateral-damage a real, resolvable move sharing no segment
-        with it."""
+        """Codex review, fresh evidence (round 3): an earlier revision of
+        this fix treated `ns::old::f`/`ns::old::g` as an unambiguous
+        "unrelated" survivor here, on the reasoning that its OWN masking
+        position (masking `old`, matching `ns::new::f`) is collision-free
+        even though its OTHER position (masking `ns`, matching
+        `new::old::f`) collides with `p1`/`p2` there. That reasoning is
+        unsound: `ns::old::f` genuinely has TWO live, structurally possible
+        fates here -- `ns -> new` (contested with `p1`, unconfirmable) or
+        `old -> new` (its own, otherwise-clean candidacy) -- and a
+        collision at one position proves the CONTESTED half is
+        unconfirmable, not that the OTHER half is thereby confirmed.
+        `ns::old::f`'s fate is exactly as undecided as `p1::old::f`'s or
+        `new::p2::f`'s, so nothing here should be reported at all -- see
+        `test_an_unambiguous_move_with_no_second_candidacy_still_survives`
+        below for what a GENUINELY unambiguous unrelated move (only one
+        candidacy total, not merely one collision-free position) looks
+        like, and that it does still survive alongside this rejection."""
         removed = {
             "_ZN2p13old1fEv",
             "_ZN2p13old1gEv",
@@ -1256,14 +1270,43 @@ class TestFindNamespaceMoveGroupsRejectsCrossPositionManyToOnePairings:
             "_ZN2ns3new1fEv",
             "_ZN2ns3new1gEv",
         }
+        assert find_namespace_move_groups(removed, added) == {}
+
+    def test_an_unambiguous_move_with_no_second_candidacy_still_survives(
+        self,
+    ) -> None:
+        """The rejection must be scoped to a removed symbol that genuinely
+        has more than one raw candidacy, not collateral-damage a real,
+        resolvable move that has only ONE candidacy in total (no second
+        masking position produces any candidate at all) -- unlike
+        `ns::old::f` above, whose own second position DOES produce a
+        (contested) candidate."""
+        removed = {
+            "_ZN2p13old1fEv",
+            "_ZN2p13old1gEv",
+            "_ZN3new2p21fEv",
+            "_ZN3new2p21gEv",
+            "_ZN2ns3old1fEv",
+            "_ZN2ns3old1gEv",
+            "_ZN2a34old31hEv",
+            "_ZN2a34old31iEv",
+        }
+        added = {
+            "_ZN3new3old1fEv",
+            "_ZN3new3old1gEv",
+            "_ZN2ns3new1fEv",
+            "_ZN2ns3new1gEv",
+            "_ZN2a34new31hEv",
+            "_ZN2a34new31iEv",
+        }
         groups = find_namespace_move_groups(removed, added)
         assert groups == {
-            ("old", "new"): [
-                ("ns::old::f", "ns::new::f"),
-                ("ns::old::g", "ns::new::g"),
+            ("old3", "new3"): [
+                ("a3::old3::h", "a3::new3::h"),
+                ("a3::old3::i", "a3::new3::i"),
             ]
         }
-        assert ("old", "new") in groups
+        assert ("old", "new") not in groups
         assert ("p1", "new") not in groups
         assert ("p2", "old") not in groups
 
@@ -1313,22 +1356,22 @@ class TestFindNamespaceMoveGroupsRejectsCrossPositionOneToManyPairings:
         }
         assert find_namespace_move_groups(removed, added) == {}
 
-    def test_unrelated_same_position_collision_does_not_taint_a_clean_move(
+    def test_unrelated_same_position_collision_also_rejects_the_shared_symbol(
         self,
     ) -> None:
-        """Regression for a real bug in an earlier revision of this fix:
-        building the cross-position tracking dicts from the SAME entry set
-        for both directions let a same-position collision on `p1`'s own
-        entry (correctly rejected on its own by the position-scoped
-        many-to-one guard) leak into the SYMMETRIC (removed-side) check for
-        the UNRELATED `ns::old::f`/`ns::old::g`, which happens to share the
-        bare masked context ``('*', 'old', 'f')``/``('*', 'old', 'g')``
-        with `p1::old::f`/`p1::old::g` purely by coincidental bare-name
-        reuse. `ns::old -> ns::new` is a real, cleanly-evidenced move via
-        its OWN, collision-free masking position and must survive; `p1`'s
-        and `p2`'s contradictory claims on `new::old::{f,g}` (the
-        cross-position many-to-one shape from the previous test class)
-        must still both be rejected."""
+        """This is the identical scenario as
+        `TestFindNamespaceMoveGroupsRejectsCrossPositionManyToOnePairings.
+        test_ns_symbol_sharing_the_collision_at_one_position_is_also_rejected`
+        above, pinned here too since it's the concrete counterexample that
+        proved an earlier revision of THIS class's own guard unsound (see
+        the round-3 note on `removed_id_to_added_symbols`'s construction):
+        `ns::old::f`/`ns::old::g` genuinely have two live candidacies here
+        (`ns -> new`, contested with `p1`/`p2`; `old -> new`, its own
+        otherwise-clean candidacy) and must be rejected entirely, not
+        merely have the contested half discarded in favor of the clean
+        half. See `TestFindNamespaceMoveGroupsRejectsCrossPositionManyToOnePairings.
+        test_an_unambiguous_move_with_no_second_candidacy_still_survives`
+        for what a genuinely single-candidacy unrelated move looks like."""
         removed = {
             "_ZN2p13old1fEv",
             "_ZN2p13old1gEv",
@@ -1343,12 +1386,40 @@ class TestFindNamespaceMoveGroupsRejectsCrossPositionOneToManyPairings:
             "_ZN2ns3new1fEv",
             "_ZN2ns3new1gEv",
         }
-        groups = find_namespace_move_groups(removed, added)
-        assert groups == {
-            ("old", "new"): [
-                ("ns::old::f", "ns::new::f"),
-                ("ns::old::g", "ns::new::g"),
-            ]
+        assert find_namespace_move_groups(removed, added) == {}
+
+
+class TestFindNamespaceMoveGroupsRejectsContestedAlternateCandidacies:
+    """Codex review, fresh evidence (round 3) -- the mirror image of
+    `TestFindNamespaceMoveGroupsRejectsCrossPositionOneToManyPairings`'s own
+    counterexample, found on review of that fix. A removed symbol with two
+    raw candidacies must be rejected even when only ONE of its two
+    candidacies is itself independently ambiguous (contested by an
+    unrelated third symbol at that position) -- the OTHER, locally-clean
+    candidacy is not thereby confirmed; it remains merely one of two
+    unconfirmed hypotheses. Removing ``ns::old::{f,g}`` and ``ns::q::{f,g}``
+    while adding ``new::old::{f,g}`` and ``ns::new::{f,g}``: `ns::old::f`
+    matches `new::old::f` cleanly via one masking position (implying
+    `ns -> new`) and matches `ns::new::f` via its other masking position
+    (implying `old -> new`), but that second candidacy collides with
+    `ns::q::f`'s own identical claim on `ns::new::f` (was it `old` or `q`
+    that became `new`?). An earlier revision of this fix discarded the
+    colliding candidacy and let the clean one survive uncontested, emitting
+    a false `ns -> new` batch backed only by `ns::old::f`/`ns::old::g`."""
+
+    def test_alternate_candidacy_contested_by_a_third_symbol_is_still_rejected(
+        self,
+    ) -> None:
+        removed = {
+            "_ZN2ns3old1fEv",
+            "_ZN2ns3old1gEv",
+            "_ZN2ns1q1fEv",
+            "_ZN2ns1q1gEv",
         }
-        assert ("p1", "new") not in groups
-        assert ("p2", "old") not in groups
+        added = {
+            "_ZN3new3old1fEv",
+            "_ZN3new3old1gEv",
+            "_ZN2ns3new1fEv",
+            "_ZN2ns3new1gEv",
+        }
+        assert find_namespace_move_groups(removed, added) == {}

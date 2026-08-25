@@ -1040,55 +1040,53 @@ def find_namespace_move_groups(
 
     # Phase 1b: build the two cross-position collision signals Phase 2 below
     # needs -- deliberately a separate pass over `entries`, not folded into
-    # the loop above, and deliberately built from two DIFFERENT entry sets
-    # (Codex review, fresh evidence, two rounds): an earlier revision built
-    # BOTH signals from the SAME entry set, and either choice of that one
-    # set was wrong for a different reason.
+    # the loop above, and deliberately built from the FULL, UNFILTERED
+    # `entries` list for BOTH signals (Codex review, fresh evidence, three
+    # rounds -- the middle round's "fix" is worth recording since its
+    # failure mode is the interesting part).
     #
-    # Building both from the FULL, unfiltered `entries` list let a same
-    # -position collision on ONE removed symbol's entry (already correctly
-    # rejected on its own by `masked_to_old_segments`) leak into
-    # `removed_id_to_added_symbols` for an UNRELATED removed symbol sharing
-    # that same masked context, wrongly making that unrelated symbol look
-    # self-contradictory (see the "spurious same-position collision must
-    # not taint a symbol's own clean, different-position candidacy" test
-    # below: `ns::old::f`'s legitimate `ns -> new` move, evidenced cleanly
-    # via one masking position, was wrongly rejected purely because its
-    # OTHER masking position happened to collide with an unrelated `p1`/`p2`
-    # pair at that position's masked context).
+    # Round 1 built both from the full, unfiltered list, same as here.
+    # Round 2 found that this let `ns::old::f`'s legitimate `ns -> new`
+    # move -- evidenced cleanly via ONE masking position -- get wrongly
+    # rejected purely because its OTHER masking position happened to
+    # collide with an unrelated `p1`/`p2` pair at THAT position's masked
+    # context, and "fixed" it by filtering `removed_id_to_added_symbols` to
+    # only entries surviving `masked_to_old_segments` -- i.e. by preferring
+    # whichever of a removed symbol's two candidacies happened to be
+    # locally clean at its own masked context.
     #
-    # Building both from ONLY the entries that survive
-    # `masked_to_old_segments` instead (the fix attempted for the above)
-    # broke the ORIGINAL many-to-one-across-positions case this dict exists
-    # for: when a removed symbol's own entry is invalidated by a same
-    # -position collision with an UNRELATED third symbol, that entry's
-    # candidacy on a given added declaration is still real evidence that
-    # the added declaration is CONTESTED (a different removed symbol's
-    # independent, valid entry cannot be treated as its sole, uncontested
-    # source just because its rival's own entry additionally happens to
-    # collide with something else at the SAME masked context) -- see
-    # `TestFindNamespaceMoveGroupsRejectsCrossPositionManyToOnePairings`'s
-    # own reported collision, reproduced again here alongside `ns`: `p1`'s
-    # only candidacy on `new::old::f` still contests that target even
-    # though `p1`'s SPECIFIC entry is separately invalidated by the
-    # unrelated `ns` collision at that same masked context.
+    # Round 3 found that "fix" itself unsound, with the EXACT MIRROR-IMAGE
+    # shape: removed `ns::old::{f,g}` and `ns::q::{f,g}`, added
+    # `new::old::{f,g}` and `ns::new::{f,g}`. `ns::old::f` again has two
+    # raw candidacies -- position 0 (masking `ns`) cleanly, uniquely
+    # matches `new::old::f`; position 1 (masking `old`) matches
+    # `ns::new::f`, but COLLIDES with `ns::q::f` there (real,
+    # unconfirmable ambiguity: was it `old` or `q` that became `new`?).
+    # Round 2's filter discarded the colliding position-1 entry and kept
+    # the clean position-0 one, letting `ns::old -> new::old` survive
+    # uncontested -- but a colliding masked context proves the SPECIFIC
+    # claimant (old vs. q) is unconfirmable, not that the ALTERNATE
+    # explanation (`old -> new`, competing with `ns -> new`) is
+    # impossible. `ns::old::f`'s true fate is exactly as uncertain as it
+    # was without `ns::q` in the picture at all -- an unrelated third
+    # symbol colliding with ONE of two live hypotheses cannot make the
+    # OTHER hypothesis newly confirmed. Round 2's own justifying scenario
+    # (`ns`/`p1`/`p2`) is the identical shape from the other position, and
+    # is -- by the same reasoning -- equally unconfirmable: `ns::old::f`
+    # there ALSO has two live, unconfirmed candidacies (`ns -> new`,
+    # contested with `p1`; `old -> new`, clean), and preferring the clean
+    # one over the contested one is exactly the same unsound "resolve
+    # ambiguity by picking whichever half of it happens to look cleaner"
+    # move, just with the collision on the other side.
     #
-    # The two questions are genuinely asymmetric, which is why they need
-    # two different entry sets:
-    #  - "is this ADDED declaration contested by more than one distinct
-    #    removed identity" (`added_id_to_removed_symbols`) is a question
-    #    about the target, answerable from EVERY raw candidacy regardless
-    #    of whether that candidacy is independently valid -- a same
-    #    -position-colliding candidacy is still a real, structurally
-    #    possible alternative explanation contesting the target, so it
-    #    still counts.
-    #  - "does this REMOVED symbol resolve to more than one distinct added
-    #    declaration" (`removed_id_to_added_symbols`) should only weigh a
-    #    removed symbol's OWN candidacies that are not already known
-    #    -spurious for an unrelated reason (a same-position collision with
-    #    a THIRD symbol) -- otherwise a removed symbol's one clean,
-    #    unambiguous candidacy gets wrongly discredited by its OWN
-    #    unrelated, already-rejected candidacy at a different position.
+    # So both signals are built from every raw candidacy, without regard
+    # to whether that specific candidacy's own masked context is itself
+    # ambiguous -- deliberately more conservative than round 2 (a removed
+    # symbol with any second raw candidacy, confirmed-contested or not, is
+    # treated as genuinely undecidable and reported nowhere), matching this
+    # function's own stated false-negative-over-false-positive default
+    # (see the local-ambiguity comment above) rather than trying to be
+    # clever about which half of an ambiguity to trust.
     #
     # `added_id_to_removed_symbols`: reject an ambiguous substitution
     # ACROSS masking positions (Codex review, fresh evidence): the
@@ -1139,17 +1137,15 @@ def find_namespace_move_groups(
     # for both at once. Tracked the mirror-image way: per removed symbol's
     # own "::"-joined identity, the set of distinct added declarations'
     # "::"-joined identities it was resolved to across every masking
-    # position whose OWN masked context is not itself already known
-    # -ambiguous (see the asymmetry note above for why this differs from
-    # `added_id_to_removed_symbols`, which uses every raw candidacy).
+    # position -- every raw candidacy, same as `added_id_to_removed_symbols`
+    # (see the round-3 note above for why filtering either dict by
+    # `masked_to_old_segments` is unsound).
     added_id_to_removed_symbols: dict[str, set[str]] = {}
     removed_id_to_added_symbols: dict[str, set[str]] = {}
-    for masked, r_comps, i, a_comps in entries:
+    for _masked, r_comps, _i, a_comps in entries:
         added_id = "::".join(a_comps)
         symbol_id = "::".join(r_comps)
         added_id_to_removed_symbols.setdefault(added_id, set()).add(symbol_id)
-        if len(masked_to_old_segments[masked]) != 1:
-            continue
         removed_id_to_added_symbols.setdefault(symbol_id, set()).add(added_id)
 
     # Phase 2: record only the entries whose masked context was claimed by

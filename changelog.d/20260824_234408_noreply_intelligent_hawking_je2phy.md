@@ -121,8 +121,17 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   (a same-position collision on one removed symbol's entry either leaked
   into an unrelated symbol's own clean, different-position candidacy and
   wrongly discredited it, or — filtered the other way — lost real evidence
-  that a target is contested); the two checks are now built from
-  deliberately different entry sets to avoid both failure modes.
+  that a target is contested). A third round found that "filtering the
+  other way" fix was itself unsound in the mirror-image shape: a removed
+  symbol whose one candidacy is contested by an unrelated third symbol
+  (unconfirmable, not disproven) had its OTHER, merely-locally-clean
+  candidacy wrongly treated as confirmed and reported — the identical
+  unsound "resolve ambiguity by preferring whichever half looks cleaner"
+  move, just with the collision on the other position. Both tracking dicts
+  are now built from every raw candidacy, unfiltered, matching this
+  function's own stated false-negative-over-false-positive default: a
+  removed symbol with any second raw candidacy at all — confirmed-contested
+  or not — is now treated as genuinely undecidable and reported nowhere.
 - **Cross-tier enum findings now dedupe correctly.** The L2 header-tier
   enum detector (`diff_types._diff_enums`, bare `EnumType.name`) and the L1
   DWARF-tier detector (`diff_platform._diff_enum_layouts`, fully-qualified
