@@ -47,6 +47,7 @@ fi
 
 COLLECT_VERIFY_OUTCOME="${COLLECT_VERIFY_OUTCOME:-}"
 COLLECT_REPLAY_OUTCOME="${COLLECT_REPLAY_OUTCOME:-}"
+CONSUMER_CONTEXT_OUTCOME="${CONSUMER_CONTEXT_OUTCOME:-}"
 
 ACTION_PATH="${ACTION_PATH:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
 
@@ -122,6 +123,9 @@ elif [[ "$COLLECT_VERIFY_OUTCOME" == "failure" ]]; then
 elif [[ "$COLLECT_REPLAY_OUTCOME" == "failure" ]]; then
   MODE="operational-error"
   RESOLVE_ARGS+=(--resolve-outcome "ambiguous" --resolve-message "collect-facts phase: auto (replay) failed to resolve source evidence.")
+elif [[ "$CONSUMER_CONTEXT_OUTCOME" == "failure" ]]; then
+  MODE="operational-error"
+  RESOLVE_ARGS+=(--resolve-outcome "ambiguous" --resolve-message "the consumer_compile header extraction pass failed before comparison.")
 elif [[ "$ANALYSIS_RAN" != "true" || -z "$ANALYSIS_REPORT_PATH" || ! -f "$ANALYSIS_REPORT_PATH" ]]; then
   # Baseline resolution succeeded (or was skipped for baseline-channel:
   # none), but the analysis step never produced a report -- a genuine

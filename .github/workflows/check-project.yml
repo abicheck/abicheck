@@ -582,7 +582,7 @@ jobs:
       # operational error instead.
       - name: Download build-output artifact
         id: download_build_output
-        if: matrix.baseline_channel != 'none' || inputs.evidence-producer == 'wrapper' || inputs.evidence-producer == 'clang-plugin'
+        if: matrix.baseline_channel != 'none' || matrix.requested_depth == 'build' || matrix.requested_depth == 'source' || inputs.evidence-producer == 'wrapper' || inputs.evidence-producer == 'clang-plugin'
         uses: actions/download-artifact@v8
         with:
           name: '${{ inputs.build-output-artifact-prefix }}${{ matrix.profile_id }}'
@@ -750,7 +750,41 @@ jobs:
                   print('consumer-binary=')
 
           build_output_path = 'build-output/build-output.json'
-          print(f'build-output={build_output_path}' if os.path.isfile(build_output_path) else 'build-output=')
+          if os.path.isfile(build_output_path):
+              print(f'build-output={build_output_path}')
+              # build-output.json is the authority for target-scoped source
+              # evidence.  Resolve the library target represented by this
+              # cell (redirected contract checks use baseline_target) rather
+              # than forwarding one workflow-global pack to every target.
+              with open(build_output_path, encoding='utf-8') as f:
+                  build_output = json.load(f)
+              target_id = cell.get('baseline_target') or cell.get('name')
+              target = next(
+                  (t for t in build_output.get('targets', []) if t.get('id') == target_id),
+                  None,
+              )
+              evidence_path = (target or {}).get('evidence', {}).get('path', '')
+              if evidence_path:
+                  if os.path.isabs(evidence_path) or '..' in evidence_path.replace('\\\\', '/').split('/'):
+                      print(f'::error::target {target_id!r}: evidence.path {evidence_path!r} is absolute or escapes the build-output artifact', file=sys.stderr)
+                      sys.exit(1)
+                  resolved_evidence = os.path.realpath(os.path.join('build-output', evidence_path))
+                  build_output_root = os.path.realpath('build-output')
+                  if os.path.commonpath([build_output_root, resolved_evidence]) != build_output_root:
+                      print(f'::error::target {target_id!r}: evidence.path {evidence_path!r} escapes the build-output artifact', file=sys.stderr)
+                      sys.exit(1)
+                  if not os.path.exists(resolved_evidence):
+                      print(f'::error::target {target_id!r}: evidence.path {evidence_path!r} does not exist in the downloaded build-output artifact', file=sys.stderr)
+                      sys.exit(1)
+                  if '\\n' in resolved_evidence or '\\r' in resolved_evidence:
+                      print(f'::error::target {target_id!r}: evidence.path contains a newline character', file=sys.stderr)
+                      sys.exit(1)
+                  print(f'evidence-pack={resolved_evidence}')
+              else:
+                  print('evidence-pack=')
+          else:
+              print('build-output=')
+              print('evidence-pack=')
           " >> "$GITHUB_OUTPUT"
 
       # Closes the G30 P1.4 known gap tracked by issue #628 (the plan doc's
@@ -875,7 +909,7 @@ jobs:
           head-sha: ${{ inputs.head-sha != '' && inputs.head-sha || github.sha }}
           base-ref: ${{ inputs.base-ref }}
           evidence-producer: ${{ inputs.evidence-producer }}
-          evidence-pack-path: ${{ inputs.evidence-pack-path }}
+          evidence-pack-path: ${{ steps.candidate.outputs.evidence-pack || inputs.evidence-pack-path }}
           new-library: ${{ steps.candidate.outputs.new-library }}
           consumer-binary: ${{ matrix.target_kind == 'app-consumer' && steps.candidate.outputs.consumer-binary || '' }}
           contract-file: ${{ matrix.target_kind == 'plugin-contract' && matrix.contract_file || '' }}
@@ -894,12 +928,6 @@ jobs:
           # profile's cell in the same run resolves `clang`, which one
           # workflow-global --ast-frontend cannot express.
           #
-          # `consumer_compile.frontend` has no counterpart here on purpose.
-          # It describes the *consumer* half of the two-pass L2 extraction
-          # Phase 0 has not built yet, so there is no second invocation for
-          # it to steer; forwarding it onto this one would silently apply a
-          # consumer overlay to the producer pass.
-          #
           # Gated on `kind != 'bundle'` (Codex review): a bundle cell's
           # new-library is the `bundle-staging` *directory* it stages its
           # members into, and the root Action rejects every non-`auto`
@@ -915,6 +943,9 @@ jobs:
           # non-`auto` value -- declining to add a new source of the error
           # is this line's job, not silencing the existing one.
           ast-frontend: ${{ matrix.kind != 'bundle' && matrix.compile_ast_frontend || inputs.ast-frontend }}
+          consumer-ast-frontend: ${{ matrix.kind != 'bundle' && matrix.consumer_compile_ast_frontend || '' }}
+          consumer-gcc-path: ${{ matrix.kind != 'bundle' && matrix.consumer_compile_gcc_path || '' }}
+          consumer-gcc-options: ${{ matrix.kind != 'bundle' && matrix.consumer_compile_gcc_options || '' }}
           # P1 toolchain-profile audit: this cell's profiles.<id>.compile
           # overlay (project plan --toolchain-bindings), when the
           # profile declares one, takes precedence over these workflow-

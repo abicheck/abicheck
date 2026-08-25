@@ -282,10 +282,11 @@ example above genuinely runs its producer pass under castxml. The one
 exception is a `kind: bundle` check, whose operand is a staging *directory*
 — the root Action rejects any non-`auto` frontend there, so such a cell
 keeps resolving the workflow-global value.
-`consumer_compile.frontend`, by contrast, is still projection only — it
-describes the header-AST pass of the two-pass producer/consumer extraction
-that `consumer_compile:` itself has not built yet, so nothing forwards it;
-see the G34 plan doc's Phase B and Phase 0 for what remains.
+`consumer_compile.frontend` drives a separate candidate dump in the native
+`check-project` pipeline. The dump reads the same producer binary but parses
+its public headers with the consumer overlay's frontend, compiler binding,
+and options; the comparison then consumes that materialized snapshot instead
+of parsing the candidate headers again under the producer context.
 
 ### `os:` and `dependency_source:` — how a profile schedules its own check cell (G34 Phase C)
 

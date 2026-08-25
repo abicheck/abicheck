@@ -115,11 +115,9 @@ ProfileSpec`'s docstring for the producer/consumer distinction). A profile
 with no ``consumer_compile:`` simply leaves both fields empty -- this
 module does not fall back to the producer ``compile:`` overlay's own
 fields for them, since "no consumer overlay" and "an actual empty overlay"
-are meant to look the same to a caller either way. Actually applying these
-fields to a separate header-AST (L2) extraction pass, merged with the
-producer-toolchain binary facts, is not yet wired here -- this module only
-projects the config-schema axis; the extraction/merge integration is
-G34 Phase 0's remaining, larger piece.
+are meant to look the same to a caller either way. The native ``check-project`` caller applies these fields to a separate
+candidate dump: it reads the unchanged producer binary while interpreting
+headers under the consumer context, then compares the materialized snapshot.
 
 **``compile.frontend``/``consumer_compile.frontend`` (G34 Phase B) project
 the same way**, into :attr:`RunPlanCheck.compile_ast_frontend`/
@@ -132,10 +130,9 @@ per overlay, with no fallback from one overlay's field to the other's.
 || inputs.ast-frontend``, the same per-cell-first precedence
 :attr:`~RunPlanCheck.compile_gcc_path` already uses, so a GCC profile's cell
 and a Clang profile's cell in one run genuinely invoke different frontends.
-:attr:`~RunPlanCheck.consumer_compile_ast_frontend` deliberately is not: it
-describes the *consumer* half of the two-pass L2 extraction G34 Phase 0 has
-not built, so there is no second invocation for it to steer, and forwarding
-it onto the producer pass would apply a consumer overlay to the wrong side.
+:attr:`~RunPlanCheck.consumer_compile_ast_frontend` is forwarded to the
+separate consumer-context candidate dump, never onto the producer-context
+comparison invocation.
 """
 
 from __future__ import annotations

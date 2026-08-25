@@ -263,9 +263,10 @@ could not be applied and silently dropping it would parse headers under the
 wrong one. A bundle cell therefore keeps resolving the workflow-global
 `ast-frontend` input exactly as it did before this override existed.
 
-The sibling `consumer_compile.frontend` is *not* forwarded at all: it
-describes the consumer half of a two-pass extraction that does not exist yet,
-so there is only one dump invocation per cell for it to steer.
+The sibling `consumer_compile.frontend`, compiler binding, and options are
+forwarded to a separate candidate dump. That invocation reads the same
+producer binary under the client header context, and the comparison consumes
+the materialized snapshot without reparsing candidate headers.
 
 Every *other* analysis option above stays global-only, unaffected by these
 three exceptions.
