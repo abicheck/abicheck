@@ -780,11 +780,16 @@ jobs:
                       print(f'::error::target {target_id!r}: evidence.path contains a newline character', file=sys.stderr)
                       sys.exit(1)
                   print(f'evidence-pack={resolved_evidence}')
+                  producer = build_output.get('evidence_producer', {})
+                  producer_kind = producer.get('kind', '') if isinstance(producer, dict) else ''
+                  print(f'evidence-producer={producer_kind}')
               else:
                   print('evidence-pack=')
+                  print('evidence-producer=')
           else:
               print('build-output=')
               print('evidence-pack=')
+              print('evidence-producer=')
           " >> "$GITHUB_OUTPUT"
 
       # Closes the G30 P1.4 known gap tracked by issue #628 (the plan doc's
@@ -908,7 +913,10 @@ jobs:
           project: ${{ inputs.project != '' && inputs.project || github.repository }}
           head-sha: ${{ inputs.head-sha != '' && inputs.head-sha || github.sha }}
           base-ref: ${{ inputs.base-ref }}
-          evidence-producer: ${{ inputs.evidence-producer }}
+          # A build-emitted target pack carries its producer identity with
+          # it. Keep the workflow input only for replay/legacy callers that
+          # have no target evidence entry in build-output.json.
+          evidence-producer: ${{ steps.candidate.outputs.evidence-producer || inputs.evidence-producer }}
           # Never fall back to the workflow-global pack here: a project cell
           # without declared target evidence must not consume another
           # target's build-wide pack.

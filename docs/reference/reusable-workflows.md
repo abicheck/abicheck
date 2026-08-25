@@ -181,6 +181,12 @@ for the full requirement. A `build-output.json` with no `profile.id` set
 fails the `plan` job outright, even though that field is optional in the
 schema generally.
 
+For a target carrying `targets[].evidence`, the check cell resolves both the
+pack path and its `evidence_producer.kind` from this same downloaded manifest.
+It never substitutes the workflow-global pack path for a target with no
+declared evidence; the global producer input remains only for replay and
+legacy callers without a target evidence entry.
+
 ```yaml
 jobs:
   build-linux:

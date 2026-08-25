@@ -70,6 +70,9 @@ def test_target_evidence_path_is_forwarded_per_matrix_cell() -> None:
     assert run_step["with"]["evidence-pack-path"] == (
         "${{ steps.candidate.outputs.evidence-pack }}"
     )
+    assert run_step["with"]["evidence-producer"].startswith(
+        "${{ steps.candidate.outputs.evidence-producer"
+    )
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="requires POSIX bash")
@@ -88,10 +91,11 @@ def test_resolver_selects_only_the_current_targets_evidence(tmp_path: Path) -> N
     (build_root / "build-output.json").write_text(
         json.dumps(
             {
+                "evidence_producer": {"kind": "clang-plugin"},
                 "targets": [
                     {"id": "core", "evidence": {"path": "evidence/core"}},
                     {"id": "math", "evidence": {"path": "evidence/math"}},
-                ]
+                ],
             }
         )
     )
@@ -117,6 +121,7 @@ def test_resolver_selects_only_the_current_targets_evidence(tmp_path: Path) -> N
         if "=" in line
     )
     assert outputs["evidence-pack"] == str((build_root / "evidence" / "math").resolve())
+    assert outputs["evidence-producer"] == "clang-plugin"
     assert "evidence/core" not in outputs["evidence-pack"]
 
 
