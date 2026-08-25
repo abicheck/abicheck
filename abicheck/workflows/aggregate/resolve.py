@@ -99,14 +99,12 @@ def _check_manifest_version(raw: Any) -> None:
             f"manifest 'aggregate_manifest_version' is not a MAJOR.MINOR "
             f"version: {raw!r}"
         )
-    try:
-        major = int(parts[0])
-        supported = int(AGGREGATE_MANIFEST_VERSION.split(".", 1)[0])
-    except ValueError as exc:
-        raise AggregateError(
-            f"manifest 'aggregate_manifest_version' is not a MAJOR.MINOR "
-            f"version: {raw!r}"
-        ) from exc
+    # Both values are guaranteed numeric here: ``parts`` passed the digit
+    # validation above, and the supported version is a module-owned constant.
+    # Keeping a defensive ``ValueError`` arm after that proof created dead code
+    # which could neither be exercised nor explain a real input failure.
+    major = int(parts[0])
+    supported = int(AGGREGATE_MANIFEST_VERSION.split(".", 1)[0])
     if major > supported:
         raise AggregateError(
             f"manifest 'aggregate_manifest_version' {raw!r} is newer than this "
