@@ -1125,14 +1125,18 @@ class TestReplaySourcesForwardedWithDefault:
         analysis_step = next(s for s in steps if s.get("name") == "Run analysis")
         expr = analysis_step["with"]["sources"]
         assert expr == (
-            "${{ inputs.sources != '' && inputs.sources || "
-            "(inputs.evidence-producer == 'replay' && '.' || '') }}"
+            "${{ steps.consumer_context.outcome == 'success' && '' || "
+            "(inputs.sources != '' && inputs.sources || "
+            "(inputs.evidence-producer == 'replay' && '.' || '')) }}"
         ), (
             "the analysis step's `sources` must fall back to '.' for "
             "evidence-producer: replay when inputs.sources is empty, "
             "mirroring collect-facts' own default -- a bare "
             "`${{ inputs.sources }}` forward would leave --sources unset "
-            "entirely for that case"
+            "entirely for that case. When the separate consumer-context "
+            "dump already succeeded, `new-library` is that pre-dumped "
+            "snapshot (its own evidence already embedded when it ran), so "
+            "`sources` must be emptied here rather than re-applied to it."
         )
 
     @staticmethod
