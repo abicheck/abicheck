@@ -946,9 +946,16 @@ jobs:
           # non-`auto` value -- declining to add a new source of the error
           # is this line's job, not silencing the existing one.
           ast-frontend: ${{ matrix.kind != 'bundle' && matrix.compile_ast_frontend || inputs.ast-frontend }}
-          consumer-ast-frontend: ${{ matrix.kind != 'bundle' && matrix.consumer_compile_ast_frontend || '' }}
-          consumer-gcc-path: ${{ matrix.kind != 'bundle' && matrix.consumer_compile_gcc_path || '' }}
-          consumer-gcc-options: ${{ matrix.kind != 'bundle' && matrix.consumer_compile_gcc_options || '' }}
+          # An omitted consumer_compile field defers to the caller's
+          # workflow-global input, the same as an omitted producer compile
+          # field does two lines up -- not to the empty string, which would
+          # silently apply the frontend/binding/options *default* instead of
+          # the caller's actual selection whenever a profile's
+          # consumer_compile: overlay sets some fields but not others (e.g.
+          # only `standard:`) (Codex review).
+          consumer-ast-frontend: ${{ matrix.kind != 'bundle' && matrix.consumer_compile_ast_frontend || inputs.ast-frontend }}
+          consumer-gcc-path: ${{ matrix.kind != 'bundle' && matrix.consumer_compile_gcc_path || inputs.gcc-path }}
+          consumer-gcc-options: ${{ matrix.kind != 'bundle' && matrix.consumer_compile_gcc_options || inputs.gcc-options }}
           # P1 toolchain-profile audit: this cell's profiles.<id>.compile
           # overlay (project plan --toolchain-bindings), when the
           # profile declares one, takes precedence over these workflow-
@@ -998,7 +1005,18 @@ jobs:
           gcc-options: ${{ matrix.kind != 'bundle' && matrix.compile_gcc_options || inputs.gcc-options }}
           sysroot: ${{ inputs.sysroot }}
           sources: ${{ inputs.sources }}
-          build-info: ${{ inputs.build-info }}
+          # check-target's own build-info gate only converts evidence-pack-path
+          # into --build-info for evidence-producer: wrapper/clang-plugin --
+          # for replay (or no producer at all), a per-target pack this cell
+          # resolved from build-output.json above would otherwise never
+          # reach dump/compare, silently losing source-only evidence for
+          # exactly the build/source-depth cells this resolution exists for
+          # (Codex review). build-info's own docs already cover this case
+          # ("set it directly ... for a producer-less build/source-depth
+          # check that already has an out-of-band pack") -- forward the
+          # resolved pack there directly rather than widening check-target's
+          # own evidence-producer-gated conversion.
+          build-info: ${{ (inputs.evidence-producer != 'wrapper' && inputs.evidence-producer != 'clang-plugin' && steps.candidate.outputs.evidence-pack != '') && steps.candidate.outputs.evidence-pack || inputs.build-info }}
           compile-db: ${{ inputs.compile-db }}
           build-config: ${{ inputs.build-config }}
           policy: ${{ inputs.policy }}

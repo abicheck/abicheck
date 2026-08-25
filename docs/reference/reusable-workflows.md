@@ -266,7 +266,19 @@ wrong one. A bundle cell therefore keeps resolving the workflow-global
 The sibling `consumer_compile.frontend`, compiler binding, and options are
 forwarded to a separate candidate dump. That invocation reads the same
 producer binary under the client header context, and the comparison consumes
-the materialized snapshot without reparsing candidate headers.
+the materialized snapshot without reparsing candidate headers. An omitted
+field falls back to this same workflow's global input (`ast-frontend`/
+`gcc-path`/`gcc-options`), never to the empty string — an overlay that sets
+only `standard:`, say, still uses the caller's selected frontend for the
+consumer dump rather than silently reverting to the CLI default.
+
+**Known gap: only this candidate-side dump exists.** The baseline (old)
+side of a real `baseline-channel` comparison is produced by
+`publish-baseline.yml`/`update-main-baseline.yml` long before this job
+runs, and neither reads a profile's `consumer_compile:` overlay — see
+`project-targets-schema.md`'s own "Known gap" note above for what this
+means for a `consumer_compile:` check compared against a real baseline
+(it currently resolves `NOT_COMPARABLE` rather than a wrong verdict).
 
 Every *other* analysis option above stays global-only, unaffected by these
 three exceptions.

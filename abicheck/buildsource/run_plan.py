@@ -119,6 +119,34 @@ are meant to look the same to a caller either way. The native ``check-project`` 
 candidate dump: it reads the unchanged producer binary while interpreting
 headers under the consumer context, then compares the materialized snapshot.
 
+**Known gap: only the candidate side gets this treatment.** The baseline
+(old) side of a ``baseline-channel`` comparison is produced by a
+completely different workflow, at a completely different time --
+``publish-baseline.yml``/``update-main-baseline.yml``, via ``actions/
+baseline`` -- which reads only ``build-output.json`` (no per-profile
+compile-context fields at all: see :class:`~.build_output.BuildOutputTarget`)
+and never consults ``run-plan.json``, so it has no way to know a profile
+declared a ``consumer_compile:`` overlay, let alone dump that profile's
+baseline snapshot under the same consumer toolchain. A ``consumer_compile``-
+active check compared against a real (non-``none``) baseline channel
+therefore compares two snapshots produced under two different header-AST
+contexts -- the candidate under the consumer's, the baseline under the
+producer's (or the CLI default, if the producer profile sets no ``compile:``
+overlay either). ``compare``'s own comparability gate (ADR-050 D2) is what
+keeps this from silently misreporting: a resulting extraction-profile
+fingerprint mismatch is refused outright as ``NOT_COMPARABLE``/
+``ProfileMismatchError`` rather than compared -- so the failure mode here is
+"the feature doesn't work with a real baseline yet," not "the feature lies."
+Closing this needs ``actions/baseline`` (and the ``libraries`` JSON schema
+:func:`~.baseline_publish.derive_baseline_libraries` produces) to gain the
+same per-library ``ast-frontend``/``gcc-path``/``gcc-options`` -- and their
+``consumer_compile`` counterparts -- that ``check-target`` already resolves
+per cell here, sourced from a real per-target run-plan resolution neither
+baseline workflow reads today. That is a new, cross-cutting feature
+spanning ``abicheck/buildsource/baseline_publish.py``, ``actions/baseline``,
+and both baseline-publishing workflows, not a follow-up to this module's own
+projection -- see the G34 plan doc's Phase 0 for where this belongs.
+
 **``compile.frontend``/``consumer_compile.frontend`` (G34 Phase B) project
 the same way**, into :attr:`RunPlanCheck.compile_ast_frontend`/
 :attr:`RunPlanCheck.consumer_compile_ast_frontend` -- one of the same four

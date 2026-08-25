@@ -541,13 +541,22 @@ runs:
       with:
         mode: dump
         new-library: ${{ inputs.new-library }}
-        header: ${{ inputs.header }}
-        new-header: ${{ inputs.new-header }}
-        include: ${{ inputs.include }}
-        new-include: ${{ inputs.new-include }}
+        # mode: dump has no old/new distinction -- root action/run.sh's dump
+        # path adds -H/-I for *both* `header`/`new-header` (and
+        # `include`/`new-include`) unconditionally, so passing both here
+        # would union them into one parse instead of letting the candidate-
+        # specific value replace the shared one the way `compare` mode does
+        # for its own new side. A stale shared header can then retain
+        # declarations the candidate header set actually removed (Codex
+        # review). Select the candidate-specific value when the caller gave
+        # one, falling back to the shared value otherwise -- exactly
+        # `compare`'s own new-side precedent.
+        header: ${{ inputs.new-header != '' && inputs.new-header || inputs.header }}
+        include: ${{ inputs.new-include != '' && inputs.new-include || inputs.include }}
         lang: ${{ inputs.lang }}
         ast-frontend: ${{ inputs.consumer-ast-frontend }}
         gcc-path: ${{ inputs.consumer-gcc-path }}
+        gcc-prefix: ${{ inputs.gcc-prefix }}
         gcc-options: ${{ inputs.consumer-gcc-options }}
         sysroot: ${{ inputs.sysroot }}
         sources: ${{ inputs.sources != '' && inputs.sources || (inputs.evidence-producer == 'replay' && '.' || '') }}

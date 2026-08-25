@@ -57,6 +57,96 @@ def test_consumer_compile_context_uses_a_separate_extraction() -> None:
     assert "consumer_context.outcome == 'success'" in analysis["with"]["header"]
 
 
+def test_resolved_evidence_pack_also_reaches_build_info_for_every_producer() -> None:
+    """check-target's own evidence-pack-path -> --build-info conversion is
+
+    gated on evidence-producer: wrapper/clang-plugin, so a replay (or
+    unset) producer would otherwise never see this cell's resolved
+    per-target build-output.json evidence at all (Codex review P1). The
+    workflow must forward it through the caller-supplied `build-info` input
+    independently of that gate, falling back to the caller's own
+    `inputs.build-info` when this cell resolved no target evidence.
+    """
+    project = _load(CHECK_PROJECT)
+    run_step = next(
+        step
+        for step in _steps(project["jobs"]["check"])
+        if step.get("name") == "Run check-target"
+    )
+    expr = run_step["with"]["build-info"]
+    assert "steps.candidate.outputs.evidence-pack" in expr
+    assert "inputs.evidence-producer != 'wrapper'" in expr
+    assert "inputs.evidence-producer != 'clang-plugin'" in expr
+    assert expr.rstrip().endswith("|| inputs.build-info }}")
+
+
+def test_consumer_dump_prefers_new_side_over_shared_header_and_include() -> None:
+    """mode: dump has no old/new distinction, so passing both `header` and
+
+    `new-header` (or `include`/`new-include`) would union them instead of
+    letting the candidate-specific value replace the shared one the way
+    `compare` mode's own new side does (Codex review P2).
+    """
+    target = _load(CHECK_TARGET)
+    consumer = next(
+        step
+        for step in _steps(target["runs"])
+        if step.get("name") == "Extract candidate consumer context"
+    )
+    assert "new-header" not in consumer["with"]
+    assert "new-include" not in consumer["with"]
+    header_expr = consumer["with"]["header"]
+    assert "inputs.new-header != ''" in header_expr
+    assert header_expr.rstrip().endswith("|| inputs.header }}")
+    include_expr = consumer["with"]["include"]
+    assert "inputs.new-include != ''" in include_expr
+    assert include_expr.rstrip().endswith("|| inputs.include }}")
+
+
+def test_consumer_dump_forwards_gcc_prefix() -> None:
+    """A cross-compilation caller selects its toolchain via `gcc-prefix`;
+
+    the separate consumer-context dump forwarded the compiler path/options
+    but omitted this global-only field, so it would resolve a host/default
+    compiler instead (Codex review P2).
+    """
+    target = _load(CHECK_TARGET)
+    consumer = next(
+        step
+        for step in _steps(target["runs"])
+        if step.get("name") == "Extract candidate consumer context"
+    )
+    assert consumer["with"]["gcc-prefix"] == "${{ inputs.gcc-prefix }}"
+
+
+def test_consumer_compile_fields_fall_back_to_global_compiler_inputs() -> None:
+    """An omitted consumer_compile field must defer to the caller's
+
+    workflow-global input, not the empty string, matching the schema's
+    documented per-field precedence and the producer field's own fallback
+    two lines up (Codex review P2).
+    """
+    project = _load(CHECK_PROJECT)
+    run_step = next(
+        step
+        for step in _steps(project["jobs"]["check"])
+        if step.get("name") == "Run check-target"
+    )
+    assert (
+        run_step["with"]["consumer-ast-frontend"]
+        .rstrip()
+        .endswith("|| inputs.ast-frontend }}")
+    )
+    assert (
+        run_step["with"]["consumer-gcc-path"].rstrip().endswith("|| inputs.gcc-path }}")
+    )
+    assert (
+        run_step["with"]["consumer-gcc-options"]
+        .rstrip()
+        .endswith("|| inputs.gcc-options }}")
+    )
+
+
 def test_target_evidence_path_is_forwarded_per_matrix_cell() -> None:
     project = _load(CHECK_PROJECT)
     steps = _steps(project["jobs"]["check"])
