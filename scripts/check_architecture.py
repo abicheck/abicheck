@@ -147,7 +147,28 @@ def _validate_modules(
             )
         if path:
             paths.add(path)
-        validated[name] = {"path": path, "may_import": imports}
+        legacy_paths = _string_list(
+            raw.get("legacy_paths", []), f"{where}.legacy_paths", findings
+        )
+        for index, legacy_path in enumerate(legacy_paths):
+            valid_legacy = _safe_relative_path(
+                legacy_path, f"{where}.legacy_paths[{index}]", findings
+            )
+            if valid_legacy and (
+                not valid_legacy.startswith("abicheck/")
+                or not valid_legacy.endswith(".py")
+            ):
+                findings.append(
+                    Finding(
+                        "schema",
+                        f"{where}.legacy_paths[{index}]: must name an abicheck Python module",
+                    )
+                )
+        validated[name] = {
+            "path": path,
+            "may_import": imports,
+            "legacy_paths": legacy_paths,
+        }
         graph[name] = set(imports)
     for name, imports in graph.items():
         unknown = imports - graph.keys()
@@ -162,6 +183,17 @@ def _validate_modules(
             findings.append(
                 Finding("dependency-cycle", f"layer {name!r} imports itself")
             )
+    legacy_owners: dict[str, str] = {}
+    for name, layer in validated.items():
+        for legacy_path in layer["legacy_paths"]:
+            previous = legacy_owners.setdefault(legacy_path, name)
+            if previous != name:
+                findings.append(
+                    Finding(
+                        "schema",
+                        f"legacy path {legacy_path!r} is classified by both {previous!r} and {name!r}",
+                    )
+                )
     cycle = _find_cycle(
         {name: imports & graph.keys() for name, imports in graph.items()}
     )
@@ -300,6 +332,10 @@ def _layer_for(module: str, layers: Mapping[str, dict[str, Any]]) -> str | None:
         if isinstance(path, str):
             prefix = path.replace("/", ".")
             if module == prefix or module.startswith(prefix + "."):
+                return name
+        for legacy_path in layer.get("legacy_paths", []):
+            legacy_module = legacy_path.removesuffix(".py").replace("/", ".")
+            if module == legacy_module or module.startswith(legacy_module + "."):
                 return name
     return None
 

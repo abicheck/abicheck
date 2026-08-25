@@ -23,7 +23,9 @@ It separates the desired dependency graph from temporary migration debt.
 
 `modules.yaml` has `schema_version: 1`, a `limits` mapping, and a `layers`
 mapping. Every layer record requires a repository-relative `path` and a
-`may_import` list naming other declared layers. Paths must be unique; imports
+`may_import` list naming other declared layers. During migration, an optional
+`legacy_paths` list classifies flat modules by their target owner so dependency
+direction can be enforced before their own physical move. Paths must be unique; imports
 must name real layers; and the resulting graph must be acyclic. The remaining
 lists classify public root surfaces, compatibility facades, parser/catalog
 exception roots, frozen root filename families, pre-adoption root directories,

@@ -148,6 +148,32 @@ def test_undeclared_cross_package_import_fails(tmp_path: Path) -> None:
     assert any("compare -> extract" in finding.message for finding in findings)
 
 
+def test_legacy_module_is_classified_by_its_target_owner(tmp_path: Path) -> None:
+    root = _tree(tmp_path)
+    config = json.loads((root / "architecture/modules.yaml").read_text())
+    config["layers"]["model"]["legacy_paths"] = ["abicheck/legacy_model.py"]
+    _write(root / "architecture/modules.yaml", json.dumps(config))
+    _write(root / "abicheck/legacy_model.py", "VALUE = 1\n")
+    _add_package(root, "workflows", "from abicheck.legacy_model import VALUE\n")
+
+    assert check_repository(root) == []
+
+
+def test_legacy_module_cannot_have_two_target_owners(tmp_path: Path) -> None:
+    root = _tree(tmp_path)
+    config = json.loads((root / "architecture/modules.yaml").read_text())
+    for layer in ("model", "compare"):
+        config["layers"][layer]["legacy_paths"] = ["abicheck/legacy.py"]
+    _write(root / "architecture/modules.yaml", json.dumps(config))
+
+    findings = check_repository(root)
+
+    assert any(
+        finding.rule == "schema" and "classified by both" in finding.message
+        for finding in findings
+    )
+
+
 def test_migrated_package_cannot_import_legacy_facade(tmp_path: Path) -> None:
     root = _tree(tmp_path)
     _add_package(root, "workflows", "from abicheck.service import run_dump\n")

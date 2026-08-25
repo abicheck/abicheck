@@ -40,14 +40,15 @@ from pathlib import Path
 
 import click
 
-from .aggregate import (
+from .cli import _safe_write_output, _setup_verbosity, main
+from .cli_options import output_options, verbose_option
+from .report.aggregate import render_aggregate_json, render_aggregate_text
+from .workflows.aggregate import (
     DEFAULT_REPORT_PREFIX,
     AggregateError,
     ExpectedTargets,
     aggregate_reports_dir,
 )
-from .cli import _safe_write_output, _setup_verbosity, main
-from .cli_options import output_options, verbose_option
 
 
 @main.command("aggregate")
@@ -144,9 +145,9 @@ def aggregate_cmd(
         raise click.UsageError(str(exc)) from exc
 
     text = (
-        json.dumps(result.to_dict(), indent=2)
+        json.dumps(render_aggregate_json(result), indent=2)
         if fmt == "json"
-        else result.render_text()
+        else render_aggregate_text(result)
     )
     if output is not None:
         _safe_write_output(output, text)
@@ -173,7 +174,7 @@ def _resolve_expected(
 
     Returns the expected-target set plus a ``policy_source_hint`` label
     (``"manifest"``/``"run-plan"``) naming which source it came from --
-    :func:`~.aggregate.resolve_gate_policy` reports this back in the
+    :func:`~.workflows.aggregate.resolve_gate_policy` reports this back in the
     result's ``effective_policy.source`` whenever that source's own ``gate``
     block actually supplied a value.
     """
@@ -187,8 +188,7 @@ def _resolve_expected(
         return None, "default"
     if sources_given > 1:
         raise click.UsageError(
-            "--manifest and --run-plan are mutually exclusive expected-target "
-            "sources"
+            "--manifest and --run-plan are mutually exclusive expected-target sources"
         )
     if manifest is not None:
         try:

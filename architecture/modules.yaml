@@ -10,7 +10,10 @@
   "layers": {
     "model": {
       "path": "abicheck/model",
-      "may_import": []
+      "may_import": [],
+      "legacy_paths": [
+        "abicheck/change_registry_types.py"
+      ]
     },
     "storage": {
       "path": "abicheck/storage",
@@ -29,6 +32,11 @@
       "path": "abicheck/compare",
       "may_import": [
         "model"
+      ],
+      "legacy_paths": [
+        "abicheck/checker_types.py",
+        "abicheck/diff_cxx_rules.py",
+        "abicheck/finding_identity.py"
       ]
     },
     "policy": {
@@ -70,7 +78,11 @@
     "abicheck.api_types",
     "abicheck.errors"
   ],
-  "facades": [],
+  "facades": [
+    "abicheck.aggregate",
+    "abicheck.aggregate_findings",
+    "abicheck.aggregate_manifest"
+  ],
   "frozen_root_families": {
     "cli_": [
       "cli_aggregate.py",

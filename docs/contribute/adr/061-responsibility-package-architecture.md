@@ -1,7 +1,7 @@
 # ADR-061: Responsibility-Package Architecture and Flat-Namespace Migration
 
 **Date:** 2026-08-24
-**Status:** Accepted — Phase 0 implemented; Phases 1-5 remain incremental.
+**Status:** Accepted — Phases 0-1 implemented; Phases 2-5 remain incremental.
 **Decision maker:** abicheck maintainers
 
 ## Context

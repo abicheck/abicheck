@@ -2,26 +2,6 @@
   "schema_version": 1,
   "files": [
     {
-      "path": "abicheck/aggregate.py",
-      "baseline_lines": 2000,
-      "target": "workflows-or-frontends",
-      "rule": "no_growth",
-      "category": "legacy_workflow_or_frontend_monolith",
-      "owner": "abicheck maintainers",
-      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
-      "review_by": "2026-11-30"
-    },
-    {
-      "path": "abicheck/aggregate_findings.py",
-      "baseline_lines": 1127,
-      "target": "see ADR-061 ownership map",
-      "rule": "no_growth",
-      "category": "legacy_oversized_module",
-      "owner": "abicheck maintainers",
-      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
-      "review_by": "2026-11-30"
-    },
-    {
       "path": "abicheck/analysis_assurance.py",
       "baseline_lines": 1545,
       "target": "see ADR-061 ownership map",
