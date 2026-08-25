@@ -558,6 +558,34 @@ def msvc_qualified_name(mangled: str) -> str | None:
     return "::".join(comps) if comps else None
 
 
+#: Symbol-operator spellings that carry a literal ``<``/``>`` as part of the
+#: operator token itself (stream insertion/extraction, relational, C++20
+#: three-way comparison) rather than as template-argument delimiters --
+#: longest-first so ``"<<="`` matches before the shorter ``"<<"``/``"<"``
+#: prefixes it also starts with.
+_OPERATOR_ANGLE_TOKENS = ("<<=", ">>=", "<=>", "<<", ">>", "<=", ">=", "<", ">")
+
+
+def _operator_angle_token_len(qualified: str, i: int) -> int:
+    """Length of a symbol-operator angle token at *qualified[i:]* immediately
+    following a literal ``"operator"`` (checked by the caller), or 0.
+
+    ``ns::Stream::operator<<`` has no space after ``operator`` -- unlike a
+    conversion operator (``operator ns::Bar``), so it never matches the
+    ``"::operator "`` marker above -- and its own ``<``/``>`` are the
+    operator's spelling, not template-argument delimiters. Without
+    recognizing this, the depth tracker below would see an unmatched ``<``
+    (or two, for ``operator<<``) with no closing ``>`` anywhere in the
+    string, reporting "unbalanced nesting" and rejecting an otherwise
+    perfectly ordinary qualified name (Codex/CodeRabbit review, fresh
+    evidence).
+    """
+    for tok in _OPERATOR_ANGLE_TOKENS:
+        if qualified.startswith(tok, i):
+            return len(tok)
+    return 0
+
+
 def qualified_name_scope_components(qualified: str) -> list[str] | None:
     """Scope components of an already-demangled, ``::``-qualified name.
 
@@ -617,6 +645,11 @@ def qualified_name_scope_components(qualified: str) -> list[str] | None:
     marker_idx = -1
     while i < n:
         ch = qualified[i]
+        if ch in "<>" and i >= 8 and qualified[i - 8 : i] == "operator":
+            tok_len = _operator_angle_token_len(qualified, i)
+            if tok_len:
+                i += tok_len
+                continue
         if ch in "<(":
             depth += 1
         elif ch in ">)":
@@ -648,6 +681,11 @@ def qualified_name_scope_components(qualified: str) -> list[str] | None:
     i = 0
     while i < n:
         ch = qualified[i]
+        if ch in "<>" and i >= 8 and qualified[i - 8 : i] == "operator":
+            tok_len = _operator_angle_token_len(qualified, i)
+            if tok_len:
+                i += tok_len
+                continue
         if ch in "<(":
             depth += 1
         elif ch in ">)":

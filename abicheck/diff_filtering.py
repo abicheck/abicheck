@@ -353,11 +353,16 @@ def _enrich_source_locations(
             if loc:
                 c.source_location = loc
         if not c.qualified_name:
-            qual = _qualified_name_for_change(
-                c, old_qualified, new_qualified
-            ) or _canonicalize_enum_symbol(
-                c.symbol, old_enum_names
-            ) or _canonicalize_enum_symbol(c.symbol, new_enum_names)
+            qual = _qualified_name_for_change(c, old_qualified, new_qualified)
+            if not qual and c.kind in _ENUM_QUALIFICATION_KINDS:
+                # Scoped to the four enum kinds the bridge is meant for --
+                # see _ENUM_QUALIFICATION_KINDS's own docstring (Codex
+                # review, fresh evidence: a second unconditional call site,
+                # this one in the enrichment pass rather than the dedup
+                # pass, had the identical unrelated-symbol-collision risk).
+                qual = _canonicalize_enum_symbol(
+                    c.symbol, old_enum_names
+                ) or _canonicalize_enum_symbol(c.symbol, new_enum_names)
             if qual:
                 c.qualified_name = qual
 

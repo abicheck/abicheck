@@ -42,6 +42,7 @@ from abicheck.checker_types import Change
 from abicheck.diff_filtering import (
     _canonicalize_enum_symbol,
     _deduplicate_cross_detector,
+    _enrich_source_locations,
     _enum_canonical_names,
 )
 from abicheck.dwarf_metadata import DwarfMetadata, EnumInfo
@@ -363,4 +364,24 @@ class TestEnumQualificationDoesNotLeakIntoUnrelatedKinds:
             description="removed",
         )
         _deduplicate_cross_detector([change], snap, snap)
+        assert change.qualified_name is None
+
+    def test_a_same_named_function_removal_is_not_qualified_by_enrichment_either(
+        self,
+    ) -> None:
+        """The identical collision risk existed at a SECOND, independent
+        call site: `_enrich_source_locations` (the later pipeline step)
+        called `_canonicalize_enum_symbol` unconditionally for any change
+        still missing a `qualified_name`, not just the four enum kinds."""
+        snap = AbiSnapshot(
+            library="lib.so",
+            version="1",
+            enums=[_enum_type("Color", "detail::Color", [("RED", 0)])],
+        )
+        change = Change(
+            kind=ChangeKind.FUNC_REMOVED,
+            symbol="Color",
+            description="removed",
+        )
+        _enrich_source_locations([change], snap, snap)
         assert change.qualified_name is None

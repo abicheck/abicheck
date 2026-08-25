@@ -155,6 +155,39 @@ class TestNamespaceMoveIsRecognizedAsOneBatch:
         assert ("old2", "new1") not in groups
         assert ("old2", "new2") not in groups
 
+    def test_independent_moves_reusing_a_bare_segment_name_are_not_rejected(
+        self,
+    ) -> None:
+        """Codex review, fresh evidence: an earlier revision of the
+        ambiguity guard computed ambiguity GLOBALLY off the bare segment
+        STRING (does "old" ever map to more than one target anywhere?) --
+        which wrongly rejected two genuinely independent, individually
+        unambiguous moves that merely happen to reuse the same bare
+        segment name in different scopes: ``p1::old::{f,g} ->
+        p1::new1::{f,g}`` and the unrelated ``p2::old::{h,i} ->
+        p2::new2::{h,i}``. Each removed symbol's masked lookup here has
+        exactly ONE candidate (the leaf sets {f,g} and {h,i} don't
+        overlap, so there's no real confusion about which added symbol is
+        the target) -- ambiguity must be judged at that local, per-symbol
+        granularity, not by a global scan over bare segment strings."""
+        removed = {
+            "_ZN2p13old1fEv",
+            "_ZN2p13old1gEv",
+            "_ZN2p23old1hEv",
+            "_ZN2p23old1iEv",
+        }
+        added = {
+            "_ZN2p14new11fEv",
+            "_ZN2p14new11gEv",
+            "_ZN2p24new21hEv",
+            "_ZN2p24new21iEv",
+        }
+        groups = find_namespace_move_groups(removed, added)
+        assert ("old", "new1") in groups
+        assert ("old", "new2") in groups
+        assert len(groups[("old", "new1")]) == 2
+        assert len(groups[("old", "new2")]) == 2
+
 
 # A header-tier (L2) backend can leave ``Function.mangled`` unmangled --
 # castxml synthesizes ``__abicheck_ctor__<scope>(<params>)`` for a
@@ -506,3 +539,59 @@ class TestStripTrailingTopLevelParameterList:
         (old_q, new_q) = groups[("d1", "d2")][0]
         assert old_q == "ns::d1::Holder<void(int)>::{ctor}"
         assert new_q == "ns::d2::Holder<void(int)>::{ctor}"
+
+
+class TestQualifiedNameScopeComponentsRecognizesSymbolOperatorAngleTokens:
+    """Codex/CodeRabbit review, fresh evidence: a stream/relational
+    operator's own spelling carries a literal ``<``/``>`` (``operator<<``,
+    ``operator>>``, ``operator<``, ``operator<=``, ``operator<=>``, ...)
+    that is not a template-argument delimiter at all. Without recognizing
+    it, the depth tracker sees an unmatched bracket and rejects an
+    otherwise ordinary qualified name as "unbalanced nesting"."""
+
+    def test_stream_operators_are_recognized(self) -> None:
+        assert qualified_name_scope_components("ns::Stream::operator<<") == [
+            "ns",
+            "Stream",
+            "operator<<",
+        ]
+        assert qualified_name_scope_components("ns::Stream::operator>>") == [
+            "ns",
+            "Stream",
+            "operator>>",
+        ]
+
+    def test_relational_and_spaceship_operators_are_recognized(self) -> None:
+        assert qualified_name_scope_components("ns::Widget::operator<") == [
+            "ns",
+            "Widget",
+            "operator<",
+        ]
+        assert qualified_name_scope_components("ns::Widget::operator<=") == [
+            "ns",
+            "Widget",
+            "operator<=",
+        ]
+        assert qualified_name_scope_components("ns::Widget::operator<=>") == [
+            "ns",
+            "Widget",
+            "operator<=>",
+        ]
+
+    def test_a_namespace_move_over_a_class_with_a_stream_operator_still_pairs(
+        self,
+    ) -> None:
+        """The operator name itself never participates in the namespace
+        move (it's the leaf, not a scope segment) -- only the enclosing
+        namespace does, and that must still be detected correctly."""
+        removed = {
+            "d1::Widget::operator<<",
+            "d1::Widget::run",
+        }
+        added = {
+            "d2::Widget::operator<<",
+            "d2::Widget::run",
+        }
+        groups = find_namespace_move_groups(removed, added)
+        assert ("d1", "d2") in groups
+        assert len(groups[("d1", "d2")]) == 2

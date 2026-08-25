@@ -945,44 +945,48 @@ def find_namespace_move_groups(
         seen_here: set[tuple[str, str]] = set()
         for i in range(len(r_comps) - 1):
             masked = tuple(r_comps[:i]) + (_MASKED,) + tuple(r_comps[i + 1 :])
-            for a_sym, a_comps in added_index.get(masked, ()):
-                key = (r_comps[i], a_comps[i])
-                if key[0] == key[1] or key in seen_here:
-                    continue
-                seen_here.add(key)
-                groups.setdefault(key, []).append(
-                    ("::".join(r_comps), "::".join(a_comps))
-                )
-
-    # Reject an AMBIGUOUS substitution (Codex review, fresh evidence): when
-    # multiple old namespaces and multiple new namespaces expose the same
-    # leaf set (e.g. removed old1::{f,g}/old2::{f,g}, added
-    # new1::{f,g}/new2::{f,g}), the loop above accumulates full support for
-    # every Cartesian-product pairing -- old1->new1, old1->new2, old2->new1,
-    # AND old2->new2 -- each individually "supported" by 2+ pairs, with no
-    # way to tell which pairing (if any) is the real move. Emitting all four
-    # as contradictory BREAKING batch findings is worse than emitting none:
-    # a single `old_seg` (or `new_seg`) resolving to more than one distinct
-    # target among the otherwise-qualifying substitutions means the mapping
-    # is unresolvable from this evidence alone, so every group touching that
-    # segment is dropped rather than guessed at -- the same
-    # false-negative-over-false-positive default this codebase's other
-    # ambiguity guards already use (see e.g. type_reachability.py's
-    # collision handling).
-    qualifying = {seg_pair: pairs for seg_pair, pairs in groups.items() if len(pairs) >= 2}
-    old_targets: dict[str, set[str]] = {}
-    new_sources: dict[str, set[str]] = {}
-    for old_seg, new_seg in qualifying:
-        old_targets.setdefault(old_seg, set()).add(new_seg)
-        new_sources.setdefault(new_seg, set()).add(old_seg)
-    ambiguous_old = {seg for seg, targets in old_targets.items() if len(targets) > 1}
-    ambiguous_new = {seg for seg, sources in new_sources.items() if len(sources) > 1}
-    if ambiguous_old or ambiguous_new:
-        groups = {
-            seg_pair: pairs
-            for seg_pair, pairs in groups.items()
-            if seg_pair[0] not in ambiguous_old and seg_pair[1] not in ambiguous_new
-        }
+            candidates = added_index.get(masked, [])
+            # Reject an AMBIGUOUS substitution at the source (Codex review,
+            # fresh evidence): when the SAME masked context (this removed
+            # symbol's scope chain with position `i` blanked out) matches
+            # MORE THAN ONE added symbol -- e.g. removed old1::{f,g}/
+            # old2::{f,g} vs. added new1::{f,g}/new2::{f,g}, where
+            # `old1::f` masked at its differing position matches BOTH
+            # `new1::f` and `new2::f` -- there is no way to tell which
+            # candidate is the real rename target for this symbol, so
+            # neither is recorded. Deliberately LOCAL (per masked context),
+            # not a global "does this bare segment string ever appear with
+            # two different targets anywhere" check: two genuinely
+            # independent, unambiguous moves that happen to reuse the same
+            # bare segment NAME in different scopes (`p1::old::{f,g} ->
+            # p1::new1::{f,g}` alongside the unrelated `p2::old::{h,i} ->
+            # p2::new2::{h,i}`) must still both be reported -- each
+            # individual masked lookup there has exactly one candidate, so
+            # neither is ambiguous by this test, even though the bare
+            # segment "old" ends up mapped to two different bare targets
+            # across the two unrelated groups. The same
+            # false-negative-over-false-positive default this codebase's
+            # other ambiguity guards use (see e.g. type_reachability.py's
+            # collision handling) -- applied at the granularity the
+            # ambiguity actually exists at.
+            #
+            # Distinct by TARGET SEGMENT VALUE, not by candidate count: the
+            # same class can legitimately appear twice in `added` under two
+            # different string identities that parse to the identical
+            # scope-component list -- a real mangled ctor symbol and a
+            # header-tier synthetic ctor key for the SAME move both
+            # normalize to e.g. ["tbb","detail","d2","graph","{ctor}"].
+            # That is not ambiguity (both candidates agree on the target),
+            # only genuinely differing target segments are.
+            distinct_targets = {a_comps[i] for _a_sym, a_comps in candidates}
+            if len(distinct_targets) != 1:
+                continue
+            a_sym, a_comps = candidates[0]
+            key = (r_comps[i], a_comps[i])
+            if key[0] == key[1] or key in seen_here:
+                continue
+            seen_here.add(key)
+            groups.setdefault(key, []).append(("::".join(r_comps), "::".join(a_comps)))
     return groups
 
 
