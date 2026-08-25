@@ -909,7 +909,10 @@ jobs:
           head-sha: ${{ inputs.head-sha != '' && inputs.head-sha || github.sha }}
           base-ref: ${{ inputs.base-ref }}
           evidence-producer: ${{ inputs.evidence-producer }}
-          evidence-pack-path: ${{ steps.candidate.outputs.evidence-pack || inputs.evidence-pack-path }}
+          # Never fall back to the workflow-global pack here: a project cell
+          # without declared target evidence must not consume another
+          # target's build-wide pack.
+          evidence-pack-path: ${{ steps.candidate.outputs.evidence-pack }}
           new-library: ${{ steps.candidate.outputs.new-library }}
           consumer-binary: ${{ matrix.target_kind == 'app-consumer' && steps.candidate.outputs.consumer-binary || '' }}
           contract-file: ${{ matrix.target_kind == 'plugin-contract' && matrix.contract_file || '' }}
@@ -946,6 +949,7 @@ jobs:
           consumer-ast-frontend: ${{ matrix.kind != 'bundle' && matrix.consumer_compile_ast_frontend || '' }}
           consumer-gcc-path: ${{ matrix.kind != 'bundle' && matrix.consumer_compile_gcc_path || '' }}
           consumer-gcc-options: ${{ matrix.kind != 'bundle' && matrix.consumer_compile_gcc_options || '' }}
+          consumer-context-enabled: ${{ matrix.kind != 'bundle' && matrix.consumer_compile_enabled || false }}
           # P1 toolchain-profile audit: this cell's profiles.<id>.compile
           # overlay (project plan --toolchain-bindings), when the
           # profile declares one, takes precedence over these workflow-

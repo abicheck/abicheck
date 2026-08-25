@@ -41,6 +41,10 @@ def test_consumer_compile_context_uses_a_separate_extraction() -> None:
         "matrix.consumer_compile_gcc_options"
         in run_step["with"]["consumer-gcc-options"]
     )
+    assert (
+        "matrix.consumer_compile_enabled"
+        in run_step["with"]["consumer-context-enabled"]
+    )
 
     target = _load(CHECK_TARGET)
     steps = _steps(target["runs"])
@@ -67,8 +71,8 @@ def test_target_evidence_path_is_forwarded_per_matrix_cell() -> None:
     )
     assert ".get('evidence', {}).get('path'" in candidate["run"]
     run_step = next(step for step in steps if step.get("name") == "Run check-target")
-    assert run_step["with"]["evidence-pack-path"].startswith(
-        "${{ steps.candidate.outputs.evidence-pack"
+    assert run_step["with"]["evidence-pack-path"] == (
+        "${{ steps.candidate.outputs.evidence-pack }}"
     )
 
 
@@ -118,3 +122,47 @@ def test_resolver_selects_only_the_current_targets_evidence(tmp_path: Path) -> N
     )
     assert outputs["evidence-pack"] == str((build_root / "evidence" / "math").resolve())
     assert "evidence/core" not in outputs["evidence-pack"]
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="requires POSIX bash")
+@pytest.mark.parametrize("malicious_path", ["../outside", "/tmp/outside"])
+def test_resolver_rejects_escape_without_outside_side_effects(
+    tmp_path: Path, malicious_path: str
+) -> None:
+    project = _load(CHECK_PROJECT)
+    resolver = next(
+        step
+        for step in _steps(project["jobs"]["check"])
+        if step.get("name") == "Resolve candidate binary/binaries"
+    )
+    (tmp_path / "candidate").mkdir()
+    (tmp_path / "candidate" / "libcore.so").write_text("binary")
+    build_root = tmp_path / "build-output"
+    build_root.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    sentinel = outside / "sentinel"
+    sentinel.write_text("unchanged")
+    (build_root / "build-output.json").write_text(
+        json.dumps({"targets": [{"id": "core", "evidence": {"path": malicious_path}}]})
+    )
+    github_output = tmp_path / "github_output"
+    github_output.write_text("")
+    result = subprocess.run(
+        ["bash", "-c", resolver["run"]],
+        cwd=tmp_path,
+        env={
+            **os.environ,
+            "MATRIX_JSON": json.dumps(
+                {"kind": "target", "name": "core", "binary_pattern": "*.so"}
+            ),
+            "GITHUB_OUTPUT": str(github_output),
+        },
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode != 0
+    assert "absolute or escapes" in result.stderr
+    assert sentinel.read_text() == "unchanged"
+    assert sorted(path.name for path in outside.iterdir()) == ["sentinel"]
+    assert "evidence-pack=" not in github_output.read_text()
