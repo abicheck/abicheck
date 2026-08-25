@@ -42,27 +42,43 @@ baseline must meet the applicable production or test ceiling. The checker
 fails if a tracked file grows; a reduced file is allowed so debt can be paid
 down without coordinating a baseline update.
 
-On pull requests, CI passes the base revision through `ARCHITECTURE_BASE`.
-No-growth is then measured against both the recorded adoption baseline and the
-file as it exists on the PR base: concurrent changes already present on the
-base are not attributed to the architecture PR, while any additional growth
-on the branch still fails. When the base predates this contract entirely, the
-run is the adoption run and records the merged tree rather than treating
-concurrent pre-adoption work as new debt.
+On pull requests, CI passes the base revision through `ARCHITECTURE_BASE`,
+set to the PR's own base sha. A `push`-to-`main` or `workflow_dispatch` run
+has no PR base at all — `ci.yml`'s "Resolve architecture check base
+revision" step sets `ARCHITECTURE_BASE` to the push's own `before` sha (the
+tip of `main` immediately prior) instead, so a post-merge run is scoped to
+growth *that push* introduced rather than every file's original adoption
+baseline; a `workflow_dispatch` run, which has no equivalent "prior
+revision" concept, and a push whose `before` is git's all-zero sentinel (a
+branch's first push, no prior commit to compare against) both leave
+`ARCHITECTURE_BASE` empty. No-growth is then measured against both the
+recorded adoption baseline and the file as it exists at the resolved base:
+concurrent changes already present on the base are not attributed to the
+architecture PR/push, while any additional growth on top of it still fails.
+When the base predates this contract entirely, the run is the adoption run
+and records the merged tree rather than treating concurrent pre-adoption
+work as new debt.
 
-A local run resolves the same base without `ARCHITECTURE_BASE` set: absent an
-explicit `--base` or that environment variable, `check_architecture.py` falls
-back to a local `git merge-base HEAD <ref>` when one is resolvable, trying
-`origin/main` first and a local `main` branch second (a checkout with no
-`origin` remote-tracking ref — the remote renamed or removed, a bare local
-clone — still gets a base then). Without this, a bare local invocation
+A local run resolves the same base without `ARCHITECTURE_BASE` set at all:
+absent an explicit `--base` or that environment variable, `check_architecture.py`
+falls back to a local `git merge-base HEAD <ref>` when one is resolvable,
+trying `origin/main` first and a local `main` branch second (a checkout with
+no `origin` remote-tracking ref — the remote renamed or removed, a bare
+local clone — still gets a base then). Without this, a bare local invocation
 compares every debt-tracked file against its original adoption baseline
 directly, which drifts over time as unrelated, individually base-scoped PRs
 each grow a file a little further — turning an untouched file into a false
 failure for the next contributor who runs the documented
 `verify.py --profile pr` command. The fallback is silent and best-effort: a
 shallow clone or a checkout with neither ref resolvable simply gets the
-previous unscoped comparison, exactly as before.
+previous unscoped comparison, exactly as before. This local fallback only
+ever triggers when `ARCHITECTURE_BASE` is absent from the environment
+entirely — CI's own push/dispatch runs set it explicitly (even to the empty
+string), which is a deliberate, different signal from "not set at all" and
+must not trigger local git auto-detection: `origin/main` on a push-triggered
+runner resolves to `HEAD` itself (the very ref just pushed), which would
+silently turn the check into comparing every file against itself instead of
+against a real prior revision (Codex review, fresh evidence).
 After adoption, an ordinary file absent from the PR base cannot add itself to
 the ledger; only files below a declared parser/catalog exception root may use
 that mechanism. This keeps the hard file-size ceiling from becoming an
