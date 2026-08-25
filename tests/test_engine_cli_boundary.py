@@ -19,7 +19,8 @@
 ``docs/contribute/plans/duplication-and-convergence-assessment.md``.
 
 The check ERRORs if an engine-layer module (``scan_engine.py``,
-``service*.py``, ``artifact_*.py``, ``buildsource/**/*.py``) imports
+``service*.py``, ``artifact_*.py``, ``buildsource/**/*.py``,
+``workflows/artifact/**/*.py``) imports
 ``click`` or a ``cli``/``cli_*`` sibling module — the CLI is a frontend
 adapter over the engine, not the reverse. Pre-existing violations are
 recorded in ``ENGINE_CLI_BOUNDARY_ALLOWLIST`` (allowlist-and-shrink,
@@ -1053,6 +1054,16 @@ def test_unrelated_third_party_package_named_abicheck_is_not_flagged(
         # `artifact.py`/`artifacts.py` is NOT an engine module.
         ("abicheck/artifact.py", False),
         ("abicheck/artifacts.py", False),
+        # ADR-061 Phase 3's migrated home for that same artifact-application
+        # contract (`artifact_plan.py` -> `workflows/artifact/contracts.py`):
+        # the whole package tree is engine-layer, not just this one file.
+        ("abicheck/workflows/artifact/contracts.py", True),
+        ("abicheck/workflows/artifact/__init__.py", True),
+        ("abicheck/workflows/artifact/resolve.py", True),
+        # A sibling `workflows` package not under `workflows/artifact/` is
+        # NOT covered by this predicate -- the rest of `workflows/` isn't
+        # (yet) part of the engine-cli-boundary contract.
+        ("abicheck/workflows/aggregate/execute.py", False),
         ("abicheck/cli.py", False),
         ("abicheck/cli_dump_helpers.py", False),
         ("abicheck/appcompat.py", False),

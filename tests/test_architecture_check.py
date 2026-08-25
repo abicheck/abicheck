@@ -595,6 +595,35 @@ def test_main_falls_back_to_none_when_nothing_resolves(
     assert captured["base_revision"] is None
 
 
+def test_main_does_not_auto_detect_when_ci_sets_base_explicitly_empty(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # ci.yml sets $ARCHITECTURE_BASE unconditionally to
+    # `github.event.pull_request.base.sha`, which is the empty string on a
+    # `push`-to-`main`/`workflow_dispatch` run (no PR to read a base sha
+    # from) -- as opposed to a bare local invocation, where the variable is
+    # simply absent from the environment. Falling back to
+    # `_local_merge_base_with_main` in the former case would resolve
+    # `origin/main` to HEAD itself (the very ref just pushed) and silently
+    # turn the debt-no-growth check into comparing every file against
+    # itself (Codex review, fresh evidence) -- so an explicitly-empty
+    # $ARCHITECTURE_BASE must fall through to the unscoped comparison
+    # instead of ever calling the auto-detection helper at all.
+    captured = _capture_base_revision(monkeypatch)
+    monkeypatch.setenv("ARCHITECTURE_BASE", "")
+
+    def _unexpected_call(root: Path) -> str:
+        raise AssertionError(
+            "_local_merge_base_with_main must not be called when "
+            "$ARCHITECTURE_BASE is explicitly set to the empty string"
+        )
+
+    monkeypatch.setattr(architecture, "_local_merge_base_with_main", _unexpected_call)
+
+    assert architecture.main(["--root", str(tmp_path)]) == 0
+    assert captured["base_revision"] is None
+
+
 def test_main_without_base_resolution_still_catches_real_violations(
     tmp_path: Path,
 ) -> None:

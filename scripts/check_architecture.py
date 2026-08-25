@@ -840,11 +840,28 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
     root = args.root.resolve()
-    base = (
-        args.base
-        or os.environ.get("ARCHITECTURE_BASE")
-        or _local_merge_base_with_main(root)
-    )
+    base = args.base
+    if base is None:
+        env_base = os.environ.get("ARCHITECTURE_BASE")
+        if env_base:
+            base = env_base
+        elif "ARCHITECTURE_BASE" not in os.environ:
+            # Only fall back to a locally-resolved merge-base when nothing
+            # set $ARCHITECTURE_BASE at all -- a bare local invocation. CI's
+            # own `ci.yml` sets it unconditionally, to
+            # `github.event.pull_request.base.sha`, which is the empty
+            # string on a `push`-to-`main` or `workflow_dispatch` run (no PR
+            # context to read a base sha from). Falling back to
+            # `_local_merge_base_with_main` in *that* case would resolve
+            # `origin/main` to HEAD itself (the ref just pushed *is*
+            # `origin/main` at that point), silently turning the debt-
+            # no-growth check into comparing every file against itself --
+            # vacuously passing committed growth instead of catching it
+            # (Codex review, fresh evidence). An explicitly-empty
+            # $ARCHITECTURE_BASE is CI's own signal that no PR base applies
+            # to this run, so it must fall through to the previous unscoped
+            # comparison instead, exactly like the pre-fallback behavior.
+            base = _local_merge_base_with_main(root)
     findings = check_repository(root, base_revision=base)
     for finding in findings:
         print(f"ERROR: {finding.render()}")
