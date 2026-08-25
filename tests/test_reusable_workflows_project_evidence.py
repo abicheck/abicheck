@@ -222,7 +222,7 @@ def test_target_evidence_path_is_forwarded_per_matrix_cell() -> None:
         for step in steps
         if step.get("name") == "Resolve candidate binary/binaries"
     )
-    assert ".get('evidence', {}).get('path'" in candidate["run"]
+    assert "target_evidence.get('path'" in candidate["run"]
     run_step = next(step for step in steps if step.get("name") == "Run check-target")
     assert run_step["with"]["evidence-pack-path"] == (
         "${{ steps.candidate.outputs.evidence-pack }}"
@@ -404,6 +404,50 @@ def test_resolver_forwards_a_validated_targets_evidence_and_producer(
     assert outputs["evidence-pack"] == str(
         (tmp_path / "build-output" / "evidence" / "math").resolve()
     )
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="requires POSIX bash")
+def test_resolver_validates_an_evidence_claim_with_an_empty_path(
+    tmp_path: Path,
+) -> None:
+    """Codex review (P2): a target declaring an `evidence` object at all --
+
+    even one whose `path` is empty or missing -- must be validated before
+    being treated as though no evidence were declared. Gating
+    validate_build_output() on a truthy `path` let a malformed claim (an
+    `evidence: {}` with no `projection`, which validate_build_output()
+    rejects as not being one of 'declared'/'inferred') silently fall
+    through to the empty-evidence branch instead of failing closed.
+    """
+    from test_build_output import _binary
+
+    project = _load(CHECK_PROJECT)
+    resolver = next(
+        step
+        for step in _steps(project["jobs"]["check"])
+        if step.get("name") == "Resolve candidate binary/binaries"
+    )
+    build_root = tmp_path / "build-output"
+    digest = _binary(build_root, "artifacts/libmath.so")
+    (build_root / "build-output.json").write_text(
+        json.dumps(
+            {
+                "schema": "abicheck.build-output/v1",
+                "targets": [
+                    {
+                        "id": "math",
+                        "binary": "artifacts/libmath.so",
+                        "evidence": {},
+                    }
+                ],
+                "digests": {"artifacts/libmath.so": f"sha256:{digest}"},
+            }
+        )
+    )
+    result, outputs = _run_resolver(resolver["run"], tmp_path, "math")
+    assert result.returncode != 0
+    assert "evidence.projection" in result.stderr
+    assert "evidence-pack" not in outputs
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="requires POSIX bash")

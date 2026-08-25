@@ -763,18 +763,29 @@ jobs:
                   (t for t in build_output.get('targets', []) if t.get('id') == target_id),
                   None,
               )
-              evidence_path = (target or {}).get('evidence', {}).get('path', '')
-              if evidence_path:
-                  # Path confinement alone only proves evidence_path *points*
-                  # somewhere safe -- it says nothing about whether the
-                  # build-output.json making this 'declared' claim is
-                  # actually trustworthy (e.g. two targets sharing one pack,
-                  # or a pack whose own manifest.library names a different
-                  # target). validate_build_output() is the same check
-                  # 'project validate-build' runs, and 'project plan' never
-                  # calls it -- run it here, before this target's evidence is
-                  # treated as scoped to it, rather than inferring validity
-                  # from path confinement alone (Codex review).
+              target_evidence = (target or {}).get('evidence')
+              if isinstance(target_evidence, dict):
+                  # validate_build_output() must run whenever the target
+                  # declares an evidence OBJECT at all, not only once it
+                  # happens to carry a non-empty path -- gating validation
+                  # on a truthy path let a malformed claim (e.g.
+                  # projection: declared with an empty/missing path, which
+                  # validate_build_output() would reject as \"not a readable
+                  # abicheck_inputs pack\") silently fall through to the
+                  # sources-based-evidence fallback below instead of
+                  # failing closed (Codex review).
+                  #
+                  # Path confinement alone only proves evidence_path
+                  # *points* somewhere safe -- it says nothing about
+                  # whether the build-output.json making this 'declared'
+                  # claim is actually trustworthy (e.g. two targets
+                  # sharing one pack, or a pack whose own manifest.library
+                  # names a different target). validate_build_output() is
+                  # the same check 'project validate-build' runs, and
+                  # 'project plan' never calls it -- run it here, before
+                  # this target's evidence is treated as scoped to it,
+                  # rather than inferring validity from path confinement
+                  # alone (Codex review).
                   from abicheck.buildsource.build_output import validate_build_output
 
                   # validate_build_output() only reports structural findings
@@ -809,41 +820,46 @@ jobs:
                   # sharing the same pack (Codex review). Reject rather than
                   # analyze it as if it were scoped, until that filtering is
                   # actually wired up end to end.
-                  projection = (target or {}).get('evidence', {}).get('projection', '')
+                  projection = target_evidence.get('projection', '')
                   if projection == 'inferred':
                       print(f'::error::target {target_id!r}: evidence.projection is \'inferred\', but no dump/compare entry point yet filters an inferred packs TUs by attribution_path/target id before analysis -- forwarding it here would let this target incorporate every other targets evidence too. Rejecting until attribution-based filtering is wired end to end; use a per-target \'declared\' evidence pack instead', file=sys.stderr)
                       sys.exit(1)
-                  if os.path.isabs(evidence_path) or '..' in evidence_path.replace('\\\\', '/').split('/'):
-                      print(f'::error::target {target_id!r}: evidence.path {evidence_path!r} is absolute or escapes the build-output artifact', file=sys.stderr)
-                      sys.exit(1)
-                  resolved_evidence = os.path.realpath(os.path.join('build-output', evidence_path))
-                  build_output_root = os.path.realpath('build-output')
-                  if os.path.commonpath([build_output_root, resolved_evidence]) != build_output_root:
-                      print(f'::error::target {target_id!r}: evidence.path {evidence_path!r} escapes the build-output artifact', file=sys.stderr)
-                      sys.exit(1)
-                  if not os.path.exists(resolved_evidence):
-                      print(f'::error::target {target_id!r}: evidence.path {evidence_path!r} does not exist in the downloaded build-output artifact', file=sys.stderr)
-                      sys.exit(1)
-                  if '\\n' in resolved_evidence or '\\r' in resolved_evidence:
-                      print(f'::error::target {target_id!r}: evidence.path contains a newline character', file=sys.stderr)
-                      sys.exit(1)
-                  print(f'evidence-pack={resolved_evidence}')
-                  producer = build_output.get('evidence_producer', {})
-                  producer_kind = producer.get('kind', '') if isinstance(producer, dict) else ''
-                  if not isinstance(producer_kind, str):
-                      producer_kind = ''
-                  # producer_kind is read from an untrusted build artifact
-                  # and written straight to the line-oriented \$GITHUB_OUTPUT
-                  # file below -- an embedded newline/carriage-return could
-                  # inject or override a later output line the same way an
-                  # embedded newline in a resolved candidate path could
-                  # above (Codex review). Reject outright, matching that
-                  # same defensive pattern, rather than trusting a value
-                  # this script never controlled.
-                  if '\\n' in producer_kind or '\\r' in producer_kind:
-                      print(f'::error::target {target_id!r}: build-output.json evidence_producer.kind contains a newline character', file=sys.stderr)
-                      sys.exit(1)
-                  print(f'evidence-producer={producer_kind}')
+                  evidence_path = target_evidence.get('path', '')
+                  if evidence_path:
+                      if os.path.isabs(evidence_path) or '..' in evidence_path.replace('\\\\', '/').split('/'):
+                          print(f'::error::target {target_id!r}: evidence.path {evidence_path!r} is absolute or escapes the build-output artifact', file=sys.stderr)
+                          sys.exit(1)
+                      resolved_evidence = os.path.realpath(os.path.join('build-output', evidence_path))
+                      build_output_root = os.path.realpath('build-output')
+                      if os.path.commonpath([build_output_root, resolved_evidence]) != build_output_root:
+                          print(f'::error::target {target_id!r}: evidence.path {evidence_path!r} escapes the build-output artifact', file=sys.stderr)
+                          sys.exit(1)
+                      if not os.path.exists(resolved_evidence):
+                          print(f'::error::target {target_id!r}: evidence.path {evidence_path!r} does not exist in the downloaded build-output artifact', file=sys.stderr)
+                          sys.exit(1)
+                      if '\\n' in resolved_evidence or '\\r' in resolved_evidence:
+                          print(f'::error::target {target_id!r}: evidence.path contains a newline character', file=sys.stderr)
+                          sys.exit(1)
+                      print(f'evidence-pack={resolved_evidence}')
+                      producer = build_output.get('evidence_producer', {})
+                      producer_kind = producer.get('kind', '') if isinstance(producer, dict) else ''
+                      if not isinstance(producer_kind, str):
+                          producer_kind = ''
+                      # producer_kind is read from an untrusted build artifact
+                      # and written straight to the line-oriented \$GITHUB_OUTPUT
+                      # file below -- an embedded newline/carriage-return could
+                      # inject or override a later output line the same way an
+                      # embedded newline in a resolved candidate path could
+                      # above (Codex review). Reject outright, matching that
+                      # same defensive pattern, rather than trusting a value
+                      # this script never controlled.
+                      if '\\n' in producer_kind or '\\r' in producer_kind:
+                          print(f'::error::target {target_id!r}: build-output.json evidence_producer.kind contains a newline character', file=sys.stderr)
+                          sys.exit(1)
+                      print(f'evidence-producer={producer_kind}')
+                  else:
+                      print('evidence-pack=')
+                      print('evidence-producer=')
               else:
                   print('evidence-pack=')
                   print('evidence-producer=')
