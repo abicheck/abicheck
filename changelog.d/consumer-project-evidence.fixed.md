@@ -6,4 +6,8 @@ resolved per-target evidence pack now also reaches `--build-info` for a
 consumer-context dump forwards `gcc-prefix` and prefers a candidate-specific
 header/include set over unioning it with the shared one, and an omitted
 `consumer_compile` field falls back to the workflow's global
-frontend/compiler inputs instead of the empty string.
+frontend/compiler inputs instead of the empty string -- gated on a new
+`consumer_compile_active` run-plan field so that fallback only fires for a
+cell whose profile actually declares a `consumer_compile:` overlay, not for
+every cell whenever the caller sets any global `--ast-frontend`/`--gcc-path`/
+`--gcc-options`.

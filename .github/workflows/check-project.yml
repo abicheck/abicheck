@@ -946,16 +946,27 @@ jobs:
           # non-`auto` value -- declining to add a new source of the error
           # is this line's job, not silencing the existing one.
           ast-frontend: ${{ matrix.kind != 'bundle' && matrix.compile_ast_frontend || inputs.ast-frontend }}
-          # An omitted consumer_compile field defers to the caller's
+          # An omitted consumer_compile FIELD defers to the caller's
           # workflow-global input, the same as an omitted producer compile
           # field does two lines up -- not to the empty string, which would
           # silently apply the frontend/binding/options *default* instead of
           # the caller's actual selection whenever a profile's
           # consumer_compile: overlay sets some fields but not others (e.g.
-          # only `standard:`) (Codex review).
-          consumer-ast-frontend: ${{ matrix.kind != 'bundle' && matrix.consumer_compile_ast_frontend || inputs.ast-frontend }}
-          consumer-gcc-path: ${{ matrix.kind != 'bundle' && matrix.consumer_compile_gcc_path || inputs.gcc-path }}
-          consumer-gcc-options: ${{ matrix.kind != 'bundle' && matrix.consumer_compile_gcc_options || inputs.gcc-options }}
+          # only `standard:`) (Codex review). That fallback is gated on
+          # `matrix.consumer_compile_active` (the overlay's own presence,
+          # independent of what its fields resolve to) rather than firing
+          # whenever any of these three expressions is merely non-empty --
+          # without that gate, a profile with NO consumer_compile: overlay
+          # at all would still get a non-empty consumer-ast-frontend/
+          # gcc-path/gcc-options the moment the caller sets any
+          # workflow-global --ast-frontend/--gcc-path/--gcc-options, which
+          # would activate check-target's separate consumer-context dump
+          # (and its "replace the candidate snapshot" behavior) for every
+          # cell, not just the ones that actually declare an overlay
+          # (Codex review, second round).
+          consumer-ast-frontend: ${{ (matrix.kind != 'bundle' && matrix.consumer_compile_active) && (matrix.consumer_compile_ast_frontend || inputs.ast-frontend) || '' }}
+          consumer-gcc-path: ${{ (matrix.kind != 'bundle' && matrix.consumer_compile_active) && (matrix.consumer_compile_gcc_path || inputs.gcc-path) || '' }}
+          consumer-gcc-options: ${{ (matrix.kind != 'bundle' && matrix.consumer_compile_active) && (matrix.consumer_compile_gcc_options || inputs.gcc-options) || '' }}
           # P1 toolchain-profile audit: this cell's profiles.<id>.compile
           # overlay (project plan --toolchain-bindings), when the
           # profile declares one, takes precedence over these workflow-

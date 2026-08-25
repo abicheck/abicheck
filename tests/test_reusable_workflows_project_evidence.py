@@ -124,7 +124,15 @@ def test_consumer_compile_fields_fall_back_to_global_compiler_inputs() -> None:
 
     workflow-global input, not the empty string, matching the schema's
     documented per-field precedence and the producer field's own fallback
-    two lines up (Codex review P2).
+    two lines up (Codex review P2) -- but ONLY for a cell whose profile
+    actually declares a consumer_compile: overlay. A second review round
+    found the first fix used the global fallback unconditionally, so a
+    profile with NO consumer_compile: overlay at all still got a non-empty
+    consumer-ast-frontend/gcc-path/gcc-options the moment the caller set
+    any workflow-global --ast-frontend/--gcc-path/--gcc-options -- which
+    activates check-target's separate consumer-context dump for every
+    cell, not just the ones with a real overlay. The fallback must be
+    gated on matrix.consumer_compile_active (the overlay's own presence).
     """
     project = _load(CHECK_PROJECT)
     run_step = next(
@@ -132,19 +140,17 @@ def test_consumer_compile_fields_fall_back_to_global_compiler_inputs() -> None:
         for step in _steps(project["jobs"]["check"])
         if step.get("name") == "Run check-target"
     )
-    assert (
-        run_step["with"]["consumer-ast-frontend"]
-        .rstrip()
-        .endswith("|| inputs.ast-frontend }}")
-    )
-    assert (
-        run_step["with"]["consumer-gcc-path"].rstrip().endswith("|| inputs.gcc-path }}")
-    )
-    assert (
-        run_step["with"]["consumer-gcc-options"]
-        .rstrip()
-        .endswith("|| inputs.gcc-options }}")
-    )
+    for field in ("consumer-ast-frontend", "consumer-gcc-path", "consumer-gcc-options"):
+        expr = run_step["with"][field]
+        assert "matrix.consumer_compile_active" in expr, field
+        assert expr.rstrip().endswith("|| '' }}"), field
+
+    from abicheck.buildsource.run_plan import RunPlanCheck
+
+    active = RunPlanCheck(consumer_compile_active=True)
+    assert "consumer_compile_active" in active.to_dict()
+    inactive = RunPlanCheck(consumer_compile_active=False)
+    assert "consumer_compile_active" not in inactive.to_dict()
 
 
 def test_target_evidence_path_is_forwarded_per_matrix_cell() -> None:

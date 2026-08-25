@@ -453,6 +453,17 @@ class RunPlanCheck:
     #: ``CheckSpec.allow_new_target``'s own docstring for why a bundle check
     #: can never support this lifecycle state).
     allow_new_target: bool = False
+    #: Whether this cell's profile declares a ``consumer_compile:`` overlay
+    #: at all (G34 Phase 0/B), independent of what that overlay's own
+    #: fields resolve to. A caller must gate any workflow-global fallback
+    #: for :attr:`consumer_compile_ast_frontend`/:attr:`consumer_compile_gcc_path`/
+    #: :attr:`consumer_compile_gcc_options` on this flag rather than on
+    #: whether the resolved field itself is non-empty -- falling back
+    #: whenever *any* global `--ast-frontend`/`--gcc-path`/`--gcc-options`
+    #: is set would otherwise activate the separate consumer-context dump
+    #: for every cell of a profile that has no ``consumer_compile:``
+    #: overlay at all, not just the ones that declare one (Codex review).
+    consumer_compile_active: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {
@@ -498,6 +509,8 @@ class RunPlanCheck:
             d["dependency_source"] = self.dependency_source
         if self.allow_new_target:
             d["allow_new_target"] = True
+        if self.consumer_compile_active:
+            d["consumer_compile_active"] = True
         return d
 
     @classmethod
@@ -539,6 +552,7 @@ class RunPlanCheck:
             runs_on=_opt_str(d.get("runs_on"), DEFAULT_PROFILE_RUNNER_LABEL),
             dependency_source=_opt_str(d.get("dependency_source")),
             allow_new_target=bool(d.get("allow_new_target", False)),
+            consumer_compile_active=bool(d.get("consumer_compile_active", False)),
         )
 
 
@@ -756,6 +770,19 @@ def _compile_ast_frontend_for_profile(
     return compile_spec.frontend if compile_spec is not None else ""
 
 
+def _consumer_compile_active_for_profile(
+    config: ProjectTargetsConfig, profile_id: str
+) -> bool:
+    """Whether *profile_id* declares a ``consumer_compile:`` overlay at all
+
+    (G34 Phase 0/B) -- independent of whether that overlay's own fields
+    resolve to anything non-empty (an overlay declaring only ``binding:``
+    with no matching *resolved_bindings* entry still counts as active).
+    """
+    profile = config.profiles.get(profile_id)
+    return profile is not None and profile.consumer_compile is not None
+
+
 def _consumer_compile_ast_frontend_for_profile(
     config: ProjectTargetsConfig, profile_id: str
 ) -> str:
@@ -900,6 +927,9 @@ def _generate_target_checks(
                     consumer_compile_ast_frontend=(
                         _consumer_compile_ast_frontend_for_profile(config, profile_id)
                     ),
+                    consumer_compile_active=_consumer_compile_active_for_profile(
+                        config, profile_id
+                    ),
                     runs_on=runs_on,
                     dependency_source=dependency_source,
                     allow_new_target=check.allow_new_target,
@@ -1001,6 +1031,9 @@ def _generate_bundle_checks(
                     ),
                     consumer_compile_ast_frontend=(
                         _consumer_compile_ast_frontend_for_profile(config, profile_id)
+                    ),
+                    consumer_compile_active=_consumer_compile_active_for_profile(
+                        config, profile_id
                     ),
                     runs_on=runs_on,
                     dependency_source=dependency_source,
