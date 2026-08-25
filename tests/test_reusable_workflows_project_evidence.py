@@ -173,6 +173,17 @@ def test_target_evidence_path_is_forwarded_per_matrix_cell() -> None:
 
 @pytest.mark.skipif(sys.platform == "win32", reason="requires POSIX bash")
 def test_resolver_selects_only_the_current_targets_evidence(tmp_path: Path) -> None:
+    """validate_build_output() (added alongside the injection hardening
+
+    below) validates every targets[] entry, not just the one this cell is
+    resolving -- so both "core" and "math" need a genuinely valid binary
+    + digest + evidence pack here, matching a real build-output.json a
+    build wrapper would actually produce, or the resolver would (correctly)
+    fail closed before ever reaching the per-cell selection this test is
+    about.
+    """
+    from test_build_output import _binary, _write_pack
+
     project = _load(CHECK_PROJECT)
     resolver = next(
         step
@@ -182,16 +193,39 @@ def test_resolver_selects_only_the_current_targets_evidence(tmp_path: Path) -> N
     (tmp_path / "candidate").mkdir()
     (tmp_path / "candidate" / "libmath.so").write_text("binary")
     build_root = tmp_path / "build-output"
-    (build_root / "evidence" / "core").mkdir(parents=True)
-    (build_root / "evidence" / "math").mkdir(parents=True)
+    digest_core = _binary(build_root, "artifacts/libcore.so")
+    digest_math = _binary(build_root, "artifacts/libmath.so")
+    _write_pack(build_root, "evidence/core", library="core")
+    _write_pack(build_root, "evidence/math", library="math")
     (build_root / "build-output.json").write_text(
         json.dumps(
             {
+                "schema": "abicheck.build-output/v1",
                 "evidence_producer": {"kind": "clang-plugin"},
                 "targets": [
-                    {"id": "core", "evidence": {"path": "evidence/core"}},
-                    {"id": "math", "evidence": {"path": "evidence/math"}},
+                    {
+                        "id": "core",
+                        "binary": "artifacts/libcore.so",
+                        "evidence": {
+                            "kind": "source-facts",
+                            "path": "evidence/core",
+                            "projection": "declared",
+                        },
+                    },
+                    {
+                        "id": "math",
+                        "binary": "artifacts/libmath.so",
+                        "evidence": {
+                            "kind": "source-facts",
+                            "path": "evidence/math",
+                            "projection": "declared",
+                        },
+                    },
                 ],
+                "digests": {
+                    "artifacts/libcore.so": f"sha256:{digest_core}",
+                    "artifacts/libmath.so": f"sha256:{digest_math}",
+                },
             }
         )
     )
@@ -221,11 +255,240 @@ def test_resolver_selects_only_the_current_targets_evidence(tmp_path: Path) -> N
     assert "evidence/core" not in outputs["evidence-pack"]
 
 
+def _write_valid_build_output(
+    build_root: Path, *, target_id: str = "math", producer_kind: str = "wrapper"
+) -> None:
+    """A build-output.json that genuinely passes validate_build_output(),
+
+    reusing test_build_output.py's own fixture helpers rather than
+    hand-rolling a second copy of what "valid" means.
+    """
+    from test_build_output import _binary, _write_pack
+
+    binary_rel = f"artifacts/lib{target_id}.so"
+    digest = _binary(build_root, binary_rel)
+    _write_pack(build_root, f"evidence/{target_id}", library=target_id)
+    (build_root / "build-output.json").write_text(
+        json.dumps(
+            {
+                "schema": "abicheck.build-output/v1",
+                "targets": [
+                    {
+                        "id": target_id,
+                        "binary": binary_rel,
+                        "evidence": {
+                            "kind": "source-facts",
+                            "path": f"evidence/{target_id}",
+                            "projection": "declared",
+                        },
+                    }
+                ],
+                "digests": {binary_rel: f"sha256:{digest}"},
+                "evidence_producer": {"kind": producer_kind},
+            }
+        )
+    )
+
+
+def _run_resolver(resolver_run: str, tmp_path: Path, target_id: str) -> Any:
+    candidate = tmp_path / "candidate"
+    candidate.mkdir(exist_ok=True)
+    (candidate / f"lib{target_id}.so").write_text("binary")
+    github_output = tmp_path / "github_output"
+    github_output.write_text("")
+    result = subprocess.run(
+        ["bash", "-c", resolver_run],
+        cwd=tmp_path,
+        env={
+            **os.environ,
+            "MATRIX_JSON": json.dumps(
+                {
+                    "kind": "target",
+                    "name": target_id,
+                    "binary_pattern": f"lib{target_id}.so",
+                }
+            ),
+            "GITHUB_OUTPUT": str(github_output),
+        },
+        capture_output=True,
+        text=True,
+    )
+    outputs = dict(
+        line.split("=", 1)
+        for line in github_output.read_text().splitlines()
+        if "=" in line
+    )
+    return result, outputs
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="requires POSIX bash")
+def test_resolver_forwards_a_validated_targets_evidence_and_producer(
+    tmp_path: Path,
+) -> None:
+    """Happy-path control for the two hardening tests below: a genuinely
+
+    valid build-output.json (passes validate_build_output()) still resolves
+    its evidence-pack and evidence-producer normally.
+    """
+    project = _load(CHECK_PROJECT)
+    resolver = next(
+        step
+        for step in _steps(project["jobs"]["check"])
+        if step.get("name") == "Resolve candidate binary/binaries"
+    )
+    _write_valid_build_output(tmp_path / "build-output")
+    result, outputs = _run_resolver(resolver["run"], tmp_path, "math")
+    assert result.returncode == 0, result.stderr
+    assert outputs["evidence-producer"] == "wrapper"
+    assert outputs["evidence-pack"] == str(
+        (tmp_path / "build-output" / "evidence" / "math").resolve()
+    )
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="requires POSIX bash")
+@pytest.mark.parametrize("newline_char", ["\n", "\r"], ids=["lf", "cr"])
+def test_resolver_rejects_newline_in_evidence_producer_kind(
+    tmp_path: Path, newline_char: str
+) -> None:
+    """Codex review (P1): evidence_producer.kind is read from an untrusted
+
+    build artifact and was written straight to the line-oriented
+    $GITHUB_OUTPUT file -- an embedded newline could inject or override a
+    later output record (e.g. a spoofed new-library=), the same class of
+    bug already guarded against for resolved candidate/evidence paths.
+    """
+    project = _load(CHECK_PROJECT)
+    resolver = next(
+        step
+        for step in _steps(project["jobs"]["check"])
+        if step.get("name") == "Resolve candidate binary/binaries"
+    )
+    _write_valid_build_output(
+        tmp_path / "build-output",
+        producer_kind=f"wrapper{newline_char}new-library=evil",
+    )
+    result, outputs = _run_resolver(resolver["run"], tmp_path, "math")
+    assert result.returncode != 0
+    assert "newline character" in result.stderr
+    # The injected line must never have landed as a second, overriding
+    # new-library= record.
+    # new-library is resolved relative to the (relative) `candidate` root the
+    # script glob.glob()s against -- not an absolute path.
+    assert outputs.get("new-library") == "candidate/libmath.so"
+    assert "evidence-producer" not in outputs
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="requires POSIX bash")
+def test_resolver_rejects_evidence_shared_across_targets(tmp_path: Path) -> None:
+    """Codex review (P2): path confinement alone only proves evidence.path
+
+    *points* somewhere safe -- it says nothing about whether the
+    build-output.json making a 'declared' claim is actually trustworthy.
+    Two targets sharing one evidence pack is exactly the shape
+    validate_build_output() (the same check `project validate-build` runs,
+    which `project plan` never calls) already rejects; the resolver must
+    run it before treating this target's evidence as scoped to it.
+    """
+    from test_build_output import _binary, _write_pack
+
+    project = _load(CHECK_PROJECT)
+    resolver = next(
+        step
+        for step in _steps(project["jobs"]["check"])
+        if step.get("name") == "Resolve candidate binary/binaries"
+    )
+    build_root = tmp_path / "build-output"
+    digest_math = _binary(build_root, "artifacts/libmath.so")
+    digest_core = _binary(build_root, "artifacts/libcore.so")
+    _write_pack(build_root, "evidence/shared", library="math")
+    (build_root / "build-output.json").write_text(
+        json.dumps(
+            {
+                "schema": "abicheck.build-output/v1",
+                "targets": [
+                    {
+                        "id": "math",
+                        "binary": "artifacts/libmath.so",
+                        "evidence": {
+                            "kind": "source-facts",
+                            "path": "evidence/shared",
+                            "projection": "declared",
+                        },
+                    },
+                    {
+                        "id": "core",
+                        "binary": "artifacts/libcore.so",
+                        "evidence": {
+                            "kind": "source-facts",
+                            "path": "evidence/shared",
+                            "projection": "declared",
+                        },
+                    },
+                ],
+                "digests": {
+                    "artifacts/libmath.so": f"sha256:{digest_math}",
+                    "artifacts/libcore.so": f"sha256:{digest_core}",
+                },
+                "evidence_producer": {"kind": "wrapper"},
+            }
+        )
+    )
+    result, outputs = _run_resolver(resolver["run"], tmp_path, "math")
+    assert result.returncode != 0
+    assert "referenced by more than one target" in result.stderr
+    assert "evidence-pack" not in outputs
+    assert "evidence-producer" not in outputs
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="requires POSIX bash")
+def test_resolver_rejects_evidence_whose_manifest_names_another_target(
+    tmp_path: Path,
+) -> None:
+    """Codex review (P2), the sibling scenario: a pack whose own
+
+    manifest.library disagrees with the target referencing it.
+    """
+    project = _load(CHECK_PROJECT)
+    resolver = next(
+        step
+        for step in _steps(project["jobs"]["check"])
+        if step.get("name") == "Resolve candidate binary/binaries"
+    )
+    _write_valid_build_output(tmp_path / "build-output")
+    # Overwrite the pack's manifest so its declared library disagrees with
+    # the target ("math") that references it.
+    manifest_path = tmp_path / "build-output" / "evidence" / "math" / "manifest.json"
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "kind": "abicheck_inputs",
+                "abicheck_inputs_version": 1,
+                "library": "some-other-target",
+            }
+        )
+    )
+    result, outputs = _run_resolver(resolver["run"], tmp_path, "math")
+    assert result.returncode != 0
+    assert "does not match the target referencing it" in result.stderr
+    assert "evidence-pack" not in outputs
+
+
 @pytest.mark.skipif(sys.platform == "win32", reason="requires POSIX bash")
 @pytest.mark.parametrize("malicious_path", ["../outside", "/tmp/outside"])
 def test_resolver_rejects_escape_without_outside_side_effects(
     tmp_path: Path, malicious_path: str
 ) -> None:
+    """validate_build_output() now runs before the resolver's own manual
+
+    confinement checks, and its own `_declared_evidence_sharing_issues`
+    check independently rejects an escaping evidence.path for a
+    projection: declared target -- so this target must otherwise be
+    genuinely valid (a real binary + digest) for the escaping path to be
+    what actually trips the rejection, rather than an unrelated "no
+    binary declared"/"missing schema" failure.
+    """
+    from test_build_output import _binary
+
     project = _load(CHECK_PROJECT)
     resolver = next(
         step
@@ -240,8 +503,25 @@ def test_resolver_rejects_escape_without_outside_side_effects(
     outside.mkdir()
     sentinel = outside / "sentinel"
     sentinel.write_text("unchanged")
+    digest_core = _binary(build_root, "artifacts/libcore.so")
     (build_root / "build-output.json").write_text(
-        json.dumps({"targets": [{"id": "core", "evidence": {"path": malicious_path}}]})
+        json.dumps(
+            {
+                "schema": "abicheck.build-output/v1",
+                "targets": [
+                    {
+                        "id": "core",
+                        "binary": "artifacts/libcore.so",
+                        "evidence": {
+                            "kind": "source-facts",
+                            "path": malicious_path,
+                            "projection": "declared",
+                        },
+                    }
+                ],
+                "digests": {"artifacts/libcore.so": f"sha256:{digest_core}"},
+            }
+        )
     )
     github_output = tmp_path / "github_output"
     github_output.write_text("")
