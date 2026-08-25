@@ -1,10 +1,8 @@
 # ADR-061: Responsibility-Package Architecture and Flat-Namespace Migration
 
 **Date:** 2026-08-24
-**Status:** Proposed — not implemented. This ADR defines the target package
-architecture, migration rules, and enforcement plan; it deliberately does not
-perform the repository-wide move it describes.
-**Decision maker:** (pending)
+**Status:** Accepted — Phase 0 implemented; Phases 1-5 remain incremental.
+**Decision maker:** abicheck maintainers
 
 ## Context
 

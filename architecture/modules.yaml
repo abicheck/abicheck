@@ -1,0 +1,255 @@
+{
+  "schema_version": 1,
+  "limits": {
+    "production": 800,
+    "test": 1200,
+    "facade": 150,
+    "package_agents": 150,
+    "root_agents": 350
+  },
+  "layers": {
+    "model": {
+      "path": "abicheck/model",
+      "may_import": []
+    },
+    "storage": {
+      "path": "abicheck/storage",
+      "may_import": [
+        "model"
+      ]
+    },
+    "extract": {
+      "path": "abicheck/extract",
+      "may_import": [
+        "model",
+        "storage"
+      ]
+    },
+    "compare": {
+      "path": "abicheck/compare",
+      "may_import": [
+        "model"
+      ]
+    },
+    "policy": {
+      "path": "abicheck/policy",
+      "may_import": [
+        "model",
+        "compare"
+      ]
+    },
+    "workflows": {
+      "path": "abicheck/workflows",
+      "may_import": [
+        "model",
+        "storage",
+        "extract",
+        "compare",
+        "policy"
+      ]
+    },
+    "report": {
+      "path": "abicheck/report",
+      "may_import": [
+        "model",
+        "compare",
+        "policy",
+        "workflows"
+      ]
+    },
+    "frontends": {
+      "path": "abicheck/frontends",
+      "may_import": [
+        "model",
+        "workflows",
+        "report"
+      ]
+    }
+  },
+  "public_root_surfaces": [
+    "abicheck.api_types",
+    "abicheck.errors"
+  ],
+  "facades": [],
+  "frozen_root_families": {
+    "cli_": [
+      "cli_aggregate.py",
+      "cli_audit.py",
+      "cli_buildsource.py",
+      "cli_buildsource_helpers.py",
+      "cli_buildsource_merge.py",
+      "cli_compare_fold.py",
+      "cli_compare_helpers.py",
+      "cli_compare_options.py",
+      "cli_compare_receipt.py",
+      "cli_compare_release.py",
+      "cli_compare_release_helpers.py",
+      "cli_contract_options.py",
+      "cli_datasources.py",
+      "cli_dump_depth.py",
+      "cli_dump_dry_run_build_query.py",
+      "cli_dump_helpers.py",
+      "cli_dump_non_elf.py",
+      "cli_dump_protocols.py",
+      "cli_dump_request.py",
+      "cli_graph.py",
+      "cli_help.py",
+      "cli_helpers_compare.py",
+      "cli_options.py",
+      "cli_options_contract.py",
+      "cli_params.py",
+      "cli_pr_comment.py",
+      "cli_profiles.py",
+      "cli_project.py",
+      "cli_resolve.py",
+      "cli_scan.py",
+      "cli_scan_baseline.py",
+      "cli_scan_helpers.py",
+      "cli_scan_receipt.py",
+      "cli_secondary_output.py",
+      "cli_stack.py"
+    ],
+    "service_": [
+      "service_compare_evidence.py",
+      "service_compare_pipeline.py",
+      "service_dump_cache.py",
+      "service_dump_pipeline.py",
+      "service_header_graph_attach.py",
+      "service_header_scoped.py",
+      "service_input_resolution.py",
+      "service_metadata_attach.py",
+      "service_render.py",
+      "service_scan.py"
+    ],
+    "reporter_": [
+      "reporter_contract_blocks.py",
+      "reporter_markdown.py"
+    ],
+    "diff_": [
+      "diff_abi_tags.py",
+      "diff_atomic.py",
+      "diff_bit_int.py",
+      "diff_build_config.py",
+      "diff_char8t.py",
+      "diff_cpp_patterns.py",
+      "diff_cxx_rules.py",
+      "diff_default_value_reliability.py",
+      "diff_elf_layout.py",
+      "diff_filtering.py",
+      "diff_helpers.py",
+      "diff_hidden_friends.py",
+      "diff_integer_model.py",
+      "diff_kabi.py",
+      "diff_layout.py",
+      "diff_layout_coherence.py",
+      "diff_long_double.py",
+      "diff_namespaces.py",
+      "diff_numpy_capi.py",
+      "diff_param_qualifiers.py",
+      "diff_platform.py",
+      "diff_platform_elf_dynamic.py",
+      "diff_platform_elf_symbols.py",
+      "diff_platform_templates.py",
+      "diff_python.py",
+      "diff_python_api.py",
+      "diff_reconcile.py",
+      "diff_serialization.py",
+      "diff_stdlib_impl.py",
+      "diff_surface_metrics.py",
+      "diff_sycl.py",
+      "diff_symbols.py",
+      "diff_symbols_renames.py",
+      "diff_symbols_scalar.py",
+      "diff_symbols_variables.py",
+      "diff_templates.py",
+      "diff_time64.py",
+      "diff_type_spellings.py",
+      "diff_types.py",
+      "diff_types_abicc_parity.py",
+      "diff_types_field_facts.py",
+      "diff_types_surface.py",
+      "diff_unnamed_types.py",
+      "diff_versioning.py",
+      "diff_vtable_layout.py",
+      "diff_wheel_deployment.py"
+    ],
+    "bundle_": [
+      "bundle_analysis.py",
+      "bundle_facts.py",
+      "bundle_manifest.py",
+      "bundle_models.py",
+      "bundle_multibuild.py",
+      "bundle_resolution_reachability.py",
+      "bundle_side_input.py",
+      "bundle_signature_evidence.py",
+      "bundle_soname.py",
+      "bundle_variants_config.py"
+    ],
+    "aggregate_": [
+      "aggregate_findings.py",
+      "aggregate_manifest.py"
+    ],
+    "dumper_": [
+      "dumper_ast_config.py",
+      "dumper_ast_config_cpp20.py",
+      "dumper_ast_config_cpp20_chains.py",
+      "dumper_cache.py",
+      "dumper_castxml.py",
+      "dumper_castxml_probe.py",
+      "dumper_castxml_typedefs.py",
+      "dumper_clang.py",
+      "dumper_clang_attributes.py",
+      "dumper_clang_errors.py",
+      "dumper_clang_expr.py",
+      "dumper_clang_qualifiers.py",
+      "dumper_clang_streaming.py",
+      "dumper_clang_vtable.py",
+      "dumper_contract.py",
+      "dumper_debug.py",
+      "dumper_elf_fallback.py",
+      "dumper_elf_symbols.py",
+      "dumper_hybrid.py",
+      "dumper_layout_backfill.py",
+      "dumper_manifest.py",
+      "dumper_scoping.py",
+      "dumper_sysinc.py",
+      "dumper_toolchain.py"
+    ],
+    "change_registry_": [
+      "change_registry_buildsource.py",
+      "change_registry_castxml.py",
+      "change_registry_composition.py",
+      "change_registry_coverage.py",
+      "change_registry_numpy.py",
+      "change_registry_suppression.py",
+      "change_registry_types.py",
+      "change_registry_wheel.py"
+    ]
+  },
+  "legacy_root_directories": [
+    "buildsource",
+    "compat",
+    "impact",
+    "policies",
+    "schemas"
+  ],
+  "legacy_generic_modules": [
+    "abicheck/binary_utils.py",
+    "abicheck/buildsource/adapters/base.py",
+    "abicheck/buildsource/source_extractors/base.py",
+    "abicheck/cli_buildsource_helpers.py",
+    "abicheck/cli_compare_helpers.py",
+    "abicheck/cli_compare_release_helpers.py",
+    "abicheck/cli_dump_helpers.py",
+    "abicheck/cli_scan_helpers.py",
+    "abicheck/compat/_helpers.py",
+    "abicheck/diff_helpers.py",
+    "abicheck/dwarf_utils.py",
+    "abicheck/header_utils.py",
+    "abicheck/pdb_utils.py"
+  ],
+  "parser_or_catalog_roots": [
+    "abicheck/extract",
+    "abicheck/model/change_catalog"
+  ]
+}

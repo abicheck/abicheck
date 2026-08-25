@@ -45,6 +45,33 @@ floor" below), and what the `ai-readiness` CI job (including its
 runs on 3.14, matching the other non-canonical lanes. When in doubt about
 which Python to develop against locally, use 3.13.
 
+## Task routing and dependency direction
+
+ADR-061 makes these responsibility owners authoritative for new code. During
+the incremental migration, route new behavior to the target owner rather than
+extending a flat root prefix family.
+
+| Change | Owner |
+|---|---|
+| Read a binary, debug, header, build, or source fact | `extract/` |
+| Add an ABI entity/value shared across stages | `model/` |
+| Match old/new entities or identify a raw change | `compare/` |
+| Decide relevance, suppression, classification, severity, or gating | `policy/` |
+| Coordinate dump, compare, scan, release, aggregate, project, or dependency behavior | `workflows/` |
+| Serialize snapshots/baselines, own their schemas/migrations, or manage caches | `storage/` |
+| Add a report field, report schema, or output format | `report/` |
+| Add a CLI flag, Python adapter, or ABICC translation | `frontends/` |
+
+Imports point inward: `storage -> model`; `extract -> model, storage`;
+`compare -> model`; `policy -> model, compare`; `workflows -> model, storage,
+extract, compare, policy`; `report -> model, compare, policy, workflows`; and
+`frontends -> model, workflows, report`. New internal code imports canonical
+implementation modules, never legacy `cli`/`service` facades. Preserve only
+documented public paths through delegation-only facades. The executable
+contract and temporary no-growth inventory live in `architecture/`; run
+`python scripts/check_architecture.py` for the focused gate. See
+[ADR-061](docs/contribute/adr/061-responsibility-package-architecture.md).
+
 ## Quick reference
 
 ```bash
