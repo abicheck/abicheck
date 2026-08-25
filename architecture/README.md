@@ -46,12 +46,14 @@ On pull requests, CI passes the base revision through `ARCHITECTURE_BASE`,
 set to the PR's own base sha. A `push`-to-`main` or `workflow_dispatch` run
 has no PR base at all — `ci.yml`'s "Resolve architecture check base
 revision" step sets `ARCHITECTURE_BASE` to the push's own `before` sha (the
-tip of `main` immediately prior) instead, so a post-merge run is scoped to
-growth *that push* introduced rather than every file's original adoption
-baseline; a `workflow_dispatch` run, which has no equivalent "prior
-revision" concept, and a push whose `before` is git's all-zero sentinel (a
-branch's first push, no prior commit to compare against) both leave
-`ARCHITECTURE_BASE` empty. No-growth is then measured against both the
+tip of `main` immediately prior) for a push, and to the checked-out
+revision's own parent commit (`HEAD^`) for a manual dispatch, so either kind
+of run is scoped to growth *that run* introduced rather than every file's
+original adoption baseline. A push whose `before` is git's all-zero
+sentinel (a branch's first push, no prior commit to compare against), and a
+dispatch against the repository's very first commit (no parent to resolve),
+both leave `ARCHITECTURE_BASE` empty instead. No-growth is then measured
+against both the
 recorded adoption baseline and the file as it exists at the resolved base:
 concurrent changes already present on the base are not attributed to the
 architecture PR/push, while any additional growth on top of it still fails.

@@ -72,21 +72,24 @@ jobs:
       # A `pull_request` run scopes the debt-no-growth check to the PR's own
       # base sha. A `push`-to-`main`/`workflow_dispatch` run has no PR base
       # at all -- `github.event.pull_request.base.sha` is simply empty there
-      # -- so it instead uses the push's own `before` sha (the tip of `main`
-      # immediately prior), scoping the check to growth *this push*
+      # -- so `push` instead uses its own `before` sha (the tip of `main`
+      # immediately prior) and `workflow_dispatch` uses the checked-out
+      # revision's own parent commit, scoping the check to growth *this run*
       # introduced rather than every file's original ADR-061 adoption
       # baseline. Falling through to that unscoped baseline on every
       # post-merge `main` run would make it permanently red on any
       # pre-existing drift already on `main` (individually-compliant PRs
       # each growing a debt-tracked file a little further past its original
-      # baseline), even when the merged change itself introduced none
-      # (Codex review, fresh evidence: reproduced directly against this
-      # tree). `before` is skipped when it's the all-zero sentinel git uses
-      # for a branch's first push (no prior commit to compare against) --
-      # `check_repository()` would otherwise report a hard `base-revision`
-      # error for an unresolvable sha rather than silently falling back.
-      # `workflow_dispatch` has no equivalent "prior revision" concept at
-      # all, so it keeps the pre-existing unscoped comparison.
+      # baseline), even when the merged/dispatched change itself introduced
+      # none (Codex review, fresh evidence, both for `push` and, in a
+      # follow-up finding, for `workflow_dispatch`: reproduced directly
+      # against this tree both times). `push`'s `before` is skipped when
+      # it's the all-zero sentinel git uses for a branch's first push (no
+      # prior commit to compare against); `workflow_dispatch`'s `HEAD^` is
+      # skipped when it doesn't resolve (the repository's very first commit)
+      # -- `check_repository()` would otherwise report a hard
+      # `base-revision` error for an unresolvable sha rather than silently
+      # falling back, for either case.
       - name: Resolve architecture check base revision
         run: |
           if [ "${{ github.event_name }}" = "pull_request" ]; then
@@ -94,6 +97,8 @@ jobs:
           elif [ "${{ github.event_name }}" = "push" ] \
             && [ "${{ github.event.before }}" != "0000000000000000000000000000000000000000" ]; then
             base="${{ github.event.before }}"
+          elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            base="$(git rev-parse --verify -q HEAD^ || true)"
           else
             base=""
           fi
