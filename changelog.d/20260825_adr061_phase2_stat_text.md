@@ -6,6 +6,8 @@
   moved to `abicheck/report/render_text.py`, which now also exposes
   `render_stat_document`, a pure `ReportDocument -> str` projection that
   formats an already-resolved verdict label, summary counts, and (when
-  severity configuration is active) a precomputed exit code — it computes
-  no decision of its own. `to_stat` builds that document once instead of
-  independently recomputing the severity-aware exit code.
+  severity configuration is active) a precomputed exit code — it never
+  calls `compute_exit_code` or otherwise computes a decision itself.
+  `to_stat` still resolves the severity-aware exit code exactly once (as
+  before), but now carries that value into the document instead of
+  formatting it inline.
