@@ -154,14 +154,20 @@ Before adopting it, confirm none of these apply to you:
 - **`publish-baseline.yml` expects one `build-output.json` per contract
   profile** (G30 P1.1). A build system that doesn't emit a per-profile
   manifest in that shape needs to add one first.
-- **`profiles:` describes a build *lane*, not a per-library flag set** — a
-  project where different libraries need different compiler flags (SYCL vs.
-  not, say) needs one profile per library, not one profile per compiler.
+- **`profiles:` describes a build *lane* (compiler/flags), not a library** —
+  one profile's `targets[]` can list several libraries built under it (see
+  the [`build-output.json` reference](https://abicheck.github.io/abicheck/reference/build-output-schema/)),
+  but a project needs one profile *per distinct build configuration*: e.g.
+  oneDAL needs one profile for its SYCL-built subset and another for the
+  rest, not one profile per library.
 
 None of these block `compare`-based CI today — they're gaps in the
-*declarative* topology specifically. Track their closure in
-[development/goals.md](docs/contribute/goals.md) before migrating a project
-that hits one of them.
+*declarative* topology specifically. Track their closure in the
+[G30 GitHub Actions integration plan](docs/contribute/plans/g30-github-actions-integration-model.md)
+(the first four) and the
+[G38 bundle-facts plan](docs/contribute/plans/g38-bundle-facts-model-and-multibuild-comparability.md)
+(stored-facts bundle comparison) before migrating a project that hits one of
+them.
 
 ---
 
