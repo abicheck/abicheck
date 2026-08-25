@@ -83,11 +83,11 @@ from .cli_options import (
     verbose_option,
 )
 from .cli_params import _load_suppression_and_policy
-from .cli_secondary_output import (
+from .errors import ProfileMismatchError, ScopeMismatchError
+from .frontends.cli.options import (
     reject_incoherent_secondary_output,
     secondary_output_options,
 )
-from .errors import ProfileMismatchError, ScopeMismatchError
 from .model import AbiSnapshot
 from .reporter import to_json
 

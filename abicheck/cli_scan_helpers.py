@@ -21,8 +21,9 @@ Keeping them here holds ``cli_scan.py`` under the 2000-line hard cap while
 decomposing the two long methods into legible pieces.
 
 No import cycle: this module imports only from :mod:`abicheck.buildsource`
-and, function-locally, the dependency-free :mod:`abicheck.cli_secondary_output`
-leaf (never :mod:`abicheck.cli_options` itself -- see
+and, function-locally, the dependency-free
+:mod:`abicheck.frontends.cli.options.secondary_output` leaf (never
+:mod:`abicheck.cli_options` itself -- see
 :func:`reject_incoherent_scan_secondary_output`'s own docstring for why that
 distinction matters). The render helpers take the ``ScanOutcome`` dataclass
 as ``Any`` rather than importing it from :mod:`abicheck.cli_scan` (even under
@@ -94,22 +95,22 @@ def reject_incoherent_scan_secondary_output(
     """Reject a ``--secondary-*`` combination that cannot mean anything.
 
     The four checks common to any command carrying the shared
-    ``cli_secondary_output.secondary_output_options`` pair (dry-run,
+    ``secondary_output.secondary_output_options`` pair (dry-run,
     half-given pair either direction, same-file collision) now live once in
-    ``cli_secondary_output.reject_incoherent_secondary_output`` -- previously
+    ``secondary_output.reject_incoherent_secondary_output`` -- previously
     duplicated byte-for-byte from ``compare``'s own
     ``_reject_incoherent_compare_flags`` (Codex review). Imported from the
-    dependency-free ``cli_secondary_output`` leaf module rather than from
-    ``cli_options`` itself: this module sits on an existing import path back
-    into ``cli_options`` (``cli_options -> cli_resolve -> service_scan ->
-    scan_engine -> cli_scan_helpers``), so a ``cli_scan_helpers ->
-    cli_options`` edge would close a real cycle the AI-readiness
-    ``import-cycle-growth`` gate rejects -- see ``cli_secondary_output``'s
-    own module docstring. This wrapper adds only the one check specific to
+    dependency-free ``frontends.cli.options.secondary_output`` leaf module
+    rather than from ``cli_options`` itself: this module sits on an existing
+    import path back into ``cli_options`` (``cli_options -> cli_resolve ->
+    service_scan -> scan_engine -> cli_scan_helpers``), so a
+    ``cli_scan_helpers -> cli_options`` edge would close a real cycle the
+    AI-readiness ``import-cycle-growth`` gate rejects -- see that leaf
+    module's own docstring. This wrapper adds only the one check specific to
     ``scan``: ``--artifact-set`` has no single-artifact report to render a
     second time at all.
     """
-    from .cli_secondary_output import (
+    from .frontends.cli.options import (
         reject_incoherent_secondary_output as _reject_shared,
     )
 

@@ -17,6 +17,15 @@
 (Codex review, PR #748) -- a dependency-free leaf module, not a member of
 ``cli_options.py`` itself.
 
+ADR-061 Phase 4: this is the first module to move under
+``abicheck.frontends`` -- the "reusable Click-only option declaration into
+``frontends/cli/options``" half of Phase 4 item 1. It qualified for a
+same-session move for the identical reason ``artifact_plan.py`` did for
+Phase 3: zero first-party imports, so the physical relocation cannot change
+any import-cycle or dependency-direction fact about the rest of the
+codebase. Its own cycle-avoidance role (below) is unaffected by *where* the
+file lives, only by what it imports -- still nothing.
+
 ``--write`` replaces the ``--secondary-format``/``--secondary-output`` pair
 it grew out of. The two flags only ever meant anything together -- half of
 the pair was a usage error either direction -- so they were one option

@@ -1,7 +1,7 @@
 # ADR-061: Responsibility-Package Architecture and Flat-Namespace Migration
 
 **Date:** 2026-08-24
-**Status:** Accepted — Phases 0-1 implemented; Phases 2-3 in progress; Phases 4-5 remain incremental.
+**Status:** Accepted — Phases 0-1 implemented; Phases 2-4 in progress; Phase 5 remains incremental.
 **Decision maker:** abicheck maintainers
 
 ## Context
@@ -715,6 +715,43 @@ dry-run renders the same resolved plan normal execution consumes; achieved
 depth and degradation are result facts rather than frontend guesses.
 
 ### Phase 4 — thin CLI and Python API
+
+Implementation status: the `abicheck.frontends` package now exists, with its
+first tenant — `frontends.cli.options.secondary_output` (moved from the flat
+`abicheck/cli_secondary_output.py`) — covering the `--write FORMAT=PATH`
+option factory and its coherence validator. It qualified for an immediate
+move for the same reason `artifact_plan.py` did for Phase 3: zero
+first-party imports, so a physical relocation changes no import-cycle or
+dependency-direction fact elsewhere. Its four call sites
+(`cli_options.py`, `cli_scan_helpers.py`, `cli_compare_helpers.py`,
+`cli_compare_release.py`) now import it from the new package.
+
+Known blocker for the rest of this phase, investigated directly rather than
+assumed: `cli.py` (1959 lines) and `service.py` (1763 lines) are nowhere
+near the "under 150 lines" acceptance target, and cannot move toward it yet
+for two independent, structural reasons. First, the option-declaration
+cluster item 1 also names (`cli_options.py` itself, near its own 2000-line
+hard cap, plus `cli_params.py`/`cli_profiles.py`/`cli_options_contract.py`/
+`cli_contract_options.py`/`cli_help.py`) is not leaf-shaped the way
+`secondary_output.py` was — these ~3,800 combined lines import each other
+and are imported by essentially every `cli_*.py` command module, so moving
+the cluster is a high-blast-radius change to Click decorator stacking
+across the whole CLI surface, not an independently-verifiable vertical
+slice; it needs its own pass that first splits the cluster's internal
+dependency graph. Second, and more fundamentally: `service.py`'s
+`resolve_input`/`_run_dump_uncached`/`compare_snapshots` (hundreds of lines
+each) *are* the current dump/compare implementation, not adapters over an
+already-existing workflow object that `cli.py`/`service.py` could be
+rewritten to call instead — moving that logic into `workflows/` is Phase
+3's own job (item 2 above, "make workflows the sole operation owners"), and
+Phase 3 has so far relocated only one dependency-free contract type
+(`ResolvedArtifactPlan`); the real per-artifact resolve/execute pipeline
+does not exist yet (see Phase 3's own status note above and
+`workflows/AGENTS.md`). Thinning `cli.py`/`service.py` ahead of that
+pipeline would mean either a wrapper around the same inline logic
+(achieving nothing toward the acceptance criteria) or a second, duplicate
+implementation with nothing shared to delegate to. Documented in
+`abicheck/frontends/AGENTS.md`.
 
 1. Move command input translation into `frontends/cli/commands` and reusable
    Click-only option declaration into `frontends/cli/options`.

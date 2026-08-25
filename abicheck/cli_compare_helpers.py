@@ -106,10 +106,10 @@ from .cli_resolve import (
     classify_compare_operand,
     resolve_directory_compile_context,
 )
-from .cli_secondary_output import reject_incoherent_secondary_output
 from .contract_coverage_exit import announce_coverage_floor, fold_coverage_exit
 from .contract_scoped_promotion import stamp_scoped_result_findings
 from .errors import AbicheckError, ProfileMismatchError, ScopeMismatchError
+from .frontends.cli.options import reject_incoherent_secondary_output
 from .service_render import ONELINE_FORMAT
 
 if TYPE_CHECKING:

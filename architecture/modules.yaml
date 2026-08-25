@@ -117,7 +117,6 @@
       "cli_scan_baseline.py",
       "cli_scan_helpers.py",
       "cli_scan_receipt.py",
-      "cli_secondary_output.py",
       "cli_stack.py"
     ],
     "service_": [
@@ -339,7 +338,6 @@
     "cli_scan_baseline.py",
     "cli_scan_helpers.py",
     "cli_scan_receipt.py",
-    "cli_secondary_output.py",
     "cli_stack.py",
     "comparability.py",
     "comparability_fields.py",
