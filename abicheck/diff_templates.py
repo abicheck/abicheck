@@ -1329,6 +1329,7 @@ def demote_lambda_closure_unexported_findings(
     Mutates and returns ``changes``.
     """
     from .checker_policy import API_BREAK_KINDS, BREAKING_KINDS, Verdict
+    from .diff_symbols import _public_functions
     from .dumper_castxml import is_synthetic_ctor_key, is_synthetic_dtor_key
     from .elf_symbol_filter import FUNCTION_SYMBOL_TYPES, exported_symbol_names
 
@@ -1345,6 +1346,19 @@ def demote_lambda_closure_unexported_findings(
         return changes
     old_exported = exported_symbol_names(old_elf, FUNCTION_SYMBOL_TYPES)
     new_exported = exported_symbol_names(new_elf, FUNCTION_SYMBOL_TYPES)
+    # `change.symbol` is the dict *key* the detector matched functions
+    # through -- for a function retained only via `_public_functions`'s own
+    # bare-name export fallback (a guessed/incomplete mangling that never
+    # equals the real export), that key can differ from the function's
+    # actual accepted export spelling, `Function.name` (Codex review, fresh
+    # evidence: the fallback exists specifically because castxml/DWARF can
+    # under-mangle a name that the real ELF export table still carries
+    # correctly). Checking `symbol` alone can therefore declare a subject
+    # "confirmed absent" even though the SAME function is genuinely exported
+    # under its `.name` spelling and a real consumer could have bound it --
+    # resolve both accepted spellings before ever claiming absence.
+    old_map = _public_functions(old)
+    new_map = _public_functions(new)
 
     for change in changes:
         if change.kind not in _LAMBDA_CLOSURE_DEMOTABLE_KINDS:
@@ -1362,10 +1376,19 @@ def demote_lambda_closure_unexported_findings(
             continue
         if not _change_mentions_lambda_closure(change):
             continue
-        if symbol in old_exported or symbol in new_exported:
-            # Genuinely exported on at least one side: an already-linked
-            # consumer could really have resolved this exact spelling, so
-            # the finding stays exactly as severe as the detector made it.
+        candidate_spellings = {symbol}
+        old_fn = old_map.get(symbol)
+        if old_fn is not None:
+            candidate_spellings.add(old_fn.name)
+        new_fn = new_map.get(symbol)
+        if new_fn is not None:
+            candidate_spellings.add(new_fn.name)
+        if candidate_spellings & (old_exported | new_exported):
+            # Genuinely exported on at least one side, under either the
+            # dict-key spelling or the matched function's own accepted
+            # export alias: an already-linked consumer could really have
+            # resolved this exact spelling, so the finding stays exactly as
+            # severe as the detector made it.
             continue
         change.effective_verdict = Verdict.COMPATIBLE_WITH_RISK
         change.modulation_reason = (

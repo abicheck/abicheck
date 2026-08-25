@@ -111,6 +111,46 @@ class TestEnumCanonicalNames:
     def test_none_snapshot_is_empty(self) -> None:
         assert _enum_canonical_names(None) == {}
 
+    def test_ambiguous_bare_name_across_two_enums_is_not_registered(self) -> None:
+        """Codex review, fresh evidence: ``a::Color`` and ``b::Color`` share
+        the bare name ``Color``. A plain ``setdefault`` would pin the bare
+        key to whichever enum is iterated first, silently misattributing
+        the OTHER enum's own header-tier finding to the wrong qualified
+        spelling. The bare name must be dropped entirely rather than
+        resolved to an arbitrary winner -- each enum's fully-qualified name
+        stays a safe, unambiguous key regardless."""
+        snap = AbiSnapshot(
+            library="lib.so",
+            version="1",
+            enums=[
+                _enum_type("Color", "a::Color", [("RED", 0)]),
+                _enum_type("Color", "b::Color", [("BLUE", 1)]),
+            ],
+        )
+        names = _enum_canonical_names(snap)
+        assert "Color" not in names
+        assert names["a::Color"] == "a::Color"
+        assert names["b::Color"] == "b::Color"
+
+    def test_unambiguous_bare_name_across_matching_qualified_enums_still_registers(
+        self,
+    ) -> None:
+        """Two *distinct* enums that happen to share both a bare name and a
+        fully-qualified spelling (the same enum reported at two different
+        member counts, e.g. by two independent detector passes over the
+        same identity) are not an ambiguity -- the bare name still resolves
+        cleanly since only one qualified target is ever proposed for it."""
+        snap = AbiSnapshot(
+            library="lib.so",
+            version="1",
+            enums=[
+                _enum_type("Color", "a::Color", [("RED", 0)]),
+                _enum_type("Color", "a::Color", [("RED", 0), ("BLUE", 1)]),
+            ],
+        )
+        names = _enum_canonical_names(snap)
+        assert names["Color"] == "a::Color"
+
 
 class TestCanonicalizeEnumSymbol:
     def test_bare_member_symbol_resolves_to_qualified(self) -> None:

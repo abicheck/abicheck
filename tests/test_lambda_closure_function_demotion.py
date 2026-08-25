@@ -42,9 +42,9 @@ _NEW_PARAM = "raii_guard<(lambda:task_group.h:522:26)>"
 _MANGLED = "_Z7processDoesNotMatchAnyRealDynsymEntry"
 
 
-def _fn(mangled: str, ptype: str) -> Function:
+def _fn(mangled: str, ptype: str, name: str = "process") -> Function:
     return Function(
-        name="process",
+        name=name,
         mangled=mangled,
         return_type="void",
         params=[Param(name="g", type=ptype)],
@@ -61,27 +61,11 @@ def _snap(version: str, fn: Function, elf: ElfMetadata | None) -> AbiSnapshot:
 
 
 class TestDemotesWhenConfirmedAbsentFromBothExportTables:
-    def test_reported_through_compare(self) -> None:
-        # "process" (the bare display name) is exported -- which is what lets
-        # _public_functions keep the entry via its name-fallback route even
-        # though the *mangled* key itself (what the finding's own `symbol`
-        # carries) is not a real export at all.
-        old = _snap("1", _fn(_MANGLED, _OLD_PARAM), _elf("process"))
-        new = _snap("2", _fn(_MANGLED, _NEW_PARAM), _elf("process"))
-        result = compare(old, new)
-
-        lambda_kinds = {
-            ChangeKind.FUNC_PARAMS_CHANGED,
-            ChangeKind.TEMPLATE_PARAM_TYPE_CHANGED,
-        }
-        touched = [c for c in result.changes if c.kind in lambda_kinds]
-        assert touched, "expected at least one lambda-closure param finding"
-        for c in touched:
-            assert c.effective_verdict is Verdict.COMPATIBLE_WITH_RISK
-            assert c.modulation_rule == "lambda_closure_never_exported"
-            assert c.modulation_reason
-
     def test_primitive_sets_the_modulation_fields(self) -> None:
+        # Neither the finding's own `symbol` (the guessed mangling) NOR the
+        # function's real display name ("process") appears anywhere in
+        # either side's exported symbol table -- genuinely, unambiguously
+        # never exported under any accepted spelling.
         from abicheck.checker_types import Change
 
         change = Change(
@@ -91,8 +75,8 @@ class TestDemotesWhenConfirmedAbsentFromBothExportTables:
             old_value=_OLD_PARAM,
             new_value=_NEW_PARAM,
         )
-        old = _snap("1", _fn(_MANGLED, _OLD_PARAM), _elf("process"))
-        new = _snap("2", _fn(_MANGLED, _NEW_PARAM), _elf("process"))
+        old = _snap("1", _fn(_MANGLED, _OLD_PARAM), _elf("unrelated_symbol"))
+        new = _snap("2", _fn(_MANGLED, _NEW_PARAM), _elf("unrelated_symbol"))
 
         demote_lambda_closure_unexported_findings([change], old, new)
 
@@ -140,6 +124,55 @@ class TestGenuinelyExportedSymbolStaysBreaking:
         demote_lambda_closure_unexported_findings([change], old, new)
 
         assert change.effective_verdict is None
+
+    def test_symbol_exported_only_under_its_export_alias_is_not_demoted(self) -> None:
+        """Codex review, fresh evidence: `change.symbol` can be a guessed
+        mangling from `_public_functions`' own bare-name export fallback --
+        the function is retained because its real display name ("process")
+        is exported, even though the *dict key*/`change.symbol` itself
+        (here, a mangling that matches no real dynsym entry) never is.
+        Checking `symbol` alone would wrongly call this "confirmed absent";
+        an already-linked consumer could still have resolved the exported
+        "process" spelling, so the finding must stay exactly as severe as
+        the detector made it.
+        """
+        from abicheck.checker_types import Change
+
+        change = Change(
+            kind=ChangeKind.TEMPLATE_PARAM_TYPE_CHANGED,
+            symbol=_MANGLED,
+            description="d",
+            old_value=_OLD_PARAM,
+            new_value=_NEW_PARAM,
+        )
+        old = _snap("1", _fn(_MANGLED, _OLD_PARAM), _elf("process"))
+        new = _snap("2", _fn(_MANGLED, _NEW_PARAM), _elf("process"))
+
+        demote_lambda_closure_unexported_findings([change], old, new)
+
+        assert change.effective_verdict is None
+        assert change.modulation_rule is None
+
+    def test_symbol_exported_only_under_its_export_alias_reported_through_compare(
+        self,
+    ) -> None:
+        """The same scenario as above, exercised through the real detection
+        pipeline rather than a hand-built ``Change`` -- proving the fix
+        holds at the public ``compare()`` surface, not only against the
+        primitive in isolation."""
+        old = _snap("1", _fn(_MANGLED, _OLD_PARAM), _elf("process"))
+        new = _snap("2", _fn(_MANGLED, _NEW_PARAM), _elf("process"))
+        result = compare(old, new)
+
+        lambda_kinds = {
+            ChangeKind.FUNC_PARAMS_CHANGED,
+            ChangeKind.TEMPLATE_PARAM_TYPE_CHANGED,
+        }
+        touched = [c for c in result.changes if c.kind in lambda_kinds]
+        assert touched, "expected at least one lambda-closure param finding"
+        for c in touched:
+            assert c.effective_verdict is None
+            assert c.modulation_rule is None
 
 
 class TestSyntheticCtorDtorKeysAreNeverDemoted:

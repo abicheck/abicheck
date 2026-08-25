@@ -571,15 +571,52 @@ def qualified_name_scope_components(qualified: str) -> list[str] | None:
         "Class::method"     -> ["Class", "method"]
         "freefunc"          -> ["freefunc"]              (no scope to split)
 
-    Deliberately conservative: returns ``None`` for an empty string or a
+    Splits only at TOP-LEVEL ``"::"`` — bracket/paren nesting depth is
+    tracked (mirroring ``clang_layout_tool._bare_base_name``'s identical
+    concern) so a template argument's own ``"::"`` is never mistaken for a
+    scope separator. Without this, ``"lib::foo<old::A>"`` would split into
+    ``["lib", "foo<old", "A>"]`` — the fabricated middle component
+    ``"foo<old"`` can then coincidentally collide with an unrelated
+    ``"foo<new"`` from a different instantiation, producing a false
+    namespace-move grouping between two type arguments that were never
+    renamed at all (Codex review, fresh evidence: exactly this happened for
+    ``lib::foo<old::A>``/``lib::foo<old::B>`` vs.
+    ``lib::foo<new::A>``/``lib::foo<new::B>``, reported as a spurious
+    BREAKING ``symbol_renamed_batch``)::
+
+        "lib::foo<old::A>" -> ["lib", "foo<old::A>"]   (not ["lib", "foo<old", "A>"])
+
+    Deliberately conservative: returns ``None`` for an empty string, a
     component list with any empty segment (a leading/trailing/doubled
-    ``"::"``, e.g. ``"::foo"`` or ``"foo::::bar"``) rather than silently
-    dropping or fabricating a component, mirroring the "return ``None``, let
-    the caller fall back" contract the mangled-name parsers above use.
+    top-level ``"::"``, e.g. ``"::foo"`` or ``"foo::::bar"``), or unbalanced
+    bracket/paren nesting, rather than silently dropping or fabricating a
+    component, mirroring the "return ``None``, let the caller fall back"
+    contract the mangled-name parsers above use.
     """
     if not qualified:
         return None
-    comps = qualified.split("::")
+    comps: list[str] = []
+    depth = 0
+    start = 0
+    i = 0
+    n = len(qualified)
+    while i < n:
+        ch = qualified[i]
+        if ch in "<(":
+            depth += 1
+        elif ch in ">)":
+            depth -= 1
+            if depth < 0:
+                return None
+        elif depth == 0 and qualified[i : i + 2] == "::":
+            comps.append(qualified[start:i])
+            i += 2
+            start = i
+            continue
+        i += 1
+    if depth != 0:
+        return None
+    comps.append(qualified[start:])
     if any(not c for c in comps):
         return None
     return comps

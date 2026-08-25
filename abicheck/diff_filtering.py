@@ -250,15 +250,32 @@ def _enum_canonical_names(snap: AbiSnapshot | None) -> dict[str, str]:
     fixing the bare-vs-qualified mismatch this function exists to close
     (Codex review, fresh evidence — reproduced against a real enum member
     named like an internal-namespace segment).
+
+    A bare name is registered only when it uniquely identifies one
+    qualified enum. Two distinct enums sharing a bare name (e.g.
+    ``a::Color`` and ``b::Color``) would otherwise have the bare key
+    ``setdefault``-pinned to whichever enum is iterated first -- silently
+    mapping the OTHER enum's own header-tier finding to the wrong
+    qualified spelling, which can both hide it from its real DWARF-tier
+    twin (a genuine cross-detector dedup miss, the opposite failure this
+    bridge exists to prevent) and misattribute it under later
+    namespace-aware processing that trusts ``qualified_name`` (Codex
+    review, fresh evidence). The fully-qualified key is never ambiguous --
+    two enums cannot share the same qualified name -- so it is always safe
+    to register.
     """
     if snap is None:
         return {}
+    by_bare: dict[str, set[str]] = {}
     out: dict[str, str] = {}
     for e in getattr(snap, "enums", None) or ():
         if not e.qualified_name:
             continue
-        out.setdefault(e.name, e.qualified_name)
-        out.setdefault(e.qualified_name, e.qualified_name)
+        by_bare.setdefault(e.name, set()).add(e.qualified_name)
+        out[e.qualified_name] = e.qualified_name
+    for bare, qualified_names in by_bare.items():
+        if len(qualified_names) == 1:
+            out[bare] = next(iter(qualified_names))
     return out
 
 

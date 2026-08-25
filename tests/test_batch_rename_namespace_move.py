@@ -34,6 +34,7 @@ from hypothesis import given, settings, strategies as st
 
 from abicheck.checker import compare
 from abicheck.checker_policy import ChangeKind
+from abicheck.diff_cxx_rules import qualified_name_scope_components
 from abicheck.diff_symbols_renames import (
     emit_namespace_move_batches,
     find_namespace_move_groups,
@@ -337,3 +338,47 @@ def test_header_tier_keys_obey_the_same_grouping_invariant_as_mangled_ones(
         assert a != b
         for old_q, new_q in pairs:
             assert old_q.replace(f"::{a}::", f"::{b}::") == new_q
+
+
+class TestQualifiedNameScopeComponentsRespectsTemplateNesting:
+    """Codex review, fresh evidence: a naive ``split("::")`` treats a
+    separator INSIDE a template argument as an enclosing scope. For
+    ``lib::foo<old::A>``, that would fabricate a middle component
+    ``"foo<old"`` -- which can then coincidentally collide with an
+    unrelated ``"foo<new"`` from a different instantiation, producing a
+    false namespace-move grouping between two type arguments that were
+    never renamed at all."""
+
+    def test_splits_only_at_top_level_separators(self) -> None:
+        assert qualified_name_scope_components("lib::foo<old::A>") == [
+            "lib",
+            "foo<old::A>",
+        ]
+        assert qualified_name_scope_components("ns::Class::method") == [
+            "ns",
+            "Class",
+            "method",
+        ]
+        assert qualified_name_scope_components("freefunc") == ["freefunc"]
+
+    def test_a_templated_removal_and_addition_never_pair_as_a_namespace_move(
+        self,
+    ) -> None:
+        """The exact repro from review: ``lib::foo<old::A>``/
+        ``lib::foo<old::B>`` removed and ``lib::foo<new::A>``/
+        ``lib::foo<new::B>`` added must NOT group as a ``foo<old`` ->
+        ``foo<new`` namespace move -- these are two distinct template
+        instantiations, not a namespace rename."""
+        removed = {"lib::foo<old::A>", "lib::foo<old::B>"}
+        added = {"lib::foo<new::A>", "lib::foo<new::B>"}
+        groups = find_namespace_move_groups(removed, added)
+        assert groups == {}
+
+    def test_unbalanced_nesting_returns_none(self) -> None:
+        assert qualified_name_scope_components("lib::foo<old::A") is None
+        assert qualified_name_scope_components("lib::foo>old::A") is None
+
+    def test_empty_and_degenerate_inputs_return_none(self) -> None:
+        assert qualified_name_scope_components("") is None
+        assert qualified_name_scope_components("::foo") is None
+        assert qualified_name_scope_components("foo::::bar") is None
