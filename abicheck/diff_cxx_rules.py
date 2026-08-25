@@ -781,6 +781,49 @@ def qualified_name_scope_components(qualified: str) -> list[str] | None:
     matching close -- regardless of what it looks like -- is treated as
     fully opaque interior, untouched by any other counter in this
     function.
+
+    Bracket (``[``/``]``) nesting is tracked as a FOURTH independent
+    counter, for the same reason: a subscript expression used inside a
+    non-type template argument (e.g. ``operator B<A[N > M]>()``, confirmed
+    to compile) carries a ``>`` that needs no parenthesization either --
+    ``]``, not ``>``, closes the subscript, so it carries none of the
+    top-level template-argument ambiguity a bare ``>`` would (Codex review,
+    fresh evidence). Treated exactly like a brace: once a bracket opens,
+    its entire interior is opaque, and this needs no heuristic either,
+    since ``[``/``]`` always balance unconditionally in valid C++ too.
+
+    Known, accepted limitation (Codex review, fresh evidence): the brace/
+    bracket "opaque interior" scan above is a raw character count, not a
+    real tokenizer -- it does not skip over string/char-literal content or
+    comments, so a brace, bracket, paren, or angle-bracket CHARACTER
+    embedded inside a string literal within a lambda body (e.g. ``operator
+    B<[]{ return sizeof("}"); }>()``, confirmed to compile and to be
+    pretty-printed verbatim by clang) desynchronizes the corresponding
+    counter and this function rejects otherwise-valid input. Closing this
+    for real needs an actual lexical scanner for the brace/bracket
+    interior -- string/char-literal quoting and escape-sequence handling
+    (including raw string literals, ``R"delim(...)delim"``, whose
+    terminator is itself data-dependent), plus line (``//``) and block
+    (``/* */``) comment recognition -- which is a materially different,
+    larger piece of work than "track one more independently-balancing
+    bracket kind" (the pattern every fix in this function's history above
+    has been). Deliberately not attempted here: this is the sixth
+    consecutive real-but-increasingly-exotic C++ grammar shape found in
+    this function across as many review rounds, and a string/char literal
+    containing bracket-like characters *inside a lambda body used as a
+    conversion-operator's own non-type template argument* is deep into
+    adversarially-constructed territory -- vanishingly unlikely to appear
+    in any real-world header this tool would actually be pointed at,
+    unlike every shape fixed above (each was a plain, if less common,
+    construct a real codebase could plausibly contain). Per this
+    codebase's own "known gaps over risky reactive patches" convention:
+    the input this function was built to defend against in the first
+    place is a genuinely MALFORMED synthetic key, and no valid, real-world
+    header-tier declaration this codebase has ever actually needed to
+    parse has required this. A caller reaching this gap gets the existing,
+    documented conservative fallback (``None``, no namespace-move pairing
+    for that one declaration) -- a missed roll-up for one input, not a
+    wrong one.
     """
     if not qualified:
         return None
@@ -788,6 +831,7 @@ def qualified_name_scope_components(qualified: str) -> list[str] | None:
     angle_depth = 0
     paren_depth = 0
     brace_depth = 0
+    bracket_depth = 0
     i = 0
     n = len(qualified)
     marker_idx = -1
@@ -803,13 +847,28 @@ def qualified_name_scope_components(qualified: str) -> list[str] | None:
                 return None
             i += 1
             continue
-        if brace_depth > 0:
+        if ch == "[":
+            bracket_depth += 1
+            i += 1
+            continue
+        if ch == "]":
+            bracket_depth -= 1
+            if bracket_depth < 0:
+                return None
+            i += 1
+            continue
+        if brace_depth > 0 or bracket_depth > 0:
             # Opaque interior of a brace-delimited lambda body (a legal
             # C++20 non-type template argument, e.g. "B<[]{ return N > M;
-            # }>") -- a full statement grammar, unrelated to the enclosing
-            # template-argument-list's own bracket balance. See this
-            # function's own docstring for why braces need no whitespace
-            # heuristic, unlike angle brackets.
+            # }>") or a bracketed subscript expression (e.g. "B<A[N >
+            # M]>", confirmed to compile: a ">" nested inside "[...]" is
+            # unambiguous to the parser -- "]", not ">", closes the
+            # subscript, so it carries none of the top-level
+            # template-argument ambiguity a bare ">" would). Both are a
+            # full expression/statement grammar unrelated to the
+            # enclosing template-argument-list's own bracket balance. See
+            # this function's own docstring for why braces/brackets need
+            # no whitespace heuristic, unlike angle brackets.
             i += 1
             continue
         if ch in "<>" and _operator_keyword_precedes(qualified, i):
@@ -844,7 +903,7 @@ def qualified_name_scope_components(qualified: str) -> list[str] | None:
         ):
             marker_idx = i
         i += 1
-    if angle_depth != 0 or paren_depth != 0 or brace_depth != 0:
+    if angle_depth != 0 or paren_depth != 0 or brace_depth != 0 or bracket_depth != 0:
         return None
     if marker_idx != -1:
         head = qualified[:marker_idx]
@@ -865,6 +924,7 @@ def qualified_name_scope_components(qualified: str) -> list[str] | None:
     angle_depth = 0
     paren_depth = 0
     brace_depth = 0
+    bracket_depth = 0
     start = 0
     i = 0
     while i < n:
@@ -879,7 +939,17 @@ def qualified_name_scope_components(qualified: str) -> list[str] | None:
                 return None
             i += 1
             continue
-        if brace_depth > 0:
+        if ch == "[":
+            bracket_depth += 1
+            i += 1
+            continue
+        if ch == "]":
+            bracket_depth -= 1
+            if bracket_depth < 0:
+                return None
+            i += 1
+            continue
+        if brace_depth > 0 or bracket_depth > 0:
             i += 1
             continue
         if ch in "<>" and _operator_keyword_precedes(qualified, i):
@@ -912,7 +982,7 @@ def qualified_name_scope_components(qualified: str) -> list[str] | None:
             start = i
             continue
         i += 1
-    if angle_depth != 0 or paren_depth != 0 or brace_depth != 0:
+    if angle_depth != 0 or paren_depth != 0 or brace_depth != 0 or bracket_depth != 0:
         return None
     comps.append(qualified[start:])
     if any(not c for c in comps):
@@ -962,6 +1032,7 @@ def strip_trailing_top_level_parameter_list(text: str) -> str:
     depth = 0
     paren_depth = 0
     brace_depth = 0
+    bracket_depth = 0
     i = 0
     n = len(text)
     while i < n:
@@ -974,8 +1045,16 @@ def strip_trailing_top_level_parameter_list(text: str) -> str:
             brace_depth = max(0, brace_depth - 1)
             i += 1
             continue
-        if brace_depth > 0:
-            # Opaque lambda-body interior -- see
+        if ch == "[":
+            bracket_depth += 1
+            i += 1
+            continue
+        if ch == "]":
+            bracket_depth = max(0, bracket_depth - 1)
+            i += 1
+            continue
+        if brace_depth > 0 or bracket_depth > 0:
+            # Opaque lambda-body/subscript interior -- see
             # qualified_name_scope_components's identical concern.
             i += 1
             continue

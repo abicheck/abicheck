@@ -52,7 +52,21 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   pretty-print verbatim). Once a brace opens, every character up to its
   matching close is now treated as fully opaque — unlike the angle-bracket
   cases, this needs no heuristic at all, since braces always balance
-  unconditionally in valid C++.
+  unconditionally in valid C++. Bracket (`[`/`]`) nesting is now tracked
+  the same way, for the same reason: a subscript expression as (or within)
+  a non-type template argument (`operator B<A[N > M]>`, confirmed to
+  compile) carries a `>` needing no parenthesization either, since `]` —
+  not `>` — closes it. Both fixes are string/character-count-based, not a
+  real tokenizer: a string/char literal inside a lambda body containing a
+  brace/bracket/paren/angle-bracket character can still desynchronize the
+  count, and closing that would need real lexical scanning (quoting,
+  escape sequences, raw string literals, comments) — documented as a
+  known, accepted limitation in `qualified_name_scope_components`'s own
+  docstring rather than attempted, since it is a materially larger piece
+  of work than the bounded fixes above and the shape it would guard
+  against (a string literal inside a lambda body used as a conversion
+  operator's own non-type template argument) is far into
+  adversarially-constructed territory rather than real-world C++.
 - **A lambda-closure-parameterized function-level finding is now demoted
   when confirmed never exported on either side.** A `func_removed`/
   `func_params_changed`/`template_param_type_changed`/

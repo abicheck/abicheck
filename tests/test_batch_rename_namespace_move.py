@@ -823,6 +823,65 @@ class TestStripTrailingTopLevelParameterListAcceptsLambdaBodyTemplateArguments:
         )
 
 
+class TestQualifiedNameScopeComponentsAcceptsSubscriptTemplateArguments:
+    """Codex review, fresh evidence: a subscript expression used as (or
+    within) a non-type template argument carries a ``>`` that needs no
+    parenthesization either -- ``]``, not ``>``, closes the subscript, so
+    it carries none of the top-level template-argument ambiguity a bare
+    ``>`` would. Confirmed directly against real clang:
+    ``operator B<A[N > M]>()`` compiles cleanly (with ``constexpr int
+    A[10]``) and is pretty-printed verbatim. An earlier revision treated
+    every ``>`` at ``paren_depth == 0`` as a real template-closing
+    delimiter unconditionally, so the comparison's own ``>`` closed the
+    outer template early and the real closing ``>`` drove the counter
+    negative, rejecting valid input."""
+
+    def test_subscript_comparison_target_is_accepted(self) -> None:
+        target = "operator B<A[N > M]>"
+        assert qualified_name_scope_components(f"api::C::{target}") == [
+            "api",
+            "C",
+            target,
+        ]
+
+    def test_subscript_in_an_ordinary_qualified_name_splits_correctly(self) -> None:
+        assert qualified_name_scope_components("ns::B<A[N > M]>::method") == [
+            "ns",
+            "B<A[N > M]>",
+            "method",
+        ]
+
+    def test_a_real_nested_template_after_a_subscript_sibling_is_still_recognized(
+        self,
+    ) -> None:
+        target = "operator Foo<A[N > M], Other<C>>"
+        assert qualified_name_scope_components(f"api::C::{target}") == [
+            "api",
+            "C",
+            target,
+        ]
+
+    def test_still_rejects_genuinely_unbalanced_brackets(self) -> None:
+        assert qualified_name_scope_components("api::C::operator B<A[N > M>") is None
+
+    def test_still_rejects_genuinely_unbalanced_nesting_after_a_closed_subscript(
+        self,
+    ) -> None:
+        assert qualified_name_scope_components("api::C::operator B<A[N > M]") is None
+
+
+class TestStripTrailingTopLevelParameterListAcceptsSubscriptTemplateArguments:
+    """The identical bracket-tracking fix, applied to
+    :func:`strip_trailing_top_level_parameter_list`'s own angle-bracket
+    tracking."""
+
+    def test_subscript_scope_splits_correctly(self) -> None:
+        assert (
+            strip_trailing_top_level_parameter_list("ns::Holder<A[N > M]>(int)")
+            == "ns::Holder<A[N > M]>"
+        )
+
+
 class TestStripTrailingTopLevelParameterListAcceptsExpressionBearingScopes:
     """The identical bracket-kind-blind depth bug as the class above, in
     :func:`strip_trailing_top_level_parameter_list`'s own angle-bracket
