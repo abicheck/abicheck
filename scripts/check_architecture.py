@@ -778,6 +778,43 @@ def check_repository(root: Path, *, base_revision: str | None = None) -> list[Fi
     return findings
 
 
+def _local_merge_base_with_main(root: Path) -> str | None:
+    """Best-effort local stand-in for CI's ``ARCHITECTURE_BASE``.
+
+    CI sets ``ARCHITECTURE_BASE`` to the PR's actual base sha, so the
+    debt-no-growth check only flags growth this change itself introduces.
+    Without that, a bare local invocation compares every debt-tracked file
+    against its ADR-061 *adoption* baseline directly -- which drifts as
+    unrelated, individually-compliant PRs each grow a file a little further
+    past that original baseline (each one only checked against its own
+    base). The cumulative drift then reads as a failure for the next
+    contributor who runs this exact command untouched, on a file their own
+    change never touched -- exactly the "local and CI definitions of done
+    silently diverge" gap `scripts/verify.py`'s own module docstring (M0-3)
+    exists to prevent, just not yet closed for this one step.
+
+    Returns ``None`` (falling back to the previous unscoped comparison)
+    whenever git or a local `origin/main` ref isn't available -- a shallow
+    clone, a detached checkout, or a non-git ``--root`` such as this
+    script's own miniature-tree tests use via `check_repository()` directly
+    (which never calls this function at all). Never raises.
+    """
+    try:
+        proc = subprocess.run(
+            ["git", "merge-base", "HEAD", "origin/main"],
+            cwd=root,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if proc.returncode != 0:
+        return None
+    sha = proc.stdout.strip()
+    return sha or None
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -785,11 +822,21 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--base",
-        default=os.environ.get("ARCHITECTURE_BASE"),
-        help="PR base revision used to distinguish concurrent pre-adoption growth",
+        default=None,
+        help=(
+            "PR base revision used to distinguish concurrent pre-adoption "
+            "growth (default: $ARCHITECTURE_BASE, else the local merge-base "
+            "with origin/main when one is resolvable)"
+        ),
     )
     args = parser.parse_args(argv)
-    findings = check_repository(args.root.resolve(), base_revision=args.base)
+    root = args.root.resolve()
+    base = (
+        args.base
+        or os.environ.get("ARCHITECTURE_BASE")
+        or _local_merge_base_with_main(root)
+    )
+    findings = check_repository(root, base_revision=base)
     for finding in findings:
         print(f"ERROR: {finding.render()}")
     print(f"Architecture: {len(findings)} error(s)")
