@@ -228,7 +228,16 @@ class TestHeaderTierKeysAlsoJoinTheNamespaceMove:
         """A real move reports *some* symbols mangled and some through a
         header-tier synthetic key at once -- all of them must land in the
         one substitution group, not split across a recognized group and a
-        silently-dropped remainder."""
+        silently-dropped remainder.
+
+        The ctor/dtor here are each reported through BOTH a real mangled
+        symbol AND a header-tier synthetic key -- the same two declarations
+        as the plain-mangled _D1 set already covers, just spelled twice.
+        The group must count each declaration once (Codex review, fresh
+        evidence: an earlier revision appended the identical normalized
+        pair once per string identity, double-counting a single moved
+        declaration toward the batch-emission support threshold), so the
+        total is `len(_D1)` -- not `len(_D1) + len(_D1_HEADER_TIER)`."""
         removed = set(_D1) | set(_D1_HEADER_TIER)
         added = set(_D2) | set(_D2_HEADER_TIER)
         groups = find_namespace_move_groups(removed, added)
@@ -242,7 +251,7 @@ class TestHeaderTierKeysAlsoJoinTheNamespaceMove:
             pairs["tbb::detail::d1::graph::{dtor}"]
             == "tbb::detail::d2::graph::{dtor}"
         )
-        assert len(groups[("d1", "d2")]) == len(_D1) + len(_D1_HEADER_TIER)
+        assert len(groups[("d1", "d2")]) == len(_D1)
 
     def test_reported_through_compare_with_header_tier_keys_only(self) -> None:
         old = _snap("2021", [_fn("graph", m) for m in _D1_HEADER_TIER])
@@ -595,3 +604,74 @@ class TestQualifiedNameScopeComponentsRecognizesSymbolOperatorAngleTokens:
         groups = find_namespace_move_groups(removed, added)
         assert ("d1", "d2") in groups
         assert len(groups[("d1", "d2")]) == 2
+
+
+class TestQualifiedNameScopeComponentsRequiresATokenBoundaryForOperator:
+    """Codex review, fresh evidence: a suffix-only ``"operator"`` check
+    mistakes the tail of a longer identifier (``myoperator``) for the
+    ``operator`` keyword. ``lib::myoperator<old::A>::f`` legitimately ends
+    in the eight characters ``"operator"`` right before its ``<``, but the
+    real identifier is ``myoperator`` -- an ordinary (if unusually named)
+    class, not an overloaded operator. Without a boundary check, the
+    parser skips the ``<`` as if it opened a symbol-operator token,
+    misreads the template argument's own ``::`` as top-level, and
+    eventually returns ``None`` at the unmatched ``>``."""
+
+    def test_an_identifier_merely_ending_in_operator_is_not_mistaken_for_one(
+        self,
+    ) -> None:
+        assert qualified_name_scope_components("lib::myoperator<old::A>::f") == [
+            "lib",
+            "myoperator<old::A>",
+            "f",
+        ]
+
+    def test_a_namespace_move_over_such_an_identifier_still_pairs(self) -> None:
+        removed = {
+            "lib::old::myoperator<T>::f",
+            "lib::old::myoperator<T>::g",
+        }
+        added = {
+            "lib::new1::myoperator<T>::f",
+            "lib::new1::myoperator<T>::g",
+        }
+        groups = find_namespace_move_groups(removed, added)
+        assert ("old", "new1") in groups
+        assert len(groups[("old", "new1")]) == 2
+
+    def test_a_real_operator_at_the_start_of_the_string_is_still_recognized(
+        self,
+    ) -> None:
+        """The boundary check must not itself become over-strict: a bare
+        ``"operator<<"`` with no preceding scope (index 0) is still a real
+        operator token, not a truncated identifier."""
+        assert qualified_name_scope_components("operator<<") == ["operator<<"]
+
+
+class TestFindNamespaceMoveGroupsCountsEachDeclarationOnce:
+    """Codex review, fresh evidence: when a single declaration is reported
+    under two different string identities in `removed` (a real mangled
+    ctor symbol AND a header-tier synthetic key for the SAME move -- see
+    `TestHeaderTierKeysAlsoJoinTheNamespaceMove`'s co-matching case), each
+    identity independently produced the identical normalized
+    ``(old_qualified, new_qualified)`` pair, double-counting one
+    declaration toward `emit_namespace_move_batches`' 2+-pairs threshold
+    and potentially emitting a false BREAKING batch finding for what was
+    really just one moved symbol."""
+
+    def test_one_declaration_reported_two_ways_counts_once(self) -> None:
+        removed = {
+            "_ZN3tbb6detail2d15graphC1Ev",
+            "__abicheck_ctor__tbb::detail::d1::graph()",
+        }
+        added = {
+            "_ZN3tbb6detail2d25graphC1Ev",
+            "__abicheck_ctor__tbb::detail::d2::graph()",
+        }
+        groups = find_namespace_move_groups(removed, added)
+        assert groups[("d1", "d2")] == [
+            ("tbb::detail::d1::graph::{ctor}", "tbb::detail::d2::graph::{ctor}")
+        ]
+        # Below the 2-pairs threshold -- a single declaration reported
+        # twice must not manufacture a batch finding on its own.
+        assert emit_namespace_move_batches(groups) == []

@@ -586,6 +586,26 @@ def _operator_angle_token_len(qualified: str, i: int) -> int:
     return 0
 
 
+def _operator_keyword_precedes(qualified: str, i: int) -> bool:
+    """Whether ``qualified[i-8:i] == "operator"`` is the COMPLETE leaf
+    token, not merely a suffix of a longer identifier.
+
+    A bare suffix match alone is unsound: ``lib::myoperator<old::A>::f`` also
+    ends in the eight characters ``"operator"`` immediately before its ``<``,
+    but the real identifier is ``myoperator`` -- a legal (if unusual) class
+    name, not an overloaded-operator declaration. Requires the character
+    immediately before ``"operator"`` to be a scope/token boundary (start of
+    string, or anything that isn't an identifier character) rather than
+    assuming one (Codex review, fresh evidence).
+    """
+    if i < 8:
+        return False
+    if qualified[i - 8 : i] != "operator":
+        return False
+    before = i - 8
+    return before == 0 or not (qualified[before - 1].isalnum() or qualified[before - 1] == "_")
+
+
 def qualified_name_scope_components(qualified: str) -> list[str] | None:
     """Scope components of an already-demangled, ``::``-qualified name.
 
@@ -645,7 +665,7 @@ def qualified_name_scope_components(qualified: str) -> list[str] | None:
     marker_idx = -1
     while i < n:
         ch = qualified[i]
-        if ch in "<>" and i >= 8 and qualified[i - 8 : i] == "operator":
+        if ch in "<>" and _operator_keyword_precedes(qualified, i):
             tok_len = _operator_angle_token_len(qualified, i)
             if tok_len:
                 i += tok_len
@@ -681,7 +701,7 @@ def qualified_name_scope_components(qualified: str) -> list[str] | None:
     i = 0
     while i < n:
         ch = qualified[i]
-        if ch in "<>" and i >= 8 and qualified[i - 8 : i] == "operator":
+        if ch in "<>" and _operator_keyword_precedes(qualified, i):
             tok_len = _operator_angle_token_len(qualified, i)
             if tok_len:
                 i += tok_len

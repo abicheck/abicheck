@@ -938,6 +938,17 @@ def find_namespace_move_groups(
             added_index.setdefault(masked, []).append((a_sym, comps))
 
     groups: dict[tuple[str, str], list[tuple[str, str]]] = {}
+    # Tracks which (old_qualified, new_qualified) pairs have already been
+    # recorded per substitution key, so the SAME declaration reported under
+    # two different `removed` string identities (a real mangled symbol and
+    # a header-tier synthetic key that normalize to the identical
+    # scope-component list -- see the co-matching comment below) is only
+    # ever counted once toward the 2+-pairs support threshold
+    # (Codex review, fresh evidence: without this, one moved declaration
+    # reported both ways produced two identical list entries, passing
+    # emit_namespace_move_batches' threshold and reporting a false
+    # BREAKING batch for what was really a single symbol).
+    recorded_pairs: dict[tuple[str, str], set[tuple[str, str]]] = {}
     for r_sym in sorted(removed):
         r_comps = _scope_components(r_sym)
         if r_comps is None:
@@ -986,7 +997,12 @@ def find_namespace_move_groups(
             if key[0] == key[1] or key in seen_here:
                 continue
             seen_here.add(key)
-            groups.setdefault(key, []).append(("::".join(r_comps), "::".join(a_comps)))
+            pair = ("::".join(r_comps), "::".join(a_comps))
+            already_recorded = recorded_pairs.setdefault(key, set())
+            if pair in already_recorded:
+                continue
+            already_recorded.add(pair)
+            groups.setdefault(key, []).append(pair)
     return groups
 
 
