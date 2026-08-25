@@ -40,7 +40,7 @@ from .demangle import demangle, demangle_batch
 from .detector_registry import registry
 from .diff_cxx_rules import (
     component_embeds_template_args,
-    itanium_scope_components,
+    itanium_scope_components_with_template_positions,
     msvc_scope_components,
     qualified_name_scope_components,
     strip_trailing_top_level_parameter_list,
@@ -869,8 +869,8 @@ def _qualified_key_scope_components(key: str) -> list[str] | None:
     return qualified_name_scope_components(key)
 
 
-def _scope_components(mangled: str) -> list[str] | None:
-    """Return *mangled*'s scope chain (namespaces + class path + leaf), or None.
+def _scope_components(mangled: str) -> tuple[list[str], frozenset[int]] | None:
+    """Return (*mangled*'s scope chain, template-bearing component indices), or None.
 
     Itanium first, MSVC second — the two prefixes (``_Z``/``__Z`` vs. ``?``)
     are mutually exclusive, so trying both in order is unambiguous, and it is
@@ -882,15 +882,38 @@ def _scope_components(mangled: str) -> list[str] | None:
     namespace to substitute, so it is reported as "no usable chain" rather
     than as a one-element chain, regardless of which of the three parsers
     produced it.
+
+    The second element identifies which components embed a template-
+    argument list, so a caller can exclude them from ever being treated as
+    a bare namespace/class segment (see the two masking loops in
+    :func:`find_namespace_move_groups`). For an Itanium mangling this is
+    the *exact* structural answer from
+    :func:`diff_cxx_rules.itanium_scope_components_with_template_positions`
+    — not a guess back out of the assembled text, which is unsound (Codex
+    review, fresh evidence: a text-based heuristic misreads an ordinary
+    identifier like ``"ICE"`` as a template block by coincidental
+    spelling). For MSVC this is always empty:
+    :func:`diff_cxx_rules.msvc_scope_components` already rejects the whole
+    symbol outright when any component starts with the template marker
+    ``?$``, so a template-bearing MSVC component never reaches here. Only
+    the qualified-name/header-tier-fallback shape has no parser to ask, so
+    it falls back to :func:`diff_cxx_rules.component_embeds_template_args`'s
+    text-based ``<...>`` check — exact for that shape, since a pretty-
+    printed spelling never coincidentally contains a raw Itanium encoding.
     """
-    comps = (
-        itanium_scope_components(mangled)
-        or msvc_scope_components(mangled)
-        or _qualified_key_scope_components(mangled)
+    itanium = itanium_scope_components_with_template_positions(mangled)
+    if itanium is not None:
+        comps, template_positions = itanium
+        return (comps, template_positions) if len(comps) >= 2 else None
+    fallback = msvc_scope_components(mangled) or _qualified_key_scope_components(
+        mangled
     )
-    if comps is None or len(comps) < 2:
+    if fallback is None or len(fallback) < 2:
         return None
-    return comps
+    fallback_template_positions = frozenset(
+        i for i, c in enumerate(fallback) if component_embeds_template_args(c)
+    )
+    return fallback, fallback_template_positions
 
 
 def find_namespace_move_groups(
@@ -964,9 +987,10 @@ def find_namespace_move_groups(
     """
     added_index: dict[tuple[str, ...], list[tuple[str, list[str]]]] = {}
     for a_sym in sorted(added):
-        comps = _scope_components(a_sym)
-        if comps is None:
+        resolved = _scope_components(a_sym)
+        if resolved is None:
             continue
+        comps, template_positions = resolved
         for i in range(len(comps) - 1):
             # A component that itself carries a template-argument list is not
             # a bare namespace/class segment -- it is an instantiation whose
@@ -980,20 +1004,15 @@ def find_namespace_move_groups(
             # instantiation text instead of on the real namespace segment --
             # which the un-instantiated symbol that actually names the moved
             # type already supplies evidence for. See
-            # ``_scope_components``'s own "signature-blind" caveat above:
-            # this primitive reasons about scope chains, not about a
-            # component's internal template structure, so a templated
-            # component is simply excluded from ever being *the* differing
-            # position (oneTBB report, fresh evidence). Recognizes both the
-            # qualified-name-fallback's pretty-printed ``<...>`` spelling AND
-            # a real Itanium mangled symbol's RAW, un-demangled template-args
-            # encoding (``itanium_scope_components`` keeps it raw so distinct
-            # specializations stay distinct -- see
-            # ``component_embeds_template_args``'s own docstring; a naive
-            # ``"<" in comps[i]`` check alone never fires for the real,
-            # mangled-symbol production case this guard exists for -- Codex
-            # review, fresh evidence).
-            if component_embeds_template_args(comps[i]):
+            # ``_scope_components``'s own docstring: for a real Itanium
+            # mangling *i* is checked against the EXACT structural answer
+            # (``template_positions``), never guessed back out of the
+            # assembled text -- a text-based guess is unsound (Codex review,
+            # fresh evidence: ordinary identifiers like ``"ICE"`` coincide
+            # with a balanced raw template-args spelling), which is exactly
+            # why this primitive reasons about scope chains via a per-
+            # position flag rather than re-deriving it here.
+            if i in template_positions:
                 continue
             masked = tuple(comps[:i]) + (_MASKED,) + tuple(comps[i + 1 :])
             added_index.setdefault(masked, []).append((a_sym, comps))
@@ -1043,16 +1062,17 @@ def find_namespace_move_groups(
     added_id_to_removed_symbols: dict[str, set[str]] = {}
     removed_id_to_added_symbols: dict[str, set[str]] = {}
     for r_sym in sorted(removed):
-        r_comps = _scope_components(r_sym)
-        if r_comps is None:
+        r_resolved = _scope_components(r_sym)
+        if r_resolved is None:
             continue
+        r_comps, r_template_positions = r_resolved
         symbol_id = "::".join(r_comps)
         for i in range(len(r_comps) - 1):
             # Mirrors the identical skip in the `added_index` build above: a
-            # templated component (pretty-printed or raw-Itanium-encoded)
-            # can never be treated as *the* differing namespace/class
-            # segment.
-            if component_embeds_template_args(r_comps[i]):
+            # templated component (pretty-printed, or the exact structural
+            # answer for a raw-Itanium-encoded one) can never be treated as
+            # *the* differing namespace/class segment.
+            if i in r_template_positions:
                 continue
             masked = tuple(r_comps[:i]) + (_MASKED,) + tuple(r_comps[i + 1 :])
             candidates = added_index.get(masked, [])

@@ -37,6 +37,7 @@ from abicheck.checker_policy import ChangeKind
 from abicheck.diff_cxx_rules import (
     component_embeds_template_args,
     itanium_scope_components,
+    itanium_scope_components_with_template_positions,
     qualified_name_scope_components,
     strip_trailing_top_level_parameter_list,
 )
@@ -1610,8 +1611,11 @@ class TestFindNamespaceMoveGroupsIgnoresTemplateArgumentSubstitutions:
 
 
 class TestComponentEmbedsTemplateArgs:
-    """Direct primitive-level tests for the shared predicate the fix above
-    relies on (CLAUDE.md's "Primitive-level property tests" guidance)."""
+    """Direct primitive-level tests for the qualified-name/header-tier-
+    fallback predicate (CLAUDE.md's "Primitive-level property tests"
+    guidance). Text-only, and deliberately NOT used for an Itanium-mangled
+    component -- see ``TestItaniumScopeComponentsWithTemplatePositions``
+    below for that shape's own, structural predicate."""
 
     def test_recognizes_pretty_printed_form(self) -> None:
         assert component_embeds_template_args("Box<int>") is True
@@ -1622,25 +1626,89 @@ class TestComponentEmbedsTemplateArgs:
             is True
         )
 
-    def test_recognizes_raw_itanium_form(self) -> None:
-        assert component_embeds_template_args("BoxIiE") is True
-        assert (
-            component_embeds_template_args(
-                "concurrent_priority_queueIPN3tbb6detail2d110graph_taskEE"
-            )
-            is True
-        )
-
     def test_plain_identifiers_are_not_template_bearing(self) -> None:
         assert component_embeds_template_args("graph_task") is False
         assert component_embeds_template_args("run") is False
-
-    def test_a_bare_leading_i_is_not_mistaken_for_a_template_marker(self) -> None:
-        """An ordinary identifier that happens to start with 'I' (a common
-        interface-naming convention) must not be misread as an opened,
-        unterminated template-args block."""
         assert component_embeds_template_args("Item") is False
-        assert component_embeds_template_args("IWidget") is False
+        assert component_embeds_template_args("ICE") is False
+
+
+class TestItaniumScopeComponentsWithTemplatePositions:
+    """Direct primitive-level tests for the structural (parse-time, not
+    text-guessed) template-position signal a real Itanium mangling uses.
+    CodeRabbit/Codex review, fresh evidence: this predicate exists
+    specifically because a text-based guess over the assembled raw
+    component (the shape ``component_embeds_template_args`` briefly also
+    attempted for this case, then reverted) is unsound -- an ordinary
+    identifier like ``"ICE"`` parses as a balanced raw ``I...E`` template
+    block purely by coincidental spelling, which would silently exclude a
+    genuine namespace move of a class named ``ICE`` from ever being
+    detected."""
+
+    def test_recognizes_a_real_template_instantiation(self) -> None:
+        # `tbb::detail::d1::concurrent_priority_queue<tbb::detail::d1::graph_task *>::graph_task_ptr` (ctor)
+        mangled = "_ZN3tbb6detail2d125concurrent_priority_queueIPN3tbb6detail2d110graph_taskEEC1Ev"
+        result = itanium_scope_components_with_template_positions(mangled)
+        assert result is not None
+        comps, template_positions = result
+        assert comps == [
+            "tbb",
+            "detail",
+            "d1",
+            "concurrent_priority_queueIPN3tbb6detail2d110graph_taskEE",
+            "{ctor}",
+        ]
+        assert template_positions == frozenset({3})
+
+    def test_does_not_misread_a_coincidentally_ice_shaped_identifier(self) -> None:
+        """The exact regression this predicate exists to close: a real class
+        literally named ``ICE`` moving namespace must not have its own
+        component excluded from masking -- unlike the text-based guess this
+        function replaces for the Itanium shape."""
+        mangled = "_ZN2ns3ICE1fEv"
+        result = itanium_scope_components_with_template_positions(mangled)
+        assert result is not None
+        comps, template_positions = result
+        assert comps == ["ns", "ICE", "f"]
+        assert template_positions == frozenset()
+
+    def test_plain_symbols_have_no_template_positions(self) -> None:
+        result = itanium_scope_components_with_template_positions(
+            "_ZN3tbb6detail2d110graph_task3runEv"
+        )
+        assert result is not None
+        comps, template_positions = result
+        assert comps == ["tbb", "detail", "d1", "graph_task", "run"]
+        assert template_positions == frozenset()
+
+    def test_matches_the_plain_scope_components_list(self) -> None:
+        """The list half of a successful result must be identical to what
+        ``itanium_scope_components`` (the pre-existing, template-position-
+        blind function) returns for the same input."""
+        mangled = "_ZN3tbb6detail2d125concurrent_priority_queueIPN3tbb6detail2d110graph_taskEEC1Ev"
+        result = itanium_scope_components_with_template_positions(mangled)
+        assert result is not None
+        assert result[0] == itanium_scope_components(mangled)
+
+
+class TestFindNamespaceMoveGroupsDoesNotSkipACoincidentallyTemplateShapedName:
+    """End-to-end regression for the same fix, through the real detector
+    entry points -- not just the primitive."""
+
+    def test_a_real_move_of_a_class_named_ice_is_still_detected(self) -> None:
+        removed = {
+            "_ZN2ns3ICE1fEv",
+            "_ZN2ns3ICE1gEv",
+        }
+        added = {
+            "_ZN2ns3ACE1fEv",
+            "_ZN2ns3ACE1gEv",
+        }
+        groups = find_namespace_move_groups(removed, added)
+        assert ("ICE", "ACE") in groups
+        assert len(groups[("ICE", "ACE")]) == 2
+        changes = emit_namespace_move_batches(groups)
+        assert len(changes) == 1
 
 
 class TestFindNamespaceMoveGroupsIgnoresRawMangledTemplateArguments:

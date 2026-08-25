@@ -22,9 +22,16 @@
   `concurrent_priority_queue<tbb::detail::d1::graph_task *, ...>` vs. the
   `...d2...` spelling, alongside the real `d1` → `d2` group the actual move
   is already reported under). Fixed by never treating a template-bearing
-  component as the differing scope position — a new
-  `diff_cxx_rules.component_embeds_template_args` recognizes both a
-  pretty-printed `<...>` spelling *and* a real Itanium-mangled symbol's raw,
-  un-demangled template-argument encoding (`itanium_scope_components` keeps
-  it raw, so a literal `<` alone never fires for the actual production
-  case this fix exists for).
+  component as the differing scope position. A pretty-printed `<...>`
+  spelling (the qualified-name/header-tier-fallback shape) is recognized by
+  `diff_cxx_rules.component_embeds_template_args`'s literal `<` check; a
+  real Itanium-mangled symbol's raw, un-demangled template-argument
+  encoding (`itanium_scope_components` keeps it raw, so a literal `<` never
+  appears there at all) is recognized by the new, structural
+  `diff_cxx_rules.itanium_scope_components_with_template_positions` instead
+  — tracked at parse time from whether a template-argument list was
+  actually consumed, not guessed back out of the assembled component text
+  (an earlier revision of this fix used a text-based guess for both shapes,
+  which misread an ordinary identifier like `ICE` as a template block by
+  coincidental spelling and silently excluded a real move of a class named
+  that from detection).
