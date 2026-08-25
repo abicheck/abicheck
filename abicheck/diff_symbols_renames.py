@@ -953,6 +953,36 @@ def find_namespace_move_groups(
                 groups.setdefault(key, []).append(
                     ("::".join(r_comps), "::".join(a_comps))
                 )
+
+    # Reject an AMBIGUOUS substitution (Codex review, fresh evidence): when
+    # multiple old namespaces and multiple new namespaces expose the same
+    # leaf set (e.g. removed old1::{f,g}/old2::{f,g}, added
+    # new1::{f,g}/new2::{f,g}), the loop above accumulates full support for
+    # every Cartesian-product pairing -- old1->new1, old1->new2, old2->new1,
+    # AND old2->new2 -- each individually "supported" by 2+ pairs, with no
+    # way to tell which pairing (if any) is the real move. Emitting all four
+    # as contradictory BREAKING batch findings is worse than emitting none:
+    # a single `old_seg` (or `new_seg`) resolving to more than one distinct
+    # target among the otherwise-qualifying substitutions means the mapping
+    # is unresolvable from this evidence alone, so every group touching that
+    # segment is dropped rather than guessed at -- the same
+    # false-negative-over-false-positive default this codebase's other
+    # ambiguity guards already use (see e.g. type_reachability.py's
+    # collision handling).
+    qualifying = {seg_pair: pairs for seg_pair, pairs in groups.items() if len(pairs) >= 2}
+    old_targets: dict[str, set[str]] = {}
+    new_sources: dict[str, set[str]] = {}
+    for old_seg, new_seg in qualifying:
+        old_targets.setdefault(old_seg, set()).add(new_seg)
+        new_sources.setdefault(new_seg, set()).add(old_seg)
+    ambiguous_old = {seg for seg, targets in old_targets.items() if len(targets) > 1}
+    ambiguous_new = {seg for seg, sources in new_sources.items() if len(sources) > 1}
+    if ambiguous_old or ambiguous_new:
+        groups = {
+            seg_pair: pairs
+            for seg_pair, pairs in groups.items()
+            if seg_pair[0] not in ambiguous_old and seg_pair[1] not in ambiguous_new
+        }
     return groups
 
 

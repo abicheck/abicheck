@@ -115,6 +115,46 @@ class TestNamespaceMoveIsRecognizedAsOneBatch:
             == []
         )
 
+    def test_ambiguous_many_to_many_pairing_is_rejected(self) -> None:
+        """Codex review, fresh evidence: two old namespaces and two new
+        namespaces sharing the identical leaf set ({f, g}) let the grouping
+        loop accumulate full support for EVERY Cartesian-product pairing --
+        old1->new1, old1->new2, old2->new1, AND old2->new2 -- with nothing
+        in the evidence to say which (if any) is the real move. Emitting
+        all four as contradictory BREAKING batch findings would be worse
+        than emitting none; the correct answer is no group at all."""
+        removed = {
+            "_ZN4old11fEv",
+            "_ZN4old11gEv",
+            "_ZN4old21fEv",
+            "_ZN4old21gEv",
+        }
+        added = {
+            "_ZN4new11fEv",
+            "_ZN4new11gEv",
+            "_ZN4new21fEv",
+            "_ZN4new21gEv",
+        }
+        assert find_namespace_move_groups(removed, added) == {}
+
+    def test_an_unambiguous_group_survives_alongside_an_unrelated_ambiguous_one(
+        self,
+    ) -> None:
+        """A genuinely unambiguous move (`_D1` -> `_D2`) in the same
+        comparison as an unrelated, ambiguous many-to-many pairing must
+        still be reported -- rejecting the ambiguous segments must not
+        collateral-damage a real, resolvable move that shares no segment
+        with them."""
+        removed = set(_D1) | {"_ZN4old11fEv", "_ZN4old11gEv", "_ZN4old21fEv", "_ZN4old21gEv"}
+        added = set(_D2) | {"_ZN4new11fEv", "_ZN4new11gEv", "_ZN4new21fEv", "_ZN4new21gEv"}
+        groups = find_namespace_move_groups(removed, added)
+        assert ("d1", "d2") in groups
+        assert len(groups[("d1", "d2")]) == len(_D1)
+        assert ("old1", "new1") not in groups
+        assert ("old1", "new2") not in groups
+        assert ("old2", "new1") not in groups
+        assert ("old2", "new2") not in groups
+
 
 # A header-tier (L2) backend can leave ``Function.mangled`` unmangled --
 # castxml synthesizes ``__abicheck_ctor__<scope>(<params>)`` for a

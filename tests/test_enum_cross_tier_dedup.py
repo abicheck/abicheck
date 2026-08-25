@@ -338,3 +338,29 @@ class TestEndToEndOnlyOneFindingSurvives:
             if c.kind is ChangeKind.ENUM_MEMBER_REMOVED
         }
         assert removed == {"ccl::v1::reduction::MAX", "ccl::v1::mode::SLOW"}
+
+
+class TestEnumQualificationDoesNotLeakIntoUnrelatedKinds:
+    """Codex review, fresh evidence: the bare/qualified enum bridge, applied
+    at the top of ``_deduplicate_cross_detector``, was gated on
+    ``c.kind in _DEDUP_CATEGORIES`` -- a much broader set covering
+    function/variable/version dedup categories too, not just the four enum
+    kinds. An unrelated finding whose bare `symbol` happened to coincide
+    with a registered enum alias had its `Change.qualified_name` silently
+    (and permanently -- the later ``EnrichSourceLocations`` step never
+    overwrites an already-set value) rewritten to the enum's qualified
+    spelling."""
+
+    def test_a_same_named_function_removal_is_not_qualified_as_the_enum(self) -> None:
+        snap = AbiSnapshot(
+            library="lib.so",
+            version="1",
+            enums=[_enum_type("Color", "detail::Color", [("RED", 0)])],
+        )
+        change = Change(
+            kind=ChangeKind.FUNC_REMOVED,
+            symbol="Color",
+            description="removed",
+        )
+        _deduplicate_cross_detector([change], snap, snap)
+        assert change.qualified_name is None

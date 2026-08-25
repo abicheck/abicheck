@@ -218,6 +218,28 @@ def _qualified_name_for_change(
     return None
 
 
+#: The four enum kinds the bare/qualified bridge (`_enum_canonical_names`/
+#: `_canonicalize_enum_symbol`) applies to -- deliberately a NARROWER set
+#: than `_DEDUP_CATEGORIES` (which also covers function/variable/version
+#: dedup categories unrelated to enums). Codex review, fresh evidence: an
+#: earlier revision gated the bridging on `c.kind in _DEDUP_CATEGORIES`
+#: directly, so an unrelated symbol from any OTHER category whose spelling
+#: happened to coincide with a registered enum alias (e.g. an extern-C
+#: `FUNC_REMOVED` named "Color" when a `detail::Color` enum exists) had its
+#: `Change.qualified_name` incorrectly rewritten to the enum's qualified
+#: spelling -- corrupting an unrelated finding's identity, and doing so
+#: permanently, since the later `EnrichSourceLocations` step refuses to
+#: overwrite an already-populated `qualified_name`.
+_ENUM_QUALIFICATION_KINDS = frozenset(
+    {
+        ChangeKind.ENUM_MEMBER_REMOVED,
+        ChangeKind.ENUM_MEMBER_VALUE_CHANGED,
+        ChangeKind.ENUM_LAST_MEMBER_VALUE_CHANGED,
+        ChangeKind.ENUM_UNDERLYING_SIZE_CHANGED,
+    }
+)
+
+
 def _enum_canonical_names(snap: AbiSnapshot | None) -> dict[str, str]:
     """Bare/qualified enum-name -> canonical (qualified-if-known) spelling.
 
@@ -1519,7 +1541,7 @@ def _deduplicate_cross_detector(
         old_enum_names = _enum_canonical_names(old)
         new_enum_names = _enum_canonical_names(new)
         for c in changes:
-            if c.kind in _DEDUP_CATEGORIES and not c.qualified_name:
+            if c.kind in _ENUM_QUALIFICATION_KINDS and not c.qualified_name:
                 qual = _canonicalize_enum_symbol(
                     c.symbol, old_enum_names
                 ) or _canonicalize_enum_symbol(c.symbol, new_enum_names)
