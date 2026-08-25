@@ -86,6 +86,20 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   table, mirroring `diff_versioning.demote_internal_version_node_findings`.
   A genuinely-exported symbol, or a castxml-synthesized ctor/dtor key
   (never a real export by construction), is left untouched.
+- **`find_namespace_move_groups` now also rejects a many-to-one collision
+  spanning DIFFERENT masking positions**, not just the same one. The
+  existing many-to-one guard only caught two removed segment values
+  competing for the identical masked context at the SAME component
+  position; when `p1::old::{f,g}` (differing from the sole added
+  `new::old::{f,g}` at position 0) and `new::p2::{f,g}` (differing from the
+  same added declaration at position 1) are both removed, their masked
+  contexts differ, so the position-scoped check saw no collision and both
+  `p1 -> new` and `p2 -> old` independently cleared the 2+-pairs threshold
+  as contradictory `SYMBOL_RENAMED_BATCH` findings over the identical
+  added symbols. Fixed by also tracking, per added declaration's own full
+  scope-chain identity, the distinct `(old_segment, new_segment)`
+  substitution keys it has been claimed under, and rejecting any entry
+  whose added declaration was claimed under more than one.
 - **Cross-tier enum findings now dedupe correctly.** The L2 header-tier
   enum detector (`diff_types._diff_enums`, bare `EnumType.name`) and the L1
   DWARF-tier detector (`diff_platform._diff_enum_layouts`, fully-qualified

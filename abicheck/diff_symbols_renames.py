@@ -990,6 +990,7 @@ def find_namespace_move_groups(
     # (Codex review, fresh evidence).
     entries: list[tuple[tuple[str, ...], list[str], int, list[str]]] = []
     masked_to_old_segments: dict[tuple[str, ...], set[str]] = {}
+    added_id_to_keys: dict[str, set[tuple[str, str]]] = {}
     for r_sym in sorted(removed):
         r_comps = _scope_components(r_sym)
         if r_comps is None:
@@ -1037,11 +1038,32 @@ def find_namespace_move_groups(
                 continue
             masked_to_old_segments.setdefault(masked, set()).add(r_comps[i])
             entries.append((masked, r_comps, i, a_comps))
+            # Reject an ambiguous substitution ACROSS masking positions too
+            # (Codex review, fresh evidence): the check above only catches
+            # two old segments competing for the SAME masked context (same
+            # position), but the identical added declaration can just as
+            # well be claimed by two removed symbols differing at
+            # DIFFERENT positions -- e.g. removed `p1::old::{f,g}` and
+            # `new::p2::{f,g}` vs. added only `new::old::{f,g}`:
+            # `p1::old::f` (masking position 0) and `new::p2::f` (masking
+            # position 1) both resolve to the SAME added `new::old::f`, so
+            # their masked contexts differ and the position-scoped check
+            # above sees no collision at all, yet the same added
+            # declaration cannot simultaneously be evidence for both
+            # `p1 -> new` AND `p2 -> old`. Tracked by the added
+            # declaration's own identity (its full "::"-joined scope
+            # chain) rather than by masked context, since that identity is
+            # exactly the one thing both positions' candidates share.
+            added_id_to_keys.setdefault("::".join(a_comps), set()).add(
+                (r_comps[i], a_comps[i])
+            )
 
     # Phase 2: record only the entries whose masked context was claimed by
-    # exactly one distinct old segment value -- i.e. reject the reciprocal
-    # many-to-one collision Phase 1 detected, then apply the pre-existing
-    # per-symbol/per-key/per-pair dedup exactly as before.
+    # exactly one distinct old segment value (the position-scoped
+    # many-to-one rejection) AND whose added declaration was claimed by
+    # exactly one distinct substitution key (the cross-position rejection)
+    # -- then apply the pre-existing per-symbol/per-key/per-pair dedup
+    # exactly as before.
     seen_here: dict[str, set[tuple[str, str]]] = {}
     # Tracks which (old_qualified, new_qualified) pairs have already been
     # recorded per substitution key, so the SAME declaration reported under
@@ -1056,6 +1078,9 @@ def find_namespace_move_groups(
     recorded_pairs: dict[tuple[str, str], set[tuple[str, str]]] = {}
     for masked, r_comps, i, a_comps in entries:
         if len(masked_to_old_segments[masked]) != 1:
+            continue
+        added_id = "::".join(a_comps)
+        if len(added_id_to_keys[added_id]) != 1:
             continue
         key = (r_comps[i], a_comps[i])
         symbol_id = "::".join(r_comps)

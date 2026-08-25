@@ -1205,3 +1205,64 @@ class TestFindNamespaceMoveGroupsRejectsManyToOnePairings:
             ("p2::old2::h", "p2::new::h"),
             ("p2::old2::i", "p2::new::i"),
         ]
+
+
+class TestFindNamespaceMoveGroupsRejectsCrossPositionManyToOnePairings:
+    """Codex review, fresh evidence: the position-scoped many-to-one guard
+    above (``TestFindNamespaceMoveGroupsRejectsManyToOnePairings``) only
+    catches two old segment values competing for the SAME masked context --
+    i.e. differing at the SAME component position. When removed candidates
+    differ from the same added symbol at DIFFERENT positions, their masked
+    contexts differ too, so that check sees no collision and both
+    contradictory pairings survive. Concretely: removing ``p1::old::{f,g}``
+    (masking position 0 -> candidate ``new::old::{f,g}``) and
+    ``new::p2::{f,g}`` (masking position 1 -> the SAME candidate
+    ``new::old::{f,g}``) while adding only ``new::old::{f,g}`` lets both
+    ``p1 -> new`` and ``p2 -> old`` independently clear the 2+-pairs
+    threshold, over the identical added declarations -- the same added
+    symbol cannot simultaneously be evidence that ``p1`` moved to ``new``
+    (with ``old`` unchanged) AND that ``p2`` moved to ``old`` (with ``new``
+    unchanged)."""
+
+    def test_cross_position_collision_on_one_added_declaration_is_rejected(
+        self,
+    ) -> None:
+        removed = {
+            "_ZN2p13old1fEv",
+            "_ZN2p13old1gEv",
+            "_ZN3new2p21fEv",
+            "_ZN3new2p21gEv",
+        }
+        added = {"_ZN3new3old1fEv", "_ZN3new3old1gEv"}
+        assert find_namespace_move_groups(removed, added) == {}
+
+    def test_an_unambiguous_group_survives_alongside_a_cross_position_collision(
+        self,
+    ) -> None:
+        """The rejection must be scoped to the colliding added declarations,
+        not collateral-damage a real, resolvable move sharing no segment
+        with it."""
+        removed = {
+            "_ZN2p13old1fEv",
+            "_ZN2p13old1gEv",
+            "_ZN3new2p21fEv",
+            "_ZN3new2p21gEv",
+            "_ZN2ns3old1fEv",
+            "_ZN2ns3old1gEv",
+        }
+        added = {
+            "_ZN3new3old1fEv",
+            "_ZN3new3old1gEv",
+            "_ZN2ns3new1fEv",
+            "_ZN2ns3new1gEv",
+        }
+        groups = find_namespace_move_groups(removed, added)
+        assert groups == {
+            ("old", "new"): [
+                ("ns::old::f", "ns::new::f"),
+                ("ns::old::g", "ns::new::g"),
+            ]
+        }
+        assert ("old", "new") in groups
+        assert ("p1", "new") not in groups
+        assert ("p2", "old") not in groups
