@@ -927,6 +927,39 @@ def find_namespace_move_groups(
 
     Returns ``{(old_segment, new_segment): [(old_qualified, new_qualified)]}``
     with deterministic ordering (both sides iterated sorted).
+
+    Known, accepted limitation (Codex review, fresh evidence): matching is
+    on the *scope chain only* -- :func:`_scope_components` deliberately
+    discards a function's own parameter-type signature, since two overloads
+    of the same declaration share an identical scope chain and are not
+    "different declarations" for this detector's purpose. This means the
+    reciprocal many-to-one rejection above cannot distinguish a genuine
+    collision (two unrelated old namespaces both proposing themselves as
+    the source of the identical target, e.g. ``old1::f``/``old2::f`` both
+    matching a single ``new::f``) from a legitimate consolidation where two
+    old namespaces contribute *different overloads* of the same name to one
+    new namespace (``old1::f(int)``/``old2::f(double)`` both genuinely
+    moving into ``new::{f(int), f(double)}``) -- both shapes look identical
+    once the parameter types are stripped, so the rejection fires on the
+    overload-consolidation case too, even though the mangled symbols
+    themselves *do* carry the disambiguating parameter-type suffix that
+    would resolve it. This is not a new gap this function's many-to-one
+    check introduced: the whole primitive was already signature-blind
+    before that check existed (a pre-existing overload pair collapses to
+    one identical ``pair`` string via the same ``_scope_components`` chain,
+    and the pre-existing one-to-many check has the mirror-image blind spot
+    from the other side) -- the new check simply makes an already-ambiguous
+    shape resolve to REJECT (no roll-up; the individual
+    ``func_removed``/``func_added`` findings are still reported
+    individually) rather than to arbitrarily ACCEPT one specific pairing
+    that might be wrong, which is the same false-negative-over-false-
+    positive default this module's other ambiguity guards already use (see
+    the many-to-many/local-ambiguity comments above). A correct fix needs
+    real parameter-signature matching threaded through the whole primitive
+    (``_scope_components``, ``added_index``, candidate resolution, and the
+    ``(old_segment, new_segment)`` key itself) -- a genuine redesign of a
+    primitive several other things in this module already depend on being
+    signature-blind, not a scoped patch to the many-to-one check alone.
     """
     added_index: dict[tuple[str, ...], list[tuple[str, list[str]]]] = {}
     for a_sym in sorted(added):

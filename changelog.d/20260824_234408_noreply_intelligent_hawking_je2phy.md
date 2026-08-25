@@ -19,7 +19,14 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   `new::{f,g}` added) — and no longer double-counts the same declaration
   toward the roll-up's 2+-pairs threshold when it's reported under two
   different string identities (a real mangled symbol and a header-tier
-  synthetic key for the same move).
+  synthetic key for the same move). `qualified_name_scope_components`'s
+  balanced-nesting check (and `strip_trailing_top_level_parameter_list`'s
+  identical concern) now track angle-bracket and paren nesting as two
+  independent counters rather than one shared depth — a real, demangled
+  non-type template argument can legitimately contain a parenthesized
+  `<`/`>` comparison (`operator std::integral_constant<bool, (sizeof(T) >
+  1)>`), which a single shared counter miscounted as closing the enclosing
+  template and rejected as malformed.
 - **A lambda-closure-parameterized function-level finding is now demoted
   when confirmed never exported on either side.** A `func_removed`/
   `func_params_changed`/`template_param_type_changed`/

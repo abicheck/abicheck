@@ -538,6 +538,99 @@ class TestQualifiedNameScopeComponentsKeepsConversionTargetsWhole:
         assert groups == {}
 
 
+class TestQualifiedNameScopeComponentsAcceptsExpressionBearingTargets:
+    """Codex review, fresh evidence: an earlier revision of the balanced-
+    nesting check (added to close the malformed-target gap above) used one
+    shared depth counter for both ``<``/``>`` and ``(``/``)`` -- but a real,
+    demangled non-type template argument can legitimately contain a bare
+    ``<``/``>`` comparison, e.g. ``operator
+    std::integral_constant<bool, (sizeof(T) > 1)>``. The comparison's own
+    ``>`` was miscounted as closing the ``integral_constant<`` template,
+    driving the counter negative and rejecting perfectly well-formed input.
+    C++'s own grammar requires such a comparison to be parenthesized
+    wherever it appears as a template argument specifically to remove this
+    ambiguity, so a compiler's pretty-printed text always carries the
+    disambiguating parens -- angle-bracket and paren nesting are now
+    tracked as two independent counters, and a ``<``/``>`` is only ever
+    treated as a real template delimiter while no paren is open."""
+
+    def test_comparison_inside_a_non_type_template_argument_is_accepted(self) -> None:
+        target = "operator std::integral_constant<bool, (sizeof(T) > 1)>"
+        assert qualified_name_scope_components(f"api::C::{target}") == [
+            "api",
+            "C",
+            target,
+        ]
+
+    def test_less_than_comparison_inside_a_non_type_template_argument_is_accepted(
+        self,
+    ) -> None:
+        target = "operator Array<bool, (N < M)>"
+        assert qualified_name_scope_components(f"api::C::{target}") == [
+            "api",
+            "C",
+            target,
+        ]
+
+    def test_nested_template_argument_alongside_a_parenthesized_comparison_is_accepted(
+        self,
+    ) -> None:
+        """A comparison AND a genuinely nested template argument in the same
+        argument list -- the paren-open/close bracket the comparison sits in
+        must not desynchronize the angle-bracket counter for the sibling
+        template argument that follows it."""
+        target = "operator Holder<(A > B), Other<C>>"
+        assert qualified_name_scope_components(f"api::C::{target}") == [
+            "api",
+            "C",
+            target,
+        ]
+
+    def test_still_rejects_genuinely_unbalanced_nesting_alongside_a_comparison(
+        self,
+    ) -> None:
+        """The two-counter fix must not become blind to real malformation --
+        an unclosed template past a parenthesized comparison is still
+        rejected."""
+        assert (
+            qualified_name_scope_components("api::C::operator Holder<(A > B), Other<C>")
+            is None
+        )
+
+    def test_ordinary_qualified_name_with_a_comparison_template_argument_splits_correctly(
+        self,
+    ) -> None:
+        """The same fix applies to the main top-level ``"::"`` split loop,
+        not just the conversion-operator scan -- a plain (non-conversion-
+        operator) qualified name can carry the identical non-type template
+        argument shape anywhere in its scope chain."""
+        assert qualified_name_scope_components("ns::Array<bool, (N > M)>::method") == [
+            "ns",
+            "Array<bool, (N > M)>",
+            "method",
+        ]
+
+
+class TestStripTrailingTopLevelParameterListAcceptsExpressionBearingScopes:
+    """The identical bracket-kind-blind depth bug as the class above, in
+    :func:`strip_trailing_top_level_parameter_list`'s own angle-bracket
+    tracking: a comparison inside a parenthesized non-type template
+    argument, followed by a genuinely nested function-type template
+    argument, could make the counter close the enclosing template one
+    character early and mistake the nested function type's own parameter
+    list for the real, top-level one."""
+
+    def test_comparison_alongside_a_nested_function_type_argument_splits_correctly(
+        self,
+    ) -> None:
+        assert (
+            strip_trailing_top_level_parameter_list(
+                "ns::Holder<(A > B), int(int)>(really)"
+            )
+            == "ns::Holder<(A > B), int(int)>"
+        )
+
+
 class TestStripTrailingTopLevelParameterList:
     """CodeRabbit review, fresh evidence: a synthesized ctor key's
     parameter-list suffix (``__abicheck_ctor__<scope>(<params>)``) was

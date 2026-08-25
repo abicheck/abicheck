@@ -664,11 +664,32 @@ def qualified_name_scope_components(qualified: str) -> list[str] | None:
     malformed target like ``"api::C::operator old::X<"`` (CodeRabbit
     review, fresh evidence: the earlier revision broke out of the loop the
     moment the marker was found, so nothing past it was ever validated).
+
+    Angle-bracket (``<``/``>``) and paren (``(``/``)``) nesting are tracked
+    as two INDEPENDENT counters, not one shared ``depth`` -- a real,
+    demangled non-type template argument can legitimately contain a bare
+    ``<``/``>`` comparison, e.g. ``operator
+    std::integral_constant<bool, (sizeof(T) > 1)>`` for
+    ``std::integral_constant<bool, (sizeof(T) > 1)>`` (Codex review, fresh
+    evidence: an earlier revision used one shared counter for both bracket
+    kinds, so the comparison's ``>`` was miscounted as closing the
+    ``integral_constant<`` template, driving the counter negative and
+    rejecting a perfectly well-formed target). This is not a heuristic: the
+    C++ grammar itself requires such a comparison to be parenthesized
+    wherever it appears as a non-type template argument, specifically to
+    remove this exact ambiguity for any parser -- so a compiler's own
+    demangled/pretty-printed text is guaranteed to already carry the
+    disambiguating parens around it. A ``<``/``>`` character can therefore
+    only be a REAL template delimiter while no paren is currently open
+    (``paren_depth == 0``); while a paren is open, it is guaranteed by that
+    same grammar rule to be part of an expression, never a delimiter, so it
+    is left untouched rather than folded into a bracket-kind-blind counter.
     """
     if not qualified:
         return None
     marker = "::operator "
-    depth = 0
+    angle_depth = 0
+    paren_depth = 0
     i = 0
     n = len(qualified)
     marker_idx = -1
@@ -679,18 +700,27 @@ def qualified_name_scope_components(qualified: str) -> list[str] | None:
             if tok_len:
                 i += tok_len
                 continue
-        if ch in "<(":
-            depth += 1
-        elif ch in ">)":
-            depth -= 1
-            if depth < 0:
+        if ch == "(":
+            paren_depth += 1
+        elif ch == ")":
+            paren_depth -= 1
+            if paren_depth < 0:
+                return None
+        elif ch == "<" and paren_depth == 0:
+            angle_depth += 1
+        elif ch == ">" and paren_depth == 0:
+            angle_depth -= 1
+            if angle_depth < 0:
                 return None
         elif (
-            depth == 0 and marker_idx == -1 and qualified[i : i + len(marker)] == marker
+            angle_depth == 0
+            and paren_depth == 0
+            and marker_idx == -1
+            and qualified[i : i + len(marker)] == marker
         ):
             marker_idx = i
         i += 1
-    if depth != 0:
+    if angle_depth != 0 or paren_depth != 0:
         return None
     if marker_idx != -1:
         head = qualified[:marker_idx]
@@ -708,7 +738,8 @@ def qualified_name_scope_components(qualified: str) -> list[str] | None:
         # whole thing as one leaf rather than guessing at a split.
         return [qualified]
     comps: list[str] = []
-    depth = 0
+    angle_depth = 0
+    paren_depth = 0
     start = 0
     i = 0
     while i < n:
@@ -718,19 +749,25 @@ def qualified_name_scope_components(qualified: str) -> list[str] | None:
             if tok_len:
                 i += tok_len
                 continue
-        if ch in "<(":
-            depth += 1
-        elif ch in ">)":
-            depth -= 1
-            if depth < 0:
+        if ch == "(":
+            paren_depth += 1
+        elif ch == ")":
+            paren_depth -= 1
+            if paren_depth < 0:
                 return None
-        elif depth == 0 and qualified[i : i + 2] == "::":
+        elif ch == "<" and paren_depth == 0:
+            angle_depth += 1
+        elif ch == ">" and paren_depth == 0:
+            angle_depth -= 1
+            if angle_depth < 0:
+                return None
+        elif angle_depth == 0 and paren_depth == 0 and qualified[i : i + 2] == "::":
             comps.append(qualified[start:i])
             i += 2
             start = i
             continue
         i += 1
-    if depth != 0:
+    if angle_depth != 0 or paren_depth != 0:
         return None
     comps.append(qualified[start:])
     if any(not c for c in comps):
@@ -758,15 +795,33 @@ def strip_trailing_top_level_parameter_list(text: str) -> str:
 
     Returns *text* unchanged when no top-level ``(`` is found (e.g. unbalanced
     nesting, or genuinely no parameter list) rather than guessing.
+
+    Angle-bracket depth is only tracked while no paren is currently open —
+    the identical concern :func:`qualified_name_scope_components` documents
+    for the same reason: a non-type template argument can legitimately
+    contain a parenthesized ``<``/``>`` comparison (``Holder<(A > B),
+    void(int)>``), and the C++ grammar itself guarantees such a comparison
+    is always parenthesized wherever it appears as a template argument. A
+    ``<``/``>`` seen while a paren is open is therefore guaranteed to be
+    part of that expression, never a real template delimiter, so folding it
+    into the angle-bracket counter would close the enclosing template one
+    character too early and let a later, still-nested ``(`` (a function-type
+    template argument's own parameter list, not the real trailing one) be
+    mistaken for the top-level split point.
     """
     depth = 0
+    paren_depth = 0
     for i, ch in enumerate(text):
-        if ch == "<":
+        if ch == "(":
+            if depth == 0 and paren_depth == 0:
+                return text[:i]
+            paren_depth += 1
+        elif ch == ")":
+            paren_depth = max(0, paren_depth - 1)
+        elif ch == "<" and paren_depth == 0:
             depth += 1
-        elif ch == ">":
+        elif ch == ">" and paren_depth == 0:
             depth = max(0, depth - 1)
-        elif ch == "(" and depth == 0:
-            return text[:i]
     return text
 
 
