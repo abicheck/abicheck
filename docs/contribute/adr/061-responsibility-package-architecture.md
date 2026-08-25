@@ -628,9 +628,32 @@ exists; the relevant debt entries shrink or disappear.
 
 Implementation status: the immutable, JSON-shaped ``ReportDocument`` and its
 pure JSON projection are established, and all native JSON report modes (full,
-stat, leaf, and root-cause) now cross that boundary. Markdown, HTML, SARIF, and
-JUnit remain explicit follow-up slices; this partial status must not be read as
-the phase acceptance criteria having been met.
+stat, leaf, and root-cause) now cross that boundary. The `--stat` one-line
+text summary (`reporter_markdown.to_stat`) now also builds and renders a
+`ReportDocument` via `report/render_text.py`'s `render_stat_document`, the
+first non-JSON format to do so. Markdown's richer modes (`to_markdown`,
+`to_review_digest`), HTML, SARIF, and JUnit remain explicit follow-up slices;
+this partial status must not be read as the phase acceptance criteria having
+been met.
+
+Known blocker for the remaining Markdown modes: their JSON counterparts
+(`full`/`leaf`/`root-cause`) build a severity-aware document by calling into
+`severity.py`/`analysis_assurance.py`, and `checker_types.py` (`DiffResult`'s
+own methods) and `checker.py` (`compare()`'s own orchestration) already call
+directly into those same modules — a real, pre-existing `compare -> policy`
+coupling `architecture/modules.yaml`'s dependency contract does not yet
+permit. Classifying `severity.py`/`analysis_assurance.py`/`contract_gating.py`
+as `policy` while `checker.py`/`checker_types.py` stay `compare` reproduces
+this edge as a `check_architecture.py` `dependency-direction`/
+`dependency-cycle` failure immediately (verified directly: adding both sides
+surfaces the cycle at `checker.py:1277`, `checker_types.py:36,713,737,749`).
+A physically migrated `report/`-package module touching any richer,
+severity-aware document shape hits the same wall the moment it imports
+`severity.py`. Resolving it needs `checker_types.py`'s
+`_effective_verdict_for_change`/`_evaluated_changes`/`not_evaluated` (and
+`checker.py`'s `compare()` call into `analysis_assurance.compute_
+analysis_assurance`) moved off `compare`'s core types — a real, scoped
+migration in its own right, not a follow-up edit to a reporting slice.
 
 1. Define immutable `ReportDocument` contracts from existing report-model
    behavior rather than inventing a second schema.

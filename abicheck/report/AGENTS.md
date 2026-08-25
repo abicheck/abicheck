@@ -16,8 +16,15 @@ Use explicit implementation modules rather than broad compatibility facades.
 
 During ADR-061 migration, each moved projection names its workflow result in
 the module name. `aggregate.py` projects `AggregateResult` to JSON-compatible
-mapping or text. Phase 2 will establish the shared immutable
-`ReportDocument` used by every output format.
+mapping or text. `document.py` is the shared immutable `ReportDocument`
+Phase 2 is establishing across every output format; `render_json.py` is its
+pure JSON projection and `render_text.py` is its pure one-line stat/text
+projection (`render_stat_document`). Markdown, HTML, SARIF, and JUnit remain
+explicit follow-up slices — see this package's own module docstrings and
+ADR-061's Phase 2 status note for what still builds its output outside a
+`ReportDocument`, and why (a pre-existing `compare -> policy` coupling in
+`checker_types.py`/`checker.py` blocks moving any severity-touching builder
+physically into this package until that coupling is resolved separately).
 
 ## Tests
 
