@@ -306,6 +306,85 @@ class TestSyntheticCtorDtorKeysNotDemotedWhenTemplateIsExported:
         assert change.modulation_rule is None
 
 
+class TestSyntheticDtorKeyReportedThroughComparePipeline:
+    """The exact real-world shape reported for oneTBB: an unrelated edit
+    shifts a lambda's source line, so the destructor's castxml-synthesized
+    key changes spelling between old and new -- `compare()`'s own function
+    matching (keyed by this same synthetic identity) reports a
+    FUNC_REMOVED/FUNC_ADDED pair, not a rename. Exercised through the real
+    detection pipeline, not only against the demotion primitive in
+    isolation, proving the fix reaches the shape `compare()` actually
+    produces."""
+
+    def test_removal_demoted_when_owning_template_never_exported(self) -> None:
+        from abicheck.dumper_castxml import _SYNTHETIC_DTOR_KEY_PREFIX
+
+        old_key = f"{_SYNTHETIC_DTOR_KEY_PREFIX}{_OLD_PARAM}"
+        new_key = f"{_SYNTHETIC_DTOR_KEY_PREFIX}{_NEW_PARAM}"
+        old_fn = Function(
+            name="~raii_guard",
+            mangled=old_key,
+            return_type="void",
+            params=[],
+            visibility=Visibility.PUBLIC,
+        )
+        new_fn = Function(
+            name="~raii_guard",
+            mangled=new_key,
+            return_type="void",
+            params=[],
+            visibility=Visibility.PUBLIC,
+        )
+        old = _snap("1", old_fn, _elf("unrelated_symbol"))
+        new = _snap("2", new_fn, _elf("unrelated_symbol"))
+
+        result = compare(old, new)
+
+        removed = [
+            c
+            for c in result.changes
+            if c.kind == ChangeKind.FUNC_REMOVED and c.symbol == old_key
+        ]
+        assert removed, "expected a FUNC_REMOVED for the old synthetic dtor key"
+        assert removed[0].effective_verdict is Verdict.COMPATIBLE_WITH_RISK
+        assert removed[0].modulation_rule == "lambda_closure_never_exported"
+
+    def test_removal_untouched_when_owning_template_is_exported(self) -> None:
+        from abicheck.dumper_castxml import _SYNTHETIC_DTOR_KEY_PREFIX
+
+        old_key = f"{_SYNTHETIC_DTOR_KEY_PREFIX}{_OLD_PARAM}"
+        new_key = f"{_SYNTHETIC_DTOR_KEY_PREFIX}{_NEW_PARAM}"
+        old_fn = Function(
+            name="~raii_guard",
+            mangled=old_key,
+            return_type="void",
+            params=[],
+            visibility=Visibility.PUBLIC,
+        )
+        new_fn = Function(
+            name="~raii_guard",
+            mangled=new_key,
+            return_type="void",
+            params=[],
+            visibility=Visibility.PUBLIC,
+        )
+        # A real exported dtor of a DIFFERENT raii_guard<...> instantiation.
+        other_instantiation_dtor = "_ZN3tbb6detail10raii_guardIiED1Ev"
+        old = _snap("1", old_fn, _elf(other_instantiation_dtor))
+        new = _snap("2", new_fn, _elf(other_instantiation_dtor))
+
+        result = compare(old, new)
+
+        removed = [
+            c
+            for c in result.changes
+            if c.kind == ChangeKind.FUNC_REMOVED and c.symbol == old_key
+        ]
+        assert removed, "expected a FUNC_REMOVED for the old synthetic dtor key"
+        assert removed[0].effective_verdict is None
+        assert removed[0].modulation_rule is None
+
+
 class TestNonLambdaFindingsAreNeverTouched:
     def test_ordinary_param_change_with_no_lambda_marker_is_untouched(self) -> None:
         from abicheck.checker_types import Change
