@@ -132,7 +132,11 @@ divergent compiler flags (e.g. `-fsycl` for a subset) — there are two ways to
 wire `abicheck` into CI. The one every project can use today is
 `abicheck compare` on directory/package inputs (see the table above) driven
 directly from your own workflow, with a release-asset baseline and a
-committed digest anchor. The other is G30/ADR-047's declarative topology: a
+committed digest anchor — cross-library findings (removed dependencies,
+provider changes) from this path are **ELF/Linux-only**; a Windows/macOS
+release gets per-library results only, with bundle analysis silently
+skipped (see [Platform Support](https://abicheck.github.io/abicheck/user-guide/multi-binary/#platform-support)).
+The other is G30/ADR-047's declarative topology: a
 `.abicheck.yml` `targets:`/`bundles:`/`profiles:`/`baseline:` block, validated
 with `abicheck project validate`, fanned out with `abicheck project plan`,
 and run by the reusable `check-project.yml`/`publish-baseline.yml`
