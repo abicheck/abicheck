@@ -586,6 +586,21 @@ def qualified_name_scope_components(qualified: str) -> list[str] | None:
 
         "lib::foo<old::A>" -> ["lib", "foo<old::A>"]   (not ["lib", "foo<old", "A>"])
 
+    A conversion operator's own target type can itself carry ``"::"``
+    (``"api::C::operator old::X"`` for `operator old::X()`) — without special
+    handling, the target's own scope separator would be treated as an
+    enclosing-scope boundary too, splitting into
+    ``["api", "C", "operator old", "X"]`` instead of the correct
+    ``["api", "C", "operator old::X"]``. That fabricated middle component
+    can then collide with an unrelated target sharing the same "operator
+    <prefix>" spelling, producing a false namespace-move grouping (Codex
+    review, fresh evidence — mirrors the identical concern
+    :func:`owner_class_of` already documents for exactly this shape).
+    Recognized the same way that function already does: a top-level
+    ``"::operator "`` marker is the true scope/leaf boundary, and
+    everything from ``"operator "`` onward (including the target's own
+    ``"::"``) is kept as ONE opaque leaf component, never split further.
+
     Deliberately conservative: returns ``None`` for an empty string, a
     component list with any empty segment (a leading/trailing/doubled
     top-level ``"::"``, e.g. ``"::foo"`` or ``"foo::::bar"``), or unbalanced
@@ -595,11 +610,42 @@ def qualified_name_scope_components(qualified: str) -> list[str] | None:
     """
     if not qualified:
         return None
+    marker = "::operator "
+    depth = 0
+    i = 0
+    n = len(qualified)
+    marker_idx = -1
+    while i < n:
+        ch = qualified[i]
+        if ch in "<(":
+            depth += 1
+        elif ch in ">)":
+            depth -= 1
+            if depth < 0:
+                return None
+        elif depth == 0 and qualified[i : i + len(marker)] == marker:
+            marker_idx = i
+            break
+        i += 1
+    if marker_idx != -1:
+        head = qualified[:marker_idx]
+        leaf = qualified[marker_idx + 2 :]  # keep the "operator ..." target whole
+        head_comps = qualified_name_scope_components(head)
+        if head_comps is None:
+            return None
+        return [*head_comps, leaf]
+    if qualified.startswith("operator "):
+        # A bare-recorded conversion operator with no owning-class prefix at
+        # all (no "::operator " marker to find) can still carry a qualified
+        # target ("operator ns::Bar") whose own "::" is not a scope
+        # separator -- the same shape owner_class_of's docstring documents.
+        # There is no scope to substitute here regardless, so treat the
+        # whole thing as one leaf rather than guessing at a split.
+        return [qualified]
     comps: list[str] = []
     depth = 0
     start = 0
     i = 0
-    n = len(qualified)
     while i < n:
         ch = qualified[i]
         if ch in "<(":

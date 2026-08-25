@@ -427,6 +427,53 @@ class TestQualifiedNameScopeComponentsRespectsTemplateNesting:
         assert qualified_name_scope_components("foo::::bar") is None
 
 
+class TestQualifiedNameScopeComponentsKeepsConversionTargetsWhole:
+    """Codex review, fresh evidence: a conversion operator's own target
+    type can carry ``"::"`` (``operator old::X()``) -- without special
+    handling, the target's own separator is mistaken for an enclosing
+    scope boundary, the same concern :func:`owner_class_of` already
+    documents and handles for exactly this shape."""
+
+    def test_owned_conversion_operator_keeps_the_target_whole(self) -> None:
+        assert qualified_name_scope_components("api::C::operator old::X") == [
+            "api",
+            "C",
+            "operator old::X",
+        ]
+
+    def test_bare_conversion_operator_with_no_owner_has_no_scope(self) -> None:
+        assert qualified_name_scope_components("operator old::X") == [
+            "operator old::X"
+        ]
+
+    def test_two_conversion_operator_removals_and_additions_still_pair_correctly(
+        self,
+    ) -> None:
+        """The exact repro shape from review: two classes' conversion
+        operators to a namespace-qualified target, the namespace moving
+        the same way plain ``d1`` -> ``d2`` does elsewhere in this file.
+        Confirmed to produce a false ``operator old`` -> ``operator new``
+        namespace-move claim before the fix, instead of the real
+        ``old`` -> ``new`` substitution over the whole target."""
+        removed = {
+            "api::C::operator old::X",
+            "api::D::operator old::X",
+        }
+        added = {
+            "api::C::operator new::X",
+            "api::D::operator new::X",
+        }
+        groups = find_namespace_move_groups(removed, added)
+        assert ("operator old", "operator new") not in groups
+        assert ("old::X", "new::X") not in groups
+        # No scope substitution can pair these at all: the differing
+        # segment is the whole conversion-target leaf, which
+        # find_namespace_move_groups deliberately never treats as
+        # substitutable (a differing leaf is a renamed declaration, not a
+        # moved scope -- see this function's own docstring).
+        assert groups == {}
+
+
 class TestStripTrailingTopLevelParameterList:
     """CodeRabbit review, fresh evidence: a synthesized ctor key's
     parameter-list suffix (``__abicheck_ctor__<scope>(<params>)``) was
