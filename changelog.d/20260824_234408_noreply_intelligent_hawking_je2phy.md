@@ -26,7 +26,15 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   non-type template argument can legitimately contain a parenthesized
   `<`/`>` comparison (`operator std::integral_constant<bool, (sizeof(T) >
   1)>`), which a single shared counter miscounted as closing the enclosing
-  template and rejected as malformed.
+  template and rejected as malformed. A bare, unparenthesized `<`
+  comparison (e.g. `operator B<N < M>`, legal C++ and confirmed produced
+  verbatim by clang's own AST dump for an uninstantiated class template
+  member) is also now correctly accepted — unlike `>`, C++'s grammar does
+  not require a `<` comparison to be parenthesized as a non-type template
+  argument, so a real template-opening `<` is now distinguished from a
+  comparison via the same spacing convention every compiler pretty-printer
+  uses (a template opener is never preceded by whitespace; a binary
+  operator always is, on both sides).
 - **A lambda-closure-parameterized function-level finding is now demoted
   when confirmed never exported on either side.** A `func_removed`/
   `func_params_changed`/`template_param_type_changed`/

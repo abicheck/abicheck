@@ -611,6 +611,69 @@ class TestQualifiedNameScopeComponentsAcceptsExpressionBearingTargets:
         ]
 
 
+class TestQualifiedNameScopeComponentsAcceptsUnparenthesizedLessThan:
+    """Codex review, fresh evidence: unlike ``>``, a bare, UNPARENTHESIZED
+    ``<`` comparison as a non-type template argument is legal C++ -- a real
+    parser disambiguates it via name lookup (is the identifier immediately
+    to its left a known template name?), which this text-only scanner has
+    no access to. Confirmed directly against real clang: ``template<int N,
+    int M> struct C { operator B<N < M>() const; };`` compiles cleanly, and
+    clang's own AST dump prints the unparenthesized comparison verbatim as
+    ``operator B<N < M>`` for the uninstantiated member -- exactly the
+    shape this function receives from this codebase's own castxml/clang-
+    derived declaration names. An earlier revision treated every ``<`` at
+    ``paren_depth == 0`` as a real template opener unconditionally, driving
+    ``angle_depth`` one too high with nothing to bring it back down,
+    rejecting this valid input."""
+
+    def test_unparenthesized_less_than_comparison_target_is_accepted(self) -> None:
+        target = "operator B<N < M>"
+        assert qualified_name_scope_components(f"api::C::{target}") == [
+            "api",
+            "C",
+            target,
+        ]
+
+    def test_unparenthesized_less_than_in_an_ordinary_qualified_name_splits_correctly(
+        self,
+    ) -> None:
+        assert qualified_name_scope_components("ns::B<N < M>::method") == [
+            "ns",
+            "B<N < M>",
+            "method",
+        ]
+
+    def test_a_real_template_open_immediately_after_a_name_is_still_recognized(
+        self,
+    ) -> None:
+        """The spacing signal must not become blind to genuine nested
+        templates -- a real template-opening ``<`` (no preceding space)
+        alongside an unparenthesized comparison in a sibling argument."""
+        target = "operator Holder<N < M, Other<C>>"
+        assert qualified_name_scope_components(f"api::C::{target}") == [
+            "api",
+            "C",
+            target,
+        ]
+
+    def test_still_rejects_genuinely_unbalanced_nesting_alongside_the_comparison(
+        self,
+    ) -> None:
+        assert qualified_name_scope_components("api::C::operator B<N < M") is None
+
+
+class TestStripTrailingTopLevelParameterListAcceptsUnparenthesizedLessThan:
+    """The identical spacing-based fix, applied to
+    :func:`strip_trailing_top_level_parameter_list`'s own angle-bracket
+    tracking."""
+
+    def test_unparenthesized_less_than_scope_splits_correctly(self) -> None:
+        assert (
+            strip_trailing_top_level_parameter_list("ns::Holder<N < M>(int)")
+            == "ns::Holder<N < M>"
+        )
+
+
 class TestStripTrailingTopLevelParameterListAcceptsExpressionBearingScopes:
     """The identical bracket-kind-blind depth bug as the class above, in
     :func:`strip_trailing_top_level_parameter_list`'s own angle-bracket

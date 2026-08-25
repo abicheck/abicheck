@@ -608,6 +608,24 @@ def _operator_keyword_precedes(qualified: str, i: int) -> bool:
     )
 
 
+def _is_template_opening_angle(qualified: str, i: int) -> bool:
+    """Whether ``qualified[i] == "<"`` is a real template-opening delimiter,
+    as opposed to an unparenthesized ``<`` comparison in a dependent
+    non-type template argument.
+
+    Unlike ``>`` (see :func:`qualified_name_scope_components`'s own
+    docstring -- a bare ``>`` there is a genuine, unparenthesized-forbidden
+    compile error), a bare ``<`` comparison is legal C++ and a real
+    compiler's parser disambiguates it via name lookup, which this scanner
+    has no access to. Falls back to a spacing signal instead, confirmed
+    against real clang output: a template-opening ``<`` is always rendered
+    immediately after its name with no preceding space, while a binary
+    comparison operator is always rendered with a space on both sides
+    regardless of the original source's own spacing.
+    """
+    return i == 0 or not qualified[i - 1].isspace()
+
+
 def qualified_name_scope_components(qualified: str) -> list[str] | None:
     """Scope components of an already-demangled, ``::``-qualified name.
 
@@ -679,11 +697,41 @@ def qualified_name_scope_components(qualified: str) -> list[str] | None:
     wherever it appears as a non-type template argument, specifically to
     remove this exact ambiguity for any parser -- so a compiler's own
     demangled/pretty-printed text is guaranteed to already carry the
-    disambiguating parens around it. A ``<``/``>`` character can therefore
-    only be a REAL template delimiter while no paren is currently open
+    disambiguating parens around it. A ``>`` character can therefore only be
+    a REAL template-closing delimiter while no paren is currently open
     (``paren_depth == 0``); while a paren is open, it is guaranteed by that
     same grammar rule to be part of an expression, never a delimiter, so it
     is left untouched rather than folded into a bracket-kind-blind counter.
+
+    That grammar guarantee is ONE-SIDED, though: only a ``>``-bearing
+    expression must be parenthesized as a non-type template argument (a
+    bare, unparenthesized ``>`` there is a genuine, confirmed compile
+    error) -- an unparenthesized ``<`` comparison is perfectly legal and
+    unambiguous to a real parser, which disambiguates it via *name lookup*
+    (is the identifier immediately to its left a known template name?), not
+    via any textual rule this scanner could replicate. Confirmed directly
+    against real clang: ``template<int N, int M> struct C { operator
+    B<N < M>() const; };`` compiles cleanly, and clang's own AST dump
+    prints the *unparenthesized* comparison verbatim as ``operator B<N <
+    M>`` for the uninstantiated (template-parameter-dependent) member --
+    exactly the shape :func:`qualified_name_scope_components` receives from
+    this codebase's own castxml/clang-derived declaration names (Codex
+    review, fresh evidence: an earlier revision treated every ``<`` at
+    ``paren_depth == 0`` as a real template opener unconditionally, so this
+    exact input drove ``angle_depth`` one too high and never came back
+    down, rejecting valid input). Since a `<` cannot be soundly resolved by
+    grammar alone, a ``<`` at ``paren_depth == 0`` is instead treated as a
+    real template-opening delimiter only when it is NOT preceded by
+    whitespace -- confirmed, empirically, against real clang output: a
+    template-opening ``<`` is always rendered immediately after its name
+    with no space (``Other<D>``, ``B<N < M>``'s own leading ``<``), while a
+    binary comparison operator is always rendered with a space on both
+    sides (``N < M``) REGARDLESS of the source's own spacing (confirmed by
+    compiling the identical construct spelled ``N<M`` with no spaces at
+    all -- clang's pretty-printer still re-inserts them). This is not
+    airtight for arbitrary hand-crafted text, but it is sound for every
+    real input this function actually receives, which originates from a
+    compiler's own canonical printer, never from hand-written source.
     """
     if not qualified:
         return None
@@ -706,7 +754,9 @@ def qualified_name_scope_components(qualified: str) -> list[str] | None:
             paren_depth -= 1
             if paren_depth < 0:
                 return None
-        elif ch == "<" and paren_depth == 0:
+        elif (
+            ch == "<" and paren_depth == 0 and _is_template_opening_angle(qualified, i)
+        ):
             angle_depth += 1
         elif ch == ">" and paren_depth == 0:
             angle_depth -= 1
@@ -755,7 +805,9 @@ def qualified_name_scope_components(qualified: str) -> list[str] | None:
             paren_depth -= 1
             if paren_depth < 0:
                 return None
-        elif ch == "<" and paren_depth == 0:
+        elif (
+            ch == "<" and paren_depth == 0 and _is_template_opening_angle(qualified, i)
+        ):
             angle_depth += 1
         elif ch == ">" and paren_depth == 0:
             angle_depth -= 1
@@ -800,14 +852,19 @@ def strip_trailing_top_level_parameter_list(text: str) -> str:
     the identical concern :func:`qualified_name_scope_components` documents
     for the same reason: a non-type template argument can legitimately
     contain a parenthesized ``<``/``>`` comparison (``Holder<(A > B),
-    void(int)>``), and the C++ grammar itself guarantees such a comparison
-    is always parenthesized wherever it appears as a template argument. A
-    ``<``/``>`` seen while a paren is open is therefore guaranteed to be
-    part of that expression, never a real template delimiter, so folding it
-    into the angle-bracket counter would close the enclosing template one
-    character too early and let a later, still-nested ``(`` (a function-type
-    template argument's own parameter list, not the real trailing one) be
-    mistaken for the top-level split point.
+    void(int)>``), and the C++ grammar itself guarantees a ``>``-bearing
+    comparison must be parenthesized wherever it appears as a template
+    argument. A ``>`` seen while a paren is open is therefore guaranteed to
+    be part of that expression, never a real template delimiter, so folding
+    it into the angle-bracket counter would close the enclosing template
+    one character too early and let a later, still-nested ``(`` (a
+    function-type template argument's own parameter list, not the real
+    trailing one) be mistaken for the top-level split point. That grammar
+    guarantee does NOT cover ``<``, though -- an unparenthesized ``<``
+    comparison is legal C++ (e.g. a class template's own scope carrying an
+    uninstantiated ``Holder<N < M>``), so a ``<`` is only counted as a real
+    template opener via :func:`_is_template_opening_angle`'s spacing signal,
+    the same one :func:`qualified_name_scope_components` uses.
     """
     depth = 0
     paren_depth = 0
@@ -818,7 +875,7 @@ def strip_trailing_top_level_parameter_list(text: str) -> str:
             paren_depth += 1
         elif ch == ")":
             paren_depth = max(0, paren_depth - 1)
-        elif ch == "<" and paren_depth == 0:
+        elif ch == "<" and paren_depth == 0 and _is_template_opening_angle(text, i):
             depth += 1
         elif ch == ">" and paren_depth == 0:
             depth = max(0, depth - 1)
