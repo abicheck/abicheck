@@ -626,6 +626,37 @@ def _is_template_opening_angle(qualified: str, i: int) -> bool:
     return i == 0 or not qualified[i - 1].isspace()
 
 
+#: Multi-character ``<``-led expression-operator tokens (as opposed to a
+#: lone ``<``, which needs :func:`_is_template_opening_angle`'s spacing
+#: signal). Longest-first so ``<<=`` matches before ``<<``.
+_LESS_THAN_LED_OPERATOR_TOKENS = ("<<=", "<=>", "<<", "<=")
+
+
+def _less_than_led_operator_token_len(qualified: str, i: int) -> int:
+    """Length of a multi-character ``<``-led expression-operator token
+    (``<<=``, ``<=>``, ``<<``, ``<=``) at ``qualified[i:]``, or 0.
+
+    Unlike a lone ``<`` (see :func:`_is_template_opening_angle`), ANY
+    multi-character ``<``-led token is structurally guaranteed to be a
+    real operator, never two adjacent template-opening delimiters: a
+    template-argument-list can never begin with a bare ``<`` or ``=`` (no
+    expression or type-id starts with either), so two consecutive ``<``
+    characters, or a ``<`` immediately followed by ``=``, cannot be two
+    independent delimiters -- they can only be this operator's own
+    spelling. Confirmed against real clang: ``operator B<N << M>``
+    compiles and is pretty-printed verbatim for an uninstantiated member
+    (Codex review, fresh evidence -- the second ``<`` of ``<<`` is not
+    preceded by whitespace, so :func:`_is_template_opening_angle`'s
+    per-character spacing signal alone misclassified it as a template
+    opener). No whitespace check needed here, unlike the lone-``<`` case:
+    the grammar guarantee is unconditional.
+    """
+    for tok in _LESS_THAN_LED_OPERATOR_TOKENS:
+        if qualified.startswith(tok, i):
+            return len(tok)
+    return 0
+
+
 def qualified_name_scope_components(qualified: str) -> list[str] | None:
     """Scope components of an already-demangled, ``::``-qualified name.
 
@@ -748,6 +779,11 @@ def qualified_name_scope_components(qualified: str) -> list[str] | None:
             if tok_len:
                 i += tok_len
                 continue
+        if ch == "<":
+            lt_tok_len = _less_than_led_operator_token_len(qualified, i)
+            if lt_tok_len:
+                i += lt_tok_len
+                continue
         if ch == "(":
             paren_depth += 1
         elif ch == ")":
@@ -798,6 +834,11 @@ def qualified_name_scope_components(qualified: str) -> list[str] | None:
             tok_len = _operator_angle_token_len(qualified, i)
             if tok_len:
                 i += tok_len
+                continue
+        if ch == "<":
+            lt_tok_len = _less_than_led_operator_token_len(qualified, i)
+            if lt_tok_len:
+                i += lt_tok_len
                 continue
         if ch == "(":
             paren_depth += 1
@@ -868,7 +909,15 @@ def strip_trailing_top_level_parameter_list(text: str) -> str:
     """
     depth = 0
     paren_depth = 0
-    for i, ch in enumerate(text):
+    i = 0
+    n = len(text)
+    while i < n:
+        ch = text[i]
+        if ch == "<":
+            lt_tok_len = _less_than_led_operator_token_len(text, i)
+            if lt_tok_len:
+                i += lt_tok_len
+                continue
         if ch == "(":
             if depth == 0 and paren_depth == 0:
                 return text[:i]
@@ -879,6 +928,7 @@ def strip_trailing_top_level_parameter_list(text: str) -> str:
             depth += 1
         elif ch == ">" and paren_depth == 0:
             depth = max(0, depth - 1)
+        i += 1
     return text
 
 

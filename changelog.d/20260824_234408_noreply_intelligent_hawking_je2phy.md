@@ -34,7 +34,16 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   argument, so a real template-opening `<` is now distinguished from a
   comparison via the same spacing convention every compiler pretty-printer
   uses (a template opener is never preceded by whitespace; a binary
-  operator always is, on both sides).
+  operator always is, on both sides). A multi-character `<`-led expression
+  operator (`<<`, `<=`, `<<=`, `<=>`, e.g. `operator B<N << M>`) is now
+  also correctly accepted — the per-character spacing signal alone
+  misclassified the second `<` of `<<` (preceded by the first `<`, not
+  whitespace) as its own template opener; these tokens are now recognized
+  and skipped atomically before either character is considered
+  individually, which is structurally sound with no whitespace check
+  needed (a template-argument-list can never begin with a bare `<` or
+  `=`, so two adjacent `<`s, or a `<` immediately followed by `=`, can
+  only be this operator's own spelling).
 - **A lambda-closure-parameterized function-level finding is now demoted
   when confirmed never exported on either side.** A `func_removed`/
   `func_params_changed`/`template_param_type_changed`/

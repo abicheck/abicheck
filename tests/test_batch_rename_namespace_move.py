@@ -674,6 +674,80 @@ class TestStripTrailingTopLevelParameterListAcceptsUnparenthesizedLessThan:
         )
 
 
+class TestQualifiedNameScopeComponentsAcceptsLeftShiftExpressionOperators:
+    """Codex review, fresh evidence: a lone ``<`` was correctly distinguished
+    from a template opener via the spacing signal
+    (:func:`_is_template_opening_angle`), but that signal examines each
+    character independently -- the SECOND ``<`` of a genuine ``<<``
+    left-shift expression operator (e.g. ``operator B<N << M>``) is
+    preceded by the FIRST ``<``, not whitespace, so it was still
+    misclassified as a template opener. Confirmed directly against real
+    clang: ``template<int N, int M> struct C { operator B<N << M>() const;
+    };`` compiles cleanly, and clang's AST dump prints the comparison
+    verbatim as ``operator B<N << M>``. Fixed by tokenizing multi-character
+    ``<``-led expression operators (``<<``, ``<=``, ``<<=``, ``<=>``)
+    atomically via :func:`_less_than_led_operator_token_len` BEFORE
+    considering either character individually -- structurally sound
+    without any whitespace signal, since a template-argument-list can
+    never begin with a bare ``<`` or ``=``, so two adjacent ``<``
+    characters (or a ``<`` immediately followed by ``=``) can only ever be
+    this operator's own spelling, never two independent delimiters."""
+
+    def test_left_shift_comparison_target_is_accepted(self) -> None:
+        target = "operator B<N << M>"
+        assert qualified_name_scope_components(f"api::C::{target}") == [
+            "api",
+            "C",
+            target,
+        ]
+
+    def test_less_than_or_equal_comparison_target_is_accepted(self) -> None:
+        """A second multi-character `<`-led token, confirmed against real
+        clang (``operator B<N <= M>`` compiles and prints verbatim)."""
+        target = "operator B<N <= M>"
+        assert qualified_name_scope_components(f"api::C::{target}") == [
+            "api",
+            "C",
+            target,
+        ]
+
+    def test_left_shift_in_an_ordinary_qualified_name_splits_correctly(self) -> None:
+        assert qualified_name_scope_components("ns::B<N << M>::method") == [
+            "ns",
+            "B<N << M>",
+            "method",
+        ]
+
+    def test_a_real_nested_template_after_a_left_shift_sibling_is_still_recognized(
+        self,
+    ) -> None:
+        """The multi-char-token skip must not desynchronize angle-bracket
+        tracking for a genuinely nested template argument that follows."""
+        target = "operator Foo<N << M, Other<C>>"
+        assert qualified_name_scope_components(f"api::C::{target}") == [
+            "api",
+            "C",
+            target,
+        ]
+
+    def test_still_rejects_genuinely_unbalanced_nesting_alongside_left_shift(
+        self,
+    ) -> None:
+        assert qualified_name_scope_components("api::C::operator B<N << M") is None
+
+
+class TestStripTrailingTopLevelParameterListAcceptsLeftShiftExpressionOperators:
+    """The identical multi-character-token fix, applied to
+    :func:`strip_trailing_top_level_parameter_list`'s own angle-bracket
+    tracking."""
+
+    def test_left_shift_scope_splits_correctly(self) -> None:
+        assert (
+            strip_trailing_top_level_parameter_list("ns::Holder<N << M>(int)")
+            == "ns::Holder<N << M>"
+        )
+
+
 class TestStripTrailingTopLevelParameterListAcceptsExpressionBearingScopes:
     """The identical bracket-kind-blind depth bug as the class above, in
     :func:`strip_trailing_top_level_parameter_list`'s own angle-bracket
