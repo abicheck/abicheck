@@ -43,7 +43,16 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   individually, which is structurally sound with no whitespace check
   needed (a template-argument-list can never begin with a bare `<` or
   `=`, so two adjacent `<`s, or a `<` immediately followed by `=`, can
-  only be this operator's own spelling).
+  only be this operator's own spelling). Brace (`{`/`}`) nesting is now
+  also tracked as a third independent counter: C++20 allows a captureless
+  lambda closure as a non-type template argument, and its body is a full,
+  self-contained statement grammar where a `<`/`>` comparison needs no
+  parenthesization the way one directly in the template-argument-list
+  does (`operator B<[]{ return N > M; }>`, confirmed to compile and
+  pretty-print verbatim). Once a brace opens, every character up to its
+  matching close is now treated as fully opaque — unlike the angle-bracket
+  cases, this needs no heuristic at all, since braces always balance
+  unconditionally in valid C++.
 - **A lambda-closure-parameterized function-level finding is now demoted
   when confirmed never exported on either side.** A `func_removed`/
   `func_params_changed`/`template_param_type_changed`/

@@ -763,17 +763,55 @@ def qualified_name_scope_components(qualified: str) -> list[str] | None:
     airtight for arbitrary hand-crafted text, but it is sound for every
     real input this function actually receives, which originates from a
     compiler's own canonical printer, never from hand-written source.
+
+    Brace (``{``/``}``) nesting is tracked as a THIRD independent counter,
+    for a different reason than the ``<``/``>``/``(``/``)`` cases above:
+    C++20 allows a captureless lambda closure as a non-type template
+    argument, and its body is a full, self-contained statement grammar --
+    a ``>``/``<`` inside it is not required to be parenthesized the way a
+    bare comparison directly in the template-argument-list is, because it
+    is not at that grammar production at all. Confirmed directly against
+    real clang: ``operator B<[]{ return N > M; }>()`` (a lambda-typed
+    conversion target) compiles under ``-std=c++20`` and is pretty-printed
+    verbatim, unparenthesized comparison included, sometimes spanning
+    multiple lines (Codex review, fresh evidence). Unlike the angle-bracket
+    cases, this needs no heuristic at all: braces always balance
+    unconditionally in valid C++ (no ambiguity like ``<``/``>`` ever
+    applies to them), so once a brace opens, every character up to its
+    matching close -- regardless of what it looks like -- is treated as
+    fully opaque interior, untouched by any other counter in this
+    function.
     """
     if not qualified:
         return None
     marker = "::operator "
     angle_depth = 0
     paren_depth = 0
+    brace_depth = 0
     i = 0
     n = len(qualified)
     marker_idx = -1
     while i < n:
         ch = qualified[i]
+        if ch == "{":
+            brace_depth += 1
+            i += 1
+            continue
+        if ch == "}":
+            brace_depth -= 1
+            if brace_depth < 0:
+                return None
+            i += 1
+            continue
+        if brace_depth > 0:
+            # Opaque interior of a brace-delimited lambda body (a legal
+            # C++20 non-type template argument, e.g. "B<[]{ return N > M;
+            # }>") -- a full statement grammar, unrelated to the enclosing
+            # template-argument-list's own bracket balance. See this
+            # function's own docstring for why braces need no whitespace
+            # heuristic, unlike angle brackets.
+            i += 1
+            continue
         if ch in "<>" and _operator_keyword_precedes(qualified, i):
             tok_len = _operator_angle_token_len(qualified, i)
             if tok_len:
@@ -806,7 +844,7 @@ def qualified_name_scope_components(qualified: str) -> list[str] | None:
         ):
             marker_idx = i
         i += 1
-    if angle_depth != 0 or paren_depth != 0:
+    if angle_depth != 0 or paren_depth != 0 or brace_depth != 0:
         return None
     if marker_idx != -1:
         head = qualified[:marker_idx]
@@ -826,10 +864,24 @@ def qualified_name_scope_components(qualified: str) -> list[str] | None:
     comps: list[str] = []
     angle_depth = 0
     paren_depth = 0
+    brace_depth = 0
     start = 0
     i = 0
     while i < n:
         ch = qualified[i]
+        if ch == "{":
+            brace_depth += 1
+            i += 1
+            continue
+        if ch == "}":
+            brace_depth -= 1
+            if brace_depth < 0:
+                return None
+            i += 1
+            continue
+        if brace_depth > 0:
+            i += 1
+            continue
         if ch in "<>" and _operator_keyword_precedes(qualified, i):
             tok_len = _operator_angle_token_len(qualified, i)
             if tok_len:
@@ -860,7 +912,7 @@ def qualified_name_scope_components(qualified: str) -> list[str] | None:
             start = i
             continue
         i += 1
-    if angle_depth != 0 or paren_depth != 0:
+    if angle_depth != 0 or paren_depth != 0 or brace_depth != 0:
         return None
     comps.append(qualified[start:])
     if any(not c for c in comps):
@@ -909,10 +961,24 @@ def strip_trailing_top_level_parameter_list(text: str) -> str:
     """
     depth = 0
     paren_depth = 0
+    brace_depth = 0
     i = 0
     n = len(text)
     while i < n:
         ch = text[i]
+        if ch == "{":
+            brace_depth += 1
+            i += 1
+            continue
+        if ch == "}":
+            brace_depth = max(0, brace_depth - 1)
+            i += 1
+            continue
+        if brace_depth > 0:
+            # Opaque lambda-body interior -- see
+            # qualified_name_scope_components's identical concern.
+            i += 1
+            continue
         if ch == "<":
             lt_tok_len = _less_than_led_operator_token_len(text, i)
             if lt_tok_len:

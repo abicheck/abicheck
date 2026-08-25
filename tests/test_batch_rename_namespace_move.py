@@ -748,6 +748,81 @@ class TestStripTrailingTopLevelParameterListAcceptsLeftShiftExpressionOperators:
         )
 
 
+class TestQualifiedNameScopeComponentsAcceptsLambdaBodyTemplateArguments:
+    """Codex review, fresh evidence: C++20 allows a captureless lambda
+    closure as a non-type template argument, and its BODY is a full,
+    self-contained statement grammar -- a comparison inside it is not
+    required to be parenthesized the way a bare comparison directly in the
+    template-argument-list is, since it isn't at that grammar production at
+    all. Confirmed directly against real clang: ``operator B<[]{ return N
+    > M; }>() const`` (a lambda-typed conversion target) compiles under
+    ``-std=c++20`` and is pretty-printed verbatim, unparenthesized
+    comparison included, sometimes spanning multiple lines. An earlier
+    revision treated every ``>`` at ``paren_depth == 0`` as a real
+    template-closing delimiter unconditionally, so this comparison's ``>``
+    closed the outer template early and the real closing ``>`` drove the
+    counter negative, rejecting valid input."""
+
+    def test_lambda_body_comparison_target_is_accepted(self) -> None:
+        target = "operator B<[]{ return N > M; }>"
+        assert qualified_name_scope_components(f"api::C::{target}") == [
+            "api",
+            "C",
+            target,
+        ]
+
+    def test_multi_line_lambda_body_target_confirmed_against_real_clang_output(
+        self,
+    ) -> None:
+        """The exact spelling confirmed by ``clang -ast-dump`` for
+        ``operator B<[]{ return N > M; }>()`` under ``-std=c++20`` --
+        clang's pretty-printer wraps the lambda body across lines."""
+        target = "operator B<[] {\n    return N > M;\n}>"
+        assert qualified_name_scope_components(f"api::C::{target}") == [
+            "api",
+            "C",
+            target,
+        ]
+
+    def test_a_real_nested_template_after_a_lambda_body_sibling_is_still_recognized(
+        self,
+    ) -> None:
+        target = "operator Foo<[]{ return N > M; }, Other<C>>"
+        assert qualified_name_scope_components(f"api::C::{target}") == [
+            "api",
+            "C",
+            target,
+        ]
+
+    def test_still_rejects_genuinely_unbalanced_braces(self) -> None:
+        assert (
+            qualified_name_scope_components("api::C::operator B<[]{ return N > M; >")
+            is None
+        )
+
+    def test_still_rejects_genuinely_unbalanced_nesting_after_a_closed_lambda_body(
+        self,
+    ) -> None:
+        assert (
+            qualified_name_scope_components("api::C::operator B<[]{ return N > M; }")
+            is None
+        )
+
+
+class TestStripTrailingTopLevelParameterListAcceptsLambdaBodyTemplateArguments:
+    """The identical brace-tracking fix, applied to
+    :func:`strip_trailing_top_level_parameter_list`'s own angle-bracket
+    tracking."""
+
+    def test_lambda_body_scope_splits_correctly(self) -> None:
+        assert (
+            strip_trailing_top_level_parameter_list(
+                "ns::Holder<[]{ return N > M; }>(int)"
+            )
+            == "ns::Holder<[]{ return N > M; }>"
+        )
+
+
 class TestStripTrailingTopLevelParameterListAcceptsExpressionBearingScopes:
     """The identical bracket-kind-blind depth bug as the class above, in
     :func:`strip_trailing_top_level_parameter_list`'s own angle-bracket
