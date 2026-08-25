@@ -145,8 +145,18 @@ class TestNamespaceMoveIsRecognizedAsOneBatch:
         still be reported -- rejecting the ambiguous segments must not
         collateral-damage a real, resolvable move that shares no segment
         with them."""
-        removed = set(_D1) | {"_ZN4old11fEv", "_ZN4old11gEv", "_ZN4old21fEv", "_ZN4old21gEv"}
-        added = set(_D2) | {"_ZN4new11fEv", "_ZN4new11gEv", "_ZN4new21fEv", "_ZN4new21gEv"}
+        removed = set(_D1) | {
+            "_ZN4old11fEv",
+            "_ZN4old11gEv",
+            "_ZN4old21fEv",
+            "_ZN4old21gEv",
+        }
+        added = set(_D2) | {
+            "_ZN4new11fEv",
+            "_ZN4new11gEv",
+            "_ZN4new21fEv",
+            "_ZN4new21gEv",
+        }
         groups = find_namespace_move_groups(removed, added)
         assert ("d1", "d2") in groups
         assert len(groups[("d1", "d2")]) == len(_D1)
@@ -216,9 +226,7 @@ class TestHeaderTierKeysAlsoJoinTheNamespaceMove:
         return ``{}`` before the qualified-name fallback (neither
         ``itanium_scope_components`` nor ``msvc_scope_components`` recognizes
         either key shape)."""
-        groups = find_namespace_move_groups(
-            set(_D1_HEADER_TIER), set(_D2_HEADER_TIER)
-        )
+        groups = find_namespace_move_groups(set(_D1_HEADER_TIER), set(_D2_HEADER_TIER))
         assert ("d1", "d2") in groups
         assert len(groups[("d1", "d2")]) == 2
 
@@ -244,12 +252,10 @@ class TestHeaderTierKeysAlsoJoinTheNamespaceMove:
         assert ("d1", "d2") in groups
         pairs = dict(groups[("d1", "d2")])
         assert (
-            pairs["tbb::detail::d1::graph::{ctor}"]
-            == "tbb::detail::d2::graph::{ctor}"
+            pairs["tbb::detail::d1::graph::{ctor}"] == "tbb::detail::d2::graph::{ctor}"
         )
         assert (
-            pairs["tbb::detail::d1::graph::{dtor}"]
-            == "tbb::detail::d2::graph::{dtor}"
+            pairs["tbb::detail::d1::graph::{dtor}"] == "tbb::detail::d2::graph::{dtor}"
         )
         assert len(groups[("d1", "d2")]) == len(_D1)
 
@@ -257,9 +263,7 @@ class TestHeaderTierKeysAlsoJoinTheNamespaceMove:
         old = _snap("2021", [_fn("graph", m) for m in _D1_HEADER_TIER])
         new = _snap("2022", [_fn("graph", m) for m in _D2_HEADER_TIER])
         result = compare(old, new)
-        batch = [
-            c for c in result.changes if c.kind is ChangeKind.SYMBOL_RENAMED_BATCH
-        ]
+        batch = [c for c in result.changes if c.kind is ChangeKind.SYMBOL_RENAMED_BATCH]
         assert batch, "namespace move via header-tier keys produced no batch roll-up"
 
     def test_qualified_function_name_without_any_mangling_also_pairs(self) -> None:
@@ -484,9 +488,7 @@ class TestQualifiedNameScopeComponentsKeepsConversionTargetsWhole:
         ]
 
     def test_bare_conversion_operator_with_no_owner_has_no_scope(self) -> None:
-        assert qualified_name_scope_components("operator old::X") == [
-            "operator old::X"
-        ]
+        assert qualified_name_scope_components("operator old::X") == ["operator old::X"]
 
     def test_two_conversion_operator_removals_and_additions_still_pair_correctly(
         self,
@@ -675,3 +677,82 @@ class TestFindNamespaceMoveGroupsCountsEachDeclarationOnce:
         # Below the 2-pairs threshold -- a single declaration reported
         # twice must not manufacture a batch finding on its own.
         assert emit_namespace_move_batches(groups) == []
+
+
+class TestFindNamespaceMoveGroupsRejectsManyToOnePairings:
+    """Codex review, fresh evidence: the one-to-many ambiguity guard (see
+    ``test_ambiguous_many_to_many_pairing_is_rejected`` above) checks
+    whether a REMOVED symbol's masked context matches more than one added
+    candidate, but says nothing about the RECIPROCAL shape -- more than one
+    DISTINCT removed segment value converging on the identical masked
+    context. When ``old1::{f,g}`` and ``old2::{f,g}`` are both removed
+    while only ``new::{f,g}`` is added, each removed symbol's masked lookup
+    has exactly one candidate (``new::f``/``new::g``), so the one-to-many
+    check alone accepts BOTH ``old1 -> new`` and ``old2 -> new`` and each
+    independently clears the 2+-pairs threshold -- two contradictory
+    SYMBOL_RENAMED_BATCH findings for evidence that cannot say which of
+    old1/old2 actually moved (the other was simply deleted)."""
+
+    def test_two_old_namespaces_converging_on_one_new_namespace_is_rejected(
+        self,
+    ) -> None:
+        removed = {
+            "_ZN4old11fEv",
+            "_ZN4old11gEv",
+            "_ZN4old21fEv",
+            "_ZN4old21gEv",
+        }
+        added = {"_ZN3new1fEv", "_ZN3new1gEv"}
+        assert find_namespace_move_groups(removed, added) == {}
+
+    def test_an_unambiguous_group_survives_alongside_an_unrelated_many_to_one_one(
+        self,
+    ) -> None:
+        """The rejection must be scoped to the colliding masked context,
+        not collateral-damage a real, resolvable move sharing no segment
+        with it."""
+        removed = set(_D1) | {
+            "_ZN4old11fEv",
+            "_ZN4old11gEv",
+            "_ZN4old21fEv",
+            "_ZN4old21gEv",
+        }
+        added = set(_D2) | {"_ZN3new1fEv", "_ZN3new1gEv"}
+        groups = find_namespace_move_groups(removed, added)
+        assert ("d1", "d2") in groups
+        assert len(groups[("d1", "d2")]) == len(_D1)
+        assert ("old1", "new") not in groups
+        assert ("old2", "new") not in groups
+
+    def test_independent_moves_reusing_a_bare_target_name_are_not_rejected(
+        self,
+    ) -> None:
+        """Two genuinely independent, unambiguous moves that happen to
+        reuse the same bare TARGET segment name in different scopes
+        (``p1::old1::{f,g} -> p1::new::{f,g}`` alongside the unrelated
+        ``p2::old2::{h,i} -> p2::new::{h,i}``) must still both be
+        reported: each masked context is scoped by its own unmasked
+        siblings (``p1`` vs. ``p2``), so the two moves never collide on
+        the same masked key even though both target a segment spelled
+        ``new``."""
+        removed = {
+            "_ZN2p14old11fEv",
+            "_ZN2p14old11gEv",
+            "_ZN2p24old21hEv",
+            "_ZN2p24old21iEv",
+        }
+        added = {
+            "_ZN2p13new1fEv",
+            "_ZN2p13new1gEv",
+            "_ZN2p23new1hEv",
+            "_ZN2p23new1iEv",
+        }
+        groups = find_namespace_move_groups(removed, added)
+        assert groups[("old1", "new")] == [
+            ("p1::old1::f", "p1::new::f"),
+            ("p1::old1::g", "p1::new::g"),
+        ]
+        assert groups[("old2", "new")] == [
+            ("p2::old2::h", "p2::new::h"),
+            ("p2::old2::i", "p2::new::i"),
+        ]

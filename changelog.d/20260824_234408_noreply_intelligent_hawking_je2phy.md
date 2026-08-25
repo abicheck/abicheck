@@ -11,7 +11,15 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   `~Qualified::Name`) or a plain qualified display name never joined the
   batch roll-up — leaving most of a real move's findings unpaired. A new
   qualified-name fallback (`diff_cxx_rules.qualified_name_scope_components`)
-  closes the gap generically for any such key.
+  closes the gap generically for any such key. `find_namespace_move_groups`
+  also now rejects an ambiguous pairing in either direction: one removed
+  symbol matching several distinct added targets (one-to-many), and several
+  distinct removed namespaces converging on the identical added target
+  (many-to-one, e.g. `old1::{f,g}`/`old2::{f,g}` removed with only
+  `new::{f,g}` added) — and no longer double-counts the same declaration
+  toward the roll-up's 2+-pairs threshold when it's reported under two
+  different string identities (a real mangled symbol and a header-tier
+  synthetic key for the same move).
 - **A lambda-closure-parameterized function-level finding is now demoted
   when confirmed never exported on either side.** A `func_removed`/
   `func_params_changed`/`template_param_type_changed`/

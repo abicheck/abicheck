@@ -938,22 +938,29 @@ def find_namespace_move_groups(
             added_index.setdefault(masked, []).append((a_sym, comps))
 
     groups: dict[tuple[str, str], list[tuple[str, str]]] = {}
-    # Tracks which (old_qualified, new_qualified) pairs have already been
-    # recorded per substitution key, so the SAME declaration reported under
-    # two different `removed` string identities (a real mangled symbol and
-    # a header-tier synthetic key that normalize to the identical
-    # scope-component list -- see the co-matching comment below) is only
-    # ever counted once toward the 2+-pairs support threshold
-    # (Codex review, fresh evidence: without this, one moved declaration
-    # reported both ways produced two identical list entries, passing
-    # emit_namespace_move_batches' threshold and reporting a false
-    # BREAKING batch for what was really a single symbol).
-    recorded_pairs: dict[tuple[str, str], set[tuple[str, str]]] = {}
+
+    # Phase 1: for every (removed symbol, masking position) pair, resolve at
+    # most one unambiguous-on-the-target-side candidate (the existing
+    # one-to-many rejection below), and record which OLD segment value it
+    # came from under that masked context. This also builds
+    # `masked_to_old_segments`, the reciprocal (many-to-one) signal Phase 2
+    # needs: a masked context claimed by more than one distinct old segment
+    # value means several different removed namespaces are each proposing
+    # themselves as the source of the SAME added symbol -- e.g. removed
+    # old1::{f,g}/old2::{f,g} vs. added only new::{f,g}: `old1::f` and
+    # `old2::f` masked at their differing position both resolve to the
+    # single candidate `new::f` (no one-to-many ambiguity on the target
+    # side at all), yet there is no evidence which of old1/old2 actually
+    # moved -- the other was simply deleted. Without this check both
+    # `old1 -> new` and `old2 -> new` would independently clear the 2+-pair
+    # threshold and emit two contradictory SYMBOL_RENAMED_BATCH findings
+    # (Codex review, fresh evidence).
+    entries: list[tuple[tuple[str, ...], list[str], int, list[str]]] = []
+    masked_to_old_segments: dict[tuple[str, ...], set[str]] = {}
     for r_sym in sorted(removed):
         r_comps = _scope_components(r_sym)
         if r_comps is None:
             continue
-        seen_here: set[tuple[str, str]] = set()
         for i in range(len(r_comps) - 1):
             masked = tuple(r_comps[:i]) + (_MASKED,) + tuple(r_comps[i + 1 :])
             candidates = added_index.get(masked, [])
@@ -992,17 +999,43 @@ def find_namespace_move_groups(
             distinct_targets = {a_comps[i] for _a_sym, a_comps in candidates}
             if len(distinct_targets) != 1:
                 continue
-            a_sym, a_comps = candidates[0]
-            key = (r_comps[i], a_comps[i])
-            if key[0] == key[1] or key in seen_here:
+            _a_sym, a_comps = candidates[0]
+            if r_comps[i] == a_comps[i]:
                 continue
-            seen_here.add(key)
-            pair = ("::".join(r_comps), "::".join(a_comps))
-            already_recorded = recorded_pairs.setdefault(key, set())
-            if pair in already_recorded:
-                continue
-            already_recorded.add(pair)
-            groups.setdefault(key, []).append(pair)
+            masked_to_old_segments.setdefault(masked, set()).add(r_comps[i])
+            entries.append((masked, r_comps, i, a_comps))
+
+    # Phase 2: record only the entries whose masked context was claimed by
+    # exactly one distinct old segment value -- i.e. reject the reciprocal
+    # many-to-one collision Phase 1 detected, then apply the pre-existing
+    # per-symbol/per-key/per-pair dedup exactly as before.
+    seen_here: dict[str, set[tuple[str, str]]] = {}
+    # Tracks which (old_qualified, new_qualified) pairs have already been
+    # recorded per substitution key, so the SAME declaration reported under
+    # two different `removed` string identities (a real mangled symbol and
+    # a header-tier synthetic key that normalize to the identical
+    # scope-component list -- see the co-matching comment above) is only
+    # ever counted once toward the 2+-pairs support threshold
+    # (Codex review, fresh evidence: without this, one moved declaration
+    # reported both ways produced two identical list entries, passing
+    # emit_namespace_move_batches' threshold and reporting a false
+    # BREAKING batch for what was really a single symbol).
+    recorded_pairs: dict[tuple[str, str], set[tuple[str, str]]] = {}
+    for masked, r_comps, i, a_comps in entries:
+        if len(masked_to_old_segments[masked]) != 1:
+            continue
+        key = (r_comps[i], a_comps[i])
+        symbol_id = "::".join(r_comps)
+        symbol_seen = seen_here.setdefault(symbol_id, set())
+        if key in symbol_seen:
+            continue
+        symbol_seen.add(key)
+        pair = (symbol_id, "::".join(a_comps))
+        already_recorded = recorded_pairs.setdefault(key, set())
+        if pair in already_recorded:
+            continue
+        already_recorded.add(pair)
+        groups.setdefault(key, []).append(pair)
     return groups
 
 
