@@ -39,6 +39,14 @@ baseline must meet the applicable production or test ceiling. The checker
 fails if a tracked file grows; a reduced file is allowed so debt can be paid
 down without coordinating a baseline update.
 
+On pull requests, CI passes the base revision through `ARCHITECTURE_BASE`.
+No-growth is then measured against both the recorded adoption baseline and the
+file as it exists on the PR base: concurrent changes already present on the
+base are not attributed to the architecture PR, while any additional growth
+on the branch still fails. When the base predates this contract entirely, the
+run is the adoption run and records the merged tree rather than treating
+concurrent pre-adoption work as new debt.
+
 ## Updating the contract
 
 Do not raise a baseline to make a check pass. Move a responsibility with its

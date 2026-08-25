@@ -15,6 +15,8 @@ import argparse
 import ast
 import datetime as dt
 import json
+import os
+import subprocess
 import sys
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
@@ -286,6 +288,35 @@ def _line_count(path: Path) -> int:
         return sum(1 for _ in stream)
 
 
+def _git_file_line_count(root: Path, revision: str, relative: str) -> int | None:
+    """Return a file's line count at *revision*, or ``None`` when absent."""
+    proc = subprocess.run(
+        ["git", "show", f"{revision}:{relative}"],
+        cwd=root,
+        capture_output=True,
+        text=True,
+    )
+    if proc.returncode != 0:
+        return None
+    return len(proc.stdout.splitlines())
+
+
+def _base_has_architecture_contract(root: Path, revision: str) -> bool | None:
+    revision_check = subprocess.run(
+        ["git", "cat-file", "-e", f"{revision}^{{commit}}"],
+        cwd=root,
+        capture_output=True,
+    )
+    if revision_check.returncode != 0:
+        return None
+    proc = subprocess.run(
+        ["git", "cat-file", "-e", f"{revision}:architecture/debt.yaml"],
+        cwd=root,
+        capture_output=True,
+    )
+    return proc.returncode == 0
+
+
 def _module_name(root: Path, path: Path) -> str:
     relative = path.relative_to(root).with_suffix("")
     parts = list(relative.parts)
@@ -403,7 +434,7 @@ def _check_facade(path: Path, name: str, limit: int, findings: list[Finding]) ->
             )
 
 
-def check_repository(root: Path) -> list[Finding]:
+def check_repository(root: Path, *, base_revision: str | None = None) -> list[Finding]:
     """Return all ADR-061 violations below ``root``."""
     findings: list[Finding] = []
     modules = _load_mapping(root / "architecture/modules.yaml", findings)
@@ -424,6 +455,17 @@ def check_repository(root: Path) -> list[Finding]:
         test_limit = 1200
     baselines = _validate_debt(debt, production_limit, test_limit, findings)
 
+    base_has_contract = (
+        _base_has_architecture_contract(root, base_revision) if base_revision else None
+    )
+    if base_revision and base_has_contract is None:
+        findings.append(
+            Finding(
+                "base-revision",
+                f"architecture base revision {base_revision!r} cannot be resolved",
+            )
+        )
+    adopting_contract = bool(base_revision and base_has_contract is False)
     for relative, baseline in baselines.items():
         path = root / relative
         if not path.is_file():
@@ -435,11 +477,21 @@ def check_repository(root: Path) -> list[Finding]:
             )
             continue
         lines = _line_count(path)
-        if lines > baseline:
+        base_lines = (
+            _git_file_line_count(root, base_revision, relative)
+            if base_revision and not adopting_contract
+            else None
+        )
+        if (
+            lines > baseline
+            and not adopting_contract
+            and (base_lines is None or lines > base_lines)
+        ):
+            comparison = f" and PR base {base_lines}" if base_lines is not None else ""
             findings.append(
                 Finding(
                     "debt-no-growth",
-                    f"{relative}: {lines} lines exceeds adoption baseline {baseline}; move responsibility instead of raising the baseline",
+                    f"{relative}: {lines} lines exceeds adoption baseline {baseline}{comparison}; move responsibility instead of raising the baseline",
                 )
             )
 
@@ -603,8 +655,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--root", type=Path, default=Path(__file__).resolve().parent.parent
     )
+    parser.add_argument(
+        "--base",
+        default=os.environ.get("ARCHITECTURE_BASE"),
+        help="PR base revision used to distinguish concurrent pre-adoption growth",
+    )
     args = parser.parse_args(argv)
-    findings = check_repository(args.root.resolve())
+    findings = check_repository(args.root.resolve(), base_revision=args.base)
     for finding in findings:
         print(f"ERROR: {finding.render()}")
     print(f"Architecture: {len(findings)} error(s)")

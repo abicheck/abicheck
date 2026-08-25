@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import scripts.check_architecture as architecture
 from scripts.check_architecture import check_repository
 
 
@@ -134,6 +135,107 @@ def test_debt_baseline_cannot_grow(tmp_path: Path) -> None:
 
     assert "debt-no-growth" in {finding.rule for finding in findings}
     assert any("adoption baseline 9" in finding.message for finding in findings)
+
+
+def test_concurrent_growth_already_on_pr_base_is_not_attributed_to_branch(
+    tmp_path: Path, monkeypatch
+) -> None:
+    root = _tree(tmp_path)
+    _write(root / "abicheck/legacy.py", "VALUE = 1\n" * 10)
+    debt = {
+        "schema_version": 1,
+        "files": [
+            {
+                "path": "abicheck/legacy.py",
+                "baseline_lines": 9,
+                "target": "model",
+                "rule": "no_growth",
+                "category": "legacy_monolith",
+                "owner": "maintainers",
+                "rationale": "Move it as a tested vertical slice.",
+                "review_by": "2026-11-30",
+            }
+        ],
+    }
+    _write(root / "architecture/debt.yaml", json.dumps(debt))
+    monkeypatch.setattr(
+        architecture, "_base_has_architecture_contract", lambda *_: True
+    )
+    monkeypatch.setattr(architecture, "_git_file_line_count", lambda *_: 10)
+
+    findings = check_repository(root, base_revision="base")
+
+    assert "debt-no-growth" not in {finding.rule for finding in findings}
+
+
+def test_branch_growth_beyond_pr_base_still_fails(tmp_path: Path, monkeypatch) -> None:
+    root = _tree(tmp_path)
+    _write(root / "abicheck/legacy.py", "VALUE = 1\n" * 10)
+    debt = {
+        "schema_version": 1,
+        "files": [
+            {
+                "path": "abicheck/legacy.py",
+                "baseline_lines": 9,
+                "target": "model",
+                "rule": "no_growth",
+                "category": "legacy_monolith",
+                "owner": "maintainers",
+                "rationale": "Move it as a tested vertical slice.",
+                "review_by": "2026-11-30",
+            }
+        ],
+    }
+    _write(root / "architecture/debt.yaml", json.dumps(debt))
+    monkeypatch.setattr(
+        architecture, "_base_has_architecture_contract", lambda *_: True
+    )
+    monkeypatch.setattr(architecture, "_git_file_line_count", lambda *_: 9)
+
+    findings = check_repository(root, base_revision="base")
+
+    assert "debt-no-growth" in {finding.rule for finding in findings}
+
+
+def test_initial_adoption_accepts_concurrent_pre_contract_growth(
+    tmp_path: Path, monkeypatch
+) -> None:
+    root = _tree(tmp_path)
+    _write(root / "abicheck/legacy.py", "VALUE = 1\n" * 10)
+    debt = {
+        "schema_version": 1,
+        "files": [
+            {
+                "path": "abicheck/legacy.py",
+                "baseline_lines": 9,
+                "target": "model",
+                "rule": "no_growth",
+                "category": "legacy_monolith",
+                "owner": "maintainers",
+                "rationale": "Move it as a tested vertical slice.",
+                "review_by": "2026-11-30",
+            }
+        ],
+    }
+    _write(root / "architecture/debt.yaml", json.dumps(debt))
+    monkeypatch.setattr(
+        architecture, "_base_has_architecture_contract", lambda *_: False
+    )
+
+    findings = check_repository(root, base_revision="base")
+
+    assert "debt-no-growth" not in {finding.rule for finding in findings}
+
+
+def test_unresolvable_base_cannot_bypass_no_growth(tmp_path: Path, monkeypatch) -> None:
+    root = _tree(tmp_path)
+    monkeypatch.setattr(
+        architecture, "_base_has_architecture_contract", lambda *_: None
+    )
+
+    findings = check_repository(root, base_revision="missing")
+
+    assert "base-revision" in {finding.rule for finding in findings}
 
 
 def test_undeclared_cross_package_import_fails(tmp_path: Path) -> None:

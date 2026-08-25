@@ -70,6 +70,8 @@ jobs:
       - name: AI-readiness checks (file size, CLAUDE.md coverage, ChangeKind invariants, mypy drift, import cycles)
         run: python scripts/verify.py --profile pr --only ai-readiness
       - name: Architecture contract (ADR-061)
+        env:
+          ARCHITECTURE_BASE: ${{ github.event.pull_request.base.sha }}
         run: python scripts/verify.py --profile pr --only architecture
       # Scoping FP-rate gate (ADR-024 §7), per-tier accuracy gate, the use-case
       # docs sync gate, the docs/AGENTS.md ownership contract gate, the
