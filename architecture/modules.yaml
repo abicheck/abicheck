@@ -272,7 +272,6 @@
     "annotations_step_summary.py",
     "appcompat.py",
     "appcompat_html.py",
-    "artifact_plan.py",
     "binary_fingerprint.py",
     "binary_utils.py",
     "binder.py",

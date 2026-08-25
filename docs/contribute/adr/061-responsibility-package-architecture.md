@@ -1,7 +1,7 @@
 # ADR-061: Responsibility-Package Architecture and Flat-Namespace Migration
 
 **Date:** 2026-08-24
-**Status:** Accepted — Phases 0-1 implemented; Phase 2 in progress; Phases 3-5 remain incremental.
+**Status:** Accepted — Phases 0-1 implemented; Phases 2-3 in progress; Phases 4-5 remain incremental.
 **Decision maker:** abicheck maintainers
 
 ## Context
@@ -670,6 +670,31 @@ tests pass; mutability tests show renderers cannot alter the workflow result;
 no renderer computes an exit code or compatibility decision.
 
 ### Phase 3 — converge artifact workflows
+
+Implementation status: the flat `abicheck/artifact_plan.py` — the
+`ResolvedArtifactPlan` cleanup-thunk session type this phase's own target
+layout names as `contracts.py` — moved to
+`abicheck.workflows.artifact.contracts`, with `abicheck.workflows.artifact`
+re-exporting it. The module had zero first-party imports, so this is the
+`contracts.py` half of the `Request -> ResolvedPlan -> Result` split with no
+behavior change; its four flat call sites (`service_dump_pipeline.py`,
+`service_input_resolution.py`, `cli_dump_helpers.py`, `cli_dump_non_elf.py`)
+now import it from the new location but are themselves unchanged.
+
+Known blocker for the remaining convergence: those four call sites'
+*owning* modules cannot yet move into `workflows/` themselves.
+`service_dump_pipeline.py` and `service_input_resolution.py` both reach into
+`cli_dump_helpers.py` (a `frontends`-destined module, per its `cli_` prefix
+family) for CLI-resolved facts (`_gated_source_label` and similar) — moving
+either service module into `workflows/` while that import stays would
+create a `workflows -> frontends` inversion, the exact same shape of
+dependency-direction problem Phase 2 hit between `compare` and `policy`.
+Resolving it needs that shared logic pulled out to a leaf both sides can
+depend on (mirroring how `contracts.py` itself was extractable only because
+it already had zero first-party dependencies) — a real, scoped migration of
+its own, not a follow-up edit to this vertical slice. Resolve/execute
+(`resolve.py`/`execute.py`, the request-shaped half of this phase's own
+target layout) are unaffected either way and remain unattempted.
 
 Use the pattern already emerging in the typed compare, dump, input-resolution,
 and artifact-plan code:

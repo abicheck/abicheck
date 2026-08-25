@@ -37,7 +37,6 @@ from typing import TYPE_CHECKING, Any
 
 import click
 
-from .artifact_plan import ResolvedArtifactPlan
 from .cli_dump_protocols import (
     StampProvenance as _StampProvenance,
     WriteSnapshotOutput as _WriteSnapshotOutput,
@@ -45,6 +44,7 @@ from .cli_dump_protocols import (
 from .dumper_clang_streaming import suppress_streaming_prune
 from .errors import AbicheckError
 from .header_utils import include_operand_dirs
+from .workflows.artifact import ResolvedArtifactPlan
 
 if TYPE_CHECKING:
     from .model import AbiSnapshot
@@ -138,7 +138,7 @@ def handle_non_elf_dump(
     # `_l2_pending_cleanups: list[...] = []` + manual
     # `if _l2_pending_cleanups: _run_cleanups(...)` finally block to the
     # shared, independently-tested `ResolvedArtifactPlan` primitive
-    # (`artifact_plan.py`) -- this was the one call site the plan's own
+    # (`workflows/artifact/contracts.py`) -- this was the one call site the plan's own
     # Phase 1 text named as still using the old pattern. Behavior-preserving
     # only: identical cleanup thunks, identical single-drain timing (the
     # `finally` below, the only place this function's original code drained

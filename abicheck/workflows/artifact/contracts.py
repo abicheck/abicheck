@@ -74,6 +74,15 @@ dependency on ``service_input_resolution.py``, ``cli_dump_helpers.py``, or
 ``service_dump_pipeline.py`` — each of those depends on this module, not
 the reverse, so a new resolved-fact field added here must stay plain data
 (``str``/``Path``/tuples), never a type those modules themselves own.
+
+ADR-061 Phase 3: this contract has zero first-party dependencies, so it
+moved into ``abicheck.workflows.artifact`` (D2's target
+``workflows/artifact/contracts.py``) as-is — the flat module's own leaf
+status above is exactly what made the physical move risk-free. Its four
+call sites (``service_dump_pipeline.py``, ``service_input_resolution.py``,
+``cli_dump_helpers.py``, ``cli_dump_non_elf.py``) stay flat for now and
+import it from its new location; the resolve/execute split this module's
+own docstring already defers is unaffected by the move.
 """
 
 from __future__ import annotations

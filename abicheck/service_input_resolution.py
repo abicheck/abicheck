@@ -45,10 +45,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from .artifact_plan import ResolvedArtifactPlan
 from .errors import SnapshotError, ValidationError
 from .header_conditionals import attach_build_context_for_parsed_headers
 from .header_utils import include_operand_dirs
+from .workflows.artifact import ResolvedArtifactPlan
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
