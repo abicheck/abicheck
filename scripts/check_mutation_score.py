@@ -107,6 +107,11 @@ SURVIVOR_BASELINE: int | None = None
 #: Default per-module baseline, committed alongside the code.
 DEFAULT_BASELINE_FILE = REPO_ROOT / "mutation-baseline.json"
 
+# Must match the 240-minute GitHub Actions job limit in mutation.yml.  The
+# subprocess cap formerly stayed at 7,200 seconds, silently aborting the run
+# at 120 minutes even after the job itself was given more time.
+MUTMUT_RUN_TIMEOUT_SECONDS = 14_400
+
 #: ``@@ -old,cnt +new,cnt @@`` — we only need the new-side range.
 _HUNK = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
 
@@ -126,7 +131,7 @@ def _run_mutmut(cmd: list[str]) -> tuple[str, int]:
     and let the gate pass on stale results (Codex review).
     """
     proc = subprocess.run(  # noqa: S603 — fixed argv, no shell
-        cmd, capture_output=True, text=True, timeout=7200
+        cmd, capture_output=True, text=True, timeout=MUTMUT_RUN_TIMEOUT_SECONDS
     )
     return proc.stdout + proc.stderr, proc.returncode
 

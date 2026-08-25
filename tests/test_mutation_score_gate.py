@@ -67,6 +67,15 @@ def test_parse_survivors_returns_none_when_unmeasurable(text: str) -> None:
     assert gate.parse_survivors(text) is None
 
 
+def test_mutmut_subprocess_timeout_matches_the_workflow_ceiling() -> None:
+    """The Python cap must not pre-empt the GitHub Actions job deadline."""
+    workflow = (
+        Path(__file__).resolve().parent.parent / ".github" / "workflows" / "mutation.yml"
+    ).read_text(encoding="utf-8")
+    assert "timeout-minutes: 240" in workflow
+    assert gate.MUTMUT_RUN_TIMEOUT_SECONDS == 240 * 60
+
+
 def test_stats_without_a_survivor_count_are_not_a_completion_witness(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
