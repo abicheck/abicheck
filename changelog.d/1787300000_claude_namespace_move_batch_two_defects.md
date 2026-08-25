@@ -21,5 +21,10 @@
   redundant "namespace segment" rename (reported against real oneTBB data:
   `concurrent_priority_queue<tbb::detail::d1::graph_task *, ...>` vs. the
   `...d2...` spelling, alongside the real `d1` → `d2` group the actual move
-  is already reported under). Fixed by never treating a component
-  containing `<` as the differing scope position.
+  is already reported under). Fixed by never treating a template-bearing
+  component as the differing scope position — a new
+  `diff_cxx_rules.component_embeds_template_args` recognizes both a
+  pretty-printed `<...>` spelling *and* a real Itanium-mangled symbol's raw,
+  un-demangled template-argument encoding (`itanium_scope_components` keeps
+  it raw, so a literal `<` alone never fires for the actual production
+  case this fix exists for).

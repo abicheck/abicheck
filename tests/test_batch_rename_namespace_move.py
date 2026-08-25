@@ -35,6 +35,8 @@ from hypothesis import given, settings, strategies as st
 from abicheck.checker import compare
 from abicheck.checker_policy import ChangeKind
 from abicheck.diff_cxx_rules import (
+    component_embeds_template_args,
+    itanium_scope_components,
     qualified_name_scope_components,
     strip_trailing_top_level_parameter_list,
 )
@@ -1599,6 +1601,99 @@ class TestFindNamespaceMoveGroupsIgnoresTemplateArgumentSubstitutions:
             "tbb::detail::d2::graph_task::wait",
             f"__abicheck_ctor__tbb::detail::d1::{self._TEMPLATE.format('tbb::detail::d2')}()",
             f"~tbb::detail::d1::{self._TEMPLATE.format('tbb::detail::d2')}",
+        }
+        groups = find_namespace_move_groups(removed, added)
+        assert set(groups) == {("d1", "d2")}
+        assert len(groups[("d1", "d2")]) == 2
+        changes = emit_namespace_move_batches(groups)
+        assert len(changes) == 1
+
+
+class TestComponentEmbedsTemplateArgs:
+    """Direct primitive-level tests for the shared predicate the fix above
+    relies on (CLAUDE.md's "Primitive-level property tests" guidance)."""
+
+    def test_recognizes_pretty_printed_form(self) -> None:
+        assert component_embeds_template_args("Box<int>") is True
+        assert (
+            component_embeds_template_args(
+                "concurrent_priority_queue<tbb::detail::d1::graph_task *>"
+            )
+            is True
+        )
+
+    def test_recognizes_raw_itanium_form(self) -> None:
+        assert component_embeds_template_args("BoxIiE") is True
+        assert (
+            component_embeds_template_args(
+                "concurrent_priority_queueIPN3tbb6detail2d110graph_taskEE"
+            )
+            is True
+        )
+
+    def test_plain_identifiers_are_not_template_bearing(self) -> None:
+        assert component_embeds_template_args("graph_task") is False
+        assert component_embeds_template_args("run") is False
+
+    def test_a_bare_leading_i_is_not_mistaken_for_a_template_marker(self) -> None:
+        """An ordinary identifier that happens to start with 'I' (a common
+        interface-naming convention) must not be misread as an opened,
+        unterminated template-args block."""
+        assert component_embeds_template_args("Item") is False
+        assert component_embeds_template_args("IWidget") is False
+
+
+class TestFindNamespaceMoveGroupsIgnoresRawMangledTemplateArguments:
+    """Codex review, fresh evidence, on the fix above: a REAL Itanium-mangled
+    symbol keeps a directly-attached template-argument list RAW (see
+    ``itanium_scope_components``'s own docstring -- ``Box<int>`` mangles to
+    the component ``"BoxIiE"``, with no literal ``<`` anywhere), so a naive
+    ``"<" in comps[i]`` check never fires for the real, mangled-symbol
+    production case this whole fix exists for -- only for the qualified-
+    name/header-tier-fallback spelling the sibling test class above uses.
+    These tests reproduce the exact reported shape through real mangled
+    symbols: ``tbb::detail::d1::concurrent_priority_queue<tbb::detail::d1::
+    graph_task *>`` (ctor/dtor mangled with a raw ``I...E`` template-args
+    block naming ``tbb::detail::d1::graph_task``) whose OWN enclosing scope
+    (``tbb::detail::d1::concurrent_priority_queue``) never moved, alongside
+    the real ``d1`` -> ``d2`` move of ``graph_task`` itself."""
+
+    # `tbb::detail::d1::concurrent_priority_queue<tbb::detail::d1::graph_task *>`
+    # ctor/dtor, and the `d2`-instantiated sibling -- hand-mangled (not from a
+    # real compiler) but structurally well-formed Itanium encodings, verified
+    # to parse via `itanium_scope_components` before being used here.
+    _OLD_CTOR = "_ZN3tbb6detail2d125concurrent_priority_queueIPN3tbb6detail2d110graph_taskEEC1Ev"
+    _NEW_CTOR = "_ZN3tbb6detail2d125concurrent_priority_queueIPN3tbb6detail2d210graph_taskEEC1Ev"
+    _OLD_DTOR = "_ZN3tbb6detail2d125concurrent_priority_queueIPN3tbb6detail2d110graph_taskEED1Ev"
+    _NEW_DTOR = "_ZN3tbb6detail2d125concurrent_priority_queueIPN3tbb6detail2d210graph_taskEED1Ev"
+
+    def test_component_is_recognized_as_template_bearing(self) -> None:
+        """Sanity check on the primitive itself: the raw Itanium component
+        differs between old and new (it embeds ``d1``/``d2``), so without the
+        fix it would be a candidate differing position."""
+        old_comps = itanium_scope_components(self._OLD_CTOR)
+        new_comps = itanium_scope_components(self._NEW_CTOR)
+        assert old_comps is not None and new_comps is not None
+        assert old_comps[3] != new_comps[3]
+        assert "<" not in old_comps[3]  # the raw shape, not the pretty one
+
+    def test_template_argument_substitution_alone_yields_no_group(self) -> None:
+        removed = {self._OLD_CTOR, self._OLD_DTOR}
+        added = {self._NEW_CTOR, self._NEW_DTOR}
+        assert find_namespace_move_groups(removed, added) == {}
+
+    def test_does_not_duplicate_the_real_move_it_is_redundant_with(self) -> None:
+        removed = {
+            "_ZN3tbb6detail2d110graph_task3runEv",
+            "_ZN3tbb6detail2d110graph_task4waitEv",
+            self._OLD_CTOR,
+            self._OLD_DTOR,
+        }
+        added = {
+            "_ZN3tbb6detail2d210graph_task3runEv",
+            "_ZN3tbb6detail2d210graph_task4waitEv",
+            self._NEW_CTOR,
+            self._NEW_DTOR,
         }
         groups = find_namespace_move_groups(removed, added)
         assert set(groups) == {("d1", "d2")}

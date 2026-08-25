@@ -436,6 +436,51 @@ def itanium_qualified_name(mangled: str) -> str | None:
     return "::".join(comps) if comps else None
 
 
+def component_embeds_template_args(component: str) -> bool:
+    """Whether *component* -- one entry from
+    :func:`itanium_scope_components`/:func:`qualified_name_scope_components`
+    -- embeds a template-argument list, rather than naming a bare
+    namespace/class/function segment.
+
+    Two representations to recognize, since the two producers keep a
+    component's template arguments in different forms:
+
+    * :func:`qualified_name_scope_components` (a demangled or already
+      pretty-printed spelling) keeps the human-readable ``<...>`` form, so a
+      literal ``<`` anywhere in *component* is sufficient.
+    * :func:`itanium_scope_components` keeps a directly-attached template
+      argument list RAW -- see :func:`_parse_source_name_component`'s own
+      docstring, "keep it raw so ``Box<int>`` and ``Box<float>`` stay
+      distinct" -- so ``Box<int>`` there is the component ``"BoxIiE"``,
+      containing no literal ``<`` at all (Codex review, fresh evidence: a
+      real Itanium-mangled ``concurrent_priority_queue<tbb::detail::d1::
+      graph_task *>`` component is ``"...QIPN3tbb6detail2d110graph_taskEE"``
+      -- exactly the shape this module's own namespace-move masking
+      primitive needs to recognize as template-bearing, not just the
+      qualified-name fallback's pretty-printed spelling). Detected by
+      scanning for a raw ``I...E`` block via the identical bracket-aware
+      parser :func:`_skip_template_args` uses, and requiring the match to
+      reach the *exact end* of *component*: :func:`_parse_source_name_component`
+      always appends a directly-attached template-argument list as the
+      final suffix of a component, so this is what tells a real template
+      block apart from an ordinary identifier that merely happens to
+      contain the letter ``"I"`` (e.g. a class named ``"Item"``) -- such an
+      identifier fails to parse as a balanced template-args block at all,
+      or parses to something short of the component's actual end.
+
+    Deliberately conservative like every other guard in this module: an
+    unrecognized shape returns ``False`` (not template-bearing) rather than
+    risking a false positive that would suppress a genuine namespace-move
+    finding.
+    """
+    if "<" in component:
+        return True
+    for i, ch in enumerate(component):
+        if ch == "I" and _skip_template_args(component, i) == len(component):
+            return True
+    return False
+
+
 def itanium_ctor_dtor_marker_span(mangled: str) -> tuple[int, int] | None:
     """``(start, end)`` indices of *mangled*'s own Itanium ctor/dtor code
     (``C1``/``C2``/``C3``/``D0``/``D1``/``D2``) -- the exact 2-character

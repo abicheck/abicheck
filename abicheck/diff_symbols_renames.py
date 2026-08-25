@@ -39,6 +39,7 @@ from .checker_types import Change
 from .demangle import demangle, demangle_batch
 from .detector_registry import registry
 from .diff_cxx_rules import (
+    component_embeds_template_args,
     itanium_scope_components,
     msvc_scope_components,
     qualified_name_scope_components,
@@ -983,8 +984,16 @@ def find_namespace_move_groups(
             # this primitive reasons about scope chains, not about a
             # component's internal template structure, so a templated
             # component is simply excluded from ever being *the* differing
-            # position (oneTBB report, fresh evidence).
-            if "<" in comps[i]:
+            # position (oneTBB report, fresh evidence). Recognizes both the
+            # qualified-name-fallback's pretty-printed ``<...>`` spelling AND
+            # a real Itanium mangled symbol's RAW, un-demangled template-args
+            # encoding (``itanium_scope_components`` keeps it raw so distinct
+            # specializations stay distinct -- see
+            # ``component_embeds_template_args``'s own docstring; a naive
+            # ``"<" in comps[i]`` check alone never fires for the real,
+            # mangled-symbol production case this guard exists for -- Codex
+            # review, fresh evidence).
+            if component_embeds_template_args(comps[i]):
                 continue
             masked = tuple(comps[:i]) + (_MASKED,) + tuple(comps[i + 1 :])
             added_index.setdefault(masked, []).append((a_sym, comps))
@@ -1040,9 +1049,10 @@ def find_namespace_move_groups(
         symbol_id = "::".join(r_comps)
         for i in range(len(r_comps) - 1):
             # Mirrors the identical skip in the `added_index` build above: a
-            # templated component can never be treated as *the* differing
-            # namespace/class segment.
-            if "<" in r_comps[i]:
+            # templated component (pretty-printed or raw-Itanium-encoded)
+            # can never be treated as *the* differing namespace/class
+            # segment.
+            if component_embeds_template_args(r_comps[i]):
                 continue
             masked = tuple(r_comps[:i]) + (_MASKED,) + tuple(r_comps[i + 1 :])
             candidates = added_index.get(masked, [])
