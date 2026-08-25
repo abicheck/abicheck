@@ -260,8 +260,17 @@ class TestHeaderTierKeysAlsoJoinTheNamespaceMove:
         assert len(groups[("d1", "d2")]) == len(_D1)
 
     def test_reported_through_compare_with_header_tier_keys_only(self) -> None:
-        old = _snap("2021", [_fn("graph", m) for m in _D1_HEADER_TIER])
-        new = _snap("2022", [_fn("graph", m) for m in _D2_HEADER_TIER])
+        # A class's own ctor+dtor pair alone is deliberately *not* enough
+        # support (see `TestEmitNamespaceMoveBatchesRequiresTwoDistinctEntities`
+        # below) -- it is one declaring entity, indistinguishable from an
+        # unrelated deleted-class/added-class coincidence. A second,
+        # independent header-tier declaration (a plain qualified free-form
+        # member name, the third shape this fallback covers) is what makes
+        # this a genuine multi-entity move.
+        old_keys = [*_D1_HEADER_TIER, "tbb::detail::d1::graph::reset"]
+        new_keys = [*_D2_HEADER_TIER, "tbb::detail::d2::graph::reset"]
+        old = _snap("2021", [_fn("graph", m) for m in old_keys])
+        new = _snap("2022", [_fn("graph", m) for m in new_keys])
         result = compare(old, new)
         batch = [c for c in result.changes if c.kind is ChangeKind.SYMBOL_RENAMED_BATCH]
         assert batch, "namespace move via header-tier keys produced no batch roll-up"
@@ -1458,3 +1467,141 @@ class TestFindNamespaceMoveGroupsRetainsLocallyAmbiguousCandidatesGlobally:
             "_ZN1x3old1gEv",
         }
         assert find_namespace_move_groups(removed, added) == {}
+
+
+class TestEmitNamespaceMoveBatchesRequiresTwoDistinctEntities:
+    """Reported false positive (oneCCL, fresh evidence): an unrelated class
+    deleted in one scope and an unrelated, differently-named class added in
+    the SAME scope always contributes exactly two pairs -- its own
+    compiler-generated ``{ctor}``/``{dtor}`` -- to whatever one-component
+    substitution their scope chains happen to mask into, regardless of
+    whether the class actually moved. ``len(pairs) >= 2`` alone treats that
+    as sufficient support; it is not, because a ctor and a dtor of the same
+    class are never independent evidence -- they always travel together for
+    ANY class, moved or not."""
+
+    def test_one_deleted_class_and_one_unrelated_added_class_is_not_a_batch(
+        self,
+    ) -> None:
+        removed = {
+            "__abicheck_ctor__ccl::v1::broadcastExt_attr()",
+            "~ccl::v1::broadcastExt_attr",
+        }
+        added = {
+            "__abicheck_ctor__ccl::v1::window()",
+            "~ccl::v1::window",
+        }
+        groups = find_namespace_move_groups(removed, added)
+        # The grouping primitive itself still sees two genuine, unambiguous
+        # pairs -- the fix belongs at the batch-emission threshold, not here.
+        assert groups == {
+            ("broadcastExt_attr", "window"): [
+                (
+                    "ccl::v1::broadcastExt_attr::{ctor}",
+                    "ccl::v1::window::{ctor}",
+                ),
+                (
+                    "ccl::v1::broadcastExt_attr::{dtor}",
+                    "ccl::v1::window::{dtor}",
+                ),
+            ]
+        }
+        assert emit_namespace_move_batches(groups) == []
+
+    def test_a_real_move_of_two_distinct_classes_still_reports(self) -> None:
+        """The guard is "one entity's ctor+dtor alone is not enough", not
+        "ctor/dtor pairs never count" -- two DIFFERENT classes each moving
+        namespace, evidenced only by their ctor/dtor pairs, is genuine
+        multi-entity support and must still be reported."""
+        removed = {
+            "__abicheck_ctor__ccl::v1::Foo()",
+            "~ccl::v1::Foo",
+            "__abicheck_ctor__ccl::v1::Bar()",
+            "~ccl::v1::Bar",
+        }
+        added = {
+            "__abicheck_ctor__ccl::v2::Foo()",
+            "~ccl::v2::Foo",
+            "__abicheck_ctor__ccl::v2::Bar()",
+            "~ccl::v2::Bar",
+        }
+        groups = find_namespace_move_groups(removed, added)
+        changes = emit_namespace_move_batches(groups)
+        assert len(changes) == 1
+        assert changes[0].kind is ChangeKind.SYMBOL_RENAMED_BATCH
+        assert "v1" in changes[0].description and "v2" in changes[0].description
+
+    def test_reported_through_compare(self) -> None:
+        """The false positive reproduced end to end: an unrelated class
+        deletion + addition in the same scope must never surface as
+        SYMBOL_RENAMED_BATCH."""
+        old = _snap(
+            "13.1",
+            [
+                _fn(
+                    "broadcastExt_attr",
+                    "__abicheck_ctor__ccl::v1::broadcastExt_attr()",
+                ),
+                _fn("~broadcastExt_attr", "~ccl::v1::broadcastExt_attr"),
+            ],
+        )
+        new = _snap(
+            "14.0",
+            [
+                _fn("window", "__abicheck_ctor__ccl::v1::window()"),
+                _fn("~window", "~ccl::v1::window"),
+            ],
+        )
+        kinds = {c.kind for c in compare(old, new).changes}
+        assert ChangeKind.SYMBOL_RENAMED_BATCH not in kinds
+
+
+class TestFindNamespaceMoveGroupsIgnoresTemplateArgumentSubstitutions:
+    """Reported mislabel (oneTBB, fresh evidence): a template class whose OWN
+    enclosing scope never changed, but whose spelling embeds a template
+    argument naming a type that DID move namespace (e.g.
+    ``concurrent_priority_queue<tbb::detail::d1::graph_task *>`` ->
+    ``concurrent_priority_queue<tbb::detail::d2::graph_task *>``), must not
+    be reported as its own "namespace segment" substitution -- the whole
+    templated spelling is not a namespace segment, and the real move is
+    already reported through ``graph_task``'s own (non-templated) symbols."""
+
+    _OLD_ARG = "tbb::detail::d1::graph_task"
+    _NEW_ARG = "tbb::detail::d2::graph_task"
+    _TEMPLATE = "concurrent_priority_queue<{}::graph_task *>"
+
+    def test_template_argument_substitution_alone_yields_no_group(self) -> None:
+        """With no OTHER evidence of a `d1` -> `d2` move at all, the
+        templated ctor/dtor pair must produce nothing -- not even a group
+        keyed on the whole instantiation text."""
+        removed = {
+            f"__abicheck_ctor__tbb::detail::d1::{self._TEMPLATE.format('tbb::detail::d1')}()",
+            f"~tbb::detail::d1::{self._TEMPLATE.format('tbb::detail::d1')}",
+        }
+        added = {
+            f"__abicheck_ctor__tbb::detail::d1::{self._TEMPLATE.format('tbb::detail::d2')}()",
+            f"~tbb::detail::d1::{self._TEMPLATE.format('tbb::detail::d2')}",
+        }
+        assert find_namespace_move_groups(removed, added) == {}
+
+    def test_does_not_duplicate_the_real_move_it_is_redundant_with(self) -> None:
+        """The real ``d1`` -> ``d2`` move (evidenced by ``graph_task``'s own
+        symbols) must still be reported, and reported EXACTLY ONCE -- not
+        alongside a second, spurious group keyed on the templated spelling."""
+        removed = {
+            "tbb::detail::d1::graph_task::run",
+            "tbb::detail::d1::graph_task::wait",
+            f"__abicheck_ctor__tbb::detail::d1::{self._TEMPLATE.format('tbb::detail::d1')}()",
+            f"~tbb::detail::d1::{self._TEMPLATE.format('tbb::detail::d1')}",
+        }
+        added = {
+            "tbb::detail::d2::graph_task::run",
+            "tbb::detail::d2::graph_task::wait",
+            f"__abicheck_ctor__tbb::detail::d1::{self._TEMPLATE.format('tbb::detail::d2')}()",
+            f"~tbb::detail::d1::{self._TEMPLATE.format('tbb::detail::d2')}",
+        }
+        groups = find_namespace_move_groups(removed, added)
+        assert set(groups) == {("d1", "d2")}
+        assert len(groups[("d1", "d2")]) == 2
+        changes = emit_namespace_move_batches(groups)
+        assert len(changes) == 1

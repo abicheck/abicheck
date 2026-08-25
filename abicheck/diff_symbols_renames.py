@@ -967,6 +967,25 @@ def find_namespace_move_groups(
         if comps is None:
             continue
         for i in range(len(comps) - 1):
+            # A component that itself carries a template-argument list is not
+            # a bare namespace/class segment -- it is an instantiation whose
+            # *spelling* can differ between old and new purely because one of
+            # its template arguments names a declaration that moved (e.g.
+            # ``concurrent_priority_queue<tbb::detail::d1::graph_task *, ...>``
+            # vs. ``...d2::graph_task...``, where the enclosing scope of
+            # ``concurrent_priority_queue`` itself never changed). Treating
+            # such a component as "the segment that changed" fabricates a
+            # spurious, redundant substitution group keyed on the whole
+            # instantiation text instead of on the real namespace segment --
+            # which the un-instantiated symbol that actually names the moved
+            # type already supplies evidence for. See
+            # ``_scope_components``'s own "signature-blind" caveat above:
+            # this primitive reasons about scope chains, not about a
+            # component's internal template structure, so a templated
+            # component is simply excluded from ever being *the* differing
+            # position (oneTBB report, fresh evidence).
+            if "<" in comps[i]:
+                continue
             masked = tuple(comps[:i]) + (_MASKED,) + tuple(comps[i + 1 :])
             added_index.setdefault(masked, []).append((a_sym, comps))
 
@@ -1020,6 +1039,11 @@ def find_namespace_move_groups(
             continue
         symbol_id = "::".join(r_comps)
         for i in range(len(r_comps) - 1):
+            # Mirrors the identical skip in the `added_index` build above: a
+            # templated component can never be treated as *the* differing
+            # namespace/class segment.
+            if "<" in r_comps[i]:
+                continue
             masked = tuple(r_comps[:i]) + (_MASKED,) + tuple(r_comps[i + 1 :])
             candidates = added_index.get(masked, [])
             for _cand_sym, cand_comps in candidates:
@@ -1153,10 +1177,53 @@ def find_namespace_move_groups(
     return groups
 
 
+def _declaring_entity(qualified: str) -> str:
+    """Collapse a synthesized ``{ctor}``/``{dtor}`` leaf marker so both
+    facets of one class -- its constructor and its destructor -- count as
+    the SAME declaring entity for support-counting purposes.
+
+    Every class, real or coincidentally paired, contributes exactly a
+    ``{ctor}`` pair and a ``{dtor}`` pair once *any* one-component
+    substitution happens to line its removed and added mangled names up
+    (see :func:`emit_namespace_move_batches`) -- so two such pairs are not
+    two independent pieces of evidence, they are one class counted twice.
+    An ordinary (non-ctor/dtor) leaf is returned unchanged: two distinct
+    member functions of the same class are still two distinct declarations.
+    """
+    for suffix in ("::{ctor}", "::{dtor}"):
+        if qualified.endswith(suffix):
+            return qualified[: -len(suffix)]
+    return qualified
+
+
 def emit_namespace_move_batches(
     groups: dict[tuple[str, str], list[tuple[str, str]]],
 ) -> list[Change]:
-    """Emit one SYMBOL_RENAMED_BATCH per namespace substitution with 2+ pairs.
+    """Emit one SYMBOL_RENAMED_BATCH per namespace substitution supported by
+    2+ pairs from 2+ *distinct declaring entities*.
+
+    ``len(pairs) >= 2`` alone gives zero protection at class granularity: an
+    unrelated deleted class and an unrelated added class that happen to
+    share an enclosing scope always contribute exactly two pairs -- the
+    class's compiler-generated constructor and destructor -- to whatever
+    substitution key their names happen to mask into, regardless of
+    whether the class actually moved namespaces or was simply deleted while
+    an unrelated, differently-named class was simultaneously added in the
+    same scope. Neither :func:`find_namespace_move_groups`'s per-position
+    ambiguity guards catches this: there is exactly one candidate per
+    masked context (so ``distinct_targets`` never fires), and the ctor/dtor
+    pairs are recorded under different leaves (so the header-tier
+    double-counting guard's ``recorded_pairs`` dedup never collapses them
+    either) -- the two pairs are both genuine, unambiguous matches, they
+    are just not *independent* evidence of a scope move (oneCCL report,
+    fresh evidence: ``broadcastExt_attr`` deleted and an unrelated
+    ``window`` added in the same enclosing scope reported a fabricated
+    ``broadcastExt_attr`` -> ``window`` "namespace segment" rename).
+    Requiring support from 2+ distinct declaring entities (via
+    :func:`_declaring_entity`, which folds a class's own ctor/dtor pair
+    down to one entity) closes this at the class-count level without
+    touching :func:`find_namespace_move_groups`'s ambiguity logic, which
+    is unaffected by this exact shape.
 
     Ordered by support (most-supported substitution first, then by the
     substitution itself) so the report is stable across runs and the dominant
@@ -1167,6 +1234,8 @@ def emit_namespace_move_batches(
         groups.items(), key=lambda kv: (-len(kv[1]), kv[0])
     ):
         if len(pairs) < 2:
+            continue
+        if len({_declaring_entity(old) for old, _new in pairs}) < 2:
             continue
         pair_desc = ", ".join(f"{o} → {n}" for o, n in pairs[:5])
         if len(pairs) > 5:
