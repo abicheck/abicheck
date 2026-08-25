@@ -2,9 +2,10 @@
 
 - **A destructor/constructor of a template instantiated over a local lambda
   closure type was never demoted from BREAKING even when confirmed
-  unreachable from any consumer**, because `demote_lambda_closure_
-  unexported_findings` (added to demote a `FUNC_PARAMS_CHANGED`/
-  `TEMPLATE_PARAM_TYPE_CHANGED`/`TEMPLATE_RETURN_TYPE_CHANGED` finding whose
+  unreachable from any consumer**, because
+  `demote_lambda_closure_unexported_findings` (added to demote a
+  `FUNC_PARAMS_CHANGED`/`TEMPLATE_PARAM_TYPE_CHANGED`/
+  `TEMPLATE_RETURN_TYPE_CHANGED` finding whose
   reported symbol is confirmed absent from both binaries' real exported
   symbol table) deliberately excluded every castxml-synthesized ctor/dtor
   key — such a key is never itself a real exported symbol, so checking it
@@ -24,4 +25,10 @@
   that does export some other instantiation is left exactly as severe as
   the detector made it, since that check cannot rule out the specific
   closure-parameterized instantiation was the one a consumer actually
-  linked against.
+  linked against. Six `std::` names (`allocator`, `basic_string`,
+  `basic_istream`, `basic_ostream`, `basic_iostream`) carry a fixed,
+  mandatory Itanium ABI substitution instead of their literal source-name
+  in every real mangled symbol, so the check also matches that
+  substitution (e.g. `Sa` for `std::allocator`) — without it, a synthetic
+  `std::allocator<(lambda:...)>` finding would always read as unexported
+  and demote even when genuinely removed.

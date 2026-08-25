@@ -1313,6 +1313,7 @@ def demote_lambda_closure_unexported_findings(
     from .elf_symbol_filter import FUNCTION_SYMBOL_TYPES, exported_symbol_names
     from .finding_identity_ctor_dtor import (
         itanium_source_name_token,
+        itanium_standard_substitution_token,
         synthetic_ctor_dtor_template_base_name,
     )
 
@@ -1352,12 +1353,17 @@ def demote_lambda_closure_unexported_findings(
         if is_synthetic_ctor_key(symbol) or is_synthetic_dtor_key(symbol):
             base_name = synthetic_ctor_dtor_template_base_name(symbol)
             if base_name is None:
-                # Scope could not be recovered from the key text -- fail
-                # closed, same as an evidence gap elsewhere in this function.
-                continue
-            token = itanium_source_name_token(base_name)
-            if any(token in exported for exported in old_exported) or any(
-                token in exported for exported in new_exported
+                continue  # scope unrecoverable -- fail closed
+            # A std:: owner may mangle via a fixed Itanium substitution
+            # instead of its literal source-name -- see
+            # itanium_standard_substitution_token's own docstring.
+            tokens = {itanium_source_name_token(base_name)}
+            std_token = itanium_standard_substitution_token(symbol)
+            if std_token is not None:
+                tokens.add(std_token)
+            if any(
+                any(token in exported for token in tokens)
+                for exported in (*old_exported, *new_exported)
             ):
                 # Exported under SOME instantiation on at least one side --
                 # can't rule out it was this one, so stays as severe as made.

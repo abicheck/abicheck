@@ -488,3 +488,103 @@ class TestItaniumSourceNameTokenUsesEncodedByteLength:
 
         assert change.effective_verdict is None
         assert change.modulation_rule is None
+
+
+class TestItaniumStandardSubstitutionToken:
+    """Six ``std::`` names (``allocator``, ``basic_string``, ``basic_istream``,
+    ``basic_ostream``, ``basic_iostream``) always mangle via a fixed Itanium
+    ABI substitution (``Sa``/``Sb``/``Si``/``So``/``Sd``), never via their
+    literal source-name -- a literal-token-only search would therefore always
+    read such a class as "never exported" regardless of the truth."""
+
+    def test_known_std_names_map_to_their_fixed_substitution(self) -> None:
+        from abicheck.dumper_castxml import SYNTHETIC_CTOR_KEY_PREFIX
+        from abicheck.finding_identity_ctor_dtor import (
+            itanium_standard_substitution_token,
+        )
+
+        cases = {
+            "allocator": "Sa",
+            "basic_string": "Sb",
+            "basic_istream": "Si",
+            "basic_ostream": "So",
+            "basic_iostream": "Sd",
+        }
+        for name, expected in cases.items():
+            symbol = f"{SYNTHETIC_CTOR_KEY_PREFIX}std::{name}<(lambda:f.h:1:1)>()"
+            assert itanium_standard_substitution_token(symbol) == expected
+
+    def test_non_std_owner_returns_none(self) -> None:
+        from abicheck.dumper_castxml import SYNTHETIC_CTOR_KEY_PREFIX
+        from abicheck.finding_identity_ctor_dtor import (
+            itanium_standard_substitution_token,
+        )
+
+        symbol = f"{SYNTHETIC_CTOR_KEY_PREFIX}raii_guard<(lambda:f.h:1:1)>()"
+        assert itanium_standard_substitution_token(symbol) is None
+
+    def test_std_name_outside_the_fixed_set_returns_none(self) -> None:
+        from abicheck.dumper_castxml import SYNTHETIC_CTOR_KEY_PREFIX
+        from abicheck.finding_identity_ctor_dtor import (
+            itanium_standard_substitution_token,
+        )
+
+        symbol = f"{SYNTHETIC_CTOR_KEY_PREFIX}std::vector<(lambda:f.h:1:1)>()"
+        assert itanium_standard_substitution_token(symbol) is None
+
+    def test_non_synthetic_symbol_returns_none(self) -> None:
+        from abicheck.finding_identity_ctor_dtor import (
+            itanium_standard_substitution_token,
+        )
+
+        assert itanium_standard_substitution_token("_ZN3Foo3barEv") is None
+
+
+class TestStdAllocatorSyntheticKeyNotFalselyDemoted:
+    """The exact counterexample from review: a real exported
+    ``std::allocator<int>::allocator()`` mangles to ``_ZNSaIiEC1Ev`` (the
+    fixed ``Sa`` substitution), never to anything containing the literal
+    source-name substring ``"9allocator"``. Checking only the literal token
+    would read this class as "never exported" and wrongly demote a genuine
+    removal to ``COMPATIBLE_WITH_RISK``."""
+
+    def test_allocator_ctor_not_demoted_when_another_instantiation_is_exported(
+        self,
+    ) -> None:
+        from abicheck.checker_types import Change
+        from abicheck.dumper_castxml import SYNTHETIC_CTOR_KEY_PREFIX
+
+        symbol = f"{SYNTHETIC_CTOR_KEY_PREFIX}std::allocator<(lambda:f.h:1:1)>()"
+        change = Change(
+            kind=ChangeKind.FUNC_REMOVED,
+            symbol=symbol,
+            description="d",
+            old_value="std::allocator",
+        )
+        real_export = "_ZNSaIiEC1Ev"  # std::allocator<int>::allocator()
+        old = _snap("1", _fn(_MANGLED, _OLD_PARAM), _elf(real_export))
+        new = _snap("2", _fn(_MANGLED, _NEW_PARAM), _elf(real_export))
+
+        demote_lambda_closure_unexported_findings([change], old, new)
+
+        assert change.effective_verdict is None
+        assert change.modulation_rule is None
+
+    def test_allocator_ctor_still_demoted_when_genuinely_unexported(self) -> None:
+        from abicheck.checker_types import Change
+        from abicheck.dumper_castxml import SYNTHETIC_CTOR_KEY_PREFIX
+
+        symbol = f"{SYNTHETIC_CTOR_KEY_PREFIX}std::allocator<(lambda:f.h:1:1)>()"
+        change = Change(
+            kind=ChangeKind.FUNC_REMOVED,
+            symbol=symbol,
+            description="d",
+            old_value="std::allocator",
+        )
+        old = _snap("1", _fn(_MANGLED, _OLD_PARAM), _elf("unrelated_symbol"))
+        new = _snap("2", _fn(_MANGLED, _NEW_PARAM), _elf("unrelated_symbol"))
+
+        demote_lambda_closure_unexported_findings([change], old, new)
+
+        assert change.effective_verdict is Verdict.COMPATIBLE_WITH_RISK
+        assert change.modulation_rule == "lambda_closure_never_exported"

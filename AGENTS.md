@@ -5364,17 +5364,19 @@ Once a root command genuinely clears the bar above, pick the right home:
   of a closure-parameterized instantiation permanently un-demotable,
   which is exactly the residual (1) describes and exactly what the oneTBB
   report reproduced: 5 breaking `func_removed` findings, all on synthetic
-  ctor/dtor keys naming `tbb::detail::raii_guard<(lambda:task_group.h:
-  522:26)>`/`try_call_proxy<...>`/`task_arena_function<...>`/
+  ctor/dtor keys naming
+  `tbb::detail::raii_guard<(lambda:task_group.h:522:26)>`/
+  `try_call_proxy<...>`/`task_arena_function<...>`/
   `delegated_function<...>`, paired 1:1 with 5 compatible `func_added`
   findings differing only in the lambda's line number.
 
   Fixed by asking the binary a question the synthetic key's *text* can
   answer honestly, even though the key itself is not a real symbol: is
   the owning class/class-template exported under ANY instantiation at
-  all, on either side? `finding_identity_ctor_dtor.
-  synthetic_ctor_dtor_template_base_name` recovers the owning scope from
-  the key (that same module's own `synthetic_ctor_scope` for a ctor key's
+  all, on either side?
+  `finding_identity_ctor_dtor.synthetic_ctor_dtor_template_base_name`
+  recovers the owning scope from the key (that same module's own
+  `synthetic_ctor_scope` for a ctor key's
   depth-aware `scope(params)` split; a plain prefix strip for a dtor key),
   reduces it to the bare, template-argument-stripped template name via
   `type_reachability._bare_type_name` plus a top-level `<` scan
@@ -5425,6 +5427,24 @@ Once a root command genuinely clears the bar above, pick the right home:
   `TestSyntheticCtorDtorKeysNotDemotedWhenTemplateIsExported` for both
   directions, verified against the exact class names from the oneTBB
   report.
+
+  **A review round on the same fix found a real gap in the substring
+  search itself, not in the demotion logic around it.** Six `std::` names
+  (`allocator`, `basic_string`, `basic_istream`, `basic_ostream`,
+  `basic_iostream`) carry a *fixed, mandatory* Itanium ABI substitution
+  (`Sa`/`Sb`/`Si`/`So`/`Sd`, C++ Itanium ABI §5.1.2) — the mangler always
+  emits the abbreviation instead of the literal source-name, even on the
+  first occurrence in a symbol. A real `std::allocator<int>::allocator()`
+  mangles to `_ZNSaIiEC1Ev`, never to anything containing the literal
+  substring `"9allocator"` — so a synthetic `std::allocator<(lambda:...)>`
+  finding's literal-token search would read that class as "never
+  exported" regardless of the truth, silently demoting a genuine removal.
+  Fixed with `finding_identity_ctor_dtor.itanium_standard_substitution_
+  token`, checked alongside the literal token whenever the owning class's
+  qualified name is exactly one of the six; see
+  `tests/test_lambda_closure_function_demotion.py`'s
+  `TestStdAllocatorSyntheticKeyNotFalselyDemoted` for the exact
+  counterexample from review, reproduced and fixed.
 
   Two related residuals from the same report, deliberately not addressed
   here: the *type-level* churn among these same symbols (the compatible

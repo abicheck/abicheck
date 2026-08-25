@@ -302,6 +302,21 @@ def synthetic_ctor_scope(mangled: str) -> str | None:
     return split[0] if split is not None else None
 
 
+def _synthetic_ctor_dtor_scope(symbol: str) -> str | None:
+    """The raw (possibly namespace/template-qualified) scope embedded in a
+    castxml synthetic ctor/dtor key, or ``None`` if *symbol* is not such a
+    key or the scope cannot be recovered. Shared by
+    :func:`synthetic_ctor_dtor_template_base_name` and
+    :func:`itanium_standard_substitution_token`.
+    """
+    if is_synthetic_ctor_key(symbol):
+        return synthetic_ctor_scope(symbol)
+    if is_synthetic_dtor_key(symbol):
+        scope = symbol[len(_SYNTHETIC_DTOR_KEY_PREFIX) :]
+        return scope or None
+    return None
+
+
 def synthetic_ctor_dtor_template_base_name(symbol: str) -> str | None:
     """The bare (namespace- and template-argument-stripped) name of the
     class/class-template a castxml synthetic ctor/dtor key names as its
@@ -317,12 +332,7 @@ def synthetic_ctor_dtor_template_base_name(symbol: str) -> str | None:
     mangled substring for one specific instantiation can't be reconstructed
     from the snapshot text alone).
     """
-    if is_synthetic_ctor_key(symbol):
-        scope = synthetic_ctor_scope(symbol)
-    elif is_synthetic_dtor_key(symbol):
-        scope = symbol[len(_SYNTHETIC_DTOR_KEY_PREFIX) :]
-    else:
-        return None
+    scope = _synthetic_ctor_dtor_scope(symbol)
     if not scope:
         return None
     bare = _bare_type_name(scope)
@@ -334,6 +344,53 @@ def synthetic_ctor_dtor_template_base_name(symbol: str) -> str | None:
     idx = bare.find("<")
     base = bare[:idx] if idx != -1 else bare
     return base or None
+
+
+#: The Itanium C++ ABI (section 5.1.2) reserves a fixed, mandatory
+#: 2-character substitution for these six ``std::`` component names --
+#: the mangler ALWAYS emits the abbreviation instead of spelling out the
+#: source-name, even on the very first occurrence in a symbol (unlike an
+#: ordinary repeated-component substitution, which is optional and only
+#: ever applies to a name already spelled out earlier in the SAME symbol).
+#: `"basic_string"` deliberately maps to the *name* substitution `Sb`, not
+#: the additional, narrower full-type substitution `Ss` (`std::string`
+#: with its exact default template arguments) -- `Sb` is what a
+#: differently-parameterized `std::basic_string<...>` instantiation uses.
+_ITANIUM_STD_NAME_SUBSTITUTIONS: dict[str, str] = {
+    "allocator": "Sa",
+    "basic_string": "Sb",
+    "basic_istream": "Si",
+    "basic_ostream": "So",
+    "basic_iostream": "Sd",
+}
+
+
+def itanium_standard_substitution_token(symbol: str) -> str | None:
+    """The fixed Itanium ABI substitution abbreviation for *symbol*'s owning
+    class, if that class's qualified name is exactly ``std::<name>`` for one
+    of the six names :data:`_ITANIUM_STD_NAME_SUBSTITUTIONS` covers -- or
+    ``None`` otherwise (including when *symbol* is not a synthetic ctor/dtor
+    key, or its scope can't be recovered).
+
+    A caller asking "does any real exported symbol reference this class"
+    via :func:`itanium_source_name_token` alone is unsafe for these six
+    names specifically: a real ``std::allocator<T>::allocator()`` mangles
+    to ``_ZNSaIiEC1Ev`` (using the substitution `Sa`), never to anything
+    containing the literal source-name substring ``"9allocator"`` -- so a
+    literal-token-only search would always read "never exported" for such a
+    class regardless of the truth, silently letting a genuine removal
+    demote to ``COMPATIBLE_WITH_RISK``. Callers should check both this AND
+    :func:`itanium_source_name_token` of
+    :func:`synthetic_ctor_dtor_template_base_name`'s result.
+    """
+    scope = _synthetic_ctor_dtor_scope(symbol)
+    if not scope:
+        return None
+    idx = scope.find("<")
+    qualified = scope[:idx] if idx != -1 else scope
+    if not qualified.startswith("std::"):
+        return None
+    return _ITANIUM_STD_NAME_SUBSTITUTIONS.get(qualified[len("std::") :])
 
 
 def itanium_source_name_token(name: str) -> str:
