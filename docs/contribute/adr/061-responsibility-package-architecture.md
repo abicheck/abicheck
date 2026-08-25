@@ -1,7 +1,7 @@
 # ADR-061: Responsibility-Package Architecture and Flat-Namespace Migration
 
 **Date:** 2026-08-24
-**Status:** Accepted — Phases 0-1 implemented; Phases 2-5 remain incremental.
+**Status:** Accepted — Phases 0-1 implemented; Phase 2 in progress; Phases 3-5 remain incremental.
 **Decision maker:** abicheck maintainers
 
 ## Context
@@ -625,6 +625,12 @@ new owner; no reverse facade import or duplicated aggregation decision
 exists; the relevant debt entries shrink or disappear.
 
 ### Phase 2 — establish the canonical report document
+
+Implementation status: the immutable, JSON-shaped ``ReportDocument`` and its
+pure JSON projection are established, and all native JSON report modes (full,
+stat, leaf, and root-cause) now cross that boundary. Markdown, HTML, SARIF, and
+JUnit remain explicit follow-up slices; this partial status must not be read as
+the phase acceptance criteria having been met.
 
 1. Define immutable `ReportDocument` contracts from existing report-model
    behavior rather than inventing a second schema.
