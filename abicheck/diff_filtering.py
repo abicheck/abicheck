@@ -218,6 +218,114 @@ def _qualified_name_for_change(
     return None
 
 
+#: The four enum kinds the bare/qualified bridge (`_enum_canonical_names`/
+#: `_canonicalize_enum_symbol`) applies to -- deliberately a NARROWER set
+#: than `_DEDUP_CATEGORIES` (which also covers function/variable/version
+#: dedup categories unrelated to enums). Codex review, fresh evidence: an
+#: earlier revision gated the bridging on `c.kind in _DEDUP_CATEGORIES`
+#: directly, so an unrelated symbol from any OTHER category whose spelling
+#: happened to coincide with a registered enum alias (e.g. an extern-C
+#: `FUNC_REMOVED` named "Color" when a `detail::Color` enum exists) had its
+#: `Change.qualified_name` incorrectly rewritten to the enum's qualified
+#: spelling -- corrupting an unrelated finding's identity, and doing so
+#: permanently, since the later `EnrichSourceLocations` step refuses to
+#: overwrite an already-populated `qualified_name`.
+_ENUM_QUALIFICATION_KINDS = frozenset(
+    {
+        ChangeKind.ENUM_MEMBER_REMOVED,
+        ChangeKind.ENUM_MEMBER_VALUE_CHANGED,
+        ChangeKind.ENUM_LAST_MEMBER_VALUE_CHANGED,
+        ChangeKind.ENUM_UNDERLYING_SIZE_CHANGED,
+    }
+)
+
+
+def _enum_canonical_names(snap: AbiSnapshot | None) -> dict[str, str]:
+    """Bare/qualified enum-name -> canonical (qualified-if-known) spelling.
+
+    Bridges two independent, individually-correct conventions this
+    codebase's two enum detectors use for ``Change.symbol``:
+    ``diff_types._diff_enums`` (header/castxml tier) always keys off
+    ``EnumType.name``, which stays deliberately *bare* for DWARF-parity
+    reasons (see ``EnumType.qualified_name``'s own docstring) — while
+    ``diff_platform._diff_enum_layouts`` (DWARF tier) keys directly off the
+    DWARF-derived dict, whose keys are always fully qualified
+    (``dwarf_metadata._process_enum``: ``f"{scope_prefix}::{name}"``).
+    Without this bridge, the exact same enum change reported by both tiers
+    resolves to two different :mod:`finding_identity` identities (one
+    bare, one qualified) and neither detector's own cross-detector dedup
+    can ever recognize them as the same finding.
+
+    Maps both a bare name and the qualified name to the same canonical
+    (qualified) value, so a lookup succeeds regardless of which spelling a
+    given tier's ``Change.symbol`` used.
+
+    Only registers an entry when ``EnumType.qualified_name`` is actually
+    known: an enum with no recorded qualification carries no bridging
+    information at all, so mapping its bare name to itself would be a
+    no-op that exists only to set ``Change.qualified_name`` to a value
+    identical to ``Change.symbol`` — and other consumers of that field
+    (e.g. ``post_processing_reachability.py``'s internal-namespace check)
+    treat "qualified_name is set" as meaningful evidence on its own,
+    regardless of what value it holds. Setting it here to a merely
+    identical string would be reporting false confidence rather than
+    fixing the bare-vs-qualified mismatch this function exists to close
+    (Codex review, fresh evidence — reproduced against a real enum member
+    named like an internal-namespace segment).
+
+    A bare name is registered only when it uniquely identifies one
+    qualified enum. Two distinct enums sharing a bare name (e.g.
+    ``a::Color`` and ``b::Color``) would otherwise have the bare key
+    ``setdefault``-pinned to whichever enum is iterated first -- silently
+    mapping the OTHER enum's own header-tier finding to the wrong
+    qualified spelling, which can both hide it from its real DWARF-tier
+    twin (a genuine cross-detector dedup miss, the opposite failure this
+    bridge exists to prevent) and misattribute it under later
+    namespace-aware processing that trusts ``qualified_name`` (Codex
+    review, fresh evidence). The fully-qualified key is never ambiguous --
+    two enums cannot share the same qualified name -- so it is always safe
+    to register.
+    """
+    if snap is None:
+        return {}
+    by_bare: dict[str, set[str]] = {}
+    out: dict[str, str] = {}
+    for e in getattr(snap, "enums", None) or ():
+        if not e.qualified_name:
+            continue
+        by_bare.setdefault(e.name, set()).add(e.qualified_name)
+        out[e.qualified_name] = e.qualified_name
+    for bare, qualified_names in by_bare.items():
+        if len(qualified_names) == 1:
+            out[bare] = next(iter(qualified_names))
+    return out
+
+
+def _canonicalize_enum_symbol(symbol: str, enum_names: dict[str, str]) -> str | None:
+    """Translate *symbol* (an enum's own name, or ``"Enum::member"``) to its
+    canonical spelling via *enum_names* (see :func:`_enum_canonical_names`).
+
+    Tries a whole-symbol match first (``ENUM_UNDERLYING_SIZE_CHANGED``,
+    ``ENUM_BECAME_SCOPED``, ... — ``symbol`` is the bare enum name itself),
+    then splits off the trailing ``"::member"`` (``ENUM_MEMBER_REMOVED``,
+    ``ENUM_MEMBER_VALUE_CHANGED``, ...) and translates only the enum-name
+    prefix — ``rpartition`` splits on the *last* ``"::"``, which is always
+    the member separator regardless of how many scope components the
+    enum's own qualified name carries. Returns ``None`` when *enum_names*
+    recognizes neither shape (an unrelated symbol, or genuinely no
+    qualified spelling known from either tier).
+    """
+    canonical = enum_names.get(symbol)
+    if canonical is not None:
+        return canonical
+    if "::" in symbol:
+        prefix, _, member = symbol.rpartition("::")
+        canonical_prefix = enum_names.get(prefix)
+        if canonical_prefix:
+            return f"{canonical_prefix}::{member}"
+    return None
+
+
 def _enrich_source_locations(
     changes: list[Change],
     old: AbiSnapshot,
@@ -228,6 +336,8 @@ def _enrich_source_locations(
 
     old_qualified = _qualified_functions_by_mangled(old) | _qualified_variables_by_mangled(old)
     new_qualified = _qualified_functions_by_mangled(new) | _qualified_variables_by_mangled(new)
+    old_enum_names = _enum_canonical_names(old)
+    new_enum_names = _enum_canonical_names(new)
 
     for c in changes:
         if not c.source_location:
@@ -244,6 +354,15 @@ def _enrich_source_locations(
                 c.source_location = loc
         if not c.qualified_name:
             qual = _qualified_name_for_change(c, old_qualified, new_qualified)
+            if not qual and c.kind in _ENUM_QUALIFICATION_KINDS:
+                # Scoped to the four enum kinds the bridge is meant for --
+                # see _ENUM_QUALIFICATION_KINDS's own docstring (Codex
+                # review, fresh evidence: a second unconditional call site,
+                # this one in the enrichment pass rather than the dedup
+                # pass, had the identical unrelated-symbol-collision risk).
+                qual = _canonicalize_enum_symbol(
+                    c.symbol, old_enum_names
+                ) or _canonicalize_enum_symbol(c.symbol, new_enum_names)
             if qual:
                 c.qualified_name = qual
 
@@ -1325,7 +1444,11 @@ def _deduplicate_ast_dwarf(changes: list[Change]) -> list[Change]:
     return _dedup_cross_kind(stage2)
 
 
-def _deduplicate_cross_detector(changes: list[Change]) -> list[Change]:
+def _deduplicate_cross_detector(
+    changes: list[Change],
+    old: AbiSnapshot | None = None,
+    new: AbiSnapshot | None = None,
+) -> list[Change]:
     """Remove cross-detector duplicates that the per-detector guards may miss.
 
     Centralised dedup applied after all detectors have run. The dedup key is
@@ -1345,6 +1468,22 @@ def _deduplicate_cross_detector(changes: list[Change]) -> list[Change]:
     - "func_addition": FUNC_ADDED
     - "var_removal": VAR_REMOVED
     - "var_addition": VAR_ADDED
+    - "enum_member_removed"/"enum_member_value_changed"/
+      "enum_last_member_value_changed"/"enum_underlying_size_changed": each
+      is the *same* ``ChangeKind`` reported independently by the L2
+      header-tier enum detector (``diff_types._diff_enums``, keyed by
+      ``EnumType.name`` — deliberately bare, see that field's docstring)
+      and the L1 DWARF-tier one (``diff_platform._diff_enum_layouts``,
+      keyed by the DWARF dict's own fully-qualified name) whenever both
+      tiers observe the same enum. Reaching this dict alone is not
+      sufficient to collapse them — ``resolve_change_identity``'s
+      NORMALIZED-tier identity also needs the two spellings bridged to the
+      same qualified name, which ``_enrich_source_locations``'s
+      ``_enum_canonical_names``/``_canonicalize_enum_symbol`` (this module,
+      above) does before this step ever runs. The two module-import order
+      in ``checker.py`` (``diff_platform`` before ``diff_types``,
+      alphabetical) means the richer, qualified DWARF-tier finding is
+      always the "first occurrence" kept below.
 
     Within each category, the first occurrence wins (preserving detector
     priority order from the ``compare()`` spec list).
@@ -1359,6 +1498,18 @@ def _deduplicate_cross_detector(changes: list[Change]) -> list[Change]:
         # the same version string.  Keep the more specific node-level change.
         ChangeKind.SYMBOL_VERSION_NODE_REMOVED: "version_def_removal",
         ChangeKind.SYMBOL_VERSION_DEFINED_REMOVED: "version_def_removal",
+        # See this function's own docstring above: the L1 (DWARF)/L2 (header)
+        # enum detectors independently report the same ChangeKind for the
+        # same enum member change. resolve_change_identity's own
+        # _EQUIVALENT_CHANGE_CATEGORIES already self-maps these four kinds
+        # (so their *discriminator* already collapses regardless of
+        # producer-specific old_value/description spelling) — what was
+        # missing was including them here at all, so identity resolution
+        # (and therefore dedup) is even attempted for them.
+        ChangeKind.ENUM_MEMBER_REMOVED: "enum_member_removed",
+        ChangeKind.ENUM_MEMBER_VALUE_CHANGED: "enum_member_value_changed",
+        ChangeKind.ENUM_LAST_MEMBER_VALUE_CHANGED: "enum_last_member_value_changed",
+        ChangeKind.ENUM_UNDERLYING_SIZE_CHANGED: "enum_underlying_size_changed",
     }
     # A symbol-version-node bump (e.g. LLVM_17 -> LLVM_18.1 applied to every
     # symbol during a major release) makes BOTH version detectors fire per
@@ -1380,6 +1531,27 @@ def _deduplicate_cross_detector(changes: list[Change]) -> list[Change]:
         for c in changes
         if c.kind is ChangeKind.SYMBOL_MOVED_VERSION_NODE
     }
+
+    # This step runs BEFORE EnrichSourceLocations in the default pipeline
+    # (DEFAULT_PIPELINE), so the four enum categories above cannot rely on
+    # that later step to have already bridged a bare/qualified enum-name
+    # spelling mismatch into a matching `Change.qualified_name` --
+    # `resolve_change_identity` would still see the raw, tier-specific
+    # `symbol` and compute two different identities. Do the same bridging
+    # here, early, whenever the caller has the snapshots available (the
+    # pipeline step always does; a caller testing this function directly
+    # with no `old`/`new` degrades to the pre-existing behavior — a missed
+    # dedup for these four kinds, never an incorrect one).
+    if old is not None or new is not None:
+        old_enum_names = _enum_canonical_names(old)
+        new_enum_names = _enum_canonical_names(new)
+        for c in changes:
+            if c.kind in _ENUM_QUALIFICATION_KINDS and not c.qualified_name:
+                qual = _canonicalize_enum_symbol(
+                    c.symbol, old_enum_names
+                ) or _canonicalize_enum_symbol(c.symbol, new_enum_names)
+                if qual:
+                    c.qualified_name = qual
 
     seen: set[str] = set()
     result: list[Change] = []

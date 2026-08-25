@@ -558,6 +558,206 @@ def msvc_qualified_name(mangled: str) -> str | None:
     return "::".join(comps) if comps else None
 
 
+#: Symbol-operator spellings that carry a literal ``<``/``>`` as part of the
+#: operator token itself (stream insertion/extraction, relational, C++20
+#: three-way comparison) rather than as template-argument delimiters --
+#: longest-first so ``"<<="`` matches before the shorter ``"<<"``/``"<"``
+#: prefixes it also starts with.
+_OPERATOR_ANGLE_TOKENS = ("<<=", ">>=", "<=>", "<<", ">>", "<=", ">=", "<", ">")
+
+
+def _operator_angle_token_len(qualified: str, i: int) -> int:
+    """Length of a symbol-operator angle token at *qualified[i:]* immediately
+    following a literal ``"operator"`` (checked by the caller), or 0.
+
+    ``ns::Stream::operator<<`` has no space after ``operator`` -- unlike a
+    conversion operator (``operator ns::Bar``), so it never matches the
+    ``"::operator "`` marker above -- and its own ``<``/``>`` are the
+    operator's spelling, not template-argument delimiters. Without
+    recognizing this, the depth tracker below would see an unmatched ``<``
+    (or two, for ``operator<<``) with no closing ``>`` anywhere in the
+    string, reporting "unbalanced nesting" and rejecting an otherwise
+    perfectly ordinary qualified name (Codex/CodeRabbit review, fresh
+    evidence).
+    """
+    for tok in _OPERATOR_ANGLE_TOKENS:
+        if qualified.startswith(tok, i):
+            return len(tok)
+    return 0
+
+
+def _operator_keyword_precedes(qualified: str, i: int) -> bool:
+    """Whether ``qualified[i-8:i] == "operator"`` is the COMPLETE leaf
+    token, not merely a suffix of a longer identifier.
+
+    A bare suffix match alone is unsound: ``lib::myoperator<old::A>::f`` also
+    ends in the eight characters ``"operator"`` immediately before its ``<``,
+    but the real identifier is ``myoperator`` -- a legal (if unusual) class
+    name, not an overloaded-operator declaration. Requires the character
+    immediately before ``"operator"`` to be a scope/token boundary (start of
+    string, or anything that isn't an identifier character) rather than
+    assuming one (Codex review, fresh evidence).
+    """
+    if i < 8:
+        return False
+    if qualified[i - 8 : i] != "operator":
+        return False
+    before = i - 8
+    return before == 0 or not (qualified[before - 1].isalnum() or qualified[before - 1] == "_")
+
+
+def qualified_name_scope_components(qualified: str) -> list[str] | None:
+    """Scope components of an already-demangled, ``::``-qualified name.
+
+    A structural counterpart to :func:`itanium_scope_components`/
+    :func:`msvc_scope_components` for callers that hold a plain qualified
+    spelling rather than a mangled symbol — e.g. a header-tier snapshot key
+    that was never mangled at all (a synthesized constructor/destructor
+    identity, a plain-C fallback name) but is already scope-qualified text::
+
+        "ns::Class::method" -> ["ns", "Class", "method"]
+        "Class::method"     -> ["Class", "method"]
+        "freefunc"          -> ["freefunc"]              (no scope to split)
+
+    Splits only at TOP-LEVEL ``"::"`` — bracket/paren nesting depth is
+    tracked (mirroring ``clang_layout_tool._bare_base_name``'s identical
+    concern) so a template argument's own ``"::"`` is never mistaken for a
+    scope separator. Without this, ``"lib::foo<old::A>"`` would split into
+    ``["lib", "foo<old", "A>"]`` — the fabricated middle component
+    ``"foo<old"`` can then coincidentally collide with an unrelated
+    ``"foo<new"`` from a different instantiation, producing a false
+    namespace-move grouping between two type arguments that were never
+    renamed at all (Codex review, fresh evidence: exactly this happened for
+    ``lib::foo<old::A>``/``lib::foo<old::B>`` vs.
+    ``lib::foo<new::A>``/``lib::foo<new::B>``, reported as a spurious
+    BREAKING ``symbol_renamed_batch``)::
+
+        "lib::foo<old::A>" -> ["lib", "foo<old::A>"]   (not ["lib", "foo<old", "A>"])
+
+    A conversion operator's own target type can itself carry ``"::"``
+    (``"api::C::operator old::X"`` for `operator old::X()`) — without special
+    handling, the target's own scope separator would be treated as an
+    enclosing-scope boundary too, splitting into
+    ``["api", "C", "operator old", "X"]`` instead of the correct
+    ``["api", "C", "operator old::X"]``. That fabricated middle component
+    can then collide with an unrelated target sharing the same "operator
+    <prefix>" spelling, producing a false namespace-move grouping (Codex
+    review, fresh evidence — mirrors the identical concern
+    :func:`owner_class_of` already documents for exactly this shape).
+    Recognized the same way that function already does: a top-level
+    ``"::operator "`` marker is the true scope/leaf boundary, and
+    everything from ``"operator "`` onward (including the target's own
+    ``"::"``) is kept as ONE opaque leaf component, never split further.
+
+    Deliberately conservative: returns ``None`` for an empty string, a
+    component list with any empty segment (a leading/trailing/doubled
+    top-level ``"::"``, e.g. ``"::foo"`` or ``"foo::::bar"``), or unbalanced
+    bracket/paren nesting, rather than silently dropping or fabricating a
+    component, mirroring the "return ``None``, let the caller fall back"
+    contract the mangled-name parsers above use.
+    """
+    if not qualified:
+        return None
+    marker = "::operator "
+    depth = 0
+    i = 0
+    n = len(qualified)
+    marker_idx = -1
+    while i < n:
+        ch = qualified[i]
+        if ch in "<>" and _operator_keyword_precedes(qualified, i):
+            tok_len = _operator_angle_token_len(qualified, i)
+            if tok_len:
+                i += tok_len
+                continue
+        if ch in "<(":
+            depth += 1
+        elif ch in ">)":
+            depth -= 1
+            if depth < 0:
+                return None
+        elif depth == 0 and qualified[i : i + len(marker)] == marker:
+            marker_idx = i
+            break
+        i += 1
+    if marker_idx != -1:
+        head = qualified[:marker_idx]
+        leaf = qualified[marker_idx + 2 :]  # keep the "operator ..." target whole
+        head_comps = qualified_name_scope_components(head)
+        if head_comps is None:
+            return None
+        return [*head_comps, leaf]
+    if qualified.startswith("operator "):
+        # A bare-recorded conversion operator with no owning-class prefix at
+        # all (no "::operator " marker to find) can still carry a qualified
+        # target ("operator ns::Bar") whose own "::" is not a scope
+        # separator -- the same shape owner_class_of's docstring documents.
+        # There is no scope to substitute here regardless, so treat the
+        # whole thing as one leaf rather than guessing at a split.
+        return [qualified]
+    comps: list[str] = []
+    depth = 0
+    start = 0
+    i = 0
+    while i < n:
+        ch = qualified[i]
+        if ch in "<>" and _operator_keyword_precedes(qualified, i):
+            tok_len = _operator_angle_token_len(qualified, i)
+            if tok_len:
+                i += tok_len
+                continue
+        if ch in "<(":
+            depth += 1
+        elif ch in ">)":
+            depth -= 1
+            if depth < 0:
+                return None
+        elif depth == 0 and qualified[i : i + 2] == "::":
+            comps.append(qualified[start:i])
+            i += 2
+            start = i
+            continue
+        i += 1
+    if depth != 0:
+        return None
+    comps.append(qualified[start:])
+    if any(not c for c in comps):
+        return None
+    return comps
+
+
+def strip_trailing_top_level_parameter_list(text: str) -> str:
+    """Strip a trailing ``(...)`` parameter list, at TOP-LEVEL template
+    nesting only.
+
+    A synthesized constructor key (``__abicheck_ctor__<scope>(<params>)``)
+    needs its parameter-list suffix removed before the ``<scope>`` prefix is
+    handed to :func:`qualified_name_scope_components` — but a naive
+    ``text.find("(")`` matches the FIRST ``(`` anywhere, including one
+    belonging to a function-type template argument nested inside the scope
+    itself (e.g. ``ns::Holder<void(int)>``), truncating the scope at that
+    inner paren instead of the real, top-level parameter list (Codex/
+    CodeRabbit review, fresh evidence). Tracks ``<``/``>`` nesting depth —
+    mirroring :func:`qualified_name_scope_components`'s own concern — and
+    only treats a ``(`` at depth 0 as the parameter list's start::
+
+        "ns::Holder<void(int)>(int)" -> "ns::Holder<void(int)>"
+        "ns::graph"                  -> "ns::graph"              (no paren at all)
+
+    Returns *text* unchanged when no top-level ``(`` is found (e.g. unbalanced
+    nesting, or genuinely no parameter list) rather than guessing.
+    """
+    depth = 0
+    for i, ch in enumerate(text):
+        if ch == "<":
+            depth += 1
+        elif ch == ">":
+            depth = max(0, depth - 1)
+        elif ch == "(" and depth == 0:
+            return text[:i]
+    return text
+
+
 def owner_class_of(f: Function) -> str | None:
     """The enclosing class/struct of a method.
 

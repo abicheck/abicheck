@@ -1031,6 +1031,14 @@ _EQUIVALENT_CHANGE_CATEGORIES = {
     "enum_member_value_changed": "enum_member_value_changed",
     "enum_member_removed": "enum_member_removed",
     "enum_last_member_value_changed": "enum_last_member_value_changed",
+    # diff_types._diff_enums (L2 header tier, bare EnumType.name) and
+    # diff_platform._diff_enum_layouts (L1 DWARF tier, fully-qualified DWARF
+    # dict key) both emit this same kind for the same enum's underlying-type
+    # size change — self-mapped so its discriminator collapses across
+    # producers the same way the three sibling enum-member kinds above
+    # already do; see diff_filtering._deduplicate_cross_detector's own
+    # docstring for the qualified-name bridge this also depends on.
+    "enum_underlying_size_changed": "enum_underlying_size_changed",
     # diff_symbols._detect_newly_deleted_functions emits FUNC_DELETED
     # (castxml is_deleted attribute) or FUNC_DELETED_DWARF (DWARF
     # DW_AT_deleted) for the same symbol/callable->deleted transition --

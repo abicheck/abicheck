@@ -38,8 +38,18 @@ from .checker_policy import ChangeKind
 from .checker_types import Change
 from .demangle import demangle, demangle_batch
 from .detector_registry import registry
-from .diff_cxx_rules import itanium_scope_components, msvc_scope_components
+from .diff_cxx_rules import (
+    itanium_scope_components,
+    msvc_scope_components,
+    qualified_name_scope_components,
+    strip_trailing_top_level_parameter_list,
+)
 from .diff_helpers import make_change
+from .dumper_castxml import (
+    SYNTHETIC_CTOR_KEY_PREFIX,
+    is_synthetic_ctor_key,
+    is_synthetic_dtor_key,
+)
 from .elf_metadata import SymbolType
 from .elf_symbol_filter import is_abi_relevant_elf_symbol
 from .model import AbiSnapshot, Function, is_cxx_runtime_library
@@ -802,16 +812,81 @@ def emit_prefix_batch_rename(rename_pairs: list[tuple[str, str]]) -> list[Change
 _MASKED = "\x00"
 
 
+def _qualified_key_scope_components(key: str) -> list[str] | None:
+    """Scope chain for a header-tier snapshot key that was never mangled.
+
+    Many real findings this detector needs to see are keyed by something
+    other than a mangled symbol — a header-only (L2) backend can leave
+    ``Function.mangled`` as a *qualified display name* instead, and
+    :func:`itanium_scope_components`/:func:`msvc_scope_components` both
+    correctly return ``None`` for those (they parse mangling grammars, not
+    qualified text). Two shapes are recognized here, both produced by
+    ``dumper_castxml`` when castxml omits a ctor/dtor's real mangled name
+    (see ``SYNTHETIC_CTOR_KEY_PREFIX``/``is_synthetic_dtor_key``):
+
+    * ``__abicheck_ctor__<scope>(<params>)`` — a synthesized constructor
+      identity. The ``<scope>`` is a real, qualified class path
+      (``"tbb::detail::d1::graph"``); the parameter signature is stripped
+      before splitting.
+    * ``~<scope>`` — a synthesized destructor identity, the same qualified
+      class path with a leading ``~``.
+
+    For both, a synthetic trailing leaf (``"{ctor}"``/``"{dtor}"``) is
+    appended after splitting the scope on ``"::"`` — mirroring the shape
+    :func:`itanium_scope_components` already produces for a *real* mangled
+    ctor/dtor (``_ZN1CC1Ev -> ["C", "{ctor}"]``, never the class name
+    itself as the leaf). This keeps the "which index is the leaf, and
+    therefore excluded from namespace substitution" position semantics
+    identical regardless of whether the chain came from a real mangling or
+    from this fallback — without it, a synthesized ctor/dtor key would let
+    :func:`find_namespace_move_groups` treat the class's own name as a
+    substitutable "namespace segment", which a real mangled ctor/dtor never
+    permits.
+
+    Any other key containing ``"::"`` (a header-tier function with no
+    mangled name at all, but a real ``"ns::Class::member"`` display name)
+    is split as-is via :func:`qualified_name_scope_components` — its own
+    last component already is the leaf, same as a plain mangled free
+    function's single component is.
+
+    A key with neither a recognized synthetic prefix nor any ``"::"`` at
+    all (a bare, unqualified name — the plain-C-linkage fallback) carries
+    no scope to substitute, so it returns ``None`` the same as an
+    unmodelled mangled form would.
+    """
+    if is_synthetic_ctor_key(key):
+        scope = strip_trailing_top_level_parameter_list(
+            key[len(SYNTHETIC_CTOR_KEY_PREFIX) :]
+        )
+        comps = qualified_name_scope_components(scope)
+        return [*comps, "{ctor}"] if comps else None
+    if is_synthetic_dtor_key(key):
+        comps = qualified_name_scope_components(key[1:])
+        return [*comps, "{dtor}"] if comps else None
+    if "::" not in key:
+        return None
+    return qualified_name_scope_components(key)
+
+
 def _scope_components(mangled: str) -> list[str] | None:
     """Return *mangled*'s scope chain (namespaces + class path + leaf), or None.
 
     Itanium first, MSVC second — the two prefixes (``_Z``/``__Z`` vs. ``?``)
     are mutually exclusive, so trying both in order is unambiguous, and it is
-    the same order :func:`diff_cxx_rules.owner_class_of` already uses. A
-    component list shorter than two carries no namespace to substitute, so it
-    is reported as "no usable chain" rather than as a one-element chain.
+    the same order :func:`diff_cxx_rules.owner_class_of` already uses. When
+    neither recognizes *mangled* as a mangling at all — a header-tier key
+    that was never mangled in the first place, see
+    :func:`_qualified_key_scope_components` — fall back to parsing it as
+    already-qualified text. A component list shorter than two carries no
+    namespace to substitute, so it is reported as "no usable chain" rather
+    than as a one-element chain, regardless of which of the three parsers
+    produced it.
     """
-    comps = itanium_scope_components(mangled) or msvc_scope_components(mangled)
+    comps = (
+        itanium_scope_components(mangled)
+        or msvc_scope_components(mangled)
+        or _qualified_key_scope_components(mangled)
+    )
     if comps is None or len(comps) < 2:
         return None
     return comps
@@ -863,6 +938,17 @@ def find_namespace_move_groups(
             added_index.setdefault(masked, []).append((a_sym, comps))
 
     groups: dict[tuple[str, str], list[tuple[str, str]]] = {}
+    # Tracks which (old_qualified, new_qualified) pairs have already been
+    # recorded per substitution key, so the SAME declaration reported under
+    # two different `removed` string identities (a real mangled symbol and
+    # a header-tier synthetic key that normalize to the identical
+    # scope-component list -- see the co-matching comment below) is only
+    # ever counted once toward the 2+-pairs support threshold
+    # (Codex review, fresh evidence: without this, one moved declaration
+    # reported both ways produced two identical list entries, passing
+    # emit_namespace_move_batches' threshold and reporting a false
+    # BREAKING batch for what was really a single symbol).
+    recorded_pairs: dict[tuple[str, str], set[tuple[str, str]]] = {}
     for r_sym in sorted(removed):
         r_comps = _scope_components(r_sym)
         if r_comps is None:
@@ -870,14 +956,53 @@ def find_namespace_move_groups(
         seen_here: set[tuple[str, str]] = set()
         for i in range(len(r_comps) - 1):
             masked = tuple(r_comps[:i]) + (_MASKED,) + tuple(r_comps[i + 1 :])
-            for a_sym, a_comps in added_index.get(masked, ()):
-                key = (r_comps[i], a_comps[i])
-                if key[0] == key[1] or key in seen_here:
-                    continue
-                seen_here.add(key)
-                groups.setdefault(key, []).append(
-                    ("::".join(r_comps), "::".join(a_comps))
-                )
+            candidates = added_index.get(masked, [])
+            # Reject an AMBIGUOUS substitution at the source (Codex review,
+            # fresh evidence): when the SAME masked context (this removed
+            # symbol's scope chain with position `i` blanked out) matches
+            # MORE THAN ONE added symbol -- e.g. removed old1::{f,g}/
+            # old2::{f,g} vs. added new1::{f,g}/new2::{f,g}, where
+            # `old1::f` masked at its differing position matches BOTH
+            # `new1::f` and `new2::f` -- there is no way to tell which
+            # candidate is the real rename target for this symbol, so
+            # neither is recorded. Deliberately LOCAL (per masked context),
+            # not a global "does this bare segment string ever appear with
+            # two different targets anywhere" check: two genuinely
+            # independent, unambiguous moves that happen to reuse the same
+            # bare segment NAME in different scopes (`p1::old::{f,g} ->
+            # p1::new1::{f,g}` alongside the unrelated `p2::old::{h,i} ->
+            # p2::new2::{h,i}`) must still both be reported -- each
+            # individual masked lookup there has exactly one candidate, so
+            # neither is ambiguous by this test, even though the bare
+            # segment "old" ends up mapped to two different bare targets
+            # across the two unrelated groups. The same
+            # false-negative-over-false-positive default this codebase's
+            # other ambiguity guards use (see e.g. type_reachability.py's
+            # collision handling) -- applied at the granularity the
+            # ambiguity actually exists at.
+            #
+            # Distinct by TARGET SEGMENT VALUE, not by candidate count: the
+            # same class can legitimately appear twice in `added` under two
+            # different string identities that parse to the identical
+            # scope-component list -- a real mangled ctor symbol and a
+            # header-tier synthetic ctor key for the SAME move both
+            # normalize to e.g. ["tbb","detail","d2","graph","{ctor}"].
+            # That is not ambiguity (both candidates agree on the target),
+            # only genuinely differing target segments are.
+            distinct_targets = {a_comps[i] for _a_sym, a_comps in candidates}
+            if len(distinct_targets) != 1:
+                continue
+            a_sym, a_comps = candidates[0]
+            key = (r_comps[i], a_comps[i])
+            if key[0] == key[1] or key in seen_here:
+                continue
+            seen_here.add(key)
+            pair = ("::".join(r_comps), "::".join(a_comps))
+            already_recorded = recorded_pairs.setdefault(key, set())
+            if pair in already_recorded:
+                continue
+            already_recorded.add(pair)
+            groups.setdefault(key, []).append(pair)
     return groups
 
 

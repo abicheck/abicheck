@@ -491,6 +491,24 @@ def is_compiler_internal_type(name: str) -> bool:
     )
 
 
+def contains_anonymous_type_marker(text: str | None) -> bool:
+    """Return True if *text* embeds an anonymous/lambda-closure type marker.
+
+    A narrower, standalone sibling of :func:`is_non_abi_surface_type`'s
+    anonymous-type check (the marker test alone, with none of that
+    function's compiler-internal/stdlib-namespace exclusions) for a caller
+    that isn't testing a *type identity* string but some other piece of
+    already-recorded text a type's own spelling can flow into — e.g. a
+    ``Change.symbol``/``old_value``/``new_value`` for a function-level
+    finding whose parameter or owner type is closure-parameterized. Safe on
+    ``None`` (returns ``False``) so a caller doesn't need to guard every
+    optional ``Change`` field before checking it.
+    """
+    if not text:
+        return False
+    return any(marker in text for marker in _ANONYMOUS_TYPE_MARKERS)
+
+
 def is_non_abi_surface_type(
     name: str, *, exclude_stdlib_namespaces: bool = True
 ) -> bool:
@@ -513,7 +531,7 @@ def is_non_abi_surface_type(
         return True
     if exclude_stdlib_namespaces and name.startswith(STDLIB_TYPE_NAMESPACE_PREFIXES):
         return True
-    return any(marker in name for marker in _ANONYMOUS_TYPE_MARKERS)
+    return contains_anonymous_type_marker(name)
 
 
 def is_abi_surface_type_name(name: str, *, exclude_stdlib: bool) -> bool:
