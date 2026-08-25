@@ -1285,3 +1285,70 @@ class TestFindNamespaceMoveGroupsRejectsCrossPositionManyToOnePairings:
         removed = {"_ZN3old3new1fEv", "_ZN3new3old1fEv"}
         added = {"_ZN3new3new1fEv"}
         assert find_namespace_move_groups(removed, added) == {}
+
+
+class TestFindNamespaceMoveGroupsRejectsCrossPositionOneToManyPairings:
+    """Codex review, fresh evidence: the previous fixes catch several
+    removed symbols converging on one added declaration; they say nothing
+    about the SYMMETRIC shape -- the SAME removed symbol resolving to
+    DIFFERENT added declarations at its different masking positions.
+    Removing ``p1::old::{f,g}`` while adding ``new::old::{f,g}`` AND
+    ``p1::new::{f,g}`` makes each removed symbol match TWO candidates: at
+    masking position 0 (hiding ``p1``) it matches ``new::old::{f,g}``
+    (implying ``p1 -> new``); at masking position 1 (hiding ``old``) it
+    matches ``p1::new::{f,g}`` (implying ``old -> new``). Both
+    substitutions are individually unambiguous by every other check, yet
+    the identical removed symbol is being counted as evidence for two
+    mutually exclusive moves at once."""
+
+    def test_one_removed_symbol_matching_two_targets_across_positions_is_rejected(
+        self,
+    ) -> None:
+        removed = {"_ZN2p13old1fEv", "_ZN2p13old1gEv"}
+        added = {
+            "_ZN3new3old1fEv",
+            "_ZN3new3old1gEv",
+            "_ZN2p13new1fEv",
+            "_ZN2p13new1gEv",
+        }
+        assert find_namespace_move_groups(removed, added) == {}
+
+    def test_unrelated_same_position_collision_does_not_taint_a_clean_move(
+        self,
+    ) -> None:
+        """Regression for a real bug in an earlier revision of this fix:
+        building the cross-position tracking dicts from the SAME entry set
+        for both directions let a same-position collision on `p1`'s own
+        entry (correctly rejected on its own by the position-scoped
+        many-to-one guard) leak into the SYMMETRIC (removed-side) check for
+        the UNRELATED `ns::old::f`/`ns::old::g`, which happens to share the
+        bare masked context ``('*', 'old', 'f')``/``('*', 'old', 'g')``
+        with `p1::old::f`/`p1::old::g` purely by coincidental bare-name
+        reuse. `ns::old -> ns::new` is a real, cleanly-evidenced move via
+        its OWN, collision-free masking position and must survive; `p1`'s
+        and `p2`'s contradictory claims on `new::old::{f,g}` (the
+        cross-position many-to-one shape from the previous test class)
+        must still both be rejected."""
+        removed = {
+            "_ZN2p13old1fEv",
+            "_ZN2p13old1gEv",
+            "_ZN3new2p21fEv",
+            "_ZN3new2p21gEv",
+            "_ZN2ns3old1fEv",
+            "_ZN2ns3old1gEv",
+        }
+        added = {
+            "_ZN3new3old1fEv",
+            "_ZN3new3old1gEv",
+            "_ZN2ns3new1fEv",
+            "_ZN2ns3new1gEv",
+        }
+        groups = find_namespace_move_groups(removed, added)
+        assert groups == {
+            ("old", "new"): [
+                ("ns::old::f", "ns::new::f"),
+                ("ns::old::g", "ns::new::g"),
+            ]
+        }
+        assert ("p1", "new") not in groups
+        assert ("p2", "old") not in groups

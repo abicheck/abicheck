@@ -990,7 +990,6 @@ def find_namespace_move_groups(
     # (Codex review, fresh evidence).
     entries: list[tuple[tuple[str, ...], list[str], int, list[str]]] = []
     masked_to_old_segments: dict[tuple[str, ...], set[str]] = {}
-    added_id_to_removed_symbols: dict[str, set[str]] = {}
     for r_sym in sorted(removed):
         r_comps = _scope_components(r_sym)
         if r_comps is None:
@@ -1038,52 +1037,130 @@ def find_namespace_move_groups(
                 continue
             masked_to_old_segments.setdefault(masked, set()).add(r_comps[i])
             entries.append((masked, r_comps, i, a_comps))
-            # Reject an ambiguous substitution ACROSS masking positions too
-            # (Codex review, fresh evidence): the check above only catches
-            # two old segments competing for the SAME masked context (same
-            # position), but the identical added declaration can just as
-            # well be claimed by two removed symbols differing at
-            # DIFFERENT positions -- e.g. removed `p1::old::{f,g}` and
-            # `new::p2::{f,g}` vs. added only `new::old::{f,g}`:
-            # `p1::old::f` (masking position 0) and `new::p2::f` (masking
-            # position 1) both resolve to the SAME added `new::old::f`, so
-            # their masked contexts differ and the position-scoped check
-            # above sees no collision at all, yet the same added
-            # declaration cannot simultaneously be evidence for both
-            # `p1 -> new` AND `p2 -> old`.
-            #
-            # Tracked by DISTINCT CLAIMING REMOVED-SYMBOL IDENTITY, not by
-            # distinct substitution KEY (Codex review, fresh evidence: an
-            # earlier revision tracked distinct `(old_segment, new_segment)`
-            # key text instead, which is insufficient -- removing
-            # `old::new::f` and `new::old::f` while adding only
-            # `new::new::f` has BOTH claims spell the identical key
-            # `('old', 'new')` (`old::new::f` masked at position 0 gives
-            # `old -> new`; `new::old::f` masked at position 1 also gives
-            # `old -> new`), so a key-text set collapses them to size one
-            # and the guard wrongly accepted both, even though they are two
-            # genuinely different removed originals both claiming the same
-            # single added declaration as their target -- an added
-            # declaration can only actually be the result of one historical
-            # move). Keyed by the added declaration's own identity (its
-            # full "::"-joined scope chain), tracking the set of distinct
-            # claiming removed symbols' own "::"-joined identities: two
-            # different string spellings of the SAME removed declaration
-            # (a real mangled symbol and a header-tier synthetic key for
-            # the same move -- see the co-matching comment above, which is
-            # about the ADDED side, but the identical principle applies
-            # here) normalize to the same joined identity and so still
-            # count as one claimant, not two.
-            added_id_to_removed_symbols.setdefault("::".join(a_comps), set()).add(
-                "::".join(r_comps)
-            )
+
+    # Phase 1b: build the two cross-position collision signals Phase 2 below
+    # needs -- deliberately a separate pass over `entries`, not folded into
+    # the loop above, and deliberately built from two DIFFERENT entry sets
+    # (Codex review, fresh evidence, two rounds): an earlier revision built
+    # BOTH signals from the SAME entry set, and either choice of that one
+    # set was wrong for a different reason.
+    #
+    # Building both from the FULL, unfiltered `entries` list let a same
+    # -position collision on ONE removed symbol's entry (already correctly
+    # rejected on its own by `masked_to_old_segments`) leak into
+    # `removed_id_to_added_symbols` for an UNRELATED removed symbol sharing
+    # that same masked context, wrongly making that unrelated symbol look
+    # self-contradictory (see the "spurious same-position collision must
+    # not taint a symbol's own clean, different-position candidacy" test
+    # below: `ns::old::f`'s legitimate `ns -> new` move, evidenced cleanly
+    # via one masking position, was wrongly rejected purely because its
+    # OTHER masking position happened to collide with an unrelated `p1`/`p2`
+    # pair at that position's masked context).
+    #
+    # Building both from ONLY the entries that survive
+    # `masked_to_old_segments` instead (the fix attempted for the above)
+    # broke the ORIGINAL many-to-one-across-positions case this dict exists
+    # for: when a removed symbol's own entry is invalidated by a same
+    # -position collision with an UNRELATED third symbol, that entry's
+    # candidacy on a given added declaration is still real evidence that
+    # the added declaration is CONTESTED (a different removed symbol's
+    # independent, valid entry cannot be treated as its sole, uncontested
+    # source just because its rival's own entry additionally happens to
+    # collide with something else at the SAME masked context) -- see
+    # `TestFindNamespaceMoveGroupsRejectsCrossPositionManyToOnePairings`'s
+    # own reported collision, reproduced again here alongside `ns`: `p1`'s
+    # only candidacy on `new::old::f` still contests that target even
+    # though `p1`'s SPECIFIC entry is separately invalidated by the
+    # unrelated `ns` collision at that same masked context.
+    #
+    # The two questions are genuinely asymmetric, which is why they need
+    # two different entry sets:
+    #  - "is this ADDED declaration contested by more than one distinct
+    #    removed identity" (`added_id_to_removed_symbols`) is a question
+    #    about the target, answerable from EVERY raw candidacy regardless
+    #    of whether that candidacy is independently valid -- a same
+    #    -position-colliding candidacy is still a real, structurally
+    #    possible alternative explanation contesting the target, so it
+    #    still counts.
+    #  - "does this REMOVED symbol resolve to more than one distinct added
+    #    declaration" (`removed_id_to_added_symbols`) should only weigh a
+    #    removed symbol's OWN candidacies that are not already known
+    #    -spurious for an unrelated reason (a same-position collision with
+    #    a THIRD symbol) -- otherwise a removed symbol's one clean,
+    #    unambiguous candidacy gets wrongly discredited by its OWN
+    #    unrelated, already-rejected candidacy at a different position.
+    #
+    # `added_id_to_removed_symbols`: reject an ambiguous substitution
+    # ACROSS masking positions (Codex review, fresh evidence): the
+    # position-scoped check above only catches two old segments competing
+    # for the SAME masked context (same position), but the identical added
+    # declaration can just as well be claimed by two removed symbols
+    # differing at DIFFERENT positions -- e.g. removed `p1::old::{f,g}`
+    # and `new::p2::{f,g}` vs. added only `new::old::{f,g}`:
+    # `p1::old::f` (masking position 0) and `new::p2::f` (masking
+    # position 1) both resolve to the SAME added `new::old::f`, so their
+    # masked contexts differ and the position-scoped check above sees no
+    # collision at all, yet the same added declaration cannot
+    # simultaneously be evidence for both `p1 -> new` AND `p2 -> old`.
+    #
+    # Tracked by DISTINCT CLAIMING REMOVED-SYMBOL IDENTITY, not by distinct
+    # substitution KEY (Codex review, fresh evidence: an earlier revision
+    # tracked distinct `(old_segment, new_segment)` key text instead, which
+    # is insufficient -- removing `old::new::f` and `new::old::f` while
+    # adding only `new::new::f` has BOTH claims spell the identical key
+    # `('old', 'new')` (`old::new::f` masked at position 0 gives
+    # `old -> new`; `new::old::f` masked at position 1 also gives
+    # `old -> new`), so a key-text set collapses them to size one and the
+    # guard wrongly accepted both, even though they are two genuinely
+    # different removed originals both claiming the same single added
+    # declaration as their target -- an added declaration can only
+    # actually be the result of one historical move). Keyed by the added
+    # declaration's own identity (its full "::"-joined scope chain),
+    # tracking the set of distinct claiming removed symbols' own
+    # "::"-joined identities: two different string spellings of the SAME
+    # removed declaration (a real mangled symbol and a header-tier
+    # synthetic key for the same move -- see the co-matching comment above,
+    # which is about the ADDED side, but the identical principle applies
+    # here) normalize to the same joined identity and so still count as
+    # one claimant, not two.
+    #
+    # `removed_id_to_added_symbols`: reject the SYMMETRIC cross-position
+    # ambiguity too (Codex review, fresh evidence): the check just above
+    # catches several removed symbols converging on one added declaration;
+    # it says nothing about the reverse -- the SAME removed symbol matching
+    # DIFFERENT added declarations at its different masking positions. E.g.
+    # removed `p1::old::{f,g}` with added `new::old::{f,g}` AND
+    # `p1::new::{f,g}`: `p1::old::f` masked at position 0 (masking `p1`)
+    # matches `new::old::f` (implying `p1 -> new`), while the SAME
+    # `p1::old::f` masked at position 1 (masking `old`) matches
+    # `p1::new::f` (implying `old -> new`) -- two mutually exclusive
+    # substitutions, each independently unambiguous by every check above,
+    # both backed by the identical removed symbol as if it were evidence
+    # for both at once. Tracked the mirror-image way: per removed symbol's
+    # own "::"-joined identity, the set of distinct added declarations'
+    # "::"-joined identities it was resolved to across every masking
+    # position whose OWN masked context is not itself already known
+    # -ambiguous (see the asymmetry note above for why this differs from
+    # `added_id_to_removed_symbols`, which uses every raw candidacy).
+    added_id_to_removed_symbols: dict[str, set[str]] = {}
+    removed_id_to_added_symbols: dict[str, set[str]] = {}
+    for masked, r_comps, i, a_comps in entries:
+        added_id = "::".join(a_comps)
+        symbol_id = "::".join(r_comps)
+        added_id_to_removed_symbols.setdefault(added_id, set()).add(symbol_id)
+        if len(masked_to_old_segments[masked]) != 1:
+            continue
+        removed_id_to_added_symbols.setdefault(symbol_id, set()).add(added_id)
 
     # Phase 2: record only the entries whose masked context was claimed by
     # exactly one distinct old segment value (the position-scoped
-    # many-to-one rejection) AND whose added declaration was claimed by
+    # many-to-one rejection), whose added declaration was claimed by
     # exactly one distinct removed-symbol identity (the cross-position
-    # rejection) -- then apply the pre-existing per-symbol/per-key/per-pair
-    # dedup exactly as before.
+    # many-to-one rejection), AND whose removed symbol was itself resolved
+    # to exactly one distinct added declaration across all its masking
+    # positions (the symmetric cross-position one-to-many rejection) --
+    # then apply the pre-existing per-symbol/per-key/per-pair dedup exactly
+    # as before.
     seen_here: dict[str, set[tuple[str, str]]] = {}
     # Tracks which (old_qualified, new_qualified) pairs have already been
     # recorded per substitution key, so the SAME declaration reported under
@@ -1102,6 +1179,8 @@ def find_namespace_move_groups(
         added_id = "::".join(a_comps)
         symbol_id = "::".join(r_comps)
         if len(added_id_to_removed_symbols[added_id]) != 1:
+            continue
+        if len(removed_id_to_added_symbols[symbol_id]) != 1:
             continue
         key = (r_comps[i], a_comps[i])
         symbol_seen = seen_here.setdefault(symbol_id, set())

@@ -109,7 +109,20 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   removed-symbol identities* per added declaration instead of key text —
   an added declaration can only actually be the result of one historical
   move, regardless of whether two different claims happen to describe that
-  move with the same substitution text.
+  move with the same substitution text. A symmetric gap was found and
+  closed too: the same removed symbol can resolve to *different* added
+  declarations at its different masking positions (removing
+  `p1::old::{f,g}` while adding `new::old::{f,g}` and `p1::new::{f,g}`
+  makes each removed symbol match both `p1 -> new` and `old -> new`,
+  mutually exclusive substitutions, simultaneously) — now tracked the
+  mirror-image way, per removed symbol's own identity, the set of distinct
+  added declarations it resolves to. Building both directions' tracking
+  from the same entry set turned out to be unsound either way it was tried
+  (a same-position collision on one removed symbol's entry either leaked
+  into an unrelated symbol's own clean, different-position candidacy and
+  wrongly discredited it, or — filtered the other way — lost real evidence
+  that a target is contested); the two checks are now built from
+  deliberately different entry sets to avoid both failure modes.
 - **Cross-tier enum findings now dedupe correctly.** The L2 header-tier
   enum detector (`diff_types._diff_enums`, bare `EnumType.name`) and the L1
   DWARF-tier detector (`diff_platform._diff_enum_layouts`, fully-qualified
