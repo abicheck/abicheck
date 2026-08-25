@@ -190,7 +190,7 @@ topics:
     fact_sources:
       - abicheck/cli.py
       - abicheck/cli_scan.py
-      - abicheck/cli_secondary_output.py
+      - abicheck/frontends/cli/options/secondary_output.py
       - abicheck/cli_options.py
       - abicheck/cli_help.py
       - abicheck/cli_contract_options.py
@@ -364,7 +364,7 @@ topics:
       - abicheck/cli_scan.py
       - abicheck/cli_scan_baseline.py
       - abicheck/scan_engine.py
-      - abicheck/cli_secondary_output.py
+      - abicheck/frontends/cli/options/secondary_output.py
       - abicheck/finding_identity.py
       - abicheck/cli_compare_fold.py
       - abicheck/effective_config_digest.py
