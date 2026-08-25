@@ -793,26 +793,35 @@ def _local_merge_base_with_main(root: Path) -> str | None:
     silently diverge" gap `scripts/verify.py`'s own module docstring (M0-3)
     exists to prevent, just not yet closed for this one step.
 
+    Tries ``origin/main`` first (matching what CI's own base sha would
+    resolve to), then falls back to a local ``main`` branch -- a checkout
+    with no ``origin`` remote-tracking ref at all (the remote renamed or
+    removed, a bare local clone) still has a resolvable base then, instead
+    of silently reporting nothing (Codex review).
+
     Returns ``None`` (falling back to the previous unscoped comparison)
-    whenever git or a local `origin/main` ref isn't available -- a shallow
-    clone, a detached checkout, or a non-git ``--root`` such as this
+    when neither ref is resolvable -- a shallow clone, a detached checkout
+    with no local branch either, or a non-git ``--root`` such as this
     script's own miniature-tree tests use via `check_repository()` directly
     (which never calls this function at all). Never raises.
     """
-    try:
-        proc = subprocess.run(
-            ["git", "merge-base", "HEAD", "origin/main"],
-            cwd=root,
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return None
-    if proc.returncode != 0:
-        return None
-    sha = proc.stdout.strip()
-    return sha or None
+    for ref in ("origin/main", "main"):
+        try:
+            proc = subprocess.run(
+                ["git", "merge-base", "HEAD", ref],
+                cwd=root,
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+        except (OSError, subprocess.SubprocessError):
+            return None
+        if proc.returncode != 0:
+            continue
+        sha = proc.stdout.strip()
+        if sha:
+            return sha
+    return None
 
 
 def main(argv: list[str] | None = None) -> int:

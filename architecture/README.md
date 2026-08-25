@@ -52,14 +52,17 @@ concurrent pre-adoption work as new debt.
 
 A local run resolves the same base without `ARCHITECTURE_BASE` set: absent an
 explicit `--base` or that environment variable, `check_architecture.py` falls
-back to the local `git merge-base HEAD origin/main` when one is resolvable.
-Without this, a bare local invocation compares every debt-tracked file
-against its original adoption baseline directly, which drifts over time as
-unrelated, individually base-scoped PRs each grow a file a little further —
-turning an untouched file into a false failure for the next contributor who
-runs the documented `verify.py --profile pr` command. The fallback is silent
-and best-effort: a shallow clone or a checkout with no `origin/main` ref
-simply gets the previous unscoped comparison, exactly as before.
+back to a local `git merge-base HEAD <ref>` when one is resolvable, trying
+`origin/main` first and a local `main` branch second (a checkout with no
+`origin` remote-tracking ref — the remote renamed or removed, a bare local
+clone — still gets a base then). Without this, a bare local invocation
+compares every debt-tracked file against its original adoption baseline
+directly, which drifts over time as unrelated, individually base-scoped PRs
+each grow a file a little further — turning an untouched file into a false
+failure for the next contributor who runs the documented
+`verify.py --profile pr` command. The fallback is silent and best-effort: a
+shallow clone or a checkout with neither ref resolvable simply gets the
+previous unscoped comparison, exactly as before.
 After adoption, an ordinary file absent from the PR base cannot add itself to
 the ledger; only files below a declared parser/catalog exception root may use
 that mechanism. This keeps the hard file-size ceiling from becoming an

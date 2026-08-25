@@ -496,6 +496,42 @@ def test_local_merge_base_returns_stripped_sha_on_success(
     assert architecture._local_merge_base_with_main(tmp_path) == "deadbeef"
 
 
+def test_local_merge_base_falls_back_to_local_main_without_origin(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A checkout with no `origin` remote-tracking ref at all (renamed/removed
+    # remote, a bare local clone) but a resolvable local `main` branch must
+    # still get a base rather than silently reporting nothing (Codex review).
+    calls: list[list[str]] = []
+
+    def _fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append(cmd)
+        if cmd[-1] == "origin/main":
+            return subprocess.CompletedProcess(
+                cmd, 128, stdout="", stderr="unknown revision"
+            )
+        assert cmd == ["git", "merge-base", "HEAD", "main"]
+        return subprocess.CompletedProcess(cmd, 0, stdout="cafef00d\n", stderr="")
+
+    monkeypatch.setattr(architecture.subprocess, "run", _fake_run)
+
+    assert architecture._local_merge_base_with_main(tmp_path) == "cafef00d"
+    assert [c[-1] for c in calls] == ["origin/main", "main"]
+
+
+def test_local_merge_base_returns_none_when_neither_ref_resolves(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def _fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(
+            cmd, 128, stdout="", stderr="unknown revision"
+        )
+
+    monkeypatch.setattr(architecture.subprocess, "run", _fake_run)
+
+    assert architecture._local_merge_base_with_main(tmp_path) is None
+
+
 def _capture_base_revision(
     monkeypatch: pytest.MonkeyPatch,
 ) -> dict[str, object]:
