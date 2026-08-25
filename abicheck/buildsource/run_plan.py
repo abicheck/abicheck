@@ -775,12 +775,21 @@ def _consumer_compile_active_for_profile(
 ) -> bool:
     """Whether *profile_id* declares a ``consumer_compile:`` overlay at all
 
-    (G34 Phase 0/B) -- independent of whether that overlay's own fields
-    resolve to anything non-empty (an overlay declaring only ``binding:``
-    with no matching *resolved_bindings* entry still counts as active).
+    (G34 Phase 0/B) -- independent of whether that overlay's own resolved
+    *output* fields (gcc_path/gcc_options/frontend) are non-empty (an
+    overlay declaring only ``binding:`` with no matching *resolved_bindings*
+    entry still counts as active). An *empty* ``consumer_compile: {}``
+    overlay is excluded, matching :class:`~.project_targets.
+    ProfileCompileSpec`'s own documented rule that an empty overlay is
+    indistinguishable from an absent one -- ``ProfileSpec.to_dict()``
+    already drops it for exactly this reason, so treating it as active here
+    would make a project's behavior depend on whether its config had been
+    round-tripped through to_dict/from_dict (Codex review).
     """
     profile = config.profiles.get(profile_id)
-    return profile is not None and profile.consumer_compile is not None
+    if profile is None or profile.consumer_compile is None:
+        return False
+    return not profile.consumer_compile.is_empty
 
 
 def _consumer_compile_ast_frontend_for_profile(
