@@ -162,12 +162,15 @@ Before adopting it, confirm none of these apply to you:
   rest, not one profile per library.
 
 None of these block `compare`-based CI today — they're gaps in the
-*declarative* topology specifically. Track their closure in the
-[G30 GitHub Actions integration plan](docs/contribute/plans/g30-github-actions-integration-model.md)
-(the first four) and the
+*declarative* topology specifically, verified directly against
+`abicheck/buildsource/project_targets.py`/`run_plan.py` rather than tracked
+as open punch-list items anywhere: the design history for the bundle-depth
+restriction and the `build-output.json` contract lives in the
+[G30 GitHub Actions integration plan](docs/contribute/plans/g30-github-actions-integration-model.md),
+and for stored-facts bundle comparison in the
 [G38 bundle-facts plan](docs/contribute/plans/g38-bundle-facts-model-and-multibuild-comparability.md)
-(stored-facts bundle comparison) before migrating a project that hits one of
-them.
+— neither doc currently lists these as scheduled work, so check the code
+itself, not just the docs, before relying on a gap having closed.
 
 ---
 
