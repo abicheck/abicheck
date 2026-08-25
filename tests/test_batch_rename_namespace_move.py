@@ -1266,3 +1266,22 @@ class TestFindNamespaceMoveGroupsRejectsCrossPositionManyToOnePairings:
         assert ("old", "new") in groups
         assert ("p1", "new") not in groups
         assert ("p2", "old") not in groups
+
+    def test_cross_position_collision_sharing_identical_key_text_is_rejected(
+        self,
+    ) -> None:
+        """Codex review, fresh evidence: the fix above tracked distinct
+        claiming removed-symbol identities per added declaration -- an
+        earlier revision tracked distinct ``(old_segment, new_segment)``
+        KEY TEXT instead, which is insufficient. Removing ``old::new::f``
+        and ``new::old::f`` while adding only ``new::new::f`` has BOTH
+        claims spell the identical key ``('old', 'new')`` (``old::new::f``
+        masked at position 0 gives ``old -> new``; ``new::old::f`` masked
+        at position 1 also gives ``old -> new``), so a key-text-only guard
+        wrongly saw one distinct key and accepted both -- even though they
+        are two genuinely different removed originals both claiming the
+        SAME single added declaration as their target, which cannot
+        actually be the result of two different historical moves at once."""
+        removed = {"_ZN3old3new1fEv", "_ZN3new3old1fEv"}
+        added = {"_ZN3new3new1fEv"}
+        assert find_namespace_move_groups(removed, added) == {}

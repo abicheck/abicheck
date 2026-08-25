@@ -990,7 +990,7 @@ def find_namespace_move_groups(
     # (Codex review, fresh evidence).
     entries: list[tuple[tuple[str, ...], list[str], int, list[str]]] = []
     masked_to_old_segments: dict[tuple[str, ...], set[str]] = {}
-    added_id_to_keys: dict[str, set[tuple[str, str]]] = {}
+    added_id_to_removed_symbols: dict[str, set[str]] = {}
     for r_sym in sorted(removed):
         r_comps = _scope_components(r_sym)
         if r_comps is None:
@@ -1050,20 +1050,40 @@ def find_namespace_move_groups(
             # their masked contexts differ and the position-scoped check
             # above sees no collision at all, yet the same added
             # declaration cannot simultaneously be evidence for both
-            # `p1 -> new` AND `p2 -> old`. Tracked by the added
-            # declaration's own identity (its full "::"-joined scope
-            # chain) rather than by masked context, since that identity is
-            # exactly the one thing both positions' candidates share.
-            added_id_to_keys.setdefault("::".join(a_comps), set()).add(
-                (r_comps[i], a_comps[i])
+            # `p1 -> new` AND `p2 -> old`.
+            #
+            # Tracked by DISTINCT CLAIMING REMOVED-SYMBOL IDENTITY, not by
+            # distinct substitution KEY (Codex review, fresh evidence: an
+            # earlier revision tracked distinct `(old_segment, new_segment)`
+            # key text instead, which is insufficient -- removing
+            # `old::new::f` and `new::old::f` while adding only
+            # `new::new::f` has BOTH claims spell the identical key
+            # `('old', 'new')` (`old::new::f` masked at position 0 gives
+            # `old -> new`; `new::old::f` masked at position 1 also gives
+            # `old -> new`), so a key-text set collapses them to size one
+            # and the guard wrongly accepted both, even though they are two
+            # genuinely different removed originals both claiming the same
+            # single added declaration as their target -- an added
+            # declaration can only actually be the result of one historical
+            # move). Keyed by the added declaration's own identity (its
+            # full "::"-joined scope chain), tracking the set of distinct
+            # claiming removed symbols' own "::"-joined identities: two
+            # different string spellings of the SAME removed declaration
+            # (a real mangled symbol and a header-tier synthetic key for
+            # the same move -- see the co-matching comment above, which is
+            # about the ADDED side, but the identical principle applies
+            # here) normalize to the same joined identity and so still
+            # count as one claimant, not two.
+            added_id_to_removed_symbols.setdefault("::".join(a_comps), set()).add(
+                "::".join(r_comps)
             )
 
     # Phase 2: record only the entries whose masked context was claimed by
     # exactly one distinct old segment value (the position-scoped
     # many-to-one rejection) AND whose added declaration was claimed by
-    # exactly one distinct substitution key (the cross-position rejection)
-    # -- then apply the pre-existing per-symbol/per-key/per-pair dedup
-    # exactly as before.
+    # exactly one distinct removed-symbol identity (the cross-position
+    # rejection) -- then apply the pre-existing per-symbol/per-key/per-pair
+    # dedup exactly as before.
     seen_here: dict[str, set[tuple[str, str]]] = {}
     # Tracks which (old_qualified, new_qualified) pairs have already been
     # recorded per substitution key, so the SAME declaration reported under
@@ -1080,10 +1100,10 @@ def find_namespace_move_groups(
         if len(masked_to_old_segments[masked]) != 1:
             continue
         added_id = "::".join(a_comps)
-        if len(added_id_to_keys[added_id]) != 1:
+        symbol_id = "::".join(r_comps)
+        if len(added_id_to_removed_symbols[added_id]) != 1:
             continue
         key = (r_comps[i], a_comps[i])
-        symbol_id = "::".join(r_comps)
         symbol_seen = seen_here.setdefault(symbol_id, set())
         if key in symbol_seen:
             continue

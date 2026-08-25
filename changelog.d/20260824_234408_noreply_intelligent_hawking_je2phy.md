@@ -99,7 +99,17 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   added symbols. Fixed by also tracking, per added declaration's own full
   scope-chain identity, the distinct `(old_segment, new_segment)`
   substitution keys it has been claimed under, and rejecting any entry
-  whose added declaration was claimed under more than one.
+  whose added declaration was claimed under more than one. That guard was
+  itself refined once more: tracking distinct *substitution key text*
+  under-rejected a further collision where two genuinely different removed
+  originals happen to spell the identical `(old_segment, new_segment)`
+  text from different masking positions (removing `old::new::f` and
+  `new::old::f` while adding only `new::new::f`: both claims spell
+  `old -> new`). Fixed by tracking the set of distinct *claiming
+  removed-symbol identities* per added declaration instead of key text —
+  an added declaration can only actually be the result of one historical
+  move, regardless of whether two different claims happen to describe that
+  move with the same substitution text.
 - **Cross-tier enum findings now dedupe correctly.** The L2 header-tier
   enum detector (`diff_types._diff_enums`, bare `EnumType.name`) and the L1
   DWARF-tier detector (`diff_platform._diff_enum_layouts`, fully-qualified
