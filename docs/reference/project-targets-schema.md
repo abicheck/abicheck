@@ -242,12 +242,17 @@ profiles:
 `compile:`'s do, into their own separate pair —
 [`consumer_compile_gcc_path`/`consumer_compile_gcc_options`](run-plan-schema.md#runplancheck-fields)
 — never falling back to the producer overlay's own resolved values when
-absent. **Not yet wired:** actually applying `consumer_compile:` to a
-separate header-AST (L2) extraction pass and merging it with the producer
-toolchain's binary (L0/L1) facts — this schema slice only projects the
-config axis into `run-plan.json`; see
+absent. **Applied, for the candidate side only:** `check-project.yml` runs
+a separate `dump` of the (unchanged) candidate binary under this overlay's
+frontend/binding/options, and the comparison consumes that materialized
+snapshot as the candidate's entire new side — see the
+`compile.frontend`/`consumer_compile.frontend` section immediately below
+for how that separate dump is wired, and its "Known gap" note for what
+still isn't covered (the baseline/old side). This is a real, working
+extraction pass, not the L0/L1-producer-plus-L2-consumer merge originally
+scoped in
 [`docs/contribute/plans/g34-producer-consumer-compiler-profile-separation.md`](../contribute/plans/g34-producer-consumer-compiler-profile-separation.md)'s
-Phase 0 for the remaining extraction/merge integration.
+Phase 0 — see that plan for the design this superseded.
 
 ### `compile.frontend` / `consumer_compile.frontend` — per-profile AST frontend (G34 Phase B)
 

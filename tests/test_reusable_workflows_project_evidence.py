@@ -57,6 +57,38 @@ def test_consumer_compile_context_uses_a_separate_extraction() -> None:
     assert "consumer_context.outcome == 'success'" in analysis["with"]["header"]
 
 
+def test_consumer_dump_activates_from_the_overlay_marker_alone() -> None:
+    """Codex review (P2): an overlay declaring only e.g. `binding:` with no
+
+    matching --toolchain-bindings entry (and no workflow-global compiler
+    input to fall back to) resolves consumer-ast-frontend/consumer-gcc-path/
+    consumer-gcc-options all to the empty string even though the profile
+    genuinely declared a consumer_compile: overlay. Requiring one of those
+    three to be non-empty before activating the separate candidate dump let
+    such a cell silently skip it, leaking the producer's own compiler
+    options into what the schema documents as an isolated client view. The
+    activation condition must also fire on the overlay's own presence
+    marker, forwarded independently of what its fields resolved to.
+    """
+    project = _load(CHECK_PROJECT)
+    run_step = next(
+        step
+        for step in _steps(project["jobs"]["check"])
+        if step.get("name") == "Run check-target"
+    )
+    expr = run_step["with"]["consumer-compile-active"]
+    assert "matrix.consumer_compile_active" in expr
+    assert "matrix.kind != 'bundle'" in expr
+
+    target = _load(CHECK_TARGET)
+    consumer = next(
+        step
+        for step in _steps(target["runs"])
+        if step.get("name") == "Extract candidate consumer context"
+    )
+    assert "inputs.consumer-compile-active == 'true'" in consumer["if"]
+
+
 def test_resolved_evidence_pack_also_reaches_build_info_for_every_producer() -> None:
     """check-target's own evidence-pack-path -> --build-info conversion is
 

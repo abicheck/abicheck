@@ -220,6 +220,19 @@ inputs:
   consumer-gcc-options:
     description: 'Consumer-only compiler options used by the separate candidate header extraction pass.'
     required: false
+  consumer-compile-active:
+    description: >-
+      Whether the profile declared a consumer_compile: overlay at all
+      (independent of whether it resolved any of the three fields above to
+      a non-empty value -- e.g. an overlay naming only a `binding:` with no
+      matching --toolchain-bindings entry). Forces the separate candidate
+      consumer-context dump below to run even when consumer-ast-frontend/
+      consumer-gcc-path/consumer-gcc-options are all empty, so a declared
+      overlay always isolates the candidate's header parse from the
+      producer's own compiler options rather than silently falling back to
+      them (Codex review).
+    required: false
+    default: 'false'
   sysroot:
     description: 'Alternative system root directory for cross-compilation. Forwarded to the internal analysis step.'
     required: false
@@ -511,7 +524,7 @@ runs:
       id: consumer_context
       if: |
         inputs.kind == 'target' &&
-        (inputs.consumer-ast-frontend != '' || inputs.consumer-gcc-path != '' || inputs.consumer-gcc-options != '') &&
+        (inputs.consumer-compile-active == 'true' || inputs.consumer-ast-frontend != '' || inputs.consumer-gcc-path != '' || inputs.consumer-gcc-options != '') &&
         (inputs.baseline-channel == 'none' || steps.resolve.outputs.outcome == 'resolved') &&
         steps.collect_verify.outcome != 'failure' &&
         steps.collect_replay.outcome != 'failure'

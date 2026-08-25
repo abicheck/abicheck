@@ -1036,6 +1036,18 @@ jobs:
           consumer-ast-frontend: ${{ (matrix.kind != 'bundle' && matrix.consumer_compile_active) && (matrix.consumer_compile_ast_frontend || inputs.ast-frontend) || '' }}
           consumer-gcc-path: ${{ (matrix.kind != 'bundle' && matrix.consumer_compile_active) && (matrix.consumer_compile_gcc_path || inputs.gcc-path) || '' }}
           consumer-gcc-options: ${{ (matrix.kind != 'bundle' && matrix.consumer_compile_active) && (matrix.consumer_compile_gcc_options || inputs.gcc-options) || '' }}
+          # An overlay declaring only e.g. `binding:` with no matching
+          # --toolchain-bindings entry (and no workflow-global compiler
+          # input to fall back to above) resolves all three fields above to
+          # the empty string even though the profile genuinely declared a
+          # consumer_compile: overlay -- check-target's own activation
+          # condition previously required at least one of those three
+          # fields to be non-empty, so this cell would silently skip the
+          # separate consumer dump and let the producer's own compiler
+          # options (e.g. its `-std=`) leak into what the schema documents
+          # as an isolated client view (Codex review). Forward the marker
+          # itself so check-target can activate on it directly.
+          consumer-compile-active: ${{ (matrix.kind != 'bundle' && matrix.consumer_compile_active) && 'true' || 'false' }}
           # P1 toolchain-profile audit: this cell's profiles.<id>.compile
           # overlay (project plan --toolchain-bindings), when the
           # profile declares one, takes precedence over these workflow-
