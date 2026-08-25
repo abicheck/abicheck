@@ -161,7 +161,10 @@ class DeduplicateCrossDetector:
     def run(self, changes: list[Change], ctx: PipelineContext) -> list[Change]:
         from .diff_filtering import _deduplicate_cross_detector
 
-        return _deduplicate_cross_detector(changes)
+        # Pass the snapshots so the enum bare/qualified-name bridge can run
+        # here (before EnrichSourceLocations, which runs later in this
+        # pipeline) — see _deduplicate_cross_detector's own docstring.
+        return _deduplicate_cross_detector(changes, ctx.old, ctx.new)
 
 
 class DowngradeOpaqueTypeChanges:

@@ -112,6 +112,86 @@ class TestNamespaceMoveIsRecognizedAsOneBatch:
         )
 
 
+# A header-tier (L2) backend can leave ``Function.mangled`` unmangled --
+# castxml synthesizes ``__abicheck_ctor__<scope>(<params>)`` for a
+# constructor whose real mangled name it omitted, and ``~<scope>`` for a
+# destructor (see ``dumper_castxml.SYNTHETIC_CTOR_KEY_PREFIX``/
+# ``is_synthetic_dtor_key``). Before the qualified-name fallback,
+# ``_scope_components`` returned ``None`` for both shapes (neither is an
+# Itanium/MSVC mangling), so a namespace move reported through them never
+# joined the roll-up -- reproducing the reported 22/35 func_removed / 25/31
+# type_removed unpaired-finding shape on real oneTBB data.
+_D1_HEADER_TIER = [
+    "__abicheck_ctor__tbb::detail::d1::graph()",
+    "~tbb::detail::d1::graph",
+]
+_D2_HEADER_TIER = [
+    "__abicheck_ctor__tbb::detail::d2::graph()",
+    "~tbb::detail::d2::graph",
+]
+
+
+class TestHeaderTierKeysAlsoJoinTheNamespaceMove:
+    def test_synthetic_ctor_dtor_keys_alone_form_a_group(self) -> None:
+        """Reproduces the reported gap directly: with *no* mangled evidence at
+        all (a pure header-tier snapshot), two synthesized ctor/dtor keys for
+        the same class moving namespace must still pair up. Confirmed to
+        return ``{}`` before the qualified-name fallback (neither
+        ``itanium_scope_components`` nor ``msvc_scope_components`` recognizes
+        either key shape)."""
+        groups = find_namespace_move_groups(
+            set(_D1_HEADER_TIER), set(_D2_HEADER_TIER)
+        )
+        assert ("d1", "d2") in groups
+        assert len(groups[("d1", "d2")]) == 2
+
+    def test_synthetic_ctor_and_dtor_keys_join_the_same_group_as_mangled_symbols(
+        self,
+    ) -> None:
+        """A real move reports *some* symbols mangled and some through a
+        header-tier synthetic key at once -- all of them must land in the
+        one substitution group, not split across a recognized group and a
+        silently-dropped remainder."""
+        removed = set(_D1) | set(_D1_HEADER_TIER)
+        added = set(_D2) | set(_D2_HEADER_TIER)
+        groups = find_namespace_move_groups(removed, added)
+        assert ("d1", "d2") in groups
+        pairs = dict(groups[("d1", "d2")])
+        assert (
+            pairs["tbb::detail::d1::graph::{ctor}"]
+            == "tbb::detail::d2::graph::{ctor}"
+        )
+        assert (
+            pairs["tbb::detail::d1::graph::{dtor}"]
+            == "tbb::detail::d2::graph::{dtor}"
+        )
+        assert len(groups[("d1", "d2")]) == len(_D1) + len(_D1_HEADER_TIER)
+
+    def test_reported_through_compare_with_header_tier_keys_only(self) -> None:
+        old = _snap("2021", [_fn("graph", m) for m in _D1_HEADER_TIER])
+        new = _snap("2022", [_fn("graph", m) for m in _D2_HEADER_TIER])
+        result = compare(old, new)
+        batch = [
+            c for c in result.changes if c.kind is ChangeKind.SYMBOL_RENAMED_BATCH
+        ]
+        assert batch, "namespace move via header-tier keys produced no batch roll-up"
+
+    def test_qualified_function_name_without_any_mangling_also_pairs(self) -> None:
+        """A plain, already-qualified display name used directly as the
+        snapshot key (no mangled name, no synthetic ctor/dtor marker) is the
+        third real shape this fallback needs to cover."""
+        removed = {"tbb::detail::d1::graph::reset", "tbb::detail::d1::graph::wait"}
+        added = {"tbb::detail::d2::graph::reset", "tbb::detail::d2::graph::wait"}
+        groups = find_namespace_move_groups(removed, added)
+        assert ("d1", "d2") in groups
+        assert len(groups[("d1", "d2")]) == 2
+
+    def test_bare_unqualified_key_still_yields_no_scope(self) -> None:
+        """A plain-C-linkage fallback key (no ``::`` at all) carries no
+        namespace to substitute, matching an unmodelled mangled form."""
+        assert find_namespace_move_groups({"foo"}, {"bar"}) == {}
+
+
 class TestDestructorKeysAreNotRenameGroupMembers:
     def test_dtor_is_not_a_prefixed_rename_of_its_class_name(self) -> None:
         old = {"a": _fn("Wrapper"), "b": _fn("graph")}
@@ -213,3 +293,47 @@ def test_an_unchanged_namespace_never_yields_a_group(leaves: list[str]) -> None:
     a self-comparison must stay silent."""
     syms = {f"_ZN3lib2d1{len(leaf)}{leaf}Ev" for leaf in leaves}
     assert find_namespace_move_groups(syms, syms) == {}
+
+
+_HEADER_TIER_KEY_SHAPES = st.sampled_from(
+    [
+        "__abicheck_ctor__{scope}::{leaf}()",
+        "~{scope}::{leaf}",
+        "{scope}::{leaf}",
+    ]
+)
+
+
+@settings(max_examples=200, deadline=None)
+@given(
+    old_seg=st.sampled_from(["d1", "v1", "detail"]),
+    new_seg=st.sampled_from(["d1", "v1", "d2", "v2", "impl"]),
+    leaves=st.lists(
+        st.sampled_from(["run", "stop", "reset", "wait"]),
+        min_size=1,
+        max_size=4,
+        unique=True,
+    ),
+    shape=_HEADER_TIER_KEY_SHAPES,
+)
+def test_header_tier_keys_obey_the_same_grouping_invariant_as_mangled_ones(
+    old_seg: str, new_seg: str, leaves: list[str], shape: str
+) -> None:
+    """The same "never mixes leaves" invariant
+    (``test_a_namespace_move_group_never_mixes_leaves``) must hold whether the
+    scope chain came from a real mangling or from the header-tier
+    (unmangled) fallback — a namespace move reported through castxml's
+    synthetic ctor/dtor keys, or through a plain qualified display name, is
+    the same kind of finding as one reported through real symbols and must
+    obey the same shape."""
+
+    def key(seg: str, leaf: str) -> str:
+        return shape.format(scope=f"lib::{seg}", leaf=leaf)
+
+    removed = {key(old_seg, leaf) for leaf in leaves}
+    added = {key(new_seg, leaf) for leaf in leaves}
+    groups = find_namespace_move_groups(removed, added)
+    for (a, b), pairs in groups.items():
+        assert a != b
+        for old_q, new_q in pairs:
+            assert old_q.replace(f"::{a}::", f"::{b}::") == new_q

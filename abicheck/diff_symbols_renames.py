@@ -38,8 +38,17 @@ from .checker_policy import ChangeKind
 from .checker_types import Change
 from .demangle import demangle, demangle_batch
 from .detector_registry import registry
-from .diff_cxx_rules import itanium_scope_components, msvc_scope_components
+from .diff_cxx_rules import (
+    itanium_scope_components,
+    msvc_scope_components,
+    qualified_name_scope_components,
+)
 from .diff_helpers import make_change
+from .dumper_castxml import (
+    SYNTHETIC_CTOR_KEY_PREFIX,
+    is_synthetic_ctor_key,
+    is_synthetic_dtor_key,
+)
 from .elf_metadata import SymbolType
 from .elf_symbol_filter import is_abi_relevant_elf_symbol
 from .model import AbiSnapshot, Function, is_cxx_runtime_library
@@ -802,16 +811,82 @@ def emit_prefix_batch_rename(rename_pairs: list[tuple[str, str]]) -> list[Change
 _MASKED = "\x00"
 
 
+def _qualified_key_scope_components(key: str) -> list[str] | None:
+    """Scope chain for a header-tier snapshot key that was never mangled.
+
+    Many real findings this detector needs to see are keyed by something
+    other than a mangled symbol — a header-only (L2) backend can leave
+    ``Function.mangled`` as a *qualified display name* instead, and
+    :func:`itanium_scope_components`/:func:`msvc_scope_components` both
+    correctly return ``None`` for those (they parse mangling grammars, not
+    qualified text). Two shapes are recognized here, both produced by
+    ``dumper_castxml`` when castxml omits a ctor/dtor's real mangled name
+    (see ``SYNTHETIC_CTOR_KEY_PREFIX``/``is_synthetic_dtor_key``):
+
+    * ``__abicheck_ctor__<scope>(<params>)`` — a synthesized constructor
+      identity. The ``<scope>`` is a real, qualified class path
+      (``"tbb::detail::d1::graph"``); the parameter signature is stripped
+      before splitting.
+    * ``~<scope>`` — a synthesized destructor identity, the same qualified
+      class path with a leading ``~``.
+
+    For both, a synthetic trailing leaf (``"{ctor}"``/``"{dtor}"``) is
+    appended after splitting the scope on ``"::"`` — mirroring the shape
+    :func:`itanium_scope_components` already produces for a *real* mangled
+    ctor/dtor (``_ZN1CC1Ev -> ["C", "{ctor}"]``, never the class name
+    itself as the leaf). This keeps the "which index is the leaf, and
+    therefore excluded from namespace substitution" position semantics
+    identical regardless of whether the chain came from a real mangling or
+    from this fallback — without it, a synthesized ctor/dtor key would let
+    :func:`find_namespace_move_groups` treat the class's own name as a
+    substitutable "namespace segment", which a real mangled ctor/dtor never
+    permits.
+
+    Any other key containing ``"::"`` (a header-tier function with no
+    mangled name at all, but a real ``"ns::Class::member"`` display name)
+    is split as-is via :func:`qualified_name_scope_components` — its own
+    last component already is the leaf, same as a plain mangled free
+    function's single component is.
+
+    A key with neither a recognized synthetic prefix nor any ``"::"`` at
+    all (a bare, unqualified name — the plain-C-linkage fallback) carries
+    no scope to substitute, so it returns ``None`` the same as an
+    unmodelled mangled form would.
+    """
+    if is_synthetic_ctor_key(key):
+        scope = key[len(SYNTHETIC_CTOR_KEY_PREFIX) :]
+        paren = scope.find("(")
+        if paren != -1:
+            scope = scope[:paren]
+        comps = qualified_name_scope_components(scope)
+        return [*comps, "{ctor}"] if comps else None
+    if is_synthetic_dtor_key(key):
+        comps = qualified_name_scope_components(key[1:])
+        return [*comps, "{dtor}"] if comps else None
+    if "::" not in key:
+        return None
+    return qualified_name_scope_components(key)
+
+
 def _scope_components(mangled: str) -> list[str] | None:
     """Return *mangled*'s scope chain (namespaces + class path + leaf), or None.
 
     Itanium first, MSVC second — the two prefixes (``_Z``/``__Z`` vs. ``?``)
     are mutually exclusive, so trying both in order is unambiguous, and it is
-    the same order :func:`diff_cxx_rules.owner_class_of` already uses. A
-    component list shorter than two carries no namespace to substitute, so it
-    is reported as "no usable chain" rather than as a one-element chain.
+    the same order :func:`diff_cxx_rules.owner_class_of` already uses. When
+    neither recognizes *mangled* as a mangling at all — a header-tier key
+    that was never mangled in the first place, see
+    :func:`_qualified_key_scope_components` — fall back to parsing it as
+    already-qualified text. A component list shorter than two carries no
+    namespace to substitute, so it is reported as "no usable chain" rather
+    than as a one-element chain, regardless of which of the three parsers
+    produced it.
     """
-    comps = itanium_scope_components(mangled) or msvc_scope_components(mangled)
+    comps = (
+        itanium_scope_components(mangled)
+        or msvc_scope_components(mangled)
+        or _qualified_key_scope_components(mangled)
+    )
     if comps is None or len(comps) < 2:
         return None
     return comps

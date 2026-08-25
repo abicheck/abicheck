@@ -558,6 +558,33 @@ def msvc_qualified_name(mangled: str) -> str | None:
     return "::".join(comps) if comps else None
 
 
+def qualified_name_scope_components(qualified: str) -> list[str] | None:
+    """Scope components of an already-demangled, ``::``-qualified name.
+
+    A structural counterpart to :func:`itanium_scope_components`/
+    :func:`msvc_scope_components` for callers that hold a plain qualified
+    spelling rather than a mangled symbol — e.g. a header-tier snapshot key
+    that was never mangled at all (a synthesized constructor/destructor
+    identity, a plain-C fallback name) but is already scope-qualified text::
+
+        "ns::Class::method" -> ["ns", "Class", "method"]
+        "Class::method"     -> ["Class", "method"]
+        "freefunc"          -> ["freefunc"]              (no scope to split)
+
+    Deliberately conservative: returns ``None`` for an empty string or a
+    component list with any empty segment (a leading/trailing/doubled
+    ``"::"``, e.g. ``"::foo"`` or ``"foo::::bar"``) rather than silently
+    dropping or fabricating a component, mirroring the "return ``None``, let
+    the caller fall back" contract the mangled-name parsers above use.
+    """
+    if not qualified:
+        return None
+    comps = qualified.split("::")
+    if any(not c for c in comps):
+        return None
+    return comps
+
+
 def owner_class_of(f: Function) -> str | None:
     """The enclosing class/struct of a method.
 
