@@ -103,12 +103,12 @@ they do not reconstruct it.
 | Package | Owns | May depend on | Must not own |
 |---|---|---|---|
 | `model` | Immutable shared domain values and persisted/public identities | Standard library and lightweight typing dependencies | Filesystem access, subprocesses, Click, rendering, policy execution |
-| `storage` | Snapshot/baseline serialization, cache behavior, schemas, migrations | `model` | Extraction, compatibility decisions, presentation |
+| `storage` | Snapshot/baseline serialization, cache behavior, snapshot/baseline schemas, migrations | `model` | Extraction, compatibility decisions, report schemas, presentation |
 | `extract` | Reading binary, debug, header, build, and source evidence into facts | `model`, `storage` | Severity, suppression, gate decisions, user-facing output |
 | `compare` | Comparability, old/new matching, identity, detectors, raw findings | `model` | User policy, suppression, exit codes, rendering |
 | `policy` | Effective configuration, contract relevance, suppression, classification, assurance, severity, gate decisions | `model`, `compare` | Parsing artifacts, running compilers, rendering reports |
 | `workflows` | Operation orchestration, sequencing, resource lifetime, and request/plan/result composition | `model`, `storage`, `extract`, `compare`, `policy` | Click concepts and format rendering |
-| `report` | The canonical immutable `ReportDocument` and pure format projections | `model`, `compare`, `policy`, `workflows` | Re-running comparison or changing findings, severity, verdicts, or gate state |
+| `report` | The canonical immutable `ReportDocument`, report schemas, and pure format projections | `model`, `compare`, `policy`, `workflows` | Re-running comparison or changing findings, severity, verdicts, or gate state |
 | `frontends` | CLI, typed-Python, and compatibility input translation and output selection | `model`, `workflows`, `report` | Extraction algorithms, precedence rules, and business decisions |
 
 The dependency list is exact for first-party responsibility packages. A
@@ -151,7 +151,7 @@ abicheck/
     snapshot.py
     baseline.py
     cache.py
-    schema.py
+    schema.py                   snapshot/baseline schema ownership
     migrations.py
 
   extract/
@@ -187,7 +187,7 @@ abicheck/
     dump/{contracts,resolve,execute}.py
     compare/{contracts,resolve,execute}.py
     scan/{contracts,resolve,execute}.py
-    aggregate/{contracts,load,fold,reconcile,execute}.py
+    aggregate/{contracts,resolve,load,fold,reconcile,execute}.py
     release/{discovery,matching,execute}.py
     project.py
     dependencies.py
@@ -197,6 +197,7 @@ abicheck/
     document.py
     build.py
     grouping.py
+    schema.py                   report schema ownership
     render/{json,markdown,html,sarif,junit}.py
 
   frontends/
@@ -225,8 +226,8 @@ beginning:
 | Match old/new entities or identify a change | `compare/` |
 | Decide relevance, suppression, classification, severity, or gate effect | `policy/` |
 | Coordinate dump, compare, scan, release, aggregate, project, or dependency behavior | `workflows/` |
-| Serialize snapshots, baselines, schemas, migrations, or caches | `storage/` |
-| Add a report field or output format | `report/` |
+| Serialize snapshots/baselines, maintain their schemas or migrations, or manage caches | `storage/` |
+| Add a report field, report schema, or output format | `report/` |
 | Add a CLI flag, API adapter, or ABICC translation | `frontends/` |
 
 A new production file is not created until its owner can be selected from
@@ -605,6 +606,7 @@ Create real implementation modules, not empty scaffolding:
 ```text
 workflows/aggregate/
   contracts.py
+  resolve.py
   load.py
   fold.py
   reconcile.py
