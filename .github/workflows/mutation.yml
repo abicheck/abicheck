@@ -168,7 +168,10 @@ jobs:
     needs: resolve
     if: needs.resolve.outputs.run == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    # The full baseline has taken just over two hours on GitHub-hosted runners.
+    # Keep a hard ceiling, but leave enough headroom for the measurement to
+    # finish and produce a receipt rather than being cancelled at 120 minutes.
+    timeout-minutes: 240
     steps:
       - uses: actions/checkout@v6
         with:
