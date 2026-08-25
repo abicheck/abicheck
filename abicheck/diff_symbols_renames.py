@@ -39,7 +39,8 @@ from .checker_types import Change
 from .demangle import demangle, demangle_batch
 from .detector_registry import registry
 from .diff_cxx_rules import (
-    itanium_scope_components,
+    component_embeds_template_args,
+    itanium_scope_components_with_template_positions,
     msvc_scope_components,
     qualified_name_scope_components,
     strip_trailing_top_level_parameter_list,
@@ -868,8 +869,8 @@ def _qualified_key_scope_components(key: str) -> list[str] | None:
     return qualified_name_scope_components(key)
 
 
-def _scope_components(mangled: str) -> list[str] | None:
-    """Return *mangled*'s scope chain (namespaces + class path + leaf), or None.
+def _scope_components(mangled: str) -> tuple[list[str], frozenset[int]] | None:
+    """Return (*mangled*'s scope chain, template-bearing component indices), or None.
 
     Itanium first, MSVC second — the two prefixes (``_Z``/``__Z`` vs. ``?``)
     are mutually exclusive, so trying both in order is unambiguous, and it is
@@ -881,15 +882,38 @@ def _scope_components(mangled: str) -> list[str] | None:
     namespace to substitute, so it is reported as "no usable chain" rather
     than as a one-element chain, regardless of which of the three parsers
     produced it.
+
+    The second element identifies which components embed a template-
+    argument list, so a caller can exclude them from ever being treated as
+    a bare namespace/class segment (see the two masking loops in
+    :func:`find_namespace_move_groups`). For an Itanium mangling this is
+    the *exact* structural answer from
+    :func:`diff_cxx_rules.itanium_scope_components_with_template_positions`
+    — not a guess back out of the assembled text, which is unsound (Codex
+    review, fresh evidence: a text-based heuristic misreads an ordinary
+    identifier like ``"ICE"`` as a template block by coincidental
+    spelling). For MSVC this is always empty:
+    :func:`diff_cxx_rules.msvc_scope_components` already rejects the whole
+    symbol outright when any component starts with the template marker
+    ``?$``, so a template-bearing MSVC component never reaches here. Only
+    the qualified-name/header-tier-fallback shape has no parser to ask, so
+    it falls back to :func:`diff_cxx_rules.component_embeds_template_args`'s
+    text-based ``<...>`` check — exact for that shape, since a pretty-
+    printed spelling never coincidentally contains a raw Itanium encoding.
     """
-    comps = (
-        itanium_scope_components(mangled)
-        or msvc_scope_components(mangled)
-        or _qualified_key_scope_components(mangled)
+    itanium = itanium_scope_components_with_template_positions(mangled)
+    if itanium is not None:
+        comps, template_positions = itanium
+        return (comps, template_positions) if len(comps) >= 2 else None
+    fallback = msvc_scope_components(mangled) or _qualified_key_scope_components(
+        mangled
     )
-    if comps is None or len(comps) < 2:
+    if fallback is None or len(fallback) < 2:
         return None
-    return comps
+    fallback_template_positions = frozenset(
+        i for i, c in enumerate(fallback) if component_embeds_template_args(c)
+    )
+    return fallback, fallback_template_positions
 
 
 def find_namespace_move_groups(
@@ -963,10 +987,33 @@ def find_namespace_move_groups(
     """
     added_index: dict[tuple[str, ...], list[tuple[str, list[str]]]] = {}
     for a_sym in sorted(added):
-        comps = _scope_components(a_sym)
-        if comps is None:
+        resolved = _scope_components(a_sym)
+        if resolved is None:
             continue
+        comps, template_positions = resolved
         for i in range(len(comps) - 1):
+            # A component that itself carries a template-argument list is not
+            # a bare namespace/class segment -- it is an instantiation whose
+            # *spelling* can differ between old and new purely because one of
+            # its template arguments names a declaration that moved (e.g.
+            # ``concurrent_priority_queue<tbb::detail::d1::graph_task *, ...>``
+            # vs. ``...d2::graph_task...``, where the enclosing scope of
+            # ``concurrent_priority_queue`` itself never changed). Treating
+            # such a component as "the segment that changed" fabricates a
+            # spurious, redundant substitution group keyed on the whole
+            # instantiation text instead of on the real namespace segment --
+            # which the un-instantiated symbol that actually names the moved
+            # type already supplies evidence for. See
+            # ``_scope_components``'s own docstring: for a real Itanium
+            # mangling *i* is checked against the EXACT structural answer
+            # (``template_positions``), never guessed back out of the
+            # assembled text -- a text-based guess is unsound (Codex review,
+            # fresh evidence: ordinary identifiers like ``"ICE"`` coincide
+            # with a balanced raw template-args spelling), which is exactly
+            # why this primitive reasons about scope chains via a per-
+            # position flag rather than re-deriving it here.
+            if i in template_positions:
+                continue
             masked = tuple(comps[:i]) + (_MASKED,) + tuple(comps[i + 1 :])
             added_index.setdefault(masked, []).append((a_sym, comps))
 
@@ -1015,11 +1062,18 @@ def find_namespace_move_groups(
     added_id_to_removed_symbols: dict[str, set[str]] = {}
     removed_id_to_added_symbols: dict[str, set[str]] = {}
     for r_sym in sorted(removed):
-        r_comps = _scope_components(r_sym)
-        if r_comps is None:
+        r_resolved = _scope_components(r_sym)
+        if r_resolved is None:
             continue
+        r_comps, r_template_positions = r_resolved
         symbol_id = "::".join(r_comps)
         for i in range(len(r_comps) - 1):
+            # Mirrors the identical skip in the `added_index` build above: a
+            # templated component (pretty-printed, or the exact structural
+            # answer for a raw-Itanium-encoded one) can never be treated as
+            # *the* differing namespace/class segment.
+            if i in r_template_positions:
+                continue
             masked = tuple(r_comps[:i]) + (_MASKED,) + tuple(r_comps[i + 1 :])
             candidates = added_index.get(masked, [])
             for _cand_sym, cand_comps in candidates:
@@ -1153,10 +1207,53 @@ def find_namespace_move_groups(
     return groups
 
 
+def _declaring_entity(qualified: str) -> str:
+    """Collapse a synthesized ``{ctor}``/``{dtor}`` leaf marker so both
+    facets of one class -- its constructor and its destructor -- count as
+    the SAME declaring entity for support-counting purposes.
+
+    Every class, real or coincidentally paired, contributes exactly a
+    ``{ctor}`` pair and a ``{dtor}`` pair once *any* one-component
+    substitution happens to line its removed and added mangled names up
+    (see :func:`emit_namespace_move_batches`) -- so two such pairs are not
+    two independent pieces of evidence, they are one class counted twice.
+    An ordinary (non-ctor/dtor) leaf is returned unchanged: two distinct
+    member functions of the same class are still two distinct declarations.
+    """
+    for suffix in ("::{ctor}", "::{dtor}"):
+        if qualified.endswith(suffix):
+            return qualified[: -len(suffix)]
+    return qualified
+
+
 def emit_namespace_move_batches(
     groups: dict[tuple[str, str], list[tuple[str, str]]],
 ) -> list[Change]:
-    """Emit one SYMBOL_RENAMED_BATCH per namespace substitution with 2+ pairs.
+    """Emit one SYMBOL_RENAMED_BATCH per namespace substitution supported by
+    2+ pairs from 2+ *distinct declaring entities*.
+
+    ``len(pairs) >= 2`` alone gives zero protection at class granularity: an
+    unrelated deleted class and an unrelated added class that happen to
+    share an enclosing scope always contribute exactly two pairs -- the
+    class's compiler-generated constructor and destructor -- to whatever
+    substitution key their names happen to mask into, regardless of
+    whether the class actually moved namespaces or was simply deleted while
+    an unrelated, differently-named class was simultaneously added in the
+    same scope. Neither :func:`find_namespace_move_groups`'s per-position
+    ambiguity guards catches this: there is exactly one candidate per
+    masked context (so ``distinct_targets`` never fires), and the ctor/dtor
+    pairs are recorded under different leaves (so the header-tier
+    double-counting guard's ``recorded_pairs`` dedup never collapses them
+    either) -- the two pairs are both genuine, unambiguous matches, they
+    are just not *independent* evidence of a scope move (oneCCL report,
+    fresh evidence: ``broadcastExt_attr`` deleted and an unrelated
+    ``window`` added in the same enclosing scope reported a fabricated
+    ``broadcastExt_attr`` -> ``window`` "namespace segment" rename).
+    Requiring support from 2+ distinct declaring entities (via
+    :func:`_declaring_entity`, which folds a class's own ctor/dtor pair
+    down to one entity) closes this at the class-count level without
+    touching :func:`find_namespace_move_groups`'s ambiguity logic, which
+    is unaffected by this exact shape.
 
     Ordered by support (most-supported substitution first, then by the
     substitution itself) so the report is stable across runs and the dominant
@@ -1167,6 +1264,8 @@ def emit_namespace_move_batches(
         groups.items(), key=lambda kv: (-len(kv[1]), kv[0])
     ):
         if len(pairs) < 2:
+            continue
+        if len({_declaring_entity(old) for old, _new in pairs}) < 2:
             continue
         pair_desc = ", ".join(f"{o} → {n}" for o, n in pairs[:5])
         if len(pairs) > 5:

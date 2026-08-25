@@ -184,17 +184,28 @@ def _itanium_strip_prefix(mangled: str) -> tuple[str, bool] | None:
     return s, nested
 
 
-def _parse_source_name_component(s: str, i: int) -> tuple[str | None, int]:
+def _parse_source_name_component(s: str, i: int) -> tuple[str | None, int, bool]:
     """Parse a length-prefixed source-name component (with optional template args
     and GNU ABI tags) starting at ``s[i]``.
 
-    Returns ``(name, next_index)`` where *name* includes any directly-attached
-    ``I…E`` template-argument list and ``B<tag>`` GNU ABI tags, or
-    ``(None, i)`` on any parse failure.
+    Returns ``(name, next_index, template_attached)`` where *name* includes
+    any directly-attached ``I…E`` template-argument list and ``B<tag>`` GNU
+    ABI tags, and *template_attached* is ``True`` exactly when a template-
+    argument list was consumed -- tracked structurally here, at the one
+    place that ever attaches one, rather than left for a caller to guess
+    back out of the assembled *name* text. Guessing from text is unsound:
+    ``component_embeds_template_args()``'s own text-based heuristic (kept
+    for the qualified-name/header-tier-fallback shape, which has no parser
+    to ask) misreads an ordinary identifier like ``"ICE"`` or ``"IWidgetE"``
+    as a balanced ``I...E`` template block purely by coincidental spelling
+    (Codex review, fresh evidence) -- a real false positive this structural
+    flag exists to avoid for the one shape (a real Itanium mangling) that
+    has a parser available to answer the question exactly. Returns
+    ``(None, i, False)`` on any parse failure.
     """
     name, i = _read_length_prefixed_name(s, i)
     if name is None:
-        return None, i
+        return None, i, False
     n = len(s)
     # GNU ABI tags (`B<source-name>`, e.g. the libstdc++ `cxx11` tag, or a
     # user `__attribute__((abi_tag(...)))`) attach to the unqualified name
@@ -230,10 +241,11 @@ def _parse_source_name_component(s: str, i: int) -> tuple[str | None, int]:
     if i < n and s[i] == "I":
         end = _skip_template_args(s, i)
         if end is None:
-            return None, i
+            return None, i, False
         name = name + s[i:end]
         i = end
-    return name, i
+        return name, i, True
+    return name, i, False
 
 
 def _parse_ctor_dtor_component(s: str, i: int) -> tuple[str | None, int]:
@@ -335,30 +347,35 @@ def _parse_non_source_name_component(s: str, i: int) -> tuple[str | None, int]:
 
 def _step_next_component(
     s: str, i: int, nested: bool
-) -> tuple[str | None, int, bool] | None:
+) -> tuple[str | None, int, bool, bool] | None:
     """Advance one component in the Itanium nested-name body ``s`` at position ``i``.
 
-    Returns ``(label, next_i, done)`` on success:
+    Returns ``(label, next_i, done, template_attached)`` on success:
 
     - *label* is the parsed component string, or ``None`` when the position
       holds the nested-name ``E`` terminator (no component to append, just stop).
     - *next_i* is the index to continue from.
     - *done* is ``True`` when the caller should stop iterating (``E`` reached
       for a nested name, or a free-function's single component was consumed).
+    - *template_attached* is ``True`` exactly when this step consumed a
+      directly-attached template-argument list -- structurally known only for
+      a source-name component (see :func:`_parse_source_name_component`);
+      always ``False`` for a ctor/dtor/operator component, none of which can
+      carry one.
 
-    Returns ``None`` (not a 3-tuple) when the component cannot be parsed at all
+    Returns ``None`` (not a 4-tuple) when the component cannot be parsed at all
     (an unrecognized/vendor operator, substitution, truncated source name) so
     the caller propagates failure by returning ``None`` from its own scope.
     """
     c = s[i]
     if nested and c == "E":
         # Normal terminator of the ``N…E`` nested-name wrapper; no component.
-        return None, i + 1, True
+        return None, i + 1, True, False
     if c in _ASCII_DIGITS:
-        name, new_i = _parse_source_name_component(s, i)
+        name, new_i, template_attached = _parse_source_name_component(s, i)
         if name is None:
             return None  # malformed source name — propagate failure
-        return name, new_i, not nested
+        return name, new_i, not nested, template_attached
     label, new_i = _parse_non_source_name_component(s, i)
     if label is None:
         return None  # conversion operator / substitution / vendor — not modelled
@@ -367,8 +384,56 @@ def _step_next_component(
         # target type follows immediately and is deliberately not parsed
         # (see _parse_operator_component) so stop right here regardless of
         # nesting, rather than attempt to step into that unparsed type.
-        return label, new_i, True
-    return label, new_i, not nested
+        return label, new_i, True, False
+    return label, new_i, not nested, False
+
+
+def itanium_scope_components_with_template_positions(
+    mangled: str,
+) -> tuple[list[str], frozenset[int]] | None:
+    """Like :func:`itanium_scope_components`, but also reports exactly which
+    component indices carry a directly-attached template-argument list.
+
+    Tracked structurally at parse time -- from :func:`_step_next_component`'s
+    (in turn :func:`_parse_source_name_component`'s) own knowledge of
+    whether it consumed an ``I…E`` block -- rather than guessed back out of
+    the assembled component text by a caller. See
+    :func:`_parse_source_name_component`'s own docstring for why the
+    structural signal matters: a text-based guess (``component_embeds_
+    template_args()``, kept for the qualified-name/header-tier-fallback
+    shape, which has no parser to ask) misreads an ordinary identifier like
+    ``"ICE"`` as a balanced template block purely by coincidental spelling.
+
+    Returns ``None`` under the identical conditions
+    :func:`itanium_scope_components` does (see its own docstring); the
+    ``list[str]`` half of a successful result is byte-for-byte the same
+    list that function returns for the same input.
+    """
+    prefix = _itanium_strip_prefix(mangled)
+    if prefix is None:
+        return None
+    s, nested = prefix
+    components: list[str] = []
+    template_positions: set[int] = set()
+    i = 0
+    n = len(s)
+    if s[i : i + 2] == "St":
+        components.append("std")
+        i += 2
+    while i < n:
+        step = _step_next_component(s, i, nested)
+        if step is None:
+            return None  # unmodelled or malformed component
+        label, i, done, template_attached = step
+        if label is not None:
+            if template_attached:
+                template_positions.add(len(components))
+            components.append(label)
+        if done:
+            break
+    if not components:
+        return None
+    return components, frozenset(template_positions)
 
 
 def itanium_scope_components(mangled: str) -> list[str] | None:
@@ -408,32 +473,55 @@ def itanium_scope_components(mangled: str) -> list[str] | None:
     other substitutions, non-Itanium or unmangled names) so callers fall
     back.
     """
-    prefix = _itanium_strip_prefix(mangled)
-    if prefix is None:
-        return None
-    s, nested = prefix
-    components: list[str] = []
-    i = 0
-    n = len(s)
-    if s[i : i + 2] == "St":
-        components.append("std")
-        i += 2
-    while i < n:
-        step = _step_next_component(s, i, nested)
-        if step is None:
-            return None  # unmodelled or malformed component
-        label, i, done = step
-        if label is not None:
-            components.append(label)
-        if done:
-            break
-    return components or None
+    result = itanium_scope_components_with_template_positions(mangled)
+    return result[0] if result is not None else None
 
 
 def itanium_qualified_name(mangled: str) -> str | None:
     """Fully scope-qualified name (``ns::C::bar``) from a mangled symbol, or None."""
     comps = itanium_scope_components(mangled)
     return "::".join(comps) if comps else None
+
+
+def component_embeds_template_args(component: str) -> bool:
+    """Whether *component* -- one entry from
+    :func:`qualified_name_scope_components` (a demangled or already
+    pretty-printed spelling) -- embeds a template-argument list, rather than
+    naming a bare namespace/class/function segment.
+
+    A pretty-printed spelling keeps the human-readable ``<...>`` form (e.g.
+    ``"Box<int>"``), so a literal ``<`` anywhere in *component* is a sound,
+    exact signal for this shape: no ordinary C++ identifier can contain
+    ``<``.
+
+    This is deliberately a TEXT-ONLY heuristic and is NOT used for an
+    Itanium-mangled component: :func:`itanium_scope_components` keeps a
+    directly-attached template-argument list RAW -- see
+    :func:`_parse_source_name_component`'s own docstring, "keep it raw so
+    ``Box<int>`` and ``Box<float>`` stay distinct" -- so ``Box<int>`` there
+    is the component ``"BoxIiE"``, containing no literal ``<`` at all, and a
+    naive scan for a raw ``I...E`` block is unsound: an ordinary identifier
+    like ``"ICE"`` or ``"IWidgetE"`` parses as a balanced template-args
+    block purely by coincidental spelling (Codex review, fresh evidence --
+    this function itself carried exactly that guessing branch until this
+    fix, and it produced a real false positive: a genuine namespace move of
+    a class spelled e.g. ``ICE`` -> ``ACE`` was silently skipped). The sound
+    answer for an Itanium mangling is the STRUCTURAL one,
+    :func:`itanium_scope_components_with_template_positions`, which knows
+    at parse time -- from :func:`_parse_source_name_component`'s own
+    return value -- whether a template-argument list was actually consumed,
+    rather than guessing it back out of the assembled text. Every caller of
+    *this* function must therefore route an Itanium-mangled component
+    through that structural answer instead (see
+    :mod:`diff_symbols_renames`'s ``_scope_components``, this function's
+    only production consumer).
+
+    Deliberately conservative like every other guard in this module: an
+    unrecognized shape returns ``False`` (not template-bearing) rather than
+    risking a false positive that would suppress a genuine namespace-move
+    finding.
+    """
+    return "<" in component
 
 
 def itanium_ctor_dtor_marker_span(mangled: str) -> tuple[int, int] | None:
@@ -486,7 +574,7 @@ def itanium_ctor_dtor_marker_span(mangled: str) -> tuple[int, int] | None:
         if c == "E":
             return None  # nested name closed with no ctor/dtor component found
         if c in _ASCII_DIGITS:
-            _name, new_i = _parse_source_name_component(s, i)
+            _name, new_i, _template_attached = _parse_source_name_component(s, i)
             if new_i == i:
                 return None  # malformed source name
             i = new_i

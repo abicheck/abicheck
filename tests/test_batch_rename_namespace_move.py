@@ -35,6 +35,9 @@ from hypothesis import given, settings, strategies as st
 from abicheck.checker import compare
 from abicheck.checker_policy import ChangeKind
 from abicheck.diff_cxx_rules import (
+    component_embeds_template_args,
+    itanium_scope_components,
+    itanium_scope_components_with_template_positions,
     qualified_name_scope_components,
     strip_trailing_top_level_parameter_list,
 )
@@ -260,8 +263,17 @@ class TestHeaderTierKeysAlsoJoinTheNamespaceMove:
         assert len(groups[("d1", "d2")]) == len(_D1)
 
     def test_reported_through_compare_with_header_tier_keys_only(self) -> None:
-        old = _snap("2021", [_fn("graph", m) for m in _D1_HEADER_TIER])
-        new = _snap("2022", [_fn("graph", m) for m in _D2_HEADER_TIER])
+        # A class's own ctor+dtor pair alone is deliberately *not* enough
+        # support (see `TestEmitNamespaceMoveBatchesRequiresTwoDistinctEntities`
+        # below) -- it is one declaring entity, indistinguishable from an
+        # unrelated deleted-class/added-class coincidence. A second,
+        # independent header-tier declaration (a plain qualified free-form
+        # member name, the third shape this fallback covers) is what makes
+        # this a genuine multi-entity move.
+        old_keys = [*_D1_HEADER_TIER, "tbb::detail::d1::graph::reset"]
+        new_keys = [*_D2_HEADER_TIER, "tbb::detail::d2::graph::reset"]
+        old = _snap("2021", [_fn("graph", m) for m in old_keys])
+        new = _snap("2022", [_fn("graph", m) for m in new_keys])
         result = compare(old, new)
         batch = [c for c in result.changes if c.kind is ChangeKind.SYMBOL_RENAMED_BATCH]
         assert batch, "namespace move via header-tier keys produced no batch roll-up"
@@ -1458,3 +1470,319 @@ class TestFindNamespaceMoveGroupsRetainsLocallyAmbiguousCandidatesGlobally:
             "_ZN1x3old1gEv",
         }
         assert find_namespace_move_groups(removed, added) == {}
+
+
+class TestEmitNamespaceMoveBatchesRequiresTwoDistinctEntities:
+    """Reported false positive (oneCCL, fresh evidence): an unrelated class
+    deleted in one scope and an unrelated, differently-named class added in
+    the SAME scope always contributes exactly two pairs -- its own
+    compiler-generated ``{ctor}``/``{dtor}`` -- to whatever one-component
+    substitution their scope chains happen to mask into, regardless of
+    whether the class actually moved. ``len(pairs) >= 2`` alone treats that
+    as sufficient support; it is not, because a ctor and a dtor of the same
+    class are never independent evidence -- they always travel together for
+    ANY class, moved or not."""
+
+    def test_one_deleted_class_and_one_unrelated_added_class_is_not_a_batch(
+        self,
+    ) -> None:
+        removed = {
+            "__abicheck_ctor__ccl::v1::broadcastExt_attr()",
+            "~ccl::v1::broadcastExt_attr",
+        }
+        added = {
+            "__abicheck_ctor__ccl::v1::window()",
+            "~ccl::v1::window",
+        }
+        groups = find_namespace_move_groups(removed, added)
+        # The grouping primitive itself still sees two genuine, unambiguous
+        # pairs -- the fix belongs at the batch-emission threshold, not here.
+        assert groups == {
+            ("broadcastExt_attr", "window"): [
+                (
+                    "ccl::v1::broadcastExt_attr::{ctor}",
+                    "ccl::v1::window::{ctor}",
+                ),
+                (
+                    "ccl::v1::broadcastExt_attr::{dtor}",
+                    "ccl::v1::window::{dtor}",
+                ),
+            ]
+        }
+        assert emit_namespace_move_batches(groups) == []
+
+    def test_a_real_move_of_two_distinct_classes_still_reports(self) -> None:
+        """The guard is "one entity's ctor+dtor alone is not enough", not
+        "ctor/dtor pairs never count" -- two DIFFERENT classes each moving
+        namespace, evidenced only by their ctor/dtor pairs, is genuine
+        multi-entity support and must still be reported."""
+        removed = {
+            "__abicheck_ctor__ccl::v1::Foo()",
+            "~ccl::v1::Foo",
+            "__abicheck_ctor__ccl::v1::Bar()",
+            "~ccl::v1::Bar",
+        }
+        added = {
+            "__abicheck_ctor__ccl::v2::Foo()",
+            "~ccl::v2::Foo",
+            "__abicheck_ctor__ccl::v2::Bar()",
+            "~ccl::v2::Bar",
+        }
+        groups = find_namespace_move_groups(removed, added)
+        changes = emit_namespace_move_batches(groups)
+        assert len(changes) == 1
+        assert changes[0].kind is ChangeKind.SYMBOL_RENAMED_BATCH
+        assert "v1" in changes[0].description and "v2" in changes[0].description
+
+    def test_reported_through_compare(self) -> None:
+        """The false positive reproduced end to end: an unrelated class
+        deletion + addition in the same scope must never surface as
+        SYMBOL_RENAMED_BATCH."""
+        old = _snap(
+            "13.1",
+            [
+                _fn(
+                    "broadcastExt_attr",
+                    "__abicheck_ctor__ccl::v1::broadcastExt_attr()",
+                ),
+                _fn("~broadcastExt_attr", "~ccl::v1::broadcastExt_attr"),
+            ],
+        )
+        new = _snap(
+            "14.0",
+            [
+                _fn("window", "__abicheck_ctor__ccl::v1::window()"),
+                _fn("~window", "~ccl::v1::window"),
+            ],
+        )
+        kinds = {c.kind for c in compare(old, new).changes}
+        assert ChangeKind.SYMBOL_RENAMED_BATCH not in kinds
+
+
+class TestFindNamespaceMoveGroupsIgnoresTemplateArgumentSubstitutions:
+    """Reported mislabel (oneTBB, fresh evidence): a template class whose OWN
+    enclosing scope never changed, but whose spelling embeds a template
+    argument naming a type that DID move namespace (e.g.
+    ``concurrent_priority_queue<tbb::detail::d1::graph_task *>`` ->
+    ``concurrent_priority_queue<tbb::detail::d2::graph_task *>``), must not
+    be reported as its own "namespace segment" substitution -- the whole
+    templated spelling is not a namespace segment, and the real move is
+    already reported through ``graph_task``'s own (non-templated) symbols."""
+
+    _OLD_ARG = "tbb::detail::d1::graph_task"
+    _NEW_ARG = "tbb::detail::d2::graph_task"
+    _TEMPLATE = "concurrent_priority_queue<{}::graph_task *>"
+
+    def test_template_argument_substitution_alone_yields_no_group(self) -> None:
+        """With no OTHER evidence of a `d1` -> `d2` move at all, the
+        templated ctor/dtor pair must produce nothing -- not even a group
+        keyed on the whole instantiation text."""
+        removed = {
+            f"__abicheck_ctor__tbb::detail::d1::{self._TEMPLATE.format('tbb::detail::d1')}()",
+            f"~tbb::detail::d1::{self._TEMPLATE.format('tbb::detail::d1')}",
+        }
+        added = {
+            f"__abicheck_ctor__tbb::detail::d1::{self._TEMPLATE.format('tbb::detail::d2')}()",
+            f"~tbb::detail::d1::{self._TEMPLATE.format('tbb::detail::d2')}",
+        }
+        assert find_namespace_move_groups(removed, added) == {}
+
+    def test_does_not_duplicate_the_real_move_it_is_redundant_with(self) -> None:
+        """The real ``d1`` -> ``d2`` move (evidenced by ``graph_task``'s own
+        symbols) must still be reported, and reported EXACTLY ONCE -- not
+        alongside a second, spurious group keyed on the templated spelling."""
+        removed = {
+            "tbb::detail::d1::graph_task::run",
+            "tbb::detail::d1::graph_task::wait",
+            f"__abicheck_ctor__tbb::detail::d1::{self._TEMPLATE.format('tbb::detail::d1')}()",
+            f"~tbb::detail::d1::{self._TEMPLATE.format('tbb::detail::d1')}",
+        }
+        added = {
+            "tbb::detail::d2::graph_task::run",
+            "tbb::detail::d2::graph_task::wait",
+            f"__abicheck_ctor__tbb::detail::d1::{self._TEMPLATE.format('tbb::detail::d2')}()",
+            f"~tbb::detail::d1::{self._TEMPLATE.format('tbb::detail::d2')}",
+        }
+        groups = find_namespace_move_groups(removed, added)
+        assert set(groups) == {("d1", "d2")}
+        assert len(groups[("d1", "d2")]) == 2
+        changes = emit_namespace_move_batches(groups)
+        assert len(changes) == 1
+
+
+class TestComponentEmbedsTemplateArgs:
+    """Direct primitive-level tests for the qualified-name/header-tier-
+    fallback predicate (CLAUDE.md's "Primitive-level property tests"
+    guidance). Text-only, and deliberately NOT used for an Itanium-mangled
+    component -- see ``TestItaniumScopeComponentsWithTemplatePositions``
+    below for that shape's own, structural predicate."""
+
+    def test_recognizes_pretty_printed_form(self) -> None:
+        assert component_embeds_template_args("Box<int>") is True
+        assert (
+            component_embeds_template_args(
+                "concurrent_priority_queue<tbb::detail::d1::graph_task *>"
+            )
+            is True
+        )
+
+    def test_plain_identifiers_are_not_template_bearing(self) -> None:
+        assert component_embeds_template_args("graph_task") is False
+        assert component_embeds_template_args("run") is False
+        assert component_embeds_template_args("Item") is False
+        assert component_embeds_template_args("ICE") is False
+
+
+class TestItaniumScopeComponentsWithTemplatePositions:
+    """Direct primitive-level tests for the structural (parse-time, not
+    text-guessed) template-position signal a real Itanium mangling uses.
+    CodeRabbit/Codex review, fresh evidence: this predicate exists
+    specifically because a text-based guess over the assembled raw
+    component (the shape ``component_embeds_template_args`` briefly also
+    attempted for this case, then reverted) is unsound -- an ordinary
+    identifier like ``"ICE"`` parses as a balanced raw ``I...E`` template
+    block purely by coincidental spelling, which would silently exclude a
+    genuine namespace move of a class named ``ICE`` from ever being
+    detected."""
+
+    def test_recognizes_a_real_template_instantiation(self) -> None:
+        # `tbb::detail::d1::concurrent_priority_queue<tbb::detail::d1::graph_task *>::graph_task_ptr` (ctor)
+        mangled = "_ZN3tbb6detail2d125concurrent_priority_queueIPN3tbb6detail2d110graph_taskEEC1Ev"
+        result = itanium_scope_components_with_template_positions(mangled)
+        assert result is not None
+        comps, template_positions = result
+        assert comps == [
+            "tbb",
+            "detail",
+            "d1",
+            "concurrent_priority_queueIPN3tbb6detail2d110graph_taskEE",
+            "{ctor}",
+        ]
+        assert template_positions == frozenset({3})
+
+    def test_does_not_misread_a_coincidentally_ice_shaped_identifier(self) -> None:
+        """The exact regression this predicate exists to close: a real class
+        literally named ``ICE`` moving namespace must not have its own
+        component excluded from masking -- unlike the text-based guess this
+        function replaces for the Itanium shape."""
+        mangled = "_ZN2ns3ICE1fEv"
+        result = itanium_scope_components_with_template_positions(mangled)
+        assert result is not None
+        comps, template_positions = result
+        assert comps == ["ns", "ICE", "f"]
+        assert template_positions == frozenset()
+
+    def test_plain_symbols_have_no_template_positions(self) -> None:
+        result = itanium_scope_components_with_template_positions(
+            "_ZN3tbb6detail2d110graph_task3runEv"
+        )
+        assert result is not None
+        comps, template_positions = result
+        assert comps == ["tbb", "detail", "d1", "graph_task", "run"]
+        assert template_positions == frozenset()
+
+    def test_matches_the_plain_scope_components_list(self) -> None:
+        """The list half of a successful result must be identical to what
+        ``itanium_scope_components`` (the pre-existing, template-position-
+        blind function) returns for the same input."""
+        mangled = "_ZN3tbb6detail2d125concurrent_priority_queueIPN3tbb6detail2d110graph_taskEEC1Ev"
+        result = itanium_scope_components_with_template_positions(mangled)
+        assert result is not None
+        assert result[0] == itanium_scope_components(mangled)
+
+    def test_an_unbalanced_directly_attached_template_args_list_returns_none(
+        self,
+    ) -> None:
+        """A class name followed by an opened but never-closed ``I`` template-
+        args list (no matching ``E`` anywhere) must degrade to ``None`` --
+        the same "unparseable, let the caller fall back" contract every
+        other malformed-input branch in this module uses -- rather than
+        raising or fabricating a component."""
+        assert itanium_scope_components_with_template_positions("_ZN3FooI") is None
+        assert itanium_scope_components("_ZN3FooI") is None
+
+    def test_an_empty_nested_name_body_returns_none(self) -> None:
+        """``N…E`` immediately closed with no component in between (no
+        ``std::`` prefix, nothing parsed before the terminator) must
+        degrade to ``None`` rather than an empty, unusable component list."""
+        assert itanium_scope_components_with_template_positions("_ZNEi") is None
+        assert itanium_scope_components("_ZNEi") is None
+
+
+class TestFindNamespaceMoveGroupsDoesNotSkipACoincidentallyTemplateShapedName:
+    """End-to-end regression for the same fix, through the real detector
+    entry points -- not just the primitive."""
+
+    def test_a_real_move_of_a_class_named_ice_is_still_detected(self) -> None:
+        removed = {
+            "_ZN2ns3ICE1fEv",
+            "_ZN2ns3ICE1gEv",
+        }
+        added = {
+            "_ZN2ns3ACE1fEv",
+            "_ZN2ns3ACE1gEv",
+        }
+        groups = find_namespace_move_groups(removed, added)
+        assert ("ICE", "ACE") in groups
+        assert len(groups[("ICE", "ACE")]) == 2
+        changes = emit_namespace_move_batches(groups)
+        assert len(changes) == 1
+
+
+class TestFindNamespaceMoveGroupsIgnoresRawMangledTemplateArguments:
+    """Codex review, fresh evidence, on the fix above: a REAL Itanium-mangled
+    symbol keeps a directly-attached template-argument list RAW (see
+    ``itanium_scope_components``'s own docstring -- ``Box<int>`` mangles to
+    the component ``"BoxIiE"``, with no literal ``<`` anywhere), so a naive
+    ``"<" in comps[i]`` check never fires for the real, mangled-symbol
+    production case this whole fix exists for -- only for the qualified-
+    name/header-tier-fallback spelling the sibling test class above uses.
+    These tests reproduce the exact reported shape through real mangled
+    symbols: ``tbb::detail::d1::concurrent_priority_queue<tbb::detail::d1::
+    graph_task *>`` (ctor/dtor mangled with a raw ``I...E`` template-args
+    block naming ``tbb::detail::d1::graph_task``) whose OWN enclosing scope
+    (``tbb::detail::d1::concurrent_priority_queue``) never moved, alongside
+    the real ``d1`` -> ``d2`` move of ``graph_task`` itself."""
+
+    # `tbb::detail::d1::concurrent_priority_queue<tbb::detail::d1::graph_task *>`
+    # ctor/dtor, and the `d2`-instantiated sibling -- hand-mangled (not from a
+    # real compiler) but structurally well-formed Itanium encodings, verified
+    # to parse via `itanium_scope_components` before being used here.
+    _OLD_CTOR = "_ZN3tbb6detail2d125concurrent_priority_queueIPN3tbb6detail2d110graph_taskEEC1Ev"
+    _NEW_CTOR = "_ZN3tbb6detail2d125concurrent_priority_queueIPN3tbb6detail2d210graph_taskEEC1Ev"
+    _OLD_DTOR = "_ZN3tbb6detail2d125concurrent_priority_queueIPN3tbb6detail2d110graph_taskEED1Ev"
+    _NEW_DTOR = "_ZN3tbb6detail2d125concurrent_priority_queueIPN3tbb6detail2d210graph_taskEED1Ev"
+
+    def test_component_is_recognized_as_template_bearing(self) -> None:
+        """Sanity check on the primitive itself: the raw Itanium component
+        differs between old and new (it embeds ``d1``/``d2``), so without the
+        fix it would be a candidate differing position."""
+        old_comps = itanium_scope_components(self._OLD_CTOR)
+        new_comps = itanium_scope_components(self._NEW_CTOR)
+        assert old_comps is not None and new_comps is not None
+        assert old_comps[3] != new_comps[3]
+        assert "<" not in old_comps[3]  # the raw shape, not the pretty one
+
+    def test_template_argument_substitution_alone_yields_no_group(self) -> None:
+        removed = {self._OLD_CTOR, self._OLD_DTOR}
+        added = {self._NEW_CTOR, self._NEW_DTOR}
+        assert find_namespace_move_groups(removed, added) == {}
+
+    def test_does_not_duplicate_the_real_move_it_is_redundant_with(self) -> None:
+        removed = {
+            "_ZN3tbb6detail2d110graph_task3runEv",
+            "_ZN3tbb6detail2d110graph_task4waitEv",
+            self._OLD_CTOR,
+            self._OLD_DTOR,
+        }
+        added = {
+            "_ZN3tbb6detail2d210graph_task3runEv",
+            "_ZN3tbb6detail2d210graph_task4waitEv",
+            self._NEW_CTOR,
+            self._NEW_DTOR,
+        }
+        groups = find_namespace_move_groups(removed, added)
+        assert set(groups) == {("d1", "d2")}
+        assert len(groups[("d1", "d2")]) == 2
+        changes = emit_namespace_move_batches(groups)
+        assert len(changes) == 1
