@@ -792,6 +792,23 @@ def qualified_name_scope_components(qualified: str) -> list[str] | None:
     its entire interior is opaque, and this needs no heuristic either,
     since ``[``/``]`` always balance unconditionally in valid C++ too.
 
+    A lambda's trailing-return-type arrow (``[]() -> bool { ... }``,
+    confirmed to compile and pretty-print verbatim as a non-type template
+    argument) needs its own check, unrelated to brace/bracket tracking:
+    the ``->`` sits in the lambda's OWN declarator, between its parameter
+    list and its body, so it is not inside any brace/bracket this function
+    already tracks as opaque. Unlike every other ``>`` case above, this
+    one needs no heuristic and no depth-awareness at all: by the C++
+    lexical grammar's own maximal-munch rule, a ``-`` immediately adjacent
+    to a ``>`` can ONLY ever tokenize as the single ``->`` token, never as
+    two separate ``-`` and ``>`` tokens -- if the source meant a
+    subtraction immediately followed by a separate closing ``>`` with
+    zero characters between them, the compiler's own lexer would already
+    have misread that as ``->`` too, so this exact adjacency cannot
+    represent two separate tokens in any valid, compiled C++ program
+    (Codex review, fresh evidence). A ``>`` immediately preceded by ``-``
+    is therefore always skipped as part of ``->``, unconditionally.
+
     Known, accepted limitation (Codex review, fresh evidence): the brace/
     bracket "opaque interior" scan above is a raw character count, not a
     real tokenizer -- it does not skip over string/char-literal content or
@@ -869,6 +886,22 @@ def qualified_name_scope_components(qualified: str) -> list[str] | None:
             # enclosing template-argument-list's own bracket balance. See
             # this function's own docstring for why braces/brackets need
             # no whitespace heuristic, unlike angle brackets.
+            i += 1
+            continue
+        if ch == ">" and i > 0 and qualified[i - 1] == "-":
+            # A lambda's trailing-return-type arrow ("[]() -> bool {...}",
+            # confirmed to compile as a non-type template argument and be
+            # pretty-printed verbatim) -- unlike the other ">" cases, this
+            # needs no heuristic or brace/bracket-depth awareness at all:
+            # by the C++ lexical grammar's own maximal-munch rule, a "-"
+            # character immediately adjacent to a ">" can ONLY ever
+            # tokenize as the single "->" token, never as two separate
+            # "-" and ">" tokens -- if the source meant a subtraction
+            # immediately followed by a separate closing ">" with zero
+            # characters between them, the compiler's own lexer would
+            # already have misread THAT as "->" too, so this adjacency
+            # cannot represent two separate tokens in any valid, compiled
+            # C++ program (Codex review, fresh evidence).
             i += 1
             continue
         if ch in "<>" and _operator_keyword_precedes(qualified, i):
@@ -950,6 +983,12 @@ def qualified_name_scope_components(qualified: str) -> list[str] | None:
             i += 1
             continue
         if brace_depth > 0 or bracket_depth > 0:
+            i += 1
+            continue
+        if ch == ">" and i > 0 and qualified[i - 1] == "-":
+            # A lambda's trailing-return-type arrow -- see this function's
+            # own docstring / the sibling scan above for why this needs
+            # no heuristic at all.
             i += 1
             continue
         if ch in "<>" and _operator_keyword_precedes(qualified, i):
@@ -1055,6 +1094,11 @@ def strip_trailing_top_level_parameter_list(text: str) -> str:
             continue
         if brace_depth > 0 or bracket_depth > 0:
             # Opaque lambda-body/subscript interior -- see
+            # qualified_name_scope_components's identical concern.
+            i += 1
+            continue
+        if ch == ">" and i > 0 and text[i - 1] == "-":
+            # A lambda's trailing-return-type arrow -- see
             # qualified_name_scope_components's identical concern.
             i += 1
             continue

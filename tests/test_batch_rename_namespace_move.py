@@ -882,6 +882,71 @@ class TestStripTrailingTopLevelParameterListAcceptsSubscriptTemplateArguments:
         )
 
 
+class TestQualifiedNameScopeComponentsAcceptsLambdaTrailingReturnArrows:
+    """Codex review, fresh evidence: a lambda's trailing-return-type arrow
+    (``[]() -> bool { ... }``) sits in the lambda's OWN declarator, between
+    its parameter list and its body -- not inside any brace/bracket the
+    earlier fixes already track as opaque. Confirmed directly against real
+    clang: ``operator B<[]() -> bool { return N > 0; }>()`` compiles under
+    ``-std=c++20`` and is pretty-printed verbatim. Unlike every other ``>``
+    case, this needs no heuristic at all: by the C++ lexical grammar's own
+    maximal-munch rule, a ``-`` immediately adjacent to a ``>`` can only
+    ever tokenize as the single ``->`` token, never as two separate
+    tokens."""
+
+    def test_lambda_trailing_return_arrow_target_is_accepted(self) -> None:
+        target = "operator B<[]() -> bool { return N > 0; }>"
+        assert qualified_name_scope_components(f"api::C::{target}") == [
+            "api",
+            "C",
+            target,
+        ]
+
+    def test_multi_line_trailing_return_arrow_confirmed_against_real_clang_output(
+        self,
+    ) -> None:
+        """The exact spelling confirmed by ``clang -ast-dump`` for
+        ``operator B<[]() -> bool { return N > 0; }>()`` under
+        ``-std=c++20``."""
+        target = "operator B<[]() -> bool {\n    return N > 0;\n}>"
+        assert qualified_name_scope_components(f"api::C::{target}") == [
+            "api",
+            "C",
+            target,
+        ]
+
+    def test_trailing_return_arrow_in_an_ordinary_qualified_name_splits_correctly(
+        self,
+    ) -> None:
+        assert qualified_name_scope_components(
+            "ns::B<[]() -> bool { return N > 0; }>::method"
+        ) == ["ns", "B<[]() -> bool { return N > 0; }>", "method"]
+
+    def test_still_rejects_genuinely_unbalanced_nesting_alongside_the_arrow(
+        self,
+    ) -> None:
+        assert (
+            qualified_name_scope_components(
+                "api::C::operator B<[]() -> bool { return N > 0; }"
+            )
+            is None
+        )
+
+
+class TestStripTrailingTopLevelParameterListAcceptsLambdaTrailingReturnArrows:
+    """The identical arrow-token fix, applied to
+    :func:`strip_trailing_top_level_parameter_list`'s own angle-bracket
+    tracking."""
+
+    def test_lambda_trailing_return_arrow_scope_splits_correctly(self) -> None:
+        assert (
+            strip_trailing_top_level_parameter_list(
+                "ns::Holder<[]() -> bool { return N > 0; }>(int)"
+            )
+            == "ns::Holder<[]() -> bool { return N > 0; }>"
+        )
+
+
 class TestStripTrailingTopLevelParameterListAcceptsExpressionBearingScopes:
     """The identical bracket-kind-blind depth bug as the class above, in
     :func:`strip_trailing_top_level_parameter_list`'s own angle-bracket

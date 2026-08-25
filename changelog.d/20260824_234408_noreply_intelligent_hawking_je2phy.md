@@ -66,7 +66,15 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   of work than the bounded fixes above and the shape it would guard
   against (a string literal inside a lambda body used as a conversion
   operator's own non-type template argument) is far into
-  adversarially-constructed territory rather than real-world C++.
+  adversarially-constructed territory rather than real-world C++. A
+  lambda's trailing-return-type arrow (`[]() -> bool { ... }`, confirmed
+  to compile and pretty-print verbatim as a non-type template argument) is
+  now also correctly accepted — the `>` in `->` sits in the lambda's own
+  declarator, not inside any brace/bracket the earlier fixes already
+  track as opaque, so it needs its own check. Unlike every other `>` case
+  here, this one needs no heuristic at all: a `-` immediately adjacent to
+  a `>` can only ever tokenize as the single `->` token by the C++
+  lexical grammar's own maximal-munch rule, never as two separate tokens.
 - **A lambda-closure-parameterized function-level finding is now demoted
   when confirmed never exported on either side.** A `func_removed`/
   `func_params_changed`/`template_param_type_changed`/
