@@ -949,7 +949,6 @@ jobs:
           consumer-ast-frontend: ${{ matrix.kind != 'bundle' && matrix.consumer_compile_ast_frontend || '' }}
           consumer-gcc-path: ${{ matrix.kind != 'bundle' && matrix.consumer_compile_gcc_path || '' }}
           consumer-gcc-options: ${{ matrix.kind != 'bundle' && matrix.consumer_compile_gcc_options || '' }}
-          consumer-context-enabled: ${{ matrix.kind != 'bundle' && matrix.consumer_compile_enabled || false }}
           # P1 toolchain-profile audit: this cell's profiles.<id>.compile
           # overlay (project plan --toolchain-bindings), when the
           # profile declares one, takes precedence over these workflow-

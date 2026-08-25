@@ -688,13 +688,11 @@ class TestRunPlanRoundTrip:
             compile_gcc_options="-std=gnu++17",
             consumer_compile_gcc_path="/opt/llvm-20/bin/clang++",
             consumer_compile_gcc_options="-std=gnu++20 -stdlib=libc++",
-            consumer_compile_enabled=True,
         )
         plan = RunPlan(checks=[check])
         d = check.to_dict()
         assert d["consumer_compile_gcc_path"] == "/opt/llvm-20/bin/clang++"
         assert d["consumer_compile_gcc_options"] == "-std=gnu++20 -stdlib=libc++"
-        assert d["consumer_compile_enabled"] is True
         restored = RunPlan.from_dict(json.loads(json.dumps(plan.to_dict())))
         assert restored == plan
 
@@ -705,7 +703,6 @@ class TestRunPlanRoundTrip:
         d = check.to_dict()
         assert "consumer_compile_gcc_path" not in d
         assert "consumer_compile_gcc_options" not in d
-        assert "consumer_compile_enabled" not in d
 
     def test_compile_frontend_fields_round_trip(self) -> None:
         """G34 Phase B: compile_ast_frontend/consumer_compile_ast_frontend
@@ -914,7 +911,6 @@ class TestConsumerCompileOverlayProjection:
         [check] = [c for c in plan.checks if c.profile_id == "plain"]
         assert check.consumer_compile_gcc_path == ""
         assert check.consumer_compile_gcc_options == ""
-        assert check.consumer_compile_enabled is False
         assert "consumer_compile_gcc_path" not in check.to_dict()
         assert "consumer_compile_gcc_options" not in check.to_dict()
 
@@ -940,8 +936,6 @@ class TestConsumerCompileOverlayProjection:
         # consumer_compile: resolves independently to its own pair.
         assert check.consumer_compile_gcc_path == "/opt/llvm-20/bin/clang++"
         assert check.consumer_compile_gcc_options == "-std=gnu++20 -stdlib=libc++"
-        assert check.consumer_compile_enabled is True
-        assert check.to_dict()["consumer_compile_enabled"] is True
 
     def test_consumer_binding_absent_from_resolved_bindings_leaves_path_empty(
         self,

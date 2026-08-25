@@ -392,10 +392,6 @@ class RunPlanCheck:
     #: ``consumer_compile:`` overlay, or the overlay sets none of
     #: ``standard``/``stdlib``/``target``/``abi_macros``/``args``.
     consumer_compile_gcc_options: str = ""
-    #: True whenever this profile declares ``consumer_compile:``. This is
-    #: independent of its projected values: an empty/identity-only overlay
-    #: still requests the distinct consumer-context extraction pass.
-    consumer_compile_enabled: bool = False
     #: This cell's profile's ``compile.frontend`` (G34 Phase B) -- one of
     #: ``auto``/``castxml``/``clang``/``hybrid``, overriding the global
     #: ``--ast-frontend`` default for this profile's cell only. Empty when
@@ -463,8 +459,6 @@ class RunPlanCheck:
             d["consumer_compile_gcc_path"] = self.consumer_compile_gcc_path
         if self.consumer_compile_gcc_options:
             d["consumer_compile_gcc_options"] = self.consumer_compile_gcc_options
-        if self.consumer_compile_enabled:
-            d["consumer_compile_enabled"] = True
         if self.compile_ast_frontend:
             d["compile_ast_frontend"] = self.compile_ast_frontend
         if self.consumer_compile_ast_frontend:
@@ -510,7 +504,6 @@ class RunPlanCheck:
             consumer_compile_gcc_options=_opt_str(
                 d.get("consumer_compile_gcc_options")
             ),
-            consumer_compile_enabled=bool(d.get("consumer_compile_enabled", False)),
             compile_ast_frontend=_opt_str(d.get("compile_ast_frontend")),
             consumer_compile_ast_frontend=_opt_str(
                 d.get("consumer_compile_ast_frontend")
@@ -746,15 +739,6 @@ def _consumer_compile_ast_frontend_for_profile(
     return consumer_compile_spec.frontend if consumer_compile_spec is not None else ""
 
 
-def _consumer_compile_enabled_for_profile(
-    config: ProjectTargetsConfig, profile_id: str
-) -> bool:
-    """Return whether *profile_id* explicitly declares consumer compilation."""
-
-    profile = config.profiles.get(profile_id)
-    return profile is not None and profile.consumer_compile is not None
-
-
 def _scheduling_fields_for_profile(
     config: ProjectTargetsConfig, profile_id: str
 ) -> tuple[str, str]:
@@ -882,9 +866,6 @@ def _generate_target_checks(
                     compile_gcc_options=compile_gcc_options,
                     consumer_compile_gcc_path=consumer_compile_gcc_path,
                     consumer_compile_gcc_options=consumer_compile_gcc_options,
-                    consumer_compile_enabled=_consumer_compile_enabled_for_profile(
-                        config, profile_id
-                    ),
                     compile_ast_frontend=_compile_ast_frontend_for_profile(
                         config, profile_id
                     ),
@@ -987,9 +968,6 @@ def _generate_bundle_checks(
                     compile_gcc_options=compile_gcc_options,
                     consumer_compile_gcc_path=consumer_compile_gcc_path,
                     consumer_compile_gcc_options=consumer_compile_gcc_options,
-                    consumer_compile_enabled=_consumer_compile_enabled_for_profile(
-                        config, profile_id
-                    ),
                     compile_ast_frontend=_compile_ast_frontend_for_profile(
                         config, profile_id
                     ),

@@ -220,10 +220,6 @@ inputs:
   consumer-gcc-options:
     description: 'Consumer-only compiler options used by the separate candidate header extraction pass.'
     required: false
-  consumer-context-enabled:
-    description: 'Whether the profile declares consumer_compile, including an overlay whose projected compiler fields are empty.'
-    required: false
-    default: 'false'
   sysroot:
     description: 'Alternative system root directory for cross-compilation. Forwarded to the internal analysis step.'
     required: false
@@ -536,7 +532,7 @@ runs:
       id: consumer_context
       if: |
         inputs.kind == 'target' &&
-        inputs.consumer-context-enabled == 'true' &&
+        (inputs.consumer-ast-frontend != '' || inputs.consumer-gcc-path != '' || inputs.consumer-gcc-options != '') &&
         (inputs.baseline-channel == 'none' || steps.resolve.outputs.outcome == 'resolved') &&
         steps.collect_verify.outcome != 'failure' &&
         steps.collect_replay.outcome != 'failure'

@@ -41,10 +41,6 @@ def test_consumer_compile_context_uses_a_separate_extraction() -> None:
         "matrix.consumer_compile_gcc_options"
         in run_step["with"]["consumer-gcc-options"]
     )
-    assert (
-        "matrix.consumer_compile_enabled"
-        in run_step["with"]["consumer-context-enabled"]
-    )
 
     target = _load(CHECK_TARGET)
     steps = _steps(target["runs"])
