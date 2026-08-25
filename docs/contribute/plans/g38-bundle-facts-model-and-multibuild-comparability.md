@@ -1762,12 +1762,29 @@ bundle_variants_config.py`'s own module docstrings record this same table
 (re-measured at the time each was written) so a future contributor who
 splits one of these files has a concrete, checkable pointer to what should
 consume the room it frees, rather than rediscovering this constraint from
-scratch. Until then: `bundle_variants_config.py` also does not verify a
-captured `BundleFacts.variant_fingerprint` against what a declared spec's
-own `.fingerprint()` would compute for the same name — documented in that
-module's own `run_bundle_variant_pairing()` docstring as a second,
-narrower gap that a real config-discovery producer should close alongside
-the CLI wiring itself, once one exists.
+scratch.
+
+**Fixed (Phase 13 follow-up, second pass):** `bundle_variants_config.py`'s
+own narrower, non-CLI-blocked gap — that it never verified a captured
+`BundleFacts.variant_fingerprint` against what a declared spec's own
+`.fingerprint()` would compute for the same name — is closed.
+`run_bundle_variant_pairing()` gained an opt-in `verify_fingerprints: bool
+= False` parameter: when `True`, a name present in both `specs` and one of
+the facts maps whose captured, *non-default* `variant_fingerprint`
+disagrees with `specs[name].fingerprint()` raises
+`BundleVariantsConfigError` (the wrong file assigned to the wrong declared
+variant name), while a facts file still carrying the
+`DEFAULT_VARIANT_FINGERPRINT` sentinel — what every `--bundle-facts-out`
+capture produces today, since no real capture pipeline can be told a
+variant name yet — is never flagged, since it was never captured against
+any declared coordinates to verify against. Default `False` so every
+pre-existing caller (this module's own test suite included, which pairs
+specs against arbitrary sentinel fingerprints unrelated to any real
+coordinates) is unaffected. This does not need the CLI/`BuildConfig`
+wiring above — it is a pure addition to the already-shipped Python-API
+`run_bundle_variant_pairing()` function — so it was safe to close
+independently of the still-open CLI-surface gap. See
+`tests/test_bundle_variants_config.py::TestRunBundleVariantPairingVerifyFingerprints`.
 
 The original multi-binary performance problem (repeated header/AST
 extraction across sibling DSOs sharing one source tree) is explicitly out
