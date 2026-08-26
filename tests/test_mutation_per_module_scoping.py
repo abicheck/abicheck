@@ -248,3 +248,86 @@ def test_run_mode_scoped_run_still_catches_a_regression_in_the_scoped_module(
         ]
     )
     assert rc == 1
+
+
+# ---------------------------------------------------------------------------
+# The identical gap one level flatter (Codex review, PR #877, fifteenth
+# round): the *global-total* baseline (`--baseline`/`SURVIVOR_BASELINE`)
+# compares `survivors` — the whole-records survivor count — against a total
+# established from a full run. A scoped run's `survivors` is really only the
+# scoped module(s)' own count (every out-of-scope mutant reads "not
+# checked", never "survived"), so comparing it against the recorded total
+# is meaningless — and, worse, a real out-of-scope regression would read as
+# "improved, please lower the baseline". Unlike the per-module gate, there
+# is no narrower population to restrict a *total* to, so the only sound fix
+# is to skip the comparison outright for a scoped run.
+# ---------------------------------------------------------------------------
+
+
+def test_run_mode_scoped_run_skips_the_global_total_baseline_check(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A scoped run measuring 0 survivors (nothing outside scope was ever
+    test-executed) must not read as "0 < baseline 5 — please lower the
+    baseline", which would falsely certify an improvement no measurement
+    actually made."""
+    (tmp_path / "abicheck").mkdir()
+    (tmp_path / "abicheck" / "diff_types.py").write_text(_SOURCE, encoding="utf-8")
+    _pyproject_with_only_mutate(
+        tmp_path, ["abicheck/diff_types.py", "abicheck/diff_symbols.py"]
+    )
+    monkeypatch.setattr(gate, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(gate.shutil, "which", lambda name: "/usr/bin/mutmut")
+    diff = _write(tmp_path, "d.diff", _DIFF)
+
+    def fake_run_mutmut(cmd: list[str]) -> tuple[str, int]:
+        if cmd[:2] == ["mutmut", "run"]:
+            return "1/1  🎉 1  🙁 0  🫥 0  ⏰ 0  🤔 0", 0
+        return "    abicheck.diff_types.x_alpha__mutmut_1: killed\n", 0
+
+    monkeypatch.setattr(gate, "_run_mutmut", fake_run_mutmut)
+    monkeypatch.setattr(
+        gate, "load_cicd_stats", lambda _dir: {"total": 1, "survived": 0, "killed": 1}
+    )
+    rc = gate.main(
+        [
+            "--run",
+            "--diff-scoped",
+            "--scope-run-to-diff",
+            "--diff-file",
+            diff,
+            "--baseline",
+            "5",
+        ]
+    )
+    out = capsys.readouterr().out
+    assert rc == 0, out
+    assert "global-total baseline check skipped" in out
+    assert "please lower SURVIVOR_BASELINE" not in out
+    assert "OK (0 == baseline 5)" not in out
+
+
+def test_run_mode_unscoped_run_still_gates_the_global_total_baseline(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Negative control: without --scope-run-to-diff, a real regression
+    against the global-total baseline still fails the run exactly as before
+    this fix — nothing here weakens the unscoped case."""
+    (tmp_path / "abicheck").mkdir()
+    (tmp_path / "abicheck" / "diff_types.py").write_text(_SOURCE, encoding="utf-8")
+    monkeypatch.setattr(gate, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(gate.shutil, "which", lambda name: "/usr/bin/mutmut")
+    monkeypatch.setattr(
+        gate,
+        "_run_mutmut",
+        lambda cmd: (
+            ("1/1  🎉 0  🙁 1  🫥 0  ⏰ 0  🤔 0", 0)
+            if cmd[:2] == ["mutmut", "run"]
+            else ("    abicheck.diff_types.x_alpha__mutmut_1: survived\n", 0)
+        ),
+    )
+    monkeypatch.setattr(
+        gate, "load_cicd_stats", lambda _dir: {"total": 1, "survived": 1, "killed": 0}
+    )
+    rc = gate.main(["--run", "--baseline", "0"])
+    assert rc == 1

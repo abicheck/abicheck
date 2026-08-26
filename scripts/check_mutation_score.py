@@ -1645,6 +1645,28 @@ def main(argv: list[str] | None = None) -> int:
             "mutation-score: global-total baseline not set — report-only. The "
             "per-module baseline file is the preferred gate."
         )
+    elif scope_modules:
+        # The identical blind spot check_per_module() had (Codex review,
+        # round 14) applies here too, one level flatter: `survivors` is the
+        # *whole-records* survivor count, but a scoped run never
+        # test-executes a mutant outside `scope_modules` — every one of
+        # those reads "not checked", never "survived" — so `survivors` here
+        # is really only the scoped module(s)' own count, not the whole
+        # population's. Comparing it against a baseline established from a
+        # full run is meaningless in both directions: a real out-of-scope
+        # regression would silently read as "improved, please lower the
+        # baseline", and there's no partial baseline to fall back to the way
+        # check_per_module() has one per module — a "total" has no narrower
+        # population to restrict to, so the only sound answer is to skip the
+        # comparison outright rather than score it against the wrong
+        # population (Codex review).
+        print(
+            "mutation-score: global-total baseline check skipped — this run "
+            f"was scoped to {len(scope_modules)} module(s), so its "
+            f"{survivors} surviving mutant(s) is not the whole population's "
+            f"count and cannot be compared against the recorded baseline of "
+            f"{total_baseline}."
+        )
     elif survivors > total_baseline:
         print(f"ERROR: surviving mutants {survivors} exceed baseline {total_baseline}.")
         exit_code = 1
