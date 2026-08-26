@@ -17,6 +17,7 @@ import pytest
 from hypothesis import given, strategies as st
 
 from abicheck.storage.availability import (
+    _GAP_STATUSES as _MODULE_GAP_STATUSES,
     AvailabilityLedger,
     Confidence,
     FactAvailability,
@@ -26,13 +27,11 @@ from abicheck.storage.availability import (
 _STATUSES = list(FactStatus)
 _CONFIDENCES = list(Confidence)
 
-#: Statuses that mean "evidence is missing for a reason", as opposed to
-#: NOT_APPLICABLE, which means "there is nothing here to be missing".
-_GAP_STATUSES = [
-    FactStatus.NOT_COLLECTED,
-    FactStatus.UNSUPPORTED,
-    FactStatus.FAILED,
-]
+#: Imported from the module under test rather than restated here. This list
+#: previously lived only in this file, with a comment explaining the very
+#: distinction `missing_families` was failing to make — so the tests knew
+#: something the production predicate did not, and nothing could notice.
+_GAP_STATUSES = sorted(_MODULE_GAP_STATUSES, key=lambda s: s.value)
 
 
 class TestComparablePredicate:
@@ -870,3 +869,81 @@ class TestTheSerializedFallbackIsTheEffectiveOne:
         assert not effective.comparable
         assert ledger.for_family("undeclared") == effective
         assert ledger.to_dict()["unknown_family_default"] == effective.to_dict()
+
+
+class TestNotApplicableIsNotAGap:
+    """Codex review: `missing_families` asked "not comparable", not "missing".
+
+    A generic evidence profile naturally requires families that do not apply
+    to every artifact — vtable facts for a C-only library. Recording
+    `NOT_APPLICABLE` exists to answer that; folding it in with the gap
+    statuses produced a coverage gap for a ledger that had explicitly
+    established none.
+
+    The distinction already existed in this file, spelled exactly this way.
+    It is now imported from the module, so the tests cannot again know
+    something the production predicate does not.
+    """
+
+    def test_an_explicitly_inapplicable_family_is_not_missing(self) -> None:
+        ledger = AvailabilityLedger()
+        ledger.declare("vtables", FactAvailability(FactStatus.NOT_APPLICABLE))
+
+        assert ledger.missing_families(["vtables"]) == ()
+
+    @pytest.mark.parametrize("status", _GAP_STATUSES)
+    def test_every_gap_status_is_still_missing(self, status: FactStatus) -> None:
+        ledger = AvailabilityLedger()
+        ledger.declare("graph", FactAvailability(status))
+
+        assert ledger.missing_families(["graph"]) == ("graph",)
+
+    def test_an_undeclared_family_is_still_missing(self) -> None:
+        """Only an explicit declaration may say "not applicable".
+
+        An undeclared family resolves through the fallback, which cannot be
+        comparable and defaults to `NOT_COLLECTED` — so silence is a gap, not
+        an exemption. This is the case that would make the fix dangerous if it
+        were wrong, since it is how an unset ledger behaves.
+        """
+        assert AvailabilityLedger().missing_families(["anything"]) == ("anything",)
+
+    def test_a_default_of_not_applicable_exempts_undeclared_families(self) -> None:
+        """The one way silence becomes an exemption: say so in the fallback.
+
+        `NOT_APPLICABLE` is a permitted `unknown_family_default` — the
+        artifact-kind case the constructor guard deliberately leaves open —
+        so a ledger for a C-only artifact can exempt what it never declares.
+        """
+        ledger = AvailabilityLedger(
+            unknown_family_default=FactAvailability(FactStatus.NOT_APPLICABLE)
+        )
+
+        assert ledger.missing_families(["vtables", "graph"]) == ()
+
+    def test_gap_and_comparable_statuses_do_not_overlap_or_exhaust(self) -> None:
+        """The two sets are deliberately not complements of each other.
+
+        Asserting it here keeps `NOT_APPLICABLE`'s third position explicit: a
+        future status added to neither set is neither usable evidence nor a
+        reported gap, which must be a deliberate choice rather than a default.
+        """
+        from abicheck.storage.availability import (
+            _COMPARABLE_STATUSES,
+            _GAP_STATUSES as gaps,
+        )
+
+        assert not (_COMPARABLE_STATUSES & gaps)
+        assert set(FactStatus) - _COMPARABLE_STATUSES - gaps == {
+            FactStatus.NOT_APPLICABLE
+        }
+
+    def test_a_mixed_ledger_reports_only_the_real_gaps(self) -> None:
+        ledger = AvailabilityLedger()
+        ledger.declare("binary", FactAvailability(FactStatus.PRESENT))
+        ledger.declare("vtables", FactAvailability(FactStatus.NOT_APPLICABLE))
+        ledger.declare("graph", FactAvailability(FactStatus.FAILED))
+
+        assert ledger.missing_families(
+            ["binary", "vtables", "graph", "never-declared"]
+        ) == ("graph", "never-declared")

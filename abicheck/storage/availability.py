@@ -99,6 +99,14 @@ class Confidence(enum.Enum):
 #: reduced-confidence result) rather than read an empty collection as "fine".
 _COMPARABLE_STATUSES = frozenset({FactStatus.PRESENT, FactStatus.PARTIAL})
 
+#: Statuses that mean "evidence is missing for a reason". Deliberately not the
+#: complement of :data:`_COMPARABLE_STATUSES`: ``NOT_APPLICABLE`` is neither
+#: usable evidence nor a gap — it is a ledger stating that there is nothing
+#: here to be missing, which is an answer rather than an absence.
+_GAP_STATUSES = frozenset(
+    {FactStatus.NOT_COLLECTED, FactStatus.UNSUPPORTED, FactStatus.FAILED}
+)
+
 
 @dataclass(frozen=True)
 class FactAvailability:
@@ -418,7 +426,26 @@ class AvailabilityLedger:
         )
 
     def missing_families(self, required: Iterable[str]) -> tuple[str, ...]:
-        """Required families this ledger cannot support a conclusion for.
+        """Required families whose evidence is *missing*, per :data:`_GAP_STATUSES`.
+
+        A family explicitly declared ``NOT_APPLICABLE`` is not reported. A
+        generic evidence profile naturally requires families that do not apply
+        to every artifact — vtable facts for a C-only library — and the point
+        of recording ``NOT_APPLICABLE`` is to answer that, not to defer it. A
+        predicate of ``not comparable`` folded the two together and produced a
+        coverage gap for a ledger that had explicitly established none (Codex
+        review).
+
+        Worth recording how this one hid: the distinction already existed in
+        this module's own tests, spelled exactly this way and with a comment
+        saying why, while the production predicate kept asking the weaker
+        question. The test module now imports :data:`_GAP_STATUSES` from here
+        rather than restating it, so the two cannot drift apart again.
+
+        An *undeclared* required family is still reported, because
+        :meth:`for_family` resolves it through the fallback, which cannot be
+        comparable and defaults to ``NOT_COLLECTED``. Only an explicit
+        declaration can say "not applicable".
 
         Sorted, so a caller rendering the result into a diagnostic or a
         coverage row gets a stable message rather than one that depends on
@@ -426,7 +453,9 @@ class AvailabilityLedger:
         """
         return tuple(
             sorted(
-                name for name in set(required) if not self.for_family(name).comparable
+                name
+                for name in set(required)
+                if self.for_family(name).status in _GAP_STATUSES
             )
         )
 

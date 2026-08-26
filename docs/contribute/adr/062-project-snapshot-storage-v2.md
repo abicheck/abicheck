@@ -221,7 +221,10 @@ availability rather than a `name -> offset` mapping.
   insertion order carries meaning (template arguments become
   `[{"parameter": …, "value": …}, …]`);
 - a map is used only when its keys are unique and its order is meaningless;
-- float and path normalization are specified;
+- float normalization is specified: `-0.0` and `0.0` agree, an integral
+  float and the same integer agree, and a non-finite value is refused rather
+  than emitted as a bare `NaN`/`Infinity` literal no conforming JSON parser
+  accepts;
 - volatile capture metadata (timestamps, hostnames, wall-clock durations,
   absolute scratch paths) lives outside the semantic-hash domain;
 - semantic digests are computed from the normalized logical object,
@@ -230,6 +233,23 @@ availability rather than a `name -> offset` mapping.
 Randomizing producer traversal, dictionary insertion, TU completion, and
 parallel extraction order must not change any semantic digest or any
 comparison result.
+
+**Path normalization is deliberately not specified here, and is Phase 1
+work.** An earlier draft of this list claimed it alongside float
+normalization; nothing defined or implemented it, so a producer had a
+requirement it could not satisfy consistently and two equivalent captures
+could hash differently on path spelling or platform (Codex review). Stating a
+rule nobody can implement is worse than stating none: it reads as settled.
+
+It is not a line item because it is not a small one — separator direction,
+case folding on case-insensitive filesystems, absolute versus source-root-
+relative form, symlink resolution, and `~`-redaction (which ADR-032 D7
+already applies to `CompileUnit.output`, for persistence rather than for
+hashing) each change what two captures of one build agree on, and getting any
+of them wrong silently merges or splits content. It belongs with the
+`normalization_recipe` axis D2 already reserves, so that a package states
+which rule produced its digests rather than every reader assuming the current
+one. Until then, a path reaching the hash domain is hashed as written.
 
 ### D6 — One `ProjectSnapshot` package
 
