@@ -33,7 +33,7 @@ from .checker_policy import (
     Verdict,
 )
 from .checker_types import Change
-from .elf_metadata import SymbolBinding
+from .model.elf_facts import SymbolBinding
 from .suppression_yaml import parse_finding_id, raw_finding_ids_by_index
 
 # Valid values for Suppression.binding — the same value strings

@@ -793,7 +793,7 @@
     },
     {
       "path": "abicheck/dumper_scoping.py",
-      "baseline_lines": 1290,
+      "baseline_lines": 1289,
       "target": "see ADR-061 ownership map",
       "rule": "no_growth",
       "category": "legacy_oversized_module",
@@ -813,7 +813,7 @@
     },
     {
       "path": "abicheck/dwarf_advanced.py",
-      "baseline_lines": 1300,
+      "baseline_lines": 1249,
       "target": "see ADR-061 ownership map",
       "rule": "no_growth",
       "category": "legacy_oversized_module",
@@ -833,7 +833,7 @@
     },
     {
       "path": "abicheck/elf_metadata.py",
-      "baseline_lines": 1366,
+      "baseline_lines": 1193,
       "target": "see ADR-061 ownership map",
       "rule": "no_growth",
       "category": "legacy_oversized_module",
@@ -917,16 +917,6 @@
       "target": "report",
       "rule": "no_growth",
       "category": "legacy_report_monolith",
-      "owner": "abicheck maintainers",
-      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
-      "review_by": "2026-11-30"
-    },
-    {
-      "path": "abicheck/model.py",
-      "baseline_lines": 1208,
-      "target": "model",
-      "rule": "no_growth",
-      "category": "legacy_model_or_catalog_monolith",
       "owner": "abicheck maintainers",
       "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
       "review_by": "2026-11-30"

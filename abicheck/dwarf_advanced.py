@@ -60,6 +60,14 @@ from .dwarf_utils import (
     resolve_type_die as _resolve_type_die,
 )
 
+# Fact dataclasses live in the model package (ADR-061 Phase 5): this module
+# parses into them and re-exports them so the historical
+# ``from abicheck.dwarf_advanced import AdvancedDwarfMetadata`` spelling keeps resolving.
+from .model.dwarf_facts import (
+    AdvancedDwarfMetadata as AdvancedDwarfMetadata,
+    ToolchainInfo as ToolchainInfo,
+)
+
 log = logging.getLogger(__name__)
 
 # DW_AT_calling_convention values (DWARF 5 standard + vendor extensions)
@@ -129,65 +137,6 @@ _PRUNE_TAGS: frozenset[str] = BASE_PRUNE_TAGS
 # ---------------------------------------------------------------------------
 # Data model
 # ---------------------------------------------------------------------------
-
-@dataclass
-class ToolchainInfo:
-    """Parsed DW_AT_producer metadata from a binary."""
-    producer_string: str = ""       # raw DW_AT_producer value
-    compiler: str = ""              # "GCC", "clang", "ICC" (ICC/ICX/DPC++ family)
-    version: str = ""               # e.g. "13.2.1"
-    abi_flags: set[str] = field(default_factory=set)  # extracted ABI-affecting flags
-    vector_abi_flags: set[str] = field(default_factory=set)  # vector-function (SIMD clone) ABI flags
-    wchar_flags: set[str] = field(default_factory=set)  # -fshort-wchar / -fno-short-wchar
-
-
-@dataclass
-class AdvancedDwarfMetadata:
-    """Sprint 4 metadata extracted from a single .so."""
-    has_dwarf: bool = False
-    # Normalized target architecture (_normalize_arch): "x86_64", "aarch64",
-    # "i386", … Empty string when unknown (e.g. arch-less mock snapshots).
-    # Gates the SysV-AMD64-specific aggregate-return-convention classification.
-    target_arch: str = ""
-    toolchain: ToolchainInfo = field(default_factory=ToolchainInfo)
-    # linkage_name (mangled) → CC string for ALL externally-visible functions visited.
-    # Storing "normal" explicitly lets the diff distinguish "became normal" from
-    # "function was removed/added" (sparse dict would conflate the two cases).
-    # NOTE: on Linux x86-64 this dict mostly contains "normal" entries since
-    # DW_AT_calling_convention is rarely emitted by GCC/Clang for System V AMD64.
-    calling_conventions: dict[str, str] = field(default_factory=dict)
-    # linkage_name (mangled) → value ABI trait fingerprint derived from DWARF types.
-    # Used as fallback signal when DW_AT_calling_convention is not emitted.
-    # Example: "ret:v(trivial)" -> "ret:v(nontrivial)" can imply SysV ABI drift.
-    value_abi_traits: dict[str, str] = field(default_factory=dict)
-    # linkage_name (mangled) → byte size of a by-value aggregate *return* type.
-    # Used only to label a return triviality flip: a SysV AMD64 aggregate is
-    # returned in registers only when it is trivial AND <= 16 bytes; a larger
-    # struct is memory-returned regardless of triviality, so a triviality change
-    # there is a value-ABI (copy-semantics) change, not a register<->sret flip.
-    return_value_sizes: dict[str, int] = field(default_factory=dict)
-    # linkage_name (mangled) → set membership when the by-value aggregate return
-    # is forced to memory (sret) by an unaligned member (e.g. a packed struct).
-    # Such a type is memory-returned regardless of size/triviality, so a
-    # triviality flip there is never a register<->sret convention change.
-    return_memory_classified: set[str] = field(default_factory=set)
-    # struct names where any field has a misaligned byte offset → __attribute__((packed))
-    packed_structs: set[str] = field(default_factory=set)
-    # All struct/class names seen (for cross-referencing in diff to avoid
-    # false "packing removed" when a struct was simply deleted)
-    all_struct_names: set[str] = field(default_factory=set)
-    # linkage_name → CFA register name for exported functions (from .eh_frame / .debug_frame).
-    # Typically "rsp" or "rbp" on x86-64; empty string when not present.
-    # A change from "rbp" (frame-pointer) to "rsp" (stack-pointer) or vice-versa
-    # indicates a calling-convention / frame-layout drift (#117).
-    frame_registers: dict[str, str] = field(default_factory=dict)
-    # linkage_name → frozenset of callee-saved register names for exported functions.
-    # Derived from CFI DW_CFA_offset / DW_CFA_rel_offset rules in the function prologue.
-    # On x86-64 SysV ABI the callee-saved set is {rbx,rbp,r12-r15}.
-    # On x86-64 ms_abi (Windows x64) it additionally includes {rdi,rsi,r10,r11}.
-    # Presence of rdi/rsi in the saved-registers set is a strong ELF-level signal
-    # that the function uses ms_abi, even when DW_AT_calling_convention is absent (GCC gap).
-    callee_saved_regs: dict[str, frozenset[str]] = field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------

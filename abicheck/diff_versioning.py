@@ -24,7 +24,7 @@ from .binary_utils import strip_vendor_hash
 from .checker_policy import API_BREAK_KINDS, BREAKING_KINDS, ChangeKind, Verdict
 from .checker_types import Change
 from .diff_helpers import make_change
-from .elf_metadata import ElfMetadata
+from .model.elf_facts import ElfMetadata
 
 # Tokens that mark an ELF symbol-version node as implementation-internal rather
 # than public ABI. This is a widespread upstream convention: implementation-only

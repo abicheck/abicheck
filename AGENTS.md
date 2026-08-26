@@ -176,13 +176,20 @@ Protocol) server shipped and was later removed; see
 design.
 
 Core pipeline (in order of data flow):
+0. **Model** — `abicheck/model/` owns every shape the stages below agree on
+   (ADR-061's innermost ring; see `abicheck/model/AGENTS.md`). A
+   `*_metadata.py` module *parses*; the dataclass it parses into lives in the
+   matching `model/*_facts.py` and is re-exported by the parser, so
+   `from abicheck.elf_metadata import ElfMetadata` still resolves. **A new
+   fact's field goes in `model/`, next to the format it belongs to — not in
+   the parser.**
 1. **Parsing** — extract metadata from binaries
    - `elf_metadata.py`, `pe_metadata.py`, `macho_metadata.py` — platform-specific
    - `dwarf_metadata.py`, `dwarf_advanced.py`, `dwarf_unified.py` — DWARF debug info
    - `pdb_parser.py`, `pdb_metadata.py`, `pdb_utils.py` — Windows PDB
    - `btf_metadata.py`, `ctf_metadata.py` — Linux kernel debug formats
    - `sycl_metadata.py` — SYCL plugin interface
-2. **Snapshot** — `dumper.py` creates `AbiSnapshot` (model in `model.py`)
+2. **Snapshot** — `dumper.py` creates `AbiSnapshot` (model in `model/snapshot.py`)
    - `dumper_castxml.py` — castxml XML → model parser (default L2 header backend)
    - `dumper_clang.py` — `clang -ast-dump=json` → model parser (alternative L2
      backend for clang-only hosts; `--ast-frontend clang` /
@@ -572,7 +579,7 @@ cover the surrounding first-party trees this file doesn't detail.
 
 ## Key types
 
-- `AbiSnapshot` (`model.py`) — serializable snapshot of a library's ABI surface
+- `AbiSnapshot` (`model/snapshot.py`) — serializable snapshot of a library's ABI surface
 - `DiffResult` (`checker_types.py`) — single detected change with kind, severity, details
 - `ChangeKind` (`checker_policy.py`) — enum of 397 change types; categorized into `BREAKING_KINDS`, `API_BREAK_KINDS`, `RISK_KINDS`, and `COMPATIBLE_KINDS` (further split into `ADDITION_KINDS` and `QUALITY_KINDS`)
 - `Verdict` (`checker.py`) — overall comparison result (compatible/source_break/breaking)

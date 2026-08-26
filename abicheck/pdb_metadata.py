@@ -39,8 +39,14 @@ import re
 import struct
 from pathlib import Path
 
-from .dwarf_advanced import AdvancedDwarfMetadata, ToolchainInfo
-from .dwarf_metadata import DwarfMetadata, EnumInfo, FieldInfo, StructLayout
+from .model.dwarf_facts import (
+    AdvancedDwarfMetadata,
+    DwarfMetadata,
+    EnumInfo,
+    FieldInfo,
+    StructLayout,
+    ToolchainInfo,
+)
 from .pdb_parser import (
     CvEnumerator,
     CvMember,

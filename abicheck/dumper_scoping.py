@@ -101,9 +101,8 @@ from pathlib import Path
 from typing import Any
 
 from .dumper_clang_streaming import suppress_streaming_prune
-from .dwarf_advanced import AdvancedDwarfMetadata
-from .dwarf_metadata import DwarfMetadata
 from .model import AbiSnapshot, EnumType, Function, RecordType, Variable, Visibility
+from .model.dwarf_facts import AdvancedDwarfMetadata, DwarfMetadata
 from .provenance import is_dependency_header
 from .type_reachability import (
     _NON_PUBLIC_ORIGINS,

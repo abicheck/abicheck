@@ -1,0 +1,55 @@
+# AGENTS.md — `abicheck/model/`
+
+## Purpose
+
+This package owns the *shapes* every other responsibility package agrees on:
+what an ABI entity, a captured binary/debug fact, and a whole snapshot are,
+per ADR-061 D1. It is the innermost ring — it answers "what is this fact"
+and never "how was it produced", "does it differ", "does it matter", or
+"how is it rendered".
+
+## Permitted imports
+
+Per ADR-061 D1, `model/` may import **nothing** first-party except the public
+root surfaces (`abicheck.api_types`, `abicheck.errors`) and, transitionally,
+the flat leaf modules classified `model` in `architecture/modules.yaml`.
+Importing `extract`, `compare`, `policy`, `workflows`, `report` or
+`frontends` is a defect, not a case for an exception list —
+`scripts/check_architecture.py` enforces it.
+
+That constraint is what the `*_facts` modules exist for: a `*_metadata.py`
+parser used to own both the dataclass and the code that fills it in, so
+anything holding an `AbiSnapshot` field type dragged in an extractor. The
+dataclass halves live here; each parser imports and re-exports its own
+types, so `from abicheck.elf_metadata import ElfMetadata` still resolves.
+
+## Where a change goes
+
+| Change | Module |
+|---|---|
+| A new enum value describing an entity | `vocabulary.py` |
+| A field on a function, variable, or parameter | `declarations.py` |
+| A field on a record, enum, or type field | `entities.py` |
+| A comparability fingerprint or dependency ledger field | `extraction_contract.py` |
+| A new snapshot-level field or layer attachment | `snapshot.py` |
+| A new ELF/PE/Mach-O/DWARF/SYCL/kABI fact | the matching `*_facts.py` |
+| A snapshot-aware surface predicate | `stdlib_surface.py` |
+
+`__init__.py` is the supported import surface and stays a re-export list
+with `__all__` — no logic, no new names that are not owned by a submodule.
+
+## Rules that are easy to get wrong
+
+- **Adding a field to `AbiSnapshot` is a storage event.** `storage`/
+  `serialization.py` must round-trip it and the schema version must move;
+  a field that only exists in memory reads as data loss on reload.
+- **Never add `frozen=True` to a fact class carrying `@cached_property`**
+  (`ElfMetadata`, `PeMetadata`, `MachoMetadata`): the cache needs a
+  writable instance `__dict__`.
+- **Append new fields at the end, keyword-only where a default is needed.**
+  These dataclasses are public API; inserting mid-list silently changes what
+  every positional caller — including callers this repository cannot see —
+  constructs.
+- **`AbiSnapshot.index()` is idempotent and does not rebuild.** A caller
+  mutating the collections in place must reset `_func_by_mangled`,
+  `_var_by_mangled` and `_type_by_name` to `None` together.

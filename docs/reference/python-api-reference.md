@@ -292,7 +292,7 @@ Classify an already-resolved pair — the second half of ``run_compare_request``
 
 ## `collect_metadata`
 
-Compute SHA-256 and file size for a library artifact.
+Compute SHA-256 and file size for a library artifact, or ``None`` for a text-based snapshot/manifest (JSON, Perl dump, ``Module.symvers``) -- not a binary, so a same-binary comparison must never claim it.
 
 | Parameter | Type | Default |
 |---|---|---|
@@ -592,7 +592,7 @@ Run :func:`run_scan` in a killable child process; return ``ScanResult.to_dict()`
 
 ## `sniff_text_format`
 
-Read a small header chunk and return ``'json'``, ``'perl'``, or ``'unknown'``.
+Read a small header chunk and return ``'json'``, ``'perl'``, ``'symvers'``, or ``'unknown'``.
 
 | Parameter | Type | Default |
 |---|---|---|

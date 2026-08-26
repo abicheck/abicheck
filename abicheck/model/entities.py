@@ -1,0 +1,178 @@
+# Copyright 2026 Nikolay Petrov
+# SPDX-License-Identifier: Apache-2.0
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""User-defined types: records (struct/class/union) and enumerations."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+
+from .vocabulary import AccessLevel, ScopeOrigin
+
+
+@dataclass
+class TypeField:
+    name: str
+    type: str
+    offset_bits: int | None = None
+    is_bitfield: bool = False
+    bitfield_bits: int | None = None
+    is_const: bool = False
+    is_volatile: bool = False
+    is_mutable: bool = False
+    access: AccessLevel = AccessLevel.PUBLIC
+    # Default member initializer expression, verbatim (value not evaluated).
+    # None = no initializer, or the dumper does not capture this (older
+    # snapshots / non-castxml producers). As with Function.deprecated, None
+    # is not unambiguously "unsupported" here — a real "gained/lost
+    # initializer" transition has one side genuinely None by construction —
+    # so the detector gates on header-tier confirmation at the *snapshot*
+    # level (mirroring Param.default/param_defaults) rather than skipping
+    # per-pair on either side being None.
+    default: str | None = None
+    # See Function.deprecated for the message-string convention.
+    deprecated: str | None = None
+
+
+@dataclass
+class RecordType:
+    """struct / class / union."""
+
+    name: str
+    kind: str  # "struct" | "class" | "union"
+    size_bits: int | None = None
+    alignment_bits: int | None = None
+    fields: list[TypeField] = field(default_factory=list)
+    bases: list[str] = field(default_factory=list)  # base class names
+    virtual_bases: list[str] = field(default_factory=list)
+    vtable: list[str] = field(default_factory=list)  # ordered vtable entries (mangled)
+    source_location: str | None = None
+    is_union: bool = False
+    is_opaque: bool = (
+        False  # incomplete type (forward-decl only; was complete → BREAKING)
+    )
+    # `final` class-key specifier. Tri-state to keep "unknown" distinct from
+    # "not final":
+    # - True  → declared `class C final { ... }` (castxml `final` attribute).
+    # - False → declared without `final`.
+    # - None  → dumper/loader could not determine (DWARF/symbols-only mode,
+    #           which carries no `final` information; older snapshots). The
+    #           diff skips the finality detector when either side is None to
+    #           avoid false findings from schema evolution / tier downgrade.
+    is_final: bool | None = None
+    # True when this RecordType is a class/struct template's own pattern body
+    # (e.g. the clang header backend's CXXRecordDecl nested inside a
+    # ClassTemplateDecl) rather than a concrete, instantiable type. Its field
+    # *names*/*types* are still real public surface, but it has no fixed
+    # layout for any one instantiation — detectors that need real
+    # size/offset data (e.g. DWARF layout backfill's name-based matching)
+    # must not treat it as an ordinary type. False for every non-clang
+    # producer (castxml/DWARF never emit an uninstantiated pattern this way).
+    is_template_pattern: bool = False
+    # True when *every* entry in `fields` was flattened up from an anonymous
+    # struct/union member by the clang header backend (clang emits an
+    # IndirectFieldDecl for each such member; see dumper_clang.py) -- not
+    # merely "at least one was" (Codex review): a mixed record like
+    # `struct Foo { union { int i; }; int tag; };` has an ordinary field
+    # (`tag`) with no such provenance guarantee, so the flag must be False
+    # for it too. DWARF's own record builder (dwarf_snapshot.py) now flattens
+    # *supported* anonymous aggregates too, but an unsupported producer/shape
+    # or a cached snapshot predating that flatten still legitimately leaves
+    # an all-anonymous record's DWARF view fieldless even though it carries
+    # the real size_bits — a structural signal the DWARF layout backfill
+    # needs to trust a
+    # bare-suffix (namespaced) match for this case without also trusting an
+    # ordinary record's coincidental match to an unrelated, fieldless type
+    # reached the same way. False for every non-clang producer (castxml
+    # computes real layout itself and is never backfilled; DWARF-only
+    # snapshots have no header view to flatten).
+    has_anonymous_aggregate_fields: bool = False
+    # Provenance (ADR-015, schema v6) — see Function.source_header.
+    source_header: str | None = None
+    origin: ScopeOrigin = ScopeOrigin.UNKNOWN
+    # ── Fine-grained layout descriptor (layout-closure work) ─────────────────
+    # All tri-state / optional so "unknown" (DWARF-only or symbols-only dumps,
+    # older snapshots) stays distinct from a real value; the layout detectors
+    # skip a comparison whenever either side is None/empty, avoiding false
+    # findings from schema evolution or an evidence-tier downgrade.
+    #
+    # Itanium "data size" (a.k.a. dsize/nvsize): the size occupied by the
+    # object's own members *excluding* trailing tail padding. A derived class
+    # may reuse a base's tail padding, so a change here can shift a derived
+    # layout even when ``size_bits`` (the padded sizeof) is unchanged.
+    data_size_bits: int | None = None
+    # C++ type traits that govern tail-padding reuse and how the type is passed
+    # by value (in registers vs. on the stack / via hidden reference).
+    is_standard_layout: bool | None = None
+    is_trivially_copyable: bool | None = None
+    # Bit offset of the vtable pointer within the object (0 for a simple
+    # polymorphic class; nonzero with virtual bases). None when the type is
+    # non-polymorphic or the dumper could not determine it. Introducing the
+    # first virtual function makes this go from None → 0 and shifts every field.
+    vptr_offset_bits: int | None = None
+    # Base-class subobject offsets: base name → bit offset within this object.
+    # Distinct from ``bases`` (declaration order only): a base can *move* (e.g.
+    # an empty-base-optimization is lost, or a member is inserted ahead of it)
+    # without the name list reordering. Empty when unknown.
+    base_offsets: dict[str, int] = field(default_factory=dict)
+    # Namespace/enclosing-class-qualified spelling (e.g. "mylib::detail::Impl"),
+    # set only when it differs from the bare ``name`` above. ``name`` itself
+    # stays bare (matching the DWARF backend, which has no cheaper way to
+    # qualify a struct name) so type-map lookups and DWARF/header merges keep
+    # matching by the same key across both backends; this field exists solely
+    # for namespace-aware checks (internal-leak detection, SYCL-queue param
+    # matching) that need to see the real namespace path. None when the type
+    # is at global scope or the dumper couldn't determine it (e.g. DWARF-only).
+    qualified_name: str | None = None
+    # Whether the class/struct declares at least one pure virtual function
+    # (making it abstract — cannot be instantiated). Tri-state like
+    # ``is_final``: True/False = captured (castxml's `abstract` attribute;
+    # clang's `definitionData.isAbstract` since G31 Phase C); None =
+    # dumper/loader could not determine (DWARF/symbols-only mode, older
+    # snapshots). The diff skips comparison when either side is None.
+    is_abstract: bool | None = None
+    # See Function.deprecated for the message-string convention.
+    deprecated: str | None = None
+
+
+@dataclass
+class EnumMember:
+    name: str
+    value: int
+
+
+@dataclass
+class EnumType:
+    name: str
+    members: list[EnumMember] = field(default_factory=list)
+    underlying_type: str = "int"
+    source_location: str | None = None
+    # Provenance (ADR-015, schema v6) — see Function.source_header.
+    source_header: str | None = None
+    origin: ScopeOrigin = ScopeOrigin.UNKNOWN
+    # `enum class` / `enum struct` (C++11 scoped enumeration) versus a plain
+    # C-style enum. Tri-state like RecordType.is_final: True/False = captured
+    # (castxml's `scoped` attribute); None = dumper/loader could not
+    # determine (DWARF/symbols-only mode, older snapshots, non-castxml
+    # header producers). The diff skips comparison when either side is None.
+    is_scoped: bool | None = None
+    # See Function.deprecated for the message-string convention.
+    deprecated: str | None = None
+    # Namespace/enclosing-class-qualified spelling, mirroring
+    # ``RecordType.qualified_name`` (same bare-``name``-collision motivation:
+    # PR #608 follow-up). ``name`` stays bare for the same DWARF-parity and
+    # type-map-key reasons documented on ``RecordType.qualified_name``. None
+    # when the enum is at global scope or the dumper couldn't determine it.
+    qualified_name: str | None = None

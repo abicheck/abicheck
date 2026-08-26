@@ -51,9 +51,9 @@ from .dumper_castxml import (
     is_synthetic_ctor_key,
     is_synthetic_dtor_key,
 )
-from .elf_metadata import SymbolType
 from .elf_symbol_filter import is_abi_relevant_elf_symbol
 from .model import AbiSnapshot, Function, is_cxx_runtime_library
+from .model.elf_facts import SymbolType
 
 _log = logging.getLogger(__name__)
 

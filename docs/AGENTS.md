@@ -278,7 +278,7 @@ canonical_for:
 summarizes:
   - evidence-model
 depends_on:
-  - abicheck/model.py
+  - abicheck/model/snapshot.py
 lifecycle: active
 generated: false
 ---

@@ -11,11 +11,13 @@
       "path": "abicheck/model",
       "may_import": [],
       "legacy_paths": [
+        "abicheck/buildsource/model.py",
+        "abicheck/buildsource/pack.py",
         "abicheck/change_registry_types.py",
         "abicheck/checker_types.py",
         "abicheck/compile_context.py",
         "abicheck/evidence_depth.py",
-        "abicheck/model.py"
+        "abicheck/name_classification.py"
       ]
     },
     "storage": {

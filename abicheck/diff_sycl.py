@@ -36,7 +36,7 @@ from .checker_types import Change
 from .detector_registry import registry
 from .diff_helpers import make_change
 from .model import AbiSnapshot
-from .sycl_metadata import SyclMetadata
+from .model.sycl_facts import SyclMetadata
 
 
 def _diff_implementation(old: SyclMetadata, new: SyclMetadata) -> list[Change]:
