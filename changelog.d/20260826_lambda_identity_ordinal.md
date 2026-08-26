@@ -57,3 +57,11 @@
   could even consume an ordinal slot a real closure should have gotten.
   These two field names are now excluded from both collection and
   rewriting, by name, across every dataclass that has them.
+- **Fourth follow-up (Codex review): a basename with two or more levels of
+  nested parens (`foo(a(b)).hpp`) still fell through to no match at all.**
+  A single regex alternation can only ever balance one level of nesting.
+  The basename is now scanned manually (`_scan_anon_type_marker`), tracking
+  real paren depth so any number of nested groups balance correctly; the
+  fixed marker prefix (`(lambda:`/`(unnamed <kind>:`) stays a regex, and
+  the first depth-0 `)` always ends the marker, matching a real compiler's
+  own basename spelling (never unbalanced).

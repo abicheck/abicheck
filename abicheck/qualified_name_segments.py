@@ -58,7 +58,7 @@ from collections.abc import (
     Iterator as _Iterator,
     Mapping as _Mapping,
 )
-from typing import TypeVar as _TypeVar
+from typing import NamedTuple as _NamedTuple, TypeVar as _TypeVar
 
 _SnapshotT = _TypeVar("_SnapshotT")
 
@@ -271,22 +271,77 @@ def raw_segments(qualified: str) -> list[str]:
 # ``architecture/debt.yaml``.
 # ---------------------------------------------------------------------------
 
-#: Matches the marker :func:`strip_anonymous_type_location` already produces
-#: (``"(lambda:foo.h:4:37)"``, ``"(unnamed struct:foo.h:56:5)"``) -- NOT the
-#: raw ``at <path>:<line>:<col>`` form that function itself consumes. The
-#: basename group accepts one level of balanced parens (``foo(test).hpp``,
-#: Codex review) via an explicit alternation rather than a bare ``[^:()]+``
-#: exclusion, while still refusing a bare, unparenthesized ``:`` or ``)`` --
-#: which is what stops this from ever crossing into a second, later marker's
-#: own text. A colon *outside* parens in the basename (legal on POSIX, e.g.
-#: ``weird:name.h``) is still not handled: nothing here can tell such a
-#: colon apart from the marker's own ``:line:col`` separators without more
-#: structure than a flattened type-name string carries -- the same
-#: "known, accepted limitation" shape as the basename-collision gap
-#: documented on :func:`collect_anonymous_type_ordinals`.
-_ANON_TYPE_ORDINAL_RE = _re.compile(
-    r"(\((?:lambda|unnamed\s+\w+)):((?:[^:()]|\([^()]*\))+):(\d+):(\d+)(?=\s*\))"
-)
+#: Matches the marker prefix :func:`strip_anonymous_type_location` already
+#: produces (``"(lambda:"``, ``"(unnamed struct:"``) -- NOT the raw
+#: ``at <path>:<line>:<col>`` form that function itself consumes. Only the
+#: fixed prefix is a regex; the variable-length basename that follows is
+#: scanned manually by :func:`_scan_anon_type_marker` below, since a single
+#: regex alternation (``\([^()]*\)``) can only ever balance one level of
+#: nesting and fails on a basename with two, e.g. ``foo(a(b)).hpp``
+#: (Codex review, fresh evidence).
+_ANON_TYPE_MARKER_PREFIX_RE = _re.compile(r"\((lambda|unnamed\s+\w+):")
+
+#: Matches a marker's trailing ``:<line>:<col>`` right before the closing
+#: paren :func:`_scan_anon_type_marker` already found -- applied to the text
+#: between the prefix and that paren, anchored at the end so a basename that
+#: itself contains a colon (legal on POSIX, e.g. ``weird:name.h`` -- the same
+#: "known, accepted limitation" shape documented on
+#: :func:`collect_anonymous_type_ordinals`) still yields the *rightmost*
+#: ``:digits:digits`` as the real discriminator, matching this module's
+#: previous (regex-only) behavior for that case.
+_ANON_TYPE_TRAILING_LINE_COL_RE = _re.compile(r":(\d+):(\d+)\s*$")
+
+
+class _AnonTypeMatch(_NamedTuple):
+    """One marker occurrence -- a drop-in replacement for the ``re.Match``
+    shape this module used before switching to manual scanning, carrying
+    only what :func:`collect_anonymous_type_ordinals`/
+    :func:`apply_anonymous_type_ordinals` actually read."""
+
+    start: int
+    end: int
+    marker: str
+    header: str
+    line: int
+    col: int
+
+
+def _scan_anon_type_marker(
+    name: str, prefix_match: _re.Match[str]
+) -> _AnonTypeMatch | None:
+    """Scan forward from *prefix_match* for its balanced-paren-aware basename
+    and trailing ``:<line>:<col>)``.
+
+    Tracks paren depth through the basename so any number of nested
+    parenthesized groups (not just one level) are correctly balanced; the
+    *first* depth-0 ``)`` always ends the marker (a real compiler-emitted
+    basename can never contain an unbalanced ``)``), so unlike a regex this
+    never needs to backtrack across multiple candidate end points.
+    """
+    depth = 0
+    i = prefix_match.end()
+    length = len(name)
+    while i < length:
+        ch = name[i]
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            if depth == 0:
+                body = name[prefix_match.end() : i]
+                tail = _ANON_TYPE_TRAILING_LINE_COL_RE.search(body)
+                if tail is None:
+                    return None
+                return _AnonTypeMatch(
+                    start=prefix_match.start(),
+                    end=i,
+                    marker=f"({prefix_match.group(1)}",
+                    header=body[: tail.start()],
+                    line=int(tail.group(1)),
+                    col=int(tail.group(2)),
+                )
+            depth -= 1
+        i += 1
+    return None
 
 
 def _quoted_spans(text: str) -> list[tuple[int, int]]:
@@ -318,18 +373,21 @@ def _quoted_spans(text: str) -> list[tuple[int, int]]:
     return spans
 
 
-def _anon_type_ordinal_matches(name: str) -> list[_re.Match[str]]:
-    """Every :data:`_ANON_TYPE_ORDINAL_RE` match in *name*, excluding one
-    that falls inside a quoted literal.
+def _anon_type_ordinal_matches(name: str) -> list[_AnonTypeMatch]:
+    """Every anonymous/lambda-closure marker in *name*, excluding one that
+    falls inside a quoted literal.
     """
     if "(" not in name:
         return []
     quoted_spans = _quoted_spans(name)
-    return [
-        match
-        for match in _ANON_TYPE_ORDINAL_RE.finditer(name)
-        if not any(start <= match.start() < end for start, end in quoted_spans)
-    ]
+    matches: list[_AnonTypeMatch] = []
+    for prefix in _ANON_TYPE_MARKER_PREFIX_RE.finditer(name):
+        if any(start <= prefix.start() < end for start, end in quoted_spans):
+            continue
+        match = _scan_anon_type_marker(name, prefix)
+        if match is not None:
+            matches.append(match)
+    return matches
 
 
 def collect_anonymous_type_ordinals(
@@ -366,8 +424,8 @@ def collect_anonymous_type_ordinals(
     coordinates: dict[tuple[str, str], set[tuple[int, int]]] = {}
     for name in names:
         for match in _anon_type_ordinal_matches(name):
-            marker, header, line, col = match.groups()
-            coordinates.setdefault((marker, header), set()).add((int(line), int(col)))
+            key = (match.marker, match.header)
+            coordinates.setdefault(key, set()).add((match.line, match.col))
 
     ordinals: dict[tuple[str, str, int, int], int] = {}
     for (marker, header), coords in coordinates.items():
@@ -390,18 +448,21 @@ def apply_anonymous_type_ordinals(
     """
     if "(" not in name:
         return name
-    quoted_spans = _quoted_spans(name)
-
-    def _replace(match: _re.Match[str]) -> str:
-        if any(start <= match.start() < end for start, end in quoted_spans):
-            return match.group(0)
-        marker, header, line, col = match.groups()
-        ordinal = ordinals.get((marker, header, int(line), int(col)))
+    matches = _anon_type_ordinal_matches(name)
+    if not matches:
+        return name
+    pieces: list[str] = []
+    cursor = 0
+    for match in matches:
+        ordinal = ordinals.get((match.marker, match.header, match.line, match.col))
+        pieces.append(name[cursor : match.start])
         if ordinal is None:
-            return match.group(0)
-        return f"{marker}:{header}#{ordinal}"
-
-    return _ANON_TYPE_ORDINAL_RE.sub(_replace, name)
+            pieces.append(name[match.start : match.end])
+        else:
+            pieces.append(f"{match.marker}:{match.header}#{ordinal}")
+        cursor = match.end
+    pieces.append(name[cursor:])
+    return "".join(pieces)
 
 
 #: Dataclass field names that carry free-text/expression payload, never a

@@ -434,6 +434,34 @@ class TestBasenameWithParensIsStillRenumbered:
         rewritten = apply_anonymous_type_ordinals(combined, ordinals)
         assert rewritten == "Wrap<(lambda:foo(x).h#1), (lambda:bar.h#1)>"
 
+    def test_two_levels_of_nested_parens_in_a_basename_still_match(self) -> None:
+        """Codex review, follow-up: the regex-based basename capture
+        (``\\([^()]*\\)``) can only ever balance ONE level of nesting, so a
+        legal basename with two -- ``foo(a(b)).hpp`` -- fell through to no
+        match at all, silently leaving the ordinal map empty for it."""
+        old = [strip_anonymous_type_location("(lambda at /src/foo(a(b)).hpp:10:2)")]
+        new = [strip_anonymous_type_location("(lambda at /src/foo(a(b)).hpp:14:2)")]
+        old_final = apply_anonymous_type_ordinals(
+            old[0], collect_anonymous_type_ordinals(old)
+        )
+        new_final = apply_anonymous_type_ordinals(
+            new[0], collect_anonymous_type_ordinals(new)
+        )
+        assert old_final == new_final == "(lambda:foo(a(b)).hpp#1)"
+
+    def test_a_second_marker_after_a_doubly_nested_basename_is_not_swallowed(
+        self,
+    ) -> None:
+        combined = (
+            f"Wrap<{strip_anonymous_type_location('(lambda at /src/foo(a(b)).h:1:2)')}, "
+            f"{strip_anonymous_type_location('(lambda at /src/bar.h:3:4)')}>"
+        )
+        ordinals = collect_anonymous_type_ordinals([combined])
+        assert ("(lambda", "foo(a(b)).h", 1, 2) in ordinals
+        assert ("(lambda", "bar.h", 3, 4) in ordinals
+        rewritten = apply_anonymous_type_ordinals(combined, ordinals)
+        assert rewritten == "Wrap<(lambda:foo(a(b)).h#1), (lambda:bar.h#1)>"
+
 
 class TestHybridMergeDefersRenumbering:
     """Codex review: ``--ast-frontend hybrid`` runs castxml and clang over
