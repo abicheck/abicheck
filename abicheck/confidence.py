@@ -28,9 +28,14 @@ at the bottom of the dependency graph (no cycle with ``checker``).
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from .checker_policy import Confidence, EvidenceTier
 from .detectors import DetectorResult
 from .model import AbiSnapshot
+
+if TYPE_CHECKING:
+    from .checker_types import DiffResult
 
 __all__ = [
     "compute_confidence",
@@ -38,6 +43,7 @@ __all__ = [
     "_detect_evidence_tiers",
     "_determine_evidence_tier",
     "_determine_confidence_level",
+    "note_if_same_binary_compared",
 ]
 
 
@@ -241,3 +247,49 @@ def compute_confidence(
 # Back-compat alias: the function was historically named ``_compute_confidence``
 # and imported under that name by checker and tests.
 _compute_confidence = compute_confidence
+
+
+def note_if_same_binary_compared(result: DiffResult) -> None:
+    """Append an L0 coverage warning when *result*'s two compared binaries
+    are byte-for-byte identical.
+
+    A comparison against the identical file content necessarily reports
+    ``NO_CHANGE`` (there is nothing to diff), and that is the *correct*
+    verdict for the bytes actually given -- but it silently reads the same
+    as "these two builds genuinely have no ABI-visible differences" from
+    the report alone. A user who intended to compare two distinct
+    releases and instead passed a stale/duplicate artifact (a build that
+    didn't actually rerun, a symlink resolving both `--old`/`--new` to the
+    same file, a packaging step that copied the wrong binary) gets a clean
+    report with no signal that the comparison itself couldn't have caught
+    anything either way -- the under-reporting is silent specifically
+    because the correct verdict and the "nothing was actually compared"
+    case are indistinguishable without this warning.
+
+    Uses ``LibraryMetadata.sha256`` (populated post-``compare()`` by each
+    caller that has real file paths -- ``cli._finalize_compare_result``,
+    ``service_compare_pipeline.classify_compare_pair``) rather than any
+    ELF-level identity (build-id, soname, symbol-table digest): the sha256
+    is the only signal available that is unconditionally exact regardless
+    of binary format (ELF/PE/Mach-O) or whether the snapshot carries ELF
+    metadata at all, and it needs no new model field or extraction work.
+    A no-op whenever either side's metadata is absent (a pure two-snapshot
+    Python-API comparison never populates ``old_metadata``/
+    ``new_metadata`` at all) or the two digests differ.
+
+    Idempotent and additive: appends to the existing
+    ``DiffResult.coverage_warnings`` list already surfaced by every
+    report format (JSON/SARIF/text/HTML/Markdown), so this needed no new
+    field on the ADR-061 no-growth-baselined ``DiffResult``/``checker.py``.
+    """
+    old_meta, new_meta = result.old_metadata, result.new_metadata
+    if old_meta is None or new_meta is None:
+        return
+    if old_meta.sha256 != new_meta.sha256:
+        return
+    result.coverage_warnings.append(
+        "old and new binaries are byte-identical (sha256 "
+        f"{old_meta.sha256[:12]}...); this comparison cannot detect a "
+        "change even if one was intended -- verify the correct build "
+        "artifacts were provided"
+    )

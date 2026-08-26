@@ -64,6 +64,7 @@ from typing import TYPE_CHECKING, Any
 
 from .api_types import CompareRequest, CompareResult, InputSpec, required_path
 from .compile_context import CompileContext
+from .confidence import note_if_same_binary_compared
 from .dependency_info import populate_pair_dependency_info
 from .errors import ValidationError
 from .service_input_resolution import enforce_requested_depth, resolve_side_snapshot
@@ -482,6 +483,7 @@ def classify_compare_pair(
     attach_evidence_metrics(result, evidence_metrics, extra_changes or [], quiet=True)
     result.old_metadata = service.collect_metadata(required_path(request.old, "old"))
     result.new_metadata = service.collect_metadata(required_path(request.new, "new"))
+    note_if_same_binary_compared(result)
 
     # P0.4 follow-up (P2 review, discussion_r3787839902): `DiffResult.
     # requested_depth`/`analysis_assurance.requested_depth`/`depth_satisfied`

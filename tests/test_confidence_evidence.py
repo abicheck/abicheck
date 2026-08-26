@@ -436,3 +436,86 @@ class TestDetectorResults:
         assert len(disabled) > 0
         for dr in disabled:
             assert dr.coverage_gap  # should explain why it was disabled
+
+
+class TestNoteIfSameBinaryCompared:
+    """Item 4 of the abicheck code-review report: a comparison against a
+    byte-identical binary silently produces a clean NO_CHANGE report with
+    no signal that the comparison couldn't have caught anything either
+    way -- the correct verdict and "nothing was actually compared" read
+    identically without this warning."""
+
+    def _result(self, old_sha=None, new_sha=None):
+        from abicheck.checker import DiffResult
+        from abicheck.checker_types import LibraryMetadata
+
+        result = DiffResult(old_version="1.0", new_version="2.0", library="lib")
+        if old_sha is not None:
+            result.old_metadata = LibraryMetadata(
+                path="/a/old.so", sha256=old_sha, size_bytes=100
+            )
+        if new_sha is not None:
+            result.new_metadata = LibraryMetadata(
+                path="/b/new.so", sha256=new_sha, size_bytes=100
+            )
+        return result
+
+    def test_identical_sha256_appends_warning(self):
+        from abicheck.confidence import note_if_same_binary_compared
+
+        result = self._result(old_sha="a" * 64, new_sha="a" * 64)
+        note_if_same_binary_compared(result)
+        assert any("byte-identical" in w for w in result.coverage_warnings), (
+            result.coverage_warnings
+        )
+
+    def test_different_sha256_appends_nothing(self):
+        from abicheck.confidence import note_if_same_binary_compared
+
+        result = self._result(old_sha="a" * 64, new_sha="b" * 64)
+        note_if_same_binary_compared(result)
+        assert result.coverage_warnings == []
+
+    def test_missing_old_metadata_is_a_noop(self):
+        from abicheck.confidence import note_if_same_binary_compared
+
+        result = self._result(old_sha=None, new_sha="a" * 64)
+        note_if_same_binary_compared(result)
+        assert result.coverage_warnings == []
+
+    def test_missing_new_metadata_is_a_noop(self):
+        from abicheck.confidence import note_if_same_binary_compared
+
+        result = self._result(old_sha="a" * 64, new_sha=None)
+        note_if_same_binary_compared(result)
+        assert result.coverage_warnings == []
+
+    def test_both_metadata_absent_is_a_noop(self):
+        from abicheck.confidence import note_if_same_binary_compared
+
+        result = self._result()
+        note_if_same_binary_compared(result)
+        assert result.coverage_warnings == []
+
+    def test_end_to_end_through_the_real_cli_compare_command(
+        self, tmp_path, monkeypatch
+    ):
+        """Public-surface test: exercised through the real `compare` CLI
+        entry point (same path/dump-mocking pattern as
+        TestUsedByScopedOnlyChange in test_cli_compare_audit_suppressions.py),
+        not only the internal helper directly."""
+        from unittest.mock import MagicMock
+
+        from click.testing import CliRunner
+
+        from abicheck import dumper as dumper_mod
+        from abicheck.cli import main
+
+        so_path = tmp_path / "lib.so"
+        so_path.write_bytes(b"\x7fELF" + b"\x00" * 200)
+        snap = AbiSnapshot(library="libfoo.so", version="1.0", functions=[])
+        monkeypatch.setattr(dumper_mod, "dump", MagicMock(side_effect=[snap, snap]))
+
+        runner = CliRunner()
+        result = runner.invoke(main, ["compare", str(so_path), str(so_path)])
+        assert "byte-identical" in result.stdout, result.stdout

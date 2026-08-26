@@ -35,7 +35,7 @@ try:
 except ImportError:  # pragma: no cover - rich-click is a declared dependency
     _RootGroupBase = click.Group  # type: ignore[assignment,misc]
 
-from . import deadline
+from . import confidence, deadline
 from .checker import DiffResult, LibraryMetadata
 from .cli_audit import echo_filtered_surface, echo_reconciled
 from .cli_dump_helpers import (
@@ -219,9 +219,7 @@ def _collect_metadata(path: Path) -> LibraryMetadata | None:
 
     data = path.read_bytes()
     return LibraryMetadata(
-        path=str(path),
-        sha256=hashlib.sha256(data).hexdigest(),
-        size_bytes=len(data),
+        path=str(path), sha256=hashlib.sha256(data).hexdigest(), size_bytes=len(data)
     )
 
 
@@ -1192,6 +1190,7 @@ def _finalize_compare_result(
     """Attach metadata and emit redundancy/filter/suppression output."""
     result.old_metadata = _collect_metadata(old_input)
     result.new_metadata = _collect_metadata(new_input)
+    confidence.note_if_same_binary_compared(result)
 
     if show_redundant and result.redundant_changes:
         _merge_redundant_changes(result)
