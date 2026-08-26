@@ -401,25 +401,17 @@ def write_bundle_facts_archive(
     p = Path(path)
     # Everything below is computed -- and every cap the reader will later
     # enforce is checked -- *before* `BundleArchiveWriter` is ever opened,
-    # so a rejected write never touches disk. This two-pass shape replaced
-    # an earlier incremental version that charged the write-side member/
-    # byte/name caps against raw *name* count rather than *distinct
-    # content* -- over-rejecting the "one snapshot, many aliases" dedup
-    # shape this format exists to provide. Every cap below is measured on
-    # the *same* unique-hash map the write further down actually populates.
-    # Sorted by name, not dict insertion order: two logically-equal
-    # BundleFacts populated in a different order would otherwise write
-    # blobs/manifest keys in a different order, producing different
-    # archive bytes/stored_sha256 for identical facts -- undermining the
-    # reproducibility the pinned zip timestamps exist to provide.
+    # so a rejected write never touches disk. Every cap is measured on
+    # the *same* unique-hash map the write further down actually
+    # populates. Sorted by name, not dict insertion order: two logically-
+    # equal BundleFacts populated in a different order would otherwise
+    # produce different archive bytes/stored_sha256 for identical facts.
     # (a-) Library-name-count cap, independent of the distinct-blob cap
-    # below: many names can share one blob, so a BundleFacts with more
-    # names than the reader's own DEFAULT_MAX_LIBRARY_COUNT could write
-    # successfully -- one blob, one manifest member -- and then never be
-    # reopened. Checked *before* the serialization loop, not after
-    # building `library_blobs` from it: many names referencing one large
-    # shared snapshot would otherwise serialize that payload once per
-    # name -- possibly terabytes of work -- before this cap can fire.
+    # below: many names can share one blob, so more names than the
+    # reader's own DEFAULT_MAX_LIBRARY_COUNT could write successfully and
+    # then never be reopened. Checked before the serialization loop, not
+    # after: many names referencing one large shared snapshot would
+    # otherwise serialize that payload once per name before this can fire.
     if len(facts.per_library_snapshots) > DEFAULT_MAX_LIBRARY_COUNT:
         raise SnapshotError(
             f"{p}: writing this bundle's {len(facts.per_library_snapshots)} "
@@ -437,10 +429,23 @@ def write_bundle_facts_archive(
     # loop, so many large distinct snapshots don't all sit in memory at
     # once before the aggregate cap gets a chance to fire (Codex review).
     unique_bytes_seen = 0
+    # Keyed by id(snap), not content -- many names can legitimately share
+    # the *same* AbiSnapshot object, and re-serializing it once per name
+    # is real, unbounded work the dedup below never prevented (N names
+    # sharing one large snapshot could re-serialize it N times before the
+    # aggregate cap gets a chance to fire). Safe: every snap here stays
+    # referenced by `facts.per_library_snapshots` for the loop's
+    # duration, so no id() can be reused by an unrelated object mid-loop.
+    serialized_by_identity: dict[int, tuple[str, bytes]] = {}
     for name, snap in sorted(facts.per_library_snapshots.items()):
-        payload = _json.dumps(snapshot_to_dict(snap), indent=2).encode("utf-8")
+        cached = serialized_by_identity.get(id(snap))
+        if cached is not None:
+            h, payload = cached
+        else:
+            payload = _json.dumps(snapshot_to_dict(snap), indent=2).encode("utf-8")
+            h = content_hash(payload)
+            serialized_by_identity[id(snap)] = (h, payload)
         decoded_size_bytes += len(payload)
-        h = content_hash(payload)
         if h not in unique_payloads:
             unique_payloads[h] = payload
             unique_bytes_seen += len(payload)
@@ -548,13 +553,9 @@ def write_bundle_facts_archive(
         # would independently discover by sniffing `path`'s own magic
         # bytes -- and the envelope here is a ZIP (`PK\x03\x04`), which
         # neither sniffer recognizes as a zstd frame. The zstd compression
-        # is real but internal, applied per-member by `BundleArchiveWriter`
-        # to each `blobs/<hash>.json.zst` entry -- a fact about individual
-        # zip members, not about `path` as a whole. Claiming ZSTD here
-        # would mislead a caller that cross-checks this field against an
-        # independent sniff of the same file, or attempts to feed the raw
-        # file bytes to a zstd decoder directly (Codex review, fresh
-        # evidence).
+        # is real but internal, applied per-member to each
+        # `blobs/<hash>.json.zst` entry -- claiming ZSTD here would
+        # mislead a caller cross-checking against an independent sniff.
         compression=SnapshotCompression.NONE,
         decoded_size_bytes=decoded_size_bytes,
         stored_size_bytes=writer.stored_size_bytes,
@@ -623,9 +624,9 @@ def read_bundle_facts_archive(
                 "bundle archive: 'library_blobs' must be a mapping, got "
                 f"{type(library_blobs).__name__}"
             )
-        # Each value must be a content-hash string -- an unvalidated list/dict
-        # value reaches snapshot_cache/blob_cache below (both keyed dicts) and
-        # raises a raw TypeError instead of this module's own error type.
+        # Each value must be a content-hash string -- an unvalidated list/
+        # dict reaches snapshot_cache/blob_cache below and raises a raw
+        # TypeError instead of this module's own error type.
         for _name, _h in library_blobs.items():
             if not isinstance(_h, str):
                 raise ValueError(
@@ -675,8 +676,7 @@ def read_bundle_facts_archive(
 
         # read_blob() verifies the blob's *hash*, not its JSON *shape* -- a
         # blob that legitimately decodes to a list/scalar must raise this
-        # module's own error type below, not a raw AttributeError out of
-        # snapshot_from_dict's d.get(...) calls (CodeRabbit review).
+        # module's own error type below, not a raw AttributeError.
         #
         # snapshot_cache is keyed by hash too, alongside blob_cache above,
         # avoiding a repeat snapshot_from_dict() call per name sharing one
@@ -684,9 +684,8 @@ def read_bundle_facts_archive(
         # returned mapping (AbiSnapshot is mutable, BundleFacts is public
         # API, so no two names may alias one object): the first-built
         # instance is held unmodified, every later name sharing that hash
-        # gets a deep copy, matching
-        # `serialization.bundle_facts_from_dict()`'s one-instance-per-entry
-        # contract.
+        # gets a deep copy, matching `bundle_facts_from_dict()`'s own
+        # one-instance-per-entry contract.
         snapshot_cache: dict[str, AbiSnapshot] = {}
         snapshot_blob_len: dict[str, int] = {}
         per_library_snapshots: dict[str, AbiSnapshot] = {}

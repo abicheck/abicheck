@@ -650,6 +650,47 @@ class TestBundleFactsArchiveFormat:
         # 2nd, so the 3rd must never have been serialized at all.
         assert calls == ["lib0.so", "lib1.so"]
 
+    def test_many_names_sharing_one_snapshot_object_serialize_it_only_once(
+        self, tmp_path: Path
+    ) -> None:
+        """The dedup that skips *adding* an already-seen hash to
+        `unique_payloads` never skipped the expensive *serialization*
+        itself -- many names referencing the identical `AbiSnapshot`
+        object re-ran `snapshot_to_dict`/`json.dumps` once per name
+        regardless (Codex review, fresh evidence: 20,000 names sharing
+        one large snapshot could perform ~2 TiB of redundant
+        serialization work before the aggregate check ever runs). Now
+        cached per object identity."""
+        import abicheck.bundle_facts as bundle_facts_module_local
+        from abicheck.serialization import snapshot_to_dict
+
+        shared_snap = _per_library_snapshots(_old_metadata())["libcore.so"]
+        facts = BundleFacts(
+            per_library_snapshots={f"lib{i}.so": shared_snap for i in range(50)}
+        )
+
+        calls: list[str] = []
+
+        def _tracking_to_dict(snap: AbiSnapshot) -> dict[str, object]:
+            calls.append(snap.library)
+            return snapshot_to_dict(snap)
+
+        out = tmp_path / "shared-object.bundlefacts.archive.zip"
+        result = bundle_facts_module_local.write_bundle_facts_archive(
+            facts, out, snapshot_to_dict=_tracking_to_dict
+        )
+        # 50 names, but the identical object was serialized exactly once.
+        assert calls == ["libcore.so"]
+        # decoded_size_bytes still reports the full logical total, as if
+        # every name were independently serialized -- caching how the
+        # work is done must not change what is reported.
+        import json as _json
+
+        one_payload_len = len(
+            _json.dumps(snapshot_to_dict(shared_snap), indent=2).encode("utf-8")
+        )
+        assert result.decoded_size_bytes == 50 * one_payload_len
+
     def test_save_rejects_a_write_whose_manifest_blob_alone_would_exceed_the_aggregate_cap(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:

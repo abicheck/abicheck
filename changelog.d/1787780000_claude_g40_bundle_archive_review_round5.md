@@ -103,3 +103,30 @@
   raising `ZstdError` -- can never match the recorded hash without
   breaking SHA-256 collision resistance. No code change made for that
   finding; the reasoning is recorded on its own PR review thread.
+
+- **G40 bundle archive: three more Codex review findings, all real, all
+  fixed.** (1, P1) Sharing one fd between the central-directory preflight
+  and `zipfile.ZipFile` closes a *path-substitution* race but not an
+  *in-place content* one -- another writer with access to the same inode
+  could still grow the file between the preflight returning and
+  `ZipFile`'s own independent, unbounded scan of the (by-then-larger)
+  current end of file, reproduced: a one-entry file grown to four entries
+  after the check returned still had all four parsed despite a
+  three-entry limit. `reject_absurd_central_directory()` now returns the
+  file size it validated, and `BundleArchiveReader.__init__` re-`fstat()`s
+  immediately before constructing `ZipFile`, rejecting a mismatch -- this
+  narrows the window to the two adjacent statements rather than closing
+  it outright (a stable, separately-materialized copy of the archive
+  bytes would be a much larger change). (2) `write_bundle_facts_archive`'s
+  dedup only skipped *adding* an already-seen hash to `unique_payloads` --
+  the expensive serialization itself (`snapshot_to_dict`/`json.dumps`)
+  still ran once per *name*, even when many names reference the identical
+  `AbiSnapshot` object. Now cached per object identity (safe: every
+  referenced object stays alive for the whole loop via `facts.
+  per_library_snapshots` itself, so `id()` can't be reused mid-loop).
+  (3) An explicit `format="archive"` caller reaches `BundleArchiveReader.
+  open()`/`__init__` directly, bypassing `open_regular_file_for_format_
+  sniff`'s own non-regular-source guard entirely -- a FIFO with no writer
+  blocked on `open()` instead of failing cleanly. Now uses the same
+  O_NONBLOCK-open + `fstat()`-classify shape as that sniff, raising
+  `SnapshotError` for a non-regular source.

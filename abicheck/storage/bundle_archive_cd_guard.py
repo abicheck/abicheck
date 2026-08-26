@@ -84,7 +84,7 @@ def _actual_central_directory_entry_count(
     return count
 
 
-def reject_absurd_central_directory(f: Any, path: Path, *, max_entries: int) -> None:
+def reject_absurd_central_directory(f: Any, path: Path, *, max_entries: int) -> int | None:
     """Reject *path* if its central directory claims more than *max_entries*
     entries or `_MAX_CENTRAL_DIRECTORY_BYTES` -- read directly from the EOCD
     (and, when present, the ZIP64 EOCD locator/record), without invoking
@@ -97,6 +97,21 @@ def reject_absurd_central_directory(f: Any, path: Path, *, max_entries: int) -> 
     path let a concurrent replacement between this check and `ZipFile`'s
     own open swap in a different generation, bypassing every guard here.
     Left at its own read position on return.
+
+    Returns the file's own size as observed at the *start* of this check
+    (or `None` if even that couldn't be determined) -- the caller re-
+    fstat()s immediately before constructing `zipfile.ZipFile` and rejects
+    a mismatch, since sharing one fd closes a *path-substitution* race but
+    not an *in-place content* one: another writer with access to this
+    same inode could still grow the file between this check returning and
+    `ZipFile`'s own independent, unbounded scan from the (by-then-larger)
+    current end of file (Codex review, fresh evidence, reproduced: a
+    one-entry file grown to four entries after this check returned still
+    had all four parsed by `ZipFile` despite a three-entry limit). This
+    narrows that window to the two adjacent statements at the call site
+    rather than closing it outright -- true immutability would need a
+    stable, separately-materialized copy of the archive bytes, a much
+    larger change than this preflight's own scope.
 
     Best-effort only for "the EOCD itself can't be found/read" (a
     genuinely truncated/non-zip file) -- `zipfile.ZipFile`'s own error is
@@ -117,14 +132,14 @@ def reject_absurd_central_directory(f: Any, path: Path, *, max_entries: int) -> 
     try:
         size = os.fstat(f.fileno()).st_size
     except OSError:
-        return
+        return None
     tail_len = min(size, _EOCD_SEARCH_WINDOW_BYTES)
     try:
         f.seek(size - tail_len)
         tail = f.read(tail_len)
         idx = tail.rfind(b"PK\x05\x06")
         if idx == -1 or idx + 22 > len(tail):
-            return
+            return size
         # EOCD layout: signature(4) this_disk(2) cd_start_disk(2)
         # entries_this_disk(2) total_entries(2) cd_size(4) cd_offset(4)
         # comment_len(2) [comment...]
@@ -190,7 +205,7 @@ def reject_absurd_central_directory(f: Any, path: Path, *, max_entries: int) -> 
             cd_size = int.from_bytes(record[40:48], "little")
             cd_offset = int.from_bytes(record[48:56], "little")
     except OSError:
-        return
+        return size
     if total_entries > max_entries:
         raise SnapshotError(
             f"{path}: central directory claims {total_entries} entries, "
@@ -219,7 +234,7 @@ def reject_absurd_central_directory(f: Any, path: Path, *, max_entries: int) -> 
                 f, cd_offset=cd_offset, cd_size=cd_size, max_entries=max_entries
             )
         except OSError:
-            return
+            return size
         if actual_entries > max_entries:
             raise SnapshotError(
                 f"{path}: central directory actually contains more than "
@@ -228,3 +243,4 @@ def reject_absurd_central_directory(f: Any, path: Path, *, max_entries: int) -> 
                 "refusing to open (possible memory-exhaustion attack, or "
                 "a genuinely malformed archive)."
             )
+    return size

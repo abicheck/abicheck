@@ -83,9 +83,8 @@ DEFAULT_MAX_BLOB_BYTES = 1024 * 1024 * 1024
 
 #: `manifest.json`'s own size cap -- far smaller than
 #: `DEFAULT_MAX_BLOB_BYTES`: the manifest holds only name/hash pairs, not
-#: payload content. Rejecting deflate for a member isn't itself a size
-#: bound -- a still-`ZIP_STORED` member's own claimed size is read via
-#: `ZipInfo.file_size` and checked before the read.
+#: payload content. A still-`ZIP_STORED` member's own claimed size is
+#: read via `ZipInfo.file_size` and checked before the read.
 DEFAULT_MAX_MANIFEST_BYTES = 64 * 1024 * 1024
 
 #: Slack added to a decoded-size cap when bounding the *outer*,
@@ -185,13 +184,11 @@ def open_regular_file_for_format_sniff(
     different generation (Codex review). ``(None, "json")`` for a
     non-regular-file source -- the caller must not close *fp* then."""
     p = Path(path)
-    # Open first, nonblocking, then fstat() *that* fd -- a plain path
-    # stat() followed by a separate open() leaves a window where a
-    # concurrent replacement swaps a regular file for e.g. a FIFO, whose
-    # open() then blocks until a writer connects, violating this
-    # function's "non-regular source returned without being read"
-    # contract. O_NONBLOCK keeps open() from blocking either way, and
-    # fstat() on the resulting fd names the exact inode read below.
+    # Open first, nonblocking, then fstat() *that* fd -- a plain stat()
+    # then a separate open() leaves a window where a concurrent
+    # replacement swaps a regular file for e.g. a FIFO, whose open() then
+    # blocks until a writer connects. O_NONBLOCK keeps open() from
+    # blocking either way, and fstat() names the exact inode read below.
     nonblock = getattr(os, "O_NONBLOCK", 0)
     try:
         fd = os.open(p, os.O_RDONLY | nonblock)
@@ -307,25 +304,19 @@ class BundleArchiveWriter:
         try:
             existing_stat = self._target.stat()
         except (FileNotFoundError, NotADirectoryError):
-            # Only genuine absence is treated as "no pre-existing
-            # destination" -- any other OSError (e.g. a cyclic symlink
-            # raising ELOOP) must propagate, not be silently treated as
-            # absence, bypassing the checks below. Mirrors
-            # `snapshot_io._atomic_write_bytes`'s own identical rule.
+            # Only genuine absence means "no pre-existing destination" --
+            # any other OSError (e.g. ELOOP on a cyclic symlink) must
+            # propagate, not bypass the checks below.
             existing_stat = None
         self._existing_mode: int | None = None
         self._existing_uid: int | None = None
         self._existing_gid: int | None = None
         if existing_stat is not None:
             if not stat.S_ISREG(existing_stat.st_mode):
-                # os.replace() would silently destroy a pre-existing FIFO/
-                # socket/device by installing a regular zip in its place --
-                # unlike snapshot_io._atomic_write_bytes (which can write
-                # straight through a non-regular destination, holding the
-                # complete payload as one bytes object), this writer builds
-                # a zip incrementally into a temp file and only ever
-                # publishes via an atomic rename, so there is no way to
-                # "write through" such a destination at all.
+                # os.replace() would destroy a pre-existing FIFO/socket/
+                # device -- this writer builds incrementally into a temp
+                # file and can only publish via atomic rename, so there
+                # is no way to "write through" such a destination.
                 raise SnapshotError(
                     f"{self._target}: already exists and is not a regular "
                     "file (a FIFO, socket, or device) -- refusing to "
@@ -344,20 +335,17 @@ class BundleArchiveWriter:
             self._existing_uid = existing_stat.st_uid
             self._existing_gid = existing_stat.st_gid
         self._target.parent.mkdir(parents=True, exist_ok=True)
-        # _open_unique_temp, not a predictable "<name>.tmp-<pid>-<id>" path
-        # opened separately by zipfile.ZipFile -- such a name in a
-        # directory writable by another account could be pre-created as a
-        # symlink, and `ZipFile(path, mode="w")` follows symlinks. This
-        # randomizes the name and opens it O_CREAT|O_EXCL, at a
-        # umask-filtered 0o666 rather than tempfile.mkstemp's hardcoded
-        # 0600 (must not be more restrictive than the plain-JSON path's
-        # ordinary `open()` mode).
+        # _open_unique_temp, not a predictable path zipfile.ZipFile could
+        # open separately -- a directory writable by another account
+        # could pre-create such a name as a symlink, which `ZipFile`
+        # follows. Randomized and opened O_CREAT|O_EXCL at 0o666 filtered
+        # by umask (not mkstemp's more-restrictive hardcoded 0600).
         tmp_fd, self._tmp_path = _open_unique_temp(
             self._target.parent, f".{self._target.name}.", ".tmp"
         )
         self._tmp_file = os.fdopen(tmp_fd, "wb")
-        # A file object, not a path: ZipFile doesn't close a fileobj it
-        # didn't open itself, so close()/_abort() own closing it.
+        # A file object, not a path: ZipFile won't close a fileobj it
+        # didn't itself open, so close()/_abort() own closing it.
         self._zf = zipfile.ZipFile(self._tmp_file, mode="w", compression=zipfile.ZIP_STORED)
         self._written_hashes: set[str] = set()
         self._manifest_written = False
@@ -436,19 +424,12 @@ class BundleArchiveWriter:
             # mirroring snapshot_io._atomic_write_bytes's own two-part
             # fsync. Best-effort only for "fs doesn't support fsync".
             self._fsync_tmp_file()
-            # Ownership restored *before* mode: chown() silently clears
-            # setuid/setgid on POSIX, so restoring mode first would let a
-            # real 06755 destination's bits survive the chmod only to be
-            # stripped by chown right after. Not best-effort, mirroring
-            # `snapshot_io.py`'s own fix: publishing under the wrong
-            # owner/group can revoke real access.
-            #
-            # fchown/fchmod on `self._tmp_file`'s own fd, not chown/chmod on
-            # `self._tmp_path` -- a shared, non-sticky directory writable by
-            # another account could substitute a file/symlink at that path
-            # between this exclusively-created fd and a later path-based
-            # reopen. The fd held open since creation cannot be redirected
-            # that way.
+            # Ownership before mode: chown() clears setuid/setgid on
+            # POSIX, so mode first would strip real 06755 bits right
+            # after. Not best-effort -- wrong owner/group revokes access.
+            # fchown/fchmod on the fd, not the path: a shared directory
+            # could substitute a file at that path before a path-based
+            # reopen; the held-open fd cannot be redirected that way.
             if (
                 self._existing_uid is not None or self._existing_gid is not None
             ) and hasattr(os, "fchown"):
@@ -466,12 +447,10 @@ class BundleArchiveWriter:
             # only guarantees content reached storage -- chown/chmod mutate
             # inode metadata afterward, which a crash could lose otherwise.
             self._fsync_tmp_file()
-            # Computed from a duplicated fd of `self._tmp_file`, not by
-            # reopening `self._tmp_path` -- the same path-substitution race
-            # above would let this hash verify attacker content instead of
-            # what was actually written. Write position is already
-            # finished, so the `os.lseek` below can't disturb it (`os.dup`
-            # shares the open-file description).
+            # A duplicated fd, not a path reopen -- the same substitution
+            # race above would verify attacker content otherwise. Write
+            # position is already finished, so `os.lseek` below can't
+            # disturb it (`os.dup` shares the open-file description).
             self.stored_size_bytes = os.fstat(self._tmp_file.fileno()).st_size
             hasher = hashlib.sha256()
             read_fd = os.dup(self._tmp_file.fileno())
@@ -481,26 +460,20 @@ class BundleArchiveWriter:
                     hasher.update(chunk)
             self.stored_sha256 = hasher.hexdigest()
             self._tmp_file.close()
-            # Known residual gap: `os.replace()` is inherently path-based
-            # (no fd-scoped rename in stdlib `os`), so a substitution right
+            # Known residual gap: `os.replace()` is path-based (no
+            # fd-scoped rename in stdlib `os`), so a substitution right
             # before this call still publishes attacker content -- but
-            # stored_sha256/stored_size_bytes above were already computed
-            # from the real fd, so this is no longer a silent MITM: a
-            # caller verifying the published file against stored_sha256
-            # detects the mismatch.
+            # stored_sha256 above was already computed from the real fd,
+            # so a caller verifying against it detects the mismatch.
             os.replace(self._tmp_path, self._target)
         except BaseException:
             # A failure anywhere above must not leave the -- potentially
-            # large -- temp file behind next to the untouched destination;
-            # a repeated failure (ENOSPC, EIO) would otherwise starve later
-            # retries of the space they're trying to free. No-op once
-            # os.replace() has already succeeded.
+            # large -- temp file behind; a repeated failure (ENOSPC, EIO)
+            # would otherwise starve later retries of the space they're
+            # trying to free. No-op once os.replace() has succeeded.
             #
-            # The unlink is in a nested `finally` -- not a plain sibling
-            # statement -- so it still runs even when close() *itself*
-            # raises (e.g. ENOSPC/EIO flushing buffered bytes during an
-            # exception-driven abort), which a plain sibling statement
-            # would never reach in that case.
+            # Nested `finally`, not a plain sibling statement, so the
+            # unlink still runs even when close() itself raises.
             try:
                 if not self._tmp_file.closed:
                     self._tmp_file.close()
@@ -575,18 +548,33 @@ class BundleArchiveReader:
     def __init__(self, path: str | Path, *, _fp: Any | None = None) -> None:
         self._path = Path(path)
         # Opened once; the identical fd is handed to both the preflight
-        # below and `zipfile.ZipFile` -- reopening *path* a second time for
-        # `ZipFile` would let a concurrent atomic replacement swap in a
-        # different generation in between (Codex review, fresh evidence).
-        # `_fp`, when given, is an already-open fd a caller sniffed the
-        # format from (`from_open_file`) -- extends the identical guarantee
-        # one layer up, to the sniff-then-open gap (see that classmethod).
+        # below and `zipfile.ZipFile` -- reopening *path* would let a
+        # concurrent atomic replacement swap in a different generation.
+        # `_fp`, when given, is an already-open fd sniffed the format
+        # from (`from_open_file`) -- extends the same guarantee up.
         if _fp is not None:
             fp = _fp
             fp.seek(0)
         else:
+            # Same O_NONBLOCK-open + fstat()-classify shape as
+            # `open_regular_file_for_format_sniff` -- an explicit
+            # `format="archive"` caller bypasses that sniff's own non-
+            # regular-source guard entirely, so a FIFO with no writer
+            # would otherwise hang here. ZIP input must be seekable
+            # regardless, so a non-regular source is always a usage
+            # error here, never a valid "reads as JSON".
+            nonblock = getattr(os, "O_NONBLOCK", 0)
             try:
-                fp = open(self._path, "rb")
+                fd = os.open(self._path, os.O_RDONLY | nonblock)
+                st = os.fstat(fd)
+                if not stat.S_ISREG(st.st_mode):
+                    os.close(fd)
+                    raise SnapshotError(
+                        f"{self._path}: not a regular file -- a bundle "
+                        "archive must be seekable, which a FIFO/socket/"
+                        "device cannot provide."
+                    )
+                fp = os.fdopen(fd, "rb")
             except OSError as exc:
                 raise SnapshotError(
                     f"{self._path}: not a valid bundle archive: {exc}"
@@ -594,7 +582,20 @@ class BundleArchiveReader:
         try:
             from .bundle_archive_cd_guard import reject_absurd_central_directory
 
-            reject_absurd_central_directory(fp, self._path, max_entries=MAX_ARCHIVE_MEMBERS)
+            validated_size = reject_absurd_central_directory(
+                fp, self._path, max_entries=MAX_ARCHIVE_MEMBERS
+            )
+            # Sharing one fd closes a path-substitution race but not an
+            # in-place content one -- the file could still grow between
+            # the preflight returning and ZipFile's own scan below
+            # (reproduced). Re-checked here to narrow, not close, that
+            # window; see reject_absurd_central_directory's own docstring.
+            if validated_size is not None and os.fstat(fp.fileno()).st_size != validated_size:
+                raise SnapshotError(
+                    f"{self._path}: changed size while being opened -- "
+                    "refusing to parse a central directory that may no "
+                    "longer be the one just validated."
+                )
             fp.seek(0)
             self._zf = zipfile.ZipFile(fp, mode="r")
         except (zipfile.BadZipFile, OSError) as exc:
@@ -658,13 +659,12 @@ class BundleArchiveReader:
                 "read (possible decompression bomb, or a genuinely oversized "
                 "member)."
             )
-        # The zip "encrypted" bit (bit 0 of `flag_bits`) makes `ZipFile.
-        # open()` raise a bare `RuntimeError`, not `BadZipFile` -- the only
-        # exception the except clause below translates -- so it would leak
-        # past this module's SnapshotError contract (Codex review, fresh
-        # evidence). No member this writer produces is ever encrypted, so
-        # checked here rather than caught after (RuntimeError is too
-        # generic to safely narrow in an except clause).
+        # The zip "encrypted" bit makes `ZipFile.open()` raise a bare
+        # `RuntimeError`, not the `BadZipFile` the except clause below
+        # translates, leaking past this module's SnapshotError contract.
+        # No member this writer produces is ever encrypted, so checked
+        # here rather than caught after (RuntimeError is too generic to
+        # safely narrow in an except clause).
         if info.flag_bits & 0x1:
             raise SnapshotError(
                 f"{self._path}: member {name!r} is encrypted -- not a "

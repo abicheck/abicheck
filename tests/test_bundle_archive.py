@@ -935,20 +935,87 @@ class TestBundleArchivePreflightUsesTheSameFdAsZipFile:
             h = writer.put_blob(b'{"a": 1}')
             writer.write_manifest({"library_blobs": {"a.so": h}})
 
+        # BundleArchiveReader.__init__ opens via os.open() (not the
+        # builtin open()) as of the FIFO-TOCTOU fix -- tracked there.
         opened_paths: list[object] = []
-        real_open = open
+        real_os_open = os.open
 
         def _tracking_open(file, *a, **kw):  # type: ignore[no-untyped-def]
             if file == path or file == str(path):
                 opened_paths.append(file)
-            return real_open(file, *a, **kw)
+            return real_os_open(file, *a, **kw)
 
-        monkeypatch.setattr("builtins.open", _tracking_open)
+        monkeypatch.setattr(os, "open", _tracking_open)
         with BundleArchiveReader.open(path) as reader:
             assert reader.read_blob(h) == b'{"a": 1}'
         # Exactly one open() of *path* -- zipfile.ZipFile receives the
         # already-open fd, not the path again.
         assert len(opened_paths) == 1
+
+
+class TestBundleArchiveReaderRejectsNonRegularSourcesDirectly:
+    """Codex review, fresh evidence: an explicit `format="archive"`
+    caller reaches `BundleArchiveReader.open()`/`__init__` directly,
+    bypassing `open_regular_file_for_format_sniff`'s own non-regular-
+    source guard entirely -- a FIFO with no writer must still be
+    rejected cleanly rather than hanging on a blocking `open()`."""
+
+    @pytest.mark.skipif(sys.platform == "win32", reason="no os.mkfifo on Windows")
+    def test_open_does_not_block_on_a_fifo_with_no_writer(self, tmp_path: Path) -> None:
+        import threading
+
+        fifo = tmp_path / "no_writer.fifo"
+        os.mkfifo(fifo)
+
+        outcomes: list[object] = []
+
+        def _call() -> None:
+            try:
+                BundleArchiveReader.open(fifo)
+            except SnapshotError as exc:
+                outcomes.append(exc)
+
+        t = threading.Thread(target=_call, daemon=True)
+        t.start()
+        t.join(timeout=5)
+        assert not t.is_alive(), "BundleArchiveReader.open() blocked on a FIFO"
+        assert len(outcomes) == 1
+        assert "not a regular file" in str(outcomes[0])
+
+
+class TestBundleArchivePreflightRejectsInPlaceGrowth:
+    """Codex review, fresh evidence, reproduced: sharing one fd between
+    the preflight and `zipfile.ZipFile` closes a *path-substitution*
+    race but not an *in-place content* one -- another writer with this
+    inode's access could still grow the file between the preflight
+    returning and `ZipFile`'s own scan. Re-checked immediately before
+    construction."""
+
+    def test_growth_between_preflight_and_zipfile_is_rejected(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import abicheck.storage.bundle_archive_cd_guard as cd_guard_module
+
+        path = tmp_path / "bundle.archive.zip"
+        with BundleArchiveWriter(path) as writer:
+            h = writer.put_blob(b'{"a": 1}')
+            writer.write_manifest({"library_blobs": {"a.so": h}})
+
+        real_guard = cd_guard_module.reject_absurd_central_directory
+
+        def _guard_then_grow(f, archive_path, *, max_entries):  # type: ignore[no-untyped-def]
+            validated_size = real_guard(f, archive_path, max_entries=max_entries)
+            # Simulates another writer appending to the same inode right
+            # after this check returns but before ZipFile is constructed.
+            with open(path, "ab") as grower:
+                grower.write(b"\x00" * 64)
+            return validated_size
+
+        monkeypatch.setattr(
+            cd_guard_module, "reject_absurd_central_directory", _guard_then_grow
+        )
+        with pytest.raises(SnapshotError, match="changed size while being opened"):
+            BundleArchiveReader.open(path)
 
 
 class TestBundleArchiveReadBlobCompressedSlack:
