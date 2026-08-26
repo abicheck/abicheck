@@ -62,14 +62,33 @@ __all__ = [
     "elf_symbol_occurrence",
 ]
 
-#: Separator between an identity's parts in its flat string key. U+001F (unit
-#: separator) rather than ``"::"`` or ``"@"``, because every printable
-#: separator this codebase has reached for is legal inside some real C++
-#: spelling, symbol version, or file path — a mangled name contains ``@``, a
-#: qualified name contains ``::``, a path contains ``/``. A control character
-#: cannot appear in any of them, so two distinct identities can never collide
-#: on a key merely because one part contained the separator.
-_SEP = "\x1f"
+
+def _packed(*parts: str) -> str:
+    """Join identity parts into a key no part's content can forge.
+
+    Each part is length-prefixed (``"<len>:<part>"``) rather than joined by a
+    separator, so a key decomposes into exactly one part sequence regardless
+    of what any part contains — including a nested key produced by this same
+    function, which the outer length prefix delimits exactly.
+
+    A separator was tried first and was wrong. The reasoning behind it went:
+    every *printable* separator is legal inside some real spelling (a mangled
+    name contains ``@``, a qualified name ``::``, a path ``/``), so use a
+    control character (U+001F) that no real C++ or ELF spelling can contain.
+    That argument holds for the parts derived from real spellings and fails
+    for the rest: ``OccurrenceId.attributes`` carries arbitrary
+    producer-supplied strings, so a value containing the separator could
+    forge a part boundary. Codex review found the concrete counterexample —
+    ``(("a", "x\\x1fb=y"),)`` and ``(("a", "x"), ("b", "y"))`` are unequal
+    occurrences that encoded to the same key, so ``OccurrenceSet.add`` saw
+    the second as a duplicate and **silently discarded it**. That is the one
+    thing this module exists to make impossible, reached through the key
+    function rather than through the set logic.
+
+    Length-prefixing removes the question rather than narrowing it: there is
+    no byte a part can contain that changes how the key parses.
+    """
+    return "".join(f"{len(part)}:{part}" for part in parts)
 
 
 class EntityKind(enum.Enum):
@@ -103,10 +122,6 @@ class ObservationKind(enum.Enum):
     BUILD_UNIT = "build_unit"
 
 
-def _key(*parts: str) -> str:
-    return _SEP.join(parts)
-
-
 @dataclass(frozen=True, order=True)
 class EntityId:
     """A logical entity's identity.
@@ -127,7 +142,7 @@ class EntityId:
     @property
     def key(self) -> str:
         """Flat, collision-free string key. Stable across runs and releases."""
-        return _key(self.kind.value, self.qualified_name, self.discriminator)
+        return _packed(self.kind.value, self.qualified_name, self.discriminator)
 
     def to_dict(self) -> dict[str, Any]:
         out: dict[str, Any] = {
@@ -179,8 +194,17 @@ class OccurrenceId:
 
     @property
     def key(self) -> str:
-        attrs = _SEP.join(f"{k}={v}" for k, v in self.attributes)
-        return _key(self.entity.key, self.observation.value, self.container, attrs)
+        # Each attribute contributes its key and value as two separate parts.
+        # Flattening them into the same length-prefixed sequence is safe for
+        # the same reason the nested entity key is: every part is delimited by
+        # its own prefix, so no attribute content can forge a boundary.
+        flat_attributes = [item for pair in self.attributes for item in pair]
+        return _packed(
+            self.entity.key,
+            self.observation.value,
+            self.container,
+            *flat_attributes,
+        )
 
     def attribute(self, name: str, default: str = "") -> str:
         for key, value in self.attributes:

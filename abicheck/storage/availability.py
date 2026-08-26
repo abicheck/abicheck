@@ -44,7 +44,7 @@ from __future__ import annotations
 
 import enum
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from typing import Any
 
 __all__ = [
@@ -165,18 +165,29 @@ class FactAvailability:
         would let one optimistic override defeat the family-level statement.
         Diagnostics accumulate from both sides, since both explain the result.
         """
-        status = _worse_status(self.status, other.status)
-        confidence = _worse_confidence(self.confidence, other.confidence)
-        merged_diagnostics = self.diagnostics + tuple(
-            d for d in other.diagnostics if d not in self.diagnostics
-        )
-        # Identifying fields come from the override where it states one, since
-        # the override is the more specific observation.
-        return replace(
-            other if other.producer else self,
-            status=status,
-            confidence=confidence,
-            diagnostics=merged_diagnostics,
+        # Identifying fields merge *field by field*: a non-empty override
+        # value wins as the more specific observation, and anything the
+        # override leaves blank is inherited from the family.
+        #
+        # An earlier version selected the whole record — `other if
+        # other.producer else self` — which lost information in both
+        # directions (Codex review). An override stating a narrower `scope`
+        # but no `producer` had that scope discarded, so the result described
+        # coverage the entity never had; and an override stating only a
+        # `producer` erased the inherited `recipe` and `producer_version`,
+        # which are exactly the fields that decide whether two `PRESENT`
+        # records are interchangeable. Neither is a cosmetic loss: the first
+        # misstates evidence scope, the second makes interchangeability
+        # unanswerable.
+        return FactAvailability(
+            status=_worse_status(self.status, other.status),
+            producer=other.producer or self.producer,
+            producer_version=other.producer_version or self.producer_version,
+            recipe=other.recipe or self.recipe,
+            scope=other.scope or self.scope,
+            confidence=_worse_confidence(self.confidence, other.confidence),
+            diagnostics=self.diagnostics
+            + tuple(d for d in other.diagnostics if d not in self.diagnostics),
         )
 
     def to_dict(self) -> dict[str, Any]:

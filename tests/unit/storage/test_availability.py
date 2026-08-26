@@ -381,3 +381,93 @@ class TestRoundTrip:
         for status, confidence in itertools.product(_STATUSES, _CONFIDENCES):
             record = FactAvailability(status, confidence=confidence)
             assert FactAvailability.from_dict(record.to_dict()) == record
+
+
+class TestNarrowingMergesIdentifyingFieldsPerField:
+    """Codex review: whole-record selection lost information both ways.
+
+    `other if other.producer else self` discarded an override's own `scope`
+    when it named no producer, and erased the family's `recipe`/
+    `producer_version` when it named only a producer. Neither loss is
+    cosmetic: the first misstates evidence scope, the second makes
+    interchangeability unanswerable.
+    """
+
+    def test_an_override_scope_survives_without_a_producer(self) -> None:
+        family = FactAvailability(
+            FactStatus.PRESENT, producer="clang", recipe="r1", scope="all"
+        )
+        override = FactAvailability(FactStatus.PARTIAL, scope="headers-only")
+
+        result = family.narrowed(override)
+
+        assert result.scope == "headers-only"
+        assert result.status is FactStatus.PARTIAL
+        # Unstated fields still inherit.
+        assert result.producer == "clang"
+        assert result.recipe == "r1"
+
+    def test_a_producer_only_override_does_not_erase_recipe_or_version(
+        self,
+    ) -> None:
+        family = FactAvailability(
+            FactStatus.PRESENT,
+            producer="clang",
+            producer_version="18.1.0",
+            recipe="r1",
+            scope="all",
+        )
+        override = FactAvailability(FactStatus.PARTIAL, producer="castxml")
+
+        result = family.narrowed(override)
+
+        assert result.producer == "castxml"
+        assert result.recipe == "r1"
+        assert result.producer_version == "18.1.0"
+        assert result.scope == "all"
+
+    @given(
+        st.sampled_from(["", "castxml"]),
+        st.sampled_from(["", "r2"]),
+        st.sampled_from(["", "headers-only"]),
+        st.sampled_from(["", "20.1"]),
+    )
+    def test_each_field_is_the_override_when_stated_else_the_family(
+        self, producer: str, recipe: str, scope: str, version: str
+    ) -> None:
+        family = FactAvailability(
+            FactStatus.PRESENT,
+            producer="clang",
+            producer_version="18.1.0",
+            recipe="r1",
+            scope="all",
+        )
+        override = FactAvailability(
+            FactStatus.PRESENT,
+            producer=producer,
+            producer_version=version,
+            recipe=recipe,
+            scope=scope,
+        )
+
+        result = family.narrowed(override)
+
+        assert result.producer == (producer or "clang")
+        assert result.producer_version == (version or "18.1.0")
+        assert result.recipe == (recipe or "r1")
+        assert result.scope == (scope or "all")
+
+    def test_no_field_is_ever_silently_blanked(self) -> None:
+        """A field set on either side must never come back empty."""
+        family = FactAvailability(
+            FactStatus.PRESENT, producer="clang", recipe="r1", scope="all"
+        )
+
+        for override in (
+            FactAvailability(FactStatus.PARTIAL),
+            FactAvailability(FactStatus.PARTIAL, producer="castxml"),
+            FactAvailability(FactStatus.PARTIAL, scope="headers-only"),
+            FactAvailability(FactStatus.PARTIAL, recipe="r2"),
+        ):
+            result = family.narrowed(override)
+            assert result.producer and result.recipe and result.scope

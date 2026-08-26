@@ -467,3 +467,61 @@ def _built_set(occurrences: tuple[OccurrenceId, ...]) -> OccurrenceSet:
     result = OccurrenceSet()
     result.extend(occurrences)
     return result
+
+
+class TestKeysAreInjectionProof:
+    """Codex review: a separator-joined key could be forged by part content.
+
+    The separator argument was right about spellings and wrong about
+    attributes, which carry arbitrary producer-supplied strings. Length
+    prefixing removes the question instead of narrowing it.
+    """
+
+    def test_the_reported_counterexample_stays_two_occurrences(self) -> None:
+        entity = EntityId(EntityKind.FUNCTION, "f")
+        forged = OccurrenceId(entity, ObservationKind.AST, "", (("a", "x\x1fb=y"),))
+        genuine = OccurrenceId(
+            entity, ObservationKind.AST, "", (("a", "x"), ("b", "y"))
+        )
+
+        assert forged != genuine
+        assert forged.key != genuine.key
+
+        occurrences = OccurrenceSet()
+        occurrences.add(forged)
+        occurrences.add(genuine)
+
+        # The invariant this module exists for, reached through the key
+        # function rather than through the set logic.
+        assert len(occurrences) == 2
+
+    @given(
+        st.text(alphabet=st.characters(min_codepoint=1, max_codepoint=200), max_size=6),
+        st.text(alphabet=st.characters(min_codepoint=1, max_codepoint=200), max_size=6),
+    )
+    def test_no_attribute_content_can_forge_a_part_boundary(
+        self, left: str, right: str
+    ) -> None:
+        """Two attribute pairs vs one pair holding both, for any content."""
+        entity = EntityId(EntityKind.FUNCTION, "f")
+        two_pairs = OccurrenceId(
+            entity, ObservationKind.AST, "", (("a", left), ("b", right))
+        )
+        one_pair = OccurrenceId(
+            entity, ObservationKind.AST, "", (("a", f"{left}\x1fb={right}"),)
+        )
+
+        assert (two_pairs == one_pair) == (two_pairs.key == one_pair.key)
+
+    @given(
+        st.text(alphabet=st.characters(min_codepoint=1, max_codepoint=200), max_size=8),
+        st.text(alphabet=st.characters(min_codepoint=1, max_codepoint=200), max_size=8),
+    )
+    def test_entity_parts_never_collide_for_any_content(
+        self, name: str, discriminator: str
+    ) -> None:
+        """Key equality must mean identity equality, for arbitrary strings."""
+        a = EntityId(EntityKind.FUNCTION, name, discriminator)
+        b = EntityId(EntityKind.FUNCTION, name + discriminator, "")
+
+        assert (a == b) == (a.key == b.key)

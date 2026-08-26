@@ -66,6 +66,20 @@ __all__ = [
 #: real fact (a field genuinely named ``deprecated_at`` is content), and a
 #: digest that quietly ignores content is far worse than one that includes
 #: an extra timestamp.
+#:
+#: Every name here must be **unambiguous**, which is a stricter bar than
+#: "exact". ``host`` was listed and has been removed (Codex review): in this
+#: codebase it is just as likely to name real platform or frontend-context
+#: content as a hostname, so excluding it made
+#: ``semantic_digest({"host": "linux"})``,
+#: ``semantic_digest({"host": "windows"})`` and ``semantic_digest({})``
+#: identical — a content-address collision, and precisely the "quietly
+#: ignores content" failure this comment already warns about, committed one
+#: entry below the warning. ``hostname`` cannot mean anything else and
+#: stays. The stricter long-term shape is D6's designated capture-metadata
+#: object, where volatility is structural rather than name-based; until a
+#: package has one, a name earns a place here only if no reading of it is
+#: content.
 VOLATILE_KEYS: frozenset[str] = frozenset(
     {
         "created_at",
@@ -74,7 +88,6 @@ VOLATILE_KEYS: frozenset[str] = frozenset(
         "duration_seconds",
         "elapsed_seconds",
         "hostname",
-        "host",
         "pid",
         "tmpdir",
         "scratch_dir",

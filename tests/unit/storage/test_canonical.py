@@ -383,3 +383,41 @@ class TestReaderCompatibility:
         )
 
         assert not result.readable
+
+
+class TestVolatileKeysAreUnambiguous:
+    """Codex review: `host` was excluded and is not unambiguously volatile.
+
+    In this codebase `host` is as likely to name real platform or
+    frontend-context content as a hostname, so excluding it collapsed
+    genuinely different content to one digest — the exact failure
+    `VOLATILE_KEYS`' own comment warns about.
+    """
+
+    def test_host_is_content_and_reaches_the_digest(self) -> None:
+        assert "host" not in VOLATILE_KEYS
+        assert semantic_digest({"host": "linux"}) != semantic_digest(
+            {"host": "windows"}
+        )
+        assert semantic_digest({"host": "linux"}) != semantic_digest({})
+
+    def test_hostname_remains_volatile(self) -> None:
+        """The unambiguous spelling keeps its exclusion."""
+        assert "hostname" in VOLATILE_KEYS
+        assert semantic_digest({"hostname": "runner-1"}) == semantic_digest(
+            {"hostname": "runner-2"}
+        )
+
+    @pytest.mark.parametrize("key", sorted(VOLATILE_KEYS))
+    def test_no_excluded_key_has_a_plausible_content_reading(self, key: str) -> None:
+        """A guard on the bar itself, not just on today's list.
+
+        Every excluded name must be one no reasonable payload would use for
+        content. These stems are the ones that carry a real ABI meaning
+        elsewhere in this codebase, so a future addition containing one
+        should be argued for explicitly rather than added to the set.
+        """
+        ambiguous_stems = ("host", "target", "arch", "platform", "version", "path")
+        assert not any(
+            key == stem or key.startswith(stem + "_") for stem in ambiguous_stems
+        )
