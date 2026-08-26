@@ -284,6 +284,30 @@ whole-document read, so a single oversized blob can't exhaust memory on a
 `load_library` call for an unrelated, small library elsewhere in the same
 archive.
 
+**A per-member cap alone is not sufficient for a *whole-bundle* load, and
+this is not merely a `load_library()` design note — it's already load-bearing
+in the shipped implementation (Codex review, fresh evidence).** Bounding
+each blob individually stops one oversized member from being a bomb on its
+own, but an archive can name many blobs each just under the per-member
+ceiling — a whole-bundle load (`load_bundle_facts()`/
+`read_bundle_facts_archive()`, not the lazy per-library `load_library()`
+this phase otherwise describes) would decompress and parse an unbounded
+*aggregate* before returning, since nothing stops the per-member checks from
+each individually passing. `read_bundle_facts_archive()` therefore also
+enforces a cumulative decoded-byte budget across the whole load
+(`DEFAULT_MAX_BUNDLE_DECODED_BYTES`, mirrored from `snapshot_io.py`'s own
+whole-document cap) — each blob read is capped at *the remaining* aggregate
+allowance, not the full per-blob ceiling, so a long run of just-under-the-
+limit blobs is caught by the shrinking budget rather than by any single
+blob's own size — plus a separate cap on the *number* of `library_blobs`
+entries a manifest may name (`DEFAULT_MAX_LIBRARY_COUNT`), since many
+library names can cheaply share one small, size-capped blob and each still
+materializes its own full `AbiSnapshot` object graph on load — a
+Python-object-count amplification the byte-level caps alone don't bound.
+`load_library()`'s own single-blob read correctly keeps only the per-member
+cap — it has no aggregate to bound, by construction, since it never touches
+more than one blob.
+
 ### Phase 3 — CLI/API wiring (S)
 
 **`load`/`save` get separate, unambiguous contracts — deliberately not one

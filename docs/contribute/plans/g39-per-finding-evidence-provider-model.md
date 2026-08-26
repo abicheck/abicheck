@@ -356,6 +356,33 @@ time, wire the field there instead — but the sub-task is "cover every
 current `Change`→dict projection," not "extend whichever one happens to be
 literally named `report/`."
 
+**Four more `Change`→dict projections exist beyond those three, and this
+phase must cover them too (Codex review, fresh evidence, confirmed by
+reading `reporter.py` directly): `_out_of_surface_entry`, `_add_reconciled`,
+`_filtered_internal_entry`, and `_suppressed_change_entry`.** These are the
+audit-ledger serializers `_add_contract_decision_fields`'s own docstring
+already names as the reason that helper exists (see that docstring's own
+"a demoted/suppressed/reconciled finding" language) — each builds a
+compact, independent dict from a real `Change` object for a finding that
+was *excluded* from the main `changes` list (out-of-surface, ADR-039
+reconciled, filtered-internal, or suppressed), and none of the four routes
+through `_change_to_dict`/`_leaf_entry`/`_baseline_finding_dicts` to pick up
+`evidence_provenance` incidentally. Implementing Phase 3 literally against
+only the three builders named above would leave `evidence_provenance`
+present on every *kept* finding while silently absent from every demoted
+one — exactly backwards from where a report reader most needs to see the
+evidence a policy or suppression decision rested on: an audit trail that
+shows a finding was suppressed but not what evidence justified suppressing
+it defeats the auditability this whole model exists to provide. Add
+`evidence_provenance` to all four the same way `_add_contract_decision_fields`
+already stamps `finding_id`/`canonical_finding_id`/the contract-decision
+fields on each of them — a single shared helper call at each site, not four
+independent implementations — and extend the schema-version-bump/topic-
+registration steps above to cover these four projections' own output shape
+(the `surface_scope.out_of_surface_changes`/`scope.filtered_internal_changes`/
+reconciliation-ledger/suppressed-changes JSON blocks), not just the three
+originally named.
+
 **A new public field on an already-published report format is a real
 schema change, not a cosmetic addition (Codex review — a prior revision of
 this phase named all three builders but never said this)**:
