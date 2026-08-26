@@ -26,9 +26,19 @@ it does not want to inherit.
 
 from __future__ import annotations
 
+import struct
 from typing import Any
 
 from ..errors import SnapshotError
+
+#: Zstandard "skippable frame" magic range (format spec): the low nibble
+#: is a free-form Magic_Number_Value, all 16 values are legal skippable-
+#: frame markers. `get_frame_parameters()`/`decompressobj()` don't
+#: recognize these at all -- they'd misread the frame's own 4-byte
+#: Frame_Size field as a bogus content-size declaration (Codex review,
+#: fresh evidence) -- so they must be detected and skipped explicitly.
+_SKIPPABLE_FRAME_MAGIC_LOW = 0x184D2A50
+_SKIPPABLE_FRAME_MAGIC_HIGH = 0x184D2A5F
 
 
 def validate_zstd_frame_completeness(
@@ -81,16 +91,37 @@ def validate_zstd_frame_completeness(
     loop only ever calls this on a non-empty ``remaining`` (the ``while``
     guard), there is no legitimate reason for a parse to fail here.
 
-    *data* itself must contain at least one frame -- a genuinely
-    zero-byte *data* would otherwise skip this ``while`` loop entirely,
-    "validating" with zero frames checked, and `ZstdCompressor.compress`
-    always emits a real (non-empty) frame even for an empty payload
-    (confirmed empirically), so an empty *data* can never be this
-    codebase's own legitimate output (Codex review, fresh evidence)."""
-    if not data:
-        raise SnapshotError(f"{source}: corrupt or truncated zstd stream (no data at all)")
+    *data* itself must contain at least one real *data* frame -- a
+    skippable frame contributes no decoded content (confirmed
+    empirically) and `ZstdCompressor.compress` always emits a real
+    (non-empty) data frame even for an empty payload, so *data* made up
+    of nothing but skippable frames (including the zero-byte case) can
+    never be this codebase's own legitimate output. Checked once, after
+    the walk, rather than up front -- a leading skippable frame ahead of
+    a real one is legitimate and must not be rejected (Codex review,
+    fresh evidence, two rounds: the first fix skipped skippable frames
+    but didn't also re-check this invariant afterward)."""
     remaining = data
+    saw_data_frame = False
     while remaining:
+        if len(remaining) >= 4:
+            (magic,) = struct.unpack_from("<I", remaining, 0)
+            if _SKIPPABLE_FRAME_MAGIC_LOW <= magic <= _SKIPPABLE_FRAME_MAGIC_HIGH:
+                if len(remaining) < 8:
+                    raise SnapshotError(
+                        f"{source}: corrupt or truncated zstd stream (a "
+                        "skippable frame header is itself truncated)"
+                    )
+                (frame_size,) = struct.unpack_from("<I", remaining, 4)
+                total = 8 + frame_size
+                if len(remaining) < total:
+                    raise SnapshotError(
+                        f"{source}: corrupt or truncated zstd stream (a "
+                        f"skippable frame declares {frame_size} bytes of "
+                        f"user data but only {len(remaining) - 8} remain)"
+                    )
+                remaining = remaining[total:]
+                continue
         try:
             frame_declared = zstandard.get_frame_parameters(remaining).content_size
             dobj = dctx.decompressobj()
@@ -109,4 +140,7 @@ def validate_zstd_frame_completeness(
                 f"declares {frame_declared} bytes but only "
                 f"{len(frame_out)} decoded)"
             )
+        saw_data_frame = True
         remaining = dobj.unused_data
+    if not saw_data_frame:
+        raise SnapshotError(f"{source}: corrupt or truncated zstd stream (no data frame at all)")

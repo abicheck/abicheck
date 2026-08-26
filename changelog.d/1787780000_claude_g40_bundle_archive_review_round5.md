@@ -621,3 +621,33 @@
   then a full `BundleArchiveReader.read_blob()` round trip); confirmed
   to fail against the pre-fix code with `read_blob()` returning `b""`
   instead of raising.
+
+- **G40 bundle archive: one more Codex review finding, real and fixed --
+  a false-positive rejection this time, not a missed one.** A standard
+  zstd "skippable frame" (magic `0x184D2A50`-`0x184D2A5F`, an arbitrary-
+  payload frame the format spec permits between real data frames) is
+  correctly skipped by `stream_reader()`, but `validate_zstd_frame_
+  completeness()`'s per-frame walk had no notion of it: `get_frame_
+  parameters()`/`decompressobj()` don't recognize skippable frames
+  either, misreading the frame's own 4-byte Frame_Size field as a bogus
+  content-size declaration -- so a legitimate externally-produced
+  multi-frame stream with an interspersed skippable frame was rejected
+  as "corrupt or truncated" even though the real primary decompression
+  pass decoded it correctly. Fixed by detecting the skippable-frame
+  magic range and advancing past it (validating its own header isn't
+  itself truncated, and that it doesn't claim more payload than is
+  present) without treating it as a data frame. A second, self-caught
+  round: skipping skippable frames blindly reopens a *different* hole --
+  a *lone* skippable frame (no real data frame at all) would then pass
+  with zero frames actually validated, structurally identical to the
+  already-fixed completely-empty-member bypass. Fixed by requiring at
+  least one real data frame to have been validated by the end of the
+  walk (replacing the earlier, narrower "data must be non-empty"
+  up-front check, which a leading skippable frame would have failed
+  incorrectly). Regression tests:
+  `tests/test_bundle_archive_cd_guard.py::TestReadBlobHandlesSkippableFrames`
+  -- one confirming a real interspersed-skippable-frame stream now
+  round-trips correctly through `BundleArchiveReader.read_blob()`
+  (premise-checked against real `zstandard`, confirmed to fail against
+  the pre-fix code with a false "corrupt or truncated" error), one
+  confirming a stream made only of skippable frames still raises.

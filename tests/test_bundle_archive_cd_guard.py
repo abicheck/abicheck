@@ -984,6 +984,71 @@ class TestReadBlobRejectsTruncatedZstdFrames:
                 reader.read_blob(manifest["library_blobs"]["a.so"])
 
 
+class TestReadBlobHandlesSkippableFrames:
+    """A standard zstd "skippable frame" (magic 0x184D2A50-0x184D2A5F) can
+    legally appear between real data frames in an externally-produced
+    stream. `get_frame_parameters()`/`decompressobj()` don't recognize
+    these at all -- they misread the frame's own 4-byte Frame_Size field
+    as a bogus content-size declaration, producing a false "truncated"
+    rejection for a stream `stream_reader()` decodes correctly. But
+    skipping them blindly reopens a different hole: *only* skippable
+    frames (including a lone one) must still be rejected, since a real
+    data frame is never actually validated in that case (Codex review,
+    two rounds)."""
+
+    @staticmethod
+    def _skippable(payload: bytes = b"hello") -> bytes:
+        return struct.pack("<I", 0x184D2A50) + struct.pack("<I", len(payload)) + payload
+
+    def test_read_blob_accepts_a_stream_with_an_interspersed_skippable_frame(
+        self, tmp_path: Path
+    ) -> None:
+        import zstandard
+
+        c = zstandard.ZstdCompressor(level=19)
+        frame1 = c.compress(b'{"a": 1}')
+        frame2 = c.compress(b"more")
+        stream = frame1 + self._skippable() + frame2
+        decoded = b'{"a": 1}more'
+
+        # Premise: confirm real zstandard's stream_reader() really does
+        # decode this correctly despite the interspersed skippable frame.
+        dctx = zstandard.ZstdDecompressor()
+        out = io.BytesIO()
+        with dctx.stream_reader(io.BytesIO(stream)) as reader:
+            while True:
+                chunk = reader.read(1024 * 1024)
+                if not chunk:
+                    break
+                out.write(chunk)
+        assert out.getvalue() == decoded
+
+        h = content_hash(decoded)
+        path = tmp_path / "bundle.archive.zip"
+        with zipfile.ZipFile(path, mode="w") as zf:
+            zf.writestr(MANIFEST_MEMBER, json.dumps({"library_blobs": {"a.so": h}}))
+            zf.writestr(f"blobs/{h}.json.zst", stream, compress_type=zipfile.ZIP_STORED)
+
+        with BundleArchiveReader.open(path) as reader:
+            manifest = reader.read_manifest()
+            assert reader.read_blob(manifest["library_blobs"]["a.so"]) == decoded
+
+    def test_read_blob_rejects_a_stream_made_only_of_skippable_frames(
+        self, tmp_path: Path
+    ) -> None:
+        stream = self._skippable()
+        h = content_hash(b"")
+        path = tmp_path / "bundle.archive.zip"
+        with zipfile.ZipFile(path, mode="w") as zf:
+            zf.writestr(MANIFEST_MEMBER, json.dumps({"library_blobs": {"a.so": h}}))
+            zf.writestr(f"blobs/{h}.json.zst", stream, compress_type=zipfile.ZIP_STORED)
+
+        with BundleArchiveReader.open(path) as reader:
+            manifest = reader.read_manifest()
+            with pytest.raises(SnapshotError, match="corrupt or truncated zstd stream"):
+                reader.read_blob(manifest["library_blobs"]["a.so"])
+
+
 class TestSniffDoesNotConsumeAOneShotFifoProducer:
     """A *thread*-based writer doesn't reliably reproduce this: Python
     thread scheduling can let the writer's open()+write()+close() finish
