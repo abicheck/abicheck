@@ -930,60 +930,42 @@ def find_namespace_move_groups(
     same declaration under a new scope.
 
     Matching is on the *mangled* names' parsed scope chains
-    (:func:`_scope_components`), not on demangled text: the chain is exactly
-    the sequence of namespace/class components plus the leaf, with ctor/dtor
-    markers already normalized, so "differs in exactly one component" is a
-    statement about scoping rather than about string spelling.
-
-    A pair is recorded when the two chains have the same length, differ at
-    exactly one position, and that position is **not** the leaf — a differing
-    leaf is a renamed *declaration*, which is a different claim from a moved
-    scope and is what the prefix shape above is for. Pairs are grouped by the
-    ``(old_segment, new_segment)`` substitution they support, so unrelated
-    coincidental one-component differences never accumulate into one group;
-    the caller requires a group to have at least two supporting pairs before
-    reporting anything.
-
-    Deliberately *not* keyed on the position index as well: the same rename
-    of a namespace can legitimately show up at different depths (a nested
-    class in one symbol, a free function in another), and requiring an equal
-    index would split one real move into several under-supported groups.
+    (:func:`_scope_components`), not demangled text: the chain is exactly
+    the namespace/class components plus the leaf, ctor/dtor markers already
+    normalized, so "differs in exactly one component" is about scoping, not
+    string spelling. A pair is recorded when the two chains have the same
+    length, differ at exactly one position, and that position is **not**
+    the leaf (a differing leaf is a renamed *declaration* -- the prefix
+    shape above's job). Pairs are grouped by the ``(old_segment,
+    new_segment)`` substitution they support, so unrelated coincidental
+    one-component differences never accumulate into one group; the caller
+    requires 2+ supporting pairs before reporting anything. Deliberately
+    *not* keyed on position too: the same namespace rename can legitimately
+    show up at different depths, and requiring an equal index would split
+    one real move into several under-supported groups.
 
     Returns ``{(old_segment, new_segment): [(old_qualified, new_qualified)]}``
     with deterministic ordering (both sides iterated sorted).
 
     Known, accepted limitation (Codex review, fresh evidence): matching is
     on the *scope chain only* -- :func:`_scope_components` deliberately
-    discards a function's own parameter-type signature, since two overloads
-    of the same declaration share an identical scope chain and are not
-    "different declarations" for this detector's purpose. This means the
-    reciprocal many-to-one rejection above cannot distinguish a genuine
-    collision (two unrelated old namespaces both proposing themselves as
-    the source of the identical target, e.g. ``old1::f``/``old2::f`` both
-    matching a single ``new::f``) from a legitimate consolidation where two
-    old namespaces contribute *different overloads* of the same name to one
-    new namespace (``old1::f(int)``/``old2::f(double)`` both genuinely
-    moving into ``new::{f(int), f(double)}``) -- both shapes look identical
-    once the parameter types are stripped, so the rejection fires on the
-    overload-consolidation case too, even though the mangled symbols
-    themselves *do* carry the disambiguating parameter-type suffix that
-    would resolve it. This is not a new gap this function's many-to-one
-    check introduced: the whole primitive was already signature-blind
-    before that check existed (a pre-existing overload pair collapses to
-    one identical ``pair`` string via the same ``_scope_components`` chain,
-    and the pre-existing one-to-many check has the mirror-image blind spot
-    from the other side) -- the new check simply makes an already-ambiguous
-    shape resolve to REJECT (no roll-up; the individual
-    ``func_removed``/``func_added`` findings are still reported
-    individually) rather than to arbitrarily ACCEPT one specific pairing
-    that might be wrong, which is the same false-negative-over-false-
-    positive default this module's other ambiguity guards already use (see
-    the many-to-many/local-ambiguity comments above). A correct fix needs
-    real parameter-signature matching threaded through the whole primitive
-    (``_scope_components``, ``added_index``, candidate resolution, and the
-    ``(old_segment, new_segment)`` key itself) -- a genuine redesign of a
-    primitive several other things in this module already depend on being
-    signature-blind, not a scoped patch to the many-to-one check alone.
+    discards a function's own parameter-type signature, so two overloads of
+    the same declaration share an identical chain. The many-to-one
+    rejection above therefore can't distinguish a genuine collision (two
+    unrelated old namespaces both proposing themselves as the source of one
+    target) from a legitimate consolidation (two old namespaces
+    contributing *different overloads* of the same name to one new
+    namespace) -- both look identical once parameter types are stripped, so
+    the rejection fires on the overload case too, even though the mangled
+    symbols themselves carry the disambiguating suffix. Not a new gap: the
+    primitive was already signature-blind before this check existed; the
+    check just makes an already-ambiguous shape REJECT (individual
+    ``func_removed``/``func_added`` still reported) rather than arbitrarily
+    ACCEPT a pairing that might be wrong -- the same false-negative-over-
+    false-positive default this module's other guards use. A correct fix
+    needs real parameter-signature matching threaded through the whole
+    primitive (``_scope_components``, ``added_index``, candidate
+    resolution, the key itself) -- a genuine redesign, not a scoped patch.
     """
     added_index: dict[tuple[str, ...], list[tuple[str, list[str]]]] = {}
     for a_sym in sorted(added):
@@ -1184,6 +1166,20 @@ def find_namespace_move_groups(
     # emit_namespace_move_batches' threshold and reporting a false
     # BREAKING batch for what was really a single symbol).
     recorded_pairs: dict[tuple[str, str], set[tuple[str, str]]] = {}
+    # Cross-position ambiguity (removed_id_to_added_symbols[symbol_id] > 1)
+    # need not be a dead end: one candidate key independently reused by a
+    # DIFFERENT removed symbol is real corroborating evidence the other
+    # candidate lacks (code-review item 6, "rank by global support"). Built
+    # from `entries` alone (never an already-resolved set) -- not circular;
+    # a genuine tie (both/neither corroborated) still rejects, preserving
+    # the pre-existing false-negative default.
+    symbol_to_keys: dict[str, set[tuple[str, str]]] = {}
+    key_support: dict[tuple[str, str], set[str]] = {}
+    for masked, r_comps, i, a_comps in entries:
+        sid = "::".join(r_comps)
+        k = (r_comps[i], a_comps[i])
+        symbol_to_keys.setdefault(sid, set()).add(k)
+        key_support.setdefault(k, set()).add(sid)
     for masked, r_comps, i, a_comps in entries:
         if len(masked_to_old_segments[masked]) != 1:
             continue
@@ -1191,9 +1187,13 @@ def find_namespace_move_groups(
         symbol_id = "::".join(r_comps)
         if len(added_id_to_removed_symbols[added_id]) != 1:
             continue
-        if len(removed_id_to_added_symbols[symbol_id]) != 1:
-            continue
         key = (r_comps[i], a_comps[i])
+        if len(removed_id_to_added_symbols[symbol_id]) != 1:
+            if not key_support[key] - {symbol_id}:
+                continue
+            other_keys = symbol_to_keys[symbol_id] - {key}
+            if any(key_support[ok] - {symbol_id} for ok in other_keys):
+                continue
         symbol_seen = seen_here.setdefault(symbol_id, set())
         if key in symbol_seen:
             continue
