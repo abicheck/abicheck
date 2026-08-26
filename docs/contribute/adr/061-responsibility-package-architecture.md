@@ -1,7 +1,7 @@
 # ADR-061: Responsibility-Package Architecture and Flat-Namespace Migration
 
 **Date:** 2026-08-24
-**Status:** Accepted — Phases 0-1 implemented; Phases 2-4 in progress; Phase 5 remains incremental.
+**Status:** Accepted — Phases 0-1 implemented; Phases 2-4 in progress; Phase 5 begun (the `model` package and the `*_metadata.py` dataclass/parser split have landed) and otherwise incremental.
 **Decision maker:** abicheck maintainers
 
 ## Context
@@ -1052,7 +1052,60 @@ algorithm; CLI/API parity tests exercise shared workflows.
 
 ### Phase 5 — parsers and catalogs
 
-After lower-level model contracts stabilize:
+Implementation status: **the `model` package now exists, and its first tenant
+is the split Phase 4 was blocked on.** That blocker is recorded above in full;
+in short, `frontends`/`workflows` could not take `service.py` because doing so
+means classifying the flat modules it imports, and nine `*_metadata.py`
+modules conflate a *model dataclass* with its *parser* — `AbiSnapshot` has
+typed fields of `ElfMetadata`/`PeMetadata`/`MachoMetadata`/`DwarfMetadata`/
+`AdvancedDwarfMetadata`, so classifying those modules `extract` (which is what
+their parsers are) makes `model -> extract` and `storage -> extract`.
+
+Creating the package forced the split rather than merely permitting it, for a
+reason worth recording: `abicheck/model.py` and `abicheck/model/` cannot
+coexist — Python resolves one import name, and `check_architecture.py` has a
+`module-package-collision` finding saying so. So the `model` package could not
+be opened for *any* tenant until the flat module became it, and the flat
+module imported `elf_metadata` at runtime for `SymbolBinding`. The dependency
+that blocked Phase 4 was therefore also the dependency that blocked opening
+the package Phase 5 needed. It is closed in one direction: the dataclass
+halves moved to `model`, and each parser imports and re-exports its own types,
+so `from abicheck.elf_metadata import ElfMetadata` still resolves.
+
+| flat module | keeps | model now owns |
+|---|---|---|
+| `elf_metadata.py` | ELF/pyelftools parsing | `model/elf_facts.py` |
+| `pe_metadata.py` | PE/COFF parsing | `model/pe_facts.py` |
+| `macho_metadata.py` | Mach-O parsing | `model/macho_facts.py` |
+| `dwarf_metadata.py`, `dwarf_advanced.py` | DWARF parsing | `model/dwarf_facts.py` |
+| `sycl_metadata.py` | SYCL runtime probing | `model/sycl_facts.py` |
+| `symvers_metadata.py` | `Module.symvers` parsing | `model/kabi_facts.py` |
+| `python_api.py`, `python_ext.py`, `numpy_capi.py` | stub/binary parsing | `model/python_facts.py` |
+| `build_mode.py` | signal detection | `model/build_mode_facts.py` |
+
+The flat `model.py`'s own 1,208 lines became six modules by responsibility
+(`vocabulary`, `declarations`, `entities`, `extraction_contract`, `snapshot`,
+`stdlib_surface`), none above the 800-line ceiling, and its debt entry is
+retired rather than lowered. One of those six is not a relocation:
+`AbiSnapshot.index` carried three hand-written copies of "index by key,
+first wins, warn about what was dropped", now one
+`model/first_wins_index.py` primitive with its contract stated as
+Hypothesis invariants — the treatment `AGENTS.md` prescribes for a reusable
+merge/dedupe/grouping helper, and the reason a de-duplication like this is
+worth doing at all rather than leaving three loops that can drift.
+
+**One residual, recorded rather than papered over.** `AbiSnapshot.build_source`
+is typed `BuildSourcePack`, whose class is five data fields plus `load`/
+`write`/`content_hash`/`verify_integrity` — persistence, which ADR-061 assigns
+to `storage`, and `model` may not import `storage`. `buildsource/pack.py` and
+`buildsource/model.py` are therefore classified `model` in
+`architecture/modules.yaml`'s `legacy_paths` (target owner, per that field's
+meaning) even though `pack.py`'s persistence half is a `storage` split still
+owed. Splitting it means separating a dataclass from its own load/write
+methods without changing what `BuildSourcePack(...)` constructs for callers
+this repository cannot see, which is its own slice.
+
+The remaining Phase 5 work, unchanged:
 
 1. split CastXML and Clang parsing by entity and shared parser context;
 2. separate source-graph values, construction, and comparison;

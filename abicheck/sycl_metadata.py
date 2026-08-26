@@ -50,8 +50,15 @@ import logging
 import os
 import re
 import stat
-from dataclasses import dataclass, field
 from pathlib import Path
+
+# Fact dataclasses live in the model package (ADR-061 Phase 5): this module
+# parses into them and re-exports them so the historical
+# ``from abicheck.sycl_metadata import SyclMetadata`` spelling keeps resolving.
+from .model.sycl_facts import (
+    SyclMetadata as SyclMetadata,
+    SyclPluginInfo as SyclPluginInfo,
+)
 
 log = logging.getLogger(__name__)
 
@@ -141,39 +148,6 @@ _BACKEND_MAP: dict[str, str] = {
 # ---------------------------------------------------------------------------
 # Data model
 # ---------------------------------------------------------------------------
-
-@dataclass
-class SyclPluginInfo:
-    """Metadata for a single backend plugin (PI or UR)."""
-
-    name: str                           # e.g. "level_zero", "opencl", "cuda"
-    library: str                        # e.g. "libpi_level_zero.so"
-    interface_type: str = "pi"          # "pi" (Plugin Interface) or "ur" (Unified Runtime)
-    pi_version: str = ""                # interface version (if detectable)
-    entry_points: list[str] = field(default_factory=list)  # exported pi*/ur* symbols
-    backend_type: str = ""              # "level_zero" | "opencl" | "cuda" | ...
-    min_driver_version: str | None = None  # minimum backend driver version
-
-
-@dataclass
-class SyclMetadata:
-    """SYCL runtime + plugin interface metadata for one distribution."""
-
-    implementation: str = ""            # "dpcpp" | "adaptivecpp" | "computecpp"
-    runtime_version: str = ""           # e.g. "2025.2.0"
-    pi_version: str = ""                # PI interface version of the runtime
-    plugins: list[SyclPluginInfo] = field(default_factory=list)
-    plugin_search_paths: list[str] = field(default_factory=list)
-
-    @property
-    def plugin_map(self) -> dict[tuple[str, str], SyclPluginInfo]:
-        """(interface_type, name) -> SyclPluginInfo lookup.
-
-        Keyed by ``(p.interface_type, p.name)`` so PI and UR plugins
-        with the same backend name (e.g. both ``level_zero``) are
-        treated as distinct entries.
-        """
-        return {(p.interface_type, p.name): p for p in self.plugins}
 
 
 # ---------------------------------------------------------------------------

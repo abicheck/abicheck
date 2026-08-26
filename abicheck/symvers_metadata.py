@@ -32,26 +32,15 @@ from __future__ import annotations
 
 import os
 import stat
-from dataclasses import dataclass, field
 from pathlib import Path
 
-
-@dataclass(frozen=True)
-class KabiEntry:
-    """One ``Module.symvers`` record."""
-
-    crc: str            # e.g. "0x12345678"
-    symbol: str
-    module: str         # "vmlinux" or a module path
-    export_type: str    # EXPORT_SYMBOL / EXPORT_SYMBOL_GPL / EXPORT_SYMBOL_NS[_GPL]
-    namespace: str = ""  # 5th column (kernel ≥ 5.4); "" when absent
-
-
-@dataclass
-class KabiMetadata:
-    """Parsed ``Module.symvers`` — symbol → entry."""
-
-    entries: dict[str, KabiEntry] = field(default_factory=dict)
+# Fact dataclasses live in the model package (ADR-061 Phase 5): this module
+# parses into them and re-exports them so the historical
+# ``from abicheck.symvers_metadata import KabiEntry`` spelling keeps resolving.
+from .model.kabi_facts import (
+    KabiEntry as KabiEntry,
+    KabiMetadata as KabiMetadata,
+)
 
 
 def parse_symvers(text: str) -> KabiMetadata:

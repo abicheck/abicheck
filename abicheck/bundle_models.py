@@ -33,8 +33,8 @@ from pathlib import Path
 from .checker_policy import ChangeKind, Verdict, compute_verdict, effective_category
 from .checker_types import Change, DiffResult
 from .contract_gating import is_evaluated
-from .elf_metadata import ElfMetadata
 from .model import AbiSnapshot, Function, Variable
+from .model.elf_facts import ElfMetadata
 
 # Symbols imported by virtually every C/C++ shared library that are
 # provided by the system loader, not by the bundle. Resolution against the

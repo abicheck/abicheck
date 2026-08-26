@@ -40,7 +40,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TypeVar
 
-from .dwarf_metadata import DwarfMetadata, EnumInfo, FieldInfo, StructLayout
+from .model.dwarf_facts import DwarfMetadata, EnumInfo, FieldInfo, StructLayout
 from .type_metadata import FuncProto, read_null_terminated_string
 
 log = logging.getLogger(__name__)

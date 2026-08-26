@@ -61,7 +61,6 @@ from .diff_platform_templates import (
 )
 from .diff_symbols import _public_functions, _should_filter_transitive_runtime_symbols
 from .diff_types import _RESERVED_FIELD_RE
-from .elf_metadata import SymbolType
 from .elf_symbol_filter import is_abi_relevant_elf_symbol
 from .model import (
     AbiSnapshot,
@@ -70,6 +69,7 @@ from .model import (
     is_non_abi_surface_type,
     stdlib_namespaces_excluded,
 )
+from .model.elf_facts import SymbolType
 from .name_classification import RTTI_DATA_PREFIXES
 
 if TYPE_CHECKING:  # pragma: no cover - typing only

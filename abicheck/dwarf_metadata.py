@@ -53,7 +53,6 @@ import collections
 import logging
 import os
 import stat
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -70,75 +69,22 @@ from .dwarf_utils import (
     resolve_die_ref as _resolve_ref,
 )
 
+# Fact dataclasses live in the model package (ADR-061 Phase 5): this module
+# parses into them and re-exports them so the historical
+# ``from abicheck.dwarf_metadata import DwarfMetadata`` spelling keeps resolving.
+from .model.dwarf_facts import (
+    DwarfMetadata as DwarfMetadata,
+    EnumInfo as EnumInfo,
+    FieldInfo as FieldInfo,
+    StructLayout as StructLayout,
+)
+
 log = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
 # Data model
 # ---------------------------------------------------------------------------
-
-@dataclass
-class FieldInfo:
-    """One field (member) inside a struct/union/class."""
-    name: str
-    type_name: str      # human-readable type (e.g. "int", "MyStruct *")
-    byte_offset: int    # DW_AT_data_member_location
-    byte_size: int      # size of the field's type (0 if unknown)
-    bit_offset: int = 0 # for bitfields: normalised bit offset from LSB
-    bit_size: int = 0 # for bitfields: width in bits (0 = not a bitfield)
-
-
-@dataclass
-class StructLayout:
-    """Size and field layout of a struct/class/union."""
-    name: str
-    byte_size: int                          # DW_AT_byte_size
-    alignment: int = 0                      # DW_AT_alignment (DWARF 5; 0 = unknown)
-    fields: list[FieldInfo] = field(default_factory=list)
-    is_union: bool = False
-    # Defining source header, when the debug info records it. DWARF leaves this
-    # None (decl-file is resolved on the DIE path); the PDB pipeline fills it
-    # from LF_UDT_SRC_LINE / LF_UDT_MOD_SRC_LINE so provenance (ADR-024 Phase 1)
-    # works for Windows binaries.
-    decl_file: str | None = None
-
-
-@dataclass
-class EnumInfo:
-    """Enum type: underlying integer type + all named members."""
-    name: str
-    underlying_byte_size: int               # sizeof underlying integer type
-    members: dict[str, int] = field(default_factory=dict)  # name → value
-    # Defining source header — see StructLayout.decl_file (ADR-024 Phase 1).
-    decl_file: str | None = None
-
-
-@dataclass
-class DwarfMetadata:
-    """All DWARF-derived ABI-relevant type information from one .so.
-
-    Implements the TypeMetadataSource protocol (see type_metadata.py).
-    """
-    # name → StructLayout  (structs, classes, unions)
-    structs: dict[str, StructLayout] = field(default_factory=dict)
-    # name → EnumInfo
-    enums: dict[str, EnumInfo] = field(default_factory=dict)
-    # DW_TAG_base_type name → DW_AT_byte_size. Captures scalar sizes whose ABI
-    # can shift without any signature or mangling change — notably `long double`
-    # under -mlong-double-64/-mabi=ibmlongdouble (G23 D2, same-mangling case).
-    base_types: dict[str, int] = field(default_factory=dict)
-    has_dwarf: bool = False   # False = binary had no DWARF info
-
-    # TypeMetadataSource protocol methods
-    @property
-    def has_data(self) -> bool:
-        return self.has_dwarf
-
-    def get_struct_layout(self, name: str) -> StructLayout | None:
-        return self.structs.get(name)
-
-    def get_enum_info(self, name: str) -> EnumInfo | None:
-        return self.enums.get(name)
 
 
 # Tags whose subtrees we never descend into (function-local types, inline

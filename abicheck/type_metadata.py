@@ -25,7 +25,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
-from .dwarf_metadata import EnumInfo, StructLayout
+from .model.dwarf_facts import EnumInfo, StructLayout
 
 
 @dataclass
