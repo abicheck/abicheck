@@ -1132,11 +1132,17 @@ test_duplicate_entry_raises`; and completeness in both directions — every
 `ChangeKind` member has a registry entry, and the registry has no entry
 beyond the enum — is pinned by that same class's
 `test_registry_has_all_changekind_members`/`test_registry_no_extra_entries`.
-`scripts/check_ai_readiness.py`'s `changekind-partition`/`changekind-detector`/
-`changekind-docs` checks additionally gate that every kind is categorized,
-produced by some detector, and documented. None of that changes when the
-files move to their D9-shaped homes — it's evidence the repartition can lean
-on, not a substitute for it.
+`scripts/check_ai_readiness.py`'s `changekind-partition` check additionally
+gates (as an ERROR) that every kind is categorized. Its `changekind-detector`/
+`changekind-docs` siblings are WARN-only, not gates, and check for a bare
+textual reference (`ChangeKind.NAME` appearing anywhere outside
+`checker_policy.py`, or the kind's name/value appearing anywhere under
+`docs/`) rather than proving a detector actually produces the kind or that a
+page substantively documents it — real, current-state evidence toward
+"produced by some detector" and "documented", but advisory, not enforced (a
+second Codex review round on this PR caught an earlier draft overstating
+this as gated). None of that changes when the files move to their D9-shaped
+homes — it's evidence the repartition can lean on, not a substitute for it.
 
 The remaining Phase 5 work:
 
