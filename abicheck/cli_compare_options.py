@@ -233,19 +233,22 @@ class _NormalizedCompareOptions(NamedTuple):
 def _resolve_demangle(fmt: str, demangle: bool | None) -> bool:
     """Resolve the tri-state ``--demangle`` flag against a specific format.
 
-    Default ON for the text formats whose renderer post-processes symbols
-    through ``demangle_text`` (markdown/review), OFF for machine formats
-    (json/sarif/junit) and HTML — the HTML renderer emits symbols
-    structurally and demangling its string would inject unescaped
-    ``<``/``>``/``&`` from C++ names and corrupt the markup. An explicit
-    flag always wins over the per-format default.
+    Default ON for the human-facing formats (markdown/review/html), OFF for
+    machine formats (json/sarif/junit) whose consumers match on the raw
+    mangled symbol. HTML demangles safely because ``html_report.
+    _symbol_cell``/``_changes_table`` always run ``demangle_text`` BEFORE
+    ``html.escape`` — never the reverse — so a demangled signature's own
+    ``<``/``>``/``&`` are escaped like any other text, not injected raw
+    (this was previously assumed unsafe and HTML defaulted OFF; abicheck
+    code-review report item 8). An explicit flag always wins over the
+    per-format default.
 
     Shared by the primary render (:func:`_normalize_compare_options`) and
     the ``--write`` render in :func:`run_compare`, each resolved
     against its own format — a machine primary format paired with a text
     secondary format (or vice versa) must not inherit the other's default.
     """
-    return fmt in {"markdown", "review"} if demangle is None else demangle
+    return fmt in {"markdown", "review", "html"} if demangle is None else demangle
 
 
 def _reject_debug_format_for_non_elf(
