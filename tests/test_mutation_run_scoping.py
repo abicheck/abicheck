@@ -255,6 +255,65 @@ def test_diff_touches_outside_only_mutate_detects_pyproject_toml() -> None:
     assert gate.diff_touches_outside_only_mutate(diff, _ONLY_MUTATE_TWO) is True
 
 
+def test_diff_touches_outside_only_mutate_detects_a_binary_file_diff() -> None:
+    """A binary-file diff has no `@@` hunk at all — invisible to
+    `parse_changed_lines`/`parse_removed_lines` (built on `_hunks()`), which
+    the pre-fix predicate relied on exclusively (Codex review, PR #877,
+    fourth round on this same check)."""
+    diff = (
+        "diff --git a/abicheck/diff_types.py b/abicheck/diff_types.py\n"
+        "--- a/abicheck/diff_types.py\n+++ b/abicheck/diff_types.py\n"
+        "@@ -1,0 +2,1 @@\n+    pass\n"
+        "diff --git a/tests/fixtures/blob.bin b/tests/fixtures/blob.bin\n"
+        "index abc123..def456 100644\n"
+        "Binary files a/tests/fixtures/blob.bin and b/tests/fixtures/blob.bin differ\n"
+    )
+    assert gate.diff_touches_outside_only_mutate(diff, _ONLY_MUTATE_TWO) is True
+    # And the pre-fix hunk-based reading really did miss it — pinning why
+    # the fix had to change what feeds the check, not just its allowlist.
+    hunk_based_touched = set(gate.parse_changed_lines(diff)) | set(
+        gate.parse_removed_lines(diff)
+    )
+    assert "tests/fixtures/blob.bin" not in hunk_based_touched
+
+
+def test_diff_touches_outside_only_mutate_detects_a_pure_rename() -> None:
+    """A pure rename with no content change has no `@@` hunk either."""
+    diff = (
+        "diff --git a/abicheck/diff_types.py b/abicheck/diff_types.py\n"
+        "--- a/abicheck/diff_types.py\n+++ b/abicheck/diff_types.py\n"
+        "@@ -1,0 +2,1 @@\n+    pass\n"
+        "diff --git a/tests/old_name.py b/tests/new_name.py\n"
+        "similarity index 100%\n"
+        "rename from tests/old_name.py\n"
+        "rename to tests/new_name.py\n"
+    )
+    assert gate.diff_touches_outside_only_mutate(diff, _ONLY_MUTATE_TWO) is True
+
+
+def test_diff_touches_outside_only_mutate_detects_a_mode_only_change() -> None:
+    """A mode-only change (e.g. `chmod +x`) has no `@@` hunk either."""
+    diff = (
+        "diff --git a/abicheck/diff_types.py b/abicheck/diff_types.py\n"
+        "--- a/abicheck/diff_types.py\n+++ b/abicheck/diff_types.py\n"
+        "@@ -1,0 +2,1 @@\n+    pass\n"
+        "diff --git a/scripts/some_script.sh b/scripts/some_script.sh\n"
+        "old mode 100644\n"
+        "new mode 100755\n"
+    )
+    assert gate.diff_touches_outside_only_mutate(diff, _ONLY_MUTATE_TWO) is True
+
+
+def test_diff_touched_paths_reads_both_sides_of_a_diff_git_header() -> None:
+    diff = (
+        "diff --git a/old_name.py b/new_name.py\n"
+        "similarity index 100%\n"
+        "rename from old_name.py\n"
+        "rename to new_name.py\n"
+    )
+    assert gate.diff_touched_paths(diff) == {"old_name.py", "new_name.py"}
+
+
 def test_mutant_run_scope_is_none_when_a_shared_test_fixture_is_touched() -> None:
     """The scenario `--require-baseline` alone cannot rule out: a production
     module and a *shared* test fixture both change, but the fixture doesn't

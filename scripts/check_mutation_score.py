@@ -118,6 +118,15 @@ MUTMUT_RUN_TIMEOUT_SECONDS = 14_400
 #: ``@@ -old,cnt +new,cnt @@`` — we only need the new-side range.
 _HUNK = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
 
+#: ``diff --git a/<path> b/<path>`` — present on *every* diff entry regardless
+#: of what follows (a hunk, a binary-file marker, a rename with no content
+#: change, a mode-only change). Deliberately not anchored past the two
+#: capture groups: an unusual filename (spaces, a literal `` b/`` substring)
+#: can defeat this the same way it can any line-based diff parser, and
+#: over-matching here only ever makes `diff_touches_outside_only_mutate`
+#: *more* conservative, never less — the safe direction to err in.
+_DIFF_GIT_HEADER = re.compile(r"^diff --git a/(.+) b/(.+)$")
+
 PYPROJECT_PATH = REPO_ROOT / "pyproject.toml"
 
 
@@ -213,18 +222,47 @@ def diff_touched_only_mutate_modules(
     return touched & only_mutate_set
 
 
-def diff_touches_outside_only_mutate(diff_text: str, only_mutate: list[str]) -> bool:
-    """Any changed/removed path — of *any* kind — that isn't itself in ``only_mutate``.
+def diff_touched_paths(diff_text: str) -> set[str]:
+    """Every path named by a ``diff --git a/... b/...`` header, either side.
 
-    Three widening review rounds on this same predicate (Codex + CodeRabbit,
-    PR #877) each found the previous version's allowlist still let through a
-    real class of file that could change an *untouched* module's behavior
-    under mutation without touching that module's own file: first "any
-    `tests/` path" (a shared fixture), then "any `.py` file, of any kind"
-    (a shared production helper an untouched module imports), and finally
-    a non-Python `also_copy` input (`examples/**/*.json` and the like,
-    `[tool.mutmut].also_copy` — read as fixture/oracle data by tests that
-    exercise mutated modules, e.g. `test_reachability_examples.py`).
+    The authoritative "did this diff touch this path at all" — unlike
+    `parse_changed_lines`/`parse_removed_lines` (built on `_hunks()`, i.e.
+    on ``@@`` hunks), this also sees a binary-file diff, a pure rename with
+    no content change, and a mode-only change, none of which produce a
+    hunk at all. A diff-scoping safety check built on the hunk-based
+    readers alone stayed blind to exactly those three shapes — reported
+    against the fourth revision of `diff_touches_outside_only_mutate`,
+    which by then had *no allowlist left to narrow* (Codex review, PR
+    #877): the gap was never in what counted as "outside `only_mutate`",
+    it was in what this function's *inputs* could see in the first place.
+    """
+    touched: set[str] = set()
+    for line in diff_text.splitlines():
+        m = _DIFF_GIT_HEADER.match(line)
+        if m:
+            touched.add(m.group(1))
+            touched.add(m.group(2))
+    return touched
+
+
+def diff_touches_outside_only_mutate(diff_text: str, only_mutate: list[str]) -> bool:
+    """Any path this diff touches — of *any* kind — that isn't itself in ``only_mutate``.
+
+    Four widening review rounds on this same predicate (Codex + CodeRabbit,
+    PR #877) each found the previous version still let something through
+    that could change an *untouched* module's behavior under mutation
+    without touching that module's own file: "any `tests/` path" (a shared
+    fixture), then "any `.py` file, of any kind" (a shared production
+    helper an untouched module imports), then a non-Python `also_copy`
+    input (`examples/**/*.json` and the like — read as fixture/oracle data
+    by tests that exercise mutated modules), and finally a class of change
+    invisible to the *diff-line* readers entirely: a binary-file diff, a
+    pure rename, or a mode-only change, none of which contain a ``@@``
+    hunk. The first three rounds each narrowed what counted as "outside
+    `only_mutate`"; the fourth exposed that no such narrowing could have
+    helped, since the affected path was never in the touched set at all.
+    Fixed at that root instead: `diff_touched_paths` reads the one thing
+    every diff entry has in common (its `diff --git` header), hunk or not.
 
     Every mutant, however scoped, is tested against the diff's *entire*
     current tree — mutmut's own `copy_src_dir`/`copy_also_copy_files` copy
@@ -234,12 +272,12 @@ def diff_touches_outside_only_mutate(diff_text: str, only_mutate: list[str]) -> 
     from what's checked out. Given that surface, trying to name every
     input a test *might* read as fixture/oracle data and enumerate it as
     "safe" is exactly the reactive whack-a-mole this repository's own
-    "Known gaps" convention (AGENTS.md) warns against repeating a third
-    time for one predicate. The only version of this check that cannot be
-    falsified by a fourth review round is the one with no allowlist at
-    all: if literally nothing outside `only_mutate` changed, no other
-    file's content — read by any test, in any way this function does not
-    have to know about — differs from what any other measurement (a prior
+    "Known gaps" convention (AGENTS.md) warns against repeating. The only
+    version of this check immune to a further round is the one with no
+    allowlist at all: if literally nothing outside `only_mutate` changed —
+    checked the one way that can't miss a hunkless diff entry — no other
+    path's content, read by any test in any way this function does not
+    have to know about, differs from what any other measurement (a prior
     baseline, a full run) already reflects.
 
     Costs real applicability: this repo's own changelog-fragment
@@ -247,13 +285,12 @@ def diff_touches_outside_only_mutate(diff_text: str, only_mutate: list[str]) -> 
     `abicheck/**/*.py` changes) means a real `fix:`/`perf:`/`security:` PR
     touching one `only_mutate` module will usually also touch a changelog
     fragment, and this predicate treats that the same as anything else —
-    disabling scoping for it. Deliberate: a reviewed, narrow allowlist for
-    a handful of paths verified never to be read as test fixture/oracle
-    content (`changelog.d/`, say) is a real, separate improvement, not
-    attempted here after three consecutive rounds of "the previous
-    allowlist wasn't narrow enough."
+    disabling scoping for it. A reviewed, narrow allowlist for a handful
+    of paths verified never to be read as test fixture/oracle content
+    (`changelog.d/`, say) is a real, separate improvement, not attempted
+    here after four consecutive rounds on the same check.
     """
-    touched = set(parse_changed_lines(diff_text)) | set(parse_removed_lines(diff_text))
+    touched = diff_touched_paths(diff_text)
     only_mutate_set = set(only_mutate)
     return any(p not in only_mutate_set for p in touched)
 
