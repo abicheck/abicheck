@@ -1,7 +1,7 @@
 # ADR-061: Responsibility-Package Architecture and Flat-Namespace Migration
 
 **Date:** 2026-08-24
-**Status:** Accepted — Phases 0-1 implemented; Phases 2-4 in progress; Phase 5 begun (the `model` package, the `*_metadata.py` dataclass/parser split, and the change-catalog partition/registry-validation item have landed) and otherwise incremental.
+**Status:** Accepted — Phases 0-1 implemented; Phases 2-4 in progress; Phase 5 begun (the `model` package and the `*_metadata.py` dataclass/parser split have landed; the change catalog's registry-validation is already satisfied but its D9 taxonomy repartition is not) and otherwise incremental.
 **Decision maker:** abicheck maintainers
 
 ## Context
@@ -1105,39 +1105,53 @@ owed. Splitting it means separating a dataclass from its own load/write
 methods without changing what `BuildSourcePack(...)` constructs for callers
 this repository cannot see, which is its own slice.
 
-**Item 3 (partition the change catalog by taxonomy and validate one assembled
-registry) is done, found already satisfied on inspection rather than
-requiring new work.** The catalog was already split by taxonomy —
+**Item 3's *validation* half (global uniqueness and complete metadata) is
+already satisfied; its *taxonomy-partition* half is not, and stays open.**
+D9 specifies the target shape as declarative modules named by taxonomy
+(`symbols.py`, `types.py`, `platform.py`, `build.py`, `source.py`) under
+`model/change_catalog/`, feeding one `registry.py`. What exists today —
 `change_registry.py` plus `change_registry_{buildsource,castxml,composition,
-coverage,numpy,suppression,wheel,types}.py`, none importing anything under
-`abicheck/` beyond `change_registry_types` (verified by grep: every one of
-these eight files has zero `from abicheck...`/`from .` imports outside the
-family itself, so "no parser imports policy/report/workflows/frontends"
-holds trivially — there is no parser in this family at all, only leaf catalog
-data). Global uniqueness and completeness are both already enforced, not
-merely assumed: `ChangeKindRegistry.__init__` raises `ValueError` on a
-duplicate `kind` at import time (so `REGISTRY` existing at all is proof of
-uniqueness), pinned by `tests/test_architecture_refactor.py::
-TestChangeKindRegistry.test_duplicate_entry_raises`; and completeness in both
-directions — every `ChangeKind` member has a registry entry, and the registry
-has no entry beyond the enum — is pinned by that same class's
+coverage,numpy,suppression,wheel,types}.py` — is not that: per this
+repository's own `AGENTS.md` ("Adding a new ChangeKind"), those siblings were
+"split out only to stay under the file-size cap," so `change_registry.py`
+still holds most entries across many taxonomies and
+`change_registry_buildsource.py` places unrelated bundle entries there purely
+for space, not because either is that entry's taxonomy home. Repartitioning
+into D9's target layout is real work still owed and stays in the list below
+(a first Codex review round on this PR correctly caught an earlier draft
+marking the whole item done on the strength of the validation half alone).
+
+What *is* already true, and worth recording so it isn't re-verified from
+scratch when the repartition happens: global uniqueness and completeness are
+enforced independent of file layout, since `ChangeKindRegistry` validates the
+assembled `REGISTRY` regardless of which module each `ChangeKindMeta` entry
+came from. `ChangeKindRegistry.__init__` raises `ValueError` on a duplicate
+`kind` at import time (so `REGISTRY` existing at all is proof of uniqueness),
+pinned by `tests/test_architecture_refactor.py::TestChangeKindRegistry::
+test_duplicate_entry_raises`; and completeness in both directions — every
+`ChangeKind` member has a registry entry, and the registry has no entry
+beyond the enum — is pinned by that same class's
 `test_registry_has_all_changekind_members`/`test_registry_no_extra_entries`.
 `scripts/check_ai_readiness.py`'s `changekind-partition`/`changekind-detector`/
 `changekind-docs` checks additionally gate that every kind is categorized,
-produced by some detector, and documented. No code or test changes were
-needed for this item; it is recorded here so the phase's remaining scope
-reflects what is actually still open.
+produced by some detector, and documented. None of that changes when the
+files move to their D9-shaped homes — it's evidence the repartition can lean
+on, not a substitute for it.
 
 The remaining Phase 5 work:
 
 1. split CastXML and Clang parsing by entity and shared parser context;
-2. separate source-graph values, construction, and comparison; and
-3. remove superseded private re-exports, migration edges, and cycle
+2. separate source-graph values, construction, and comparison;
+3. repartition the change catalog into D9's `model/change_catalog/
+   {symbols,types,platform,build,source}.py` taxonomy (the validation half is
+   already done — see above); and
+4. remove superseded private re-exports, migration edges, and cycle
    exceptions.
 
 **Acceptance:** parser fixtures demonstrate byte/fact parity where applicable;
-no parser imports policy/report/workflows/frontends; corresponding debt
-entries are removed.
+catalog validation proves global uniqueness and complete metadata; no parser
+imports policy/report/workflows/frontends; corresponding debt entries are
+removed.
 
 ## Migration rules for every phase
 
