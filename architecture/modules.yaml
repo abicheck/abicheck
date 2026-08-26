@@ -43,6 +43,10 @@
       "may_import": [
         "model",
         "compare"
+      ],
+      "legacy_paths": [
+        "abicheck/severity.py",
+        "abicheck/analysis_assurance.py"
       ]
     },
     "workflows": {
