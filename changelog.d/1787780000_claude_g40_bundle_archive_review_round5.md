@@ -310,3 +310,32 @@
   to keep that module under the same 800-line cap after these fixes --
   `storage/` already owns this repo's persisted-field validators and has
   no coupling to either caller beyond the two functions themselves.
+
+- **G40 bundle archive: two more Codex review findings, both real, both
+  fixed.** (1) `write_bundle_facts_archive()`'s own mirrored aggregate-byte
+  preflight (added in the previous round, to accept exactly what its
+  paired reader would) only charged `manifest_blob`'s second-materialization
+  bytes when its hash was *not* already among the library hashes -- the
+  reader's own new charge (previous round, above) fires unconditionally
+  whenever a manifest is present, including the *shared*-hash case, so the
+  writer could still accept an archive its own reader would then reject.
+  Reproduced: a 20-byte shared payload under a 30-byte cap wrote
+  successfully (`decoded_size_bytes == 40`) but failed to reload. Fixed by
+  dropping the now-wrong `not in hash_counts` condition -- the extra
+  charge applies unconditionally whenever `manifest_blob` is present,
+  matching the reader in both directions (a genuine raw-fetch charge on a
+  cache miss, or the second-materialization charge on a cache hit). (2)
+  `oversized_raw_string()`'s own raw-string preflight (added two rounds
+  ago specifically to avoid materializing an oversized string's encoded
+  form) still called `obj.encode("utf-8")` on the whole string before
+  comparing its length -- for a value already guaranteed to be oversized
+  (a multi-gigabyte string, say), that allocates a second object as large
+  as the input, exactly the allocation the preflight exists to prevent.
+  Fixed with a new `_utf8_length_exceeds()` helper: a Python `str`'s
+  *character* count is always a lower bound on its UTF-8 *byte* count (1-4
+  bytes per codepoint), so a character count alone already over the limit
+  proves the byte count is too, with zero encoding; otherwise the
+  remainder is encoded incrementally in bounded (64 Ki-character) chunks,
+  stopping as soon as the running total exceeds the limit, so no single
+  `encode()` call ever materializes more than a bounded slice regardless
+  of the input's total size.

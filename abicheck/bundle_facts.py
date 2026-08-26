@@ -485,10 +485,16 @@ def write_bundle_facts_archive(
     # not each unique blob's bytes once.
     hash_counts = Counter(library_blobs.values())
     reader_charged_bytes = sum(len(unique_payloads[h]) * n for h, n in hash_counts.items())
-    # manifest_blob is fetched exactly once -- if its hash isn't already
-    # one of the library hashes just summed, the reader's own
-    # _cached_blob() still charges its bytes once on a cache miss.
-    if manifest_blob is not None and manifest_blob not in hash_counts:
+    # manifest_blob's bytes are charged once more, unconditionally,
+    # whenever present -- as _cached_blob()'s raw-fetch charge on a cache
+    # miss (hash not shared), or as the reader's own separate "second
+    # materialization" charge on a cache hit (hash shared with a library).
+    # Either way that's one extra `unique_payloads[manifest_blob]` beyond
+    # what hash_counts counted; charging only the not-shared case (as
+    # before) missed the shared one, letting the writer accept an archive
+    # its own reader rejects (Codex review; repro: a 20-byte shared
+    # payload, a 30-byte cap).
+    if manifest_blob is not None:
         reader_charged_bytes += len(unique_payloads[manifest_blob])
     if reader_charged_bytes > DEFAULT_MAX_BUNDLE_DECODED_BYTES:
         raise SnapshotError(
@@ -753,16 +759,15 @@ def read_bundle_facts_archive(
                     f"string, got {type(manifest_blob).__name__}"
                 )
             # _cached_blob() only charges a hash's raw bytes against
-            # total_decoded once, on its first fetch -- correct for the
-            # bytes themselves, but json.loads()+manifest_from_dict() below
-            # always build a *fresh* object graph from them regardless of
-            # whether this call is a cache hit. When manifest_blob shares a
-            # hash with an already-fetched library blob (a cache hit here),
-            # this is exactly the same "duplicate materialization" the
-            # per-library-name loop above already re-charges for its own
-            # deep-copied AbiSnapshot -- uncharged here previously would
-            # have let a single large shared blob be parsed twice while
-            # billed once (Codex review, fresh evidence).
+            # total_decoded once, on its first fetch -- but json.loads()+
+            # manifest_from_dict() below always build a *fresh* object
+            # graph regardless of cache hit. On a hit (manifest_blob shares
+            # a hash with an already-fetched library blob) this is the same
+            # "duplicate materialization" the per-library-name loop above
+            # already re-charges for its own deep-copied AbiSnapshot --
+            # uncharged here would let a shared blob parse twice, billed
+            # once (Codex review, fresh evidence). The writer mirrors this
+            # exact accounting in its own aggregate-byte preflight.
             was_cached = manifest_blob in blob_cache
             raw_manifest = _cached_blob(manifest_blob)
             if was_cached:

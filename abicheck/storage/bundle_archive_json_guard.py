@@ -21,6 +21,39 @@ caller beyond the one function below.
 
 from __future__ import annotations
 
+# Chunk size for the incremental UTF-8 byte count below -- large enough to
+# keep the per-chunk encode() call cheap, small enough that no single
+# encode() ever materializes more than this many *characters* worth of
+# bytes at once (at most 4 bytes/char, so ~256 KiB per chunk).
+_CHUNK_CHARS = 65536
+
+
+def _utf8_length_exceeds(s: str, limit: int) -> bool:
+    """Return whether *s*'s UTF-8 encoding exceeds *limit* bytes, without
+    ever encoding the whole string in one call.
+
+    A prior revision called ``obj.encode("utf-8")`` on the whole string
+    before comparing its length -- for a guaranteed-oversized value (a
+    multi-gigabyte string, say) that allocates a second object as large as
+    the input, exactly the allocation this preflight exists to prevent
+    (Codex review, fresh evidence). Two steps close that: a Python `str`'s
+    length in *characters* is always a lower bound on its UTF-8 length in
+    *bytes* (each codepoint encodes to 1-4 bytes), so a character count
+    alone already over *limit* proves the byte count is too, with no
+    encoding at all. Otherwise the character count is already `<= limit`,
+    but encoding it in one call could still allocate up to `4 * limit`
+    bytes at once -- so the remainder is encoded incrementally, in bounded
+    chunks, stopping as soon as the running total exceeds *limit*.
+    """
+    if len(s) > limit:
+        return True
+    total = 0
+    for start in range(0, len(s), _CHUNK_CHARS):
+        total += len(s[start : start + _CHUNK_CHARS].encode("utf-8"))
+        if total > limit:
+            return True
+    return False
+
 
 def oversized_raw_string(obj: object, limit: int) -> str | None:
     """Return the first string leaf found in *obj* whose own raw UTF-8
@@ -39,7 +72,7 @@ def oversized_raw_string(obj: object, limit: int) -> str | None:
     strings, so the oversized allocation never happens at all.
     """
     if isinstance(obj, str):
-        return obj if len(obj.encode("utf-8")) > limit else None
+        return obj if _utf8_length_exceeds(obj, limit) else None
     if isinstance(obj, dict):
         for k, v in obj.items():
             found = oversized_raw_string(k, limit) if isinstance(k, str) else None

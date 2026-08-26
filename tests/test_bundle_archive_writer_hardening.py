@@ -647,6 +647,81 @@ class TestWriteManifestRejectsASingleOversizedString:
             assert reader.read_manifest() == manifest
 
 
+class TestOversizedRawStringNeverEncodesTheWholeString:
+    """A prior revision of the raw-string pre-check called
+    ``obj.encode("utf-8")`` on the whole string before comparing its
+    length -- for a guaranteed-oversized value (a multi-gigabyte string)
+    that allocates a second object as large as the input, exactly the
+    allocation the pre-check exists to prevent (Codex review, fresh
+    evidence). Verified directly against `_utf8_length_exceeds` via a
+    tracking `str` subclass, since a functional round-trip test alone
+    can't distinguish "rejected cheaply" from "rejected after a hidden
+    full-size encode"."""
+
+    def test_a_guaranteed_oversized_string_is_never_encoded_at_all(self) -> None:
+        from abicheck.storage.bundle_archive_json_guard import _utf8_length_exceeds
+
+        class _TrackedStr(str):
+            encode_calls: list[int] = []
+
+            def encode(self, *a: object, **kw: object) -> bytes:  # type: ignore[override]
+                _TrackedStr.encode_calls.append(len(self))
+                return super().encode(*a, **kw)  # type: ignore[arg-type]
+
+        # Character count alone (10) already exceeds the limit (5), so no
+        # encode() call is needed -- or permitted -- to answer the question.
+        s = _TrackedStr("x" * 10)
+        assert _utf8_length_exceeds(s, 5) is True
+        assert _TrackedStr.encode_calls == []
+
+    def test_a_string_near_the_limit_is_encoded_only_in_bounded_chunks(self) -> None:
+        from abicheck.storage.bundle_archive_json_guard import (
+            _CHUNK_CHARS,
+            _utf8_length_exceeds,
+        )
+
+        class _TrackedStr(str):
+            encode_calls: list[int] = []
+
+            def encode(self, *a: object, **kw: object) -> bytes:  # type: ignore[override]
+                _TrackedStr.encode_calls.append(len(self))
+                return super().encode(*a, **kw)  # type: ignore[arg-type]
+
+            def __getitem__(self, item: object) -> object:
+                # A plain slice of a str subclass returns a base `str`,
+                # not the subclass -- override so the chunk slices below
+                # stay trackable too, not just the original whole string.
+                result = super().__getitem__(item)  # type: ignore[index]
+                if isinstance(result, str) and not isinstance(result, _TrackedStr):
+                    return _TrackedStr(result)
+                return result
+
+        # Char count (under the limit) can't answer the question on its
+        # own -- multi-byte characters mean the real UTF-8 length still
+        # needs checking. Every individual encode() call must still be
+        # bounded by _CHUNK_CHARS characters, never the whole string.
+        char_count = _CHUNK_CHARS * 3
+        s = _TrackedStr("a" * char_count)
+        result = _utf8_length_exceeds(s, char_count + 1000)
+        assert result is False
+        assert _TrackedStr.encode_calls
+        assert all(n <= _CHUNK_CHARS for n in _TrackedStr.encode_calls)
+
+    def test_a_multibyte_string_under_the_char_limit_but_over_the_byte_limit_is_rejected(
+        self,
+    ) -> None:
+        """Functional correctness check alongside the two structural ones
+        above: a 2-byte-per-char string whose character count alone would
+        pass a naive `len(s) > limit` check must still be caught once its
+        real UTF-8 byte length is counted."""
+        from abicheck.storage.bundle_archive_json_guard import _utf8_length_exceeds
+
+        s = "é" * 10  # 'é', 2 bytes each in UTF-8 -> 20 bytes total
+        assert len(s) == 10
+        assert _utf8_length_exceeds(s, 15) is True
+        assert _utf8_length_exceeds(s, 20) is False
+
+
 class TestReaderClosesTheOwnedFdWhenRewindFails:
     """`from_open_file()` hands the reader ownership of the caller's fd --
     a `seek()` failure while rewinding it must be caught by the same

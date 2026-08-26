@@ -1097,6 +1097,68 @@ class TestBundleFactsArchiveFormat:
         assert loaded.manifest is not None
         assert loaded.manifest.entries == ()
 
+    def test_write_charges_manifest_blob_even_when_its_hash_is_shared(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Codex review, fresh evidence: the reader now charges
+        `manifest_blob`'s bytes a second time whenever its hash is shared
+        with an already-fetched `library_blobs` entry (the finding just
+        above), but the *writer*'s own mirrored aggregate-byte preflight
+        only added that charge when the hash was *not* shared -- so the
+        writer could accept an archive its own paired reader would then
+        reject. Forces a hash collision via a patched `content_hash` (the
+        real reader/writer's normal per-content hashing gives no way to
+        make two different payloads collide without literally breaking
+        SHA-256) so the accounting bug is exercised directly, independent
+        of whether any real content happens to collide."""
+        import json as json_module
+
+        import abicheck.bundle_facts as bundle_facts_module
+        import abicheck.storage.bundle_archive as bundle_archive_module
+
+        monkeypatch.setattr(
+            bundle_archive_module, "content_hash", lambda payload: "deadbeef" * 8
+        )
+        snap = AbiSnapshot(library="libcore.so", version="old")
+        facts = BundleFacts(
+            per_library_snapshots={"libcore.so": snap},
+            manifest=InstantiationManifest(entries=()),
+        )
+        out = tmp_path / "write-side-shared-manifest-blob.bundlefacts.archive.zip"
+
+        # The library snapshot's own serialized size is the one real charge
+        # (hash_counts sums it once); a cap between that and double it is
+        # exceeded only if the manifest's own second charge is included --
+        # the fix's regression signal, mirroring the reader-side test.
+        library_payload = json_module.dumps(
+            snapshot_to_dict(snap), indent=2
+        ).encode("utf-8")
+        cap = len(library_payload) + 10
+        monkeypatch.setattr(bundle_facts_module, "DEFAULT_MAX_BUNDLE_DECODED_BYTES", cap)
+        with pytest.raises(SnapshotError, match="byte aggregate safety limit"):
+            save_bundle_facts(facts, out, format="archive")
+        assert not out.exists()
+
+    def test_write_still_succeeds_with_a_shared_manifest_blob_under_a_sufficient_cap(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Positive control for the finding above: the same forced-
+        collision shape must still write successfully once the cap has
+        room for both charges."""
+        import abicheck.storage.bundle_archive as bundle_archive_module
+
+        monkeypatch.setattr(
+            bundle_archive_module, "content_hash", lambda payload: "deadbeef" * 8
+        )
+        snap = AbiSnapshot(library="libcore.so", version="old")
+        facts = BundleFacts(
+            per_library_snapshots={"libcore.so": snap},
+            manifest=InstantiationManifest(entries=()),
+        )
+        out = tmp_path / "write-side-shared-manifest-blob-ok.bundlefacts.archive.zip"
+        save_bundle_facts(facts, out, format="archive")
+        assert out.exists()
+
     def test_load_rejects_a_library_blob_that_decodes_to_a_non_dict(
         self, tmp_path: Path
     ) -> None:
