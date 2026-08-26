@@ -47,11 +47,10 @@ their two independent :class:`~abicheck.model.AbiSnapshot`\\ s to
   cross-*producer* without being cross-*comparable*: castxml keeps the
   verbatim source expression where clang emits a literal or a structural
   fingerprint, so its detector gates on the two sides sharing one producer
-  rather than on both merely having a known one. Every such fact records its source in the
-  returned snapshot's ``fact_provenance`` map (see
+  rather than on both merely having a known one. Every such fact records
+  its source in the returned snapshot's ``fact_provenance`` map (see
   ``abicheck/fact_provenance.py``), so detectors can tell which backend
-  backs a fact apart from an unbacked one on a per-declaration basis
-  instead of trusting a whole-snapshot producer tag.
+  backs a fact on a per-declaration basis.
 - **Declaration-existence provenance** (G31 Phase C, hybrid-graph
   provenance-tagging): every merged function/variable also gets a
   ``"visibility"``-named ``fact_provenance`` entry recording which backend
@@ -93,16 +92,15 @@ current producer pair (a clang-recognized template pattern never shares a
 type_map_key with any castxml-matched concrete type — it reaches the merged
 snapshot via the clang-only-append path instead, already carrying the flag
 correctly); kept anyway as a defense-in-depth/honesty measure, the same
-precedent this module already sets for ``RecordType.is_abstract``.
-``has_anonymous_aggregate_fields`` is not provably inert the same way — see
-:func:`_merge_record_type`'s own comment.
+precedent already set for ``RecordType.is_abstract``.
+``has_anonymous_aggregate_fields`` is not provably inert the same way —
+see :func:`_merge_record_type`'s own comment.
 
 Everything not explicitly merged below (bare-keyed ``typedefs``, constants,
 ELF/PE/Mach-O metadata, DWARF metadata, ...) is taken verbatim from the
-castxml snapshot, which is used as the base via ``dataclasses.replace`` --
-except ``typedefs_qualified`` (schema v25), which IS explicitly unioned
-from both sides (see the merge's own comment on that field) since its
-whole purpose is recovering an alias a single backend alone would miss.
+castxml base (``dataclasses.replace``) -- except ``typedefs_qualified``
+(schema v25), unioned from both sides (its own merge comment) to recover
+an alias a single backend alone would miss.
 """
 
 from __future__ import annotations
@@ -114,6 +112,7 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
+from . import qualified_name_segments
 from .comparability import PROFILE_FIELD_KEYS, _sha256_of
 from .diff_cxx_rules import _skip_template_args, itanium_scope_components
 from .diff_helpers import type_map_key
@@ -974,6 +973,7 @@ def run_hybrid_dump(
     completely unchanged for both sub-dumps — only the merge step
     (:func:`merge_snapshots`) is new.
     """
-    castxml_snap = dump_fn(so_path, headers, header_backend="castxml", **kwargs)
-    clang_snap = dump_fn(so_path, headers, header_backend="clang", **kwargs)
-    return merge_snapshots(castxml_snap, clang_snap)
+    with qualified_name_segments.defer_closure_identity_renumbering():
+        castxml_snap = dump_fn(so_path, headers, header_backend="castxml", **kwargs)
+        clang_snap = dump_fn(so_path, headers, header_backend="clang", **kwargs)
+    return qualified_name_segments.renumber_anonymous_closure_identities(merge_snapshots(castxml_snap, clang_snap))

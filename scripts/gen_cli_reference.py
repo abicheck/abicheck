@@ -121,6 +121,29 @@ def _option_row(param: Any) -> str:
     # behind the same "—" used for no-default-at-all would make a disabled-
     # by-default flag indistinguishable from one with no default.
     is_unset = type(default).__name__ == "Sentinel"
+    # Click >= 8.5 represents a boolean flag's *implicit* default with that
+    # same UNSET sentinel, where earlier versions stored a literal `False` --
+    # so the suppression above would swallow exactly the case the paragraph
+    # above says must stay visible, and the committed reference would differ
+    # by which Click version happened to generate it. Resolve it back to the
+    # value Click itself passes the command (verified against 8.5.0: a
+    # boolean flag resolves to False, while a non-boolean `flag_value=`
+    # option resolves to None and so correctly stays "—"). `is_bool_flag`,
+    # not `is_flag`, is the discriminator: Click sets `is_flag` for both.
+    # Under an older Click the raw default is already `False`, never the
+    # sentinel, so this branch cannot fire and the output is unchanged.
+    # `multiple=True` is excluded: Click 8.5 accepts it alongside `is_flag`
+    # and sets `is_bool_flag`, but such an option resolves to `()`, not
+    # `False` (verified against 8.5.0), and an empty tuple is already
+    # rendered "—" the same way `--many`'s is. Reading `is_bool_flag` alone
+    # would state a default the command never receives (CodeRabbit review).
+    if (
+        is_unset
+        and getattr(param, "is_bool_flag", False)
+        and not getattr(param, "multiple", False)
+    ):
+        default = False
+        is_unset = False
     default_str = "—"
     if not is_unset and default is not None and default != ():
         default_str = f"`{_default_str(default)}`"

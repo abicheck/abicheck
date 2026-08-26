@@ -1195,7 +1195,7 @@ class TestMarkdownReporter:
     def test_demangle_rewrites_mangled_names_when_enabled(self, monkeypatch):
         import abicheck.demangle as dm
 
-        monkeypatch.setattr(dm, "demangle_batch", lambda syms: {"_Z3foov": "foo()"})
+        monkeypatch.setattr(dm, "demangle_batch", lambda syms, **kw: {"_Z3foov": "foo()"})
         c = Change(
             ChangeKind.FUNC_REMOVED, "_Z3foov", "Public function removed: _Z3foov"
         )
@@ -1212,7 +1212,7 @@ class TestMarkdownReporter:
         from abicheck.model import AbiSnapshot
         from abicheck.service import render_output
 
-        monkeypatch.setattr(dm, "demangle_batch", lambda syms: {"_Z3foov": "foo()"})
+        monkeypatch.setattr(dm, "demangle_batch", lambda syms, **kw: {"_Z3foov": "foo()"})
         result = _result(
             Verdict.BREAKING,
             [Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "removed _Z3foov")],

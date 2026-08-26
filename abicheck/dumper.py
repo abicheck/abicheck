@@ -36,7 +36,7 @@ if TYPE_CHECKING:
 
 from defusedxml import ElementTree as DefusedET
 
-from . import deadline, dumper_cache
+from . import deadline, dumper_cache, qualified_name_segments
 from .castxml_policy import evaluate_castxml_version
 from .dumper_ast_config import (
     _CPP_ONLY_PATTERNS as _CPP_ONLY_PATTERNS,
@@ -1646,7 +1646,7 @@ def _dump_elf(
         **_ast_compile_provenance(list(ast_result.provenance_headers), gcc_options, gcc_option_tokens, sysroot, ast_toolchain=ast_result.ast_toolchain, lang=lang),
     )
     _populate_elf_visibility(snapshot)
-    return snapshot
+    return qualified_name_segments.renumber_anonymous_closure_identities(snapshot)
 
 
 def _dump_macho(
@@ -1792,7 +1792,7 @@ def _dump_macho(
     )
 
     _dylib_mtime, _dylib_mtime_epoch = _safe_mtime(dylib_path)
-    return AbiSnapshot(
+    return qualified_name_segments.renumber_anonymous_closure_identities(AbiSnapshot(
         library=dylib_path.name,
         version=version,
         source_path=str(dylib_path.resolve()),
@@ -1819,7 +1819,7 @@ def _dump_macho(
         platform="macho",
         language_profile=profile_hint,
         **_ast_compile_provenance(headers, gcc_options, gcc_option_tokens, sysroot, ast_toolchain=_parser_ast_toolchain(parser), lang=lang),
-    )
+    ))
 
 
 def _dump_pe(
@@ -1915,7 +1915,7 @@ def _dump_pe(
     )
 
     _dll_mtime, _dll_mtime_epoch = _safe_mtime(dll_path)
-    return AbiSnapshot(
+    return qualified_name_segments.renumber_anonymous_closure_identities(AbiSnapshot(
         library=dll_path.name,
         version=version,
         source_path=str(dll_path.resolve()),
@@ -1942,7 +1942,7 @@ def _dump_pe(
         platform="pe",
         language_profile=profile_hint,
         **_ast_compile_provenance(headers, gcc_options, gcc_option_tokens, sysroot, ast_toolchain=_parser_ast_toolchain(parser), lang=lang),
-    )
+    ))
 
 
 # ---------------------------------------------------------------------------
