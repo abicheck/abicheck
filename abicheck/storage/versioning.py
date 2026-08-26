@@ -88,6 +88,31 @@ def _stated_version(raw: object) -> int:
     return value if value > 0 else UNSTATED_VERSION
 
 
+def _stated_count(raw: object) -> int:
+    """A generation/count an informational axis stated, or ``0`` if unusable.
+
+    The informational axes must parse *defensively* — this repo's convention
+    is that a hand-edited or newer package never aborts a load, and a refusal
+    belongs at the decision point. Bare ``int()``/``dict()`` broke that
+    contract in four ways at once (CodeRabbit review):
+    ``extractor_generation: "x"`` raised ``ValueError``,
+    ``resolver_generation: null`` raised ``TypeError``,
+    ``section_schema_versions: 5`` raised ``TypeError``, and
+    ``producer: "clang"`` raised ``AttributeError`` — so a malformed
+    *informational* field, one no decision even reads, could abort loading a
+    package whose real evidence was intact.
+
+    Unlike :func:`_stated_version` this accepts ``0``, since ``0`` is these
+    axes' own "unset" value rather than an invalid one.
+    """
+    if isinstance(raw, bool) or not isinstance(raw, (int, float)):
+        return 0
+    if isinstance(raw, float) and not raw.is_integer():
+        return 0
+    value = int(raw)
+    return value if value > 0 else 0
+
+
 @dataclass(frozen=True)
 class ProducerIdentity:
     """What emitted a set of facts.
@@ -116,6 +141,9 @@ class ProducerIdentity:
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> ProducerIdentity:
+        if not isinstance(data, Mapping):
+            # A scalar where an object belongs is malformed, not fatal.
+            return cls()
         return cls(
             name=str(data.get("name", "")),
             version=str(data.get("version", "")),
@@ -189,14 +217,18 @@ class StorageVersions:
             package_format_version=_stated_version(
                 data.get("package_format_version", UNSTATED_VERSION)
             ),
-            section_schema_versions={
-                str(k): int(v)
-                for k, v in dict(data.get("section_schema_versions", {})).items()
-            },
+            section_schema_versions=(
+                {
+                    str(k): _stated_count(v)
+                    for k, v in data["section_schema_versions"].items()
+                }
+                if isinstance(data.get("section_schema_versions"), Mapping)
+                else {}
+            ),
             normalization_recipe=str(data.get("normalization_recipe", "")),
             producer=ProducerIdentity.from_dict(data.get("producer", {})),
-            extractor_generation=int(data.get("extractor_generation", 0)),
-            resolver_generation=int(data.get("resolver_generation", 0)),
+            extractor_generation=_stated_count(data.get("extractor_generation")),
+            resolver_generation=_stated_count(data.get("resolver_generation")),
             # Absence is recorded as UNSTATED, never synthesized as this
             # reader's own version. Defaulting to `COMPARISON_CONTRACT_VERSION`
             # made a malformed or pre-versioned package claim to share this
@@ -209,7 +241,7 @@ class StorageVersions:
             comparison_contract_version=_stated_version(
                 data.get("comparison_contract_version", UNSTATED_VERSION)
             ),
-            source_schema_version=int(data.get("source_schema_version", 0)),
+            source_schema_version=_stated_count(data.get("source_schema_version")),
             source_producer_generation=str(data.get("source_producer_generation", "")),
         )
 

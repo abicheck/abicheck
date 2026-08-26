@@ -1,7 +1,7 @@
 # ADR-062: Project Snapshot Storage v2 — Content-Addressed Sections, Explicit Fact Availability, and Occurrence-Preserving Identity
 
 **Date:** 2026-08-26
-**Status:** Proposed — Phase 0 primitives implemented (`abicheck/storage/`:
+**Status:** Proposed — partially implemented. Phase 0 primitives implemented (`abicheck/storage/`:
 fact availability, entity/occurrence identity with conflict preservation,
 canonical encoding and semantic digest, and the separated version axes).
 No producer, reader, or comparison path consumes them yet, so every

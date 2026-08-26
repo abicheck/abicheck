@@ -10,6 +10,7 @@ primitive still makes that unwritable.
 
 from __future__ import annotations
 
+import dataclasses
 import itertools
 
 import pytest
@@ -192,7 +193,7 @@ class TestImmutability:
         """
         record = FactAvailability(FactStatus.PRESENT)
 
-        with pytest.raises(Exception):  # FrozenInstanceError
+        with pytest.raises(dataclasses.FrozenInstanceError):
             record.status = FactStatus.FAILED  # type: ignore[misc]
 
     def test_diagnostics_are_normalized_to_a_tuple(self) -> None:

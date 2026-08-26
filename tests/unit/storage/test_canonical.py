@@ -667,3 +667,65 @@ class TestAnOmittedPackageFormatIsUnstated:
         assert check_reader_compatibility(
             StorageVersions.from_dict(StorageVersions().to_dict())
         ).readable
+
+
+class TestInformationalAxesParseDefensively:
+    """CodeRabbit review: malformed *informational* fields aborted the load.
+
+    This repo's convention is that a hand-edited or newer package never aborts
+    a load and the refusal belongs at the decision point. Bare `int()`/`dict()`
+    broke that in four ways — and for fields no decision even reads, so a
+    package whose real evidence was intact became unloadable over a typo in a
+    field that changes nothing.
+    """
+
+    @pytest.mark.parametrize(
+        "payload",
+        [
+            {"extractor_generation": "x"},
+            {"extractor_generation": None},
+            {"resolver_generation": [1]},
+            {"resolver_generation": 1.5},
+            {"source_schema_version": "old"},
+            {"section_schema_versions": 5},
+            {"section_schema_versions": "graph"},
+            {"section_schema_versions": {"graph": "bad"}},
+            {"producer": "clang"},
+            {"producer": None},
+            {"normalization_recipe": 7},
+        ],
+    )
+    def test_no_malformed_informational_field_aborts_a_load(
+        self, payload: dict[str, object]
+    ) -> None:
+        versions = StorageVersions.from_dict(payload)
+
+        assert isinstance(versions, StorageVersions)
+
+    def test_a_malformed_informational_field_does_not_make_a_package_unreadable(
+        self,
+    ) -> None:
+        """It is informational: it must not affect the fail-closed decision."""
+        versions = StorageVersions.from_dict(
+            {
+                "package_format_version": PACKAGE_FORMAT_VERSION,
+                "comparison_contract_version": COMPARISON_CONTRACT_VERSION,
+                "extractor_generation": "nonsense",
+                "producer": "not-an-object",
+            }
+        )
+
+        assert check_reader_compatibility(versions).readable
+
+    def test_valid_informational_values_still_round_trip(self) -> None:
+        """The tolerance must not quietly discard good data."""
+        versions = StorageVersions(
+            section_schema_versions={"graph": 2, "binary": 1},
+            normalization_recipe="norm-v2",
+            producer=ProducerIdentity("castxml", "0.7.0", "sha256:abc"),
+            extractor_generation=1,
+            resolver_generation=2,
+            source_schema_version=25,
+        )
+
+        assert StorageVersions.from_dict(versions.to_dict()) == versions

@@ -47,6 +47,7 @@ module gives them somewhere honest to land.
 
 from __future__ import annotations
 
+import bisect
 import enum
 import functools
 from collections.abc import Iterable, Iterator, Mapping, Sequence
@@ -359,7 +360,15 @@ class OccurrenceSet:
         self._entities.setdefault(entity_key, occurrence.entity)
         if any(existing.key == occurrence.key for existing in bucket):
             return
-        bucket.append(occurrence)
+        # Inserted in key order so the *stored state* is canonical, not merely
+        # the views over it. Appending left `_by_entity`'s bucket lists in
+        # producer order, which the dataclass-generated `__eq__` compares
+        # element by element — so two sets holding the same occurrences of one
+        # entity, added in a different order, compared unequal even though
+        # `list()` and `to_dict()` agreed (CodeRabbit review). Making the state
+        # canonical fixes equality at the source rather than adding a third
+        # accessor that sorts.
+        bisect.insort(bucket, occurrence, key=lambda o: o.key)
 
     def extend(self, occurrences: Iterable[OccurrenceId]) -> None:
         for occurrence in occurrences:
@@ -371,16 +380,28 @@ class OccurrenceSet:
 
     def __iter__(self) -> Iterator[OccurrenceId]:
         for entity_key in sorted(self._by_entity):
-            yield from sorted(self._by_entity[entity_key], key=lambda o: o.key)
+            yield from self._by_entity[entity_key]
+
+    def __repr__(self) -> str:
+        """Render the canonical occurrence sequence, not the internal dicts.
+
+        The generated repr printed `_by_entity`/`_entities` in dict insertion
+        order, so two sets holding identical occurrences rendered differently
+        depending on which entity was added first — the same leak of producer
+        order that `__eq__` had, in the one place a reader looks to check
+        whether two sets agree.
+        """
+        return f"{type(self).__name__}({list(self)!r})"
 
     def entities(self) -> tuple[EntityId, ...]:
         return tuple(self._entities[k] for k in sorted(self._entities))
 
     def occurrences_of(self, entity: EntityId) -> tuple[OccurrenceId, ...]:
-        # Sorted for the same reason __iter__ is: a caller must never see
-        # producer traversal order through any accessor, or it becomes an
-        # accidental part of this class's contract.
-        return tuple(sorted(self._by_entity.get(entity.key, ()), key=lambda o: o.key))
+        # Already canonical: `add` maintains each bucket in key order, so no
+        # accessor needs to re-sort. A caller must never see producer
+        # traversal order through any accessor, or it becomes an accidental
+        # part of this class's contract.
+        return tuple(self._by_entity.get(entity.key, ()))
 
     def is_ambiguous(self, entity: EntityId) -> bool:
         """Whether this entity has more than one distinct occurrence.

@@ -58,7 +58,7 @@ __all__ = [
 class FactStatus(enum.Enum):
     """Why a fact family is, or is not, present in stored evidence.
 
-    Deliberately five *distinct* members rather than a boolean plus a note:
+    Deliberately six *distinct* members rather than a boolean plus a note:
     a reader that collapses ``UNSUPPORTED`` and ``FAILED`` into one "no data"
     case cannot tell a permanent producer limitation (re-running changes
     nothing) from a transient extraction error (re-running may well fix it),
@@ -137,7 +137,7 @@ class FactAvailability:
 
         This is the single predicate ADR-062 D3 asks call sites to route
         through. It is deliberately *not* ``status is not FactStatus.FAILED``
-        or any other negative spelling: adding a sixth status later must make
+        or any other negative spelling: adding a seventh status later must make
         the new status non-comparable by default, so that a status this
         predicate has never heard of can never be mistaken for usable
         evidence.

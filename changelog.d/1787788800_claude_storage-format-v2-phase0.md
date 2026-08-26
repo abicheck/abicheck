@@ -15,8 +15,8 @@
   reserved slot at the document root rather than by key name at arbitrary
   depth), and `StorageVersions`/
   `check_reader_compatibility` (the seven version axes today's single
-  `SCHEMA_VERSION` integer conflates, with only the comparison-contract axis
-  failing closed). These are leaf primitives: nothing produces, consumes, or
+  `SCHEMA_VERSION` integer conflates, with the package-format and
+  comparison-contract axes failing closed). These are leaf primitives: nothing produces, consumes, or
   persists them yet, so every existing snapshot, baseline set, and
   `BundleFacts` document is byte-for-byte unchanged, `SCHEMA_VERSION` stays
   at 25, and no CLI surface, report field, or exit code moves. ADR-059's

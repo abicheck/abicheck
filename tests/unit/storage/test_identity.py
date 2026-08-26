@@ -672,3 +672,74 @@ class TestIdentifiersAreOrderable:
 
         assert (low < high) and (low <= high)
         assert (high > low) and (high >= low)
+
+
+class TestStoredStateIsCanonicalNotJustItsViews:
+    """CodeRabbit review: `__eq__` and `repr` leaked producer order.
+
+    `add` appended, so a bucket's list order followed observation order. The
+    generated `__eq__` compares those lists element by element, so two sets
+    holding the same occurrences of one entity compared *unequal* while
+    `list()` and `to_dict()` agreed — the documented invariant said they are
+    indistinguishable. `repr` leaked the same order across entities.
+
+    Worth recording how this survived the round-1 order-independence property:
+    that test asserted `list(a) == list(b)`, which the accessors' own sorting
+    made true regardless. The state underneath was never canonical.
+    """
+
+    def test_equality_is_order_independent_within_one_entity(self) -> None:
+        entity = EntityId(EntityKind.FUNCTION, "f")
+        first = OccurrenceId(entity, ObservationKind.AST, "a.cpp")
+        second = OccurrenceId(entity, ObservationKind.DWARF, "a.cpp")
+
+        forward, backward = OccurrenceSet(), OccurrenceSet()
+        forward.extend([first, second])
+        backward.extend([second, first])
+
+        assert forward == backward
+
+    def test_repr_is_order_independent_across_entities(self) -> None:
+        a = OccurrenceId(EntityId(EntityKind.FUNCTION, "f"), ObservationKind.AST)
+        b = OccurrenceId(EntityId(EntityKind.FUNCTION, "g"), ObservationKind.AST)
+
+        forward, backward = OccurrenceSet(), OccurrenceSet()
+        forward.extend([a, b])
+        backward.extend([b, a])
+
+        assert repr(forward) == repr(backward)
+
+    def test_the_bucket_itself_is_stored_in_key_order(self) -> None:
+        """Canonical *state*, not a canonical view over unsorted state."""
+        entity = EntityId(EntityKind.FUNCTION, "f")
+        built = [
+            OccurrenceId(entity, ObservationKind.SOURCE_LOCATION, "z.cpp"),
+            OccurrenceId(entity, ObservationKind.AST, "a.cpp"),
+            OccurrenceId(entity, ObservationKind.DWARF, "m.cpp"),
+        ]
+        occurrences = OccurrenceSet()
+        occurrences.extend(built)
+
+        stored = occurrences.occurrences_of(entity)
+
+        assert list(stored) == sorted(built, key=lambda o: o.key)
+
+    @given(st.permutations([0, 1, 2, 3, 4]))
+    def test_every_ordering_produces_an_equal_set(self, order: list[int]) -> None:
+        """The invariant the earlier property test could not have caught."""
+        entity = EntityId(EntityKind.FUNCTION, "f")
+        built = [
+            OccurrenceId(entity, ObservationKind.AST, "a.cpp"),
+            OccurrenceId(entity, ObservationKind.DWARF, "a.cpp"),
+            OccurrenceId(entity, ObservationKind.AST, "b.cpp"),
+            OccurrenceId(EntityId(EntityKind.TYPE, "T"), ObservationKind.AST),
+            OccurrenceId(EntityId(EntityKind.FUNCTION, "g"), ObservationKind.PDB),
+        ]
+        reference = OccurrenceSet()
+        reference.extend(built)
+        shuffled = OccurrenceSet()
+        shuffled.extend(built[i] for i in order)
+
+        assert shuffled == reference
+        assert repr(shuffled) == repr(reference)
+        assert shuffled.to_dict() == reference.to_dict()
