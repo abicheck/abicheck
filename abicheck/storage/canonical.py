@@ -135,6 +135,33 @@ def _set_member(value: Any) -> Any:
     return value
 
 
+def _is_binary_buffer(value: Any) -> bool:
+    """Whether a value is a binary payload rather than logical content.
+
+    Tested by the **buffer protocol** rather than against a list of types.
+    An enumerated guard (``bytes``, ``bytearray``) is only as complete as the
+    list: ``memoryview`` is a ``Sequence``, so it fell through and encoded as
+    a list of integers, taking the same digest as a genuine integer list —
+    an inline binary payload silently reinterpreted, and deduplicated against
+    unrelated logical content (Codex review). ``array.array`` and
+    ``mmap.mmap`` are the same shape, and the next such type would have been
+    the third instance of one bug.
+
+    ``memoryview(value)`` succeeds exactly when a value exposes a buffer, so
+    it asks the question the rule is actually about. ``str`` does not expose
+    one and is handled earlier regardless.
+
+    :func:`canonical_form` is the one caller and reaches this before its
+    ``Sequence`` branch, which is what the ordering has to be: every one of
+    these types would otherwise be caught by a broader branch first.
+    """
+    try:
+        memoryview(value)
+    except TypeError:
+        return False
+    return True
+
+
 def canonical_form(value: Any) -> Any:
     """Recursively normalize a value into its canonical logical form.
 
@@ -155,14 +182,14 @@ def canonical_form(value: Any) -> Any:
         return value
     if isinstance(value, float):
         return _canonical_number(value)
-    if isinstance(value, (bytes, bytearray)):
+    if _is_binary_buffer(value):
         # `bytes` is a Sequence, so without this guard it would fall through
         # and encode as a list of integers — a silent, lossy reinterpretation
         # rather than an error. Binary payloads belong in the object store as
         # raw objects referenced by digest, never inline in a facts document.
         raise TypeError(
-            "bytes have no canonical storage form; store binary payloads as "
-            "raw objects and reference them by digest"
+            f"{type(value).__name__} has no canonical storage form; store "
+            "binary payloads as raw objects and reference them by digest"
         )
     if isinstance(value, (set, frozenset)):
         # Sorted by canonical JSON text, so heterogeneous members (ints
