@@ -563,6 +563,35 @@ with BundleArchiveReader.open(path) as reader:
     snapshot = snapshot_from_dict(json.loads(payload))
 ```
 
+**This sketch is incomplete as written, and deliberately corrected here
+rather than left implicit (Codex review, fresh evidence): a lazy per-library
+read must check `manifest["bundle_facts_schema_version"]` against the
+supported range *before* trusting anything else the manifest says, exactly
+where the sketch currently jumps straight from `read_manifest()` to
+indexing `library_blobs`.** `bundle_facts_schema_version` gates
+bundle-*wide* semantics — `filesystem_aliases`, `library_filenames`, and
+`library_blobs`'s own keying, not just each per-library `AbiSnapshot`'s own
+shape — so a too-new value can make `manifest["library_blobs"][name]`
+itself unsafe to interpret even when the one referenced snapshot blob
+still happens to deserialize without error. As shipped (PR #869), this
+check exists only inside `bundle_facts.read_bundle_facts_archive()` (the
+whole-bundle load) — its own docstring explicitly directs a caller wanting
+one library to `BundleArchiveReader` directly instead, and that primitive's
+`read_manifest()`/`read_blob()` perform no schema check at all, so a caller
+following this sketch literally skips the rejection Phase 1 promises for
+`bundle_facts_schema_version` above. This is a real gap in the shipped
+lazy-read path, not merely a documentation omission: closing it means every
+lazy per-library reader — this sketch included, and any future dedicated
+wrapper — must reject `manifest["bundle_facts_schema_version"] >
+BUNDLE_FACTS_SCHEMA_VERSION` (the same comparison `read_bundle_facts_archive()`
+already performs) immediately after `read_manifest()` returns, before doing
+anything with `library_blobs`/`filesystem_aliases`/`library_filenames`.
+Updating `BundleArchiveReader`/`read_bundle_facts_archive()` themselves is
+implementation work on the already-shipped PR #869 branch, out of scope for
+this plan document — recorded here as a Phase 2 acceptance requirement so a
+future lazy-read entry point (CLI or typed API) is built to check this from
+the start rather than reproducing the same gap a second time.
+
 This per-library read decompresses and parses exactly the one referenced blob member
 (acceptance criterion (a)); a caller wanting every library still pays the
 full cost, but a caller wanting one library out of a fifty-library release

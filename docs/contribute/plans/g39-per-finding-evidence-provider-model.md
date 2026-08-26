@@ -451,20 +451,48 @@ structure already in place:
    filter (`visibility`/`is_abi_relevant_elf_symbol`/`_is_local_type_rtti`
    over `snap.variable_map`) and returns directly — it never calls
    `exported_symbol_names()` or consults `snap.elf.symbols` at all. So the
-   rule above must not be applied to variables by extension: a
+   *narrowing* rule above must not be applied to variables by extension: a
    `VAR_REMOVED`/`VAR_ADDED` finding's `searched:` entry for the empty side
-   must never include `l0:searched:elf_symtab` (or a PE/Mach-O export-table
-   equivalent), on an ELF, PE, or Mach-O snapshot alike, since no such
-   narrowing step exists for variables to license one. It records only
-   whichever tier actually populated `variable_map` for that snapshot — the
-   same `l1:searched:dwarf` / `l2:searched:castxml` / `l2:searched:clang`
-   vocabulary this item already establishes, just without the extra ELF/PE/
-   Mach-O tier that only applies on the function path. This is a difference
-   in what evidence exists, not a stylistic simplification — if a later pass
-   ever gives `_public_variables()` its own ELF/PE/Mach-O narrowing step
-   (matching how functions already treat `= delete`), the vocabulary above
-   generalizes then and only then; until it does, applying it to variables
-   would fabricate export-table provenance the join never actually consulted.
+   must never claim an `l0:searched:elf_symtab` *narrowing* of an
+   otherwise-DWARF/header-populated `variable_map`, on an ELF, PE, or
+   Mach-O snapshot alike, since no such narrowing step exists for variables
+   to license one.
+
+   **This does not mean `l0:searched:elf_symtab` (or its PE/Mach-O
+   siblings) is categorically unreachable for a variable finding — an
+   earlier draft of this rule said exactly that, and it was wrong (Codex
+   review, verified against the code): the tag must be derived from *how
+   `variable_map` was populated in the first place*, not from a blanket
+   always/never rule.** For a snapshot with headers or DWARF, `variable_map`
+   is genuinely L1/L2-derived and the rule above stands unchanged: record
+   only the `l1:searched:dwarf` / `l2:searched:castxml` / `l2:searched:clang`
+   tier that populated it, since no ELF/PE/Mach-O narrowing step touched it.
+   But for a symbols-only snapshot — `elf_only_mode`/`_is_stripped_symbols_
+   only()`, the identical condition item 1's function-side rule already
+   names above — `variable_map` is not narrowed by export-table evidence,
+   it is *built directly from it*: `dumper_elf_fallback.py`'s symbol-only
+   fallback (`build_symbol_only_snapshot`, ~lines 153–189) constructs every
+   `Variable` straight from `exported_dynamic_objects | exported_dynamic_tls`
+   — the parsed ELF export table — and `dumper.py`'s Mach-O symbols-only
+   path (~lines 1747–1757) does the identical thing from `macho_meta.exports`;
+   neither goes through DWARF or a header backend at all in this mode. A
+   `VAR_REMOVED`/`VAR_ADDED` search over such a snapshot's `variable_map` is
+   therefore purely L0 evidence by construction, and the emitted tag must
+   say so — `new:l0:searched:elf_symtab` for the ELF fallback, the matching
+   `new:l0:searched:pe_export_table` / `new:l0:searched:macho_exports` for
+   the PE/Mach-O siblings — mirroring the function path's own `elf_only_mode`
+   branch above, not omitting the empty side's real provider. Implement
+   this the same way item 1 already requires for functions: inspect
+   whether the snapshot side is symbols-only before choosing the vocabulary,
+   rather than encoding a fixed per-`ChangeKind` answer. This is a
+   difference in what evidence exists per snapshot shape, not a stylistic
+   simplification — if a later pass ever gives `_public_variables()` its own
+   ELF/PE/Mach-O *narrowing* step over an otherwise header/DWARF-populated
+   `variable_map` (matching how functions already treat `= delete`), the
+   two-entry composite vocabulary item 1 describes generalizes then and only
+   then; until it does, claiming a narrowing tag for that case would
+   fabricate export-table provenance the join never actually consulted —
+   the one part of the original rule that remains correct.
 2. **L2 header-derived detectors** (`diff_types.py`'s struct/enum/typedef
    findings, `diff_type_spellings.py`) — provenance here genuinely varies
    per finding (which backend produced *this specific* `RecordType`, and
