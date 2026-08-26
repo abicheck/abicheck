@@ -58,6 +58,7 @@ import hashlib
 import io
 import json
 import os
+import stat
 import zipfile
 from pathlib import Path
 from typing import Any
@@ -95,6 +96,16 @@ _ZSTD_MAX_WINDOW_LOG = 27  # 128 MiB
 #: itself part of `storage/` yet; see the module docstring for why this
 #: module avoids depending on it).
 DEFAULT_MAX_BLOB_BYTES = 1024 * 1024 * 1024
+
+#: `manifest.json`'s own size cap -- deliberately far smaller than
+#: `DEFAULT_MAX_BLOB_BYTES`: the manifest holds only name/hash pairs, not
+#: payload content, so even a bundle referencing tens of thousands of
+#: libraries stays well under this (Codex review: rejecting deflate for a
+#: member is not itself a size bound -- a still-`ZIP_STORED` member's own
+#: claimed size is read via `ZipInfo.file_size` and checked *before* the
+#: read, so a crafted archive can't exhaust memory merely by claiming (and
+#: actually storing) an enormous manifest member).
+DEFAULT_MAX_MANIFEST_BYTES = 64 * 1024 * 1024
 
 
 def _zstd_module() -> Any:
@@ -173,10 +184,21 @@ class BundleArchiveWriter:
     destination swaps the symlink's own directory entry for a regular
     file, destroying the link; every other reader still following that
     link would then see nothing written here). Mirrors
-    ``snapshot_io._atomic_write_bytes``'s own symlink handling, narrower:
-    that function's additional non-regular-file/hard-link/stat-failure
-    cases don't apply to a zip-writing primitive whose only realistic
-    destination shape is a regular file or a symlink to one.
+    ``snapshot_io._atomic_write_bytes``'s own symlink handling.
+
+    A pre-existing destination with more than one hard link is rejected
+    outright, before any write starts (Codex review): replacing just this
+    one directory entry would silently desynchronize every other link from
+    it, leaving them pointing at the old, now-stale content while this
+    call reports success. The destination's existing file mode (and,
+    where supported, owner/group) are preserved onto the replacement --
+    without this, the temp file's fresh-file permissions/ownership would
+    silently replace a shared baseline's real access, mirroring
+    `snapshot_io._atomic_write_bytes`'s own guard for the plain-JSON path.
+    Ownership restoration is *not* best-effort: a failed `os.chown` aborts
+    the write rather than silently publishing under the wrong owner/group
+    (same hard-won lesson as `snapshot_io.py`'s own two-round fix for this
+    exact failure mode -- see that function's docstring).
 
     *path*'s parent directory is created (``parents=True``) if missing, so
     ``save_bundle_facts(..., format="archive")`` behaves like the
@@ -190,6 +212,26 @@ class BundleArchiveWriter:
         self._target = (
             Path(os.path.realpath(self._path)) if self._path.is_symlink() else self._path
         )
+        try:
+            existing_stat = self._target.stat()
+        except OSError:
+            existing_stat = None
+        self._existing_mode: int | None = None
+        self._existing_uid: int | None = None
+        self._existing_gid: int | None = None
+        if existing_stat is not None:
+            if stat.S_ISREG(existing_stat.st_mode) and existing_stat.st_nlink > 1:
+                raise SnapshotError(
+                    f"{self._target}: has {existing_stat.st_nlink} hard links -- "
+                    "an atomic rewrite would silently desynchronize the other "
+                    "link(s) from this one (they would keep the old content, "
+                    "not see the new write). Unlink the extra hard link(s) "
+                    "first if you want this path atomically rewritten in "
+                    "isolation."
+                )
+            self._existing_mode = stat.S_IMODE(existing_stat.st_mode)
+            self._existing_uid = existing_stat.st_uid
+            self._existing_gid = existing_stat.st_gid
         self._target.parent.mkdir(parents=True, exist_ok=True)
         self._tmp_path = self._target.with_name(
             f"{self._target.name}.tmp-{os.getpid()}-{id(self):x}"
@@ -233,6 +275,27 @@ class BundleArchiveWriter:
                 "resulting archive would have no manifest.json member"
             )
         self._zf.close()
+        if self._existing_mode is not None:
+            os.chmod(self._tmp_path, self._existing_mode)
+        if (self._existing_uid is not None or self._existing_gid is not None) and hasattr(
+            os, "chown"
+        ):
+            try:
+                os.chown(
+                    self._tmp_path,
+                    self._existing_uid if self._existing_uid is not None else -1,
+                    self._existing_gid if self._existing_gid is not None else -1,
+                )
+            except OSError:
+                # Not best-effort (Codex review, mirroring snapshot_io.py's
+                # own two-round fix for this exact failure mode): silently
+                # proceeding to os.replace() after a failed ownership
+                # restoration would publish under the wrong owner/group,
+                # which can revoke real access for a shared baseline's
+                # other readers. Abort instead -- the *existing* target is
+                # untouched either way, since this runs before replace().
+                self._tmp_path.unlink(missing_ok=True)
+                raise
         os.replace(self._tmp_path, self._target)
 
     def _abort(self) -> None:
@@ -273,19 +336,26 @@ class BundleArchiveReader:
     def open(cls, path: str | Path) -> BundleArchiveReader:
         return cls(path)
 
-    def _read_stored_member(self, name: str) -> bytes:
+    def _read_stored_member(self, name: str, *, max_bytes: int) -> bytes:
         """Read one zip member's raw bytes, rejecting anything but
-        ``ZIP_STORED`` compression first (Codex review).
+        ``ZIP_STORED`` compression, and bounding the read to *max_bytes*
+        (Codex review, two rounds).
 
         Every member `BundleArchiveWriter` produces is `ZIP_STORED`
         deliberately (see the module docstring's "Zip, not tar" section) --
         so a member's own stored size is exactly its (already
-        zstd-compressed) payload size, with no zip-level amplification. A
-        crafted archive using `ZIP_DEFLATED` for a member could otherwise
-        expand to an arbitrary in-memory allocation via
-        ``ZipExtFile.read()`` *before* `read_blob`'s own zstd
-        decoded-size guard ever runs -- merely opening such an archive
-        (e.g. auto-detected as a baseline) could exhaust memory. Checked
+        zstd-compressed, for a blob) payload size, with no zip-level
+        amplification. A crafted archive using `ZIP_DEFLATED` for a member
+        could otherwise expand to an arbitrary in-memory allocation via
+        ``ZipExtFile.read()`` *before* `read_blob`'s own zstd decoded-size
+        guard ever runs. Rejecting deflate alone is not itself a size bound,
+        though: a still-`ZIP_STORED` member can simply claim (and actually
+        contain) an enormous size, exhausting memory on the read itself
+        before any downstream guard runs -- checked first via the cheap
+        ``ZipInfo.file_size`` metadata (a fast pre-read rejection for the
+        common case), and enforced for real via a bounded, chunked read
+        rather than one unbounded ``f.read()`` (in case that metadata were
+        ever spoofed relative to the member's actual stored bytes). Checked
         here, once, for both `read_manifest` and `read_blob`.
         """
         info = self._zf.getinfo(name)
@@ -296,12 +366,34 @@ class BundleArchiveReader:
                 "-- not a BundleArchiveWriter-produced archive, or a "
                 "corrupted/hostile one."
             )
+        if info.file_size > max_bytes:
+            raise SnapshotError(
+                f"{self._path}: member {name!r} claims {info.file_size} bytes, "
+                f"exceeding the {max_bytes} byte safety limit -- refusing to "
+                "read (possible decompression bomb, or a genuinely oversized "
+                "member)."
+            )
+        out = io.BytesIO()
         with self._zf.open(name) as f:
-            return f.read()
+            while True:
+                chunk = f.read(1024 * 1024)
+                if not chunk:
+                    break
+                out.write(chunk)
+                if out.tell() > max_bytes:
+                    raise SnapshotError(
+                        f"{self._path}: member {name!r} exceeds the "
+                        f"{max_bytes} byte safety limit while streaming -- "
+                        "refusing to continue reading (its declared "
+                        "file_size did not match its actual stored bytes)."
+                    )
+        return out.getvalue()
 
     def read_manifest(self) -> dict[str, Any]:
         try:
-            raw = self._read_stored_member(MANIFEST_MEMBER)
+            raw = self._read_stored_member(
+                MANIFEST_MEMBER, max_bytes=DEFAULT_MAX_MANIFEST_BYTES
+            )
         except KeyError as exc:
             raise SnapshotError(
                 f"{self._path}: archive has no {MANIFEST_MEMBER!r} member"
@@ -338,7 +430,7 @@ class BundleArchiveReader:
         """
         member = _blob_member_name(content_hash_hex)
         try:
-            compressed = self._read_stored_member(member)
+            compressed = self._read_stored_member(member, max_bytes=max_decoded_bytes)
         except KeyError as exc:
             raise SnapshotError(
                 f"{self._path}: manifest references blob {content_hash_hex!r} "

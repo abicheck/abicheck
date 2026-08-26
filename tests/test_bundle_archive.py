@@ -26,6 +26,9 @@ through ``serialization.save_bundle_facts``/``load_bundle_facts``.
 from __future__ import annotations
 
 import json
+import os
+import stat
+import sys
 import zipfile
 from pathlib import Path
 
@@ -34,6 +37,7 @@ import pytest
 from abicheck.errors import SnapshotError
 from abicheck.storage.bundle_archive import (
     DEFAULT_MAX_BLOB_BYTES,
+    DEFAULT_MAX_MANIFEST_BYTES,
     MANIFEST_MEMBER,
     BundleArchiveReader,
     BundleArchiveWriter,
@@ -180,6 +184,9 @@ class TestBundleArchiveWriterReader:
     def test_default_max_blob_bytes_is_one_gib(self) -> None:
         assert DEFAULT_MAX_BLOB_BYTES == 1024 * 1024 * 1024
 
+    def test_default_max_manifest_bytes_is_64_mib(self) -> None:
+        assert DEFAULT_MAX_MANIFEST_BYTES == 64 * 1024 * 1024
+
     def test_read_blob_rejects_content_that_does_not_match_its_hash(
         self, tmp_path: Path
     ) -> None:
@@ -297,6 +304,41 @@ class TestBundleArchiveWriterAtomicity:
         with BundleArchiveWriter(path) as writer:
             h = writer.put_blob(b'{"a": 1}')
             writer.write_manifest({"library_blobs": {"a.so": h}})
+
+    @pytest.mark.skipif(sys.platform == "win32", reason="hard links behave differently on Windows")
+    def test_rejects_a_hard_linked_destination_before_any_write(self, tmp_path: Path) -> None:
+        """Replacing just this one directory entry would silently
+        desynchronize every other hard link from it, leaving them pointing
+        at stale content while this call reports success (Codex review)."""
+        path = tmp_path / "bundle.archive.zip"
+        with BundleArchiveWriter(path) as writer:
+            h = writer.put_blob(b'{"a": 1}')
+            writer.write_manifest({"library_blobs": {"a.so": h}})
+        other_link = tmp_path / "other_link.zip"
+        os.link(path, other_link)
+        original_bytes = path.read_bytes()
+
+        with pytest.raises(SnapshotError, match="hard link"):
+            BundleArchiveWriter(path)
+
+        # Neither alias was touched, and no temp file was left behind.
+        assert path.read_bytes() == original_bytes
+        assert other_link.read_bytes() == original_bytes
+        assert list(tmp_path.glob("*.tmp-*")) == []
+
+    @pytest.mark.skipif(sys.platform == "win32", reason="POSIX file mode semantics")
+    def test_preserves_the_existing_destinations_file_mode(self, tmp_path: Path) -> None:
+        path = tmp_path / "bundle.archive.zip"
+        with BundleArchiveWriter(path) as writer:
+            h = writer.put_blob(b'{"a": 1}')
+            writer.write_manifest({"library_blobs": {"a.so": h}})
+        os.chmod(path, 0o600)
+
+        with BundleArchiveWriter(path) as writer:
+            h = writer.put_blob(b'{"a": 2}')
+            writer.write_manifest({"library_blobs": {"a.so": h}})
+
+        assert stat.S_IMODE(path.stat().st_mode) == 0o600
         assert path.exists()
 
 
@@ -329,3 +371,43 @@ class TestBundleArchiveReaderRejectsNonStoredMembers:
         with BundleArchiveReader.open(path) as reader:
             with pytest.raises(SnapshotError, match="ZIP_STORED"):
                 reader.read_blob(h)
+
+    def test_read_stored_member_rejects_a_member_exceeding_max_bytes(
+        self, tmp_path: Path
+    ) -> None:
+        """Rejecting deflate alone is not a size bound -- a still-ZIP_STORED
+        member can simply claim (and actually contain) an oversized payload.
+        Exercised directly on the shared primitive (rather than through
+        read_manifest()'s own much larger, production-sized
+        DEFAULT_MAX_MANIFEST_BYTES default) with a small max_bytes, so the
+        test doesn't need to actually write 64 MiB (Codex review)."""
+        path = tmp_path / "bundle.archive.zip"
+        with zipfile.ZipFile(path, mode="w") as zf:
+            zf.writestr(MANIFEST_MEMBER, b"x" * 2048)
+
+        with BundleArchiveReader.open(path) as reader:
+            with pytest.raises(SnapshotError, match="safety limit"):
+                reader._read_stored_member(MANIFEST_MEMBER, max_bytes=1024)
+            # Unbounded (large enough) read still succeeds for the same member.
+            assert reader._read_stored_member(MANIFEST_MEMBER, max_bytes=4096) == b"x" * 2048
+
+    def test_read_blob_rejects_a_stored_member_exceeding_max_decoded_bytes(
+        self, tmp_path: Path
+    ) -> None:
+        path = tmp_path / "bundle.archive.zip"
+        # A payload whose zstd-*compressed* form is still large relative to
+        # a small cap -- incompressible random-looking bytes, unlike the
+        # existing test's highly-repetitive payload, so this exercises the
+        # outer ZIP_STORED size gate specifically, not the inner zstd
+        # decoded-size gate test_read_blob_enforces_max_decoded_bytes
+        # already covers.
+        payload = os.urandom(4096)
+        h = content_hash(payload)
+        with BundleArchiveWriter(path) as writer:
+            written_hash = writer.put_blob(payload)
+            assert written_hash == h
+            writer.write_manifest({"library_blobs": {"a.so": h}})
+
+        with BundleArchiveReader.open(path) as reader:
+            with pytest.raises(SnapshotError, match="safety limit"):
+                reader.read_blob(h, max_decoded_bytes=16)
