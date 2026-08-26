@@ -133,9 +133,13 @@ class TestDuplicateMangledSymbols:
 
         snap = AbiSnapshot(library="lib.so", version="1.0", functions=[f1, f2])
 
-        # Capture WARNING from abicheck.model logger
+        # Capture WARNING from the module that owns ``index()``. ADR-061
+        # Phase 5 moved ``AbiSnapshot`` into ``abicheck.model.snapshot``, so
+        # its logger is that submodule's — still under the ``abicheck.model``
+        # hierarchy, so logging *configuration* keyed on the package is
+        # unaffected, but an exact-name patch has to name the real owner.
         with __import__("unittest.mock", fromlist=["patch"]).patch.object(
-            logging.getLogger("abicheck.model"), "warning"
+            logging.getLogger("abicheck.model.snapshot"), "warning"
         ) as mock_warn:
             _ = snap.function_map
 
@@ -198,7 +202,7 @@ class TestDuplicateMangledSymbols:
             ],
         )
         with __import__("unittest.mock", fromlist=["patch"]).patch.object(
-            logging.getLogger("abicheck.model"), "warning"
+            logging.getLogger("abicheck.model.snapshot"), "warning"
         ) as mock_warn:
             snap.index()
             snap.index()

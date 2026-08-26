@@ -82,7 +82,7 @@ topics:
   baseline-lifecycle:
     canonical_page: use/baseline-management.md
     fact_sources:
-      - abicheck/model.py
+      - abicheck/model/snapshot.py
       - abicheck/serialization.py
       - abicheck/buildsource/baseline_set.py
       - abicheck/buildsource/baseline_publish.py
