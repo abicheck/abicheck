@@ -197,6 +197,50 @@ about — instantiation-order-sensitive fields must never be key-sorted, so
 the hash input is the same non-`sort_keys` encoding the plain-JSON path
 already writes, not a re-derived canonical form).
 
+**Publication must be atomic — this needs to be a stated part of the
+`BundleArchiveWriter` contract, not left implicit (Codex review, fresh
+evidence).** This document mentions "Phase 1's own atomicity design" later
+(the dedup-correction section below), but never actually specifies one
+here, where the writer's own API is defined — an implementation that
+follows only the documented writer surface (`put_blob`/`write_manifest`/
+`close`) has no requirement forcing it to avoid writing or truncating the
+destination path directly. A writer that opens `path` itself (via
+`zipfile.ZipFile(path, mode="w")` or equivalent) and something fails
+mid-write — an oversized/unhashable blob, a disk-full `OSError`, a process
+kill — leaves a truncated, unreadable zip at `path`, destroying whatever
+valid archive was there before, exactly where a released baseline a
+downstream reader depends on can least afford it. `BundleArchiveWriter`
+must therefore write to a private, uniquely-named temporary file in the
+destination's own parent directory (never a predictable name, and never
+`/tmp` — a shared temp directory is writable by other users/processes and
+a cross-filesystem rename cannot be atomic) and publish only via a single
+`os.replace()` of that temp file onto the destination, performed once
+every blob and the manifest have been written successfully — inside
+`close()` on a clean context-manager exit, never before. Any failure
+before that point (a raised exception from `put_blob`/`write_manifest`, an
+exception propagating out of the `with` block) must leave the destination
+path completely untouched — a `SnapshotError`, a full disk, or a killed
+process must never partially overwrite a previously-valid baseline, and
+the abandoned temporary file must be cleaned up rather than left behind. A
+destination that is itself a symlink is replaced at its resolved real
+target, not by clobbering the link, mirroring `snapshot_io.
+_atomic_write_bytes`'s existing symlink handling for the plain-JSON path —
+this format should not invent a second convention for the identical
+concern. This atomic-publish behavior is part of Phase 1's acceptance
+criteria and needs its own dedicated test in Phase 1's test list (see
+below): write a real archive to a path, then attempt a second write that
+is made to fail partway through (an injected error after some blobs are
+written but before `write_manifest`/`close()`), and assert the original
+file at that path is byte-for-byte unchanged — a failure-preserves-old-file
+test, not merely a happy-path round-trip. (The shipped implementation
+already does this: `BundleArchiveWriter` writes to a randomized,
+`O_CREAT|O_EXCL` sibling temp file and calls `os.replace()` only from
+`close()`, using `fchown`/`fchmod` on the temp file's own open descriptor
+— not a second, TOCTOU-able path-based reopen — to preserve a pre-existing
+destination's ownership/mode before the swap; this paragraph exists so the
+plan states that contract explicitly rather than leaving it as an
+implementation detail a reader has to discover from the code.)
+
 **Payload-level determinism alone does not make the *archive file's own*
 `stored_sha256` reproducible — the zip container's own metadata must be
 pinned too (Codex review, fresh evidence).** `zipfile.ZipFile.writestr(name,
@@ -561,6 +605,65 @@ instantiation-order-sensitive fields (Phase 1's hash input).
   in place (still valid zstd/JSON, but no longer matching its own member
   name's hash) must raise on load, not return the substituted content
   under the original, now-incorrect content address.
+- **Atomic publication: a failed write leaves a prior valid archive
+  untouched** (Codex review — the requirement introduced above under
+  "Publication must be atomic", not previously exercised by any test in
+  this list) — write a real archive to a path, capture its bytes, then
+  attempt a second write to the same path that is made to fail partway
+  through (an injected exception between a successful `put_blob` and
+  `write_manifest`/`close()`); assert both that the destination's bytes
+  are byte-for-byte identical to the first write's, and that no leftover
+  temp file survives in the destination's parent directory.
+- **Every declared resource-limit guard needs its own adversarial test, not
+  just the intra-archive dedup/round-trip happy path above (Codex review,
+  fresh evidence — the decompression-bomb and central-directory guards
+  introduced earlier in this plan are exactly the class of security
+  boundary a plan can describe in prose while its own test list quietly
+  never exercises, letting a later regression silently reopen the memory-
+  exhaustion risk those guards exist to close).** Each of the following is
+  its own required test, not a single combined smoke test — a shared test
+  could pass while any one individual guard silently regresses:
+  1. *Oversized manifest* — a `manifest.json` member whose declared/actual
+     size exceeds the manifest read cap is rejected before its content is
+     parsed as JSON, with a clear error rather than an out-of-memory
+     failure or a hang.
+  2. *Cumulative decoded-byte exhaustion across a whole-bundle load* — an
+     archive with many blob members, each individually under the
+     per-member decompression cap but whose combined decoded size exceeds
+     the aggregate budget a whole-bundle load enforces, is rejected once
+     the aggregate budget is exceeded (not merely once any single member
+     exceeds it) — the scenario the per-member-only cap is explicitly
+     insufficient for, per this plan's own "aggregate before returning"
+     note above.
+  3. *Library-count exhaustion* — a manifest naming an implausibly large
+     number of `library_blobs` entries (whether or not any of them
+     resolve to a real member) is rejected before the reader attempts to
+     iterate or open that many members.
+  4. *Forged/oversized ZIP central directory* — a hand-crafted archive
+     whose End-Of-Central-Directory record claims an absurd entry count,
+     and a second case whose EOCD understates the entry count while the
+     actual central-directory bytes (`cd_size`) contain far more real
+     records than declared — both must be rejected by the preflight
+     central-directory guard *before* `zipfile.ZipFile` is ever
+     constructed on the untrusted bytes, per this plan's own "must run
+     before `ZipFile`" requirement above; a real, ordinary-sized archive
+     must still open cleanly (a positive control alongside the two
+     adversarial ones, so the guard's threshold isn't accidentally
+     tightened to reject legitimate archives).
+  5. *Forged/oversized ZIP64 central directory* — the ZIP64 extension's own
+     End-Of-Central-Directory-Locator/Record pair (used once an archive's
+     entry count or offsets exceed the legacy 32-bit EOCD's range) is
+     checked by the identical preflight, not only the legacy EOCD shape —
+     an archive whose ZIP64 record claims an absurd entry count must be
+     rejected the same way, since a reader that validates only the
+     legacy EOCD leaves the ZIP64 path as an unguarded bypass.
+  6. *Writer-side symmetry* — `BundleArchiveWriter` itself must not be
+     capable of producing an archive that fails these same limits at
+     write time (e.g. it must refuse, or itself bound, a write that would
+     manifest an absurd member count) rather than relying solely on the
+     reader-side guards to catch what the writer already knows would be
+     illegitimate output — a real gap if the writer can silently emit
+     something only the reader's adversarial-input guards happen to catch.
 - Back-compat: every existing plain-JSON `BundleFacts` fixture in this
   repo's test suite still loads unchanged via the `"auto"`-sniffing path
   once this plan ships, with **no** re-save required.

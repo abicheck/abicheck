@@ -307,13 +307,50 @@ structure already in place:
    real, specific sources for every one of its checks in each
    `_CheckOutput.providers` list — a sequence of `PROVIDER_*` constants
    (`PROVIDER_BINARY_EXPORTS`, `PROVIDER_PUBLIC_HEADER_AST`,
-   `PROVIDER_BUILD_CONFIG`, `PROVIDER_SOURCE_INDEX`, each mapping cleanly
-   to an `l0:`/`l2:`/`l3:`/`l4:` prefix), one entry per evidence kind the
-   check actually consulted, already present at every one of this file's
-   `_check_*` call sites. This slice's wiring derives `evidence_provenance`
-   from that `providers` list directly, not from `evidence_category` — the
-   richer, already-collected fact, not the coarser tag layered on top of a
-   subset of it.
+   `PROVIDER_BUILD_CONFIG`, `PROVIDER_SOURCE_INDEX`), one entry per evidence
+   kind the check actually consulted, already present at every one of this
+   file's `_check_*` call sites. This slice's wiring derives
+   `evidence_provenance` from that `providers` list, not from
+   `evidence_category` — the richer, already-collected fact, not the coarser
+   tag layered on top of a subset of it.
+
+   **`PROVIDER_*` is not itself tier-bearing, and the list cannot be
+   translated to a prefix by a fixed `PROVIDER_* -> l*:` lookup table
+   (Codex review, fresh evidence, verified against the code).** The
+   parenthetical originally here claimed each `PROVIDER_*` constant "maps
+   cleanly to an `l0:`/`l2:`/`l3:`/`l4:` prefix" — false for
+   `PROVIDER_SOURCE_INDEX`, which several distinct `_check_*` functions
+   share despite consuming genuinely different evidence *tiers*:
+   `_check_odr_type_variant` reads `snapshot.build_source.source_abi` (the
+   L4 source-replay surface — its own docstring says so explicitly) while
+   `_check_public_to_internal_dependency` reads
+   `snapshot.build_source.source_graph` (the L5 source/consumer graph) —
+   both stamp the identical `providers = [PROVIDER_SOURCE_INDEX]`.
+   Translating the provider list directly into a prefix, as the previous
+   wording of this bullet directed, would derive the same tier string for
+   both and silently mislabel the L5 finding as L4 (or vice versa) — the
+   `current:l5:source_graph` example already given for
+   `_check_public_to_internal_dependency` earlier in this document (see
+   the `old:`/`new:`/`both:`/`current:` scoping section above) is the
+   correct value for that check specifically, and is *not* recoverable from
+   `providers` alone. The fix is not a richer `PROVIDER_*` enum (that would
+   re-litigate `crosscheck_base.py`'s own provider-agreement-matrix
+   contract, which several other consumers beyond this plan already
+   depend on) — it is that this slice's wiring must key the `l*:` prefix
+   off **the emitting `_check_*` function's own known tier**, not off the
+   `PROVIDER_*` identity alone. Concretely: build the mapping as one entry
+   per `_check_*` function (`_check_odr_type_variant ->
+   "l4:source_replay"`, `_check_public_to_internal_dependency ->
+   "l5:source_graph"`, and so on for every check in this module), derived
+   by reading each function's own body to see which `snapshot.build_source`
+   field it actually consults — the same per-call-site reading discipline
+   Phase 1's other slices already use — rather than assuming the
+   `PROVIDER_*` constant on `_CheckOutput.providers` is itself sufficient.
+   A `PROVIDER_*` constant that turns out to name only one tier across every
+   one of its call sites (e.g. `PROVIDER_BUILD_CONFIG` naming only L3) may
+   still resolve to a single fixed prefix in practice — the point is that
+   this must be verified per constant, function by function, not assumed
+   uniformly from the constant's name.
 4. **Cross-cutting post-processing and roll-up emitters**
    (`post_processing.py`, `post_processing_reachability.py`,
    `pattern_verdicts.py`, `internal_leak.py`, `bundle_models.py`,
