@@ -107,3 +107,30 @@
   ordinary basename text -- correct precisely because depth tracking
   already had its chance and failed, meaning the string's parens don't
   balance within this marker to begin with.
+- **Ninth follow-up (Codex review): a basename with coordinate-shaped text
+  of its own before the real terminator (`foo:1:2)bar.hpp:10:2)`)
+  corrupted the marker instead of assigning an ordinal to the real,
+  trailing coordinates.** The depth-tracking scan returned on the FIRST
+  depth-0 `)` whose preceding text matched `:<digits>:<digits>`, which for
+  this basename shape is `foo:1:2)` -- not the true end of the marker. It
+  now scans to the end of the string and prefers the LAST such candidate.
+  This can never run past a genuinely separate, later marker: any such
+  marker's own prefix always starts with `(`, which bumps depth before its
+  own closing paren is reached, keeping it ineligible as a candidate for
+  the current scan.
+- **Tenth follow-up (Codex review): `service.run_dump`'s ELF/PE/Mach-O
+  tails renumbered too early relative to `attach_clang_layout`.** That
+  function runs the G28 layout tool AFTER `_dump_elf`/`_dump_pe`/
+  `_dump_macho`'s own `dumper.dump()` call already renumbered the
+  snapshot's closure markers to `#N` form -- but the tool independently
+  derives a base class's name straight from clang's own (still
+  `:line:col`-form) spelling and inserts it into `RecordType.base_offsets`,
+  so a closure-parameterized base's offset landed keyed by the pre-renumber
+  spelling while `RecordType.bases` itself already carried the
+  post-renumber one. `_check_base_offsets()` does an exact key lookup, so
+  old/new snapshots could never join on that key, silently missing a real
+  base-offset ABI change. Fixed the same way the hybrid recursion already
+  handles the analogous problem: `qualified_name_segments.
+  defer_closure_identity_renumbering()` now wraps the whole
+  `_dump_elf`/`_dump_pe`/`_dump_macho` + `attach_clang_layout` sequence,
+  with renumbering applied exactly once at the very end.

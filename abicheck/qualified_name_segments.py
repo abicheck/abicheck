@@ -330,28 +330,43 @@ def _scan_anon_type_marker(
 
     Tracks paren depth through the basename so any number of nested,
     genuinely-balanced parenthesized groups are correctly matched. A
-    depth-0 ``)`` is only accepted as the marker's terminator when the text
-    immediately before it ends in ``:<digits>:<digits>`` -- a real
-    compiler-emitted basename can also contain an *unmatched* ``)`` of its
-    own (e.g. ``foo)bar.hpp``, legal on POSIX), which would otherwise be
-    mistaken for the terminator before the real coordinates are ever
-    reached (Codex review, fresh evidence). A depth-0 ``)`` that fails that
-    check is treated as ordinary basename text and scanning continues.
+    depth-0 ``)`` is only a CANDIDATE terminator when the text immediately
+    before it ends in ``:<digits>:<digits>`` -- a real compiler-emitted
+    basename can also contain an *unmatched* ``)`` of its own (e.g.
+    ``foo)bar.hpp``, legal on POSIX), which would otherwise be mistaken for
+    the terminator before the real coordinates are ever reached (Codex
+    review, fresh evidence). A depth-0 ``)`` that fails that check is
+    treated as ordinary basename text and scanning continues.
+
+    The LAST such candidate found while scanning to the end of the string
+    is the one returned, not the first (Codex review, fresh evidence): a
+    basename can legally contain coordinate-shaped text of its own before
+    the real terminator (``foo:1:2)bar.hpp:10:2)``), and stopping at the
+    first depth-0 match would then corrupt the marker at ``foo:1:2)``
+    instead of assigning an ordinal to the real trailing coordinates at
+    the end. Preferring the last candidate is safe against ever running
+    past a genuinely separate, later marker: any such marker's own prefix
+    always starts with ``(``, which bumps depth before its own closing
+    paren is reached, keeping it ineligible as a candidate for THIS scan.
 
     A real basename can just as legally contain an *unmatched* ``(`` of its
     own (``foo(bar.hpp``, Codex review, fresh evidence) -- there, depth
     never returns to 0 by the time the marker's real closing paren is
-    reached, so the depth-tracking pass above finds no match at all. When
-    that happens, a second, depth-blind pass looks for the first ``)``
+    reached, so the depth-tracking pass above finds no candidate at all.
+    When that happens, a second, depth-blind pass looks for the FIRST ``)``
     whose immediately preceding text ends in ``:<digits>:<digits>``,
     treating every ``(``/``)`` in between as ordinary basename text rather
     than a nesting delimiter -- correct precisely because depth tracking
     already had its chance and failed, meaning the string's parens don't
-    balance within this marker to begin with.
+    balance within this marker to begin with; unlike the primary pass, this
+    fallback has no depth signal to tell a later, separate marker apart
+    from more of this one's own basename, so it must stop at the first
+    candidate to avoid swallowing that later marker.
     """
     depth = 0
     i = prefix_match.end()
     length = len(name)
+    last_candidate: int | None = None
     while i < length:
         ch = name[i]
         if ch == "(":
@@ -360,10 +375,12 @@ def _scan_anon_type_marker(
             if depth == 0:
                 body = name[prefix_match.end() : i]
                 if _ANON_TYPE_TRAILING_LINE_COL_RE.search(body) is not None:
-                    return _anon_type_match_from_close_paren(name, prefix_match, i)
+                    last_candidate = i
             else:
                 depth -= 1
         i += 1
+    if last_candidate is not None:
+        return _anon_type_match_from_close_paren(name, prefix_match, last_candidate)
 
     for i in range(prefix_match.end(), length):
         if name[i] == ")":

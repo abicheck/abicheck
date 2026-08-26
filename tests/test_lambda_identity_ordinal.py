@@ -626,6 +626,42 @@ class TestBasenameWithAnUnmatchedOpeningParenIsStillRenumbered:
         assert rewritten == "Wrap<(lambda:foo(bar.h#1), (lambda:baz.h#1)>"
 
 
+class TestBasenameWithEmbeddedCoordinateShapedTextIsStillRenumbered:
+    """Codex review, fresh evidence: a legal basename can contain
+    coordinate-shaped text of its own before the real terminator
+    (``foo:1:2)bar.hpp``) -- the depth-tracking scan's first depth-0
+    candidate was ``foo:1:2)``, not the real trailing ``:10:2)`` at the
+    end, corrupting the marker into ``(lambda:foo#1)bar.hpp:10:2)``
+    instead of assigning an ordinal to the real coordinates. The scan now
+    prefers the LAST depth-0 candidate found, not the first."""
+
+    def test_line_drift_with_an_embedded_coordinate_shaped_basename_collapses(
+        self,
+    ) -> None:
+        old = [strip_anonymous_type_location("(lambda at /src/foo:1:2)bar.hpp:10:2)")]
+        new = [strip_anonymous_type_location("(lambda at /src/foo:1:2)bar.hpp:14:2)")]
+        old_final = apply_anonymous_type_ordinals(
+            old[0], collect_anonymous_type_ordinals(old)
+        )
+        new_final = apply_anonymous_type_ordinals(
+            new[0], collect_anonymous_type_ordinals(new)
+        )
+        assert old_final == new_final == "(lambda:foo:1:2)bar.hpp#1)"
+
+    def test_a_second_marker_after_an_embedded_coordinate_basename_is_not_swallowed(
+        self,
+    ) -> None:
+        combined = (
+            f"Wrap<{strip_anonymous_type_location('(lambda at /src/foo:1:2)bar.h:10:2)')}, "
+            f"{strip_anonymous_type_location('(lambda at /src/baz.h:3:4)')}>"
+        )
+        ordinals = collect_anonymous_type_ordinals([combined])
+        assert ("(lambda", "foo:1:2)bar.h", 10, 2) in ordinals
+        assert ("(lambda", "baz.h", 3, 4) in ordinals
+        rewritten = apply_anonymous_type_ordinals(combined, ordinals)
+        assert rewritten == "Wrap<(lambda:foo:1:2)bar.h#1), (lambda:baz.h#1)>"
+
+
 class TestHybridMergeDefersRenumbering:
     """Codex review: ``--ast-frontend hybrid`` runs castxml and clang over
     the same headers and merges the two snapshots by identity key

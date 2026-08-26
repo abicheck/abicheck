@@ -706,15 +706,12 @@ def _run_dump_uncached(
     from .dumper import _resolve_header_backend
 
     if _resolve_header_backend(eff_backend) == "hybrid":
-        # G28 Phase 3: this is the real Tier-2 entry point the CLI routes
-        # through (unlike dumper.dump(), which has its own, simpler hybrid
-        # recursion for direct Python-API callers) — recurse into run_dump()
-        # itself once per real backend, forcing frontend via a *replaced*
-        # CompileContext (frozen dataclass) so it wins eff_backend's own
-        # precedence check above regardless of what header_backend carries,
-        # then merge. Every other kwarg (SYCL/python-ext/numpy-capi/
-        # header-graph attachment, debug roots, ...) runs identically on
-        # both recursive calls; only the merge step is new.
+        # G28 Phase 3: the real Tier-2 hybrid entry point the CLI routes
+        # through (dumper.dump() has its own, simpler recursion for direct
+        # Python-API callers) — recurse into run_dump() once per real
+        # backend, forcing frontend via a *replaced* CompileContext (frozen
+        # dataclass) so it wins eff_backend's precedence check regardless of
+        # header_backend, then merge; only the merge step is new.
         from dataclasses import replace as _dc_replace
 
         from .dumper_hybrid import merge_snapshots
@@ -789,14 +786,11 @@ def _run_dump_uncached(
         merged = qualified_name_segments.renumber_anonymous_closure_identities(
             merge_snapshots(castxml_snap, clang_snap)
         )
-        # No attach_clang_layout call here: clang_snap's own recursive
-        # run_dump(header_backend="clang") call above already got it (this
-        # function's ELF/PE/Mach-O tail below calls it unconditionally), so
-        # re-running it on merged would just re-invoke the external tool for
-        # nothing left to backfill (review finding).
-        # dwarf_only/symbols_only both mean "ignore headers entirely" -- same
-        # rationale as the ELF tail's own _attach_header_graph call below
-        # (Codex review).
+        # No attach_clang_layout call here: clang_snap's own recursive call
+        # above already got it (the ELF/PE/Mach-O tail below always calls it),
+        # so re-running it on merged would backfill nothing (review finding).
+        # dwarf_only/symbols_only mean "ignore headers entirely", same as the
+        # ELF tail's own _attach_header_graph call below (Codex review).
         return _attach_header_graph(
             merged,
             _HEADER_GRAPH_ENABLED and not dwarf_only and not symbols_only,
@@ -820,11 +814,19 @@ def _run_dump_uncached(
         # TU parses too whenever they share this thread (single TU /
         # `ABICHECK_TU_JOBS=1`) -- protecting a memo nothing will ever read
         # (Codex review, PR #840).
+        # defer_closure_identity_renumbering (Codex review, fresh evidence):
+        # attach_clang_layout below independently derives a base's name from
+        # clang's still-`:line:col`-form spelling, so pre-renumbering here
+        # (as _dump_elf's own dump() otherwise would) leaves `base_offsets`
+        # keyed differently than the already-`#N` `bases` -- and renumbering
+        # twice isn't safe either, since a second pass only sees the surviving
+        # raw markers and assigns them ordinals from that narrower view.
+        # Suppressed for this whole branch, renumbered once at the end.
         with (
             dumper_cache.ast_memoize_scope()
             if _headers and not _skip_header_graph_attach and not dwarf_only and not symbols_only
             else nullcontext()
-        ):
+        ), qualified_name_segments.defer_closure_identity_renumbering():
             snap = _dump_elf(
                 path,
                 _headers,
@@ -852,15 +854,11 @@ def _run_dump_uncached(
         _try_attach_python_ext_metadata(snap)
         _try_attach_python_api_surface(snap)
         _try_attach_numpy_capi_surface(snap, path)
-        # dwarf_only/symbols_only both mean "ignore headers entirely" --
-        # _dump_elf above already honors that for both (dwarf_only skips
-        # header-root inference/include validation and warns when headers
-        # are supplied alongside it; symbols_only skips the header-based
-        # type-expansion pass in dumper.dump() -- see its own
-        # `if symbols_only or not headers:` gate), so the header-graph
-        # attach must not silently re-parse those same headers and attach
-        # L2 build_source evidence to what the caller explicitly requested
-        # as a DWARF-only or symbols-only snapshot (Codex review).
+        # dwarf_only/symbols_only mean "ignore headers entirely" -- _dump_elf
+        # above already honors both, so the header-graph attach must not
+        # silently re-parse those headers and attach L2 build_source evidence
+        # to what the caller explicitly requested as DWARF-only/symbols-only
+        # (Codex review).
         snap = _attach_header_graph(
             snap,
             _HEADER_GRAPH_ENABLED
@@ -885,11 +883,17 @@ def _run_dump_uncached(
             # re-widen it.
             include_search_dirs=_public_include_search_dirs,
         )
-        return attach_clang_layout(
+        snap = attach_clang_layout(
             snap, _headers, _includes, lang=lang, compile=compile
         )
+        return qualified_name_segments.renumber_anonymous_closure_identities(snap)
     if binary_fmt == "pe":
-        with dumper_cache.ast_memoize_scope():
+        # See the ELF branch's comment above -- same base_offsets/bases
+        # spelling mismatch, since _dump_pe already renumbers too early.
+        with (
+            dumper_cache.ast_memoize_scope(),
+            qualified_name_segments.defer_closure_identity_renumbering(),
+        ):
             snap = _dump_pe(
                 path,
                 version,
@@ -918,7 +922,11 @@ def _run_dump_uncached(
             public_include_search_dirs=_public_include_search_dirs,
         )
     if binary_fmt == "macho":
-        with dumper_cache.ast_memoize_scope():
+        # See the ELF/PE branches' own comments above -- same mismatch.
+        with (
+            dumper_cache.ast_memoize_scope(),
+            qualified_name_segments.defer_closure_identity_renumbering(),
+        ):
             snap = _dump_macho(
                 path,
                 version,
@@ -966,12 +974,17 @@ def _finish_native_snapshot(
 
     Both formats finish a dump identically — native provenance, the optional
     Python/NumPy surface attachments, the header-only (L2) graph, then the
-    clang layout backfill — and the two branches only differ in which
-    ``_dump_*`` produced *snap*. Kept as one function so a new post-processing
-    step cannot be added to one format and silently forgotten on the other
-    (CodeFactor: duplicate code). The ELF branch deliberately stays separate:
-    it also attaches SYCL metadata and honors ``dwarf_only``, neither of which
-    applies here.
+    clang layout backfill, then a single closure-identity renumbering pass —
+    and the two branches only differ in which ``_dump_*`` produced *snap*.
+    Kept as one function so a new post-processing step cannot be added to
+    one format and silently forgotten on the other (CodeFactor: duplicate
+    code). The ELF branch deliberately stays separate: it also attaches
+    SYCL metadata and honors ``dwarf_only``, neither of which applies here.
+
+    Callers are expected to have produced *snap* under
+    :func:`qualified_name_segments.defer_closure_identity_renumbering` --
+    renumbered here exactly once, after ``attach_clang_layout``, so a base's
+    offset lands under the same ordinal ``bases`` gets, not disagreeing.
 
     ``skip_header_graph`` folds the caller's own reasons to suppress the graph
     (the ``hybrid`` recursion's ``_skip_header_graph_attach``, ``symbols_only``)
@@ -1005,7 +1018,8 @@ def _finish_native_snapshot(
         public_header_dirs,
         include_search_dirs=_public_dirs,
     )
-    return attach_clang_layout(snap, headers, includes, lang=lang, compile=compile)
+    snap = attach_clang_layout(snap, headers, includes, lang=lang, compile=compile)
+    return qualified_name_segments.renumber_anonymous_closure_identities(snap)
 
 
 @functools.wraps(_run_dump_uncached)  # name lookup below so patching sticks
@@ -1182,11 +1196,10 @@ def _dump_elf(
         eff_includes += inc_extra
         eff_tokens = cc.gcc_option_tokens + tuple(deferred)
         # Deferred roots ride in gcc_option_tokens (-isystem), not extra_includes,
-        # so hash their contents into the AST cache key explicitly (Codex review).
-        # Also fold in any include-search dir in cc.gcc_option_tokens itself, so
-        # this PRIMARY parse's cache key stays aligned with _attach_header_graph's
-        # own identical fold above -- else the two passes could disagree on
-        # staleness for the same header (Codex review).
+        # so hash them into the AST cache key explicitly, folding in any
+        # include-search dir in cc.gcc_option_tokens itself so this PRIMARY
+        # parse's key stays aligned with _attach_header_graph's own fold above
+        # (Codex review).
         deferred_dirs = tuple(
             deferred_token_dirs(deferred)
         ) + cache_relevant_operand_paths(cc.gcc_option_tokens)
@@ -1508,23 +1521,11 @@ def load_suppression_and_policy(
                 "Set base_policy in the YAML file to override the base policy.",
                 policy,
             )
-        # This is the Tier-2 chokepoint every consumer other than the CLI's
-        # own early-validation calls actually loads its policy through --
-        # notably `compare-release`'s real per-library fan-out
-        # (`_run_compare_pair` -> `run_compare` -> `run_compare_request` ->
-        # `classify_compare_pair`), and any direct Python API caller of
-        # `run_compare`/`run_compare_request`. `cli_params.
-        # _load_suppression_and_policy`'s own warning (surfaced via
-        # `click.echo`) does not reach that path, so a risky override in a
-        # release comparison stayed silent (Codex review). Mirrors that same
-        # warning here, through the logger this module already uses above.
-        #
-        # Routed through `pending_validate_overrides_warnings` (not
-        # `pf.validate_overrides()` directly) so a `dedup_policy_override_
-        # warnings()` scope -- shared with `cli_params._load_suppression_
-        # and_policy`'s identical call -- collapses a warning repeated across
-        # several loads down to one (Codex review); outside any such scope
-        # every warning is logged every call, unchanged from before.
+        # The Tier-2 chokepoint every non-CLI-validation consumer loads its
+        # policy through, none of which reach `cli_params._load_suppression_
+        # and_policy`'s own `click.echo` warning (Codex review). Routed
+        # through `pending_validate_overrides_warnings` so a shared
+        # `dedup_policy_override_warnings()` scope collapses repeats to one.
         for warning in _policy_file.pending_validate_overrides_warnings(pf):
             _logger.warning("%s", warning)
     return suppression, pf
