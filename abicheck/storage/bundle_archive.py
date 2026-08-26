@@ -61,26 +61,22 @@ _BLOB_PREFIX = "blobs/"
 _BLOB_SUFFIX = ".json.zst"
 
 #: zstd compression level for archive blobs. Matches ADR-059's own
-#: ``ZSTD_LEVEL_BASELINE`` reasoning: a bundle archive is written rarely
-#: (an explicit capture/convert step) and read often, so it takes the
-#: slow/best-ratio end rather than the fast, internal-cache end.
+#: ``ZSTD_LEVEL_BASELINE`` reasoning: written rarely, read often, so it
+#: takes the slow/best-ratio end rather than the fast, internal-cache end.
 ZSTD_LEVEL = 19
 
 #: Same reasoning as `snapshot_io.py`'s own `_ZSTD_MAX_WINDOW_LOG`: bound
 #: decompression memory to a window a legitimate blob will never need,
-#: rather than trusting an archive's own embedded frame parameters --
-#: per-blob, so one oversized blob can't exhaust memory on an unrelated one.
+#: rather than trusting an archive's own embedded frame parameters.
 _ZSTD_MAX_WINDOW_LOG = 27  # 128 MiB
 
 #: Per-blob decompressed-size cap, mirroring `snapshot_io.py`'s own
-#: `DEFAULT_MAX_DECODED_BYTES` (same 1 GiB value, independently applied --
-#: see the module docstring for why this avoids depending on that module).
+#: `DEFAULT_MAX_DECODED_BYTES` (same 1 GiB value, independently applied).
 DEFAULT_MAX_BLOB_BYTES = 1024 * 1024 * 1024
 
 #: `manifest.json`'s own size cap -- far smaller than
 #: `DEFAULT_MAX_BLOB_BYTES`: the manifest holds only name/hash pairs, not
-#: payload content. A still-`ZIP_STORED` member's own claimed size is
-#: read via `ZipInfo.file_size` and checked before the read.
+#: payload content.
 DEFAULT_MAX_MANIFEST_BYTES = 64 * 1024 * 1024
 
 #: Slack added to a decoded-size cap when bounding the *outer*,
@@ -108,10 +104,8 @@ def _blob_member_name(content_hash: str) -> str:
 
 
 #: A fixed zip timestamp (the format's own epoch floor -- 1980-01-01) used
-#: for every member this module writes -- `ZipFile.writestr(name, data)`
-#: with a bare string `name` otherwise stamps `time.localtime()` at write
-#: time, so byte-identical facts saved on two different days would
-#: produce two different archives/`stored_sha256` values.
+#: for every member this module writes -- otherwise `ZipFile.writestr`
+#: stamps `time.localtime()`, so identical facts on two days would differ.
 _ZIP_EPOCH = (1980, 1, 1, 0, 0, 0)
 
 
@@ -134,12 +128,10 @@ def _deterministic_zipinfo(name: str) -> zipfile.ZipInfo:
 
 _ZIP_MAGIC_PREFIXES = (b"PK\x03\x04", b"PK\x05\x06")
 
-#: gzip/zstd magic -- a matching prefix already unambiguously identifies a
-#: compressed `BundleFacts` JSON envelope, so `looks_like_zip_from_tail()`
-#: must never run against one: a crafted gzip `FEXTRA` sub-field (unlike
-#: `FCOMMENT`, already closed) can embed a `PK\x05\x06` whose comment-length
-#: field still lands exactly at the file's true end (Codex review). A local
-#: copy, not an import from `snapshot_io` -- see the module docstring.
+#: gzip/zstd magic -- a matching prefix already identifies a compressed
+#: `BundleFacts` JSON envelope, so `looks_like_zip_from_tail()` must never
+#: run against one: a crafted gzip `FEXTRA` sub-field (unlike `FCOMMENT`,
+#: already closed) can embed a `PK\x05\x06` landing exactly at file end.
 _JSON_ENVELOPE_MAGIC_PREFIXES = (b"\x1f\x8b", b"\x28\xb5\x2f\xfd")
 
 
@@ -643,8 +635,8 @@ class BundleArchiveReader:
                 "read (possible decompression bomb, or a genuinely oversized "
                 "member)."
             )
-        # The zip "encrypted" bit makes `ZipFile.open()` raise a bare
-        # `RuntimeError` -- too generic to narrow in an except, so checked here.
+        # The zip "encrypted" bit makes open() raise a bare RuntimeError --
+        # too generic to narrow in an except, so checked here.
         if info.flag_bits & 0x1:
             raise SnapshotError(
                 f"{self._path}: member {name!r} is encrypted -- not a "
@@ -680,6 +672,14 @@ class BundleArchiveReader:
             raise SnapshotError(
                 f"{self._path}: member {name!r} failed its CRC-32 check -- "
                 "the archive is corrupted or was tampered with."
+            ) from exc
+        except UnicodeDecodeError as exc:
+            # open() re-decodes the LOCAL header's own filename (a separate
+            # copy from the central directory's, already validated) -- a
+            # crafted local header can set its own UTF-8 bit invalidly.
+            raise SnapshotError(
+                f"{self._path}: member {name!r} has an invalid local file "
+                f"header filename encoding: {exc}"
             ) from exc
         except OSError as exc:
             # A transient I/O failure (e.g. EIO) must not escape raw either.

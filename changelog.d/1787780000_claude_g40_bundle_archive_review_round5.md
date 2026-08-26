@@ -511,3 +511,17 @@
   open()` raise a bare `NotImplementedError`, at lazy-open time rather
   than construction, so this also escaped untranslated. Now rejected
   proactively the same way the encrypted bit already is.
+
+- **G40 bundle archive: one more Codex review finding, real and fixed.**
+  `BundleArchiveReader.__init__()`'s widened exception handling (above)
+  covers the *central directory*'s own filename decoding, done once at
+  construction. But `zipfile.ZipFile.open()` separately re-reads and
+  re-decodes the *local* file header's own filename -- a distinct copy
+  the format allows to diverge from the central directory's -- whenever
+  that local header's own general-purpose flag bit 11 is set, regardless
+  of what the central directory recorded. A crafted local header can set
+  that bit over invalid UTF-8 bytes, raising a bare `UnicodeDecodeError`
+  neither `read_manifest()` nor `read_blob()` caught, since this happens
+  lazily inside `_read_stored_member()`'s `self._zf.open(name)` call, not
+  at construction. Now caught and translated to `SnapshotError` alongside
+  the pre-existing `BadZipFile`/`OSError` handling there.

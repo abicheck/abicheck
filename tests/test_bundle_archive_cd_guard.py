@@ -786,3 +786,76 @@ class TestBundleArchiveReaderRejectsInvalidUtf8Filenames:
         path.write_bytes(data)
         with pytest.raises(SnapshotError, match="not a valid bundle archive"):
             BundleArchiveReader.open(path)
+
+
+class TestBundleArchiveReaderRejectsInvalidUtf8LocalHeaderFilenames:
+    """The central-directory filename can be perfectly valid (so
+    `ZipFile()` construction succeeds) while the *local* file header --
+    a separate, independently-flagged copy `open()` re-reads and
+    re-decodes -- sets its own UTF-8 bit over invalid bytes, raising a
+    bare `UnicodeDecodeError` neither `read_manifest()` nor `read_blob()`
+    caught (Codex review, fresh evidence)."""
+
+    def _zip_with_invalid_utf8_local_filename(self) -> bytes:
+        cd_name = b"manifest.json"
+        local_name = b"\xff\xfe\xff\xfe\xff\xfe\xff\xfe\xff\xfe\xff\xfe\xff"
+        data = b"{}"
+        flags_local = 0x0800  # local header only: filename is UTF-8
+        crc = zipfile.crc32(data) & 0xFFFFFFFF
+        lfh = (
+            struct.pack(
+                "<IHHHHHIIIHH",
+                0x04034B50,
+                20,
+                flags_local,
+                0,
+                0,
+                0,
+                crc,
+                len(data),
+                len(data),
+                len(local_name),
+                0,
+            )
+            + local_name
+            + data
+        )
+        cd = (
+            struct.pack(
+                "<IHHHHHHIIIHHHHHII",
+                0x02014B50,
+                20,
+                20,
+                0,  # central directory: no UTF-8 flag, plain ASCII name
+                0,
+                0,
+                0,
+                crc,
+                len(data),
+                len(data),
+                len(cd_name),
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+            )
+            + cd_name
+        )
+        eocd = struct.pack("<IHHHHIIH", 0x06054B50, 0, 0, 1, 1, len(cd), len(lfh), 0)
+        return lfh + cd + eocd
+
+    def test_raises_snapshot_error_not_unicode_decode_error(self, tmp_path: Path) -> None:
+        # Premise: real zipfile really does raise UnicodeDecodeError from
+        # open() -- construction itself succeeds, since the CD name is clean.
+        data = self._zip_with_invalid_utf8_local_filename()
+        zf = zipfile.ZipFile(io.BytesIO(data), mode="r")
+        with pytest.raises(UnicodeDecodeError):
+            zf.open("manifest.json")
+
+        path = tmp_path / "bad_local_filename.zip"
+        path.write_bytes(data)
+        with pytest.raises(SnapshotError, match="invalid local file header filename"):
+            with BundleArchiveReader.open(path) as reader:
+                reader.read_manifest()
