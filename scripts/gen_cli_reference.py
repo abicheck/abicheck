@@ -121,6 +121,19 @@ def _option_row(param: Any) -> str:
     # behind the same "—" used for no-default-at-all would make a disabled-
     # by-default flag indistinguishable from one with no default.
     is_unset = type(default).__name__ == "Sentinel"
+    # Click 8.5 widened that same internal sentinel to *every* is_flag
+    # option with no explicit override, not just genuinely-optionless ones
+    # (verified: click 8.4.2 reports a concrete `False` for a plain
+    # `is_flag=True` option's `.default`; click 8.5.0 reports the sentinel
+    # for the identical option) -- an omitted flag still resolves to `False`
+    # at parse time either way (verified via CliRunner), so treating this
+    # case the same as "no default at all" would silently regress *every*
+    # boolean flag's committed default from `False` to "—" the moment the
+    # installed click crosses 8.5, defeating the whole point of the
+    # is-it-really-unset distinction this function exists to make.
+    if is_unset and getattr(param, "is_flag", False):
+        default = False
+        is_unset = False
     default_str = "—"
     if not is_unset and default is not None and default != ():
         default_str = f"`{_default_str(default)}`"
