@@ -5486,8 +5486,8 @@ Once a root command genuinely clears the bar above, pick the right home:
   (`graph_facts._decl_node_id`/`_type_node_id`) are derived directly from
   the raw, un-renumbered identity string -- confirmed by reading both
   functions, which apply no renumbering at all. A closure-parameterized
-  declaration therefore reads as `Foo<(lambda...)#1>` in the flat snapshot
-  but `Foo<(lambda:file.h:20:5)>` in its own source-graph node, so any
+  declaration therefore reads as `Foo<(lambda:file.h#1)>` in the flat
+  snapshot but `Foo<(lambda:file.h:20:5)>` in its own source-graph node, so any
   consumer trying to correlate the two (e.g. matching a flat finding back
   to its graph neighborhood) sees two different spellings for the same
   entity. **Not fixed here**: a correct fix needs the ordinal map

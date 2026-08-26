@@ -8,18 +8,19 @@
   2021.13.0 -> 2022.3.0 binaries as a spurious `type_removed`/`type_added`
   pair, a paired `func_removed`/`func_added` on every ctor/dtor/method of
   the instantiation, and a `declaration_renamed` RISK finding whose entire
-  content was the line-number text. `qualified_name_segments.
-  renumber_anonymous_closure_identities()` now replaces the
-  `:<line>:<col>` discriminator with a stable ordinal -- "the Nth lambda of
-  this marker kind declared in this header" -- computed once per snapshot,
-  mirroring GCC/DWARF's own per-scope `{lambda(...)#1}` numbering. As long
-  as an edit doesn't reorder or add/remove same-header, same-kind lambdas
-  relative to each other, both sides of a comparison now assign the
-  identical ordinal to the identical closure, eliminating all three noise
-  classes for that case. Snapshots loaded from disk are renumbered too
-  (a no-op once already renumbered), so a baseline persisted before this
-  fix compares correctly against a freshly-dumped snapshot instead of
-  disagreeing on identity purely from the encoding change. A hybrid
+  content was the line-number text.
+  `qualified_name_segments.renumber_anonymous_closure_identities()` now
+  replaces the `:<line>:<col>` discriminator with a stable ordinal -- "the
+  Nth lambda of this marker kind declared in this header" -- computed once
+  per snapshot, mirroring GCC/DWARF's own per-scope `{lambda(...)#1}`
+  numbering. As long as an edit doesn't reorder or add/remove same-header,
+  same-kind lambdas relative to each other, both sides of a comparison now
+  assign the identical ordinal to the identical closure, eliminating all
+  three noise classes for that case. Snapshots loaded from disk are
+  renumbered too (a no-op once already renumbered), so a baseline
+  persisted before this fix compares correctly against a freshly-dumped
+  snapshot instead of disagreeing on identity purely from the encoding
+  change. A hybrid
   (`--ast-frontend hybrid`) snapshot's `fact_provenance` dict is renumbered
   alongside the ABI-surface fields too, since its keys embed the same
   closure-parameterized type-name spelling -- left un-renumbered, a
@@ -76,3 +77,10 @@
   `constants` from the set of fields renumbering ever reaches at all,
   since a constant's literal value can never legitimately be a
   closure-parameterized type spelling.
+- **Sixth follow-up (Codex review): a basename with an *unmatched* closing
+  paren (`foo)bar.hpp`, legal on POSIX) still fell through to no match.**
+  The manual scanner treated the first depth-0 `)` as the marker's
+  terminator unconditionally; a depth-0 `)` is now only accepted once the
+  text immediately before it ends in `:<digits>:<digits>`, and otherwise
+  treated as ordinary basename text so scanning continues to the real
+  terminator.

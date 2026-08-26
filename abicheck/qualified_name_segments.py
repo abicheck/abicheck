@@ -312,11 +312,15 @@ def _scan_anon_type_marker(
     """Scan forward from *prefix_match* for its balanced-paren-aware basename
     and trailing ``:<line>:<col>)``.
 
-    Tracks paren depth through the basename so any number of nested
-    parenthesized groups (not just one level) are correctly balanced; the
-    *first* depth-0 ``)`` always ends the marker (a real compiler-emitted
-    basename can never contain an unbalanced ``)``), so unlike a regex this
-    never needs to backtrack across multiple candidate end points.
+    Tracks paren depth through the basename so any number of nested,
+    genuinely-balanced parenthesized groups are correctly matched. A
+    depth-0 ``)`` is only accepted as the marker's terminator when the text
+    immediately before it ends in ``:<digits>:<digits>`` -- a real
+    compiler-emitted basename can also contain an *unmatched* ``)`` of its
+    own (e.g. ``foo)bar.hpp``, legal on POSIX), which would otherwise be
+    mistaken for the terminator before the real coordinates are ever
+    reached (Codex review, fresh evidence). A depth-0 ``)`` that fails that
+    check is treated as ordinary basename text and scanning continues.
     """
     depth = 0
     i = prefix_match.end()
@@ -330,7 +334,8 @@ def _scan_anon_type_marker(
                 body = name[prefix_match.end() : i]
                 tail = _ANON_TYPE_TRAILING_LINE_COL_RE.search(body)
                 if tail is None:
-                    return None
+                    i += 1
+                    continue
                 return _AnonTypeMatch(
                     start=prefix_match.start(),
                     end=i,

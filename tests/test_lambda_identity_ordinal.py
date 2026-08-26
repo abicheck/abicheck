@@ -398,7 +398,7 @@ class TestLegacyPersistedSnapshotsAreRenumberedOnLoad:
 class TestKnownLimitationDifferentFilesSharingABasename:
     """Documented, accepted limitation (Codex review): the ordinal group
     key is ``(marker, header basename)`` -- the same checkout-independent
-    basename :func:`_declaring_header_discriminator` already reduces a
+    basename :func:`strip_anonymous_type_location` already reduces a
     full path to -- so two genuinely different files sharing a basename
     share one ordinal sequence. This test pins the documented behavior so
     a future change to the grouping key is a deliberate decision, not a
@@ -512,6 +512,34 @@ class TestBasenameWithParensIsStillRenumbered:
         assert ("(lambda", "bar.h", 3, 4) in ordinals
         rewritten = apply_anonymous_type_ordinals(combined, ordinals)
         assert rewritten == "Wrap<(lambda:foo(a(b)).h#1), (lambda:bar.h#1)>"
+
+    def test_an_unmatched_closing_paren_in_a_basename_still_matches(self) -> None:
+        """Codex review, follow-up: a legal basename can contain an
+        UNMATCHED ``)`` of its own (``foo)bar.hpp``) -- the depth-0 ``)``
+        it produces must not be mistaken for the marker's own terminator
+        before the real trailing coordinates are ever reached."""
+        old = [strip_anonymous_type_location("(lambda at /src/foo)bar.hpp:10:2)")]
+        new = [strip_anonymous_type_location("(lambda at /src/foo)bar.hpp:14:2)")]
+        old_final = apply_anonymous_type_ordinals(
+            old[0], collect_anonymous_type_ordinals(old)
+        )
+        new_final = apply_anonymous_type_ordinals(
+            new[0], collect_anonymous_type_ordinals(new)
+        )
+        assert old_final == new_final == "(lambda:foo)bar.hpp#1)"
+
+    def test_a_second_marker_after_an_unmatched_paren_basename_is_not_swallowed(
+        self,
+    ) -> None:
+        combined = (
+            f"Wrap<{strip_anonymous_type_location('(lambda at /src/foo)bar.h:1:2)')}, "
+            f"{strip_anonymous_type_location('(lambda at /src/baz.h:3:4)')}>"
+        )
+        ordinals = collect_anonymous_type_ordinals([combined])
+        assert ("(lambda", "foo)bar.h", 1, 2) in ordinals
+        assert ("(lambda", "baz.h", 3, 4) in ordinals
+        rewritten = apply_anonymous_type_ordinals(combined, ordinals)
+        assert rewritten == "Wrap<(lambda:foo)bar.h#1), (lambda:baz.h#1)>"
 
 
 class TestHybridMergeDefersRenumbering:
