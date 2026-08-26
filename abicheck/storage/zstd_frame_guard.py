@@ -79,7 +79,16 @@ def validate_zstd_frame_completeness(
     proved it decodes cleanly" cannot be trusted to rule this out here
     -- confirmed empirically (Codex review, fresh evidence). Since the
     loop only ever calls this on a non-empty ``remaining`` (the ``while``
-    guard), there is no legitimate reason for a parse to fail here."""
+    guard), there is no legitimate reason for a parse to fail here.
+
+    *data* itself must contain at least one frame -- a genuinely
+    zero-byte *data* would otherwise skip this ``while`` loop entirely,
+    "validating" with zero frames checked, and `ZstdCompressor.compress`
+    always emits a real (non-empty) frame even for an empty payload
+    (confirmed empirically), so an empty *data* can never be this
+    codebase's own legitimate output (Codex review, fresh evidence)."""
+    if not data:
+        raise SnapshotError(f"{source}: corrupt or truncated zstd stream (no data at all)")
     remaining = data
     while remaining:
         try:

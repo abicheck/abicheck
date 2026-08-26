@@ -598,3 +598,26 @@
   magic bytes to nothing, then a full `BundleArchiveReader.read_blob()`
   round trip); confirmed to fail against the pre-fix code with no
   exception raised.
+
+- **G40 bundle archive: one more Codex review finding, real and fixed --
+  the same swallowed-parse-failure class, one shape further.** A
+  completely empty (zero-byte) stored blob member decodes to `b""` with
+  no error via `stream_reader()`, and `validate_zstd_frame_completeness`'s
+  own `while remaining:` loop never executes at all for empty `data` --
+  "validating" with zero frames actually checked, rather than raising.
+  A member named after the empty payload's own hash would then pass the
+  post-decode content-hash check too, so `read_blob()` would silently
+  accept an archive containing no zstd frame whatsoever as a valid empty
+  blob. Confirmed `BundleArchiveWriter.put_blob()` always calls
+  `ZstdCompressor.compress()` unconditionally, even for an empty payload
+  -- producing a real, non-empty frame every time -- so a genuinely
+  zero-byte member can never be this codebase's own legitimate output.
+  Fixed by requiring `data` to be non-empty before entering the
+  per-frame walk at all. Regression test:
+  `tests/test_bundle_archive_cd_guard.py::
+  TestReadBlobRejectsTruncatedZstdFrames::
+  test_read_blob_raises_for_a_completely_empty_member` (a premise check
+  confirming real `zstandard` silently decodes empty input to nothing,
+  then a full `BundleArchiveReader.read_blob()` round trip); confirmed
+  to fail against the pre-fix code with `read_blob()` returning `b""`
+  instead of raising.

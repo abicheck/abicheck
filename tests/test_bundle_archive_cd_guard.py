@@ -948,6 +948,41 @@ class TestReadBlobRejectsTruncatedZstdFrames:
             with pytest.raises(SnapshotError, match="corrupt or truncated zstd stream"):
                 reader.read_blob(manifest["library_blobs"]["a.so"])
 
+    def test_read_blob_raises_for_a_completely_empty_member(self, tmp_path: Path) -> None:
+        """A zero-byte stored member decodes to `b""` via `stream_reader()`
+        with no error, and the frame-completeness `while` loop never even
+        runs (nothing to walk) -- so a member named after the empty-
+        payload hash would otherwise pass every check, accepting an
+        archive containing no zstd frame at all as a valid empty blob.
+        `BundleArchiveWriter.put_blob()` always calls `ZstdCompressor.
+        compress()` unconditionally, even for an empty payload, so a
+        zero-byte member can never be this codebase's own legitimate
+        output (Codex review, fresh evidence)."""
+        # Premise: confirm real zstandard's stream_reader() really does
+        # silently decode a genuinely empty input to nothing, not raise.
+        import zstandard
+
+        dctx = zstandard.ZstdDecompressor()
+        out = io.BytesIO()
+        with dctx.stream_reader(io.BytesIO(b"")) as reader:
+            while True:
+                chunk = reader.read(1024 * 1024)
+                if not chunk:
+                    break
+                out.write(chunk)
+        assert out.getvalue() == b""
+
+        h = content_hash(b"")
+        path = tmp_path / "bundle.archive.zip"
+        with zipfile.ZipFile(path, mode="w") as zf:
+            zf.writestr(MANIFEST_MEMBER, json.dumps({"library_blobs": {"a.so": h}}))
+            zf.writestr(f"blobs/{h}.json.zst", b"", compress_type=zipfile.ZIP_STORED)
+
+        with BundleArchiveReader.open(path) as reader:
+            manifest = reader.read_manifest()
+            with pytest.raises(SnapshotError, match="corrupt or truncated zstd stream"):
+                reader.read_blob(manifest["library_blobs"]["a.so"])
+
 
 class TestSniffDoesNotConsumeAOneShotFifoProducer:
     """A *thread*-based writer doesn't reliably reproduce this: Python
