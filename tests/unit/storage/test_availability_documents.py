@@ -166,17 +166,18 @@ class TestDuplicateOverridesAreRefused:
 
     def test_duplicate_rows_are_refused(self) -> None:
         with pytest.raises(ValueError, match="duplicate availability override"):
-            AvailabilityLedger.from_dict({"overrides": self._rows()})
+            AvailabilityLedger.from_dict({"families": {}, "overrides": self._rows()})
 
     def test_the_refusal_does_not_depend_on_row_order(self) -> None:
         """Both orderings refuse; neither silently wins."""
         for rows in (self._rows(), list(reversed(self._rows()))):
             with pytest.raises(ValueError, match="duplicate availability override"):
-                AvailabilityLedger.from_dict({"overrides": rows})
+                AvailabilityLedger.from_dict({"families": {}, "overrides": rows})
 
     def test_distinct_entities_in_one_family_are_fine(self) -> None:
         ledger = AvailabilityLedger.from_dict(
             {
+                "families": {},
                 "overrides": [
                     {
                         "family": "layout",
@@ -188,7 +189,7 @@ class TestDuplicateOverridesAreRefused:
                         "entity": "ns::Bar",
                         "availability": {"status": "present"},
                     },
-                ]
+                ],
             }
         )
 
@@ -197,6 +198,7 @@ class TestDuplicateOverridesAreRefused:
     def test_the_same_entity_in_distinct_families_is_fine(self) -> None:
         ledger = AvailabilityLedger.from_dict(
             {
+                "families": {},
                 "overrides": [
                     {
                         "family": "layout",
@@ -208,7 +210,7 @@ class TestDuplicateOverridesAreRefused:
                         "entity": "ns::Foo",
                         "availability": {"status": "present"},
                     },
-                ]
+                ],
             }
         )
 
@@ -369,7 +371,7 @@ class TestScalarDiagnosticsAreRefused:
         string, they would acquire exactly this defect.
         """
         with pytest.raises((TypeError, ValueError, KeyError)):
-            AvailabilityLedger.from_dict({"overrides": "oops"})
+            AvailabilityLedger.from_dict({"families": {}, "overrides": "oops"})
 
 
 class TestDecisionKeysAreRejectedNotCoerced:
@@ -389,17 +391,20 @@ class TestDecisionKeysAreRejectedNotCoerced:
         with pytest.raises(TypeError, match="family name"):
             AvailabilityLedger.from_dict(
                 {
+                    "overrides": [],
                     "families": {
                         1: {"status": "failed"},
                         "1": {"status": "present"},
-                    }
+                    },
                 }
             )
 
     @pytest.mark.parametrize("key", [1, 1.0, True, None, (1,)])
     def test_a_non_string_family_key_is_refused(self, key: object) -> None:
         with pytest.raises(TypeError, match="family name"):
-            AvailabilityLedger.from_dict({"families": {key: {"status": "present"}}})
+            AvailabilityLedger.from_dict(
+                {"families": {key: {"status": "present"}}, "overrides": []}
+            )
 
     @pytest.mark.parametrize("field", ["family", "entity"])
     @pytest.mark.parametrize("key", [1, True, None])
@@ -414,7 +419,7 @@ class TestDecisionKeysAreRejectedNotCoerced:
         row[field] = key
 
         with pytest.raises(TypeError, match="override"):
-            AvailabilityLedger.from_dict({"overrides": [row]})
+            AvailabilityLedger.from_dict({"families": {}, "overrides": [row]})
 
     def test_a_well_formed_ledger_still_round_trips(self) -> None:
         ledger = AvailabilityLedger()
@@ -507,31 +512,55 @@ class TestASequenceShapedFamilyTableIsRefused:
 
     def test_the_reported_sequence_is_refused(self) -> None:
         with pytest.raises(TypeError, match="families must be a mapping"):
-            AvailabilityLedger.from_dict({"families": self.ROWS})
+            AvailabilityLedger.from_dict({"families": self.ROWS, "overrides": []})
 
     def test_row_order_can_no_longer_decide_a_verdict(self) -> None:
         """Both orders must fail the same way, not disagree."""
         with pytest.raises(TypeError):
-            AvailabilityLedger.from_dict({"families": self.ROWS})
+            AvailabilityLedger.from_dict({"families": self.ROWS, "overrides": []})
         with pytest.raises(TypeError):
-            AvailabilityLedger.from_dict({"families": list(reversed(self.ROWS))})
+            AvailabilityLedger.from_dict(
+                {"families": list(reversed(self.ROWS)), "overrides": []}
+            )
 
     @pytest.mark.parametrize(
         "value", ["layout", [1, 2], (("a", {}),), 5, None, {("a",)}]
     )
     def test_a_non_mapping_families_value_is_refused(self, value: object) -> None:
         with pytest.raises(TypeError, match="families"):
-            AvailabilityLedger.from_dict({"families": value})
+            AvailabilityLedger.from_dict({"families": value, "overrides": []})
 
     def test_a_real_mapping_still_loads(self) -> None:
         ledger = AvailabilityLedger.from_dict(
-            {"families": {"layout": {"status": "present"}}}
+            {"families": {"layout": {"status": "present"}}, "overrides": []}
         )
 
         assert ledger.for_family("layout").status is FactStatus.PRESENT
 
-    def test_an_absent_families_key_is_empty(self) -> None:
-        assert AvailabilityLedger.from_dict({}).families == {}
+    def test_an_absent_collection_is_refused_rather_than_read_as_empty(self) -> None:
+        """This test previously pinned the opposite, and was the bug.
+
+        It asserted that an absent `families` key parses to `{}` — which is
+        exactly the reading this package's third invariant forbids: an empty
+        collection claims "the producer ran and established nothing is
+        there". A truncated ledger that keeps a `PRESENT` family and loses
+        its override rows would then have `for_entity` answer with the
+        comparable family record, licensing a compatibility conclusion from
+        damage (Codex review).
+
+        `to_dict` writes both collections unconditionally, so an absent one
+        means the document did not come from this writer.
+        """
+        for document in ({}, {"families": {}}, {"overrides": []}):
+            with pytest.raises(ValueError, match="missing required field"):
+                AvailabilityLedger.from_dict(document)
+
+        # The control: both present and empty is still a real, loadable
+        # ledger that establishes there is nothing in either collection.
+        assert (
+            AvailabilityLedger.from_dict({"families": {}, "overrides": []}).families
+            == {}
+        )
 
 
 class TestTheConstructorAppliesTheDocumentRules:

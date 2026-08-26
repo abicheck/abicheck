@@ -572,7 +572,13 @@ class TestUnknownFamilyFallbackCannotBeComparable:
     ) -> None:
         """The path the finding is actually about: a stored package."""
         with pytest.raises(ValueError, match="must not be comparable"):
-            AvailabilityLedger.from_dict({"unknown_family_default": {"status": status}})
+            AvailabilityLedger.from_dict(
+                {
+                    "families": {},
+                    "overrides": [],
+                    "unknown_family_default": {"status": status},
+                }
+            )
 
     @pytest.mark.parametrize(
         "status",

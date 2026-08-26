@@ -261,7 +261,9 @@ def test_a_null_nested_record_reads_as_unstated_not_as_a_record() -> None:
     has no unstated state to express, so `None` there is a mistake and is
     refused.
     """
-    loaded = AvailabilityLedger.from_dict({"unknown_family_default": None})
+    loaded = AvailabilityLedger.from_dict(
+        {"families": {}, "overrides": [], "unknown_family_default": None}
+    )
     assert loaded.unknown_family_default.status is FactStatus.NOT_COLLECTED
     assert not loaded.unknown_family_default.comparable
     assert _refused(lambda: AvailabilityLedger(unknown_family_default=None))

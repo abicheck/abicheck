@@ -461,7 +461,23 @@ class AvailabilityLedger:
                 f"an availability ledger must be a mapping, not "
                 f"{type(data).__name__} ({data!r})"
             )
-        raw_families = data.get("families", {})
+        # Required, not defaulted. `to_dict` writes both collections
+        # unconditionally, so an absent one means the document did not come
+        # from this writer — and defaulting it silently asserted the one
+        # thing this package exists to stop asserting: that the producer ran
+        # and established there is nothing here (`AGENTS.md` invariant 3).
+        # A truncated ledger keeping a `PRESENT` family while losing its
+        # override rows then answered `for_entity` with the comparable
+        # family record, licensing a compatibility conclusion from damage
+        # (Codex review). Codex named `overrides`; `families` is the same
+        # shape, where the loss instead reads as "no family was declared"
+        # and falls through to the unknown-family default.
+        #
+        # `unknown_family_default` is deliberately *not* required: absent, it
+        # resolves to `NOT_COLLECTED`, which is a gap status — the explicit
+        # "we do not know" that invariant 3 asks for, not a default standing
+        # in for evidence.
+        raw_families = _required_field(data, "families", "an availability ledger")
         if not isinstance(raw_families, Mapping):
             # `dict()` accepts a sequence of pairs and collapses duplicate
             # names *before* any key validation runs, so rows declaring one
@@ -485,7 +501,9 @@ class AvailabilityLedger:
             for name, raw in raw_families.items()
         }
         overrides: dict[tuple[str, str], FactAvailability] = {}
-        for raw in _row_sequence(data.get("overrides", []), "overrides"):
+        for raw in _row_sequence(
+            _required_field(data, "overrides", "an availability ledger"), "overrides"
+        ):
             # Each *row* is checked, not only the array holding them. The
             # outer guard above says nothing about what the rows are, and the
             # identifying fields are read here by subscript — so a

@@ -58,7 +58,7 @@ class TestMalformedDocumentsRaiseTheDocumentedErrorKinds:
             ),
             pytest.param(
                 AvailabilityLedger.from_dict,
-                {"overrides": [{}]},
+                {"families": {}, "overrides": [{}]},
                 "family",
                 id="ledger-override-family",
             ),
@@ -289,7 +289,9 @@ class TestRowSequenceFieldsRejectEveryWrongContainer:
         rather than fixing the reports.
         """
         cases = [
-            lambda: AvailabilityLedger.from_dict({"overrides": container}),
+            lambda: AvailabilityLedger.from_dict(
+                {"families": {}, "overrides": container}
+            ),
             lambda: OccurrenceId.from_dict(
                 {
                     "entity": self._ENTITY,
@@ -339,7 +341,10 @@ class TestRowSequenceFieldsRejectEveryWrongContainer:
             ).attributes
             == ()
         )
-        assert AvailabilityLedger.from_dict({"overrides": []}).overrides == {}
+        assert (
+            AvailabilityLedger.from_dict({"families": {}, "overrides": []}).overrides
+            == {}
+        )
 
     def test_no_document_field_is_iterated_without_a_container_check(self) -> None:
         """The sweep as a test, since three rounds of these were reported.
@@ -787,20 +792,21 @@ class TestOverrideRowsAreCheckedIndividually:
             availability={"status": "present"},
         )
         with pytest.raises(TypeError, match="override document"):
-            AvailabilityLedger.from_dict({"overrides": [row]})
+            AvailabilityLedger.from_dict({"families": {}, "overrides": [row]})
 
     def test_a_real_override_row_still_round_trips(self) -> None:
         """The control: the row that should be accepted still is."""
         from abicheck.storage import AvailabilityLedger
 
         document = {
+            "families": {},
             "overrides": [
                 {
                     "family": "exports",
                     "entity": "libfoo.so",
                     "availability": {"status": "present"},
                 }
-            ]
+            ],
         }
         ledger = AvailabilityLedger.from_dict(document)
         assert AvailabilityLedger.from_dict(ledger.to_dict()).to_dict() == (
@@ -849,7 +855,7 @@ class TestAFabricatingMappingCannotInventARequiredField:
     def test_override_document(self) -> None:
         with pytest.raises(ValueError, match="entity"):
             AvailabilityLedger.from_dict(
-                {"overrides": [self._fabricating(family="exports")]}
+                {"families": {}, "overrides": [self._fabricating(family="exports")]}
             )
 
     def test_a_plain_dict_still_reports_the_same_missing_field(self) -> None:
