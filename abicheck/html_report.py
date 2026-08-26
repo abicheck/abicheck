@@ -35,7 +35,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 from .checker_policy import HasKind
-from .demangle import demangle_text
+from .demangle import demangle_text, prewarm_demangle_batch
 
 # Page chrome (DOCTYPE/head/stylesheet/body frame, verdict palette, footer) now
 # lives in one shared seam (``html_template``). ``_VERDICT_STYLE`` /
@@ -740,12 +740,11 @@ def _gate_card_html(
         kind_sets=_eff_kind_sets_fn2() if callable(_eff_kind_sets_fn2) else None,
         policy_file=getattr(result, "policy_file", None),
     )
-    # `--used-by`/`--required-symbol(s)` scoping (ADR-043): the CLI
-    # process actually exits on the *scoped* gate, not this full-library
-    # one -- without this, the card could say "CI Gate: FAIL (exit 4)"
-    # for a run that just exited 0 because the scoped contract was
-    # compatible (CodeRabbit review). Mirrors the JSON severity block's
-    # full_severity/severity split.
+    # `--used-by`/`--required-symbol(s)` scoping (ADR-043): the CLI process
+    # actually exits on the *scoped* gate, not this full-library one --
+    # without this, the card could say "CI Gate: FAIL (exit 4)" for a run
+    # that exited 0 because the scoped contract was compatible (CodeRabbit
+    # review). Mirrors the JSON severity block's full_severity/severity split.
     scoped_exit_code = getattr(result, "scoped_exit_code", None)
     scoped_exit_code_scheme = getattr(result, "scoped_exit_code_scheme", None)
     gate_exit_code: int
@@ -880,13 +879,10 @@ def generate_html_report(
     _effective_verdict_fn = getattr(result, "_effective_verdict_for_change", None)
     # ADR-049 D1: a NOT_EVALUATED finding is partitioned out of the three
     # verdict buckets before they are built, the same way Markdown's own
-    # "Not Evaluated (Contract)" section works. Bucketing one by its raw
+    # "Not Evaluated (Contract)" section works -- bucketing one by its raw
     # effective verdict rendered it under the red "Changed Symbols (1)"
-    # heading on a page whose banner reads NO_CHANGE and whose compatibility
-    # metric reads 100%, with the relevance and reason appearing nowhere
-    # (Codex review, reproduced). It gets its own section below instead --
-    # conserved and explained, not filed under a verdict policy never
-    # reached. Empty for every run without `--contract`.
+    # heading on a page whose banner reads NO_CHANGE (Codex review). It
+    # gets its own section below instead. Empty without `--contract`.
     from .contract_gating import contract_relevance_of, is_evaluated
 
     not_evaluated = [ch for ch in display_changes if not is_evaluated(ch)]
@@ -1015,6 +1011,8 @@ def generate_html_report(
             f"</div></div>"
         )
 
+    if demangle:
+        prewarm_demangle_batch([*all_changes, *suppressed, *not_evaluated])
     summary_html = _summary_table(removed, changed, added, suppressed_count)
     nav_html = _nav_bar(removed, changed, added, suppressed_count)
 
@@ -1037,6 +1035,7 @@ def generate_html_report(
         _section,
         not_evaluated=not_evaluated,
         relevance_of=contract_relevance_of,
+        demangle=demangle,
     )
 
     if not sections:
@@ -1151,6 +1150,7 @@ def _build_sections_html(
     *,
     not_evaluated: list[object] | None = None,
     relevance_of: Callable[[object], object] | None = None,
+    demangle: bool = True,
 ) -> list[str]:
     """Build ordered section blocks for HTML report body.
 
@@ -1180,7 +1180,7 @@ def _build_sections_html(
         rows = []
         for ch in not_evaluated:
             relevance = relevance_of(ch) if relevance_of is not None else None
-            symbol = html.escape(str(getattr(ch, "symbol", "") or ""))
+            symbol = _symbol_cell(ch, demangle)
             kind = html.escape(str(getattr(getattr(ch, "kind", None), "value", "")))
             rel = html.escape(str(getattr(relevance, "value", "") or ""))
             reason = html.escape(str(getattr(ch, "contract_reason_code", "") or ""))

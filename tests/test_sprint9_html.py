@@ -921,3 +921,74 @@ class TestRealDemanglingThroughTheProductionChangeDataclass:
         assert "foo&lt;Bar&gt;" in out
         assert "<Bar>" not in out
         assert "foo<Bar>" not in out
+
+    def test_prewarms_the_demangle_cache_before_rendering_rows(
+        self, monkeypatch
+    ) -> None:
+        """Codex review: without pre-warming, a report with many distinct
+        C++ symbols would call demangle_text (and therefore demangle_batch)
+        once per row, paying a fresh c++filt subprocess per row when the
+        fast in-process cxxfilt package isn't installed. The first call to
+        demangle_batch must already carry every symbol the report will
+        render, proving the whole report was batched upfront rather than
+        deferred to per-row calls."""
+        import abicheck.demangle as demangle_mod
+        from abicheck.checker import Change, DiffResult, Verdict
+        from abicheck.checker_policy import ChangeKind
+
+        symbols = ["_ZN3FooC1Ev", "_ZN3Bar3runEv", "_ZN3Baz3getEv"]
+        changes = [
+            Change(
+                kind=ChangeKind.FUNC_REMOVED,
+                symbol=s,
+                description=f"Function removed: {s}",
+            )
+            for s in symbols
+        ]
+        result = DiffResult(
+            old_version="1.0",
+            new_version="2.0",
+            library="libtest.so.1",
+            changes=changes,
+            verdict=Verdict.BREAKING,
+        )
+
+        calls: list[list[str]] = []
+        orig = demangle_mod.demangle_batch
+
+        def spy(batch: list[str]) -> dict[str, str]:
+            calls.append(list(batch))
+            return orig(batch)
+
+        monkeypatch.setattr(demangle_mod, "demangle_batch", spy)
+        generate_html_report(result)
+        assert calls, "demangle_batch was never called"
+        assert set(symbols) <= set(calls[0]), calls
+
+    def test_not_evaluated_table_demangles_the_symbol(self) -> None:
+        """Codex review: the bespoke "Not Evaluated (Contract)" table
+        (`_build_sections_html`) rendered `change.symbol` directly,
+        bypassing `_changes_table`'s demangling entirely -- both the new
+        default and an explicit `--demangle` left those symbols mangled."""
+        from abicheck.checker import Change, DiffResult, Verdict
+        from abicheck.checker_policy import ChangeKind
+        from abicheck.contract_relevance_types import CompatibilityEvaluationStatus
+
+        mangled = "_ZN3FooC1Ev"
+        change = Change(
+            kind=ChangeKind.FUNC_REMOVED,
+            symbol=mangled,
+            description=f"Function removed: {mangled}",
+            compatibility_evaluation_status=CompatibilityEvaluationStatus.NOT_EVALUATED,
+        )
+        result = DiffResult(
+            old_version="1.0",
+            new_version="2.0",
+            library="libtest.so.1",
+            changes=[change],
+            verdict=Verdict.NO_CHANGE,
+        )
+        out = generate_html_report(result)
+        assert "Not Evaluated (Contract)" in out
+        assert "Foo::Foo()" in out
+        assert '<abbr title="_ZN3FooC1Ev">Foo::Foo()</abbr>' in out

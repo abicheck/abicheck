@@ -50,6 +50,7 @@ def demangle(symbol: str) -> str | None:
         return None
     try:
         import cxxfilt
+
         return str(cxxfilt.demangle(symbol))
     except Exception:  # noqa: BLE001
         _log.debug("cxxfilt demangling failed for %s", symbol)
@@ -119,6 +120,7 @@ def _batch_phase2_cxxfilt(uncached: list[str], result: dict[str, str]) -> list[s
     remaining: list[str] = []
     try:
         import cxxfilt
+
         for s in uncached:
             try:
                 d = cxxfilt.demangle(s)
@@ -258,6 +260,30 @@ def base_name(symbol: str) -> str:
 _MANGLED_TOKEN_RE = re.compile(r"_Z[A-Za-z0-9_$]+(?:\.[A-Za-z0-9_$]+)*")
 
 
+def extract_mangled_tokens(text: str) -> set[str]:
+    """Return every Itanium-mangled symbol token embedded in *text*."""
+    return set(_MANGLED_TOKEN_RE.findall(text))
+
+
+def prewarm_demangle_batch(
+    objs: list[object], attrs: tuple[str, ...] = ("symbol", "description")
+) -> None:
+    """Pre-warm :func:`demangle_batch`'s process-wide cache from *attrs* of
+    every object in *objs* (e.g. one HTML report's whole change list).
+
+    Without this, a caller rendering many rows one at a time via
+    :func:`demangle_text` pays a fresh ``c++filt`` subprocess per row once
+    the fast in-process ``cxxfilt`` package isn't installed; one upfront
+    batched call here makes every later per-row call a pure cache hit.
+    """
+    tokens: set[str] = set()
+    for obj in objs:
+        for attr in attrs:
+            tokens |= extract_mangled_tokens(str(getattr(obj, attr, "") or ""))
+    if tokens:
+        demangle_batch(sorted(tokens))
+
+
 def demangle_text(text: str) -> str:
     """Demangle every Itanium-mangled symbol token embedded in *text*.
 
@@ -266,7 +292,7 @@ def demangle_text(text: str) -> str:
     human-facing report output only — machine formats (JSON/SARIF/JUnit) keep
     the raw mangled symbols so downstream tooling can match on them.
     """
-    tokens = set(_MANGLED_TOKEN_RE.findall(text))
+    tokens = extract_mangled_tokens(text)
     if not tokens:
         return text
     mapping = demangle_batch(sorted(tokens))
