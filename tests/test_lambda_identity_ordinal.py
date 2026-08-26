@@ -47,6 +47,7 @@ from abicheck.name_classification import (
     collect_anonymous_type_ordinals,
     strip_anonymous_type_location,
 )
+from abicheck.serialization import snapshot_from_dict
 
 
 def _closure(header: str, line: int, col: int) -> str:
@@ -184,3 +185,140 @@ class TestSnapshotRenumbering:
         snap.renumber_anonymous_closure_identities()
         assert snap.types[0].qualified_name == before_type
         assert snap.functions[0].mangled == before_func
+
+
+class TestLegacyPersistedSnapshotsAreRenumberedOnLoad:
+    """A snapshot persisted by a pre-fix abicheck still carries the raw
+    ``:<line>:<col>`` closure identity. Comparing it (via ``compare``'s
+    normal saved-baseline-vs-fresh-dump workflow) against a freshly-dumped
+    snapshot -- which IS renumbered -- must not manufacture a
+    removed+added pair purely from the encoding change (Codex review on
+    the original PR)."""
+
+    def _legacy_dict(self, line: int) -> dict:
+        owner = f"tbb::detail::d1::raii_guard<{_closure('task_group.h', line, 26)}>"
+        return {
+            "library": "libtbb.so",
+            "version": "2021.13.0",
+            "schema_version": 25,
+            "types": [
+                {
+                    "name": owner.rsplit("::", 1)[-1],
+                    "qualified_name": owner,
+                    "kind": "class",
+                    "size_bits": 8,
+                }
+            ],
+            "functions": [
+                {
+                    "name": "raii_guard::raii_guard",
+                    "mangled": f"__abicheck_ctor__{owner}()",
+                    "return_type": "void",
+                }
+            ],
+        }
+
+    def test_loading_a_legacy_snapshot_renumbers_it(self) -> None:
+        loaded = snapshot_from_dict(self._legacy_dict(522))
+        assert "#" in loaded.types[0].qualified_name
+        assert ":522:" not in loaded.types[0].qualified_name
+
+    def test_legacy_baseline_agrees_with_a_fresh_dump_across_line_drift(
+        self,
+    ) -> None:
+        legacy_baseline = snapshot_from_dict(self._legacy_dict(522))
+
+        fresh = AbiSnapshot(
+            library="libtbb.so",
+            version="2022.3.0",
+            types=[
+                _record(
+                    f"raii_guard<{_closure('task_group.h', 539, 26)}>",
+                    qualified=(
+                        "tbb::detail::d1::raii_guard<"
+                        f"{_closure('task_group.h', 539, 26)}>"
+                    ),
+                )
+            ],
+            functions=[
+                Function(
+                    name="raii_guard::raii_guard",
+                    mangled=(
+                        "__abicheck_ctor__tbb::detail::d1::raii_guard<"
+                        f"{_closure('task_group.h', 539, 26)}>()"
+                    ),
+                    return_type="void",
+                )
+            ],
+        )
+        fresh.renumber_anonymous_closure_identities()
+
+        assert legacy_baseline.types[0].qualified_name == fresh.types[0].qualified_name
+        assert legacy_baseline.functions[0].mangled == fresh.functions[0].mangled
+
+        result = compare(legacy_baseline, fresh)
+        noisy_kinds = {
+            ChangeKind.FUNC_REMOVED,
+            ChangeKind.FUNC_ADDED,
+            ChangeKind.TYPE_REMOVED,
+            ChangeKind.TYPE_ADDED,
+        }
+        assert not ({c.kind for c in result.changes} & noisy_kinds)
+
+    def test_a_snapshot_already_in_ordinal_form_round_trips_unchanged(self) -> None:
+        already_ordinal = {
+            "library": "libtbb.so",
+            "version": "2022.3.0",
+            "schema_version": 25,
+            "types": [
+                {
+                    "name": "raii_guard<(lambda:task_group.h#1)>",
+                    "kind": "class",
+                }
+            ],
+        }
+        loaded = snapshot_from_dict(already_ordinal)
+        assert loaded.types[0].name == "raii_guard<(lambda:task_group.h#1)>"
+
+
+class TestKnownLimitationDifferentFilesSharingABasename:
+    """Documented, accepted limitation (Codex review): the ordinal group
+    key is ``(marker, header basename)`` -- the same checkout-independent
+    basename :func:`_declaring_header_discriminator` already reduces a
+    full path to -- so two genuinely different files sharing a basename
+    share one ordinal sequence. This test pins the documented behavior so
+    a future change to the grouping key is a deliberate decision, not a
+    silent regression in either direction."""
+
+    def test_an_edit_in_one_file_can_reorder_an_unrelated_same_basename_file(
+        self,
+    ) -> None:
+        # Two DIFFERENT physical files, both named "config.h" (a vendored
+        # dependency shape), each declaring one lambda -- before either
+        # snapshot has an edit, both compare identically to a snapshot of
+        # themselves alone.
+        before = [
+            strip_anonymous_type_location("(lambda at /vendor/a/config.h:100:1)"),
+            strip_anonymous_type_location("(lambda at /vendor/b/config.h:5:1)"),
+        ]
+        before_ordinals = collect_anonymous_type_ordinals(before)
+        before_final = [
+            apply_anonymous_type_ordinals(n, before_ordinals) for n in before
+        ]
+
+        # An unrelated lambda is added to vendor/b/config.h *only*, at a
+        # line ahead of vendor/a's own (unedited) lambda.
+        after = [
+            strip_anonymous_type_location("(lambda at /vendor/a/config.h:100:1)"),
+            strip_anonymous_type_location("(lambda at /vendor/b/config.h:1:1)"),
+            strip_anonymous_type_location("(lambda at /vendor/b/config.h:5:1)"),
+        ]
+        after_ordinals = collect_anonymous_type_ordinals(after)
+        after_final = [
+            apply_anonymous_type_ordinals(n, after_ordinals) for n in after
+        ]
+
+        # vendor/a's own, completely unedited lambda is reassigned a
+        # different ordinal purely because of the unrelated insertion in
+        # vendor/b -- the documented, accepted limitation.
+        assert before_final[0] != after_final[0]

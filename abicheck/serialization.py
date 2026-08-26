@@ -1644,6 +1644,11 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
         )
 
     _backfill_missing_elf_binding(snap)
+    # A pre-this-PR-saved snapshot still carries a closure's raw
+    # ``:<line>:<col>`` identity; schema_version doesn't track this, so
+    # renumber unconditionally -- a no-op once already in ordinal form
+    # (see AbiSnapshot.renumber_anonymous_closure_identities's docstring).
+    snap.renumber_anonymous_closure_identities()
     return snap
 
 

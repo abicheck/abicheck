@@ -857,6 +857,30 @@ def collect_anonymous_type_ordinals(
     header still shifts every later ordinal, the same way it would shift
     every later ``#N`` in a real compiler's own numbering).
 
+    A second, narrower known-accepted limitation (Codex review, fresh
+    evidence): the grouping key is ``(marker, header basename)``, the same
+    checkout-independent basename :func:`_declaring_header_discriminator`
+    already reduces a full path to (see that function's own docstring for
+    why the directory is dropped). Two genuinely DIFFERENT files sharing a
+    basename (e.g. two vendored dependencies each shipping their own
+    ``config.h``) therefore share one ordinal sequence: an edit that adds,
+    removes, or moves a lambda in one such file can shift the assigned
+    ordinal of an unrelated lambda in the OTHER file of the same basename,
+    even though their line:col never collided. This is a strictly worse
+    case of the same "two different headers, one basename" collision
+    :func:`_declaring_header_discriminator` already accepts as a documented
+    limitation (there, only an exact line:col match collides; here, any
+    edit within the shared basename group can reorder the whole group) --
+    not fixed here, because closing it needs real per-file identity (a full
+    path, or a stable hash of one) threaded from castxml/clang extraction
+    time through to this whole-snapshot renumbering pass, which runs after
+    :func:`strip_anonymous_type_location` has already discarded that
+    information down to a bare basename for every existing caller. That is
+    a cross-cutting change to an already-shipped, already-tested normalized
+    spelling (every existing consumer of :func:`strip_anonymous_type_location`
+    and its pinned test fixtures expect the current basename-only output),
+    not a scoped fix to this one function.
+
     Returns a mapping from ``(marker, header_basename, line, col)`` to a
     1-based ordinal, ready for :func:`apply_anonymous_type_ordinals`.
     """

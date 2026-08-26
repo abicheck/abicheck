@@ -16,4 +16,7 @@
   as an edit doesn't reorder or add/remove same-header, same-kind lambdas
   relative to each other, both sides of a comparison now assign the
   identical ordinal to the identical closure, eliminating all three noise
-  classes for that case.
+  classes for that case. Snapshots loaded from disk are renumbered too
+  (a no-op once already renumbered), so a baseline persisted before this
+  fix compares correctly against a freshly-dumped snapshot instead of
+  disagreeing on identity purely from the encoding change.
