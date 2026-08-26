@@ -671,6 +671,53 @@ def test_diff_has_unrecognized_content_catches_a_hypothetical_future_marker() ->
     assert gate.diff_touches_outside_only_mutate(diff, _ONLY_MUTATE_TWO) is True
 
 
+def test_diff_has_unrecognized_content_requires_a_header_before_entry_metadata() -> (
+    None
+):
+    """Git entry metadata (`rename from`/`rename to`, `old mode`/`new mode`,
+    `index `, ...) carries no path extractor anywhere in this module — the
+    owning `diff --git` header already names the path. Recognizing a
+    metadata-shaped line *regardless of parser state* (the first version of
+    this function) left a headerless `rename from`/`rename to` pair pasted
+    after an already-open, properly-headed hunk invisible to both this
+    function and the path-set comparison at once — the exact
+    "recognized but never path-extracted" mistake this function's own
+    docstring warns against, reproduced by this function's own first draft
+    (Codex review, PR #877, thirteenth round on this same predicate)."""
+    diff = (
+        "diff --git a/abicheck/diff_types.py b/abicheck/diff_types.py\n"
+        "--- a/abicheck/diff_types.py\n+++ b/abicheck/diff_types.py\n"
+        "@@ -1,0 +2,1 @@\n+    pass\n"
+        "rename from tests/shared_fixture.py\n"
+        "rename to tests/renamed_fixture.py\n"
+    )
+    assert gate.diff_has_unrecognized_content(diff) is True
+
+
+def test_diff_touches_outside_only_mutate_falls_back_on_a_headerless_rename() -> None:
+    diff = (
+        "diff --git a/abicheck/diff_types.py b/abicheck/diff_types.py\n"
+        "--- a/abicheck/diff_types.py\n+++ b/abicheck/diff_types.py\n"
+        "@@ -1,0 +2,1 @@\n+    pass\n"
+        "rename from tests/shared_fixture.py\n"
+        "rename to tests/renamed_fixture.py\n"
+    )
+    assert gate.diff_touches_outside_only_mutate(diff, _ONLY_MUTATE_TWO) is True
+
+
+def test_diff_has_unrecognized_content_still_accepts_a_real_headed_rename() -> None:
+    """A legitimate git rename (metadata immediately after its own
+    `diff --git` header, no content hunk) must still pass — the fix is
+    about *state*, not about rejecting rename metadata outright."""
+    diff = (
+        "diff --git a/tests/old_name.py b/tests/new_name.py\n"
+        "similarity index 100%\n"
+        "rename from tests/old_name.py\n"
+        "rename to tests/new_name.py\n"
+    )
+    assert gate.diff_has_unrecognized_content(diff) is False
+
+
 def test_mutant_run_scope_is_none_when_a_shared_test_fixture_is_touched() -> None:
     """The scenario `--require-baseline` alone cannot rule out: a production
     module and a *shared* test fixture both change, but the fixture doesn't

@@ -447,25 +447,50 @@ def diff_has_unrecognized_content(diff_text: str) -> bool:
     caught — provided nobody ever adds it to this function's own
     recognized set without also giving it a path extractor, exactly the
     mistake this docstring exists to warn the next round away from.
+
+    That mistake is exactly what the first version of this function made
+    for `_GIT_ENTRY_METADATA_PREFIXES`: those lines carry no path extractor
+    anywhere in this module (the owning ``diff --git`` header already
+    names the path; a rename/mode/index line never needs its own), so
+    recognizing one unconditionally — in *any* parser state, not only
+    immediately after the ``diff --git`` line that makes it legitimate —
+    left a headerless ``rename from``/``rename to`` pair (pasted after an
+    already-open, properly-headed hunk, say) invisible to *both* checks at
+    once: not path-extracted, and now also not flagged as unrecognized
+    (Codex review, PR #877, thirteenth round on this same predicate — the
+    same class of self-inflicted gap the eleventh round's fix already
+    warned future rounds away from, reproduced anyway one round later, this
+    time by this function's own first draft rather than by the code it was
+    meant to guard). Fixed with an explicit ``in_entry_metadata_zone``
+    flag: metadata prefixes are only recognized immediately after a
+    ``diff --git`` line (or after another recognized metadata line in that
+    same run), and the zone closes — same as `in_hunk` — the moment any
+    other recognized content type appears, so a metadata-shaped line
+    anywhere else falls straight through to the unrecognized-content
+    fallback instead of being waved through by a prefix match alone.
     """
     in_hunk = False
+    in_entry_metadata_zone = False
     for line in diff_text.splitlines():
         if not line:
             return True
         if line.startswith("diff --git "):
             in_hunk = False
+            in_entry_metadata_zone = True
             continue
-        if line.startswith(_GIT_ENTRY_METADATA_PREFIXES):
-            in_hunk = False
+        if in_entry_metadata_zone and line.startswith(_GIT_ENTRY_METADATA_PREFIXES):
             continue
         if line.startswith(("--- ", "+++ ")):
             in_hunk = False
+            in_entry_metadata_zone = False
             continue
         if _HUNK.match(line):
             in_hunk = True
+            in_entry_metadata_zone = False
             continue
         if _BINARY_MARKER.match(line) or _ONLY_IN_MARKER.match(line):
             in_hunk = False
+            in_entry_metadata_zone = False
             continue
         if in_hunk and line.startswith(_HUNK_BODY_PREFIXES):
             continue
