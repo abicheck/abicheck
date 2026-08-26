@@ -554,7 +554,16 @@ class AvailabilityLedger:
             overrides[key] = FactAvailability.from_dict(
                 _required_field(raw, "availability", "an override document")
             )
-        raw_default = data.get("unknown_family_default")
+        # Required too, reversing the previous round's call. That round
+        # argued absence is safe here because it resolves to `NOT_COLLECTED`,
+        # a gap status that claims nothing — true, but a weaker rule than the
+        # one actually available: `to_dict` writes this key unconditionally,
+        # so its absence means the document is not this writer's output.
+        # A `null` value is still accepted below and still reads as unstated;
+        # what is refused is the key being gone.
+        raw_default = _required_field(
+            data, "unknown_family_default", "an availability ledger"
+        )
         default = (
             FactAvailability.from_dict(raw_default)
             if raw_default is not None

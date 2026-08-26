@@ -159,7 +159,12 @@ class IdentityConflict:
             reason=_required_field(data, "reason", "an identity conflict document"),
             occurrences=tuple(
                 OccurrenceId.from_dict(raw)
-                for raw in _row_sequence(data.get("occurrences", ()), "occurrences")
+                for raw in _row_sequence(
+                    _required_field(
+                        data, "occurrences", "an identity conflict document"
+                    ),
+                    "occurrences",
+                )
             ),
         )
 
@@ -425,9 +430,17 @@ class OccurrenceSet:
         # (Codex review). Same rule the availability documents already apply.
         _mapping(data, "an occurrence set document")
         result = cls()
+        # Required, not defaulted: `to_dict` writes this key unconditionally,
+        # so an absent one means the document did not come from this writer —
+        # and defaulting it turned a truncated set into a valid empty one,
+        # indistinguishable from the writer's explicit claim that the producer
+        # found no observations (`AGENTS.md` invariant 3, Codex review).
         result.extend(
             OccurrenceId.from_dict(raw)
-            for raw in _row_sequence(data.get("occurrences", ()), "occurrences")
+            for raw in _row_sequence(
+                _required_field(data, "occurrences", "an occurrence set document"),
+                "occurrences",
+            )
         )
         return result
 

@@ -58,7 +58,11 @@ class TestMalformedDocumentsRaiseTheDocumentedErrorKinds:
             ),
             pytest.param(
                 AvailabilityLedger.from_dict,
-                {"families": {}, "overrides": [{}]},
+                {
+                    "families": {},
+                    "unknown_family_default": {"status": "not_collected"},
+                    "overrides": [{}],
+                },
                 "family",
                 id="ledger-override-family",
             ),
@@ -290,7 +294,11 @@ class TestRowSequenceFieldsRejectEveryWrongContainer:
         """
         cases = [
             lambda: AvailabilityLedger.from_dict(
-                {"families": {}, "overrides": container}
+                {
+                    "families": {},
+                    "unknown_family_default": {"status": "not_collected"},
+                    "overrides": container,
+                }
             ),
             lambda: OccurrenceId.from_dict(
                 {
@@ -325,13 +333,23 @@ class TestRowSequenceFieldsRejectEveryWrongContainer:
                 }
             )
 
-    def test_real_arrays_and_absent_fields_still_work(self) -> None:
-        """The control. An *omitted* field is not a malformed one.
+    def test_real_arrays_and_optional_fields_still_work(self) -> None:
+        """The control, corrected: an *omitted* field is not always benign.
 
-        The default is a real empty tuple, so absence still means "no rows
-        stated" — only a wrongly-typed container is refused.
+        This asserted that `OccurrenceSet.from_dict({})` reads as an empty
+        set — the same absence-is-emptiness reading the ledger's own
+        `families` test encoded, and wrong for the same reason. `to_dict`
+        writes `occurrences` unconditionally, so its absence is truncation,
+        and treating it as "the producer found no observations" is the claim
+        invariant 3 forbids (Codex review).
+
+        A genuinely optional field — one `to_dict` omits at its default —
+        does still default, which is the other half of the rule and is swept
+        over every record in
+        `TestEveryUnconditionallyWrittenKeyIsRequired`.
         """
-        assert OccurrenceSet.from_dict({}).to_dict() == {"occurrences": []}
+        with pytest.raises(ValueError, match="missing required field"):
+            OccurrenceSet.from_dict({})
         assert OccurrenceSet.from_dict({"occurrences": []}).to_dict() == {
             "occurrences": []
         }
@@ -342,7 +360,13 @@ class TestRowSequenceFieldsRejectEveryWrongContainer:
             == ()
         )
         assert (
-            AvailabilityLedger.from_dict({"families": {}, "overrides": []}).overrides
+            AvailabilityLedger.from_dict(
+                {
+                    "families": {},
+                    "unknown_family_default": {"status": "not_collected"},
+                    "overrides": [],
+                }
+            ).overrides
             == {}
         )
 
@@ -792,7 +816,13 @@ class TestOverrideRowsAreCheckedIndividually:
             availability={"status": "present"},
         )
         with pytest.raises(TypeError, match="override document"):
-            AvailabilityLedger.from_dict({"families": {}, "overrides": [row]})
+            AvailabilityLedger.from_dict(
+                {
+                    "families": {},
+                    "unknown_family_default": {"status": "not_collected"},
+                    "overrides": [row],
+                }
+            )
 
     def test_a_real_override_row_still_round_trips(self) -> None:
         """The control: the row that should be accepted still is."""
@@ -800,6 +830,7 @@ class TestOverrideRowsAreCheckedIndividually:
 
         document = {
             "families": {},
+            "unknown_family_default": {"status": "not_collected"},
             "overrides": [
                 {
                     "family": "exports",
@@ -855,7 +886,11 @@ class TestAFabricatingMappingCannotInventARequiredField:
     def test_override_document(self) -> None:
         with pytest.raises(ValueError, match="entity"):
             AvailabilityLedger.from_dict(
-                {"families": {}, "overrides": [self._fabricating(family="exports")]}
+                {
+                    "families": {},
+                    "unknown_family_default": {"status": "not_collected"},
+                    "overrides": [self._fabricating(family="exports")],
+                }
             )
 
     def test_a_plain_dict_still_reports_the_same_missing_field(self) -> None:
@@ -868,3 +903,116 @@ class TestAFabricatingMappingCannotInventARequiredField:
         """
         with pytest.raises(ValueError, match="missing required field"):
             EntityId.from_dict({"kind": "function"})
+
+
+class TestEveryUnconditionallyWrittenKeyIsRequired:
+    """The rule behind four separate reports, stated once and measured.
+
+    `from_dict` may default a field only where `to_dict` omits it
+    conditionally. A key the writer always emits cannot be absent in a
+    document that writer produced, so absence means truncation — and
+    defaulting it converts damage into a positive claim: an empty
+    collection asserts "the producer ran and established nothing is
+    there" (`AGENTS.md` invariant 3).
+
+    Four instances of this were reported one at a time — `overrides`,
+    then `families` alongside it, then `occurrences` in two modules, with
+    `unknown_family_default` and `status` found by applying the rule
+    rather than waiting for the fifth report. Enumerating it removes the
+    need for a sixth: a record whose writer gains an unconditional key
+    fails here unless its reader requires it.
+
+    A *minimal* instance is what makes this mechanical. Every optional
+    field is omitted by `to_dict` at its default, so whatever a minimal
+    instance still emits is exactly the unconditional set — no list of
+    key names to maintain, and no way for the test to disagree with the
+    writer.
+    """
+
+    @pytest.mark.parametrize(
+        "record",
+        [
+            pytest.param(EntityId(EntityKind.FUNCTION, "ns::f"), id="entity"),
+            pytest.param(
+                OccurrenceId(
+                    EntityId(EntityKind.FUNCTION, "ns::f"), ObservationKind.AST
+                ),
+                id="occurrence",
+            ),
+            pytest.param(OccurrenceSet(), id="occurrence-set"),
+            pytest.param(
+                IdentityConflict(
+                    reason="two spellings",
+                    occurrences=(
+                        OccurrenceId(
+                            EntityId(EntityKind.FUNCTION, "ns::f"),
+                            ObservationKind.AST,
+                        ),
+                        OccurrenceId(
+                            EntityId(EntityKind.FUNCTION, "ns::f"),
+                            ObservationKind.DWARF,
+                        ),
+                    ),
+                ),
+                id="identity-conflict",
+            ),
+            pytest.param(FactAvailability(FactStatus.PRESENT), id="availability"),
+            pytest.param(AvailabilityLedger(), id="ledger"),
+        ],
+    )
+    def test_dropping_any_key_the_writer_always_emits_is_refused(
+        self, record: Any
+    ) -> None:
+        document = record.to_dict()
+        assert document, "a minimal record must still emit its required keys"
+
+        for key in document:
+            truncated = {k: v for k, v in document.items() if k != key}
+            with pytest.raises((TypeError, ValueError)):
+                type(record).from_dict(truncated)
+
+    @pytest.mark.parametrize(
+        ("full", "minimal"),
+        [
+            pytest.param(
+                EntityId(EntityKind.FUNCTION, "ns::f", discriminator="d"),
+                EntityId(EntityKind.FUNCTION, "ns::f"),
+                id="entity",
+            ),
+            pytest.param(
+                OccurrenceId(
+                    EntityId(EntityKind.FUNCTION, "ns::f"),
+                    ObservationKind.AST,
+                    container="libfoo.so",
+                    attributes=(("version", "GLIBC_2.2"),),
+                ),
+                OccurrenceId(
+                    EntityId(EntityKind.FUNCTION, "ns::f"), ObservationKind.AST
+                ),
+                id="occurrence",
+            ),
+            pytest.param(
+                FactAvailability(FactStatus.PARTIAL, producer="dwarf"),
+                FactAvailability(FactStatus.PARTIAL),
+                id="availability",
+            ),
+        ],
+    )
+    def test_the_optional_keys_are_still_optional(
+        self, full: Any, minimal: Any
+    ) -> None:
+        """The other half of the rule.
+
+        Without this, "require everything" would satisfy the test above and
+        break the round trip for precisely the fields `to_dict` omits to keep
+        a document small. The optional set is derived the same mechanical
+        way — whatever the full document carries that the minimal one does
+        not — so neither half depends on a maintained list of key names.
+        """
+        document = full.to_dict()
+        optional = set(document) - set(minimal.to_dict())
+        assert optional, "this record was chosen for having optional keys"
+
+        for key in optional:
+            without = {k: v for k, v in document.items() if k != key}
+            type(full).from_dict(without)  # must not raise

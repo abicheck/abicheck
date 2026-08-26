@@ -166,18 +166,31 @@ class TestDuplicateOverridesAreRefused:
 
     def test_duplicate_rows_are_refused(self) -> None:
         with pytest.raises(ValueError, match="duplicate availability override"):
-            AvailabilityLedger.from_dict({"families": {}, "overrides": self._rows()})
+            AvailabilityLedger.from_dict(
+                {
+                    "families": {},
+                    "unknown_family_default": {"status": "not_collected"},
+                    "overrides": self._rows(),
+                }
+            )
 
     def test_the_refusal_does_not_depend_on_row_order(self) -> None:
         """Both orderings refuse; neither silently wins."""
         for rows in (self._rows(), list(reversed(self._rows()))):
             with pytest.raises(ValueError, match="duplicate availability override"):
-                AvailabilityLedger.from_dict({"families": {}, "overrides": rows})
+                AvailabilityLedger.from_dict(
+                    {
+                        "families": {},
+                        "unknown_family_default": {"status": "not_collected"},
+                        "overrides": rows,
+                    }
+                )
 
     def test_distinct_entities_in_one_family_are_fine(self) -> None:
         ledger = AvailabilityLedger.from_dict(
             {
                 "families": {},
+                "unknown_family_default": {"status": "not_collected"},
                 "overrides": [
                     {
                         "family": "layout",
@@ -199,6 +212,7 @@ class TestDuplicateOverridesAreRefused:
         ledger = AvailabilityLedger.from_dict(
             {
                 "families": {},
+                "unknown_family_default": {"status": "not_collected"},
                 "overrides": [
                     {
                         "family": "layout",
@@ -371,7 +385,13 @@ class TestScalarDiagnosticsAreRefused:
         string, they would acquire exactly this defect.
         """
         with pytest.raises((TypeError, ValueError, KeyError)):
-            AvailabilityLedger.from_dict({"families": {}, "overrides": "oops"})
+            AvailabilityLedger.from_dict(
+                {
+                    "families": {},
+                    "unknown_family_default": {"status": "not_collected"},
+                    "overrides": "oops",
+                }
+            )
 
 
 class TestDecisionKeysAreRejectedNotCoerced:
@@ -419,7 +439,13 @@ class TestDecisionKeysAreRejectedNotCoerced:
         row[field] = key
 
         with pytest.raises(TypeError, match="override"):
-            AvailabilityLedger.from_dict({"families": {}, "overrides": [row]})
+            AvailabilityLedger.from_dict(
+                {
+                    "families": {},
+                    "unknown_family_default": {"status": "not_collected"},
+                    "overrides": [row],
+                }
+            )
 
     def test_a_well_formed_ledger_still_round_trips(self) -> None:
         ledger = AvailabilityLedger()
@@ -532,7 +558,11 @@ class TestASequenceShapedFamilyTableIsRefused:
 
     def test_a_real_mapping_still_loads(self) -> None:
         ledger = AvailabilityLedger.from_dict(
-            {"families": {"layout": {"status": "present"}}, "overrides": []}
+            {
+                "families": {"layout": {"status": "present"}},
+                "overrides": [],
+                "unknown_family_default": {"status": "not_collected"},
+            }
         )
 
         assert ledger.for_family("layout").status is FactStatus.PRESENT
@@ -558,7 +588,13 @@ class TestASequenceShapedFamilyTableIsRefused:
         # The control: both present and empty is still a real, loadable
         # ledger that establishes there is nothing in either collection.
         assert (
-            AvailabilityLedger.from_dict({"families": {}, "overrides": []}).families
+            AvailabilityLedger.from_dict(
+                {
+                    "families": {},
+                    "unknown_family_default": {"status": "not_collected"},
+                    "overrides": [],
+                }
+            ).families
             == {}
         )
 

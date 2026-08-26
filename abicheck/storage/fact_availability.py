@@ -46,6 +46,7 @@ from .guards import (
     diagnostics_from as _diagnostics_from,
     instance_of as _instance_of,
     provenance_text as _provenance_text,
+    required_field as _required_field,
 )
 
 __all__ = ["FactAvailability"]
@@ -279,7 +280,11 @@ class FactAvailability:
                 "an availability record must be a mapping, not "
                 f"{type(data).__name__} ({data!r})"
             )
-        raw_status = data.get("status")
+        # `FactStatus(None)` already refused an absent status, but blamed it
+        # on a newer writer ("unknown fact status None") when the document was
+        # simply truncated. Same rule as its siblings: `to_dict` writes
+        # `status` unconditionally, so absence is malformed and says so.
+        raw_status = _required_field(data, "status", "an availability record")
         try:
             status = FactStatus(raw_status)
         except ValueError as exc:
