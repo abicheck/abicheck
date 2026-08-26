@@ -1152,3 +1152,10 @@ def test_run_scope_mode_is_unknown_for_a_bare_database_read(
     doc = json.loads(receipt.read_text())
     assert doc["run_scope"]["mode"] == "unknown"
     assert doc["run_seconds"] is None
+    # `load_cicd_stats` above is mocked to return a real, non-None dict — a
+    # bare database read must not publish mutants_measured from it either:
+    # the local mutmut database it reflects could be arbitrarily old or
+    # itself the product of an earlier scoped run, and this invocation
+    # never executed anything to measure (Codex review, PR #877,
+    # seventeenth round).
+    assert doc["mutants_measured"] is None

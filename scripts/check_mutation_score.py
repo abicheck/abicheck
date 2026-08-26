@@ -1706,23 +1706,29 @@ def main(argv: list[str] | None = None) -> int:
     if args.json:
         mutants_measured = None
         mutants_per_second = None
-        # `stats` is always read from args.mutants_dir's *local* database
-        # (_gather()'s own load_cicd_stats(Path(args.mutants_dir)) call, on
-        # every branch) — for --run or a bare `mutmut results` read, that is
-        # the same database `results_out` was just produced from, so the two
-        # genuinely correspond. --results-file breaks that: `results_out`
-        # comes from an arbitrary external capture the caller supplied, while
-        # `stats` still comes from whatever happens to be sitting in
-        # args.mutants_dir locally — two runs with the same survivor count
-        # (the only field the cross-check above validates) but different
-        # populations would pair a real `total`/`not_checked` from one run
-        # with a saved listing from another, publishing a plausible-looking
-        # but meaningless `mutants_measured`/`mutants_per_second` (Codex
-        # review).
-        if stats is not None and not args.results_file:
+        # These are budget/efficiency metrics for *this invocation's own*
+        # measurement, not a report of whatever the local mutmut database
+        # happens to currently hold — so both require the same
+        # `args.run and not args.results_file` provenance bar run_seconds
+        # already holds itself to (that combination genuinely executes
+        # mutmut; --run alone does not, since --results-file wins and
+        # returns saved results unconditionally when both are given — see
+        # this same condition a few lines above `_gather()`'s own call).
+        # Without the bare-database-read case excluded too, a bare `mutmut
+        # results` read (no --run, no --results-file) would publish a
+        # fresh-looking mutants_measured from a database that could be
+        # arbitrarily old or itself the product of an earlier *scoped*
+        # run — self-consistent with `results_out` (both come from the same
+        # local mutants_dir at read time), but not evidence this invocation
+        # measured anything at all (Codex review). --results-file is the
+        # sibling, narrower case already fixed above: there `stats` isn't
+        # even self-consistent with `results_out`, since the latter is an
+        # arbitrary externally-supplied file with no relationship to
+        # whatever happens to be sitting in args.mutants_dir locally.
+        if stats is not None and args.run and not args.results_file:
             not_checked = stats.get("not_checked", 0)
             mutants_measured = max(stats.get("total", 0) - not_checked, 0)
-            if args.run and gather_seconds > 0:
+            if gather_seconds > 0:
                 mutants_per_second = round(mutants_measured / gather_seconds, 3)
         Path(args.json).write_text(
             json.dumps(
