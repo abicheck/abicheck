@@ -43,6 +43,7 @@ from typing import Any
 __all__ = [
     "decision_key",
     "enum_member",
+    "instance_of",
     "diagnostics_from",
     "identity_text",
     "mapping",
@@ -163,6 +164,13 @@ def diagnostics_from(raw: Any) -> tuple[str, ...]:
     an unknown status rather than downgrading it. Silently promoting a scalar
     to a one-element list would make a malformed package indistinguishable from
     a well-formed one, which is how the original defect went unnoticed.
+
+    The *members* are rejected too, and this was the half the container guard
+    left open: `str()` turned `diagnostics: [1, null]` into
+    `("1", "None")` and wrote it back as apparently valid diagnostic text
+    (Codex review). Preserving the extraction error a reader audits with is
+    the entire reason this field is guarded, so silently manufacturing a
+    plausible one defeats it exactly as the character-splitting did.
     """
     if isinstance(raw, (str, bytes)) or not isinstance(raw, Sequence):
         raise TypeError(
@@ -170,7 +178,15 @@ def diagnostics_from(raw: Any) -> tuple[str, ...]:
             f"{type(raw).__name__} ({raw!r}); a bare string would be split "
             "into one diagnostic per character"
         )
-    return tuple(str(d) for d in raw)
+    entries = tuple(raw)
+    for index, entry in enumerate(entries):
+        if not isinstance(entry, str):
+            raise TypeError(
+                f"diagnostics[{index}] must be a string, not "
+                f"{type(entry).__name__} ({entry!r}); coercing it would write "
+                "a manufactured diagnostic back as if a producer had reported it"
+            )
+    return entries
 
 
 def mapping(raw: Any, field_name: str) -> None:
@@ -208,5 +224,22 @@ def enum_member(raw: Any, enum_class: type, field_name: str) -> Any:
             f"{field_name} must be a {enum_class.__name__}, not "
             f"{type(raw).__name__} ({raw!r}); the string spelling is what a "
             "document carries, not what an in-memory record holds"
+        )
+    return raw
+
+
+def instance_of(raw: Any, expected: type, field_name: str) -> Any:
+    """A stored record, checked where it is assigned rather than where read.
+
+    Nothing consults a nested record until a decision needs it, so a value of
+    the wrong type survives construction and surfaces as an `AttributeError`
+    from inside whichever accessor happens to reach it first — `key`,
+    `to_dict`, `comparable` — far from the assignment that accepted it
+    (Codex review).
+    """
+    if not isinstance(raw, expected):
+        raise TypeError(
+            f"{field_name} must be a {expected.__name__}, not "
+            f"{type(raw).__name__} ({raw!r})"
         )
     return raw

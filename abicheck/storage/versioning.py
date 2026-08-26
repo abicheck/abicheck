@@ -211,9 +211,30 @@ class StorageVersions:
             ),
         }
         if self.section_schema_versions:
-            out["section_schema_versions"] = dict(
-                sorted(self.section_schema_versions.items())
-            )
+            # Normalized the way this field's own reader normalizes it, so a
+            # document emits what it reads back. Writing the mapping verbatim
+            # meant `{1: 1}` reloaded as `{"1": 1}` and `{"x": "bad"}` as
+            # `{"x": 0}`, while mixed integer and string keys raised from
+            # `sorted` mid-serialization (Codex review) — the same
+            # "serialization agrees with the reader's verdict" property the
+            # two fail-closed axes above already hold to, on the one field
+            # that is a mapping rather than a scalar.
+            #
+            # `str()` on the key rather than a rejection is deliberate and is
+            # this module's documented exception: the informational axes parse
+            # defensively because no decision reads them, and aborting a write
+            # over one would break that contract. Everything a decision reads
+            # rejects instead. Two keys colliding under `str()` therefore
+            # still collapse — but through `sorted`, so which survives is
+            # decided by the pair's own order rather than by how the mapping
+            # was traversed.
+            out["section_schema_versions"] = {
+                key: value
+                for key, value in sorted(
+                    (str(k), _stated_count(v))
+                    for k, v in self.section_schema_versions.items()
+                )
+            }
         if self.normalization_recipe:
             out["normalization_recipe"] = self.normalization_recipe
         producer = self.producer.to_dict()

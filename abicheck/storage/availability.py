@@ -50,6 +50,7 @@ from typing import Any
 from .guards import (
     decision_key as _decision_key,
     diagnostics_from as _diagnostics_from,
+    instance_of as _instance_of,
     mapping as _mapping,
     provenance_text as _provenance_text,
 )
@@ -134,17 +135,11 @@ _ASSERTS_NO_PRODUCER = frozenset({FactStatus.NOT_COLLECTED})
 def _availability(raw: Any, field_name: str) -> None:
     """A stored record, checked at the door rather than where it is read.
 
-    Nothing reads a family's record until a decision needs one, so a value
-    that is not a :class:`FactAvailability` survives construction and
-    surfaces as an ``AttributeError`` inside ``comparable``/``narrowed`` —
-    far from the assignment that accepted it, and only on the branch that
-    happens to consult it.
+    Thin wrapper over the shared guard so this module names its own record
+    type once. See :func:`abicheck.storage.guards.instance_of` for why a
+    record slot is checked where it is assigned.
     """
-    if not isinstance(raw, FactAvailability):
-        raise TypeError(
-            f"{field_name} must be a FactAvailability, not "
-            f"{type(raw).__name__} ({raw!r})"
-        )
+    _instance_of(raw, FactAvailability, field_name)
 
 
 @dataclass(frozen=True)

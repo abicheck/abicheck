@@ -54,7 +54,12 @@ from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
-from .guards import enum_member as _enum_member, identity_text as _identity_text
+from .guards import (
+    enum_member as _enum_member,
+    identity_text as _identity_text,
+    instance_of as _instance_of,
+    mapping as _mapping,
+)
 
 __all__ = [
     "EntityId",
@@ -267,6 +272,9 @@ class OccurrenceId:
         # this way; the constructor did not, which is the same
         # boundary-only-guard gap as the provenance and diagnostics fields.
         object.__setattr__(
+            self, "entity", _instance_of(self.entity, EntityId, "entity")
+        )
+        object.__setattr__(
             self,
             "observation",
             _enum_member(self.observation, ObservationKind, "observation"),
@@ -442,6 +450,7 @@ class IdentityConflict:
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> IdentityConflict:
+        _mapping(data, "an identity conflict document")
         return cls(
             # Not `str(...)`: the constructor validates it, and coercing
             # here would reintroduce exactly the round-trip asymmetry that
@@ -646,6 +655,11 @@ class OccurrenceSet:
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> OccurrenceSet:
+        # The outer container is checked before `.get` reaches it: a scalar or
+        # a list otherwise raised `AttributeError`, which a caller separating
+        # a malformed package from a broken reader classifies as the second
+        # (Codex review). Same rule the availability documents already apply.
+        _mapping(data, "an occurrence set document")
         result = cls()
         result.extend(
             OccurrenceId.from_dict(raw) for raw in data.get("occurrences", ())

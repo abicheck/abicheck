@@ -51,6 +51,7 @@ from abicheck.storage.identity import (
     IdentityConflict,
     ObservationKind,
     OccurrenceId,
+    OccurrenceSet,
 )
 
 #: Values no identity-bearing or provenance field may accept. `True` and `1.0`
@@ -351,3 +352,60 @@ def test_the_ledger_mutators_check_the_record_too(value: Any) -> None:
 
     assert _refused(_declare)
     assert _refused(_override)
+
+
+@pytest.mark.parametrize("value", NOT_RECORDS)
+def test_the_nested_entity_is_a_record(value: Any) -> None:
+    """A record slot holding another record, not a scalar field.
+
+    `OccurrenceId.__post_init__` validated its own text and vocabulary fields
+    and not the entity it wraps, so a parsed mapping or a string survived
+    construction and surfaced from `key`/`to_dict`/`OccurrenceSet.add`
+    (Codex review).
+    """
+    assert _refused(
+        lambda: OccurrenceId(entity=value, observation=ObservationKind.DWARF)
+    )
+
+
+@pytest.mark.parametrize("value", NOT_MAPPINGS)
+def test_every_document_door_refuses_a_non_mapping(value: Any) -> None:
+    """Cleanly, not as an `AttributeError` from inside `.get`.
+
+    A caller separating "malformed package" from "broken reader" catches
+    `TypeError`/`ValueError`. The availability documents were fixed for this
+    a round earlier; the identity ones still called `.get` first (Codex
+    review), which is the same fix landing at one site and not its siblings.
+    """
+    for door in (
+        EntityId.from_dict,
+        OccurrenceId.from_dict,
+        IdentityConflict.from_dict,
+        OccurrenceSet.from_dict,
+    ):
+        assert _refused(lambda door=door: door(value)), f"{door.__qualname__}"
+
+
+@pytest.mark.parametrize("value", [1, 1.0, True, None, {"k": 1}, b"b", ["x"]])
+def test_a_diagnostic_entry_is_not_coerced(value: Any) -> None:
+    """The container guard checked the sequence and coerced its members.
+
+    `diagnostics: [1, null]` became `("1", "None")` and was written back as
+    apparently valid diagnostic text — manufacturing the extraction error a
+    reader audits with, which is the whole reason this field is guarded
+    (Codex review).
+    """
+    assert _refused(lambda: FactAvailability(FactStatus.PRESENT, diagnostics=[value]))
+    assert _refused(
+        lambda: FactAvailability.from_dict(
+            {"status": "present", "diagnostics": [value]}
+        )
+    )
+
+
+def test_a_real_diagnostic_list_still_loads() -> None:
+    """The parity must not be satisfied by refusing everything."""
+    record = FactAvailability(FactStatus.FAILED, diagnostics=["parse error", "x"])
+
+    assert record.diagnostics == ("parse error", "x")
+    assert FactAvailability.from_dict(record.to_dict()) == record

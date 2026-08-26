@@ -28,6 +28,7 @@ and for the same reason.
 
 from __future__ import annotations
 
+import ast
 import importlib
 import re
 from pathlib import Path
@@ -125,3 +126,39 @@ def test_the_package_reexports_exactly_the_modules_public_surface() -> None:
     assert list(package.__all__) == sorted(package.__all__)
     for name in package.__all__:
         assert hasattr(package, name), f"{name} is in __all__ but not importable"
+
+
+def test_no_docstring_carries_a_lone_surrogate() -> None:
+    """A docstring is source text, and source text has to survive being encoded.
+
+    `semantic_digest`'s docstring quoted the surrogate-escaped path this
+    module handles — in a non-raw string, so the escape became a real lone
+    surrogate in `__doc__`. Nothing on Linux minded. On macOS the storage
+    package failed to import at all and took every test in this directory
+    with it, and coverage could not parse the file either.
+
+    The failure is a property of the character, not of the module that
+    happens to hold it, so this checks the whole package rather than the one
+    docstring that had it. Documenting an escape means writing it escaped.
+    """
+    package = Path(importlib.import_module("abicheck.storage").__file__ or "").parent
+    offenders: list[str] = []
+    for path in sorted(package.glob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if not isinstance(
+                node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)
+            ):
+                continue
+            doc = ast.get_docstring(node, clean=False)
+            if doc is None:
+                continue
+            for index, char in enumerate(doc):
+                if 0xD800 <= ord(char) <= 0xDFFF:
+                    name = getattr(node, "name", "<module>")
+                    offenders.append(f"{path.name}:{name} at {index} ({char!r})")
+
+    assert offenders == [], (
+        "a lone surrogate in a docstring cannot be encoded to UTF-8, and the "
+        f"module carrying one may fail to import: {offenders}"
+    )

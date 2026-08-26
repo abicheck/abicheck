@@ -614,3 +614,35 @@ class TestAMalformedDocumentDegradesToTheFailClosedValue:
         """
         with pytest.raises((TypeError, ValueError)):
             cls.from_dict(raw)
+
+
+class TestTheInformationalMappingAxisRoundTrips:
+    """`section_schema_versions` is a mapping, and was written verbatim.
+
+    The two fail-closed axes already held "what is written reads back the
+    same way". This one did not: `{1: 1}` reloaded as `{"1": 1}`,
+    `{"x": "bad"}` as `{"x": 0}`, and mixed key types raised from `sorted`
+    part-way through serialization (Codex review). It is normalized on the
+    way out by the same rules its own reader applies.
+    """
+
+    @pytest.mark.parametrize(
+        "raw",
+        [{1: 1}, {"x": "bad"}, {1: 1, "1": 2}, {"a": 3, "b": 1}, {"s": True}],
+    )
+    def test_the_document_is_what_its_reader_produces(self, raw: Any) -> None:
+        emitted = StorageVersions(section_schema_versions=raw).to_dict()
+
+        assert StorageVersions.from_dict(emitted).to_dict() == emitted
+
+    def test_serialization_does_not_raise_on_mixed_key_types(self) -> None:
+        """The half that was not a wrong value but an aborted write."""
+        emitted = StorageVersions(section_schema_versions={1: 1, "b": 2}).to_dict()
+
+        assert emitted["section_schema_versions"] == {"1": 1, "b": 2}
+
+    def test_a_well_formed_mapping_is_untouched(self) -> None:
+        """Normalizing the malformed case must not disturb the valid one."""
+        versions = StorageVersions(section_schema_versions={"entities": 3})
+
+        assert versions.to_dict()["section_schema_versions"] == {"entities": 3}

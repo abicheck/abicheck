@@ -274,13 +274,13 @@ def semantic_digest(value: Any, *, algorithm: str = "sha256") -> str:
     The hash payload is deliberately **ASCII** (``ensure_ascii=True``), unlike
     :func:`canonical_json`'s stored document. Two reasons, and the first is a
     real defect this closes: a POSIX path carrying a non-UTF-8 byte decodes
-    through ``surrogateescape`` into a lone surrogate — ``os.fsdecode(b"caf\xe9")``
-    is ``"caf\udce9"``, which is an ordinary source path on a real filesystem —
+    through ``surrogateescape`` into a lone surrogate — ``os.fsdecode(b"caf\\xe9")``
+    is ``"caf\\udce9"``, which is an ordinary source path on a real filesystem —
     and encoding that to UTF-8 raises ``UnicodeEncodeError``. So a supported
     string could make a package unaddressable, and worse, asymmetrically:
     ``canonical_json`` accepted the same value happily, since only the encode
     step failed (Codex review). Standard JSON escaping represents a lone
-    surrogate as ``\udce9`` and the payload encodes cleanly.
+    surrogate as ``\\udce9`` and the payload encodes cleanly.
 
     Second, an ASCII payload is re-derivable by any implementation that can
     produce the same JSON escaping, rather than requiring agreement on UTF-8
