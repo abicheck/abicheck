@@ -108,6 +108,16 @@ DEFAULT_MAX_BLOB_BYTES = 1024 * 1024 * 1024
 #: actually storing) an enormous manifest member).
 DEFAULT_MAX_MANIFEST_BYTES = 64 * 1024 * 1024
 
+#: Slack added to a decoded-size cap when bounding the *outer*,
+#: still-compressed blob member read -- zstd frame/block overhead can make
+#: an incompressible payload's compressed form slightly larger than its
+#: decoded size, and this margin is deliberately far more generous than
+#: any real zstd frame needs, so it costs nothing against a genuine
+#: decompression-bomb attempt (which the tighter decoded running-total
+#: check below still catches) while never spuriously rejecting a
+#: legitimate payload at the cap (Codex review).
+_ZSTD_FRAME_OVERHEAD_SLACK_BYTES = 1024 * 1024
+
 
 def _zstd_module() -> Any:
     try:
@@ -159,14 +169,96 @@ def sniff_bundle_archive_format(path: str | Path) -> str:
     which the plain-JSON ``BundleFacts`` path already detects and
     transparently decompresses from those same magic-byte conventions).
     Used by ``serialization.load_bundle_facts``'s ``format="auto"``.
+
+    Always ``"json"`` for a non-regular-file source (a FIFO, `/dev/stdin`,
+    a socket) without reading anything from it (Codex review): a real
+    bundle archive can never actually be delivered that way regardless --
+    `zipfile.ZipFile` seeks to the *end* of its input to locate the
+    central directory, which a non-seekable stream cannot support -- so
+    consuming this sniff's own 4-byte peek from a non-regular source would
+    only cost the caller's later, separate open (``read_snapshot_text``)
+    those same bytes for no benefit, and could hang or misparse a pipe
+    that isn't rewindable.
     """
     p = Path(path)
+    try:
+        st = p.stat()
+    except OSError as exc:
+        raise SnapshotError(f"Cannot read {p}: {exc}") from exc
+    if not stat.S_ISREG(st.st_mode):
+        return "json"
     try:
         with open(p, "rb") as f:
             prefix = f.read(4)
     except OSError as exc:
         raise SnapshotError(f"Cannot read {p}: {exc}") from exc
     return "archive" if prefix.startswith(_ZIP_MAGIC_PREFIXES) else "json"
+
+
+#: A real bundle archive (one manifest member + one member per *distinct*
+#: content hash) is never expected to have anywhere near this many
+#: members -- a crafted archive claiming more is rejected outright before
+#: `zipfile.ZipFile` is ever constructed (Codex review): `ZipFile.__init__`
+#: eagerly parses the *entire* central directory and builds one `ZipInfo`
+#: per entry, so an archive with an enormous entry count can exhaust
+#: memory merely by being opened, before any of this module's own
+#: per-member size guards ever run. Deliberately well below 0xFFFF
+#: (65535): the non-ZIP64 EOCD record's own 2-byte entry-count field
+#: cannot represent 65535 itself (that value is reserved as the "read the
+#: real count from the ZIP64 EOCD instead" sentinel _reject_absurd_
+#: central_directory doesn't parse), so a cap anywhere near that ceiling
+#: would be unreachable for the common, non-ZIP64 archives this check
+#: actually covers.
+_MAX_ARCHIVE_MEMBERS = 20_000
+
+#: Bytes to search from the end of the file for the End-Of-Central-
+#: Directory record's signature -- the record itself is 22 bytes plus up
+#: to a 64 KiB archive comment (the zip format's own comment-length field
+#: is 2 bytes), so this comfortably covers the worst case.
+_EOCD_SEARCH_WINDOW_BYTES = 65536 + 22
+
+
+def _reject_absurd_central_directory(path: Path) -> None:
+    """Reject *path* if its End-Of-Central-Directory record claims more
+    than `_MAX_ARCHIVE_MEMBERS` entries -- read directly, without invoking
+    `zipfile.ZipFile`'s own central-directory parse (which is exactly the
+    unbounded work this check exists to preflight against).
+
+    Best-effort: if the EOCD record can't be found in the search window
+    (a genuinely malformed archive, or one requiring the ZIP64 EOCD
+    variant this function doesn't parse), this silently returns rather
+    than raising -- `zipfile.ZipFile`'s own error, or its own central-
+    directory read, is authoritative for those cases; this function only
+    ever *adds* an earlier rejection for the common, easily-recognized
+    attack shape, never a false one.
+    """
+    try:
+        size = path.stat().st_size
+    except OSError:
+        return
+    tail_len = min(size, _EOCD_SEARCH_WINDOW_BYTES)
+    try:
+        with open(path, "rb") as f:
+            f.seek(size - tail_len)
+            tail = f.read(tail_len)
+    except OSError:
+        return
+    idx = tail.rfind(b"PK\x05\x06")
+    if idx == -1 or idx + 12 > len(tail):
+        return
+    # EOCD layout: signature(4) this_disk(2) cd_start_disk(2)
+    # entries_this_disk(2) total_entries(2) cd_size(4) cd_offset(4)
+    # comment_len(2) [comment...]
+    total_entries = int.from_bytes(tail[idx + 10 : idx + 12], "little")
+    if total_entries == 0xFFFF:
+        return  # ZIP64 marker -- the real count lives in the ZIP64 EOCD, not parsed here
+    if total_entries > _MAX_ARCHIVE_MEMBERS:
+        raise SnapshotError(
+            f"{path}: central directory claims {total_entries} entries, "
+            f"exceeding the {_MAX_ARCHIVE_MEMBERS} safety limit -- refusing "
+            "to open (possible memory-exhaustion attack, or a genuinely "
+            "malformed archive)."
+        )
 
 
 def content_hash(payload: bytes) -> str:
@@ -411,6 +503,7 @@ class BundleArchiveReader:
 
     def __init__(self, path: str | Path) -> None:
         self._path = Path(path)
+        _reject_absurd_central_directory(self._path)
         try:
             self._zf = zipfile.ZipFile(self._path, mode="r")
         except (zipfile.BadZipFile, OSError) as exc:
@@ -518,10 +611,22 @@ class BundleArchiveReader:
         given hash's member name would otherwise be handed back to the
         caller unchecked, defeating the whole point of content-addressing
         (Codex review).
+
+        The *outer*, still-compressed member read is bounded by
+        *max_decoded_bytes* plus a fixed slack margin, not by
+        *max_decoded_bytes* alone -- zstd's own frame/block overhead can
+        make an incompressible payload's compressed form a handful of
+        bytes *larger* than its decoded size, so using the decoded cap
+        as-is for the outer read would reject a payload that legitimately
+        satisfies the documented decoded-size contract (Codex review).
+        The decoded running-total check below remains the tight,
+        authoritative bound.
         """
         member = _blob_member_name(content_hash_hex)
         try:
-            compressed = self._read_stored_member(member, max_bytes=max_decoded_bytes)
+            compressed = self._read_stored_member(
+                member, max_bytes=max_decoded_bytes + _ZSTD_FRAME_OVERHEAD_SLACK_BYTES
+            )
         except KeyError as exc:
             raise SnapshotError(
                 f"{self._path}: manifest references blob {content_hash_hex!r} "

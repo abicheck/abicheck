@@ -544,3 +544,117 @@ class TestBundleArchiveReaderWrapsThirdPartyExceptions:
         with BundleArchiveReader.open(path) as reader:
             with pytest.raises(SnapshotError, match="failed to decompress"):
                 reader.read_blob(h)
+
+
+class TestBundleArchiveCentralDirectoryGuard:
+    """Codex review: zipfile.ZipFile(...) eagerly parses the whole central
+    directory and builds one ZipInfo per entry before any of this
+    module's own per-member size guards ever run -- a crafted archive
+    with an absurd entry count must be rejected before that parse."""
+
+    def test_rejects_an_absurd_central_directory_entry_count(
+        self, tmp_path: Path
+    ) -> None:
+        import struct
+
+        path = tmp_path / "fake.zip"
+        # A hand-crafted EOCD record claiming far more entries than this
+        # format ever legitimately needs -- no real central directory
+        # backs it, since the guard must fire before zipfile.ZipFile ever
+        # tries to parse one.
+        eocd = struct.pack("<IHHHHIIH", 0x06054B50, 0, 0, 0, 65000, 0, 0, 0)
+        path.write_bytes(b"PK\x03\x04" + b"junk" + eocd)
+
+        with pytest.raises(SnapshotError, match="central directory claims"):
+            BundleArchiveReader.open(path)
+
+    def test_a_real_archive_with_ordinary_member_count_opens_fine(
+        self, tmp_path: Path
+    ) -> None:
+        path = tmp_path / "bundle.archive.zip"
+        with BundleArchiveWriter(path) as writer:
+            h = writer.put_blob(b'{"a": 1}')
+            writer.write_manifest({"library_blobs": {"a.so": h}})
+
+        with BundleArchiveReader.open(path) as reader:
+            assert reader.read_manifest()["library_blobs"] == {"a.so": h}
+
+
+class TestBundleArchiveReadBlobCompressedSlack:
+    """Codex review: zstd frame/block overhead can make an incompressible
+    payload's compressed form slightly larger than its decoded size --
+    the outer, still-compressed read must not reject a payload that
+    legitimately satisfies the documented decoded-size contract."""
+
+    def test_incompressible_payload_at_the_decoded_cap_still_succeeds(
+        self, tmp_path: Path
+    ) -> None:
+        path = tmp_path / "bundle.archive.zip"
+        payload = os.urandom(4096)  # incompressible -- compressed form is larger
+        with BundleArchiveWriter(path) as writer:
+            h = writer.put_blob(payload)
+            writer.write_manifest({"library_blobs": {"a.so": h}})
+
+        with BundleArchiveReader.open(path) as reader:
+            assert reader.read_blob(h, max_decoded_bytes=4096) == payload
+
+    def test_a_genuinely_oversized_blob_is_still_rejected(self, tmp_path: Path) -> None:
+        """The slack margin only accommodates real zstd frame overhead --
+        it must not open a loophole for an actually oversized payload."""
+        path = tmp_path / "bundle.archive.zip"
+        payload = os.urandom(4096)
+        with BundleArchiveWriter(path) as writer:
+            h = writer.put_blob(payload)
+            writer.write_manifest({"library_blobs": {"a.so": h}})
+
+        with BundleArchiveReader.open(path) as reader:
+            with pytest.raises(SnapshotError, match="safety limit"):
+                reader.read_blob(h, max_decoded_bytes=16)
+
+
+class TestSniffBundleArchiveFormatNonRegularSource:
+    """Codex review: a real bundle archive can never be delivered via a
+    FIFO/pipe regardless (zipfile.ZipFile needs to seek to its end to
+    locate the central directory), so sniffing must never consume bytes
+    from a non-regular source -- doing so would silently lose them for
+    the plain-JSON path's own separate, later open."""
+
+    @pytest.mark.skipif(sys.platform == "win32", reason="no os.mkfifo on Windows")
+    def test_sniff_never_reads_a_fifo_source(self, tmp_path: Path) -> None:
+        from abicheck.storage.bundle_archive import sniff_bundle_archive_format
+
+        fifo = tmp_path / "input.fifo"
+        os.mkfifo(fifo)
+
+        # A regular-file stat check alone must be enough to answer "json"
+        # -- opening/reading the FIFO here would block forever with no
+        # writer, so a hang (rather than a wrong answer) is exactly what
+        # a regression in this guard would look like.
+        assert sniff_bundle_archive_format(fifo) == "json"
+
+    @pytest.mark.skipif(sys.platform == "win32", reason="no os.mkfifo on Windows")
+    def test_end_to_end_load_through_a_fifo_with_format_auto(
+        self, tmp_path: Path
+    ) -> None:
+        """The real regression this guards against: format="auto" losing
+        the sniff's consumed bytes on the plain-JSON path's own, later,
+        separate open of the same (non-rewindable) source."""
+        import threading
+
+        from abicheck.serialization import load_bundle_facts
+
+        fifo = tmp_path / "input.fifo"
+        os.mkfifo(fifo)
+        payload = b'{"schema_version": 1, "per_library_snapshots": {}}'
+
+        def _writer() -> None:
+            with open(fifo, "wb") as f:
+                f.write(payload)
+
+        t = threading.Thread(target=_writer)
+        t.start()
+        try:
+            facts = load_bundle_facts(fifo)  # format="auto" default
+        finally:
+            t.join()
+        assert facts.per_library_snapshots == {}
