@@ -395,9 +395,26 @@ class IdentityConflict:
     occurrences: tuple[OccurrenceId, ...]
 
     def __post_init__(self) -> None:
-        object.__setattr__(
-            self, "occurrences", tuple(sorted(self.occurrences, key=lambda o: o.key))
-        )
+        # Sorted so a conflict's own membership does not depend on the order
+        # its occurrences were collected in.
+        ordered = tuple(sorted(self.occurrences, key=lambda o: o.key))
+        if len({o.key for o in ordered}) < 2:
+            # A conflict needs two occurrences that actually disagree. Zero,
+            # one, or the same occurrence twice were all accepted, so a reader
+            # could report — or gate on — an ambiguity with no contradictory
+            # pair in it (Codex review). The class docstring already said "two
+            # or more"; nothing enforced it.
+            #
+            # Distinct *keys*, not distinct objects: two equal occurrences are
+            # one observation recorded twice, which is exactly the case that
+            # looks like a conflict and is not.
+            raise ValueError(
+                f"an identity conflict needs at least two distinct occurrences, "
+                f"got {len(ordered)} ({len({o.key for o in ordered})} distinct); "
+                "a conflict with nothing to disagree about would let a reader "
+                "gate on an ambiguity that does not exist"
+            )
+        object.__setattr__(self, "occurrences", ordered)
 
     def to_dict(self) -> dict[str, Any]:
         return {

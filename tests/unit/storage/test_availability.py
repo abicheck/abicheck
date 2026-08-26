@@ -855,3 +855,59 @@ class TestProvenanceFollowsTheSurvivingStatus:
         )
 
         assert set(result.diagnostics) == {"parse error", "ok"}
+
+
+class TestARepeatedOverrideIsRefused:
+    """Codex review: the mutation API had the deserializer's defect.
+
+    `from_dict` rejects duplicate override rows, but two extraction passes
+    calling `override()` for one entity silently discarded the first: a
+    `FAILED` observation followed by `PRESENT` made `for_entity` comparable
+    and dropped the failure permanently, while the reverse call order reached
+    the opposite conclusion.
+    """
+
+    def test_a_second_override_for_one_entity_is_refused(self) -> None:
+        ledger = AvailabilityLedger()
+        ledger.override("layout", "E1", FactAvailability(FactStatus.FAILED))
+
+        with pytest.raises(ValueError, match="already recorded"):
+            ledger.override("layout", "E1", FactAvailability(FactStatus.PRESENT))
+
+    def test_the_first_record_survives_the_refusal(self) -> None:
+        """Refusing must not corrupt what was already there."""
+        ledger = AvailabilityLedger()
+        ledger.declare("layout", FactAvailability(FactStatus.PRESENT))
+        ledger.override(
+            "layout", "E1", FactAvailability(FactStatus.FAILED, diagnostics=("boom",))
+        )
+
+        with pytest.raises(ValueError):
+            ledger.override("layout", "E1", FactAvailability(FactStatus.PRESENT))
+
+        resolved = ledger.for_entity("layout", "E1")
+        assert resolved.status is FactStatus.FAILED
+        assert "boom" in resolved.diagnostics
+
+    def test_other_entities_and_families_are_unaffected(self) -> None:
+        ledger = AvailabilityLedger()
+        ledger.override("layout", "E1", FactAvailability(FactStatus.PRESENT))
+        ledger.override("layout", "E2", FactAvailability(FactStatus.PARTIAL))
+        ledger.override("graph", "E1", FactAvailability(FactStatus.FAILED))
+
+        assert len(ledger.overrides) == 3
+
+    def test_declare_deliberately_remains_last_wins(self) -> None:
+        """Pinned because it is the same hazard, left alone on purpose.
+
+        `declare` is documented "last declaration wins" — a stated contract
+        rather than an accident — and it carries the same risk of a later
+        `PRESENT` burying an earlier `FAILED`. Changing a documented behaviour
+        belongs with whoever owns that contract, so it is pinned here to make
+        the asymmetry deliberate and visible rather than silently divergent.
+        """
+        ledger = AvailabilityLedger()
+        ledger.declare("layout", FactAvailability(FactStatus.FAILED))
+        ledger.declare("layout", FactAvailability(FactStatus.PRESENT))
+
+        assert ledger.for_family("layout").status is FactStatus.PRESENT

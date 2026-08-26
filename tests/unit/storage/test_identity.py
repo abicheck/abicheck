@@ -1134,3 +1134,63 @@ class TestAnAsymmetricPredicateStillReportsItsConflict:
         assert forward.conflicts(self._asymmetric) == backward.conflicts(
             self._asymmetric
         )
+
+
+class TestAConflictNeedsSomethingToDisagreeAbout:
+    """Codex review: the class docstring said "two or more"; nothing enforced it.
+
+    Zero occurrences, one occurrence, and the same occurrence twice were all
+    accepted, so a reader could report — or gate on — an ambiguity with no
+    contradictory pair in it.
+    """
+
+    @staticmethod
+    def _occurrence(size: str) -> OccurrenceId:
+        return OccurrenceId(
+            entity=EntityId(EntityKind.TYPE, "S"),
+            observation=ObservationKind.DWARF,
+            attributes=(("size", size),),
+        )
+
+    @pytest.mark.parametrize("count", [0, 1])
+    def test_fewer_than_two_occurrences_is_refused(self, count: int) -> None:
+        occurrences = tuple(self._occurrence("8") for _ in range(count))
+
+        with pytest.raises(ValueError, match="two distinct occurrences"):
+            IdentityConflict(reason="r", occurrences=occurrences)
+
+    def test_the_same_occurrence_twice_is_refused(self) -> None:
+        """Distinct *keys*, not distinct objects.
+
+        Two equal occurrences are one observation recorded twice — exactly the
+        case that looks like a conflict and is not.
+        """
+        one = self._occurrence("8")
+
+        with pytest.raises(ValueError, match="distinct"):
+            IdentityConflict(reason="r", occurrences=(one, one))
+
+    def test_a_genuine_pair_is_kept_and_ordered(self) -> None:
+        conflict = IdentityConflict(
+            reason="r", occurrences=(self._occurrence("16"), self._occurrence("8"))
+        )
+
+        assert len(conflict.occurrences) == 2
+        assert list(conflict.occurrences) == sorted(
+            conflict.occurrences, key=lambda o: o.key
+        )
+
+    def test_conflicts_still_produces_valid_conflicts(self) -> None:
+        """The guard must not reject what the producer legitimately builds."""
+        occurrences = OccurrenceSet()
+        for size in ("8", "16"):
+            occurrences.add(self._occurrence(size))
+
+        def sizes_disagree(left: OccurrenceId, right: OccurrenceId) -> bool:
+            sizes = (left.attribute("size"), right.attribute("size"))
+            return all(sizes) and sizes[0] != sizes[1]
+
+        found = occurrences.conflicts(sizes_disagree)
+
+        assert len(found) == 1
+        assert len(found[0].occurrences) == 2

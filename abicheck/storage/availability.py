@@ -490,7 +490,37 @@ class AvailabilityLedger:
     def override(
         self, family: str, entity_key: str, availability: FactAvailability
     ) -> None:
-        """Record that one entity's availability differs from its family's."""
+        """Record that one entity's availability differs from its family's.
+
+        Refuses a key already recorded. Two extraction passes calling this for
+        one entity is a real disagreement, and plain assignment discarded the
+        first: a `FAILED` observation followed by `PRESENT` made
+        :meth:`for_entity` comparable and dropped the failure from
+        :meth:`to_dict` permanently, while the reverse call order reached the
+        opposite conclusion — producer traversal order deciding availability
+        (Codex review).
+
+        This is the same rule :meth:`from_dict` applies to duplicate override
+        *rows*, at the in-memory door rather than the document one, and
+        rejecting rather than combining is deliberate for the same reason
+        recorded there: :meth:`FactAvailability.narrowed` is symmetric in
+        status and confidence but not in the identifying fields, so a merged
+        record's producer and recipe would still depend on which call came
+        first. Refusing removes the order dependence; combining only moves it.
+
+        :meth:`declare` is deliberately *not* changed to match. It is
+        documented "last declaration wins", which is a stated contract rather
+        than an accident, and it carries the same hazard — a later `PRESENT`
+        can bury an earlier `FAILED` for a whole family. Changing a documented
+        behaviour is a decision for whoever owns that contract, so it is
+        flagged here rather than altered in passing.
+        """
+        if (family, entity_key) in self.overrides:
+            raise ValueError(
+                f"an availability override for family {family!r} and entity "
+                f"{entity_key!r} is already recorded; overwriting it would let "
+                "the order two extraction passes ran in decide availability"
+            )
         self.overrides[family, entity_key] = availability
 
     @property
