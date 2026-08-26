@@ -164,6 +164,78 @@ def test_mutant_run_scope_narrows_to_the_touched_module() -> None:
     assert gate.mutant_run_scope(diff, only_mutate) == ["abicheck.diff_types.*"]
 
 
+def test_diff_touches_tests_detects_any_tests_path() -> None:
+    diff_touching_a_shared_fixture = (
+        "diff --git a/abicheck/diff_types.py b/abicheck/diff_types.py\n"
+        "--- a/abicheck/diff_types.py\n+++ b/abicheck/diff_types.py\n"
+        "@@ -1,0 +2,1 @@\n+    pass\n"
+        "diff --git a/tests/conftest.py b/tests/conftest.py\n"
+        "--- a/tests/conftest.py\n+++ b/tests/conftest.py\n"
+        "@@ -1,0 +2,1 @@\n+    pass\n"
+    )
+    assert gate.diff_touches_tests(diff_touching_a_shared_fixture) is True
+
+    diff_touching_only_production = (
+        "diff --git a/abicheck/diff_types.py b/abicheck/diff_types.py\n"
+        "--- a/abicheck/diff_types.py\n+++ b/abicheck/diff_types.py\n"
+        "@@ -1,0 +2,1 @@\n+    pass\n"
+    )
+    assert gate.diff_touches_tests(diff_touching_only_production) is False
+
+
+def test_mutant_run_scope_is_none_when_a_shared_test_fixture_is_touched() -> None:
+    """The scenario `--require-baseline` alone cannot rule out: a production
+    module and a *shared* test fixture both change, but the fixture doesn't
+    match any of mutation.yml's per-module `mutated_tests` globs, so
+    `require_baseline` stays false — scoping must refuse on its own rather
+    than trust that upstream signal here (CodeRabbit review, PR #877)."""
+    diff = (
+        "diff --git a/abicheck/diff_types.py b/abicheck/diff_types.py\n"
+        "--- a/abicheck/diff_types.py\n+++ b/abicheck/diff_types.py\n"
+        "@@ -1,0 +2,1 @@\n+    pass\n"
+        "diff --git a/tests/conftest.py b/tests/conftest.py\n"
+        "--- a/tests/conftest.py\n+++ b/tests/conftest.py\n"
+        "@@ -1,0 +2,1 @@\n+    pass\n"
+    )
+    only_mutate = ["abicheck/diff_types.py", "abicheck/diff_symbols.py"]
+    assert gate.mutant_run_scope(diff, only_mutate) is None
+
+
+def test_run_mode_falls_back_to_full_run_when_a_test_file_is_also_touched(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """End-to-end version of the shared-fixture case above, through main()."""
+    (tmp_path / "abicheck").mkdir()
+    (tmp_path / "abicheck" / "diff_types.py").write_text(_SOURCE, encoding="utf-8")
+    _pyproject_with_only_mutate(
+        tmp_path, ["abicheck/diff_types.py", "abicheck/diff_symbols.py"]
+    )
+    monkeypatch.setattr(gate, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(gate.shutil, "which", lambda name: "/usr/bin/mutmut")
+    diff = _write(
+        tmp_path,
+        "d.diff",
+        _DIFF + "diff --git a/tests/conftest.py b/tests/conftest.py\n"
+        "--- a/tests/conftest.py\n+++ b/tests/conftest.py\n"
+        "@@ -1,0 +2,1 @@\n+    pass\n",
+    )
+
+    seen_cmds: list[list[str]] = []
+
+    def fake_run_mutmut(cmd: list[str]) -> tuple[str, int]:
+        seen_cmds.append(cmd)
+        if cmd[:2] == ["mutmut", "run"]:
+            return "1/1  🎉 1  🙁 0", 0
+        return "    abicheck.diff_types.x_alpha__mutmut_1: killed\n", 0
+
+    monkeypatch.setattr(gate, "_run_mutmut", fake_run_mutmut)
+    rc = gate.main(
+        ["--run", "--diff-scoped", "--scope-run-to-diff", "--diff-file", diff]
+    )
+    assert rc == 0
+    assert seen_cmds[0] == ["mutmut", "run"]
+
+
 def test_run_mode_passes_the_scope_patterns_to_mutmut_run(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

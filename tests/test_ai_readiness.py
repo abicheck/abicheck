@@ -10,29 +10,14 @@ from __future__ import annotations
 
 import datetime as _dt
 import importlib.util
-import json
 import sys
 from pathlib import Path
 
 import pytest
+from _canonical_lane import is_canonical_lane
 
 ROOT = Path(__file__).resolve().parent.parent
 SCRIPT = ROOT / "scripts" / "check_ai_readiness.py"
-
-
-def _canonical_python() -> tuple[int, int]:
-    """``repo_facts.json``'s ``canonical_python``, the single source of truth
-    (AGENTS.md's "Line-coverage floor" section) for which unit-test lane is
-    the one that actually matters here — falls back to 3.13 (today's value)
-    if the file is missing/malformed rather than failing collection over it.
-    """
-    try:
-        raw = json.loads((ROOT / "repo_facts.json").read_text(encoding="utf-8"))
-        major, minor = (int(p) for p in str(raw["canonical_python"]).split("."))
-        return major, minor
-    except (OSError, json.JSONDecodeError, KeyError, ValueError):
-        return 3, 13
-
 
 # Every check in this module is pure-Python structural analysis of the repo
 # tree (file sizes, doc/ADR sync, import cycles, ...) — none of it exercises
@@ -45,9 +30,12 @@ def _canonical_python() -> tuple[int, int]:
 # `scripts/check_ai_readiness.py` itself already runs for real, as CI's
 # dedicated `ai-readiness` job — this module is a *unit-test* smoke suite
 # for that script's own internals and inherits its scope, not a
-# cross-platform contract of its own.
+# cross-platform contract of its own. `is_canonical_lane` (and its own
+# defensive-degradation tests) lives in tests/_canonical_lane.py — see
+# tests/test_canonical_lane.py — split out rather than kept inline here so
+# this already-large module doesn't grow past the file-size hard cap.
 pytestmark = pytest.mark.skipif(
-    not (sys.platform.startswith("linux") and sys.version_info[:2] == _canonical_python()),
+    not is_canonical_lane(),
     reason=(
         "structural repo-tree checks — platform/interpreter-independent; "
         "runs once, on the canonical Linux lane, not on every unit-test "

@@ -213,6 +213,28 @@ def diff_touched_only_mutate_modules(
     return touched & only_mutate_set
 
 
+def diff_touches_tests(diff_text: str) -> bool:
+    """Any changed/removed path under ``tests/``.
+
+    The safety check `mutant_run_scope` needs beyond mere `only_mutate`
+    membership: mutation.yml's `require_baseline` decision only forces a
+    full (unscoped) run when a changed test file matches one of the
+    *per-module* globs in `resolve`'s `mutated_tests` filter — a shared
+    fixture/helper (`tests/conftest.py` and the like, matching none of
+    those globs) does not set it. Such a change can weaken what an
+    *untouched* module's tests actually verify without editing that
+    module's own source at all — exactly the shape `check_per_module`'s
+    per-module drift gate exists to catch, and exactly what scoping would
+    silently blind it to, since an untested module's mutants read as zero
+    survivors regardless of whether anything regressed (CodeRabbit review,
+    PR #877). So any touched `tests/` path at all disables scoping, not
+    just one matching a specific module's own glob — cheaper to be
+    conservative here than to try to model which test changes are "safe".
+    """
+    touched = set(parse_changed_lines(diff_text)) | set(parse_removed_lines(diff_text))
+    return any(p.startswith("tests/") for p in touched)
+
+
 def mutant_run_scope(
     diff_text: str | None, only_mutate: list[str] | None
 ) -> list[str] | None:
@@ -222,10 +244,13 @@ def mutant_run_scope(
     safe: no diff, no readable ``only_mutate``, no ``only_mutate`` module
     touched (the diff may still be real — e.g. only this lane's own
     infrastructure changed — just not one this function can attribute to a
-    mutated module), or every ``only_mutate`` module touched (scoping would
-    filter nothing, so it's not worth the extra mutmut invocation shape).
+    mutated module), every ``only_mutate`` module touched (scoping would
+    filter nothing, so it's not worth the extra mutmut invocation shape),
+    or any ``tests/`` path touched at all (see `diff_touches_tests`).
     """
     if diff_text is None or not only_mutate:
+        return None
+    if diff_touches_tests(diff_text):
         return None
     touched = diff_touched_only_mutate_modules(diff_text, only_mutate)
     if not touched or touched >= set(only_mutate):

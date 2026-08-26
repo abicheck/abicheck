@@ -42,9 +42,11 @@ finishes in ~45 seconds.
   previous fixtures encoded a key format mutmut never emits and so passed
   against a parser that misread real output. `test_mutation_run_scoping.py`
   covers `--scope-run-to-diff` (restricting `mutmut run`'s own test-execution
-  phase to the `only_mutate` module(s) a PR's diff actually touches) — split
-  into its own file so `test_mutation_score_gate.py` didn't grow further past
-  the file-size soft limit.
+  phase to the `only_mutate` module(s) a PR's diff actually touches, and
+  refusing to scope at all whenever any `tests/` path is also touched or the
+  measurement comes from a saved `--results-file`) — split into its own file
+  so `test_mutation_score_gate.py` didn't grow further past the file-size
+  soft limit.
 - `test_canonical_finding_id_completeness.py` — every `ChangeKind` must be
   classified for canonical identity, so an omission cannot be silent the way
   the #753 -> #759 escape was. Pins both directions: a declared type-bearing
@@ -85,6 +87,15 @@ finishes in ~45 seconds.
 - `canonical_identity_contract.py` — the exhaustive per-`ChangeKind` identity
   classification enforced by `test_canonical_finding_id_completeness.py`; a new
   `ChangeKind` fails CI until it is placed in a bucket.
+- `_canonical_lane.py` — `is_canonical_lane()`/`canonical_python()`: whether
+  the current interpreter is Linux + `repo_facts.json`'s `canonical_python`,
+  for a module-level `pytestmark` that skips a platform/interpreter-
+  independent test module on every other unit-test matrix leg (see
+  `test_ai_readiness.py`'s own `pytestmark`). Deliberately degrades to a
+  fixed fallback on any malformed `repo_facts.json` rather than raising,
+  since it runs at *collection* time on every lane. Direct tests in
+  `test_canonical_lane.py`, split out so the (already large) consumer module
+  doesn't grow past the file-size cap just to host them.
 - `_workflow_exec.py` — executes a workflow's `run:` steps for real, in a
   throwaway workspace with a real `$GITHUB_OUTPUT` and a sentinel tree *outside*
   it. Use it whenever a security property of a workflow step matters: asserting
