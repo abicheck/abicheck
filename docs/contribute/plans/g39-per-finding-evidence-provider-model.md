@@ -306,24 +306,101 @@ entire premise is that the fact could not be confirmed. The correct model
 is the same side-prefixed `<side>:<tier>:searched:<backend>` vocabulary
 item 3/item 5 above already establish for a negative result — `old:`/
 `new:`/`both:` naming which side(s) failed the sufficiency check, `:tier:`
-and `:backend` naming what evidence was actually consulted (per
-`snapshot.dwarf_aware`/header-backend/`elf_only_mode`, the same fields the
-existing `searched:` derivation already reads), and `:searched:` recording
-that the check ran and did not confirm sufficiency — never a bare positive
-tag standing in for "insufficient." This does not by itself distinguish
-reasons (a) and (b) from each other (`_symbol_evidence_sufficient` itself
-returns a plain `bool`, so the caller has no finer signal to carry
-forward without also changing that function's own return shape, which is
-out of scope for this one Phase 1 slice) — only that both collapse to the
-same honest `searched:`-and-insufficient shape rather than one of them
-being misrepresented as a confirmed provider fact. **This value must
-survive `to_change()`'s own lowering unchanged, not be silently dropped or
-overwritten** — the same requirement the surrounding paragraph already
-states for `BundleFinding.evidence_provenance` in general, restated here
-because a `searched:`-shaped value is exactly the kind of "no fact, just a
-negative result" entry a naive lowering step could mistake for "nothing to
-carry" and omit. Neither shape's real evidentiary basis survives into
-`to_change()`'s own bare
+and `:backend` naming what evidence was actually consulted, and
+`:searched:` recording that the check ran and did not confirm
+sufficiency — never a bare positive tag standing in for "insufficient."
+This does not by itself distinguish reasons (a) and (b) from each other
+(`_symbol_evidence_sufficient` itself returns a plain `bool`, so the
+caller has no finer signal to carry forward without also changing that
+function's own return shape, which is out of scope for this one Phase 1
+slice) — only that both collapse to the same honest `searched:`-and-
+insufficient shape rather than one of them being misrepresented as a
+confirmed provider fact.
+
+**Where `:backend` actually comes from is a real, separate problem this
+paragraph glossed over on its first pass, and it is not the item-1
+derivation this paragraph pointed to (Codex review, verified against the
+real code, PR #866 round 16).** `snapshot.dwarf_aware` does not exist —
+`DWARF_AWARE` is a value of the `EvidenceTier` enum in
+`checker_policy.py`, not an `AbiSnapshot` attribute — so the parenthetical
+naming it as a field this derivation "already reads" was simply wrong.
+More importantly, even the *real* fields item 1's derivation reads
+(`snap.function_map`, `snap.elf`, `snap.from_headers`, the header-backend
+field, `snap.elf_only_mode`) are fields of a **full `AbiSnapshot`**, and
+`_symbol_evidence_sufficient(symbol, old_snap)`/`(symbol, new_snap)` — the
+two calls whose `False` result is what this whole paragraph is about — are
+typed `AbiSnapshot | BundleSignatureEvidence`, and on the one real,
+live call path (`cli_compare_release.py`'s directory/package `compare`
+fan-out) they are always given a `BundleSignatureEvidence`, not an
+`AbiSnapshot`: `cli_compare_release.py` calls
+`BundleSignatureEvidence.from_snapshot(...)` for both sides before ever
+calling `find_unverified_signature_findings`, specifically so the full
+snapshot (types, layout, source graph, build-source evidence — everything
+but `function_map`/`variable_map`/`elf_only_mode`) can be garbage
+collected before bundle analysis runs (G38 stabilization Phase 9, see
+`BundleSignatureEvidence`'s own docstring in `bundle_models.py`). By the
+time `find_unverified_signature_findings`'s finding-construction site
+(the loop building `BUNDLE_INTRA_DEP_SIGNATURE_UNVERIFIED`) would need to
+emit a `:backend` value, `old_snap`/`new_snap` there are that compact
+projection, and neither `snap.from_headers` nor the header-backend field
+nor `snap.elf` survived the projection — there is nothing left to read to
+fill `:backend` in truthfully.
+
+This plan's own design philosophy, applied consistently elsewhere in this
+document, is "derive once from the full-evidence object, then carry the
+*derived, minimal* result through a narrower structure" — not "assume the
+narrower structure still carries the raw fields a full-object derivation
+needs." `BundleSignatureEvidence.from_snapshot()` is exactly the seam
+where the full `AbiSnapshot` is still available, so the fix is to compute
+item 1's `<tier>:searched:<backend>` derivation *there*, once per side,
+and carry only the small derived result (not the raw fields) into a new
+`BundleSignatureEvidence` field — e.g. `evidence_backend_tag: str`
+(or a small tuple, for the hybrid multi-backend case item 1 already
+describes) — so `find_unverified_signature_findings` reads that field
+directly instead of re-deriving anything from a snapshot it no longer has.
+This is a real, if small, implementation change `BundleSignatureEvidence`
+itself needs (a new field, populated in `from_snapshot()`), not merely a
+documentation correction — recorded here so Phase 1's implementation
+doesn't discover the gap only after already committing to deriving
+`:backend` at the finding-construction site, where the information no
+longer exists. **This value must survive `to_change()`'s own lowering
+unchanged, not be silently dropped or overwritten** — the same requirement
+the surrounding paragraph already states for `BundleFinding.
+evidence_provenance` in general, restated here because a `searched:`-
+shaped value is exactly the kind of "no fact, just a negative result"
+entry a naive lowering step could mistake for "nothing to carry" and omit.
+
+**A third, distinct provenance shape is needed for the version-collapse
+path, which does not go through `_symbol_evidence_sufficient` at all
+(Codex review, verified against the real code, PR #866 round 16).**
+`find_unverified_signature_findings`'s main loop has a branch —
+`if version_collapsed: old_sufficient = new_sufficient = False` — that
+sets both sufficiency flags directly, bypassing
+`_symbol_evidence_sufficient(symbol, old_snap)`/`(symbol, new_snap)`
+entirely, whenever `_bare_name_version_collapsed()` finds that the
+bare-name-keyed `AbiSnapshot`/`BundleSignatureEvidence` entry for `symbol`
+can't be safely attributed to the specific co-existing GNU symbol
+*version* this `provider_entry` names (see this same module's own
+docstring, "A fourth check ... guards the evidence-sufficiency lookup
+itself against the same version-blindness"). Labeling this case with the
+same `<side>:<tier>:searched:<backend>` tag the paragraph above establishes
+for a genuine "searched, found nothing" result would be dishonest in the
+identical way naming one concrete backend as "the provider" already was:
+no search of `old_snap`/`new_snap` for this symbol's evidence was actually
+attempted here — the identity of *which* version's evidence to search for
+is itself ambiguous, so `:searched:` would misrepresent an unresolved
+identity question as a completed, empty search. This needs its own,
+clearly distinguished tag — `<side>:ambiguous:version_collapsed` (no
+`:tier:`/`:backend`, since no evidence source was consulted; `<side>` is
+always `both:` for this branch, since the collapse check runs once per
+`provider_entry` and sets both flags together) — so an implementation
+cannot accidentally conflate "we looked and found nothing" with "we
+couldn't even tell what to look for." This mirrors the same
+`searched:`/no-evidence-consulted distinction item 1 and item 3 already
+draw for their own negative results, generalized to a third case those
+items don't have: not "insufficient evidence was found" but "no specific
+evidence could be identified to search for." Neither shape's real
+evidentiary basis survives into `to_change()`'s own bare
 `Change(...)` call (`kind`/`symbol`/`description`/`old_value`/`new_value`/
 `affected_symbols`/`effective_verdict`/`modulation_*` only, no
 provenance-bearing field of any kind today) — so Phase 1 must add
