@@ -48,11 +48,14 @@ cannot be made sound with the data available today.
 
 from __future__ import annotations
 
+import contextlib as _contextlib
 import dataclasses as _dataclasses
 import re as _re
+import threading as _threading
 from collections.abc import (
     Callable as _Callable,
     Iterable as _Iterable,
+    Iterator as _Iterator,
     Mapping as _Mapping,
 )
 from typing import TypeVar as _TypeVar
@@ -465,6 +468,39 @@ _LAMBDA_IDENTITY_FIELDS: tuple[str, ...] = (
 )
 
 
+_defer_renumber = _threading.local()
+
+
+@_contextlib.contextmanager
+def defer_closure_identity_renumbering() -> _Iterator[None]:
+    """Suppress :func:`renumber_anonymous_closure_identities` for the
+    duration of this context (re-entrant; restores the previous state on
+    exit, so a nested caller can't un-suppress an outer one).
+
+    For a caller that produces MULTIPLE independent snapshots of the SAME
+    headers and then merges them by identity key --
+    ``dumper_hybrid.run_hybrid_dump`` is the one caller today -- and needs
+    the renumbering applied exactly once, on the merged result, rather
+    than once per input. Per-input renumbering before such a merge can
+    silently desynchronize: two backends that see a header's lambdas in a
+    different count or order (one omits an earlier same-header lambda the
+    other captures, say) independently assign the SAME later closure a
+    DIFFERENT ordinal, and the merge's identity-keyed matching (a
+    qualified type name, a mangled function name) then either fails to
+    join the two backends' facts for that closure, or -- worse -- joins
+    it against a different, unrelated closure that happens to land on the
+    same ordinal (Codex review, fresh evidence). ``threading.local`` scopes
+    this per-thread, not process-global, in case a future caller ever runs
+    two such merges concurrently on different threads.
+    """
+    previous = getattr(_defer_renumber, "active", False)
+    _defer_renumber.active = True
+    try:
+        yield
+    finally:
+        _defer_renumber.active = previous
+
+
 def renumber_anonymous_closure_identities(snapshot: _SnapshotT) -> _SnapshotT:
     """Replace each castxml/clang closure marker's ``:<line>:<col>``
     discriminator with a stable ordinal among same-header, same-kind
@@ -497,7 +533,12 @@ def renumber_anonymous_closure_identities(snapshot: _SnapshotT) -> _SnapshotT:
     ``docs/`` (the doc-count-sync AI-readiness check) and every test
     fixture pinning the current schema version -- a real, separate change,
     not folded into this fix.
+
+    A no-op, returning *snapshot* untouched, inside
+    :func:`defer_closure_identity_renumbering`'s context.
     """
+    if getattr(_defer_renumber, "active", False):
+        return snapshot
     containers = [getattr(snapshot, name) for name in _LAMBDA_IDENTITY_FIELDS]
     strings: list[str] = []
     for container in containers:

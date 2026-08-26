@@ -39,6 +39,9 @@ identical ordinal to the identical closure.
 
 from __future__ import annotations
 
+from dataclasses import replace
+from pathlib import Path
+
 from abicheck.checker import compare
 from abicheck.checker_policy import ChangeKind
 from abicheck.model import AbiSnapshot, Function, Param, RecordType, Visibility
@@ -323,3 +326,70 @@ class TestKnownLimitationDifferentFilesSharingABasename:
         # different ordinal purely because of the unrelated insertion in
         # vendor/b -- the documented, accepted limitation.
         assert before_final[0] != after_final[0]
+
+
+class TestHybridMergeDefersRenumbering:
+    """Codex review: ``--ast-frontend hybrid`` runs castxml and clang over
+    the same headers and merges the two snapshots by identity key
+    (``type_map_key``/mangled name). If each backend's own closure ordinal
+    were computed independently -- BEFORE the merge -- a backend that sees
+    a header's lambdas in a different count (one omits an earlier
+    same-header lambda the other captures) would assign the SAME later
+    closure a DIFFERENT ordinal on each side, and the merge's identity
+    lookup would silently miss the join. Deferring renumbering until after
+    the merge means both backends' RAW ``:line:col`` spellings -- which
+    agree by construction, since both describe the same physical source
+    location -- are what the merge actually keys on.
+    """
+
+    def test_shared_closure_merges_despite_differing_lambda_counts(self) -> None:
+        from abicheck.dumper_hybrid import run_hybrid_dump
+
+        shared = _closure("widget.h", 20, 5)
+        owner_castxml = f"Foo<{shared}>"
+        owner_clang = f"Foo<{shared}>"
+
+        castxml_snap = AbiSnapshot(
+            library="lib.so",
+            version="old",
+            from_headers=True,
+            types=[
+                # castxml sees an EARLIER lambda too (a template castxml
+                # instantiates that clang's own leg never reaches), so its
+                # own independent ordinal for the shared closure would be
+                # #2, not #1.
+                _record(f"Earlier<{_closure('widget.h', 5, 1)}>"),
+                _record(owner_castxml, qualified=owner_castxml),
+            ],
+        )
+        clang_snap = AbiSnapshot(
+            library="lib.so",
+            version="old",
+            from_headers=True,
+            types=[
+                # clang's leg never instantiates the earlier template, so
+                # its own independent ordinal for the SAME shared closure
+                # would be #1 -- a real fact only clang captures rides
+                # along on this type, to prove the merge actually joined.
+                replace(
+                    _record(owner_clang, qualified=owner_clang), is_abstract=True
+                ),
+            ],
+        )
+
+        def fake_dump(so_path, headers, *, header_backend, **kwargs):
+            return castxml_snap if header_backend == "castxml" else clang_snap
+
+        merged = run_hybrid_dump(fake_dump, Path("lib.so"), [])
+
+        matched = [t for t in merged.types if t.name.startswith("Foo<")]
+        assert len(matched) == 1, "the shared closure must merge into one type"
+        assert matched[0].is_abstract is True, (
+            "clang's is_abstract fact must have reached the merged type -- "
+            "if the merge missed the join (mismatched per-leg ordinals), "
+            "this would be None (castxml's own value) instead"
+        )
+        # And the final, merged snapshot IS in ordinal form -- renumbering
+        # happened, just deferred to after the merge.
+        assert "#" in matched[0].name
+        assert ":20:" not in matched[0].name
