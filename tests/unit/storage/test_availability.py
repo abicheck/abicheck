@@ -705,3 +705,88 @@ class TestANonComparableFallbackKeepsItsEvidence:
         # Only the one upgradeable status is substituted; nothing else is lost.
         assert answer.producer == "policy"
         assert "C only" in answer.diagnostics
+
+
+class TestDuplicateOverridesAreRefused:
+    """Codex review: serialized row order decided availability.
+
+    Assignment kept the last row, so a ledger holding both a `failed` and a
+    `present` override for one entity answered differently depending on array
+    order — reversing it flipped `for_entity` from non-comparable to
+    comparable.
+    """
+
+    @staticmethod
+    def _rows() -> list[dict[str, object]]:
+        return [
+            {
+                "family": "layout",
+                "entity": "ns::Foo",
+                "availability": {"status": "failed"},
+            },
+            {
+                "family": "layout",
+                "entity": "ns::Foo",
+                "availability": {"status": "present"},
+            },
+        ]
+
+    def test_duplicate_rows_are_refused(self) -> None:
+        with pytest.raises(ValueError, match="duplicate availability override"):
+            AvailabilityLedger.from_dict({"overrides": self._rows()})
+
+    def test_the_refusal_does_not_depend_on_row_order(self) -> None:
+        """Both orderings refuse; neither silently wins."""
+        for rows in (self._rows(), list(reversed(self._rows()))):
+            with pytest.raises(ValueError, match="duplicate availability override"):
+                AvailabilityLedger.from_dict({"overrides": rows})
+
+    def test_distinct_entities_in_one_family_are_fine(self) -> None:
+        ledger = AvailabilityLedger.from_dict(
+            {
+                "overrides": [
+                    {
+                        "family": "layout",
+                        "entity": "ns::Foo",
+                        "availability": {"status": "failed"},
+                    },
+                    {
+                        "family": "layout",
+                        "entity": "ns::Bar",
+                        "availability": {"status": "present"},
+                    },
+                ]
+            }
+        )
+
+        assert ledger.for_entity("layout", "ns::Foo").status is FactStatus.FAILED
+
+    def test_the_same_entity_in_distinct_families_is_fine(self) -> None:
+        ledger = AvailabilityLedger.from_dict(
+            {
+                "overrides": [
+                    {
+                        "family": "layout",
+                        "entity": "ns::Foo",
+                        "availability": {"status": "failed"},
+                    },
+                    {
+                        "family": "vtables",
+                        "entity": "ns::Foo",
+                        "availability": {"status": "present"},
+                    },
+                ]
+            }
+        )
+
+        assert ledger.for_entity("layout", "ns::Foo").status is FactStatus.FAILED
+
+    def test_an_ordinary_ledger_still_round_trips(self) -> None:
+        """`to_dict` cannot emit duplicates, so writers are unaffected."""
+        ledger = AvailabilityLedger()
+        ledger.declare("layout", FactAvailability(FactStatus.PRESENT))
+        ledger.override("layout", "ns::Foo", FactAvailability(FactStatus.FAILED))
+
+        assert AvailabilityLedger.from_dict(ledger.to_dict()).to_dict() == (
+            ledger.to_dict()
+        )

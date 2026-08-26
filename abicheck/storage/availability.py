@@ -444,9 +444,32 @@ class AvailabilityLedger:
         }
         overrides: dict[tuple[str, str], FactAvailability] = {}
         for raw in data.get("overrides", []):
-            overrides[str(raw["family"]), str(raw["entity"])] = (
-                FactAvailability.from_dict(raw["availability"])
-            )
+            key = (str(raw["family"]), str(raw["entity"]))
+            if key in overrides:
+                # Rejected rather than resolved. Assignment silently kept the
+                # last row, so a ledger holding both a `failed` and a
+                # `present` override for one entity answered differently
+                # depending on which came first in the array — reversing it
+                # flipped `for_entity` from non-comparable to comparable and
+                # could license a compatibility conclusion (Codex review).
+                #
+                # Combining them conservatively was the alternative, and it
+                # does not actually remove the order dependence: `narrowed`
+                # is symmetric in status and confidence but not in the
+                # identifying fields, where a non-empty override value wins,
+                # so the merged producer/recipe would still depend on row
+                # order. Refusing is consistent with how this module already
+                # treats malformed *availability* data — `FactAvailability.
+                # from_dict` raises on an unknown status rather than
+                # downgrading it — as distinct from the informational version
+                # axes, which parse defensively because no decision reads
+                # them.
+                raise ValueError(
+                    f"duplicate availability override for family {key[0]!r} "
+                    f"and entity {key[1]!r}; availability must not depend on "
+                    "the order rows were serialized in"
+                )
+            overrides[key] = FactAvailability.from_dict(raw["availability"])
         raw_default = data.get("unknown_family_default")
         default = (
             FactAvailability.from_dict(raw_default)
