@@ -214,7 +214,23 @@ earlier), a fixed, portable permission bit, and a fixed `create_system`
 `library_blobs`/`filesystem_aliases`/`library_filenames` are unordered-by-
 name maps rather than order-sensitive content, writing their manifest keys
 in sorted order rather than whatever order the caller's own `BundleFacts`
-mapping happens to iterate in. A dedicated round-trip test (two saves of
+mapping happens to iterate in.
+
+**Pinning per-member metadata and manifest-key order is not sufficient on
+its own — the *order the blob members themselves are written in* is also
+part of the zip container's own bytes (central directory entries are
+written in write order), and must be pinned the identical way (Codex
+review, fresh evidence).** Two logically-equal `BundleFacts` values built
+by populating `per_library_snapshots` in a different insertion order would
+otherwise still produce different archive bytes even with every above fix
+applied, since a naive `for name, snap in facts.per_library_snapshots.items():
+writer.put_blob(...)` writes blobs in whatever order that dict happens to
+iterate in. The write path must therefore compute every blob's content hash
+first and emit `put_blob` calls in sorted-hash order (not sorted-by-name
+order — two different library names can share one content hash, so a
+name-sorted emission order is not itself uniquely determined by content),
+so archive byte-identity depends only on the *set* of unique payloads, never
+on construction order. A dedicated round-trip test (two saves of
 logically-equal but differently-*constructed* `BundleFacts` values,
 asserting byte-identical output and matching `stored_sha256`) belongs in
 Phase 2's own test list, not deferred to an ad hoc discovery later.
