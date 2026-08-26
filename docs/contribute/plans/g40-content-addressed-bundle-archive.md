@@ -197,6 +197,28 @@ about — instantiation-order-sensitive fields must never be key-sorted, so
 the hash input is the same non-`sort_keys` encoding the plain-JSON path
 already writes, not a re-derived canonical form).
 
+**Payload-level determinism alone does not make the *archive file's own*
+`stored_sha256` reproducible — the zip container's own metadata must be
+pinned too (Codex review, fresh evidence).** `zipfile.ZipFile.writestr(name,
+data)` given a bare string `name` stamps its own `ZipInfo` with
+`time.localtime()` at write time, and a `ZipInfo`'s own file-mode/
+`create_system` (0 on Windows, 3 on Unix/macOS) default to the *host*
+platform unless set explicitly — so writing byte-identical facts on two
+different days, or on two different CI platforms, would otherwise produce
+two different archives (and two different `stored_sha256` values) despite
+every payload being identical. `BundleArchiveWriter` must therefore pin, on
+every member it writes: a fixed timestamp (the zip format's own 1980-01-01
+epoch floor, since DOS-style zip timestamps can't represent anything
+earlier), a fixed, portable permission bit, and a fixed `create_system`
+(Unix, matching this project's actual CI/release platforms) — plus, since
+`library_blobs`/`filesystem_aliases`/`library_filenames` are unordered-by-
+name maps rather than order-sensitive content, writing their manifest keys
+in sorted order rather than whatever order the caller's own `BundleFacts`
+mapping happens to iterate in. A dedicated round-trip test (two saves of
+logically-equal but differently-*constructed* `BundleFacts` values,
+asserting byte-identical output and matching `stored_sha256`) belongs in
+Phase 2's own test list, not deferred to an ad hoc discovery later.
+
 **Deduplication granularity is the whole per-library `AbiSnapshot`, not
 individual declarations — and this plan's own dedup motivation has now been
 corrected twice, each round narrower than the last (Codex review, two

@@ -153,6 +153,31 @@ recorded there rather than guessed here, since (mirroring this plan's own
 "XL, phased" discipline) the answer genuinely varies by detector and
 shouldn't be frozen before real call sites are examined.
 
+**The `old:`/`new:`/`both:` vocabulary is mandatory-prefix but not
+exhaustive over every finding shape -- a fourth, `current:` scope is
+needed for genuinely unary findings (Codex review, fresh evidence,
+confirmed by reading real call sites rather than assumed from the
+prefix table alone).** `buildsource/crosscheck.py`'s
+`_check_header_build_context_mismatch`/`_check_public_to_internal_
+dependency` (and their sibling `_check_*` functions in that module) each
+take exactly one `snapshot: AbiSnapshot` parameter -- there is no old/new
+pair at all, so neither `old:`/`new:` (which name a *side* of a
+comparison) nor `both:` (explicitly defined above as "the mechanism runs
+on both sides" -- itself presupposing two sides) can truthfully describe
+where this evidence came from. Forcing one of the three onto a
+single-snapshot check would either mislabel it (claiming a `both:` a
+consumer would read as "ran on both sides of a comparison," when only one
+snapshot was ever examined) or violate the "mandatory prefix" contract
+Phase 1 otherwise enforces. Resolution: a fourth scope, `current:`,
+reserved specifically for a `_change()`/`Change(...)` construction site
+whose function signature takes one `AbiSnapshot`, not a
+`(old, new)` pair -- e.g. `current:l5:source_graph` for
+`_check_public_to_internal_dependency`'s L5 reachability evidence. Phase
+1's own per-call-site wiring decides, from the function signature at each
+site, whether `old:`/`new:`/`both:` or `current:` applies -- the same
+"recorded there rather than guessed here" discipline the paragraph above
+already establishes for the `both:`-suffices question.
+
 ### Phase 1 — wire the finding-construction call sites (XL, phased itself)
 
 **No hand-copied count — this plan has already gotten one wrong twice
