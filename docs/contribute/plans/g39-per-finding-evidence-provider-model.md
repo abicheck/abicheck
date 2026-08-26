@@ -335,24 +335,54 @@ structure already in place:
    since this narrowing checks `snap.elf` specifically and has no `snap.pe`/
    `snap.macho` counterpart) keeps the full DWARF/header-derived set
    untouched, so no `l0` component was ever searched for that snapshot.
-   Concretely, per real backend combination this can produce: `new:
-   searched:l1` for a DWARF-derived snapshot with no ELF export table
-   consulted; `new:searched:l2` for a header-only snapshot; `new:
-   searched:l0` when the snapshot is `elf_only_mode` (an ELF-only, symbols-
-   only dump with no type-level evidence at all, per `_is_stripped_symbols_
-   only`); `new:searched:l0+l1` or `new:searched:l0+l2` when DWARF or
-   header-AST evidence was narrowed by a *present* ELF export table; and a
-   PE- or Mach-O-specific tag (e.g. `new:searched:pe-exports`/
-   `new:searched:macho-exports`) for a snapshot whose declaration surface
-   came from a PE/Mach-O export table rather than ELF `.dynsym` — `_public_
-   functions()` has no such narrowing today, so this slice's implementation
-   must decide whether to add an equivalent PE/Mach-O narrowing step or
-   record the platform's evidence tier as-is. Implement this as one function
+   **Each entry names its own concrete backend, not just a tier — collapsing
+   a real provider into a bare `searched:<tier>`/composite `<tier1>+<tier2>`
+   tag (an earlier draft of this section did exactly that, flagged by
+   Codex review as a real regression relative to the vocabulary this same
+   item already commits to two paragraphs up) loses the castxml-vs-clang
+   distinction on a header-derived surface and drops the mandatory `l0:`
+   tier prefix on a PE/Mach-O entry entirely.** The corrected shape is
+   `<side>:<tier>:searched:<backend>` — side prefix first (this item's own
+   `old:`/`new:`/`both:` rule from two paragraphs up), then the identical
+   `l0:`/`l1:`/`l2:`-plus-backend-id vocabulary the table above and item 3
+   below both already use, with `searched` inserted before the concrete
+   backend id rather than replacing it (matching item 3's own
+   `l2:searched:<frontend>` shape, generalized here with the side prefix
+   item 3's single-snapshot crosscheck findings don't need). **A
+   multi-provider search records one entry per provider actually
+   consulted, never one collapsed tag** — the same "one tier-bearing entry
+   per provider" rule item 3 states for its own multi-`PROVIDER_*` checks
+   applies identically here. Concretely, per real backend combination:
+   `new:l1:searched:dwarf` for a DWARF-derived snapshot with no ELF export
+   table consulted; `new:l2:searched:castxml` or `new:l2:searched:clang`
+   (never a bare `l2`) for a header-only snapshot, naming whichever backend
+   actually produced it (or both, `new:l2:searched:castxml` plus
+   `new:l2:searched:clang`, for a hybrid snapshot where both surfaces were
+   built and consulted); `new:l0:searched:elf_symtab` when the snapshot is
+   `elf_only_mode` (an ELF-only, symbols-only dump with no type-level
+   evidence at all, per `_is_stripped_symbols_only`); **two** separate
+   entries — e.g. `new:l0:searched:elf_symtab` *plus*
+   `new:l1:searched:dwarf` (or the `l2:searched:castxml`/`clang` sibling) —
+   rather than one `l0+l1`/`l0+l2` composite, when DWARF or header-AST
+   evidence was narrowed by a *present* ELF export table; and, for a
+   PE/Mach-O snapshot whose declaration surface came from a PE/Mach-O
+   export table rather than ELF `.dynsym`, the identical `l0:`-prefixed
+   shape using this plan's own PE/Mach-O backend ids from item 3 below —
+   `new:l0:searched:pe_export_table` / `new:l0:searched:macho_exports` —
+   never a bare, tier-less `pe-exports`/`macho-exports` tag. `_public_
+   functions()` has no PE/Mach-O narrowing step today, so this slice's
+   implementation must decide whether to add an equivalent narrowing step
+   or record the platform's evidence tier as-is; whichever it picks, the
+   emitted tag still carries the full `l0:searched:<backend>` shape, not a
+   platform name standing in for the tier. Implement this as one function
    that inspects the actual snapshot fields the way `_public_functions()`
    and `_is_stripped_symbols_only()` already do, not as a table keyed by an
    assumed-fixed platform. This is Phase 0 vocabulary work for this slice,
    the same way item 3 below folds its own `searched:` form into Phase 0
-   rather than deferring it.
+   rather than deferring it — and the two must use the literal same
+   per-backend vocabulary (`l2:castxml`/`l2:clang`/`l0:elf_symtab`/
+   `l0:pe_export_table`/`l0:macho_exports`), not two independently-drifting
+   spellings of the same idea.
 2. **L2 header-derived detectors** (`diff_types.py`'s struct/enum/typedef
    findings, `diff_type_spellings.py`) — provenance here genuinely varies
    per finding (which backend produced *this specific* `RecordType`, and
