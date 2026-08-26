@@ -503,42 +503,131 @@ insufficient hybrid variable signature, masking exactly the
 castxml-vs-clang distinction this field exists to carry. (Falling back to
 the snapshot's own single `ast_producer` still applies, for either map, on
 a non-hybrid snapshot where no per-declaration `"visibility"` entry is
-ever written.) Not a single scalar the multi-backend case was assumed to
-fit into a tuple, and not a single helper the two symbol kinds were
-assumed to share.
+ever written — **except when the retained entry's own `visibility` is
+`Visibility.ELF_ONLY` (Codex review, verified against the real code, PR
+#866 round 23): that entry has no header-AST declaration to attribute a
+backend to in the first place** (`_symbol_evidence_sufficient`'s own
+docstring above: "an L0-only entry with no corroborating declaration at
+all"), on a hybrid snapshot or otherwise, so `fact_provenance` never holds
+a `"visibility"` key for it regardless of `ast_producer`'s value — falling
+back to `ast_producer` here would misreport a symbol-table-only entry as
+`l2:castxml`/`l2:clang`/`l2:legacy_unknown_backend`, fabricating header-AST
+provenance for a declaration no header-AST backend ever produced. This case
+is handled separately below, alongside the identical mistake the
+snapshot-wide fallback made for the same `Visibility.ELF_ONLY` shape.) Not
+a single scalar the multi-backend case was assumed to fit into a tuple, and
+not a single helper the two symbol kinds were assumed to share.
 
-**A separate, snapshot-wide fallback must also be retained alongside this
-per-symbol dict — not as a substitute for it, but for the one shape the
-dict structurally cannot answer at all (Codex review, verified against
-the real code, PR #866 round 22).** `evidence_backend_tag` is keyed by
-`function_map`/`variable_map` membership, so it has an entry only for a
-mangled name one of those two maps actually retains. Item 3's own case (a)
-above — "the symbol is absent from `function_map`/`variable_map` entirely,
-or carries `Visibility.ELF_ONLY`" — is exactly the shape with no key to
-look up: `mangled not in evidence_backend_tag` is not "the fallback described
-in the previous paragraph applies" (that fallback is for a symbol *present*
-in one of the two maps but missing its per-declaration `"visibility"` fact),
-it is "there is no per-symbol entry to fall back from," and `from_snapshot()`
-discards the full `AbiSnapshot` immediately afterward — so once projection
-is done, nothing later in the pipeline can re-derive anything for this
-symbol from `snap.function_map`/`snap.variable_map`/`snap.fact_provenance`,
-because none of them exist anymore. Without a second, independent field,
-`find_unverified_signature_findings`'s finding-construction site would have
-no honest `:backend` value to emit for this exact, explicitly-documented
-finding shape — the same "no fact, just a negative result" trap this
-section's `:searched:` vocabulary already exists to avoid, reached from a
-different structural direction. `BundleSignatureEvidence.from_snapshot()`
-must therefore also retain `snapshot_backend_tag: str` (`snap.ast_producer`
-— `"castxml"`/`"clang"`/`"hybrid"`/`None` for the pre-schema-25
-`from_headers=True, ast_producer is None` case per Phase 0's own vocabulary
-table), read only when `mangled not in evidence_backend_tag`, so the two
-fallbacks stay structurally distinct: the per-symbol dict's own inline
+**Item 3's own case (a) is two evidentiarily distinct shapes, not one, and
+conflating them was the round-22 fallback's own mistake — corrected here
+(Codex review, verified against the real code, PR #866 round 23).** "The
+symbol is absent from `function_map`/`variable_map` entirely, or carries
+`Visibility.ELF_ONLY`" reads as one case, but `_symbol_evidence_sufficient`'s
+own body (quoted above) treats them completely differently: an
+`ELF_ONLY`-visibility entry is `fn is not None`/`var is not None` — a real,
+present map entry, just one built directly from the ELF symbol table with no
+corroborating declaration (`dumper_elf_fallback.py`, or any other backend
+that degrades to it) — while a symbol truly absent from both maps has no
+entry to inspect at all. The two need different tags, and routing both
+through the same fallback (as round 22 did) produces a wrong answer for the
+`ELF_ONLY` half specifically:
+
+- **`Visibility.ELF_ONLY` (a real map entry, L0-only)** never reaches
+  `evidence_backend_tag`'s `ast_producer` fallback or `snapshot_backend_tag`
+  at all — the preceding paragraph's revision above routes it to a positive,
+  correct L0 tag instead, since this case *positively knows* its only
+  evidence is the binary's own export table: `l0:elf_symtab` /
+  `l0:pe_export_table` / `l0:macho_exports`, selected from
+  `AbiSnapshot.platform` (`"elf"`/`"pe"`/`"macho"`, `model.py`) the same way
+  Phase 0's vocabulary table already distinguishes those three per-platform
+  L0 providers. Whether the snapshot happens to be a header/DWARF-aware
+  build overall is irrelevant here — `ELF_ONLY` visibility on *this specific
+  declaration* means no header-AST or debug-info fact ever corroborated it,
+  regardless of what the rest of the snapshot contains.
+- **Genuinely absent from both maps** — no declaration of any kind retained
+  for this symbol — is the one shape with no per-symbol entry to fall back
+  from at all, and `from_snapshot()` discards the full `AbiSnapshot`
+  immediately afterward, so nothing later in the pipeline can re-derive
+  anything for it from `snap.function_map`/`snap.variable_map`/
+  `snap.fact_provenance`. This is the shape that genuinely needs a second,
+  snapshot-wide fallback field, `BundleSignatureEvidence.from_snapshot()`
+  retaining `snapshot_backend_tag: tuple[str, ...]` (a tuple, not a bare
+  `str` — see below for why), read only when `mangled not in
+  evidence_backend_tag`. Without it, `find_unverified_signature_findings`'s
+  finding-construction site would have no honest `:backend` value to emit
+  for this exact, explicitly-documented finding shape — the same "no fact,
+  just a negative result" trap this section's `:searched:` vocabulary
+  already exists to avoid, reached from a different structural direction.
+
+**`snap.ast_producer` alone cannot back `snapshot_backend_tag`, for the
+reason the field's own docstring already states (Codex review, verified
+against `model.py`'s `ast_producer` field comment: "None for non-header
+snapshots (DWARF/symbols-only) and for snapshots predating this field").**
+`ast_producer` is `None` in at least three genuinely different situations,
+not one — an ordinary DWARF-only ELF snapshot, a PDB-derived PE snapshot, a
+BTF/CTF-derived kernel snapshot, and a symbols-only (`elf_only_mode=True`)
+dump all leave it `None`, exactly as much as the pre-schema-v10 legacy
+header case (**not v25** — `serialization.py`'s own schema-history comment
+dates `ast_producer`'s introduction to schema v10, "`--ast-frontend hybrid`
+(G28 Phase 3) — `AbiSnapshot.ast_producer`"; v25 is an unrelated later
+migration, `typedefs_qualified`, and does not apply here) does. Retaining
+only `ast_producer` therefore cannot distinguish "this snapshot never had a
+header-AST layer to search" (which needs an L0 or L1 tag, never an L2 one)
+from "this snapshot did have a header-AST layer, but it predates
+`ast_producer` being tracked" (which needs `l2:legacy_unknown_backend`) — a
+`None` value means one of at least four different things, and a single
+`snap.ast_producer` copy cannot tell them apart. `snapshot_backend_tag` must
+instead be **derived** from the combination of fields that together do
+distinguish them, all real, already-present `AbiSnapshot` fields:
+`elf_only_mode`, `from_headers`, `ast_producer`, and `platform`:
+
+1. `elf_only_mode is True` — the whole snapshot was dumped without headers
+   or debug info; every declaration is `ELF_ONLY` provenance by
+   construction (`model.py`'s own field comment). Tag: the same
+   platform-selected L0 provider used for the per-declaration `ELF_ONLY`
+   case above (`l0:elf_symtab`/`l0:pe_export_table`/`l0:macho_exports`).
+2. `from_headers is True` — a header-AST layer was genuinely used. Read
+   `ast_producer`:
+   - `"castxml"` → `("l2:castxml",)`.
+   - `"clang"` → `("l2:clang",)`.
+   - `"hybrid"` → **`("l2:castxml", "l2:clang")` — both, not the bare string
+     `"hybrid"` (Codex review, verified against Phase 0's own vocabulary
+     table above, which defines exactly `l2:castxml`/`l2:clang`/
+     `l2:legacy_unknown_backend` as the valid `l2:` values and has no
+     `l2:hybrid` entry at all).** A `--ast-frontend hybrid` snapshot ran
+     *both* backends over the same headers (`dumper_hybrid.merge_snapshots()`
+     — see `AbiSnapshot.ast_producer`'s own docstring, "this snapshot was
+     built by running BOTH castxml and clang over the same headers and
+     merging them field-by-field"), so for a symbol with no per-declaration
+     `fact_provenance` entry to attribute to one specific backend, the
+     honest claim is that both backends were consulted at the snapshot
+     level — exactly what item 3's own `:searched:` vocabulary is for
+     (`("both:l2:searched:castxml", "both:l2:searched:clang")` once
+     rendered, not a single unregistered `hybrid` token a consumer would
+     have no rule to interpret).
+   - `None` → `("l2:legacy_unknown_backend",)` — the pre-schema-v10 case
+     Phase 0's vocabulary table already names for exactly this shape.
+3. Neither `elf_only_mode` nor `from_headers` is `True` — a DWARF/PDB/BTF/
+   CTF-derived snapshot with no header-AST layer at all. **This is the L1
+   producer-identity gap this same plan already documents above ("`l1:pdb`/
+   `l1:btf`/`l1:ctf` name a real gap, not just a missing table row") and
+   explicitly calls a *prerequisite* Phase 1 must resolve before wiring any
+   detector that could draw on such a snapshot — it applies here
+   identically, and fabricating `l1:dwarf` for a PDB/BTF/CTF-derived
+   snapshot would repeat exactly the false-claim failure mode that gap note
+   already refuses to accept. `snapshot_backend_tag` for this branch is
+   therefore left unresolved by this document — it depends on the same
+   per-record/per-snapshot L1-producer marker that gap note calls for, not
+   a fresh design choice made here.**
+
+Both fallbacks stay structurally distinct: the per-symbol dict's own inline
 fallback (paragraph above) answers "this symbol has a declaration, but no
 per-backend attribution was recorded for it"; `snapshot_backend_tag`
 answers "this symbol has no declaration in this snapshot at all, so the
-best available fact is which backend(s) this snapshot's header-AST layer
-used overall." Neither may be read as a positive per-declaration fact —
-both feed the same `<side>:<tier>:searched:<backend>` "searched, not
+best available fact is which backend(s) this snapshot's header-AST (or,
+once the L1 gap above closes, debug-info) layer used overall." Neither may
+be read as a positive per-declaration fact — every one of the tags derived
+above feeds the same `<side>:<tier>:searched:<backend>` "searched, not
 found sufficient" shape the surrounding paragraphs already establish, never
 a bare provider tag implying the symbol's declaration was actually located.
 
