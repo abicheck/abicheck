@@ -40,7 +40,11 @@ finishes in ~45 seconds.
   gate's drift logic and its parsing/attribution primitives. The latter
   includes one *real* end-to-end `mutmut` run (marked `slow`), because the
   previous fixtures encoded a key format mutmut never emits and so passed
-  against a parser that misread real output.
+  against a parser that misread real output. `test_mutation_run_scoping.py`
+  covers `--scope-run-to-diff` (restricting `mutmut run`'s own test-execution
+  phase to the `only_mutate` module(s) a PR's diff actually touches) — split
+  into its own file so `test_mutation_score_gate.py` didn't grow further past
+  the file-size soft limit.
 - `test_canonical_finding_id_completeness.py` — every `ChangeKind` must be
   classified for canonical identity, so an omission cannot be silent the way
   the #753 -> #759 escape was. Pins both directions: a declared type-bearing

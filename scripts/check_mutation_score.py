@@ -71,6 +71,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 from collections.abc import Callable, Iterator
 from pathlib import Path
 
@@ -116,6 +117,120 @@ MUTMUT_RUN_TIMEOUT_SECONDS = 14_400
 
 #: ``@@ -old,cnt +new,cnt @@`` — we only need the new-side range.
 _HUNK = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
+
+PYPROJECT_PATH = REPO_ROOT / "pyproject.toml"
+
+
+# ---------------------------------------------------------------------------
+# Run-scoping — restrict *which mutants get test-executed*, not just gated
+# ---------------------------------------------------------------------------
+#
+# `mutmut run` always *generates* mutants for every file `[tool.mutmut]`'s
+# `only_mutate` names (cheap: an AST pass per file) — that part cannot be
+# scoped per invocation, since mutmut reads its config fresh from
+# pyproject.toml on every run and has no CLI/env override for it. But the
+# *expensive* part — re-running the test suite once per mutant — is scoped by
+# `mutmut run`'s own optional positional `MUTANT_NAMES` argument: verified
+# directly against mutmut 3.7.0's source
+# (`collect_source_file_mutation_data`), a name there is matched against every
+# mutant key via `fnmatch`, and the tests actually executed
+# (`tests_for_mutant_names(mutant_names)`) are filtered to that set — nothing
+# to do with `mutmut show`/`mutmut run <id>` "re-run one already-generated
+# mutant", which is a different, narrower use of the same argument covered
+# in mutmut's own docs. This is what lets a PR that only touched
+# `diff_symbols.py` skip paying for `diff_types.py`/`checker_policy.py`/…'s
+# entire test-suite-per-mutant cost, without touching `only_mutate` itself.
+#
+# Deliberately conservative: this only ever *narrows* which mutants get
+# tested, and only when every touched, `only_mutate`-scoped module can be
+# named — any uncertainty (can't read the diff, can't read pyproject.toml,
+# every module touched) falls back to the unscoped, unconditionally-correct
+# full run rather than guessing.
+
+
+def load_only_mutate_globs(pyproject_path: Path | None = None) -> list[str] | None:
+    """``[tool.mutmut].only_mutate`` from pyproject.toml, or ``None`` if unreadable.
+
+    *pyproject_path* defaults to ``REPO_ROOT / "pyproject.toml"`` resolved at
+    *call* time (not a frozen default argument) so a test that monkeypatches
+    ``gate.REPO_ROOT`` — the established pattern in
+    tests/test_mutation_score_gate.py — affects this too.
+
+    A local import: this module runs on any supported Python (3.10+), but the
+    ``--run`` scoping path this feeds only ever executes inside the mutation
+    CI lane, which pins Python 3.13 (``tomllib`` is stdlib since 3.11). A
+    stale-tomllib environment simply gets no scoping — the safe direction to
+    fail in — rather than an import error on every other invocation of this
+    script.
+    """
+    try:
+        import tomllib
+    except ImportError:
+        return None
+    path = (
+        pyproject_path if pyproject_path is not None else REPO_ROOT / "pyproject.toml"
+    )
+    try:
+        with open(path, "rb") as fh:
+            doc = tomllib.load(fh)
+    except (OSError, tomllib.TOMLDecodeError):
+        return None
+    only_mutate = doc.get("tool", {}).get("mutmut", {}).get("only_mutate")
+    if not isinstance(only_mutate, list) or not all(
+        isinstance(p, str) for p in only_mutate
+    ):
+        return None
+    return only_mutate
+
+
+def mutant_scope_pattern(module_path: str) -> str:
+    """``"abicheck/diff_symbols.py"`` -> ``"abicheck.diff_symbols.*"``.
+
+    Matches mutmut's own dotted-module mutant-key prefix (`mutation_results.
+    parse_mutant_module_and_function`'s ``pkg.gamma`` half of ``pkg.gamma.
+    xǁWidgetǁarea__mutmut_1``) — an ``fnmatch`` pattern against the full key,
+    so the trailing ``.*`` covers every function, nested class, and mutant
+    number in that one module without needing to know any of them in advance.
+    """
+    dotted = module_path[: -len(".py")] if module_path.endswith(".py") else module_path
+    return dotted.replace("/", ".") + ".*"
+
+
+def diff_touched_only_mutate_modules(
+    diff_text: str, only_mutate: list[str]
+) -> set[str]:
+    """Which ``only_mutate`` modules this diff added, modified, or removed lines in.
+
+    File granularity only — `only_mutate` itself has no finer scope, so there
+    is nothing function-level to gain here that `check_diff_scoped`'s
+    post-run gating does not already do. Both added/modified (new-side) and
+    removed (old-side) lines count: a module whose only edit in this diff is
+    a deleted guard still needs its mutants test-executed, or a survivor
+    `check_diff_scoped` would have reported is silently never measured.
+    """
+    only_mutate_set = set(only_mutate)
+    touched = set(parse_changed_lines(diff_text)) | set(parse_removed_lines(diff_text))
+    return touched & only_mutate_set
+
+
+def mutant_run_scope(
+    diff_text: str | None, only_mutate: list[str] | None
+) -> list[str] | None:
+    """``MUTANT_NAMES`` patterns to pass to ``mutmut run``, or ``None`` for "full run".
+
+    ``None`` — not scoping — is the answer whenever scoping cannot be proven
+    safe: no diff, no readable ``only_mutate``, no ``only_mutate`` module
+    touched (the diff may still be real — e.g. only this lane's own
+    infrastructure changed — just not one this function can attribute to a
+    mutated module), or every ``only_mutate`` module touched (scoping would
+    filter nothing, so it's not worth the extra mutmut invocation shape).
+    """
+    if diff_text is None or not only_mutate:
+        return None
+    touched = diff_touched_only_mutate_modules(diff_text, only_mutate)
+    if not touched or touched >= set(only_mutate):
+        return None
+    return sorted(mutant_scope_pattern(m) for m in touched)
 
 
 def _run_mutmut(cmd: list[str]) -> tuple[str, int]:
@@ -486,13 +601,20 @@ def check_diff_scoped(
 # ---------------------------------------------------------------------------
 
 
-def _gather(args: argparse.Namespace) -> tuple[str | None, dict[str, int] | None]:
+def _gather(
+    args: argparse.Namespace, mutant_name_patterns: list[str] | None = None
+) -> tuple[str | None, dict[str, int] | None]:
     """Return ``(results_text, cicd_stats)``.
 
     ``mutmut run``'s own stdout is deliberately **not** folded into the text
     used for counting — see the module docstring. It is still executed (and its
     output shown) under ``--run``; only the *measurement* comes from ``mutmut
     results`` plus the exported stats.
+
+    *mutant_name_patterns*, when given, are passed as ``mutmut run``'s own
+    ``MUTANT_NAMES`` positional argument — see ``mutant_run_scope``'s
+    docstring for what that actually scopes (test execution, not mutant
+    generation) and why that is still the dominant cost.
     """
     if args.results_file:
         if args.results_file == "-":
@@ -509,8 +631,16 @@ def _gather(args: argparse.Namespace) -> tuple[str | None, dict[str, int] | None
         return None, None
 
     if args.run:
-        print("mutation-score: running `mutmut run` (this is slow)…")
-        run_out, run_rc = _run_mutmut(["mutmut", "run"])
+        run_cmd = ["mutmut", "run", *(mutant_name_patterns or [])]
+        if mutant_name_patterns:
+            print(
+                "mutation-score: running `mutmut run` scoped to "
+                f"{len(mutant_name_patterns)} changed module(s) (this is still "
+                "slow, just less of it)…"
+            )
+        else:
+            print("mutation-score: running `mutmut run` (this is slow)…")
+        run_out, run_rc = _run_mutmut(run_cmd)
         tail = "\n".join(run_out.splitlines()[-5:])
         print(f"mutation-score: mutmut run tail:\n{tail}")
         if run_rc != 0:
@@ -537,6 +667,41 @@ def _gather(args: argparse.Namespace) -> tuple[str | None, dict[str, int] | None
         )
         return None, None
     return results_out, load_cicd_stats(Path(args.mutants_dir))
+
+
+def _load_diff_text(args: argparse.Namespace) -> tuple[str | None, int | None]:
+    """``(diff_text, None)`` on success, ``(None, exit_code)`` on failure.
+
+    Factored out of the diff-scoped gating block so it can also run *before*
+    ``--run``, for run-scoping: fetching it once and reusing it there too
+    avoids a second ``git diff`` invocation, and — a genuine side benefit,
+    not just tidiness — a bad ``--base-ref`` now fails before paying for a
+    multi-hour mutmut run instead of after (previously: the diff was only
+    ever fetched post-run, so a typo here wasted the entire run before
+    reporting the same error it reports now up front).
+    """
+    if args.diff_file:
+        return Path(args.diff_file).read_text(encoding="utf-8"), None
+    proc = subprocess.run(  # noqa: S603 — fixed argv, no shell
+        ["git", "diff", "--unified=0", f"{args.base_ref}...HEAD"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        timeout=300,
+    )
+    if proc.returncode != 0:
+        # Without this the fatal stderr is parsed as a diff, yielding zero
+        # changed functions — so the diff-scoped gate reports OK with
+        # survivors present. A typo in --base-ref silently disables the gate
+        # (reproduced with `--base-ref does-not-exist`, Codex review).
+        print(
+            f"ERROR: `git diff {args.base_ref}...HEAD` failed "
+            f"(exit {proc.returncode}): {proc.stderr.strip()}\n"
+            "Cannot determine which functions this branch changed, so the "
+            "diff-scoped gate would pass vacuously."
+        )
+        return None, 1
+    return proc.stdout, None
 
 
 def _run_reached_its_end(text: str, stats: dict[str, int] | None) -> bool:
@@ -625,6 +790,20 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--diff-file", help="Read the diff from a file instead of git.")
     parser.add_argument(
+        "--scope-run-to-diff",
+        action="store_true",
+        help=(
+            "With --run --diff-scoped (and not --require-baseline): pass "
+            "mutmut run the MUTANT_NAMES of only the only_mutate module(s) "
+            "this diff touches, so the expensive test-execution phase runs "
+            "against a fraction of the mutant population instead of all of "
+            "[tool.mutmut].only_mutate every time. Falls back to an "
+            "unscoped (full) run whenever the scope cannot be established "
+            "as safe — never widens the gate, only ever the amount of work "
+            "it costs to satisfy it."
+        ),
+    )
+    parser.add_argument(
         "--require-baseline",
         action="store_true",
         help=(
@@ -635,7 +814,42 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--json", help="Write a machine-readable receipt here.")
     args = parser.parse_args(argv)
 
-    text, stats = _gather(args)
+    # Fetched once, up front, whenever it will be needed at all: by run-scoping
+    # below (if requested) and, either way, by the diff-scoped gate further
+    # down. See _load_diff_text's own docstring for why this also has to
+    # happen before --run, not just before gating.
+    diff_text: str | None = None
+    if args.diff_scoped:
+        diff_text, err = _load_diff_text(args)
+        if diff_text is None:
+            return err if err is not None else 1
+
+    scope_patterns: list[str] | None = None
+    scope_modules: set[str] = set()
+    if (
+        args.run
+        and args.diff_scoped
+        and args.scope_run_to_diff
+        and not args.require_baseline
+        and not args.write_baseline
+    ):
+        # Guaranteed non-None: this branch requires args.diff_scoped, which is
+        # exactly the condition under which the block above either set
+        # diff_text or already returned.
+        assert diff_text is not None
+        only_mutate = load_only_mutate_globs()
+        scope_patterns = mutant_run_scope(diff_text, only_mutate)
+        if scope_patterns is not None and only_mutate is not None:
+            scope_modules = diff_touched_only_mutate_modules(diff_text, only_mutate)
+            print(
+                "mutation-score: scoping this run to "
+                f"{len(scope_modules)}/{len(only_mutate)} only_mutate module(s): "
+                + ", ".join(sorted(scope_modules))
+            )
+
+    gather_started = time.monotonic()
+    text, stats = _gather(args, scope_patterns)
+    gather_seconds = time.monotonic() - gather_started
     if text is None:
         if args.run:
             print(
@@ -679,6 +893,19 @@ def main(argv: list[str] | None = None) -> int:
     else:
         survivors = parse_survivors(text) or 0
     unresolved = count_unresolved(text)
+    # A scoped run deliberately never test-executes mutants outside
+    # `scope_modules` — every one of them reads "not checked", which
+    # `count_unresolved`/`MutantRecord.is_unresolved` correctly treat as an
+    # unresolved measurement (as they must for a *genuinely* interrupted run).
+    # Gating on the unscoped total here would fail every scoped run on the
+    # out-of-scope population it deliberately never measured. `unresolved`
+    # itself (the informational, whole-population figure printed below and
+    # written to the receipt) is untouched.
+    unresolved_for_gate = (
+        sum(1 for r in records if r.is_unresolved and r.module_path in scope_modules)
+        if scope_modules
+        else unresolved
+    )
     by_module = survivors_by_module(records)
 
     # Two independent sources must agree. `mutmut results`' per-mutant listing
@@ -778,11 +1005,11 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 1
 
-    if unresolved and (gating_active or args.write_baseline):
+    if unresolved_for_gate and (gating_active or args.write_baseline):
         print(
-            f"ERROR: {unresolved} mutant(s) did not resolve (timeout/suspicious/"
-            "no-tests/segfault) — the measurement is incomplete; fix or silence "
-            "them so the survivor count is trustworthy."
+            f"ERROR: {unresolved_for_gate} mutant(s) did not resolve (timeout/"
+            "suspicious/no-tests/segfault) — the measurement is incomplete; fix "
+            "or silence them so the survivor count is trustworthy."
         )
         exit_code = 1
         if args.write_baseline:
@@ -820,30 +1047,9 @@ def main(argv: list[str] | None = None) -> int:
         return exit_code
 
     if args.diff_scoped:
-        if args.diff_file:
-            diff_text = Path(args.diff_file).read_text(encoding="utf-8")
-        else:
-            proc = subprocess.run(  # noqa: S603 — fixed argv, no shell
-                ["git", "diff", "--unified=0", f"{args.base_ref}...HEAD"],
-                cwd=REPO_ROOT,
-                capture_output=True,
-                text=True,
-                timeout=300,
-            )
-            if proc.returncode != 0:
-                # Without this the fatal stderr is parsed as a diff, yielding
-                # zero changed functions — so the diff-scoped gate reports OK
-                # with survivors present. A typo in --base-ref silently
-                # disables the gate (reproduced with `--base-ref
-                # does-not-exist`, Codex review).
-                print(
-                    f"ERROR: `git diff {args.base_ref}...HEAD` failed "
-                    f"(exit {proc.returncode}): {proc.stderr.strip()}\n"
-                    "Cannot determine which functions this branch changed, so "
-                    "the diff-scoped gate would pass vacuously."
-                )
-                return 1
-            diff_text = proc.stdout
+        # Fetched once, at the top of main() (before --run, for run-scoping);
+        # reused here rather than fetched a second time.
+        assert diff_text is not None, "args.diff_scoped implies diff_text was fetched"
         removed = parse_removed_lines(diff_text)
         read_base = _base_reader(args.base_ref)
         touched = changed_functions(
@@ -959,15 +1165,36 @@ def main(argv: list[str] | None = None) -> int:
         print(f"mutation-score: OK ({survivors} == baseline {total_baseline})")
 
     if args.json:
+        mutants_measured = None
+        mutants_per_second = None
+        if stats is not None:
+            not_checked = stats.get("not_checked", 0)
+            mutants_measured = max(stats.get("total", 0) - not_checked, 0)
+            if args.run and gather_seconds > 0:
+                mutants_per_second = round(mutants_measured / gather_seconds, 3)
         Path(args.json).write_text(
             json.dumps(
                 {
                     "survivors": survivors,
                     "unresolved": unresolved,
+                    "unresolved_in_scope": unresolved_for_gate,
                     "stats": stats,
                     "by_module": by_module,
                     "gated": gated,
                     "exit_code": exit_code,
+                    #: Budget/efficiency metrics (only meaningful under
+                    #: --run): how long `_gather` took, how many mutants were
+                    #: actually test-executed and at what rate, and whether
+                    #: this run scoped the expensive phase to a subset of
+                    #: `only_mutate` or fell back to the full population.
+                    "run_seconds": round(gather_seconds, 3) if args.run else None,
+                    "mutants_measured": mutants_measured,
+                    "mutants_per_second": mutants_per_second,
+                    "run_scope": {
+                        "mode": "diff" if scope_modules else "full",
+                        "modules": sorted(scope_modules),
+                        "requested": bool(args.scope_run_to_diff),
+                    },
                 },
                 indent=2,
             )

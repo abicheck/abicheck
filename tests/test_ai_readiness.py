@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import datetime as _dt
 import importlib.util
+import json
 import sys
 from pathlib import Path
 
@@ -17,6 +18,42 @@ import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
 SCRIPT = ROOT / "scripts" / "check_ai_readiness.py"
+
+
+def _canonical_python() -> tuple[int, int]:
+    """``repo_facts.json``'s ``canonical_python``, the single source of truth
+    (AGENTS.md's "Line-coverage floor" section) for which unit-test lane is
+    the one that actually matters here — falls back to 3.13 (today's value)
+    if the file is missing/malformed rather than failing collection over it.
+    """
+    try:
+        raw = json.loads((ROOT / "repo_facts.json").read_text(encoding="utf-8"))
+        major, minor = (int(p) for p in str(raw["canonical_python"]).split("."))
+        return major, minor
+    except (OSError, json.JSONDecodeError, KeyError, ValueError):
+        return 3, 13
+
+
+# Every check in this module is pure-Python structural analysis of the repo
+# tree (file sizes, doc/ADR sync, import cycles, ...) — none of it exercises
+# an OS API or a Python-version-specific code path, so running the identical
+# ~120 assertions again on each of the unit-test matrix's other four legs
+# (ubuntu/3.12, ubuntu/3.14, windows/3.13, macos/3.13) re-verifies the same
+# repo-tree facts against the same commit for zero additional confidence —
+# it can only ever pass or fail identically everywhere. The canonical lane
+# (ubuntu + repo_facts.json's canonical_python) is also where
+# `scripts/check_ai_readiness.py` itself already runs for real, as CI's
+# dedicated `ai-readiness` job — this module is a *unit-test* smoke suite
+# for that script's own internals and inherits its scope, not a
+# cross-platform contract of its own.
+pytestmark = pytest.mark.skipif(
+    not (sys.platform.startswith("linux") and sys.version_info[:2] == _canonical_python()),
+    reason=(
+        "structural repo-tree checks — platform/interpreter-independent; "
+        "runs once, on the canonical Linux lane, not on every unit-test "
+        "matrix leg (see this module's own pytestmark comment)"
+    ),
+)
 
 
 def _load_module():
