@@ -50,7 +50,7 @@ consumer — a policy file, a report reader, a future confidence-scoring
 step — cannot distinguish "this `TYPE_SIZE_CHANGED` finding is grounded in
 DWARF-corroborated layout" from "this one is a castxml-only computation with
 no DWARF to check it against" without re-deriving that fact from the
-snapshot's own `dwarf_layout_coherence`/`ast_frontend` fields and guessing
+snapshot's own `dwarf_layout_coherence`/`ast_producer` fields and guessing
 which one applied to *this* finding specifically — fragile, and already
 shown to be wrong at least once (see `AGENTS.md`'s "Findings emitted from
 absent evidence" entry: the vtable false positive traced to exactly this
@@ -779,8 +779,11 @@ structure already in place:
      `_check_header_build_context_mismatch`, `_check_private_header_leak`,
      `_check_rtti_for_internal_type`) runs against whichever L2 header-AST
      backend actually produced the snapshot being checked — castxml,
-     clang, or hybrid, selected per run via `--ast-frontend`/
-     `AbiSnapshot.ast_frontend`, not per detector function. Phase 0's own
+     clang, or hybrid, selected per run via `--ast-frontend` and recorded
+     on the snapshot as `AbiSnapshot.ast_producer` (the persisted field
+     name — there is no `ast_frontend` attribute on `AbiSnapshot`, that
+     spelling names only the CLI flag/`ABICHECK_AST_FRONTEND` env var,
+     per `abicheck/model.py`), not per detector function. Phase 0's own
      vocabulary table above deliberately distinguishes `l2:castxml` from
      `l2:clang` because the two backends have measurably different fact
      completeness, so a `_check_exported_not_public -> "l2:..."` table
@@ -807,10 +810,13 @@ structure already in place:
 
    1. For a `PROVIDER_PUBLIC_HEADER_AST` entry specifically, the `l2:`
       suffix is read off the snapshot the check actually ran against —
-      `AbiSnapshot.ast_frontend` (or, for a hybrid snapshot, the relevant
-      per-fact provenance via `fact_provenance.py`, mirroring slice 1's
-      own hybrid-snapshot carve-out earlier in this document) — at the
-      point the finding is constructed, never hard-coded per function.
+      `AbiSnapshot.ast_producer` (`"castxml"` / `"clang"` / `"hybrid"` /
+      `None` for a non-header snapshot or one predating the field — see
+      `abicheck/model.py`'s own field comment), or, for a hybrid snapshot,
+      the relevant per-fact provenance via `fact_provenance.py` (mirroring
+      slice 1's own hybrid-snapshot carve-out earlier in this document) —
+      at the point the finding is constructed, never hard-coded per
+      function.
    2. For a check whose `providers` list carries more than one `PROVIDER_*`
       entry, `evidence_provenance` carries one tier-bearing entry per
       provider actually consulted for that finding, not a single collapsed
