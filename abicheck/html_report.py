@@ -140,14 +140,20 @@ def _file_metadata_html(result: object) -> str:
 </div>"""
 
 
-def _symbol_cell(change: object, demangle: bool = True) -> str:
-    """Symbol: demangled text with mangled name as tooltip. Demangles
-    BEFORE ``html.escape`` (never the reverse) -- safe by construction."""
-    raw = getattr(change, "symbol", "") or ""
+def _abbr_symbol_text(raw: str, demangle: bool = True) -> str:
+    """Demangled text with the mangled name as an ``<abbr>`` tooltip --
+    shared by any caller rendering one bare symbol string, so two mangled
+    names that demangle identically (C1/C2 ctor variants) don't collapse
+    into indistinguishable text. Demangles before ``html.escape``."""
     mangled, demangled = html.escape(raw), html.escape(demangle_text(raw) if demangle else raw)
     if demangled and demangled != mangled and mangled:
         return f'<abbr title="{html.escape(mangled, quote=True)}">{demangled}</abbr>'
     return demangled or mangled
+
+
+def _symbol_cell(change: object, demangle: bool = True) -> str:
+    """Symbol cell for one Change -- see _abbr_symbol_text's own contract."""
+    return _abbr_symbol_text(getattr(change, "symbol", "") or "", demangle)
 
 
 def _changes_table(changes: list[object], demangle: bool = True) -> str:
@@ -181,9 +187,7 @@ def _changes_table(changes: list[object], demangle: bool = True) -> str:
                     f"💡 {html.escape(impact)}</div>"
                 )
         if affected:
-            names = ", ".join(
-                html.escape(demangle_text(s) if demangle else s) for s in affected[:5]
-            )
+            names = ", ".join(_abbr_symbol_text(s, demangle) for s in affected[:5])
             suffix = f" (+{len(affected) - 5} more)" if len(affected) > 5 else ""
             desc_parts.append(
                 f"<div style='font-size:0.82em; color:#1565c0; margin-top:2px;'>"
@@ -965,16 +969,11 @@ def generate_html_report(
     scoped_verdict = getattr(result, "scoped_verdict", None)
     scoped_html = ""
     if scoped_verdict is not None:
-        # `--used-by`/`--required-symbol(s)` scoping (ADR-043): the
-        # Compatibility verdict box above stays computed from the full,
-        # unscoped library diff -- this format's own gate/verdict rendering
-        # intentionally keeps that authoritative. But the actual CLI process
-        # exits on the *scoped* verdict floor when scoping is requested,
-        # which can legitimately disagree with the verdict shown above.
-        # Surfaced here so a reader of the HTML report can't miss that
-        # disagreement, mirroring the human-format banner
-        # (`_fold_scoped_compat_into_text`) without changing this report's
-        # own verdict-box semantics.
+        # `--used-by`/`--required-symbol(s)` scoping (ADR-043): the verdict
+        # box above stays computed from the full, unscoped diff, but the CLI
+        # process exits on the *scoped* verdict floor -- surfaced here so a
+        # reader can't miss the disagreement (mirrors the human-format
+        # banner, `_fold_scoped_compat_into_text`).
         scoped_value = (
             scoped_verdict.value
             if hasattr(scoped_verdict, "value")

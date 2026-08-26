@@ -952,6 +952,35 @@ class TestRealDemanglingThroughTheProductionChangeDataclass:
         assert "Foo::Foo()" in out
         assert "Bar::run()" in out
 
+    def test_affected_symbols_preserve_mangled_identity(self) -> None:
+        """Codex review, fresh evidence: two ABI-distinct affected symbols
+        that demangle identically (a class's C1/C2 constructor variants,
+        both `Foo::Foo()`) must not collapse into indistinguishable text
+        with the exact linker names gone -- especially since a grouped
+        finding's own primary symbol can be a placeholder (`<isa:...>`)
+        with no tooltip of its own to recover them from."""
+        from abicheck.checker import Change, DiffResult, Verdict
+        from abicheck.checker_policy import ChangeKind
+
+        affected = ["_ZN3FooC1Ev", "_ZN3FooC2Ev"]
+        change = Change(
+            kind=ChangeKind.TYPE_SIZE_CHANGED,
+            symbol="<isa:Widget>",
+            description="Type size changed",
+            affected_symbols=affected,
+        )
+        result = DiffResult(
+            old_version="1.0",
+            new_version="2.0",
+            library="libtest.so.1",
+            changes=[change],
+            verdict=Verdict.BREAKING,
+        )
+        out = generate_html_report(result)
+        assert out.count("Foo::Foo()") == 2
+        assert '<abbr title="_ZN3FooC1Ev">Foo::Foo()</abbr>' in out
+        assert '<abbr title="_ZN3FooC2Ev">Foo::Foo()</abbr>' in out
+
     def test_template_argument_angle_brackets_are_escaped_not_injected(self) -> None:
         """Demangling runs BEFORE html.escape, so a demangled template
         argument's own `<`/`>` must never appear unescaped in the output."""

@@ -80,3 +80,12 @@
   `_missing_symbol_cell` helper mirrors `_symbol_cell`'s own contract: the
   demangled text is shown with the raw mangled name preserved as an
   `<abbr>` tooltip.
+- **Sixth follow-up (Codex review): the identical ambiguity in
+  `_changes_table`'s own `affected_symbols` list.** A finding whose
+  primary symbol is itself a placeholder (`<isa:...>`,
+  `<sycl_overload_family>`) has no per-row `<abbr>` tooltip to recover a
+  colliding demangled name from, so two ABI-distinct affected symbols
+  (again, C1/C2 constructor variants) collapsed into duplicate,
+  indistinguishable text. `_symbol_cell`'s rendering logic is now shared
+  via a new `_abbr_symbol_text` helper, used by both `_symbol_cell` and
+  the `affected_symbols` loop.
