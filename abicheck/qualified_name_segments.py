@@ -457,6 +457,21 @@ def _walk_rewrite_strings(value: object, rewrite: _Callable[[str], str]) -> obje
 #: spelling. Keeping this scoped is what keeps
 #: :func:`renumber_anonymous_closure_identities` cheap even for a snapshot
 #: with a large exported symbol table.
+#:
+#: ``fact_provenance`` is included even though it carries no closure
+#: markers of its own to *collect* ordinals from: its keys are composite
+#: strings built by ``fact_provenance.type_fact_key``/``field_fact_key``
+#: (e.g. ``"type:Foo<(lambda:x.h:10:2)>:field:y:size"``) that embed the
+#: exact same type-name spelling ``types``/``functions``/etc. carry. Left
+#: out, a hybrid-merged snapshot's provenance keys would still name the
+#: pre-renumber ``:line:col`` spelling after every other field was
+#: renumbered to ``#<ordinal>``, so ``fact_provenance.fact_producer()``
+#: would silently miss on every closure-parameterized declaration (Codex
+#: review on PR #868, fresh evidence). Rewriting it is safe: the ordinal
+#: map is keyed on (marker, header, line, col), computed once from the
+#: ABI-surface fields above, and a key or value here that doesn't match
+#: any of those tuples is left untouched by
+#: :func:`apply_anonymous_type_ordinals`.
 _LAMBDA_IDENTITY_FIELDS: tuple[str, ...] = (
     "functions",
     "variables",
@@ -465,6 +480,7 @@ _LAMBDA_IDENTITY_FIELDS: tuple[str, ...] = (
     "typedefs",
     "typedefs_qualified",
     "constants",
+    "fact_provenance",
 )
 
 

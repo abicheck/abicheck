@@ -393,3 +393,75 @@ class TestHybridMergeDefersRenumbering:
         # happened, just deferred to after the merge.
         assert "#" in matched[0].name
         assert ":20:" not in matched[0].name
+
+
+class TestFactProvenanceKeysAreRenumberedToo:
+    """A hybrid snapshot's ``fact_provenance`` dict is keyed by composite
+    strings (``fact_provenance.type_fact_key``/``field_fact_key``) that
+    embed the exact same closure-parameterized type-name spelling
+    ``types``/``functions``/etc. carry. If renumbering rewrote only the
+    ABI-surface fields and left these keys in ``:line:col`` form, a
+    renamed type's provenance would become unreachable through
+    ``fact_provenance.fact_producer()`` -- silently defeating every
+    provenance-gated detector for that declaration (Codex review on
+    PR #868, fresh evidence)."""
+
+    def test_type_fact_key_is_renumbered_in_place(self) -> None:
+        from abicheck.fact_provenance import type_fact_key
+
+        owner = f"Foo<{_closure('widget.h', 20, 5)}>"
+        snap = AbiSnapshot(
+            library="lib.so",
+            version="1",
+            from_headers=True,
+            ast_producer="hybrid",
+            types=[_record(owner, qualified=owner)],
+            fact_provenance={type_fact_key(owner, "is_abstract"): "castxml"},
+        )
+        renumber_anonymous_closure_identities(snap)
+
+        new_name = snap.types[0].qualified_name
+        assert new_name is not None
+        assert "#" in new_name
+        assert type_fact_key(new_name, "is_abstract") in snap.fact_provenance
+        assert type_fact_key(owner, "is_abstract") not in snap.fact_provenance
+        assert snap.fact_provenance[type_fact_key(new_name, "is_abstract")] == (
+            "castxml"
+        )
+
+    def test_field_fact_key_is_renumbered_in_place(self) -> None:
+        from abicheck.fact_provenance import field_fact_key
+
+        owner = f"Foo<{_closure('widget.h', 20, 5)}>"
+        snap = AbiSnapshot(
+            library="lib.so",
+            version="1",
+            from_headers=True,
+            ast_producer="hybrid",
+            types=[_record(owner, qualified=owner)],
+            fact_provenance={field_fact_key(owner, "x", "default"): "clang"},
+        )
+        renumber_anonymous_closure_identities(snap)
+
+        new_name = snap.types[0].qualified_name
+        assert new_name is not None
+        assert field_fact_key(new_name, "x", "default") in snap.fact_provenance
+
+    def test_fact_producer_resolves_after_renumbering(self) -> None:
+        """End-to-end through the real reader, not just the raw dict key."""
+        from abicheck.fact_provenance import fact_producer, type_fact_key
+
+        owner = f"Foo<{_closure('widget.h', 20, 5)}>"
+        snap = AbiSnapshot(
+            library="lib.so",
+            version="1",
+            from_headers=True,
+            ast_producer="hybrid",
+            types=[_record(owner, qualified=owner)],
+            fact_provenance={type_fact_key(owner, "is_abstract"): "castxml"},
+        )
+        renumber_anonymous_closure_identities(snap)
+        renamed_owner = snap.types[0].qualified_name
+        assert renamed_owner is not None
+        key = type_fact_key(renamed_owner, "is_abstract")
+        assert fact_producer(snap, key) == "castxml"

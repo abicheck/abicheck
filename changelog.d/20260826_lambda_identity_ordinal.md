@@ -19,4 +19,10 @@
   classes for that case. Snapshots loaded from disk are renumbered too
   (a no-op once already renumbered), so a baseline persisted before this
   fix compares correctly against a freshly-dumped snapshot instead of
-  disagreeing on identity purely from the encoding change.
+  disagreeing on identity purely from the encoding change. A hybrid
+  (`--ast-frontend hybrid`) snapshot's `fact_provenance` dict is renumbered
+  alongside the ABI-surface fields too, since its keys embed the same
+  closure-parameterized type-name spelling -- left un-renumbered, a
+  provenance-gated detector would silently miss on every closure-
+  parameterized declaration after this fix renamed the type it was keyed
+  against.
