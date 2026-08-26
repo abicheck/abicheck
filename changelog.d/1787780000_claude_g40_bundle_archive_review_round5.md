@@ -571,3 +571,30 @@
   against the pre-fix code -- the truncated-frame test with no exception
   raised, the FIFO test with the real read blocking past its 5s join
   timeout, reliably across repeated runs.
+
+- **G40 bundle archive: one more Codex review finding on the just-shared
+  `zstd_frame_guard.py`, real and fixed.** A member truncated to just the
+  4-byte zstd magic (`28 b5 2f fd`, no complete frame header at all)
+  decodes to `b""` with no error at all via `stream_reader()` -- the
+  bounded primary pass in `read_blob()` therefore succeeds cleanly, and
+  the new frame-completeness cross-check's own `get_frame_parameters()`
+  call then raises on that same truncated input, but was swallowed by a
+  blanket `except Exception: pass` (inherited verbatim from
+  `snapshot_io._decompress_zstd`'s own pre-existing pattern) on the
+  reasoning that "the primary pass already proved the stream decodes
+  cleanly" -- which is exactly false here, since the primary pass was
+  fooled by the identical truncation. A member named after the empty
+  payload's own hash therefore passed the post-decode content-hash check
+  too, so `BundleArchiveReader.read_blob()` silently returned `b""` for a
+  genuinely malformed archive. Fixed by treating any per-frame header
+  parse failure inside the validation loop as corruption -- the loop only
+  ever calls `get_frame_parameters()`/`decompressobj()` on a non-empty
+  `remaining` chunk (the `while` guard), so there is no legitimate reason
+  for a parse to fail there. Regression test:
+  `tests/test_bundle_archive_cd_guard.py::
+  TestReadBlobRejectsTruncatedZstdFrames::
+  test_read_blob_raises_for_a_member_truncated_inside_the_frame_header`
+  (a premise check confirming real `zstandard` silently decodes the bare
+  magic bytes to nothing, then a full `BundleArchiveReader.read_blob()`
+  round trip); confirmed to fail against the pre-fix code with no
+  exception raised.

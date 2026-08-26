@@ -69,28 +69,35 @@ def validate_zstd_frame_completeness(
     the total decoded content across every frame is already known to fit
     within whatever cap that pass enforced -- redecompressing the same,
     already-proven-bounded data a second time for validation cannot exceed
-    that same total, whatever this loop's own call granularity is."""
+    that same total, whatever this loop's own call granularity is.
+
+    A frame header parse failure (``get_frame_parameters``/
+    ``decompressobj().decompress()`` raising) is itself treated as
+    corruption, not swallowed: truncating right after the 4-byte zstd
+    magic makes the caller's own bounded ``stream_reader()`` pass return
+    an empty payload with no error at all, so "the primary pass already
+    proved it decodes cleanly" cannot be trusted to rule this out here
+    -- confirmed empirically (Codex review, fresh evidence). Since the
+    loop only ever calls this on a non-empty ``remaining`` (the ``while``
+    guard), there is no legitimate reason for a parse to fail here."""
     remaining = data
-    try:
-        while remaining:
+    while remaining:
+        try:
             frame_declared = zstandard.get_frame_parameters(remaining).content_size
             dobj = dctx.decompressobj()
             frame_out = dobj.decompress(remaining)
-            if not dobj.eof or (
-                frame_declared != zstandard.CONTENTSIZE_UNKNOWN
-                and len(frame_out) != frame_declared
-            ):
-                raise SnapshotError(
-                    f"{source}: corrupt or truncated zstd stream (a frame "
-                    f"declares {frame_declared} bytes but only "
-                    f"{len(frame_out)} decoded)"
-                )
-            remaining = dobj.unused_data
-    except SnapshotError:
-        raise
-    except Exception:
-        pass  # frame-header parsing itself failing adds no new information
-        # -- the caller's own bounded primary pass already proved the
-        # stream decodes cleanly end to end; this pass is an additional,
-        # stricter cross-check on top of that, not the only line of
-        # defense.
+        except Exception as exc:
+            raise SnapshotError(
+                f"{source}: corrupt or truncated zstd stream (failed to "
+                f"parse a frame header: {exc})"
+            ) from exc
+        if not dobj.eof or (
+            frame_declared != zstandard.CONTENTSIZE_UNKNOWN
+            and len(frame_out) != frame_declared
+        ):
+            raise SnapshotError(
+                f"{source}: corrupt or truncated zstd stream (a frame "
+                f"declares {frame_declared} bytes but only "
+                f"{len(frame_out)} decoded)"
+            )
+        remaining = dobj.unused_data

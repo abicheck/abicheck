@@ -913,6 +913,41 @@ class TestReadBlobRejectsTruncatedZstdFrames:
             with pytest.raises(SnapshotError, match="corrupt or truncated zstd stream"):
                 reader.read_blob(h)
 
+    def test_read_blob_raises_for_a_member_truncated_inside_the_frame_header(
+        self, tmp_path: Path
+    ) -> None:
+        """A member truncated to just the 4-byte zstd magic (no full frame
+        header at all) decodes to `b""` with no error via `stream_reader()`
+        -- so a member named after the empty-payload hash would otherwise
+        pass the post-decode hash check too, accepting a malformed archive
+        as an empty blob (Codex review, fresh evidence)."""
+        magic = b"\x28\xb5\x2f\xfd"
+
+        # Premise: confirm real zstandard's stream_reader() really does
+        # silently decode this to nothing, not raise.
+        import zstandard
+
+        dctx = zstandard.ZstdDecompressor()
+        out = io.BytesIO()
+        with dctx.stream_reader(io.BytesIO(magic)) as reader:
+            while True:
+                chunk = reader.read(1024 * 1024)
+                if not chunk:
+                    break
+                out.write(chunk)
+        assert out.getvalue() == b""
+
+        h = content_hash(b"")
+        path = tmp_path / "bundle.archive.zip"
+        with zipfile.ZipFile(path, mode="w") as zf:
+            zf.writestr(MANIFEST_MEMBER, json.dumps({"library_blobs": {"a.so": h}}))
+            zf.writestr(f"blobs/{h}.json.zst", magic, compress_type=zipfile.ZIP_STORED)
+
+        with BundleArchiveReader.open(path) as reader:
+            manifest = reader.read_manifest()
+            with pytest.raises(SnapshotError, match="corrupt or truncated zstd stream"):
+                reader.read_blob(manifest["library_blobs"]["a.so"])
+
 
 class TestSniffDoesNotConsumeAOneShotFifoProducer:
     """A *thread*-based writer doesn't reliably reproduce this: Python
