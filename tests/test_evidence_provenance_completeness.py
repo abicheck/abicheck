@@ -98,3 +98,24 @@ class TestFieldDefaultsToNone:
             evidence_provenance=(),
         )
         assert c.evidence_provenance == ()
+
+    def test_field_is_keyword_only_appended_last(self) -> None:
+        """`Change` is public API -- a new optional field must be
+        `field(kw_only=True)`, appended after every pre-existing field, so
+        a caller passing later fields positionally (e.g.
+        `compatibility_evaluation_status`/`compatibility_decision`) keeps
+        landing on the same field it always did (Codex review: an earlier
+        revision inserted this field positionally between
+        `contract_evidence_refs` and `compatibility_evaluation_status`,
+        which would have silently shifted every later field's position for
+        such a caller)."""
+        import dataclasses
+
+        f = next(
+            field for field in dataclasses.fields(Change) if field.name == "evidence_provenance"
+        )
+        assert f.kw_only is True
+        all_names = [field.name for field in dataclasses.fields(Change)]
+        assert all_names[-1] == "evidence_provenance", (
+            "evidence_provenance must be the last-declared field on Change"
+        )
