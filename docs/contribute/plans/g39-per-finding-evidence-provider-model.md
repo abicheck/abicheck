@@ -308,9 +308,28 @@ ChangeKind" section). Every `ChangeKind` must appear in one of:
 - `PROVENANCE_UNVERIFIED` — an explicit backlog bucket, not a silent gap,
   identical in spirit to `UNVERIFIED` in the canonical-identity contract.
 
-A `ChangeKind` with no entry fails CI — the exact mechanism that closes the
-class of bug this plan's own "Problem" section names (a kind whose call site
-was never revisited).
+A `ChangeKind` with no entry fails CI — the same "no silent omission"
+mechanism `canonical_identity_contract.UNVERIFIED` already established for
+identity classification, applied here to provenance classification instead.
+
+**What this gate does and does not prove (Codex review, fresh evidence):**
+it proves every `ChangeKind` is classified into one of the three buckets —
+an *enum-partition* completeness, mirroring the #753 → #759 incident's own
+lesson (a missing entry is silent everywhere else, so make the enum itself
+un-skippable). It does **not** prove a kind's real producer(s) actually
+behave the way its bucket claims — a kind moved to `PROVENANCE_STATIC`/
+`PROVENANCE_PER_FINDING` whose producer forgot to actually set
+`evidence_provenance`, or whose *second*, independent producer path (e.g. a
+kind emitted from both a `diff_symbols.py` path and an unrelated
+`diff_platform.py` path) never got wired at all, still passes this gate
+outright, since it checks bucket *membership*, not producer *behavior*. That
+gap is why the "completeness gate over construction paths" idea two
+paragraphs above is called out as real, separate, not-yet-designed
+follow-up work rather than something this phase already closes — the two
+sections must not be read as contradicting each other: Phase 2's gate closes
+the enum-omission failure mode specifically, and is deliberately silent on
+the construction-path failure mode, which needs its own mechanism this plan
+does not yet specify.
 
 ### Phase 3 — report/schema surface (S)
 

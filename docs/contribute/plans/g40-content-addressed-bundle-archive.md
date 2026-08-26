@@ -129,7 +129,8 @@ New module, `abicheck/storage/bundle_archive.py`:
 ```python
 @dataclass(frozen=True)
 class BundleArchiveManifest:
-    schema_version: int
+    schema_version: int  # the *container's own* layout version
+    bundle_facts_schema_version: int  # the encoded BundleFacts' own version
     variant_fingerprint: str
     # canonical_library_name -> content hash of its serialized AbiSnapshot
     library_blobs: dict[str, str]
@@ -137,6 +138,23 @@ class BundleArchiveManifest:
     filesystem_aliases: dict[str, tuple[str, ...]]
     library_filenames: dict[str, str]
 ```
+
+**Two independent schema versions, not one (Codex review, fresh evidence):**
+the archive manifest's own layout (this dataclass's shape) and the
+`BundleFacts` it encodes (`BundleFacts.schema_version`) evolve on separate
+schedules — a manifest-layout change (e.g. a new top-level field) says
+nothing about whether the `BundleFacts` shape inside it changed, and vice
+versa. A single `schema_version` field would force a reader to conflate the
+two: bump it for a manifest change and an old reader can no longer tell
+"the container changed" from "the facts changed," or skip bumping it for a
+facts-only change and lose the rejection this whole mechanism exists to
+provide. `schema_version` gates the container's own shape (checked against
+this format's own version constant before reading any other manifest
+field); `bundle_facts_schema_version` is carried through opaquely and
+handed to the same version check `bundle_facts_from_dict` already performs
+for the plain-JSON path, so both axes reject a too-new value independently
+and the two consumers (the archive reader, `BundleFacts`'s own loader) each
+answer only the question they own.
 
 Layout inside the zip: `manifest.json` (the `BundleArchiveManifest` above,
 uncompressed member — always readable without touching the blob store,
@@ -300,6 +318,24 @@ above already distinguishes from an archive member's own per-blob zstd
 compression, which is unconditional and not user-configurable (every blob
 is stored zstd-compressed regardless of `compression=`, the same way the
 archive's own zip container is always `ZIP_STORED`, never `ZIP_DEFLATED`).
+
+**`save_bundle_facts` keeps its existing `SnapshotWriteResult` return type
+for `format="archive"` too, with each field computed for real rather than
+left at a JSON-envelope default (Codex review, fresh evidence):** an
+earlier revision of this section defined the new `format=` argument's
+behavior but never stated what the archive branch returns, which could
+otherwise degrade to `None` or to values that describe a JSON envelope, not
+a zip. `compression=SnapshotCompression.ZSTD` (every blob is zstd, so this
+is never ambiguous the way `format="json"`'s configurable `compression=`
+is); `decoded_size_bytes` is the sum of every serialized payload actually
+written to the blob store — one library's snapshot plus the instantiation
+manifest, if present, each counted once even when `put_blob`'s own content
+dedup collapses two libraries onto one blob (this field answers "how much
+was there to encode," not "how many bytes did the store end up holding");
+`stored_size_bytes`/`stored_sha256` are the real archive **file's** own
+size and sha256 digest, streamed rather than read fully into memory, since
+this bookkeeping step has no reason to hold a second full copy of a
+potentially large multi-library archive just to size/hash it.
 `save_bundle_facts(facts, path, format="archive", compression="gzip")` is
 therefore not a contradiction to reject: `compression` is silently
 inapplicable to that branch (ignored, not an error) since the archive
