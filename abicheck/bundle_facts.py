@@ -76,22 +76,16 @@ BUNDLE_FACTS_SCHEMA_VERSION = 1
 BUNDLE_ARCHIVE_SCHEMA_VERSION = 1
 
 #: Aggregate decoded-size cap for a whole read_bundle_facts_archive() load
-#: -- same 1 GiB value as `snapshot_io.DEFAULT_MAX_DECODED_BYTES`, the cap
-#: the plain-JSON BundleFacts loader already enforces on its own single
-#: whole-document read. `storage.bundle_archive.read_blob`'s own
-#: `max_decoded_bytes` only bounds ONE blob at a time -- a crafted archive
-#: with many individually-valid blobs (or many library names referencing
-#: one large blob) could otherwise amplify past that per-call limit across
-#: the whole load even though every single `read_blob()` call passes its
-#: own guard (Codex review).
+#: -- same 1 GiB value as `snapshot_io.DEFAULT_MAX_DECODED_BYTES`. A crafted
+#: archive with many individually-valid blobs (or many library names
+#: referencing one large blob) could otherwise amplify past `read_blob`'s
+#: own per-call `max_decoded_bytes` across the whole load (Codex review).
 DEFAULT_MAX_BUNDLE_DECODED_BYTES = 1024 * 1024 * 1024
 
 #: Hard cap on the number of `library_blobs` entries one archive manifest
-#: may name -- independent of any byte-size cap (see
-#: `read_bundle_facts_archive`'s own check for why: a shared blob's decoded
+#: may name -- independent of any byte-size cap (a shared blob's decoded
 #: bytes are charged once, but each name sharing it still materializes its
-#: own AbiSnapshot object graph). No real bundle approaches this; a real
-#: multi-library release is hundreds of libraries, not tens of thousands.
+#: own AbiSnapshot object graph). No real bundle approaches this.
 DEFAULT_MAX_LIBRARY_COUNT = 20_000
 
 #: The fingerprint value used when no multibuild variant applies (every
@@ -428,27 +422,20 @@ def write_bundle_facts_archive(
 
     p = Path(path)
     # Everything below is computed -- and every cap the reader will later
-    # enforce is checked -- *before* `BundleArchiveWriter` is ever opened,
-    # so a rejected write never touches disk. This two-pass shape (compute,
-    # then write) replaced an earlier incremental version that charged the
-    # write-side member/byte caps against raw *name* count rather than
-    # *distinct content* -- over-rejecting whenever multiple names share
-    # one blob (the "one snapshot, many aliases" shape this format's own
-    # dedup exists to provide) on both axes at once, since the informational
-    # `decoded_size_bytes` total is deliberately name-count-based too (see
-    # its own docstring below) and the aggregate-bytes cap previously reused
-    # it (Codex review, fresh evidence, two findings on the incremental
-    # design). Both caps are now measured on the *same* unique-hash map the
-    # write below actually populates -- no separate reasoning about what
-    # the writer will do, just what it did.
-    # Sorted by name, not `facts.per_library_snapshots`' own dict insertion
-    # order (Codex review, fresh evidence): two BundleFacts values that are
-    # logically equal but built by populating this mapping in a different
-    # order would otherwise write their blobs in different orders (and so
-    # the manifest's `library_blobs` keys in different orders too, since
-    # dict order is insertion order), producing different archive bytes and
-    # stored_sha256 for otherwise-identical facts -- undermining the same
-    # reproducibility the pinned zip timestamps exist to provide.
+    # enforce is checked -- *before* `BundleArchiveWriter` is ever opened, so
+    # a rejected write never touches disk. This two-pass shape (compute, then
+    # write) replaced an earlier incremental version that charged the
+    # write-side member/byte/name caps against raw *name* count rather than
+    # *distinct content* -- over-rejecting the "one snapshot, many aliases"
+    # dedup shape this format exists to provide (Codex review, fresh
+    # evidence, several rounds). Every cap below is measured on the *same*
+    # unique-hash map the write further down actually populates.
+    # Sorted by name, not dict insertion order (Codex review, fresh
+    # evidence): two logically-equal BundleFacts populated in a different
+    # order would otherwise write blobs (and manifest keys) in a different
+    # order, producing different archive bytes/stored_sha256 for otherwise-
+    # identical facts -- undermining the reproducibility the pinned zip
+    # timestamps exist to provide.
     library_blobs: dict[str, str] = {}
     decoded_size_bytes = 0
     unique_payloads: dict[str, bytes] = {}  # content hash -> its own payload
@@ -469,6 +456,18 @@ def write_bundle_facts_archive(
         manifest_blob = content_hash(manifest_payload)
         unique_payloads.setdefault(manifest_blob, manifest_payload)
 
+    # (a-) Library-name-count cap, independent of the distinct-blob cap
+    # below: many names can share one blob (the dedup this format exists
+    # to provide), so a BundleFacts with more names than the reader's own
+    # DEFAULT_MAX_LIBRARY_COUNT could write successfully -- one blob, one
+    # manifest member -- and then never be reopened (Codex review).
+    if len(library_blobs) > DEFAULT_MAX_LIBRARY_COUNT:
+        raise SnapshotError(
+            f"{p}: writing this bundle's {len(library_blobs)} library "
+            f"names would exceed the {DEFAULT_MAX_LIBRARY_COUNT} name "
+            "safety limit read_bundle_facts_archive() enforces on load -- "
+            "refusing to write an archive that could not be reopened."
+        )
     # (a) Member-count cap: one member per *distinct* blob hash, plus
     # exactly one for the mandatory `manifest.json` container member --
     # `manifest_blob`'s own hash is already inside `unique_payloads` above
@@ -511,15 +510,12 @@ def write_bundle_facts_archive(
         "library_filenames": dict(sorted(facts.library_filenames.items())),
     }
     # A third cap: `manifest.json` (the container member above, distinct
-    # from `facts.manifest`/`manifest_blob`) has its own size ceiling on
-    # the reader side (`read_manifest()`'s `DEFAULT_MAX_MANIFEST_BYTES`),
-    # never covered by either cap above -- neither charges the container
-    # manifest's own bytes, only blob content. A `BundleFacts` with a large
-    # `filesystem_aliases`/`library_filenames` mapping could otherwise
-    # write a `manifest.json` the reader would then always refuse (Codex
-    # review, fresh evidence). Checked against the exact bytes about to be
-    # written, via the identical `json.dumps(..., indent=2)` encoding
-    # `write_manifest()` itself uses.
+    # from `facts.manifest`/`manifest_blob`) has its own reader-side size
+    # ceiling (`DEFAULT_MAX_MANIFEST_BYTES`), never covered by either cap
+    # above -- neither charges the container manifest's own bytes, only
+    # blob content. Checked against the exact bytes about to be written,
+    # via the identical `json.dumps(..., indent=2)` encoding
+    # `write_manifest()` itself uses (Codex review, fresh evidence).
     manifest_member_payload = _json.dumps(container_manifest, indent=2)
     if len(manifest_member_payload.encode("utf-8")) > DEFAULT_MAX_MANIFEST_BYTES:
         raise SnapshotError(
@@ -659,13 +655,10 @@ def read_bundle_facts_archive(
             cached = blob_cache.get(h)
             if cached is not None:
                 return cached
-            # Pass the *remaining* aggregate allowance as this one read's
-            # own per-blob cap, not read_blob's full 1 GiB default -- a
-            # single call letting a blob decompress up to the whole
-            # per-blob ceiling before the aggregate check runs afterward
-            # would let peak decoded memory substantially exceed the
-            # promised whole-load limit for a manifest with several large
-            # distinct blobs (Codex review, fresh evidence).
+            # Pass the *remaining* aggregate allowance as this read's own
+            # per-blob cap, not read_blob's full 1 GiB default -- else peak
+            # decoded memory could exceed the whole-load limit for a
+            # manifest with several large distinct blobs (Codex review).
             remaining = DEFAULT_MAX_BUNDLE_DECODED_BYTES - total_decoded
             if remaining <= 0:
                 raise SnapshotError(
@@ -680,44 +673,52 @@ def read_bundle_facts_archive(
             blob_cache[h] = raw
             return raw
 
-        # reader.read_blob() verifies the blob's *hash*, not its JSON
-        # *shape* -- a blob that legitimately decodes (valid zstd, valid
-        # JSON) to a list or scalar would otherwise reach
-        # snapshot_from_dict's own d.get(...) calls and raise a raw
-        # AttributeError instead of this module's normal error type
-        # (CodeRabbit review).
+        # read_blob() verifies the blob's *hash*, not its JSON *shape* -- a
+        # blob that legitimately decodes to a list/scalar must raise this
+        # module's own error type below, not a raw AttributeError out of
+        # snapshot_from_dict's d.get(...) calls (CodeRabbit review).
         #
-        # snapshot_cache is keyed by hash too, alongside blob_cache above
-        # (Codex review, fresh evidence): blob_cache only avoids repeated
-        # *decompression* for several library names sharing one blob --
-        # without this second cache, snapshot_from_dict() still runs once
-        # per *name*, materializing a separate (if structurally identical)
-        # AbiSnapshot object graph for each one, so a manifest naming many
-        # libraries against one shared blob could still amplify one valid,
-        # size-capped blob into many times its own memory footprint in live
-        # Python objects.
-        #
-        # Each *name* still gets its own AbiSnapshot instance in the
-        # returned mapping (CodeRabbit review): AbiSnapshot is a plain,
-        # mutable dataclass and BundleFacts is public API -- no internal
-        # consumer mutates a loaded snapshot today, but that isn't a
-        # contract this loader can impose on every future caller of the
-        # public Python API. `snapshot_cache` holds the *first* built
-        # instance for a hash (handed out to its first name unmodified);
-        # every subsequent name sharing that hash gets a deep copy of it,
-        # so no two names in the returned mapping ever alias the same
-        # object, matching `serialization.bundle_facts_from_dict()`'s own
-        # one-instance-per-entry contract. The cost this pays is a deep
-        # copy instead of a second parse -- cheaper, and still linear in
-        # the number of *duplicate* names, not in blob size.
+        # snapshot_cache is keyed by hash too, alongside blob_cache above:
+        # blob_cache only avoids repeated *decompression* for several names
+        # sharing one blob -- this second cache avoids re-running
+        # snapshot_from_dict() per name too. Each *name* still gets its own
+        # AbiSnapshot instance in the returned mapping (CodeRabbit review:
+        # AbiSnapshot is a mutable dataclass and BundleFacts is public API,
+        # so no two names may alias one object) -- `snapshot_cache` holds
+        # the first-built instance unmodified, every later name sharing
+        # that hash gets a deep copy, matching
+        # `serialization.bundle_facts_from_dict()`'s one-instance-per-entry
+        # contract.
         snapshot_cache: dict[str, AbiSnapshot] = {}
+        snapshot_blob_len: dict[str, int] = {}
         per_library_snapshots: dict[str, AbiSnapshot] = {}
         for name, h in library_blobs.items():
             cached_snapshot = snapshot_cache.get(h)
             if cached_snapshot is not None:
+                # blob_cache/total_decoded above only charge a shared
+                # blob's bytes *once* -- but every duplicate name here
+                # still materializes its own independent, deep-copied
+                # AbiSnapshot object graph, so a manifest naming many
+                # names against one moderately-sized blob could otherwise
+                # amplify far past the aggregate cap in live Python
+                # objects alone. Charge each copy's own blob byte length
+                # against the same budget (Codex review, fresh evidence).
+                copy_bytes = snapshot_blob_len[h]
+                if total_decoded + copy_bytes > DEFAULT_MAX_BUNDLE_DECODED_BYTES:
+                    raise SnapshotError(
+                        f"{path}: this bundle archive's total decoded "
+                        f"size exceeds the {DEFAULT_MAX_BUNDLE_DECODED_BYTES} "
+                        "byte safety limit once every duplicate library "
+                        "name's own materialized copy is counted -- "
+                        "refusing to continue loading (possible "
+                        "object-count amplification attack, or a "
+                        "genuinely oversized bundle)."
+                    )
+                total_decoded += copy_bytes
                 per_library_snapshots[name] = copy.deepcopy(cached_snapshot)
                 continue
-            blob = _json.loads(_cached_blob(h))
+            raw = _cached_blob(h)
+            blob = _json.loads(raw)
             if not isinstance(blob, dict):
                 raise ValueError(
                     f"bundle archive: blob for library {name!r} must decode "
@@ -725,6 +726,7 @@ def read_bundle_facts_archive(
                 )
             snap = snapshot_from_dict(blob)
             snapshot_cache[h] = snap
+            snapshot_blob_len[h] = len(raw)
             per_library_snapshots[name] = snap
         manifest_blob = manifest.get("manifest_blob")
         instantiation_manifest = None

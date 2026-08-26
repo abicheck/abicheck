@@ -104,10 +104,9 @@ class TestBundleArchiveWriterReader:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Production-scale-shaped partial-load proof (AGENTS.md's
-        "Third-party-boundary tests" convention): a real, multi-blob
-        archive where reading one blob touches exactly that member's data,
-        not the whole archive -- proving lazy access is real, not merely
-        API-shaped."""
+        "Third-party-boundary tests" convention): reading one blob from a
+        multi-blob archive touches exactly that member, not the whole
+        archive."""
         path = tmp_path / "bundle.archive.zip"
         payloads = {
             f"lib{i}.so": f'{{"library": "lib{i}.so", "padding": "{"x" * 5000}"}}'.encode()
@@ -220,10 +219,9 @@ class TestBundleArchiveWriterReader:
 
 
 class TestBundleArchiveWriterAtomicity:
-    """Codex review: the original revision opened *path* with ``mode="w"``,
-    truncating any pre-existing archive immediately -- a later error would
-    leave a partial file where a valid prior archive used to be. Writes go
-    to a temp file now, promoted only on a fully successful close()."""
+    """The original revision opened *path* with ``mode="w"``, truncating
+    any pre-existing archive immediately -- writes go to a temp file now,
+    promoted only on a fully successful close() (Codex review)."""
 
     def test_close_without_manifest_leaves_existing_destination_untouched(
         self, tmp_path: Path
@@ -271,9 +269,7 @@ class TestBundleArchiveWriterAtomicity:
         self, tmp_path: Path
     ) -> None:
         """A bare os.replace(tmp, path) on a symlink destination would
-        swap the symlink's own directory entry for a regular file,
-        destroying the link -- every other reader still following it
-        would then see nothing written here (Codex review)."""
+        destroy the link instead of updating its target (Codex review)."""
         real_dir = tmp_path / "real"
         real_dir.mkdir()
         target = real_dir / "bundle.archive.zip"
@@ -298,12 +294,10 @@ class TestBundleArchiveWriterAtomicity:
     def test_cyclic_symlink_destination_raises_instead_of_being_overwritten(
         self, tmp_path: Path
     ) -> None:
-        """Codex review, fresh evidence: a bare `except OSError:` around
-        the target stat() swallowed ELOOP (a cyclic symlink) the same as
-        genuine absence, letting os.replace() silently destroy the cyclic
-        symlink and install a regular zip in its place. Only real absence
-        (FileNotFoundError/NotADirectoryError) may be treated that way --
-        anything else must propagate."""
+        """A bare `except OSError:` around the target stat() swallowed
+        ELOOP (a cyclic symlink) the same as genuine absence -- only real
+        absence may be treated that way, anything else must propagate
+        (Codex review, fresh evidence)."""
         a = tmp_path / "a"
         b = tmp_path / "b"
         a.symlink_to(b)
@@ -353,10 +347,7 @@ class TestBundleArchiveWriterAtomicity:
         self, tmp_path: Path
     ) -> None:
         """A pre-existing FIFO/socket/device destination is rejected
-        outright rather than being silently replaced by os.replace() with
-        a regular zip file (Codex review) -- unlike the hard-link case,
-        there's no way to "write through" such a destination with this
-        writer's atomic-rename design."""
+        outright, not silently replaced by os.replace() (Codex review)."""
         path = tmp_path / "bundle.archive.zip"
         os.mkfifo(path)
 
@@ -385,12 +376,10 @@ class TestBundleArchiveWriterAtomicity:
     def test_restores_mode_after_ownership_not_before(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Codex review, fresh evidence: chown() can silently clear a
-        setuid/setgid bit on POSIX -- restoring mode before chown (the
-        original order) let a destination's setuid/setgid bits be set by
-        chmod only to be stripped by the chown that followed it.
-        Simulated via a fake chown that mirrors that kernel behavior,
-        rather than depending on a real setuid/setgid-capable sandbox."""
+        """chown() can silently clear a setuid/setgid bit on POSIX --
+        restoring mode before chown let those bits be stripped by the
+        chown that followed (Codex review). Simulated via a fake chown
+        mirroring that kernel behavior."""
         path = tmp_path / "bundle.archive.zip"
         with BundleArchiveWriter(path) as writer:
             h = writer.put_blob(b'{"a": 1}')
@@ -416,11 +405,9 @@ class TestBundleArchiveWriterAtomicity:
     def test_close_failure_removes_the_temp_file(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Codex review: a failure anywhere in close()'s post-zf.close()
-        block (fsync, chown, chmod, or the replace itself) must not leave
-        the temp file behind -- repeated failures would otherwise
-        accumulate temp files and starve later retries of the space
-        they're trying to free up."""
+        """A failure anywhere in close()'s post-zf.close() block (fsync,
+        chown, chmod, replace) must not leave the temp file behind --
+        repeated failures would otherwise accumulate temp files (Codex)."""
         path = tmp_path / "bundle.archive.zip"
         writer = BundleArchiveWriter(path)
         h = writer.put_blob(b'{"a": 1}')
@@ -437,11 +424,9 @@ class TestBundleArchiveWriterAtomicity:
 
 
 class TestBundleArchiveReaderRejectsNonStoredMembers:
-    """Codex review: every member BundleArchiveWriter produces is
-    ZIP_STORED deliberately -- a crafted archive using ZIP_DEFLATED for a
-    member could otherwise expand to an arbitrary in-memory allocation via
-    plain ZipExtFile.read(), before read_blob's own zstd decoded-size
-    guard ever runs. Both read_manifest and read_blob must reject it."""
+    """Every member BundleArchiveWriter produces is ZIP_STORED
+    deliberately -- ZIP_DEFLATED could expand to an arbitrary in-memory
+    allocation before read_blob's zstd guard ever runs (Codex)."""
 
     def test_read_manifest_rejects_a_deflated_manifest_member(self, tmp_path: Path) -> None:
         path = tmp_path / "bundle.archive.zip"
@@ -469,12 +454,10 @@ class TestBundleArchiveReaderRejectsNonStoredMembers:
     def test_read_stored_member_rejects_a_member_exceeding_max_bytes(
         self, tmp_path: Path
     ) -> None:
-        """Rejecting deflate alone is not a size bound -- a still-ZIP_STORED
-        member can simply claim (and actually contain) an oversized payload.
-        Exercised directly on the shared primitive (rather than through
-        read_manifest()'s own much larger, production-sized
-        DEFAULT_MAX_MANIFEST_BYTES default) with a small max_bytes, so the
-        test doesn't need to actually write 64 MiB (Codex review)."""
+        """Rejecting deflate alone is not a size bound -- a ZIP_STORED
+        member can still claim an oversized payload. Uses a small
+        max_bytes directly rather than read_manifest()'s much larger
+        production default, so the test needn't write 64 MiB (Codex)."""
         path = tmp_path / "bundle.archive.zip"
         with zipfile.ZipFile(path, mode="w") as zf:
             zf.writestr(MANIFEST_MEMBER, b"x" * 2048)
@@ -621,12 +604,9 @@ class TestBundleArchiveReaderWrapsThirdPartyExceptions:
                 reader.read_blob(h)
 
     def test_an_encrypted_member_raises_snapshot_error(self, tmp_path: Path) -> None:
-        """Codex review, fresh evidence: a member with the zip 'encrypted'
-        general-purpose bit set makes `ZipFile.open()` raise a bare
-        `RuntimeError("... is encrypted, password required ...")`, not
-        `BadZipFile` -- the only exception the CRC-mismatch handling below
-        translates -- so it must be rejected explicitly, not left to leak
-        a raw RuntimeError past this module's SnapshotError contract."""
+        """A member with the zip 'encrypted' bit set makes `ZipFile.open()`
+        raise a bare RuntimeError, not the `BadZipFile` the CRC-mismatch
+        handling translates -- must be rejected explicitly (Codex)."""
         path = tmp_path / "bundle.archive.zip"
         with BundleArchiveWriter(path) as writer:
             h = writer.put_blob(b'{"a": 1}')
@@ -758,6 +738,33 @@ class TestBundleArchiveCentralDirectoryGuard:
         zip64_locator = struct.pack("<IIQI", 0x07064B50, 0, zip64_eocd_offset, 1)
         # Standard EOCD with the 0xFFFF sentinel for total_entries.
         eocd = struct.pack("<IHHHHIIH", 0x06054B50, 0, 0, 0, 0xFFFF, 0, 0, 0)
+
+        data = bytearray(b"\x00" * zip64_eocd_offset)
+        data += zip64_record
+        data += zip64_locator
+        data += eocd
+        path.write_bytes(bytes(data))
+
+        with pytest.raises(SnapshotError, match="central directory claims 70000"):
+            BundleArchiveReader.open(path)
+
+    def test_rejects_a_zip64_locator_even_without_a_standard_eocd_sentinel(
+        self, tmp_path: Path
+    ) -> None:
+        """CPython's ZipFile inspects a preceding ZIP64 locator
+        unconditionally, not only on a sentinel overflow -- a hostile
+        archive can pair small standard-EOCD values with a real oversized
+        ZIP64 record (Codex review, fresh evidence)."""
+        import struct
+
+        path = tmp_path / "fake_zip64_no_sentinel.zip"
+        zip64_eocd_offset = 4
+        zip64_record = struct.pack(
+            "<IQHHIIQQQQ", 0x06064B50, 44, 0, 0, 0, 0, 0, 70_000, 1024, 0
+        )
+        zip64_locator = struct.pack("<IIQI", 0x07064B50, 0, zip64_eocd_offset, 1)
+        # Standard EOCD with small, non-sentinel total_entries/cd_size.
+        eocd = struct.pack("<IHHHHIIH", 0x06054B50, 0, 0, 0, 1, 100, 0, 0)
 
         data = bytearray(b"\x00" * zip64_eocd_offset)
         data += zip64_record
@@ -928,12 +935,10 @@ class TestSniffBundleArchiveFormatNonRegularSource:
 
 
 class TestBundleArchiveWriterTempFileCreation:
-    """Codex review, fresh evidence: a predictable temp filename in a
-    directory writable by another account can be pre-created as a
-    symlink, and ZipFile(path, mode="w")'s own open(path, "w+b") follows
-    it and truncates whatever it points at. The writer must create its
-    temp file itself, exclusively, so it can never be tricked into
-    writing through an attacker-planted entry."""
+    """A predictable temp filename in a writable-by-another-account
+    directory can be pre-created as a symlink ZipFile(mode="w") would
+    follow and truncate -- the writer must create its temp file itself,
+    exclusively (Codex review, fresh evidence)."""
 
     def test_round_trip_still_works_through_the_new_temp_file_creation(
         self, tmp_path: Path
@@ -1103,14 +1108,11 @@ class TestBundleArchiveDeterministicCreateSystem:
 
 
 class TestBundleArchiveWriterNewArchivePermissions:
-    """Codex review, fresh evidence: tempfile.mkstemp() always creates its
-    file at mode 0600 regardless of the process umask -- a brand-new
-    archive must not silently publish more restrictively than a normal
-    `open(..., "wb")` would under the same umask. Implemented via
-    `_open_unique_temp` (`os.O_CREAT` filtered through the umask by the
-    kernel at creation), not a process-wide `os.umask()` read-zero-restore
-    dance -- see `TestBundleArchiveWriterDoesNotToggleTheProcessUmask`
-    below for that specific hazard's own regression test."""
+    """tempfile.mkstemp() always creates its file at mode 0600 regardless
+    of the process umask -- a brand-new archive must not silently publish
+    more restrictively than `open(..., "wb")` would (Codex review).
+    Implemented via `_open_unique_temp`, not an `os.umask()` dance -- see
+    `TestBundleArchiveWriterDoesNotToggleTheProcessUmask` below."""
 
     @pytest.mark.skipif(
         sys.platform == "win32", reason="POSIX permission bits are not meaningful on Windows"
@@ -1171,12 +1173,10 @@ class TestBundleArchiveWriterNewArchivePermissions:
 
 
 class TestBundleArchiveWriterDoesNotToggleTheProcessUmask:
-    """Codex review, fresh evidence: the earlier `os.umask(0)`/
-    `os.umask(current_umask)` read-zero-restore sequence is process-wide
-    and not thread-safe -- a concurrent thread creating any file during
-    that window could observe the temporarily-zeroed umask. Confirms the
-    fix directly: the process umask is bit-for-bit unchanged by opening a
-    writer for a brand-new archive."""
+    """The earlier `os.umask(0)`/restore sequence is process-wide and not
+    thread-safe -- a concurrent thread could observe the zeroed umask
+    (Codex review, fresh evidence). Confirms the process umask is
+    bit-for-bit unchanged by opening a writer."""
 
     @pytest.mark.skipif(sys.platform == "win32", reason="POSIX umask semantics")
     def test_umask_is_never_read_or_modified(self, tmp_path: Path) -> None:

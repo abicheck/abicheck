@@ -65,14 +65,19 @@ def reject_absurd_central_directory(f: Any, path: Path, *, max_entries: int) -> 
 
     Best-effort only for "the EOCD itself can't be found/read" (a
     genuinely truncated/non-zip file) -- `zipfile.ZipFile`'s own error is
-    authoritative there. Once the EOCD is found, though, a ZIP64 sentinel
-    (`total_entries == 0xFFFF` or `cd_size == 0xFFFFFFFF`) whose locator/
-    record can't be validated is rejected outright, not silently passed
-    through: CPython's `ZipFile` falls back to the *standard* EOCD's raw,
-    un-overflowed fields in that case, so a crafted archive pairing the
-    sentinel with a missing/malformed ZIP64 record could carry an
-    oversized, never-validated `cd_size` straight past this preflight
-    (Codex review, fresh evidence).
+    authoritative there. The ZIP64 EOCD locator is inspected
+    *unconditionally*, not only when the standard EOCD's own
+    `total_entries`/`cd_size` fields overflow to their sentinel values
+    (`0xFFFF`/`0xFFFFFFFF`): CPython's own `zipfile._EndRecData` always
+    looks for a locator immediately preceding the EOCD and, when a valid
+    one is found, always prefers its record's values -- regardless of
+    whether the standard EOCD's fields happen to signal an overflow. A
+    hostile archive can therefore leave small, sentinel-free values in the
+    standard EOCD while a real ZIP64 locator/record right behind it names
+    an oversized directory; gating the locator lookup on the sentinel
+    would let that straight through this preflight (Codex review, fresh
+    evidence). A sentinel set with no locator to back it up, or a locator
+    pointing at no valid record, is still rejected outright either way.
     """
     try:
         size = os.fstat(f.fileno()).st_size
@@ -90,30 +95,34 @@ def reject_absurd_central_directory(f: Any, path: Path, *, max_entries: int) -> 
         # comment_len(2) [comment...]
         total_entries = int.from_bytes(tail[idx + 10 : idx + 12], "little")
         cd_size = int.from_bytes(tail[idx + 12 : idx + 16], "little")
-        is_zip64 = total_entries == 0xFFFF or cd_size == 0xFFFFFFFF
-        if is_zip64:
-            # ZIP64: the real values live in the ZIP64 EOCD record, whose
-            # own locator is always the fixed 20 bytes immediately
-            # preceding this standard EOCD's signature.
-            eocd_abs = (size - tail_len) + idx
-            locator_start = eocd_abs - _ZIP64_EOCD_LOCATOR_SIZE
-            if locator_start < 0:
-                raise SnapshotError(
-                    f"{path}: EOCD signals ZIP64 (entry-count/central-"
-                    "directory-size sentinel set) but the file is too "
-                    "short to hold a ZIP64 EOCD locator -- refusing to "
-                    "open (malformed or hostile archive)."
-                )
+        is_zip64_sentinel = total_entries == 0xFFFF or cd_size == 0xFFFFFFFF
+
+        # The locator is always the fixed 20 bytes immediately preceding
+        # the standard EOCD's signature -- looked up regardless of the
+        # sentinel, per this function's own docstring.
+        eocd_abs = (size - tail_len) + idx
+        locator_start = eocd_abs - _ZIP64_EOCD_LOCATOR_SIZE
+        locator = b""
+        if locator_start >= 0:
             f.seek(locator_start)
             locator = f.read(_ZIP64_EOCD_LOCATOR_SIZE)
-            if len(locator) != _ZIP64_EOCD_LOCATOR_SIZE or not locator.startswith(
-                _ZIP64_EOCD_LOCATOR_SIG
-            ):
-                raise SnapshotError(
-                    f"{path}: EOCD signals ZIP64 but no valid ZIP64 EOCD "
-                    "locator precedes it -- refusing to open (malformed or "
-                    "hostile archive)."
+        has_locator = len(
+            locator
+        ) == _ZIP64_EOCD_LOCATOR_SIZE and locator.startswith(_ZIP64_EOCD_LOCATOR_SIG)
+
+        if not has_locator:
+            if is_zip64_sentinel:
+                reason = (
+                    "the file is too short to hold a ZIP64 EOCD locator"
+                    if locator_start < 0
+                    else "no valid ZIP64 EOCD locator precedes it"
                 )
+                raise SnapshotError(
+                    f"{path}: EOCD signals ZIP64 (entry-count/central-"
+                    f"directory-size sentinel set) but {reason} -- "
+                    "refusing to open (malformed or hostile archive)."
+                )
+        else:
             zip64_eocd_offset = int.from_bytes(locator[8:16], "little")
             f.seek(zip64_eocd_offset)
             # Fixed portion only (56 bytes) -- signature/total_entries/
@@ -122,9 +131,9 @@ def reject_absurd_central_directory(f: Any, path: Path, *, max_entries: int) -> 
             record = f.read(56)
             if len(record) != 56 or not record.startswith(_ZIP64_EOCD_RECORD_SIG):
                 raise SnapshotError(
-                    f"{path}: ZIP64 EOCD locator points at no valid ZIP64 "
-                    "EOCD record -- refusing to open (malformed or hostile "
-                    "archive)."
+                    f"{path}: a ZIP64 EOCD locator precedes the central "
+                    "directory but points at no valid ZIP64 EOCD record -- "
+                    "refusing to open (malformed or hostile archive)."
                 )
             total_entries = int.from_bytes(record[32:40], "little")
             cd_size = int.from_bytes(record[40:48], "little")

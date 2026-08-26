@@ -361,26 +361,30 @@ class TestBundleFactsArchiveFormat:
     def test_load_rejects_a_manifest_naming_too_many_libraries(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Codex review, fresh evidence: DEFAULT_MAX_BUNDLE_DECODED_BYTES
-        only charges a shared blob's bytes once, but each library name
-        sharing it still materializes its own AbiSnapshot object graph on
-        load -- a manifest naming far more libraries than any real bundle
-        needs could otherwise amplify one small, size-capped blob into an
-        unbounded number of live Python objects. Rejected on name count
-        alone, before any blob is even read."""
+        """DEFAULT_MAX_BUNDLE_DECODED_BYTES only charges a shared blob's
+        bytes once, but each library name sharing it still materializes
+        its own AbiSnapshot object graph on load -- a manifest naming far
+        more libraries than any real bundle needs could otherwise amplify
+        one small, size-capped blob into an unbounded number of live
+        Python objects. Rejected on name count alone, before any blob is
+        even read. Built as a raw archive (bypassing `write_bundle_facts_
+        archive`'s own, now-symmetric write-time name-count cap) so this
+        exercises the reader's *independent* enforcement of the same cap
+        -- e.g. against a manifest hand-crafted or written by an older,
+        less-strict writer."""
         import abicheck.bundle_facts as bundle_facts_module
-        from abicheck.storage.bundle_archive import BundleArchiveReader
+        from abicheck.storage.bundle_archive import (
+            BundleArchiveReader,
+            BundleArchiveWriter,
+        )
 
         monkeypatch.setattr(bundle_facts_module, "DEFAULT_MAX_LIBRARY_COUNT", 3)
-        # This cap is on name *count* alone (`len(library_blobs)`), not
-        # decoded size or blob-content sharing -- these five snapshots each
-        # still stamp their own distinct `AbiSnapshot.library`, so each gets
-        # its own small blob too, proving the cap fires independently of
-        # whether content happens to be shared.
-        metadata = {f"lib{i}.so": _meta(soname="shared.so") for i in range(5)}
-        facts = capture_bundle_facts(_per_library_snapshots(metadata))
         out = tmp_path / "many-names.bundlefacts.archive.zip"
-        save_bundle_facts(facts, out, format="archive")
+        with BundleArchiveWriter(out) as writer:
+            h = writer.put_blob(b'{"library": "shared.so"}')
+            writer.write_manifest(
+                {"library_blobs": {f"lib{i}.so": h for i in range(5)}}
+            )
 
         real_read_blob = BundleArchiveReader.read_blob
         blob_reads: list[object] = []
@@ -456,6 +460,58 @@ class TestBundleFactsArchiveFormat:
         save_bundle_facts(facts, out, format="archive")
         loaded = load_bundle_facts(out, format="archive")
         assert set(loaded.per_library_snapshots) == {f"lib{i}.so" for i in range(10)}
+
+    def test_save_rejects_a_write_that_would_exceed_the_reader_own_library_count_cap(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A `BundleFacts` naming more library names than the reader's own
+        `DEFAULT_MAX_LIBRARY_COUNT` -- even when every name shares one
+        identical blob, so the member-count/aggregate-byte caps alone
+        would let it through -- must fail on write, before producing an
+        archive its own paired reader would refuse to reopen (Codex
+        review, fresh evidence)."""
+        import abicheck.bundle_facts as bundle_facts_module_local
+
+        monkeypatch.setattr(
+            bundle_facts_module_local, "DEFAULT_MAX_LIBRARY_COUNT", 3
+        )
+        shared_snap = _per_library_snapshots(_old_metadata())["libcore.so"]
+        facts = BundleFacts(
+            per_library_snapshots={f"lib{i}.so": shared_snap for i in range(5)}
+        )
+        out = tmp_path / "too-many-names.bundlefacts.archive.zip"
+
+        with pytest.raises(SnapshotError, match="5 library names.*exceed the 3"):
+            save_bundle_facts(facts, out, format="archive")
+        assert not out.exists()
+
+    def test_load_charges_each_duplicate_name_own_copy_against_the_aggregate_cap(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The aggregate decoded-byte cap only charges a shared blob's
+        bytes once (via blob_cache) -- but every duplicate name still
+        materializes its own independent, deep-copied AbiSnapshot object
+        graph on load, so a manifest naming many names against one
+        moderately-sized blob could otherwise amplify past the promised
+        aggregate limit in live Python objects alone. Each duplicate's own
+        copy must be charged against the same budget too (Codex review,
+        fresh evidence)."""
+        import abicheck.bundle_facts as bundle_facts_module_local
+
+        shared_snap = _per_library_snapshots(_old_metadata())["libcore.so"]
+        facts = BundleFacts(
+            per_library_snapshots={f"lib{i}.so": shared_snap for i in range(5)}
+        )
+        out = tmp_path / "duplicate-copies.bundlefacts.archive.zip"
+        save_bundle_facts(facts, out, format="archive")
+
+        # A cap big enough for one copy but not for all five duplicate
+        # copies charged on top of it.
+        monkeypatch.setattr(
+            bundle_facts_module_local, "DEFAULT_MAX_BUNDLE_DECODED_BYTES", 500
+        )
+        with pytest.raises(SnapshotError, match="exceeds the 500 byte"):
+            load_bundle_facts(out, format="archive")
 
     def test_save_rejects_a_write_that_would_exceed_the_reader_own_aggregate_cap(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
