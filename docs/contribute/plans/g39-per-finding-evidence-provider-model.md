@@ -193,7 +193,10 @@ detector-wiring step itself.
 emit at all, which the vocabulary above has no entry for (Codex review,
 verified against `abicheck/serialization.py::snapshot_from_dict`).** A
 persisted header baseline from before `ast_producer` was tracked (schema
-v9 and earlier) round-trips as `from_headers=True` — a real, deliberately
+v9 and earlier — the version number is owned by `abicheck/serialization.py`'s
+own `SCHEMA_VERSION` history comment, not this plan; re-check that comment
+rather than trusting this prose if the two ever disagree) round-trips as
+`from_headers=True` — a real, deliberately
 explicit fact `snapshot_from_dict` preserves rather than discards — with
 `ast_producer=None`: not "not a header snapshot," but "a header snapshot
 whose backend was never recorded." Phase 1's `AbiSnapshot.ast_producer`
@@ -567,10 +570,13 @@ snapshots (DWARF/symbols-only) and for snapshots predating this field").**
 not one — an ordinary DWARF-only ELF snapshot, a PDB-derived PE snapshot, a
 BTF/CTF-derived kernel snapshot, and a symbols-only (`elf_only_mode=True`)
 dump all leave it `None`, exactly as much as the pre-schema-v10 legacy
-header case (**not v25** — `serialization.py`'s own schema-history comment
-dates `ast_producer`'s introduction to schema v10, "`--ast-frontend hybrid`
-(G28 Phase 3) — `AbiSnapshot.ast_producer`"; v25 is an unrelated later
-migration, `typedefs_qualified`, and does not apply here) does. Retaining
+header case (**not v25** — `abicheck/serialization.py`'s own `SCHEMA_VERSION`
+history comment, the canonical source for every version number cited in
+this section, dates `ast_producer`'s introduction to schema v10,
+"`--ast-frontend hybrid` (G28 Phase 3) — `AbiSnapshot.ast_producer`"; v25 is
+an unrelated later migration, `typedefs_qualified`, and does not apply
+here — re-check that comment rather than trusting this prose if the two
+ever disagree) does. Retaining
 only `ast_producer` therefore cannot distinguish "this snapshot never had a
 header-AST layer to search" (which needs an L0 or L1 tag, never an L2 one)
 from "this snapshot did have a header-AST layer, but it predates

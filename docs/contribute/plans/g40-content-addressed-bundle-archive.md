@@ -1037,19 +1037,34 @@ what actually shipped.**
   in place (still valid zstd/JSON, but no longer matching its own member
   name's hash) must raise on load, not return the substituted content
   under the original, now-incorrect content address.
-- **Lazy read rejects a too-new `bundle_facts_schema_version` before
-  touching `library_blobs`** (Codex review, fresh evidence — the Status
-  note and Phase 2 below both require this check on every lazy per-library
-  path; without a test pinning it, an implementation can satisfy every
-  other test in this list while omitting or misordering it) — an archive
-  whose `manifest["bundle_facts_schema_version"]` is one greater than
-  `BUNDLE_FACTS_SCHEMA_VERSION` must be rejected by the direct
-  `BundleArchiveReader`-based lazy per-library read above (`read_manifest()`
-  then `read_blob()` against a `library_blobs` entry), the same way the
-  whole-bundle `read_bundle_facts_archive()` path already rejects it — and
-  the rejection must happen before any `library_blobs` lookup or blob read
-  is attempted, not merely before the caller tries to *use* the returned
-  `AbiSnapshot`.
+- **Deferred — not yet implemented, no test exists today (Codex review,
+  2026-08-26, verified against the real `BundleArchiveReader.read_manifest()`/
+  `read_blob()` on `claude/g40-bundle-archive-impl`@`abfda5b`): lazy read
+  rejects a too-new `bundle_facts_schema_version` before touching
+  `library_blobs`.** This bullet describes the test that would pin the fix
+  for the still-open known limitation the Status note and the "Effort &
+  risk" section both name (`BundleArchiveReader.read_manifest()`/
+  `read_blob()` perform no `bundle_facts_schema_version` check at all,
+  because that key is a `bundle_facts.py`-level concept the `storage/`-layer
+  reader deliberately doesn't know about — confirmed by reading both
+  functions directly: neither references `bundle_facts_schema_version`, or
+  `schema_version` at all, anywhere). It is *not* satisfied by the shipped
+  code and must not be read as describing a passing test: an archive whose
+  `manifest["bundle_facts_schema_version"]` is one greater than
+  `BUNDLE_FACTS_SCHEMA_VERSION` is rejected today only via the whole-bundle
+  `read_bundle_facts_archive()` path (`bundle_facts.py`, which does check
+  both `schema_version` and `bundle_facts_schema_version` before any blob
+  read); the direct `BundleArchiveReader`-based lazy per-library read
+  (`read_manifest()` then `read_blob()` against a `library_blobs` entry,
+  bypassing `bundle_facts.py` entirely) currently returns the blob
+  regardless. Closing this — either by teaching the lazy path the same
+  check (which needs `BundleArchiveReader` to accept the caller's
+  `BUNDLE_FACTS_SCHEMA_VERSION` ceiling, since `storage/` cannot import it
+  as a constant per ADR-061's dependency direction) or by documenting the
+  lazy path as deliberately unchecked and pushing the obligation onto every
+  caller — is a real, separate follow-up; when it lands, this bullet
+  should be promoted out of "deferred" and a real test added alongside the
+  fix, not written speculatively ahead of it.
 - **Atomic publication: a failed write leaves a prior valid archive
   untouched** (Codex review — the requirement introduced above under
   "Publication must be atomic", not previously exercised by any test in
