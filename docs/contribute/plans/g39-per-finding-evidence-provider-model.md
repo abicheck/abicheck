@@ -289,8 +289,41 @@ provider's type change is reachable from that consumer's public surface.
 `bundle_signature_evidence.py`'s `BUNDLE_INTRA_DEP_SIGNATURE_UNVERIFIED`
 finding is a different shape again — it has no participating per-library
 `Change` at all, only a direct old/new-snapshot signature-evidence-
-sufficiency check (`_symbol_evidence_sufficient`) on each side. Neither
-shape's real evidentiary basis survives into `to_change()`'s own bare
+sufficiency check (`_symbol_evidence_sufficient`) on each side. **This one
+cannot be derived as "whichever snapshot evidence the finding rests on" the
+way that phrase reads for the other three sites (Codex review, verified
+against `_symbol_evidence_sufficient`'s own real body): the finding fires
+precisely when that check returns `False`, and it returns `False` for two
+evidentiarily distinct reasons that a single positive provider tag cannot
+honestly collapse — (a) the symbol is absent from `function_map`/
+`variable_map` entirely, or carries `Visibility.ELF_ONLY` (no corroborating
+declaration exists at all), versus (b) a declaration is present but a
+specific fact within it is unresolved (`_type_spelling_is_unresolved` on
+the return/variable/parameter types, or `is_variadic`/`contract_attributes`
+left at their tri-state `None`).** Naming one concrete backend as "the
+provider" for this finding would claim a positive fact where the finding's
+entire premise is that the fact could not be confirmed. The correct model
+is the same side-prefixed `<side>:<tier>:searched:<backend>` vocabulary
+item 3/item 5 above already establish for a negative result — `old:`/
+`new:`/`both:` naming which side(s) failed the sufficiency check, `:tier:`
+and `:backend` naming what evidence was actually consulted (per
+`snapshot.dwarf_aware`/header-backend/`elf_only_mode`, the same fields the
+existing `searched:` derivation already reads), and `:searched:` recording
+that the check ran and did not confirm sufficiency — never a bare positive
+tag standing in for "insufficient." This does not by itself distinguish
+reasons (a) and (b) from each other (`_symbol_evidence_sufficient` itself
+returns a plain `bool`, so the caller has no finer signal to carry
+forward without also changing that function's own return shape, which is
+out of scope for this one Phase 1 slice) — only that both collapse to the
+same honest `searched:`-and-insufficient shape rather than one of them
+being misrepresented as a confirmed provider fact. **This value must
+survive `to_change()`'s own lowering unchanged, not be silently dropped or
+overwritten** — the same requirement the surrounding paragraph already
+states for `BundleFinding.evidence_provenance` in general, restated here
+because a `searched:`-shaped value is exactly the kind of "no fact, just a
+negative result" entry a naive lowering step could mistake for "nothing to
+carry" and omit. Neither shape's real evidentiary basis survives into
+`to_change()`'s own bare
 `Change(...)` call (`kind`/`symbol`/`description`/`old_value`/`new_value`/
 `affected_symbols`/`effective_verdict`/`modulation_*` only, no
 provenance-bearing field of any kind today) — so Phase 1 must add

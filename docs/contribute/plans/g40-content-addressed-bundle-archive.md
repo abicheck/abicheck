@@ -853,19 +853,17 @@ several `format=`s with one fixed `compression="none"` for reproducible,
 uncompressed-envelope output) this module's compression contract exists to
 support uniformly.
 
-**Confirmed CODE GAP, not yet fixed in the shipped implementation
-(`abicheck/serialization.py`, PR #869):** the current guard reads `if
-format == "archive" and compression != "auto": raise ValueError(...)`,
-which rejects `compression="none"` exactly as incorrectly as it rejects
-`"gzip"`/`"zstd"` — the previous revision of this section described that
-guard as already correct; it is not. The fix is a one-line widening of the
-guard's condition to `compression not in ("auto", "none")`, verified
-against a real `save_bundle_facts(..., format="archive",
-compression="none")` round-trip alongside the existing `"gzip"`/`"zstd"`
-rejection tests. Not fixed as part of this planning-document pass — this
-plan is documentation only (see this document's own status note above) —
-but the intended, correct contract is now stated here accurately rather
-than matching the shipped guard's current, too-strict behavior.
+**Closed in the shipped implementation (`abicheck/serialization.py`,
+commit `ec85ed3e8` on the `claude/g40-bundle-archive-impl` branch) — this
+section previously described the guard as still rejecting
+`compression="none"`; that is now stale.** The guard reads
+`if format == "archive" and SnapshotCompression(compression) not in
+(SnapshotCompression.AUTO, SnapshotCompression.NONE): raise
+ValueError(...)`, so `compression="none"` is accepted as a no-op alongside
+`"auto"`, and only `"gzip"`/`"zstd"` are rejected — exactly the contract
+this section calls for. Verified directly against the real function at
+that commit; kept here as a record of the correct contract rather than a
+still-open gap.
 
 `BundleFacts` itself is unchanged — this plan is a storage-layer addition
 underneath the existing dataclass, not a new in-memory shape;
