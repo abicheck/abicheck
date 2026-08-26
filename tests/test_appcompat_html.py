@@ -84,6 +84,15 @@ def test_html_shows_missing_symbols() -> None:
     assert "bar" in out
 
 
+def test_html_demangles_missing_symbols() -> None:
+    """Codex review: missing_symbols is rendered via a bespoke table that
+    bypasses _changes_table/_symbol_cell entirely, so it never demangled
+    at all -- the most important missing linker symbols stayed raw even
+    though every other symbol-bearing field in the report is demangled."""
+    out = appcompat_to_html(_appcompat_result(missing=["_ZN3FooC1Ev"]))
+    assert "Foo::Foo()" in out
+
+
 def test_html_shows_file_metadata() -> None:
     out = appcompat_to_html(_appcompat_result(with_metadata=True))
     assert "Library Files" in out

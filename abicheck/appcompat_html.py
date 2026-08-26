@@ -27,7 +27,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 # Shared page chrome (document frame, verdict palette, footer) + the change table.
-from .demangle import prewarm_demangle_batch
+from .demangle import demangle_batch, demangle_text, prewarm_demangle_batch
 from .html_report import _changes_table
 from .html_template import _VERDICT_STYLE, render_document, render_footer
 
@@ -61,6 +61,12 @@ def appcompat_to_html(result: object) -> str:
         [*breaking, *irrelevant],
         attrs=("symbol", "description", "old_value", "new_value", "affected_symbols"),
     )
+    # missing_symbols is a plain list of raw mangled names, not change
+    # objects prewarm_demangle_batch's attr-based extraction can read --
+    # warm the same process-wide cache directly so the Missing Symbols
+    # table below (Codex review) also renders from a single batched call.
+    if missing:
+        demangle_batch(list(missing))
 
     verdict_icon = {
         "BREAKING": "\U0001f534",
@@ -124,7 +130,7 @@ def appcompat_to_html(result: object) -> str:
     missing_html = ""
     if missing:
         rows = "\n".join(
-            f"<tr><td><code>{h(s)}</code></td></tr>" for s in missing
+            f"<tr><td><code>{h(demangle_text(s))}</code></td></tr>" for s in missing
         )
         missing_html = f"""<div class='section section-removed'>
   <h3>\u26d4 Missing Symbols ({len(missing)})</h3>

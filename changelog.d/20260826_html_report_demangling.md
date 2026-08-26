@@ -60,3 +60,13 @@
   report -- the identical gap `generate_html_report` already closed,
   just left open on this second entry point into the shared table
   renderer.
+- **Fourth follow-up (Codex review): `appcompat_html`'s Missing Symbols
+  table rendered `change.symbol`-equivalent raw mangled names directly**,
+  bypassing `_changes_table`/`_symbol_cell` entirely -- so a report could
+  show a demangled `Foo::bar()` in the Symbol column of a change row while
+  the arguably more important missing-linker-symbol list right above it
+  still showed the raw `_ZN3Foo3barEv`. Now demangled the same way
+  (`demangle_text` before `html.escape`) and folded into the same batch
+  prewarm via a direct `demangle_batch` call, since `missing_symbols` is a
+  plain list of raw strings rather than change objects
+  `prewarm_demangle_batch`'s attribute-based extraction can read.
