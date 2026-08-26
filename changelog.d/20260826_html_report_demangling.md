@@ -223,13 +223,18 @@
   records evidence *sources* -- `elf`/`dwarf`/`header` -- not container
   format), so a correct fix needs new model plumbing threaded through
   every report-renderer call site, not a one-line change to this module.
-  The blast radius is bounded in the meantime: the raw mangled/literal
-  name is always preserved verbatim (as the `<abbr>` tooltip in HTML, or
-  simply left alongside the substituted text elsewhere), no `ChangeKind`,
-  verdict, or exit code is affected -- this is purely a cosmetic
-  human-readable label, never a correctness input downstream of the
-  report. `json`/`sarif`/`junit` output is untouched by any of this and
-  always carries the raw symbol. Left as a documented residual per this
-  repo's "known gaps over risky reactive patches" convention (AGENTS.md)
-  rather than a same-PR structural change to add binary-format context
-  to the report pipeline.
+  The blast radius is bounded in the meantime, but not identically across
+  formats: HTML always preserves the raw mangled/literal name verbatim as
+  the `<abbr>` tooltip, while `service_render.render_output()` runs
+  `demangle_text()` over the *entire* rendered Markdown/review document
+  as a plain in-place substring replacement, with no tooltip or residual
+  copy of the raw text -- a false-positive substitution there is a
+  straight loss of the original spelling, not a cosmetic label next to
+  it (Codex review, fresh evidence, correcting this entry's own earlier
+  overstatement). In neither case does it affect any `ChangeKind`,
+  verdict, or exit code -- this is a human-readable rendering path only,
+  never a correctness input downstream of the report. `json`/`sarif`/
+  `junit` output is untouched by any of this and always carries the raw
+  symbol. Left as a documented residual per this repo's "known gaps over
+  risky reactive patches" convention (AGENTS.md) rather than a same-PR
+  structural change to add binary-format context to the report pipeline.
