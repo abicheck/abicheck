@@ -398,12 +398,9 @@ def _add_severity_blocking_compatible_findings(
     if len(findings) > len(head) or len(added) > len(tail):
         summary["findings_truncated"] = True
         # Findings evicted here were either already counted in `findings`
-        # (now bumped out to make room for a compatible blocker) or never
-        # made it in at all (`added` beyond `tail`) -- both are real cuts a
-        # reader can't otherwise see the shape of without rerunning at a
-        # higher cap, so both accumulate onto the same per-kind ledger
-        # `_baseline_summary` started (Low-effort DX follow-up: report cap
-        # was hard-coded with no per-kind visibility into what was cut).
+        # (bumped out to make room for a compatible blocker) or never made
+        # it in at all (`added` beyond `tail`) -- both are real cuts, so both
+        # accumulate onto the same per-kind ledger `_baseline_summary` started.
         _accumulate_kind_counts(
             summary,
             "findings_truncated_kinds",
@@ -808,18 +805,15 @@ def _baseline_summary(
             summary["policy_reclassify"] = [rule.to_report_dict() for rule in active]
             if getattr(policy_file, "source_path", None):
                 summary["policy_file"] = str(policy_file.source_path)
-    # ADR-049 D9 conserves every detector fact in exactly one visible
-    # outcome. The four buckets above are the *compatibility* axis, so since
-    # Phase 7 they exclude findings contract evaluation did not score -- and
-    # this summary itemizes findings from those buckets alone, so an
-    # excluded fact disappeared from the scan report altogether rather than
-    # merely stopping gating (Codex review, confirmed with a
-    # `PROVEN_OUT_OF_CONTRACT` removal: `NO_CHANGE`, all counts zero, no
-    # findings at all). Emitted only when non-empty, so an ordinary scan's
-    # summary is byte-identical to before.
-    # Duck-typed like the other optional reads in this function: a
-    # `DiffResult` always has the property, but this module is also driven
-    # with lightweight stand-ins that model only the buckets they exercise.
+    # ADR-049 D9 conserves every detector fact in exactly one visible outcome.
+    # The four buckets above are the *compatibility* axis, so since Phase 7
+    # they exclude findings contract evaluation did not score -- and this
+    # summary itemizes those buckets alone, so an excluded fact disappeared
+    # from the scan report altogether rather than merely stopping gating
+    # (Codex review, confirmed with a `PROVEN_OUT_OF_CONTRACT` removal:
+    # `NO_CHANGE`, all counts zero, no findings at all). Emitted only when
+    # non-empty; duck-typed like the other optional reads here, since this
+    # module is also driven with lightweight stand-ins.
     not_evaluated = list(getattr(diff, "not_evaluated", ()) or ())
     if not_evaluated:
         summary["not_evaluated"] = len(not_evaluated)
@@ -828,14 +822,11 @@ def _baseline_summary(
     if coverage_warnings:
         summary["coverage_warnings"] = coverage_warnings
     # ADR-049 Phase 5 §6.4 names *detector provenance* among the fields the
-    # two commands must agree on, and `compare`'s JSON report has carried it
+    # two commands must agree on: `compare`'s JSON report has carried it
     # since long before this Gate (`reporter._add_detectors`) while `scan
-    # --against`'s summary carried nothing equivalent -- so "which detector
-    # produced this comparison's findings, and did any report a coverage
-    # gap" was answerable for one command and not the other on the same
-    # inputs. Same shape and same "only detectors with findings or a
-    # coverage gap" filter as the reporter's, so the two are comparable
-    # rather than merely both non-empty.
+    # --against`'s summary carried nothing equivalent. Same shape and same
+    # "only detectors with findings or a coverage gap" filter as the
+    # reporter's, so the two are comparable rather than merely both non-empty.
     detectors = [
         {
             "name": det.name,
@@ -1193,10 +1184,18 @@ def _run_baseline_compare(
         contract_mode=contract_mode,
     )
     # Codex review: stamp metadata so the same-binary warning below fires
-    # here too (a no-op for a JSON/Perl snapshot baseline).
-    diff.old_metadata = collect_metadata(baseline)
-    diff.new_metadata = collect_metadata(binary)
-    note_if_same_binary_compared(diff)
+    # here too (a no-op for a JSON/Perl snapshot baseline). Best-effort: a
+    # test (or a caller mocking resolve_input above) may pass a path with
+    # no real file backing it, and this enrichment must not turn a
+    # perfectly good comparison into a hard failure over a missing file --
+    # all-or-nothing, so a partial failure never leaves one side stamped.
+    try:
+        old_meta, new_meta = collect_metadata(baseline), collect_metadata(binary)
+    except OSError:
+        pass
+    else:
+        diff.old_metadata, diff.new_metadata = old_meta, new_meta
+        note_if_same_binary_compared(diff)
     # P0.4 (Codex review, fresh evidence): checker.compare()'s own internal
     # compute_analysis_assurance call (inside compare_snapshots above) runs
     # before this function ever sees *diff*, so it always reads

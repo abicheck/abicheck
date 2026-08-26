@@ -71,6 +71,24 @@ def test_scan_against_byte_identical_binary_warns() -> None:
         assert any("byte-identical" in w for w in warnings), payload
 
 
+def test_scan_against_byte_identical_binary_warns_in_default_text_output() -> None:
+    """Follow-up Codex review: the JSON summary carried this warning, but
+    `scan`'s own text renderer (`cli_scan_helpers.render_baseline_lines`) --
+    the *default* format, printed with no `--format`/`-o` at all -- never
+    surfaced it, so the warning was invisible in an ordinary console run."""
+    with CliRunner().isolated_filesystem() as tmp_dir:
+        so_path = Path(tmp_dir) / "lib.so"
+        so_path.write_bytes(b"\x7fELF" + b"\x00" * 200)
+        snap = AbiSnapshot(library="libfoo.so", version="1.0", functions=[])
+
+        with mock.patch.object(dumper_mod, "dump", mock.MagicMock(return_value=snap)):
+            result = CliRunner().invoke(
+                main, ["scan", str(so_path), "--against", str(so_path)]
+            )
+        assert result.exit_code == 0, result.output
+        assert "byte-identical" in result.output, result.output
+
+
 def test_scan_against_distinct_binaries_does_not_warn() -> None:
     """Negative control: two genuinely different binaries must not trip
     the warning, and the summary must not even carry the key."""

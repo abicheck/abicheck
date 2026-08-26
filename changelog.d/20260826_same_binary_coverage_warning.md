@@ -25,4 +25,12 @@
   `old_metadata`/`new_metadata` from the baseline/candidate paths, calls
   `note_if_same_binary_compared`, and `_baseline_summary` copies
   `coverage_warnings` into the JSON summary the same way it already
-  copies `not_evaluated`.
+  copies `not_evaluated`. The metadata stamp is best-effort (a caller
+  passing a path with no real file backing it degrades to a no-op
+  rather than raising).
+- **Second follow-up (Codex review): the warning was still invisible in
+  `scan`'s own default text/console output.** `_baseline_summary` copied
+  `coverage_warnings` into the JSON summary, but `cli_scan_helpers.
+  render_baseline_lines` -- the text renderer, which is the *default*
+  format printed with no `--format`/`-o` at all -- never read that key.
+  It now prints each warning right under the counts line.
