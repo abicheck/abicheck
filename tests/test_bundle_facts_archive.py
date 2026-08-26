@@ -540,6 +540,33 @@ class TestBundleFactsArchiveFormat:
         with pytest.raises(SnapshotError, match="exceeds the 500 byte"):
             load_bundle_facts(out, format="archive")
 
+    def test_save_rejects_a_write_that_would_exceed_the_reader_own_duplicate_copy_cap(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The write-side aggregate cap must mirror the reader's own
+        duplicate-copy accounting, not just each unique blob's bytes once
+        -- many names sharing one blob whose *unique* size passes the cap
+        can still exceed it once every duplicate name's own copy is
+        counted the way the reader counts it on load, publishing an
+        archive its own paired reader would then refuse to reopen (Codex
+        review, fresh evidence)."""
+        import abicheck.bundle_facts as bundle_facts_module_local
+
+        shared_snap = _per_library_snapshots(_old_metadata())["libcore.so"]
+        facts = BundleFacts(
+            per_library_snapshots={f"lib{i}.so": shared_snap for i in range(5)}
+        )
+        out = tmp_path / "too-many-duplicate-copies.bundlefacts.archive.zip"
+
+        # A cap big enough for one copy (the unique-bytes check alone
+        # would pass) but not for all five duplicate copies together.
+        monkeypatch.setattr(
+            bundle_facts_module_local, "DEFAULT_MAX_BUNDLE_DECODED_BYTES", 500
+        )
+        with pytest.raises(SnapshotError, match="exceed the 500"):
+            save_bundle_facts(facts, out, format="archive")
+        assert not out.exists()
+
     def test_save_rejects_a_write_that_would_exceed_the_reader_own_aggregate_cap(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:

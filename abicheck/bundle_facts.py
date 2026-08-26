@@ -335,12 +335,11 @@ def maybe_write_bundle_facts_archive(
     *,
     snapshot_to_dict: Callable[[AbiSnapshot], dict[str, Any]],
 ) -> SnapshotWriteResult | None:
-    """``serialization.save_bundle_facts``'s ``format=`` dispatch: returns a
-    real result for ``format="archive"``, ``None`` for ``format="json"``
-    (telling the caller to fall through to its own plain-JSON path), and
-    raises for anything else. *snapshot_to_dict* is
-    ``serialization.snapshot_to_dict``, passed in rather than imported --
-    see the module-level comment above."""
+    """``serialization.save_bundle_facts``'s ``format=`` dispatch: returns
+    a real result for ``format="archive"``, ``None`` for ``format="json"``
+    (fall through to plain-JSON), raises otherwise. *snapshot_to_dict* is
+    ``serialization.snapshot_to_dict``, passed in -- see the module-level
+    comment above."""
     if format == "archive":
         return write_bundle_facts_archive(facts, path, snapshot_to_dict=snapshot_to_dict)
     if format != "json":
@@ -358,13 +357,12 @@ def maybe_read_bundle_facts_archive(
     ``"auto"`` sniffs *path*'s own bytes; returns a real result whenever
     the resolved format is ``"archive"``, ``None`` for ``"json"`` (fall
     through to plain-JSON), and raises for anything else.
-    *snapshot_from_dict* is ``serialization.snapshot_from_dict``, passed in
-    rather than imported -- see the module-level comment above.
+    *snapshot_from_dict* is ``serialization.snapshot_from_dict``, passed
+    in -- see the module-level comment above.
 
-    The sniff and the follow-up archive parse share one fd rather than
-    each opening *path* independently, else a concurrent atomic
-    replacement between the two opens could swap in a different
-    generation the sniff result no longer describes (Codex review)."""
+    The sniff and the follow-up archive parse share one fd, else a
+    concurrent atomic replacement between two separate opens could swap
+    in a different generation (Codex review)."""
     from .storage.bundle_archive import open_regular_file_for_format_sniff
 
     fp = None
@@ -393,10 +391,9 @@ def write_bundle_facts_archive(
     plan's own scope note): two libraries whose entire serialized
     ``AbiSnapshot`` is byte-identical share one blob, via
     ``BundleArchiveWriter.put_blob``'s own hash-addressed dedup -- nothing
-    in this function decides that; it simply calls ``put_blob`` once per
-    library and lets identical payloads collapse on their own.
-    """
+    here decides that; it just calls ``put_blob`` once per library."""
     import json as _json
+    from collections import Counter
 
     from .errors import SnapshotError
     from .snapshot_io import SnapshotCompression, SnapshotWriteResult
@@ -455,12 +452,11 @@ def write_bundle_facts_archive(
             "safety limit read_bundle_facts_archive() enforces on load -- "
             "refusing to write an archive that could not be reopened."
         )
-    # (a) Member-count cap: one member per *distinct* blob hash, plus
-    # exactly one for the mandatory `manifest.json` container member --
-    # `manifest_blob`'s own hash is already inside `unique_payloads` above
-    # (or coincides with an existing library blob's hash, in which case it
-    # doesn't add a member at all), so there is nothing further to reserve
-    # for it here.
+    # (a) Member-count cap: one member per *distinct* blob hash, plus one
+    # for the mandatory `manifest.json` container member -- `manifest_
+    # blob`'s own hash is already inside `unique_payloads` above (or
+    # coincides with an existing library blob's hash), so nothing further
+    # to reserve for it here.
     if len(unique_payloads) + 1 > MAX_ARCHIVE_MEMBERS:
         raise SnapshotError(
             f"{p}: writing this bundle's {len(unique_payloads)} distinct "
@@ -469,15 +465,22 @@ def write_bundle_facts_archive(
             "an archive that could not be reopened."
         )
     # (b) Aggregate decoded-byte cap, mirroring exactly what
-    # `read_bundle_facts_archive`'s own `blob_cache`-based aggregate cap
-    # charges on load: each unique blob's bytes, once.
-    unique_decoded_bytes = sum(len(payload) for payload in unique_payloads.values())
-    if unique_decoded_bytes > DEFAULT_MAX_BUNDLE_DECODED_BYTES:
+    # read_bundle_facts_archive() charges on load -- not each unique
+    # blob's bytes once, but every *duplicate* name's own deep-copied
+    # AbiSnapshot too. A write charging only unique bytes could publish
+    # an archive its own reader then refuses to reopen -- e.g. 1,025
+    # names sharing one 1 MiB blob passes a unique-bytes check but
+    # exceeds the reader's per-copy total (Codex review, fresh evidence).
+    hash_counts = Counter(library_blobs.values())
+    reader_charged_bytes = sum(len(unique_payloads[h]) * n for h, n in hash_counts.items())
+    if reader_charged_bytes > DEFAULT_MAX_BUNDLE_DECODED_BYTES:
         raise SnapshotError(
-            f"{p}: writing this bundle's distinct content ({unique_decoded_bytes} "
-            f"bytes) would exceed the {DEFAULT_MAX_BUNDLE_DECODED_BYTES} byte "
-            "aggregate safety limit read_bundle_facts_archive() enforces on "
-            "load -- refusing to write an archive that could not be reopened."
+            f"{p}: writing this bundle's content, once every duplicate "
+            f"library name's own copy is counted ({reader_charged_bytes} "
+            f"bytes), would exceed the {DEFAULT_MAX_BUNDLE_DECODED_BYTES} "
+            "byte aggregate safety limit read_bundle_facts_archive() "
+            "enforces on load -- refusing to write an archive that could "
+            "not be reopened."
         )
 
     container_manifest = {
@@ -496,13 +499,11 @@ def write_bundle_facts_archive(
         },
         "library_filenames": dict(sorted(facts.library_filenames.items())),
     }
-    # A third cap: `manifest.json` (the container member above, distinct
-    # from `facts.manifest`/`manifest_blob`) has its own reader-side size
-    # ceiling (`DEFAULT_MAX_MANIFEST_BYTES`), never covered by either cap
-    # above -- neither charges the container manifest's own bytes, only
-    # blob content. Checked against the exact bytes about to be written,
-    # via the identical `json.dumps(..., indent=2)` encoding
-    # `write_manifest()` itself uses (Codex review, fresh evidence).
+    # A third cap: `manifest.json` (the container member, distinct from
+    # `facts.manifest`/`manifest_blob`) has its own reader-side size
+    # ceiling, never covered above (neither charges the container
+    # manifest's own bytes). Checked against the exact bytes about to be
+    # written, via the identical encoding `write_manifest()` uses.
     manifest_member_payload = _json.dumps(container_manifest, indent=2)
     if len(manifest_member_payload.encode("utf-8")) > DEFAULT_MAX_MANIFEST_BYTES:
         raise SnapshotError(
@@ -563,9 +564,8 @@ def read_bundle_facts_archive(
     library's snapshot without paying for the rest uses
     ``storage.bundle_archive.BundleArchiveReader`` directly instead.
 
-    *_fp*, when given, is an already-open fd from
-    ``maybe_read_bundle_facts_archive``'s own format sniff, reused instead
-    of reopening *path* (Codex review, fresh evidence)."""
+    *_fp*, when given, is an already-open fd reused from
+    ``maybe_read_bundle_facts_archive``'s own format sniff (Codex)."""
     import json as _json
 
     from .bundle_manifest import manifest_from_dict

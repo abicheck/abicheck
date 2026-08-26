@@ -22,3 +22,13 @@
   during an exception-driven abort), the unlink was never reached,
   leaving the temp file behind. The unlink now runs from a nested
   `finally`, so it fires regardless of whether the close raises.
+- **G40 bundle archive: the write-side aggregate cap didn't mirror the
+  reader's duplicate-copy accounting.** The write path's aggregate
+  decoded-byte cap only charged each unique blob's bytes once -- but the
+  reader (per the previous review round's fix) charges every duplicate
+  library name's own deep-copied `AbiSnapshot` too. Many names sharing
+  one moderately-sized blob could pass the write-side unique-bytes check
+  while exceeding the reader's real per-copy total (e.g. 1,025 names
+  sharing one 1 MiB blob), publishing an archive its own paired reader
+  would then refuse to reopen. The write path now computes the identical
+  duplicate-charged total the reader will enforce, before publishing.
