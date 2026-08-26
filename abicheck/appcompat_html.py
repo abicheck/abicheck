@@ -27,6 +27,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 # Shared page chrome (document frame, verdict palette, footer) + the change table.
+from .demangle import prewarm_demangle_batch
 from .html_report import _changes_table
 from .html_template import _VERDICT_STYLE, render_document, render_footer
 
@@ -50,6 +51,16 @@ def appcompat_to_html(result: object) -> str:
     irrelevant = getattr(result, "irrelevant_for_app", [])
     total_changes = len(breaking) + len(irrelevant)
     full_diff = getattr(result, "full_diff", None)
+
+    # Batch-demangle every C++ symbol up front, the same way
+    # generate_html_report() does -- _changes_table()/_symbol_cell() below
+    # each demangle one symbol at a time on a cache miss, which without this
+    # prewarm means one c++filt subprocess invocation per row instead of one
+    # batched invocation for the whole report (Codex review).
+    prewarm_demangle_batch(
+        [*breaking, *irrelevant],
+        attrs=("symbol", "description", "old_value", "new_value", "affected_symbols"),
+    )
 
     verdict_icon = {
         "BREAKING": "\U0001f534",

@@ -180,3 +180,49 @@ def test_html_escapes_xss_in_missing_symbols() -> None:
     out = appcompat_to_html(_appcompat_result(missing=["<b>evil</b>"]))
     assert "<b>evil</b>" not in out
     assert "&lt;b&gt;" in out
+
+
+def test_prewarms_the_demangle_cache_before_rendering_rows(monkeypatch) -> None:
+    """Codex review: appcompat_to_html() renders its Relevant/Irrelevant
+    Changes tables via the shared _changes_table()/_symbol_cell() helpers
+    (the same ones generate_html_report() uses), but -- unlike
+    generate_html_report() -- never called prewarm_demangle_batch() first.
+    Without it, each row's symbol/description demangles one at a time on a
+    cache miss, paying a fresh c++filt subprocess per row instead of one
+    batched call for the whole report. The first call to demangle_batch
+    must already carry every symbol from both the breaking and irrelevant
+    lists, proving the whole report was batched upfront."""
+    import abicheck.demangle as demangle_mod
+    from abicheck.checker import Change
+    from abicheck.checker_policy import ChangeKind
+
+    breaking = [
+        Change(
+            kind=ChangeKind.FUNC_REMOVED,
+            symbol="_ZN3FooC1Ev",
+            description="Function removed: _ZN3FooC1Ev",
+        )
+    ]
+    irrelevant = [
+        Change(
+            kind=ChangeKind.FUNC_ADDED,
+            symbol="_ZN3Bar3runEv",
+            description="Function added: _ZN3Bar3runEv",
+        )
+    ]
+
+    calls: list[list[str]] = []
+    orig = demangle_mod.demangle_batch
+
+    def spy(batch: list[str]) -> dict[str, str]:
+        calls.append(list(batch))
+        return orig(batch)
+
+    monkeypatch.setattr(demangle_mod, "demangle_batch", spy)
+    appcompat_to_html(
+        _appcompat_result(
+            verdict=Verdict.BREAKING, breaking=breaking, irrelevant=irrelevant
+        )
+    )
+    assert calls, "demangle_batch was never called"
+    assert {"_ZN3FooC1Ev", "_ZN3Bar3runEv"} <= set(calls[0]), calls

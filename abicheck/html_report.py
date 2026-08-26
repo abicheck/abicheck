@@ -201,15 +201,8 @@ def _changes_table(changes: list[object], demangle: bool = True) -> str:
                 f"🔗 {caused_count} derived change(s) collapsed</div>"
             )
         # CLI-audit P1: same per-finding contract-decision parity SARIF's
-        # `properties`/JUnit's `<properties>` carry -- every finding this
-        # table renders is, by construction, one compatibility policy
-        # scored (an un-evaluated finding is filtered into its own
-        # "Not Evaluated" section above, never reaches this table), so
-        # `contract_relevance` here is always IN_CONTRACT/NOT_APPLICABLE.
-        # `gate_contribution` is left out: unlike SARIF/JUnit, this table
-        # has no severity_config/policy in scope to compute it from, and
-        # threading those through every _section/_changes_table caller
-        # for one more field is its own follow-up, not a drive-by here.
+        # `properties`/JUnit's `<properties>` carry (always IN_CONTRACT/
+        # NOT_APPLICABLE here; `gate_contribution` omitted, its own follow-up).
         contract_relevance = getattr(ch, "contract_relevance", None)
         if contract_relevance is not None:
             bits = [f"relevance: {html.escape(str(contract_relevance.value))}"]

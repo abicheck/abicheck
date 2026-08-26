@@ -51,3 +51,12 @@
   next to a still-mangled Affected list or value pair for the identical
   name. All three are now demangled the same way, before `html.escape`,
   and folded into `prewarm_demangle_batch`'s batch call.
+- **Third follow-up (Codex review): `appcompat_html.appcompat_to_html`
+  rendered its own Relevant/Irrelevant Changes tables via the same
+  `_changes_table`/`_symbol_cell` helpers without ever calling
+  `prewarm_demangle_batch` first**, so an appcompat report with many
+  distinct C++ symbols paid a fresh `demangle_text`/`demangle_batch`
+  call per row instead of one batched upfront call for the whole
+  report -- the identical gap `generate_html_report` already closed,
+  just left open on this second entry point into the shared table
+  renderer.
