@@ -1024,6 +1024,21 @@ class TestRealDemanglingThroughTheProductionChangeDataclass:
         assert '<abbr title="_ZN3FooC1Ev">Foo::Foo()</abbr>' in out
         assert '<abbr title="_ZN3FooC2Ev">Foo::Foo()</abbr>' in out
 
+    def test_abbr_symbol_text_skips_redundant_abbr_when_demangled_equals_raw(
+        self, monkeypatch
+    ) -> None:
+        """No real Itanium demangler ever produces output identical to its
+        own mangled input, so _abbr_symbol_text's defensive guard against a
+        redundant `<abbr title="X">X</abbr>` (identical tooltip and text)
+        can only be exercised by forcing the demangler's return value
+        directly (Codecov: this was this PR's one uncovered new line)."""
+        import abicheck.html_report as html_report_mod
+
+        monkeypatch.setattr(html_report_mod, "_demangle_symbol", lambda raw, **kw: raw)
+        out = html_report_mod._abbr_symbol_text("safe_name")
+        assert out == "safe_name"
+        assert "<abbr" not in out
+
     def test_impact_summary_demangles_root_change_symbol(self) -> None:
         """Codex review, fresh evidence: the Impact Summary table
         (`--report-mode impact` / `show_impact=True`) rendered
