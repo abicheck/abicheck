@@ -112,3 +112,11 @@
   report had no way to opt out of demangling at all. Both now accept a
   keyword-only `demangle` parameter (default `True`), threaded into the
   prewarm calls, `_changes_table`, and `_missing_symbol_cell`.
+- **Tenth follow-up (Codex review): the Impact Summary table
+  (`--report-mode impact` / `show_impact=True`) never demangled its own
+  Root Change column.** `_build_impact_html` rendered `change.symbol`
+  directly via `html.escape`, bypassing the demangling setting entirely --
+  the normal change table right above it demangles the identical symbol,
+  so the same root read as `Foo::Foo()` in one table and the raw
+  `_ZN3FooC1Ev` in the other on the same page. Now rendered through the
+  same `_abbr_symbol_text` helper, with `demangle` threaded through.

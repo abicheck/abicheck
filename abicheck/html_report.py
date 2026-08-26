@@ -664,12 +664,16 @@ def _confidence_html(result: object) -> str:
 def _build_impact_html(
     result: DiffResult,
     displayed_changes: list[object] | None = None,
+    demangle: bool = True,
 ) -> str:
     """Build an HTML impact summary table.
 
     When *displayed_changes* is given, only those changes are considered.
     Interface counts use unique ``affected_symbols``; ``caused_count`` is
-    shown separately to avoid double-counting.
+    shown separately to avoid double-counting. ``demangle`` mirrors every
+    other symbol-bearing cell in this module (Codex review, fresh evidence:
+    the Root Change column rendered ``change.symbol`` raw, bypassing the
+    demangling setting entirely).
     """
     from .checker import _ROOT_TYPE_CHANGE_KINDS
 
@@ -697,7 +701,7 @@ def _build_impact_html(
         iface_str = f"{iface_count} interface(s)" if iface_count > 0 else "—"
         caused_str = f" (+{caused} collapsed)" if caused > 0 else ""
         rows.append(
-            f"<tr><td><code>{html.escape(symbol)}</code></td>"
+            f"<tr><td><code>{_abbr_symbol_text(symbol, demangle)}</code></td>"
             f"<td><span class='kind-badge'>{html.escape(kind_val)}</span></td>"
             f"<td>{iface_str}{caused_str}</td></tr>"
         )
@@ -736,20 +740,16 @@ def _gate_card_html(
         kind_sets=_eff_kind_sets_fn2() if callable(_eff_kind_sets_fn2) else None,
         policy_file=getattr(result, "policy_file", None),
     )
-    # `--used-by`/`--required-symbol(s)` scoping (ADR-043): the CLI process
-    # actually exits on the *scoped* gate, not this full-library one --
-    # without this, the card could say "CI Gate: FAIL (exit 4)" for a run
-    # that exited 0 because the scoped contract was compatible (CodeRabbit
-    # review). Mirrors the JSON severity block's full_severity/severity split.
+    # `--used-by`/`--required-symbol(s)` scoping (ADR-043): the CLI exits on
+    # the *scoped* gate, not this full-library one -- without this, the card
+    # could say "FAIL" for a run that exited 0 (CodeRabbit review). Mirrors
+    # the JSON severity block's full_severity/severity split.
     scoped_exit_code = getattr(result, "scoped_exit_code", None)
     scoped_exit_code_scheme = getattr(result, "scoped_exit_code_scheme", None)
     gate_exit_code: int
-    # blocking_categories only corresponds 1:1 to full_gate in the
-    # non-scoped branch below (gate_passed derives directly from
-    # full_gate.blocking there); the scoped exit code can fail for a
-    # reason full_gate's categories don't describe at all (e.g. a
-    # missing --required-symbol entrypoint), so it's left blank there
-    # rather than risk naming the wrong cause.
+    # blocking_categories only corresponds 1:1 to full_gate below; the scoped
+    # exit code can fail for a reason full_gate's categories don't describe
+    # (e.g. a missing --required-symbol entrypoint), so it's left blank there.
     gate_blocking_categories: tuple[str, ...] = ()
     if scoped_exit_code is not None and scoped_exit_code_scheme == "severity":
         gate_passed = scoped_exit_code == 0
@@ -776,11 +776,9 @@ def _gate_card_html(
     gate_fg, gate_bg = ("#1b5e20", "#e8f5e9") if gate_passed else ("#b71c1c", "#ffebee")
     gate_label = "PASS" if gate_passed else f"FAIL (exit {gate_exit_code})"
     gate_icon = "✅" if gate_passed else "🛑"
-    # Names which severity category(ies) actually gated CI — without
-    # this, "FAIL" reads as an undifferentiated red box even when the
-    # cause is a policy-blocked COMPATIBLE addition rather than a
-    # genuine ABI/API break (same category-naming this PR already
-    # added to the sticky PR comment and the Action's Job Summary).
+    # Names which severity category(ies) actually gated CI — without this,
+    # "FAIL" reads as an undifferentiated red box even for a policy-blocked
+    # COMPATIBLE addition rather than a genuine ABI/API break.
     gate_categories_html = ""
     if not gate_passed and gate_blocking_categories:
         cats = ", ".join(
@@ -1075,7 +1073,9 @@ def generate_html_report(
 
     impact_html = ""
     if show_impact:
-        impact_html = _build_impact_html(result, displayed_changes=display_changes)
+        impact_html = _build_impact_html(
+            result, displayed_changes=display_changes, demangle=demangle
+        )
 
     body = f"""
 <div class="header">

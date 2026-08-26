@@ -1024,6 +1024,62 @@ class TestRealDemanglingThroughTheProductionChangeDataclass:
         assert '<abbr title="_ZN3FooC1Ev">Foo::Foo()</abbr>' in out
         assert '<abbr title="_ZN3FooC2Ev">Foo::Foo()</abbr>' in out
 
+    def test_impact_summary_demangles_root_change_symbol(self) -> None:
+        """Codex review, fresh evidence: the Impact Summary table
+        (`--report-mode impact` / `show_impact=True`) rendered
+        `change.symbol` directly via `html.escape`, bypassing the
+        demangling setting entirely -- the normal change table right above
+        it demangles the identical symbol, so the same root read as
+        `Foo::Foo()` in one table and the raw `_ZN3FooC1Ev` in the other."""
+        from abicheck.checker import Change, DiffResult, Verdict
+        from abicheck.checker_policy import ChangeKind
+
+        mangled = "_ZN3FooC1Ev"
+        change = Change(
+            kind=ChangeKind.TYPE_SIZE_CHANGED,
+            symbol=mangled,
+            description="Type size changed",
+            affected_symbols=["f1", "f2"],
+        )
+        result = DiffResult(
+            old_version="1.0",
+            new_version="2.0",
+            library="libtest.so.1",
+            changes=[change],
+            verdict=Verdict.BREAKING,
+        )
+        out = generate_html_report(result, show_impact=True)
+        assert "Impact Summary" in out
+        # Scope the assertion to the Impact Summary section itself -- the
+        # normal changes table above it renders the identical symbol
+        # correctly, so asserting on the whole document would pass even
+        # when only the impact table's own Root Change cell stays raw.
+        impact_section = out[out.index("id='impact'") :]
+        assert f'<abbr title="{mangled}">Foo::Foo()</abbr>' in impact_section
+
+    def test_impact_summary_demangle_false_keeps_root_change_raw(self) -> None:
+        from abicheck.checker import Change, DiffResult, Verdict
+        from abicheck.checker_policy import ChangeKind
+
+        mangled = "_ZN3FooC1Ev"
+        change = Change(
+            kind=ChangeKind.TYPE_SIZE_CHANGED,
+            symbol=mangled,
+            description="Type size changed",
+            affected_symbols=["f1", "f2"],
+        )
+        result = DiffResult(
+            old_version="1.0",
+            new_version="2.0",
+            library="libtest.so.1",
+            changes=[change],
+            verdict=Verdict.BREAKING,
+        )
+        out = generate_html_report(result, show_impact=True, demangle=False)
+        impact_section = out[out.index("id='impact'") :]
+        assert "Foo::Foo()" not in impact_section
+        assert mangled in impact_section
+
     def test_template_argument_angle_brackets_are_escaped_not_injected(self) -> None:
         """Demangling runs BEFORE html.escape, so a demangled template
         argument's own `<`/`>` must never appear unescaped in the output."""
