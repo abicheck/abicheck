@@ -26,7 +26,7 @@ if TYPE_CHECKING:
     from .build_mode import BuildMode
     from .bundle_facts import BundleFacts
     from .snapshot_io import SnapshotWriteResult
-
+from . import qualified_name_segments
 from .errors import IncompatibleSnapshotSchemaError, SnapshotError
 from .model import (
     AbiSnapshot,
@@ -1644,7 +1644,7 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
         )
 
     _backfill_missing_elf_binding(snap)
-    return snap
+    return qualified_name_segments.renumber_anonymous_closure_identities(snap)
 
 
 def _extraction_contract_from_dict(raw: Any) -> ExtractionContract | None:
