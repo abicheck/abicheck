@@ -419,6 +419,42 @@ class TestDeduplication:
         result = _deduplicate_ast_dwarf(changes)
         assert len(result) == 2
 
+    def test_field_type_transition_disagreeing_on_indirection_not_deduped(self):
+        """Codex review: comparing a field-type transition via
+        `_normalize_type_name` (which strips trailing `*`/`&`) made
+        `Foo * -> Bar *` (DWARF) and `Foo -> Bar` (header) compare equal,
+        hiding a genuine indirection-level disagreement between the two
+        tiers. `cross_tier_transition` must preserve `*`/`&` for this
+        comparison even though it still bridges tag-keyword spelling."""
+        from abicheck.checker import _deduplicate_ast_dwarf
+
+        changes = [
+            Change(ChangeKind.TYPE_FIELD_TYPE_CHANGED, "S::a",
+                   "Field type changed: S::a", old_value="Foo", new_value="Bar"),
+            # DWARF says both sides are pointers -- a real disagreement
+            # with the header's by-value Foo -> Bar, not a duplicate.
+            Change(ChangeKind.STRUCT_FIELD_TYPE_CHANGED, "S::a",
+                   "Field type changed: S::a", old_value="Foo *", new_value="Bar *"),
+        ]
+        result = _deduplicate_ast_dwarf(changes)
+        assert len(result) == 2
+
+    def test_field_type_transition_agreeing_modulo_tag_keyword_still_deduped(self):
+        """The bridge this whole comparison exists for must still work:
+        a tag-keyword spelling difference ("struct Foo" vs "Foo") alone
+        is not a real disagreement and still collapses to one finding."""
+        from abicheck.checker import _deduplicate_ast_dwarf
+
+        changes = [
+            Change(ChangeKind.TYPE_FIELD_TYPE_CHANGED, "S::a",
+                   "Field type changed: S::a", old_value="Foo", new_value="Bar"),
+            Change(ChangeKind.STRUCT_FIELD_TYPE_CHANGED, "S::a",
+                   "Field type changed: S::a",
+                   old_value="struct Foo", new_value="struct Bar"),
+        ]
+        result = _deduplicate_ast_dwarf(changes)
+        assert len(result) == 1
+
     def test_exact_dedup_same_kind(self):
         """Exact duplicates by (kind, description) are removed."""
         from abicheck.checker import _deduplicate_ast_dwarf

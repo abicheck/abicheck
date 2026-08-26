@@ -109,3 +109,16 @@
   it, since that module imports `diff_cxx_rules`, which imports
   `diff_helpers`, so importing it here would add the identical kind of
   cycle edge the previous follow-up's move avoided.
+- **Follow-up (Codex review): comparing a field-type transition via
+  `_normalize_type_name` hid a genuine indirection-level disagreement.**
+  That normalizer strips trailing `*`/`&` (by design, for its own
+  same-tier callers, where a pointee cv-qualifier change is source churn
+  rather than a layout break) — reusing it directly for the new
+  cross-tier transition comparison meant `Foo * -> Bar *` (DWARF) and
+  `Foo -> Bar` (header) compared equal, silently hiding a real
+  indirection-level conflict between the two tiers. `_normalize_type_name`
+  is now a thin wrapper over a new, shared `_normalize_type_spelling(name,
+  *, strip_indirection)`; `cross_tier_transition` calls it with
+  `strip_indirection=False`, so it still bridges a tag-keyword spelling
+  difference (`"struct Foo"` vs `"Foo"`) but no longer collapses a real
+  pointer/reference-level disagreement.

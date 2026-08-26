@@ -689,33 +689,20 @@ _ANON_TYPE_RE = re.compile(
 
 
 def _normalize_type_name(name: str) -> str:
-    """Normalize a C/C++ type name for stable DWARF↔castxml comparison.
+    """Normalize a C/C++ type name for stable DWARF↔castxml comparison: strips whitespace, CV-qualifiers, pointer/reference decorations, and 'struct'/'class'/'union' tag keywords ("struct Foo" -> "Foo", "const struct Foo *" -> "Foo"). Lossy by design, for comparison only -- Change.old_value/new_value keep the original spelling. Moved here from diff_platform.py (Codex review): cross_tier_transition below needs a sibling of it, and diff_platform.py already imports from this module, so importing back from there would grow the import-cycle-growth gate's tracked SCC.
+    """
+    return _normalize_type_spelling(name, strip_indirection=True)
 
-    Strips leading/trailing whitespace, CV-qualifiers, pointer/reference
-    decorations, and 'struct'/'class'/'union' tag keywords so that semantically
-    equivalent names compare equal regardless of DWARF vs castxml source:
 
-    Examples::
+def _normalize_type_spelling(name: str, *, strip_indirection: bool) -> str:
+    """Shared implementation behind ``_normalize_type_name`` and the cross-tier type-spelling comparison in ``cross_tier_transition``.
 
-        "struct Foo"     → "Foo"
-        "const struct Foo *" → "Foo"
-        "class Bar &"    → "Bar"
-        "union U"        → "U"
-        "int"            → "int"   (unchanged)
-
-    Note: this normalizer is intentionally lossy for comparison purposes only.
-    The original type names are still preserved in Change.old_value/new_value.
-
-    Moved here from ``diff_platform.py`` (Codex review, fresh evidence):
-    ``cross_tier_transition`` below needs it too, and ``diff_platform.py``
-    already imports from this module, so importing it back from
-    ``diff_platform`` would grow the ``import-cycle-growth`` gate's tracked
-    SCC set -- ``diff_platform.py`` now imports this function from here
-    instead, preserving the one-directional dependency.
+    *strip_indirection* controls whether trailing pointer/reference sigils are dropped. ``_normalize_type_name``'s own same-tier callers want them dropped (a pointee cv-qualifier change like ``char *`` -> ``const char *`` is source churn, not a layout break). Cross-tier comparison must NOT drop them (Codex review, fresh evidence): stripping ``*``/``&`` made ``Foo * -> Bar *`` (DWARF) and ``Foo -> Bar`` (header) compare equal, silently hiding a genuine indirection-level disagreement between the two tiers' own evidence -- exactly the class of bug this whole value-agreement gate exists to catch.
     """
     s = name.strip()
-    # Remove trailing pointer/reference decorators and CV-qualifiers
-    s = re.sub(r"[\s*&]+$", "", s).strip()
+    if strip_indirection:
+        # Remove trailing pointer/reference decorators and CV-qualifiers
+        s = re.sub(r"[\s*&]+$", "", s).strip()
     # Remove leading CV-qualifiers
     s = re.sub(r"^(const|volatile)(\s+(const|volatile))?\s+", "", s).strip()
     # Remove struct/class/union tag keyword, remembering it: for an anonymous
@@ -791,7 +778,11 @@ def cross_tier_transition(c: Change) -> tuple[str | None, str | None] | None:
         return _bits_str_from_bytes_str(old), _bits_str_from_bytes_str(new)
     if c.kind in _TYPE_SPELLING_VALUE_KINDS:
         return (
-            _normalize_type_name(old) if old is not None else None,
-            _normalize_type_name(new) if new is not None else None,
+            _normalize_type_spelling(old, strip_indirection=False)
+            if old is not None
+            else None,
+            _normalize_type_spelling(new, strip_indirection=False)
+            if new is not None
+            else None,
         )
     return old, new
