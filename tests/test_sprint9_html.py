@@ -400,6 +400,18 @@ def test_write_passes_old_symbol_count(tmp_path: Path) -> None:
     assert "98.0%" in content  # (50-1)/50 * 100
 
 
+def test_write_passes_demangle_through(tmp_path: Path) -> None:
+    """Codex review, fresh evidence: write_html_report() had no way to opt
+    out of demangling the way the CLI's own --no-demangle does -- it always
+    called generate_html_report() with the implicit True default."""
+    r = _result(changes=[_ch("func_removed", symbol="_ZN3FooC1Ev")])
+    out = tmp_path / "report.html"
+    write_html_report(r, out, demangle=False)
+    content = out.read_text()
+    assert "_ZN3FooC1Ev" in content
+    assert "Foo::Foo()" not in content
+
+
 # ---------------------------------------------------------------------------
 # Verdict colours
 # ---------------------------------------------------------------------------

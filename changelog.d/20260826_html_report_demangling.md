@@ -98,3 +98,11 @@
   tooltip to fall back on. `old_val`/`new_val` now render through the
   same `_abbr_symbol_text` helper instead of a bare `demangle_text` +
   `html.escape`.
+- **Eighth follow-up (Codex review): `write_html_report()` had no way to
+  opt out of demangling.** Unlike the CLI's own `--no-demangle`, this
+  Python-API writer always called `generate_html_report()` with the
+  implicit `True` default, so a caller needing raw linker names in the
+  written file had no equivalent knob. `write_html_report()` now accepts
+  and forwards a keyword-only `demangle` parameter (default `True`,
+  matching `generate_html_report`'s own default -- no behavior change for
+  an existing caller that omits it).

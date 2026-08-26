@@ -224,10 +224,9 @@ def _changes_table(changes: list[object], demangle: bool = True) -> str:
                 f"<div style='font-size:0.82em; color:#6a1b9a; margin-top:2px;'>"
                 f"📜 Contract — {' · '.join(bits)}</div>"
             )
-        # Cross-detector correlation (e.g. LAYOUT_UNVERIFIABLE annotated by
-        # post_processing.AnnotateLayoutUnverifiableCoveredByVtableChanged as
-        # sharing its evidence gap with a co-reported TYPE_VTABLE_CHANGED) --
-        # only JSON/SARIF rendered this field before (Codex review).
+        # Cross-detector correlation (e.g. LAYOUT_UNVERIFIABLE sharing its
+        # evidence gap with a co-reported TYPE_VTABLE_CHANGED) -- only
+        # JSON/SARIF rendered this field before (Codex review).
         correlated = getattr(ch, "correlated_change_kind", None)
         if correlated:
             desc_parts.append(
@@ -383,11 +382,9 @@ def _compat_changes_table(items: list[object], show_severity: bool = False) -> s
         old_val = h(str(getattr(ch, "old_value", "") or ""))
         new_val = h(str(getattr(ch, "new_value", "") or ""))
         sev_cell = f"<td>{severity(ks)}</td>" if show_severity else ""
-        # Cross-detector correlation (e.g. LAYOUT_UNVERIFIABLE annotated by
-        # post_processing.AnnotateLayoutUnverifiableCoveredByVtableChanged) --
-        # this ABICC-compatible table has its own separate rendering from
-        # _changes_table above, so it needs the same note added here too
-        # (Codex review, fresh evidence).
+        # Cross-detector correlation: this ABICC-compatible table has its own
+        # separate rendering from _changes_table above, needing the same
+        # note (Codex review, fresh evidence).
         correlated = getattr(ch, "correlated_change_kind", None)
         if correlated:
             desc += (
@@ -1225,8 +1222,12 @@ def write_html_report(
     title: str | None = None,
     compat_html: bool = False,
     report_kind: str = "binary",
+    *,
+    demangle: bool = True,
 ) -> None:
-    """Write HTML report to *output_path*, creating parent directories as needed."""
+    """Write HTML report to *output_path*, creating parent directories as
+    needed -- passing ``demangle`` through, unlike the CLI's own
+    ``--no-demangle`` this writer previously had no equivalent for."""
     output_path.parent.mkdir(parents=True, exist_ok=True)
     content = generate_html_report(
         result,
@@ -1237,5 +1238,6 @@ def write_html_report(
         title=title,
         compat_html=compat_html,
         report_kind=report_kind,
+        demangle=demangle,
     )
     output_path.write_text(content, encoding="utf-8")
