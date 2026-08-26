@@ -360,6 +360,60 @@ class TestBundleArchiveWriterAtomicity:
         assert stat.S_IMODE(path.stat().st_mode) == 0o600
         assert path.exists()
 
+    @pytest.mark.skipif(sys.platform == "win32", reason="POSIX file mode semantics")
+    def test_restores_mode_after_ownership_not_before(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Codex review, fresh evidence: chown() can silently clear a
+        setuid/setgid bit on POSIX -- restoring mode before chown (the
+        original order) let a destination's setuid/setgid bits be set by
+        chmod only to be stripped by the chown that followed it.
+        Simulated via a fake chown that mirrors that kernel behavior,
+        rather than depending on a real setuid/setgid-capable sandbox."""
+        path = tmp_path / "bundle.archive.zip"
+        with BundleArchiveWriter(path) as writer:
+            h = writer.put_blob(b'{"a": 1}')
+            writer.write_manifest({"library_blobs": {"a.so": h}})
+        os.chmod(path, 0o6755)
+
+        real_chmod = os.chmod
+        real_chown = os.chown
+
+        def _clearing_chown(path_arg: object, uid: int, gid: int) -> None:
+            real_chown(path_arg, uid, gid)
+            current = stat.S_IMODE(os.stat(path_arg).st_mode)
+            real_chmod(path_arg, current & 0o777)  # simulate the kernel clearing setuid/setgid
+
+        monkeypatch.setattr(os, "chown", _clearing_chown)
+
+        with BundleArchiveWriter(path) as writer:
+            h = writer.put_blob(b'{"a": 2}')
+            writer.write_manifest({"library_blobs": {"a.so": h}})
+
+        assert stat.S_IMODE(path.stat().st_mode) == 0o6755
+
+    def test_close_failure_removes_the_temp_file(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Codex review: a failure anywhere in close()'s post-zf.close()
+        block (fsync, chown, chmod, or the replace itself) must not leave
+        the temp file behind -- repeated failures would otherwise
+        accumulate temp files and starve later retries of the space
+        they're trying to free up."""
+        path = tmp_path / "bundle.archive.zip"
+        writer = BundleArchiveWriter(path)
+        h = writer.put_blob(b'{"a": 1}')
+        writer.write_manifest({"library_blobs": {"a.so": h}})
+
+        def _failing_replace(*_args: object, **_kw: object) -> None:
+            raise OSError(errno.ENOSPC, "simulated disk full")
+
+        monkeypatch.setattr(os, "replace", _failing_replace)
+        with pytest.raises(OSError, match="simulated disk full"):
+            writer.close()
+        assert list(tmp_path.glob("*.tmp-*")) == []
+        assert not path.exists()
+
 
 class TestBundleArchiveReaderRejectsNonStoredMembers:
     """Codex review: every member BundleArchiveWriter produces is

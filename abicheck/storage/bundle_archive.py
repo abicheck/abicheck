@@ -410,49 +410,63 @@ class BundleArchiveWriter:
                 "resulting archive would have no manifest.json member"
             )
         self._zf.close()
-        # Durability (Codex review, mirroring snapshot_io._atomic_write_bytes's
-        # own two-part fsync): ZipFile.close() only flushes to the OS's
-        # buffer cache via the underlying file object's own close(), which
-        # is not itself a durability guarantee -- a power loss between here
-        # and os.replace() could leave the temp file's data unflushed to
-        # actual storage even though close() reported success. Reopening
-        # the just-written temp file to fsync it is safe: fsync operates on
-        # the inode's dirty pages regardless of which fd wrote them, so a
-        # fresh read-only fd is sufficient. Best-effort only in the narrow
-        # sense of "this filesystem/platform doesn't support fsync"
-        # (EINVAL/ENOTSUP/EOPNOTSUPP); a real storage failure (ENOSPC, EIO,
-        # EROFS) must propagate rather than let os.replace() publish
-        # unconfirmed content over a known-good archive.
-        tmp_fd = os.open(self._tmp_path, os.O_RDONLY)
         try:
-            os.fsync(tmp_fd)
-        except OSError as exc:
-            if exc.errno not in (errno.EINVAL, errno.ENOTSUP, errno.EOPNOTSUPP):
-                os.close(tmp_fd)
-                raise
-        os.close(tmp_fd)
-        if self._existing_mode is not None:
-            os.chmod(self._tmp_path, self._existing_mode)
-        if (self._existing_uid is not None or self._existing_gid is not None) and hasattr(
-            os, "chown"
-        ):
+            # Durability (Codex review, mirroring snapshot_io._atomic_write_bytes's
+            # own two-part fsync): ZipFile.close() only flushes to the OS's
+            # buffer cache via the underlying file object's own close(),
+            # which is not itself a durability guarantee -- a power loss
+            # between here and os.replace() could leave the temp file's
+            # data unflushed to actual storage even though close() reported
+            # success. Reopening the just-written temp file to fsync it is
+            # safe: fsync operates on the inode's dirty pages regardless of
+            # which fd wrote them, so a fresh read-only fd is sufficient.
+            # Best-effort only in the narrow sense of "this filesystem/
+            # platform doesn't support fsync" (EINVAL/ENOTSUP/EOPNOTSUPP);
+            # a real storage failure (ENOSPC, EIO, EROFS) must propagate
+            # rather than let os.replace() publish unconfirmed content
+            # over a known-good archive.
+            tmp_fd = os.open(self._tmp_path, os.O_RDONLY)
             try:
+                os.fsync(tmp_fd)
+            except OSError as exc:
+                if exc.errno not in (errno.EINVAL, errno.ENOTSUP, errno.EOPNOTSUPP):
+                    raise
+            finally:
+                os.close(tmp_fd)
+            # Ownership restored *before* mode (Codex review, fresh
+            # evidence): on POSIX, chown() silently clears a file's
+            # setuid/setgid bits as a security measure -- restoring mode
+            # first and chown second (the original order) let a real
+            # 06755 destination's setuid/setgid bits survive the chmod
+            # only to be stripped by the chown that followed it, so
+            # rewriting such a destination silently downgraded it to
+            # 0755. Not best-effort (mirroring `snapshot_io.py`'s own
+            # two-round fix for this exact failure mode): silently
+            # proceeding after a failed ownership restoration would
+            # publish under the wrong owner/group, which can revoke real
+            # access for a shared baseline's other readers.
+            if (
+                self._existing_uid is not None or self._existing_gid is not None
+            ) and hasattr(os, "chown"):
                 os.chown(
                     self._tmp_path,
                     self._existing_uid if self._existing_uid is not None else -1,
                     self._existing_gid if self._existing_gid is not None else -1,
                 )
-            except OSError:
-                # Not best-effort (Codex review, mirroring snapshot_io.py's
-                # own two-round fix for this exact failure mode): silently
-                # proceeding to os.replace() after a failed ownership
-                # restoration would publish under the wrong owner/group,
-                # which can revoke real access for a shared baseline's
-                # other readers. Abort instead -- the *existing* target is
-                # untouched either way, since this runs before replace().
-                self._tmp_path.unlink(missing_ok=True)
-                raise
-        os.replace(self._tmp_path, self._target)
+            if self._existing_mode is not None:
+                os.chmod(self._tmp_path, self._existing_mode)
+            os.replace(self._tmp_path, self._target)
+        except BaseException:
+            # Codex review: a failure anywhere in this block (the fsync,
+            # the ownership/mode restoration, or the replace itself) must
+            # not leave the -- potentially very large -- temp file behind
+            # next to the untouched destination; a repeated failure
+            # (ENOSPC, EIO) would otherwise accumulate temp files and
+            # starve later retries of the very space they're trying to
+            # free up. A no-op once os.replace() has actually succeeded,
+            # since the temp path no longer exists at that point.
+            self._tmp_path.unlink(missing_ok=True)
+            raise
         # os.replace()'s directory-entry update is not itself durable
         # across a crash until the *parent* directory is fsync'd too --
         # the file-content fsync above only guarantees the new data

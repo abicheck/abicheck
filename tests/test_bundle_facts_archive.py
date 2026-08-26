@@ -203,6 +203,45 @@ class TestBundleFactsArchiveFormat:
         with pytest.raises(SnapshotError, match="safety limit"):
             load_bundle_facts(out, format="archive")
 
+    def test_load_caps_each_blob_read_by_the_remaining_aggregate_allowance(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Codex review, fresh evidence: each blob read must be capped by
+        the *remaining* aggregate allowance, not read_blob's own full
+        per-blob default -- otherwise a second large distinct blob could
+        fully decompress up to that far larger ceiling before the
+        aggregate check (previously applied only after the read
+        returned) ever gets a chance to reject it, letting peak decoded
+        memory substantially exceed the promised whole-load limit."""
+        import abicheck.bundle_facts as bundle_facts_module
+        from abicheck.storage.bundle_archive import BundleArchiveReader
+
+        # Generous enough for both real per-library JSON blobs (~2.7 KiB
+        # each) to actually decode, so the assertions below exercise the
+        # cap *shrinking* between reads rather than a decode failure.
+        cap = 6000
+        monkeypatch.setattr(bundle_facts_module, "DEFAULT_MAX_BUNDLE_DECODED_BYTES", cap)
+        metadata = {
+            f"lib{i}.so": _meta(soname=f"lib{i}.so", exports=[f"sym{i}"]) for i in range(2)
+        }
+        facts = capture_bundle_facts(_per_library_snapshots(metadata))
+        out = tmp_path / "two.bundlefacts.archive.zip"
+        save_bundle_facts(facts, out, format="archive")
+
+        calls: list[object] = []
+        real_read_blob = BundleArchiveReader.read_blob
+
+        def _tracking_read_blob(self, h, **kw):  # type: ignore[no-untyped-def]
+            calls.append(kw.get("max_decoded_bytes"))
+            return real_read_blob(self, h, **kw)
+
+        monkeypatch.setattr(BundleArchiveReader, "read_blob", _tracking_read_blob)
+        load_bundle_facts(out, format="archive")
+
+        assert len(calls) == 2
+        assert calls[0] == cap  # the full remaining allowance for the first blob
+        assert calls[1] is not None and calls[1] < cap  # reduced by the first blob's own size
+
     def test_back_compat_plain_json_fixture_still_loads_via_auto(
         self, tmp_path: Path
     ) -> None:

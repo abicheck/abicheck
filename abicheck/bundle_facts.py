@@ -530,9 +530,15 @@ def read_bundle_facts_archive(
             cached = blob_cache.get(h)
             if cached is not None:
                 return cached
-            raw = reader.read_blob(h)
-            total_decoded += len(raw)
-            if total_decoded > DEFAULT_MAX_BUNDLE_DECODED_BYTES:
+            # Pass the *remaining* aggregate allowance as this one read's
+            # own per-blob cap, not read_blob's full 1 GiB default -- a
+            # single call letting a blob decompress up to the whole
+            # per-blob ceiling before the aggregate check runs afterward
+            # would let peak decoded memory substantially exceed the
+            # promised whole-load limit for a manifest with several large
+            # distinct blobs (Codex review, fresh evidence).
+            remaining = DEFAULT_MAX_BUNDLE_DECODED_BYTES - total_decoded
+            if remaining <= 0:
                 raise SnapshotError(
                     f"{path}: this bundle archive's total decoded size "
                     f"exceeds the {DEFAULT_MAX_BUNDLE_DECODED_BYTES} byte "
@@ -540,6 +546,8 @@ def read_bundle_facts_archive(
                     "continue loading (possible decompression bomb, or a "
                     "genuinely oversized bundle)."
                 )
+            raw = reader.read_blob(h, max_decoded_bytes=remaining)
+            total_decoded += len(raw)
             blob_cache[h] = raw
             return raw
 
