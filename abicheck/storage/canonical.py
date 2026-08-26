@@ -111,8 +111,28 @@ def _canonical_number(value: float) -> Any:
 
 
 def _set_member(value: Any) -> Any:
-    """Normalize one set member. See the set branch of :func:`canonical_form`."""
-    return int(value) if isinstance(value, bool) else value
+    """Normalize one set member, recursively. See :func:`canonical_form`.
+
+    The collapse has to reach *inside* composite members, not just their top
+    level: Python considers ``{(True,)}`` and ``{(1,)}`` equal sets, so which
+    tuple survives construction depends only on which was inserted first, and
+    emitting ``[[true]]`` for one and ``[[1]]`` for the other gave two equal
+    sets two different digests (Codex review). That is precisely the defect the
+    top-level collapse was written to fix, one level down — the fix was scoped
+    to the shape that had been demonstrated rather than to the rule.
+
+    Only set members are treated this way. Outside a set, ``{"x": True}`` and
+    ``{"x": 1}`` are genuinely different documents and must hash differently;
+    it is *set membership* that makes the distinction unrecoverable, so it is
+    only there that agreeing is the sole option left.
+    """
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, tuple):
+        return tuple(_set_member(item) for item in value)
+    if isinstance(value, frozenset):
+        return frozenset(_set_member(item) for item in value)
+    return value
 
 
 def canonical_form(value: Any) -> Any:

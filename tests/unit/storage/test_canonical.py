@@ -1026,3 +1026,45 @@ class TestVersionSerializationAgreesWithTheReader:
 
         assert emitted["package_format_version"] == PACKAGE_FORMAT_VERSION
         assert isinstance(emitted["package_format_version"], int)
+
+
+class TestNestedBooleansInSetMembersAgree:
+    """Codex review: the bool/int collapse stopped at the member's top level.
+
+    Python considers `{(True,)}` and `{(1,)}` equal sets — which tuple survives
+    construction depends only on which was inserted first — but they
+    canonicalized to `[[true]]` and `[[1]]` and received different digests.
+    That is exactly the defect the top-level collapse was written to fix, one
+    level down: the fix had been scoped to the shape that was demonstrated
+    rather than to the rule.
+    """
+
+    @pytest.mark.parametrize(
+        ("left", "right"),
+        [
+            pytest.param({(True,)}, {(1,)}, id="tuple"),
+            pytest.param({((True,),)}, {((1,),)}, id="nested-tuple"),
+            pytest.param({frozenset({True})}, {frozenset({1})}, id="frozenset"),
+            pytest.param({(False,)}, {(0,)}, id="false-and-zero"),
+            pytest.param({(1, (False, "x"))}, {(True, (0, "x"))}, id="mixed-depths"),
+        ],
+    )
+    def test_equal_sets_receive_equal_digests(self, left: set, right: set) -> None:
+        assert left == right, "fixture must be equal sets or this proves nothing"
+
+        assert semantic_digest({"s": left}) == semantic_digest({"s": right})
+
+    def test_a_boolean_outside_a_set_is_still_content(self) -> None:
+        """The collapse must stay scoped to where equality forces it.
+
+        `{"x": True}` and `{"x": 1}` are genuinely different documents; it is
+        set *membership* that makes the distinction unrecoverable, so it is
+        only there that agreeing is the sole option left.
+        """
+        assert semantic_digest({"x": True}) != semantic_digest({"x": 1})
+        assert semantic_digest({"x": [True]}) != semantic_digest({"x": [1]})
+
+    def test_distinct_sets_still_differ(self) -> None:
+        """Collapsing must not merge sets that are not equal."""
+        assert semantic_digest({"s": {(1,)}}) != semantic_digest({"s": {(2,)}})
+        assert semantic_digest({"s": {(1, 2)}}) != semantic_digest({"s": {(1,)}})

@@ -857,12 +857,22 @@ class TestTheSemanticJudgementBelongsToTheCaller:
         assert forward.same_site_observations() == backward.same_site_observations()
 
     def test_only_the_members_the_predicate_names_are_reported(self) -> None:
-        """A group can hold one contradictory pair and one innocent member."""
+        """A group can hold one contradictory pair and one innocent member.
 
-        def size_disagrees(left: OccurrenceId, right: OccurrenceId) -> bool:
-            return bool(left.attribute("size")) and left.attribute(
-                "size"
-            ) != right.attribute("size")
+        The predicate is deliberately **symmetric** — both sides must carry a
+        size before a disagreement counts. An earlier version of this test used
+        an asymmetric one (`bool(left...) and left != right`), which does not
+        say what this test claims: under it, an unsized member really *is*
+        contradicted by a sized one, so calling it "innocent" was an artifact
+        of the old implementation dropping members that did not independently
+        qualify. Once `conflicts()` started evaluating unordered pairs, this
+        test failed — correctly — and the premise, not the fix, was what
+        needed correcting.
+        """
+
+        def sizes_disagree(left: OccurrenceId, right: OccurrenceId) -> bool:
+            sizes = (left.attribute("size"), right.attribute("size"))
+            return all(sizes) and sizes[0] != sizes[1]
 
         entity = EntityId(EntityKind.TYPE, "Foo")
         occurrences = OccurrenceSet()
@@ -871,7 +881,7 @@ class TestTheSemanticJudgementBelongsToTheCaller:
                 OccurrenceId(entity, ObservationKind.AST, "a.cpp", attributes)
             )
 
-        conflicts = occurrences.conflicts(size_disagrees)
+        conflicts = occurrences.conflicts(sizes_disagree)
 
         assert len(conflicts) == 1
         assert {o.attribute("size") for o in conflicts[0].occurrences} == {"8", "16"}
@@ -1039,3 +1049,88 @@ class TestARepeatedAttributeIsNotSilentlyResolved:
         assert OccurrenceId.from_dict(original.to_dict()).attribute_values(
             "size"
         ) == original.attribute_values("size")
+
+
+class TestAnAsymmetricPredicateStillReportsItsConflict:
+    """Codex review: a contradiction the caller named could vanish entirely.
+
+    Nothing in `conflicts()`'s signature promises the predicate is symmetric,
+    and an asymmetric one is easy to write by accident. Requiring each
+    occurrence to qualify *independently* then dropped the pair: one endpoint
+    qualified, the other did not, a group of one is not a conflict, and the
+    finding disappeared. Unordered pairs with either direction counting is the
+    only direction this module may err in — reporting, never discarding.
+    """
+
+    @staticmethod
+    def _asymmetric(left: OccurrenceId, right: OccurrenceId) -> bool:
+        """True for a sized observation against a differently-sized one.
+
+        The literal predicate from the review. False in reverse when the right
+        side carries no size at all.
+        """
+        return bool(left.attribute("size")) and left.attribute(
+            "size"
+        ) != right.attribute("size")
+
+    @staticmethod
+    def _pair() -> OccurrenceSet:
+        entity = EntityId(EntityKind.TYPE, "S")
+        occurrences = OccurrenceSet()
+        for attributes in ((("size", "8"),), (("note", "x"),)):
+            occurrences.add(
+                OccurrenceId(entity, ObservationKind.DWARF, "a.o", attributes)
+            )
+        return occurrences
+
+    def test_the_direction_that_holds_is_enough(self) -> None:
+        assert self._asymmetric(*self._pair()) != self._asymmetric(
+            *reversed(list(self._pair()))
+        ), "fixture must actually be asymmetric or this test proves nothing"
+
+        conflicts = self._pair().conflicts(self._asymmetric)
+
+        assert len(conflicts) == 1
+
+    def test_both_endpoints_are_retained(self) -> None:
+        """Reporting one side would name a contradiction without its other half."""
+        conflicts = self._pair().conflicts(self._asymmetric)
+
+        assert len(conflicts[0].occurrences) == 2
+
+    def test_a_symmetric_predicate_is_unaffected(self) -> None:
+        """The change must be invisible to callers who were already correct."""
+
+        def sizes_disagree(left: OccurrenceId, right: OccurrenceId) -> bool:
+            sizes = (left.attribute("size"), right.attribute("size"))
+            return all(sizes) and sizes[0] != sizes[1]
+
+        entity = EntityId(EntityKind.TYPE, "S")
+        occurrences = OccurrenceSet()
+        for attributes in ((("size", "8"),), (("size", "16"),), (("note", "x"),)):
+            occurrences.add(
+                OccurrenceId(entity, ObservationKind.DWARF, "a.o", attributes)
+            )
+
+        conflicts = occurrences.conflicts(sizes_disagree)
+
+        assert len(conflicts) == 1
+        assert len(conflicts[0].occurrences) == 2
+
+    def test_a_never_conflicting_predicate_still_reports_nothing(self) -> None:
+        """Evaluating both directions must not manufacture conflicts."""
+        assert self._pair().conflicts(lambda left, right: False) == ()
+
+    def test_order_of_insertion_does_not_change_the_result(self) -> None:
+        """An asymmetric predicate must not become order-sensitive either."""
+        entity = EntityId(EntityKind.TYPE, "S")
+        rows = ((("size", "8"),), (("note", "x"),))
+        forward, backward = OccurrenceSet(), OccurrenceSet()
+        for attributes in rows:
+            forward.add(OccurrenceId(entity, ObservationKind.DWARF, "a.o", attributes))
+        for attributes in reversed(rows):
+            backward.add(OccurrenceId(entity, ObservationKind.DWARF, "a.o", attributes))
+
+        assert forward.conflicts(self._asymmetric) == backward.conflicts(
+            self._asymmetric
+        )

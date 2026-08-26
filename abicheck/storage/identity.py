@@ -559,17 +559,32 @@ class OccurrenceSet:
         Returning conflicts rather than raising is unchanged and intentional:
         a package must remain writable with conflicts in it, so the ambiguity
         reaches a reader instead of aborting the capture that found it.
+
+        The predicate is evaluated over **unordered pairs**, and either
+        direction answering ``True`` puts *both* endpoints in the conflict.
+        Nothing in this signature promises symmetry, and an asymmetric
+        predicate is easy to write by accident — ``bool(left.attribute("size"))
+        and left.attribute("size") != right.attribute("size")`` is true for a
+        sized observation against an unsized one and false in reverse.
+        Requiring each occurrence to qualify independently then dropped that
+        pair entirely: one endpoint qualified, the other did not, and a group
+        of one is not a conflict, so a contradiction the caller had explicitly
+        identified vanished (Codex review). A symmetric predicate is
+        unaffected; only the asymmetric case changes, and it changes from
+        "silently discarded" to "reported", which is the only direction this
+        module may err in.
         """
         found: list[IdentityConflict] = []
         for group in self.same_site_observations():
+            flagged = set()
+            for index in range(len(group)):
+                for position in range(index + 1, len(group)):
+                    left, right = group[index], group[position]
+                    if irreconcilable(left, right) or irreconcilable(right, left):
+                        flagged.add(index)
+                        flagged.add(position)
             members = [
-                occurrence
-                for index, occurrence in enumerate(group)
-                if any(
-                    irreconcilable(occurrence, other)
-                    for position, other in enumerate(group)
-                    if position != index
-                )
+                occurrence for index, occurrence in enumerate(group) if index in flagged
             ]
             if len(members) < 2:
                 continue
