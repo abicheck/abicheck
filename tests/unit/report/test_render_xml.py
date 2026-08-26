@@ -64,6 +64,29 @@ def test_absent_text_stays_absent_rather_than_becoming_empty() -> None:
     assert _round_trip(element).text is None
 
 
+def test_tail_round_trips_and_stays_absent_when_unset() -> None:
+    """``tail`` is half the losslessness claim, so it is checked like ``text``.
+
+    ``ET.indent`` expresses *all* of its formatting through ``tail``, so a
+    projection that dropped it would silently render every JUnit suite on one
+    line — the encoding has to carry it even though nothing in this package
+    sets one before rendering.
+    """
+    root = ET.Element("testsuites")
+    child = ET.SubElement(root, "testsuite")
+    child.tail = "\n  "
+
+    assert "tail" not in element_to_mapping(root)
+    assert element_to_mapping(root)["children"][0]["tail"] == "\n  "
+
+    restored = element_from_mapping(
+        ReportDocument.from_mapping(element_to_mapping(root)).to_mapping()
+    )
+
+    assert restored.tail is None
+    assert restored[0].tail == "\n  "
+
+
 def test_projection_cannot_mutate_the_source_tree() -> None:
     root = ET.Element("testsuites")
     ET.SubElement(root, "testsuite")
@@ -96,33 +119,35 @@ _TEXT = st.one_of(
 
 
 def _trees(depth: int = 0) -> st.SearchStrategy[ET.Element]:
+    attribs = st.dictionaries(
+        st.sampled_from(["a", "b", "name"]), st.text(max_size=4), max_size=3
+    )
     leaves = st.builds(
-        lambda tag, attrib, text: _make(tag, attrib, text, []),
+        lambda tag, attrib, text, tail: _make(tag, attrib, text, tail, []),
         _TAGS,
-        st.dictionaries(
-            st.sampled_from(["a", "b", "name"]), st.text(max_size=4), max_size=3
-        ),
+        attribs,
+        _TEXT,
         _TEXT,
     )
     if depth >= 2:
         return leaves
     return st.builds(
-        _make,
-        _TAGS,
-        st.dictionaries(
-            st.sampled_from(["a", "b", "name"]), st.text(max_size=4), max_size=3
-        ),
-        _TEXT,
-        st.lists(_trees(depth + 1), max_size=3),
+        _make, _TAGS, attribs, _TEXT, _TEXT, st.lists(_trees(depth + 1), max_size=3)
     )
 
 
 def _make(
-    tag: str, attrib: dict[str, str], text: str | None, children: list[ET.Element]
+    tag: str,
+    attrib: dict[str, str],
+    text: str | None,
+    tail: str | None,
+    children: list[ET.Element],
 ) -> ET.Element:
     element = ET.Element(tag, dict(attrib))
     if text is not None:
         element.text = text
+    if tail is not None:
+        element.tail = tail
     element.extend(children)
     return element
 
