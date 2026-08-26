@@ -613,6 +613,21 @@ class TestBundleFactsArchiveFormat:
         with pytest.raises(ValueError, match="library_blobs"):
             load_bundle_facts(out, format="archive")
 
+    def test_load_rejects_a_non_string_library_blobs_value(
+        self, tmp_path: Path
+    ) -> None:
+        """A 'library_blobs' value that isn't a string must raise this
+        module's own error type -- not a raw, unhashable-type TypeError out
+        of snapshot_cache.get(h)/blob_cache.get(h) (CodeRabbit review)."""
+        from abicheck.storage.bundle_archive import BundleArchiveWriter
+
+        out = tmp_path / "bad_value.bundlefacts.archive.zip"
+        with BundleArchiveWriter(out) as writer:
+            writer.write_manifest({"library_blobs": {"a.so": ["not", "a", "hash"]}})
+
+        with pytest.raises(ValueError, match="library_blobs\\['a.so'\\]"):
+            load_bundle_facts(out, format="archive")
+
     def test_load_rejects_a_library_blob_that_decodes_to_a_non_dict(
         self, tmp_path: Path
     ) -> None:

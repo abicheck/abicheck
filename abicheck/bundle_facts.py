@@ -624,18 +624,21 @@ def read_bundle_facts_archive(
                 "bundle archive: 'library_blobs' must be a mapping, got "
                 f"{type(library_blobs).__name__}"
             )
-        # Bound the *name count* independently of decoded-byte size (Codex
-        # review, fresh evidence): DEFAULT_MAX_BUNDLE_DECODED_BYTES only
-        # charges a shared blob's bytes once (blob_cache below), but each
+        # Each value must be a content-hash string -- an unvalidated list/dict
+        # value reaches snapshot_cache/blob_cache below (both keyed dicts) and
+        # raises a raw TypeError instead of this module's own error type.
+        for _name, _h in library_blobs.items():
+            if not isinstance(_h, str):
+                raise ValueError(
+                    f"bundle archive: 'library_blobs[{_name!r}]' must be a "
+                    f"content-hash string, got {type(_h).__name__}"
+                )
+        # Bound the *name count* independently of decoded-byte size: the
+        # byte-level caps only charge a shared blob's bytes once, but each
         # *name* referencing it still gets its own materialized AbiSnapshot
-        # object graph (snapshot_cache's own deep copy, to preserve
-        # per-entry isolation -- see that block's comment). A manifest
-        # naming far more libraries than any real bundle would need -- up
-        # to ~700k entries fit under DEFAULT_MAX_MANIFEST_BYTES's 64 MiB
-        # even at ~90 bytes/entry -- could otherwise turn one small,
-        # size-capped blob into an unbounded number of live Python objects
-        # regardless of the byte-level caps, since none of them measure
-        # object count. Checked before any blob is even read.
+        # object graph (snapshot_cache's own deep copy) -- an oversized
+        # manifest could otherwise amplify one small, size-capped blob into
+        # an unbounded object count. Checked before any blob is read.
         if len(library_blobs) > DEFAULT_MAX_LIBRARY_COUNT:
             raise SnapshotError(
                 f"{path}: this bundle archive's manifest names "
