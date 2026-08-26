@@ -333,23 +333,41 @@ class AvailabilityLedger:
         """Record that one entity's availability differs from its family's."""
         self.overrides[family, entity_key] = availability
 
-    def for_family(self, family: str) -> FactAvailability:
-        """Resolve a family's availability, declared or not.
+    @property
+    def effective_unknown_family_default(self) -> FactAvailability:
+        """The fallback as it actually behaves, not as the field holds it.
 
         The fallback is re-checked rather than trusted. ``__post_init__``
         already refuses a comparable one, but this ledger is mutable by
         design (``declare``/``override`` mutate it), so the field can also be
-        reassigned after construction. Coercing here — rather than raising —
-        keeps the guarantee total at the point a comparison actually asks,
-        and errs toward "no conclusion", which is the safe direction.
+        reassigned after construction — a plain attribute assignment runs no
+        ``__post_init__``. Coercing — rather than raising — keeps the
+        guarantee total at the point a comparison actually asks, and errs
+        toward "no conclusion", which is the safe direction.
+
+        This is a property rather than a branch inside :meth:`for_family`
+        because lookup was not the only consumer, and the three that existed
+        disagreed: the constructor refused a comparable fallback,
+        :meth:`for_family` coerced one, and :meth:`to_dict` wrote the raw
+        field — so a ledger reassigned to ``PRESENT`` answered
+        ``not_collected`` while serializing ``present``, producing a document
+        that :meth:`from_dict` then refused to reload, and that a consumer
+        without that validation would read as available evidence (Codex
+        review). One definition, every consumer, is the same rule the
+        versioning axes needed for the same reason: a second, differently
+        placed notion of the same fact is what lets two of them drift.
         """
-        declared = self.families.get(family)
-        if declared is not None:
-            return declared
         fallback = self.unknown_family_default
         if fallback.comparable:
             return FactAvailability(FactStatus.NOT_COLLECTED)
         return fallback
+
+    def for_family(self, family: str) -> FactAvailability:
+        """Resolve a family's availability, declared or not."""
+        declared = self.families.get(family)
+        if declared is not None:
+            return declared
+        return self.effective_unknown_family_default
 
     def for_entity(self, family: str, entity_key: str) -> FactAvailability:
         """Resolve one entity's availability.
@@ -433,7 +451,11 @@ class AvailabilityLedger:
                 }
                 for (family, entity_key), avail in sorted(self.overrides.items())
             ],
-            "unknown_family_default": self.unknown_family_default.to_dict(),
+            # The *effective* fallback, so the document says what this ledger
+            # answers. Writing the raw field let a post-construction
+            # reassignment serialize a comparable fallback that `for_family`
+            # would never return — see `effective_unknown_family_default`.
+            "unknown_family_default": self.effective_unknown_family_default.to_dict(),
         }
 
     @classmethod

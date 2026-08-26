@@ -643,14 +643,25 @@ class TestAnOmittedPackageFormatIsUnstated:
         assert not result.readable
         assert "usable package format version" in result.reason
 
-    def test_both_fail_closed_axes_treat_absence_identically(self) -> None:
-        for payload in (
-            {"comparison_contract_version": COMPARISON_CONTRACT_VERSION},
-            {"package_format_version": PACKAGE_FORMAT_VERSION},
-        ):
-            assert not check_reader_compatibility(
-                StorageVersions.from_dict(payload)
-            ).readable
+    @pytest.mark.parametrize(
+        "payload",
+        [
+            pytest.param(
+                {"comparison_contract_version": COMPARISON_CONTRACT_VERSION},
+                id="package-format-absent",
+            ),
+            pytest.param(
+                {"package_format_version": PACKAGE_FORMAT_VERSION},
+                id="comparison-contract-absent",
+            ),
+        ],
+    )
+    def test_both_fail_closed_axes_treat_absence_identically(
+        self, payload: dict[str, int]
+    ) -> None:
+        assert not check_reader_compatibility(
+            StorageVersions.from_dict(payload)
+        ).readable
 
     def test_a_package_stating_both_is_readable(self) -> None:
         versions = StorageVersions.from_dict(
@@ -834,23 +845,23 @@ class TestTheDecisionPointRejectsNonIntegralVersions:
         assert result.reason
 
     @pytest.mark.parametrize("value", ["2", "1", None, [1], {"v": 1}])
+    @pytest.mark.parametrize(
+        "axis", ["package_format_version", "comparison_contract_version"]
+    )
     def test_a_non_numeric_version_fails_closed_rather_than_raising(
-        self, value: object
+        self, axis: str, value: object
     ) -> None:
         """It must refuse, not raise: `'2' > 1` was a `TypeError` out of the guard."""
-        for versions in (
-            StorageVersions(
-                package_format_version=value,  # type: ignore[arg-type]
-                comparison_contract_version=COMPARISON_CONTRACT_VERSION,
-            ),
-            StorageVersions(
-                package_format_version=PACKAGE_FORMAT_VERSION,
-                comparison_contract_version=value,  # type: ignore[arg-type]
-            ),
-        ):
-            result = check_reader_compatibility(versions)
-            assert not result.readable
-            assert result.reason
+        axes: dict[str, object] = {
+            "package_format_version": PACKAGE_FORMAT_VERSION,
+            "comparison_contract_version": COMPARISON_CONTRACT_VERSION,
+        }
+        axes[axis] = value
+
+        result = check_reader_compatibility(StorageVersions(**axes))  # type: ignore[arg-type]
+
+        assert not result.readable
+        assert result.reason
 
     def test_an_integral_float_is_still_a_real_version(self) -> None:
         """Refusing malformed values must not refuse an equal value spelled 1.0."""
@@ -865,21 +876,22 @@ class TestTheDecisionPointRejectsNonIntegralVersions:
 
         assert result.readable
 
-    def test_the_guard_and_the_sanitizer_agree(self) -> None:
+    @pytest.mark.parametrize("value", [0.5, True, "2", None, -1, 0, [1]])
+    def test_the_guard_and_the_sanitizer_agree(self, value: object) -> None:
         """One rule, checked as one: whatever `from_dict` calls unusable, the
         guard must refuse when handed the same value directly."""
-        for value in (0.5, True, "2", None, -1, 0, [1]):
-            sanitized = StorageVersions.from_dict(
-                {
-                    "package_format_version": value,
-                    "comparison_contract_version": COMPARISON_CONTRACT_VERSION,
-                }
-            )
-            direct = StorageVersions(
-                package_format_version=value,  # type: ignore[arg-type]
-                comparison_contract_version=COMPARISON_CONTRACT_VERSION,
-            )
-            assert (
-                check_reader_compatibility(sanitized).readable
-                == check_reader_compatibility(direct).readable
-            )
+        sanitized = StorageVersions.from_dict(
+            {
+                "package_format_version": value,
+                "comparison_contract_version": COMPARISON_CONTRACT_VERSION,
+            }
+        )
+        direct = StorageVersions(
+            package_format_version=value,  # type: ignore[arg-type]
+            comparison_contract_version=COMPARISON_CONTRACT_VERSION,
+        )
+
+        assert (
+            check_reader_compatibility(sanitized).readable
+            == check_reader_compatibility(direct).readable
+        )

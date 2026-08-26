@@ -790,3 +790,83 @@ class TestDuplicateOverridesAreRefused:
         assert AvailabilityLedger.from_dict(ledger.to_dict()).to_dict() == (
             ledger.to_dict()
         )
+
+
+class TestTheSerializedFallbackIsTheEffectiveOne:
+    """Codex review: three consumers of one field, and they disagreed.
+
+    `__post_init__` refuses a comparable `unknown_family_default`,
+    `for_family` coerces one, and `to_dict` wrote the raw field. A ledger
+    whose fallback is reassigned after construction — a plain attribute
+    assignment, which runs no `__post_init__`, on a class that is mutable by
+    design — therefore answered `not_collected` while serializing `present`:
+    a document `from_dict` refuses to reload, and that a consumer without
+    that validation would read as available evidence.
+    """
+
+    @staticmethod
+    def _reassigned(status: FactStatus) -> AvailabilityLedger:
+        ledger = AvailabilityLedger()
+        ledger.unknown_family_default = FactAvailability(status)
+        return ledger
+
+    @pytest.mark.parametrize("status", [FactStatus.PRESENT, FactStatus.PARTIAL])
+    def test_a_reassigned_comparable_fallback_serializes_as_not_collected(
+        self, status: FactStatus
+    ) -> None:
+        ledger = self._reassigned(status)
+
+        assert ledger.to_dict()["unknown_family_default"] == {"status": "not_collected"}
+
+    @pytest.mark.parametrize("status", [FactStatus.PRESENT, FactStatus.PARTIAL])
+    def test_the_document_round_trips(self, status: FactStatus) -> None:
+        """The invariant that actually broke: write then read must work."""
+        ledger = self._reassigned(status)
+
+        reloaded = AvailabilityLedger.from_dict(ledger.to_dict())
+
+        assert reloaded.for_family("undeclared").status is FactStatus.NOT_COLLECTED
+
+    @pytest.mark.parametrize("status", [FactStatus.PRESENT, FactStatus.PARTIAL])
+    def test_serialization_agrees_with_lookup(self, status: FactStatus) -> None:
+        """The general contract, not just the two statuses that broke it."""
+        ledger = self._reassigned(status)
+
+        assert (
+            ledger.to_dict()["unknown_family_default"]
+            == ledger.for_family("undeclared").to_dict()
+        )
+
+    @pytest.mark.parametrize(
+        "status",
+        [FactStatus.NOT_COLLECTED, FactStatus.UNSUPPORTED, FactStatus.FAILED],
+    )
+    def test_a_legitimate_fallback_is_serialized_untouched(
+        self, status: FactStatus
+    ) -> None:
+        """Coercing the invalid case must not flatten the valid ones.
+
+        A `FAILED` fallback carrying a parse error is exactly the evidence an
+        earlier round of this module lost by substituting a bare
+        `NOT_COLLECTED`; it must survive serialization intact.
+        """
+        fallback = FactAvailability(
+            status, producer="castxml", diagnostics=("parse failed",)
+        )
+        ledger = AvailabilityLedger(unknown_family_default=fallback)
+
+        assert ledger.to_dict()["unknown_family_default"] == fallback.to_dict()
+
+    @pytest.mark.parametrize("status", list(FactStatus))
+    def test_effective_fallback_is_the_one_definition(self, status: FactStatus) -> None:
+        """Both consumers must read the same property, not re-derive it.
+
+        Over every status, not only the two that broke: the contract is that
+        serialization and lookup never disagree, whatever the field holds.
+        """
+        ledger = self._reassigned(status)
+        effective = ledger.effective_unknown_family_default
+
+        assert not effective.comparable
+        assert ledger.for_family("undeclared") == effective
+        assert ledger.to_dict()["unknown_family_default"] == effective.to_dict()
