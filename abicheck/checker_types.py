@@ -290,17 +290,17 @@ class Change:
     contract_relevance: ContractRelevance | None = None
     contract_reason_code: str | None = None
     contract_assurance: ContractAssurance | None = None
-    # ADR-049 Phase 3's provider-evidence ledger (plan Section 4.1): the ids
-    # of the `contract_evidence` provider records this finding's decision
-    # actually rests on (`contract_evidence_collect.evidence_refs_for_reason`),
-    # or a run-level reference (`RUN_LEVEL_EVIDENCE_REFS`) for a decision made
-    # outside `compare()` by a caller that holds no evidence block -- the
-    # `--used-by`/`--required-symbol` scoped stamp. `None` when contract
-    # evaluation was not requested; `()` is a real value, meaning "this
-    # decision consulted no provider" (a non-entity finding, whose relevance
-    # follows from its `ChangeKind` alone). Kept as a flat tuple for the same
-    # circular-import reason as the three fields above.
+    # ADR-049 Phase 3's provider-evidence ledger (plan Section 4.1): ids of
+    # the `contract_evidence` provider records this finding's decision rests
+    # on (`contract_evidence_collect.evidence_refs_for_reason`), or a
+    # run-level reference (`RUN_LEVEL_EVIDENCE_REFS`) for a decision made
+    # outside `compare()` (the `--used-by`/`--required-symbol` scoped stamp).
+    # `None` when not requested; `()` = "consulted no provider" (a
+    # non-entity finding). Flat tuple, same circular-import reason as above.
     contract_evidence_refs: tuple[str, ...] | None = None
+    # G39 Phase 0: evidence tier(s) producing this finding; same shape as
+    # contract_evidence_refs (None = not yet computed, () = no provider).
+    evidence_provenance: tuple[str, ...] | None = None
     # ADR-049 D1's other half of the canonical per-finding shape, and the one
     # that makes the contract decision *authoritative* rather than shadow:
     # whether compatibility policy ran for this finding, and what it decided.
