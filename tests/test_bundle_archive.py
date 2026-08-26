@@ -25,6 +25,7 @@ through ``serialization.save_bundle_facts``/``load_bundle_facts``.
 
 from __future__ import annotations
 
+import json
 import zipfile
 from pathlib import Path
 
@@ -33,6 +34,7 @@ import pytest
 from abicheck.errors import SnapshotError
 from abicheck.storage.bundle_archive import (
     DEFAULT_MAX_BLOB_BYTES,
+    MANIFEST_MEMBER,
     BundleArchiveReader,
     BundleArchiveWriter,
     content_hash,
@@ -257,3 +259,73 @@ class TestBundleArchiveWriterAtomicity:
             writer.write_manifest({"library_blobs": {"a.so": h}})
         assert list(tmp_path.glob("*.tmp-*")) == []
         assert path.exists()
+
+    def test_writing_through_a_symlink_updates_the_target_not_the_link(
+        self, tmp_path: Path
+    ) -> None:
+        """A bare os.replace(tmp, path) on a symlink destination would
+        swap the symlink's own directory entry for a regular file,
+        destroying the link -- every other reader still following it
+        would then see nothing written here (Codex review)."""
+        real_dir = tmp_path / "real"
+        real_dir.mkdir()
+        target = real_dir / "bundle.archive.zip"
+        link = tmp_path / "bundle.archive.link.zip"
+        link.symlink_to(target)
+
+        with BundleArchiveWriter(link) as writer:
+            h = writer.put_blob(b'{"a": 1}')
+            writer.write_manifest({"library_blobs": {"a.so": h}})
+
+        assert link.is_symlink(), "the symlink itself must survive the write"
+        assert link.resolve() == target.resolve()
+        assert target.exists()
+        with BundleArchiveReader.open(link) as reader:
+            manifest = reader.read_manifest()
+            assert manifest["library_blobs"]["a.so"] == h
+        # No stray temp file under either the link's or the target's dir.
+        assert list(tmp_path.glob("*.tmp-*")) == []
+        assert list(real_dir.glob("*.tmp-*")) == []
+
+    def test_creates_missing_destination_parent_directory(self, tmp_path: Path) -> None:
+        """save_bundle_facts(..., format="archive") must behave like the
+        format="json" path already does (parent dirs auto-created via
+        snapshot_io.write_snapshot_text), not raise FileNotFoundError on a
+        first write below a not-yet-existing directory (Codex review)."""
+        path = tmp_path / "does" / "not" / "exist" / "bundle.archive.zip"
+        assert not path.parent.exists()
+        with BundleArchiveWriter(path) as writer:
+            h = writer.put_blob(b'{"a": 1}')
+            writer.write_manifest({"library_blobs": {"a.so": h}})
+        assert path.exists()
+
+
+class TestBundleArchiveReaderRejectsNonStoredMembers:
+    """Codex review: every member BundleArchiveWriter produces is
+    ZIP_STORED deliberately -- a crafted archive using ZIP_DEFLATED for a
+    member could otherwise expand to an arbitrary in-memory allocation via
+    plain ZipExtFile.read(), before read_blob's own zstd decoded-size
+    guard ever runs. Both read_manifest and read_blob must reject it."""
+
+    def test_read_manifest_rejects_a_deflated_manifest_member(self, tmp_path: Path) -> None:
+        path = tmp_path / "bundle.archive.zip"
+        with zipfile.ZipFile(path, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
+            zf.writestr(MANIFEST_MEMBER, json.dumps({"library_blobs": {}}))
+
+        with BundleArchiveReader.open(path) as reader:
+            with pytest.raises(SnapshotError, match="ZIP_STORED"):
+                reader.read_manifest()
+
+    def test_read_blob_rejects_a_deflated_blob_member(self, tmp_path: Path) -> None:
+        path = tmp_path / "bundle.archive.zip"
+        payload = b'{"a": 1}'
+        h = content_hash(payload)
+        with zipfile.ZipFile(path, mode="w") as zf:
+            zf.writestr(MANIFEST_MEMBER, json.dumps({"library_blobs": {"a.so": h}}))
+            zf.writestr(
+                f"blobs/{h}.json.zst", payload, compress_type=zipfile.ZIP_DEFLATED
+            )
+
+        with BundleArchiveReader.open(path) as reader:
+            with pytest.raises(SnapshotError, match="ZIP_STORED"):
+                reader.read_blob(h)

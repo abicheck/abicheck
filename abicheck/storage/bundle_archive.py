@@ -158,19 +158,41 @@ class BundleArchiveWriter:
     completed archive never observes a manifest naming a hash with no
     corresponding member).
 
-    Writes go to a temporary file in *path*'s own directory; *close()* (a
-    clean context-manager exit) only ``os.replace()``s it over *path* once
-    the archive is fully written, so an in-progress write -- interrupted by
-    any error, including one from *put_blob*/*write_manifest* themselves --
-    can never leave a truncated archive in *path*'s place when *path*
-    already held a prior, valid one (Codex review: the original revision
-    opened *path* directly with ``mode="w"``, which truncates immediately).
+    Writes go to a temporary file next to the real destination; *close()*
+    (a clean context-manager exit) only ``os.replace()``s it over the
+    destination once the archive is fully written, so an in-progress write
+    -- interrupted by any error, including one from *put_blob*/
+    *write_manifest* themselves -- can never leave a truncated archive in
+    the destination's place when it already held a prior, valid one (Codex
+    review: the original revision opened *path* directly with ``mode="w"``,
+    which truncates immediately).
+
+    If *path* is itself a symlink, the temp file is created next to --
+    and ``close()`` replaces -- the link's *real target*, not the link
+    (Codex review: a bare ``os.replace(tmp, path)`` on a symlink
+    destination swaps the symlink's own directory entry for a regular
+    file, destroying the link; every other reader still following that
+    link would then see nothing written here). Mirrors
+    ``snapshot_io._atomic_write_bytes``'s own symlink handling, narrower:
+    that function's additional non-regular-file/hard-link/stat-failure
+    cases don't apply to a zip-writing primitive whose only realistic
+    destination shape is a regular file or a symlink to one.
+
+    *path*'s parent directory is created (``parents=True``) if missing, so
+    ``save_bundle_facts(..., format="archive")`` behaves like the
+    ``format="json"`` path already does via ``snapshot_io.write_snapshot_text``
+    (Codex review) rather than raising ``FileNotFoundError`` on a first
+    write below a not-yet-existing directory.
     """
 
     def __init__(self, path: str | Path) -> None:
         self._path = Path(path)
-        self._tmp_path = self._path.with_name(
-            f"{self._path.name}.tmp-{os.getpid()}-{id(self):x}"
+        self._target = (
+            Path(os.path.realpath(self._path)) if self._path.is_symlink() else self._path
+        )
+        self._target.parent.mkdir(parents=True, exist_ok=True)
+        self._tmp_path = self._target.with_name(
+            f"{self._target.name}.tmp-{os.getpid()}-{id(self):x}"
         )
         self._zf = zipfile.ZipFile(self._tmp_path, mode="w", compression=zipfile.ZIP_STORED)
         self._written_hashes: set[str] = set()
@@ -211,7 +233,7 @@ class BundleArchiveWriter:
                 "resulting archive would have no manifest.json member"
             )
         self._zf.close()
-        os.replace(self._tmp_path, self._path)
+        os.replace(self._tmp_path, self._target)
 
     def _abort(self) -> None:
         """Close the in-progress zip handle and discard its temp file --
@@ -251,9 +273,39 @@ class BundleArchiveReader:
     def open(cls, path: str | Path) -> BundleArchiveReader:
         return cls(path)
 
+    def _read_stored_member(self, name: str) -> bytes:
+        """Read one zip member's raw bytes, rejecting anything but
+        ``ZIP_STORED`` compression first (Codex review).
+
+        Every member `BundleArchiveWriter` produces is `ZIP_STORED`
+        deliberately (see the module docstring's "Zip, not tar" section) --
+        so a member's own stored size is exactly its (already
+        zstd-compressed) payload size, with no zip-level amplification. A
+        crafted archive using `ZIP_DEFLATED` for a member could otherwise
+        expand to an arbitrary in-memory allocation via
+        ``ZipExtFile.read()`` *before* `read_blob`'s own zstd
+        decoded-size guard ever runs -- merely opening such an archive
+        (e.g. auto-detected as a baseline) could exhaust memory. Checked
+        here, once, for both `read_manifest` and `read_blob`.
+        """
+        info = self._zf.getinfo(name)
+        if info.compress_type != zipfile.ZIP_STORED:
+            raise SnapshotError(
+                f"{self._path}: member {name!r} uses compression method "
+                f"{info.compress_type} instead of the required ZIP_STORED "
+                "-- not a BundleArchiveWriter-produced archive, or a "
+                "corrupted/hostile one."
+            )
+        with self._zf.open(name) as f:
+            return f.read()
+
     def read_manifest(self) -> dict[str, Any]:
-        with self._zf.open(MANIFEST_MEMBER) as f:
-            raw = f.read()
+        try:
+            raw = self._read_stored_member(MANIFEST_MEMBER)
+        except KeyError as exc:
+            raise SnapshotError(
+                f"{self._path}: archive has no {MANIFEST_MEMBER!r} member"
+            ) from exc
         value = json.loads(raw)
         if not isinstance(value, dict):
             raise SnapshotError(
@@ -286,8 +338,7 @@ class BundleArchiveReader:
         """
         member = _blob_member_name(content_hash_hex)
         try:
-            with self._zf.open(member) as f:
-                compressed = f.read()
+            compressed = self._read_stored_member(member)
         except KeyError as exc:
             raise SnapshotError(
                 f"{self._path}: manifest references blob {content_hash_hex!r} "
