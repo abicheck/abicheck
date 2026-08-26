@@ -244,11 +244,34 @@ class FactAvailability:
     diagnostics: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
+        """Validate a directly-constructed record, not only a parsed one.
+
+        Every text guard in this module was first written for ``from_dict``,
+        on the assumption that malformed input arrives as a parsed document.
+        It also arrives from an adapter building these objects from
+        dynamically sourced data, and the constructor reproduced both defects
+        exactly: ``diagnostics="parse error"`` became eleven one-character
+        diagnostics that ``to_dict`` then persisted, and ``recipe=1`` was
+        stored as an int equal to no string (Codex review). Validating at the
+        document boundary is not enough for a publicly constructible type.
+        """
         if not isinstance(self.status, FactStatus):  # pragma: no cover - guard
             raise TypeError(f"status must be a FactStatus, got {self.status!r}")
         if not isinstance(self.confidence, Confidence):  # pragma: no cover - guard
             raise TypeError(f"confidence must be a Confidence, got {self.confidence!r}")
-        object.__setattr__(self, "diagnostics", tuple(self.diagnostics))
+        object.__setattr__(
+            self, "producer", _provenance_text(self.producer, "producer")
+        )
+        object.__setattr__(
+            self,
+            "producer_version",
+            _provenance_text(self.producer_version, "producer_version"),
+        )
+        object.__setattr__(self, "recipe", _provenance_text(self.recipe, "recipe"))
+        object.__setattr__(self, "scope", _provenance_text(self.scope, "scope"))
+        object.__setattr__(
+            self, "diagnostics", tuple(_diagnostics_from(self.diagnostics))
+        )
 
     @property
     def comparable(self) -> bool:
@@ -484,8 +507,14 @@ class AvailabilityLedger:
             )
 
     def declare(self, family: str, availability: FactAvailability) -> None:
-        """Set the family-level default. Last declaration wins."""
-        self.families[family] = availability
+        """Set the family-level default. Last declaration wins.
+
+        The family name is validated for the same reason ``from_dict``
+        validates it: a non-string key coerces to one that collides with a
+        real family. Last-wins itself is unchanged — see :meth:`override` for
+        why that contract is left to whoever owns it.
+        """
+        self.families[_decision_key(family, "family name")] = availability
 
     def override(
         self, family: str, entity_key: str, availability: FactAvailability
@@ -515,6 +544,8 @@ class AvailabilityLedger:
         behaviour is a decision for whoever owns that contract, so it is
         flagged here rather than altered in passing.
         """
+        family = _decision_key(family, "override family")
+        entity_key = _decision_key(entity_key, "override entity")
         if (family, entity_key) in self.overrides:
             raise ValueError(
                 f"an availability override for family {family!r} and entity "

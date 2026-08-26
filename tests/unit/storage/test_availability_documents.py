@@ -517,3 +517,59 @@ class TestASequenceShapedFamilyTableIsRefused:
 
     def test_an_absent_families_key_is_empty(self) -> None:
         assert AvailabilityLedger.from_dict({}).families == {}
+
+
+class TestTheConstructorAppliesTheDocumentRules:
+    """Codex review, twice: every guard was written for `from_dict` only.
+
+    Malformed input does not only arrive as a parsed document — it arrives
+    from an adapter building these objects from dynamically sourced data, and
+    the constructor reproduced the same defects exactly. Validating at the
+    document boundary is not enough for a publicly constructible type.
+
+    These live in the *documents* file deliberately: they are the same rules
+    those documents are parsed under, checked at the other door.
+    """
+
+    def test_a_scalar_diagnostics_string_is_refused(self) -> None:
+        with pytest.raises(TypeError, match="diagnostics"):
+            FactAvailability(FactStatus.FAILED, diagnostics="parse error")
+
+    @pytest.mark.parametrize(
+        "field", ["producer", "producer_version", "recipe", "scope"]
+    )
+    def test_non_string_provenance_is_refused(self, field: str) -> None:
+        with pytest.raises(TypeError, match=field):
+            FactAvailability(FactStatus.PRESENT, **{field: 1})
+
+    def test_the_pre_existing_status_guard_still_fires(self) -> None:
+        """Pinned because adding validation is how you shadow validation.
+
+        The first attempt at this fix added a *second* `__post_init__`, which
+        silently replaced the one checking `status`/`confidence` — caught by
+        that guard's own existing test. The rules are merged into one method.
+        """
+        with pytest.raises(TypeError, match="status must be a FactStatus"):
+            FactAvailability("present")  # type: ignore[arg-type]
+
+    def test_a_well_formed_record_is_unaffected(self) -> None:
+        record = FactAvailability(
+            FactStatus.FAILED,
+            producer="dwarf",
+            recipe="r1",
+            diagnostics=["parse error"],
+        )
+
+        assert record.diagnostics == ("parse error",)
+        assert FactAvailability.from_dict(record.to_dict()) == record
+
+    @pytest.mark.parametrize("key", [1, None, True])
+    def test_ledger_mutators_validate_their_keys(self, key: object) -> None:
+        ledger = AvailabilityLedger()
+
+        with pytest.raises(TypeError, match="family"):
+            ledger.declare(key, FactAvailability(FactStatus.PRESENT))  # type: ignore[arg-type]
+        with pytest.raises(TypeError, match="override"):
+            ledger.override(key, "E1", FactAvailability(FactStatus.PRESENT))  # type: ignore[arg-type]
+        with pytest.raises(TypeError, match="override"):
+            ledger.override("layout", key, FactAvailability(FactStatus.PRESENT))  # type: ignore[arg-type]

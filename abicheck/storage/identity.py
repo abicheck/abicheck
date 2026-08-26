@@ -263,19 +263,22 @@ class OccurrenceId:
         # duplicate is detected would depend on producer traversal order,
         # which is exactly the incidental-order dependence ADR-062 D5 rules
         # out for digests and D4 rules out for identity.
+        # `_attribute_pair`, not a bare `for k, v in ...` unpack: a
+        # two-character scalar row such as `("ab",)` unpacked as the valid
+        # pair `("a", "b")`, so it produced the same key as an occurrence that
+        # really held that pair and `OccurrenceSet.add` dropped one of them as
+        # a duplicate (Codex review). The document path already validated rows
+        # this way; the constructor did not, which is the same
+        # boundary-only-guard gap as the provenance and diagnostics fields.
         object.__setattr__(
             self,
             "attributes",
-            tuple(
-                sorted(
-                    (
-                        _identity_text(k, "attribute name"),
-                        _identity_text(v, "attribute value"),
-                    )
-                    for k, v in self.attributes
-                )
-            ),
+            tuple(sorted(_attribute_pair(row) for row in self.attributes)),
         )
+        object.__setattr__(
+            self, "container", _identity_text(self.container, "container")
+        )
+        object.__setattr__(self, "producer", _identity_text(self.producer, "producer"))
 
     @property
     def key(self) -> str:
