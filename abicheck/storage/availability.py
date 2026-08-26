@@ -43,7 +43,7 @@ means.
 from __future__ import annotations
 
 import enum
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from typing import Any
 
@@ -122,6 +122,38 @@ _GAP_STATUSES = frozenset(
 #: in. Kept as a set rather than a scalar because the reasoning is about
 #: *which* statuses qualify, and a future one might.
 _ASSERTS_NO_PRODUCER = frozenset({FactStatus.NOT_COLLECTED})
+
+
+def _diagnostics_from(raw: Any) -> tuple[str, ...]:
+    """Parse a ``diagnostics`` field, refusing a scalar rather than splitting it.
+
+    A string is a ``Sequence``, so ``tuple(str(d) for d in raw)`` turned a
+    hand-edited ``"diagnostics": "parse error"`` into eleven single-character
+    diagnostics and serialized it back as a list of characters — destroying the
+    extraction error a reader needs for auditing, with no error anywhere (Codex
+    review).
+
+    This is the only field in the package where that failure is *silent*. The
+    sibling record lists (``overrides`` here, ``occurrences`` in
+    ``identity``) already reject a scalar, but only incidentally: their
+    elements must be mappings, so iterating a string fails on the first one.
+    Diagnostics are strings, so char-iteration succeeds and looks like data.
+    ``identity._attribute_pair`` guards the same shape explicitly, and this is
+    that rule applied to the one place it was missing.
+
+    Rejecting rather than wrapping is deliberate and matches how this class
+    already treats malformed input — ``FactStatus(data["status"])`` raises on
+    an unknown status rather than downgrading it. Silently promoting a scalar
+    to a one-element list would make a malformed package indistinguishable from
+    a well-formed one, which is how the original defect went unnoticed.
+    """
+    if isinstance(raw, (str, bytes)) or not isinstance(raw, Sequence):
+        raise TypeError(
+            f"diagnostics must be a sequence of strings, not "
+            f"{type(raw).__name__} ({raw!r}); a bare string would be split "
+            "into one diagnostic per character"
+        )
+    return tuple(str(d) for d in raw)
 
 
 @dataclass(frozen=True)
@@ -307,7 +339,7 @@ class FactAvailability:
             recipe=str(data.get("recipe", "")),
             scope=str(data.get("scope", "")),
             confidence=confidence,
-            diagnostics=tuple(str(d) for d in data.get("diagnostics", ())),
+            diagnostics=_diagnostics_from(data.get("diagnostics", ())),
         )
 
 

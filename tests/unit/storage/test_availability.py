@@ -1114,3 +1114,62 @@ class TestProvenanceFollowsTheSurvivingStatus:
         )
 
         assert set(result.diagnostics) == {"parse error", "ok"}
+
+
+class TestScalarDiagnosticsAreRefused:
+    """Codex review: a hand-edited string became one diagnostic per character.
+
+    A string is a `Sequence`, so `tuple(str(d) for d in raw)` turned
+    `"diagnostics": "parse error"` into eleven single-character entries and
+    serialized it back that way — destroying the extraction error a reader
+    needs for auditing, with no error anywhere.
+
+    This is the only field in the package where the failure is silent. The
+    sibling record lists reject a scalar already, but only incidentally: their
+    elements must be mappings, so iterating a string fails on the first one.
+    Diagnostics are strings, so char-iteration succeeds and looks like data.
+    """
+
+    @pytest.mark.parametrize(
+        "value", ["parse error", "", b"bytes", 5, None, {"a": 1}, object()]
+    )
+    def test_a_non_sequence_or_string_is_refused(self, value: object) -> None:
+        with pytest.raises(TypeError, match="diagnostics"):
+            FactAvailability.from_dict({"status": "failed", "diagnostics": value})
+
+    def test_the_reported_string_is_not_split(self) -> None:
+        """The literal case: eleven characters, or a clear refusal."""
+        with pytest.raises(TypeError):
+            FactAvailability.from_dict(
+                {"status": "failed", "diagnostics": "parse error"}
+            )
+
+    @pytest.mark.parametrize(
+        "value",
+        [["parse error"], ("a", "b"), [], ()],
+    )
+    def test_a_real_sequence_still_loads(self, value: object) -> None:
+        loaded = FactAvailability.from_dict({"status": "failed", "diagnostics": value})
+
+        assert loaded.diagnostics == tuple(value)  # type: ignore[arg-type]
+
+    def test_an_absent_field_is_empty(self) -> None:
+        assert FactAvailability.from_dict({"status": "failed"}).diagnostics == ()
+
+    def test_a_well_formed_diagnostic_round_trips_intact(self) -> None:
+        """The value the guard exists to protect: one message, not eleven."""
+        original = FactAvailability(
+            FactStatus.FAILED, diagnostics=("parse error at line 3",)
+        )
+
+        assert FactAvailability.from_dict(original.to_dict()) == original
+
+    def test_the_sibling_record_lists_also_refuse_a_scalar(self) -> None:
+        """Pinning the incidental rejection, so it cannot become silent too.
+
+        These raise because their elements must be mappings, not because
+        anything checks. If a future change made an element parseable from a
+        string, they would acquire exactly this defect.
+        """
+        with pytest.raises((TypeError, ValueError, KeyError)):
+            AvailabilityLedger.from_dict({"overrides": "oops"})
