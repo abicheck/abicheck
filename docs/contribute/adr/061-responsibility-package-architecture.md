@@ -636,24 +636,58 @@ first non-JSON format to do so. Markdown's richer modes (`to_markdown`,
 this partial status must not be read as the phase acceptance criteria having
 been met.
 
-Known blocker for the remaining Markdown modes: their JSON counterparts
-(`full`/`leaf`/`root-cause`) build a severity-aware document by calling into
-`severity.py`/`analysis_assurance.py`, and `checker_types.py` (`DiffResult`'s
-own methods) and `checker.py` (`compare()`'s own orchestration) already call
-directly into those same modules — a real, pre-existing `compare -> policy`
-coupling `architecture/modules.yaml`'s dependency contract does not yet
-permit. Classifying `severity.py`/`analysis_assurance.py`/`contract_gating.py`
-as `policy` while `checker.py`/`checker_types.py` stay `compare` reproduces
-this edge as a `check_architecture.py` `dependency-direction`/
-`dependency-cycle` failure immediately (verified directly: adding both sides
-surfaces the cycle at `checker.py:1277`, `checker_types.py:36,713,737,749`).
-A physically migrated `report/`-package module touching any richer,
-severity-aware document shape hits the same wall the moment it imports
-`severity.py`. Resolving it needs `checker_types.py`'s
-`_effective_verdict_for_change`/`_evaluated_changes`/`not_evaluated` (and
-`checker.py`'s `compare()` call into `analysis_assurance.compute_
-analysis_assurance`) moved off `compare`'s core types — a real, scoped
-migration in its own right, not a follow-up edit to a reporting slice.
+**The `compare -> policy` blocker this section previously recorded is
+closed**, and how it was re-measured is worth keeping: the earlier note
+claimed classifying `severity.py`/`analysis_assurance.py`/`contract_gating.py`
+as `policy` "surfaces the cycle at `checker.py:1277`,
+`checker_types.py:36,713,737,749`". Re-running that experiment against the
+tree as it actually stood reproduced **one** edge, not five —
+`checker_types.py:713`'s function-local `from .severity import
+effective_verdict_for_change` — plus the `compare -> policy -> compare`
+cycle that single edge closes against `analysis_assurance.py`'s own
+(allowed) `policy -> compare` import of `DiffResult`. The other four cited
+positions never fired: `checker.py` is not classified at all, so its
+`compute_analysis_assurance` call is unchecked either way, and
+`checker_types.py`'s `contract_gating` imports are only a violation if
+`contract_gating.py` is itself classified `policy`, which the fix below
+deliberately declines to do. The lesson is the ordinary one — a blocker
+recorded once goes stale as the tree moves, so re-measure before scoping
+work against it.
+
+`severity.py` and `analysis_assurance.py` are now classified `policy` in
+`architecture/modules.yaml`, with `check_architecture.py` reporting zero
+findings. The one real edge was removed by extracting the shared logic to a
+leaf both sides may depend on — the same pattern Phase 3's own blocker note
+below names: `severity.py`'s `effective_verdict_for_change`, its disclosure
+sibling `reclassify_rule_for_change`, and the `KindSets`/`resolve_kind_sets`
+pair they share moved into `reclassify.py`, which already owned the
+selector-scoped rules that resolver's precedence chain is built around (and
+whose two mirrored implementations of that chain had already needed three
+separate review rounds to stop disagreeing). `severity.py` re-exports all
+three names, so `abicheck.severity.effective_verdict_for_change` and its
+siblings keep working unchanged for every caller in and out of this repo;
+`DiffResult`'s public `breaking`/`source_breaks`/`compatible`/`risk`
+properties are untouched.
+
+Two scope decisions are deliberate rather than oversights. `reclassify.py`
+stays **unclassified**: it is the leaf `compare`'s result type and `policy`'s
+severity/gating layer both depend on, and which layer finally owns it is
+decided by `checker_policy.py`'s own model-vs-policy split, not by this
+slice. `contract_gating.py` stays unclassified for the same reason — it is
+already documented as a leaf by construction, and `checker_types.py`'s
+`_evaluated_changes`/`not_evaluated` depend on it exactly as `severity.py`'s
+gate functions do.
+
+What this does **not** resolve: `DiffResult` still exposes policy-resolved
+verdict buckets from a `compare`-classified type, which is the underlying
+design tension rather than the import edge. Moving those properties off
+`DiffResult` outright would be a breaking change to the documented public
+Python API (`abicheck/CLAUDE.md`: "Changing their public surface is a
+breaking change to the Python API — coordinate it") across ~20 first-party
+modules and ~30 test modules, so it is not folded into a reporting slice.
+The same applies to `policy_file.py`, which `checker_types.py` imports at
+module scope: whichever layer eventually owns it has to answer the same
+question.
 
 1. Define immutable `ReportDocument` contracts from existing report-model
    behavior rather than inventing a second schema.

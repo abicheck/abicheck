@@ -710,7 +710,7 @@ class DiffResult:
 
     def _effective_verdict_for_change(self, change: Change) -> Verdict:
         """Return the per-change verdict, including frozen namespace guards."""
-        from .severity import effective_verdict_for_change
+        from .reclassify import effective_verdict_for_change  # severity re-exports it
 
         return effective_verdict_for_change(
             change,
