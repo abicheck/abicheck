@@ -898,6 +898,60 @@ class TestRealDemanglingThroughTheProductionChangeDataclass:
         assert "Foo::Foo()" not in out
         assert out.count("_ZN3FooC1Ev") >= 2  # symbol cell AND description
 
+    def test_default_demangles_old_and_new_value(self) -> None:
+        """Codex review: a finding carrying mangled names in `old_value`/
+        `new_value` (as `buildsource/crosscheck.py` does) left those raw
+        even under the default `--demangle`, since `_changes_table` only
+        ever applied `demangle_text` to the description and primary
+        symbol."""
+        from abicheck.checker import Change, DiffResult, Verdict
+        from abicheck.checker_policy import ChangeKind
+
+        old_mangled, new_mangled = "_ZN3FooC1Ev", "_ZN3Bar3runEv"
+        change = Change(
+            kind=ChangeKind.FUNC_RETURN_CHANGED,
+            symbol="widget",
+            description="Return type changed",
+            old_value=old_mangled,
+            new_value=new_mangled,
+        )
+        result = DiffResult(
+            old_version="1.0",
+            new_version="2.0",
+            library="libtest.so.1",
+            changes=[change],
+            verdict=Verdict.BREAKING,
+        )
+        out = generate_html_report(result)
+        assert "Foo::Foo()" in out
+        assert "Bar::run()" in out
+
+    def test_default_demangles_affected_symbols(self) -> None:
+        """Codex review: a finding's `affected_symbols` list (as
+        `diff_cpp_patterns.py` populates) was rendered raw, so the default
+        HTML report could show a demangled Symbol column next to a still-
+        mangled Affected list for the identical name."""
+        from abicheck.checker import Change, DiffResult, Verdict
+        from abicheck.checker_policy import ChangeKind
+
+        affected = ["_ZN3FooC1Ev", "_ZN3Bar3runEv"]
+        change = Change(
+            kind=ChangeKind.TYPE_SIZE_CHANGED,
+            symbol="Widget",
+            description="Type size changed",
+            affected_symbols=affected,
+        )
+        result = DiffResult(
+            old_version="1.0",
+            new_version="2.0",
+            library="libtest.so.1",
+            changes=[change],
+            verdict=Verdict.BREAKING,
+        )
+        out = generate_html_report(result)
+        assert "Foo::Foo()" in out
+        assert "Bar::run()" in out
+
     def test_template_argument_angle_brackets_are_escaped_not_injected(self) -> None:
         """Demangling runs BEFORE html.escape, so a demangled template
         argument's own `<`/`>` must never appear unescaped in the output."""

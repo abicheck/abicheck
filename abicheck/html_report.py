@@ -162,8 +162,10 @@ def _changes_table(changes: list[object], demangle: bool = True) -> str:
         cat = category(ks)
         raw_desc = getattr(ch, "description", "") or ""
         desc = html.escape(demangle_text(raw_desc) if demangle else raw_desc)
-        old_val = html.escape(str(getattr(ch, "old_value", "") or ""))
-        new_val = html.escape(str(getattr(ch, "new_value", "") or ""))
+        raw_old_val = str(getattr(ch, "old_value", "") or "")
+        raw_new_val = str(getattr(ch, "new_value", "") or "")
+        old_val = html.escape(demangle_text(raw_old_val) if demangle else raw_old_val)
+        new_val = html.escape(demangle_text(raw_new_val) if demangle else raw_new_val)
         sym_cell = _symbol_cell(ch, demangle)
         loc = getattr(ch, "source_location", None)
         affected = getattr(ch, "affected_symbols", None)
@@ -179,7 +181,9 @@ def _changes_table(changes: list[object], demangle: bool = True) -> str:
                     f"💡 {html.escape(impact)}</div>"
                 )
         if affected:
-            names = ", ".join(html.escape(s) for s in affected[:5])
+            names = ", ".join(
+                html.escape(demangle_text(s) if demangle else s) for s in affected[:5]
+            )
             suffix = f" (+{len(affected) - 5} more)" if len(affected) > 5 else ""
             desc_parts.append(
                 f"<div style='font-size:0.82em; color:#1565c0; margin-top:2px;'>"
@@ -1012,7 +1016,10 @@ def generate_html_report(
         )
 
     if demangle:
-        prewarm_demangle_batch([*all_changes, *suppressed, *not_evaluated])
+        prewarm_demangle_batch(
+            [*all_changes, *suppressed, *not_evaluated],
+            attrs=("symbol", "description", "old_value", "new_value", "affected_symbols"),
+        )
     summary_html = _summary_table(removed, changed, added, suppressed_count)
     nav_html = _nav_bar(removed, changed, added, suppressed_count)
 
