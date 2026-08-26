@@ -195,7 +195,24 @@ structure already in place:
    `ChangeKind` family (layout). Generalize that same reasoning (check the
    *specific* fields the finding rests on, not the snapshot's aggregate
    backend) across every `diff_types` detector, not just vtable/size/
-   alignment.
+   alignment. **A real prerequisite this slice cannot skip (Codex review,
+   verified against the code): the snapshot model does not currently
+   persist per-record backfill provenance for this slice to read.**
+   `dumper_layout_backfill.resolve_snapshot_layout_coherence()` returns
+   only `(coherence.status, coherence.mismatched)` — `DwarfLayoutCoherence
+   .matched` (the per-type names that *were* successfully DWARF-backfilled)
+   is computed and then discarded, and `RecordType` itself carries no
+   producer/backfill marker a detector could read per-instance. Without
+   that fact, a type-level detector in this slice can only infer from the
+   snapshot's *aggregate* `dwarf_layout_coherence` status (`"matched"` /
+   `"partial"` / ...) — exactly the report-level-metadata guess this slice
+   exists to replace with real per-finding provenance. Closing this needs
+   a small, additive extraction/model change *before* this slice's detector
+   wiring starts: thread `DwarfLayoutCoherence.matched` (or an equivalent
+   per-record marker) onto the record itself, or onto a snapshot-level
+   lookup the detector can consult per `RecordType.qualified_name`. Scope
+   that model change as its own reviewed sub-step of this slice, not a
+   simultaneous side effect of the detector wiring itself.
 3. **L3-L5 build/source detectors** (`buildsource/*.py`) — already carry
    `evidence_category`; extend rather than duplicate — a detector that
    already knows its own `evidence_category` value knows enough to also
@@ -242,23 +259,38 @@ was never revisited).
 
 ### Phase 3 — report/schema surface (S)
 
-**Implementation location (ADR-061):** `report/` already exists as a real
-package (`abicheck/report/document.py`'s `ReportDocument`,
-`render_json.py`, `render_text.py` — created by the same ADR-061 migration
-that produced this routing table) and is the named owner for "a report
-field, report schema, or output format." `evidence_provenance` reaches the
-canonical JSON path through `report/render_json.py`/`document.py` directly,
-not through the legacy `reporter.py`, which remains a delegation facade
-where it still fronts a documented public path. SARIF and JUnit rendering
-had not migrated into `report/` at the time this plan was written (only
-JSON and text renderers had) — reaches `sarif.py`'s existing `properties`
-bag (one entry, not a new top-level SARIF concept) if that's still the live
-SARIF renderer at implementation time, or `report/render_sarif.py` if that
-migration has landed by then. Also reaches the generated docs
-(`scripts/gen_detector_spec.py`'s matrix gains a column once every kind has
-a real, non-`UNVERIFIED` classification — gated on Phase 2's completeness
-test, so the docs generator cannot claim more coverage than actually
-exists).
+**Implementation location (ADR-061), corrected against the actual code
+(Codex review — an earlier revision of this section named `report/
+render_json.py`/`document.py` as the projection point, which is wrong):**
+`report/document.py`'s `ReportDocument.from_mapping`/`to_mapping` only
+freeze/thaw an *already-built* mapping, and `render_json.py` only calls
+`json.dumps(document.to_mapping())` on it — neither one projects a `Change`
+into a dict. That projection is still done entirely by legacy `reporter.py`
+call sites: `_change_to_dict` (the main per-change dict builder), its
+sibling `_leaf_entry` (leaf-mode's own, deliberately separate dict builder
+for type-change leaves — see its own docstring for why it doesn't route
+through `_change_to_dict`), and `cli_scan_baseline._baseline_finding_dicts`
+(scan's own, separate projection). **This phase must cover all three, not
+just one**, or `evidence_provenance` reaches full-mode JSON while silently
+staying absent from leaf-mode and `scan --against` output. Add the field to
+each builder directly (mirroring how `contract_evidence_refs` already
+appears in `_change_to_dict` today — `_leaf_entry`/`_baseline_finding_dicts`
+would need it added fresh, since neither currently carries
+`contract_evidence_refs` either, confirmed by reading both). If `report/`'s
+own migration has absorbed one or more of these builders by implementation
+time, wire the field there instead — but the sub-task is "cover every
+current `Change`→dict projection," not "extend whichever one happens to be
+literally named `report/`."
+
+SARIF and JUnit rendering had not migrated into `report/` at the time this
+plan was written (only JSON and text renderers had) — reaches `sarif.py`'s
+existing `properties` bag (one entry, not a new top-level SARIF concept) if
+that's still the live SARIF renderer at implementation time, or `report/
+render_sarif.py` if that migration has landed by then. Also reaches the
+generated docs (`scripts/gen_detector_spec.py`'s matrix gains a column once
+every kind has a real, non-`UNVERIFIED` classification — gated on Phase 2's
+completeness test, so the docs generator cannot claim more coverage than
+actually exists).
 
 ### Phase 4 — one real consumer (M, optional/stretch)
 

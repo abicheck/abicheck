@@ -151,9 +151,27 @@ the same one a plain-JSON `BundleFacts` already uses for this field). An
 earlier draft of this plan named `manifest_blob: str | None` in the
 manifest dataclass but never specified where the referenced content
 actually lives — corrected here: it's a blob like any other, addressed the
-same way, not a second, undocumented storage mechanism. `manifest_blob` is
-`None` exactly when `BundleFacts.manifest is None` (no instantiation
-manifest was captured), matching that field's own existing optionality.
+same way, not a second, undocumented storage mechanism.
+
+**The reader must re-verify every blob's content hash before returning it
+(Codex review) — part of the reader's own contract, not optional
+hardening.** A manifest's `library_blobs`/`manifest_blob` values are
+sha256 hex digests naming a member by content address, but a member's own
+zip entry name is just a string a corrupted or hand-assembled archive
+could set to anything — nothing about opening `blobs/<hash>.json.zst` and
+decompressing it proves the decompressed bytes actually hash to `<hash>`.
+Without that check, a tampered/corrupted archive whose payload still
+happens to decompress to valid zstd/JSON would silently load as a
+*different* `AbiSnapshot`/`InstantiationManifest` than the one the
+manifest's own reference claims — defeating content-addressing entirely,
+with no error. The reader **must** recompute the decompressed payload's
+hash and reject a mismatch before returning it — part of Phase 2's
+acceptance criteria, with a dedicated corruption test in Phase 2's own
+test list below.
+
+`manifest_blob` is `None` exactly when `BundleFacts.manifest is None` (no
+instantiation manifest was captured), matching that field's own existing
+optionality.
 Every hash — library or manifest — is computed over its own canonical JSON
 encoding (the existing `snapshot_to_json`-style deterministic serialization
 G38 Phase 13's own `save_bundle_facts` docstring already documents caring
@@ -162,14 +180,32 @@ the hash input is the same non-`sort_keys` encoding the plain-JSON path
 already writes, not a re-derived canonical form).
 
 **Deduplication granularity is the whole per-library `AbiSnapshot`, not
-individual declarations.** Two libraries whose entire parsed snapshot is
-byte-identical (a static archive re-linked into two DSOs with no other
-per-library difference, or two build variants that happen to produce
-identical output for one shared component) share one blob; two libraries
-that differ in even one declaration get two full blobs, same as today's
-plain-JSON format — no attempt to dedup at the shared-header/shared-
-declaration level. This is Phase 1's real scope boundary, and it's
-deliberate: `AbiSnapshot` has no notion of a separately-addressable,
+individual declarations — and the within-one-bundle motivating case named
+in an earlier revision of this section does not actually reproduce (Codex
+review, verified against the code).** `AbiSnapshot.library: str` is a
+required, always-distinct-per-library field (`model.py`), and
+`snapshot_to_dict()` also serializes `source_path`, mtimes/sizes, and each
+DSO's own ELF/PE/Mach-O metadata block — none of which two genuinely
+different libraries share, even when re-linking the identical static
+utility into both. So "a static archive re-linked into two DSOs" does
+**not** produce two byte-identical serialized snapshots in practice; the
+only way to observe this dedup path firing is the degenerate case of
+capturing (or testing with) the literal same `AbiSnapshot` object under two
+map keys. The real, still-genuine benefit this granularity delivers is
+**cross-capture**, not cross-library, dedup: re-saving one library's own
+unchanged `AbiSnapshot` in a later `BundleFacts` capture (the common CI
+shape — most libraries in a release are unchanged run to run) reuses its
+existing blob, since that *is* the same object's own content reproduced.
+Corrected acceptance criterion: Phase 1's own tests exercise cross-capture
+reuse (two `save_bundle_facts` calls a fixed number of days apart for one
+unchanged library, sharing a blob) as the primary case, with the
+within-one-bundle shared-content case named only as a real but rare
+possibility (identical build output for two genuinely distinct libraries),
+not the motivating scenario.
+
+Individual-declaration-level dedup (sharing one blob per struct/function
+across libraries, not per whole snapshot) is out of scope for the identical
+reason as before: `AbiSnapshot` has no notion of a separately-addressable,
 individually-hashable declaration today (it's one flat structure per
 library, not a graph of independently-identified nodes) — building that
 would be a model change reaching every consumer of `AbiSnapshot.functions`/
@@ -324,11 +360,19 @@ instantiation-order-sensitive fields (Phase 1's hash input).
   via a patched/instrumented `zipfile.ZipExtFile` or a member-read counter,
   to open and decompress **exactly one** member — proving lazy access is
   real, not merely API-shaped.
-- Dedup: two libraries whose captured `AbiSnapshot`s are byte-identical
-  (e.g. two build variants of a shared, unchanged component) produce a
-  `BundleArchiveManifest.library_blobs` with two names mapping to the same
-  hash, and the underlying archive contains exactly one `blobs/<hash>.json.zst`
-  member — not two.
+- Dedup: primarily a **cross-capture** test (matching the corrected
+  motivating case above) — two `save_bundle_facts` calls for the same
+  unchanged library's `AbiSnapshot` share a blob; a same-bundle,
+  two-different-library-names test is included too but is a synthetic,
+  same-object-under-two-keys construction, documented as such rather than
+  presented as evidence the design reduces real production duplication.
+  Either way the underlying archive contains exactly one
+  `blobs/<hash>.json.zst` member for the shared content, not two.
+- **Corruption: a tampered blob is rejected, not silently mis-loaded**
+  (Codex review) — a valid archive with one blob member's content replaced
+  in place (still valid zstd/JSON, but no longer matching its own member
+  name's hash) must raise on load, not return the substituted content
+  under the original, now-incorrect content address.
 - Back-compat: every existing plain-JSON `BundleFacts` fixture in this
   repo's test suite still loads unchanged via the `"auto"`-sniffing path
   once this plan ships, with **no** re-save required.
