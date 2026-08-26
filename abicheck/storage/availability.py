@@ -156,6 +156,37 @@ def _diagnostics_from(raw: Any) -> tuple[str, ...]:
     return tuple(str(d) for d in raw)
 
 
+def _decision_key(raw: Any, field_name: str) -> str:
+    """A key a decision is looked up by, rejected rather than coerced.
+
+    ``str()`` on a mapping key is silently lossy in the one way that matters
+    here: ``{1: {"status": "failed"}, "1": {"status": "present"}}`` — which a
+    YAML loader or a Python adapter can produce — collapses to one entry, and
+    *which* record survives depends on iteration order. Reversing it flips
+    ``for_family("1")`` from non-comparable to comparable, so a discarded
+    ``FAILED`` record can license a conclusion (Codex review).
+
+    This is the same defect ``canonical_form`` already rejects for mapping
+    keys, in the one place that had not adopted the rule. The two modules are
+    leaves and share nothing by design, so the rule is restated rather than
+    imported — which is exactly the drift this branch keeps finding, and the
+    reason both sites now carry a test instead of a comment promising they
+    agree.
+
+    ``versioning``'s ``section_schema_versions`` deliberately keeps its
+    ``str()``: it is one of the five *informational* axes, which parse
+    defensively because no decision reads them, and aborting a load over one
+    would break that contract. Everything here is read by a decision.
+    """
+    if not isinstance(raw, str):
+        raise TypeError(
+            f"{field_name} must be a string, not {type(raw).__name__} "
+            f"({raw!r}); coercing it would let two distinct keys collapse into "
+            "one record, with iteration order deciding which survives"
+        )
+    return raw
+
+
 @dataclass(frozen=True)
 class FactAvailability:
     """One fact family's availability, with the evidence for the claim.
@@ -593,12 +624,15 @@ class AvailabilityLedger:
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> AvailabilityLedger:
         families = {
-            str(name): FactAvailability.from_dict(raw)
+            _decision_key(name, "family name"): FactAvailability.from_dict(raw)
             for name, raw in dict(data.get("families", {})).items()
         }
         overrides: dict[tuple[str, str], FactAvailability] = {}
         for raw in data.get("overrides", []):
-            key = (str(raw["family"]), str(raw["entity"]))
+            key = (
+                _decision_key(raw["family"], "override family"),
+                _decision_key(raw["entity"], "override entity"),
+            )
             if key in overrides:
                 # Rejected rather than resolved. Assignment silently kept the
                 # last row, so a ledger holding both a `failed` and a
