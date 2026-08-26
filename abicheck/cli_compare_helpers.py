@@ -484,10 +484,7 @@ def _report_not_comparable(
         _write_or_echo(output, xml)
 
 
-#: The ``compare`` parameters that can set a gate field on the command line.
-#: ``exit_code_scheme`` is its own field; the rest all feed one resolved
-#: :class:`~abicheck.severity.SeverityConfig`, so any one of them being typed
-#: makes the resolved severity explicitly CLI-selected.
+#: The ``compare`` parameters that can set a gate field on the command line. ``exit_code_scheme`` is its own field; the rest all feed one resolved :class:`~abicheck.severity.SeverityConfig`, so any one of them being typed makes the resolved severity explicitly CLI-selected.
 
 def _reject_incoherent_compare_flags(
     *,
@@ -1152,8 +1149,9 @@ def _report_compare_result(
     if explain_patterns:
         echo_pattern_modulations(result)
 
+    # used_by_old_input/used_by_new_input are the *original* library paths, captured before _embed_inline_source_sides may have rewritten old_input/new_input to a temporary embedded-snapshot .abi.json path (Codex review) -- passing the post-embed operands here would silently drop the same-binary coverage warning for a --old/new-sources or raw --build-info comparison even when the two real binaries are identical.
     _finalize_compare_result(
-        result, old_input, new_input,
+        result, used_by_old_input, used_by_new_input,
         show_redundant=show_redundant, show_filtered=show_filtered,
         severity_config=report_severity,
         contract_evaluation=contract_evaluation,

@@ -2231,7 +2231,7 @@ CLI_CONTRACT_ALLOWLIST: frozenset[str] = frozenset(
         # Scan baseline resolution (P0 item 4's baseline half): calls
         # `service.resolve_input()` directly rather than through
         # `service_input_resolution.resolve_side_snapshot`.
-        "abicheck/cli_scan_baseline.py:1085:19:service.resolve_input",
+        "abicheck/cli_scan_baseline.py:1087:19:service.resolve_input",
         # ABICC compatibility wrapper (P1 "ABICC compatibility is a parallel
         # frontend and engine path"): its own parallel engine path calls
         # both `dumper.dump()` and `checker.compare()` directly.

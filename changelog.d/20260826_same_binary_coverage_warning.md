@@ -97,3 +97,27 @@
   (confirmed the pinning test fails without the fixture change, since the
   pre-existing fixture never populated `coverage_warnings` and so never
   actually exercised the new key).
+- **Eighth follow-up (Codex review): the warning was still invisible in
+  `compare --format review`, and silently dropped for the deep-compare
+  `--old/new-sources`/raw `--build-info` path.** `to_review_digest` never
+  read `coverage_warnings` -- now renders each entry as a `> ⚠️` banner,
+  right after the manual-review-required banner. Separately,
+  `_embed_inline_source_sides` rewrites `old_input`/`new_input` to a
+  temporary embedded-snapshot `.abi.json` path before
+  `_finalize_compare_result` hashes them for the same-binary check, so
+  `_collect_metadata` (which returns `None` for a JSON path) silently
+  dropped the warning for exactly these deeper comparisons even when both
+  real binaries are byte-identical. Fixed by hashing the pair already
+  captured before that rewrite for `--used-by`/`--required-symbol`
+  scoping (`used_by_old_input`/`used_by_new_input`) instead.
+- **Ninth follow-up (Codex review, two findings): `workflows.extraction`
+  was the wrong re-export surface for a post-comparison coverage warning,
+  and `--report-mode leaf`/`root-cause` markdown never showed it either.**
+  `note_if_same_binary_compared` moved to `workflows.gate` --
+  `extraction.py`'s own docstring scopes it to operations performed on an
+  input, not deciding part of a completed comparison's process response,
+  which is exactly what `gate.py` already owns for the exit-code axes.
+  Separately, `_append_confidence_section` (the JSON/full-markdown
+  coverage-warning banner) only runs in full mode; `--report-mode
+  leaf`/`root-cause` share a different preamble (`_view_preamble`), which
+  now carries the same banner.

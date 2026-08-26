@@ -129,15 +129,7 @@ _REMOVED_SUFFIXES = (
     "_const_overload",
 )
 
-# Kinds whose name doesn't end in one of the suffixes above but still name a
-# concrete symbol/entity appearing or disappearing (Codex review on #557:
-# operation_for_kind() reported these as "modified"). Checked before the
-# suffix rule. Deliberately does NOT include kinds naming a *property*
-# gained/lost on an entity that still exists — e.g. the "*_lost_*" family
-# (`field_lost_const`, `func_lost_inline`, ...) or the "*_introduced" family
-# (`vptr_introduced`, `static_tls_introduced`, ...): those are trait changes
-# on a persisting entity, which is what "modified" means here, not an
-# addition/removal of the entity itself.
+# Kinds whose name doesn't end in one of the suffixes above but still name a concrete symbol/entity appearing or disappearing (Codex review on #557: operation_for_kind() reported these as "modified"). Checked before the suffix rule. Deliberately does NOT include kinds naming a *property* gained/lost on an entity that still exists — e.g. the "*_lost_*" family (`field_lost_const`, `func_lost_inline`, ...) or the "*_introduced" family (`vptr_introduced`, `static_tls_introduced`, ...): those are trait changes on a persisting entity, which is what "modified" means here, not an addition/removal of the entity itself.
 _OPERATION_OVERRIDES: dict[str, str] = {
     # Ends in "_added_compat", not "_added"/"_added_compatible".
     "symbol_version_required_added_compat": "added",
@@ -603,12 +595,7 @@ def _to_markdown_leaf(
             policy_file=result.policy_file,
         )
 
-    # ADR-049 D1: leaf mode groups purely by ChangeKind, so without this a
-    # finding compatibility policy never scored still rendered under
-    # "Breaking Type Changes" beside a NO_CHANGE verdict -- the same
-    # contradiction the full-mode partition exists to prevent, reached by a
-    # different renderer (Codex review, fresh evidence). Partitioned before
-    # the kind grouping, and disclosed in its own non-verdict section below.
+    # ADR-049 D1: leaf mode groups purely by ChangeKind, so without this a finding compatibility policy never scored still rendered under "Breaking Type Changes" beside a NO_CHANGE verdict -- the same contradiction the full-mode partition exists to prevent, reached by a different renderer (Codex review, fresh evidence). Partitioned before the kind grouping, and disclosed in its own non-verdict section below.
     from .report_model import ReportModel
 
     not_evaluated = ReportModel.classify_not_evaluated(changes)
@@ -1505,6 +1492,11 @@ def to_review_digest(
             "",
         ]
 
+    # Coverage-warning banner (Codex review): a clean verdict can still rest on incomplete evidence -- e.g. compare.note_if_same_binary_compared's byte-identical-inputs warning -- and this digest is exactly the GitHub-facing summary a reviewer approves a merge from, so it must not read as unconditionally clean when one of these is present.
+    if result.coverage_warnings:
+        lines += [f"> ⚠️ {w}" for w in result.coverage_warnings]
+        lines.append("")
+
     scoped = result.scope_to_public_surface
     additions_label = "Public additions" if scoped else "Additions"
     lines += [
@@ -1865,6 +1857,11 @@ def _view_preamble(
         f"| **Verdict** | {_VERDICT_EMOJI[result.verdict]} `{_VERDICT_LABEL[result.verdict]}` |",
         "",
     ]
+
+    # Coverage-warning banner (Codex review): _append_confidence_section only runs in full mode, so leaf/root-cause views otherwise never surface a coverage_warnings entry (e.g. note_if_same_binary_compared's byte-identical-inputs warning) at all -- shared here rather than duplicated into both _to_markdown_leaf and _to_markdown_root_cause.
+    if result.coverage_warnings:
+        lines += [f"> ⚠️ {w}" for w in result.coverage_warnings]
+        lines.append("")
 
     if show_recommendation:
         _append_recommendation_section(lines, result)

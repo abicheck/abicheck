@@ -580,3 +580,90 @@ class TestNoteIfSameBinaryCompared:
         assert any("byte-identical" in w for w in result.diff.coverage_warnings), (
             result.diff.coverage_warnings
         )
+
+    def test_native_compare_cli_hashes_the_pre_embed_paths(
+        self, tmp_path, monkeypatch
+    ):
+        """Codex review: `--old/new-sources` naming a raw checkout (or a raw
+        `--build-info`) makes `_embed_inline_source_sides` rewrite
+        `old_input`/`new_input` to a temporary embedded-snapshot `.abi.json`
+        path *before* `_report_compare_result` calls `_finalize_compare_
+        result` -- which must still hash the two real, original binaries,
+        not the rewritten JSON snapshot path `_collect_metadata` always
+        reads as non-hashable, or the warning silently vanishes for every
+        deep-compare-folded-into-compare run even when both real binaries
+        are byte-identical. Exercised through the real `compare` CLI entry
+        point (`run_compare`'s actual call-site wiring), with only the
+        inline-embed dump itself stubbed out -- the wiring under test is
+        which path pair reaches `_finalize_compare_result`, not the dump
+        machinery `_embed_inline_source_side` would otherwise invoke."""
+        from unittest.mock import MagicMock
+
+        from click.testing import CliRunner
+
+        import abicheck.cli_compare_helpers as cch
+        from abicheck import dumper as dumper_mod
+        from abicheck.cli import main
+
+        real_so = tmp_path / "lib.so"
+        real_so.write_bytes(b"\x7fELF" + b"\x00" * 200)
+        old_sources = tmp_path / "old-src"
+        old_sources.mkdir()
+        embedded = tmp_path / "old.abi.json"
+        embedded.write_text(
+            json.dumps(
+                {
+                    "library": "libfoo.so",
+                    "version": "1.0",
+                    "functions": [],
+                }
+            )
+        )
+
+        def _fake_embed(ctx, *, old_input, new_input, **kwargs):
+            # Simulates the real _embed_inline_source_side rewriting the
+            # --old-sources side's operand to a temporary snapshot path,
+            # without needing a real inline dump toolchain.
+            return embedded, None, None, new_input, kwargs["new_sources"], kwargs["new_build_info"]
+
+        monkeypatch.setattr(cch, "_embed_inline_source_sides", _fake_embed)
+
+        snap = AbiSnapshot(library="libfoo.so", version="1.0", functions=[])
+        monkeypatch.setattr(dumper_mod, "dump", MagicMock(side_effect=[snap, snap]))
+
+        runner = CliRunner()
+        result = runner.invoke(
+            main,
+            [
+                "compare", str(real_so), str(real_so),
+                "--sources", f"old={old_sources}",
+            ],
+        )
+        assert "byte-identical" in result.stdout, result.output
+
+    def test_finalize_compare_result_does_not_hash_a_json_snapshot_path(
+        self, tmp_path
+    ):
+        """Sanity check for the fix above: confirms `_collect_metadata`
+        really does treat a `.abi.json` snapshot path as non-hashable (the
+        precondition that makes the bug this fix closes possible), so a
+        caller that mistakenly passed the post-embed operand here would see
+        the warning silently vanish rather than this test passing
+        vacuously."""
+        from abicheck.checker import DiffResult
+        from abicheck.frontends.cli.runtime import _finalize_compare_result
+
+        embedded_snapshot = tmp_path / "old.abi.json"
+        embedded_snapshot.write_text(json.dumps({"library": "libfoo.so"}))
+        real_so = tmp_path / "libfoo.so"
+        real_so.write_bytes(b"\x7fELF" + b"\x00" * 200)
+
+        result = DiffResult(old_version="1.0", new_version="1.0", library="lib")
+        _finalize_compare_result(
+            result,
+            embedded_snapshot,
+            real_so,
+            show_redundant=False,
+            show_filtered=False,
+        )
+        assert result.coverage_warnings == []

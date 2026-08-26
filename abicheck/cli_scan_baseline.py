@@ -1068,7 +1068,9 @@ def _run_baseline_compare(
     from .cli_buildsource import prepare_embedded_build_source
     from .errors import AbicheckError
     from .service import collect_metadata, compare_snapshots, resolve_input
-    from .workflows.extraction import note_if_same_binary_compared
+
+    # note_if_same_binary_compared lives in workflows.gate, not workflows.extraction (Codex review) -- see that module's own docstring for why a post-comparison coverage warning belongs there.
+    from .workflows.gate import note_if_same_binary_compared
 
     bl_headers, bl_includes, bl_public_headers, bl_public_dirs = (
         _resolve_baseline_header_scope(

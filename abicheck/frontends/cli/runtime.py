@@ -489,25 +489,46 @@ def _log_debug_resolution(
 
 
 def _finalize_compare_result(
-    result: DiffResult, old_input: Path, new_input: Path,
+    result: DiffResult, metadata_old_input: Path, metadata_new_input: Path,
     *,
     show_redundant: bool, show_filtered: bool,
     severity_config: SeverityConfig | None = None,
     contract_evaluation: bool = False,
 ) -> None:
-    """Attach metadata and emit redundancy/filter/suppression output."""
-    # Routed through `workflows.extraction`, not `binary_utils`/`confidence`
-    # directly, and not through `service` -- this module is `frontends`
-    # layer under ADR-061, which may import `workflows` but must never
-    # import back through the `service`/`cli` compatibility facades
-    # (abicheck/frontends/AGENTS.md).
-    from ...workflows.extraction import (
-        note_if_same_binary_compared,
-        resolve_linker_script_chain,
-    )
+    """Attach metadata and emit redundancy/filter/suppression output.
 
-    result.old_metadata = _collect_metadata(resolve_linker_script_chain(old_input))
-    result.new_metadata = _collect_metadata(resolve_linker_script_chain(new_input))
+    ``metadata_old_input``/``metadata_new_input`` must be the *original*
+    library paths -- resolved through any GNU ld linker-script chain, but
+    from *before* ``_embed_inline_source_sides`` may have rewritten
+    ``old_input``/``new_input`` to a temporary embedded-snapshot ``.abi.json``
+    path (Codex review). ``_collect_metadata`` returns ``None`` for a
+    JSON/Perl-text path, so passing the post-embed operands here would
+    silently drop ``note_if_same_binary_compared``'s byte-identical-binaries
+    warning for any ``--old/new-sources``/raw ``--build-info`` comparison,
+    even when the two underlying native binaries really are identical.
+    Callers already resolve this same pre-embed pair for
+    ``--used-by``/``--required-symbol`` scoping (``used_by_old_input``/
+    ``used_by_new_input``) -- reuse that pair here rather than threading a
+    third copy of the same resolution through.
+    """
+    # Routed through `workflows.extraction`/`workflows.gate`, not
+    # `binary_utils`/`confidence` directly, and not through `service` --
+    # this module is `frontends` layer under ADR-061, which may import
+    # `workflows` but must never import back through the `service`/`cli`
+    # compatibility facades (abicheck/frontends/AGENTS.md).
+    # `note_if_same_binary_compared` lives in `workflows.gate` rather than
+    # `workflows.extraction` (Codex review): it decides part of the process
+    # response a completed comparison returns, not an operation performed on
+    # an input, which is what `extraction.py`'s own docstring scopes it to.
+    from ...workflows.extraction import resolve_linker_script_chain
+    from ...workflows.gate import note_if_same_binary_compared
+
+    result.old_metadata = _collect_metadata(
+        resolve_linker_script_chain(metadata_old_input)
+    )
+    result.new_metadata = _collect_metadata(
+        resolve_linker_script_chain(metadata_new_input)
+    )
     note_if_same_binary_compared(result)
 
     if show_redundant and result.redundant_changes:
