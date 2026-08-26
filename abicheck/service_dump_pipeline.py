@@ -469,8 +469,8 @@ def execute_dump_request(
             :func:`~abicheck.cli_buildsource.dump_source_only`).
         SnapshotError: If the input cannot be loaded.
     """
-    from .cli_dump_helpers import _gated_source_label
     from .dependency_info import populate_side_dependency_info
+    from .evidence_depth import gated_source_label
 
     request = resolved.request
     side = request.input
@@ -546,7 +546,7 @@ def execute_dump_request(
         # raising, so _gated_source_label still falls through to its own
         # L3/build-context checks (Codex review, two rounds); this except
         # is a defensive backstop only, matching that same fallback label.
-        effective_depth = _gated_source_label(snap.build_source, snap)
+        effective_depth = gated_source_label(snap.build_source, snap)
     except (TypeError, ValueError, OverflowError):
         effective_depth = "headers" if snap.from_headers else "binary"
     return DumpResult(

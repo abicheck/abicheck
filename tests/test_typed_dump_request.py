@@ -533,12 +533,12 @@ class TestResolveExecuteDumpRequestSplit:
     def test_execute_falls_back_to_conservative_label_on_gated_source_label_error(
         self, snap_path: Path, monkeypatch
     ):
-        """The ``except (TypeError, ValueError)`` around ``_gated_source_label``
+        """The ``except (TypeError, ValueError)`` around ``gated_source_label``
         in ``execute_dump_request`` is a defensive backstop for any failure
-        mode beyond the one ``_l4_source_abi_was_attempted`` itself now
-        handles -- still reachable if ``_gated_source_label`` raises for a
+        mode beyond the one ``l4_source_abi_was_attempted`` itself now
+        handles -- still reachable if ``gated_source_label`` raises for a
         different reason."""
-        from abicheck import cli_dump_helpers
+        from abicheck import evidence_depth
         from abicheck.service_dump_pipeline import (
             execute_dump_request,
             resolve_dump_request,
@@ -547,10 +547,10 @@ class TestResolveExecuteDumpRequestSplit:
         def _boom(*args, **kwargs):
             raise ValueError("simulated unexpected failure")
 
-        # execute_dump_request imports _gated_source_label locally, re-reading
-        # the module attribute on every call -- patch it there, not on
-        # service_dump_pipeline itself.
-        monkeypatch.setattr(cli_dump_helpers, "_gated_source_label", _boom)
+        # Patch the owning leaf (ADR-061 Phase 3), not the cli_dump_helpers
+        # compat alias the engine no longer reads -- patching the alias makes
+        # this vacuous: the un-raised path also satisfies the assertion.
+        monkeypatch.setattr(evidence_depth, "gated_source_label", _boom)
         result = execute_dump_request(
             resolve_dump_request(DumpRequest(input=InputSpec(path=snap_path)))
         )
@@ -559,7 +559,7 @@ class TestResolveExecuteDumpRequestSplit:
     def test_dump_result_effective_depth_matches_gated_source_label(
         self, snap_path: Path
     ):
-        from abicheck.cli_dump_helpers import _gated_source_label
+        from abicheck.evidence_depth import gated_source_label
         from abicheck.service_dump_pipeline import (
             execute_dump_request,
             resolve_dump_request,
@@ -567,7 +567,7 @@ class TestResolveExecuteDumpRequestSplit:
 
         request = DumpRequest(input=InputSpec(path=snap_path))
         result = execute_dump_request(resolve_dump_request(request))
-        assert result.effective_depth == _gated_source_label(
+        assert result.effective_depth == gated_source_label(
             result.snapshot.build_source, result.snapshot
         )
 

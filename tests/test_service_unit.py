@@ -2768,7 +2768,7 @@ class TestCompareRequestAdr055Evidence:
         old_p = self._make_snap_file(tmp_path, "libtest", "1.0")
         new_p = self._make_snap_file(tmp_path, "libtest", "2.0")
         monkeypatch.setattr(
-            "abicheck.cli_dump_helpers._gated_source_label", lambda *a, **k: "build"
+            "abicheck.evidence_depth.gated_source_label", lambda *a, **k: "build"
         )
 
         request = CompareRequest(
@@ -2976,7 +2976,7 @@ class TestCompareRequestDepthSatisfaction:
         old_p = self._make_snap_file(tmp_path, "libtest", "1.0")
         new_p = self._make_snap_file(tmp_path, "libtest", "2.0")
         monkeypatch.setattr(
-            "abicheck.cli_dump_helpers._gated_source_label",
+            "abicheck.evidence_depth.gated_source_label",
             lambda *a, **k: "build",
         )
 
@@ -2990,7 +2990,7 @@ class TestCompareRequestDepthSatisfaction:
         old_p = self._make_snap_file(tmp_path, "libtest", "1.0")
         new_p = self._make_snap_file(tmp_path, "libtest", "2.0")
         monkeypatch.setattr(
-            "abicheck.cli_dump_helpers._gated_source_label",
+            "abicheck.evidence_depth.gated_source_label",
             lambda *a, **k: "source",
         )
 
@@ -3010,7 +3010,7 @@ class TestCompareRequestDepthSatisfaction:
             return "source" if snap.version == "1.0" else "binary"
 
         monkeypatch.setattr(
-            "abicheck.cli_dump_helpers._gated_source_label", _by_version
+            "abicheck.evidence_depth.gated_source_label", _by_version
         )
 
         request = CompareRequest(
@@ -3023,7 +3023,7 @@ class TestCompareRequestDepthSatisfaction:
         old_p = self._make_snap_file(tmp_path, "libtest", "1.0")
         new_p = self._make_snap_file(tmp_path, "libtest", "2.0")
         monkeypatch.setattr(
-            "abicheck.cli_dump_helpers._gated_source_label",
+            "abicheck.evidence_depth.gated_source_label",
             lambda *a, **k: "binary",
         )
 
@@ -3037,7 +3037,7 @@ class TestCompareRequestDepthSatisfaction:
         old_p = self._make_snap_file(tmp_path, "libtest", "1.0")
         new_p = self._make_snap_file(tmp_path, "libtest", "2.0")
         monkeypatch.setattr(
-            "abicheck.cli_dump_helpers._gated_source_label",
+            "abicheck.evidence_depth.gated_source_label",
             lambda *a, **k: "binary",
         )
 

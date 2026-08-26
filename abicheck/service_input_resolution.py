@@ -1150,13 +1150,13 @@ def enforce_requested_depth(
     """
     if depth is None:
         return
-    from .cli_dump_helpers import _DEPTH_RANK, _gated_source_label
+    from .evidence_depth import depth_rank, gated_source_label
 
     # validate() already restricts depth to USER_DEPTHS.
-    requested_rank = _DEPTH_RANK.get(depth.lower(), 0)
+    requested_rank = depth_rank(depth.lower())
     for side_label, snap in sides:
-        effective = _gated_source_label(snap.build_source, snap)
-        if _DEPTH_RANK.get(effective, 0) < requested_rank:
+        effective = gated_source_label(snap.build_source, snap)
+        if depth_rank(effective) < requested_rank:
             raise ValidationError(
                 f"depth={depth!r} was requested for the {side_label} "
                 f"side but the resolved snapshot only reached {effective!r} "
