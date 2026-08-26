@@ -47,7 +47,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from .artifact_plan import ResolvedArtifactPlan
 from .errors import AstContextMissingError, ValidationError
 from .service_input_resolution import (
     _resolve_side_snapshot_impl,
@@ -55,6 +54,7 @@ from .service_input_resolution import (
     is_raw_source_tree,
     reject_hybrid_source_frontend,
 )
+from .workflows.artifact import ResolvedArtifactPlan
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -110,12 +110,13 @@ class ResolvedDumpRequest:
 
     ``artifact_plan`` (dedup-and-convergence plan, Phase 1 item 1
     "Milestone B"): the same facts this object already carries, also
-    attached to a :class:`~abicheck.artifact_plan.ResolvedArtifactPlan` --
-    the general, cross-consumer shape the plan's target architecture names.
-    Built with an empty ``pending_cleanups`` (this function allocates no
-    resource -- see :mod:`abicheck.artifact_plan`'s own module docstring for
-    why the two fields that *would* require one, effective include search
-    and effective compile context, stay excluded here too), so it is
+    attached to a :class:`~abicheck.workflows.artifact.ResolvedArtifactPlan`
+    -- the general, cross-consumer shape the plan's target architecture
+    names. Built with an empty ``pending_cleanups`` (this function allocates
+    no resource -- see :mod:`abicheck.workflows.artifact.contracts`'s own
+    module docstring for why the two fields that *would* require one,
+    effective include search and effective compile context, stay excluded
+    here too), so it is
     additive, inert data today: nothing yet reads it. It exists so a future
     consumer of the general shape (e.g. a migrated ``render_dump_dry_run``)
     has one object to build from instead of this dump-specific one, without

@@ -1,7 +1,7 @@
 # ADR-061: Responsibility-Package Architecture and Flat-Namespace Migration
 
 **Date:** 2026-08-24
-**Status:** Accepted — Phases 0-1 implemented; Phase 2 in progress; Phases 3-5 remain incremental.
+**Status:** Accepted — Phases 0-1 implemented; Phases 2-4 in progress; Phase 5 remains incremental.
 **Decision maker:** abicheck maintainers
 
 ## Context
@@ -628,9 +628,32 @@ exists; the relevant debt entries shrink or disappear.
 
 Implementation status: the immutable, JSON-shaped ``ReportDocument`` and its
 pure JSON projection are established, and all native JSON report modes (full,
-stat, leaf, and root-cause) now cross that boundary. Markdown, HTML, SARIF, and
-JUnit remain explicit follow-up slices; this partial status must not be read as
-the phase acceptance criteria having been met.
+stat, leaf, and root-cause) now cross that boundary. The `--stat` one-line
+text summary (`reporter_markdown.to_stat`) now also builds and renders a
+`ReportDocument` via `report/render_text.py`'s `render_stat_document`, the
+first non-JSON format to do so. Markdown's richer modes (`to_markdown`,
+`to_review_digest`), HTML, SARIF, and JUnit remain explicit follow-up slices;
+this partial status must not be read as the phase acceptance criteria having
+been met.
+
+Known blocker for the remaining Markdown modes: their JSON counterparts
+(`full`/`leaf`/`root-cause`) build a severity-aware document by calling into
+`severity.py`/`analysis_assurance.py`, and `checker_types.py` (`DiffResult`'s
+own methods) and `checker.py` (`compare()`'s own orchestration) already call
+directly into those same modules — a real, pre-existing `compare -> policy`
+coupling `architecture/modules.yaml`'s dependency contract does not yet
+permit. Classifying `severity.py`/`analysis_assurance.py`/`contract_gating.py`
+as `policy` while `checker.py`/`checker_types.py` stay `compare` reproduces
+this edge as a `check_architecture.py` `dependency-direction`/
+`dependency-cycle` failure immediately (verified directly: adding both sides
+surfaces the cycle at `checker.py:1277`, `checker_types.py:36,713,737,749`).
+A physically migrated `report/`-package module touching any richer,
+severity-aware document shape hits the same wall the moment it imports
+`severity.py`. Resolving it needs `checker_types.py`'s
+`_effective_verdict_for_change`/`_evaluated_changes`/`not_evaluated` (and
+`checker.py`'s `compare()` call into `analysis_assurance.compute_
+analysis_assurance`) moved off `compare`'s core types — a real, scoped
+migration in its own right, not a follow-up edit to a reporting slice.
 
 1. Define immutable `ReportDocument` contracts from existing report-model
    behavior rather than inventing a second schema.
@@ -647,6 +670,31 @@ tests pass; mutability tests show renderers cannot alter the workflow result;
 no renderer computes an exit code or compatibility decision.
 
 ### Phase 3 — converge artifact workflows
+
+Implementation status: the flat `abicheck/artifact_plan.py` — the
+`ResolvedArtifactPlan` cleanup-thunk session type this phase's own target
+layout names as `contracts.py` — moved to
+`abicheck.workflows.artifact.contracts`, with `abicheck.workflows.artifact`
+re-exporting it. The module had zero first-party imports, so this is the
+`contracts.py` half of the `Request -> ResolvedPlan -> Result` split with no
+behavior change; its four flat call sites (`service_dump_pipeline.py`,
+`service_input_resolution.py`, `cli_dump_helpers.py`, `cli_dump_non_elf.py`)
+now import it from the new location but are themselves unchanged.
+
+Known blocker for the remaining convergence: those four call sites'
+*owning* modules cannot yet move into `workflows/` themselves.
+`service_dump_pipeline.py` and `service_input_resolution.py` both reach into
+`cli_dump_helpers.py` (a `frontends`-destined module, per its `cli_` prefix
+family) for CLI-resolved facts (`_gated_source_label` and similar) — moving
+either service module into `workflows/` while that import stays would
+create a `workflows -> frontends` inversion, the exact same shape of
+dependency-direction problem Phase 2 hit between `compare` and `policy`.
+Resolving it needs that shared logic pulled out to a leaf both sides can
+depend on (mirroring how `contracts.py` itself was extractable only because
+it already had zero first-party dependencies) — a real, scoped migration of
+its own, not a follow-up edit to this vertical slice. Resolve/execute
+(`resolve.py`/`execute.py`, the request-shaped half of this phase's own
+target layout) are unaffected either way and remain unattempted.
 
 Use the pattern already emerging in the typed compare, dump, input-resolution,
 and artifact-plan code:
@@ -667,6 +715,43 @@ dry-run renders the same resolved plan normal execution consumes; achieved
 depth and degradation are result facts rather than frontend guesses.
 
 ### Phase 4 — thin CLI and Python API
+
+Implementation status: the `abicheck.frontends` package now exists, with its
+first tenant — `frontends.cli.options.secondary_output` (moved from the flat
+`abicheck/cli_secondary_output.py`) — covering the `--write FORMAT=PATH`
+option factory and its coherence validator. It qualified for an immediate
+move for the same reason `artifact_plan.py` did for Phase 3: zero
+first-party imports, so a physical relocation changes no import-cycle or
+dependency-direction fact elsewhere. Its four call sites
+(`cli_options.py`, `cli_scan_helpers.py`, `cli_compare_helpers.py`,
+`cli_compare_release.py`) now import it from the new package.
+
+Known blocker for the rest of this phase, investigated directly rather than
+assumed: `cli.py` (1959 lines) and `service.py` (1763 lines) are nowhere
+near the "under 150 lines" acceptance target, and cannot move toward it yet
+for two independent, structural reasons. First, the option-declaration
+cluster item 1 also names (`cli_options.py` itself, near its own 2000-line
+hard cap, plus `cli_params.py`/`cli_profiles.py`/`cli_options_contract.py`/
+`cli_contract_options.py`/`cli_help.py`) is not leaf-shaped the way
+`secondary_output.py` was — these ~3,800 combined lines import each other
+and are imported by essentially every `cli_*.py` command module, so moving
+the cluster is a high-blast-radius change to Click decorator stacking
+across the whole CLI surface, not an independently-verifiable vertical
+slice; it needs its own pass that first splits the cluster's internal
+dependency graph. Second, and more fundamentally: `service.py`'s
+`resolve_input`/`_run_dump_uncached`/`compare_snapshots` (hundreds of lines
+each) *are* the current dump/compare implementation, not adapters over an
+already-existing workflow object that `cli.py`/`service.py` could be
+rewritten to call instead — moving that logic into `workflows/` is Phase
+3's own job (item 2 above, "make workflows the sole operation owners"), and
+Phase 3 has so far relocated only one dependency-free contract type
+(`ResolvedArtifactPlan`); the real per-artifact resolve/execute pipeline
+does not exist yet (see Phase 3's own status note above and
+`workflows/AGENTS.md`). Thinning `cli.py`/`service.py` ahead of that
+pipeline would mean either a wrapper around the same inline logic
+(achieving nothing toward the acceptance criteria) or a second, duplicate
+implementation with nothing shared to delegate to. Documented in
+`abicheck/frontends/AGENTS.md`.
 
 1. Move command input translation into `frontends/cli/commands` and reusable
    Click-only option declaration into `frontends/cli/options`.

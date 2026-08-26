@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
+
+import pytest
 
 import scripts.check_architecture as architecture
 from scripts.check_architecture import check_repository
@@ -456,3 +459,185 @@ def test_invalid_debt_path_and_review_date_fail_schema(tmp_path: Path) -> None:
     findings = check_repository(root)
 
     assert sum(finding.rule == "schema" for finding in findings) >= 2
+
+
+# ---------------------------------------------------------------------------
+# --base / $ARCHITECTURE_BASE / local merge-base auto-resolution
+# ---------------------------------------------------------------------------
+
+
+def test_local_merge_base_returns_none_when_git_command_fails(tmp_path: Path) -> None:
+    # A directory that isn't a git repository at all: `git merge-base` exits
+    # nonzero rather than raising, and this must degrade to None rather than
+    # propagate that failure.
+    assert architecture._local_merge_base_with_main(tmp_path) is None
+
+
+def test_local_merge_base_returns_none_when_git_is_unavailable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def _raise(*args: object, **kwargs: object) -> None:
+        raise FileNotFoundError("git not found")
+
+    monkeypatch.setattr(architecture.subprocess, "run", _raise)
+
+    assert architecture._local_merge_base_with_main(tmp_path) is None
+
+
+def test_local_merge_base_returns_stripped_sha_on_success(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def _fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        assert cmd == ["git", "merge-base", "HEAD", "origin/main"]
+        return subprocess.CompletedProcess(cmd, 0, stdout="deadbeef\n", stderr="")
+
+    monkeypatch.setattr(architecture.subprocess, "run", _fake_run)
+
+    assert architecture._local_merge_base_with_main(tmp_path) == "deadbeef"
+
+
+def test_local_merge_base_falls_back_to_local_main_without_origin(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A checkout with no `origin` remote-tracking ref at all (renamed/removed
+    # remote, a bare local clone) but a resolvable local `main` branch must
+    # still get a base rather than silently reporting nothing (Codex review).
+    calls: list[list[str]] = []
+
+    def _fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append(cmd)
+        if cmd[-1] == "origin/main":
+            return subprocess.CompletedProcess(
+                cmd, 128, stdout="", stderr="unknown revision"
+            )
+        assert cmd == ["git", "merge-base", "HEAD", "main"]
+        return subprocess.CompletedProcess(cmd, 0, stdout="cafef00d\n", stderr="")
+
+    monkeypatch.setattr(architecture.subprocess, "run", _fake_run)
+
+    assert architecture._local_merge_base_with_main(tmp_path) == "cafef00d"
+    assert [c[-1] for c in calls] == ["origin/main", "main"]
+
+
+def test_local_merge_base_returns_none_when_neither_ref_resolves(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def _fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(
+            cmd, 128, stdout="", stderr="unknown revision"
+        )
+
+    monkeypatch.setattr(architecture.subprocess, "run", _fake_run)
+
+    assert architecture._local_merge_base_with_main(tmp_path) is None
+
+
+def _capture_base_revision(
+    monkeypatch: pytest.MonkeyPatch,
+) -> dict[str, object]:
+    captured: dict[str, object] = {}
+
+    def _fake_check_repository(root: Path, *, base_revision: str | None = None):
+        captured["base_revision"] = base_revision
+        return []
+
+    monkeypatch.setattr(architecture, "check_repository", _fake_check_repository)
+    return captured
+
+
+def test_main_prefers_explicit_base_over_env_and_auto_detection(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    captured = _capture_base_revision(monkeypatch)
+    monkeypatch.setenv("ARCHITECTURE_BASE", "env-sha")
+    monkeypatch.setattr(
+        architecture, "_local_merge_base_with_main", lambda root: "auto-sha"
+    )
+
+    assert architecture.main(["--root", str(tmp_path), "--base", "explicit-sha"]) == 0
+    assert captured["base_revision"] == "explicit-sha"
+
+
+def test_main_prefers_env_over_auto_detection(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    captured = _capture_base_revision(monkeypatch)
+    monkeypatch.setenv("ARCHITECTURE_BASE", "env-sha")
+    monkeypatch.setattr(
+        architecture, "_local_merge_base_with_main", lambda root: "auto-sha"
+    )
+
+    assert architecture.main(["--root", str(tmp_path)]) == 0
+    assert captured["base_revision"] == "env-sha"
+
+
+def test_main_falls_back_to_auto_detected_merge_base(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    captured = _capture_base_revision(monkeypatch)
+    monkeypatch.delenv("ARCHITECTURE_BASE", raising=False)
+    monkeypatch.setattr(
+        architecture, "_local_merge_base_with_main", lambda root: "auto-sha"
+    )
+
+    assert architecture.main(["--root", str(tmp_path)]) == 0
+    assert captured["base_revision"] == "auto-sha"
+
+
+def test_main_falls_back_to_none_when_nothing_resolves(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    captured = _capture_base_revision(monkeypatch)
+    monkeypatch.delenv("ARCHITECTURE_BASE", raising=False)
+    monkeypatch.setattr(architecture, "_local_merge_base_with_main", lambda root: None)
+
+    assert architecture.main(["--root", str(tmp_path)]) == 0
+    assert captured["base_revision"] is None
+
+
+def test_main_does_not_auto_detect_when_ci_sets_base_explicitly_empty(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # ci.yml sets $ARCHITECTURE_BASE unconditionally to
+    # `github.event.pull_request.base.sha`, which is the empty string on a
+    # `push`-to-`main`/`workflow_dispatch` run (no PR to read a base sha
+    # from) -- as opposed to a bare local invocation, where the variable is
+    # simply absent from the environment. Falling back to
+    # `_local_merge_base_with_main` in the former case would resolve
+    # `origin/main` to HEAD itself (the very ref just pushed) and silently
+    # turn the debt-no-growth check into comparing every file against
+    # itself (Codex review, fresh evidence) -- so an explicitly-empty
+    # $ARCHITECTURE_BASE must fall through to the unscoped comparison
+    # instead of ever calling the auto-detection helper at all.
+    captured = _capture_base_revision(monkeypatch)
+    monkeypatch.setenv("ARCHITECTURE_BASE", "")
+
+    def _unexpected_call(root: Path) -> str:
+        raise AssertionError(
+            "_local_merge_base_with_main must not be called when "
+            "$ARCHITECTURE_BASE is explicitly set to the empty string"
+        )
+
+    monkeypatch.setattr(architecture, "_local_merge_base_with_main", _unexpected_call)
+
+    assert architecture.main(["--root", str(tmp_path)]) == 0
+    assert captured["base_revision"] is None
+
+
+def test_main_without_base_resolution_still_catches_real_violations(
+    tmp_path: Path,
+) -> None:
+    """End-to-end (no mocking of check_repository): a real violation in a
+    miniature tree is still reported when base auto-detection can't resolve
+    anything (this tree isn't a git repository), matching the pre-existing
+    unscoped-baseline behavior."""
+    root = _tree(tmp_path)
+    _add_package(root, "model")
+    _write(
+        root / "abicheck/model/oversized.py",
+        "\n".join(f"x{i} = {i}" for i in range(20)),
+    )
+
+    exit_code = architecture.main(["--root", str(root)])
+
+    assert exit_code == 1

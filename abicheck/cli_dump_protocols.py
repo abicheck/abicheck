@@ -29,7 +29,7 @@ close a `cli -> ... -> cli` cycle. These Protocols existed in
 them back would have joined `cli_dump_non_elf.py` to the pre-existing
 CLI-registration import-cycle SCC for no structural reason -- this module has
 no other edge into that cluster at all (it imports only leaves:
-`.artifact_plan`, `.buildsource.l2_seed`, `.dumper_clang`,
+`.workflows.artifact`, `.buildsource.l2_seed`, `.dumper_clang`,
 `.dumper_clang_streaming`, `.errors`, `.header_utils`). Moving the shared
 Protocol definitions to this standalone leaf instead means neither
 `cli_dump_helpers.py` nor `cli_dump_non_elf.py` needs to import the other for

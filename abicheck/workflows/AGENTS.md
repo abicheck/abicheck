@@ -24,7 +24,16 @@ Each major operation converges on `Request -> ResolvedPlan -> Result`, with
 `contracts.py`, `resolve.py`, and `execute.py` as the standard ownership split.
 Aggregation currently exposes
 `workflows.aggregate.execute.aggregate_reports_dir` as its canonical composed
-entry point.
+entry point. `workflows.artifact.contracts.ResolvedArtifactPlan` (ADR-061
+Phase 3) is the shared, dependency-free `contracts.py` half of the dump/scan
+artifact-resolution contract — a session type owning cleanup-thunk lifetime
+across a resolve/execute pipeline; its four flat call sites
+(`service_dump_pipeline.py`, `service_input_resolution.py`,
+`cli_dump_helpers.py`, `cli_dump_non_elf.py`) import it from here rather than
+duplicating it, but stay flat themselves until the larger `service_dump_pipeline.py`/
+`service_input_resolution.py` migration (blocked on their own
+`cli_dump_helpers.py`/frontends coupling — see ADR-061's Phase 3 status note)
+lands.
 
 ## Tests
 

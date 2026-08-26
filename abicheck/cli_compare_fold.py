@@ -261,9 +261,9 @@ class _ScopedFold:
         import json
 
         from .checker_policy import EvidenceStatus
+        from .report.render_text import format_stat_line
         from .reporter import _change_to_dict, _finding_id, to_stat_json
         from .reporter_markdown import _VERDICT_LABEL
-        from .stat_line import format_stat_line
 
         base = to_stat_json(self.result, severity_config=self.severity_config)
         folded = json.loads(self.into_json(base))

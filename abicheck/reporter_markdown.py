@@ -83,10 +83,21 @@ def to_stat(
     the verdict label alone could misreport whether the run actually blocks
     CI once severity configuration is in play.
     """
-    from .stat_line import format_stat_line
+    from .report.document import ReportDocument
+    from .report.render_text import render_stat_document
 
     summary = build_summary(result)
-    gate_note = ""
+    d: dict[str, object] = {
+        "verdict_label": _VERDICT_LABEL[result.verdict],
+        "summary": {
+            "breaking": summary.breaking,
+            "source_breaks": summary.source_breaks,
+            "risk_changes": summary.risk_count,
+            "compatible_additions": summary.compatible_additions,
+            "total_changes": summary.total_changes,
+        },
+        "redundant_count": result.redundant_count,
+    }
     if severity_config is not None:
         from .severity import compute_exit_code
 
@@ -97,19 +108,8 @@ def to_stat(
             kind_sets=result._effective_kind_sets(),
             policy_file=result.policy_file,
         )
-        gate_note = (
-            f" [gate: FAIL (exit {exit_code})]" if exit_code else " [gate: PASS]"
-        )
-    return format_stat_line(
-        _VERDICT_LABEL[result.verdict],
-        breaking=summary.breaking,
-        source_breaks=summary.source_breaks,
-        risk_count=summary.risk_count,
-        compatible_additions=summary.compatible_additions,
-        total_changes=summary.total_changes,
-        redundant_count=result.redundant_count,
-        gate_note=gate_note,
-    )
+        d["severity"] = {"exit_code": exit_code}
+    return render_stat_document(ReportDocument.from_mapping(d))
 
 
 # ---------------------------------------------------------------------------

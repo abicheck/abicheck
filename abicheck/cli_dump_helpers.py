@@ -24,7 +24,6 @@ from typing import TYPE_CHECKING, Any
 import click
 
 from . import dumper_cache
-from .artifact_plan import ResolvedArtifactPlan
 
 # `resolve_dump_depth`/`resolve_dump_collect_context` moved to
 # `cli_dump_depth.py`, purely to stay under the AI-readiness 2000-line hard
@@ -70,6 +69,7 @@ from .errors import AbicheckError
 # nothing in this module calls itself.
 from .header_conditionals import attach_build_context_for_parsed_headers
 from .header_utils import include_operand_dirs
+from .workflows.artifact import ResolvedArtifactPlan
 
 if TYPE_CHECKING:
     from .buildsource.pack import BuildSourcePack
@@ -1324,7 +1324,7 @@ def perform_elf_dump(
     # replacing the hand-rolled `_l2_pending_cleanups: list[...] = []` +
     # manual `if _l2_pending_cleanups: _run_cleanups(...)` this function used
     # before, with a single reusable, independently-tested primitive
-    # (`artifact_plan.py`) that drains exactly once (idempotent -- calling
+    # (`workflows/artifact/contracts.py`) that drains exactly once (idempotent -- calling
     # `run_cleanups()` from both the except branch below and the second
     # block's `finally` is therefore safe on the shared-block path where
     # only one of the two ever actually has anything to drain) regardless of

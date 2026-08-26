@@ -69,9 +69,41 @@ jobs:
         run: python scripts/gen_agent_skills.py
       - name: AI-readiness checks (file size, CLAUDE.md coverage, ChangeKind invariants, mypy drift, import cycles)
         run: python scripts/verify.py --profile pr --only ai-readiness
+      # A `pull_request` run scopes the debt-no-growth check to the PR's own
+      # base sha. A `push`-to-`main`/`workflow_dispatch` run has no PR base
+      # at all -- `github.event.pull_request.base.sha` is simply empty there
+      # -- so `push` instead uses its own `before` sha (the tip of `main`
+      # immediately prior) and `workflow_dispatch` uses the checked-out
+      # revision's own parent commit, scoping the check to growth *this run*
+      # introduced rather than every file's original ADR-061 adoption
+      # baseline. Falling through to that unscoped baseline on every
+      # post-merge `main` run would make it permanently red on any
+      # pre-existing drift already on `main` (individually-compliant PRs
+      # each growing a debt-tracked file a little further past its original
+      # baseline), even when the merged/dispatched change itself introduced
+      # none (Codex review, fresh evidence, both for `push` and, in a
+      # follow-up finding, for `workflow_dispatch`: reproduced directly
+      # against this tree both times). `push`'s `before` is skipped when
+      # it's the all-zero sentinel git uses for a branch's first push (no
+      # prior commit to compare against); `workflow_dispatch`'s `HEAD^` is
+      # skipped when it doesn't resolve (the repository's very first commit)
+      # -- `check_repository()` would otherwise report a hard
+      # `base-revision` error for an unresolvable sha rather than silently
+      # falling back, for either case.
+      - name: Resolve architecture check base revision
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            base="${{ github.event.pull_request.base.sha }}"
+          elif [ "${{ github.event_name }}" = "push" ] \
+            && [ "${{ github.event.before }}" != "0000000000000000000000000000000000000000" ]; then
+            base="${{ github.event.before }}"
+          elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            base="$(git rev-parse --verify -q HEAD^ || true)"
+          else
+            base=""
+          fi
+          echo "ARCHITECTURE_BASE=${base}" >> "$GITHUB_ENV"
       - name: Architecture contract (ADR-061)
-        env:
-          ARCHITECTURE_BASE: ${{ github.event.pull_request.base.sha }}
         run: python scripts/verify.py --profile pr --only architecture
       # Scoping FP-rate gate (ADR-024 §7), per-tier accuracy gate, the use-case
       # docs sync gate, the docs/AGENTS.md ownership contract gate, the

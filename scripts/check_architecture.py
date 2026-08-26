@@ -778,6 +778,52 @@ def check_repository(root: Path, *, base_revision: str | None = None) -> list[Fi
     return findings
 
 
+def _local_merge_base_with_main(root: Path) -> str | None:
+    """Best-effort local stand-in for CI's ``ARCHITECTURE_BASE``.
+
+    CI sets ``ARCHITECTURE_BASE`` to the PR's actual base sha, so the
+    debt-no-growth check only flags growth this change itself introduces.
+    Without that, a bare local invocation compares every debt-tracked file
+    against its ADR-061 *adoption* baseline directly -- which drifts as
+    unrelated, individually-compliant PRs each grow a file a little further
+    past that original baseline (each one only checked against its own
+    base). The cumulative drift then reads as a failure for the next
+    contributor who runs this exact command untouched, on a file their own
+    change never touched -- exactly the "local and CI definitions of done
+    silently diverge" gap `scripts/verify.py`'s own module docstring (M0-3)
+    exists to prevent, just not yet closed for this one step.
+
+    Tries ``origin/main`` first (matching what CI's own base sha would
+    resolve to), then falls back to a local ``main`` branch -- a checkout
+    with no ``origin`` remote-tracking ref at all (the remote renamed or
+    removed, a bare local clone) still has a resolvable base then, instead
+    of silently reporting nothing (Codex review).
+
+    Returns ``None`` (falling back to the previous unscoped comparison)
+    when neither ref is resolvable -- a shallow clone, a detached checkout
+    with no local branch either, or a non-git ``--root`` such as this
+    script's own miniature-tree tests use via `check_repository()` directly
+    (which never calls this function at all). Never raises.
+    """
+    for ref in ("origin/main", "main"):
+        try:
+            proc = subprocess.run(
+                ["git", "merge-base", "HEAD", ref],
+                cwd=root,
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+        except (OSError, subprocess.SubprocessError):
+            return None
+        if proc.returncode != 0:
+            continue
+        sha = proc.stdout.strip()
+        if sha:
+            return sha
+    return None
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -785,11 +831,38 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--base",
-        default=os.environ.get("ARCHITECTURE_BASE"),
-        help="PR base revision used to distinguish concurrent pre-adoption growth",
+        default=None,
+        help=(
+            "PR base revision used to distinguish concurrent pre-adoption "
+            "growth (default: $ARCHITECTURE_BASE, else the local merge-base "
+            "with origin/main when one is resolvable)"
+        ),
     )
     args = parser.parse_args(argv)
-    findings = check_repository(args.root.resolve(), base_revision=args.base)
+    root = args.root.resolve()
+    base = args.base
+    if base is None:
+        env_base = os.environ.get("ARCHITECTURE_BASE")
+        if env_base:
+            base = env_base
+        elif "ARCHITECTURE_BASE" not in os.environ:
+            # Only fall back to a locally-resolved merge-base when nothing
+            # set $ARCHITECTURE_BASE at all -- a bare local invocation. CI's
+            # own `ci.yml` sets it unconditionally, to
+            # `github.event.pull_request.base.sha`, which is the empty
+            # string on a `push`-to-`main` or `workflow_dispatch` run (no PR
+            # context to read a base sha from). Falling back to
+            # `_local_merge_base_with_main` in *that* case would resolve
+            # `origin/main` to HEAD itself (the ref just pushed *is*
+            # `origin/main` at that point), silently turning the debt-
+            # no-growth check into comparing every file against itself --
+            # vacuously passing committed growth instead of catching it
+            # (Codex review, fresh evidence). An explicitly-empty
+            # $ARCHITECTURE_BASE is CI's own signal that no PR base applies
+            # to this run, so it must fall through to the previous unscoped
+            # comparison instead, exactly like the pre-fallback behavior.
+            base = _local_merge_base_with_main(root)
+    findings = check_repository(root, base_revision=base)
     for finding in findings:
         print(f"ERROR: {finding.render()}")
     print(f"Architecture: {len(findings)} error(s)")
