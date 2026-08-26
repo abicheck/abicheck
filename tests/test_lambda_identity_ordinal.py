@@ -91,7 +91,10 @@ class TestOrdinalsAreStableAcrossLineDrift:
         quoted = 'Tag<"(lambda:a.h:1:2)">'
         ordinals = collect_anonymous_type_ordinals([quoted])
         assert ordinals == {}
-        assert apply_anonymous_type_ordinals(quoted, {("(lambda", "a.h", 1, 2): 1}) == quoted
+        assert (
+            apply_anonymous_type_ordinals(quoted, {("(lambda", "a.h", 1, 2): 1})
+            == quoted
+        )
 
 
 def _record(name: str, qualified: str | None = None) -> RecordType:
@@ -318,9 +321,7 @@ class TestKnownLimitationDifferentFilesSharingABasename:
             strip_anonymous_type_location("(lambda at /vendor/b/config.h:5:1)"),
         ]
         after_ordinals = collect_anonymous_type_ordinals(after)
-        after_final = [
-            apply_anonymous_type_ordinals(n, after_ordinals) for n in after
-        ]
+        after_final = [apply_anonymous_type_ordinals(n, after_ordinals) for n in after]
 
         # vendor/a's own, completely unedited lambda is reassigned a
         # different ordinal purely because of the unrelated insertion in
@@ -371,9 +372,7 @@ class TestHybridMergeDefersRenumbering:
                 # its own independent ordinal for the SAME shared closure
                 # would be #1 -- a real fact only clang captures rides
                 # along on this type, to prove the merge actually joined.
-                replace(
-                    _record(owner_clang, qualified=owner_clang), is_abstract=True
-                ),
+                replace(_record(owner_clang, qualified=owner_clang), is_abstract=True),
             ],
         )
 
@@ -391,6 +390,75 @@ class TestHybridMergeDefersRenumbering:
         )
         # And the final, merged snapshot IS in ordinal form -- renumbering
         # happened, just deferred to after the merge.
+        assert "#" in matched[0].name
+        assert ":20:" not in matched[0].name
+
+
+class TestServiceRunDumpHybridAlsoDefersRenumbering:
+    """Codex review on PR #868, fresh evidence: ``service.run_dump``'s own
+    hybrid recursion (the real Tier-2 entry point the CLI routes through,
+    per its own comment -- distinct from ``dumper_hybrid.run_hybrid_dump``,
+    which is for direct ``dumper.dump()`` Python-API callers) is the exact
+    same shape ``TestHybridMergeDefersRenumbering`` above tests, but was
+    missing the defer/renumber-after-merge fix entirely: each recursive
+    ``run_dump()`` call independently renumbered its own closure markers
+    before the merge, reproducing the identical ordinal-desync bug.
+    """
+
+    def test_shared_closure_merges_despite_differing_lambda_counts(
+        self, tmp_path
+    ) -> None:
+        from unittest.mock import patch
+
+        from abicheck.service import run_dump
+
+        p = tmp_path / "lib.so"
+        p.write_bytes(b"\x7fELF" + b"\x00" * 100)
+
+        shared = _closure("widget.h", 20, 5)
+        owner = f"Foo<{shared}>"
+
+        castxml_snap = AbiSnapshot(
+            library="lib.so",
+            version="1.0",
+            from_headers=True,
+            ast_producer="castxml",
+            types=[
+                # castxml sees an EARLIER lambda too, so its own
+                # independent ordinal for the shared closure would be #2.
+                _record(f"Earlier<{_closure('widget.h', 5, 1)}>"),
+                _record(owner, qualified=owner),
+            ],
+        )
+        clang_snap = AbiSnapshot(
+            library="lib.so",
+            version="1.0",
+            from_headers=True,
+            ast_producer="clang",
+            types=[
+                # clang's leg never sees the earlier template, so its own
+                # independent ordinal for the SAME closure would be #1 --
+                # a real clang-only fact rides along to prove the merge
+                # actually joined rather than missing due to desync.
+                replace(_record(owner, qualified=owner), is_abstract=True),
+            ],
+        )
+
+        def _fake_dump_elf(*args, **kwargs):
+            compile_ctx = kwargs.get("compile")
+            if compile_ctx is not None and compile_ctx.frontend == "clang":
+                return clang_snap
+            return castxml_snap
+
+        with patch("abicheck.service._dump_elf", side_effect=_fake_dump_elf):
+            merged = run_dump(p, "elf", header_backend="hybrid")
+
+        matched = [t for t in merged.types if t.name.startswith("Foo<")]
+        assert len(matched) == 1, "the shared closure must merge into one type"
+        assert matched[0].is_abstract is True, (
+            "clang's is_abstract fact must have reached the merged type -- "
+            "a per-leg ordinal desync would miss the join"
+        )
         assert "#" in matched[0].name
         assert ":20:" not in matched[0].name
 

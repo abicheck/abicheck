@@ -26,3 +26,13 @@
   provenance-gated detector would silently miss on every closure-
   parameterized declaration after this fix renamed the type it was keyed
   against.
+- **Follow-up (Codex review, fresh evidence): `service.run_dump`'s own
+  hybrid recursion -- the real Tier-2 entry point the CLI routes
+  `--ast-frontend hybrid` through -- reproduced the identical
+  per-leg-independent-ordinal bug this fix closed for
+  `dumper_hybrid.run_hybrid_dump`.** It has its own separate castxml/
+  clang recursion and merge, and was never wired to defer/re-renumber
+  after the merge. Now wrapped in the same
+  `qualified_name_segments.defer_closure_identity_renumbering()` context
+  during both recursive dumps, with the merged snapshot renumbered
+  exactly once afterward.

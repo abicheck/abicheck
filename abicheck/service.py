@@ -32,7 +32,7 @@ from contextlib import nullcontext
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from . import policy_file as _policy_file
+from . import policy_file as _policy_file, qualified_name_segments
 from .api_types import (
     CompareRequest,
     CompareResult,
@@ -270,11 +270,10 @@ def _resolve_raw_typeinfo(path: Path, version: str) -> AbiSnapshot | None:
     if len(head) < 2:
         return None
 
-    # Only detect the little-endian byte order that parse_btf_from_bytes /
-    # parse_ctf_from_bytes actually support: a big-endian-target blob (first
-    # bytes EB 9F / CF F1) would otherwise enter the branch but parse to empty
-    # metadata, silently dropping all type changes. Falling through to the
-    # "cannot detect format" error is the honest outcome for those.
+    # Only detect the little-endian byte order parse_btf_from_bytes/
+    # parse_ctf_from_bytes actually support: a big-endian blob (EB 9F/CF F1)
+    # would otherwise enter the branch but parse to empty metadata, silently
+    # dropping type changes -- falling through to "cannot detect" is honest.
     magic_le = int.from_bytes(head, "little")
     data = path.read_bytes()
     try:
@@ -467,10 +466,9 @@ def resolve_input(
             public_include_search_dirs=public_include_search_dirs,
         )
 
-    # Raw kernel type-info blobs (a bare `.BTF` / CTF section extracted with
-    # `bpftool btf dump ... format raw` or `objcopy -O binary --only-section`).
-    # A real kernel carries BTF inside an ELF `.BTF` section, but the bare blob
-    # is a convenient, toolchain-free comparison input.
+    # Raw kernel type-info blobs (a bare `.BTF`/CTF section extracted via
+    # `bpftool`/`objcopy`) -- a real kernel carries BTF inside an ELF
+    # `.BTF` section, but the bare blob is a convenient, toolchain-free input.
     raw_typeinfo = _resolve_raw_typeinfo(path, version)
     if raw_typeinfo is not None:
         return raw_typeinfo
@@ -551,10 +549,9 @@ def resolve_input(
                 "shared library named in its INPUT(...) directive directly."
             )
 
-    # Static / import libraries (`.a`, `.lib`) are member archives, not single
-    # linkable images. abicheck does not analyse archives (by design — see
-    # docs/learn/limitations.md); fail with actionable guidance rather than a
-    # generic "unknown format" error.
+    # Static/import libraries (`.a`, `.lib`) are member archives, not single
+    # linkable images -- abicheck does not analyse archives by design (see
+    # docs/learn/limitations.md); fail with actionable guidance instead.
     from .binary_utils import detect_archive
 
     if detect_archive(path):
@@ -658,9 +655,8 @@ def _run_dump_uncached(
 
     _headers = headers or []
     _includes = includes or []
-    # See this function's own docstring: falls back to `_includes` (today's
-    # unchanged behavior) when the caller doesn't distinguish its genuinely
-    # explicit -I list from an already-widened `includes`.
+    # See this function's own docstring: falls back to `_includes` when the
+    # caller doesn't distinguish an explicit -I list from a widened one.
     _public_include_search_dirs = (
         list(public_include_search_dirs)
         if public_include_search_dirs is not None
@@ -696,12 +692,11 @@ def _run_dump_uncached(
     )
     # An explicit --ast-frontend on the compile context wins over the bare
     # header_backend arg (the latter is the compare-path default carrier).
-    # .lower() (Codex review, fresh evidence): compile.frontend="AUTO" is an
-    # accepted spelling (validated case-insensitively) that must mean "no
-    # override", not be treated as an explicit one -- otherwise a pinned,
-    # already-resolved header_backend (service_dump_pipeline.ResolvedDumpRequest.
-    # effective_header_backend) can be silently discarded here in favor of
-    # re-resolving "AUTO" against a live ABICHECK_AST_FRONTEND read below.
+    # .lower() (Codex review): compile.frontend="AUTO" is an accepted,
+    # case-insensitive spelling that must mean "no override" -- else a
+    # pinned, already-resolved header_backend (service_dump_pipeline.
+    # ResolvedDumpRequest.effective_header_backend) is silently discarded
+    # in favor of re-resolving "AUTO" against a live env read below.
     eff_backend = (
         compile.frontend
         if (compile is not None and compile.frontend.lower() != "auto")
@@ -766,7 +761,17 @@ def _run_dump_uncached(
         # this scope: the _attach_header_graph call below is a real
         # downstream consumer, unlike a direct dumper.dump() caller with no
         # such follow-up (Codex review) -- see dumper_cache.ast_memoize_scope.
-        with dumper_cache.ast_memoize_scope():
+        #
+        # defer_closure_identity_renumbering (Codex review): this recursion
+        # is the same shape dumper_hybrid.run_hybrid_dump merges, and
+        # without it reproduces the bug that fix closed -- each recursive
+        # run_dump() independently renumbers its own closure markers before
+        # the merge, desynchronizing the two backends' ordinals for one
+        # closure. Suppressed here, renumbered once on the merged result.
+        with (
+            dumper_cache.ast_memoize_scope(),
+            qualified_name_segments.defer_closure_identity_renumbering(),
+        ):
             castxml_snap = run_dump(
                 path,
                 binary_fmt,
@@ -781,7 +786,9 @@ def _run_dump_uncached(
                 compile=_forced_compile("clang"),
                 **common_kwargs,
             )
-        merged = merge_snapshots(castxml_snap, clang_snap)
+        merged = qualified_name_segments.renumber_anonymous_closure_identities(
+            merge_snapshots(castxml_snap, clang_snap)
+        )
         # No attach_clang_layout call here: clang_snap's own recursive
         # run_dump(header_backend="clang") call above already got it (this
         # function's ELF/PE/Mach-O tail below calls it unconditionally), so
@@ -1106,13 +1113,10 @@ def _dump_elf(
     from .dumper import dump
 
     # P1.1 (ADR-021a): a resolved detached debug artifact (--debug-root /
-    # --debuginfod) was previously only used for a CLI log line — the DWARF
-    # parse always read `path` itself, so a stripped production .so stayed
-    # L0-only even after abicheck reported it found the matching debug file.
-    # Resolve here (gated on the caller actually requesting it, same as the
-    # CLI) and thread the artifact's DWARF-bearing file through to dumper.dump
-    # so it's read instead of `path`. Split DWARF (.dwo/.dwp) and dSYM are not
-    # threaded here — narrower follow-up, not this fix's scope.
+    # --debuginfod) was previously only used for a CLI log line -- the
+    # DWARF parse always read `path` itself, so a stripped .so stayed
+    # L0-only after abicheck reported finding the debug file. Resolve here
+    # (gated as the CLI is) and thread it to dumper.dump instead of `path`.
     debug_info_path: Path | None = None
     if (
         not symbols_only
@@ -1161,12 +1165,10 @@ def _dump_elf(
         _emit(notify, "Warning: --include paths are ignored without headers.")
 
     # P3: auto-add the public-header roots to the search path. Same bucket
-    # selection as the dump CLI path (resolve_inferred_header_roots): plain -I
-    # when this request carries no compile-context includes, or -isystem (below
-    # the build-context dirs, above the standard system dirs) when the caller's
-    # CompileContext supplies its own includes via gcc_options/tokens (e.g.
-    # -isystem build/generated) — so a real build context keeps search priority
-    # without dropping the inferred root below system headers (Codex review).
+    # selection as the dump CLI path (resolve_inferred_header_roots): plain
+    # -I with no compile-context includes, else -isystem (below build-
+    # context dirs, above system dirs) -- keeps priority without dropping
+    # the root below system headers.
     eff_includes = list(includes)
     eff_tokens: tuple[str, ...] = cc.gcc_option_tokens
     deferred_dirs: tuple[Path, ...] = ()
@@ -1345,11 +1347,10 @@ def _dump_pe(
     ]
 
     # ADR-024 Phase 1 (PDB provenance): when header scoping was requested but
-    # castxml could not resolve a surface (commonly the MSVC C++-mangling gap),
-    # recover declared types — *with their defining source header* — from the
-    # PDB debug info so that public-header scoping still has a provenance
-    # signal to classify against. Bounded to this fallback branch so default
-    # PE diffs (no --header) are unaffected.
+    # castxml could not resolve a surface (commonly the MSVC C++-mangling
+    # gap), recover declared types -- with their defining source header --
+    # from PDB debug info, so public-header scoping still has a provenance
+    # signal to classify against. Bounded so default PE diffs are unaffected.
     pdb_types: list[RecordType] = []
     pdb_enums: list[EnumType] = []
     if headers and dwarf_meta is not None:
@@ -1616,14 +1617,12 @@ def compare_snapshots(
     """
     _validate_contract_mode(contract_mode, contract_evaluation)
     # Centralized POST committed-wrapper recovery: when a committed-surface
-    # allowlist is supplied, union the callable `pp_*` wrappers exported by the
-    # old snapshot (contract_scope_allowlist's snapshot half). This keeps both
-    # dropped wrappers and still-exported-but-omitted wrappers in-surface when a
-    # caller scopes against a new manifest, preventing manifest omissions from
-    # hiding ABI breaks. Every scope caller (CLI, run_compare_request, direct API)
-    # routes through here, so recovery happens once and uniformly; it is a no-op
-    # when the allowlist/binaries carry no `pp_*` wrappers. Idempotent if the
-    # caller already unioned it.
+    # allowlist is supplied, union the callable `pp_*` wrappers exported by
+    # the old snapshot (contract_scope_allowlist's snapshot half) -- keeps
+    # both dropped and still-exported-but-omitted wrappers in-surface, so a
+    # scope against a new manifest can't hide an ABI break via omission.
+    # Every scope caller routes through here (one place, no-op with no
+    # `pp_*` wrappers, idempotent if already unioned).
     if public_surface_allowlist is not None:
         from .post_manifest import _snapshot_contract_symbols
 

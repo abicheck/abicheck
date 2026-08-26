@@ -5474,6 +5474,34 @@ Once a root command genuinely clears the bar above, pick the right home:
   spelling, which is strictly worse; closing it needs the real artifact (or
   a live castxml/DWARF repro of a closure-parameterized ctor) first.
 
+- **The L5 source graph's own node identities are never renumbered
+  alongside the flat snapshot's closure markers (Codex review on PR #868,
+  fresh evidence).** `renumber_anonymous_closure_identities` rewrites a
+  closure's `:<line>:<col>` discriminator to a stable `#N` ordinal across
+  `AbiSnapshot.functions`/`variables`/`types`/`enums`/`typedefs`/
+  `constants`/`fact_provenance` (`_LAMBDA_IDENTITY_FIELDS`), but
+  `service_header_graph_attach._attach_header_graph`'s embedded
+  `build_source.source_graph` is built by a genuinely separate clang
+  parse (`buildsource.header_graph`), whose node ids
+  (`graph_facts._decl_node_id`/`_type_node_id`) are derived directly from
+  the raw, un-renumbered identity string -- confirmed by reading both
+  functions, which apply no renumbering at all. A closure-parameterized
+  declaration therefore reads as `Foo<(lambda...)#1>` in the flat snapshot
+  but `Foo<(lambda:file.h:20:5)>` in its own source-graph node, so any
+  consumer trying to correlate the two (e.g. matching a flat finding back
+  to its graph neighborhood) sees two different spellings for the same
+  entity. **Not fixed here**: a correct fix needs the ordinal map
+  `collect_anonymous_type_ordinals` computes from the flat fields to also
+  be applied to every graph node id/name *and* every edge's `src`/`dst`
+  reference to it -- and the source graph can name a closure the flat
+  ABI-surface fields never mention at all (an internal-linkage helper
+  visible only in the L5 graph), which the flat-only ordinal map has no
+  entry for, so naively reusing it risks leaving some graph-only closures
+  unrenumbered while their flat-visible siblings are. A correct fix likely
+  needs the ordinal collection widened to scan the graph's own node/edge
+  strings too, verified against a case that actually mixes flat-visible
+  and graph-only closures in one header -- a real, cross-cutting change
+  to two independently-evolving modules, not a same-PR reactive patch.
 - Don't hand-edit `CHANGELOG.md`'s `## [Unreleased]` section directly — add a `changelog.d/` fragment instead (see Conventions above); CI enforces this
 - Don't modify `examples/` test cases without understanding the ground truth they encode
 - Don't add dependencies without strong justification (this is a lightweight tool)
