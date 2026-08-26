@@ -27,11 +27,10 @@ design hits. The ``BundleFacts``-aware glue lives in ``serialization.py``'s
 ``save_bundle_facts``/``load_bundle_facts``; see the G40 design plan
 (``docs/contribute/plans/g40-content-addressed-bundle-archive.md``).
 
-Zip, not tar (`.tar.zst`): its end-of-file central directory names every
-member's offset/compressed length, so `zipfile.ZipFile.open(name)` reads
-exactly one member without touching any other. Each payload is
-zstd-compressed independently (``ZIP_STORED``), not ``ZIP_DEFLATED``
-(ADR-059's codec).
+Zip, not tar: its end-of-file central directory names every member's
+offset/compressed length, so `zipfile.ZipFile.open(name)` reads exactly
+one member without touching any other. Each payload is zstd-compressed
+independently (``ZIP_STORED``), not ``ZIP_DEFLATED`` (ADR-059's codec).
 """
 
 from __future__ import annotations
@@ -54,7 +53,12 @@ from .json_budget import (
     JsonNestingTooDeepError,
     check_json_container_budget,
 )
-from .zstd_frame_guard import validate_zstd_frame_completeness
+from .zstd_frame_guard import (
+    read_past_leading_skippable_frames,
+    skip_leading_skippable_frames,
+    starts_with_skippable_frame_magic,
+    validate_zstd_frame_completeness,
+)
 
 #: The manifest member's own name -- always the first thing a reader
 #: touches, readable without scanning or decompressing any blob member.
@@ -107,9 +111,8 @@ def _blob_member_name(content_hash: str) -> str:
     return f"{_BLOB_PREFIX}{content_hash}{_BLOB_SUFFIX}"
 
 
-#: A fixed zip timestamp (the format's own epoch floor -- 1980-01-01) used
-#: for every member this module writes -- otherwise `ZipFile.writestr`
-#: stamps `time.localtime()`, so identical facts on two days would differ.
+#: A fixed zip timestamp (the format's epoch floor) for every member this
+#: module writes -- else `ZipFile.writestr` stamps `time.localtime()`.
 _ZIP_EPOCH = (1980, 1, 1, 0, 0, 0)
 
 
@@ -162,18 +165,17 @@ def open_regular_file_for_format_sniff(
     path: str | Path,
 ) -> tuple[Any | None, str]:
     """``format="auto"``'s fd-sharing counterpart to
-    `sniff_bundle_archive_format` -- opens *path* once, peeks its 4-byte
-    magic, and returns ``(fp, "archive"|"json")`` with *fp* left at its
-    post-peek position to reuse (`BundleArchiveReader.from_open_file`)
-    instead of reopening a second time, else a concurrent atomic
-    replacement could swap in a different generation (Codex).
+    `sniff_bundle_archive_format` -- opens *path* once, peeks its magic
+    (past a leading zstd skippable frame if any), and returns ``(fp,
+    "archive"|"json")`` with *fp* left at its post-peek position to
+    reuse (`BundleArchiveReader.from_open_file`) instead of reopening,
+    else a concurrent atomic replacement could swap generations (Codex).
     ``(None, "json")`` for a non-regular-file source -- don't close *fp*."""
     p = Path(path)
     # A path-level stat() first, BEFORE any open() -- opening a FIFO at
-    # all, even briefly/nonblocking, can complete a one-shot producer's
-    # own blocking open()-for-write, leaving a later, separate open() to
-    # block forever for a writer that already came and went (Codex
-    # review, reproduced with a real FIFO). stat() never blocks; the
+    # all, even nonblocking, can complete a one-shot producer's own
+    # blocking open()-for-write, leaving a later open() to block forever
+    # (Codex, reproduced with a real FIFO). stat() never blocks; the
     # fd-level fstat() below stays the source of truth against a swap.
     try:
         path_st = os.stat(p)
@@ -199,6 +201,15 @@ def open_regular_file_for_format_sniff(
     fp = os.fdopen(fd, "rb")
     try:
         prefix = fp.read(4)
+        # A zstd JSON envelope may start with a skippable metadata frame
+        # ahead of its real magic -- read past it so the check below
+        # sees the real frame instead of falling through to the ZIP-tail
+        # heuristic (which a crafted trailing skippable frame's own
+        # EOCD-shaped tail can then satisfy; Codex, reproduced with a
+        # real decodable stream). `read_past_...` returns raw bytes (some
+        # callers need them unstripped); `skip_...` strips them here.
+        if starts_with_skippable_frame_magic(prefix):
+            prefix = skip_leading_skippable_frames(read_past_leading_skippable_frames(fp, prefix))
     except OSError as exc:
         # A failure reading the peek must not leak the fd or propagate a
         # raw OSError -- this module's error contract is SnapshotError.
@@ -237,8 +248,8 @@ def _open_unique_temp(parent: Path, prefix: str, suffix: str) -> tuple[int, Path
     """Atomically create a unique, exclusively-owned temp file in *parent*,
     mode ``0o666`` filtered through the umask. Mirrors ``snapshot_io.
     _open_unique_temp`` (dependency-free copy), except ``O_RDWR`` not
-    ``O_WRONLY``: `close()` reads this fd back (`os.dup`) to hash what it
-    wrote, avoiding a path-based reopen a hostile actor could redirect."""
+    ``O_WRONLY``: `close()` reads this fd back (`os.dup`) to hash what
+    it wrote, avoiding a path-based reopen an attacker could redirect."""
     for _ in range(100):
         candidate = parent / f"{prefix}{secrets.token_hex(8)}{suffix}"
         try:
@@ -270,16 +281,15 @@ class BundleArchiveWriter:
     leave a truncated archive where a prior, valid one already stood.
 
     If *path* is a symlink, the temp file is created next to -- and
-    ``close()`` replaces -- the link's *real target*, not the link itself
-    (a bare ``os.replace(tmp, path)`` on a symlink destination would
-    destroy the link for every other reader). Mirrors
-    ``snapshot_io._atomic_write_bytes``'s own symlink handling.
+    ``close()`` replaces -- the link's *real target* (a bare
+    ``os.replace(tmp, path)`` on a symlink destination would destroy the
+    link for every other reader). Mirrors ``snapshot_io._atomic_write_
+    bytes``'s own symlink handling.
 
     A pre-existing destination with more than one hard link is rejected
     outright (replacing one entry would desynchronize the others). Its
-    existing mode/owner/group are preserved onto the replacement, same as
-    `snapshot_io._atomic_write_bytes` -- ownership restoration is *not*
-    best-effort, a failed chown aborts the write. *path*'s parent
+    existing mode/owner/group are preserved onto the replacement (not
+    best-effort -- a failed chown aborts the write). *path*'s parent
     directory is created (``parents=True``) if missing."""
 
     def __init__(self, path: str | Path) -> None:
@@ -334,12 +344,10 @@ class BundleArchiveWriter:
 
     def put_blob(self, payload: bytes) -> str:
         """Write *payload* (zstd-compressed) if not already present under
-        its own content hash; returns the hash either way.
-
-        Deduplication happens here: a second `put_blob` call with
-        byte-identical content to an earlier one is a no-op beyond
-        computing the hash -- one member per unique content, regardless
-        of how many logical entries reference it."""
+        its own content hash; returns the hash either way. Deduplication
+        happens here: a second `put_blob` call with byte-identical
+        content is a no-op beyond computing the hash -- one member per
+        unique content, regardless of how many entries reference it."""
         h = content_hash(payload)
         if h in self._written_hashes:
             return h
@@ -482,11 +490,9 @@ class BundleArchiveWriter:
     def _abort(self) -> None:
         """Close the in-progress zip handle and discard its temp file --
         *path* (if it already held a prior archive) is never touched.
-
-        `self._zf.close()`/`self._tmp_file.close()` can each raise
-        (ENOSPC/EIO) -- both nested in their own `finally` so the unlink
-        always runs regardless of which fails (Codex: a bare `finally`
-        around only the first close skipped it if the second raised)."""
+        `self._zf.close()`/`self._tmp_file.close()` can each raise --
+        both nested in their own `finally` so the unlink always runs
+        regardless of which fails (Codex)."""
         try:
             try:
                 self._zf.close()
@@ -509,11 +515,10 @@ class BundleArchiveWriter:
 
 
 class BundleArchiveReader:
-    """Reads one content-addressed zip archive, lazily.
-
-    `read_manifest()` and `read_blob()` each touch only the one zip member
-    they name -- `zipfile.ZipFile.open()`'s own contract, which is exactly
-    why this format is zip rather than a solid-stream tar."""
+    """Reads one content-addressed zip archive, lazily. `read_manifest()`
+    and `read_blob()` each touch only the one zip member they name --
+    `zipfile.ZipFile.open()`'s own contract, exactly why this format is
+    zip rather than a solid-stream tar."""
 
     def __init__(self, path: str | Path, *, _fp: Any | None = None) -> None:
         self._path = Path(path)
@@ -589,23 +594,19 @@ class BundleArchiveReader:
     @classmethod
     def from_open_file(cls, fp: Any, path: str | Path) -> BundleArchiveReader:
         """Construct from an already-open, seekable binary file object at
-        *path* (left at any position -- rewound internally) -- shares the
-        fd a caller used to sniff *path*'s format, closing the gap between
-        "this looked like an archive" and "open it as one". Takes
-        ownership of *fp* -- closed by this reader's own `close()`/
-        context-manager exit."""
+        *path* (left at any position -- rewound internally) -- shares
+        the fd a caller used to sniff *path*'s format. Takes ownership
+        of *fp* -- closed by this reader's own `close()`/context exit."""
         return cls(path, _fp=fp)
 
     def _read_stored_member(self, name: str, *, max_bytes: int) -> bytes:
         """Read one zip member's raw bytes, rejecting anything but
-        ``ZIP_STORED`` compression, and bounding the read to *max_bytes*.
-
+        ``ZIP_STORED`` compression, and bounding the read to *max_bytes*
+        (a still-`ZIP_STORED` member can claim an enormous size --
+        checked via `ZipInfo.file_size`, enforced via a chunked read).
         Every member `BundleArchiveWriter` produces is `ZIP_STORED`
-        deliberately -- a crafted `ZIP_DEFLATED` member could otherwise
-        expand to an arbitrary allocation via ``ZipExtFile.read()``.
-        Rejecting deflate alone isn't a size bound: a still-`ZIP_STORED`
-        member can claim an enormous size -- checked via
-        `ZipInfo.file_size`, enforced via a bounded, chunked read."""
+        deliberately -- a `ZIP_DEFLATED` member could otherwise expand
+        to an arbitrary allocation via ``ZipExtFile.read()``."""
         info = self._zf.getinfo(name)
         if info.compress_type != zipfile.ZIP_STORED:
             raise SnapshotError(
@@ -727,11 +728,10 @@ class BundleArchiveReader:
         Streams the decompression in bounded chunks against
         *max_decoded_bytes* (a bare ``ZstdDecompressor.decompress(data)``
         call would allocate the full output regardless). Re-hashes the
-        decoded payload against *content_hash_hex* -- the member name
-        alone is not a verified property of its content. The outer,
+        decoded payload against *content_hash_hex*. The outer,
         still-compressed read is bounded by *max_decoded_bytes* plus a
-        fixed slack margin (zstd overhead), with the decoded running
-        total as the tight bound."""
+        fixed slack margin, with the decoded running total the tight
+        bound."""
         member = _blob_member_name(content_hash_hex)
         try:
             compressed = self._read_stored_member(

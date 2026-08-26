@@ -911,3 +911,81 @@
   `tests/test_json_budget.py` (new file) for the shared primitive itself,
   including the Python-3.14 depth regression. All confirmed to fail
   against the pre-fix code before applying each fix.
+
+- **G40 bundle archive: three direct follow-up Codex review findings on the
+  skippable-frame fix above, all real, all fixed.** (1) `read_snapshot_
+  bytes()`'s own internal classification call was fixed to see past a
+  leading zstd skippable frame, but the *other* public probes --
+  `detect_snapshot_compression()`, `read_snapshot_storage_info()`, and
+  `bounded_decoded_prefix()` -- each still only read a bare 4-byte prefix
+  from disk, so a real zstd file with a leading skippable frame still
+  misclassified as uncompressed through those entry points (worse,
+  `bounded_decoded_prefix()` returned the still-compressed raw bytes as
+  though they were the decoded content). (2) The new `skip_leading_
+  skippable_frames()` helper (added for the sibling fix above) reintroduced
+  the exact quadratic-slicing bug `validate_zstd_frame_completeness` had
+  already been fixed for in an earlier round -- a bare `remaining =
+  remaining[total:]` on `bytes` copies the entire unread tail every
+  iteration, confirmed at ~11s for 200,000 zero-length skippable frames,
+  and `read_snapshot_bytes()` now passes its whole buffer through this
+  same helper. (3) `bundle_archive.py`'s own archive-format sniff
+  (`open_regular_file_for_format_sniff()`) only ever read a bare 4-byte
+  prefix too, so a leading-skippable-frame-prefixed zstd `BundleFacts`
+  JSON envelope fell through to the ZIP-tail EOCD heuristic unnecessarily
+  -- and, since zstd permits a skippable frame anywhere in a stream
+  (including *after* the real data frame), a crafted trailing skippable
+  frame whose own user data ends in a structurally-plausible empty-ZIP
+  EOCD landing exactly at file end let a real, independently-decodable
+  zstd JSON blob misclassify as `"archive"` (reproduced with exactly this
+  construction, not a hypothetical one).
+
+  Fixed (2) the same way the earlier `validate_zstd_frame_completeness`
+  fix did: an integer cursor into the original `bytes`, sliced exactly
+  once at the end. Fixed (1) and (3) with two new shared primitives in
+  `storage/zstd_frame_guard.py` -- `starts_with_skippable_frame_magic()`
+  (a fast, no-I/O check so the overwhelmingly common non-skippable-frame
+  case never pays for anything extra) and `read_past_leading_skippable_
+  frames()` (an escalating, forward-only, capped read that grows a
+  caller's initial small prefix only when ambiguous) -- consumed by
+  `snapshot_io.py`'s three probes (which also needed the *original*,
+  unstripped bytes preserved for hashing/plain-content use, unlike the
+  first fix's classification-only need) and by `bundle_archive.py`'s own
+  sniff (which additionally re-applies `skip_leading_skippable_frames()`
+  to the escalated read before the magic-prefix check, since the shared
+  primitive intentionally returns raw bytes, not the stripped view).
+
+  New tests: `tests/test_snapshot_compression_skippable_frames.py` gained
+  four more cases (the three public probes together, an escalation-is-
+  skipped-for-ordinary-files guard, the primitive-level quadratic-time
+  regression, and the public reader at the same 200,000-frame scale);
+  `tests/test_bundle_archive_skippable_frame_sniff.py` (new file, same
+  ADR-061 no-growth reasoning as the sibling split) covers the archive
+  sniff directly, including the crafted-trailing-EOCD construction. All
+  confirmed to fail against the pre-fix code before applying each fix.
+
+- **Separately investigated, at the coordinator's request: a reported CI
+  failure on the `unit-tests (ubuntu-latest, 3.13, false)` lane
+  (`docs/reference/cli-reference.md` drift on `scan`'s `--allow-ast-
+  frontend-fallback`/`--allow-unsupported-castxml` "Default" column).
+  Confirmed pre-existing on `main`, unrelated to this PR, no fix applied
+  here.** `docs/reference/cli-reference.md` is byte-identical between this
+  branch and `main` at every point checked, and `scripts/gen_cli_
+  reference.py --check` passes cleanly against both under the `click`
+  version already installed in this environment (8.4.2). Reproduced by
+  installing `click==8.5.0` (the newest PyPI release, and this repo's
+  `pyproject.toml` pins only `click>=8.0`, a floor with no ceiling): the
+  live-rendered reference then disagrees with the checked-in doc on
+  exactly the two reported flags, on both this branch and a fresh clone of
+  `main` alike. Root cause: Click 8.5.0 changed `is_flag=True` options to
+  keep their `default` as an internal `UNSET` sentinel until lazily
+  resolved (`Option.__init__`'s own new docstring/comment), rather than
+  eagerly assigning `False` the way every older Click version did;
+  `gen_cli_reference.py`'s `_default_str()` reads `param.default` directly
+  or (via a fragile `type(default).__name__ == "Sentinel"` string check)
+  and cannot tell a still-unresolved flag default from a genuinely
+  optionless one, rendering `—` instead of `` `False` ``. A real, if
+  narrow and unrelated, bug in a doc-generation script combined with an
+  unpinned dependency floor -- not something this PR's diff (`bundle_
+  facts.py`/`storage/*`/`snapshot_io.py`) has any bearing on, and not
+  fixed here per this repo's CI-red convention (pre-existing on the base
+  branch).

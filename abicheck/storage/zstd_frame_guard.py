@@ -231,15 +231,88 @@ def skip_leading_skippable_frames(data: bytes) -> bytes:
 
     Detection-only: a truncated/malformed skippable frame is left alone
     rather than raising -- that is `validate_zstd_frame_completeness`'s
-    job, once real decompression is attempted, not this cheap pre-check's."""
-    remaining = data
-    while len(remaining) >= 8:
-        (magic,) = struct.unpack_from("<I", remaining, 0)
+    job, once real decompression is attempted, not this cheap pre-check's.
+
+    Advances via an integer cursor into *data* -- never re-slicing it
+    inside the loop -- and slices exactly once at the end, so a stream of
+    many small leading skippable frames stays linear rather than
+    quadratic (mirrors `validate_zstd_frame_completeness`'s own zero-copy
+    advancement; a bare `remaining = remaining[total:]` on `bytes` inside
+    this loop copied the entire unread tail every iteration, ~11s for
+    200,000 zero-length frames confirmed empirically, Codex review)."""
+    length = len(data)
+    pos = 0
+    while length - pos >= 8:
+        (magic,) = struct.unpack_from("<I", data, pos)
         if not (_SKIPPABLE_FRAME_MAGIC_LOW <= magic <= _SKIPPABLE_FRAME_MAGIC_HIGH):
             break
-        (frame_size,) = struct.unpack_from("<I", remaining, 4)
+        (frame_size,) = struct.unpack_from("<I", data, pos + 4)
         total = 8 + frame_size
-        if len(remaining) < total:
+        if length - pos < total:
             break  # truncated -- leave it for the real decode path to report
-        remaining = remaining[total:]
-    return remaining
+        pos += total
+    return data[pos:]
+
+
+def starts_with_skippable_frame_magic(prefix: bytes) -> bool:
+    """Whether *prefix*'s first 4 bytes are a zstd skippable-frame magic --
+    the fast, no-I/O check a caller uses to decide whether it's worth
+    reading further before giving up on a small fixed-size probe (only a
+    skippable-frame-prefixed stream can have more to find past it; a
+    plain/gzip/real-zstd-frame prefix never does, so callers skip the
+    escalated read entirely for the overwhelmingly common case)."""
+    if len(prefix) < 4:
+        return False
+    (magic,) = struct.unpack_from("<I", prefix, 0)
+    return bool(_SKIPPABLE_FRAME_MAGIC_LOW <= magic <= _SKIPPABLE_FRAME_MAGIC_HIGH)
+
+
+#: Default step/cap for `read_past_leading_skippable_frames()` -- matches
+#: `snapshot_io.py`'s own `_SNIFF_BYTES`/`_BOUNDED_PREFIX_MAX_RAW_BYTES`
+#: bounded-prefix-sniffing conventions, shared here so every caller (not
+#: just that module) reads the same bounded amount by default.
+DEFAULT_PROBE_STEP_BYTES = 4096
+DEFAULT_PROBE_MAX_BYTES = 1024 * 1024  # 1 MiB
+
+
+def read_past_leading_skippable_frames(
+    f: Any,
+    prefix: bytes,
+    *,
+    step: int = DEFAULT_PROBE_STEP_BYTES,
+    cap: int = DEFAULT_PROBE_MAX_BYTES,
+) -> bytes:
+    """Given *prefix* (a small already-read run of bytes from the START of
+    *f*, an open, forward-readable file-like object) that starts with a
+    zstd skippable-frame magic, keep reading additional bytes from *f*
+    (appended, never re-reading what's already been consumed -- safe for
+    a non-seekable stream too) until `skip_leading_skippable_frames`
+    finds either real content past every leading skippable frame, or
+    *cap* total bytes have been read.
+
+    Shared by every caller that needs to see past a leading skippable
+    frame before classifying a small, bounded prefix -- `snapshot_io.py`'s
+    compression probes and `bundle_archive.py`'s own format sniff alike
+    (Codex review, fresh evidence on both). Callers check
+    `starts_with_skippable_frame_magic(prefix)` first and only call this
+    when it's true -- a plain/gzip/real-zstd-frame/zip prefix never has
+    more to find past it, so the overwhelmingly common case never pays
+    for this escalated read at all."""
+    buf = prefix
+    chunk_size = max(len(buf), step)
+    while len(buf) < cap:
+        skipped = skip_leading_skippable_frames(buf)
+        # A *non-empty* result that no longer starts with a skippable
+        # magic is resolved -- real content (or genuinely non-magic
+        # bytes) was found. An *empty* result means the buffer ended
+        # exactly on a skippable-frame boundary -- ambiguous (there may
+        # be more just past it), so keep reading rather than treating it
+        # as "nothing left" prematurely.
+        if skipped and not starts_with_skippable_frame_magic(skipped):
+            break
+        more = f.read(min(chunk_size, cap - len(buf)))
+        if not more:
+            break  # true EOF -- nothing more to read
+        buf += more
+        chunk_size = min(chunk_size * 4, cap)
+    return buf

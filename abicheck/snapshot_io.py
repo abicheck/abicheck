@@ -45,7 +45,9 @@ from typing import Any
 
 from .errors import SnapshotError
 from .storage.zstd_frame_guard import (
+    read_past_leading_skippable_frames,
     skip_leading_skippable_frames,
+    starts_with_skippable_frame_magic,
     validate_zstd_frame_completeness,
 )
 
@@ -228,16 +230,32 @@ def detect_compression_from_bytes(prefix: bytes) -> SnapshotCompression:
     return SnapshotCompression.NONE
 
 
+def _read_past_leading_skippable_frames(f: Any, prefix: bytes) -> bytes:
+    """This module's own step/cap bound to the shared primitive in
+    `storage.zstd_frame_guard` -- see that function's docstring; kept as
+    a thin wrapper so every call site here reads `_SNIFF_BYTES`/
+    `_BOUNDED_PREFIX_MAX_RAW_BYTES` (this module's own, pre-existing
+    bounded-prefix-sniffing constants) rather than the shared default."""
+    return read_past_leading_skippable_frames(
+        f, prefix, step=_SNIFF_BYTES, cap=_BOUNDED_PREFIX_MAX_RAW_BYTES
+    )
+
+
 def detect_snapshot_compression(path: str | Path) -> SnapshotCompression:
     """Detect a stored snapshot's compression from its magic bytes.
 
     Reads a small bounded prefix — never a full decompression just to sniff
-    the format.
+    the format. Escalates that read (up to `_BOUNDED_PREFIX_MAX_RAW_BYTES`)
+    only when the prefix itself starts with a zstd skippable-frame magic
+    (Codex review, fresh evidence: a leading skippable frame otherwise
+    read as an uncompressed file, since 4 bytes can't see past it).
     """
     p = Path(path)
     try:
         with open(p, "rb") as f:
             prefix = f.read(4)
+            if starts_with_skippable_frame_magic(prefix):
+                prefix = _read_past_leading_skippable_frames(f, prefix)
     except OSError as exc:
         raise SnapshotError(f"Cannot read {p}: {exc}") from exc
     return detect_compression_from_bytes(prefix)
@@ -326,6 +344,11 @@ def read_snapshot_storage_info(path: str | Path) -> SnapshotStorageInfo:
         with open(p, "rb") as f:
             stored_size = os.fstat(f.fileno()).st_size
             prefix = f.read(4)
+            # Escalate only when ambiguous (a leading skippable-frame
+            # magic) -- forward-only, so it stays compatible with the
+            # sequential hash loop below (Codex review, fresh evidence).
+            if starts_with_skippable_frame_magic(prefix):
+                prefix = _read_past_leading_skippable_frames(f, prefix)
             compression = detect_compression_from_bytes(prefix)
             digest = hashlib.sha256()
             digest.update(prefix)
@@ -591,10 +614,19 @@ def bounded_decoded_prefix(path: str | Path, n: int = _SNIFF_BYTES) -> bytes | N
     try:
         with open(p, "rb") as f:
             probe = f.read(4)
+            # Escalate only when ambiguous (a leading skippable-frame
+            # magic) -- a plain/gzip/real-zstd-frame probe never has more
+            # to find past it, so the common case pays nothing extra
+            # (Codex review, fresh evidence).
+            if starts_with_skippable_frame_magic(probe):
+                probe = _read_past_leading_skippable_frames(f, probe)
             compression = detect_compression_from_bytes(probe)
             if compression is SnapshotCompression.NONE:
-                return (probe + f.read(max(n, 4) - len(probe)))[:n]
-            raw_size = max(n, 4)
+                more_needed = max(n, 4) - len(probe)
+                if more_needed > 0:
+                    probe += f.read(more_needed)
+                return probe[:n]
+            raw_size = max(n, len(probe))
             while True:
                 f.seek(0)
                 head = f.read(raw_size)

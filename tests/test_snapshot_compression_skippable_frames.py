@@ -29,9 +29,21 @@ import pytest
 
 from abicheck.snapshot_io import (
     SnapshotCompression,
+    bounded_decoded_prefix,
     detect_compression_from_bytes,
+    detect_snapshot_compression,
     read_snapshot_bytes,
+    read_snapshot_storage_info,
 )
+from abicheck.storage.zstd_frame_guard import skip_leading_skippable_frames
+
+
+def _leading_skippable_zstd_bytes(payload: bytes, zstandard, *, user_data: bytes = b"some-metadata") -> bytes:
+    cctx = zstandard.ZstdCompressor(write_content_size=True)
+    real_frame = cctx.compress(payload)
+    skippable_magic = struct.pack("<I", 0x184D2A50)
+    skippable_frame = skippable_magic + struct.pack("<I", len(user_data)) + user_data
+    return skippable_frame + real_frame
 
 
 def test_leading_skippable_frame_recognized_as_zstd(tmp_path):
@@ -62,9 +74,113 @@ def test_leading_skippable_frame_recognized_as_zstd(tmp_path):
 def test_leading_skippable_frame_too_short_to_classify_stays_none(tmp_path):
     """A bare 4-byte skippable-frame magic prefix (no room for the
     Frame_Size field, let alone the real frame after it) cannot be safely
-    skipped -- confirms the detection fix degrades to the pre-existing
-    behavior rather than guessing when too little of the buffer is
-    available, as every 4-byte-prefix-only caller (e.g.
-    ``detect_snapshot_compression``) still is."""
+    skipped -- confirms `detect_compression_from_bytes()` itself degrades
+    to the pre-existing behavior rather than guessing when too little of
+    the buffer is available. `detect_snapshot_compression()` and its
+    siblings now escalate their own on-disk read when ambiguous (see
+    `test_public_probe_call_sites_see_past_a_leading_skippable_frame`
+    below) -- this test is scoped to the pure byte-prefix classifier,
+    which has no file to read further from."""
     prefix = struct.pack("<I", 0x184D2A50)  # only 4 bytes -- no Frame_Size
     assert detect_compression_from_bytes(prefix) is SnapshotCompression.NONE
+
+
+def test_public_probe_call_sites_see_past_a_leading_skippable_frame(tmp_path):
+    """`read_snapshot_bytes()`'s own internal classification call was
+    fixed to pass its full buffer, but the *other* public probes --
+    `detect_snapshot_compression()`, `read_snapshot_storage_info()`, and
+    `bounded_decoded_prefix()` -- each still only read a bare 4-byte
+    prefix from disk, so none of them could see past a leading skippable
+    frame either: `detect_snapshot_compression()`/`read_snapshot_storage_
+    info()` reported `NONE` (uncompressed) for a real zstd file, and
+    `bounded_decoded_prefix()` returned the still-compressed raw bytes
+    as though they were the decoded content (Codex review, fresh
+    evidence, follow-up to the `read_snapshot_bytes()` fix)."""
+    zstandard = pytest.importorskip("zstandard")
+
+    payload = json.dumps({"library": "x", "version": "1"}).encode()
+    blob = _leading_skippable_zstd_bytes(payload, zstandard)
+    p = tmp_path / "leading_skippable.abicheck.json.zst"
+    p.write_bytes(blob)
+
+    assert detect_snapshot_compression(p) is SnapshotCompression.ZSTD
+    assert read_snapshot_storage_info(p).compression is SnapshotCompression.ZSTD
+    assert bounded_decoded_prefix(p, n=64) == payload
+
+
+def test_bounded_prefix_escalation_is_skipped_for_ordinary_files(tmp_path, monkeypatch):
+    """The escalated read is gated on `starts_with_skippable_frame_magic`
+    so the overwhelmingly common case (no leading skippable frame at all)
+    never pays for it -- confirmed by making the escalation helper raise
+    if it's ever reached for a plain gzip/zstd/plain file."""
+    import abicheck.snapshot_io as snapshot_io_module
+
+    def _must_not_be_called(*_a, **_kw):
+        raise AssertionError("escalation helper called for a non-ambiguous prefix")
+
+    monkeypatch.setattr(
+        snapshot_io_module, "read_past_leading_skippable_frames", _must_not_be_called
+    )
+
+    plain = tmp_path / "plain.abicheck.json"
+    plain.write_bytes(json.dumps({"library": "x", "version": "1"}).encode())
+    assert detect_snapshot_compression(plain) is SnapshotCompression.NONE
+    assert read_snapshot_storage_info(plain).compression is SnapshotCompression.NONE
+    assert bounded_decoded_prefix(plain) is not None
+
+
+def test_read_past_leading_skippable_frames_stays_linear(tmp_path):
+    """`skip_leading_skippable_frames()` (the new function added earlier
+    in this PR to fix `read_snapshot_bytes()`'s own leading-skippable-
+    frame detection) reintroduced the exact quadratic-slicing bug
+    `validate_zstd_frame_completeness` already had to fix in an earlier
+    round: a bare `remaining = remaining[total:]` on `bytes` copies the
+    entire unread tail on every iteration, making the walk quadratic in
+    stored size. Confirmed empirically before the cursor-based fix: ~11s
+    for 200,000 zero-length skippable frames (~1.6 MiB) -- and
+    `read_snapshot_bytes()` now passes its whole buffer through this
+    same helper, so this is a real, newly-reachable DoS vector, not a
+    hypothetical one (Codex review, fresh evidence). Mirrors
+    `tests/test_bundle_archive_cd_guard.py`'s identical historical
+    coverage for `validate_zstd_frame_completeness`'s own instance of
+    this bug."""
+    import time
+
+    magic = struct.pack("<I", 0x184D2A50)
+    one_frame = magic + struct.pack("<I", 0)
+    n_frames = 200_000
+    data = one_frame * n_frames
+
+    t0 = time.monotonic()
+    result = skip_leading_skippable_frames(data)
+    elapsed = time.monotonic() - t0
+
+    assert result == b""
+    assert elapsed < 5.0, f"expected near-linear walk, took {elapsed:.2f}s for {n_frames} frames"
+
+
+def test_read_snapshot_bytes_handles_many_leading_skippable_frames_at_realistic_scale(tmp_path):
+    """Covers the public reader end-to-end at the same realistic frame
+    count the primitive-level test above uses directly, per the review
+    comment's own request ("cover the public reader at a realistic frame
+    count")."""
+    import time
+
+    zstandard = pytest.importorskip("zstandard")
+
+    payload = json.dumps({"library": "x", "version": "1"}).encode()
+    magic = struct.pack("<I", 0x184D2A50)
+    one_frame = magic + struct.pack("<I", 0)
+    n_frames = 200_000
+    cctx = zstandard.ZstdCompressor(write_content_size=True)
+    blob = one_frame * n_frames + cctx.compress(payload)
+
+    p = tmp_path / "many_leading_skippable.abicheck.json.zst"
+    p.write_bytes(blob)
+
+    t0 = time.monotonic()
+    result = read_snapshot_bytes(p)
+    elapsed = time.monotonic() - t0
+
+    assert result == payload
+    assert elapsed < 5.0, f"expected near-linear walk, took {elapsed:.2f}s for {n_frames} frames"
