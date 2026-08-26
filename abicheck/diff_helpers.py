@@ -700,6 +700,8 @@ def _normalize_type_spelling(name: str, *, strip_indirection: bool) -> str:
     *strip_indirection* controls whether trailing pointer/reference sigils are dropped. ``_normalize_type_name``'s own same-tier callers want them dropped (a pointee cv-qualifier change like ``char *`` -> ``const char *`` is source churn, not a layout break). Cross-tier comparison must NOT drop them (Codex review, fresh evidence): stripping ``*``/``&`` made ``Foo * -> Bar *`` (DWARF) and ``Foo -> Bar`` (header) compare equal, silently hiding a genuine indirection-level disagreement between the two tiers' own evidence -- exactly the class of bug this whole value-agreement gate exists to catch.
     """
     s = name.strip()
+    # Collapse whitespace directly touching a pointer/reference sigil ("Foo *" / "Foo* " / "Foo * *") to a single canonical spelling *before* any other step, regardless of strip_indirection -- when indirection is kept (cross-tier comparison), this is the difference between correctly matching "Foo*" (header) against "Foo *" (DWARF) and wrongly treating a pure spacing difference as a real indirection-level disagreement (Codex review, fresh evidence: preserving "*"/"&" for the indirection fix above still needs their surrounding whitespace normalized).
+    s = re.sub(r"\s*([*&])\s*", r"\1", s).strip()
     if strip_indirection:
         # Remove trailing pointer/reference decorators and CV-qualifiers
         s = re.sub(r"[\s*&]+$", "", s).strip()

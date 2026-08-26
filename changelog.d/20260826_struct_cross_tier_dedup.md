@@ -139,3 +139,12 @@
   `canonicalize_record_symbol`'s explicit `qualified_hint` always wins
   over the ambiguity table while an unhinted, unrecognized symbol is
   always returned unchanged.
+- **Follow-up (Codex review): preserving `*`/`&` for the indirection fix
+  above still let a pure spacing difference read as a false
+  indirection-level disagreement.** `_normalize_type_spelling` (with
+  `strip_indirection=False`) only stripped outer whitespace, so
+  `"Foo*"` (header) vs. `"Foo *"`/`"struct Foo * "` (DWARF) compared
+  unequal even though both describe the same pointer type, blocking a
+  dedup that should still happen. It now collapses whitespace directly
+  touching a `*`/`&` sigil to a single canonical spelling before any
+  other normalization step, regardless of `strip_indirection`.

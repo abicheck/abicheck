@@ -455,6 +455,24 @@ class TestDeduplication:
         result = _deduplicate_ast_dwarf(changes)
         assert len(result) == 1
 
+    def test_field_type_transition_agreeing_modulo_indirection_whitespace_still_deduped(self):
+        """Codex review, fresh evidence: preserving `*`/`&` for the
+        indirection fix above still needs their surrounding whitespace
+        normalized, or a pure extractor-spelling difference ("Foo*" vs
+        "Foo *" vs "struct Foo * ") reads as a false indirection-level
+        disagreement and blocks a dedup that should still happen."""
+        from abicheck.checker import _deduplicate_ast_dwarf
+
+        changes = [
+            Change(ChangeKind.TYPE_FIELD_TYPE_CHANGED, "S::a",
+                   "Field type changed: S::a", old_value="Foo*", new_value="Bar*"),
+            Change(ChangeKind.STRUCT_FIELD_TYPE_CHANGED, "S::a",
+                   "Field type changed: S::a",
+                   old_value="struct Foo * ", new_value="struct Bar * "),
+        ]
+        result = _deduplicate_ast_dwarf(changes)
+        assert len(result) == 1
+
     def test_exact_dedup_same_kind(self):
         """Exact duplicates by (kind, description) are removed."""
         from abicheck.checker import _deduplicate_ast_dwarf
