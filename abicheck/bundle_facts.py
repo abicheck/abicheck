@@ -22,18 +22,15 @@ baseline the way every other surface this tool supports (``scan
 closes that gap with a serializable ``BundleFacts`` object and a
 ``compare_bundle_from_facts()`` entry point, without adding any new
 *extraction*: it reuses :func:`abicheck.bundle.build_bundle_snapshot_from_metadata`,
-the primitive already built to construct a fully-functional
-:class:`~abicheck.bundle_models.BundleSnapshot` (cross-DSO ``DT_NEEDED``/
-symbol-version resolution included) from already-parsed
+already built to construct a fully-functional
+:class:`~abicheck.bundle_models.BundleSnapshot` from already-parsed
 :class:`~abicheck.elf_metadata.ElfMetadata` alone — exactly what
-:attr:`abicheck.model.AbiSnapshot.elf` already stores for every ELF
-``dump``. ``BundleFacts`` therefore stores only what isn't already
-reconstructible from an ``AbiSnapshot`` (the manifest, plus a
-variant-fingerprint slot G38 Phase 3 will populate), deriving everything
-else — the resolution graph, provider/consumer tables, SONAME/version
-data — from each library's own ``ElfMetadata`` on load, the same way a
-live ``compare_bundle()`` run does, so ``BundleFacts`` can never drift out
-of sync with :func:`abicheck.bundle._compute_resolution_graph`.
+:attr:`abicheck.model.AbiSnapshot.elf` already stores. ``BundleFacts``
+therefore stores only what isn't already reconstructible from an
+``AbiSnapshot`` (the manifest, plus a variant-fingerprint slot G38 Phase 3
+will populate), deriving everything else on load the same way a live
+``compare_bundle()`` run does, so it can never drift out of sync with
+:func:`abicheck.bundle._compute_resolution_graph`.
 
 This is a leaf module with respect to :mod:`abicheck.bundle`: it imports
 that module only lazily, inside function bodies, to avoid a needless import
@@ -121,12 +118,9 @@ class BundleFacts:
     *basename* at capture time (``libfoo_core.so.1``, not the canonical
     ``libfoo_core.so`` key) -- needed by ``bundle._detect_soname_skew``'s
     own ``path.name`` fallback for a versioned DSO with no usable
-    ``DT_SONAME``: without it, reconstruction falls back to
-    ``Path(canonical_key)``, whose ``.name`` is the canonical,
-    *unversioned* key -- no derivable major, so ``bundle_soname_skew``
-    silently goes unreported for a stored-baseline comparison a live one
-    would have caught (Codex review). Empty for a caller that didn't pass
-    real paths at capture time, same as ``filesystem_aliases``."""
+    ``DT_SONAME``, else it silently goes unreported for a stored-baseline
+    comparison a live one would have caught (Codex review). Empty for a
+    caller that didn't pass real paths, same as ``filesystem_aliases``."""
 
     schema_version: int = BUNDLE_FACTS_SCHEMA_VERSION
     variant_fingerprint: str = DEFAULT_VARIANT_FINGERPRINT
@@ -208,11 +202,8 @@ def bundle_snapshot_from_facts(facts: BundleFacts) -> BundleSnapshot:
     function's ``paths`` -- a real on-disk filename reconstructed as
     ``Path(filename)`` rather than the default ``Path(canonical_key)``
     fallback, so ``bundle._detect_soname_skew``'s own SONAME-major
-    fallback sees the real, versioned filename instead of the canonical,
-    unversioned key (Codex review -- see that field's own docstring). A
-    name absent from ``library_filenames`` falls back to
-    ``build_bundle_snapshot_from_metadata``'s own default, unchanged.
-    """
+    fallback sees the real, versioned filename (Codex review). A name
+    absent from ``library_filenames`` falls back to the default."""
     from .bundle import build_bundle_snapshot_from_metadata
 
     metadata = {}
@@ -258,20 +249,16 @@ def compare_bundle_from_facts(
     asserts.
 
     *manifest*, given explicitly, overrides *old_facts.manifest* (mirroring
-    ``compare_bundle()``'s own ``manifest=`` parameter, which always wins
-    over whatever a stored baseline recorded); otherwise the manifest
-    captured in *old_facts* is reused.
+    ``compare_bundle()``'s own ``manifest=`` parameter); otherwise the
+    manifest captured in *old_facts* is reused.
 
     *new_signature_evidence* (G38 stabilization Phase 12), when given and
-    non-empty, is the NEW side's bundle-canonical-key -> ``AbiSnapshot`` (or
-    the compact ``BundleSignatureEvidence`` projection) map for
-    ``find_unverified_signature_findings`` -- the OLD side's own map is
-    always *old_facts.per_library_snapshots* itself, already exactly this
-    shape. Omitted (the default): the Phase 4 gate does not run, matching
-    every pre-Phase-12 caller exactly -- there is not yet a CLI producer
-    for a live NEW-side evidence map here (G38 Phase 13 is separate,
-    not-yet-implemented), so this parameter exists for a caller that
-    already has one rather than being wired to anything today.
+    non-empty, is the NEW side's bundle-canonical-key -> ``AbiSnapshot``
+    map for ``find_unverified_signature_findings`` -- the OLD side's own
+    map is always *old_facts.per_library_snapshots* itself. Omitted (the
+    default): the Phase 4 gate does not run, matching every pre-Phase-12
+    caller -- there is not yet a CLI producer for a live NEW-side evidence
+    map here (G38 Phase 13 is separate, not-yet-implemented).
     """
     from .bundle_analysis import analyze_bundle
 
@@ -372,6 +359,15 @@ def maybe_read_bundle_facts_archive(
         resolved = format
     if resolved == "archive":
         return read_bundle_facts_archive(path, snapshot_from_dict=snapshot_from_dict, _fp=fp)
+    # Known residual gap (Codex review, fresh evidence): when the sniff
+    # resolves to "json", *fp* is closed rather than handed to the
+    # caller's own, separate `read_snapshot_text(path)` call, so the same
+    # sniff-then-reopen race the archive branch above closes still
+    # applies in this direction. Not closed: threading *fp* through
+    # `snapshot_io.read_snapshot_bytes`/`read_snapshot_text` needs a new
+    # parameter on that module, which is `debt.yaml`-locked `no_growth`
+    # pending its own ADR-061 migration -- that migration's review, not a
+    # same-pass patch from this unrelated fix.
     if fp is not None:
         fp.close()
     if resolved != "json":
@@ -474,6 +470,13 @@ def write_bundle_facts_archive(
     # real per-copy total (Codex review, fresh evidence).
     hash_counts = Counter(library_blobs.values())
     reader_charged_bytes = sum(len(unique_payloads[h]) * n for h, n in hash_counts.items())
+    # manifest_blob is fetched exactly once (no duplicate-copy treatment)
+    # -- if its hash isn't already one of the library hashes just summed,
+    # the reader's own _cached_blob() still charges its bytes once on a
+    # cache miss, which this sum would otherwise omit entirely (Codex
+    # review, fresh evidence).
+    if manifest_blob is not None and manifest_blob not in hash_counts:
+        reader_charged_bytes += len(unique_payloads[manifest_blob])
     if reader_charged_bytes > DEFAULT_MAX_BUNDLE_DECODED_BYTES:
         raise SnapshotError(
             f"{p}: writing this bundle's content, once every duplicate "
@@ -558,10 +561,8 @@ def read_bundle_facts_archive(
     """Read a G40 content-addressed zip archive at *path* back into a
     :class:`BundleFacts`.
 
-    Loads every library's blob (a whole-bundle load, matching plain
-    ``load_bundle_facts``'s own contract) -- a caller wanting only one
-    library's snapshot without paying for the rest uses
-    ``storage.bundle_archive.BundleArchiveReader`` directly instead.
+    Loads every library's blob -- a caller wanting only one library's
+    snapshot uses ``storage.bundle_archive.BundleArchiveReader`` directly.
 
     *_fp*, when given, is an already-open fd reused from
     ``maybe_read_bundle_facts_archive``'s own format sniff (Codex)."""

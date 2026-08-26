@@ -184,6 +184,24 @@ class TestBundleArchiveWriterReader:
     def test_default_max_manifest_bytes_is_64_mib(self) -> None:
         assert DEFAULT_MAX_MANIFEST_BYTES == 64 * 1024 * 1024
 
+    def test_write_manifest_rejects_a_manifest_over_the_reader_own_cap(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The primitive `write_manifest()` itself must reject an oversized
+        manifest, not only `bundle_facts.write_bundle_facts_archive`'s own
+        higher-level preflight -- a caller using this public primitive
+        directly bypasses that check entirely, and `read_manifest()`
+        rejects anything over this same limit unconditionally (Codex
+        review, fresh evidence)."""
+        import abicheck.storage.bundle_archive as bundle_archive_module
+
+        monkeypatch.setattr(bundle_archive_module, "DEFAULT_MAX_MANIFEST_BYTES", 100)
+        path = tmp_path / "bundle.archive.zip"
+        with pytest.raises(SnapshotError, match="exceeding the 100 byte"):
+            with BundleArchiveWriter(path) as writer:
+                writer.write_manifest({"library_blobs": {}, "padding": "x" * 200})
+        assert not path.exists()
+
     def test_read_blob_rejects_content_that_does_not_match_its_hash(
         self, tmp_path: Path
     ) -> None:

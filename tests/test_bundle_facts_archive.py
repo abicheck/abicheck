@@ -603,6 +603,35 @@ class TestBundleFactsArchiveFormat:
             save_bundle_facts(facts, out, format="archive")
         assert not out.exists()
 
+    def test_save_rejects_a_write_whose_manifest_blob_alone_would_exceed_the_aggregate_cap(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The write-side aggregate-byte accounting only summed hashes
+        referenced by `library_blobs` -- a `manifest_blob` whose hash
+        isn't already shared with any library (the common case) never
+        contributed to that sum at all, even though the reader's own
+        `_cached_blob()` genuinely charges it once on load. A bundle with
+        no (or small) library snapshots but an oversized manifest would
+        therefore pass this check and then be rejected on load (Codex
+        review, fresh evidence)."""
+        import abicheck.bundle_facts as bundle_facts_module_local
+
+        monkeypatch.setattr(
+            bundle_facts_module_local, "DEFAULT_MAX_BUNDLE_DECODED_BYTES", 100
+        )
+        manifest = InstantiationManifest(
+            entries=tuple(
+                ManifestEntry(symbol=f"sym_{i}", optional_provider=False)
+                for i in range(20)
+            )
+        )
+        facts = capture_bundle_facts({}, manifest=manifest)  # no library snapshots at all
+        out = tmp_path / "oversized-manifest-only.bundlefacts.archive.zip"
+
+        with pytest.raises(SnapshotError, match="exceed the 100"):
+            save_bundle_facts(facts, out, format="archive")
+        assert not out.exists()
+
     def test_save_rejects_a_write_that_would_exceed_the_reader_own_aggregate_cap(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:

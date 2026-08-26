@@ -29,16 +29,15 @@ hit.
 The ``BundleFacts``-aware glue lives in ``serialization.py``'s
 ``save_bundle_facts``/``load_bundle_facts``, same as the plain-JSON format.
 See the G40 design plan,
-``docs/contribute/plans/g40-content-addressed-bundle-archive.md`` for the
-full design.
+``docs/contribute/plans/g40-content-addressed-bundle-archive.md``.
 
 Zip, not tar (`.tar.zst`, the original review sketch's own naming): zip
 carries a real end-of-file central directory naming every member's offset
 and independently-compressed length, so `zipfile.ZipFile.open(name)` reads
 and decompresses exactly one member without touching any other. Each
 member's own *payload* is zstd-compressed independently (``ZIP_STORED``)
-rather than zip's own ``ZIP_DEFLATED``, since zstd is this project's
-compression codec of record (ADR-059).
+rather than zip's own ``ZIP_DEFLATED``, this project's codec of record
+(ADR-059).
 """
 
 from __future__ import annotations
@@ -290,13 +289,10 @@ class BundleArchiveWriter:
     outright: replacing just this one directory entry would silently
     desynchronize every other link. The destination's existing file mode
     (and, where supported, owner/group) are preserved onto the
-    replacement, mirroring `snapshot_io._atomic_write_bytes`'s own guard.
-    Ownership restoration is *not* best-effort: a failed chown aborts the
-    write rather than silently publishing under the wrong owner/group.
-
-    *path*'s parent directory is created (``parents=True``) if missing,
-    matching the ``format="json"`` path's own behavior.
-    """
+    replacement, mirroring `snapshot_io._atomic_write_bytes`'s own guard --
+    ownership restoration is *not* best-effort, a failed chown aborts the
+    write. *path*'s parent directory is created (``parents=True``) if
+    missing, matching the ``format="json"`` path's own behavior."""
 
     def __init__(self, path: str | Path) -> None:
         self._path = Path(path)
@@ -380,12 +376,10 @@ class BundleArchiveWriter:
         its own content hash; returns the hash either way.
 
         Deduplication happens here, at the point of writing: a second
-        `put_blob` call with byte-identical content to an earlier one in
-        the same archive is a no-op beyond computing the hash -- the
-        archive ends up with exactly one member for that content,
-        regardless of how many logical entries (library snapshots, an
-        instantiation manifest) reference it.
-        """
+        `put_blob` call with byte-identical content to an earlier one is a
+        no-op beyond computing the hash -- the archive ends up with
+        exactly one member for that content, regardless of how many
+        logical entries reference it."""
         h = content_hash(payload)
         if h in self._written_hashes:
             return h
@@ -399,9 +393,21 @@ class BundleArchiveWriter:
     def write_manifest(self, manifest: dict[str, Any]) -> None:
         if self._manifest_written:
             raise SnapshotError("BundleArchiveWriter.write_manifest() called twice")
-        self._zf.writestr(
-            _deterministic_zipinfo(MANIFEST_MEMBER), json.dumps(manifest, indent=2)
-        )
+        encoded = json.dumps(manifest, indent=2)
+        # Enforced here too, not only by bundle_facts.write_bundle_facts_
+        # archive()'s own higher-level preflight -- a direct caller of
+        # this public primitive bypasses that check, and read_manifest()
+        # rejects anything over this same limit unconditionally (Codex
+        # review, fresh evidence).
+        encoded_bytes = len(encoded.encode("utf-8"))
+        if encoded_bytes > DEFAULT_MAX_MANIFEST_BYTES:
+            raise SnapshotError(
+                f"manifest.json would be {encoded_bytes} bytes, exceeding "
+                f"the {DEFAULT_MAX_MANIFEST_BYTES} byte safety limit "
+                "read_manifest() enforces on load -- refusing to write an "
+                "archive that could not be reopened."
+            )
+        self._zf.writestr(_deterministic_zipinfo(MANIFEST_MEMBER), encoded)
         self._manifest_written = True
 
     def close(self) -> None:
@@ -630,13 +636,11 @@ class BundleArchiveReader:
         Every member `BundleArchiveWriter` produces is `ZIP_STORED`
         deliberately -- a crafted `ZIP_DEFLATED` member could otherwise
         expand to an arbitrary in-memory allocation via ``ZipExtFile.
-        read()`` before `read_blob`'s own zstd decoded-size guard runs.
-        Rejecting deflate alone isn't a size bound though: a still-
-        `ZIP_STORED` member can simply claim (and contain) an enormous
-        size -- checked first via the cheap ``ZipInfo.file_size``
-        metadata, enforced for real via a bounded, chunked read (in case
-        that metadata were spoofed). Checked here, once, for both
-        `read_manifest` and `read_blob`.
+        read()``. Rejecting deflate alone isn't a size bound though: a
+        still-`ZIP_STORED` member can claim (and contain) an enormous
+        size -- checked via the cheap ``ZipInfo.file_size`` metadata,
+        enforced for real via a bounded, chunked read. Checked here,
+        once, for both `read_manifest` and `read_blob`.
         """
         info = self._zf.getinfo(name)
         if info.compress_type != zipfile.ZIP_STORED:
@@ -724,16 +728,13 @@ class BundleArchiveReader:
 
         Also re-hashes the decoded payload and checks it against
         *content_hash_hex* -- the member name alone is just a zip entry
-        name, not a verified property of its content, so a corrupted or
-        hand-assembled archive could otherwise hand back unchecked bytes
-        under a given hash's name (Codex review).
+        name, not a verified property of its content (Codex review).
 
         The *outer*, still-compressed member read is bounded by
         *max_decoded_bytes* plus a fixed slack margin, not the bare
-        decoded cap -- zstd's own frame/block overhead can make an
-        incompressible payload's compressed form larger than its decoded
-        size (Codex review). The decoded running-total check below
-        remains the tight, authoritative bound.
+        decoded cap -- zstd's own overhead can make an incompressible
+        payload's compressed form larger than its decoded size (Codex
+        review). The decoded running-total check below is the tight bound.
         """
         member = _blob_member_name(content_hash_hex)
         try:

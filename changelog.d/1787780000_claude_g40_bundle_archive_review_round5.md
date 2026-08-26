@@ -30,3 +30,18 @@
   Writer`'s temp-file/security/metadata hardening tests, split out of
   `tests/test_bundle_archive.py` purely to keep both under the ADR-061
   1200-line test cap after these additions.
+
+- **G40 bundle archive: two more Codex review findings, both real, both
+  fixed.** (1) The write-side aggregate-byte cap only summed hashes
+  referenced by `library_blobs` -- `manifest_blob`'s own hash, when not
+  already shared with any library snapshot (the common case), never
+  contributed to that sum, even though the reader's own `_cached_blob()`
+  genuinely charges it once on load. A bundle with no (or small) library
+  snapshots but an oversized manifest would pass the write-side check and
+  then be rejected on load. Now included, charged exactly once (matching
+  the reader's own cache-hit-vs-miss behavior). (2) The low-level
+  `BundleArchiveWriter.write_manifest()` primitive had no size check at
+  all -- a caller using it directly (not through `bundle_facts.write_
+  bundle_facts_archive`'s own higher-level preflight) could publish a
+  manifest larger than what `read_manifest()` unconditionally accepts.
+  Now enforced in the primitive itself too.
