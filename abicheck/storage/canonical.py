@@ -263,6 +263,57 @@ def canonical_json(
     )
 
 
+def _has_surrogate_pair(text: str) -> bool:
+    """Whether ``text`` contains a high surrogate followed by a low one."""
+    return any(
+        "\ud800" <= text[index] <= "\udbff" and "\udc00" <= text[index + 1] <= "\udfff"
+        for index in range(len(text) - 1)
+    )
+
+
+def _reject_surrogate_pairs(value: Any) -> None:
+    """Refuse a string whose ASCII payload would not identify it uniquely.
+
+    The ASCII payload is what makes this module's lone-surrogate support work
+    (see :func:`semantic_digest`), and it has one blind spot: JSON escapes a
+    non-BMP scalar *as* a surrogate pair, so ``"\\U0001f600"`` and the
+    two-code-unit string ``"\\ud83d\\ude00"`` — which are not equal, and which
+    :func:`canonical_json` does distinguish — render identically and hash to
+    one address (Codex review). Two unequal values sharing a content address
+    is the failure a content-addressed store cannot tolerate, and here the
+    *stored document* and its *address* disagree about whether they differ,
+    which is worse than a plain collision.
+
+    Refused rather than escaped, and the two are not symmetric. A lone
+    surrogate is a real POSIX path this module deliberately supports; a
+    surrogate *pair* is a non-BMP scalar spelled the way UTF-16 spells it,
+    which `json.loads` of the payload silently turns into the scalar anyway.
+    Inventing an escape for it would mean this module addressing content by a
+    rule no other implementation could re-derive — giving up exactly the
+    property the ASCII payload was chosen for. Refusing says which of the two
+    the caller should pass.
+    """
+    if isinstance(value, str):
+        if _has_surrogate_pair(value):
+            raise ValueError(
+                "a surrogate pair cannot be addressed distinctly from the "
+                f"non-BMP character it spells ({value!r}); pass the character "
+                "itself. A *lone* surrogate is supported — it is what a "
+                "surrogateescape-decoded path carries."
+            )
+        return
+    if isinstance(value, Mapping):
+        for key, item in value.items():
+            _reject_surrogate_pairs(key)
+            _reject_surrogate_pairs(item)
+        return
+    if isinstance(value, (Sequence, set, frozenset)) and not isinstance(
+        value, (str, bytes)
+    ):
+        for item in value:
+            _reject_surrogate_pairs(item)
+
+
 def semantic_digest(value: Any, *, algorithm: str = "sha256") -> str:
     """Content digest of a value's canonical form, capture metadata excluded.
 
@@ -295,8 +346,10 @@ def semantic_digest(value: Any, *, algorithm: str = "sha256") -> str:
     computed the old way. It would not be free later, which is why it is
     settled now.
     """
+    stripped = strip_capture_metadata(value)
+    _reject_surrogate_pairs(stripped)
     payload = json.dumps(
-        strip_capture_metadata(value),
+        stripped,
         ensure_ascii=True,
         sort_keys=True,
         separators=(",", ":"),

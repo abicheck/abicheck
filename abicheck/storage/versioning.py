@@ -148,13 +148,6 @@ def _stated_text(raw: object) -> str:
     return raw if isinstance(raw, str) else ""
 
 
-#: Key types whose ``str()`` is the same in every process. Deliberately an
-#: allowlist: hashability is not the property that matters here, and the
-#: types that fail it (``frozenset``, any object rendering its address) are
-#: exactly the ones an inference would have to guess about.
-_STABLE_KEY_TYPES = (str, bool, int, float)
-
-
 def _stated_sections(raw: object) -> dict[str, int]:
     """The section-version mapping, normalized identically at both doors.
 
@@ -178,28 +171,37 @@ def _stated_sections(raw: object) -> dict[str, int]:
     being degraded to empty — a key *names* its entry, so every degraded key
     would name the same entry.
 
-    A key must have a *process-stable* string form, though, and being
-    hashable does not give it one (Codex review). ``str()`` on a
-    ``frozenset`` renders its members in hash order, which for strings varies
-    with ``PYTHONHASHSEED``: one logical versions block emitted three
-    different section names — and three different semantic digests — across
-    three interpreters. An object without ``__str__`` renders its address.
-    Sorting cannot repair either, because it runs *after* the conversion.
+    **Only ``str`` keys are kept; every other key is dropped.** That is the
+    fourth answer this field has had to the question "how do you stringify a
+    key safely", and the previous three each survived one review round:
 
-    So the accepted key types are enumerated rather than inferred from
-    hashability, and an unsupported key is dropped. Dropping loses an
-    informational entry, which is the lesser harm: the alternative is a
-    content address that depends on which process wrote it. A document
-    parsed from JSON is unaffected either way — its keys are always strings.
+    * plain ``str(k)`` let two keys collide with the survivor decided by
+      traversal order;
+    * sorting fixed the collapse but not the conversion, so a ``frozenset``
+      key — whose ``str()`` renders members in hash order — still gave one
+      logical block three section names and three digests across three
+      interpreters;
+    * an allowlist of ``str``/``bool``/``int``/``float``/``None`` fixed that
+      and left ``{1: 2}``, ``{1.0: 2}`` and ``{True: 2}`` — which are *the
+      same mapping* in Python — emitting ``"1"``, ``"1.0"`` and ``"True"``,
+      with three digests for one value. ``0.0`` and ``-0.0`` likewise.
+
+    Each fix drew the next instance, which is this repo's own signal to
+    change the mechanism rather than patch the rule again. There is no
+    stringification of a non-``str`` key that is both injective and
+    order-independent, because Python's key *equality* does not distinguish
+    the spellings its ``str()`` does. Keeping only what JSON can actually
+    carry removes the question.
+
+    A document parsed from JSON is unaffected: its keys are always strings.
+    A caller hand-constructing a numeric key loses an informational entry,
+    which is the lesser harm against a content address that disagrees with
+    the mapping's own notion of equality.
     """
     if not isinstance(raw, Mapping):
         return {}
     return dict(
-        sorted(
-            (str(k), _stated_count(v))
-            for k, v in raw.items()
-            if isinstance(k, _STABLE_KEY_TYPES) or k is None
-        )
+        sorted((k, _stated_count(v)) for k, v in raw.items() if isinstance(k, str))
     )
 
 

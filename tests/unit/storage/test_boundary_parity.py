@@ -48,7 +48,7 @@ from abicheck.storage.availability import (
     FactAvailability,
     FactStatus,
 )
-from abicheck.storage.canonical import semantic_digest
+from abicheck.storage.canonical import canonical_json, semantic_digest
 from abicheck.storage.identity import (
     EntityId,
     EntityKind,
@@ -712,77 +712,81 @@ class TestTheSectionVersionMappingIsNormalizedAtBothDoors:
         assert StorageVersions.from_dict(versions.to_dict()) == versions
 
 
-class TestASectionKeyHasAProcessStableName:
-    """Hashable is not the property a content address needs.
+class TestOnlyAStringSectionKeySurvives:
+    """The fourth answer this field has had, and the one that ends the class.
 
-    `str()` on a `frozenset` renders its members in hash order, which for
-    strings varies with `PYTHONHASHSEED` — so one logical versions block
-    emitted three different section names and three different semantic
-    digests across three interpreters (Codex review). Sorting cannot repair
-    it, because sorting runs after the conversion.
+    Three rules for stringifying a non-`str` key each survived one review
+    round and then produced the next finding: `str(k)` collided with the
+    survivor decided by traversal order; sorting fixed the collapse but not
+    the conversion, so a `frozenset` key still varied with `PYTHONHASHSEED`;
+    an allowlist of stable scalars fixed *that* and left `{1: 2}`,
+    `{1.0: 2}` and `{True: 2}` — the same mapping in Python — with three
+    section names and three digests.
 
-    Verified across real interpreters in
-    `test_a_frozenset_key_is_unstable_across_processes` rather than only
-    asserted here, since the whole claim is about behaviour this process
-    cannot see.
+    There is no stringification that is both injective and
+    order-independent, because Python's key *equality* does not distinguish
+    the spellings its `str()` does. Keeping only what JSON can carry removes
+    the question rather than answering it again.
     """
 
-    @pytest.mark.parametrize("key", [frozenset({"a", "b"}), object(), (1, 2), b"k"])
-    def test_an_unstable_key_is_dropped(self, key: Any) -> None:
-        """`(1, 2)` and `b"k"` are dropped too, and that is deliberate.
-
-        Their `str()` happens to be stable, so this is stricter than the
-        stated rule requires. The allowlist is enumerated rather than
-        inferred precisely so that a type nobody has reasoned about is
-        excluded by default — a tuple of *frozensets* is not stable, and no
-        rule short of a recursive walk separates it from `(1, 2)`. A JSON
-        document never has such a key, so nothing real is lost.
-        """
+    @pytest.mark.parametrize(
+        "key",
+        [1, 1.0, True, 0.0, -0.0, None, frozenset({"a", "b"}), b"k", (1, 2), object()],
+    )
+    def test_a_non_string_key_is_dropped(self, key: Any) -> None:
         emitted = StorageVersions(section_schema_versions={key: 1}).to_dict()
 
         assert "section_schema_versions" not in emitted
 
-    @pytest.mark.parametrize("key", ["entities", 7, True, 1.5, None])
-    def test_a_stable_key_is_kept(self, key: Any) -> None:
-        """Dropping the unstable case must not drop the ordinary ones."""
-        emitted = StorageVersions(section_schema_versions={key: 3}).to_dict()
+    @pytest.mark.parametrize("mapping", [{1: 2}, {1.0: 2}, {True: 2}])
+    def test_equal_mappings_cannot_disagree(self, mapping: Any) -> None:
+        """`{1: 2}`, `{1.0: 2}` and `{True: 2}` are one mapping in Python.
 
-        assert emitted["section_schema_versions"] == {str(key): 3}
+        Whatever the rule is, three spellings of one value must not produce
+        three addresses. They produce one now because none of them is kept —
+        which is a blunter answer than making them agree, and the only one
+        that does not depend on a stringification rule holding.
+        """
+        assert (
+            len(
+                {
+                    semantic_digest(
+                        StorageVersions(section_schema_versions=m).to_dict()
+                    )
+                    for m in ({1: 2}, {1.0: 2}, {True: 2})
+                }
+            )
+            == 1
+        )
+        assert (
+            "section_schema_versions"
+            not in StorageVersions(section_schema_versions=mapping).to_dict()
+        )
 
-    def test_a_mixed_mapping_keeps_only_the_stable_keys(self) -> None:
+    def test_a_string_key_is_kept(self) -> None:
+        """Dropping the rest must not disturb the only shape JSON produces."""
+        versions = StorageVersions(section_schema_versions={"entities": 3, "attrs": 1})
+
+        assert versions.to_dict()["section_schema_versions"] == {
+            "attrs": 1,
+            "entities": 3,
+        }
+        assert StorageVersions.from_dict(versions.to_dict()) == versions
+
+    def test_a_mixed_mapping_keeps_only_the_string_keys(self) -> None:
         versions = StorageVersions(
-            section_schema_versions={"entities": 3, frozenset({"a", "b"}): 9}
+            section_schema_versions={"entities": 3, 7: 9, frozenset({"a"}): 4}
         )
 
         assert versions.to_dict()["section_schema_versions"] == {"entities": 3}
 
-    def test_a_frozenset_key_is_unstable_across_processes(self) -> None:
-        """The premise, measured — not taken on trust.
-
-        Three real interpreters with different `PYTHONHASHSEED` values. If
-        this ever stops holding, the guard above is still harmless, but the
-        reason recorded for it would be wrong, and a future reader should
-        find that out from a failure rather than from the docstring.
-        """
-        script = "print(str(frozenset({'alpha', 'beta', 'gamma', 'delta', 'epsilon'})))"
-        renderings = {
-            subprocess.run(
-                [sys.executable, "-c", script],
-                env={**os.environ, "PYTHONHASHSEED": seed},
-                capture_output=True,
-                text=True,
-                check=True,
-            ).stdout.strip()
-            for seed in ("1", "2", "3", "4", "5")
-        }
-
-        assert len(renderings) > 1, (
-            "expected `str(frozenset)` to vary with PYTHONHASHSEED; if it no "
-            f"longer does, the stated reason for _STABLE_KEY_TYPES is stale: {renderings}"
-        )
-
     def test_the_digest_is_the_same_in_every_process(self) -> None:
-        """What the guard is actually for, measured end to end."""
+        """What the rule is for, measured across real interpreters.
+
+        A `frozenset` key rendered its members in hash order, so one logical
+        block addressed differently per process. It is dropped now, but the
+        property worth pinning is the digest, not the mechanism.
+        """
         script = (
             "from abicheck.storage.versioning import StorageVersions;"
             "from abicheck.storage.canonical import semantic_digest;"
@@ -801,3 +805,55 @@ class TestASectionKeyHasAProcessStableName:
         }
 
         assert len(digests) == 1, digests
+
+
+class TestASurrogatePairCannotShareAnAddress:
+    """The ASCII payload's one blind spot.
+
+    JSON escapes a non-BMP scalar *as* a surrogate pair, so the scalar and
+    the two-code-unit string that spells it render identically — two unequal
+    strings, one address, in a store that addresses by content. Worse than a
+    plain collision: `canonical_json` *does* distinguish them, so the stored
+    document and its address disagree about whether they differ.
+
+    Refused rather than escaped. A lone surrogate is a real POSIX path this
+    module supports; a pair is a scalar spelled the UTF-16 way, and inventing
+    an escape for it would address content by a rule no other implementation
+    could re-derive — giving up the property the ASCII payload was chosen
+    for.
+    """
+
+    SCALAR = chr(0x1F600)
+    PAIR = chr(0xD83D) + chr(0xDE00)
+
+    def test_the_two_are_not_equal_to_begin_with(self) -> None:
+        """The premise: if these were equal, sharing an address would be right."""
+        assert self.PAIR != self.SCALAR
+        assert len(self.PAIR) == 2
+        assert len(self.SCALAR) == 1
+
+    @pytest.mark.parametrize(
+        "payload",
+        [
+            {"k": PAIR},
+            {PAIR: 1},
+            [PAIR],
+            {"a": [{"b": PAIR}]},
+            {"a": {PAIR}},
+        ],
+    )
+    def test_a_pair_is_refused_at_any_depth(self, payload: Any) -> None:
+        with pytest.raises(ValueError, match="surrogate pair"):
+            semantic_digest(payload)
+
+    def test_the_scalar_itself_is_fine(self) -> None:
+        assert semantic_digest({"k": self.SCALAR}).startswith("sha256:")
+
+    def test_a_lone_surrogate_is_still_supported(self) -> None:
+        """The documented case this must not break: a real POSIX path."""
+        assert semantic_digest({"p": "/src/caf\udce9.h"}).startswith("sha256:")
+        assert semantic_digest({"p": self.SCALAR + "\udce9"}).startswith("sha256:")
+
+    def test_canonical_json_still_distinguishes_them(self) -> None:
+        """Which is why sharing an address was a disagreement, not a choice."""
+        assert canonical_json({"k": self.PAIR}) != canonical_json({"k": self.SCALAR})

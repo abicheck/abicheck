@@ -426,10 +426,14 @@ class TestDecisionKeysAreRejectedNotCoerced:
     def test_the_informational_version_axis_still_parses_defensively(self) -> None:
         """The distinction is deliberate, so it is pinned rather than assumed.
 
-        `section_schema_versions` keeps its `str()` because it is one of the
-        five informational axes: no decision reads them, and this repo's rule
-        is that a hand-edited package must not abort a load. Everything in the
-        availability ledger *is* read by a decision, which is why it rejects.
+        The ledger *rejects* a non-string key, because everything in it is
+        read by a decision. `section_schema_versions` is one of the five
+        informational axes — no decision reads them, and this repo's rule is
+        that a hand-edited package must never abort a load — so it degrades
+        instead. What it degrades *to* changed after four review rounds: it
+        used to be `str(k)`, and is now "dropped", since no stringification
+        of a non-string key is both injective and order-independent. The
+        distinction being pinned here is unaffected: reject versus degrade.
         """
         versions = StorageVersions.from_dict(
             {
@@ -439,7 +443,7 @@ class TestDecisionKeysAreRejectedNotCoerced:
             }
         )
 
-        assert versions.section_schema_versions == {"1": 2}
+        assert versions.section_schema_versions == {}
 
 
 class TestProvenanceIsRejectedNotCoerced:
@@ -647,10 +651,16 @@ class TestTheInformationalMappingAxisRoundTrips:
         assert StorageVersions.from_dict(emitted).to_dict() == emitted
 
     def test_serialization_does_not_raise_on_mixed_key_types(self) -> None:
-        """The half that was not a wrong value but an aborted write."""
+        """The half that was not a wrong value but an aborted write.
+
+        Mixed key types used to raise from `sorted` part-way through the
+        write. The non-string key is dropped now rather than stringified —
+        see `TestOnlyAStringSectionKeySurvives` in the parity file for why —
+        but the property this test is about is that the write completes.
+        """
         emitted = StorageVersions(section_schema_versions={1: 1, "b": 2}).to_dict()
 
-        assert emitted["section_schema_versions"] == {"1": 1, "b": 2}
+        assert emitted["section_schema_versions"] == {"b": 2}
 
     def test_a_well_formed_mapping_is_untouched(self) -> None:
         """Normalizing the malformed case must not disturb the valid one."""
