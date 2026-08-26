@@ -480,3 +480,20 @@
   resolves the format unambiguously (the plain-JSON path transparently
   decompresses from it), so there's nothing for the fallback to add and
   every reason not to trust its tail for such a file.
+
+- **G40 bundle archive: two more Codex review findings, both real, both
+  fixed.** (1) `BundleArchiveReader._read_stored_member()`'s streaming
+  read only caught `zipfile.BadZipFile` (the member's CRC-32 check) --
+  a transient I/O failure partway through (e.g. `EIO` on a network
+  filesystem) raises a raw `OSError` from `ZipExtFile.read()` instead,
+  escaping this module's `SnapshotError` contract the same way every
+  other failure here is translated. Now caught and translated too. (2)
+  `bundle_facts.py`'s two blob-decode call sites (each library's own
+  snapshot blob, and `manifest_blob`) called `json.loads()` directly
+  with no error handling at all -- unlike the already-hardened
+  `BundleArchiveReader.read_manifest()`, neither invalid JSON syntax nor
+  a deeply nested payload (`RecursionError`, a distinct exception class
+  from `JSONDecodeError`) was translated, so `load_bundle_facts()` could
+  leak a raw exception for a hostile/malformed blob. Both call sites now
+  route through a new, shared `_load_blob_json()` helper mirroring
+  `read_manifest()`'s own translation.
