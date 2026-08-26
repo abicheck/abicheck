@@ -1035,6 +1035,19 @@ what actually shipped.**
   in place (still valid zstd/JSON, but no longer matching its own member
   name's hash) must raise on load, not return the substituted content
   under the original, now-incorrect content address.
+- **Lazy read rejects a too-new `bundle_facts_schema_version` before
+  touching `library_blobs`** (Codex review, fresh evidence — the Status
+  note and Phase 2 below both require this check on every lazy per-library
+  path; without a test pinning it, an implementation can satisfy every
+  other test in this list while omitting or misordering it) — an archive
+  whose `manifest["bundle_facts_schema_version"]` is one greater than
+  `BUNDLE_FACTS_SCHEMA_VERSION` must be rejected by the direct
+  `BundleArchiveReader`-based lazy per-library read above (`read_manifest()`
+  then `read_blob()` against a `library_blobs` entry), the same way the
+  whole-bundle `read_bundle_facts_archive()` path already rejects it — and
+  the rejection must happen before any `library_blobs` lookup or blob read
+  is attempted, not merely before the caller tries to *use* the returned
+  `AbiSnapshot`.
 - **Atomic publication: a failed write leaves a prior valid archive
   untouched** (Codex review — the requirement introduced above under
   "Publication must be atomic", not previously exercised by any test in
@@ -1148,8 +1161,11 @@ Status line above states, this sizing was borne out rather than merely
 estimated: PR #869 shipped this scope (plus the several correctness rounds
 this document's own "Codex review, fresh evidence" annotations record) with
 no detector-logic changes and no FP-rate/mutation-score involvement, exactly
-as sized here — the manifest-integrity known limitation is the one item
-that grew the scope beyond this original estimate, and it remains open.
+as sized here — two known limitations grew the scope beyond this original
+estimate, and both remain open: the manifest-integrity gap in Phase 2 below
+(no reader-side binding on `manifest.json` itself), and the lazy per-library
+reader's missing `bundle_facts_schema_version` check (see the Status note
+above and Phase 2 below for what closing each would need).
 
 ## Out of scope
 

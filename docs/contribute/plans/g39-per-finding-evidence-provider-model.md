@@ -1215,6 +1215,29 @@ above, which this list intentionally does not re-duplicate.
   an `evidence_provenance` assertion alongside their existing `ChangeKind`/
   verdict assertions, for every mutation the oracle already covers — no new
   mutation catalogue, just a wider assertion on the existing one.
+- **`BundleFinding` provenance, both on the carrier and after `to_change()`
+  lowering** (Codex review, fresh evidence — neither `test_detector_
+  oracle.py` nor `test_detector_properties.py` constructs a `BundleFinding`,
+  since both are scoped to ordinary snapshot-pair detector output, so
+  neither the kind-partition completeness gate nor the property test above
+  can catch a `bundle.py`/`bundle_signature_evidence.py`/
+  `bundle_multibuild.py`/`product_baseline.py` construction site that
+  leaves `evidence_provenance` unset, or a regression in `BundleFinding.
+  to_change()` that drops it during lowering). A direct, `bundle_models.py`
+  -scoped test (alongside this plan's own Files & surfaces `BundleFinding`
+  construction-site inventory above) must assert both: (1) each of the four
+  real construction sites populates `BundleFinding.evidence_provenance`
+  with the shape that site's own evidence supports — the per-side
+  `<side>:<tier>:searched:<backend>` form for the `_symbol_evidence_
+  sufficient` sites, the distinct `both:ambiguous:version_collapsed` form
+  for the version-collapse branch, never a bare positive tag standing in
+  for an unresolved case; and (2) `BundleFinding.to_change()` carries that
+  exact value through onto the lowered `Change.evidence_provenance`
+  unchanged, the same way it already carries `effective_verdict`/
+  `modulation_reason`/`modulation_rule` — a regression here is otherwise
+  invisible to the "kind partition and ordinary snapshot-pair detector
+  output" checks above, since a `BundleFinding`'s only way to reach a
+  reporter is through this one lowering call.
 - A property test (`test_detector_properties.py`, `slow`) stating the
   general invariant: for any generated snapshot pair, every emitted
   `Change.evidence_provenance` is non-`None` once Phase 1 completes for that
