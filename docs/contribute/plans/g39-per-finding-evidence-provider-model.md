@@ -507,6 +507,41 @@ ever written.) Not a single scalar the multi-backend case was assumed to
 fit into a tuple, and not a single helper the two symbol kinds were
 assumed to share.
 
+**A separate, snapshot-wide fallback must also be retained alongside this
+per-symbol dict — not as a substitute for it, but for the one shape the
+dict structurally cannot answer at all (Codex review, verified against
+the real code, PR #866 round 22).** `evidence_backend_tag` is keyed by
+`function_map`/`variable_map` membership, so it has an entry only for a
+mangled name one of those two maps actually retains. Item 3's own case (a)
+above — "the symbol is absent from `function_map`/`variable_map` entirely,
+or carries `Visibility.ELF_ONLY`" — is exactly the shape with no key to
+look up: `mangled not in evidence_backend_tag` is not "the fallback described
+in the previous paragraph applies" (that fallback is for a symbol *present*
+in one of the two maps but missing its per-declaration `"visibility"` fact),
+it is "there is no per-symbol entry to fall back from," and `from_snapshot()`
+discards the full `AbiSnapshot` immediately afterward — so once projection
+is done, nothing later in the pipeline can re-derive anything for this
+symbol from `snap.function_map`/`snap.variable_map`/`snap.fact_provenance`,
+because none of them exist anymore. Without a second, independent field,
+`find_unverified_signature_findings`'s finding-construction site would have
+no honest `:backend` value to emit for this exact, explicitly-documented
+finding shape — the same "no fact, just a negative result" trap this
+section's `:searched:` vocabulary already exists to avoid, reached from a
+different structural direction. `BundleSignatureEvidence.from_snapshot()`
+must therefore also retain `snapshot_backend_tag: str` (`snap.ast_producer`
+— `"castxml"`/`"clang"`/`"hybrid"`/`None` for the pre-schema-25
+`from_headers=True, ast_producer is None` case per Phase 0's own vocabulary
+table), read only when `mangled not in evidence_backend_tag`, so the two
+fallbacks stay structurally distinct: the per-symbol dict's own inline
+fallback (paragraph above) answers "this symbol has a declaration, but no
+per-backend attribution was recorded for it"; `snapshot_backend_tag`
+answers "this symbol has no declaration in this snapshot at all, so the
+best available fact is which backend(s) this snapshot's header-AST layer
+used overall." Neither may be read as a positive per-declaration fact —
+both feed the same `<side>:<tier>:searched:<backend>` "searched, not
+found sufficient" shape the surrounding paragraphs already establish, never
+a bare provider tag implying the symbol's declaration was actually located.
+
 **A third, distinct provenance shape is needed for the version-collapse
 path, which does not go through `_symbol_evidence_sufficient` at all
 (Codex review, verified against the real code, PR #866 round 16).**
@@ -561,13 +596,25 @@ call site, both `make_change()`-routed and direct," spread across every
 detector module that emits findings (`diff_*.py` **and** `buildsource/*.py`
 in full, not a partial file list) — a large, XL-effort inventory whichever
 way it's counted, which is this section's actual, count-independent point.
-**A completeness gate over construction paths themselves** (the P2 finding
-this round of review also raised) is a real alternative to a static count
-and is worth a follow-up investigation — e.g. an AST-based
-`check_ai_readiness.py`-style check that every `Change(...)`/`make_change(...)`
-call site is covered by *some* test asserting on `evidence_provenance` once
-Phase 1 completes — but designing that gate is its own scoped piece of
-work, not attempted in this already-corrected-twice section.
+**A completeness gate over construction paths themselves is a required
+Phase 2 acceptance check, not optional follow-up work (Codex review, PR
+#866 round 22 — see Phase 2's own "What this gate does and does not prove"
+paragraph below for why the enum-partition gate alone cannot substitute
+for it).** An AST-based `check_ai_readiness.py`-style check — walking
+every `Change(...)`/`make_change(...)`/`BundleFinding(...)` construction
+site this same Phase 1 section's own grep-based inventory already
+enumerates (the three-grep pattern above, generalized to any further
+reusable wrapper this repo grows beyond `bool_transition()`), and failing
+CI on any site that does not set `evidence_provenance` — is the mechanism
+that makes a *second*, unwired producer for an already-classified
+`ChangeKind` (the exact gap the enum-partition gate cannot see) a build
+failure instead of a silent omission a reviewer has to notice by hand.
+Designing the check's own AST-walk implementation (matching this repo's
+existing `check_ai_readiness.py` conventions for scanning call sites) is
+Phase 2 work, tracked alongside the enum-partition gate rather than as a
+separate, unscheduled follow-up — both close a "silent omission" failure
+mode PR #753 → #759 already proved this codebase is vulnerable to, and
+neither is sufficient without the other (see below).
 
 **Implementation location (ADR-061):** detector wiring is `compare/`
 territory ("Match old/new entities or identify a raw change"). As with
@@ -1115,24 +1162,43 @@ A `ChangeKind` with no entry fails CI — the same "no silent omission"
 mechanism `canonical_identity_contract.UNVERIFIED` already established for
 identity classification, applied here to provenance classification instead.
 
-**What this gate does and does not prove (Codex review, fresh evidence):**
-it proves every `ChangeKind` is classified into one of the three buckets —
-an *enum-partition* completeness, mirroring the #753 → #759 incident's own
-lesson (a missing entry is silent everywhere else, so make the enum itself
+**What the enum-partition gate does and does not prove, and why Phase 2
+needs a second, required gate alongside it (Codex review, fresh evidence;
+strengthened PR #866 round 22 — this used to describe the second gate as
+optional follow-up work, which understated the actual gap):** the
+enum-partition gate above proves every `ChangeKind` is classified into one
+of the three buckets — mirroring the #753 → #759 incident's own lesson (a
+missing entry is silent everywhere else, so make the enum itself
 un-skippable). It does **not** prove a kind's real producer(s) actually
 behave the way its bucket claims — a kind moved to `PROVENANCE_STATIC`/
 `PROVENANCE_PER_FINDING` whose producer forgot to actually set
 `evidence_provenance`, or whose *second*, independent producer path (e.g. a
 kind emitted from both a `diff_symbols.py` path and an unrelated
 `diff_platform.py` path) never got wired at all, still passes this gate
-outright, since it checks bucket *membership*, not producer *behavior*. That
-gap is why the "completeness gate over construction paths" idea two
-paragraphs above is called out as real, separate, not-yet-designed
-follow-up work rather than something this phase already closes — the two
-sections must not be read as contradicting each other: Phase 2's gate closes
-the enum-omission failure mode specifically, and is deliberately silent on
-the construction-path failure mode, which needs its own mechanism this plan
-does not yet specify.
+outright, since it checks bucket *membership*, not producer *behavior* — and
+the property-test/FP-rate/mutation-score gates this plan otherwise leans on
+do not close this either, since none of them assert on `evidence_provenance`
+specifically and a kind's *secondary* emitter may simply never be exercised
+by the existing corpus. Leaving that gap unclosed would let Phase 2 — and
+the plan as a whole — be declared complete while a reportable finding from
+an unwired secondary emitter still carries `evidence_provenance=None` in
+production, silently violating the core guarantee this whole plan exists to
+establish.
+
+**Phase 2's second, required deliverable is therefore the construction-path
+completeness gate itself** (Phase 1's own inventory section above specifies
+the mechanism: an AST-based check, in the shape of
+`check_ai_readiness.py`'s existing call-site scans, walking every
+`Change(...)`/`make_change(...)`/`BundleFinding(...)` construction site the
+three-grep inventory enumerates and failing CI on any site that constructs
+one of these without setting `evidence_provenance`). The two gates are
+deliberately complementary, not redundant, and Phase 2 is not done until
+both exist: the enum-partition gate closes the enum-omission failure mode
+(a `ChangeKind` nobody classified at all), the construction-path gate closes
+the producer-behavior failure mode (a classified kind whose real emitter, or
+one of several, never got wired) — dropping either one reopens exactly the
+class of gap PR #753 → #759 already demonstrated this codebase needs a
+mechanical check for, not a reviewer's memory.
 
 ### Phase 3 — report/schema surface (S)
 
