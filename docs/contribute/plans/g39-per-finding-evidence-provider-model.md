@@ -769,10 +769,38 @@ is itself ambiguous, so `:searched:` would misrepresent an unresolved
 identity question as a completed, empty search. This needs its own,
 clearly distinguished tag — `<side>:ambiguous:version_collapsed` (no
 `:tier:`/`:backend`, since no *signature*-evidence source was consulted
-for this specific version; `<side>` is always `both:` for this branch,
-since the collapse check runs once per `provider_entry` and sets both
-flags together) — so an implementation cannot accidentally conflate "we
-looked and found nothing" with "we couldn't even tell what to look for."
+for this specific version) — so an implementation cannot accidentally
+conflate "we looked and found nothing" with "we couldn't even tell what
+to look for."
+
+**`<side>` is not always `both:` for this branch — it must be derived
+independently per side, from the two underlying checks, not from the
+fact that the branch sets both sufficiency flags together (Codex review,
+verified against the real code, PR #866 round 38).** The branch's own
+guard is `version_collapsed = _bare_name_version_collapsed(old,
+provider_lib, symbol) or _bare_name_version_collapsed(new, provider_lib,
+symbol)` — an `or` across two independent, single-side checks, each
+reading only its own snapshot's `resolution.provides`. `old_sufficient =
+new_sufficient = False` is a *consequence* of that `or` (both flags are
+set because the code has nothing narrower to fall back to once either
+side is ambiguous), not evidence that both sides actually collapsed —
+an entirely ordinary case has only the old side carrying two co-existing
+GNU versions of `symbol` while the new side has settled back to one, or
+vice versa (a version-script cleanup landing in the same release as an
+unrelated signature change). Emitting `both:ambiguous:version_collapsed`
+for that case asserts a fact about the *other* side that
+`_bare_name_version_collapsed()` was never even true for on that side.
+The tag must be derived the same way this document's own `<side>:`
+convention is derived everywhere else — per underlying fact, not per
+control-flow outcome: `old_collapsed = _bare_name_version_collapsed(old,
+provider_lib, symbol)`, `new_collapsed = _bare_name_version_collapsed(
+new, provider_lib, symbol)`; emit `both:ambiguous:version_collapsed` only
+when both are `True`, `old:ambiguous:version_collapsed` when only
+`old_collapsed` is `True`, and `new:ambiguous:version_collapsed` when
+only `new_collapsed` is `True`. (`version_collapsed` itself — the `or`
+of the two — is unchanged; it still gates whether the branch fires at
+all. Only the provenance tag's side prefix is recomputed from the two
+underlying booleans instead of assumed.)
 
 **The `:ambiguous:` tag is narrowly scoped to the unresolved signature
 question, not a claim that the finding rests on no evidence at all (Codex
@@ -792,15 +820,45 @@ freshly-added one, has old-side evidence), and the consumer-reachability
 chain (`_reachable`, `_consumer_matches_provider`,
 `_consumer_retained_from_old` — a real `DT_NEEDED` path and a genuine
 old-side match, not a bare name-only pairing). So `evidence_provenance`
-for this finding should carry the `both:ambiguous:version_collapsed`
-marker *alongside* — not instead of — side-scoped provenance for that
-resolution/export evidence (the same `l0:elf_symtab`/platform-selected
-tag the rest of this document already uses for export-table facts, since
-`BundleSnapshot.resolution` is itself derived from each library's own
-export surface), so the finding's provenance tuple documents both "the
-per-version signature could not be safely attributed" and "here is the
-real resolution-graph evidence that established the ambiguity and the
-finding's other preconditions" — omitting the latter would misstate a
+for this finding should carry the derived `<side>:ambiguous:
+version_collapsed` marker (per the round-38 correction above) *alongside*
+— not instead of — side-scoped provenance for that resolution/export
+evidence, the same `l0:elf_symtab`/platform-selected tag the rest of this
+document already uses for export-table facts, since `BundleSnapshot.
+resolution.provides` is itself derived from each library's own export
+surface.
+
+**That export-provenance component alone still omits real evidence this
+finding actually rests on — the consumer-reachability precondition reads
+a structurally different part of the resolution graph, and its own
+provenance must be named too (Codex review, verified against the real
+code, PR #866 round 38).** `_reachable()` calls `reachable_intra_libraries
+(new, lib)`, which walks `snapshot.resolution.intra_needed`/
+`soname_to_name` — built from each library's `ElfMetadata.needed`
+(`DT_NEEDED`) and `ElfMetadata.soname` (`DT_SONAME`), the same `.dynamic`
+-section evidence stream this document's own `l0:elf_dynamic` tag names
+(established above for `check_soname_bump_policy()`), not `.dynsym`
+export-table data (`l0:elf_symtab`, populated from each library's
+`meta.symbols` instead — see `bundle.py`'s `_compute_resolution_graph`).
+The two are genuinely independent facts about two different sections: a
+symbol can be exported (`l0:elf_symtab`) by a provider a consumer cannot
+actually load (no `DT_NEEDED` edge reaches it), and this finding's own
+consumer-reachability check exists specifically to rule that case out —
+so citing only `l0:elf_symtab` would omit the one piece of evidence that
+answers "can this consumer actually reach this provider," leaving the
+finding's provenance silent about the fact that establishes the
+consumer/provider pairing is real in the first place. `_reachable()` is
+only ever called with `new` (line 612 above, `reachable_intra_libraries
+(new, lib)`) — there is no equivalent old-side BFS in this function — so
+the tag is single-sided: `new:l0:elf_dynamic`, unioned with the
+export-provenance tag above. The finding's provenance tuple therefore
+documents three things, not two: "the per-version signature could not be
+safely attributed" (the derived `<side>:ambiguous:version_collapsed`
+tag), "here is the export-table evidence that established the ambiguity
+and the retained-export precondition" (`l0:elf_symtab`, side-scoped per
+round 26's own reasoning), and "here is the dependency-edge evidence that
+established the consumer can actually reach this provider"
+(`new:l0:elf_dynamic`) — omitting any one of the three would misstate a
 finding that rests on genuine L0 evidence as though nothing had been
 consulted at all. This mirrors the same
 `searched:`/no-evidence-consulted distinction item 1 and item 3 already
@@ -1460,15 +1518,21 @@ structure already in place:
    vocabulary had no provider id for it, since `l0:elf_symtab` names the
    `.dynsym`/export-table evidence stream, not the `.dynamic` section —
    closed above with a new `l0:elf_dynamic` entry. `SONAME_BUMP_
-   UNNECESSARY`'s `evidence_provenance` therefore carries **two**
-   independent components, neither one alone: the positive SONAME-read
-   evidence (`"both:l0:elf_dynamic"`, since both sides' `.dynamic`
-   sections were read and compared to reach `soname_bumped`), unioned
-   with a negative "no breaking change qualified" component. Dropping
-   the `l0:elf_dynamic` half — the mistake round 26's framing made —
-   would leave a reader unable to tell "this recommendation rests on a
-   real read of both SONAMEs" from "nothing here was ever actually
-   consulted," exactly the misattribution this model exists to prevent.
+   UNNECESSARY`'s `evidence_provenance` carries the positive SONAME-read
+   evidence, `"both:l0:elf_dynamic"`, since both sides' `.dynamic`
+   sections were read and compared to reach `soname_bumped`. Dropping
+   this half — the mistake round 26's framing made — would leave a reader
+   unable to tell "this recommendation rests on a real read of both
+   SONAMEs" from "nothing here was ever actually consulted," exactly the
+   misattribution this model exists to prevent. **Rounds 27–31 below also
+   explored unioning a second, negative "no breaking change qualified"
+   component onto this one — round 38, at the end of this same discussion,
+   retracts that half entirely as an unsound, fabricated claim rather than
+   an approximation worth keeping; the final design carries only this one
+   positive component. The rounds are kept in sequence below because each
+   documents a real, independently-reviewed step in why the negative
+   component was rejected, not because the two-component design they
+   describe is still current.**
 
    **The negative half cannot actually be "a `searched:` entry per
    side/tier the comparison's own `changes` list was drawn from," as
@@ -1645,6 +1709,57 @@ structure already in place:
    specific to `elf_symtab` versus `elf_dynamic` and applies identically to
    every tag this negative component emits, `l1:dwarf`/`l2:castxml`/
    `l2:clang` included, not only the ELF one.
+
+   **Round 31's "considered and not applied" call is itself reversed here:
+   the whole field-presence-derived negative component described in rounds
+   27–31 above is retracted, not merely the one `elf_symtab` sub-tag that
+   round 31 declined to drop (Codex review, verified against the real code,
+   PR #866 round 38).** Round 31's own closing paragraph already concedes
+   the thing this round treats as decisive: "snapshot-field presence
+   approximates, rather than proves, that a specific detector actually
+   consulted that field for this comparison" is "real," "not specific to
+   `elf_symtab` versus `elf_dynamic`," and "applies identically to every
+   tag this negative component emits." A tag spelled `searched:` is not a
+   neutral label for "the field happened to be present" — every other use
+   of `searched:` in this document (item 1's `l0:searched:elf_symtab` for a
+   completed export-table lookup that positively found nothing; item 3's
+   `l2:searched:<frontend>` for a specific, known header-AST consultation)
+   backs a real, completed check. `check_soname_bump_policy()` never
+   queries `.dynsym`, DWARF, or the header AST at all — it reads exactly
+   two fields, `old_elf.soname`/`new_elf.soname` — so a `both:l1:searched:
+   dwarf` tag attached to `SONAME_BUMP_UNNECESSARY` asserts a DWARF
+   consultation that this function never performs and that no other part
+   of the pipeline records as completed for this specific comparison. That
+   is a fabricated positive dressed as a documented approximation, and this
+   plan's own already-stated principle for exactly this shape of choice —
+   "a documented false-negative gap over a fabricated positive," invoked by
+   name at line 1569 above for the narrower single-sided case — resolves it
+   the same way here: **omit the negative component entirely.** Round 31's
+   objection to dropping only the `elf_symtab` slice ("would delete the
+   finding's only claim about why 'no other breaking change' is
+   trustworthy") does not survive contact with this broader retraction,
+   because that claim was never soundly available in the first place —
+   there being no genuine per-detector completion ledger anywhere in this
+   codebase (round 28/29's own finding, unchanged) means no tag in this
+   negative component, ELF included, can honestly make it. **Final design:**
+   `SONAME_BUMP_UNNECESSARY`'s `evidence_provenance` carries exactly the one
+   positive component established at round 27 — `"both:l0:elf_dynamic"` —
+   and nothing else; the "no other breaking change qualified" half of the
+   finding is not represented in `evidence_provenance` at all, the same way
+   an ordinary absence of a finding is never itself an evidence-tag claim
+   elsewhere in this model. `check_soname_bump_policy()` therefore still
+   needs the two `AbiSnapshot` objects threaded in per round 28's signature
+   change (line 1509 above) for the reachability/version-collapse work
+   items 4/5/6 in this same section depend on, but the per-side tier
+   inventory derived from them (rounds 29–31's `old_backends`/
+   `new_backends`, the `both:`/`old:`/`new:` prefix decision, the `l2`
+   backend-tuple derivation) is dropped from this finding's own
+   `evidence_provenance` — it remains correct, reusable machinery for a
+   *different* finding whose provenance genuinely rests on a completed
+   per-tier search (nothing else in this section currently needs it, so it
+   is not wired anywhere else either), just not evidence this one
+   `changes`-independent, two-field SONAME comparison can honestly claim
+   for itself.
 
 Each slice, once wired, gets its own FP-rate/mutation-score gate re-run
 before merging — never the whole inventory behind one PR. The FP-rate/
@@ -2247,6 +2362,45 @@ every kind has a real, non-`UNVERIFIED` classification — gated on Phase 2's
 completeness test, so the docs generator cannot claim more coverage than
 actually exists).
 
+**Two more human-facing per-finding renderers already carry the identical
+`contract_evidence_refs` precedent this phase extends for JSON/SARIF/JUnit,
+and this section's own inventory must cover them too, not stop at the
+machine-readable three (Codex review, verified against the real code, PR
+#866 round 38).** `html_report.py`'s `_changes_table` (the function every
+`compare --format html` finding row renders through) already reads
+`getattr(ch, "contract_evidence_refs", None)` and, when set, renders an
+`"evidence: ..."` line inside each finding's own description cell — real,
+existing per-finding evidence-string rendering, gated on `contract_relevance
+is not None` the same way the JSON/SARIF/JUnit additions above are gated on
+`--contract`. `reporter_markdown.py` carries the same pattern independently
+(`_format_leaf_type_change`, `_build_not_evaluated_section`,
+`_append_suppression_note` each read `c.contract_relevance`/render a
+per-finding contract-decision line via `_contract_decision_text`). Neither
+renderer is a hypothetical future surface: both are live, shipped output
+formats a user selects with `--format html`/`--format markdown` today, and
+a user on either format has no way to see `evidence_provenance` at all once
+Phase 1 populates it, unless these two renderers are wired the same
+additive way `_change_to_dict`/SARIF's `properties`/JUnit's `<properties>`
+already are. Add an `"evidence_provenance: ..."` line to `_changes_table`
+immediately alongside its existing `contract_evidence_refs` rendering (not
+gated on `contract_relevance`, since `evidence_provenance` is populated
+independently of `--contract`), and an equivalent rendering to
+`reporter_markdown.py`'s per-finding text (a natural home is
+`_contract_decision_text`'s sibling text-building path, or a new small
+helper called from the same finding-rendering call sites
+`contract_relevance` already reaches, for the ordinary contract-free case
+too). Each gets its own format-specific test — an HTML fixture asserting
+the rendered `<table>` cell contains the expected evidence tags for a
+finding with `evidence_provenance` set, and a Markdown fixture asserting
+the corresponding text line appears in `to_review_digest`'s output —
+mirroring the SARIF/JUnit fixture tests Phase 3 already requires above,
+rather than folding this into the JSON-only regression coverage. This is
+additive rendering of an existing, already-populated field through an
+established per-finding-metadata pattern each renderer already has, the
+same category as the JSON/SARIF/JUnit work above — not the UI/report-
+rendering *redesign* the "Out of scope" section below disclaims, and that
+section is corrected accordingly.
+
 ### Phase 4 — one real consumer (M, optional/stretch)
 
 Explicitly **not required** for this plan's acceptance criteria, named here
@@ -2393,19 +2547,30 @@ above, which this list intentionally does not re-duplicate.
   `<side>:<tier>:searched:<backend>` form for the `_symbol_evidence_
   sufficient` sites, never a bare positive tag standing in for an unresolved
   case; and, for the version-collapse branch specifically, **the complete
-  tuple round 26's correction above establishes, not the bare marker alone
-  (Codex review, fresh evidence, PR #866 round 29 — this bullet previously
-  described only `both:ambiguous:version_collapsed`, which is stale against
-  lines 668–695's later correction and would let a test pass on an
-  implementation that drops the accompanying resolution/export evidence)**:
-  the `both:ambiguous:version_collapsed` marker *alongside* the side-scoped
-  `l0:elf_symtab` resolution/export provenance that
-  `_bare_name_version_collapsed()` and the surrounding `_symbol_was_
-  exported`/`_provider_entry_retained_from_old`/reachability checks actually
-  establish — asserting the marker in isolation must fail this test, the
-  same way asserting the accompanying evidence in isolation (with the
-  marker dropped) must also fail it, since either one alone misstates what
-  the finding rests on; and (2) `BundleFinding.to_change()` carries that
+  tuple round 38's correction above establishes, not the two-tag shape an
+  earlier draft of this bullet pinned (Codex review, fresh evidence, PR
+  #866 round 38 — this bullet previously described a fixed `both:ambiguous:
+  version_collapsed` marker paired with only `l0:elf_symtab`, which is
+  stale against the per-side derivation and the `elf_dynamic` component
+  the corrected paragraphs above now require, and would let a test pass
+  on an implementation that either fabricates a `both:` claim for a
+  single-sided collapse or drops the dependency-edge evidence)**: (a) the
+  side prefix on the `ambiguous:version_collapsed` marker itself — cases
+  covering an old-only collapse, a new-only collapse, and a genuine
+  both-sides collapse must each assert the *matching* one of
+  `old:ambiguous:version_collapsed` / `new:ambiguous:version_collapsed` /
+  `both:ambiguous:version_collapsed`, and a test asserting only the
+  both-sides case would not catch a regression that always emits `both:`
+  regardless of which side(s) `_bare_name_version_collapsed()` actually
+  flagged; and (b) the accompanying side-scoped `l0:elf_symtab`
+  resolution/export provenance *and* the `new:l0:elf_dynamic`
+  dependency-edge provenance together, that
+  `_bare_name_version_collapsed()`/`_symbol_was_exported`/
+  `_provider_entry_retained_from_old`/`_reachable()` actually establish —
+  asserting the ambiguity marker in isolation must fail this test, the
+  same way asserting either evidence tag in isolation (with the marker or
+  the other tag dropped) must also fail it, since any one of the three
+  alone misstates what the finding rests on; and (2) `BundleFinding.to_change()` carries that
   exact value — the full tuple, both before and after lowering, not just the
   marker half of it — through onto the lowered `Change.evidence_provenance`
   unchanged, the same way it already carries `effective_verdict`/
@@ -2460,7 +2625,13 @@ provenance varies per-instance, not just per-kind) is most present there.
   separate change to a separate, already-shipped consumer; not required to
   call this plan's own acceptance criteria met.
 - **A UI/report-rendering redesign** around the new field — Phase 3 adds it
-  to existing surfaces (JSON, SARIF) unchanged in shape otherwise.
+  to existing surfaces (JSON, SARIF, JUnit, HTML, Markdown) unchanged in
+  shape otherwise; see Phase 3's own HTML/Markdown correction above (round
+  38) — those two are in scope as additive rendering through each format's
+  already-existing per-finding metadata pattern, not excluded by this
+  bullet. What stays out of scope is a genuinely new UI surface or layout
+  (e.g. a dedicated evidence-provenance panel, a new report section, an
+  interactive filter by provider) — not the two renderers themselves.
 - **`abicheck/compat/cli.py`'s ABICC-compatible surface** — that format has
   its own, externally-defined schema (ABICC parity) with no slot for this;
   not extended here.
