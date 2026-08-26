@@ -321,19 +321,42 @@ cross a `/`), so as of ADR-061's incremental `compare/`/`workflows/`
 package migration (see "Implementation location" above) they already miss
 a real, present-day construction site — `abicheck/impact/use_case_impact.py`
 — and will miss every detector `compare/detectors/{symbols,types,cpp,
-platform,build,source}.py` eventually migrates too. Use
-`git grep -n "Change(" -- 'abicheck/**/*.py' ':(exclude)abicheck/checker_types.py' ':(exclude)abicheck/diff_helpers.py'`
-(recursive: covers the flat `diff_*.py`/`buildsource/*.py` modules, any
-migrated `compare/`/`workflows/` package, and every other first-party
-subtree alike; `tests/` is a separate tree entirely and is not matched by
-this pathspec regardless) — the two `:(exclude)` pathspecs are what
-actually drop `checker_types.py`'s own `class Change` definition and
-`diff_helpers.py`'s own factory body from the results; a bare
-`'abicheck/**/*.py'` glob with no exclusion would otherwise report both of
-those definition sites themselves as "producers," for direct constructions;
-and `git grep -n "make_change(" -- 'abicheck/**/*.py' ':(exclude)abicheck/diff_helpers.py'`
+platform,build,source}.py` eventually migrates too. **Fresh evidence after
+that correction (Codex review, PR #866 round 20): `'abicheck/**/*.py'`
+*alone* has the opposite problem — verified directly with `git grep`
+(2.43.0) against this repo, it matches only *nested* files
+(`abicheck/buildsource/*.py`, `abicheck/impact/*.py`, ...) and matches
+**zero** flat, root-level `abicheck/*.py` files at all, `diff_atomic.py`/
+`diff_layout.py` included (`git ls-files 'abicheck/**/*.py'` confirms
+this directly: every result is one directory level deep or more, never a
+bare `abicheck/<name>.py`). So the single recursive glob this section
+told a reader to switch to *drops the very "flat `diff_*.py`" family its
+own prose claims it covers* — the flat root files need `abicheck/*.py`
+running alongside `abicheck/**/*.py`, not instead of it, since neither
+pattern alone covers both depths.** Use
+`git grep -n "Change(" -- 'abicheck/*.py' 'abicheck/**/*.py' ':(exclude)abicheck/checker_types.py' ':(exclude)abicheck/diff_helpers.py'`
+(both root-level and nested: covers the flat `diff_*.py`/`buildsource/*.py`
+modules, any migrated `compare/`/`workflows/` package, and every other
+first-party subtree alike; `tests/` is a separate tree entirely and is not
+matched by either pathspec regardless) — the two `:(exclude)` pathspecs
+are what actually drop `checker_types.py`'s own `class Change` definition
+and `diff_helpers.py`'s own factory body from the results; a bare
+`'abicheck/*.py' 'abicheck/**/*.py'` glob pair with no exclusion would
+otherwise report both of those definition sites themselves as
+"producers," for direct constructions; and
+`git grep -n "make_change(" -- 'abicheck/*.py' 'abicheck/**/*.py' ':(exclude)abicheck/diff_helpers.py'`
 (same reasoning — excluding `diff_helpers.py`'s own `def make_change(`
-definition) for factory calls.
+definition) for factory calls. **A third grep is needed for a wrapper
+producer like `bool_transition()` (`diff_helpers.py`): a call site that
+routes through such a helper (e.g. `diff_symbols.py`'s and
+`diff_hidden_friends.py`'s own `bool_transition(...)` calls) contains
+neither literal `"Change("` nor `"make_change("` text — the construction
+happens inside the wrapper's own body — so neither grep above finds that
+specific line even though the *file* it's in is still caught via its
+other, direct calls. Run
+`git grep -n "bool_transition(" -- 'abicheck/*.py' 'abicheck/**/*.py' ':(exclude)abicheck/diff_helpers.py'`
+too, and generalize the same check to any other reusable
+`Change`-producing wrapper this repo grows beyond `bool_transition`.**
 
 **A third category this grep pair does not catch at all (Codex review,
 verified against the code): `bundle_models.BundleFinding` construction

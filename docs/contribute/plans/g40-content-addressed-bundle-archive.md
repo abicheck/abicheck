@@ -1064,6 +1064,34 @@ what actually shipped.**
   it cannot exercise, and makes no claim about, a `SIGKILL`/power-loss/
   OOM-kill termination, where no cleanup code runs at all; don't read a
   pass here as evidence against that residual gap.
+- **Durability sequence: the fsync/replace ordering itself is asserted, not
+  only its net effect** (Codex review, PR #866 round 20 — the atomic-
+  publication test above proves the *result* survives an in-process
+  failure, but nothing in this list checks the *ordering* the "Closing the
+  temp file and calling `os.replace()` is not durable on its own" note
+  above promises; a writer that dropped the post-metadata-fixup fsync or
+  the parent-directory fsync could still pass every other test here while
+  reopening the exact durability gap that note exists to close). Patch
+  `os.fsync` and `os.replace` (e.g. via `unittest.mock.patch`, recording
+  each call's target fd/path in a shared list) around one real
+  `BundleArchiveWriter` write with at least one blob plus an ownership/mode
+  fixup, and assert the recorded call sequence is: fsync(temp file fd) —
+  after the payload write, before any fixup; fsync(temp file fd) again —
+  after the `fchown`/`fchmod` fixup; `os.replace()`; fsync(parent-directory
+  fd) — last. A sequence missing a step, or reordering `os.replace()` ahead
+  of either temp-file fsync, must fail this test even though the archive's
+  final on-disk bytes are unaffected either way.
+- **Hard-link rejection: a pre-existing destination with `st_nlink > 1` is
+  refused, not silently desynchronized** (Codex review, PR #866 round 20 —
+  the "must be rejected outright" requirement above names its own
+  acceptance criterion and dedicated test, but this list never added the
+  test) — create a destination file, hard-link a second name to the same
+  inode (`os.link()`), then attempt to write an archive to the original
+  path; assert the write raises before any temp file is published (before
+  `os.replace()` runs) and that both the destination and its sibling hard
+  link are byte-for-byte unchanged afterward — proving the writer refuses
+  rather than retargeting only the one directory entry it was pointed at
+  and leaving the sibling link silently stale.
 - **Every declared resource-limit guard needs its own adversarial test, not
   just the intra-archive dedup/round-trip happy path above (Codex review,
   fresh evidence — the decompression-bomb and central-directory guards
