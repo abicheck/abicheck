@@ -36,3 +36,24 @@
   `qualified_name_segments.defer_closure_identity_renumbering()` context
   during both recursive dumps, with the merged snapshot renumbered
   exactly once afterward.
+- **Second follow-up (Codex review): a header basename containing parens
+  (`foo(test).hpp`) or a colon defeated the ordinal regex's basename
+  capture, silently leaving such closures un-renumbered.** The basename
+  group now accepts one level of balanced parens via an explicit
+  alternation rather than a bare `[^:()]+` exclusion, while still
+  refusing a bare, unparenthesized `:`/`)` -- which is also what keeps a
+  match from ever bleeding across two separate markers in the same type
+  name. A bare (non-parenthesized) colon in a basename, legal on POSIX,
+  remains an accepted, documented limitation -- the same shape as the
+  pre-existing same-basename-different-file limitation.
+- **Third follow-up (Codex review): a free-text field could be
+  corrupted if it happened to contain text matching the closure marker
+  syntax.** The recursive dataclass walk that collects/rewrites closure
+  markers previously reached every string field of every declaration
+  dataclass, including `deprecated` (a human-written message) and
+  `default` (a verbatim, unevaluated expression) -- so a deprecation
+  message that happened to quote something shaped like
+  `(lambda:x.h:10:2)` was silently rewritten to `(lambda:x.h#1)`, and
+  could even consume an ordinal slot a real closure should have gotten.
+  These two field names are now excluded from both collection and
+  rewriting, by name, across every dataclass that has them.

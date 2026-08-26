@@ -273,9 +273,19 @@ def raw_segments(qualified: str) -> list[str]:
 
 #: Matches the marker :func:`strip_anonymous_type_location` already produces
 #: (``"(lambda:foo.h:4:37)"``, ``"(unnamed struct:foo.h:56:5)"``) -- NOT the
-#: raw ``at <path>:<line>:<col>`` form that function itself consumes.
+#: raw ``at <path>:<line>:<col>`` form that function itself consumes. The
+#: basename group accepts one level of balanced parens (``foo(test).hpp``,
+#: Codex review) via an explicit alternation rather than a bare ``[^:()]+``
+#: exclusion, while still refusing a bare, unparenthesized ``:`` or ``)`` --
+#: which is what stops this from ever crossing into a second, later marker's
+#: own text. A colon *outside* parens in the basename (legal on POSIX, e.g.
+#: ``weird:name.h``) is still not handled: nothing here can tell such a
+#: colon apart from the marker's own ``:line:col`` separators without more
+#: structure than a flattened type-name string carries -- the same
+#: "known, accepted limitation" shape as the basename-collision gap
+#: documented on :func:`collect_anonymous_type_ordinals`.
 _ANON_TYPE_ORDINAL_RE = _re.compile(
-    r"(\((?:lambda|unnamed\s+\w+)):([^:()]+):(\d+):(\d+)(?=\s*\))"
+    r"(\((?:lambda|unnamed\s+\w+)):((?:[^:()]|\([^()]*\))+):(\d+):(\d+)(?=\s*\))"
 )
 
 
@@ -394,14 +404,33 @@ def apply_anonymous_type_ordinals(
     return _ANON_TYPE_ORDINAL_RE.sub(_replace, name)
 
 
+#: Dataclass field names that carry free-text/expression payload, never a
+#: type/name spelling -- so a coincidental substring matching the closure
+#: marker syntax must not be collected as (fabricated) identity evidence or
+#: rewritten as if it were one (Codex review: a ``RecordType.deprecated``
+#: message like ``"avoid (lambda:x.h:10:2)"`` was silently corrupted to
+#: ``"avoid (lambda:x.h#1)"``). Shared across every declaration dataclass in
+#: ``model.py`` that has a field of this name (``Function``/``Variable``/
+#: ``TypeField``/``RecordType``/``EnumType``/``EnumMember`` all document
+#: ``deprecated`` as "see Function.deprecated for the message-string
+#: convention"; ``Param.default``/``TypeField.default`` are documented
+#: "verbatim, value not preserved"), matched by name alone rather than
+#: per-dataclass, since the walk in ``_collect_strings``/
+#: ``_walk_rewrite_strings`` is itself dataclass-agnostic.
+_PAYLOAD_FIELD_EXCLUSIONS: frozenset[str] = frozenset({"deprecated", "default"})
+
+
 def _collect_strings(value: object, out: list[str]) -> None:
     """Append every ``str`` reachable from *value* to *out*, recursing
-    through dataclasses, lists/tuples, and dicts (keys and values).
+    through dataclasses, lists/tuples, and dicts (keys and values) --
+    except a field named in :data:`_PAYLOAD_FIELD_EXCLUSIONS`.
     """
     if isinstance(value, str):
         out.append(value)
     elif _dataclasses.is_dataclass(value) and not isinstance(value, type):
         for f in _dataclasses.fields(value):
+            if f.name in _PAYLOAD_FIELD_EXCLUSIONS:
+                continue
             _collect_strings(getattr(value, f.name), out)
     elif isinstance(value, (list, tuple)):
         for item in value:
@@ -415,13 +444,16 @@ def _collect_strings(value: object, out: list[str]) -> None:
 
 def _walk_rewrite_strings(value: object, rewrite: _Callable[[str], str]) -> object:
     """Rewrite every ``str`` reachable from *value* via ``rewrite(s)``,
-    mutating dataclasses/lists/dicts in place where possible. Returns the
-    (possibly new) value -- a bare ``str`` can't be mutated in place.
+    mutating dataclasses/lists/dicts in place where possible -- except a
+    field named in :data:`_PAYLOAD_FIELD_EXCLUSIONS`. Returns the (possibly
+    new) value -- a bare ``str`` can't be mutated in place.
     """
     if isinstance(value, str):
         return rewrite(value)
     if _dataclasses.is_dataclass(value) and not isinstance(value, type):
         for f in _dataclasses.fields(value):
+            if f.name in _PAYLOAD_FIELD_EXCLUSIONS:
+                continue
             old = getattr(value, f.name)
             new = _walk_rewrite_strings(old, rewrite)
             if new is not old:

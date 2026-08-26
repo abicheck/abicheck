@@ -194,6 +194,62 @@ class TestSnapshotRenumbering:
         assert snap.functions[0].mangled == before_func
 
 
+class TestPayloadTextIsNeverCorrupted:
+    """Codex review: a free-text/expression field (never a type/name
+    spelling) can coincidentally contain a substring matching the closure
+    marker syntax -- e.g. a deprecation message that literally quotes one.
+    Such text must never be collected as identity evidence or rewritten,
+    or a snapshot's own human-readable payload silently corrupts."""
+
+    def test_a_deprecated_message_matching_the_marker_syntax_is_untouched(
+        self,
+    ) -> None:
+        message = f"avoid {_closure('x.h', 10, 2)}"
+        snap = AbiSnapshot(
+            library="lib.so",
+            version="1.0",
+            types=[replace(_record("Widget", qualified="ns::Widget"), deprecated=message)],
+        )
+        renumber_anonymous_closure_identities(snap)
+        assert snap.types[0].deprecated == message
+
+    def test_a_default_initializer_matching_the_marker_syntax_is_untouched(
+        self,
+    ) -> None:
+        from abicheck.model import TypeField
+
+        expr = f"get_default({_closure('x.h', 10, 2)})"
+        rec = replace(
+            _record("Widget", qualified="ns::Widget"),
+            fields=[TypeField(name="f", type="int", default=expr)],
+        )
+        snap = AbiSnapshot(library="lib.so", version="1.0", types=[rec])
+        renumber_anonymous_closure_identities(snap)
+        assert snap.types[0].fields[0].default == expr
+
+    def test_payload_text_does_not_fabricate_an_ordinal_for_a_real_closure(
+        self,
+    ) -> None:
+        """A deprecated message's coincidental marker must not consume an
+        ordinal slot that a real, identity-bearing closure would otherwise
+        get -- confirming exclusion happens at collection time too, not
+        only at rewrite time."""
+        closure_type = f"raii_guard<{_closure('x.h', 5, 1)}>"
+        message = f"avoid {_closure('x.h', 1, 1)}"
+        rec = replace(
+            _record(closure_type, qualified=f"ns::{closure_type}"),
+            deprecated=message,
+        )
+        snap = AbiSnapshot(library="lib.so", version="1.0", types=[rec])
+        renumber_anonymous_closure_identities(snap)
+        # The real closure gets ordinal #1 (the only identity-bearing one
+        # collected) -- not #2, which it would get if the deprecated
+        # message's coincidental marker at line 1 (earlier than line 5)
+        # had also been collected as a competing coordinate.
+        assert "#1)" in snap.types[0].qualified_name
+        assert snap.types[0].deprecated == message
+
+
 class TestLegacyPersistedSnapshotsAreRenumberedOnLoad:
     """A snapshot persisted by a pre-fix abicheck still carries the raw
     ``:<line>:<col>`` closure identity. Comparing it (via ``compare``'s
@@ -327,6 +383,56 @@ class TestKnownLimitationDifferentFilesSharingABasename:
         # different ordinal purely because of the unrelated insertion in
         # vendor/b -- the documented, accepted limitation.
         assert before_final[0] != after_final[0]
+
+
+class TestBasenameWithParensIsStillRenumbered:
+    """Codex review: ``strip_anonymous_type_location`` legitimately produces
+    a marker like ``(lambda:foo(test).hpp:10:2)`` for a header whose
+    basename itself contains parens -- the ordinal regex's old ``[^:()]+``
+    basename capture could never match this, so the ordinal map stayed
+    empty and unrelated line drift in such a header still produced the
+    removed/added findings this whole mechanism exists to eliminate."""
+
+    def test_line_drift_in_a_parenthesized_basename_still_collapses(self) -> None:
+        old = [strip_anonymous_type_location("(lambda at /src/foo(test).hpp:10:2)")]
+        new = [strip_anonymous_type_location("(lambda at /src/foo(test).hpp:14:2)")]
+        old_final = apply_anonymous_type_ordinals(
+            old[0], collect_anonymous_type_ordinals(old)
+        )
+        new_final = apply_anonymous_type_ordinals(
+            new[0], collect_anonymous_type_ordinals(new)
+        )
+        assert old_final == new_final == "(lambda:foo(test).hpp#1)"
+
+    def test_two_closures_in_the_same_parenthesized_basename_get_distinct_ordinals(
+        self,
+    ) -> None:
+        names = [
+            strip_anonymous_type_location("(lambda at /src/foo(test).hpp:10:2)"),
+            strip_anonymous_type_location("(lambda at /src/foo(test).hpp:20:2)"),
+        ]
+        ordinals = collect_anonymous_type_ordinals(names)
+        rewritten = [apply_anonymous_type_ordinals(n, ordinals) for n in names]
+        assert rewritten == [
+            "(lambda:foo(test).hpp#1)",
+            "(lambda:foo(test).hpp#2)",
+        ]
+
+    def test_a_second_marker_after_a_parenthesized_basename_is_not_swallowed(
+        self,
+    ) -> None:
+        """A parenthesized basename's own balanced ``()`` must not let the
+        regex bleed past this marker's closing paren into a second, later
+        marker's own text."""
+        combined = (
+            f"Wrap<{strip_anonymous_type_location('(lambda at /src/foo(x).h:1:2)')}, "
+            f"{strip_anonymous_type_location('(lambda at /src/bar.h:3:4)')}>"
+        )
+        ordinals = collect_anonymous_type_ordinals([combined])
+        assert ("(lambda", "foo(x).h", 1, 2) in ordinals
+        assert ("(lambda", "bar.h", 3, 4) in ordinals
+        rewritten = apply_anonymous_type_ordinals(combined, ordinals)
+        assert rewritten == "Wrap<(lambda:foo(x).h#1), (lambda:bar.h#1)>"
 
 
 class TestHybridMergeDefersRenumbering:
