@@ -530,3 +530,75 @@ def fact_same_producer_qualified(
         old_bare_unambiguous=old_map.bare_name_is_unambiguous(name),
         new_bare_unambiguous=new_map.bare_name_is_unambiguous(name),
     )
+
+
+def record_canonical_names(snap: AbiSnapshot | None) -> dict[str, str]:
+    """Bare/qualified record-type name -> canonical (qualified-if-known)
+    spelling, mirroring ``diff_filtering._enum_canonical_names`` exactly
+    but for ``RecordType`` (struct/class/union) instead of ``EnumType``.
+
+    Bridges two independent, individually-correct conventions this
+    codebase's two struct/type detectors use for a ``Change.symbol``:
+    ``diff_types._diff_type_pair`` (L2 header/castxml tier) always keys off
+    ``RecordType.name`` — deliberately bare (see that call site's own
+    comment: "Keeping emitted symbols bare preserves the identity every
+    other consumer already keys on") — while
+    ``diff_platform._diff_struct_layouts``/``_process_struct`` (L1 DWARF
+    tier) keys off ``dwarf_metadata``'s own dict, whose keys are always
+    fully qualified (``_process_struct``: ``f"{scope_prefix}::{name}"``).
+    Without this bridge, a namespaced type's ``STRUCT_SIZE_CHANGED``/
+    ``STRUCT_ALIGNMENT_CHANGED`` (DWARF, qualified) and
+    ``TYPE_SIZE_CHANGED``/``TYPE_ALIGNMENT_CHANGED`` (header, bare) never
+    resolve to the same identity, so neither
+    ``diff_filtering._dedup_cross_kind``'s exact-symbol match nor
+    ``_deduplicate_cross_detector``'s ``resolve_change_identity``-keyed
+    dedup can recognize them as the same finding — exactly the class of
+    duplicate the enum bridge above was built to close, left open for
+    every other kind pair ``_DWARF_TO_AST_EQUIV`` maps (struct size/
+    alignment AND the three field-level kinds, since a field-qualified
+    symbol's own type-name prefix carries the identical mismatch).
+
+    A bare name is registered only when it uniquely identifies one
+    qualified type — the same disambiguation rule
+    ``_enum_canonical_names`` uses, for the identical reason: two distinct
+    types sharing a bare name (e.g. ``a::Widget`` and ``b::Widget``) must
+    never have one silently bridged to the other's qualified spelling.
+    """
+    if snap is None:
+        return {}
+    by_bare: dict[str, set[str]] = {}
+    out: dict[str, str] = {}
+    for t in getattr(snap, "types", None) or ():
+        if not t.qualified_name:
+            continue
+        by_bare.setdefault(t.name, set()).add(t.qualified_name)
+        out[t.qualified_name] = t.qualified_name
+    for bare, qualified_names in by_bare.items():
+        if len(qualified_names) == 1:
+            out[bare] = next(iter(qualified_names))
+    return out
+
+
+def canonicalize_record_symbol(symbol: str, record_names: Mapping[str, str]) -> str:
+    """Canonicalize a struct/type-kind ``Change.symbol`` via *record_names*
+    (see :func:`record_canonical_names`), so a DWARF-tier qualified
+    spelling and an AST-tier bare spelling for the same type resolve to
+    the same string before an exact-match dedup compares them.
+
+    Handles both a whole-type symbol (``"Widget"``) and a field-qualified
+    one (``"Widget::x"``, for the three field-level kinds in
+    ``diff_filtering._DWARF_TO_AST_EQUIV``) — only the type-name portion
+    is ever rewritten, never the field name itself. A symbol with no
+    bridging information (an unrecognized or ambiguous bare name) is
+    returned unchanged, the same conservative default
+    :func:`record_canonical_names` uses.
+    """
+    canonical = record_names.get(symbol)
+    if canonical is not None:
+        return canonical
+    if "::" in symbol:
+        parent, sep, field = symbol.rpartition("::")
+        canonical_parent = record_names.get(parent)
+        if canonical_parent is not None:
+            return f"{canonical_parent}{sep}{field}"
+    return symbol

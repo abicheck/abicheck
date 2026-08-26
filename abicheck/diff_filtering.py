@@ -21,7 +21,11 @@ from collections import deque
 
 from .checker_policy import ChangeKind
 from .checker_types import SYMBOL_VERSION_ALIAS_NOT_RETAINED_MARKER, Change
-from .diff_helpers import make_change
+from .diff_helpers import (
+    canonicalize_record_symbol,
+    make_change,
+    record_canonical_names,
+)
 from .diff_symbols import _PUBLIC_VIS, _public_functions
 from .finding_identity import resolve_change_identity
 from .model import AbiSnapshot, Function
@@ -1382,15 +1386,19 @@ def _dedup_enum_same_kind(changes: list[Change]) -> list[Change]:
     return result
 
 
-def _dedup_cross_kind(changes: list[Change]) -> list[Change]:
+def _dedup_cross_kind(
+    changes: list[Change], record_names: dict[str, str] | None = None
+) -> list[Change]:
     """Pass 3: drop a DWARF finding when an equivalent AST finding exists.
 
-    Handles both exact symbol matches and parent-type matches for
-    field-qualified symbols (FIX-F).
+    Handles exact and parent-type matches for field-qualified symbols
+    (FIX-F). *record_names* (``diff_helpers.record_canonical_names``)
+    bridges a namespaced type's bare-vs-qualified spelling first.
     """
+    names = record_names or {}
     ast_findings: set[tuple[str, str]] = set()
     for c in changes:
-        ast_findings.add((c.kind.value, c.symbol))
+        ast_findings.add((c.kind.value, canonicalize_record_symbol(c.symbol, names)))
 
     _DWARF_FIELD_LEVEL_KINDS = {
         ChangeKind.STRUCT_FIELD_OFFSET_CHANGED,
@@ -1402,15 +1410,16 @@ def _dedup_cross_kind(changes: list[Change]) -> list[Change]:
     for c in changes:
         equiv_ast_kinds = _DWARF_TO_AST_EQUIV.get(c.kind)
         if equiv_ast_kinds:
+            canon_symbol = canonicalize_record_symbol(c.symbol, names)
             # Exact symbol match
-            if any((ak.value, c.symbol) in ast_findings for ak in equiv_ast_kinds):
+            if any((ak.value, canon_symbol) in ast_findings for ak in equiv_ast_kinds):
                 continue
 
             # Parent-type match (FIX-F): "Point::x" → check "Point"
             # Only for field-level changes; type-level changes (size, alignment)
             # must not match parent — "Outer::Inner" is a nested type, not a field.
-            if c.kind in _DWARF_FIELD_LEVEL_KINDS and "::" in c.symbol:
-                parent = c.symbol.rsplit("::", 1)[0]
+            if c.kind in _DWARF_FIELD_LEVEL_KINDS and "::" in canon_symbol:
+                parent = canon_symbol.rsplit("::", 1)[0]
                 if any((ak.value, parent) in ast_findings for ak in equiv_ast_kinds):
                     continue
 
@@ -1418,30 +1427,20 @@ def _dedup_cross_kind(changes: list[Change]) -> list[Change]:
     return result
 
 
-def _deduplicate_ast_dwarf(changes: list[Change]) -> list[Change]:
+def _deduplicate_ast_dwarf(
+    changes: list[Change], old: AbiSnapshot | None = None, new: AbiSnapshot | None = None
+) -> list[Change]:
     """Remove DWARF findings that duplicate an AST finding for the same symbol.
 
-    Three dedup passes:
-
-    1. **Exact dedup** — collapses entries with the same ``(kind, description)``.
-
-    2. **Same-kind symbol dedup** (FIX-C) — for enum change kinds only,
-       collapses entries with the same ``(kind, symbol)`` but different
-       descriptions (e.g. AST says "Color::GREEN" while DWARF says
-       "Color::GREEN (1 → 2)"). Keeps the entry with populated
-       ``old_value``/``new_value`` fields, or the longer description as
-       tiebreaker.
-
-    3. **Cross-kind dedup** — drops a DWARF finding when an equivalent AST
-       finding exists for the *same full symbol* (e.g. STRUCT_SIZE_CHANGED for
-       ``S`` is dropped when TYPE_SIZE_CHANGED for ``S`` is already present).
-       Also handles parent-type matching for field-qualified symbols (FIX-F):
-       ``STRUCT_FIELD_OFFSET_CHANGED`` for ``Point::x`` is dropped when
-       ``TYPE_FIELD_OFFSET_CHANGED`` for ``Point`` is already present.
+    Three dedup passes: (1) exact dedup on ``(kind, description)``; (2)
+    same-kind symbol dedup (FIX-C) for enum kinds; (3) cross-kind dedup,
+    bridging a bare-vs-qualified spelling mismatch via *old*/*new* first
+    (see :func:`_dedup_cross_kind`).
     """
     stage1 = _dedup_exact(changes)
     stage2 = _dedup_enum_same_kind(stage1)
-    return _dedup_cross_kind(stage2)
+    record_names = {**record_canonical_names(old), **record_canonical_names(new)}
+    return _dedup_cross_kind(stage2, record_names)
 
 
 def _deduplicate_cross_detector(

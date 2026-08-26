@@ -150,7 +150,7 @@ class DeduplicateAstDwarf:
     def run(self, changes: list[Change], ctx: PipelineContext) -> list[Change]:
         from .diff_filtering import _deduplicate_ast_dwarf
 
-        return _deduplicate_ast_dwarf(changes)
+        return _deduplicate_ast_dwarf(changes, ctx.old, ctx.new)
 
 
 class DeduplicateCrossDetector:
