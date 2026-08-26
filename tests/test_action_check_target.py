@@ -1129,14 +1129,9 @@ class TestReplaySourcesForwardedWithDefault:
             "(inputs.sources != '' && inputs.sources || "
             "(inputs.evidence-producer == 'replay' && '.' || '')) }}"
         ), (
-            "the analysis step's `sources` must fall back to '.' for "
-            "evidence-producer: replay when inputs.sources is empty, "
-            "mirroring collect-facts' own default -- a bare "
-            "`${{ inputs.sources }}` forward would leave --sources unset "
-            "entirely for that case. When the separate consumer-context "
-            "dump already succeeded, `new-library` is that pre-dumped "
-            "snapshot (its own evidence already embedded when it ran), so "
-            "`sources` must be emptied here rather than re-applied to it."
+            "sources must fall back to '.' for evidence-producer: replay "
+            "when empty (mirroring collect-facts' default), and must be "
+            "emptied once the consumer-context dump already succeeded."
         )
 
     @staticmethod

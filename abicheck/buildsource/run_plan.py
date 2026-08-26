@@ -97,55 +97,27 @@ toolchain only through ``binding`` (there is no separate "pick a family"
 invocation flag), and ``compiler_version`` is a *constraint* (e.g.
 ``">=14.0,<15"``), not a value to pass through; verifying a resolved
 binding's actual version against it needs a real toolchain-identity probe
-(subprocess), which stays out of this module by design. A P0 audit round
-briefly made :func:`_compose_gcc_options` consult ``compiler_family`` to
-drop ``-stdlib=``/``--target=`` for GCC-family profiles; a later review
-round found that broke real cross-compilation-target correctness for the
-direct-clang backend (the composed string is never actually fed to a
-literal GCC binary anywhere in this pipeline, only ever to Clang -- see
-that function's own docstring), so it was reverted -- a documented gap,
-not an oversight.
+(subprocess), which stays out of this module by design. See AGENTS.md's
+"Toolchain-profile compiler-family rendering" entry and
+:func:`_compose_gcc_options`'s own docstring for why that function does
+*not* special-case ``compiler_family`` -- a P0 audit round tried and
+reverted it after finding it broke real cross-compilation for the
+direct-clang backend.
 
 **The ``profiles.<id>.consumer_compile`` overlay (G34 Phase 0) projects the
 same way, into its own separate fields:** :attr:`RunPlanCheck.
 consumer_compile_gcc_path`/:attr:`RunPlanCheck.consumer_compile_gcc_options`,
-resolved identically to ``compile:``'s own pair but from the profile's
-separate consumer-toolchain overlay (see :class:`~.project_targets.
-ProfileSpec`'s docstring for the producer/consumer distinction). A profile
-with no ``consumer_compile:`` simply leaves both fields empty -- this
-module does not fall back to the producer ``compile:`` overlay's own
-fields for them, since "no consumer overlay" and "an actual empty overlay"
-are meant to look the same to a caller either way. The native ``check-project`` caller applies these fields to a separate
-candidate dump: it reads the unchanged producer binary while interpreting
-headers under the consumer context, then compares the materialized snapshot.
+resolved from the profile's separate consumer-toolchain overlay (see
+:class:`~.project_targets.ProfileSpec`'s docstring for the producer/
+consumer split), with no fallback to the producer ``compile:`` overlay's
+own fields when absent. The native ``check-project`` caller applies these
+to a separate candidate dump: same producer binary, headers reparsed
+under the consumer context, and that snapshot is what gets compared.
 
-**Known gap: only the candidate side gets this treatment.** The baseline
-(old) side of a ``baseline-channel`` comparison is produced by a
-completely different workflow, at a completely different time --
-``publish-baseline.yml``/``update-main-baseline.yml``, via ``actions/
-baseline`` -- which reads only ``build-output.json`` (no per-profile
-compile-context fields at all: see :class:`~.build_output.BuildOutputTarget`)
-and never consults ``run-plan.json``, so it has no way to know a profile
-declared a ``consumer_compile:`` overlay, let alone dump that profile's
-baseline snapshot under the same consumer toolchain. A ``consumer_compile``-
-active check compared against a real (non-``none``) baseline channel
-therefore compares two snapshots produced under two different header-AST
-contexts -- the candidate under the consumer's, the baseline under the
-producer's (or the CLI default, if the producer profile sets no ``compile:``
-overlay either). ``compare``'s own comparability gate (ADR-050 D2) is what
-keeps this from silently misreporting: a resulting extraction-profile
-fingerprint mismatch is refused outright as ``NOT_COMPARABLE``/
-``ProfileMismatchError`` rather than compared -- so the failure mode here is
-"the feature doesn't work with a real baseline yet," not "the feature lies."
-Closing this needs ``actions/baseline`` (and the ``libraries`` JSON schema
-:func:`~.baseline_publish.derive_baseline_libraries` produces) to gain the
-same per-library ``ast-frontend``/``gcc-path``/``gcc-options`` -- and their
-``consumer_compile`` counterparts -- that ``check-target`` already resolves
-per cell here, sourced from a real per-target run-plan resolution neither
-baseline workflow reads today. That is a new, cross-cutting feature
-spanning ``abicheck/buildsource/baseline_publish.py``, ``actions/baseline``,
-and both baseline-publishing workflows, not a follow-up to this module's own
-projection -- see the G34 plan doc's Phase 0 for where this belongs.
+**Known gap:** only the candidate side gets this treatment --
+``publish-baseline.yml``/``update-main-baseline.yml`` never apply a
+``consumer_compile:`` overlay to the baseline side; see
+``docs/reference/project-targets-schema.md`` and the G34 plan's Phase 0.
 
 **``compile.frontend``/``consumer_compile.frontend`` (G34 Phase B) project
 the same way**, into :attr:`RunPlanCheck.compile_ast_frontend`/
@@ -153,11 +125,9 @@ the same way**, into :attr:`RunPlanCheck.compile_ast_frontend`/
 values the global ``--ast-frontend`` flag accepts, resolved independently
 per overlay, with no fallback from one overlay's field to the other's.
 
-:attr:`~RunPlanCheck.compile_ast_frontend` is threaded all the way through:
-``check-project.yml``'s check job forwards it as ``matrix.compile_ast_frontend
-|| inputs.ast-frontend``, the same per-cell-first precedence
-:attr:`~RunPlanCheck.compile_gcc_path` already uses, so a GCC profile's cell
-and a Clang profile's cell in one run genuinely invoke different frontends.
+:attr:`~RunPlanCheck.compile_ast_frontend` is threaded through as
+``matrix.compile_ast_frontend || inputs.ast-frontend``, the same
+per-cell-first precedence :attr:`~RunPlanCheck.compile_gcc_path` uses.
 :attr:`~RunPlanCheck.consumer_compile_ast_frontend` is forwarded to the
 separate consumer-context candidate dump, never onto the producer-context
 comparison invocation.
@@ -316,30 +286,13 @@ def _compose_gcc_options(compile_spec: ProfileCompileSpec) -> str:
     structured axes this function derives flags from.
 
     **Deliberately not family-aware.** A P0 audit round had this function
-    drop ``-stdlib=``/``--target=`` whenever ``compiler_family: gcc`` was
-    set, reasoning that a real GCC binary rejects both (true: confirmed
-    against GCC 14.2). A later review round found that fix backwards: this
-    composed string is *never* fed to a literal GCC binary anywhere in the
-    current pipeline -- ``--ast-frontend`` only has ``auto``/``castxml``/
-    ``clang``/``hybrid`` (no ``gcc``); castxml's own frontend is always its
-    internal bundled Clang (``--castxml-cc-<id>`` selects an *emulation*
-    mode, not a literal execution path); and the direct-clang backend's
-    ``_resolve_clang_bin`` (``dumper_clang.py``) explicitly *rejects* a
-    ``gcc-path`` that doesn't look clang-family and falls back to host
-    ``clang``/``clang++`` instead. Since the real consumer is always Clang,
-    dropping ``--target=`` actively broke cross-compilation-target
-    correctness for the direct-clang backend: it is the *only* signal
-    available there to steer parsing away from the host architecture (no
-    "probe the real compiler" auto-discovery step exists on that path the
-    way castxml has one), so a GCC-family profile with an explicit
-    ``target:`` would silently have its headers parsed for the runner's
-    architecture instead -- a correctness bug, not merely a redundant flag.
-    Reverted; both flags are emitted unconditionally regardless of
-    ``compiler_family`` again, same as before that audit. A genuine
-    family-specific argv resolver belongs to the toolchain-profile-
-    execution-contract work (AGENTS.md's "Known gaps"), where the actual
-    consuming frontend is known at composition time -- not a per-flag
-    heuristic here that cannot tell which frontend will read its output.
+    drop ``-stdlib=``/``--target=`` for ``compiler_family: gcc``; a later
+    round found the real consumer here is always Clang, never a literal
+    GCC binary, and dropping ``--target=`` broke direct-clang cross-
+    compilation correctness. Reverted; both flags are emitted
+    unconditionally regardless of ``compiler_family``. See AGENTS.md's
+    "Toolchain-profile compiler-family rendering" entry for the full
+    account -- not a per-flag heuristic to re-derive here.
     """
     parts: list[str] = []
     if compile_spec.standard:
@@ -453,16 +406,8 @@ class RunPlanCheck:
     #: ``CheckSpec.allow_new_target``'s own docstring for why a bundle check
     #: can never support this lifecycle state).
     allow_new_target: bool = False
-    #: Whether this cell's profile declares a ``consumer_compile:`` overlay
-    #: at all (G34 Phase 0/B), independent of what that overlay's own
-    #: fields resolve to. A caller must gate any workflow-global fallback
-    #: for :attr:`consumer_compile_ast_frontend`/:attr:`consumer_compile_gcc_path`/
-    #: :attr:`consumer_compile_gcc_options` on this flag rather than on
-    #: whether the resolved field itself is non-empty -- falling back
-    #: whenever *any* global `--ast-frontend`/`--gcc-path`/`--gcc-options`
-    #: is set would otherwise activate the separate consumer-context dump
-    #: for every cell of a profile that has no ``consumer_compile:``
-    #: overlay at all, not just the ones that declare one (Codex review).
+    #: Whether the profile declares a non-empty ``consumer_compile:``
+    #: overlay -- gates the fallback for the three fields above.
     consumer_compile_active: bool = False
 
     def to_dict(self) -> dict[str, Any]:
@@ -773,19 +718,7 @@ def _compile_ast_frontend_for_profile(
 def _consumer_compile_active_for_profile(
     config: ProjectTargetsConfig, profile_id: str
 ) -> bool:
-    """Whether *profile_id* declares a ``consumer_compile:`` overlay at all
-
-    (G34 Phase 0/B) -- independent of whether that overlay's own resolved
-    *output* fields (gcc_path/gcc_options/frontend) are non-empty (an
-    overlay declaring only ``binding:`` with no matching *resolved_bindings*
-    entry still counts as active). An *empty* ``consumer_compile: {}``
-    overlay is excluded, matching :class:`~.project_targets.
-    ProfileCompileSpec`'s own documented rule that an empty overlay is
-    indistinguishable from an absent one -- ``ProfileSpec.to_dict()``
-    already drops it for exactly this reason, so treating it as active here
-    would make a project's behavior depend on whether its config had been
-    round-tripped through to_dict/from_dict (Codex review).
-    """
+    """True iff *profile_id* declares a non-empty ``consumer_compile:`` overlay."""
     profile = config.profiles.get(profile_id)
     if profile is None or profile.consumer_compile is None:
         return False
