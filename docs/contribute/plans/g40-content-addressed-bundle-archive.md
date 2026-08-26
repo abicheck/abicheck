@@ -1082,6 +1082,31 @@ what actually shipped.**
   caller — is a real, separate follow-up; when it lands, this bullet
   should be promoted out of "deferred" and a real test added alongside the
   fix, not written speculatively ahead of it.
+- **Deferred — a distinct, second case for the *other* axis, not covered by
+  the bullet above (Codex review, 2026-08-26, fresh evidence on the same
+  commit): lazy read also rejects a too-new *container* `schema_version`
+  before touching `library_blobs`.** The bullet above mutates only
+  `manifest["bundle_facts_schema_version"]` above its ceiling — it says
+  nothing about `manifest["schema_version"]` (the container's own layout
+  version) above *its* ceiling, and the two are independently checked by
+  `read_bundle_facts_archive()` (see the Phase 2 correction above), so an
+  implementation could satisfy the `bundle_facts_schema_version` case above
+  while still leaving `schema_version` completely unguarded on the lazy
+  path — passing this test list without actually closing the gap Phase 2
+  now requires both checks for. This bullet is the container-axis sibling:
+  an archive whose `manifest["schema_version"]` is one greater than the
+  container's own supported ceiling must be rejected by the lazy
+  per-library read path *before* `library_blobs` is ever indexed — the
+  same "reject before doing anything with `library_blobs`" ordering the
+  Phase 2 correction states for both axes, asserted here specifically so a
+  fix that only special-cases `bundle_facts_schema_version` (the axis a
+  reader might reach for first, since it is the one already familiar from
+  the whole-bundle path) cannot pass this test list while leaving
+  `schema_version` open. Like its sibling above, this is *not* satisfied
+  by the shipped code and must not be read as describing a passing test;
+  when the lazy-path fix lands, both this bullet and its sibling should be
+  promoted out of "deferred" together, with real tests for both axes added
+  alongside the fix.
 - **Atomic publication: a failed write leaves a prior valid archive
   untouched** (Codex review — the requirement introduced above under
   "Publication must be atomic", not previously exercised by any test in

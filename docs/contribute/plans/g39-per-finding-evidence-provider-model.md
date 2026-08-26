@@ -1305,6 +1305,36 @@ structure already in place:
    `"both:l0:elf_dynamic"` for the SONAME comparison that gates whether
    the recommendation fires at all.
 
+   **That second component is only correct for one of two sub-cases the
+   guard covers, and the function's own `detail` string already
+   distinguishes them (Codex review, verified against the real code, PR
+   #866 round 34).** `has_breaking and not soname_bumped and
+   old_elf.soname` is satisfied two structurally different ways, both
+   reachable: (a) `new_elf.soname` is also truthy and, once
+   vendor-hash-stripped, equal to `old_elf.soname` — a genuine two-sided
+   comparison of two real values, where `"both:l0:elf_dynamic"` is exactly
+   right; and (b) `new_elf.soname` is falsy — the new side dropped its
+   SONAME entirely, the branch the function's own `detail = f"SONAME was
+   dropped (was {old_elf.soname!r})"` string (a few lines above the
+   `make_change(...)` call) already narrates separately from case (a)'s
+   `detail = f"SONAME remains {old_elf.soname!r}"`. In case (b) the new
+   side contributes no SONAME *value* to compare against — reading
+   `.dynamic` on that side is still a real, positive read, but what it
+   found is an absence, the same old-has-it/new-was-searched-and-lacks-it
+   distinction this plan's own `<side>:<tier>:searched:<backend>` grammar
+   (established above for a removed symbol's empty side) already exists to
+   preserve. Spelling case (b) as `"both:l0:elf_dynamic"` overstates it —
+   it reads as "both sides carried a comparable SONAME value," when only
+   the old side did. The corrected shape branches on `bool(new_elf.soname)`:
+   case (a) keeps `"both:l0:elf_dynamic"` exactly as specified above; case
+   (b) emits `"old:l0:elf_dynamic"` (the old side's real, positive SONAME
+   value) unioned with `"new:l0:searched:elf_dynamic"` (the new side's
+   `.dynamic` section was read and no `DT_SONAME` entry was found) instead,
+   never `"both:l0:elf_dynamic"` for that branch. `SONAME_BUMP_UNNECESSARY`
+   below is unaffected — it only ever fires when `soname_bumped` is `True`,
+   which requires `both_have_soname`, so its own `"both:l0:elf_dynamic"`
+   component never reaches this dropped-SONAME branch.
+
    **`SONAME_BUMP_UNNECESSARY`, the function's other emitted kind, is
    *not* the genuinely evidence-free case round 26 first described it as
    — it rests on real, positive L0 evidence, and treating it as a pure
