@@ -520,6 +520,36 @@ class TestNoteIfSameBinaryCompared:
         result = runner.invoke(main, ["compare", str(so_path), str(so_path)])
         assert "byte-identical" in result.stdout, result.stdout
 
+    def test_native_compare_cli_hashes_through_a_multi_hop_linker_script_chain(
+        self, tmp_path, monkeypatch
+    ):
+        """Follow-up (Codex review): `_normalize_binary_input` (called ahead
+        of `_finalize_compare_result` in `cli_compare_helpers.py`) only ever
+        resolves one linker-script hop, while `resolve_input()` follows the
+        whole chain recursively -- so a script pointing at another script
+        still hashed the intermediate script, not the final target, and the
+        warning was omitted even though both sides resolve to the same
+        binary."""
+        from unittest.mock import MagicMock
+
+        from click.testing import CliRunner
+
+        from abicheck import dumper as dumper_mod
+        from abicheck.cli import main
+
+        real_so = tmp_path / "libfoo.so.1.2.3"
+        real_so.write_bytes(b"\x7fELF" + b"\x00" * 200)
+        middle_script = tmp_path / "libfoo.so.1"
+        middle_script.write_text("INPUT(libfoo.so.1.2.3)\n")
+        outer_script = tmp_path / "libfoo.so"
+        outer_script.write_text("INPUT(libfoo.so.1)\n")
+        snap = AbiSnapshot(library="libfoo.so", version="1.0", functions=[])
+        monkeypatch.setattr(dumper_mod, "dump", MagicMock(side_effect=[snap, snap]))
+
+        runner = CliRunner()
+        result = runner.invoke(main, ["compare", str(real_so), str(outer_script)])
+        assert "byte-identical" in result.stdout, result.stdout
+
     def test_typed_compare_request_hashes_through_a_linker_script(
         self, tmp_path, monkeypatch
     ):

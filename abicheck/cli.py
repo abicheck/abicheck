@@ -677,17 +677,16 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
     # `dump --dry-run` could report success on an invocation the real run
     # would immediately reject.
     # CodeRabbit review: an earlier version of this fix instead encoded it
-    # as a DryRunResult blocker (exit 1) -- silently downgrading what is a
-    # genuine usage error (exit 64) into an evidence-blocker mistakenly, and
-    # disagreeing with the real run's actual exit code for the identical
-    # input. Raising directly here keeps dry-run and the real run on the
-    # exact same code path for this check, not just the same message. Uses
-    # the pure, side-effect-free binary_utils.normalize_binary_input (no
-    # linker-script "Note:" echo) rather than _normalize_binary_input,
-    # matching dry-run's own "cheap, read-only resolution only" contract;
-    # the real path below still calls _normalize_binary_input itself for
-    # that echo and the so_path reassignment (a no-op re-validation once
-    # this has already passed).
+    # as a DryRunResult blocker (exit 1) -- silently downgrading a genuine
+    # usage error (exit 64) into an evidence-blocker, disagreeing with the
+    # real run's own exit code for the identical input. Raising directly
+    # keeps dry-run and the real run on the same code path for this check,
+    # not just the same message. Uses the pure, side-effect-free
+    # binary_utils.normalize_binary_input (no linker-script "Note:" echo)
+    # rather than _normalize_binary_input, matching dry-run's own "cheap,
+    # read-only resolution only" contract -- the real path below still
+    # calls _normalize_binary_input itself for that echo and the so_path
+    # reassignment (a no-op re-validation once this has already passed).
     effective_debug_format = _resolve_and_check_dump_debug_format(
         so_path, debug_format_opt, debug_format,
     )
@@ -1188,8 +1187,10 @@ def _finalize_compare_result(
     contract_evaluation: bool = False,
 ) -> None:
     """Attach metadata and emit redundancy/filter/suppression output."""
-    result.old_metadata = _collect_metadata(old_input)
-    result.new_metadata = _collect_metadata(new_input)
+    from .binary_utils import resolve_linker_script_chain
+
+    result.old_metadata = _collect_metadata(resolve_linker_script_chain(old_input))
+    result.new_metadata = _collect_metadata(resolve_linker_script_chain(new_input))
     confidence.note_if_same_binary_compared(result)
 
     if show_redundant and result.redundant_changes:

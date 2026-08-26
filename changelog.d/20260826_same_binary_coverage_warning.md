@@ -54,7 +54,11 @@
   (bounded, to guard against a pathological cycle), used by both
   `cli_scan_baseline._run_baseline_compare` and, separately,
   `service_compare_pipeline.classify_compare_pair` -- the shared
-  typed-API/Python-API compare path, which had the identical single-hop-vs-
-  original-operand gap `compare`'s own CLI path never had (it stamps
-  metadata from the CLI's own already-resolved input, not from the request
-  object).
+  typed-API/Python-API compare path.
+- **Fifth follow-up (Codex review): the native `compare` CLI itself had
+  the identical multi-hop gap.** `_finalize_compare_result` hashes the
+  operand paths `cli_compare_helpers.py` already resolved via
+  `cli._normalize_binary_input` -- which, like `resolve_linker_script`
+  itself, only ever follows one hop. It now also resolves through
+  `resolve_linker_script_chain()` immediately before hashing, matching
+  the scan and typed-API paths.
