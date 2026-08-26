@@ -113,14 +113,8 @@ class IdentityConflict:
         # string is a `Sequence` too, so it is refused explicitly rather than
         # iterated one character at a time — the same shape `diagnostics_from`
         # guards against.
-        if isinstance(self.occurrences, (str, bytes)) or not isinstance(
-            self.occurrences, Sequence
-        ):
-            raise TypeError(
-                "occurrences must be a sequence of OccurrenceId, not "
-                f"{type(self.occurrences).__name__} ({self.occurrences!r})"
-            )
-        for index, occurrence in enumerate(self.occurrences):
+        rows = _row_sequence(self.occurrences, "occurrences")
+        for index, occurrence in enumerate(rows):
             _instance_of(occurrence, OccurrenceId, f"occurrences[{index}]")
         # Sorted so a conflict's own membership does not depend on the order
         # its occurrences were collected in, and deduplicated by key for the
@@ -129,9 +123,7 @@ class IdentityConflict:
         # what a reader sees as the size of the disagreement. Lossless — the
         # key is a function of every field, so two occurrences sharing one
         # are equal.
-        ordered = tuple(
-            {o.key: o for o in sorted(self.occurrences, key=lambda o: o.key)}.values()
-        )
+        ordered = tuple({o.key: o for o in sorted(rows, key=lambda o: o.key)}.values())
         if len({o.key for o in ordered}) < 2:
             # A conflict needs two occurrences that actually disagree. Zero,
             # one, or the same occurrence twice were all accepted, so a reader
@@ -229,6 +221,26 @@ class OccurrenceSet:
         bisect.insort(bucket, occurrence, key=lambda o: o.key)
 
     def extend(self, occurrences: Iterable[OccurrenceId]) -> None:
+        """Add every occurrence in an iterable.
+
+        A `Mapping` is refused rather than iterated. Its keys really can be
+        `OccurrenceId`s, so every per-item guard passes while the values are
+        dropped — the same silent loss as `attributes={pair: value}`, and
+        this class has exactly one invariant it cannot lose.
+
+        Deliberately *not* `row_sequence`: this takes an `Iterable`, so a
+        generator is a legitimate caller and that guard would reject one. A
+        `set` is accepted for a reason worth stating rather than assuming —
+        `add` keeps each bucket in key order, so the resulting state is
+        canonical no matter what order a set iterated in. Only the mapping
+        changes what the call means.
+        """
+        if isinstance(occurrences, Mapping):
+            raise TypeError(
+                "occurrences must not be a mapping "
+                f"({occurrences!r}); iterating one yields its keys and "
+                "silently drops every value"
+            )
         for occurrence in occurrences:
             self.add(occurrence)
 

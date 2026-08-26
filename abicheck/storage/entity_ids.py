@@ -264,10 +264,23 @@ class OccurrenceId:
             "observation",
             _enum_member(self.observation, ObservationKind, "observation"),
         )
+        # The *container*, before its rows — the same boundary-only-guard gap
+        # the comment above records for row shape, repeated one level out. A
+        # mapping iterates its keys, so `attributes={("size", "8"): "x"}`
+        # became that attribute with the value dropped, and since attributes
+        # are part of `key`, `OccurrenceSet.add` then deduplicated under an
+        # identity no adapter supplied (Codex review). `from_dict` grew this
+        # check first and the constructor did not, which is two doors into
+        # one field disagreeing about what a valid container is.
         object.__setattr__(
             self,
             "attributes",
-            tuple(sorted(_attribute_pair(row) for row in self.attributes)),
+            tuple(
+                sorted(
+                    _attribute_pair(row)
+                    for row in _row_sequence(self.attributes, "attributes")
+                )
+            ),
         )
         object.__setattr__(
             self, "container", _identity_text(self.container, "container")
@@ -385,6 +398,12 @@ class OccurrenceId:
             container=_identity_text(data.get("container", ""), "container"),
             producer=_identity_text(data.get("producer", ""), "producer"),
             attributes=tuple(
+                # Kept alongside `__post_init__`'s check rather than
+                # delegated to it: this comprehension *materializes* a
+                # mapping's keys into a tuple, so by the time the
+                # constructor sees the value it is a perfectly valid
+                # sequence. Removing this one and relying on the assignment
+                # door reopened the parse path — verified, not assumed.
                 _attribute_pair(pair)
                 for pair in _row_sequence(data.get("attributes", ()), "attributes")
             ),

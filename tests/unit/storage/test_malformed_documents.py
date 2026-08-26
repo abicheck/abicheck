@@ -16,6 +16,7 @@ from __future__ import annotations
 import pytest
 
 from abicheck.storage.availability import AvailabilityLedger
+from abicheck.storage.entity_ids import EntityKind, ObservationKind
 from abicheck.storage.identity import (
     EntityId,
     IdentityConflict,
@@ -257,3 +258,87 @@ class TestRowSequenceFieldsRejectEveryWrongContainer:
             "these document fields are iterated without checking the container, "
             f"so a mapping yields keys and an empty one reads as 'none': {offenders}"
         )
+
+
+class TestConstructorsGuardContainersToo:
+    """The parse door and the assignment door must agree about a container.
+
+    `526cd29` added `row_sequence` to `from_dict` and stopped there, so
+    direct construction still accepted a mapping — and `OccurrenceId`'s own
+    `__post_init__` already carried a comment recording that exact
+    boundary-only-guard gap for row *shape*, one level in (Codex review).
+    The gap was reintroduced one level out, in the same commit that quoted
+    the lesson.
+    """
+
+    _ENTITY = EntityId(kind=EntityKind.FUNCTION, qualified_name="f")
+
+    @pytest.mark.parametrize(
+        "container",
+        [
+            pytest.param({("size", "8"): "discarded"}, id="mapping"),
+            pytest.param("ab", id="str"),
+            pytest.param({("size", "8")}, id="set"),
+        ],
+    )
+    def test_the_constructor_refuses_what_from_dict_refuses(
+        self, container: object
+    ) -> None:
+        with pytest.raises(TypeError, match="attributes must be a sequence of rows"):
+            OccurrenceId(
+                entity=self._ENTITY,
+                observation=ObservationKind.AST,
+                attributes=container,
+            )
+
+    def test_the_parse_guard_is_not_redundant(self) -> None:
+        """Verified rather than assumed, because I assumed wrong first.
+
+        Adding the check to `__post_init__` looked like it made the
+        `from_dict` one redundant — one door, per this package's own rule.
+        It does not: that comprehension *materializes* a mapping's keys into
+        a tuple, so the constructor receives a perfectly valid sequence.
+        Removing it reopened the parse path, and only re-running the
+        reproduction caught it.
+        """
+        with pytest.raises(TypeError, match="attributes must be a sequence of rows"):
+            OccurrenceId.from_dict(
+                {
+                    "entity": {"kind": "function", "qualified_name": "f"},
+                    "observation": "ast",
+                    "attributes": {("size", "8"): "discarded"},
+                }
+            )
+
+    def test_extend_refuses_a_mapping_but_keeps_every_other_iterable(self) -> None:
+        """A narrower rule than `row_sequence`, deliberately.
+
+        `extend` takes an `Iterable`, so a generator is a legitimate caller
+        and `row_sequence` would reject one. A `set` is accepted for a
+        checked reason rather than an assumed one: `add` keeps each bucket
+        in key order, so the resulting state is canonical whatever order a
+        set iterated in. Only a mapping changes what the call means — its
+        keys pass every per-item guard while its values vanish.
+        """
+        first = OccurrenceId(entity=self._ENTITY, observation=ObservationKind.AST)
+        second = OccurrenceId(entity=self._ENTITY, observation=ObservationKind.DWARF)
+
+        with pytest.raises(TypeError, match="must not be a mapping"):
+            OccurrenceSet().extend({first: "dropped"})
+
+        for accepted in (
+            [first, second],
+            {first, second},
+            (item for item in (first, second)),
+        ):
+            built = OccurrenceSet()
+            built.extend(accepted)
+            assert len(built) == 2
+
+    def test_a_valid_construction_is_untouched(self) -> None:
+        occurrence = OccurrenceId(
+            entity=self._ENTITY,
+            observation=ObservationKind.AST,
+            attributes=(("size", "8"),),
+        )
+        assert occurrence.attributes == (("size", "8"),)
