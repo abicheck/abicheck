@@ -870,9 +870,22 @@ projects per-finding contract detail onto each `<testcase>`'s `<properties>`
 block (`abicheck.contract_relevance`, `abicheck.contract_evidence_refs`,
 ...), mirroring `reporter.py`'s JSON `properties` bag and `sarif.py`'s own
 one-to-one — so this phase adds `abicheck.evidence_provenance` there the
-same way, gated the same way `contract_evidence_refs` already is (append
-only when the value is non-`None`, keeping every pre-`--contract` JUnit
-report byte-for-byte unchanged).** Also reaches the
+same way: append the property only when the value is non-`None`, mirroring
+`contract_evidence_refs`' own append rule exactly.** Unlike
+`contract_evidence_refs` — which stays `None` on every finding unless the
+run was given `--contract`, so its own append rule *does* keep a
+pre-`--contract` JUnit report byte-for-byte unchanged — `evidence_provenance`
+is Phase 1's whole point: once that phase lands, it is populated on every
+finding regardless of `--contract` (see Phase 1's own vocabulary section
+above and Phase 3's four-projection coverage below), so this addition
+changes JUnit output for the ordinary, contract-free case too, not only the
+`--contract` one. That is an intentional, in-scope consequence of adding a
+new always-computed field to a public report format, not a defect — but it
+means this phase's JUnit change is a real, unconditional schema-shape change
+to every emitted `<testcase>`, and must be called out as such (the same
+`REPORT_SCHEMA_VERSION`/topic-registration discipline the JSON side already
+requires below applies here too), not described as a change confined to
+`--contract` runs.
 generated docs (`scripts/gen_detector_spec.py`'s matrix gains a column once
 every kind has a real, non-`UNVERIFIED` classification — gated on Phase 2's
 completeness test, so the docs generator cannot claim more coverage than

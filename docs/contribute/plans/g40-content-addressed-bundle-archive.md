@@ -976,6 +976,18 @@ what actually shipped.**
      read back through the real `BundleArchiveReader`'s per-library `read_blob()` read —
      the actual public chokepoints, not a hand-constructed shortcut into
      `zstandard`'s own lower-level API.
+- **Determinism across construction order** — the round-trip test promised
+  by Phase 2's own "order the blob members themselves are written in" note
+  above: two logically-equal `BundleFacts` values whose `per_library_snapshots`
+  are populated in different insertion orders (e.g. built by iterating the
+  same library set forwards vs. reversed, or via two dicts constructed with
+  their keys inserted in a different sequence) are each saved as an archive
+  and asserted to produce byte-identical archive bytes and matching
+  `stored_sha256` — proving archive identity depends only on the *set* of
+  unique payloads, never on the order the caller happened to build the map
+  in. Distinct from the plain round-trip test above, which only checks that
+  one save/reload cycle preserves content, not that two differently-ordered
+  but logically-equal inputs converge on the same bytes.
 - Dedup: an **intra-archive** test only (matching the corrected, honest
   scope above, round 2) — two library names in *one* `BundleFacts` map to
   byte-identical `AbiSnapshot` content (the same object under two keys,
