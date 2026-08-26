@@ -69,7 +69,20 @@ def load_bundle_facts_dispatch(
     architecture violation. Caller resolves *max_json_object_nodes*'s
     ``None`` default (``bundle_facts.DEFAULT_MAX_JSON_OBJECT_NODES``) before
     calling, since that constant lives in one of those unclassified modules
-    too."""
+    too.
+
+    *max_json_object_nodes* is deliberately an aggregate, whole-document
+    budget on this path, not a per-library one -- unlike the G40 archive
+    path, where each library's blob is a separately zip-stored member and
+    can be budget-checked independently before any of them are decoded.
+    Splitting the plain-JSON document into per-library slices first would
+    mean parsing the untrusted text before checking it, defeating the
+    entire point of a pre-scan budget (Codex review: a multi-library
+    document whose *individual* snapshots each fit the budget can still
+    be rejected in aggregate here, though never the reverse). A caller
+    with a legitimately large multi-library bundle has two ways around
+    this: pass a larger *max_json_object_nodes*, or use ``format="archive"``
+    for real per-library accounting."""
     import json as _json
 
     archived = maybe_read_bundle_facts_archive(
