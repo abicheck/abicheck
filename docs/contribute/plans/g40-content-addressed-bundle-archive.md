@@ -74,11 +74,30 @@ informed by whatever `BundleFacts` looked like in production by then").
 ## Goal & acceptance criteria
 
 A stored bundle-facts artifact that (a) can have one library's snapshot read
-without touching any other library's data, (b) stores one copy of a
-byte-identical parsed snapshot shared by multiple libraries, and (c) is
-fully backward-compatible with every `BundleFacts` file already produced by
-the shipped G38 Phase 2 format — never a breaking format bump for an
-existing consumer.
+without touching any other library's data, (b) stores one copy per *unique*
+serialized-snapshot content within a single archive write — i.e. two map
+entries that happen to reference the byte-identical `AbiSnapshot` collapse
+onto one stored blob — and (c) is fully backward-compatible with every
+`BundleFacts` file already produced by the shipped G38 Phase 2 format —
+never a breaking format bump for an existing consumer.
+
+**Criterion (b) is deliberately narrower than it may first read, and the
+"Design" section's dedup-correction subsection below states exactly how
+narrow.** Two genuinely distinct libraries — even a shared static
+utility re-linked into both — do **not** produce byte-identical serialized
+snapshots in practice: `AbiSnapshot.library`, `source_path`, mtimes/sizes,
+and each DSO's own ELF/PE/Mach-O metadata block are always
+per-library-distinct, so criterion (b) does not, by itself, close the
+storage-duplication problem this plan's own "Problem" section opens with
+(shared headers or a shared static library across several DSOs in one
+release). What (b) delivers is real but narrower: within one archive write,
+two map keys that reference the literal same already-serialized snapshot
+object collapse onto one stored blob instead of two. Closing the
+real-world, multi-library storage-duplication case — sharing content
+*across* genuinely distinct libraries, or *across* separate captures/archive
+files — is future work, out of scope for this plan; see "Design"'s
+dedup-correction subsection and "Out of scope" below for what each would
+require.
 
 ### Phase 0 — container format decision (S)
 

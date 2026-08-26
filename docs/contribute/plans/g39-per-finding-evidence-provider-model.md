@@ -321,15 +321,38 @@ structure already in place:
    the *matched* side's real per-fact provenance (whichever tier actually
    produced `f_old`, per the hybrid-aware rule above) alongside a
    `searched:<tier>` entry for the side that was searched and came back
-   empty — `new:searched:l0` when only the new side's exported-symbol table
-   was consulted (`elf_only_mode`/`_check_removed_function`'s own ELF-only
-   branch), `new:searched:l0+l2` when the full declaration surface
-   (`new_map`/`new_all`) was also searched, mirroring which of `new_index`'s
-   lookups actually ran before falling through to removal — never a bare
-   `both:` label implying two facts where there is one fact and one
-   confirmed absence. This is Phase 0 vocabulary work for this slice, the
-   same way item 3 below folds its own `searched:` form into Phase 0 rather
-   than deferring it.
+   empty — never a bare `both:` label implying two facts where there is one
+   fact and one confirmed absence. **The `<tier>` value must be derived per
+   snapshot from which providers actually populated that snapshot's
+   declaration surface, not hardcoded to one example (Codex review,
+   verified against the code): `_public_functions()`'s own narrowing is
+   evidence-conditional, not a fixed ELF+L2 pair.** It starts from
+   `snap.function_map` — populated from whichever of DWARF (L1), header-AST
+   parsing (L2), or a symbols-only ELF dump (L0/`elf_only_mode`) actually
+   produced the snapshot — and narrows that set to the exported subset only
+   when `snap.elf is not None and snap.elf.symbols`; a snapshot with no ELF
+   symbol table at all (a header-only L2 dump, or a PE/Mach-O snapshot,
+   since this narrowing checks `snap.elf` specifically and has no `snap.pe`/
+   `snap.macho` counterpart) keeps the full DWARF/header-derived set
+   untouched, so no `l0` component was ever searched for that snapshot.
+   Concretely, per real backend combination this can produce: `new:
+   searched:l1` for a DWARF-derived snapshot with no ELF export table
+   consulted; `new:searched:l2` for a header-only snapshot; `new:
+   searched:l0` when the snapshot is `elf_only_mode` (an ELF-only, symbols-
+   only dump with no type-level evidence at all, per `_is_stripped_symbols_
+   only`); `new:searched:l0+l1` or `new:searched:l0+l2` when DWARF or
+   header-AST evidence was narrowed by a *present* ELF export table; and a
+   PE- or Mach-O-specific tag (e.g. `new:searched:pe-exports`/
+   `new:searched:macho-exports`) for a snapshot whose declaration surface
+   came from a PE/Mach-O export table rather than ELF `.dynsym` — `_public_
+   functions()` has no such narrowing today, so this slice's implementation
+   must decide whether to add an equivalent PE/Mach-O narrowing step or
+   record the platform's evidence tier as-is. Implement this as one function
+   that inspects the actual snapshot fields the way `_public_functions()`
+   and `_is_stripped_symbols_only()` already do, not as a table keyed by an
+   assumed-fixed platform. This is Phase 0 vocabulary work for this slice,
+   the same way item 3 below folds its own `searched:` form into Phase 0
+   rather than deferring it.
 2. **L2 header-derived detectors** (`diff_types.py`'s struct/enum/typedef
    findings, `diff_type_spellings.py`) — provenance here genuinely varies
    per finding (which backend produced *this specific* `RecordType`, and
