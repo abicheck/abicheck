@@ -477,6 +477,70 @@ class TestReadDoorsValidateTheirLookupKeys:
         assert ledger.for_family("undeclared").status is FactStatus.NOT_COLLECTED
 
 
+class TestRequiredFamiliesMustBeACollection:
+    """A bare `str` is an iterable of `str`, so every per-item check passes.
+
+    `missing_families("layout")` answered `('a', 'l', 'o', 't', 'u', 'y')`
+    and omitted the real failed family — the coverage check that exists to
+    *find* gaps reporting six that do not exist and missing the one that
+    does (Codex review). Confidently answered about the wrong thing, which
+    is worse than raising.
+    """
+
+    @staticmethod
+    def _ledger() -> AvailabilityLedger:
+        ledger = AvailabilityLedger()
+        ledger.declare("layout", FactAvailability(status=FactStatus.FAILED))
+        return ledger
+
+    def test_the_reported_case_is_refused(self) -> None:
+        with pytest.raises(TypeError, match="collection of keys"):
+            self._ledger().missing_families("layout")
+
+    def test_bytes_is_refused_too(self) -> None:
+        """Rejected here rather than left to the item guard.
+
+        `bytes` yields `int`, which the per-family key guard already raises
+        on — but that is the item guard's accident, not this one's intent,
+        and depending on it would make the container rule true only by
+        coincidence.
+        """
+        with pytest.raises(TypeError, match="collection of keys"):
+            self._ledger().missing_families(b"layout")
+
+    @pytest.mark.parametrize(
+        "required",
+        [
+            pytest.param(["layout"], id="list"),
+            pytest.param(("layout",), id="tuple"),
+            pytest.param({"layout"}, id="set"),
+            pytest.param(iter(["layout"]), id="iterator"),
+        ],
+    )
+    def test_real_collections_still_work(self, required: object) -> None:
+        """The control. A generator is included because the guard must test
+        the container, not consume it — a check that iterated to decide
+        would leave a caller's iterator empty.
+        """
+        assert self._ledger().missing_families(required) == ("layout",)
+
+    def test_only_string_item_collections_are_vulnerable(self) -> None:
+        """Why this is the package's only door of its kind, not an assertion.
+
+        A per-item guard already covers a collection whose items are not
+        strings: `extend("abc")` raises on `"a"`, since a character is not
+        an `OccurrenceId`. Only a collection *of strings* is defeated,
+        because there a character is a perfectly valid item — so the sweep
+        for this class has exactly one member, provably.
+        """
+        from abicheck.storage.identity import OccurrenceSet, group_by_entity
+
+        with pytest.raises(TypeError, match="must be a OccurrenceId"):
+            OccurrenceSet().extend("abc")
+        with pytest.raises(TypeError, match="must be a OccurrenceId"):
+            group_by_entity("abc")
+
+
 class TestUnknownFamilyFallbackCannotBeComparable:
     """Codex review: one stored field could defeat the whole module's rule.
 

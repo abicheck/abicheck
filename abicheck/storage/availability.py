@@ -67,6 +67,7 @@ from .guards import (
     decision_key as _decision_key,
     diagnostics_from as _diagnostics_from,
     instance_of as _instance_of,
+    key_collection as _key_collection,
     mapping as _mapping,
     provenance_text as _provenance_text,
 )
@@ -668,7 +669,14 @@ class AvailabilityLedger:
         Sorted, so a caller rendering the result into a diagnostic or a
         coverage row gets a stable message rather than one that depends on
         the caller's own iteration order.
+
+        The collection itself is checked before it is iterated. A bare
+        ``str`` satisfies every per-item key check while yielding
+        characters, so this reported six families that do not exist and
+        omitted the one that does — a coverage check answering confidently
+        about the wrong thing.
         """
+        _key_collection(required, "required")
         return tuple(
             sorted(
                 name

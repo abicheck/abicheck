@@ -225,7 +225,7 @@ bytes/objects actually loaded.
 | `abicheck/storage/identity.py` | `EntityKind`, `ObservationKind`, `EntityId`, `OccurrenceId`, `OccurrenceSet`, `IdentityConflict`, `elf_symbol_occurrence` (A0.2/A0.3) |
 | `abicheck/storage/canonical.py` | `canonical_form`, `canonical_json`, `semantic_digest`, `strip_capture_metadata`, `CAPTURE_METADATA_KEY` (A0.4) |
 | `abicheck/storage/versioning.py` | `PACKAGE_FORMAT_VERSION`, `COMPARISON_CONTRACT_VERSION`, `UNSTATED_VERSION`, `StorageVersions`, `ProducerIdentity`, `ReaderCompatibility`, `check_reader_compatibility` (A0.5) |
-| `abicheck/storage/guards.py` | `identity_text`, `decision_key`, `provenance_text`, `diagnostics_from`, `mapping`, `enum_member`, `instance_of` — internal, not re-exported by the package |
+| `abicheck/storage/guards.py` | `identity_text`, `decision_key`, `key_collection`, `provenance_text`, `diagnostics_from`, `mapping`, `enum_member`, `instance_of` — internal, not re-exported by the package |
 
 `guards.py` is the one row the package does not re-export: it holds the value
 guards each module used to restate at its own doors. Three copies of one rule

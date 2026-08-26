@@ -42,6 +42,7 @@ from typing import Any
 #: and a new guard cannot appear here unadvertised.
 __all__ = [
     "decision_key",
+    "key_collection",
     "enum_member",
     "instance_of",
     "diagnostics_from",
@@ -206,6 +207,35 @@ def mapping(raw: Any, field_name: str) -> None:
             f"{field_name} must be a mapping, not {type(raw).__name__} "
             f"({raw!r}); a sequence yields valid-looking keys but answers "
             "neither lookup nor serialization"
+        )
+
+
+def key_collection(raw: Any, field_name: str) -> None:
+    """A collection *of* keys, checked before it is iterated.
+
+    A bare ``str`` is an iterable of ``str``, so it satisfies both the
+    parameter's annotation and every per-item key check — it just yields
+    characters. ``missing_families("layout")`` answered
+    ``('a', 'l', 'o', 't', 'u', 'y')`` and omitted the real failed family,
+    so the coverage check that exists to *find* gaps reported six that do
+    not exist and missed the one that does (Codex review).
+
+    Worth being precise about the scope, because it is narrower than it
+    looks. A per-item guard already covers a collection whose items are
+    *not* strings: ``OccurrenceSet.extend("abc")`` raises on the first
+    character, since ``"a"`` is not an ``OccurrenceId``. Only a collection
+    of *strings* is defeated this way, because there a character is a
+    perfectly valid item. ``bytes`` is rejected alongside ``str`` for the
+    same reason in reverse — it yields ``int``, which today raises from the
+    item guard, but that is the item guard's accident rather than this
+    one's intent.
+    """
+    if isinstance(raw, (str, bytes)):
+        raise TypeError(
+            f"{field_name} must be a collection of keys, not a bare "
+            f"{type(raw).__name__} ({raw!r}); iterating it yields characters, "
+            "each of which is a valid key, so the result would look answered "
+            "rather than wrong"
         )
 
 
