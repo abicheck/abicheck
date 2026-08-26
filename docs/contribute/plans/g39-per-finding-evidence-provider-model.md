@@ -325,8 +325,40 @@ cross a `/`), so as of ADR-061's incremental `compare/`/`workflows/`
 package migration (see "Implementation location" above) they already miss
 a real, present-day construction site — `abicheck/impact/use_case_impact.py`
 — and will miss every detector `compare/detectors/{symbols,types,cpp,
-platform,build,source}.py` eventually migrates too. **Fresh evidence after
-that correction (Codex review, PR #866 round 20): `'abicheck/**/*.py'`
+platform,build,source}.py` eventually migrates too.
+
+**That `use_case_impact.py` citation is itself wrong, and the mistake is
+worth naming rather than quietly dropping (Codex review, fresh evidence,
+PR #866 round 37, confirmed by reading the module directly).**
+`UseCaseChange(...)` (lines ~313-317 of that file, inside
+`build_use_case_impact()`) is not a `Change`-construction site at all — it
+is a *projection*: it copies three fields (`symbol`, `kind.value`,
+`report_finding_id(change)`) off an already-constructed `Change` that
+already carries its own `evidence_provenance` decision from whichever
+Phase 1 site produced it, into a smaller, differently-shaped carrier
+dataclass with no `evidence_provenance` field of its own, which
+`UseCaseImpact.to_dict()` then serializes under the report's
+`use_case_impact.by_use_case` key. Its only reason for appearing in this
+paragraph is that the *text* `"UseCaseChange("` contains the substring
+`"Change("`, so the grep this section builds toward matches the line
+regardless of the two pathspecs' directory depth — a genuine grep hit, but
+a false positive for "needs Phase 1 wiring." Sending it to Phase 1 (supply
+a fresh `evidence_provenance` here) would be wrong twice over: there is no
+new evidence decision to make at this call site, and the module already
+has the value it should be projecting — the participating `change`'s own
+`evidence_provenance` — sitting unused one line above the construction.
+The real gap is downstream: `UseCaseImpact.to_dict()` is an eighth
+`Change`→dict projection this plan's inventory was missing entirely, the
+same shape as the seven families Phase 3 already enumerates. See that
+phase's own correction below and the matching "Files & surfaces" entry —
+this paragraph's own point about the two glob patterns missing nested
+files still stands (`buildsource/*.py`'s several dozen sites above already
+establish it), it just needed a construction-site example, not a
+projection-site one; the module remains a valid illustration of "the old
+globs would miss this file entirely," it is only mis-filed as Phase 1
+rather than Phase 3.
+
+**Fresh evidence after that correction (Codex review, PR #866 round 20): `'abicheck/**/*.py'`
 *alone* has the opposite problem — verified directly with `git grep`
 (2.43.0) against this repo, it matches only *nested* files
 (`abicheck/buildsource/*.py`, `abicheck/impact/*.py`, ...) and matches
@@ -2040,6 +2072,51 @@ report/SARIF/JUnit surface `reporter.py` calls), so — like the
 "don't add a field silently to an unversioned format" caution applies, not
 a schema file to update.
 
+**An eighth projection family, `abicheck/impact/use_case_impact.py`'s
+`UseCaseImpact.to_dict()`, is missing from this inventory entirely — Phase
+1's own inventory paragraph mis-cited this module's `UseCaseChange(...)`
+call as a construction site, which it is not (Codex review, fresh
+evidence, PR #866 round 37, confirmed by reading the module directly; see
+Phase 1's own correction above for the full account of the mis-citation).**
+`build_use_case_impact()` builds one `UseCaseChange` per (already-
+constructed) `Change`/use-case pair it attributes, copying `symbol`,
+`kind.value`, and `report_finding_id(change)` off the participating
+`Change` — never a fresh evidence decision — into `UseCaseChange`, a
+carrier dataclass with no `evidence_provenance` field at all.
+`UseCaseImpact.to_dict()` then serializes each use case's tuple of
+`UseCaseChange` objects under `use_case_impact.by_use_case[<use
+case>][i]`, straight off `UseCaseChange.to_dict()`'s own three-key dict
+(`symbol`/`kind`/`finding_id`) — the identical "small, independently
+projected carrier" shape the fifth family's `_stack_finding_dicts` and the
+seventh family's `RootCauseGroup.to_dict()` already establish, not reached
+by `to_change()`, `_change_to_dict()`, `_leaf_entry()`, or any of the
+other seven families. Implementing this phase against only the first
+seven families would leave `compare --use-cases MANIFEST --format json`
+silently missing `evidence_provenance` on every attributed finding in
+`use_case_impact.by_use_case`, even once every other JSON surface this
+phase covers carries it — the reader loses exactly the information needed
+to judge how solid the *use-case attribution itself* is for a given
+finding, on the one report block whose entire purpose is telling a reader
+which of their own use cases a change actually touches. Fix by widening
+`UseCaseChange` with an `evidence_provenance` field carrying the
+participating `Change.evidence_provenance` forward unchanged (populated at
+the one construction call site inside `build_use_case_impact()`'s loop,
+mirroring how `finding_id` is already carried the same way), and adding it
+to `UseCaseChange.to_dict()`'s dict literal; give it its own test
+coverage — a `compare --use-cases MANIFEST --format json` fixture
+asserting `use_case_impact.by_use_case[<use case>][i].evidence_provenance`
+matches the corresponding finding's own `evidence_provenance` in the
+report's main `changes`/`findings` array, mirroring the existing
+per-builder pattern rather than assumed to follow from `reporter.py`'s own
+coverage. `UseCaseImpact.to_dict()` feeds no dedicated `.schema.json`
+(confirmed: no `use_case_impact.schema.json` exists under
+`abicheck/schemas/` or `docs/reference/schemas/v1/`, and it is not part of
+`compare_report.schema.json`'s own `Change`-object definition either,
+since `by_use_case` entries are `UseCaseChange`, a distinct, smaller
+shape) — so, like the `_baseline_finding_dicts`/release-JSON/stack-JSON/
+`RootCauseGroup` families above, only the "don't add a field silently to
+an unversioned format" caution applies, not a schema file to update.
+
 **A new public field on an already-published report format is a real
 schema change, not a cosmetic addition (Codex review — a prior revision of
 this phase named all three builders but never said this)**:
@@ -2282,6 +2359,13 @@ above, which this list intentionally does not re-duplicate.
   `_add_contract_properties` — Phase 3's SARIF/JUnit surfaces (or their
   `report/`-migrated successors, e.g. `report/render_sarif.py`, if that
   migration has landed by implementation time).
+- `abicheck/impact/use_case_impact.py`'s `UseCaseChange`/
+  `UseCaseImpact.to_dict()` — Phase 3's eighth projection family (see that
+  phase's own correction above): `compare --use-cases`'s independent
+  `use_case_impact.by_use_case` dict builder, not reached by `reporter.py`'s
+  six builders or by any of the other projection families. Not a Phase 1
+  construction site despite matching the `"Change("` grep textually — see
+  Phase 1's own correction above.
 - `tests/test_evidence_provenance_completeness.py` — Phase 2 (new).
 - `scripts/gen_detector_spec.py`, `docs/reference/detector-spec.md` — Phase 3.
 
