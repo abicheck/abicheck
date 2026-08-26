@@ -52,19 +52,57 @@ def test_counts_array_nodes_too():
         check_json_container_budget(raw, max_container_nodes=5)
 
 
+def test_counts_scalar_string_values_too():
+    """Sixth-order follow-up (Codex review, fresh evidence): a payload
+    placing many scalar strings under one ignored field previously
+    contributed nothing to the budget at all -- only container starts
+    were counted, and a matched string token was consumed and silently
+    discarded. `json.loads()` allocates one real Python object per string
+    element regardless, so a highly compressible array of many short
+    strings could inflate real memory well past this budget's intent
+    while passing the check cleanly (reported at 1,100,001 eight-
+    character strings / 12.1 MB increasing RSS by ~79 MB)."""
+    raw = ("[" + ",".join(['"x"'] * 10) + "]").encode()
+    # 1 array + 10 string scalars = 11 real tokens.
+    with pytest.raises(JsonContainerBudgetExceeded):
+        check_json_container_budget(raw, max_container_nodes=5)
+    check_json_container_budget(raw, max_container_nodes=11)
+
+
+def test_counts_number_and_literal_scalars_too():
+    """The same gap as above, for the other JSON scalar shapes (numbers,
+    ``true``/``false``/``null``) -- none of which are containers, and
+    none of which the pre-fix scan counted either."""
+    raw = ("[" + ",".join(["1", "2.5", "-3e10", "true", "false", "null"]) + "]").encode()
+    # 1 array + 6 scalars = 7 real tokens.
+    with pytest.raises(JsonContainerBudgetExceeded):
+        check_json_container_budget(raw, max_container_nodes=6)
+    check_json_container_budget(raw, max_container_nodes=7)
+
+
 def test_a_bracket_inside_a_string_value_is_not_counted():
     raw = json.dumps({"weird": "a[b]c{d}e" * 50}).encode()
-    # Only the one real outer object -- well under a tiny budget.
-    check_json_container_budget(raw, max_container_nodes=1)
+    # The real token count is exactly 3 -- one object, one key string, one
+    # value string -- regardless of the value string's own length or the
+    # 250 bracket-look-alike characters embedded in it (50 repeats of
+    # "a[b]c{d}e", five bracket characters each). A desync that started
+    # matching brackets *inside* the string would inflate this by close to
+    # two orders of magnitude.
+    check_json_container_budget(raw, max_container_nodes=3)
+    with pytest.raises(JsonContainerBudgetExceeded):
+        check_json_container_budget(raw, max_container_nodes=2)
 
 
 def test_an_escaped_quote_inside_a_string_does_not_desync_token_boundaries():
     raw = json.dumps({"s": 'a\\"[b]\\"c', "arr": [1, 2, 3]}).encode()
-    # One object, one array = 2 containers; a desync would either
-    # miscount or run past the string into structural false positives.
-    check_json_container_budget(raw, max_container_nodes=2)
+    # The real token count is exactly 8: the outer object, the "s" key,
+    # its string value, the "arr" key, the array, and its three number
+    # elements. A desync (the escaped quote splitting the string open too
+    # early) would either miscount or run past the string into structural
+    # false positives from the bracket look-alikes it contains.
+    check_json_container_budget(raw, max_container_nodes=8)
     with pytest.raises(JsonContainerBudgetExceeded):
-        check_json_container_budget(raw, max_container_nodes=1)
+        check_json_container_budget(raw, max_container_nodes=7)
 
 
 def test_raises_once_the_budget_is_first_exceeded_not_after_a_full_scan():

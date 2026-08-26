@@ -219,6 +219,43 @@ def test_read_snapshot_bytes_cap_selection_survives_escalation_ceiling(tmp_path)
     assert read_snapshot_bytes(p, max_decoded_bytes=100) == b"{}"
 
 
+def test_probe_call_sites_stay_correct_past_the_escalation_ceiling(tmp_path):
+    """Sixth-order follow-up (Codex review, fresh evidence): the same
+    >1 MiB-leading-skippable-frame shape as the test above, but for the
+    *other* three skippable-frame-aware probes -- `detect_snapshot_
+    compression()`, `read_snapshot_storage_info()`, and `bounded_decoded_
+    prefix()` -- each of which independently fell back to `NONE`/raw-bytes
+    once its own escalation hit the same 1 MiB ceiling without finding the
+    real data frame, unlike `read_snapshot_bytes()`'s cap-selection probe
+    (fixed in the prior round). `detect_snapshot_compression()`/`read_
+    snapshot_storage_info()` reported the file as uncompressed even though
+    the leading magic alone already proves it's zstd; `bounded_decoded_
+    prefix()` returned the still-compressed raw skippable-frame bytes as
+    though they were decoded content -- the exact bug this whole area's
+    fixes exist to prevent, just reached through the escalation-ceiling
+    edge case rather than a bare 4-byte prefix. All four probes now share
+    one fallback (`_classify_with_skippable_fallback`)."""
+    zstandard = pytest.importorskip("zstandard")
+
+    user_data = b"\x00" * (2 * 1024 * 1024)
+    payload = json.dumps({"library": "x", "version": "1"}).encode()
+    blob = _leading_skippable_zstd_bytes(payload, zstandard, user_data=user_data)
+    assert len(blob) > 1024 * 1024  # past the escalation ceiling
+
+    p = tmp_path / "leading_skippable_past_ceiling_probes.abicheck.json.zst"
+    p.write_bytes(blob)
+
+    assert detect_snapshot_compression(p) is SnapshotCompression.ZSTD
+    assert read_snapshot_storage_info(p).compression is SnapshotCompression.ZSTD
+
+    prefix = bounded_decoded_prefix(p, n=64)
+    # The old bug: this equalled the raw, still-compressed skippable-frame
+    # bytes (starting with the skippable magic) rather than anything
+    # actually decoded.
+    skippable_magic = struct.pack("<I", 0x184D2A50)
+    assert prefix is None or not prefix.startswith(skippable_magic)
+
+
 def test_read_snapshot_bytes_handles_many_leading_skippable_frames_at_realistic_scale(tmp_path):
     """Covers the public reader end-to-end at the same realistic frame
     count the primitive-level test above uses directly, per the review

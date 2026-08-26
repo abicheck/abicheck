@@ -53,13 +53,24 @@ from __future__ import annotations
 
 import re
 
-#: Matches one JSON string literal (consumed and discarded as a whole
-#: token, so a bracket inside a string value is never counted) or one
-#: container-boundary character (open or close). `re.DOTALL` so a literal
-#: newline inside a string (invalid JSON, but not this scan's job to
-#: reject) can't desync the token boundary and leak the rest of the
-#: payload as unmatched text.
-_CONTAINER_TOKEN_RE = re.compile(rb'"(?:[^"\\]|\\.)*"|[{}\[\]]', re.DOTALL)
+#: Matches one JSON *token* that costs `json.loads()` its own Python-object
+#: allocation: a string (consumed as a whole token, so a bracket inside a
+#: string value is never separately counted), a container-boundary
+#: character (open or close), a number, or a `true`/`false`/`null`
+#: literal. Every one of these -- not just containers -- is a real
+#: allocation cost (Codex review, sixth-order follow-up: a payload of
+#: millions of scalar strings/numbers under an ignored field previously
+#: contributed nothing here, since only container starts were counted).
+#: The number pattern is deliberately loose (not a strict JSON-number
+#: grammar) -- validating syntax is `json.loads()`'s job, not this scan's;
+#: it only needs to consume one token per number without desyncing the
+#: boundary for what follows. `re.DOTALL` so a literal newline inside a
+#: string (invalid JSON, but likewise not this scan's job to reject)
+#: can't desync the token boundary and leak the rest of the payload as
+#: unmatched text.
+_CONTAINER_TOKEN_RE = re.compile(
+    rb'"(?:[^"\\]|\\.)*"|[{}\[\]]|-?\d[\d.eE+-]*|true|false|null', re.DOTALL
+)
 
 _OPEN_TOKENS = (b"{", b"[")
 _CLOSE_TOKENS = (b"}", b"]")
@@ -110,10 +121,14 @@ def check_json_container_budget(
     *,
     max_nesting_depth: int = DEFAULT_MAX_JSON_NESTING_DEPTH,
 ) -> None:
-    """Raise :class:`JsonContainerBudgetExceeded` once *raw* contains more
-    than *max_container_nodes* JSON object/array container starts outside
-    any string literal, or :class:`JsonNestingTooDeepError` once *raw*
-    nests containers deeper than *max_nesting_depth*.
+    """Raise :class:`JsonContainerBudgetExceeded` once *raw* would cost
+    `json.loads()` more than *max_container_nodes* Python-object
+    allocations -- every container start (object/array) *and* every
+    scalar leaf (string, number, ``true``/``false``/``null``) outside a
+    string literal counts, since each is its own allocation regardless of
+    shape -- or :class:`JsonNestingTooDeepError` once *raw* nests
+    containers deeper than *max_nesting_depth* (a container-only measure;
+    a scalar leaf never nests).
 
     A pure pre-check: never decodes *raw*, never allocates a container of
     its own, and stops scanning the instant either budget is exceeded
@@ -129,9 +144,18 @@ def check_json_container_budget(
             depth += 1
             if depth > max_nesting_depth:
                 raise JsonNestingTooDeepError(depth)
-        elif token in _CLOSE_TOKENS and depth > 0:
+        elif token in _CLOSE_TOKENS:
             # A close with no matching open (malformed JSON) is not this
             # pre-check's job to reject -- json.loads() reports that on
             # its own, with its own precise error. `depth > 0` just keeps
             # this loop from ever going negative on such input.
-            depth -= 1
+            if depth > 0:
+                depth -= 1
+        else:
+            # A scalar leaf (string, number, true/false/null) -- each is
+            # its own Python object json.loads() allocates, so it counts
+            # toward the same budget a container node does. Never nests,
+            # so `depth` is untouched.
+            count += 1
+            if count > max_container_nodes:
+                raise JsonContainerBudgetExceeded(count)

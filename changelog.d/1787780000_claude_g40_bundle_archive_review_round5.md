@@ -1056,3 +1056,62 @@
   finding's own repro shape (a 2 MiB skippable frame, past the 1 MiB
   escalation ceiling). Confirmed to fail against the pre-fix code with the
   same wrong-cap `SnapshotError` before applying the fix.
+
+- **Two more Codex review findings on this same PR, both real, both
+  fixed -- a sixth-order follow-up in the skippable-frame area, plus an
+  unrelated JSON-allocation-budget gap.** (1) The prior round's
+  `read_snapshot_bytes()` cap-selection fix was the *fourth* of this
+  module's four skippable-frame-aware probes to need this exact
+  escalation-ceiling fallback, but the other three --
+  `detect_snapshot_compression()`, `read_snapshot_storage_info()`, and
+  `bounded_decoded_prefix()` -- still independently fell back to `NONE`
+  (or, for `bounded_decoded_prefix()`, returned the still-compressed raw
+  metadata bytes as though they were decoded content) whenever their own
+  bounded escalation hit the same 1 MiB ceiling without reaching the real
+  data frame. Reproduced exactly as reported: a 2 MiB skippable frame
+  ahead of a real zstd frame made `detect_snapshot_compression()`/`read_
+  snapshot_storage_info()` report `NONE` and `bounded_decoded_prefix()`
+  return the raw skippable-frame bytes, even though `read_snapshot_
+  bytes()` on the identical file decodes correctly. Fixed by extracting
+  the fallback into one shared `_classify_with_skippable_fallback()` --
+  the leading skippable-frame magic alone already proves the zstd family,
+  independent of whether the bounded escalation can resolve the exact
+  frame structure -- now used by all four probes (including `read_
+  snapshot_bytes()`'s own cap-selection probe, refactored onto the same
+  helper rather than keeping its own separate `known_compressed` special
+  case). New test: `test_probe_call_sites_stay_correct_past_the_
+  escalation_ceiling` in `tests/test_snapshot_compression_skippable_
+  frames.py`, confirmed to fail against the pre-fix code on all three
+  probes. (2) `storage/json_budget.py`'s container-node budget (closing
+  an earlier round's object/array-only gap) still only counted container
+  *starts* -- a matched string token was consumed and silently discarded
+  rather than counted, and numbers/`true`/`false`/`null` were never
+  matched by the scanner's regex at all. `json.loads()` allocates one
+  real Python object per scalar value regardless of container shape, so
+  a highly compressible payload of many scalar strings under an ignored
+  field could still inflate real memory well past this budget's intent
+  while passing the check cleanly -- reproduced exactly as reported:
+  1,100,001 eight-character strings in a 12.1 MB payload passed the
+  check while increasing RSS by ~76 MB. Fixed by widening the token
+  regex to also match numbers and the three literal scalars, and
+  counting every matched string/number/literal token (not just container
+  opens) toward the same budget -- close tokens still only adjust nesting
+  depth, so this doesn't affect the existing depth check. Two pre-existing
+  tests (`test_a_bracket_inside_a_string_value_is_not_counted`, `test_an_
+  escaped_quote_inside_a_string_does_not_desync_token_boundaries`) had
+  their `max_container_nodes` values updated to the correct token counts
+  under the new, intentionally-widened semantics -- their own point (no
+  desync from a bracket/escaped-quote inside a string) is unaffected and
+  still asserted. New tests: `test_counts_scalar_string_values_too`,
+  `test_counts_number_and_literal_scalars_too` in `tests/test_json_
+  budget.py`, both confirmed to fail against the pre-fix code.
+
+  A third CI-visible signal on this same head commit was investigated
+  and is unrelated to this PR: `test_generated_reference_is_in_sync_
+  with_cli` (macos-latest/3.13, ubuntu-latest/3.14, and the `mutmut`
+  baseline run that depends on a clean test pass) fails on a pre-existing
+  Click 8.5.0 doc-drift for `scan`'s `--allow-ast-frontend-fallback`/
+  `--allow-unsupported-castxml` options (`docs/reference/cli-reference.md`
+  records `False`, a freshly-generated reference on these lanes reports
+  `—`) -- a base-branch/environmental issue orthogonal to the skippable-
+  frame or JSON-budget code this round touches, not fixed here.

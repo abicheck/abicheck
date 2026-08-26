@@ -241,6 +241,18 @@ def _read_past_leading_skippable_frames(f: Any, prefix: bytes) -> bytes:
     )
 
 
+def _classify_with_skippable_fallback(prefix: bytes, saw_skippable_magic: bool) -> SnapshotCompression:
+    """`detect_compression_from_bytes(prefix)`, except a leading skippable-
+    frame magic that outlasts the bounded escalation (`_BOUNDED_PREFIX_
+    MAX_RAW_BYTES`) still classifies as `ZSTD` -- the magic alone already
+    proves the zstd family (Codex review, sixth-order follow-up), shared
+    by every skippable-frame-aware probe in this module."""
+    compression = detect_compression_from_bytes(prefix)
+    if compression is SnapshotCompression.NONE and saw_skippable_magic:
+        return SnapshotCompression.ZSTD
+    return compression
+
+
 def detect_snapshot_compression(path: str | Path) -> SnapshotCompression:
     """Detect a stored snapshot's compression from its magic bytes.
 
@@ -254,11 +266,12 @@ def detect_snapshot_compression(path: str | Path) -> SnapshotCompression:
     try:
         with open(p, "rb") as f:
             prefix = f.read(4)
-            if starts_with_skippable_frame_magic(prefix):
+            saw_skippable_magic = starts_with_skippable_frame_magic(prefix)
+            if saw_skippable_magic:
                 prefix = _read_past_leading_skippable_frames(f, prefix)
     except OSError as exc:
         raise SnapshotError(f"Cannot read {p}: {exc}") from exc
-    return detect_compression_from_bytes(prefix)
+    return _classify_with_skippable_fallback(prefix, saw_skippable_magic)
 
 
 def suffix_compression(path: str | Path) -> SnapshotCompression | None:
@@ -347,9 +360,10 @@ def read_snapshot_storage_info(path: str | Path) -> SnapshotStorageInfo:
             # Escalate only when ambiguous (a leading skippable-frame
             # magic) -- forward-only, so it stays compatible with the
             # sequential hash loop below (Codex review, fresh evidence).
-            if starts_with_skippable_frame_magic(prefix):
+            saw_skippable_magic = starts_with_skippable_frame_magic(prefix)
+            if saw_skippable_magic:
                 prefix = _read_past_leading_skippable_frames(f, prefix)
-            compression = detect_compression_from_bytes(prefix)
+            compression = _classify_with_skippable_fallback(prefix, saw_skippable_magic)
             digest = hashlib.sha256()
             digest.update(prefix)
             for chunk in iter(lambda: f.read(1024 * 1024), b""):
@@ -486,30 +500,16 @@ def read_snapshot_bytes(
         stored_size = os.fstat(f.fileno()).st_size
         prefix = f.read(4)
         # Codex review, fresh evidence: escalate past a leading zstd
-        # skippable frame *before* selecting the cap below, the same way
-        # this module's other three prefix probes already do (`detect_
-        # snapshot_compression`, `read_snapshot_storage_info`,
-        # `bounded_decoded_prefix`). A bare 4-byte prefix can't see past a
-        # leading skippable frame, so `compression_hint` stayed `NONE` for
-        # a genuinely-compressed skippable-frame-prefixed file, and the cap
-        # selection just below then applied the wrong (stored-size, not
-        # decoded-size) ceiling to it -- even though `compression` a few
-        # lines down (computed from the fully-buffered `raw`) already sees
-        # the real zstd frame correctly. `prefix` can never grow past
-        # `stored_size` (it's read forward from this same file), so the
-        # `stored_size > cap` check just below still catches an oversized
-        # file even when this escalation itself reads far more than a
-        # small `cap` would otherwise allow.
-        # Codex review (fifth-order follow-up): the bare leading magic alone
-        # already proves this is zstd-family, even if the bounded 1 MiB
-        # escalation below hits its ceiling before the real data frame --
-        # don't let `compression_hint` fall back to `NONE` for cap selection
-        # then (a >1 MiB lead-in was misread as uncompressed and checked
-        # against the small decoded cap instead of the stored one).
-        known_compressed = starts_with_skippable_frame_magic(prefix)
-        if known_compressed:
+        # skippable frame before selecting the cap below, the same way
+        # this module's other three prefix probes do -- see `_classify_
+        # with_skippable_fallback`'s docstring for why `NONE` can't be
+        # trusted here. `prefix` never grows past `stored_size` (read
+        # forward from this same file), so `stored_size > cap` below
+        # still catches an oversized file regardless.
+        saw_skippable_magic = starts_with_skippable_frame_magic(prefix)
+        if saw_skippable_magic:
             prefix = _read_past_leading_skippable_frames(f, prefix)
-        compression_hint = detect_compression_from_bytes(prefix)
+        compression_hint = _classify_with_skippable_fallback(prefix, saw_skippable_magic)
         # Codex review: `max(limit, _max_stored_bytes())` let a raised
         # `max_decoded_bytes` (a caller's tolerance for large *decoded*
         # content) silently expand the *stored*-size ceiling too -- an
@@ -522,7 +522,7 @@ def read_snapshot_bytes(
         # a side effect of raising the unrelated decoded-size one.
         cap = (
             limit
-            if compression_hint is SnapshotCompression.NONE and not known_compressed
+            if compression_hint is SnapshotCompression.NONE
             else _max_stored_bytes()
         )
         if stored_size > cap:
@@ -642,9 +642,10 @@ def bounded_decoded_prefix(path: str | Path, n: int = _SNIFF_BYTES) -> bytes | N
             # magic) -- a plain/gzip/real-zstd-frame probe never has more
             # to find past it, so the common case pays nothing extra
             # (Codex review, fresh evidence).
-            if starts_with_skippable_frame_magic(probe):
+            saw_skippable_magic = starts_with_skippable_frame_magic(probe)
+            if saw_skippable_magic:
                 probe = _read_past_leading_skippable_frames(f, probe)
-            compression = detect_compression_from_bytes(probe)
+            compression = _classify_with_skippable_fallback(probe, saw_skippable_magic)
             if compression is SnapshotCompression.NONE:
                 more_needed = max(n, 4) - len(probe)
                 if more_needed > 0:
