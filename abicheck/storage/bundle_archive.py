@@ -695,10 +695,11 @@ class BundleArchiveReader:
             ) from exc
         try:
             value = json.loads(raw)
-        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-            # Invalid UTF-8/JSON syntax must not surface as a raw
-            # exception either -- same SnapshotError contract as every
-            # other corrupt-content failure in this module.
+        except (UnicodeDecodeError, ValueError) as exc:
+            # Invalid UTF-8/JSON syntax (or Python 3.11+'s integer-digit
+            # limit, a bare `ValueError` not `JSONDecodeError`) must not
+            # surface raw -- same SnapshotError contract as every other
+            # corrupt-content failure here (Codex review).
             raise SnapshotError(
                 f"{self._path}: manifest.json is not valid JSON: {exc}"
             ) from exc

@@ -483,6 +483,33 @@ class TestReadManifestTranslatesRecursionError:
                 reader.read_manifest()
 
 
+class TestReadManifestTranslatesIntegerDigitLimit:
+    """Python 3.11+'s own integer-string-conversion digit limit
+    (`sys.get_int_max_str_digits()`, 4300 by default) makes `json.loads()`
+    raise a bare `ValueError` for a manifest containing an integer literal
+    with more digits than that -- a different exception than
+    `json.JSONDecodeError` (which is itself a `ValueError` subclass, but
+    this one isn't raised through that subclass), so it bypassed both
+    existing handlers and escaped as a raw exception instead of this
+    module's `SnapshotError` contract (Codex review, fresh evidence)."""
+
+    def test_an_oversized_integer_literal_raises_snapshot_error(
+        self, tmp_path: Path
+    ) -> None:
+        path = tmp_path / "bundle.archive.zip"
+        huge_int_manifest = '{"library_blobs": {}, "n": ' + ("9" * 5000) + "}"
+        with zipfile.ZipFile(path, mode="w") as zf:
+            zf.writestr(
+                zipfile.ZipInfo(MANIFEST_MEMBER),
+                huge_int_manifest,
+                compress_type=zipfile.ZIP_STORED,
+            )
+
+        with BundleArchiveReader.open(path) as reader:
+            with pytest.raises(SnapshotError, match="not valid JSON"):
+                reader.read_manifest()
+
+
 class TestBundleArchiveReaderRejectsNonStoredMembers:
     """Every member BundleArchiveWriter produces is ZIP_STORED
     deliberately -- ZIP_DEFLATED could expand to an arbitrary in-memory
