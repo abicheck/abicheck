@@ -263,8 +263,46 @@ flat `diff_*.py`/`buildsource/*.py` modules, any migrated `compare/`/
 excluding `tests/` (a separate tree entirely, not matched by this
 pathspec), `checker_types.py`'s own `class Change` definition, and
 `diff_helpers.py`'s own factory body, for direct constructions; and
-`git grep -n "make_change(" -- 'abicheck/**/*.py'` for factory calls. The
-dominant path is still `diff_helpers.make_change()`,
+`git grep -n "make_change(" -- 'abicheck/**/*.py'` for factory calls.
+
+**A third category this grep pair does not catch at all (Codex review,
+verified against the code): `bundle_models.BundleFinding` construction
+sites.** `BundleFinding` (`bundle_models.py`) is a separate dataclass, not
+a `Change` — its own `to_change()` method lowers it into a `Change` only at
+report time — so a bare `git grep -n "Change("` never matches the literal
+text `"BundleFinding("` at all (the substring `Change(` does not occur in
+it), even though every `BundleFinding` becomes a real, user-visible
+`Change` once `to_change()` runs. Search separately with
+`git grep -n "BundleFinding(" -- 'abicheck/**/*.py'`, excluding
+`bundle_models.py`'s own dataclass definition. The real construction sites
+are `bundle.py`, `bundle_signature_evidence.py`, `bundle_multibuild.py`,
+and `product_baseline.py`. This is not merely a naming gap in the
+inventory: several `BundleFinding` instances combine evidence
+`to_change()` cannot see by the time it runs. `bundle.py`'s
+`BUNDLE_INTRA_TYPE_CHANGED` finding, for example, is built from a
+provider library's own per-library `Change` (`diff.changes`, itself
+already covered by the `Change(...)`/`make_change(...)` inventory above)
+*plus* a second, independent piece of evidence gathered right there —
+scanning a sibling library's own ELF symbol table
+(`sib_meta.symbols`/`_is_public_surface_symbol`) to decide whether the
+provider's type change is reachable from that consumer's public surface.
+`bundle_signature_evidence.py`'s `BUNDLE_INTRA_DEP_SIGNATURE_UNVERIFIED`
+finding is a different shape again — it has no participating per-library
+`Change` at all, only a direct old/new-snapshot signature-evidence-
+sufficiency check (`_symbol_evidence_sufficient`) on each side. Neither
+shape's real evidentiary basis survives into `to_change()`'s own bare
+`Change(...)` call (`kind`/`symbol`/`description`/`old_value`/`new_value`/
+`affected_symbols`/`effective_verdict`/`modulation_*` only, no
+provenance-bearing field of any kind today) — so Phase 1 must add
+`evidence_provenance` to `BundleFinding` itself (derived per finding at
+each of the four construction sites, from whichever ELF/per-library-Change/
+snapshot evidence that finding actually rests on, not copied from a single
+source the way item 4's "carry the source finding's own
+`evidence_provenance` forward" default works for a true one-to-one
+transform) and thread it through `to_change()`'s own `Change(...)` call,
+rather than assuming the field can be stamped onto `to_change()`'s output
+alone once `bundle_models.py`'s existing Files & surfaces entry is wired.
+The dominant path is still `diff_helpers.make_change()`,
 which already forwards arbitrary keyword arguments straight to
 `Change(...)` unchanged (`**change_kwargs: Any` in its signature) — a real,
 favorable, count-independent consequence: **`make_change()` itself needs
@@ -300,12 +338,26 @@ over risky reactive patches" discipline and the FP-rate/mutation-score gate
 structure already in place:
 
 1. **L0/L1-only detectors first** (`diff_platform.py`'s ELF/PE/Mach-O-specific
-   findings, and the direct-construction sites in `checker.py`/
-   `versioned_symbol_scheme.py` that are similarly static) — the provenance
-   is a static fact of which module produced the `Change`, not a per-call
-   derivation, so this slice is close to mechanical: one constant tuple per
-   detector function, passed through the existing `make_change(...)`/
-   `Change(...)` call. **`diff_platform.py` itself is not uniformly
+   findings, and the direct-construction sites in `checker.py` that are
+   similarly static) — the provenance is a static fact of which module
+   produced the `Change`, not a per-call derivation, so this slice is close
+   to mechanical: one constant tuple per detector function, passed through
+   the existing `make_change(...)`/`Change(...)` call. **`versioned_symbol_
+   scheme.py`'s direct-construction site does NOT belong in this mechanical
+   sub-slice (Codex review, verified against the code)** — see item 4
+   below, which is where it actually belongs: `_build_scheme_advisory()`
+   builds the single `versioned_symbol_scheme_detected` advisory from bare
+   `pairs`/`eligible` counts, but those counts (and the underlying matched
+   `Change` objects `analyze_versioned_scheme()` computes alongside them)
+   are derived from `FUNC_REMOVED`/`FUNC_ADDED`/`VAR_REMOVED`/`VAR_ADDED`/
+   `FUNC_LIKELY_RENAMED` findings already present in the comparison's
+   `changes` list — findings that, per the `diff_symbols.py` carve-out
+   below, can themselves rest on L0, L1, or L2 evidence depending on which
+   producer populated the participating `Function`/`Variable` record. A
+   fixed module-level tuple would misstate the advisory's real basis
+   whenever the matched findings used mixed or non-L0 evidence.
+
+   **`diff_platform.py` itself is not uniformly
    mechanical, and treating the whole file as one fixed-tier module would
    mislabel its own mixed-evidence detectors (Codex review, verified against
    the code)** — the same carve-out `diff_symbols.py` needed below applies
@@ -765,12 +817,22 @@ structure already in place:
 4. **Cross-cutting post-processing and roll-up emitters**
    (`post_processing.py`, `post_processing_reachability.py`,
    `pattern_verdicts.py`, `internal_leak.py`, `bundle_models.py`,
-   `post_manifest.py`, `cli_buildsource_helpers.py`) — these often
+   `post_manifest.py`, `cli_buildsource_helpers.py`,
+   `versioned_symbol_scheme.py`'s `_build_scheme_advisory()`) — these often
    construct a `Change` by *transforming* an existing one (a roll-up, a
    suppression-adjacent rewrite) rather than deriving fresh evidence; the
    right default here is usually "carry the source finding's own
    `evidence_provenance` forward," verified per emitter rather than assumed
-   uniformly.
+   uniformly. `_build_scheme_advisory()` is this list's one *many-to-one*
+   roll-up rather than a single-source carry-forward: its advisory
+   summarizes every matched `Change` in `matched_removed`/`matched_added`/
+   `matched_renamed` (`analyze_versioned_scheme()`'s own second return
+   value) at once, so "carry forward" here means a union/rollup of
+   whatever `evidence_provenance` each constituent finding actually
+   carries, not a single value copied from one source. This also means
+   `_build_scheme_advisory()`'s own signature must change to receive the
+   matched findings (or their provenance) rather than only the bare
+   `pairs`/`eligible` counts it takes today.
 
 Each slice, once wired, gets its own FP-rate/mutation-score gate re-run
 before merging — never the whole inventory behind one PR. The FP-rate/
@@ -1000,6 +1062,12 @@ above, which this list intentionally does not re-duplicate.
   `stack_checker.py`, `versioned_symbol_scheme.py`,
   `cli_buildsource_helpers.py`, `bundle_models.py` (→ `compare/`/
   `workflows/`, module-dependent) — Phase 1's direct-construction sites.
+- `abicheck/bundle.py`, `bundle_signature_evidence.py`,
+  `bundle_multibuild.py`, `product_baseline.py` (→ `compare/`/`workflows/`,
+  module-dependent) — Phase 1's `BundleFinding(...)` construction sites
+  (see the grep-blind-spot note above); `bundle_models.py`'s own
+  `BundleFinding`/`to_change()` is the sibling data-carrier entry already
+  listed one bullet up, not a duplicate of this one.
 - `abicheck/buildsource/*.py` (stays `buildsource/`, per its own scoped
   `AGENTS.md` — not part of the `compare/` migration) — the L3-L5 detectors
   already carrying `evidence_category`.
