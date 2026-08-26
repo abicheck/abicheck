@@ -1381,13 +1381,14 @@ def _dedup_cross_kind(
     requires the two findings' own old/new transitions to agree (see
     :func:`cross_tier_transition`) -- a mere kind+symbol match is not
     enough when the header and DWARF evidence disagree on the transition
-    itself, e.g. a stale header vs. inconsistent extractor evidence.
+    itself, e.g. a stale header vs. inconsistent extractor evidence. Only indexes the AST-tier kinds this dedup ever looks up (``_DWARF_TO_AST_EQUIV``'s values) -- indexing every kind unconditionally crashed on a kind (e.g. ``PYTHON_STABLE_ABI_VIOLATION``) whose ``old_value``/``new_value`` is a list, unhashable for the transition-agreement set below (Codex review).
     """
     names = record_names or {}
     _Transition = tuple[str | None, str | None] | None
     ast_findings: dict[tuple[str, str], set[_Transition]] = {}
     ast_field_findings: dict[tuple[str, str, str], set[_Transition]] = {}
-    for c in changes:
+    _relevant_ast = {ak for aks in _DWARF_TO_AST_EQUIV.values() for ak in aks}
+    for c in (c for c in changes if c.kind in _relevant_ast):
         canon = canonicalize_record_symbol(
             c.symbol, names, c.qualified_name, c.field_name
         )
@@ -1402,10 +1403,7 @@ def _dedup_cross_kind(
         transitions: set[_Transition] | None,
         dwarf_transition: _Transition,
     ) -> bool:
-        # None (no transitions recorded for a key never seen) -> not present.
-        # A None entry inside the set itself means "kind with no
-        # independent transition" (e.g. a removal) -- kind+symbol alone is
-        # agreement there, matching the pre-value-gate behavior.
+        # None (no transitions recorded for a key never seen) -> not present. A None entry inside the set itself means "kind with no independent transition" (e.g. a removal) -- kind+symbol alone is agreement there, matching the pre-value-gate behavior.
         if not transitions:
             return False
         return dwarf_transition is None or dwarf_transition in transitions
