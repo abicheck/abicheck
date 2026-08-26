@@ -137,6 +137,34 @@ class TestFieldDefaultsToNone:
         )
 
 
+class TestVerifiedBucketsHaveProducerCoverage:
+    """Codex review, fresh evidence: the parametrized tests below only run
+    for a kind that already has a ``_detector_mutations.MUTATIONS`` entry
+    -- they say nothing about a kind classified PROVENANCE_STATIC/
+    PROVENANCE_PER_FINDING with *no* entry at all, which would silently
+    receive zero real-producer verification while still passing every
+    exhaustiveness test above (those only check bucket *membership*, not
+    behavior). This requires the mutation catalogue's own coverage to
+    keep pace with Phase 1's bucket reclassifications: a kind can't move
+    out of PROVENANCE_UNVERIFIED without a mutation to actually verify it
+    against. Vacuously true today (both verified buckets are still
+    empty -- Phase 1 hasn't started), which is exactly the point: it
+    starts enforcing the invariant from the first kind moved into either
+    bucket, rather than after the gap is already there."""
+
+    def test_every_verified_kind_has_a_mutation_catalogue_entry(self) -> None:
+        covered = {mutation(tag=1)[2].value for mutation in MUTATIONS}
+        verified = PROVENANCE_STATIC | PROVENANCE_PER_FINDING
+        uncovered = verified - covered
+        assert not uncovered, (
+            "these kinds are classified PROVENANCE_STATIC/PROVENANCE_PER_FINDING "
+            "but have no tests/_detector_mutations.py MUTATIONS entry, so "
+            "TestClassificationTracksRealProducerBehavior never actually "
+            "verifies their real producer -- add a mutation-catalogue entry "
+            f"before reclassifying out of PROVENANCE_UNVERIFIED: {sorted(uncovered)}"
+        )
+
+
 class TestClassificationTracksRealProducerBehavior:
     """Codex review: the exhaustiveness tests above only prove every enum
     value is in *some* bucket -- they say nothing about whether a kind's

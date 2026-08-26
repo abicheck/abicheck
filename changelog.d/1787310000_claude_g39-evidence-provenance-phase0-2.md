@@ -12,4 +12,6 @@
   mirroring the discipline `test_canonical_finding_id_completeness.py`
   already established for the same class of gap (PR #753 → #759). No
   detector behavior changes — the field is not yet read or set anywhere.
-  See `docs/contribute/plans/g39-per-finding-evidence-provider-model.md`.
+  See the G39 design plan (`docs/contribute/plans/g39-per-finding-evidence-provider-model.md`,
+  added in PR #866 — merge that PR first if this file isn't present yet on
+  the branch you're reading this from).
