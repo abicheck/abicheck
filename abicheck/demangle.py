@@ -66,15 +66,29 @@ _warned_no_demangler = False
 _cppfilt_binary_confirmed_missing = False
 
 
-def _is_itanium_mangled(symbol: str) -> bool:
-    """True for a plain ELF ``_Z...`` name or its Mach-O ``__Z...`` spelling.
+def _is_itanium_mangled(symbol: str, *, accept_macho_prefix: bool = False) -> bool:
+    """True for a plain ELF ``_Z...`` name, or its Mach-O ``__Z...`` spelling
+    when *accept_macho_prefix* is set.
 
     clang's own ``mangledName`` carries the platform global-symbol prefix on
     macOS (``__ZN3lib3addEii``, see ``dumper_clang.py``'s ``_visibility``
     docstring for the same quirk handled on the symbol-matching side), so a
     Mach-O ``Function.mangled``/``Change.symbol`` can carry either spelling.
-    """
-    return symbol.startswith("_Z") or symbol.startswith("__Z")
+
+    ``accept_macho_prefix`` defaults *off*: unlike the unambiguous single-
+    underscore ``_Z...`` form, a bare ``__Z...`` string is only *probably*
+    Mach-O-prefixed Itanium mangling -- a literal ELF export coincidentally
+    named that way (e.g. a hand-written assembler alias) is possible, and
+    this module is called for correctness-critical symbol matching
+    (``debian_symbols.py``'s Debian `.symbols` file generation,
+    ``dwarf_snapshot.py``, ``appcompat.py``) as well as for pure display
+    (Codex review, fresh evidence). Only the report-rendering entry points
+    (:func:`demangle_text`/:func:`prewarm_demangle_batch`, used solely by
+    the HTML/Markdown reporters) opt in -- every other caller keeps the
+    strict, unambiguous pre-Mach-O-fix behavior."""
+    if symbol.startswith("_Z"):
+        return True
+    return accept_macho_prefix and symbol.startswith("__Z")
 
 
 def _canonical_mangled(symbol: str) -> str:
@@ -89,15 +103,21 @@ def _canonical_mangled(symbol: str) -> str:
 
 
 @functools.lru_cache(maxsize=16384)
-def demangle(symbol: str) -> str | None:
+def demangle(symbol: str, *, accept_macho_prefix: bool = False) -> str | None:
     """Demangle a single Itanium C++ symbol. Returns *None* if not C++.
 
     Tries ``cxxfilt`` (Python binding to ``__cxa_demangle``) first, then
-    falls back to the ``c++filt`` command-line tool. Accepts either the
-    plain ELF ``_Z...`` spelling or the Mach-O ``__Z...`` spelling (see
-    :func:`_canonical_mangled`).
+    falls back to the ``c++filt`` command-line tool. Accepts the plain ELF
+    ``_Z...`` spelling always; the Mach-O ``__Z...`` spelling (see
+    :func:`_canonical_mangled`) only when *accept_macho_prefix* is set --
+    see :func:`_is_itanium_mangled`'s docstring for why that isn't the
+    default. This gate runs before any cache lookup, so a symbol a
+    permissive caller already cached OK/FAIL is never surfaced to a
+    stricter caller that wouldn't itself have accepted it.
     """
-    if not symbol or not _is_itanium_mangled(symbol):
+    if not symbol or not _is_itanium_mangled(
+        symbol, accept_macho_prefix=accept_macho_prefix
+    ):
         return None
     # Reuse a warmed batch cache so a single demangle never re-forks `c++filt`
     # for a name a prior demangle_batch() already resolved (or proved
@@ -286,11 +306,17 @@ def _batch_phase3_cppfilt(remaining: list[str], result: dict[str, str]) -> None:
                 _batch_cache_record_fail(s)
 
 
-def demangle_batch(symbols: list[str]) -> dict[str, str]:
+def demangle_batch(
+    symbols: list[str], *, accept_macho_prefix: bool = False
+) -> dict[str, str]:
     """Demangle a batch of symbols efficiently using a single ``c++filt`` call.
 
     Returns a mapping from mangled → demangled for symbols that were
     successfully demangled. Non-C++ symbols are excluded from the result.
+    ``accept_macho_prefix`` mirrors :func:`demangle`'s -- see
+    :func:`_is_itanium_mangled`'s docstring for why it defaults off, and why
+    gating it here, before any cache lookup, is what keeps a permissive
+    caller's cached result from leaking into a stricter caller's answer.
 
     Memoised per-process via module-level caches so that callers which
     repeatedly demangle the same (or overlapping) symbol sets — common
@@ -298,7 +324,11 @@ def demangle_batch(symbols: list[str]) -> dict[str, str]:
     slice of a snapshot — do not pay the subprocess cost more than once
     per unique symbol.
     """
-    cpp_syms = [s for s in symbols if s and _is_itanium_mangled(s)]
+    cpp_syms = [
+        s
+        for s in symbols
+        if s and _is_itanium_mangled(s, accept_macho_prefix=accept_macho_prefix)
+    ]
     if not cpp_syms:
         return {}
 
@@ -384,13 +414,19 @@ def prewarm_demangle_batch(
     :func:`demangle_text` pays a fresh ``c++filt`` subprocess per row once
     the fast in-process ``cxxfilt`` package isn't installed; one upfront
     batched call here makes every later per-row call a pure cache hit.
+
+    Used only by report-rendering callers (``html_report.py``/
+    ``appcompat_html.py``), so it warms with ``accept_macho_prefix=True`` --
+    matching :func:`demangle_text`'s own default; see
+    :func:`_is_itanium_mangled`'s docstring for why that default doesn't
+    extend to :func:`demangle`/:func:`demangle_batch` themselves.
     """
     tokens: set[str] = set()
     for obj in objs:
         for attr in attrs:
             tokens |= extract_mangled_tokens(str(getattr(obj, attr, "") or ""))
     if tokens:
-        demangle_batch(sorted(tokens))
+        demangle_batch(sorted(tokens), accept_macho_prefix=True)
 
 
 def demangle_text(text: str) -> str:
@@ -400,11 +436,16 @@ def demangle_text(text: str) -> str:
     because no demangler is available, are left unchanged. Intended for
     human-facing report output only — machine formats (JSON/SARIF/JUnit) keep
     the raw mangled symbols so downstream tooling can match on them.
+
+    Resolves a Mach-O ``__Z...`` token (``accept_macho_prefix=True``) since
+    this function has no other, correctness-critical caller to put at risk
+    of misreading a coincidentally-``__Z``-prefixed literal ELF symbol --
+    see :func:`_is_itanium_mangled`'s docstring.
     """
     tokens = extract_mangled_tokens(text)
     if not tokens:
         return text
-    mapping = demangle_batch(sorted(tokens))
+    mapping = demangle_batch(sorted(tokens), accept_macho_prefix=True)
 
     def _repl(m: re.Match[str]) -> str:
         tok = m.group(0)

@@ -36,6 +36,21 @@ class TestDemangle:
     def test_non_z_prefix_returns_none(self):
         assert _mod.demangle("myFunction") is None
 
+    def test_double_underscore_prefix_rejected_by_default(self):
+        """Codex review, fresh evidence: a literal ELF export coincidentally
+        named like Mach-O-prefixed Itanium mangling (e.g. a hand-written
+        assembler alias) must not be silently demangled by a caller that
+        never opted into Mach-O-prefix recognition -- `demangle()` is also
+        used for correctness-critical matching (`debian_symbols.py`'s
+        Debian `.symbols` file generation, `dwarf_snapshot.py`), not only
+        report display, and those callers must keep the old, strict,
+        unambiguous behavior."""
+        mock_cxxfilt = MagicMock()
+        mock_cxxfilt.demangle.side_effect = lambda s: f"demangled:{s}"
+        with patch.dict("sys.modules", {"cxxfilt": mock_cxxfilt}):
+            assert _mod.demangle("__ZN3foo3barEv") is None
+        mock_cxxfilt.demangle.assert_not_called()
+
     def test_cxxfilt_available(self):
         """When cxxfilt is importable and works, we get a demangled string."""
         mock_cxxfilt = MagicMock()
@@ -177,7 +192,7 @@ class TestDemangle:
         mock_cxxfilt = MagicMock()
         mock_cxxfilt.demangle.side_effect = lambda s: f"demangled:{s}"
         with patch.dict("sys.modules", {"cxxfilt": mock_cxxfilt}):
-            result = _mod.demangle("__ZN3foo3barEv")
+            result = _mod.demangle("__ZN3foo3barEv", accept_macho_prefix=True)
         assert result == "demangled:_ZN3foo3barEv"
         mock_cxxfilt.demangle.assert_called_once_with("_ZN3foo3barEv")
 
@@ -190,7 +205,7 @@ class TestDemangle:
                     args=["c++filt"], returncode=0,
                     stdout="foo::bar()\n", stderr="",
                 )
-                result = _mod.demangle("__ZN3foo3barEv")
+                result = _mod.demangle("__ZN3foo3barEv", accept_macho_prefix=True)
         assert result == "foo::bar()"
         # The canonical (single-underscore) form must reach the subprocess,
         # not the raw Mach-O `__Z...` spelling.
@@ -214,7 +229,7 @@ class TestDemangle:
                     args=["c++filt"], returncode=0,
                     stdout="_ZNOTVALID\n", stderr="",
                 )
-                result = _mod.demangle("__ZNOTVALID")
+                result = _mod.demangle("__ZNOTVALID", accept_macho_prefix=True)
         assert result is None
 
     def test_macho_prefixed_malformed_name_via_cxxfilt_is_not_demangled(self):
@@ -231,7 +246,7 @@ class TestDemangle:
                     args=["c++filt"], returncode=0,
                     stdout="_ZNOTVALID\n", stderr="",
                 )
-                result = _mod.demangle("__ZNOTVALID")
+                result = _mod.demangle("__ZNOTVALID", accept_macho_prefix=True)
         assert result is None
 
 
@@ -243,6 +258,34 @@ class TestDemangleBatch:
 
     def test_empty_list(self):
         assert _mod.demangle_batch([]) == {}
+
+    def test_double_underscore_prefix_rejected_by_default(self):
+        """Same guard as demangle()'s own -- a caller that doesn't opt into
+        Mach-O-prefix recognition must not have a `__Z...`-shaped symbol
+        silently demangled."""
+        mock_cxxfilt = MagicMock()
+        mock_cxxfilt.demangle.side_effect = lambda s: f"demangled:{s}"
+        with patch.dict("sys.modules", {"cxxfilt": mock_cxxfilt}):
+            assert _mod.demangle_batch(["__ZN3foo3barEv"]) == {}
+        mock_cxxfilt.demangle.assert_not_called()
+
+    def test_permissive_cache_entry_does_not_leak_into_a_strict_call(self):
+        """Codex review, fresh evidence: once an `accept_macho_prefix=True`
+        caller (report rendering) has cached a `__Z...` symbol's demangled
+        result, a later *strict* caller (e.g. debian_symbols.py) for the
+        identical symbol must still get the old, safe answer -- the
+        Itanium-mangled gate runs before any cache lookup, so a stricter
+        caller never even consults an entry it wouldn't itself have
+        produced."""
+        mock_cxxfilt = MagicMock()
+        mock_cxxfilt.demangle.side_effect = lambda s: f"demangled:{s}"
+        with patch.dict("sys.modules", {"cxxfilt": mock_cxxfilt}):
+            permissive = _mod.demangle_batch(
+                ["__ZN3foo3barEv"], accept_macho_prefix=True
+            )
+            assert permissive == {"__ZN3foo3barEv": "demangled:_ZN3foo3barEv"}
+            strict = _mod.demangle_batch(["__ZN3foo3barEv"])
+        assert strict == {}
 
     def test_no_cpp_symbols(self):
         assert _mod.demangle_batch(["printf", "strlen", ""]) == {}
@@ -386,7 +429,7 @@ class TestDemangleBatch:
         mock_cxxfilt = MagicMock()
         mock_cxxfilt.demangle.side_effect = lambda s: f"demangled:{s}"
         with patch.dict("sys.modules", {"cxxfilt": mock_cxxfilt}):
-            result = _mod.demangle_batch(["__ZN3foo3barEv"])
+            result = _mod.demangle_batch(["__ZN3foo3barEv"], accept_macho_prefix=True)
         assert result == {"__ZN3foo3barEv": "demangled:_ZN3foo3barEv"}
         mock_cxxfilt.demangle.assert_called_once_with("_ZN3foo3barEv")
 
@@ -397,7 +440,7 @@ class TestDemangleBatch:
                     args=["c++filt"], returncode=0,
                     stdout="foo::bar()\n", stderr="",
                 )
-                result = _mod.demangle_batch(["__ZN3foo3barEv"])
+                result = _mod.demangle_batch(["__ZN3foo3barEv"], accept_macho_prefix=True)
         assert result == {"__ZN3foo3barEv": "foo::bar()"}
         sent_input = mock_run.call_args[1]["input"]
         assert sent_input == "_ZN3foo3barEv"
@@ -415,7 +458,7 @@ class TestDemangleBatch:
                     args=["c++filt"], returncode=0,
                     stdout="_ZNOTVALID\n", stderr="",
                 )
-                result = _mod.demangle_batch(["__ZNOTVALID"])
+                result = _mod.demangle_batch(["__ZNOTVALID"], accept_macho_prefix=True)
         assert result == {}
 
     def test_macho_prefixed_malformed_name_is_not_demangled_via_cxxfilt(self):
@@ -429,7 +472,7 @@ class TestDemangleBatch:
                     args=["c++filt"], returncode=0,
                     stdout="_ZNOTVALID\n", stderr="",
                 )
-                result = _mod.demangle_batch(["__ZNOTVALID"])
+                result = _mod.demangle_batch(["__ZNOTVALID"], accept_macho_prefix=True)
         assert result == {}
 
 
@@ -617,18 +660,20 @@ class TestDemangleText:
     stubbed batch demangler so it passes where no c++filt/cxxfilt exists."""
 
     def test_replaces_known_tokens(self, monkeypatch):
-        monkeypatch.setattr(_mod, "demangle_batch", lambda syms: {"_Z3foov": "foo()"})
+        monkeypatch.setattr(
+            _mod, "demangle_batch", lambda syms, **kw: {"_Z3foov": "foo()"}
+        )
         out = _mod.demangle_text("New public function: _Z3foov; see also _Z3foov.")
         assert out == "New public function: foo(); see also foo()."
 
     def test_leaves_unresolved_tokens_unchanged(self, monkeypatch):
-        monkeypatch.setattr(_mod, "demangle_batch", lambda syms: {})
+        monkeypatch.setattr(_mod, "demangle_batch", lambda syms, **kw: {})
         assert _mod.demangle_text("_ZUnresolved stays as-is") == "_ZUnresolved stays as-is"
 
     def test_noop_and_no_batch_call_without_tokens(self, monkeypatch):
         calls = {"n": 0}
 
-        def _fake(syms):
+        def _fake(syms, **kw):
             calls["n"] += 1
             return {}
 
@@ -648,7 +693,7 @@ class TestDemangleText:
         the demangled text (`_Foo::bar()` instead of `Foo::bar()`). The whole
         `__Z...` span must be captured and replaced as one unit."""
         monkeypatch.setattr(
-            _mod, "demangle_batch", lambda syms: {"__ZN3Foo3barEv": "Foo::bar()"}
+            _mod, "demangle_batch", lambda syms, **kw: {"__ZN3Foo3barEv": "Foo::bar()"}
         )
         out = _mod.demangle_text("removed: __ZN3Foo3barEv")
         assert out == "removed: Foo::bar()"

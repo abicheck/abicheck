@@ -169,3 +169,18 @@
   missing` module flag, set on the first `FileNotFoundError` and checked
   before every later subprocess attempt, closes this without touching the
   existing (correct) retry semantics for a timeout/non-zero-exit/OSError.
+- **Fifteenth follow-up (Codex review): the Mach-O fix treated every
+  `__Z...`-prefixed symbol as Mach-O-mangled, everywhere.** `demangle()`/
+  `demangle_batch()` are also used for correctness-critical symbol
+  matching (`debian_symbols.py`'s Debian `.symbols` file generation,
+  `dwarf_snapshot.py`, `appcompat.py`), all of which are ELF/PE-specific,
+  not Mach-O -- a literal ELF export coincidentally named like a
+  Mach-O-prefixed Itanium mangling (e.g. a hand-written assembler alias)
+  would have been silently misdemangled. Both functions now accept a
+  keyword-only `accept_macho_prefix` parameter (default `False`,
+  restoring the strict, unambiguous pre-Mach-O-fix behavior for every
+  existing caller); only `demangle_text()`/`prewarm_demangle_batch()` --
+  used exclusively by the HTML/Markdown report renderers, with no
+  matching-critical caller to put at risk -- opt in. The gate runs before
+  any cache lookup, so a permissive caller's cached result can never leak
+  into a stricter caller's answer for the same symbol.

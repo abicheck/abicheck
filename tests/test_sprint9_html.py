@@ -1138,9 +1138,9 @@ class TestRealDemanglingThroughTheProductionChangeDataclass:
         calls: list[list[str]] = []
         orig = demangle_mod.demangle_batch
 
-        def spy(batch: list[str]) -> dict[str, str]:
+        def spy(batch: list[str], **kw) -> dict[str, str]:
             calls.append(list(batch))
-            return orig(batch)
+            return orig(batch, **kw)
 
         monkeypatch.setattr(demangle_mod, "demangle_batch", spy)
         generate_html_report(result)

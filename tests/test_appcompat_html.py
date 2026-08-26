@@ -239,9 +239,9 @@ def test_prewarms_the_demangle_cache_before_rendering_rows(monkeypatch) -> None:
     calls: list[list[str]] = []
     orig = demangle_mod.demangle_batch
 
-    def spy(batch: list[str]) -> dict[str, str]:
+    def spy(batch: list[str], **kw) -> dict[str, str]:
         calls.append(list(batch))
-        return orig(batch)
+        return orig(batch, **kw)
 
     monkeypatch.setattr(demangle_mod, "demangle_batch", spy)
     appcompat_to_html(
