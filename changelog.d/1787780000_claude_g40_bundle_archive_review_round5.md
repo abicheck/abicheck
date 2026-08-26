@@ -392,3 +392,36 @@
   level down, just never carried up to the manifest itself. Fixed by
   routing it through `bounded_encode_utf8()` too, streamed against the
   same remaining allowance.
+
+- **G40 bundle archive: two more Codex review findings, both real, both
+  fixed.** (1) The raw-string size preflight (`oversized_raw_string()`/
+  `_utf8_length_exceeds()`) checked a string's *raw* UTF-8 byte length,
+  but JSON's own `ensure_ascii=True` escaping can inflate a string's size
+  well past that -- a quote/backslash doubles, and a control character or
+  lone surrogate becomes a six-character `\uXXXX` sequence (up to 6x its
+  raw 1-byte form). A raw-length-only check could therefore pass a string
+  whose *escaped* form still exceeded the limit, and `JSONEncoder.
+  iterencode()` still emits that one string as a single, whole escaped
+  chunk regardless -- reproducing the exact vulnerability this preflight
+  exists to prevent, just via escaping inflation instead of raw size.
+  Fixed by replacing the raw-UTF-8-byte check with a new
+  `_escaped_length_exceeds()`, computed via `json.encoder.
+  encode_basestring_ascii()` -- the exact function `json.dumps()`/
+  `JSONEncoder(ensure_ascii=True)` use internally -- applied to bounded
+  chunks, so this measures the real escaped form rather than
+  approximating it. This also subsumes the prior round's `surrogatepass`
+  fix: since the escaped output is always pure ASCII, no `.encode()` call
+  (and therefore no `UnicodeEncodeError` on a lone surrogate) is needed
+  at all. (2) `sniff_bundle_archive_format()`/`open_regular_file_for_
+  format_sniff()` classified a source purely from its first 4 bytes, so a
+  concatenated/self-extracting archive (arbitrary bytes before its zip
+  data -- already handled correctly by `BundleArchiveReader.open()`/
+  `reject_absurd_central_directory()`, whose own EOCD-tail-scan is robust
+  to any prefix) was misclassified as `"json"`, making `load_bundle_
+  facts()`'s documented default (`format="auto"`) fail on a path the
+  identical call with `format="archive"` opened fine. Fixed with a new
+  `looks_like_zip_from_tail()` (`abicheck/storage/bundle_archive_cd_
+  guard.py`, reusing that module's own EOCD search window) as a fallback
+  classification when the byte-0 check says `"json"` -- a cheap
+  "is it worth trying" scan, not full validation; an archive that passes
+  it can still be rejected by the real preflight/`zipfile.ZipFile` itself.

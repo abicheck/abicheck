@@ -26,9 +26,8 @@ module free of any ``model``/``compare``-layer import lets it join
 coupling a naive "construct a ``BundleFacts`` directly here" design hits.
 
 The ``BundleFacts``-aware glue lives in ``serialization.py``'s
-``save_bundle_facts``/``load_bundle_facts``, same as the plain-JSON format.
-See the G40 design plan (``docs/contribute/plans/g40-content-addressed-
-bundle-archive.md``).
+``save_bundle_facts``/``load_bundle_facts``. See the G40 design plan
+(``docs/contribute/plans/g40-content-addressed-bundle-archive.md``).
 
 Zip, not tar (`.tar.zst`, the original review sketch's own naming): zip
 carries a real end-of-file central directory naming every member's offset
@@ -75,8 +74,7 @@ _ZSTD_MAX_WINDOW_LOG = 27  # 128 MiB
 
 #: Per-blob decompressed-size cap, mirroring `snapshot_io.py`'s own
 #: `DEFAULT_MAX_DECODED_BYTES` (same 1 GiB value, independently applied --
-#: this module doesn't import that constant; see the module docstring for
-#: why it avoids depending on `snapshot_io.py`).
+#: see the module docstring for why this avoids depending on that module).
 DEFAULT_MAX_BLOB_BYTES = 1024 * 1024 * 1024
 
 #: `manifest.json`'s own size cap -- far smaller than
@@ -86,11 +84,10 @@ DEFAULT_MAX_BLOB_BYTES = 1024 * 1024 * 1024
 DEFAULT_MAX_MANIFEST_BYTES = 64 * 1024 * 1024
 
 #: Slack added to a decoded-size cap when bounding the *outer*,
-#: still-compressed blob member read -- zstd frame/block overhead can make
-#: an incompressible payload's compressed form slightly larger than its
-#: decoded size; generous enough to never spuriously reject a legitimate
-#: payload at the cap, while the tighter decoded running-total check below
-#: still catches a genuine decompression-bomb attempt.
+#: still-compressed blob member read -- zstd overhead can make an
+#: incompressible payload's compressed form slightly larger than its
+#: decoded size; the tighter decoded running-total check below still
+#: catches a genuine decompression-bomb attempt.
 _ZSTD_FRAME_OVERHEAD_SLACK_BYTES = 1024 * 1024
 
 
@@ -110,12 +107,11 @@ def _blob_member_name(content_hash: str) -> str:
     return f"{_BLOB_PREFIX}{content_hash}{_BLOB_SUFFIX}"
 
 
-#: A fixed zip timestamp (the format's own epoch floor -- 1980-01-01)
-#: used for every member this module writes. `ZipFile.writestr(name,
-#: data)` with a bare string `name` stamps its own `ZipInfo` with
-#: `time.localtime()` at write time -- so saving byte-identical facts on
-#: two different days would otherwise produce two different archives
-#: (and two different `stored_sha256` values) for reproducible content.
+#: A fixed zip timestamp (the format's own epoch floor -- 1980-01-01) used
+#: for every member this module writes -- `ZipFile.writestr(name, data)`
+#: with a bare string `name` otherwise stamps `time.localtime()` at write
+#: time, so byte-identical facts saved on two different days would
+#: produce two different archives/`stored_sha256` values.
 _ZIP_EPOCH = (1980, 1, 1, 0, 0, 0)
 
 
@@ -141,8 +137,10 @@ _ZIP_MAGIC_PREFIXES = (b"PK\x03\x04", b"PK\x05\x06")
 
 def sniff_bundle_archive_format(path: str | Path) -> str:
     """``"archive"`` if *path*'s own bytes start with a zip local-file-header
-    or empty-archive magic; ``"json"`` otherwise (including gzip/zstd,
-    which the plain-JSON ``BundleFacts`` path already detects and
+    or empty-archive magic, or its tail contains a plausible EOCD signature
+    (a concatenated/self-extracting archive with an arbitrary prefix, per
+    `looks_like_zip_from_tail()`); ``"json"`` otherwise (including gzip/
+    zstd, which the plain-JSON ``BundleFacts`` path already detects and
     transparently decompresses from those same magic-byte conventions).
     Used by ``serialization.load_bundle_facts``'s ``format="auto"``.
     Always ``"json"`` for a non-regular-file source (a FIFO, `/dev/stdin`,
@@ -202,7 +200,16 @@ def open_regular_file_for_format_sniff(
         # raw OSError -- this module's error contract is SnapshotError.
         fp.close()
         raise SnapshotError(f"Cannot read {p}: {exc}") from exc
-    return fp, _classify_prefix(prefix)
+    fmt = _classify_prefix(prefix)
+    if fmt == "json":
+        # A prefixed archive's byte-0 magic misses it (Codex review) --
+        # see looks_like_zip_from_tail()'s own docstring. from_open_file()
+        # rewinds *fp* internally regardless of where this leaves it.
+        from .bundle_archive_cd_guard import looks_like_zip_from_tail
+
+        if looks_like_zip_from_tail(fp):
+            fmt = "archive"
+    return fp, fmt
 
 
 #: A real bundle archive (one manifest member + one per *distinct* content
@@ -337,9 +344,9 @@ class BundleArchiveWriter:
         self._written_hashes: set[str] = set()
         self._manifest_written = False
         #: The published archive's size/sha256, computed from the still-
-        #: private temp file before `os.replace()` -- not by re-reading
-        #: *path* afterward, avoiding a TOCTOU where a concurrent writer
-        #: could make a later re-read describe someone else's write.
+        #: private temp file before `os.replace()` -- avoids a TOCTOU
+        #: where a concurrent writer's re-read describes someone else's
+        #: write.
         self.stored_sha256: str | None = None
         self.stored_size_bytes: int | None = None
 
@@ -387,10 +394,10 @@ class BundleArchiveWriter:
         # Enforced here too, not only by write_bundle_facts_archive()'s own
         # preflight -- read_manifest() rejects anything over this limit
         # unconditionally. A single oversized string is pre-checked first
-        # (see oversized_raw_string()'s own docstring for why), then the
-        # rest is encoded via iterencode() and checked chunk-by-chunk, not
+        # (see oversized_raw_string()'s own docstring), then the rest is
+        # encoded via iterencode() and checked chunk-by-chunk, not
         # `json.dumps()` first, so an oversized manifest never gets fully
-        # materialized before either check can reject it.
+        # materialized.
         from .bundle_archive_json_guard import oversized_raw_string
 
         oversized = oversized_raw_string(manifest, DEFAULT_MAX_MANIFEST_BYTES)
@@ -464,8 +471,7 @@ class BundleArchiveWriter:
             self._tmp_file.close()
             # Known residual gap: os.replace() is path-based, so a
             # substitution right before this call still publishes attacker
-            # content -- but stored_sha256, computed from the real fd, then
-            # detects it on verification.
+            # content -- but stored_sha256 (from the real fd) detects it.
             os.replace(self._tmp_path, self._target)
         except BaseException:
             # A failure anywhere above must not leave the potentially large
@@ -548,17 +554,15 @@ class BundleArchiveReader:
         # `_fp`, when given, is an already-open fd sniffed the format
         # from (`from_open_file`) -- extends the same guarantee up.
         if _fp is not None:
-            # Rewound inside the guarded try below (Codex review), not here
-            # -- a `seek()` failure outside any handler that closes it would
-            # leak the caller-owned fd and escape as a raw OSError.
+            # Rewound inside the guarded try below, not here -- a seek()
+            # failure outside any handler that closes it would leak the
+            # caller-owned fd and escape as a raw OSError.
             fp = _fp
         else:
             # Same O_NONBLOCK-open + fstat()-classify shape as
             # `open_regular_file_for_format_sniff` -- an explicit
             # `format="archive"` caller bypasses that sniff's own guard,
-            # so a FIFO with no writer would otherwise hang here. ZIP
-            # input must be seekable, so non-regular is always a usage
-            # error, never valid JSON.
+            # so a FIFO with no writer would otherwise hang here.
             nonblock = getattr(os, "O_NONBLOCK", 0)
             try:
                 fd = os.open(self._path, os.O_RDONLY | nonblock)
@@ -603,10 +607,8 @@ class BundleArchiveReader:
         except (zipfile.BadZipFile, OSError, NotImplementedError) as exc:
             # Every deliberate failure in this module raises SnapshotError --
             # a truncated or hand-assembled archive must not surface a raw
-            # zipfile traceback (sniff_bundle_archive_format() only checks
-            # the first 4 bytes, so a damaged archive routinely reaches
-            # here). NotImplementedError is ZipFile's own raise for a
-            # member's extract_version exceeding what this module supports.
+            # zipfile traceback. NotImplementedError is ZipFile's own raise
+            # for a member's extract_version exceeding what this supports.
             fp.close()
             raise SnapshotError(f"{self._path}: not a valid bundle archive: {exc}") from exc
         except BaseException:
@@ -658,9 +660,8 @@ class BundleArchiveReader:
                 "member)."
             )
         # The zip "encrypted" bit makes `ZipFile.open()` raise a bare
-        # `RuntimeError`, not the `BadZipFile` translated below. No
-        # member this writer produces is ever encrypted, so checked here
-        # (RuntimeError is too generic to safely narrow in an except).
+        # `RuntimeError`, not the `BadZipFile` translated below -- checked
+        # here since `RuntimeError` is too generic to narrow in an except.
         if info.flag_bits & 0x1:
             raise SnapshotError(
                 f"{self._path}: member {name!r} is encrypted -- not a "
@@ -684,9 +685,8 @@ class BundleArchiveReader:
                         )
         except zipfile.BadZipFile as exc:
             # ZipExtFile validates the member's CRC-32 as it's consumed,
-            # raising BadZipFile (typically at the `with` block's own close)
-            # on a mismatch -- otherwise a raw zipfile exception escaping
-            # this module's "every failure raises SnapshotError" contract.
+            # raising BadZipFile (typically at the `with` block's own
+            # close) on a mismatch -- otherwise a raw zipfile exception.
             raise SnapshotError(
                 f"{self._path}: member {name!r} failed its CRC-32 check -- "
                 "the archive is corrupted or was tampered with."

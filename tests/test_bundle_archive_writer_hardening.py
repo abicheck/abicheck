@@ -647,97 +647,116 @@ class TestWriteManifestRejectsASingleOversizedString:
             assert reader.read_manifest() == manifest
 
 
-class TestOversizedRawStringNeverEncodesTheWholeString:
-    """A prior revision of the raw-string pre-check called
-    ``obj.encode("utf-8")`` on the whole string before comparing its
-    length -- for a guaranteed-oversized value (a multi-gigabyte string)
-    that allocates a second object as large as the input, exactly the
-    allocation the pre-check exists to prevent (Codex review, fresh
-    evidence). Verified directly against `_utf8_length_exceeds` via a
-    tracking `str` subclass, since a functional round-trip test alone
-    can't distinguish "rejected cheaply" from "rejected after a hidden
-    full-size encode"."""
+class TestOversizedRawStringNeverEscapesTheWholeString:
+    """A prior revision of this pre-check called ``obj.encode("utf-8")``
+    on the whole string before comparing its length -- for a guaranteed-
+    oversized value (a multi-gigabyte string) that allocates a second
+    object as large as the input, exactly the allocation the pre-check
+    exists to prevent (Codex review, fresh evidence). Verified directly
+    against `_escaped_length_exceeds` by tracking calls to
+    `encode_basestring_ascii` (the function it now uses in place of a raw
+    `.encode()`), since a functional round-trip test alone can't
+    distinguish "rejected cheaply" from "rejected after a hidden
+    full-size encode/escape"."""
 
-    def test_a_guaranteed_oversized_string_is_never_encoded_at_all(self) -> None:
-        from abicheck.storage.bundle_archive_json_guard import _utf8_length_exceeds
+    def test_a_guaranteed_oversized_string_is_never_escaped_at_all(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import abicheck.storage.bundle_archive_json_guard as guard_module
 
-        class _TrackedStr(str):
-            encode_calls: list[int] = []
+        calls: list[str] = []
+        real_fn = guard_module.encode_basestring_ascii
 
-            def encode(self, *a: object, **kw: object) -> bytes:  # type: ignore[override]
-                _TrackedStr.encode_calls.append(len(self))
-                return super().encode(*a, **kw)  # type: ignore[arg-type]
+        def _tracking(s: str) -> str:
+            calls.append(s)
+            return real_fn(s)  # type: ignore[no-any-return]
+
+        monkeypatch.setattr(guard_module, "encode_basestring_ascii", _tracking)
 
         # Character count alone (10) already exceeds the limit (5), so no
-        # encode() call is needed -- or permitted -- to answer the question.
-        s = _TrackedStr("x" * 10)
-        assert _utf8_length_exceeds(s, 5) == 10
-        assert _TrackedStr.encode_calls == []
+        # escaping call is needed -- or permitted -- to answer this.
+        assert guard_module._escaped_length_exceeds("x" * 10, 5) == 10
+        assert calls == []
 
-    def test_a_string_near_the_limit_is_encoded_only_in_bounded_chunks(self) -> None:
-        from abicheck.storage.bundle_archive_json_guard import (
-            _CHUNK_CHARS,
-            _utf8_length_exceeds,
-        )
+    def test_a_string_near_the_limit_is_escaped_only_in_bounded_chunks(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import abicheck.storage.bundle_archive_json_guard as guard_module
 
-        class _TrackedStr(str):
-            encode_calls: list[int] = []
+        calls: list[str] = []
+        real_fn = guard_module.encode_basestring_ascii
 
-            def encode(self, *a: object, **kw: object) -> bytes:  # type: ignore[override]
-                _TrackedStr.encode_calls.append(len(self))
-                return super().encode(*a, **kw)  # type: ignore[arg-type]
+        def _tracking(s: str) -> str:
+            calls.append(s)
+            return real_fn(s)  # type: ignore[no-any-return]
 
-            def __getitem__(self, item: object) -> object:
-                # A plain slice of a str subclass returns a base `str`,
-                # not the subclass -- override so the chunk slices below
-                # stay trackable too, not just the original whole string.
-                result = super().__getitem__(item)  # type: ignore[index]
-                if isinstance(result, str) and not isinstance(result, _TrackedStr):
-                    return _TrackedStr(result)
-                return result
+        monkeypatch.setattr(guard_module, "encode_basestring_ascii", _tracking)
 
         # Char count (under the limit) can't answer the question on its
-        # own -- multi-byte characters mean the real UTF-8 length still
-        # needs checking. Every individual encode() call must still be
-        # bounded by _CHUNK_CHARS characters, never the whole string.
-        char_count = _CHUNK_CHARS * 3
-        s = _TrackedStr("a" * char_count)
-        result = _utf8_length_exceeds(s, char_count + 1000)
+        # own -- escaping expansion means the real escaped length still
+        # needs checking. Every individual call must still be bounded by
+        # _CHUNK_CHARS characters, never the whole string.
+        char_count = guard_module._CHUNK_CHARS * 3
+        s = "a" * char_count
+        result = guard_module._escaped_length_exceeds(s, char_count + 1000)
         assert result is None
-        assert _TrackedStr.encode_calls
-        assert all(n <= _CHUNK_CHARS for n in _TrackedStr.encode_calls)
+        assert calls
+        assert all(len(c) <= guard_module._CHUNK_CHARS for c in calls)
 
     def test_a_multibyte_string_under_the_char_limit_but_over_the_byte_limit_is_rejected(
         self,
     ) -> None:
-        """Functional correctness check alongside the two structural ones
-        above: a 2-byte-per-char string whose character count alone would
-        pass a naive `len(s) > limit` check must still be caught once its
-        real UTF-8 byte length is counted."""
-        from abicheck.storage.bundle_archive_json_guard import _utf8_length_exceeds
+        """Functional correctness check alongside the structural ones
+        above: a non-ASCII string whose character count alone would pass
+        a naive `len(s) > limit` check must still be caught once its real
+        escaped length is counted. `é` (2 raw UTF-8 bytes) escapes to
+        `\\u00e9` (6 ASCII bytes) under `ensure_ascii=True`."""
+        from abicheck.storage.bundle_archive_json_guard import _escaped_length_exceeds
 
-        s = "é" * 10  # 'é', 2 bytes each in UTF-8 -> 20 bytes total
+        s = "é" * 10
         assert len(s) == 10
-        assert _utf8_length_exceeds(s, 15) == 20
-        assert _utf8_length_exceeds(s, 20) is None
+        assert _escaped_length_exceeds(s, 15) == 62  # 10 * 6 + 2 wrapping quotes
+        assert _escaped_length_exceeds(s, 62) is None
+
+    def test_json_escaping_inflation_is_caught_even_when_the_raw_length_fits(
+        self,
+    ) -> None:
+        """Codex review, fresh evidence: JSON escaping can inflate a
+        string's size well past its own raw byte count -- a control
+        character (1 raw byte) becomes a 6-character `\\uXXXX` escape.
+        A check against the *raw* UTF-8 length alone would pass a string
+        whose *escaped* form still exceeds the limit, letting
+        `iterencode()` materialize that oversized escaped chunk anyway
+        -- reproducing the exact vulnerability this whole module exists
+        to prevent."""
+        from abicheck.storage.bundle_archive_json_guard import _escaped_length_exceeds
+
+        # 10 control characters: 10 raw UTF-8 bytes, but each escapes to
+        # "" (6 ASCII chars) -- 60 bytes, +2 for the wrapping quotes.
+        s = chr(1) * 10
+        assert len(s.encode("utf-8")) == 10
+        assert _escaped_length_exceeds(s, 15) == 62
+        assert _escaped_length_exceeds(s, 62) is None
 
     def test_a_lone_surrogate_is_counted_instead_of_raising(self) -> None:
         """Codex review, fresh evidence: a lone surrogate (e.g. from a
         POSIX filename captured through `os.fsdecode`'s
         `surrogateescape` handling of non-UTF-8 bytes) makes a strict
-        `.encode("utf-8")` raise `UnicodeEncodeError`, even though
-        `json.dumps()`'s own `ensure_ascii=True` escaping round-trips the
-        identical value fine as a plain `\\uXXXX` sequence -- so this
-        pre-check must never crash on one either."""
-        from abicheck.storage.bundle_archive_json_guard import _utf8_length_exceeds
+        `.encode("utf-8")` raise `UnicodeEncodeError`. This module no
+        longer calls that at all -- `encode_basestring_ascii()` (the
+        same function `json.dumps()`'s `ensure_ascii=True` uses
+        internally) round-trips the identical value fine as a plain
+        `\\uXXXX` sequence -- so this pre-check must never crash on one
+        either."""
+        from abicheck.storage.bundle_archive_json_guard import _escaped_length_exceeds
 
         s = "bad\udcffname"
         # Confirms the premise: strict encode() really does raise here.
         with pytest.raises(UnicodeEncodeError):
             s.encode("utf-8")
 
-        assert _utf8_length_exceeds(s, 100) is None
-        assert _utf8_length_exceeds(s, 1) is not None
+        assert _escaped_length_exceeds(s, 100) is None
+        assert _escaped_length_exceeds(s, 1) is not None
 
 
 class TestReaderClosesTheOwnedFdWhenRewindFails:

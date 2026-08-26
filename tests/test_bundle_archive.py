@@ -876,6 +876,83 @@ class TestSniffBundleArchiveFormatUsesTheSameSingleOpenClassification:
         assert result == ["json"]
 
 
+class TestSniffDetectsAPrefixedArchive:
+    """`BundleArchiveReader.open()`/`reject_absurd_central_directory()`
+    already handle a concatenated/self-extracting archive correctly (an
+    arbitrary prefix before the zip data) -- but the byte-0-only prefix
+    check `sniff_bundle_archive_format()`/`open_regular_file_for_format_
+    sniff()` used misclassified one as "json", so `load_bundle_facts()`'s
+    documented default (`format="auto"`) failed on a path the identical
+    call with `format="archive"` opens fine (Codex review, fresh
+    evidence)."""
+
+    def _prefixed_archive(self, tmp_path: Path) -> Path:
+        real = tmp_path / "real.bundlefacts.archive.zip"
+        with BundleArchiveWriter(real) as writer:
+            h = writer.put_blob(b'{"a": 1}')
+            writer.write_manifest({"library_blobs": {"a.so": h}})
+        prefixed = tmp_path / "prefixed.zip"
+        prefixed.write_bytes(b"#!/bin/sh\nexit 0\n" + real.read_bytes())
+        return prefixed
+
+    def _prefixed_bundle_facts_archive(self, tmp_path: Path) -> Path:
+        """A genuinely valid (if empty) `BundleFacts` archive -- unlike
+        `_prefixed_archive()`'s hand-rolled low-level manifest, this
+        round-trips through the real `save_bundle_facts()` glue so
+        `load_bundle_facts()` can actually parse what it reads back."""
+        from abicheck.bundle_facts import capture_bundle_facts
+        from abicheck.serialization import save_bundle_facts
+
+        real = tmp_path / "real-facts.bundlefacts.archive.zip"
+        save_bundle_facts(capture_bundle_facts({}), real, format="archive")
+        prefixed = tmp_path / "prefixed-facts.zip"
+        prefixed.write_bytes(b"#!/bin/sh\nexit 0\n" + real.read_bytes())
+        return prefixed
+
+    def test_sniff_bundle_archive_format_classifies_it_as_archive(
+        self, tmp_path: Path
+    ) -> None:
+        from abicheck.storage.bundle_archive import sniff_bundle_archive_format
+
+        path = self._prefixed_archive(tmp_path)
+        assert not path.read_bytes().startswith(b"PK")
+        assert sniff_bundle_archive_format(path) == "archive"
+
+    def test_open_regular_file_for_format_sniff_classifies_it_as_archive(
+        self, tmp_path: Path
+    ) -> None:
+        from abicheck.storage.bundle_archive import open_regular_file_for_format_sniff
+
+        path = self._prefixed_archive(tmp_path)
+        fp, fmt = open_regular_file_for_format_sniff(path)
+        try:
+            assert fmt == "archive"
+        finally:
+            if fp is not None:
+                fp.close()
+
+    def test_load_bundle_facts_default_auto_format_opens_it(self, tmp_path: Path) -> None:
+        """The real regression this guards against: `load_bundle_facts()`'s
+        documented default (`format="auto"`) must succeed on a path the
+        identical call with `format="archive"` already opens fine."""
+        from abicheck.serialization import load_bundle_facts
+
+        path = self._prefixed_bundle_facts_archive(tmp_path)
+        facts = load_bundle_facts(path)  # format="auto" default
+        assert facts.per_library_snapshots == {}
+
+    def test_a_genuine_json_file_is_still_classified_as_json(self, tmp_path: Path) -> None:
+        """Positive control: an ordinary JSON file, with no EOCD signature
+        anywhere in its tail, must still classify as "json" -- the
+        tail-scan fallback only widens what's *also* recognized as an
+        archive, it must not misclassify ordinary content."""
+        from abicheck.storage.bundle_archive import sniff_bundle_archive_format
+
+        path = tmp_path / "plain.json"
+        path.write_text('{"schema_version": 1, "per_library_snapshots": {}}')
+        assert sniff_bundle_archive_format(path) == "json"
+
+
 class TestOpenRegularFileForFormatSniffClosesOnReadFailure:
     """A failure reading the 4-byte peek itself (e.g. EIO on a network
     filesystem) after open() succeeds must not leak the fd or propagate a

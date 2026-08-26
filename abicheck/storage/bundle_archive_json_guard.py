@@ -22,46 +22,53 @@ the functions below.
 from __future__ import annotations
 
 import json
+from json.encoder import encode_basestring_ascii
 
-# Chunk size for the incremental UTF-8 byte count below -- large enough to
-# keep the per-chunk encode() call cheap, small enough that no single
-# encode() ever materializes more than this many *characters* worth of
-# bytes at once (at most 4 bytes/char, so ~256 KiB per chunk).
+# Chunk size for the incremental escaped-length count below -- large enough
+# to keep the per-chunk call cheap, small enough that no single call ever
+# materializes more than this many *characters* worth of escaped text at
+# once.
 _CHUNK_CHARS = 65536
 
 
-def _utf8_length_exceeds(s: str, limit: int) -> int | None:
-    """Return a byte count already known to exceed *limit* if *s*'s UTF-8
-    encoding does, else `None` -- without ever encoding the whole string
-    in one call, and without a caller needing to re-encode it a second
-    time just to report a size.
+def _escaped_length_exceeds(s: str, limit: int) -> int | None:
+    """Return a byte count already known to exceed *limit* if *s*'s
+    JSON-escaped (``ensure_ascii=True``) encoding does, else `None` --
+    without ever escaping the whole string in one call, and without a
+    caller needing to re-encode it a second time just to report a size.
 
-    A prior revision called ``obj.encode("utf-8")`` on the whole string
-    before comparing its length -- for a guaranteed-oversized value (a
-    multi-gigabyte string, say) that allocates a second object as large as
-    the input, exactly the allocation this preflight exists to prevent
-    (Codex review, fresh evidence). Two steps close that: a Python `str`'s
-    length in *characters* is always a lower bound on its UTF-8 length in
-    *bytes* (each codepoint encodes to 1-4 bytes), so a character count
-    alone already over *limit* proves the byte count is too, with no
-    encoding at all (returned as the lower-bound count itself). Otherwise
-    the character count is already `<= limit`, but encoding it in one call
-    could still allocate up to `4 * limit` bytes at once -- so the
-    remainder is encoded incrementally, in bounded chunks via
-    ``errors="surrogatepass"`` (a lone surrogate -- e.g. from a POSIX
-    filename captured through ``os.fsdecode``'s ``surrogateescape``
-    handling of non-UTF-8 bytes -- raises `UnicodeEncodeError` under the
-    default strict handling, even though `json.dumps()`'s own
-    `ensure_ascii=True` escaping round-trips it just fine as a plain
-    `\\uXXXX` sequence; Codex review, fresh evidence), stopping as soon as
-    the running total exceeds *limit* and returning that real, already-
-    computed partial total.
+    Must check the *escaped*, not the raw UTF-8, length: JSON escaping can
+    inflate a string's size well past its raw byte count -- a quote or
+    backslash doubles, and a control character or lone surrogate becomes a
+    six-character ``\\uXXXX`` sequence (up to 6x its raw 1-byte form). A
+    raw-length-only check can therefore pass a string whose *escaped* form
+    is still far larger than *limit*, and `JSONEncoder.iterencode()`
+    yields one whole escaped string as a single chunk regardless -- so
+    that oversized chunk still gets fully materialized before any
+    chunk-by-chunk running-total check gets a chance to reject it,
+    reproducing the exact vulnerability this whole module exists to
+    prevent (Codex review, fresh evidence). A Python `str`'s length in
+    *characters* is still always a lower bound on its *escaped* length too
+    (every character maps to at least one output character), so a
+    character count alone already over *limit* proves the escaped length
+    is too, with no escaping at all. Otherwise the remainder is escaped
+    incrementally, in bounded chunks, via `json.encoder.
+    encode_basestring_ascii()` -- the exact function `json.dumps()`/
+    `JSONEncoder(ensure_ascii=True)` use internally, so this measures the
+    real escaped form rather than approximating it, and (being pure ASCII
+    output) needs no separate `.encode()` call to count bytes, sidestepping
+    the lone-surrogate `UnicodeEncodeError` a raw `.encode("utf-8")` would
+    otherwise raise. Stops as soon as the running total exceeds *limit*.
     """
     if len(s) > limit:
         return len(s)
-    total = 0
+    total = 2  # the two wrapping quote characters, counted once, not per chunk
+    if total > limit:
+        return total
     for start in range(0, len(s), _CHUNK_CHARS):
-        total += len(s[start : start + _CHUNK_CHARS].encode("utf-8", errors="surrogatepass"))
+        # encode_basestring_ascii() wraps its own quotes -- subtracted so
+        # they aren't double-counted across chunks.
+        total += len(encode_basestring_ascii(s[start : start + _CHUNK_CHARS])) - 2
         if total > limit:
             return total
     return None
@@ -69,27 +76,27 @@ def _utf8_length_exceeds(s: str, limit: int) -> int | None:
 
 def oversized_raw_string(obj: object, limit: int) -> tuple[str, int] | None:
     """Return ``(string, byte_count)`` for the first string leaf found in
-    *obj* whose own raw UTF-8 byte length already exceeds *limit* --
+    *obj* whose own JSON-escaped byte length already exceeds *limit* --
     *byte_count* a real, already-computed lower bound on that length, not
     an exact total -- or `None` if no leaf does.
 
     Used to reject a manifest whose JSON encoding cannot possibly fit
     *limit* without ever materializing that (potentially far larger)
-    encoded form: JSON string escaping only ever grows a string's encoded
-    length (a quote/backslash/control character each become a longer
-    escape sequence, never shorter), so a raw string already longer than
-    *limit* is guaranteed to encode past it too. `json.JSONEncoder.
-    iterencode()` yields one whole escaped string as a single chunk, so a
-    chunk-by-chunk length check alone can't reject an oversized string
-    before that one allocation already happened (Codex review, fresh
-    evidence) -- this check runs first, over the original, unescaped
-    strings, so the oversized allocation never happens at all. Returning
-    the byte count already found lets a caller report *some* real size in
-    an error message without re-encoding the (potentially still huge)
-    string a second time just to do so (Codex review, fresh evidence).
+    encoded form: `json.JSONEncoder.iterencode()` yields one whole escaped
+    string as a single chunk, so a chunk-by-chunk length check on the
+    *iterencode() output* alone can't reject an oversized string before
+    that one allocation already happened -- this check runs first, over
+    the original strings' own *escaped* size (see
+    `_escaped_length_exceeds()`'s own docstring for why the raw,
+    unescaped size alone isn't a safe proxy for this), so the oversized
+    allocation never happens at all (Codex review, fresh evidence).
+    Returning the byte count already found lets a caller report *some*
+    real size in an error message without re-encoding the (potentially
+    still huge) string a second time just to do so (Codex review, fresh
+    evidence).
     """
     if isinstance(obj, str):
-        count = _utf8_length_exceeds(obj, limit)
+        count = _escaped_length_exceeds(obj, limit)
         return (obj, count) if count is not None else None
     if isinstance(obj, dict):
         for k, v in obj.items():

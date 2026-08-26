@@ -50,6 +50,36 @@ _ZIP64_EOCD_LOCATOR_SIZE = 20
 _ZIP64_EOCD_RECORD_SIZE = 56  # fixed portion only; no extensible data sector
 
 
+def looks_like_zip_from_tail(f: Any) -> bool:
+    """Cheap classification only, not validation: does *f*'s tail contain
+    a plausible EOCD signature (``PK\\x05\\x06``)?
+
+    Robust to arbitrary bytes before the zip data (a concatenated or
+    self-extracting archive), unlike a bare "does this start with `PK`"
+    check -- `reject_absurd_central_directory()`/`zipfile.ZipFile` both
+    already handle such a prefix correctly once opened, but `format=
+    "auto"` sniffing previously classified one as "json" purely because
+    its first 4 bytes weren't the local-file-header magic, so `load_
+    bundle_facts(prefixed_path)` (the documented default) failed even
+    though `format="archive"` on the identical path succeeded (Codex
+    review, fresh evidence). An archive that passes this cheap check can
+    still be rejected by the real preflight/`zipfile.ZipFile` itself --
+    this only answers "is it worth trying", using the same search window
+    `reject_absurd_central_directory()` does, without any of its
+    entry-count/size validation. Leaves *f* at an unspecified position;
+    a caller that cares must seek before reuse. Fails closed (`False`) on
+    any `OSError`, the same as this module's other tail-scanning code --
+    a transient read failure here must not silently misclassify."""
+    try:
+        size = os.fstat(f.fileno()).st_size
+        tail_len = min(size, _EOCD_SEARCH_WINDOW_BYTES)
+        f.seek(size - tail_len)
+        tail = f.read(tail_len)
+    except OSError:
+        return False
+    return bool(tail.rfind(b"PK\x05\x06") != -1)
+
+
 def _actual_central_directory_entry_count(
     f: Any, *, cd_offset: int, cd_size: int, max_entries: int
 ) -> int:
