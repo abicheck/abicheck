@@ -39,6 +39,7 @@ from abicheck.elf_metadata import ElfImport, ElfMetadata, ElfSymbol
 from abicheck.errors import SnapshotError
 from abicheck.model import AbiSnapshot
 from abicheck.serialization import (
+    bundle_facts_to_dict,
     load_bundle_facts,
     save_bundle_facts,
     snapshot_to_dict,
@@ -171,6 +172,68 @@ class TestBundleFactsArchiveResourceLimits:
 
         with pytest.raises(SnapshotError, match="more than 100 JSON containers"):
             load_bundle_facts(out, format="archive")
+
+    def test_load_max_json_object_nodes_override_widens_the_per_blob_budget(
+        self, tmp_path: Path
+    ) -> None:
+        """A caller reading a known-large, trusted archive (a real
+        per-library facts blob for a SYCL/DPC++-heavy library can
+        legitimately need well over DEFAULT_MAX_JSON_OBJECT_NODES to
+        decode) can pass ``max_json_object_nodes=`` to widen the budget
+        for this call, rather than the payload being unconditionally
+        rejected as if it were a container-count amplification attack."""
+        from abicheck.storage.bundle_archive import BundleArchiveWriter
+
+        out = tmp_path / "wide-object-blob.bundlefacts.archive.zip"
+        payload = b'{"library":"a.so","version":"1","junk":[' + (b"{}," * 500) + b"{}]}"
+        with BundleArchiveWriter(out) as writer:
+            h = writer.put_blob(payload)
+            writer.write_manifest(
+                {
+                    "schema_version": 1,
+                    "bundle_facts_schema_version": 1,
+                    "library_blobs": {"a.so": h},
+                }
+            )
+
+        # Below the real container count (500 objects + the outer object +
+        # array + top-level scalars): still rejected.
+        with pytest.raises(SnapshotError, match="more than 100 JSON containers"):
+            load_bundle_facts(out, format="archive", max_json_object_nodes=100)
+
+        # A generous override succeeds -- the *same bytes* that fail above.
+        facts = load_bundle_facts(out, format="archive", max_json_object_nodes=10_000)
+        assert facts.per_library_snapshots["a.so"].library == "a.so"
+
+    def test_load_plain_json_path_enforces_the_same_container_budget(
+        self, tmp_path: Path
+    ) -> None:
+        """Prior to this fix, ``load_bundle_facts``'s plain (non-archive)
+        ``.json``/``.json.zst`` path called ``json.loads()`` directly with
+        no container-node budget at all -- the identical bytes were
+        budget-checked per blob when read via ``format="archive"`` but not
+        when read as plain JSON, so whether a container-count amplification
+        payload was caught depended only on which envelope wrapped it
+        (Codex review, fresh evidence). Both paths must now enforce the
+        same budget."""
+        import json
+
+        metadata = {"a.so": _meta(soname="a.so", exports=["fn"])}
+        facts = capture_bundle_facts(_per_library_snapshots(metadata))
+        container = bundle_facts_to_dict(facts)
+        # Real, valid BundleFacts JSON -- padded with an ignored top-level
+        # key carrying many container nodes, the same amplification shape
+        # the sibling archive-blob tests above use.
+        container["junk"] = [{} for _ in range(500)]
+        out = tmp_path / "wide-object.bundlefacts.json"
+        out.write_text(json.dumps(container))
+
+        with pytest.raises(SnapshotError, match="more than 100 JSON containers"):
+            load_bundle_facts(out, format="json", max_json_object_nodes=100)
+
+        # A generous override succeeds on the identical bytes.
+        reloaded = load_bundle_facts(out, format="json", max_json_object_nodes=10_000)
+        assert set(reloaded.per_library_snapshots) == {"a.so"}
 
     def test_load_bounds_container_allocation_while_decoding_the_manifest(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

@@ -302,18 +302,18 @@ class TestIntraDepRemoved:
         a non-system-shaped symbol (not std::-mangled, not in
         DEFAULT_SYSTEM_SYMBOLS) once every one of the consumer's non-intra
         DT_NEEDED edges is covered by the allow-list -- e.g. a vendor C API
-        symbol like MKL's mkl_custom_op imported from a soname the user
-        explicitly named via --bundle-system-providers. A prior revision
-        gated this allow-list match on the symbol *also* looking
-        system-shaped, which made --bundle-system-providers inert for
-        exactly this case.
-        """
+        symbol like Acme's acme_custom_op imported from a soname the user
+        explicitly named via --bundle-system-providers (fictitious vendor,
+        not a real default -- this tests the generic override mechanism).
+        A prior revision gated this allow-list match on the symbol *also*
+        looking system-shaped, which made --bundle-system-providers inert
+        for exactly this case."""
         new = _snapshot(
             {
                 "libfoo.so": _meta(
                     soname="libfoo.so.1",
-                    needed=["libmkl_core.so.2"],
-                    imports=["mkl_custom_op"],
+                    needed=["libacme_math.so.2"],
+                    imports=["acme_custom_op"],
                 ),
             }
         )
@@ -321,7 +321,7 @@ class TestIntraDepRemoved:
         without_extra = compare_bundle(new, new, per_library_results=[])
         assert any(
             f.kind == ChangeKind.BUNDLE_INTRA_DEP_REMOVED
-            and f.symbol == "mkl_custom_op"
+            and f.symbol == "acme_custom_op"
             for f in without_extra.bundle_findings
         )
         # With the exact soname allow-listed: finding must be suppressed.
@@ -329,7 +329,7 @@ class TestIntraDepRemoved:
             new,
             new,
             per_library_results=[],
-            system_providers=["libmkl_core.so.2"],
+            system_providers=["libacme_math.so.2"],
         )
         assert not any(
             f.kind == ChangeKind.BUNDLE_INTRA_DEP_REMOVED
@@ -338,16 +338,16 @@ class TestIntraDepRemoved:
 
     def test_system_providers_matches_versioned_soname_by_stem(self) -> None:
         """A user-supplied allow-list entry without the real DT_NEEDED
-        version suffix (e.g. 'libmkl_core', no '.so.2') must still match
+        version suffix (e.g. 'libacme_math', no '.so.2') must still match
         the real, versioned soname -- hand-typed allow-list entries rarely
-        carry the exact runtime version suffix.
-        """
+        carry the exact runtime version suffix. Fictitious vendor soname,
+        same reason as the sibling test above."""
         new = _snapshot(
             {
                 "libfoo.so": _meta(
                     soname="libfoo.so.1",
-                    needed=["libmkl_core.so.2"],
-                    imports=["mkl_custom_op"],
+                    needed=["libacme_math.so.2"],
+                    imports=["acme_custom_op"],
                 ),
             }
         )
@@ -355,7 +355,7 @@ class TestIntraDepRemoved:
             new,
             new,
             per_library_results=[],
-            system_providers=["libmkl_core"],
+            system_providers=["libacme_math"],
         )
         assert not any(
             f.kind == ChangeKind.BUNDLE_INTRA_DEP_REMOVED
