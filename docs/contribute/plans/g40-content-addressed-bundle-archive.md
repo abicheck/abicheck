@@ -25,10 +25,11 @@ identified during that work, both left as explicit, documented known
 limitations rather than blocking the rest of the design: the
 manifest-integrity gap in Phase 2 below (no reader-side binding on
 `manifest.json` itself), and a lazy per-library reader's missing
-`bundle_facts_schema_version` check (`BundleArchiveReader.read_manifest()`/
-`read_blob()` perform no schema check at all, unlike the whole-bundle
-`read_bundle_facts_archive()` path) — see those sections for what closing
-each would need. Historical framing below
+schema checks (`BundleArchiveReader.read_manifest()`/`read_blob()` check
+neither the container's own `schema_version` nor the encoded
+`bundle_facts_schema_version` at all, unlike the whole-bundle
+`read_bundle_facts_archive()` path, which checks both) — see those sections
+for what closing each would need. Historical framing below
 ("the container format decision", "Phase 0", "Phase 1", etc.) is
 unchanged; treat "the writer"/"the reader" language throughout as
 describing the shipped `BundleArchiveWriter`/`BundleArchiveReader`, not a
@@ -570,33 +571,49 @@ with BundleArchiveReader.open(path) as reader:
 ```
 
 **This sketch is incomplete as written, and deliberately corrected here
-rather than left implicit (Codex review, fresh evidence): a lazy per-library
-read must check `manifest["bundle_facts_schema_version"]` against the
-supported range *before* trusting anything else the manifest says, exactly
-where the sketch currently jumps straight from `read_manifest()` to
-indexing `library_blobs`.** `bundle_facts_schema_version` gates
-bundle-*wide* semantics — `filesystem_aliases`, `library_filenames`, and
-`library_blobs`'s own keying, not just each per-library `AbiSnapshot`'s own
-shape — so a too-new value can make `manifest["library_blobs"][name]`
-itself unsafe to interpret even when the one referenced snapshot blob
-still happens to deserialize without error. As shipped (PR #869), this
-check exists only inside `bundle_facts.read_bundle_facts_archive()` (the
-whole-bundle load) — its own docstring explicitly directs a caller wanting
-one library to `BundleArchiveReader` directly instead, and that primitive's
-`read_manifest()`/`read_blob()` perform no schema check at all, so a caller
-following this sketch literally skips the rejection Phase 1 promises for
-`bundle_facts_schema_version` above. This is a real gap in the shipped
-lazy-read path, not merely a documentation omission: closing it means every
-lazy per-library reader — this sketch included, and any future dedicated
-wrapper — must reject `manifest["bundle_facts_schema_version"] >
-BUNDLE_FACTS_SCHEMA_VERSION` (the same comparison `read_bundle_facts_archive()`
-already performs) immediately after `read_manifest()` returns, before doing
-anything with `library_blobs`/`filesystem_aliases`/`library_filenames`.
-Updating `BundleArchiveReader`/`read_bundle_facts_archive()` themselves is
+rather than left implicit (Codex review, fresh evidence; sharpened by a
+later round of the same review — the first draft of this correction named
+only one of the two axes, see below): a lazy per-library read must check
+**both** `manifest["schema_version"]` (the container's own layout version)
+**and** `manifest["bundle_facts_schema_version"]` (the encoded `BundleFacts`'
+own version) against their respective supported ranges *before* trusting
+anything else the manifest says, exactly where the sketch currently jumps
+straight from `read_manifest()` to indexing `library_blobs`.** Checking only
+`bundle_facts_schema_version` — as an earlier revision of this passage did —
+leaves the other axis unguarded: `schema_version` gates the container's own
+shape, including `library_blobs`'s own keying and layout (see the "Two
+independent schema versions, not one" note above), so a future archive whose
+container layout changed but whose `BundleFacts` shape is still supported
+could pass a `bundle_facts_schema_version`-only check and still have
+`manifest["library_blobs"][name]` interpreted under a layout assumption that
+no longer holds. Both fields independently gate bundle-*wide* semantics —
+`filesystem_aliases`, `library_filenames`, and `library_blobs`'s own keying,
+not just each per-library `AbiSnapshot`'s own shape — so a too-new value on
+either axis can make `manifest["library_blobs"][name]` itself unsafe to
+interpret even when the one referenced snapshot blob still happens to
+deserialize without error. As shipped (PR #869), this check exists only
+inside `bundle_facts.read_bundle_facts_archive()` (the whole-bundle load,
+which checks both `schema_version` and `bundle_facts_schema_version`) — its
+own docstring explicitly directs a caller wanting one library to
+`BundleArchiveReader` directly instead, and that primitive's
+`read_manifest()`/`read_blob()` perform **no schema check of either kind**
+(confirmed by reading both functions directly on
+`claude/g40-bundle-archive-impl`'s latest commit, `b9e0dae9`: neither
+references `schema_version` nor `bundle_facts_schema_version` anywhere), so
+a caller following this sketch literally skips the rejection Phase 1
+promises for both fields. This is a real gap in the shipped lazy-read path,
+not merely a documentation omission: closing it means every lazy
+per-library reader — this sketch included, and any future dedicated
+wrapper — must reject a too-new `manifest["schema_version"]` *and* a
+too-new `manifest["bundle_facts_schema_version"]` (the same two comparisons
+`read_bundle_facts_archive()` already performs) immediately after
+`read_manifest()` returns, before doing anything with
+`library_blobs`/`filesystem_aliases`/`library_filenames`. Updating
+`BundleArchiveReader`/`read_bundle_facts_archive()` themselves is
 implementation work on the already-shipped PR #869 branch, out of scope for
 this plan document — recorded here as a Phase 2 acceptance requirement so a
-future lazy-read entry point (CLI or typed API) is built to check this from
-the start rather than reproducing the same gap a second time.
+future lazy-read entry point (CLI or typed API) is built to check both axes
+from the start rather than reproducing the same gap a second time.
 
 This per-library read decompresses and parses exactly the one referenced blob member
 (acceptance criterion (a)); a caller wanting every library still pays the
@@ -1209,8 +1226,10 @@ no detector-logic changes and no FP-rate/mutation-score involvement, exactly
 as sized here — two known limitations grew the scope beyond this original
 estimate, and both remain open: the manifest-integrity gap in Phase 2 below
 (no reader-side binding on `manifest.json` itself), and the lazy per-library
-reader's missing `bundle_facts_schema_version` check (see the Status note
-above and Phase 2 below for what closing each would need).
+reader's missing schema checks — neither the container's own
+`schema_version` nor the encoded `bundle_facts_schema_version` is validated
+on that path (see the Status note above and Phase 2 below for what closing
+each would need).
 
 ## Out of scope
 

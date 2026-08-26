@@ -1610,6 +1610,65 @@ unwired producer path" failure mode this gate exists to close, just one
 level of indirection removed from the `Change(...)`/`make_change(...)`
 sites it does catch.
 
+**A structural boundary the AST gate can never close, no matter how it is
+generalized: a `Change` object supplied through the documented
+`service.compare_snapshots(..., extra_changes=...)`/`checker.compare(...,
+extra_changes=...)` API (Codex review, fresh evidence, confirmed by reading
+both functions directly).** `service.py`'s `compare_snapshots` accepts a
+keyword-only `extra_changes: list[Change] | None` and forwards it unchanged
+to `checker.compare`, whose own body is exactly `if extra_changes:
+changes.extend(extra_changes)` — the caller-supplied `Change` objects are
+appended to the result's `changes` list verbatim, with no field validation
+of any kind. This is a real, currently-documented escape hatch (see the
+`extra_changes` discussion earlier in this document, in the SONAME-bump
+finding's evidence-tiers analysis above) for L3–L5 build/source-derived
+findings a caller assembles outside `compare()`'s own detector pipeline —
+and nothing stops that same parameter from being used by **arbitrary
+Python code outside this repository entirely**, since it is public typed
+API, not an internal helper. No AST scan of this repo's own source — walking
+`Change(...)`/`make_change(...)`/`BundleFinding(...)`/`bool_transition(...)`
+call expressions, however completely generalized per the two options above —
+can ever see, let alone validate, a `Change(...)` constructor invoked inside
+a third-party script that imports `abicheck` and calls `compare_snapshots
+(old, new, extra_changes=[Change(kind=..., symbol=..., description=...)])`.
+The gate's completeness promise must therefore be stated precisely rather
+than left to imply "every `Change` in `DiffResult.changes`, unconditionally":
+**the AST gate guarantees completeness only for a `Change` constructed
+within this repository's own detector/wrapper code — an externally supplied
+`extra_changes` entry is outside its reach by construction, not by an
+implementation gap the gate could close with more coverage.**
+
+That distinction only matters if something else picks up the slack, so this
+plan specifies what must happen at the one place such a `Change` actually
+enters the pipeline: **`checker.compare`'s `extra_changes` append step
+becomes the runtime boundary check the static AST gate cannot be.**
+Immediately before `changes.extend(extra_changes)`, each appended `Change`
+with `evidence_provenance is None` is given a reserved sentinel value,
+`("external:caller_supplied",)`, rather than being extended into `changes`
+unmodified; a `Change` that already carries a real, non-`None`
+`evidence_provenance` (a well-behaved caller that already tags its own
+findings) passes through untouched. `external:caller_supplied` is
+deliberately **not** shaped like the `<side>:<tier>[:backend]` grammar
+Phase 0/1 establish elsewhere in this vocabulary (`old:`/`new:`/`both:`/
+`current:` each name a real in-repo evidence source this codebase can
+verify) — it is a top-level, ungrouped tag meaning exactly "this finding
+did not come from any detector this repository's provenance machinery can
+speak to," the honest claim available at a boundary where the actual
+evidence, if any, is unknowable from inside `compare()`. This closes the
+same gap the enum-partition/construction-path pair closes for in-repo
+producers, just at the one seam those two gates cannot reach: after this
+change, `evidence_provenance` is `None` in `DiffResult.changes` only for a
+`ChangeKind` still in `PROVENANCE_UNVERIFIED` (an explicit, tracked backlog
+state), never silently for an externally-supplied finding. Phase 2's test
+list gains one matching case: constructing a `Change` with
+`evidence_provenance=None`, passing it through `compare_snapshots(...,
+extra_changes=[...])`, and asserting the returned finding carries
+`("external:caller_supplied",)` — plus a control asserting a caller-set,
+non-`None` value survives unchanged. This is implementation work for
+Phase 2 itself (the `checker.compare` edit and its test), not a follow-up
+plan; it is recorded in this same phase because it is the other half of
+the completeness gate's own guarantee, not a separate concern.
+
 ### Phase 3 — report/schema surface (S)
 
 **Implementation location (ADR-061), corrected against the actual code
@@ -1783,6 +1842,46 @@ it needs the identical schema-version bump and `compare_report.schema.json`
 update the next paragraph already requires for `_change_to_dict`/
 `_leaf_entry`, applied to `suppression_audit`'s own definition too, in the
 same PR.
+
+**A seventh projection family, `abicheck/impact/correlation.py`'s
+`RootCauseGroup.to_dict()`, is missing from this inventory entirely — a
+public dataclass method with its own independent `Change`→dict projection,
+reachable by any caller of the typed Python API even though no in-repo CLI
+surface currently calls it (Codex review, fresh evidence, confirmed by
+reading `correlation.py` directly and grepping every call site of
+`RootCauseGroup`/`.to_dict()` in the repository — no production code path
+calls it today; the only in-repo consumer of `correlate_root_causes()`,
+`reporter_markdown.root_cause_evidence_lookup_for_changes`, iterates
+`group.members` directly and never calls `to_dict()`).** `RootCauseGroup`
+is `correlate_root_causes(changes) -> list[RootCauseGroup]`'s own return
+type, and both the function and the class are public, importable API
+(`abicheck.impact.correlation`) — nothing marks `to_dict()` private or
+internal-only, and its presence on a public dataclass is itself an
+invitation for exactly the caller this finding describes: a script that
+imports `correlate_root_causes` directly and serializes the result via
+`[g.to_dict() for g in groups]` rather than going through any of the six
+`reporter.py`-adjacent families above. Its `members` projection builds
+`{"finding_symbol": c.symbol, "kind": c.kind.value, "evidence_level":
+level}` per member — the same three-field shape `_stack_finding_dicts`'s
+sibling builders use, but independently written, with no call to
+`to_change()`, `_change_to_dict()`, `_leaf_entry()`, or any of the other
+six families. A caller relying on this method to serialize correlated
+findings therefore loses `evidence_provenance` even after every JSON
+surface this phase otherwise covers carries it — the same
+auditability gap the fourth family's paragraph above names, reached this
+time through direct API use rather than a CLI flag. Add
+`evidence_provenance` to the per-member dict literal explicitly (a `None`
+value serializes as JSON `null`, matching this field's nullable contract
+elsewhere), and give it its own test coverage — a direct unit test
+constructing a `RootCauseGroup` from `Change` objects carrying
+`evidence_provenance` and asserting `to_dict()["members"][i]
+["evidence_provenance"]` round-trips, mirroring the existing per-builder
+pattern rather than assumed to follow from `reporter.py`'s own coverage.
+`RootCauseGroup.to_dict()` feeds no dedicated `.schema.json` (it is not a
+report/SARIF/JUnit surface `reporter.py` calls), so — like the
+`_baseline_finding_dicts`/release-JSON/stack-JSON families above — only the
+"don't add a field silently to an unversioned format" caution applies, not
+a schema file to update.
 
 **A new public field on an already-published report format is a real
 schema change, not a cosmetic addition (Codex review — a prior revision of
@@ -2014,6 +2113,12 @@ above, which this list intentionally does not re-duplicate.
   `suppression_audit.high_risk_matches` dict builder, a distinct ledger
   from `_suppressed_change_entry` above, not reached by `reporter.py`'s
   six builders or by any of the other projection families.
+- `abicheck/impact/correlation.py`'s `RootCauseGroup.to_dict()` — Phase 3's
+  seventh projection family (see that phase's own correction above): a
+  public dataclass method's independent `members` dict projection,
+  reachable by any typed-API caller of `correlate_root_causes()` even
+  though no in-repo CLI surface calls it today, not reached by
+  `reporter.py`'s six builders or by any of the other projection families.
 - `abicheck/sarif.py`'s `properties` bag, its two run-level audit-ledger
   dict projections (`surfaceScope.outOfSurfaceChanges`,
   `buildContextReconciled.changes`), and `abicheck/junit_report.py`'s
