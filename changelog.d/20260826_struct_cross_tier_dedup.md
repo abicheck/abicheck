@@ -51,3 +51,15 @@
   which the old guess corrupted into `"Wrapper<dep::Tag>::Tag>"`. The
   function now takes `Change.field_name` as its sole, explicit signal for
   where to split a symbol into parent + field, never a string guess.
+- **Follow-up (Codex review): a global (unqualified) type/enum sharing a
+  bare name with a namespaced one was silently bridged to it.**
+  `record_canonical_names`/`_enum_canonical_names` both skipped an
+  unqualified record/enum entirely when building the bare-name ambiguity
+  table, so a genuinely global `Widget` alongside a namespaced `ns::Widget`
+  never counted as a competing identity — silently registering
+  `Widget -> ns::Widget` and letting the global type's own finding be
+  wrongly canonicalized onto the unrelated namespaced one. Both functions
+  now record an unqualified declaration as a competitor too (via a `None`
+  sentinel in the per-bare-name candidate set), so this collision correctly
+  disables the bridge the same way two differently-namespaced types
+  sharing a bare name already did.

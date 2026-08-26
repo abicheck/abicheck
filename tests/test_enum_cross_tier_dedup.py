@@ -133,6 +133,24 @@ class TestEnumCanonicalNames:
         assert names["a::Color"] == "a::Color"
         assert names["b::Color"] == "b::Color"
 
+    def test_a_global_enum_competing_with_a_namespaced_one_is_not_bridged(self) -> None:
+        """Codex review: a genuinely global (unqualified) ``Color`` sharing a
+        bare name with a namespaced ``ns::Color`` must not be silently
+        bridged to it -- skipping the unqualified enum entirely (found on
+        this function's ``RecordType`` sibling, ``record_canonical_names``)
+        let it happen anyway."""
+        snap = AbiSnapshot(
+            library="lib.so",
+            version="1",
+            enums=[
+                EnumType(name="Color", members=[EnumMember(name="RED", value=0)]),
+                _enum_type("Color", "ns::Color", [("BLUE", 1)]),
+            ],
+        )
+        names = _enum_canonical_names(snap)
+        assert "Color" not in names
+        assert names["ns::Color"] == "ns::Color"
+
     def test_unambiguous_bare_name_across_matching_qualified_enums_still_registers(
         self,
     ) -> None:

@@ -263,18 +263,14 @@ def _enum_canonical_names(snap: AbiSnapshot | None) -> dict[str, str]:
     (qualified) value, so a lookup succeeds regardless of which spelling a
     given tier's ``Change.symbol`` used.
 
-    Only registers an entry when ``EnumType.qualified_name`` is actually
-    known: an enum with no recorded qualification carries no bridging
-    information at all, so mapping its bare name to itself would be a
-    no-op that exists only to set ``Change.qualified_name`` to a value
-    identical to ``Change.symbol`` — and other consumers of that field
-    (e.g. ``post_processing_reachability.py``'s internal-namespace check)
-    treat "qualified_name is set" as meaningful evidence on its own,
-    regardless of what value it holds. Setting it here to a merely
-    identical string would be reporting false confidence rather than
-    fixing the bare-vs-qualified mismatch this function exists to close
-    (Codex review, fresh evidence — reproduced against a real enum member
-    named like an internal-namespace segment).
+    Only registers a bare-name entry when ``EnumType.qualified_name`` is
+    actually known and unambiguous: an enum with no recorded qualification
+    carries no bridging information at all, so mapping its bare name to
+    itself would be a no-op that exists only to set ``Change.qualified_name``
+    to a value identical to ``Change.symbol`` — and other consumers of that
+    field (e.g. ``post_processing_reachability.py``'s internal-namespace
+    check) treat "qualified_name is set" as meaningful evidence on its own,
+    regardless of value (Codex review, fresh evidence).
 
     A bare name is registered only when it uniquely identifies one
     qualified enum. Two distinct enums sharing a bare name (e.g.
@@ -287,20 +283,26 @@ def _enum_canonical_names(snap: AbiSnapshot | None) -> dict[str, str]:
     namespace-aware processing that trusts ``qualified_name`` (Codex
     review, fresh evidence). The fully-qualified key is never ambiguous --
     two enums cannot share the same qualified name -- so it is always safe
-    to register.
+    to register. An unqualified global enum sharing a bare name is itself a
+    competitor here -- skipping it let a global ``Color`` alongside a
+    namespaced ``ns::Color`` wrongly register ``Color -> ns::Color`` (Codex
+    review, found on this function's ``RecordType`` sibling).
     """
     if snap is None:
         return {}
-    by_bare: dict[str, set[str]] = {}
+    by_bare: dict[str, set[str | None]] = {}
     out: dict[str, str] = {}
     for e in getattr(snap, "enums", None) or ():
-        if not e.qualified_name:
-            continue
-        by_bare.setdefault(e.name, set()).add(e.qualified_name)
-        out[e.qualified_name] = e.qualified_name
+        if e.qualified_name:
+            by_bare.setdefault(e.name, set()).add(e.qualified_name)
+            out[e.qualified_name] = e.qualified_name
+        else:
+            by_bare.setdefault(e.name, set()).add(None)
     for bare, qualified_names in by_bare.items():
         if len(qualified_names) == 1:
-            out[bare] = next(iter(qualified_names))
+            candidate = next(iter(qualified_names))
+            if candidate is not None:
+                out[bare] = candidate
     return out
 
 
@@ -1520,19 +1522,15 @@ def _deduplicate_cross_detector(
         ChangeKind.ENUM_LAST_MEMBER_VALUE_CHANGED: "enum_last_member_value_changed",
         ChangeKind.ENUM_UNDERLYING_SIZE_CHANGED: "enum_underlying_size_changed",
     }
-    # A symbol-version-node bump (e.g. LLVM_17 -> LLVM_18.1 applied to every
-    # symbol during a major release) makes BOTH version detectors fire per
-    # symbol with the same old->new transition: SYMBOL_MOVED_VERSION_NODE (the
-    # node label moved) and SYMBOL_VERSION_ALIAS_CHANGED (the default version
-    # changed, old not retained as an alias). They describe one event; drop
-    # the alias-change duplicate where a node move already covers the same
-    # (symbol, old -> new), keeping the node-level change. Halves the
+    # A symbol-version-node bump (e.g. LLVM_17 -> LLVM_18.1 on every symbol
+    # in a major release) makes BOTH version detectors fire per symbol with
+    # the same old->new transition: SYMBOL_MOVED_VERSION_NODE (node label
+    # moved) and SYMBOL_VERSION_ALIAS_CHANGED (default version changed, old
+    # not retained as an alias). Drop the alias-change duplicate where a
+    # node move already covers the same (symbol, old -> new) -- halves the
     # version-bump noise on real libraries (libLLVM 17->18: ~46k instead of
-    # ~92k risk findings). Matches on (symbol, old_value, new_value): both
-    # detectors live in diff_versioning.py and populate those fields with the
-    # same version node labels for one bump. If that ever diverges the dedup
-    # simply no-ops (both findings kept) — a missed dedup, never a dropped
-    # real change.
+    # ~92k risk findings). Matches on (symbol, old_value, new_value); if
+    # that ever diverges the dedup simply no-ops (both findings kept).
     moved_transitions: set[tuple[str, str | None, str | None]] = {
         (c.symbol, c.old_value, c.new_value)
         for c in changes

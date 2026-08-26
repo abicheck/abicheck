@@ -562,20 +562,29 @@ def record_canonical_names(snap: AbiSnapshot | None) -> dict[str, str]:
     qualified type — the same disambiguation rule
     ``_enum_canonical_names`` uses, for the identical reason: two distinct
     types sharing a bare name (e.g. ``a::Widget`` and ``b::Widget``) must
-    never have one silently bridged to the other's qualified spelling.
+    never have one silently bridged to the other's qualified spelling. An
+    unqualified (global-namespace) record sharing that bare name is itself
+    a competing identity for this check -- skipping it entirely, as an
+    earlier revision did, let a global ``Widget`` alongside a namespaced
+    ``ns::Widget`` silently register ``Widget -> ns::Widget``, which could
+    then wrongly canonicalize the global type's own finding onto the
+    unrelated namespaced one (Codex review, fresh evidence).
     """
     if snap is None:
         return {}
-    by_bare: dict[str, set[str]] = {}
+    by_bare: dict[str, set[str | None]] = {}
     out: dict[str, str] = {}
     for t in getattr(snap, "types", None) or ():
-        if not t.qualified_name:
-            continue
-        by_bare.setdefault(t.name, set()).add(t.qualified_name)
-        out[t.qualified_name] = t.qualified_name
+        if t.qualified_name:
+            by_bare.setdefault(t.name, set()).add(t.qualified_name)
+            out[t.qualified_name] = t.qualified_name
+        else:
+            by_bare.setdefault(t.name, set()).add(None)
     for bare, qualified_names in by_bare.items():
         if len(qualified_names) == 1:
-            out[bare] = next(iter(qualified_names))
+            candidate = next(iter(qualified_names))
+            if candidate is not None:
+                out[bare] = candidate
     return out
 
 

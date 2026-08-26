@@ -93,6 +93,25 @@ class TestRecordCanonicalNames:
         assert names["a::Widget"] == "a::Widget"
         assert names["b::Widget"] == "b::Widget"
 
+    def test_a_global_record_competing_with_a_namespaced_one_is_not_bridged(
+        self,
+    ) -> None:
+        """Codex review: a genuinely global (unqualified) ``Widget`` sharing
+        a bare name with a namespaced ``ns::Widget`` must not be silently
+        bridged to it -- skipping the unqualified record entirely (an
+        earlier revision's bug) let it happen anyway."""
+        snap = AbiSnapshot(
+            library="lib.so",
+            version="1",
+            types=[
+                RecordType(name="Widget", kind="struct", size_bits=32),
+                _rec("Widget", "ns::Widget", 64),
+            ],
+        )
+        names = record_canonical_names(snap)
+        assert "Widget" not in names
+        assert names["ns::Widget"] == "ns::Widget"
+
 
 class TestCanonicalizeRecordSymbol:
     def test_bare_whole_type_symbol_resolves_to_qualified(self) -> None:
