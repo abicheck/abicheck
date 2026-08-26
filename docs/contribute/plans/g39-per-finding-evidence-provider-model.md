@@ -296,7 +296,40 @@ structure already in place:
    sibling per-fact lookup, rather than reading one provenance value off the
    record as a whole — the same "specific fields, not aggregate backend"
    principle slice 2 below already states for `diff_types.py`, extended to
-   `diff_symbols.py`'s own record-level facts.
+   `diff_symbols.py`'s own record-level facts. **A removal/addition finding
+   is not a fact on one record at all — it is a join result, and half of
+   what it rests on is an absence (Codex review, verified against the
+   code).** `_diff_functions`'s removal path (`_match_old_function`, ending
+   in `_check_removed_function`) has a participating `f_old: Function`
+   record, but `FUNC_REMOVED` is emitted only after `f_old`'s mangled key,
+   its extern-C alias, and its deleted-symbol peer all fail to resolve
+   against `new_index`/`new_all` — the new side contributes no record at
+   all, only the fact that it was searched (by exact key, by alias, and for
+   a deleted peer) and nothing matched. `_diff_variables` and the addition
+   direction (`FUNC_ADDED`/`VAR_ADDED`, symmetric: an absence on the *old*
+   side) share the identical shape. Deriving `evidence_provenance` only
+   from the one participating record — the natural first reading of the
+   rule two paragraphs up — either omits the searched-but-empty side's
+   evidence entirely or, worse, mislabels the finding `both:<tier>` as if
+   both sides contributed a fact, when only one did and the other
+   contributed a negative result. The fix is the identical `searched:`
+   shape item 3 below establishes for `crosscheck.py`'s own negative
+   `_check_*` findings (`l2:searched:<frontend>`, recording which complete
+   surface was consulted and found nothing, not which fact produced a
+   result): generalize it here rather than treating it as a `crosscheck.py`
+   -specific vocabulary entry. For a removal, `evidence_provenance` records
+   the *matched* side's real per-fact provenance (whichever tier actually
+   produced `f_old`, per the hybrid-aware rule above) alongside a
+   `searched:<tier>` entry for the side that was searched and came back
+   empty — `new:searched:l0` when only the new side's exported-symbol table
+   was consulted (`elf_only_mode`/`_check_removed_function`'s own ELF-only
+   branch), `new:searched:l0+l2` when the full declaration surface
+   (`new_map`/`new_all`) was also searched, mirroring which of `new_index`'s
+   lookups actually ran before falling through to removal — never a bare
+   `both:` label implying two facts where there is one fact and one
+   confirmed absence. This is Phase 0 vocabulary work for this slice, the
+   same way item 3 below folds its own `searched:` form into Phase 0 rather
+   than deferring it.
 2. **L2 header-derived detectors** (`diff_types.py`'s struct/enum/typedef
    findings, `diff_type_spellings.py`) — provenance here genuinely varies
    per finding (which backend produced *this specific* `RecordType`, and

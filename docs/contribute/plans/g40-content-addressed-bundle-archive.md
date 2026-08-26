@@ -222,6 +222,32 @@ exception propagating out of the `with` block) must leave the destination
 path completely untouched — a `SnapshotError`, a full disk, or a killed
 process must never partially overwrite a previously-valid baseline.
 
+**Closing the temp file and calling `os.replace()` is not durable on its
+own — the writer must fsync, matching `snapshot_io._atomic_write_bytes`'s
+existing contract rather than inventing a weaker one for this format
+(Codex review, fresh evidence).** `ZipFile.close()` only flushes Python's
+own write buffer into the OS page cache; on a power loss or a delayed
+storage-layer error, neither the temp file's own content nor the later
+directory-entry rename it durable on their own. `_atomic_write_bytes`
+already states the correct sequence for the plain-JSON path — flush the
+Python buffer, `os.fsync()` the temp file's own fd, `os.replace()`, then
+`os.fsync()` the *parent directory's* fd too (the directory-entry update
+itself isn't durable until the directory inode is synced, skipped only
+where the platform has no `O_DIRECTORY` to open it with) — and
+`BundleArchiveWriter.close()` must follow the identical sequence rather
+than a narrower one: fsync the temp file's fd after `ZipFile.close()`
+(the payload write), fsync it again after any `fchown`/`fchmod` ownership
+fixup (metadata changes made after the first fsync are not covered by
+it), only then `os.replace()`, and finally fsync the destination's
+parent-directory fd. A writer that skips any of these steps can report a
+successful `stored_sha256`/`stored_size_bytes` while a reboot immediately
+after leaves the destination missing, truncated, or holding stale bytes
+the OS never actually wrote to disk — exactly the failure mode
+`_atomic_write_bytes` already closed for the plain-JSON path, and this
+format must not reopen it by inventing its own, less careful sequence.
+This durability sequence is part of Phase 1's acceptance criteria and
+needs its own dedicated test alongside the atomicity test below.
+
 **The abandoned-temp-file cleanup guarantee must be scoped honestly — it
 covers only a failure whose handling code actually gets to run, not every
 way a write can stop (Codex review, fresh evidence).** This paragraph
@@ -266,7 +292,29 @@ A destination that is itself a symlink is replaced at its resolved real
 target, not by clobbering the link, mirroring `snapshot_io.
 _atomic_write_bytes`'s existing symlink handling for the plain-JSON path —
 this format should not invent a second convention for the identical
-concern. This atomic-publish behavior is part of Phase 1's acceptance
+concern.
+
+**A pre-existing destination with more than one hard link must be rejected
+outright, the same way `_atomic_write_bytes` already rejects it for the
+plain-JSON path (Codex review, fresh evidence).** `os.replace()` only ever
+retargets the *one* directory entry the writer was pointed at — a
+destination with `st_nlink > 1` has at least one other directory entry
+still pointing at the same inode, and that sibling link keeps resolving to
+the old, pre-replace content forever, silently desynchronized from the
+name the write actually went through. `snapshot_io._atomic_write_bytes`
+already treats this as a hard failure rather than a silent partial write
+(stat the existing destination before writing the temp file; if it exists,
+is a regular file, and `st_nlink > 1`, raise rather than proceed) — the
+archive format's write path shares the identical publication mechanism
+(temp file + `os.replace()`), so it inherits the identical risk and must
+carry the identical guard, not a narrower one that only covers symlinks
+and mode/ownership preservation. This is part of Phase 1's acceptance
+criteria alongside the atomicity and durability guarantees above and needs
+its own dedicated test: write an archive to a path that already has a
+second hard link, and assert the writer refuses rather than silently
+leaving the other link stale.
+
+This atomic-publish behavior is part of Phase 1's acceptance
 criteria and needs its own dedicated test in Phase 1's test list (see
 below): write a real archive to a path, then attempt a second write that
 is made to fail partway through (an injected error after some blobs are
@@ -620,13 +668,52 @@ implicit default from a genuine explicit request: `compression="auto"` (the
 parameter's own default — i.e. the caller never stated a preference) is
 accepted for `format="archive"` and simply has no effect, since the archive
 format has no whole-document compression envelope of its own to select; any
-other explicit value (`"gzip"`, `"zstd"`, `"none"`, ...) is rejected with a
-clear `ValueError` before any archive is written, the same way an
-incompatible explicit selection is rejected elsewhere in this module. The
-shipped implementation (`abicheck/serialization.py`, PR #869) already
-implements exactly this rule (`if format == "archive" and compression !=
-"auto": raise ValueError(...)`); this plan's own text was the one that had
-it backwards, not the code.
+other explicit value that actually asks for a *different* outer-envelope
+compression (`"gzip"`, `"zstd"`) is rejected with a clear `ValueError`
+before any archive is written, the same way an incompatible explicit
+selection is rejected elsewhere in this module.
+
+**Correction (Codex review, fresh evidence): `compression="none"` is not
+"any other explicit value" and must not be rejected alongside
+`"gzip"`/`"zstd"` — the previous revision of this paragraph got this one
+case wrong by lumping it in with the two genuinely incompatible
+selections.** `resolve_write_compression()`'s own existing contract (the
+plain-JSON path this format's rule is explicitly modeled on) treats
+`"none"` as a real, legal explicit selection — "no outer compression" — not
+merely `"auto"`'s unstated default spelled out. For `format="archive"`,
+`"none"` describes *exactly* what the format already does: the archive's
+own container (the zip envelope) is never additionally compressed —
+`SnapshotWriteResult.compression` is already documented above as
+`NONE` for this reason — so a caller stating `compression="none"` is
+asking for precisely the envelope behavior the format unconditionally
+provides, the same way `"auto"` is. `"gzip"`/`"zstd"` are different: they
+ask for an outer compression layer the archive format structurally cannot
+apply (the container is a zip, and wrapping a zip in a second compression
+layer is not what either of those flags mean anywhere else in this
+module). The correct rule is therefore **accept `compression` in
+`{"auto", "none"}` for `format="archive"`** (both are no-ops, for the
+identical reason), and reject only `"gzip"`/`"zstd"` with a `ValueError`.
+Rejecting `"none"` alongside the two truly incompatible values actively
+works against a caller who has *correctly* reasoned about the format's own
+behavior and stated it explicitly — exactly the kind of generic,
+format-agnostic caller (e.g. one iterating `save_bundle_facts` across
+several `format=`s with one fixed `compression="none"` for reproducible,
+uncompressed-envelope output) this module's compression contract exists to
+support uniformly.
+
+**Confirmed CODE GAP, not yet fixed in the shipped implementation
+(`abicheck/serialization.py`, PR #869):** the current guard reads `if
+format == "archive" and compression != "auto": raise ValueError(...)`,
+which rejects `compression="none"` exactly as incorrectly as it rejects
+`"gzip"`/`"zstd"` — the previous revision of this section described that
+guard as already correct; it is not. The fix is a one-line widening of the
+guard's condition to `compression not in ("auto", "none")`, verified
+against a real `save_bundle_facts(..., format="archive",
+compression="none")` round-trip alongside the existing `"gzip"`/`"zstd"`
+rejection tests. Not fixed as part of this planning-document pass — this
+plan is documentation only (see this document's own status note above) —
+but the intended, correct contract is now stated here accurately rather
+than matching the shipped guard's current, too-strict behavior.
 
 `BundleFacts` itself is unchanged — this plan is a storage-layer addition
 underneath the existing dataclass, not a new in-memory shape;
