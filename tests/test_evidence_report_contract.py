@@ -208,3 +208,72 @@ class TestEmitCallbackReplacesTheQuietFlag:
 
         # And with no sink at all, nothing is produced or raised.
         prepare_embedded_build_source(old, new, "off", None, None, None, None, None)
+
+
+def _inputs_pack_with_warnings(tmp_path: Path, name: str = "inputs") -> Path:
+    """A Flow-2 pack that validates with warnings but no errors.
+
+    Minimal-but-valid is already enough: an empty ``source_facts/`` yields
+    "zero readable TU records" and "no fact_set identity", both non-fatal.
+    """
+    pack = tmp_path / name
+    pack.mkdir()
+    (pack / "source_facts").mkdir()
+    (pack / "manifest.json").write_text(
+        json.dumps(
+            {
+                "kind": "abicheck_inputs",
+                "abicheck_inputs_version": 1,
+                "library": "libfoo.so",
+                "version": "1.0",
+                "created_by": "test",
+            }
+        ),
+        encoding="utf-8",
+    )
+    return pack
+
+
+class TestSidePackWarningsReachTheCaller:
+    """A Flow-2 pack's non-fatal findings must not be swallowed.
+
+    Before the loader moved into the engine the CLI printed every
+    ``report.warnings`` entry to stderr itself. The engine owns no stream, so
+    it hands them back through ``on_warning`` — and the compare-side resolver
+    initially forgot to thread it, which let a successful comparison conceal
+    incomplete fact families and empty source surfaces (Codex review, P2).
+    """
+
+    def test_engine_forwards_every_warning_to_the_sink(self, tmp_path: Path) -> None:
+        from abicheck.buildsource.evidence_report import resolve_side_pack
+
+        seen: list[str] = []
+        pack = resolve_side_pack(
+            _inputs_pack_with_warnings(tmp_path), None, None, on_warning=seen.append
+        )
+        assert pack is not None
+        assert seen, "the pack's non-fatal findings never reached the sink"
+        assert any("TU records" in line for line in seen), seen
+
+    def test_engine_stays_silent_for_a_caller_that_owns_no_stream(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Omitting the sink discards them rather than printing: a typed API
+        caller must not have output appear on its process's streams."""
+        from abicheck.buildsource.evidence_report import resolve_side_pack
+
+        assert resolve_side_pack(_inputs_pack_with_warnings(tmp_path), None, None)
+        captured = capsys.readouterr()
+        assert captured.out == ""
+        assert captured.err == ""
+
+    def test_the_cli_adapter_supplies_the_stderr_sink(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """The behaviour a user actually sees, restored end-to-end."""
+        from abicheck.cli_buildsource_helpers import _resolve_side_pack
+
+        assert _resolve_side_pack(_inputs_pack_with_warnings(tmp_path), None, None)
+        captured = capsys.readouterr()
+        assert "TU records" in captured.err
+        assert captured.out == ""

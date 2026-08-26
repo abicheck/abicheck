@@ -96,11 +96,15 @@ def _resolve_side_pack(
     well-formed and the pack was not), the same translation
     :func:`_load_pack_or_raise` makes for the single-pack case. Message
     unchanged. Pinned by ``tests/test_evidence_report_contract.py``.
+
+    Also supplies the stderr sink for a Flow-2 pack's non-fatal validation
+    findings, which the engine returns through a callback rather than
+    printing itself.
     """
     from .buildsource.evidence_report import resolve_side_pack
 
     try:
-        return resolve_side_pack(build_info, sources, snap)
+        return resolve_side_pack(build_info, sources, snap, on_warning=_echo)
     except SnapshotError as exc:
         raise click.ClickException(str(exc)) from exc
 

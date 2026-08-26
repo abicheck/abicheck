@@ -98,12 +98,22 @@ def _emit(on_output: EvidenceEmit | None, lines: Iterable[str]) -> None:
 
 
 def _load_side_pack_input(
-    path: Path | None, *, exported_symbols: Iterable[str] = ()
+    path: Path | None,
+    *,
+    exported_symbols: Iterable[str] = (),
+    on_warning: EvidenceEmit | None = None,
 ) -> BuildSourcePack | None:
     """Load a compare-side out-of-band pack, auto-detecting its pack kind.
 
     Raises ``SnapshotError`` for an unloadable pack (see the module docstring
     on why that is deliberately not a usage error).
+
+    A Flow-2 ``abicheck_inputs/`` pack validates on ingest, and its *non-fatal*
+    findings -- an incomplete fact family, an empty source surface -- leave
+    through ``on_warning``. Passing none discards them, which is right for a
+    typed caller that owns no stream and wrong for the CLI: dropping them lets
+    a successful comparison conceal degraded evidence (Codex review, P2, on
+    exactly this call site after the loader moved to the engine).
     """
     if path is None:
         return None
@@ -111,7 +121,9 @@ def _load_side_pack_input(
     from .pack_load import load_inputs_pack_or_raise, load_pack_or_raise
 
     if is_inputs_pack_dir(path):
-        return load_inputs_pack_or_raise(path, exported_symbols=exported_symbols)
+        return load_inputs_pack_or_raise(
+            path, exported_symbols=exported_symbols, on_warning=on_warning
+        )
     return load_pack_or_raise(path)
 
 
@@ -119,6 +131,8 @@ def resolve_side_pack(
     build_info: Path | None,
     sources: Path | None,
     snap: AbiSnapshot | None,
+    *,
+    on_warning: EvidenceEmit | None = None,
 ) -> BuildSourcePack | None:
     """Resolve one compare side's pack from flags first, then embedded facts.
 
@@ -134,8 +148,12 @@ def resolve_side_pack(
     from .snapshot_exports import exported_symbols_from_snapshot
 
     exported = exported_symbols_from_snapshot(snap) if snap is not None else ()
-    bi_pack = _load_side_pack_input(build_info, exported_symbols=exported)
-    src_pack = _load_side_pack_input(sources, exported_symbols=exported)
+    bi_pack = _load_side_pack_input(
+        build_info, exported_symbols=exported, on_warning=on_warning
+    )
+    src_pack = _load_side_pack_input(
+        sources, exported_symbols=exported, on_warning=on_warning
+    )
     embedded = snap.build_source if snap is not None else None
     if bi_pack is None and src_pack is None:
         return embedded
@@ -419,8 +437,12 @@ def diff_embedded_build_source(
     """
     from .build_diff import check_header_parse_drift, diff_build_evidence
 
-    old_pack = resolve_side_pack(old_build_info, old_sources, old_snapshot)
-    new_pack = resolve_side_pack(new_build_info, new_sources, new_snapshot)
+    old_pack = resolve_side_pack(
+        old_build_info, old_sources, old_snapshot, on_warning=on_output
+    )
+    new_pack = resolve_side_pack(
+        new_build_info, new_sources, new_snapshot, on_warning=on_output
+    )
 
     if old_pack is None and new_pack is None:
         if collect_mode != "off":
