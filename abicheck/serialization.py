@@ -1947,13 +1947,15 @@ def _validated_filename_map(raw: object) -> dict[str, str]:
     return filenames
 
 
-def load_bundle_facts(path: str | Path) -> BundleFacts:
-    """Load a :class:`~abicheck.bundle_facts.BundleFacts` from *path*,
-    transparently handling plain, gzip, and zstd storage (ADR-059,
-    detected from magic bytes) — the G38 Phase 2 counterpart to
-    :func:`load_snapshot`."""
+def load_bundle_facts(path: str | Path, *, format: str = "auto") -> BundleFacts:
+    """Load a BundleFacts; ``format="auto"`` also recognizes G40's archive,
+    see ``bundle_facts.maybe_read_bundle_facts_archive``."""
+    from .bundle_facts import maybe_read_bundle_facts_archive
     from .snapshot_io import read_snapshot_text
 
+    archived = maybe_read_bundle_facts_archive(path, format, snapshot_from_dict=snapshot_from_dict)
+    if archived is not None:
+        return archived
     return bundle_facts_from_dict(json.loads(read_snapshot_text(path)))
 
 
@@ -1961,24 +1963,22 @@ def save_bundle_facts(
     facts: BundleFacts,
     path: str | Path,
     *,
+    format: str = "json",
     compression: str = "auto",
 ) -> SnapshotWriteResult:
-    """Save *facts* to *path* — the G38 Phase 2 counterpart to
-    :func:`write_snapshot`. Same *compression* contract (``"auto"``
-    inferred from *path*'s suffix, ``"none"``, ``"gzip"``, ``"zstd"``)."""
+    """Save *facts*; ``format="archive"`` writes G40's zip container, see
+    ``bundle_facts.maybe_write_bundle_facts_archive``."""
+    from .bundle_facts import maybe_write_bundle_facts_archive
     from .snapshot_io import SnapshotCompression, write_snapshot_text
 
-    # sort_keys=True (matching no other writer in this module -- see
-    # snapshot_to_json's own plain json.dumps) would recursively re-sort
-    # every dict's keys, including each manifest ManifestEntry's own
-    # instantiations dict -- whose iteration order IS the C++ template
-    # argument order (_expand_instantiations()'s own contract). Sorting it
-    # alphabetically corrupts a valid "T, U" contract into "T, U" reloading
-    # as "T, U" only by coincidence -- a real reorder (e.g. "Method,
-    # Precision" -> alphabetically "Method, Precision" already matches, but
-    # "Precision, Method" would sort back to "Method, Precision") produces
-    # a manifest entry that no longer matches any real symbol, a false
-    # bundle_manifest_instantiation_removed (Codex review, fresh evidence).
+    archived = maybe_write_bundle_facts_archive(facts, path, format, snapshot_to_dict=snapshot_to_dict)
+    if archived is not None:
+        return archived
+
+    # sort_keys=True (matching no other writer here) would re-sort a
+    # manifest entry's own instantiations dict, whose order IS the C++
+    # template argument order -- corrupting a valid "T, U" contract into
+    # one matching no real symbol (Codex review).
     return write_snapshot_text(
         json.dumps(bundle_facts_to_dict(facts), indent=2),
         path,

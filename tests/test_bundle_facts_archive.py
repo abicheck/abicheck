@@ -1,0 +1,189 @@
+# Copyright 2026 Nikolay Petrov
+# SPDX-License-Identifier: Apache-2.0
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""Unit tests for ``BundleFacts``' G40 ``format="archive"`` support.
+
+Split out of ``tests/test_bundle_facts.py`` (a ``debt.yaml``-tracked,
+no-growth test module -- new coverage goes in a sibling file instead of
+growing it further) -- mirrors that file's own small ``ElfMetadata``
+fixture style. The low-level, ``BundleFacts``-agnostic content-addressed
+container itself is tested directly in ``tests/test_bundle_archive.py``.
+"""
+
+from __future__ import annotations
+
+import zipfile
+from pathlib import Path
+
+import pytest
+
+from abicheck.bundle_facts import BundleFacts, capture_bundle_facts
+from abicheck.bundle_manifest import InstantiationManifest, ManifestEntry
+from abicheck.elf_metadata import ElfImport, ElfMetadata, ElfSymbol
+from abicheck.model import AbiSnapshot
+from abicheck.serialization import load_bundle_facts, save_bundle_facts
+
+
+def _meta(
+    *,
+    soname: str = "",
+    needed: list[str] | None = None,
+    exports: list[str] | None = None,
+    imports: list[str] | None = None,
+) -> ElfMetadata:
+    syms = [ElfSymbol(name=name, visibility="default") for name in exports or []]
+    imps = [ElfImport(name=name) for name in imports or []]
+    return ElfMetadata(
+        soname=soname or "", needed=needed or [], symbols=syms, imports=imps
+    )
+
+
+def _old_metadata() -> dict[str, ElfMetadata]:
+    return {
+        "libcore.so": _meta(soname="libcore.so", exports=["core_mul", "core_add"]),
+        "libalgo.so": _meta(
+            soname="libalgo.so",
+            needed=["libcore.so"],
+            imports=["core_mul"],
+        ),
+    }
+
+
+def _per_library_snapshots(metadata: dict[str, ElfMetadata]) -> dict[str, AbiSnapshot]:
+    return {
+        name: AbiSnapshot(library=name, version="old", elf=meta)
+        for name, meta in metadata.items()
+    }
+
+
+class TestBundleFactsArchiveFormat:
+    """G40: ``format="archive"``'s content-addressed zip container, exercised
+    at the ``BundleFacts`` level (the low-level container primitive itself
+    is tested directly in ``tests/test_bundle_archive.py``)."""
+
+    def test_save_load_round_trip(self, tmp_path: Path) -> None:
+        facts = capture_bundle_facts(
+            _per_library_snapshots(_old_metadata()), variant_fingerprint="cpu"
+        )
+        out = tmp_path / "old.bundlefacts.archive.zip"
+        save_bundle_facts(facts, out, format="archive")
+        loaded = load_bundle_facts(out)  # "auto" sniff, not forced
+
+        assert loaded.schema_version == facts.schema_version
+        assert loaded.variant_fingerprint == "cpu"
+        assert set(loaded.per_library_snapshots) == set(facts.per_library_snapshots)
+        assert loaded.per_library_snapshots["libcore.so"].elf is not None
+        assert loaded.per_library_snapshots["libcore.so"].elf.soname == "libcore.so"
+
+    def test_save_load_round_trip_forced_format(self, tmp_path: Path) -> None:
+        facts = capture_bundle_facts(_per_library_snapshots(_old_metadata()))
+        out = tmp_path / "old.archive"  # no ".zip" suffix -- format= is explicit
+        save_bundle_facts(facts, out, format="archive")
+        loaded = load_bundle_facts(out, format="archive")
+        assert set(loaded.per_library_snapshots) == set(facts.per_library_snapshots)
+
+    def test_round_trip_with_non_null_instantiation_manifest(
+        self, tmp_path: Path
+    ) -> None:
+        """The manifest-blob gap a Codex review caught in the G40 *plan*
+        before any code existed (docs/contribute/plans/g40-...: an earlier
+        draft never specified where a non-null InstantiationManifest's
+        content actually lives in the archive) -- pinned here at the
+        implementation level so it can't silently regress."""
+        manifest = InstantiationManifest(
+            entries=(ManifestEntry(symbol="core_mul", optional_provider=False),)
+        )
+        facts = capture_bundle_facts(
+            _per_library_snapshots(_old_metadata()), manifest=manifest
+        )
+        out = tmp_path / "old.bundlefacts.archive.zip"
+        save_bundle_facts(facts, out, format="archive")
+        loaded = load_bundle_facts(out)
+
+        assert loaded.manifest is not None
+        assert len(loaded.manifest.entries) == 1
+        assert loaded.manifest.entries[0].symbol == "core_mul"
+
+    def test_no_manifest_round_trips_to_none_and_allocates_no_manifest_blob(
+        self, tmp_path: Path
+    ) -> None:
+        facts = capture_bundle_facts(_per_library_snapshots(_old_metadata()))
+        assert facts.manifest is None
+        out = tmp_path / "old.bundlefacts.archive.zip"
+        save_bundle_facts(facts, out, format="archive")
+
+        loaded = load_bundle_facts(out)
+        assert loaded.manifest is None
+
+        # Exactly one blob member per library, none for the absent manifest.
+        with zipfile.ZipFile(out) as zf:
+            blob_members = [n for n in zf.namelist() if n.startswith("blobs/")]
+            assert len(blob_members) == len(facts.per_library_snapshots)
+
+    def test_dedup_across_libraries_with_identical_snapshots(
+        self, tmp_path: Path
+    ) -> None:
+        """Two libraries whose captured AbiSnapshot serializes identically
+        share one blob -- BundleArchiveWriter.put_blob's own hash-addressed
+        dedup, exercised here through the real BundleFacts save path."""
+        snap = _per_library_snapshots(_old_metadata())["libcore.so"]
+        facts = BundleFacts(
+            per_library_snapshots={"a.so": snap, "b.so": snap},
+        )
+        out = tmp_path / "dup.bundlefacts.archive.zip"
+        save_bundle_facts(facts, out, format="archive")
+
+        with zipfile.ZipFile(out) as zf:
+            blob_members = [n for n in zf.namelist() if n.startswith("blobs/")]
+            assert len(blob_members) == 1
+
+        loaded = load_bundle_facts(out)
+        assert set(loaded.per_library_snapshots) == {"a.so", "b.so"}
+
+    def test_back_compat_plain_json_fixture_still_loads_via_auto(
+        self, tmp_path: Path
+    ) -> None:
+        """Every plain-JSON ``BundleFacts`` file this repo already produces
+        keeps loading unchanged once the archive format ships -- no re-save
+        required."""
+        facts = capture_bundle_facts(_per_library_snapshots(_old_metadata()))
+        out = tmp_path / "old.bundlefacts.json"
+        save_bundle_facts(facts, out)  # format="json" default, unchanged
+        loaded = load_bundle_facts(out)  # format="auto" default, unchanged
+        assert set(loaded.per_library_snapshots) == set(facts.per_library_snapshots)
+
+    def test_save_default_format_is_json_not_auto(self, tmp_path: Path) -> None:
+        """save_bundle_facts() has no "auto" format -- there is nothing to
+        sniff at a not-yet-written destination path. Confirmed by checking
+        the written file's own magic bytes rather than trusting the
+        parameter name."""
+        facts = capture_bundle_facts(_per_library_snapshots(_old_metadata()))
+        out = tmp_path / "default_format.bundlefacts"
+        save_bundle_facts(facts, out)
+        with open(out, "rb") as f:
+            prefix = f.read(4)
+        assert not prefix.startswith(b"PK")  # not a zip archive
+
+    def test_save_unknown_format_raises(self, tmp_path: Path) -> None:
+        facts = capture_bundle_facts(_per_library_snapshots(_old_metadata()))
+        with pytest.raises(ValueError, match="unknown format"):
+            save_bundle_facts(facts, tmp_path / "x", format="yaml")
+
+    def test_load_unknown_format_raises(self, tmp_path: Path) -> None:
+        facts = capture_bundle_facts(_per_library_snapshots(_old_metadata()))
+        out = tmp_path / "old.bundlefacts.json"
+        save_bundle_facts(facts, out)
+        with pytest.raises(ValueError, match="unknown format"):
+            load_bundle_facts(out, format="yaml")

@@ -47,6 +47,7 @@ cycle (:mod:`abicheck.bundle` already imports :mod:`abicheck.bundle_models`/
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -57,6 +58,7 @@ from .model import AbiSnapshot
 if TYPE_CHECKING:
     from .bundle_models import BundleDiffResult, BundleSnapshot
     from .checker_types import DiffResult
+    from .snapshot_io import SnapshotWriteResult
 
 log = logging.getLogger(__name__)
 
@@ -65,6 +67,12 @@ log = logging.getLogger(__name__)
 #: already carries its own), since the container's own shape (what fields
 #: `BundleFacts` has) can evolve on its own timeline.
 BUNDLE_FACTS_SCHEMA_VERSION = 1
+
+#: Schema version for G40's content-addressed archive *container* --
+#: independent of `BUNDLE_FACTS_SCHEMA_VERSION` above (the container's own
+#: manifest shape vs. the `BundleFacts` shape it encodes), for the same
+#: reason that field is independent of `AbiSnapshot.SCHEMA_VERSION`.
+BUNDLE_ARCHIVE_SCHEMA_VERSION = 1
 
 #: The fingerprint value used when no multibuild variant applies (every
 #: caller today) -- G38 Phase 3 populates a real per-variant fingerprint;
@@ -303,3 +311,243 @@ def compare_bundle_from_facts(
 # `BundleFacts` for its own `save_bundle_facts`/`load_bundle_facts` --
 # see `scripts/check_ai_readiness.py`'s `import-cycle-growth` check, which
 # caught exactly this the first time this module was drafted.
+
+
+# ---------------------------------------------------------------------------
+# G40: content-addressed archive format -- the BundleFacts<->blobs glue.
+#
+# Deliberately placed here rather than in `serialization.py` (ADR-061's
+# `storage` responsibility owner for this behavior): `serialization.py` is
+# a `debt.yaml`-tracked, no-growth module today (predates ADR-061, can't
+# grow without moving responsibility elsewhere first). `abicheck/storage/
+# bundle_archive.py` (the low-level, content-addressed zip-container
+# primitive this glue calls into) is deliberately kept free of any
+# `BundleFacts`/`AbiSnapshot` knowledge -- see that module's own docstring.
+#
+# This glue takes `snapshot_to_dict`/`snapshot_from_dict` as *parameters*
+# rather than importing them from `serialization.py`: `serialization.py`
+# already imports `BundleFacts` from this module (for
+# `bundle_facts_to_dict`/`bundle_facts_from_dict`/`save_bundle_facts`/
+# `load_bundle_facts`), so a `from .serialization import snapshot_to_dict`
+# here -- even function-scoped -- makes the two modules mutually dependent.
+# `scripts/check_ai_readiness.py`'s `import-cycle-growth` check flags this
+# via static AST scanning regardless of whether the import is lazy (caught
+# exactly this the first time this section was drafted, not assumed).
+# `_validated_alias_map`/`_validated_filename_map` are small enough
+# (~15 lines of dict validation each) to duplicate locally below instead of
+# threading two more callables through for the same reason.
+def maybe_write_bundle_facts_archive(
+    facts: BundleFacts,
+    path: str | Path,
+    format: str,
+    *,
+    snapshot_to_dict: Callable[[AbiSnapshot], dict[str, Any]],
+) -> SnapshotWriteResult | None:
+    """``serialization.save_bundle_facts``'s ``format=`` dispatch: returns a
+    real result for ``format="archive"``, ``None`` for ``format="json"``
+    (telling the caller to fall through to its own plain-JSON path), and
+    raises for anything else. *snapshot_to_dict* is
+    ``serialization.snapshot_to_dict``, passed in rather than imported --
+    see the module-level comment above."""
+    if format == "archive":
+        return write_bundle_facts_archive(facts, path, snapshot_to_dict=snapshot_to_dict)
+    if format != "json":
+        raise ValueError(f"save_bundle_facts: unknown format {format!r}")
+    return None
+
+
+def maybe_read_bundle_facts_archive(
+    path: str | Path,
+    format: str,
+    *,
+    snapshot_from_dict: Callable[[dict[str, Any]], AbiSnapshot],
+) -> BundleFacts | None:
+    """``serialization.load_bundle_facts``'s ``format=`` dispatch:
+    ``"auto"`` sniffs *path*'s own bytes (delegating to
+    ``storage.bundle_archive.sniff_bundle_archive_format``); returns a real
+    result whenever the resolved format is ``"archive"``, ``None`` for
+    ``"json"`` (fall through to plain-JSON), and raises for anything else.
+    *snapshot_from_dict* is ``serialization.snapshot_from_dict``, passed in
+    rather than imported -- see the module-level comment above.
+    """
+    from .storage.bundle_archive import sniff_bundle_archive_format
+
+    resolved = sniff_bundle_archive_format(path) if format == "auto" else format
+    if resolved == "archive":
+        return read_bundle_facts_archive(path, snapshot_from_dict=snapshot_from_dict)
+    if resolved != "json":
+        raise ValueError(f"load_bundle_facts: unknown format {resolved!r}")
+    return None
+
+
+def write_bundle_facts_archive(
+    facts: BundleFacts,
+    path: str | Path,
+    *,
+    snapshot_to_dict: Callable[[AbiSnapshot], dict[str, Any]],
+) -> SnapshotWriteResult:
+    """Write *facts* as a G40 content-addressed zip archive at *path*.
+
+    Deduplication is whole-per-library-snapshot granularity (see the G40
+    plan's own scope note): two libraries whose entire serialized
+    ``AbiSnapshot`` is byte-identical share one blob, via
+    ``BundleArchiveWriter.put_blob``'s own hash-addressed dedup -- nothing
+    in this function decides that; it simply calls ``put_blob`` once per
+    library and lets identical payloads collapse on their own.
+    """
+    import json as _json
+
+    from .snapshot_io import SnapshotCompression, SnapshotWriteResult
+    from .storage.bundle_archive import BundleArchiveWriter, content_hash
+
+    p = Path(path)
+    library_blobs: dict[str, str] = {}
+    decoded_size_bytes = 0
+    with BundleArchiveWriter(p) as writer:
+        for name, snap in facts.per_library_snapshots.items():
+            payload = _json.dumps(snapshot_to_dict(snap), indent=2).encode("utf-8")
+            decoded_size_bytes += len(payload)
+            library_blobs[name] = writer.put_blob(payload)
+        manifest_blob = None
+        if facts.manifest is not None:
+            from .bundle_manifest import manifest_to_dict
+
+            manifest_payload = _json.dumps(
+                manifest_to_dict(facts.manifest), indent=2
+            ).encode("utf-8")
+            decoded_size_bytes += len(manifest_payload)
+            manifest_blob = writer.put_blob(manifest_payload)
+        writer.write_manifest(
+            {
+                "schema_version": BUNDLE_ARCHIVE_SCHEMA_VERSION,
+                "bundle_facts_schema_version": facts.schema_version,
+                "variant_fingerprint": facts.variant_fingerprint,
+                "library_blobs": library_blobs,
+                "manifest_blob": manifest_blob,
+                "filesystem_aliases": {
+                    name: list(aliases)
+                    for name, aliases in facts.filesystem_aliases.items()
+                },
+                "library_filenames": dict(facts.library_filenames),
+            }
+        )
+    stored_bytes = p.read_bytes()
+    return SnapshotWriteResult(
+        path=p,
+        compression=SnapshotCompression.ZSTD,
+        decoded_size_bytes=decoded_size_bytes,
+        stored_size_bytes=len(stored_bytes),
+        stored_sha256=content_hash(stored_bytes),
+    )
+
+
+def read_bundle_facts_archive(
+    path: str | Path,
+    *,
+    snapshot_from_dict: Callable[[dict[str, Any]], AbiSnapshot],
+) -> BundleFacts:
+    """Read a G40 content-addressed zip archive at *path* back into a
+    :class:`BundleFacts`.
+
+    Loads every library's blob (a whole-bundle load, matching plain
+    ``load_bundle_facts``'s own contract) -- a caller wanting only one
+    library's snapshot without paying for the rest uses
+    ``storage.bundle_archive.BundleArchiveReader`` directly instead.
+    """
+    import json as _json
+
+    from .bundle_manifest import manifest_from_dict
+    from .errors import IncompatibleSnapshotSchemaError
+    from .storage.bundle_archive import BundleArchiveReader
+
+    with BundleArchiveReader.open(path) as reader:
+        manifest = reader.read_manifest()
+        bundle_facts_schema_version = int(
+            manifest.get("bundle_facts_schema_version", BUNDLE_FACTS_SCHEMA_VERSION)
+        )
+        if bundle_facts_schema_version > BUNDLE_FACTS_SCHEMA_VERSION:
+            raise IncompatibleSnapshotSchemaError(
+                f"Bundle facts schema_version {bundle_facts_schema_version} is "
+                "newer than this abicheck (supports up to schema_version "
+                f"{BUNDLE_FACTS_SCHEMA_VERSION}). Upgrade abicheck to read "
+                "this bundle archive."
+            )
+        library_blobs = manifest.get("library_blobs", {})
+        if not isinstance(library_blobs, dict):
+            raise ValueError(
+                "bundle archive: 'library_blobs' must be a mapping, got "
+                f"{type(library_blobs).__name__}"
+            )
+        per_library_snapshots = {
+            name: snapshot_from_dict(_json.loads(reader.read_blob(h)))
+            for name, h in library_blobs.items()
+        }
+        manifest_blob = manifest.get("manifest_blob")
+        instantiation_manifest = None
+        if manifest_blob is not None:
+            instantiation_manifest = manifest_from_dict(
+                _json.loads(reader.read_blob(manifest_blob))
+            )
+        return BundleFacts(
+            schema_version=bundle_facts_schema_version,
+            variant_fingerprint=str(
+                manifest.get("variant_fingerprint", DEFAULT_VARIANT_FINGERPRINT)
+            ),
+            per_library_snapshots=per_library_snapshots,
+            manifest=instantiation_manifest,
+            filesystem_aliases=_validated_alias_map(
+                manifest.get("filesystem_aliases", {})
+            ),
+            library_filenames=_validated_filename_map(
+                manifest.get("library_filenames", {})
+            ),
+        )
+
+
+def _validated_alias_map(raw: object) -> dict[str, tuple[str, ...]]:
+    """Validate and convert a persisted ``filesystem_aliases`` mapping.
+
+    Duplicated from ``serialization._validated_alias_map`` (not imported --
+    see the module-level comment above): rejects a non-mapping container, a
+    non-list value, and a list with a non-string element, rather than
+    silently iterating a stray string's characters into single-letter
+    "aliases".
+    """
+    if not isinstance(raw, dict):
+        raise ValueError(
+            f"bundle facts: 'filesystem_aliases' must be a mapping, got "
+            f"{type(raw).__name__}"
+        )
+    aliases: dict[str, tuple[str, ...]] = {}
+    for name, values in raw.items():
+        if not isinstance(values, list) or not all(isinstance(v, str) for v in values):
+            raise ValueError(
+                f"bundle facts: 'filesystem_aliases[{name!r}]' must be a list of "
+                f"strings, got {values!r}"
+            )
+        aliases[name] = tuple(values)
+    return aliases
+
+
+def _validated_filename_map(raw: object) -> dict[str, str]:
+    """Validate and convert a persisted ``library_filenames`` mapping.
+
+    Duplicated from ``serialization._validated_filename_map`` (not imported
+    -- see the module-level comment above): rejects a non-string value
+    instead of silently coercing it (``str(None)`` -> the fabricated
+    basename ``"None"``).
+    """
+    if not isinstance(raw, dict):
+        raise ValueError(
+            f"bundle facts: 'library_filenames' must be a mapping, got "
+            f"{type(raw).__name__}"
+        )
+    filenames: dict[str, str] = {}
+    for name, filename in raw.items():
+        if not isinstance(filename, str):
+            raise ValueError(
+                f"bundle facts: 'library_filenames[{name!r}]' must be a string, "
+                f"got {filename!r}"
+            )
+        filenames[name] = filename
+    return filenames
