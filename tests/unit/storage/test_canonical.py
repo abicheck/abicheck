@@ -643,8 +643,11 @@ class TestTheDigestIsAPureFunctionOfTheDocument:
         assert canonical_json(ordered) == canonical_json(unordered) == "[[1,2]]"
         assert semantic_digest(ordered) == semantic_digest(unordered)
 
+    @pytest.mark.parametrize(
+        ("left", "right"), list(itertools.combinations(_SHAPES, 2))
+    )
     def test_equal_documents_and_equal_digests_agree_in_both_directions(
-        self,
+        self, left: object, right: object
     ) -> None:
         """The invariant, over every shape rather than the reported pair.
 
@@ -652,14 +655,20 @@ class TestTheDigestIsAPureFunctionOfTheDocument:
         different digests means identical bytes are unaddressable as one
         object; different documents with the same digest is a real
         collision.
+
+        Parametrized rather than looped so one disagreeing pair does not
+        stop the rest from being checked in the same run — a loop reports
+        the first failure and leaves the remaining pairs unmeasured, which
+        for a sweep over shapes is the difference between "one shape is
+        wrong" and "an unknown number are" (CodeRabbit review).
         """
-        for left, right in itertools.combinations(self._SHAPES, 2):
-            same_document = canonical_json(left) == canonical_json(right)
-            same_digest = semantic_digest(left) == semantic_digest(right)
-            assert same_document == same_digest, (
-                f"{left!r} and {right!r} disagree: document-equal="
-                f"{same_document}, digest-equal={same_digest}"
-            )
+        assert (canonical_json(left) == canonical_json(right)) == (
+            semantic_digest(left) == semantic_digest(right)
+        ), (
+            f"{left!r} and {right!r} disagree: document-equal="
+            f"{canonical_json(left) == canonical_json(right)}, digest-equal="
+            f"{semantic_digest(left) == semantic_digest(right)}"
+        )
 
     @given(_json_values, _json_values)
     def test_the_property_holds_for_generated_documents(

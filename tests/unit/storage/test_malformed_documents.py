@@ -670,7 +670,15 @@ class TestRecordOperandsAreCheckedBeforeUse:
                     if fn.name.startswith("_"):
                         continue
                     body = ast.unparse(fn)
-                    for arg in fn.args.args:
+                    # Same widening as the identity sweep's, for the same
+                    # reason: a keyword-only record operand would have
+                    # escaped a sweep that reads `fn.args.args` alone
+                    # (CodeRabbit review).
+                    for arg in (
+                        *fn.args.posonlyargs,
+                        *fn.args.args,
+                        *fn.args.kwonlyargs,
+                    ):
                         if arg.arg == "self" or arg.annotation is None:
                             continue
                         if ast.unparse(arg.annotation).strip('"') not in records:

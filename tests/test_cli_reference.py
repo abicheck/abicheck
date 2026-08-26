@@ -230,3 +230,22 @@ def test_real_click_bool_flags_render_false_under_the_installed_click():
     assert rows["solo"].endswith("| no | `False` | Solo flag. |")
     assert rows["pair"].endswith("| no | `False` | Flag pair. |")
     assert rows["valued"].endswith("| no | — | Valued flag. |")
+
+
+def test_a_repeatable_boolean_flag_keeps_its_empty_default():
+    # Click 8.5 accepts `multiple=True` on a boolean flag and marks it
+    # `is_bool_flag`, but it resolves to `()` rather than `False` -- so the
+    # rule above has to exclude it, or the reference states a default the
+    # command never receives. `()` is already rendered "—", the same as
+    # `--many`'s (CodeRabbit review).
+    import click
+
+    gen = _load_gen()
+
+    @click.command()
+    @click.option("--rep", is_flag=True, multiple=True, help="Repeatable flag.")
+    def _cmd() -> None:  # pragma: no cover - never invoked
+        """Doc."""
+
+    (param,) = _cmd.params
+    assert gen._option_row(param).endswith("| no | — | Repeatable flag. |")

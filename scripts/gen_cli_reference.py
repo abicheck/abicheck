@@ -132,7 +132,16 @@ def _option_row(param: Any) -> str:
     # not `is_flag`, is the discriminator: Click sets `is_flag` for both.
     # Under an older Click the raw default is already `False`, never the
     # sentinel, so this branch cannot fire and the output is unchanged.
-    if is_unset and getattr(param, "is_bool_flag", False):
+    # `multiple=True` is excluded: Click 8.5 accepts it alongside `is_flag`
+    # and sets `is_bool_flag`, but such an option resolves to `()`, not
+    # `False` (verified against 8.5.0), and an empty tuple is already
+    # rendered "—" the same way `--many`'s is. Reading `is_bool_flag` alone
+    # would state a default the command never receives (CodeRabbit review).
+    if (
+        is_unset
+        and getattr(param, "is_bool_flag", False)
+        and not getattr(param, "multiple", False)
+    ):
         default = False
         is_unset = False
     default_str = "—"

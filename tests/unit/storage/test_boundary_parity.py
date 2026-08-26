@@ -783,6 +783,7 @@ class TestOnlyAStringSectionKeySurvives:
 
         assert versions.to_dict()["section_schema_versions"] == {"entities": 3}
 
+    @pytest.mark.slow
     def test_the_digest_is_the_same_in_every_process(self) -> None:
         """What the rule is for, measured across real interpreters.
 

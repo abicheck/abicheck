@@ -1079,7 +1079,18 @@ class TestEveryKeyTakingDoorIsGuarded:
                         continue
                     keyish = [
                         arg.arg
-                        for arg in fn.args.args
+                        # Every parameter kind, not only the plain
+                        # positional ones. This package already declares
+                        # keyword-only fields (`OccurrenceId.producer`), so
+                        # a keyword-only lookup key would have passed a
+                        # sweep reading `fn.args.args` alone — the sweep
+                        # itself carrying the defect it exists to catch
+                        # (CodeRabbit review).
+                        for arg in (
+                            *fn.args.posonlyargs,
+                            *fn.args.args,
+                            *fn.args.kwonlyargs,
+                        )
                         if arg.arg != "self"
                         and arg.annotation is not None
                         and ast.unparse(arg.annotation) in ("str", "EntityId")

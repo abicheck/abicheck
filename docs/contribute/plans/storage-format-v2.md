@@ -164,6 +164,18 @@ nothing in the existing pipeline changes behavior.
    coordinating with G38 Phase 2 so only one persisted bundle shape exists.
 5. Variant capture and CLI wiring (A1.6/A1.7).
 
+`AvailabilityLedger.declare` and `.override` rebuild, revalidate, and
+re-sort the whole mapping per call, so building a ledger of *n* overrides
+costs O(n² log n) (CodeRabbit review). That is deliberate for Phase 0,
+where nothing calls them in a loop and the validating, canonically-ordered
+reassignment is what makes the ledger's state impossible to corrupt in
+place. Step 3 above is where it starts to matter — the first producer that
+calls `override` per entity — so the container decision belongs with that
+producer, which knows the insertion pattern, rather than being guessed at
+now. Whatever replaces it must keep both properties the current shape buys:
+every stored key validated, and iteration order a function of content
+rather than of insertion.
+
 ### Phase 2
 
 Lazy loading, streaming encode, cache migration, indexes, transport, and
@@ -253,7 +265,7 @@ register a topic in `docs/_meta/topics.yaml` in the same PR, and a reviewer
 asked why storage v2 has none (Codex review). The answer is that Phase 0 adds
 no such surface: no CLI command or flag, no report field, no config
 namespace, no Action input, and nothing in the product produces, consumes or
-persists these primitives — `SCHEMA_VERSION` stays at 25 and every existing
+persists these primitives — `SCHEMA_VERSION` is unchanged and every existing
 document is byte-for-byte unchanged. They are also not part of the documented
 Python API: `abicheck/__init__.py` does not re-export them, and the
 `python-api` topic's `fact_sources` name the `service*` modules that page
@@ -288,5 +300,5 @@ rather than an omission.
 
 **Deliberately not done in Phase 0**, so that no existing behavior changes:
 nothing produces, consumes, or persists these types yet; `AbiSnapshot.index()`
-still resolves first-wins; `SCHEMA_VERSION` is untouched at 25; and no CLI
+still resolves first-wins; `SCHEMA_VERSION` is untouched; and no CLI
 surface, report field, or exit code moves.
