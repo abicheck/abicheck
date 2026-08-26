@@ -357,11 +357,31 @@ class AvailabilityLedger:
         The family default is *narrowed* by the override rather than replaced
         by it, so an override cannot claim availability the family never had
         — see :meth:`FactAvailability.narrowed`.
+
+        An **undeclared** family is narrowed from ``NOT_COLLECTED``, not from
+        :attr:`unknown_family_default`, and that distinction is load-bearing
+        (Codex review). ``NOT_APPLICABLE`` is a permitted fallback and sits
+        *below* ``PRESENT`` in the status order, deliberately: an entity that
+        genuinely carries a fact supersedes a family declared inapplicable.
+        But that is a *supersession* rule, and it is only sound when a family
+        record actually says "inapplicable". With no record at all, the same
+        ordering let an override alone manufacture a comparable answer for a
+        family nobody ever declared — availability inferred from the override
+        that was supposed to be constrained by it.
+
+        The fix belongs here rather than in :meth:`FactAvailability.narrowed`
+        because this is the only layer that can tell a declared status from a
+        fallback: ``narrowed`` sees two records and cannot know whether the
+        first came from a declaration or from a default.
         """
-        base = self.for_family(family)
         override = self.overrides.get((family, entity_key))
         if override is None:
-            return base
+            return self.for_family(family)
+        base = (
+            self.for_family(family)
+            if family in self.families
+            else FactAvailability(FactStatus.NOT_COLLECTED)
+        )
         return base.narrowed(override)
 
     def comparable_families(self) -> frozenset[str]:

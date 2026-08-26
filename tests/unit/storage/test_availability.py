@@ -561,3 +561,82 @@ class TestUnknownFamilyFallbackCannotBeComparable:
         restored = AvailabilityLedger.from_dict(ledger.to_dict())
 
         assert restored.to_dict() == ledger.to_dict()
+
+
+class TestAnOverrideCannotManufactureAnUndeclaredFamily:
+    """Codex review: the round-4 fallback fix opened this path.
+
+    `NOT_APPLICABLE` is a permitted fallback and sits *below* `PRESENT` in the
+    status order — deliberately, so an entity that genuinely carries a fact
+    supersedes a family declared inapplicable. That supersession rule is only
+    sound when a family record actually says "inapplicable"; with no record at
+    all, the same ordering let an override alone produce a comparable answer.
+    """
+
+    def test_an_override_cannot_upgrade_an_undeclared_family(self) -> None:
+        ledger = AvailabilityLedger(
+            unknown_family_default=FactAvailability(FactStatus.NOT_APPLICABLE)
+        )
+        ledger.override(
+            "layout", "ns::Foo", FactAvailability(FactStatus.PRESENT, producer="dwarf")
+        )
+
+        answer = ledger.for_entity("layout", "ns::Foo")
+
+        assert not answer.comparable
+        assert answer.status is FactStatus.NOT_COLLECTED
+
+    @pytest.mark.parametrize(
+        "fallback",
+        [
+            FactStatus.NOT_COLLECTED,
+            FactStatus.UNSUPPORTED,
+            FactStatus.FAILED,
+            FactStatus.NOT_APPLICABLE,
+        ],
+    )
+    @pytest.mark.parametrize("override", [FactStatus.PRESENT, FactStatus.PARTIAL])
+    def test_no_fallback_and_override_pair_yields_a_comparable_answer(
+        self, fallback: FactStatus, override: FactStatus
+    ) -> None:
+        """The property, over every permitted fallback and both upgrades."""
+        ledger = AvailabilityLedger(unknown_family_default=FactAvailability(fallback))
+        ledger.override("f", "e", FactAvailability(override))
+
+        assert not ledger.for_entity("f", "e").comparable
+
+    def test_a_declared_not_applicable_is_still_superseded(self) -> None:
+        """The round-1 supersession rule must survive this fix.
+
+        A family explicitly declared inapplicable, with an entity that really
+        does carry the fact, still resolves to the entity's answer. Only the
+        *undeclared* case is blocked.
+        """
+        ledger = AvailabilityLedger()
+        ledger.declare("layout", FactAvailability(FactStatus.NOT_APPLICABLE))
+        ledger.override(
+            "layout", "ns::Foo", FactAvailability(FactStatus.PRESENT, producer="dwarf")
+        )
+
+        answer = ledger.for_entity("layout", "ns::Foo")
+
+        assert answer.status is FactStatus.PRESENT
+        assert answer.comparable
+
+    def test_a_declared_family_still_narrows_downward(self) -> None:
+        ledger = AvailabilityLedger()
+        ledger.declare("layout", FactAvailability(FactStatus.PRESENT, producer="dwarf"))
+        ledger.override("layout", "ns::Foo", FactAvailability(FactStatus.FAILED))
+
+        assert ledger.for_entity("layout", "ns::Foo").status is FactStatus.FAILED
+
+    def test_an_undeclared_family_without_an_override_keeps_the_fallback(
+        self,
+    ) -> None:
+        """The fallback still means what it says where nothing overrides it."""
+        ledger = AvailabilityLedger(
+            unknown_family_default=FactAvailability(FactStatus.NOT_APPLICABLE)
+        )
+
+        assert ledger.for_entity("f", "e").status is FactStatus.NOT_APPLICABLE
+        assert ledger.for_family("f").status is FactStatus.NOT_APPLICABLE

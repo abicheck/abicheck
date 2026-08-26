@@ -477,7 +477,12 @@ class TestUnstatedComparisonContractFailsClosed:
     """
 
     def test_a_package_omitting_the_axis_is_not_readable(self) -> None:
-        versions = StorageVersions.from_dict({})
+        # A valid package format is supplied so this isolates the comparison
+        # contract axis; both axes now refuse absence, and checking them one
+        # at a time keeps each test's subject unambiguous.
+        versions = StorageVersions.from_dict(
+            {"package_format_version": PACKAGE_FORMAT_VERSION}
+        )
 
         assert versions.comparison_contract_version == UNSTATED_VERSION
 
@@ -497,7 +502,10 @@ class TestUnstatedComparisonContractFailsClosed:
 
     def test_a_stated_current_version_is_readable(self) -> None:
         versions = StorageVersions.from_dict(
-            {"comparison_contract_version": COMPARISON_CONTRACT_VERSION}
+            {
+                "package_format_version": PACKAGE_FORMAT_VERSION,
+                "comparison_contract_version": COMPARISON_CONTRACT_VERSION,
+            }
         )
 
         assert check_reader_compatibility(versions).readable
@@ -581,7 +589,10 @@ class TestMalformedVersionsFailClosed:
     def test_an_integral_float_is_accepted(self) -> None:
         """JSON has one number type, so a valid version can arrive as 1.0."""
         versions = StorageVersions.from_dict(
-            {"comparison_contract_version": float(COMPARISON_CONTRACT_VERSION)}
+            {
+                "package_format_version": PACKAGE_FORMAT_VERSION,
+                "comparison_contract_version": float(COMPARISON_CONTRACT_VERSION),
+            }
         )
 
         assert versions.comparison_contract_version == COMPARISON_CONTRACT_VERSION
@@ -606,3 +617,53 @@ class TestMalformedVersionsFailClosed:
         versions = StorageVersions.from_dict({"comparison_contract_version": True})
 
         assert versions.comparison_contract_version == UNSTATED_VERSION
+
+
+class TestAnOmittedPackageFormatIsUnstated:
+    """Codex review: the two fail-closed axes disagreed on *absence*.
+
+    An earlier round validated both axes against malformed values but left
+    `package_format_version` defaulting to this reader's own, so a package
+    stating a valid contract version while omitting its format version was
+    interpreted as the current container layout and read. That was an
+    incompletely applied principle, not a deliberate exception.
+    """
+
+    def test_a_valid_contract_version_does_not_excuse_an_omitted_format(
+        self,
+    ) -> None:
+        versions = StorageVersions.from_dict(
+            {"comparison_contract_version": COMPARISON_CONTRACT_VERSION}
+        )
+
+        assert versions.package_format_version == UNSTATED_VERSION
+
+        result = check_reader_compatibility(versions)
+
+        assert not result.readable
+        assert "usable package format version" in result.reason
+
+    def test_both_fail_closed_axes_treat_absence_identically(self) -> None:
+        for payload in (
+            {"comparison_contract_version": COMPARISON_CONTRACT_VERSION},
+            {"package_format_version": PACKAGE_FORMAT_VERSION},
+        ):
+            assert not check_reader_compatibility(
+                StorageVersions.from_dict(payload)
+            ).readable
+
+    def test_a_package_stating_both_is_readable(self) -> None:
+        versions = StorageVersions.from_dict(
+            {
+                "package_format_version": PACKAGE_FORMAT_VERSION,
+                "comparison_contract_version": COMPARISON_CONTRACT_VERSION,
+            }
+        )
+
+        assert check_reader_compatibility(versions).readable
+
+    def test_what_this_build_writes_is_always_readable_back(self) -> None:
+        """The refusal must never strand our own packages."""
+        assert check_reader_compatibility(
+            StorageVersions.from_dict(StorageVersions().to_dict())
+        ).readable

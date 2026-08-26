@@ -176,8 +176,18 @@ class StorageVersions:
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> StorageVersions:
         return cls(
+            # Absent defaults to UNSTATED, not to this reader's own version —
+            # the same rule as the comparison contract below, for the same
+            # reason. An earlier round validated both axes against *malformed*
+            # values but left this one defaulting to `PACKAGE_FORMAT_VERSION`,
+            # so a package stating a valid contract version while omitting its
+            # format version was interpreted as the current container layout
+            # and read (Codex review). That was an incompletely applied
+            # principle rather than a deliberate exception: a fail-closed axis
+            # must treat "not validly stated" identically whether the value is
+            # wrong or simply missing.
             package_format_version=_stated_version(
-                data.get("package_format_version", PACKAGE_FORMAT_VERSION)
+                data.get("package_format_version", UNSTATED_VERSION)
             ),
             section_schema_versions={
                 str(k): int(v)
