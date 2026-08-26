@@ -656,11 +656,53 @@ distinguish them, all real, already-present `AbiSnapshot` fields:
    declarations when the true tier is just as plausibly L1 — the identical
    false-claim failure mode item 3 already refuses to accept for
    PDB/BTF/CTF, reached here from the opposite direction (a
-   *tier-guessed* snapshot, not a *producer-unidentified* one). Folding it
-   into item 3 is therefore not a new fallback tag, only the existing
-   conservative one applied consistently: this case gets no `l2:` tag until
-   the same L1-producer-identity prerequisite that already blocks item 3 is
-   resolved.**
+   *tier-guessed* snapshot, not a *producer-unidentified* one).
+
+   **Folding this into item 3 without a tag of its own is incomplete, not
+   merely conservative (Codex review, fresh evidence, PR #866 round 36).**
+   Item 3's own resolution is left unresolved *deliberately*, and only
+   because that gap is scoped behind a stated precondition: it "is
+   therefore a prerequisite this phase's Phase 1 wiring must resolve
+   *before* wiring detectors that could draw on PDB/BTF/CTF-derived
+   snapshots" — i.e. Phase 1 simply does not wire a detector against a
+   PDB/BTF/CTF snapshot until the L1-producer marker lands, so no reachable
+   finding is left without a tag in the meantime. That scoping decision does
+   not transfer to this branch. `find_unverified_signature_findings`'s
+   `snapshot_backend_tag` fallback (the "genuinely absent from both maps"
+   shape discussed earlier in this section) fires unconditionally over
+   whatever bundle snapshot pair the bundle pipeline is actually given —
+   including an ordinary, currently-supported pre-schema-v10 legacy header
+   baseline with no `from_headers` key at all, which is exactly what
+   `from_headers_inferred=True` means. There is no equivalent "detectors are
+   not yet wired against this snapshot kind" decision to lean on here, so
+   routing this case through item 3's still-open fallback leaves a
+   reachable, Phase-1-wired finding with no tag to emit at all — silently
+   violating the same "non-`None` once Phase 1 completes" property test the
+   `l2:legacy_unknown_backend` tag above was invented to satisfy for the
+   sibling, non-inferred legacy case.
+
+   **Resolution: a second, explicit fallback tag,
+   `unknown:legacy_ambiguous_tier`.** Reserved for exactly this one shape
+   (`from_headers is True and from_headers_inferred is True`), and — like
+   `external:caller_supplied` in Phase 2 below — deliberately **not** shaped
+   like the `<side>:<tier>[:backend]` grammar, since there is no tier to
+   name; that is exactly the fact being reported. For the same reason
+   `external:caller_supplied` is introduced at its own point of use rather
+   than backfilled into the Phase 0 vocabulary table above, this tag is not
+   added to that table either — both are top-level, ungrouped sentinels
+   documented where they are emitted, not per-tier providers. It carries the
+   honest, maximally weak claim available: "this snapshot's declarations
+   came from *some* pre-`ast_producer`-tracking legacy layer, and the loader
+   could not confirm whether that layer was L1 (debug info) or L2
+   (header-AST)" — never a positive tier claim of either kind. It is usable
+   immediately, with no further model change required:
+   `from_headers_inferred` is already a real, present `AbiSnapshot` field
+   (`abicheck/model.py`), so nothing about this branch depends on the
+   L1-producer-identity marker item 3 still awaits. Item 3's own PDB/BTF/CTF
+   gap remains genuinely open and still blocks Phase 1 wiring for detectors
+   that could draw on those snapshot kinds specifically — that scoping
+   decision is unchanged by this fix, which narrows only the
+   `from_headers_inferred=True` branch item 3 had absorbed too broadly.**
 
 Both fallbacks stay structurally distinct: the per-symbol dict's own inline
 fallback (paragraph above) answers "this symbol has a declaration, but no
@@ -1733,6 +1775,56 @@ non-`None` value survives unchanged. This is implementation work for
 Phase 2 itself (the `checker.compare` edit and its test), not a follow-up
 plan; it is recorded in this same phase because it is the other half of
 the completeness gate's own guarantee, not a separate concern.
+
+**A caller-supplied *non-`None`* `evidence_provenance` needs the same
+runtime boundary check, not just the bare-`None` case above (Codex review,
+fresh evidence, PR #866 round 36).** The rule as stated only distinguishes
+"no value supplied" (gets the sentinel) from "some value supplied" (passes
+through unmodified) — but "some value" can itself be malformed in exactly
+the ways the normalization rule earlier in this document
+(`tuple(sorted(set(entries)))`, drawn only from the registered vocabulary)
+exists to prevent: an unregistered/made-up provider-id string no in-repo
+producer would ever emit, a duplicated entry, or an unsorted tuple. The
+repository-only construction gate (Phase 2, above) cannot inspect a
+third-party caller's own `Change(...)` construction — the identical "the
+AST gate can never close this" argument the paragraph above already makes
+for the bare-`None` case applies equally to a malformed non-`None` one.
+Left unhandled, a `DiffResult.changes` entry can carry a value the
+completeness gate's own normal-form assertion ("every non-`None`
+`evidence_provenance` it sees is already in this normal form") is defined
+to require but has no way to enforce outside this repository's own call
+sites — the malformed value would simply publish, contradicting Phase 0's
+own normalization contract at the one boundary built specifically to
+enforce contracts the static gate cannot reach.
+
+Extending the same runtime boundary check, rather than adding a second one,
+keeps this at the one seam that needs it: immediately before
+`changes.extend(extra_changes)`, a supplied non-`None` tuple is first
+normalized (`tuple(sorted(set(entries)))` — the identical rule every
+in-repo constructor already follows, cheap and never wrong to apply
+unconditionally) and then checked entry-by-entry against the registered
+vocabulary (the single code-level registry Phase 0 above calls for). An
+entry not in the registry is dropped from the emitted tuple rather than
+trusted verbatim — the same "state the honest, weaker claim, never
+fabricate" discipline this plan already applies throughout (see
+`l2:legacy_unknown_backend`/`unknown:legacy_ambiguous_tier` above) — and
+whenever any entry was dropped, or the tuple is empty after normalization,
+`external:caller_supplied` is added *alongside* whatever validated entries
+remain rather than substituted for them, so a downstream reader can still
+distinguish "every claimed provider was independently verifiable" from
+"part or all of this finding's provenance came from a caller this
+repository could not fully verify." This is deliberately corrective, not a
+hard rejection: raising out of `checker.compare` over one malformed tag in
+one `extra_changes` entry would abort an entire comparison run for a
+defect in a single finding — the same trade-off this plan's own `l1:`/`l2:`
+gap notes above already reject in the opposite direction (fabricating a
+claim rather than leaving a field honestly incomplete). Phase 2's test list
+gains two further cases alongside the `None` one above: a supplied tuple
+with a duplicate/unsorted-but-otherwise-registered entry set, asserting it
+round-trips normalized with no entries lost; and a supplied tuple
+containing an unregistered string, asserting that entry is dropped and
+`external:caller_supplied` is present in the result alongside any
+surviving registered entries.
 
 ### Phase 3 — report/schema surface (S)
 
