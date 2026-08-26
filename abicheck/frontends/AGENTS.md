@@ -74,10 +74,14 @@ remember when adding anything here: **this is a migrated package, so
 candidate's full first-party import set before moving it, not just whether it
 looks leaf-shaped.
 
-**Still open:** `service.py` (1763 lines) has not been thinned. Its
-`resolve_input`/`_run_dump_uncached`/`compare_snapshots` *are* the dump/compare
-implementation, and moving them is `workflows`' job, not this package's — see
-`workflows/AGENTS.md` and ADR-061's Phase 4 status note.
+**Still open:** `service.py` (1763 lines) has not been thinned, and the reason
+is now specific rather than open-ended. Moving it means classifying the 28 flat
+modules it imports, which surfaces 67 direction violations whose load-bearing
+cause is that `*_metadata.py` conflate a model dataclass with its parser —
+`AbiSnapshot` has typed fields of `PeMetadata`/`DwarfMetadata`/…, so making
+those modules `extract` creates a forbidden `model -> extract`. Splitting them
+is Phase 5's "parsers and catalogs" scope. See ADR-061's Phase 4 status note
+for the full measurement.
 
 ## Tests
 

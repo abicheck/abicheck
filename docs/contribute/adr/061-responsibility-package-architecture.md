@@ -1003,17 +1003,38 @@ modules (`policies`, `policy_file`, `suppression`,
 module physically inside it is subject to `unclassified-import`. It moves once
 those owners exist.
 
-**Still open: `service.py` (1763 lines).** Its
-`resolve_input`/`_run_dump_uncached`/`compare_snapshots` (hundreds of lines
-each) *are* the current dump/compare implementation, not adapters over an
-already-existing workflow object this phase could point them at instead —
-moving that logic into `workflows/` is Phase 3's own item 2. Phase 3 has now
-given all three service pipelines `workflows` owners and completed the
-per-artifact `resolve`/`execute` split, so the destination finally exists; what
-does not exist yet is a `workflows` home for `service.py`'s own three large
-functions. Thinning it before that would mean either a wrapper around the same
-inline logic (achieving nothing toward the acceptance criteria) or a second,
-duplicate implementation with nothing shared to delegate to.
+**Still open: `service.py` (1763 lines) — and re-measuring changed the reason.**
+The recorded blocker was that `workflows/` had nowhere to put its three large
+functions. Phase 3 has since given all three service pipelines `workflows`
+owners and completed the per-artifact `resolve`/`execute` split, so that
+destination now exists. Moving `service.py` into it was attempted and stopped
+against a *different*, sharper obstacle, which is worth recording precisely so
+the next pass does not re-survey it.
+
+`frontends/` and `workflows/` are migrated packages, so anything physically
+inside them is subject to `unclassified-import`. Thinning `service.py` therefore
+means classifying the 28 flat modules it imports. Doing so surfaces 67
+direction violations, and the load-bearing ones share one root cause:
+**`*_metadata.py` conflate a model dataclass with its parser.** `AbiSnapshot`
+has typed fields of `PeMetadata`/`MachoMetadata`/`DwarfMetadata`/
+`AdvancedDwarfMetadata`, and `serialization.py` names 19 such types — so
+classifying those modules `extract` (which is what their parsers are) makes
+`model -> extract` and `storage -> extract`, both forbidden, for nine modules
+totalling ~6,200 lines. The fix is to split each into its dataclass half
+(`model`) and its parser half (`extract`), which is precisely **Phase 5's
+"parsers and catalogs"** scope, not something to fold into a frontend
+translation.
+
+A second, independent inversion sits alongside it: `checker.py` imports
+`policy_file`/`suppression`/`analysis_assurance`, and `checker_types.py`
+imports `policy_file`/`contract_relevance_types` — `compare -> policy` and
+`model -> policy`, where this ADR's direction is the reverse. That one needs a
+design decision about where a policy-parameterised comparison belongs, not a
+mechanical move.
+
+So Phase 4's `service.py` half is **blocked on Phase 5**, with the dependency
+now stated concretely rather than as "the destination does not exist". The
+`cli.py` half is complete.
 
 1. Move command input translation into `frontends/cli/commands` and reusable
    Click-only option declaration into `frontends/cli/options`.
