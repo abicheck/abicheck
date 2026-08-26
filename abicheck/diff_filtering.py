@@ -1399,7 +1399,9 @@ def _dedup_cross_kind(
     ast_findings: set[tuple[str, str]] = set()
     ast_field_findings: set[tuple[str, str, str]] = set()
     for c in changes:
-        canon = canonicalize_record_symbol(c.symbol, names, c.qualified_name)
+        canon = canonicalize_record_symbol(
+            c.symbol, names, c.qualified_name, c.field_name
+        )
         ast_findings.add((c.kind.value, canon))
         if c.field_name is not None:
             ast_field_findings.add((c.kind.value, canon, c.field_name))
@@ -1414,7 +1416,9 @@ def _dedup_cross_kind(
     for c in changes:
         equiv_ast_kinds = _DWARF_TO_AST_EQUIV.get(c.kind)
         if equiv_ast_kinds:
-            canon_symbol = canonicalize_record_symbol(c.symbol, names)
+            canon_symbol = canonicalize_record_symbol(
+                c.symbol, names, None, c.field_name
+            )
             # Exact symbol match
             if any((ak.value, canon_symbol) in ast_findings for ak in equiv_ast_kinds):
                 continue
@@ -1507,12 +1511,10 @@ def _deduplicate_cross_detector(
         # the same version string.  Keep the more specific node-level change.
         ChangeKind.SYMBOL_VERSION_NODE_REMOVED: "version_def_removal",
         ChangeKind.SYMBOL_VERSION_DEFINED_REMOVED: "version_def_removal",
-        # See this function's own docstring above: the L1 (DWARF)/L2 (header)
-        # enum detectors independently report the same ChangeKind for the
-        # same enum member change. resolve_change_identity's own
-        # _EQUIVALENT_CHANGE_CATEGORIES already self-maps these four kinds --
-        # what was missing was including them here at all, so identity
-        # resolution (and therefore dedup) is even attempted for them.
+        # L1 (DWARF)/L2 (header) enum detectors independently report the
+        # same ChangeKind for the same member change; resolve_change_identity
+        # already self-maps these four kinds -- missing was including them
+        # here, so identity resolution (and dedup) is even attempted.
         ChangeKind.ENUM_MEMBER_REMOVED: "enum_member_removed",
         ChangeKind.ENUM_MEMBER_VALUE_CHANGED: "enum_member_value_changed",
         ChangeKind.ENUM_LAST_MEMBER_VALUE_CHANGED: "enum_last_member_value_changed",
@@ -1537,12 +1539,10 @@ def _deduplicate_cross_detector(
         if c.kind is ChangeKind.SYMBOL_MOVED_VERSION_NODE
     }
 
-    # Runs BEFORE EnrichSourceLocations in DEFAULT_PIPELINE, so the four enum
-    # categories above cannot rely on that later step to have already
-    # bridged a bare/qualified enum-name mismatch into `Change.qualified_
-    # name` -- do the same bridging here, early, when the caller has the
-    # snapshots (a caller testing this directly with no `old`/`new` degrades
-    # to a missed dedup for these four kinds, never an incorrect one).
+    # Runs BEFORE EnrichSourceLocations, so the four enum categories above
+    # cannot rely on it having bridged a bare/qualified enum-name mismatch
+    # into `Change.qualified_name` -- bridge it here instead (a caller with
+    # no `old`/`new` degrades to a missed dedup, never an incorrect one).
     if old is not None or new is not None:
         old_enum_names = _enum_canonical_names(old)
         new_enum_names = _enum_canonical_names(new)

@@ -42,3 +42,12 @@
   `_dedup_cross_kind`'s parent-type match requires it to agree before
   collapsing two findings; the three `TYPE_FIELD_*` emitters also now
   stamp `Change.qualified_name`, mirroring the size/alignment fix above.
+- **Follow-up (Codex review): a scoped whole-type symbol could be
+  corrupted by a stale field-qualification guess.** `canonicalize_record_
+  symbol` decided whether `Change.symbol` was field-qualified via
+  `"::" in symbol` — wrong for a scoped *whole-type* symbol that itself
+  contains `::` without being field-qualified at all, such as a template
+  specialization over a namespaced argument (`"Wrapper<dep::Tag>"`),
+  which the old guess corrupted into `"Wrapper<dep::Tag>::Tag>"`. The
+  function now takes `Change.field_name` as its sole, explicit signal for
+  where to split a symbol into parent + field, never a string guess.

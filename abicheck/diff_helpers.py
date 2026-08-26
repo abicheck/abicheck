@@ -583,6 +583,7 @@ def canonicalize_record_symbol(
     symbol: str,
     record_names: Mapping[str, str],
     qualified_hint: str | None = None,
+    field_name: str | None = None,
 ) -> str:
     """Canonicalize a struct/type-kind ``Change.symbol`` via *record_names*
     (see :func:`record_canonical_names`), so a DWARF-tier qualified
@@ -593,6 +594,17 @@ def canonicalize_record_symbol(
     one (``"Widget::x"``, for the three field-level kinds in
     ``diff_filtering._DWARF_TO_AST_EQUIV``) — only the type-name portion
     is ever rewritten, never the field name itself.
+
+    *field_name* (``Change.field_name``) is the ONLY signal used to decide
+    whether *symbol* is field-qualified — never a bare ``"::" in symbol``
+    guess (Codex review, fresh evidence): a scoped *whole-type* symbol like
+    a template specialization over a namespaced argument
+    (``"Wrapper<dep::Tag>"``) also contains ``"::"`` without being
+    field-qualified at all, and the old guess corrupted it into
+    ``"Wrapper<dep::Tag>::Tag>"``. When *field_name* is given, only the
+    literal ``f"::{field_name}"`` suffix (if present) is ever split off;
+    when it's ``None``, *symbol* is never split, regardless of how many
+    ``"::"`` it contains.
 
     *qualified_hint* (``Change.qualified_name``, when the emitting detector
     already knows exactly which type it matched) takes priority over the
@@ -607,17 +619,14 @@ def canonicalize_record_symbol(
     unchanged, the same conservative default :func:`record_canonical_names`
     uses.
     """
+    suffix = f"::{field_name}" if field_name is not None else None
+    parent = (
+        symbol[: -len(suffix)]
+        if suffix is not None and symbol.endswith(suffix)
+        else symbol
+    )
     if qualified_hint is not None:
-        if "::" in symbol:
-            _parent, sep, field = symbol.rpartition("::")
-            return f"{qualified_hint}{sep}{field}"
-        return qualified_hint
-    canonical = record_names.get(symbol)
-    if canonical is not None:
-        return canonical
-    if "::" in symbol:
-        parent, sep, field = symbol.rpartition("::")
-        canonical_parent = record_names.get(parent)
-        if canonical_parent is not None:
-            return f"{canonical_parent}{sep}{field}"
-    return symbol
+        canonical_parent = qualified_hint
+    else:
+        canonical_parent = record_names.get(parent, parent)
+    return f"{canonical_parent}{suffix}" if suffix is not None else canonical_parent

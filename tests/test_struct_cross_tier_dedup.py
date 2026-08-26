@@ -107,7 +107,9 @@ class TestCanonicalizeRecordSymbol:
         """STRUCT_FIELD_* kinds carry "Type::field" -- only the type-name
         prefix should ever be rewritten, never the field name itself."""
         names = record_canonical_names(_snap("1", 8))
-        assert canonicalize_record_symbol("Widget::x", names) == "ns::Widget::x"
+        assert (
+            canonicalize_record_symbol("Widget::x", names, None, "x") == "ns::Widget::x"
+        )
 
     def test_unrelated_symbol_is_returned_unchanged(self) -> None:
         names = record_canonical_names(_snap("1", 8))
@@ -120,8 +122,31 @@ class TestCanonicalizeRecordSymbol:
         names: dict[str, str] = {}  # simulates the ambiguous, no-entry case
         assert canonicalize_record_symbol("Widget", names, "a::Widget") == "a::Widget"
         assert (
-            canonicalize_record_symbol("Widget::x", names, "a::Widget")
+            canonicalize_record_symbol("Widget::x", names, "a::Widget", "x")
             == "a::Widget::x"
+        )
+
+    def test_field_name_is_the_only_signal_for_field_qualification(self) -> None:
+        """Codex review: a scoped *whole-type* symbol containing ``::`` (a
+        template specialization over a namespaced argument) must never be
+        corrupted by a stale ``"::" in symbol`` guess -- only an explicit
+        ``field_name`` may split a symbol into parent + field."""
+        names: dict[str, str] = {}
+        symbol = "Wrapper<dep::Tag>"
+        # No field_name given: the whole scoped symbol is the parent, and the
+        # qualified_hint replaces it wholesale -- it must not be corrupted
+        # into "Wrapper<dep::Tag>::Tag>".
+        assert (
+            canonicalize_record_symbol(symbol, names, "ns::Wrapper<dep::Tag>")
+            == "ns::Wrapper<dep::Tag>"
+        )
+        # A genuinely field-qualified symbol on the same scoped type still
+        # resolves correctly once field_name is given explicitly.
+        assert (
+            canonicalize_record_symbol(
+                f"{symbol}::count", names, "ns::Wrapper<dep::Tag>", "count"
+            )
+            == "ns::Wrapper<dep::Tag>::count"
         )
 
     def test_qualified_hint_of_none_falls_back_to_the_table(self) -> None:
