@@ -293,6 +293,17 @@ class AvailabilityLedger:
     declared. That default is ``NOT_COLLECTED``, not ``PRESENT``: a family
     this ledger has never heard of is precisely the case where inferring
     availability would be a guess.
+
+    That fallback must never be *comparable*, and this is enforced rather
+    than assumed (Codex review). ``from_dict`` reads the field from the
+    stored package, so a malformed or hand-edited ledger stating
+    ``unknown_family_default: {status: present}`` made every undeclared
+    family read as usable and ``missing_families`` report no gap at all —
+    one field silently defeating the rule this whole module exists for,
+    across every family at once. A non-comparable fallback is still freely
+    choosable (``NOT_APPLICABLE`` for an artifact kind where most families
+    are meaningless, ``UNSUPPORTED`` for a producer that cannot answer);
+    only the two statuses that license a conclusion are refused.
     """
 
     families: dict[str, FactAvailability] = field(default_factory=dict)
@@ -303,6 +314,14 @@ class AvailabilityLedger:
     unknown_family_default: FactAvailability = field(
         default_factory=lambda: FactAvailability(FactStatus.NOT_COLLECTED)
     )
+
+    def __post_init__(self) -> None:
+        if self.unknown_family_default.comparable:
+            raise ValueError(
+                "unknown_family_default must not be comparable "
+                f"(got {self.unknown_family_default.status.value!r}): a family "
+                "no availability record mentions cannot license a conclusion"
+            )
 
     def declare(self, family: str, availability: FactAvailability) -> None:
         """Set the family-level default. Last declaration wins."""
@@ -315,7 +334,22 @@ class AvailabilityLedger:
         self.overrides[family, entity_key] = availability
 
     def for_family(self, family: str) -> FactAvailability:
-        return self.families.get(family, self.unknown_family_default)
+        """Resolve a family's availability, declared or not.
+
+        The fallback is re-checked rather than trusted. ``__post_init__``
+        already refuses a comparable one, but this ledger is mutable by
+        design (``declare``/``override`` mutate it), so the field can also be
+        reassigned after construction. Coercing here — rather than raising —
+        keeps the guarantee total at the point a comparison actually asks,
+        and errs toward "no conclusion", which is the safe direction.
+        """
+        declared = self.families.get(family)
+        if declared is not None:
+            return declared
+        fallback = self.unknown_family_default
+        if fallback.comparable:
+            return FactAvailability(FactStatus.NOT_COLLECTED)
+        return fallback
 
     def for_entity(self, family: str, entity_key: str) -> FactAvailability:
         """Resolve one entity's availability.

@@ -471,3 +471,93 @@ class TestNarrowingMergesIdentifyingFieldsPerField:
         ):
             result = family.narrowed(override)
             assert result.producer and result.recipe and result.scope
+
+
+class TestUnknownFamilyFallbackCannotBeComparable:
+    """Codex review: one stored field could defeat the whole module's rule.
+
+    `from_dict` reads `unknown_family_default` from the package, so a
+    malformed or hand-edited ledger stating `present` made *every* undeclared
+    family read as usable — and `missing_families` report no gap at all.
+    """
+
+    @pytest.mark.parametrize("status", [FactStatus.PRESENT, FactStatus.PARTIAL])
+    def test_a_comparable_fallback_is_refused_at_construction(
+        self, status: FactStatus
+    ) -> None:
+        with pytest.raises(ValueError, match="must not be comparable"):
+            AvailabilityLedger(unknown_family_default=FactAvailability(status))
+
+    @pytest.mark.parametrize("status", ["present", "partial"])
+    def test_a_comparable_fallback_is_refused_on_deserialization(
+        self, status: str
+    ) -> None:
+        """The path the finding is actually about: a stored package."""
+        with pytest.raises(ValueError, match="must not be comparable"):
+            AvailabilityLedger.from_dict({"unknown_family_default": {"status": status}})
+
+    @pytest.mark.parametrize(
+        "status",
+        [
+            FactStatus.NOT_COLLECTED,
+            FactStatus.UNSUPPORTED,
+            FactStatus.FAILED,
+            FactStatus.NOT_APPLICABLE,
+        ],
+    )
+    def test_every_non_comparable_fallback_stays_choosable(
+        self, status: FactStatus
+    ) -> None:
+        """Only the two conclusion-licensing statuses are refused.
+
+        A caller may still say "most families are not applicable to this
+        artifact kind" or "this producer cannot answer" — those are real,
+        useful defaults and none of them lets absence imply safety.
+        """
+        ledger = AvailabilityLedger(unknown_family_default=FactAvailability(status))
+
+        assert ledger.for_family("never-declared").status is status
+
+    def test_post_construction_reassignment_is_coerced_at_read(self) -> None:
+        """The ledger is mutable by design, so construction checks aren't enough.
+
+        `declare`/`override` mutate it, so the fallback field can be
+        reassigned too. `for_family` re-checks rather than trusting, and errs
+        toward "no conclusion".
+        """
+        ledger = AvailabilityLedger()
+        ledger.unknown_family_default = FactAvailability(FactStatus.PRESENT)
+
+        answer = ledger.for_family("layout")
+
+        assert not answer.comparable
+        assert answer.status is FactStatus.NOT_COLLECTED
+
+    def test_the_gap_is_still_reported_after_reassignment(self) -> None:
+        ledger = AvailabilityLedger()
+        ledger.unknown_family_default = FactAvailability(FactStatus.PARTIAL)
+
+        assert ledger.missing_families(["layout", "graph"]) == ("graph", "layout")
+
+    def test_for_entity_inherits_the_coerced_fallback(self) -> None:
+        ledger = AvailabilityLedger()
+        ledger.unknown_family_default = FactAvailability(FactStatus.PRESENT)
+
+        assert not ledger.for_entity("layout", "ns::Foo").comparable
+
+    def test_a_declared_family_is_unaffected(self) -> None:
+        """The guard must only reach families nobody declared."""
+        ledger = AvailabilityLedger()
+        ledger.declare("layout", FactAvailability(FactStatus.PRESENT, producer="dwarf"))
+
+        assert ledger.for_family("layout").comparable
+        assert ledger.for_family("layout").producer == "dwarf"
+
+    def test_a_default_ledger_round_trips(self) -> None:
+        """The refusal must not make an ordinary ledger unloadable."""
+        ledger = AvailabilityLedger()
+        ledger.declare("binary", FactAvailability(FactStatus.PRESENT))
+
+        restored = AvailabilityLedger.from_dict(ledger.to_dict())
+
+        assert restored.to_dict() == ledger.to_dict()
