@@ -555,6 +555,42 @@ def test_diff_touches_outside_only_mutate_falls_back_on_a_bare_path_mixed_diff()
     assert gate.diff_touches_outside_only_mutate(diff, _ONLY_MUTATE_TWO) is True
 
 
+def test_only_in_marker_paths_reads_a_git_style_directory() -> None:
+    diff = "Only in b/examples: oracle.json\n"
+    assert gate._only_in_marker_paths(diff) == {"examples/oracle.json"}
+
+
+def test_only_in_marker_paths_reads_the_plain_diffutils_form() -> None:
+    diff = "Only in examples: oracle.json\n"
+    assert gate._only_in_marker_paths(diff) == {"examples/oracle.json"}
+
+
+def test_diff_lacks_git_headers_for_its_hunks_detects_an_only_in_marker() -> None:
+    """`diff -r`/`diff -ur` reports a one-sided file this way — no hunk, no
+    binary marker, no `diff --git` header — invisible to every path source
+    checked before this one (Codex review, PR #877, tenth round on this
+    same check)."""
+    diff = (
+        "diff --git a/abicheck/diff_types.py b/abicheck/diff_types.py\n"
+        "--- a/abicheck/diff_types.py\n+++ b/abicheck/diff_types.py\n"
+        "@@ -1,0 +2,1 @@\n+    pass\n"
+        "Only in b/examples: oracle.json\n"
+    )
+    assert gate.diff_lacks_git_headers_for_its_hunks(diff) is True
+    # Pin why: the header-based reader only ever saw the in-scope module.
+    assert gate.diff_touched_paths(diff) == {"abicheck/diff_types.py"}
+
+
+def test_diff_touches_outside_only_mutate_falls_back_on_an_only_in_marker() -> None:
+    diff = (
+        "diff --git a/abicheck/diff_types.py b/abicheck/diff_types.py\n"
+        "--- a/abicheck/diff_types.py\n+++ b/abicheck/diff_types.py\n"
+        "@@ -1,0 +2,1 @@\n+    pass\n"
+        "Only in b/examples: oracle.json\n"
+    )
+    assert gate.diff_touches_outside_only_mutate(diff, _ONLY_MUTATE_TWO) is True
+
+
 def test_mutant_run_scope_is_none_when_a_shared_test_fixture_is_touched() -> None:
     """The scenario `--require-baseline` alone cannot rule out: a production
     module and a *shared* test fixture both change, but the fixture doesn't

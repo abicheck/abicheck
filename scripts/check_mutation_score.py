@@ -129,6 +129,12 @@ _HUNK = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
 #: header, never narrows it.
 _BINARY_MARKER = re.compile(r"^Binary files (.+) and (.+) differ$")
 
+#: ``Only in <dir>: <name>`` — GNU diffutils' own marker for a one-sided file
+#: under recursive comparison (``diff -r``/``diff -ur dir1 dir2``), naming a
+#: file present on only one side with no hunk, no binary marker, and no
+#: ``diff --git`` header at all.
+_ONLY_IN_MARKER = re.compile(r"^Only in (.+): (.+)$")
+
 #: ``diff --git a/<path> b/<path>`` — present on *every* diff entry regardless
 #: of what follows (a hunk, a binary-file marker, a rename with no content
 #: change, a mode-only change). Deliberately not anchored past the two
@@ -299,6 +305,30 @@ def _binary_marker_paths(diff_text: str) -> set[str]:
     return paths
 
 
+def _only_in_marker_paths(diff_text: str) -> set[str]:
+    """Paths named by a GNU-diffutils ``Only in <dir>: <name>`` marker.
+
+    ``diff -r``/``diff -ur dir1 dir2`` reports a file present on only one
+    side this way — no hunk, no binary marker, no ``diff --git`` header —
+    so it was invisible to every path source `diff_lacks_git_headers_for_
+    its_hunks` checked before this one (Codex review, PR #877, tenth round
+    on this same predicate). The directory and name combine into one path
+    (``examples`` + ``oracle.json`` -> ``examples/oracle.json``), stripping
+    a leading ``a/``/``b/`` from the directory half if git's own recursive
+    ``diff --git ... -r`` invocation put one there.
+    """
+    paths: set[str] = set()
+    for line in diff_text.splitlines():
+        m = _ONLY_IN_MARKER.match(line)
+        if not m:
+            continue
+        directory, name = m.group(1), m.group(2)
+        if directory.startswith(("a/", "b/")):
+            directory = directory[2:]
+        paths.add(f"{directory}/{name}" if directory else name)
+    return paths
+
+
 def _hunk_file_targets(diff_text: str) -> set[str]:
     """Every ``--- ``/``+++ `` hunk-header target this diff names, whether or
     not it carries git's own ``a/``/``b/`` prefix.
@@ -377,10 +407,33 @@ def diff_lacks_git_headers_for_its_hunks(diff_text: str) -> bool:
     is folded into the same comparison (eighth round); nor is git's own
     ``a/``/``b/``-prefixed hunk-header spelling the only shape a real hunk
     can carry, so this reads targets via `_hunk_file_targets` rather than
-    `_hunks()` directly, to also catch a bare-path header (ninth round).
+    `_hunks()` directly, to also catch a bare-path header (ninth round);
+    nor is a hunk or a binary marker the only shape a one-sided file can
+    take at all — GNU diffutils' recursive ``diff -r``/``diff -ur`` mode
+    reports a file present on only one side as a hunkless, markerless
+    ``Only in <dir>: <name>`` line, folded in via `_only_in_marker_paths`
+    (tenth round).
+
+    Ten rounds in, this predicate is an *additive* enumeration of every
+    content shape a real diff tool has been shown to emit that can carry
+    file identity without a ``diff --git`` header — not a closed-form
+    grammar validator that would catch an as-yet-unreported eleventh
+    shape by construction. A genuinely closed fix would parse the diff
+    against git's own output grammar in full (every recognized per-entry
+    metadata line — mode/rename/copy/similarity/index — and flag anything
+    that doesn't fit it, rather than naming known-unsafe shapes one at a
+    time) and is a real, separate, higher-risk rewrite of this whole
+    predicate, not attempted here — seven consecutive rounds finding a new
+    gap in the same incremental style argue for it, but this file's own
+    "known gaps over risky reactive patches" convention (AGENTS.md) argues
+    against attempting a materially larger redesign under continued review
+    pressure in the same session. Each shape closed here is still real,
+    independently verified, and strictly narrows what an attacker (or an
+    honestly hand-assembled `--diff-file`) can exploit.
     """
     hunk_paths = _hunk_file_targets(diff_text)
     hunk_paths |= _binary_marker_paths(diff_text)
+    hunk_paths |= _only_in_marker_paths(diff_text)
     if not hunk_paths:
         return False
     return not hunk_paths <= diff_touched_paths(diff_text)
