@@ -194,6 +194,66 @@ class TestMalformedDocumentsRaiseTheDocumentedErrorKinds:
             f"AttributeError instead of TypeError: {unguarded}"
         )
 
+    def test_no_from_dict_reads_a_row_field_without_guarding_the_row(self) -> None:
+        """The level underneath the door, which the sweep above does not reach.
+
+        Guarding a `from_dict`'s own parameter says nothing about the rows it
+        then reads out of that parameter. `AvailabilityLedger.from_dict`
+        guarded its container and its `families` shape and still read each
+        *override row*'s identifying fields by subscript, so a
+        `__getitem__`-only row was accepted and reserialized as valid storage
+        — the same defect one level down, found by review rather than by the
+        sweep that was supposed to have closed the class.
+
+        So the rule is restated over every value that reaches
+        `required_field`, not only the parameter: whatever name it is called
+        on must have been passed to the mapping guard first, in the same
+        function.
+        """
+        import ast
+        import pathlib
+
+        def guarded_names(fn: ast.FunctionDef) -> set[str]:
+            names = set()
+            for sub in ast.walk(fn):
+                if not isinstance(sub, ast.Call):
+                    continue
+                func = sub.func
+                if isinstance(func, ast.Name) and func.id in ("_mapping", "mapping"):
+                    if sub.args and isinstance(sub.args[0], ast.Name):
+                        names.add(sub.args[0].id)
+                # `isinstance(x, Mapping)` counts too -- versioning.py's
+                # degrading form checks the same thing without raising.
+                if isinstance(func, ast.Name) and func.id == "isinstance":
+                    if sub.args and isinstance(sub.args[0], ast.Name):
+                        names.add(sub.args[0].id)
+            return names
+
+        offenders: list[str] = []
+        for path in sorted(pathlib.Path("abicheck/storage").glob("*.py")):
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.FunctionDef) or node.name != "from_dict":
+                    continue
+                safe = guarded_names(node)
+                for sub in ast.walk(node):
+                    if (
+                        isinstance(sub, ast.Call)
+                        and isinstance(sub.func, ast.Name)
+                        and sub.func.id in ("_required_field", "required_field")
+                        and sub.args
+                        and isinstance(sub.args[0], ast.Name)
+                        and sub.args[0].id not in safe
+                    ):
+                        offenders.append(
+                            f"{path.name}:{sub.lineno} required_field({sub.args[0].id})"
+                        )
+
+        assert offenders == [], (
+            "these sites read a required field off a value never checked to be a "
+            f"mapping, so a dict-like row is accepted as valid storage: {offenders}"
+        )
+
 
 class TestRowSequenceFieldsRejectEveryWrongContainer:
     """A field holding rows is a JSON array, and nothing else iterates safely.
@@ -686,3 +746,53 @@ class TestIdentityDocumentsRefuseADictLikeWithoutGet:
             }
         )
         assert OccurrenceId.from_dict(original.to_dict()) == original
+
+
+class TestOverrideRowsAreCheckedIndividually:
+    """A guarded array does not make its rows guarded.
+
+    The ledger already refused a non-mapping container and a `families` value
+    that was not a mapping. An override *row* was still read by subscript, so
+    a dict-like row supplying `family`, `entity` and `availability` was
+    accepted and would be reserialized as valid storage — a malformed
+    document laundered into a well-formed one, which is worse than a crash
+    because nothing downstream can tell.
+    """
+
+    class _SubscriptOnly:
+        def __init__(self, **fields: object) -> None:
+            self._fields = fields
+
+        def __getitem__(self, key: str) -> object:
+            return self._fields[key]
+
+    def test_a_dict_like_override_row_is_refused(self) -> None:
+        import pytest
+
+        from abicheck.storage import AvailabilityLedger
+
+        row = self._SubscriptOnly(
+            family="exports",
+            entity="libfoo.so",
+            availability={"status": "present"},
+        )
+        with pytest.raises(TypeError, match="override document"):
+            AvailabilityLedger.from_dict({"overrides": [row]})
+
+    def test_a_real_override_row_still_round_trips(self) -> None:
+        """The control: the row that should be accepted still is."""
+        from abicheck.storage import AvailabilityLedger
+
+        document = {
+            "overrides": [
+                {
+                    "family": "exports",
+                    "entity": "libfoo.so",
+                    "availability": {"status": "present"},
+                }
+            ]
+        }
+        ledger = AvailabilityLedger.from_dict(document)
+        assert AvailabilityLedger.from_dict(ledger.to_dict()).to_dict() == (
+            ledger.to_dict()
+        )

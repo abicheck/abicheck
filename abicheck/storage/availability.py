@@ -486,6 +486,19 @@ class AvailabilityLedger:
         }
         overrides: dict[tuple[str, str], FactAvailability] = {}
         for raw in _row_sequence(data.get("overrides", []), "overrides"):
+            # Each *row* is checked, not only the array holding them. The
+            # outer guard above says nothing about what the rows are, and the
+            # identifying fields are read here by subscript — so a
+            # `__getitem__`-only row supplied its family and entity, was
+            # accepted, and got reserialized as valid storage, while the
+            # `FactAvailability.from_dict` call below (which does guard) never
+            # got the chance to refuse it (Codex review).
+            #
+            # The preceding round guarded every `from_dict`'s own parameter
+            # and made that executable; this is the level underneath, which
+            # that sweep did not reach. `test_no_from_dict_reads_a_row_field_
+            # without_guarding_the_row` now covers both levels.
+            _mapping(raw, "an override document")
             key = (
                 _decision_key(
                     _required_field(raw, "family", "an override document"),
