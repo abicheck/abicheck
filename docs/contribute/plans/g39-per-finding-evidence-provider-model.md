@@ -160,7 +160,7 @@ freeze this before that):
 | `l1:btf` | Linux kernel BTF debug info (ELF snapshots) | L1 |
 | `l1:ctf` | Linux kernel CTF debug info (ELF snapshots) | L1 |
 | `l2:castxml` / `l2:clang` | Header-AST backend, named specifically (not just "L2") since the two backends have measurably different fact completeness — see [header-backend-capabilities.md](../../reference/header-backend-capabilities.md) | L2 |
-| `l2:legacy_unknown_backend` | A header snapshot persisted before `ast_producer` was tracked (`from_headers=True`, `ast_producer is None` — see the gap note below) | L2 |
+| `l2:legacy_unknown_backend` | A header snapshot persisted before `ast_producer` was tracked (`from_headers=True` recorded/confirmed, not merely guessed — i.e. `from_headers_inferred is not True` — with `ast_producer is None`; see the gap note below and `snapshot_backend_tag`'s item 4 further down for the excluded, genuinely-ambiguous `from_headers_inferred=True` case) | L2 |
 | `l3:build_context` | ADR-039 build-context collector / L3→L2 fold | L3 |
 | `l4:source_replay` | L4 source-ABI replay | L4 |
 | `l5:source_graph` | L5 source/consumer graph | L5 |
@@ -593,8 +593,10 @@ distinguish them, all real, already-present `AbiSnapshot` fields:
    construction (`model.py`'s own field comment). Tag: the same
    platform-selected L0 provider used for the per-declaration `ELF_ONLY`
    case above (`l0:elf_symtab`/`l0:pe_export_table`/`l0:macho_exports`).
-2. `from_headers is True` — a header-AST layer was genuinely used. Read
-   `ast_producer`:
+2. `from_headers is True` **and `from_headers_inferred is not True`** — a
+   header-AST layer was genuinely used (either recorded verbatim from a
+   schema carrying the explicit `from_headers` key, or confirmed by the
+   loader without guesswork). Read `ast_producer`:
    - `"castxml"` → `("l2:castxml",)`.
    - `"clang"` → `("l2:clang",)`.
    - `"hybrid"` → **`("l2:castxml", "l2:clang")` — both, not the bare string
@@ -613,19 +615,52 @@ distinguish them, all real, already-present `AbiSnapshot` fields:
      rendered, not a single unregistered `hybrid` token a consumer would
      have no rule to interpret).
    - `None` → `("l2:legacy_unknown_backend",)` — the pre-schema-v10 case
-     Phase 0's vocabulary table already names for exactly this shape.
-3. Neither `elf_only_mode` nor `from_headers` is `True` — a DWARF/PDB/BTF/
-   CTF-derived snapshot with no header-AST layer at all. **This is the L1
-   producer-identity gap this same plan already documents above ("`l1:pdb`/
-   `l1:btf`/`l1:ctf` name a real gap, not just a missing table row") and
-   explicitly calls a *prerequisite* Phase 1 must resolve before wiring any
-   detector that could draw on such a snapshot — it applies here
-   identically, and fabricating `l1:dwarf` for a PDB/BTF/CTF-derived
-   snapshot would repeat exactly the false-claim failure mode that gap note
-   already refuses to accept. `snapshot_backend_tag` for this branch is
-   therefore left unresolved by this document — it depends on the same
-   per-record/per-snapshot L1-producer marker that gap note calls for, not
-   a fresh design choice made here.**
+     Phase 0's vocabulary table already names for exactly this shape: a
+     schema old enough to predate `ast_producer` tracking, but recorded
+     with an explicit `from_headers` key, so the loader did not have to
+     guess whether a header-AST layer ran at all — only which backend
+     produced it is unknown.
+3. `elf_only_mode is not True`, and either `from_headers is not True` **or
+   `from_headers_inferred is True`** — a DWARF/PDB/BTF/CTF-derived snapshot
+   with no *confirmed* header-AST layer. **This is the L1 producer-identity
+   gap this same plan already documents above ("`l1:pdb`/`l1:btf`/`l1:ctf`
+   name a real gap, not just a missing table row") and explicitly calls a
+   *prerequisite* Phase 1 must resolve before wiring any detector that could
+   draw on such a snapshot — it applies here identically, and fabricating
+   `l1:dwarf` for a PDB/BTF/CTF-derived snapshot would repeat exactly the
+   false-claim failure mode that gap note already refuses to accept.
+   `snapshot_backend_tag` for this branch is therefore left unresolved by
+   this document — it depends on the same per-record/per-snapshot
+   L1-producer marker that gap note calls for, not a fresh design choice
+   made here.**
+4. **`from_headers is True` and `from_headers_inferred is True` — item 2's
+   own guard routes this case into item 3 above rather than an `l2:` tag,
+   and this item exists only to state why (Codex review, verified against
+   `abicheck/model.py`'s `from_headers_inferred` field comment and
+   `abicheck/serialization.py`'s `snapshot_from_dict`, lines ~1113-1132).**
+   `from_headers_inferred=True` means `from_headers=True` itself was never
+   read from the snapshot — `snapshot_from_dict` *guesses* it for a schema
+   that predates the `from_headers` key entirely, on the rule "a populated,
+   non-`elf_only_mode` surface (`funcs`/`variables`/`types`/`enums`/
+   `typedefs`) looks like a header dump." A legacy **DWARF-only** dump
+   populates that identical surface, so the guess cannot distinguish "these
+   declarations came from a header-AST parse" from "these declarations came
+   from debug info" — `model.py`'s own field comment states this
+   explicitly ("Source-level detectors that must only fire on genuine
+   header evidence ... require `from_headers and not from_headers_inferred`
+   so ambiguous legacy DWARF-only baselines do not produce false API
+   breaks"). Reusing item 2's `None → l2:legacy_unknown_backend` mapping
+   here (`ast_producer` is always `None` for a snapshot this old, so
+   nothing about item 2's own `ast_producer` dispatch would otherwise skip
+   it) would claim a header-AST provider produced the snapshot's
+   declarations when the true tier is just as plausibly L1 — the identical
+   false-claim failure mode item 3 already refuses to accept for
+   PDB/BTF/CTF, reached here from the opposite direction (a
+   *tier-guessed* snapshot, not a *producer-unidentified* one). Folding it
+   into item 3 is therefore not a new fallback tag, only the existing
+   conservative one applied consistently: this case gets no `l2:` tag until
+   the same L1-producer-identity prerequisite that already blocks item 3 is
+   resolved.**
 
 Both fallbacks stay structurally distinct: the per-symbol dict's own inline
 fallback (paragraph above) answers "this symbol has a declaration, but no
