@@ -273,20 +273,16 @@ def _enum_canonical_names(snap: AbiSnapshot | None) -> dict[str, str]:
     regardless of value (Codex review, fresh evidence).
 
     A bare name is registered only when it uniquely identifies one
-    qualified enum. Two distinct enums sharing a bare name (e.g.
-    ``a::Color`` and ``b::Color``) would otherwise have the bare key
-    ``setdefault``-pinned to whichever enum is iterated first -- silently
-    mapping the OTHER enum's own header-tier finding to the wrong
-    qualified spelling, which can both hide it from its real DWARF-tier
-    twin (a genuine cross-detector dedup miss, the opposite failure this
-    bridge exists to prevent) and misattribute it under later
-    namespace-aware processing that trusts ``qualified_name`` (Codex
-    review, fresh evidence). The fully-qualified key is never ambiguous --
-    two enums cannot share the same qualified name -- so it is always safe
-    to register. An unqualified global enum sharing a bare name is itself a
-    competitor here -- skipping it let a global ``Color`` alongside a
-    namespaced ``ns::Color`` wrongly register ``Color -> ns::Color`` (Codex
-    review, found on this function's ``RecordType`` sibling).
+    qualified enum -- two distinct enums sharing a bare name (``a::Color``/
+    ``b::Color``) must never have one silently bridged to the other's
+    spelling. The fully-qualified key is never ambiguous -- two enums
+    cannot share it -- so it is always safe to register. An unqualified
+    global enum sharing a bare name is itself a competitor here -- skipping
+    it let a global ``Color`` alongside a namespaced ``ns::Color`` wrongly
+    register ``Color -> ns::Color`` (Codex review, found on this function's
+    ``RecordType`` sibling) -- including a DWARF-only enum, which
+    contributes no ``snap.enums`` entry at all and needs
+    ``snap.dwarf.enums``'s own keys scanned directly.
     """
     if snap is None:
         return {}
@@ -298,6 +294,12 @@ def _enum_canonical_names(snap: AbiSnapshot | None) -> dict[str, str]:
             out[e.qualified_name] = e.qualified_name
         else:
             by_bare.setdefault(e.name, set()).add(None)
+    dwarf = getattr(snap, "dwarf", None)
+    for key in getattr(dwarf, "enums", None) or ():
+        if "::" in key:
+            by_bare.setdefault(key.rsplit("::", 1)[-1], set()).add(key)
+        else:
+            by_bare.setdefault(key, set()).add(None)
     for bare, qualified_names in by_bare.items():
         if len(qualified_names) == 1:
             candidate = next(iter(qualified_names))

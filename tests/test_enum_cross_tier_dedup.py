@@ -151,6 +151,31 @@ class TestEnumCanonicalNames:
         assert "Color" not in names
         assert names["ns::Color"] == "ns::Color"
 
+    def test_a_dwarf_only_global_enum_competing_with_a_namespaced_header_enum_is_not_bridged(
+        self,
+    ) -> None:
+        """Codex review, fresh evidence: an enum DWARF sees but the header
+        surface never exposes contributes no ``snap.enums`` entry at all --
+        the earlier fix, which only scans ``snap.enums``, still missed this
+        exact competing-identity shape (found on this function's
+        ``RecordType`` sibling, ``record_canonical_names``)."""
+        snap = AbiSnapshot(
+            library="lib.so",
+            version="1",
+            enums=[_enum_type("Color", "ns::Color", [("BLUE", 1)])],
+            dwarf=DwarfMetadata(
+                has_dwarf=True,
+                enums={
+                    "Color": EnumInfo(
+                        name="Color", underlying_byte_size=4, members={"RED": 0}
+                    )
+                },
+            ),
+        )
+        names = _enum_canonical_names(snap)
+        assert "Color" not in names
+        assert names["ns::Color"] == "ns::Color"
+
     def test_unambiguous_bare_name_across_matching_qualified_enums_still_registers(
         self,
     ) -> None:

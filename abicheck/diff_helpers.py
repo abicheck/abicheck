@@ -568,7 +568,13 @@ def record_canonical_names(snap: AbiSnapshot | None) -> dict[str, str]:
     earlier revision did, let a global ``Widget`` alongside a namespaced
     ``ns::Widget`` silently register ``Widget -> ns::Widget``, which could
     then wrongly canonicalize the global type's own finding onto the
-    unrelated namespaced one (Codex review, fresh evidence).
+    unrelated namespaced one (Codex review, fresh evidence). This same
+    competitor check also scans ``snap.dwarf.structs``' own keys directly:
+    a record that DWARF sees but the header surface never exposes (private,
+    not header-declared) contributes no ``snap.types`` entry at all, so a
+    bare global name there is exactly as competing as an unqualified
+    ``RecordType`` (Codex review, fresh evidence -- reachable when supplied
+    headers omit a private record that remains in binary debug metadata).
     """
     if snap is None:
         return {}
@@ -580,6 +586,12 @@ def record_canonical_names(snap: AbiSnapshot | None) -> dict[str, str]:
             out[t.qualified_name] = t.qualified_name
         else:
             by_bare.setdefault(t.name, set()).add(None)
+    dwarf = getattr(snap, "dwarf", None)
+    for key in getattr(dwarf, "structs", None) or ():
+        if "::" in key:
+            by_bare.setdefault(key.rsplit("::", 1)[-1], set()).add(key)
+        else:
+            by_bare.setdefault(key, set()).add(None)
     for bare, qualified_names in by_bare.items():
         if len(qualified_names) == 1:
             candidate = next(iter(qualified_names))

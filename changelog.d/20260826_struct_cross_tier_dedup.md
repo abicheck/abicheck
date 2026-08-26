@@ -63,3 +63,12 @@
   sentinel in the per-bare-name candidate set), so this collision correctly
   disables the bridge the same way two differently-namespaced types
   sharing a bare name already did.
+- **Follow-up (Codex review, fresh evidence): a DWARF-only global type/enum
+  (declared in binary debug info but not in the supplied headers) had the
+  identical bug from a different angle.** The fix above only scanned
+  `snap.types`/`snap.enums` (the header-tier's own declarations), so a
+  record/enum that DWARF sees but the header surface never exposes
+  contributed no competing entry at all. Both functions now also scan
+  `snap.dwarf.structs`/`snap.dwarf.enums`'s own keys directly, registering
+  a namespaced DWARF-only key as an ordinary qualified candidate and a bare
+  global DWARF-only key as the same competing-identity sentinel.

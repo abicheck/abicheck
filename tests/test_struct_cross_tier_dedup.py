@@ -112,6 +112,26 @@ class TestRecordCanonicalNames:
         assert "Widget" not in names
         assert names["ns::Widget"] == "ns::Widget"
 
+    def test_a_dwarf_only_global_record_competing_with_a_namespaced_header_type_is_not_bridged(
+        self,
+    ) -> None:
+        """Codex review, fresh evidence: a record DWARF sees but the header
+        surface never exposes (private, not header-declared) contributes no
+        ``snap.types`` entry at all -- so the earlier fix, which only scans
+        ``snap.types``, still missed this exact competing-identity shape."""
+        snap = AbiSnapshot(
+            library="lib.so",
+            version="1",
+            types=[_rec("Widget", "ns::Widget", 64)],
+            dwarf=DwarfMetadata(
+                has_dwarf=True,
+                structs={"Widget": StructLayout(name="Widget", byte_size=32)},
+            ),
+        )
+        names = record_canonical_names(snap)
+        assert "Widget" not in names
+        assert names["ns::Widget"] == "ns::Widget"
+
 
 class TestCanonicalizeRecordSymbol:
     def test_bare_whole_type_symbol_resolves_to_qualified(self) -> None:
