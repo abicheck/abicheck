@@ -159,14 +159,20 @@ class TestCompareHtml:
 # ── _resolve_demangle (shared by the primary and --write renders) ────────
 
 class TestResolveDemangle:
-    def test_defaults_on_for_markdown_and_review(self):
+    def test_defaults_on_for_markdown_review_and_html(self):
+        """HTML joined markdown/review as a human-facing default-on format
+        (abicheck code-review report item 8): html_report.py's
+        _symbol_cell/_changes_table always demangle BEFORE html.escape,
+        never the reverse, so there is no injection risk to avoid by
+        defaulting it off the way the machine formats correctly are."""
         from abicheck.cli_compare_helpers import _resolve_demangle
 
         assert _resolve_demangle("markdown", None) is True
         assert _resolve_demangle("review", None) is True
+        assert _resolve_demangle("html", None) is True
 
-    @pytest.mark.parametrize("fmt", ["json", "sarif", "junit", "html"])
-    def test_defaults_off_for_machine_formats_and_html(self, fmt):
+    @pytest.mark.parametrize("fmt", ["json", "sarif", "junit"])
+    def test_defaults_off_for_machine_formats(self, fmt):
         from abicheck.cli_compare_helpers import _resolve_demangle
 
         assert _resolve_demangle(fmt, None) is False
@@ -176,6 +182,7 @@ class TestResolveDemangle:
 
         assert _resolve_demangle("json", True) is True
         assert _resolve_demangle("markdown", False) is False
+        assert _resolve_demangle("html", False) is False
 
 
 # ── _resolve_compare_collect_mode (CLI-audit P1: --depth inference) ──────

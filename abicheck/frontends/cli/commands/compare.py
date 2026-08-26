@@ -483,10 +483,9 @@ def _embed_inline_source_side(
                 "comparison, only json/markdown/junit are available.",
 )
 @click.option("--demangle/--no-demangle", default=None,
-              help="Demangle C++ symbol names in markdown/review output (default "
-                   "ON; use --no-demangle to turn off). json/sarif always keep raw "
-                   "mangled names, and HTML is rendered structurally and is never "
-                   "demangled regardless of this flag.")
+              help="Demangle C++ symbol names in markdown/review/html output "
+                   "(default ON; use --no-demangle to turn off). json/sarif/junit "
+                   "always keep raw mangled names for downstream tooling to match on.")
 # Policy + suppression family (ADR-037 D3). The strict/justification pair
 # lives only in .abicheck.yml's suppression: block now (ADR-037 D4).
 @policy_options

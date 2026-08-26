@@ -35,6 +35,11 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 from .checker_policy import HasKind
+from .demangle import (
+    demangle as _demangle_symbol,
+    demangle_text,
+    prewarm_demangle_batch,
+)
 
 # Page chrome (DOCTYPE/head/stylesheet/body frame, verdict palette, footer) now
 # lives in one shared seam (``html_template``). ``_VERDICT_STYLE`` /
@@ -139,17 +144,33 @@ def _file_metadata_html(result: object) -> str:
 </div>"""
 
 
-def _symbol_cell(change: object) -> str:
-    """Render symbol name: demangled text with mangled name as tooltip."""
-    h = html.escape
-    mangled = h(getattr(change, "symbol", "") or "")
-    demangled = h(getattr(change, "demangled_symbol", "") or mangled)
-    if demangled and demangled != mangled and mangled:
-        return f'<abbr title="{html.escape(mangled, quote=True)}">{demangled}</abbr>'
-    return demangled or mangled
+def _abbr_symbol_text(raw: str, demangle: bool = True) -> str:
+    """Demangled text with the mangled name as an ``<abbr>`` tooltip --
+    shared by any caller rendering one bare symbol string, so two mangled
+    names that demangle identically (C1/C2 ctor variants) don't collapse
+    into indistinguishable text. Demangles before ``html.escape``.
+
+    Whole-string demangling (:func:`demangle`), not :func:`demangle_text`'s
+    embedded-token scan -- *raw* is one symbol field, not prose, and a
+    substring scan risks corrupting a real non-mangled name that merely
+    contains a `_Z...`-shaped substring (e.g. `prefix_Z3foov`) (Codex
+    review, fresh evidence)."""
+    mangled = html.escape(raw)
+    result = _demangle_symbol(raw, accept_macho_prefix=True) if demangle and raw else None
+    if not result:
+        return mangled
+    demangled = html.escape(result)
+    if demangled == mangled:
+        return demangled
+    return f'<abbr title="{html.escape(mangled, quote=True)}">{demangled}</abbr>'
 
 
-def _changes_table(changes: list[object]) -> str:
+def _symbol_cell(change: object, demangle: bool = True) -> str:
+    """Symbol cell for one Change -- see _abbr_symbol_text's own contract."""
+    return _abbr_symbol_text(getattr(change, "symbol", "") or "", demangle)
+
+
+def _changes_table(changes: list[object], demangle: bool = True) -> str:
     if not changes:
         return "<p class='empty'>No changes in this category.</p>"
 
@@ -159,10 +180,11 @@ def _changes_table(changes: list[object]) -> str:
     for ch in changes:
         ks = kind_str(ch)
         cat = category(ks)
-        desc = html.escape(getattr(ch, "description", "") or "")
-        old_val = html.escape(str(getattr(ch, "old_value", "") or ""))
-        new_val = html.escape(str(getattr(ch, "new_value", "") or ""))
-        sym_cell = _symbol_cell(ch)
+        raw_desc = getattr(ch, "description", "") or ""
+        desc = html.escape(demangle_text(raw_desc) if demangle else raw_desc)
+        old_val = _abbr_symbol_text(str(getattr(ch, "old_value", "") or ""), demangle)
+        new_val = _abbr_symbol_text(str(getattr(ch, "new_value", "") or ""), demangle)
+        sym_cell = _symbol_cell(ch, demangle)
         loc = getattr(ch, "source_location", None)
         affected = getattr(ch, "affected_symbols", None)
 
@@ -177,7 +199,7 @@ def _changes_table(changes: list[object]) -> str:
                     f"💡 {html.escape(impact)}</div>"
                 )
         if affected:
-            names = ", ".join(html.escape(s) for s in affected[:5])
+            names = ", ".join(_abbr_symbol_text(s, demangle) for s in affected[:5])
             suffix = f" (+{len(affected) - 5} more)" if len(affected) > 5 else ""
             desc_parts.append(
                 f"<div style='font-size:0.82em; color:#1565c0; margin-top:2px;'>"
@@ -195,15 +217,8 @@ def _changes_table(changes: list[object]) -> str:
                 f"🔗 {caused_count} derived change(s) collapsed</div>"
             )
         # CLI-audit P1: same per-finding contract-decision parity SARIF's
-        # `properties`/JUnit's `<properties>` carry -- every finding this
-        # table renders is, by construction, one compatibility policy
-        # scored (an un-evaluated finding is filtered into its own
-        # "Not Evaluated" section above, never reaches this table), so
-        # `contract_relevance` here is always IN_CONTRACT/NOT_APPLICABLE.
-        # `gate_contribution` is left out: unlike SARIF/JUnit, this table
-        # has no severity_config/policy in scope to compute it from, and
-        # threading those through every _section/_changes_table caller
-        # for one more field is its own follow-up, not a drive-by here.
+        # `properties`/JUnit's `<properties>` carry (always IN_CONTRACT/
+        # NOT_APPLICABLE here; `gate_contribution` omitted, its own follow-up).
         contract_relevance = getattr(ch, "contract_relevance", None)
         if contract_relevance is not None:
             bits = [f"relevance: {html.escape(str(contract_relevance.value))}"]
@@ -223,10 +238,9 @@ def _changes_table(changes: list[object]) -> str:
                 f"<div style='font-size:0.82em; color:#6a1b9a; margin-top:2px;'>"
                 f"📜 Contract — {' · '.join(bits)}</div>"
             )
-        # Cross-detector correlation (e.g. LAYOUT_UNVERIFIABLE annotated by
-        # post_processing.AnnotateLayoutUnverifiableCoveredByVtableChanged as
-        # sharing its evidence gap with a co-reported TYPE_VTABLE_CHANGED) --
-        # only JSON/SARIF rendered this field before (Codex review).
+        # Cross-detector correlation (e.g. LAYOUT_UNVERIFIABLE sharing its
+        # evidence gap with a co-reported TYPE_VTABLE_CHANGED) -- only
+        # JSON/SARIF rendered this field before (Codex review).
         correlated = getattr(ch, "correlated_change_kind", None)
         if correlated:
             desc_parts.append(
@@ -382,11 +396,9 @@ def _compat_changes_table(items: list[object], show_severity: bool = False) -> s
         old_val = h(str(getattr(ch, "old_value", "") or ""))
         new_val = h(str(getattr(ch, "new_value", "") or ""))
         sev_cell = f"<td>{severity(ks)}</td>" if show_severity else ""
-        # Cross-detector correlation (e.g. LAYOUT_UNVERIFIABLE annotated by
-        # post_processing.AnnotateLayoutUnverifiableCoveredByVtableChanged) --
-        # this ABICC-compatible table has its own separate rendering from
-        # _changes_table above, so it needs the same note added here too
-        # (Codex review, fresh evidence).
+        # Cross-detector correlation: this ABICC-compatible table has its own
+        # separate rendering from _changes_table above, needing the same
+        # note (Codex review, fresh evidence).
         correlated = getattr(ch, "correlated_change_kind", None)
         if correlated:
             desc += (
@@ -439,9 +451,8 @@ def _generate_compat_html(
     """
     h = html.escape
 
-    # Classify type vs symbol vs other problems by severity.
-    # "other" catches ELF-layer kinds (soname_, symbol_, needed_, rpath_, …)
-    # that are neither type-scoped nor symbol/interface-scoped.
+    # Classify type vs symbol vs other (ELF-layer: soname_/symbol_/needed_/
+    # rpath_, …) problems by severity.
     type_problems: dict[str, list[object]] = {"High": [], "Medium": [], "Low": []}
     symbol_problems: dict[str, list[object]] = {"High": [], "Medium": [], "Low": []}
     other_problems: dict[str, list[object]] = {"High": [], "Medium": [], "Low": []}
@@ -563,7 +574,7 @@ def _generate_compat_html(
 {_compat_changes_table(items, show_severity=True)}
 </div>""")
 
-    # Other problems (ELF-layer: soname, symbol versioning, calling convention, etc.)
+    # Other problems (ELF-layer: soname, symbol versioning, calling convention)
     other_all = (
         other_problems["High"] + other_problems["Medium"] + other_problems["Low"]
     )
@@ -616,8 +627,6 @@ def _confidence_html(result: object) -> str:
     policy_file = getattr(result, "policy_file", None)
 
     h = html.escape
-
-    # Confidence colour
     conf_color = {"high": "#1b5e20", "medium": "#e65100", "low": "#b71c1c"}.get(
         conf_val, "#212121"
     )
@@ -666,12 +675,16 @@ def _confidence_html(result: object) -> str:
 def _build_impact_html(
     result: DiffResult,
     displayed_changes: list[object] | None = None,
+    demangle: bool = True,
 ) -> str:
     """Build an HTML impact summary table.
 
     When *displayed_changes* is given, only those changes are considered.
     Interface counts use unique ``affected_symbols``; ``caused_count`` is
-    shown separately to avoid double-counting.
+    shown separately to avoid double-counting. ``demangle`` mirrors every
+    other symbol-bearing cell in this module (Codex review, fresh evidence:
+    the Root Change column rendered ``change.symbol`` raw, bypassing the
+    demangling setting entirely).
     """
     from .checker import _ROOT_TYPE_CHANGE_KINDS
 
@@ -699,7 +712,7 @@ def _build_impact_html(
         iface_str = f"{iface_count} interface(s)" if iface_count > 0 else "—"
         caused_str = f" (+{caused} collapsed)" if caused > 0 else ""
         rows.append(
-            f"<tr><td><code>{html.escape(symbol)}</code></td>"
+            f"<tr><td><code>{_abbr_symbol_text(symbol, demangle)}</code></td>"
             f"<td><span class='kind-badge'>{html.escape(kind_val)}</span></td>"
             f"<td>{iface_str}{caused_str}</td></tr>"
         )
@@ -722,10 +735,8 @@ def _gate_card_html(
 ) -> str:
     """Render the CI-gate card, or ``""`` when no severity gate is configured.
 
-    Split out of :func:`generate_html_report`; the reasoning behind the
-    scoped-vs-full gate split and the blocking-category naming is kept with the
-    code below.
-    """
+    Split out of :func:`generate_html_report`; the scoped-vs-full gate split
+    and blocking-category naming reasoning is kept with the code below."""
     if severity_config is None:
         return ""
     from .severity import compute_gate_decision
@@ -738,21 +749,13 @@ def _gate_card_html(
         kind_sets=_eff_kind_sets_fn2() if callable(_eff_kind_sets_fn2) else None,
         policy_file=getattr(result, "policy_file", None),
     )
-    # `--used-by`/`--required-symbol(s)` scoping (ADR-043): the CLI
-    # process actually exits on the *scoped* gate, not this full-library
-    # one -- without this, the card could say "CI Gate: FAIL (exit 4)"
-    # for a run that just exited 0 because the scoped contract was
-    # compatible (CodeRabbit review). Mirrors the JSON severity block's
-    # full_severity/severity split.
+    # `--used-by`/`--required-symbol(s)` scoping (ADR-043): the CLI exits on
+    # the *scoped* gate, not this full-library one (CodeRabbit review).
     scoped_exit_code = getattr(result, "scoped_exit_code", None)
     scoped_exit_code_scheme = getattr(result, "scoped_exit_code_scheme", None)
     gate_exit_code: int
-    # blocking_categories only corresponds 1:1 to full_gate in the
-    # non-scoped branch below (gate_passed derives directly from
-    # full_gate.blocking there); the scoped exit code can fail for a
-    # reason full_gate's categories don't describe at all (e.g. a
-    # missing --required-symbol entrypoint), so it's left blank there
-    # rather than risk naming the wrong cause.
+    # blocking_categories only corresponds 1:1 to full_gate below; left blank
+    # for a scoped-only failure (e.g. a missing --required-symbol entrypoint).
     gate_blocking_categories: tuple[str, ...] = ()
     if scoped_exit_code is not None and scoped_exit_code_scheme == "severity":
         gate_passed = scoped_exit_code == 0
@@ -779,11 +782,9 @@ def _gate_card_html(
     gate_fg, gate_bg = ("#1b5e20", "#e8f5e9") if gate_passed else ("#b71c1c", "#ffebee")
     gate_label = "PASS" if gate_passed else f"FAIL (exit {gate_exit_code})"
     gate_icon = "✅" if gate_passed else "🛑"
-    # Names which severity category(ies) actually gated CI — without
-    # this, "FAIL" reads as an undifferentiated red box even when the
-    # cause is a policy-blocked COMPATIBLE addition rather than a
-    # genuine ABI/API break (same category-naming this PR already
-    # added to the sticky PR comment and the Action's Job Summary).
+    # Names which severity category(ies) actually gated CI — without this,
+    # "FAIL" reads as an undifferentiated red box even for a policy-blocked
+    # COMPATIBLE addition rather than a genuine ABI/API break.
     gate_categories_html = ""
     if not gate_passed and gate_blocking_categories:
         cats = ", ".join(
@@ -820,6 +821,7 @@ def generate_html_report(
     show_only: str | None = None,
     show_impact: bool = False,
     severity_config: SeverityConfig | None = None,
+    demangle: bool = True,
 ) -> str:
     """Generate a standalone ABICC-compatible HTML ABI report.
 
@@ -833,6 +835,7 @@ def generate_html_report(
             changes (legacy behaviour).
         show_only: Optional --show-only filter string (display-only).
         show_impact: If True, append an impact summary table.
+        demangle: Demangle C++ symbols in the native table (see ``_symbol_cell``).
         severity_config: Optional severity configuration. When given (native
             report only — the ABICC-compatible ``compat_html`` layout is left
             unchanged), a separate "CI Gate" headline card is rendered
@@ -843,11 +846,7 @@ def generate_html_report(
     Returns:
         Complete self-contained HTML document as a string.
     """
-    verdict = (
-        result.verdict.value
-        if hasattr(result.verdict, "value")
-        else str(result.verdict)
-    )
+    verdict = result.verdict.value if hasattr(result.verdict, "value") else str(result.verdict)
     fg, bg = _VERDICT_STYLE.get(verdict, ("#212121", "#f5f5f5"))
 
     all_changes: list[object] = list(getattr(result, "changes", None) or [])
@@ -874,19 +873,14 @@ def generate_html_report(
     suppressed: list[object] = list(getattr(result, "suppressed_changes", None) or [])
     suppressed_count: int = getattr(result, "suppressed_count", len(suppressed))
 
-    # Split display changes into buckets (for rendering). Duck-typed via
-    # getattr (like the compatibility_metrics call below) so a lightweight
-    # stub result without a real DiffResult's policy machinery still renders.
+    # Split display changes into buckets; duck-typed like compatibility_metrics.
     _effective_verdict_fn = getattr(result, "_effective_verdict_for_change", None)
     # ADR-049 D1: a NOT_EVALUATED finding is partitioned out of the three
     # verdict buckets before they are built, the same way Markdown's own
-    # "Not Evaluated (Contract)" section works. Bucketing one by its raw
+    # "Not Evaluated (Contract)" section works -- bucketing one by its raw
     # effective verdict rendered it under the red "Changed Symbols (1)"
-    # heading on a page whose banner reads NO_CHANGE and whose compatibility
-    # metric reads 100%, with the relevance and reason appearing nowhere
-    # (Codex review, reproduced). It gets its own section below instead --
-    # conserved and explained, not filed under a verdict policy never
-    # reached. Empty for every run without `--contract`.
+    # heading on a page whose banner reads NO_CHANGE (Codex review). It
+    # gets its own section below instead. Empty without `--contract`.
     from .contract_gating import contract_relevance_of, is_evaluated
 
     not_evaluated = [ch for ch in display_changes if not is_evaluated(ch)]
@@ -912,19 +906,15 @@ def generate_html_report(
     # banner above: without them, a policy-demoted removal still counts
     # toward breaking_count by its raw kind, producing e.g. "0.0% binary
     # compatibility" on the same page whose verdict reads COMPATIBLE.
-    # Duck-typed via getattr (like the rest of this function) so a
-    # lightweight stub result without a real DiffResult's policy machinery
-    # still renders — compatibility_metrics falls back to raw-kind counting
-    # when kind_sets is None.
-    # ADR-049 D1, same reasoning one level up in `report_summary.
-    # build_summary`: a finding contract evaluation left NOT_EVALUATED is not
-    # on the compatibility axis, so counting it here would put "0.0% binary
-    # compatibility" on a page whose verdict banner reads NO_CHANGE -- the
-    # exact disagreement the policy/kind_sets note above already guards
-    # against for the demotion case. Filtered via the shared predicate rather
-    # than `result._evaluated_changes()`: `all_changes` here is the render
-    # set, which a stub result need not expose, and this function is
-    # duck-typed throughout.
+    # Duck-typed via getattr so a lightweight stub result without a real
+    # DiffResult's policy machinery still renders (falls back to raw-kind
+    # counting when kind_sets is None). ADR-049 D1, same reasoning one level
+    # up in `report_summary.build_summary`: a NOT_EVALUATED finding is off
+    # the compatibility axis, so counting it here would produce the same
+    # kind of disagreement (a page whose banner reads NO_CHANGE showing
+    # "0.0% binary compatibility") the policy/kind_sets note above already
+    # guards against. Filtered via the shared predicate rather than
+    # `result._evaluated_changes()` since a stub result need not expose it.
     from .contract_gating import is_evaluated
 
     _eff_kind_sets_fn = getattr(result, "_effective_kind_sets", None)
@@ -972,16 +962,11 @@ def generate_html_report(
     scoped_verdict = getattr(result, "scoped_verdict", None)
     scoped_html = ""
     if scoped_verdict is not None:
-        # `--used-by`/`--required-symbol(s)` scoping (ADR-043): the
-        # Compatibility verdict box above stays computed from the full,
-        # unscoped library diff -- this format's own gate/verdict rendering
-        # intentionally keeps that authoritative. But the actual CLI process
-        # exits on the *scoped* verdict floor when scoping is requested,
-        # which can legitimately disagree with the verdict shown above.
-        # Surfaced here so a reader of the HTML report can't miss that
-        # disagreement, mirroring the human-format banner
-        # (`_fold_scoped_compat_into_text`) without changing this report's
-        # own verdict-box semantics.
+        # `--used-by`/`--required-symbol(s)` scoping (ADR-043): the verdict
+        # box above stays computed from the full, unscoped diff, but the CLI
+        # process exits on the *scoped* verdict floor -- surfaced here so a
+        # reader can't miss the disagreement (mirrors the human-format
+        # banner, `_fold_scoped_compat_into_text`).
         scoped_value = (
             scoped_verdict.value
             if hasattr(scoped_verdict, "value")
@@ -1015,12 +1000,17 @@ def generate_html_report(
             f"</div></div>"
         )
 
+    if demangle:
+        prewarm_demangle_batch(
+            [*all_changes, *suppressed, *not_evaluated],
+            attrs=("symbol", "description", "old_value", "new_value", "affected_symbols"),
+        )
     summary_html = _summary_table(removed, changed, added, suppressed_count)
     nav_html = _nav_bar(removed, changed, added, suppressed_count)
 
     def _section(title: str, anchor: str, css_class: str, items: list[object]) -> str:
         count = len(items)
-        tbl = _changes_table(items)
+        tbl = _changes_table(items, demangle)
         return (
             f"<div class='section {css_class}' id='{anchor}'>"
             f"<h3>{title} ({count})</h3>"
@@ -1037,6 +1027,7 @@ def generate_html_report(
         _section,
         not_evaluated=not_evaluated,
         relevance_of=contract_relevance_of,
+        demangle=demangle,
     )
 
     if not sections:
@@ -1082,7 +1073,9 @@ def generate_html_report(
 
     impact_html = ""
     if show_impact:
-        impact_html = _build_impact_html(result, displayed_changes=display_changes)
+        impact_html = _build_impact_html(
+            result, displayed_changes=display_changes, demangle=demangle
+        )
 
     body = f"""
 <div class="header">
@@ -1151,6 +1144,7 @@ def _build_sections_html(
     *,
     not_evaluated: list[object] | None = None,
     relevance_of: Callable[[object], object] | None = None,
+    demangle: bool = True,
 ) -> list[str]:
     """Build ordered section blocks for HTML report body.
 
@@ -1180,7 +1174,7 @@ def _build_sections_html(
         rows = []
         for ch in not_evaluated:
             relevance = relevance_of(ch) if relevance_of is not None else None
-            symbol = html.escape(str(getattr(ch, "symbol", "") or ""))
+            symbol = _symbol_cell(ch, demangle)
             kind = html.escape(str(getattr(getattr(ch, "kind", None), "value", "")))
             rel = html.escape(str(getattr(relevance, "value", "") or ""))
             reason = html.escape(str(getattr(ch, "contract_reason_code", "") or ""))
@@ -1228,8 +1222,12 @@ def write_html_report(
     title: str | None = None,
     compat_html: bool = False,
     report_kind: str = "binary",
+    *,
+    demangle: bool = True,
 ) -> None:
-    """Write HTML report to *output_path*, creating parent directories as needed."""
+    """Write HTML report to *output_path*, creating parent directories as
+    needed -- passing ``demangle`` through, unlike the CLI's own
+    ``--no-demangle`` this writer previously had no equivalent for."""
     output_path.parent.mkdir(parents=True, exist_ok=True)
     content = generate_html_report(
         result,
@@ -1240,5 +1238,6 @@ def write_html_report(
         title=title,
         compat_html=compat_html,
         report_kind=report_kind,
+        demangle=demangle,
     )
     output_path.write_text(content, encoding="utf-8")

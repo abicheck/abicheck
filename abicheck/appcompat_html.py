@@ -27,12 +27,25 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 # Shared page chrome (document frame, verdict palette, footer) + the change table.
-from .html_report import _changes_table
+from .demangle import demangle_batch, prewarm_demangle_batch
+from .html_report import _abbr_symbol_text, _changes_table
 from .html_template import _VERDICT_STYLE, render_document, render_footer
 
 
-def appcompat_to_html(result: object) -> str:
-    """Generate a self-contained HTML report for an AppCompatResult."""
+def _missing_symbol_cell(raw: str, demangle: bool = True) -> str:
+    """Render one missing-symbol entry -- a thin alias for
+    html_report._abbr_symbol_text (a bare linker name, not prose, so it
+    shares that function's whole-string-not-substring-scan contract; see
+    its own docstring)."""
+    return _abbr_symbol_text(raw, demangle)
+
+
+def appcompat_to_html(result: object, *, demangle: bool = True) -> str:
+    """Generate a self-contained HTML report for an AppCompatResult.
+
+    ``demangle`` mirrors ``generate_html_report``'s own knob (Codex
+    review, fresh evidence: this entry point had no equivalent to the
+    CLI's ``--no-demangle`` either)."""
     h = html.escape
 
     verdict = getattr(result, "verdict", None)
@@ -50,6 +63,23 @@ def appcompat_to_html(result: object) -> str:
     irrelevant = getattr(result, "irrelevant_for_app", [])
     total_changes = len(breaking) + len(irrelevant)
     full_diff = getattr(result, "full_diff", None)
+
+    # Batch-demangle every C++ symbol up front, the same way
+    # generate_html_report() does -- _changes_table()/_symbol_cell() below
+    # each demangle one symbol at a time on a cache miss, which without this
+    # prewarm means one c++filt subprocess invocation per row instead of one
+    # batched invocation for the whole report (Codex review).
+    if demangle:
+        prewarm_demangle_batch(
+            [*breaking, *irrelevant],
+            attrs=("symbol", "description", "old_value", "new_value", "affected_symbols"),
+        )
+        # missing_symbols is a plain list of raw mangled names, not change
+        # objects prewarm_demangle_batch's attr-based extraction can read --
+        # warm the same process-wide cache directly so the Missing Symbols
+        # table below (Codex review) also renders from a single batched call.
+        if missing:
+            demangle_batch(list(missing), accept_macho_prefix=True)
 
     verdict_icon = {
         "BREAKING": "\U0001f534",
@@ -113,7 +143,8 @@ def appcompat_to_html(result: object) -> str:
     missing_html = ""
     if missing:
         rows = "\n".join(
-            f"<tr><td><code>{h(s)}</code></td></tr>" for s in missing
+            f"<tr><td><code>{_missing_symbol_cell(s, demangle)}</code></td></tr>"
+            for s in missing
         )
         missing_html = f"""<div class='section section-removed'>
   <h3>\u26d4 Missing Symbols ({len(missing)})</h3>
@@ -141,7 +172,7 @@ def appcompat_to_html(result: object) -> str:
   <p style='padding:0 16px; font-size:0.88em; color:#666;'>
     These library changes affect symbols your application uses.
   </p>
-  {_changes_table(list(breaking))}
+  {_changes_table(list(breaking), demangle)}
 </div>"""
     elif total_changes > 0:
         relevant_html = f"""<div class='section section-added'>
@@ -157,7 +188,7 @@ def appcompat_to_html(result: object) -> str:
   <p style='padding:0 16px; font-size:0.85em; color:#999;'>
     These library changes do NOT affect your application.
   </p>
-  {_changes_table(list(irrelevant))}
+  {_changes_table(list(irrelevant), demangle)}
 </div>"""
 
     body = f"""
@@ -198,6 +229,6 @@ def appcompat_to_html(result: object) -> str:
     return render_document(title=f"AppCompat Report: {h(app_path)}", body=body)
 
 
-def write_appcompat_html(result: object, path: Path) -> None:
+def write_appcompat_html(result: object, path: Path, *, demangle: bool = True) -> None:
     """Write an AppCompat HTML report to *path*."""
-    path.write_text(appcompat_to_html(result), encoding="utf-8")
+    path.write_text(appcompat_to_html(result, demangle=demangle), encoding="utf-8")
