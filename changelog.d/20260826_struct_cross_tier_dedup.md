@@ -92,3 +92,20 @@
   already imports from) so this new comparison doesn't need a
   `diff_helpers -> diff_platform` edge back into a module that already
   imports `diff_helpers` — a cycle the `import-cycle-growth` gate rejects.
+- **Follow-up (Codex review): the DWARF-only bare-name scan mistook a
+  template argument's own `::` for a namespace boundary.** Both
+  `record_canonical_names`'s and `_enum_canonical_names`'s scan of
+  `snap.dwarf.structs`/`snap.dwarf.enums`'s own keys used
+  `key.rsplit("::", 1)[-1]` to derive a bare leaf — for a global
+  (unqualified) record whose own name embeds a namespaced template
+  argument (`"Wrapper<dep::Tag>"`), this wrongly extracted the corrupted
+  `"Tag>"` instead of recognizing the name as already fully bare, so the
+  record silently never competed for its own bare identity and could be
+  wrongly bridged to an unrelated, differently-namespaced type sharing
+  that exact spelling. New `diff_helpers.depth_aware_bare_name()` (tracks
+  `<`/`>` nesting, splitting only on a depth-zero `::`) replaces the naive
+  `rsplit` in both scans — a small local duplicate of
+  `type_reachability_spelling._bare_type_name` rather than an import of
+  it, since that module imports `diff_cxx_rules`, which imports
+  `diff_helpers`, so importing it here would add the identical kind of
+  cycle edge the previous follow-up's move avoided.

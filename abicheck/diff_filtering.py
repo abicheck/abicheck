@@ -24,6 +24,7 @@ from .checker_types import SYMBOL_VERSION_ALIAS_NOT_RETAINED_MARKER, Change
 from .diff_helpers import (
     canonicalize_record_symbol,
     cross_tier_transition,
+    depth_aware_bare_name,
     make_change,
     record_canonical_names,
 )
@@ -282,8 +283,9 @@ def _enum_canonical_names(snap: AbiSnapshot | None) -> dict[str, str]:
             by_bare.setdefault(e.name, set()).add(None)
     dwarf = getattr(snap, "dwarf", None)
     for key in getattr(dwarf, "enums", None) or ():
-        if "::" in key:
-            by_bare.setdefault(key.rsplit("::", 1)[-1], set()).add(key)
+        bare = depth_aware_bare_name(key)
+        if bare != key:
+            by_bare.setdefault(bare, set()).add(key)
         else:
             by_bare.setdefault(key, set()).add(None)
     for bare, qualified_names in by_bare.items():
@@ -1757,8 +1759,7 @@ def _downgrade_opaque_struct_changes(
     for type_map in (non_opaque_old, non_opaque_new):
         for t in type_map.values():
             for f in t.fields:
-                # If a field type matches an opaque type name (not as pointer),
-                # the type is embedded by-value and layout changes matter
+                # If a field type matches an opaque type name (not as pointer), the type is embedded by-value and layout changes matter
                 ftype = f.type.rstrip(" *&")
                 if ftype in opaque_types and "*" not in f.type:
                     embedded_types.add(ftype)

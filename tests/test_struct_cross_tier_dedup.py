@@ -132,6 +132,37 @@ class TestRecordCanonicalNames:
         assert "Widget" not in names
         assert names["ns::Widget"] == "ns::Widget"
 
+    def test_a_dwarf_only_global_template_specialization_is_not_bridged_via_its_own_template_argument_colon(
+        self,
+    ) -> None:
+        """Codex review, fresh evidence: a global (unqualified) DWARF-only
+        record whose own name embeds a namespaced template argument
+        (``"Wrapper<dep::Tag>"``) has no depth-zero ``"::"`` at all -- a
+        naive ``rsplit("::", 1)[-1]`` mistakes the argument's own ``"::"``
+        for a namespace boundary, extracting the corrupted bare name
+        ``"Tag>"`` instead of registering the record under its real,
+        already-bare identity. That silently let it not compete for its own
+        bare name at all, so an unrelated, differently-namespaced header
+        type sharing that exact spelling (``"ns::Wrapper<dep::Tag>"``,
+        header-bare ``"Wrapper<dep::Tag>"``) was wrongly bridged as if the
+        global DWARF-only record were never in the picture."""
+        snap = AbiSnapshot(
+            library="lib.so",
+            version="1",
+            types=[_rec("Wrapper<dep::Tag>", "ns::Wrapper<dep::Tag>", 64)],
+            dwarf=DwarfMetadata(
+                has_dwarf=True,
+                structs={
+                    "Wrapper<dep::Tag>": StructLayout(
+                        name="Wrapper<dep::Tag>", byte_size=32
+                    )
+                },
+            ),
+        )
+        names = record_canonical_names(snap)
+        assert "Wrapper<dep::Tag>" not in names
+        assert names["ns::Wrapper<dep::Tag>"] == "ns::Wrapper<dep::Tag>"
+
 
 class TestCanonicalizeRecordSymbol:
     def test_bare_whole_type_symbol_resolves_to_qualified(self) -> None:

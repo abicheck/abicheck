@@ -235,15 +235,7 @@ def diff_by_key(
     return changes
 
 
-# ── Type-level old/new matching (moved out of diff_types.py, PR #608) ──────
-#
-# Generalized (PR #608 follow-up) over any entity kind that has the same
-# bare-``name`` / optional-``qualified_name`` split — ``RecordType`` was the
-# original motivating case, ``EnumType`` shares the identical ambiguity
-# (two distinct enums sharing a bare leaf name in different namespaces) and
-# the identical fix, so both are expressed as one generic implementation
-# via the ``_QualifiedNamed`` structural protocol rather than duplicating
-# ``TypeMap`` per entity kind.
+# ── Type-level old/new matching (moved out of diff_types.py, PR #608) ── Generalized (PR #608 follow-up) over any entity kind that has the same bare-``name`` / optional-``qualified_name`` split — ``RecordType`` was the original motivating case, ``EnumType`` shares the identical ambiguity (two distinct enums sharing a bare leaf name in different namespaces) and the identical fix, so both are expressed as one generic implementation via the ``_QualifiedNamed`` structural protocol rather than duplicating ``TypeMap`` per entity kind.
 
 
 class _QualifiedNamed(Protocol):
@@ -533,6 +525,41 @@ def fact_same_producer_qualified(
     )
 
 
+def depth_aware_bare_name(qualified: str) -> str:
+    """The innermost, fully-unqualified leaf of a ``::``-qualified name.
+
+    Splits only on a depth-zero ``"::"`` (tracking ``<``/``>`` nesting), so
+    a template argument's own qualification is never mistaken for a
+    namespace boundary -- ``rsplit("::", 1)[-1]`` on
+    ``"Wrapper<dep::Tag>"`` wrongly extracts ``"Tag>"`` instead of the
+    whole (unqualified, since it has no depth-zero ``"::"``) name itself
+    (Codex review, fresh evidence: found in both this module's own
+    ``record_canonical_names`` and ``diff_filtering._enum_canonical_names``,
+    each scanning a fully-qualified DWARF key for its bare leaf).
+
+    A small, local duplicate of ``type_reachability_spelling._bare_type_name``
+    rather than an import of it: that module imports ``diff_cxx_rules``,
+    which imports this one, so importing it here (even lazily -- the
+    ``import-cycle-growth`` gate tracks every ``from .x import y``
+    regardless of nesting) would add a real cycle edge back into this
+    module.
+    """
+    depth = 0
+    last_split = 0
+    i, n = 0, len(qualified)
+    while i < n:
+        ch = qualified[i]
+        if ch == "<":
+            depth += 1
+        elif ch == ">":
+            depth -= 1
+        elif ch == ":" and depth == 0 and i + 1 < n and qualified[i + 1] == ":":
+            last_split = i + 2
+            i += 1
+        i += 1
+    return qualified[last_split:]
+
+
 def record_canonical_names(snap: AbiSnapshot | None) -> dict[str, str]:
     """Bare/qualified record-type name -> canonical (qualified-if-known)
     spelling, mirroring ``diff_filtering._enum_canonical_names`` exactly
@@ -589,8 +616,9 @@ def record_canonical_names(snap: AbiSnapshot | None) -> dict[str, str]:
             by_bare.setdefault(t.name, set()).add(None)
     dwarf = getattr(snap, "dwarf", None)
     for key in getattr(dwarf, "structs", None) or ():
-        if "::" in key:
-            by_bare.setdefault(key.rsplit("::", 1)[-1], set()).add(key)
+        bare = depth_aware_bare_name(key)
+        if bare != key:
+            by_bare.setdefault(bare, set()).add(key)
         else:
             by_bare.setdefault(key, set()).add(None)
     for bare, qualified_names in by_bare.items():
@@ -654,11 +682,7 @@ def canonicalize_record_symbol(
     return f"{canonical_parent}{suffix}" if suffix is not None else canonical_parent
 
 
-# Synthesized placeholder names for anonymous/unnamed aggregate member types,
-# which differ across DWARF / castxml / PDB readers (``<unnamed-tag>``,
-# ``<unnamed-type-u>``, ``<anonymous union>``, ``<unnamed struct at …>``, …).
-# The aggregate *kind* (when the placeholder names one) is captured so a real
-# union→struct change is preserved while the unstable identifier suffix is not.
+# Synthesized placeholder names for anonymous/unnamed aggregate member types, which differ across DWARF / castxml / PDB readers (``<unnamed-tag>``, ``<unnamed-type-u>``, ``<anonymous union>``, ``<unnamed struct at …>``, …). The aggregate *kind* (when the placeholder names one) is captured so a real union→struct change is preserved while the unstable identifier suffix is not.
 _ANON_TYPE_RE = re.compile(
     r"<\s*(?:unnamed|anonymous)(?:\s+(union|struct|class|enum)\b)?", re.IGNORECASE
 )
@@ -701,16 +725,7 @@ def _normalize_type_name(name: str) -> str:
     lead_kind = lead.group(1) if lead else None
     if lead:
         s = s[lead.end() :].strip()
-    # Anonymous/unnamed member types have no stable *name* across DWARF / castxml
-    # / PDB extraction — the same anonymous union can be spelled "<unnamed-tag>"
-    # by one reader and "Parent::<unnamed-type-u>" by another (observed on the
-    # Windows SDK _TP_CALLBACK_ENVIRON_V3::u between two MSVC builds). Collapse
-    # those placeholders to a token keyed on the aggregate *kind* — taken from
-    # the placeholder itself ("<anonymous union>") or the leading tag ("union
-    # <anonymous>") — so the unstable identifier suffix no longer drives a false
-    # positive while a genuine kind change (anonymous union → anonymous struct)
-    # is still reported. Size drift remains caught by the separate byte_size
-    # comparison.
+    # Anonymous/unnamed member types have no stable *name* across DWARF / castxml / PDB extraction — the same anonymous union can be spelled "<unnamed-tag>" by one reader and "Parent::<unnamed-type-u>" by another (observed on the Windows SDK _TP_CALLBACK_ENVIRON_V3::u between two MSVC builds). Collapse those placeholders to a token keyed on the aggregate *kind* — taken from the placeholder itself ("<anonymous union>") or the leading tag ("union <anonymous>") — so the unstable identifier suffix no longer drives a false positive while a genuine kind change (anonymous union → anonymous struct) is still reported. Size drift remains caught by the separate byte_size comparison.
     anon = _ANON_TYPE_RE.search(s)
     if anon is not None:
         kind = anon.group(1) or lead_kind
@@ -733,10 +748,7 @@ _DWARF_BYTE_VALUE_KINDS = frozenset(
     }
 )
 
-# Kinds whose old_value/new_value hold a C/C++ type spelling rather than a
-# byte/bit count -- compared via _normalize_type_name (already built for
-# exactly this DWARF<->castxml spelling gap) rather than raw string equality,
-# so "struct Foo *" and "Foo *" aren't treated as disagreeing transitions.
+# Kinds whose old_value/new_value hold a C/C++ type spelling rather than a byte/bit count -- compared via _normalize_type_name (already built for exactly this DWARF<->castxml spelling gap) rather than raw string equality, so "struct Foo *" and "Foo *" aren't treated as disagreeing transitions.
 _TYPE_SPELLING_VALUE_KINDS = frozenset(
     {
         ChangeKind.STRUCT_FIELD_TYPE_CHANGED,
