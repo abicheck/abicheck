@@ -947,3 +947,74 @@ class TestNotApplicableIsNotAGap:
         assert ledger.missing_families(
             ["binary", "vtables", "graph", "never-declared"]
         ) == ("graph", "never-declared")
+
+
+class TestAnAgreeingOverrideDoesNotContradictItsFallback:
+    """Codex review: the upgrade guard was broader than the argument for it.
+
+    `for_entity` substitutes `NOT_COLLECTED` for a `NOT_APPLICABLE` fallback on
+    an undeclared family, to stop an override manufacturing availability
+    nobody declared. Applied unconditionally, it also rewrote an override that
+    *agreed*: a `NOT_APPLICABLE` fallback with a `NOT_APPLICABLE` override
+    resolved to `NOT_COLLECTED`, so `for_family` said "nothing here to be
+    missing" while `for_entity` reported a gap for the same explicit status.
+
+    Same conflation `missing_families` had, reached from the other side.
+    """
+
+    @staticmethod
+    def _ledger() -> AvailabilityLedger:
+        return AvailabilityLedger(
+            unknown_family_default=FactAvailability(FactStatus.NOT_APPLICABLE)
+        )
+
+    def test_a_matching_not_applicable_override_is_preserved(self) -> None:
+        ledger = self._ledger()
+        ledger.override("vtables", "E1", FactAvailability(FactStatus.NOT_APPLICABLE))
+
+        assert ledger.for_entity("vtables", "E1").status is FactStatus.NOT_APPLICABLE
+
+    def test_the_two_accessors_agree_about_the_same_explicit_status(self) -> None:
+        """The invariant that actually broke, stated directly."""
+        ledger = self._ledger()
+        ledger.override("vtables", "E1", FactAvailability(FactStatus.NOT_APPLICABLE))
+
+        assert (
+            ledger.for_entity("vtables", "E1").status
+            == ledger.for_family("vtables").status
+        )
+
+    @pytest.mark.parametrize("status", [FactStatus.PRESENT, FactStatus.PARTIAL])
+    def test_the_upgrade_is_still_blocked(self, status: FactStatus) -> None:
+        """The guard's actual purpose must survive narrowing its condition."""
+        ledger = self._ledger()
+        ledger.override("vtables", "E1", FactAvailability(status))
+
+        resolved = ledger.for_entity("vtables", "E1")
+        assert not resolved.comparable
+        assert resolved.status is FactStatus.NOT_COLLECTED
+
+    @pytest.mark.parametrize("status", _GAP_STATUSES)
+    def test_a_worse_override_still_wins_on_its_own(self, status: FactStatus) -> None:
+        """`narrowed` already blocks these; the substitution must not reshape them.
+
+        `FAILED` is the case with teeth: an earlier round of this module lost a
+        failure's diagnostics by substituting a bare `NOT_COLLECTED`, so a
+        parse error must still arrive as a parse error.
+        """
+        ledger = self._ledger()
+        ledger.override(
+            "vtables", "E1", FactAvailability(status, diagnostics=("boom",))
+        )
+
+        resolved = ledger.for_entity("vtables", "E1")
+        assert not resolved.comparable
+        assert "boom" in resolved.diagnostics
+
+    def test_a_declared_family_is_unaffected(self) -> None:
+        """The guard only ever applied to undeclared families; keep it that way."""
+        ledger = AvailabilityLedger()
+        ledger.declare("vtables", FactAvailability(FactStatus.NOT_APPLICABLE))
+        ledger.override("vtables", "E1", FactAvailability(FactStatus.NOT_APPLICABLE))
+
+        assert ledger.for_entity("vtables", "E1").status is FactStatus.NOT_APPLICABLE

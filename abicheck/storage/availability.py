@@ -394,9 +394,21 @@ class AvailabilityLedger:
         upgrade path, letting an override manufacture availability for a
         family nobody declared.
 
+        The substitution is conditioned on the override actually being an
+        upgrade — ``override.comparable`` — because it is only upgrades the
+        guard exists to block. Applying it unconditionally made an override
+        that *agrees* with the fallback contradict it: a ``NOT_APPLICABLE``
+        fallback with a ``NOT_APPLICABLE`` override resolved to
+        ``NOT_COLLECTED``, so :meth:`for_family` said "nothing here to be
+        missing" while :meth:`for_entity` reported a gap for the same
+        explicit status (Codex review). That is the same conflation
+        :meth:`missing_families` had, reached from the other side, and this
+        function's own reasoning below already ruled it out — the guard was
+        broader than the argument for it.
+
         ``NOT_COLLECTED``, ``UNSUPPORTED`` and ``FAILED`` need no special
-        case: each already ranks *worse* than ``PRESENT``, so ``narrowed``
-        blocks the upgrade on its own. A first version of this guard replaced
+        case for the same reason: each already ranks *worse* than
+        ``PRESENT``, so ``narrowed`` blocks the upgrade on its own. A first version of this guard replaced
         the base with a bare ``NOT_COLLECTED`` for every undeclared family,
         which blocked the upgrade but also discarded the fallback's own
         status, producer and diagnostics — a ``FAILED`` fallback carrying a
@@ -415,7 +427,11 @@ class AvailabilityLedger:
         if override is None:
             return self.for_family(family)
         base = self.for_family(family)
-        if family not in self.families and base.status is FactStatus.NOT_APPLICABLE:
+        if (
+            family not in self.families
+            and base.status is FactStatus.NOT_APPLICABLE
+            and override.comparable
+        ):
             base = replace(base, status=FactStatus.NOT_COLLECTED)
         return base.narrowed(override)
 
