@@ -1646,6 +1646,11 @@ def _dump_elf(
         **_ast_compile_provenance(list(ast_result.provenance_headers), gcc_options, gcc_option_tokens, sysroot, ast_toolchain=ast_result.ast_toolchain, lang=lang),
     )
     _populate_elf_visibility(snapshot)
+    # Must run before any snapshot.index()/type_by_name() call: renames
+    # RecordType.name for a castxml/clang closure marker, which a name-keyed
+    # index would otherwise cache under the pre-renumbering spelling. See
+    # AbiSnapshot.renumber_anonymous_closure_identities's own docstring.
+    snapshot.renumber_anonymous_closure_identities()
     return snapshot
 
 
@@ -1792,7 +1797,7 @@ def _dump_macho(
     )
 
     _dylib_mtime, _dylib_mtime_epoch = _safe_mtime(dylib_path)
-    return AbiSnapshot(
+    _macho_snapshot = AbiSnapshot(
         library=dylib_path.name,
         version=version,
         source_path=str(dylib_path.resolve()),
@@ -1820,6 +1825,10 @@ def _dump_macho(
         language_profile=profile_hint,
         **_ast_compile_provenance(headers, gcc_options, gcc_option_tokens, sysroot, ast_toolchain=_parser_ast_toolchain(parser), lang=lang),
     )
+    # See AbiSnapshot.renumber_anonymous_closure_identities's own docstring:
+    # must run before any index()/type_by_name() call on this snapshot.
+    _macho_snapshot.renumber_anonymous_closure_identities()
+    return _macho_snapshot
 
 
 def _dump_pe(
@@ -1915,7 +1924,7 @@ def _dump_pe(
     )
 
     _dll_mtime, _dll_mtime_epoch = _safe_mtime(dll_path)
-    return AbiSnapshot(
+    _pe_snapshot = AbiSnapshot(
         library=dll_path.name,
         version=version,
         source_path=str(dll_path.resolve()),
@@ -1943,6 +1952,10 @@ def _dump_pe(
         language_profile=profile_hint,
         **_ast_compile_provenance(headers, gcc_options, gcc_option_tokens, sysroot, ast_toolchain=_parser_ast_toolchain(parser), lang=lang),
     )
+    # See AbiSnapshot.renumber_anonymous_closure_identities's own docstring:
+    # must run before any index()/type_by_name() call on this snapshot.
+    _pe_snapshot.renumber_anonymous_closure_identities()
+    return _pe_snapshot
 
 
 # ---------------------------------------------------------------------------

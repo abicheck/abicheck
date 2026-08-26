@@ -1,0 +1,186 @@
+# Copyright 2026 Nikolay Petrov
+# SPDX-License-Identifier: Apache-2.0
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""A closure's identity must not embed its source ``:line:col``.
+
+Reported (real oneTBB 2021.13.0 -> 2022.3.0 comparison, AGENTS.md's
+"Lambda-closure churn" entry, item 2): an unrelated edit anywhere earlier in
+a header shifts every lambda declared below it to a new line/column. Since
+:func:`~abicheck.name_classification.strip_anonymous_type_location` keeps
+``:<line>:<col>`` as the only discriminator between two distinct lambdas in
+one header, an unchanged closure-parameterized type/function then compares
+as removed-plus-added purely from that line drift -- three separate noise
+classes in one real report: a spurious ``type_removed``/``type_added`` pair,
+a paired ``func_removed``/``func_added`` on every ctor/dtor/method of that
+instantiation (via castxml's synthetic ctor/dtor keys, which embed the same
+owner spelling), and a ``declaration_renamed`` RISK finding whose entire
+content is the line-number text.
+
+:meth:`AbiSnapshot.renumber_anonymous_closure_identities` fixes this by
+replacing the line:col discriminator with a stable ordinal -- "the Nth
+lambda of this marker kind declared in this header" -- computed once per
+snapshot. As long as an edit doesn't reorder or add/remove same-header,
+same-kind lambdas relative to each other (true for every reported case,
+which is unrelated line drift), both sides of a comparison assign the
+identical ordinal to the identical closure.
+"""
+
+from __future__ import annotations
+
+from abicheck.checker import compare
+from abicheck.checker_policy import ChangeKind
+from abicheck.model import AbiSnapshot, Function, Param, RecordType, Visibility
+from abicheck.name_classification import (
+    apply_anonymous_type_ordinals,
+    collect_anonymous_type_ordinals,
+    strip_anonymous_type_location,
+)
+
+
+def _closure(header: str, line: int, col: int) -> str:
+    return strip_anonymous_type_location(f"(lambda at /src/x/{header}:{line}:{col})")
+
+
+class TestOrdinalsAreStableAcrossLineDrift:
+    def test_two_lambdas_keep_their_relative_order(self) -> None:
+        old_names = [
+            f"raii_guard<{_closure('task_group.h', 522, 26)}>",
+            f"raii_guard<{_closure('task_group.h', 520, 18)}>",
+        ]
+        new_names = [
+            f"raii_guard<{_closure('task_group.h', 539, 26)}>",
+            f"raii_guard<{_closure('task_group.h', 528, 18)}>",
+        ]
+        old_ordinals = collect_anonymous_type_ordinals(old_names)
+        new_ordinals = collect_anonymous_type_ordinals(new_names)
+        old_final = [apply_anonymous_type_ordinals(n, old_ordinals) for n in old_names]
+        new_final = [apply_anonymous_type_ordinals(n, new_ordinals) for n in new_names]
+        assert old_final == new_final
+
+    def test_different_headers_never_collide(self) -> None:
+        names = [
+            f"raii_guard<{_closure('a.h', 4, 3)}>",
+            f"raii_guard<{_closure('b.h', 4, 3)}>",
+        ]
+        ordinals = collect_anonymous_type_ordinals(names)
+        rewritten = [apply_anonymous_type_ordinals(n, ordinals) for n in names]
+        assert rewritten[0] != rewritten[1]
+
+    def test_a_marker_absent_from_the_ordinal_map_is_left_untouched(self) -> None:
+        name = f"raii_guard<{_closure('a.h', 4, 3)}>"
+        assert apply_anonymous_type_ordinals(name, {}) == name
+
+    def test_quoted_ntt_string_looking_like_a_marker_is_not_rewritten(self) -> None:
+        quoted = 'Tag<"(lambda:a.h:1:2)">'
+        ordinals = collect_anonymous_type_ordinals([quoted])
+        assert ordinals == {}
+        assert apply_anonymous_type_ordinals(quoted, {("(lambda", "a.h", 1, 2): 1}) == quoted
+
+
+def _record(name: str, qualified: str | None = None) -> RecordType:
+    return RecordType(name=name, kind="class", qualified_name=qualified, size_bits=8)
+
+
+class TestSnapshotRenumbering:
+    def _snapshot(self, version: str, line1: int, line2: int) -> AbiSnapshot:
+        owner1 = f"tbb::detail::d1::raii_guard<{_closure('task_group.h', line1, 26)}>"
+        owner2 = f"tbb::detail::d1::raii_guard<{_closure('task_group.h', line2, 18)}>"
+        types = [
+            _record(owner1.rsplit("::", 1)[-1], qualified=owner1),
+            _record(owner2.rsplit("::", 1)[-1], qualified=owner2),
+        ]
+        ctor = Function(
+            name="raii_guard::raii_guard",
+            mangled=f"__abicheck_ctor__{owner1}()",
+            return_type="void",
+            visibility=Visibility.PUBLIC,
+            params=[Param(name="p", type=f"{owner1} &&")],
+        )
+        return AbiSnapshot(
+            library="libtbb.so", version=version, types=types, functions=[ctor]
+        )
+
+    def test_renumbering_makes_an_unrelated_line_shift_a_no_op(self) -> None:
+        old = self._snapshot("2021.13.0", 522, 520)
+        new = self._snapshot("2022.3.0", 539, 528)
+
+        old.renumber_anonymous_closure_identities()
+        new.renumber_anonymous_closure_identities()
+
+        assert old.types[0].qualified_name == new.types[0].qualified_name
+        assert old.types[1].qualified_name == new.types[1].qualified_name
+        assert old.functions[0].mangled == new.functions[0].mangled
+        assert old.functions[0].params[0].type == new.functions[0].params[0].type
+
+    def test_without_renumbering_the_line_shift_is_visible(self) -> None:
+        # Sanity check that the fixture actually reproduces the bug absent
+        # the fix, so the assertions above are testing something real.
+        old = self._snapshot("2021.13.0", 522, 520)
+        new = self._snapshot("2022.3.0", 539, 528)
+        assert old.types[0].qualified_name != new.types[0].qualified_name
+        assert old.functions[0].mangled != new.functions[0].mangled
+
+    def test_compare_reports_no_findings_for_pure_line_drift(self) -> None:
+        """End-to-end: renumbering both sides before compare() eliminates the
+        func_removed/func_added pair and the type-identity churn a plain
+        line-number identity would otherwise report."""
+        old = self._snapshot("2021.13.0", 522, 520)
+        new = self._snapshot("2022.3.0", 539, 528)
+        old.renumber_anonymous_closure_identities()
+        new.renumber_anonymous_closure_identities()
+
+        result = compare(old, new)
+        noisy_kinds = {
+            ChangeKind.FUNC_REMOVED,
+            ChangeKind.FUNC_ADDED,
+            ChangeKind.TYPE_REMOVED,
+            ChangeKind.TYPE_ADDED,
+        }
+        assert not ({c.kind for c in result.changes} & noisy_kinds)
+
+    def test_compare_without_renumbering_reports_the_reported_noise(self) -> None:
+        old = self._snapshot("2021.13.0", 522, 520)
+        new = self._snapshot("2022.3.0", 539, 528)
+        result = compare(old, new)
+        kinds = {c.kind for c in result.changes}
+        assert ChangeKind.FUNC_REMOVED in kinds
+        assert ChangeKind.FUNC_ADDED in kinds
+
+    def test_renumbering_is_idempotent(self) -> None:
+        snap = self._snapshot("2021.13.0", 522, 520)
+        snap.renumber_anonymous_closure_identities()
+        once = (snap.types[0].qualified_name, snap.functions[0].mangled)
+        snap.renumber_anonymous_closure_identities()
+        twice = (snap.types[0].qualified_name, snap.functions[0].mangled)
+        assert once == twice
+
+    def test_a_snapshot_with_no_closures_is_untouched(self) -> None:
+        snap = AbiSnapshot(
+            library="libplain.so",
+            version="1.0",
+            types=[_record("Widget", qualified="ns::Widget")],
+            functions=[
+                Function(
+                    name="Widget::Widget",
+                    mangled="_ZN2ns6WidgetC1Ev",
+                    return_type="void",
+                )
+            ],
+        )
+        before_type = snap.types[0].qualified_name
+        before_func = snap.functions[0].mangled
+        snap.renumber_anonymous_closure_identities()
+        assert snap.types[0].qualified_name == before_type
+        assert snap.functions[0].mangled == before_func

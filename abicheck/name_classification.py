@@ -47,7 +47,7 @@ checks and is left as a follow-up.
 from __future__ import annotations
 
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Iterable, Mapping
 from typing import ClassVar
 
 __all__ = [
@@ -71,6 +71,10 @@ __all__ = [
     "canonicalize_type_name",
     "cv_qualifiers_only_differ",
     "STDLIB_TYPE_NAMESPACE_PREFIXES",
+    "strip_anonymous_type_location",
+    "contains_anonymous_type_marker",
+    "collect_anonymous_type_ordinals",
+    "apply_anonymous_type_ordinals",
 ]
 
 # This module has no intra-package imports on purpose: it sits at the bottom of
@@ -782,6 +786,123 @@ def strip_anonymous_type_location(name: str) -> str:
         return f"{marker}:{_declaring_header_discriminator(path)}{coords}"
 
     return _ANON_TYPE_LOCATION_PATH_ONLY_RE.sub(_replace, name)
+
+
+# ---------------------------------------------------------------------------
+# Ordinal (not line:col) closure identity — AGENTS.md "Lambda-closure churn"
+# entry, item 2 of the oneTBB report: an unrelated edit *anywhere earlier* in
+# a header shifts every lambda declared below it to a new line, and
+# :func:`strip_anonymous_type_location`'s own ``:<line>:<col>`` discriminator
+# (kept specifically so two DIFFERENT lambdas in the same header don't
+# collide onto one identity) then makes an otherwise-unchanged closure
+# compare as a different type between old and new snapshots. GCC/DWARF
+# already avoid this by numbering a closure ordinally within its enclosing
+# scope (``{lambda(...)#1}``) rather than by source coordinates; the two
+# functions below apply the same idea to the castxml/clang spelling, once a
+# whole snapshot's worth of names is available to compute stable ordinals
+# from.
+# ---------------------------------------------------------------------------
+
+#: Matches the already-normalized marker :func:`strip_anonymous_type_location`
+#: produces (``"(lambda:foo.h:4:37)"``, ``"(unnamed struct:foo.h:56:5)"``) --
+#: NOT the raw ``at <path>:<line>:<col>`` form that function itself consumes.
+_ANON_TYPE_ORDINAL_RE = re.compile(
+    r"(\((?:lambda|unnamed\s+\w+)):([^:()]+):(\d+):(\d+)(?=\s*\))"
+)
+
+
+def _anon_type_ordinal_matches(name: str) -> list[re.Match[str]]:
+    """Every :data:`_ANON_TYPE_ORDINAL_RE` match in *name*, excluding one
+    that falls inside a quoted literal -- mirroring
+    :func:`strip_anonymous_type_location`'s own quote handling (see
+    :func:`_quoted_spans`) for the identical reason: a C++20 fixed-string
+    NTTP argument can spell location-shaped text without it being a real
+    marker.
+    """
+    if "(" not in name:
+        return []
+    quoted_spans = _quoted_spans(name)
+    return [
+        match
+        for match in _ANON_TYPE_ORDINAL_RE.finditer(name)
+        if not any(start <= match.start() < end for start, end in quoted_spans)
+    ]
+
+
+def collect_anonymous_type_ordinals(
+    names: Iterable[str],
+) -> dict[tuple[str, str, int, int], int]:
+    """Assign a stable ordinal to every distinct anonymous/lambda-closure
+    declaration referenced across *names* (typically every string field of
+    one :class:`~abicheck.model.AbiSnapshot`), grouped by marker kind
+    (``"(lambda"``, ``"(unnamed struct"``, ...) and declaring header
+    basename, ordered by source position (``:line:col``).
+
+    Mirroring the compiler's own convention for this exact problem (GCC/
+    DWARF number a closure ``{lambda(...)#1}`` per enclosing scope, not by
+    source coordinates) would need scope information that is no longer
+    available once castxml/clang have already flattened the closure into a
+    type-name string. The practically-equivalent approximation used here is
+    "the Nth lambda (of this marker kind) declared in this header, by
+    source position": for the reported failure mode -- an unrelated edit
+    shifts a lambda's line without reordering it relative to the OTHER
+    same-kind lambdas in its own header -- this assigns the identical
+    ordinal on both sides of a comparison, since the count and relative
+    order of those lambdas is unchanged. It is computed fresh per snapshot
+    (never shared across old/new), which is exactly what makes it stable
+    for that case and not a claim of being a fully general closure
+    identity -- see :func:`strip_anonymous_type_location`'s own "Known,
+    accepted limitation" note, which this function narrows but does not
+    eliminate (a lambda genuinely inserted/removed earlier in the same
+    header still shifts every later ordinal, the same way it would shift
+    every later ``#N`` in a real compiler's own numbering).
+
+    Returns a mapping from ``(marker, header_basename, line, col)`` to a
+    1-based ordinal, ready for :func:`apply_anonymous_type_ordinals`.
+    """
+    coordinates: dict[tuple[str, str], set[tuple[int, int]]] = {}
+    for name in names:
+        for match in _anon_type_ordinal_matches(name):
+            marker, header, line, col = match.groups()
+            coordinates.setdefault((marker, header), set()).add((int(line), int(col)))
+
+    ordinals: dict[tuple[str, str, int, int], int] = {}
+    for (marker, header), coords in coordinates.items():
+        for ordinal, (line, col) in enumerate(sorted(coords), start=1):
+            ordinals[(marker, header, line, col)] = ordinal
+    return ordinals
+
+
+def apply_anonymous_type_ordinals(
+    name: str, ordinals: Mapping[tuple[str, str, int, int], int]
+) -> str:
+    """Rewrite every already-normalized anonymous/lambda marker in *name*
+    (see :func:`strip_anonymous_type_location`) from its checkout-content
+    ``:<line>:<col>`` discriminator to the stable ``#<ordinal>`` computed by
+    :func:`collect_anonymous_type_ordinals` -- e.g.
+    ``"raii_guard<(lambda:task_group.h:522:26)>"`` becomes
+    ``"raii_guard<(lambda:task_group.h#3)>"``.
+
+    A marker whose coordinates are absent from *ordinals* (should not occur
+    when *ordinals* was built from a superset of *name*'s own strings, but
+    kept as a safe no-op fallback rather than raising) is left completely
+    untouched, matching :func:`strip_anonymous_type_location`'s own
+    "never fabricate, degrade to the original spelling" discipline.
+    """
+    if "(" not in name:
+        return name
+    quoted_spans = _quoted_spans(name)
+
+    def _replace(match: re.Match[str]) -> str:
+        if any(start <= match.start() < end for start, end in quoted_spans):
+            return match.group(0)
+        marker, header, line, col = match.groups()
+        ordinal = ordinals.get((marker, header, int(line), int(col)))
+        if ordinal is None:
+            return match.group(0)
+        return f"{marker}:{header}#{ordinal}"
+
+    return _ANON_TYPE_ORDINAL_RE.sub(_replace, name)
 
 
 def canonicalize_type_name(name: str) -> str:
