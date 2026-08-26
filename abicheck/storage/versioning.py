@@ -49,6 +49,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from types import MappingProxyType
 from typing import Any
 
 from .guards import instance_of as _instance_of
@@ -148,6 +149,11 @@ def _stated_text(raw: object) -> str:
     return raw if isinstance(raw, str) else ""
 
 
+def _frozen_sections(raw: object) -> Mapping[str, int]:
+    """:func:`_stated_sections`, wrapped so the stored field cannot be mutated."""
+    return MappingProxyType(_stated_sections(raw))
+
+
 def _stated_sections(raw: object) -> dict[str, int]:
     """The section-version mapping, normalized identically at both doors.
 
@@ -200,9 +206,18 @@ def _stated_sections(raw: object) -> dict[str, int]:
     """
     if not isinstance(raw, Mapping):
         return {}
-    return dict(
-        sorted((k, _stated_count(v)) for k, v in raw.items() if isinstance(k, str))
+    stated = sorted(
+        (key, _stated_count(value))
+        for key, value in raw.items()
+        if isinstance(key, str)
     )
+    # A zero count is `_stated_count`'s own "unstated", and an entry stating
+    # nothing is dropped rather than written as `0` — otherwise
+    # `{"layout": "bad"}` reserialized as `{"layout": 0}` and took a
+    # different digest from a document that states no section version at all,
+    # though neither states one (Codex review). The scalar axes already omit
+    # an unstated value; this is the same rule on the field that is a mapping.
+    return {key: count for key, count in stated if count}
 
 
 @dataclass(frozen=True)
@@ -277,7 +292,15 @@ class StorageVersions:
     package_format_version: int = PACKAGE_FORMAT_VERSION
     #: Per-section field layout. Keyed by section kind, since sections evolve
     #: independently — that independence is the whole point of D8's split.
-    section_schema_versions: dict[str, int] = field(default_factory=dict)
+    #: Read-only: a frozen record must not expose a mutable field. The
+    #: normalization in `__post_init__` was bypassable by
+    #: `versions.section_schema_versions["x"] = "bad"`, which left the object
+    #: serializing like a normalized twin while comparing unequal to it
+    #: (Codex review) — the non-canonical in-memory state that normalization
+    #: exists to remove, reintroduced through the one field whose value is a
+    #: container. The proxy wraps a dict built inside `_stated_sections`, so
+    #: no caller holds a reference to what it wraps.
+    section_schema_versions: Mapping[str, int] = field(default_factory=dict)
     normalization_recipe: str = ""
     producer: ProducerIdentity = field(default_factory=ProducerIdentity)
     extractor_generation: int = 0
@@ -318,7 +341,7 @@ class StorageVersions:
         for field_name, normalize in (
             ("package_format_version", _stated_version),
             ("comparison_contract_version", _stated_version),
-            ("section_schema_versions", _stated_sections),
+            ("section_schema_versions", _frozen_sections),
             ("normalization_recipe", _stated_text),
             ("extractor_generation", _stated_count),
             ("resolver_generation", _stated_count),

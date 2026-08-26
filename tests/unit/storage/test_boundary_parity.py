@@ -987,3 +987,73 @@ class TestTheStateIsCanonicalNotJustTheDocument:
         assert not check_reader_compatibility(
             StorageVersions(package_format_version="x")
         ).readable
+
+
+class TestTheSectionMappingIsFrozenAndDropsUnstatedEntries:
+    """A frozen record must not expose a mutable field, and `0` means unstated.
+
+    Normalizing in `__post_init__` closed the constructor; the one field whose
+    value is a *container* stayed mutable through it, so
+    `versions.section_schema_versions["x"] = "bad"` bypassed every normalizer
+    and left the object serializing like a normalized twin while comparing
+    unequal to it (Codex review). Same defect as the round before, reached
+    past the fix for it.
+
+    Separately, a zero count is `_stated_count`'s own "unstated", and the
+    entry was still written: `{"layout": "bad"}` reserialized as
+    `{"layout": 0}` and took a different digest from a document stating no
+    section version at all, though neither states one. The scalar axes
+    already omit an unstated value.
+    """
+
+    def test_the_field_cannot_be_mutated(self) -> None:
+        versions = StorageVersions(section_schema_versions={"entities": 1})
+
+        with pytest.raises(TypeError):
+            versions.section_schema_versions["x"] = "bad"  # type: ignore[index]
+
+    def test_the_caller_s_own_mapping_cannot_reach_the_state(self) -> None:
+        """Freezing the field is not enough if it wraps the caller's dict."""
+        supplied = {"entities": 1}
+        versions = StorageVersions(section_schema_versions=supplied)
+
+        supplied["entities"] = 99
+        supplied["extra"] = 5
+
+        assert dict(versions.section_schema_versions) == {"entities": 1}
+
+    @pytest.mark.parametrize("value", ["bad", 0, -1, 1.5, None, [], True])
+    def test_an_entry_stating_nothing_is_dropped(self, value: Any) -> None:
+        emitted = StorageVersions(section_schema_versions={"layout": value}).to_dict()
+
+        assert "section_schema_versions" not in emitted
+
+    @pytest.mark.parametrize("value", ["bad", 0, -1, 1.5, None])
+    def test_it_addresses_the_same_as_stating_nothing(self, value: Any) -> None:
+        """The consequence, not just the shape of the document."""
+        assert semantic_digest(
+            StorageVersions(section_schema_versions={"layout": value}).to_dict()
+        ) == semantic_digest(StorageVersions().to_dict())
+
+    def test_a_usable_entry_beside_an_unusable_one_survives(self) -> None:
+        """Dropping the unstated entry must not drop its neighbour."""
+        versions = StorageVersions(
+            section_schema_versions={"entities": 3, "layout": "bad"}
+        )
+
+        assert versions.to_dict()["section_schema_versions"] == {"entities": 3}
+
+    def test_a_real_mapping_still_round_trips(self) -> None:
+        versions = StorageVersions(section_schema_versions={"entities": 3, "attrs": 1})
+
+        assert dict(versions.section_schema_versions) == {"attrs": 1, "entities": 3}
+        assert StorageVersions.from_dict(versions.to_dict()) == versions
+        assert versions == StorageVersions(
+            section_schema_versions={"attrs": 1, "entities": 3}
+        )
+
+    def test_the_document_carries_a_plain_dict(self) -> None:
+        """`to_dict` is what a serializer consumes; it must not hand out a proxy."""
+        emitted = StorageVersions(section_schema_versions={"entities": 3}).to_dict()
+
+        assert type(emitted["section_schema_versions"]) is dict
