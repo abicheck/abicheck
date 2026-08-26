@@ -42,7 +42,7 @@ from .model import AbiSnapshot
 if TYPE_CHECKING:
     from .pack_application import PackApplication
     from .package import PackageExtractor
-    from .severity import SeverityConfig
+    from .workflows.gate import SeverityConfig
 
 
 _RELEASE_VERDICT_ORDER: dict[str, int] = {
@@ -711,7 +711,7 @@ def _resolve_release_severity_config(
         )
     ):
         return None
-    from .severity import resolve_severity_config
+    from .workflows.gate import resolve_severity_config
 
     return resolve_severity_config(
         severity_preset,
@@ -758,7 +758,7 @@ def _compute_release_severity_exit_code(
     if resolved_config is None:
         return None
 
-    from .severity import compute_exit_code
+    from .workflows.gate import compute_exit_code
 
     worst = 0
     for entry in library_results:
@@ -804,7 +804,7 @@ def _fold_release_global_severity(
     if config is None:
         return base_code
 
-    from .severity import compute_exit_code
+    from .workflows.gate import compute_exit_code
 
     worst = base_code
     if bundle_result is not None and bundle_result.bundle_findings:
@@ -891,7 +891,7 @@ def _exit_compare_release(
     if worst_verdict == "ERROR":
         sys.exit(max(4, contract_coverage_exit_contribution))
     from .checker_policy import Verdict
-    from .severity import legacy_exit_code
+    from .workflows.gate import legacy_exit_code
 
     code = (
         legacy_exit_code(Verdict[worst_verdict])

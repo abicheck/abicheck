@@ -41,7 +41,6 @@ Mapping rules:
 from __future__ import annotations
 
 import hashlib
-import io
 import xml.etree.ElementTree as ET
 from typing import TYPE_CHECKING, cast
 
@@ -1113,12 +1112,10 @@ def to_junit_xml_multi(
 
 
 def _to_xml_string(root: ET.Element) -> str:
-    """Serialize an ElementTree element to an XML string with declaration."""
-    ET.indent(root)
-    tree = ET.ElementTree(root)
-    buf = io.BytesIO()
-    tree.write(buf, encoding="UTF-8", xml_declaration=True)
-    return buf.getvalue().decode("UTF-8")
+    """Serialize a JUnit element tree to XML (via ``report.render_xml``)."""
+    from .report.render_xml import render_element_as_xml
+
+    return render_element_as_xml(root)
 
 
 def to_junit_xml_not_comparable(

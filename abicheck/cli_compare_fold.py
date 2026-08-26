@@ -528,7 +528,7 @@ class _ScopedFold:
             )
             root_cause_entries.append((key, root_display, entry))
         for label in missing_labels:
-            from .finding_identity import (
+            from .workflows.findings import (
                 missing_contract_finding,
                 report_canonical_finding_id,
                 report_finding_id,

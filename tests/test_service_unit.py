@@ -2212,13 +2212,13 @@ class TestCompareRequestAdr055Evidence:
         def _fake_embed(snap, **kwargs):
             embed_calls.append(kwargs)
 
-        monkeypatch.setattr("abicheck.cli_buildsource.embed_build_source", _fake_embed)
+        monkeypatch.setattr("abicheck.buildsource.embed.embed_build_source", _fake_embed)
         # The real diffing/pack-loading (prepare_embedded_build_source) is
         # exercised by the CLI-path tests already; here we're only asserting
         # that run_compare_request wires sources/collect_mode into
         # embed_build_source, so stub the diff step to a no-op.
         monkeypatch.setattr(
-            "abicheck.cli_buildsource.prepare_embedded_build_source",
+            "abicheck.buildsource.evidence_report.prepare_embedded_build_source",
             lambda *a, **k: (None, [], {}, []),
         )
 
@@ -2237,7 +2237,7 @@ class TestCompareRequestAdr055Evidence:
 
         embed_calls: list[dict] = []
         monkeypatch.setattr(
-            "abicheck.cli_buildsource.embed_build_source",
+            "abicheck.buildsource.embed.embed_build_source",
             lambda snap, **kwargs: embed_calls.append(kwargs),
         )
 
@@ -2263,7 +2263,7 @@ class TestCompareRequestAdr055Evidence:
         src_dir.mkdir()
 
         monkeypatch.setattr(
-            "abicheck.cli_buildsource.embed_build_source", lambda snap, **kwargs: None
+            "abicheck.buildsource.embed.embed_build_source", lambda snap, **kwargs: None
         )
         sentinel_change = Change(
             kind=ChangeKind.FUNC_REMOVED,
@@ -2271,7 +2271,7 @@ class TestCompareRequestAdr055Evidence:
             description="source-only ABI break injected by test",
         )
         monkeypatch.setattr(
-            "abicheck.cli_buildsource.prepare_embedded_build_source",
+            "abicheck.buildsource.evidence_report.prepare_embedded_build_source",
             lambda *a, **k: ([sentinel_change], [], {}, [sentinel_change]),
         )
 
@@ -2307,7 +2307,7 @@ class TestCompareRequestAdr055Evidence:
         src_dir.mkdir()
 
         monkeypatch.setattr(
-            "abicheck.cli_buildsource.embed_build_source", lambda snap, **kwargs: None
+            "abicheck.buildsource.embed.embed_build_source", lambda snap, **kwargs: None
         )
         captured_args = {}
 
@@ -2316,7 +2316,7 @@ class TestCompareRequestAdr055Evidence:
             return extra_changes, [], {}, []
 
         monkeypatch.setattr(
-            "abicheck.cli_buildsource.prepare_embedded_build_source", _fake_prepare
+            "abicheck.buildsource.evidence_report.prepare_embedded_build_source", _fake_prepare
         )
 
         request = CompareRequest(
@@ -2339,11 +2339,11 @@ class TestCompareRequestAdr055Evidence:
 
         embed_calls: list[dict] = []
         monkeypatch.setattr(
-            "abicheck.cli_buildsource.embed_build_source",
+            "abicheck.buildsource.embed.embed_build_source",
             lambda snap, **kwargs: embed_calls.append(kwargs),
         )
         monkeypatch.setattr(
-            "abicheck.cli_buildsource.prepare_embedded_build_source",
+            "abicheck.buildsource.evidence_report.prepare_embedded_build_source",
             lambda *a, **k: (None, [], {}, []),
         )
 
@@ -2373,11 +2373,11 @@ class TestCompareRequestAdr055Evidence:
 
         embed_calls: list[dict] = []
         monkeypatch.setattr(
-            "abicheck.cli_buildsource.embed_build_source",
+            "abicheck.buildsource.embed.embed_build_source",
             lambda snap, **kwargs: embed_calls.append(kwargs),
         )
         monkeypatch.setattr(
-            "abicheck.cli_buildsource.prepare_embedded_build_source",
+            "abicheck.buildsource.evidence_report.prepare_embedded_build_source",
             lambda *a, **k: (None, [], {}, []),
         )
 
@@ -2434,11 +2434,11 @@ class TestCompareRequestAdr055Evidence:
 
         embed_calls: list[dict] = []
         monkeypatch.setattr(
-            "abicheck.cli_buildsource.embed_build_source",
+            "abicheck.buildsource.embed.embed_build_source",
             lambda snap, **kwargs: embed_calls.append(kwargs),
         )
         monkeypatch.setattr(
-            "abicheck.cli_buildsource.prepare_embedded_build_source",
+            "abicheck.buildsource.evidence_report.prepare_embedded_build_source",
             lambda *a, **k: (None, [], {}, []),
         )
 
@@ -2479,11 +2479,11 @@ class TestCompareRequestAdr055Evidence:
 
         embed_calls: list[dict] = []
         monkeypatch.setattr(
-            "abicheck.cli_buildsource.embed_build_source",
+            "abicheck.buildsource.embed.embed_build_source",
             lambda snap, **kwargs: embed_calls.append(kwargs),
         )
         monkeypatch.setattr(
-            "abicheck.cli_buildsource.prepare_embedded_build_source",
+            "abicheck.buildsource.evidence_report.prepare_embedded_build_source",
             lambda *a, **k: (None, [], {}, []),
         )
 
@@ -2522,11 +2522,11 @@ class TestCompareRequestAdr055Evidence:
 
         embed_calls: list[dict] = []
         monkeypatch.setattr(
-            "abicheck.cli_buildsource.embed_build_source",
+            "abicheck.buildsource.embed.embed_build_source",
             lambda snap, **kwargs: embed_calls.append(kwargs),
         )
         monkeypatch.setattr(
-            "abicheck.cli_buildsource.prepare_embedded_build_source",
+            "abicheck.buildsource.evidence_report.prepare_embedded_build_source",
             lambda *a, **k: (None, [], {}, []),
         )
 
@@ -2589,16 +2589,14 @@ class TestCompareRequestAdr055Evidence:
         new_p = self._make_snap_file(tmp_path, "libtest", "2.0")
         pack_dir = tmp_path / "pack"
         pack_dir.mkdir()
+        # Real manifest, not a patched predicate: is_pack_dir only reads it.
+        (pack_dir / "manifest.json").write_text('{"build_source_pack_version": 1}')
 
         monkeypatch.setattr(
-            "abicheck.buildsource.inline.is_pack_dir",
-            lambda p: p == pack_dir,
+            "abicheck.buildsource.embed.embed_build_source", lambda snap, **kwargs: None
         )
         monkeypatch.setattr(
-            "abicheck.cli_buildsource.embed_build_source", lambda snap, **kwargs: None
-        )
-        monkeypatch.setattr(
-            "abicheck.cli_buildsource.prepare_embedded_build_source",
+            "abicheck.buildsource.evidence_report.prepare_embedded_build_source",
             lambda *a, **k: (None, [], {}, []),
         )
 
@@ -2621,10 +2619,10 @@ class TestCompareRequestAdr055Evidence:
         build_dir.mkdir()
 
         monkeypatch.setattr(
-            "abicheck.cli_buildsource.embed_build_source", lambda snap, **kwargs: None
+            "abicheck.buildsource.embed.embed_build_source", lambda snap, **kwargs: None
         )
         monkeypatch.setattr(
-            "abicheck.cli_buildsource.prepare_embedded_build_source",
+            "abicheck.buildsource.evidence_report.prepare_embedded_build_source",
             lambda *a, **k: (None, [], {}, []),
         )
 
@@ -2650,10 +2648,10 @@ class TestCompareRequestAdr055Evidence:
         src_dir.mkdir()
 
         monkeypatch.setattr(
-            "abicheck.cli_buildsource.embed_build_source", lambda snap, **kwargs: None
+            "abicheck.buildsource.embed.embed_build_source", lambda snap, **kwargs: None
         )
         monkeypatch.setattr(
-            "abicheck.cli_buildsource.prepare_embedded_build_source",
+            "abicheck.buildsource.evidence_report.prepare_embedded_build_source",
             lambda *a, **k: (None, [], {}, []),
         )
 
@@ -2741,11 +2739,11 @@ class TestCompareRequestAdr055Evidence:
 
         embed_calls: list[dict] = []
         monkeypatch.setattr(
-            "abicheck.cli_buildsource.embed_build_source",
+            "abicheck.buildsource.embed.embed_build_source",
             lambda snap, **kwargs: embed_calls.append(kwargs),
         )
         monkeypatch.setattr(
-            "abicheck.cli_buildsource.prepare_embedded_build_source",
+            "abicheck.buildsource.evidence_report.prepare_embedded_build_source",
             lambda *a, **k: (None, [], {}, []),
         )
 
@@ -2768,7 +2766,7 @@ class TestCompareRequestAdr055Evidence:
         old_p = self._make_snap_file(tmp_path, "libtest", "1.0")
         new_p = self._make_snap_file(tmp_path, "libtest", "2.0")
         monkeypatch.setattr(
-            "abicheck.cli_dump_helpers._gated_source_label", lambda *a, **k: "build"
+            "abicheck.evidence_depth.gated_source_label", lambda *a, **k: "build"
         )
 
         request = CompareRequest(
@@ -2976,7 +2974,7 @@ class TestCompareRequestDepthSatisfaction:
         old_p = self._make_snap_file(tmp_path, "libtest", "1.0")
         new_p = self._make_snap_file(tmp_path, "libtest", "2.0")
         monkeypatch.setattr(
-            "abicheck.cli_dump_helpers._gated_source_label",
+            "abicheck.evidence_depth.gated_source_label",
             lambda *a, **k: "build",
         )
 
@@ -2990,7 +2988,7 @@ class TestCompareRequestDepthSatisfaction:
         old_p = self._make_snap_file(tmp_path, "libtest", "1.0")
         new_p = self._make_snap_file(tmp_path, "libtest", "2.0")
         monkeypatch.setattr(
-            "abicheck.cli_dump_helpers._gated_source_label",
+            "abicheck.evidence_depth.gated_source_label",
             lambda *a, **k: "source",
         )
 
@@ -3010,7 +3008,7 @@ class TestCompareRequestDepthSatisfaction:
             return "source" if snap.version == "1.0" else "binary"
 
         monkeypatch.setattr(
-            "abicheck.cli_dump_helpers._gated_source_label", _by_version
+            "abicheck.evidence_depth.gated_source_label", _by_version
         )
 
         request = CompareRequest(
@@ -3023,7 +3021,7 @@ class TestCompareRequestDepthSatisfaction:
         old_p = self._make_snap_file(tmp_path, "libtest", "1.0")
         new_p = self._make_snap_file(tmp_path, "libtest", "2.0")
         monkeypatch.setattr(
-            "abicheck.cli_dump_helpers._gated_source_label",
+            "abicheck.evidence_depth.gated_source_label",
             lambda *a, **k: "binary",
         )
 
@@ -3037,7 +3035,7 @@ class TestCompareRequestDepthSatisfaction:
         old_p = self._make_snap_file(tmp_path, "libtest", "1.0")
         new_p = self._make_snap_file(tmp_path, "libtest", "2.0")
         monkeypatch.setattr(
-            "abicheck.cli_dump_helpers._gated_source_label",
+            "abicheck.evidence_depth.gated_source_label",
             lambda *a, **k: "binary",
         )
 
@@ -5524,7 +5522,7 @@ class TestComparePipelinePhases:
         checks the wiring itself: rows it produces are attached to the
         ``DiffResult``, and the metrics call still receives the extra changes.
         """
-        from abicheck import cli_buildsource
+        from abicheck.buildsource import evidence_report
         from abicheck.service import classify_compare_pair, resolve_compare_request
 
         rows = [{"layer": "L3", "covered": 1}]
@@ -5536,10 +5534,12 @@ class TestComparePipelinePhases:
         def _fake_attach(result, metrics, extra, **_kwargs):
             attached.append((result, metrics, extra))
 
+        # ADR-061 Phase 3: patch the owner -- these moved to the engine, and
+        # `classify_compare_pair` imports them from there.
         monkeypatch.setattr(
-            cli_buildsource, "prepare_embedded_build_source", _fake_prepare
+            evidence_report, "prepare_embedded_build_source", _fake_prepare
         )
-        monkeypatch.setattr(cli_buildsource, "attach_evidence_metrics", _fake_attach)
+        monkeypatch.setattr(evidence_report, "attach_evidence_metrics", _fake_attach)
 
         old_p = self._snap_file(tmp_path, "libtest", "1.0")
         new_p = self._snap_file(tmp_path, "libtest", "2.0")

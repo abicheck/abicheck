@@ -105,11 +105,12 @@ REQUIRED_FAMILIES: frozenset[str] = frozenset(
     }
 )
 
-#: command name → module basename, for the gate to locate each command's source.
-#: `appcompat` folded into `compare --used-by` (ADR-043) and no longer has its
-#: own registered command.
+#: command name → package-relative module path, for the gate to locate each
+#: command's source. `appcompat` folded into `compare --used-by` (ADR-043) and
+#: no longer has its own registered command. ADR-061 Phase 4 moved `compare`'s
+#: body out of `cli.py`, which is now a registration facade.
 VERDICT_EMITTING_COMMANDS: dict[str, str] = {
-    "compare": "cli.py",
+    "compare": "frontends/cli/commands/compare.py",
 }
 
 #: (command, family) → reason. A deliberate, reviewed omission of a shared

@@ -40,9 +40,15 @@ from .api_types import (
     InputSpec,
     OutputSpec,
 )
+from .binary_utils import (
+    resolve_linker_script_chain as resolve_linker_script_chain,  # noqa: F401 — re-export: frontends layer may not import `extract` directly
+)
 from .checker import compare
 from .checker_types import DiffResult, LibraryMetadata
 from .clang_layout_tool import attach_clang_layout
+from .confidence import (
+    note_if_same_binary_compared as note_if_same_binary_compared,  # noqa: F401 — re-export: `confidence` is unclassified, so frontends must reach it here
+)
 from .dumper_scoping import wrap_run_dump_with_dependency_scope
 from .errors import AbicheckError, SnapshotError, ValidationError
 from .header_utils import (
@@ -270,11 +276,7 @@ def _resolve_raw_typeinfo(path: Path, version: str) -> AbiSnapshot | None:
     if len(head) < 2:
         return None
 
-    # Only detect the little-endian byte order that parse_btf_from_bytes /
-    # parse_ctf_from_bytes actually support: a big-endian-target blob (first
-    # bytes EB 9F / CF F1) would otherwise enter the branch but parse to empty
-    # metadata, silently dropping all type changes. Falling through to the
-    # "cannot detect format" error is the honest outcome for those.
+    # Only detect the little-endian byte order parse_btf_from_bytes/parse_ctf_from_bytes support: a big-endian blob (EB 9F / CF F1) would otherwise enter the branch but parse to empty metadata, silently dropping all type changes -- falling through to "cannot detect format".
     magic_le = int.from_bytes(head, "little")
     data = path.read_bytes()
     try:
@@ -467,10 +469,7 @@ def resolve_input(
             public_include_search_dirs=public_include_search_dirs,
         )
 
-    # Raw kernel type-info blobs (a bare `.BTF` / CTF section extracted with
-    # `bpftool btf dump ... format raw` or `objcopy -O binary --only-section`).
-    # A real kernel carries BTF inside an ELF `.BTF` section, but the bare blob
-    # is a convenient, toolchain-free comparison input.
+    # Raw kernel type-info blobs (a bare `.BTF`/CTF section extracted with `bpftool btf dump ... format raw` or `objcopy -O binary --only-section`) -- a real kernel carries BTF inside an ELF `.BTF` section, the bare blob a convenient toolchain-free input.
     raw_typeinfo = _resolve_raw_typeinfo(path, version)
     if raw_typeinfo is not None:
         return raw_typeinfo
@@ -551,10 +550,9 @@ def resolve_input(
                 "shared library named in its INPUT(...) directive directly."
             )
 
-    # Static / import libraries (`.a`, `.lib`) are member archives, not single
+    # Static/import libraries (`.a`, `.lib`) are member archives, not single
     # linkable images. abicheck does not analyse archives (by design — see
-    # docs/learn/limitations.md); fail with actionable guidance rather than a
-    # generic "unknown format" error.
+    # docs/learn/limitations.md); fail with actionable guidance, not "unknown format".
     from .binary_utils import detect_archive
 
     if detect_archive(path):
@@ -1747,9 +1745,11 @@ __all__ = [
     "estimate_scan",
     "expand_header_inputs",
     "load_suppression_and_policy",
+    "note_if_same_binary_compared",
     "render_output",
     "resolve_compare_request",
     "resolve_input",
+    "resolve_linker_script_chain",
     "run_audit",
     "run_compare",
     "run_compare_request",

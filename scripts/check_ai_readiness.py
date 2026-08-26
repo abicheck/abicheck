@@ -1330,6 +1330,29 @@ IMPORT_CYCLE_ALLOWLIST: frozenset[frozenset[str]] = frozenset(
                 "service_header_graph_attach",
                 "service_input_resolution",
                 "service_scan",
+                # ADR-061 Phase 3 split `service_input_resolution` (already a
+                # member, two entries up) into `workflows.artifact.resolve` and
+                # `workflows.artifact.execute`, leaving the old path as a
+                # delegating facade. `execute` inherits the member's edges
+                # verbatim -- `service`/`service_scan` reached function-locally,
+                # imported back at those modules' tails -- so this is the same
+                # rename-follows-member case the sign-off above already covers,
+                # not a new dependency direction. `resolve` is deliberately
+                # absent: it holds only the decide-half, whose edges are all
+                # outward, so it never closes the loop.
+                "workflows.artifact.execute",
+                # ADR-061 Phase 4 split `cli` (already a member of this SCC,
+                # and the reason it exists -- sibling command modules import
+                # `main` back from it) into a registration facade plus the
+                # three modules below. Same rename-follows-member case as
+                # `workflows.artifact.execute` above: every edge they have is
+                # an edge `cli` already had, moved rather than added, and the
+                # loop still closes only through the tail-of-module
+                # registration imports it always closed through. `cli` itself
+                # stays a member via its own `{"cli", "cli_X"}` entries above.
+                "frontends.cli.commands.compare",
+                "frontends.cli.commands.dump",
+                "frontends.cli.runtime",
             }
         ),
         # TYPE_CHECKING-only typing cycle (no runtime import): AbiSnapshot
@@ -2200,7 +2223,7 @@ CLI_CONTRACT_ALLOWLIST: frozenset[str] = frozenset(
         # Native ELF CLI dump (P0 item 2): calls `dumper.dump()` directly
         # rather than through `service_dump_pipeline.run_dump_request` —
         # tracked as Phase 1 item 1 of the convergence plan.
-        "abicheck/cli_dump_helpers.py:1422:19:dumper.dump",
+        "abicheck/cli_dump_helpers.py:1302:19:dumper.dump",
         # Standalone application-compatibility (P0 item 6): dumps both
         # sides directly rather than through any of the other paths.
         "abicheck/appcompat.py:1604:19:dumper.dump",
@@ -2208,7 +2231,7 @@ CLI_CONTRACT_ALLOWLIST: frozenset[str] = frozenset(
         # Scan baseline resolution (P0 item 4's baseline half): calls
         # `service.resolve_input()` directly rather than through
         # `service_input_resolution.resolve_side_snapshot`.
-        "abicheck/cli_scan_baseline.py:1100:19:service.resolve_input",
+        "abicheck/cli_scan_baseline.py:1089:19:service.resolve_input",
         # ABICC compatibility wrapper (P1 "ABICC compatibility is a parallel
         # frontend and engine path"): its own parallel engine path calls
         # both `dumper.dump()` and `checker.compare()` directly.
@@ -2558,7 +2581,9 @@ def _iter_cli_contract_sources() -> Iterable[Path]:
 #: `appcompat` folded into `compare --used-by` (ADR-043) and no longer has its
 #: own registered command.
 _VERDICT_CMD_MODULES: dict[str, str] = {
-    "cli.py": "compare",
+    # ADR-061 Phase 4 moved `compare`'s body out of `cli.py`, which is now a
+    # registration facade. The check follows the command, not the old home.
+    "frontends/cli/commands/compare.py": "compare",
 }
 
 #: decorator callables every verdict-emitting command must compose (ADR-037 D3).
