@@ -34,7 +34,11 @@ from abicheck.bundle_manifest import InstantiationManifest, ManifestEntry
 from abicheck.elf_metadata import ElfImport, ElfMetadata, ElfSymbol
 from abicheck.errors import SnapshotError
 from abicheck.model import AbiSnapshot
-from abicheck.serialization import load_bundle_facts, save_bundle_facts
+from abicheck.serialization import (
+    load_bundle_facts,
+    save_bundle_facts,
+    snapshot_to_dict,
+)
 
 
 def _meta(
@@ -858,6 +862,28 @@ class TestBundleFactsArchiveFormat:
             save_bundle_facts(facts, out, format="archive")
         assert not out.exists()
 
+    def test_a_single_oversized_string_is_rejected_before_iterencode_runs(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Codex review, fresh evidence: `iterencode()` yields one whole
+        escaped string as a single chunk, so the chunk-by-chunk length
+        check the previous test covers can't reject a manifest containing
+        one string value alone larger than the cap before that one
+        allocation already happened. This high-level preflight must
+        pre-check every string leaf directly first."""
+        import abicheck.storage.bundle_archive as bundle_archive_module
+
+        monkeypatch.setattr(bundle_archive_module, "DEFAULT_MAX_MANIFEST_BYTES", 200)
+        facts = BundleFacts(
+            per_library_snapshots=_per_library_snapshots(_old_metadata()),
+            filesystem_aliases={"libcore.so": (("x" * 400),)},
+        )
+        out = tmp_path / "single-oversized-string.bundlefacts.archive.zip"
+
+        with pytest.raises(SnapshotError, match="alone exceeding the 200 byte"):
+            save_bundle_facts(facts, out, format="archive")
+        assert not out.exists()
+
     def test_load_caps_each_blob_read_by_the_remaining_aggregate_allowance(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -991,6 +1017,85 @@ class TestBundleFactsArchiveFormat:
 
         with pytest.raises(ValueError, match="manifest_blob"):
             load_bundle_facts(out, format="archive")
+
+    def test_manifest_blob_sharing_a_library_hash_is_charged_for_its_own_materialization(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Codex review, fresh evidence: when `manifest_blob` shares a
+        content hash with an already-fetched `library_blobs` entry,
+        `_cached_blob()` correctly charges the raw bytes only once (a
+        cache hit) -- but `json.loads()`/`manifest_from_dict()` still
+        build a *second*, independent object graph from them, the same
+        "duplicate materialization" class the per-library-name loop
+        already re-charges for its own deep-copied AbiSnapshot. A large
+        shared blob could otherwise be parsed twice while billed once,
+        bypassing the aggregate decoded-byte budget."""
+        import json as json_module
+
+        import abicheck.bundle_facts as bundle_facts_module
+        from abicheck.storage.bundle_archive import BundleArchiveWriter
+
+        # A payload that parses successfully as *both* an AbiSnapshot (via
+        # snapshot_from_dict) and an InstantiationManifest (via
+        # manifest_from_dict, which only requires a list-valued
+        # "provides") -- real content shared between the two roles this
+        # finding is about, not a synthetic shortcut.
+        snap = AbiSnapshot(library="libcore.so", version="old")
+        payload_dict = snapshot_to_dict(snap)
+        payload_dict["provides"] = []
+        payload = json_module.dumps(payload_dict, indent=2).encode("utf-8")
+
+        out = tmp_path / "shared-manifest-blob.bundlefacts.archive.zip"
+        with BundleArchiveWriter(out) as writer:
+            h = writer.put_blob(payload)
+            writer.write_manifest(
+                {
+                    "library_blobs": {"libcore.so": h},
+                    "manifest_blob": h,
+                    "filesystem_aliases": {},
+                    "library_filenames": {},
+                }
+            )
+
+        # A cap generous enough for exactly one charge of the payload's
+        # own bytes, but not two -- the fix's own regression signal.
+        cap = len(payload) + 100
+        monkeypatch.setattr(bundle_facts_module, "DEFAULT_MAX_BUNDLE_DECODED_BYTES", cap)
+        with pytest.raises(SnapshotError, match="second materialization"):
+            load_bundle_facts(out, format="archive")
+
+    def test_manifest_blob_sharing_a_library_hash_still_loads_under_the_cap(
+        self, tmp_path: Path
+    ) -> None:
+        """Positive control for the finding above: the same shared-hash
+        shape must still load correctly (both the library snapshot and
+        the instantiation manifest populated) when the aggregate cap has
+        room for the second charge."""
+        import json as json_module
+
+        from abicheck.storage.bundle_archive import BundleArchiveWriter
+
+        snap = AbiSnapshot(library="libcore.so", version="old")
+        payload_dict = snapshot_to_dict(snap)
+        payload_dict["provides"] = []
+        payload = json_module.dumps(payload_dict, indent=2).encode("utf-8")
+
+        out = tmp_path / "shared-manifest-blob-ok.bundlefacts.archive.zip"
+        with BundleArchiveWriter(out) as writer:
+            h = writer.put_blob(payload)
+            writer.write_manifest(
+                {
+                    "library_blobs": {"libcore.so": h},
+                    "manifest_blob": h,
+                    "filesystem_aliases": {},
+                    "library_filenames": {},
+                }
+            )
+
+        loaded = load_bundle_facts(out, format="archive")
+        assert loaded.per_library_snapshots["libcore.so"].library == "libcore.so"
+        assert loaded.manifest is not None
+        assert loaded.manifest.entries == ()
 
     def test_load_rejects_a_library_blob_that_decodes_to_a_non_dict(
         self, tmp_path: Path

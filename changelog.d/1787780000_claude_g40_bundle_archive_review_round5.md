@@ -269,3 +269,44 @@
   follow-up to this preflight's own scope. Documented as a known residual
   in `reject_absurd_central_directory()`'s own docstring, alongside the
   growth case it already named; not fixed here.
+
+- **G40 bundle archive: two more Codex review findings, both real, both
+  fixed.** (1) `write_manifest()`'s existing chunk-by-chunk `iterencode()`
+  size check (fixed several rounds ago) still couldn't reject a manifest
+  containing a single oversized *string* value before materializing it --
+  `json.JSONEncoder.iterencode()` yields one whole escaped string as a
+  single chunk (confirmed empirically:
+  `iterencode({'a': 'x'*2_000_000})` yields one 2000002-byte chunk), so
+  the running byte count only ever sees that one large allocation *after*
+  it already happened, defeating the whole point of the incremental check
+  for exactly this input shape. Fixed with a new preflight,
+  `oversized_raw_string()` (`abicheck/storage/bundle_archive_json_guard.py`,
+  a new leaf module split out purely to keep both callers under the
+  ADR-061 800-line production cap), that walks the *raw*, unescaped
+  string leaves before `iterencode()` ever runs: JSON escaping only ever
+  grows a string's encoded length, never shrinks it, so a raw string
+  already longer than the limit is guaranteed to encode past it too, and
+  this can be checked safely without materializing the larger escaped
+  form. Applied identically in both `BundleArchiveWriter.write_manifest()`
+  and `write_bundle_facts_archive()`'s own higher-level preflight (which
+  had the identical gap). (2) `read_bundle_facts_archive()`'s
+  `manifest_blob` fetch only ever charged `_cached_blob()`'s underlying
+  raw bytes against the aggregate decoded-byte budget once, on a hash's
+  first fetch -- correct for the bytes themselves, but the subsequent
+  `json.loads()`/`manifest_from_dict()` call always builds a *fresh*
+  object graph from them regardless of whether the fetch was a cache hit.
+  When `manifest_blob` shares a content hash with an already-fetched
+  `library_blobs` entry (a cache hit), this is the identical "duplicate
+  materialization" the per-library-name loop already re-charges for its
+  own deep-copied `AbiSnapshot` -- uncharged here, a single large shared
+  blob could be parsed twice while billed once, bypassing the aggregate
+  cap. Now charged the same way: a cache hit's own bytes are re-added to
+  the running total (and rejected if that pushes past the cap) before the
+  second `json.loads()`/`manifest_from_dict()` materialization runs.
+
+  `abicheck/storage/bundle_facts_validation.py` (new): the two
+  `_validated_alias_map`/`_validated_filename_map` helpers moved out of
+  `bundle_facts.py` (unmodified except for their now-public names) purely
+  to keep that module under the same 800-line cap after these fixes --
+  `storage/` already owns this repo's persisted-field validators and has
+  no coupling to either caller beyond the two functions themselves.

@@ -23,21 +23,19 @@ A pure, format-only primitive: a zip file with one uncompressed
 module free of any ``model``/``compare``-layer import lets it join
 `storage/` (ADR-061) cleanly, without resolving the pre-existing
 ``bundle_facts.py`` <-> ``checker_types.py`` (``model`` <-> ``compare``)
-coupling a naive "construct a ``BundleFacts`` directly here" design would
-hit.
+coupling a naive "construct a ``BundleFacts`` directly here" design hits.
 
 The ``BundleFacts``-aware glue lives in ``serialization.py``'s
 ``save_bundle_facts``/``load_bundle_facts``, same as the plain-JSON format.
-See the G40 design plan,
-``docs/contribute/plans/g40-content-addressed-bundle-archive.md``.
+See the G40 design plan (``docs/contribute/plans/g40-content-addressed-
+bundle-archive.md``).
 
 Zip, not tar (`.tar.zst`, the original review sketch's own naming): zip
 carries a real end-of-file central directory naming every member's offset
 and independently-compressed length, so `zipfile.ZipFile.open(name)` reads
 and decompresses exactly one member without touching any other. Each
-member's own *payload* is zstd-compressed independently (``ZIP_STORED``)
-rather than zip's own ``ZIP_DEFLATED``, this project's codec of record
-(ADR-059).
+member's own *payload* is zstd-compressed independently (``ZIP_STORED``),
+not zip's own ``ZIP_DEFLATED``, this project's codec of record (ADR-059).
 """
 
 from __future__ import annotations
@@ -147,12 +145,10 @@ def sniff_bundle_archive_format(path: str | Path) -> str:
     which the plain-JSON ``BundleFacts`` path already detects and
     transparently decompresses from those same magic-byte conventions).
     Used by ``serialization.load_bundle_facts``'s ``format="auto"``.
-
     Always ``"json"`` for a non-regular-file source (a FIFO, `/dev/stdin`,
     a socket) without reading anything from it: a real bundle archive can
     never be delivered that way regardless -- `zipfile.ZipFile` seeks to
-    the *end* of its input, which a non-seekable stream can't support.
-    """
+    the *end* of its input, which a non-seekable stream can't support."""
     p = Path(path)
     try:
         st = p.stat()
@@ -215,17 +211,16 @@ def open_regular_file_for_format_sniff(
 #: claiming more is rejected before `zipfile.ZipFile` is constructed, since
 #: `ZipFile.__init__` eagerly parses the whole central directory and builds
 #: one `ZipInfo` per entry. Below 0xFFFF (the non-ZIP64 EOCD sentinel;
-#: "read the real count from ZIP64 instead" is handled below). Public (no
-#: leading underscore): `bundle_facts.py` aligns its own writer-side
-#: member-count budget to this reader-side cap so it can never write an
-#: archive it wouldn't itself agree to reopen.
+#: "read the real count from ZIP64 instead" is handled below). Public:
+#: `bundle_facts.py` aligns its own writer-side member-count budget to
+#: this reader-side cap so it can never write an archive it wouldn't
+#: itself agree to reopen.
 MAX_ARCHIVE_MEMBERS = 20_000
 
-#: Central-directory bomb guard (EOCD/ZIP64 preflight) lives in a sibling
-#: module, `bundle_archive_cd_guard.py`, split out purely to stay under
-#: this module's ADR-061 800-line production cap -- see that module's own
-#: docstring. `reject_absurd_central_directory` is imported below, at each
-#: call site, rather than aliased here.
+#: Central-directory bomb guard (EOCD/ZIP64 preflight) and the manifest
+#: string-size guard each live in a sibling module (`bundle_archive_cd_
+#: guard.py`/`bundle_archive_json_guard.py`), split out purely to stay
+#: under this module's ADR-061 800-line cap -- see their own docstrings.
 
 
 def content_hash(payload: bytes) -> str:
@@ -238,13 +233,13 @@ def content_hash(payload: bytes) -> str:
 
 def _open_unique_temp(parent: Path, prefix: str, suffix: str) -> tuple[int, Path]:
     """Atomically create a unique, exclusively-owned temp file in *parent*,
-    mode ``0o666`` filtered through the umask at creation. Mirrors
-    ``snapshot_io._open_unique_temp`` (not imported, to stay dependency-
-    free), except ``O_RDWR`` not ``O_WRONLY``: `BundleArchiveWriter.
-    close()` reads this same fd back (via `os.dup`) to hash what it
-    actually wrote, without a path-based reopen a hostile actor sharing
-    the directory could redirect. Retries on a name collision rather than
-    a process-wide ``os.umask()`` dance."""
+    mode ``0o666`` filtered through the umask. Mirrors ``snapshot_io.
+    _open_unique_temp`` (not imported, to stay dependency-free), except
+    ``O_RDWR`` not ``O_WRONLY``: `BundleArchiveWriter.close()` reads this
+    same fd back (via `os.dup`) to hash what it actually wrote, without a
+    path-based reopen a hostile actor sharing the directory could
+    redirect. Retries on a name collision rather than a process-wide
+    ``os.umask()`` dance."""
     for _ in range(100):
         candidate = parent / f"{prefix}{secrets.token_hex(8)}{suffix}"
         try:
@@ -392,10 +387,22 @@ class BundleArchiveWriter:
             raise SnapshotError("BundleArchiveWriter.write_manifest() called twice")
         # Enforced here too, not only by write_bundle_facts_archive()'s own
         # preflight -- read_manifest() rejects anything over this limit
-        # unconditionally. Encoded via iterencode() and checked chunk-by-
-        # chunk (Codex review), not `json.dumps()` first -- an oversized
-        # manifest would otherwise be fully materialized in memory before
-        # this check gets a chance to reject it.
+        # unconditionally. A single oversized string is pre-checked first
+        # (see oversized_raw_string()'s own docstring for why), then the
+        # rest is encoded via iterencode() and checked chunk-by-chunk, not
+        # `json.dumps()` first, so an oversized manifest never gets fully
+        # materialized before either check can reject it.
+        from .bundle_archive_json_guard import oversized_raw_string
+
+        oversized = oversized_raw_string(manifest, DEFAULT_MAX_MANIFEST_BYTES)
+        if oversized is not None:
+            raise SnapshotError(
+                f"manifest.json contains a single string value of "
+                f"{len(oversized.encode('utf-8'))} bytes, alone exceeding "
+                f"the {DEFAULT_MAX_MANIFEST_BYTES} byte safety limit "
+                "read_manifest() enforces on load -- refusing to write an "
+                "archive that could not be reopened."
+            )
         chunks: list[str] = []
         encoded_bytes = 0
         for chunk in json.JSONEncoder(indent=2).iterencode(manifest):
@@ -424,15 +431,11 @@ class BundleArchiveWriter:
             # Inside the guarded block: a failure writing the central
             # directory (ENOSPC/EIO) must not leave the temp file uncleaned.
             self._zf.close()
-            # ZipFile.close() only flushes to the OS buffer cache, not
-            # storage -- fsync's the same fd this class already holds,
-            # mirroring snapshot_io._atomic_write_bytes's own two-part
-            # fsync. Best-effort only for "fs doesn't support fsync".
+            # ZipFile.close() only flushes to the OS buffer cache -- fsync's
+            # the same fd, mirroring snapshot_io._atomic_write_bytes.
             self._fsync_tmp_file()
-            # Ownership before mode: chown() clears setuid/setgid, so mode
-            # first would strip 06755 bits right after. Not best-effort --
-            # wrong owner/group revokes access. fchown/fchmod on the fd,
-            # not the path, to dodge a substitution before a reopen.
+            # Ownership before mode: chown() clears setuid/setgid. fchown/
+            # fchmod on the fd, not the path, to dodge a substitution.
             if (
                 self._existing_uid is not None or self._existing_gid is not None
             ) and hasattr(os, "fchown"):
@@ -448,9 +451,8 @@ class BundleArchiveWriter:
             # Re-sync after chown/chmod: the earlier fsync only covers
             # content, not the inode metadata chown/chmod mutate after it.
             self._fsync_tmp_file()
-            # A duplicated fd, not a path reopen -- avoids the same
-            # substitution race. `os.dup` shares the open-file description,
-            # so the write position is unaffected by `os.lseek` below.
+            # A duplicated fd, not a path reopen, avoids the same
+            # substitution race; `os.dup` shares the open-file description.
             self.stored_size_bytes = os.fstat(self._tmp_file.fileno()).st_size
             hasher = hashlib.sha256()
             read_fd = os.dup(self._tmp_file.fileno())
@@ -460,9 +462,9 @@ class BundleArchiveWriter:
                     hasher.update(chunk)
             self.stored_sha256 = hasher.hexdigest()
             self._tmp_file.close()
-            # Known residual gap: `os.replace()` is path-based, so a
+            # Known residual gap: os.replace() is path-based, so a
             # substitution right before this call still publishes attacker
-            # content -- but stored_sha256, computed from the real fd,
+            # content -- but stored_sha256, computed from the real fd, then
             # detects it on verification.
             os.replace(self._tmp_path, self._target)
         except BaseException:
@@ -490,9 +492,9 @@ class BundleArchiveWriter:
     def _fsync_tmp_file(self) -> None:
         """Flush this class's userspace write buffer and fsync the result --
         a bare `os.fsync(fd)` without first flushing `self._tmp_file`'s
-        buffered wrapper (`os.fdopen`) would skip whatever's still sitting
-        in the Python-level buffer. Best-effort only for "no fsync support"
-        (EINVAL/ENOTSUP/EOPNOTSUPP); a real storage failure propagates."""
+        buffered wrapper would skip whatever's still in the Python-level
+        buffer. Best-effort only for "no fsync support"; a real failure
+        propagates."""
         self._tmp_file.flush()
         try:
             os.fsync(self._tmp_file.fileno())
@@ -601,11 +603,10 @@ class BundleArchiveReader:
         except (zipfile.BadZipFile, OSError, NotImplementedError) as exc:
             # Every deliberate failure in this module raises SnapshotError --
             # a truncated or hand-assembled archive must not surface a raw
-            # zipfile traceback instead. sniff_bundle_archive_format() only
-            # checks the first 4 bytes, so a damaged archive routinely
-            # passes that detection and reaches this constructor.
-            # NotImplementedError is ZipFile's own raise for a member's
-            # extract_version exceeding what this zipfile module supports.
+            # zipfile traceback (sniff_bundle_archive_format() only checks
+            # the first 4 bytes, so a damaged archive routinely reaches
+            # here). NotImplementedError is ZipFile's own raise for a
+            # member's extract_version exceeding what this module supports.
             fp.close()
             raise SnapshotError(f"{self._path}: not a valid bundle archive: {exc}") from exc
         except BaseException:
@@ -638,10 +639,9 @@ class BundleArchiveReader:
         deliberately -- a crafted `ZIP_DEFLATED` member could otherwise
         expand to an arbitrary in-memory allocation via ``ZipExtFile.
         read()``. Rejecting deflate alone isn't a size bound though: a
-        still-`ZIP_STORED` member can claim (and contain) an enormous
-        size -- checked via the cheap ``ZipInfo.file_size`` metadata,
-        enforced for real via a bounded, chunked read. Checked here, once,
-        for both `read_manifest` and `read_blob`."""
+        still-`ZIP_STORED` member can claim (and contain) an enormous size
+        -- checked via `ZipInfo.file_size`, enforced via a bounded, chunked
+        read. Checked here, once, for both `read_manifest` and `read_blob`."""
         info = self._zf.getinfo(name)
         if info.compress_type != zipfile.ZIP_STORED:
             raise SnapshotError(

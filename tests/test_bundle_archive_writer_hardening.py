@@ -586,6 +586,67 @@ class TestWriteManifestBoundsEncodingBeforeMaterializing:
             writer.write_manifest({"library_blobs": {}})
 
 
+class TestWriteManifestRejectsASingleOversizedString:
+    """`iterencode()` yields one whole escaped string as a single chunk,
+    so the chunk-by-chunk length check in `TestWriteManifestBoundsEncoding
+    BeforeMaterializing` above can't reject a manifest containing one
+    string value alone larger than the cap before that one allocation
+    already happened. `write_manifest()` now pre-checks every string leaf
+    directly, over the raw (unescaped) manifest, before ever calling
+    `iterencode()` (Codex review, fresh evidence)."""
+
+    def test_a_single_oversized_string_is_rejected_before_iterencode_runs(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(bundle_archive_module, "DEFAULT_MAX_MANIFEST_BYTES", 100)
+        path = tmp_path / "bundle.archive.zip"
+        with BundleArchiveWriter(path) as writer:
+            with pytest.raises(SnapshotError, match="alone exceeding the 100 byte"):
+                writer.write_manifest({"library_blobs": {}, "padding": "x" * 200})
+            writer.write_manifest({"library_blobs": {}})
+
+    def test_iterencode_never_runs_on_a_manifest_with_an_oversized_string(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Regression-proof pin: patches `iterencode` itself to fail the
+        test if `write_manifest()` ever reaches it for this input -- the
+        oversized string must be caught before that call, not merely by
+        one of its early chunks."""
+        monkeypatch.setattr(bundle_archive_module, "DEFAULT_MAX_MANIFEST_BYTES", 100)
+
+        def _fail_if_called(self: object, *a: object, **kw: object) -> object:
+            raise AssertionError(
+                "write_manifest() must not reach iterencode() for a "
+                "manifest containing a single oversized string -- it "
+                "should be rejected by the raw-string pre-check first"
+            )
+
+        monkeypatch.setattr(
+            bundle_archive_module.json.JSONEncoder, "iterencode", _fail_if_called
+        )
+        path = tmp_path / "bundle.archive.zip"
+        with BundleArchiveWriter(path) as writer:
+            with pytest.raises(SnapshotError, match="alone exceeding the 100 byte"):
+                writer.write_manifest({"library_blobs": {}, "padding": "x" * 200})
+            # A fitting manifest must still work once iterencode() is
+            # un-patched -- restored so the writer can finish cleanly.
+            monkeypatch.undo()
+            writer.write_manifest({"library_blobs": {}})
+
+    def test_a_string_just_under_the_cap_still_reaches_iterencode(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The pre-check must not be overzealous -- a string comfortably
+        under the cap should round-trip normally, not be rejected."""
+        monkeypatch.setattr(bundle_archive_module, "DEFAULT_MAX_MANIFEST_BYTES", 1000)
+        path = tmp_path / "bundle.archive.zip"
+        manifest = {"library_blobs": {}, "padding": "x" * 50}
+        with BundleArchiveWriter(path) as writer:
+            writer.write_manifest(manifest)
+        with BundleArchiveReader(path) as reader:
+            assert reader.read_manifest() == manifest
+
+
 class TestReaderClosesTheOwnedFdWhenRewindFails:
     """`from_open_file()` hands the reader ownership of the caller's fd --
     a `seek()` failure while rewinding it must be caught by the same

@@ -49,6 +49,7 @@ from typing import TYPE_CHECKING, Any
 
 from .bundle_manifest import InstantiationManifest
 from .model import AbiSnapshot
+from .storage.bundle_facts_validation import validated_alias_map, validated_filename_map
 
 if TYPE_CHECKING:
     from .bundle_models import BundleDiffResult, BundleSnapshot
@@ -312,9 +313,10 @@ def compare_bundle_from_facts(
 # `scripts/check_ai_readiness.py`'s `import-cycle-growth` check flags this
 # via static AST scanning regardless of whether the import is lazy (caught
 # exactly this the first time this section was drafted, not assumed).
-# `_validated_alias_map`/`_validated_filename_map` are small enough
-# (~15 lines of dict validation each) to duplicate locally below instead of
-# threading two more callables through for the same reason.
+# `validated_alias_map`/`validated_filename_map` (`bundle_facts_
+# validation.py`, a dependency-free leaf) are duplicates of `serialization`'s
+# own private validators for the same reason -- importing that module
+# directly isn't an option here.
 def maybe_write_bundle_facts_archive(
     facts: BundleFacts,
     path: str | Path,
@@ -396,6 +398,7 @@ def write_bundle_facts_archive(
         BundleArchiveWriter,
         content_hash,
     )
+    from .storage.bundle_archive_json_guard import oversized_raw_string
 
     p = Path(path)
     # Everything below is computed -- and every cap the reader will later
@@ -520,6 +523,20 @@ def write_bundle_facts_archive(
     # reject an oversized alias/filename map (Codex review).
     # write_manifest() re-checks identically when writing the member
     # below; checked here too so a reject happens before any blob write.
+    # A single oversized string value needs its own pre-check first
+    # (Codex review, fresh evidence, same reasoning as write_manifest()'s
+    # own docstring): iterencode() yields one whole escaped string as a
+    # single chunk, so the chunk-by-chunk loop below can't reject it
+    # before that one allocation already happened.
+    oversized = oversized_raw_string(container_manifest, DEFAULT_MAX_MANIFEST_BYTES)
+    if oversized is not None:
+        raise SnapshotError(
+            f"{p}: this bundle's manifest.json contains a single string "
+            f"value of {len(oversized.encode('utf-8'))} bytes, alone "
+            f"exceeding the {DEFAULT_MAX_MANIFEST_BYTES} byte safety "
+            "limit read_bundle_facts_archive() enforces on load -- "
+            "refusing to write an archive that could not be reopened."
+        )
     manifest_member_bytes = 0
     for chunk in _json.JSONEncoder(indent=2).iterencode(container_manifest):
         manifest_member_bytes += len(chunk.encode("utf-8"))
@@ -735,9 +752,33 @@ def read_bundle_facts_archive(
                     "bundle archive: 'manifest_blob' must be a content-hash "
                     f"string, got {type(manifest_blob).__name__}"
                 )
-            instantiation_manifest = manifest_from_dict(
-                _json.loads(_cached_blob(manifest_blob))
-            )
+            # _cached_blob() only charges a hash's raw bytes against
+            # total_decoded once, on its first fetch -- correct for the
+            # bytes themselves, but json.loads()+manifest_from_dict() below
+            # always build a *fresh* object graph from them regardless of
+            # whether this call is a cache hit. When manifest_blob shares a
+            # hash with an already-fetched library blob (a cache hit here),
+            # this is exactly the same "duplicate materialization" the
+            # per-library-name loop above already re-charges for its own
+            # deep-copied AbiSnapshot -- uncharged here previously would
+            # have let a single large shared blob be parsed twice while
+            # billed once (Codex review, fresh evidence).
+            was_cached = manifest_blob in blob_cache
+            raw_manifest = _cached_blob(manifest_blob)
+            if was_cached:
+                copy_bytes = len(raw_manifest)
+                if total_decoded + copy_bytes > DEFAULT_MAX_BUNDLE_DECODED_BYTES:
+                    raise SnapshotError(
+                        f"{path}: this bundle archive's total decoded size "
+                        f"exceeds the {DEFAULT_MAX_BUNDLE_DECODED_BYTES} "
+                        "byte safety limit once the instantiation "
+                        "manifest's own second materialization is counted "
+                        "-- refusing to continue loading (possible "
+                        "object-count amplification attack, or a "
+                        "genuinely oversized bundle)."
+                    )
+                total_decoded += copy_bytes
+            instantiation_manifest = manifest_from_dict(_json.loads(raw_manifest))
         return BundleFacts(
             schema_version=bundle_facts_schema_version,
             variant_fingerprint=str(
@@ -745,56 +786,10 @@ def read_bundle_facts_archive(
             ),
             per_library_snapshots=per_library_snapshots,
             manifest=instantiation_manifest,
-            filesystem_aliases=_validated_alias_map(
+            filesystem_aliases=validated_alias_map(
                 manifest.get("filesystem_aliases", {})
             ),
-            library_filenames=_validated_filename_map(
+            library_filenames=validated_filename_map(
                 manifest.get("library_filenames", {})
             ),
         )
-
-
-def _validated_alias_map(raw: object) -> dict[str, tuple[str, ...]]:
-    """Validate and convert a persisted ``filesystem_aliases`` mapping.
-
-    Duplicated from ``serialization._validated_alias_map`` (not imported,
-    see the module-level comment above): rejects a non-mapping container,
-    a non-list value, and a list with a non-string element, rather than
-    silently iterating a stray string's characters into single-letter
-    "aliases"."""
-    if not isinstance(raw, dict):
-        raise ValueError(
-            f"bundle facts: 'filesystem_aliases' must be a mapping, got "
-            f"{type(raw).__name__}"
-        )
-    aliases: dict[str, tuple[str, ...]] = {}
-    for name, values in raw.items():
-        if not isinstance(values, list) or not all(isinstance(v, str) for v in values):
-            raise ValueError(
-                f"bundle facts: 'filesystem_aliases[{name!r}]' must be a list of "
-                f"strings, got {values!r}"
-            )
-        aliases[name] = tuple(values)
-    return aliases
-
-
-def _validated_filename_map(raw: object) -> dict[str, str]:
-    """Validate and convert a persisted ``library_filenames`` mapping.
-
-    Duplicated from ``serialization._validated_filename_map`` (not
-    imported, see the module-level comment above): rejects a non-string
-    value instead of silently coercing it (``str(None)`` -> ``"None"``)."""
-    if not isinstance(raw, dict):
-        raise ValueError(
-            f"bundle facts: 'library_filenames' must be a mapping, got "
-            f"{type(raw).__name__}"
-        )
-    filenames: dict[str, str] = {}
-    for name, filename in raw.items():
-        if not isinstance(filename, str):
-            raise ValueError(
-                f"bundle facts: 'library_filenames[{name!r}]' must be a string, "
-                f"got {filename!r}"
-            )
-        filenames[name] = filename
-    return filenames
