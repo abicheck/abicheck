@@ -84,3 +84,26 @@
   text immediately before it ends in `:<digits>:<digits>`, and otherwise
   treated as ordinary basename text so scanning continues to the real
   terminator.
+- **Seventh follow-up (Codex review): a header basename that is itself a
+  complete, marker-shaped substring (`(lambda:a.h:1:2).hpp`, a real if
+  unusual filename) produced two overlapping matches instead of one.**
+  `_anon_type_ordinal_matches()` scans for every marker *prefix* first and
+  then balances parens from each one independently, so an outer marker
+  containing a nested `"(lambda:"`-shaped basename let both the outer scan
+  and the inner prefix match succeed, and `apply_anonymous_type_ordinals`'s
+  splice-based rewrite then corrupted the string by rewriting both
+  overlapping ranges. The scan now skips any prefix match that falls
+  inside an already-accepted outer match's span, so nested marker-shaped
+  text is left untouched as part of the outer marker's own basename.
+- **Eighth follow-up (Codex review): a basename with an *unmatched
+  opening* paren (`foo(bar.hpp`, legal on POSIX) still fell through to
+  no match at all -- the mirror image of the unmatched-closing-paren case
+  above.** There, depth never returns to 0 by the time the marker's real
+  closing paren is reached, so the depth-tracking scan alone reaches the
+  end of the string without ever finding a depth-0 terminator. The scanner
+  now falls back to a second, depth-blind pass whenever the first one
+  finds nothing: it looks for the first `)` whose immediately preceding
+  text ends in `:<digits>:<digits>`, treating every paren in between as
+  ordinary basename text -- correct precisely because depth tracking
+  already had its chance and failed, meaning the string's parens don't
+  balance within this marker to begin with.

@@ -306,6 +306,22 @@ class _AnonTypeMatch(_NamedTuple):
     col: int
 
 
+def _anon_type_match_from_close_paren(
+    name: str, prefix_match: _re.Match[str], close_index: int
+) -> _AnonTypeMatch:
+    body = name[prefix_match.end() : close_index]
+    tail = _ANON_TYPE_TRAILING_LINE_COL_RE.search(body)
+    assert tail is not None  # caller only invokes this once it has matched
+    return _AnonTypeMatch(
+        start=prefix_match.start(),
+        end=close_index,
+        marker=f"({prefix_match.group(1)}",
+        header=body[: tail.start()],
+        line=int(tail.group(1)),
+        col=int(tail.group(2)),
+    )
+
+
 def _scan_anon_type_marker(
     name: str, prefix_match: _re.Match[str]
 ) -> _AnonTypeMatch | None:
@@ -321,6 +337,17 @@ def _scan_anon_type_marker(
     mistaken for the terminator before the real coordinates are ever
     reached (Codex review, fresh evidence). A depth-0 ``)`` that fails that
     check is treated as ordinary basename text and scanning continues.
+
+    A real basename can just as legally contain an *unmatched* ``(`` of its
+    own (``foo(bar.hpp``, Codex review, fresh evidence) -- there, depth
+    never returns to 0 by the time the marker's real closing paren is
+    reached, so the depth-tracking pass above finds no match at all. When
+    that happens, a second, depth-blind pass looks for the first ``)``
+    whose immediately preceding text ends in ``:<digits>:<digits>``,
+    treating every ``(``/``)`` in between as ordinary basename text rather
+    than a nesting delimiter -- correct precisely because depth tracking
+    already had its chance and failed, meaning the string's parens don't
+    balance within this marker to begin with.
     """
     depth = 0
     i = prefix_match.end()
@@ -332,20 +359,17 @@ def _scan_anon_type_marker(
         elif ch == ")":
             if depth == 0:
                 body = name[prefix_match.end() : i]
-                tail = _ANON_TYPE_TRAILING_LINE_COL_RE.search(body)
-                if tail is None:
-                    i += 1
-                    continue
-                return _AnonTypeMatch(
-                    start=prefix_match.start(),
-                    end=i,
-                    marker=f"({prefix_match.group(1)}",
-                    header=body[: tail.start()],
-                    line=int(tail.group(1)),
-                    col=int(tail.group(2)),
-                )
-            depth -= 1
+                if _ANON_TYPE_TRAILING_LINE_COL_RE.search(body) is not None:
+                    return _anon_type_match_from_close_paren(name, prefix_match, i)
+            else:
+                depth -= 1
         i += 1
+
+    for i in range(prefix_match.end(), length):
+        if name[i] == ")":
+            body = name[prefix_match.end() : i]
+            if _ANON_TYPE_TRAILING_LINE_COL_RE.search(body) is not None:
+                return _anon_type_match_from_close_paren(name, prefix_match, i)
     return None
 
 
@@ -386,12 +410,22 @@ def _anon_type_ordinal_matches(name: str) -> list[_AnonTypeMatch]:
         return []
     quoted_spans = _quoted_spans(name)
     matches: list[_AnonTypeMatch] = []
+    consumed_until = -1
     for prefix in _ANON_TYPE_MARKER_PREFIX_RE.finditer(name):
+        if prefix.start() < consumed_until:
+            # This prefix is itself inside a marker basename an earlier,
+            # outer match already claimed (e.g. the nested
+            # "(lambda:a.h:1:2)" inside "(lambda:(lambda:a.h:1:2).hpp:10:2)")
+            # -- treat it as ordinary basename text rather than a second,
+            # overlapping marker, so apply_anonymous_type_ordinals never
+            # rewrites two overlapping ranges.
+            continue
         if any(start <= prefix.start() < end for start, end in quoted_spans):
             continue
         match = _scan_anon_type_marker(name, prefix)
         if match is not None:
             matches.append(match)
+            consumed_until = match.end
     return matches
 
 

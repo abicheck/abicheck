@@ -208,7 +208,9 @@ class TestPayloadTextIsNeverCorrupted:
         snap = AbiSnapshot(
             library="lib.so",
             version="1.0",
-            types=[replace(_record("Widget", qualified="ns::Widget"), deprecated=message)],
+            types=[
+                replace(_record("Widget", qualified="ns::Widget"), deprecated=message)
+            ],
         )
         renumber_anonymous_closure_identities(snap)
         assert snap.types[0].deprecated == message
@@ -276,9 +278,7 @@ class TestPayloadTextIsNeverCorrupted:
         never a type-name spelling -- the generic dict walk previously
         rewrote its values along with any genuine identity-bearing dict's."""
         value = f"text {_closure('x.h', 10, 2)}"
-        snap = AbiSnapshot(
-            library="lib.so", version="1.0", constants={"MSG": value}
-        )
+        snap = AbiSnapshot(library="lib.so", version="1.0", constants={"MSG": value})
         renumber_anonymous_closure_identities(snap)
         assert snap.constants["MSG"] == value
 
@@ -540,6 +540,90 @@ class TestBasenameWithParensIsStillRenumbered:
         assert ("(lambda", "baz.h", 3, 4) in ordinals
         rewritten = apply_anonymous_type_ordinals(combined, ordinals)
         assert rewritten == "Wrap<(lambda:foo)bar.h#1), (lambda:baz.h#1)>"
+
+
+class TestMarkerLikeTextInsideABasenameIsNotASecondMatch:
+    """Codex review: a legal basename can itself contain a *complete*
+    marker-shaped substring, e.g. ``(lambda:a.h:1:2).hpp`` -- a real,
+    if unusual, filename. Before this fix, the outer scan and an
+    independently-found inner prefix match (found by
+    ``_ANON_TYPE_MARKER_PREFIX_RE.finditer`` re-matching the nested
+    ``"(lambda:"`` text) both produced overlapping ``_AnonTypeMatch``
+    results, and ``apply_anonymous_type_ordinals``'s splice-based rewrite
+    then corrupted the string by rewriting both overlapping ranges."""
+
+    def test_nested_marker_shaped_basename_produces_exactly_one_match(self) -> None:
+        # A legal, if unusual, basename that is itself a complete marker
+        # (already in normalized, post-strip form, as the codex report's
+        # own example is -- exercising _anon_type_ordinal_matches directly
+        # rather than routing through strip_anonymous_type_location, which
+        # only ever normalizes the first "at <path>" occurrence).
+        outer = "(lambda:(lambda:a.h:1:2).hpp:10:2)"
+        ordinals = collect_anonymous_type_ordinals([outer])
+        # Exactly one closure identity was recorded -- the outer marker,
+        # whose declaring-header basename is the whole nested string --
+        # not two overlapping ones.
+        assert len(ordinals) == 1
+        (key,) = ordinals
+        assert key == ("(lambda", "(lambda:a.h:1:2).hpp", 10, 2)
+
+    def test_nested_marker_shaped_basename_rewrites_without_corruption(self) -> None:
+        outer = "(lambda:(lambda:a.h:1:2).hpp:10:2)"
+        rewritten = apply_anonymous_type_ordinals(
+            outer, collect_anonymous_type_ordinals([outer])
+        )
+        # A single, well-formed rewrite of the *outer* marker only -- the
+        # nested marker-shaped basename text is left completely untouched,
+        # never independently rewritten to "...#1)" of its own.
+        assert rewritten == "(lambda:(lambda:a.h:1:2).hpp#1)"
+
+    def test_line_drift_still_collapses_for_a_marker_shaped_basename(self) -> None:
+        old = ["(lambda:(lambda:a.h:1:2).hpp:10:2)"]
+        new = ["(lambda:(lambda:a.h:1:2).hpp:14:2)"]
+        old_final = apply_anonymous_type_ordinals(
+            old[0], collect_anonymous_type_ordinals(old)
+        )
+        new_final = apply_anonymous_type_ordinals(
+            new[0], collect_anonymous_type_ordinals(new)
+        )
+        assert old_final == new_final == "(lambda:(lambda:a.h:1:2).hpp#1)"
+
+
+class TestBasenameWithAnUnmatchedOpeningParenIsStillRenumbered:
+    """Codex review, fresh evidence: a legal basename can contain an
+    UNMATCHED ``(`` of its own (``foo(bar.hpp``, legal on POSIX) -- the
+    mirror image of the already-fixed unmatched-``)`` case. Depth never
+    returns to 0 by the time the marker's real closing paren is reached,
+    so the depth-tracking scan alone finds no match at all and the
+    closure keeps its line:col discriminator, leaving unrelated line
+    drift in such a header still producing the removed/added findings
+    this whole mechanism exists to eliminate."""
+
+    def test_line_drift_in_a_basename_with_an_unmatched_open_paren_still_collapses(
+        self,
+    ) -> None:
+        old = [strip_anonymous_type_location("(lambda at /src/foo(bar.hpp:10:2)")]
+        new = [strip_anonymous_type_location("(lambda at /src/foo(bar.hpp:14:2)")]
+        old_final = apply_anonymous_type_ordinals(
+            old[0], collect_anonymous_type_ordinals(old)
+        )
+        new_final = apply_anonymous_type_ordinals(
+            new[0], collect_anonymous_type_ordinals(new)
+        )
+        assert old_final == new_final == "(lambda:foo(bar.hpp#1)"
+
+    def test_a_second_marker_after_an_unmatched_open_paren_basename_is_not_swallowed(
+        self,
+    ) -> None:
+        combined = (
+            f"Wrap<{strip_anonymous_type_location('(lambda at /src/foo(bar.h:1:2)')}, "
+            f"{strip_anonymous_type_location('(lambda at /src/baz.h:3:4)')}>"
+        )
+        ordinals = collect_anonymous_type_ordinals([combined])
+        assert ("(lambda", "foo(bar.h", 1, 2) in ordinals
+        assert ("(lambda", "baz.h", 3, 4) in ordinals
+        rewritten = apply_anonymous_type_ordinals(combined, ordinals)
+        assert rewritten == "Wrap<(lambda:foo(bar.h#1), (lambda:baz.h#1)>"
 
 
 class TestHybridMergeDefersRenumbering:
