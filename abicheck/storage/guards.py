@@ -358,10 +358,28 @@ def required_field(document: Any, key: str, record: str) -> Any:
     The message names the record as well as the field, since a nested
     document surfaces through its parent's ``from_dict`` and "missing
     ``kind``" alone does not say which entity was short of one.
+
+    Membership is tested *before* subscripting, because ``KeyError`` is not
+    what "absent" means for every mapping. A ``defaultdict`` — a ``Mapping``,
+    so the container guard passes it — runs ``__missing__`` and returns an
+    invented value instead of raising, so ``EntityId.from_dict(defaultdict(
+    lambda: "fabricated", {"kind": "function"}))`` accepted a fabricated
+    ``qualified_name`` and reserialized it as genuine identity, which
+    occurrences would then have deduplicated under (Codex review). Catching
+    ``KeyError`` answers "did the subscript fail", and only ``in`` answers
+    the question actually being asked.
     """
+    if key not in document:
+        raise ValueError(
+            f"{record} is missing required field {key!r}; a stored document "
+            "short of a required field is malformed, not absent"
+        )
     try:
         return document[key]
     except KeyError:
+        # Unreachable for a well-behaved mapping, kept because `in` and
+        # `[]` are two different methods and a container is free to
+        # disagree with itself between them.
         raise ValueError(
             f"{record} is missing required field {key!r}; a stored document "
             "short of a required field is malformed, not absent"

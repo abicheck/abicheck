@@ -13,6 +13,8 @@ package from a broken reader.
 
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 
 from abicheck.storage.availability import AvailabilityLedger, FactAvailability
@@ -804,3 +806,59 @@ class TestOverrideRowsAreCheckedIndividually:
         assert AvailabilityLedger.from_dict(ledger.to_dict()).to_dict() == (
             ledger.to_dict()
         )
+
+
+class TestAFabricatingMappingCannotInventARequiredField:
+    """`KeyError` is not what "absent" means for every mapping.
+
+    A `defaultdict` is a `Mapping`, so the container guard admits it, and
+    then `__missing__` returns an invented value rather than raising — so
+    the field looked present. For an identity document that is the worst
+    available outcome: the fabricated value is not rejected, it is
+    *reserialized as genuine identity*, and occurrences would go on to
+    deduplicate under a key no adapter ever supplied (Codex review).
+
+    Every door is covered rather than the reported one. The guard is shared,
+    so one fix covers them all — but "the shared guard was fixed" and "every
+    caller of it is actually safe" are different claims, and this branch has
+    had the second one falsified after asserting the first.
+    """
+
+    @staticmethod
+    def _fabricating(**present: object) -> Any:
+        from collections import defaultdict
+
+        return defaultdict(lambda: "fabricated", present)
+
+    def test_entity_document(self) -> None:
+        with pytest.raises(ValueError, match="qualified_name"):
+            EntityId.from_dict(self._fabricating(kind="function"))
+
+    def test_occurrence_document(self) -> None:
+        with pytest.raises(ValueError, match="observation"):
+            OccurrenceId.from_dict(
+                self._fabricating(
+                    entity={"kind": "function", "qualified_name": "ns::f"}
+                )
+            )
+
+    def test_identity_conflict_document(self) -> None:
+        with pytest.raises(ValueError, match="reason"):
+            IdentityConflict.from_dict(self._fabricating(occurrences=[]))
+
+    def test_override_document(self) -> None:
+        with pytest.raises(ValueError, match="entity"):
+            AvailabilityLedger.from_dict(
+                {"overrides": [self._fabricating(family="exports")]}
+            )
+
+    def test_a_plain_dict_still_reports_the_same_missing_field(self) -> None:
+        """The control: the ordinary missing-field path is unchanged.
+
+        Membership is now tested before the subscript, so the branch that
+        used to raise is no longer the one that runs — the observable
+        behaviour for a genuinely truncated document must not have moved
+        with it.
+        """
+        with pytest.raises(ValueError, match="missing required field"):
+            EntityId.from_dict({"kind": "function"})
