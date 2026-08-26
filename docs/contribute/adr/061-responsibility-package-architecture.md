@@ -629,12 +629,68 @@ exists; the relevant debt entries shrink or disappear.
 Implementation status: the immutable, JSON-shaped ``ReportDocument`` and its
 pure JSON projection are established, and all native JSON report modes (full,
 stat, leaf, and root-cause) now cross that boundary. The `--stat` one-line
-text summary (`reporter_markdown.to_stat`) now also builds and renders a
+text summary (`reporter_markdown.to_stat`) also builds and renders a
 `ReportDocument` via `report/render_text.py`'s `render_stat_document`, the
-first non-JSON format to do so. Markdown's richer modes (`to_markdown`,
-`to_review_digest`), HTML, SARIF, and JUnit remain explicit follow-up slices;
-this partial status must not be read as the phase acceptance criteria having
-been met.
+first non-JSON format to do so.
+
+**SARIF and JUnit now cross the boundary too.** `sarif.to_sarif_str` projects
+its completed SARIF log through `ReportDocument` + `render_json` — SARIF is
+itself a JSON format, so it needs no format-specific serializer. The ADR-050
+D2 refusal documents cross the same boundary rather than calling `json.dumps`
+on a raw mapping: the JSON one moved to `report/not_comparable.py`, and the
+SARIF one renders `sarif.to_sarif_not_comparable`'s existing mapping through
+`render_mapping_as_json`. That helper, and its XML counterpart
+`render_element_as_xml`, are the one-step "freeze a completed report and
+render it" forms; they exist because the three-step spelling reads as
+ceremony, which is how a caller talks itself back into `json.dumps` and
+silently leaves the boundary — and because the debt-tracked renderers this
+phase touches are on a no-growth rule, so a new wrapper belongs in `report/`
+rather than in `sarif.py`/`junit_report.py`. JUnit needed one new primitive,
+`report/render_xml.py`: a `ReportDocument` stores JSON values only
+— deliberately, so a renderer is never handed a live object graph it could
+mutate — which an `ElementTree` is not, so `element_to_mapping`/
+`element_from_mapping` are its lossless `tag`/`attrib`/`text`/`tail`/
+`children` encoding and `render_xml_document` is the projection.  The split
+follows the phase's own rule about what is a fact and what is formatting:
+the tree's structure and values belong to the document, while indentation and
+the XML declaration belong to the projection. All four JUnit entry points
+(`to_junit_xml`, `to_junit_xml_multi`, `to_junit_xml_not_comparable`, and the
+release fan-out's multi-library suite) route through the one `_to_xml_string`
+chokepoint, so all four moved at once, byte-for-byte identically — `ET.indent`
+now mutates the rebuilt tree rather than the caller's, which is the observable
+half of "a renderer cannot alter its input".
+
+**Not met yet, and this partial status must not be read as the acceptance
+criteria having been met.** Two distinct gaps remain, and they are different
+sizes:
+
+1. *Markdown's richer modes (`to_markdown`, `to_review_digest`) and HTML.*
+   Unlike JSON/SARIF/JUnit, these do not build a structured value and then
+   serialize it — they emit prose directly from a `DiffResult` across
+   ~3,200 combined lines of helpers that read `Change` attributes one at a
+   time. Routing them through a JSON-shaped document is a real rewrite of
+   both modules against their golden output, i.e. its own vertical slice
+   (plausibly one per format), not a follow-on edit to a serialization
+   change.
+2. *Items 4 and 5 — decisions and post-render mutation.* Every renderer
+   still reaches into policy itself: `sarif._severity_gate_properties`,
+   `html_report`'s gate card, and `reporter._build_severity_json` each call
+   `severity.compute_gate_decision`, and `junit_report`/`html_report`/
+   `reporter_markdown` each resolve a per-finding verdict through
+   `effective_verdict_for_change`. These are calls to *the single canonical*
+   resolver rather than drifting reimplementations, so the risk today is
+   ownership rather than disagreement — but D9 says a projection consumes
+   decisions, it does not make them, so closing this needs one
+   decisions-computed-once value carried into document construction and read
+   by every format. Separately, `cli_compare_fold.py`'s
+   `_fold_scoped_compat_into_text`/`_fold_suppression_audit_into_text`/
+   `_fold_use_case_impact_into_text` and `cli_compare_helpers.
+   _fold_evidence_depth_into_json` are exactly the "post-render mutation"
+   item 5 names: they re-parse rendered JSON (or append to rendered
+   Markdown) to add facts the workflow result should have carried in the
+   first place. Both are behavior-visible changes across every format at
+   once, so neither belongs in a slice whose parity argument is
+   byte-identical output.
 
 **The `compare -> policy` blocker this section previously recorded is
 closed**, and how it was re-measured is worth keeping: the earlier note
@@ -715,20 +771,131 @@ behavior change; its four flat call sites (`service_dump_pipeline.py`,
 `service_input_resolution.py`, `cli_dump_helpers.py`, `cli_dump_non_elf.py`)
 now import it from the new location but are themselves unchanged.
 
-Known blocker for the remaining convergence: those four call sites'
-*owning* modules cannot yet move into `workflows/` themselves.
-`service_dump_pipeline.py` and `service_input_resolution.py` both reach into
-`cli_dump_helpers.py` (a `frontends`-destined module, per its `cli_` prefix
-family) for CLI-resolved facts (`_gated_source_label` and similar) — moving
-either service module into `workflows/` while that import stays would
-create a `workflows -> frontends` inversion, the exact same shape of
-dependency-direction problem Phase 2 hit between `compare` and `policy`.
-Resolving it needs that shared logic pulled out to a leaf both sides can
-depend on (mirroring how `contracts.py` itself was extractable only because
-it already had zero first-party dependencies) — a real, scoped migration of
-its own, not a follow-up edit to this vertical slice. Resolve/execute
-(`resolve.py`/`execute.py`, the request-shaped half of this phase's own
-target layout) are unaffected either way and remain unattempted.
+**That blocker is now partly closed, and re-measuring it first changed the
+scope** — the same lesson Phase 2 recorded. The note above described a
+general coupling; the tree held exactly **four** import edges from the two
+service pipelines into `cli_*` modules. But the coupling had leaked much
+further than those four edges, because engine-side code that could not
+import upward kept private copies instead:
+
+- The depth ladder existed **four** times: `buildsource.scan_levels.
+  USER_DEPTHS` plus three independent `_DEPTH_RANK` dicts in
+  `cli_dump_helpers.py`, `analysis_assurance.py`, and
+  `buildsource/check_report.py`. `analysis_assurance.py` additionally carried
+  a hand-copied `evidence_depth_label`, its own comment recording why:
+  "duplicated rather than imported ... avoiding a CLI-layer import from this
+  leaf-ish module."
+- The `abicheck_inputs/` guard `_is_inputs_pack_dir` existed **three** times
+  (`cli_buildsource_helpers.py`, `buildsource/l2_seed.py`,
+  `cli_dump_dry_run_build_query.py`), each copy's docstring explaining that
+  it was a copy and why.
+
+So the blocker was not only an obstacle to moving modules; it was already
+being paid for, in duplication, by modules that had no intention of moving.
+
+Two leaves now own that shared logic, exactly as this phase prescribed:
+
+- `abicheck/evidence_depth.py` (classified `model`, the innermost ring, since
+  one consumer is `extract`-destined and an extract-to-policy edge would be a
+  new inversion) owns `DEPTH_RANK`, `depth_rank`, `weaker_depth`,
+  `layer_payload_empty`, `depth_label_for`, `l4_source_abi_was_attempted` and
+  `gated_source_label`. `DEPTH_RANK` is *derived* from `USER_DEPTHS`, so the
+  ordering has one definition and a new rung cannot leave a copy disagreeing.
+- `abicheck/buildsource/pack_shape.py` owns `is_pack_dir` (moved out of the
+  oversized `inline.py`, which re-exports it), and
+  `buildsource/inputs_pack.py` gained `is_inputs_pack_dir` and
+  `is_any_pack_dir`. The pair is split across two modules deliberately:
+  putting both in `pack_shape.py` closes `inline -> pack_shape ->
+  inputs_pack -> inline`, which `import-cycle-growth` correctly rejects, and
+  which is the very cycle the three private copies existed to dodge.
+
+Every prior spelling remains as a delegating alias, so no caller changed.
+
+**Result: `service_dump_pipeline.py` is now free of CLI imports entirely and
+is classified `workflows` in `architecture/modules.yaml`** — the first
+service pipeline to get a responsibility owner. Three engine-CLI boundary
+allowlist entries are gone (15 -> 12); that gate fails on a stale entry, so
+the closures are proven rather than asserted. Be precise about what the
+classification buys, since the two gates differ: `check_architecture.py`
+enforces dependency *direction* against classified layers (a
+`workflows -> report` import is rejected, and the resulting cycle reported —
+verified by probe), but for a `legacy_paths` module it does **not** flag an
+import of an unclassified module, so the CLI boundary is still held by the
+separate `engine-cli-boundary` gate (also verified by probe).
+
+**`embed_build_source` has since moved**, closing the edge that note
+described. It is now `abicheck/buildsource/embed.py`, and
+`service_input_resolution.py` — free of both `click` and `cli_buildsource` —
+is classified `workflows` alongside `service_dump_pipeline.py`. Of the eight
+helpers the note listed, four were already engine-side in `merge_support.py`;
+the rest moved with it (`buildsource/pack_load.py` for the two pack loaders,
+`buildsource/snapshot_exports.py` for the export set) or had already moved
+(`is_inputs_pack_dir`).
+
+The error contract was the real work, and it is preserved exactly rather than
+tidied. Two classes leave the engine and they mean different things to a CI
+consumer: `ValidationError` for a malformed `.abicheck.yml` (a *usage* error,
+which the CLI renders as `click.UsageError` and `cli.main` remaps to **exit
+64**) and `SnapshotError` for an invalid pack (*operational* — the invocation
+was well-formed, the data was not, so **exit 1**). Collapsing the two would
+tell a CI consumer the invocation was wrong when the data was. The typed
+surface still flattens both onto `SnapshotError`, because that is what its
+callers have always had to catch; widening it would have been a breaking API
+change made in passing.
+
+Seven characterization tests (`tests/test_build_source_embed_errors.py`) were
+written and committed *before* the move and pass unchanged after it, pinning
+both exit codes at the CLI and both error classes at the function boundary.
+Every code was measured against the real CLI, not read off the source. Two
+things that measurement corrected: the typed bad-config path is unreachable
+through `CompareRequest` (`InputSpec` has no `build_config` field) and is
+reachable only via `embed_side_build_source`'s own keyword; and the
+`cannot parse build config <path>:` prefix is added *above*
+`embed_build_source`, so the two boundaries produce different strings.
+
+**That last edge is closed, and the phase's target layout is now real.**
+`prepare_embedded_build_source`/`attach_evidence_metrics`/
+`diff_embedded_build_source` moved to `buildsource/evidence_report.py`, so
+`service_compare_pipeline.py` is the third and final service module with a
+`workflows` owner. The engine module owns no output stream: it renders the
+ADR-028 D7 coverage/capability report as lines and hands them to an optional
+`on_output` sink, replacing a `quiet` flag that was only ever meaningful to a
+caller that had a stream — `run_compare_request` never did, and had to pass
+`quiet=True` forever to suppress writes to a stream it does not own. The error
+contract is preserved rather than tidied: a malformed pack stays
+`SnapshotError` → exit **1** (operational), never the 64 a usage error gets,
+pinned by `tests/test_evidence_report_contract.py`, written before the move.
+
+`service_input_resolution.py` then split along the seam it already had:
+`workflows/artifact/resolve.py` decides a plan without running it,
+`workflows/artifact/execute.py` runs one and reports what it achieved. Three
+of this phase's acceptance criteria are structural properties of that split
+rather than claims about it — extraction happens once per artifact because
+`resolve_side_snapshot` is the single entry point every front end reaches;
+resource lifetimes cover execution because the L2 seed's cleanups drain
+between the header parse and the embed; achieved depth is a result fact on
+`SideResolution`, not a frontend guess. The old module remains a delegating
+facade.
+
+The sharpest criterion — "dry-run renders the same resolved plan normal
+execution consumes" — needed one more change to be true rather than nearly
+true. `--dry-run` already rendered a real `ResolvedDumpRequest`, but the real
+run consumed `dump_cmd`'s own locals, which merely *agreed* with it under a
+parity test. `dump_cmd` now resolves the request once, above the branch, and
+both paths read every field the plan owns off it. Ruff flagging the old locals
+as unused is the evidence there is now one derivation rather than two.
+Hoisting the resolve also fixed a real inconsistency it exposed: a bare `dump`
+and a bare `dump --dry-run` rejected the *same* invalid input with two
+different messages.
+
+**Still open:** the real ELF/PE/Mach-O run still *executes* through
+`perform_elf_dump`/`handle_non_elf_dump` rather than `execute_dump_request`.
+What changed is which object supplies its resolved inputs. That last migration
+needs the ADR-039 collector's CLI-only inputs represented in the typed API and
+`_write_snapshot_output`'s provenance/`--inputs`/depth-gate sequence reordered
+around a resolve-time embed; it is also unverifiable here, since the default
+header backend is castxml and no policy-conformant build is obtainable in this
+environment (a hand-assembled conda-forge 0.6.13 segfaults in `ParseAST`).
 
 Use the pattern already emerging in the typed compare, dump, input-resolution,
 and artifact-plan code:
@@ -760,32 +927,114 @@ dependency-direction fact elsewhere. Its four call sites
 (`cli_options.py`, `cli_scan_helpers.py`, `cli_compare_helpers.py`,
 `cli_compare_release.py`) now import it from the new package.
 
-Known blocker for the rest of this phase, investigated directly rather than
-assumed: `cli.py` (1959 lines) and `service.py` (1763 lines) are nowhere
-near the "under 150 lines" acceptance target, and cannot move toward it yet
-for two independent, structural reasons. First, the option-declaration
-cluster item 1 also names (`cli_options.py` itself, near its own 2000-line
-hard cap, plus `cli_params.py`/`cli_profiles.py`/`cli_options_contract.py`/
-`cli_contract_options.py`/`cli_help.py`) is not leaf-shaped the way
-`secondary_output.py` was — these ~3,800 combined lines import each other
-and are imported by essentially every `cli_*.py` command module, so moving
-the cluster is a high-blast-radius change to Click decorator stacking
-across the whole CLI surface, not an independently-verifiable vertical
-slice; it needs its own pass that first splits the cluster's internal
-dependency graph. Second, and more fundamentally: `service.py`'s
-`resolve_input`/`_run_dump_uncached`/`compare_snapshots` (hundreds of lines
-each) *are* the current dump/compare implementation, not adapters over an
-already-existing workflow object that `cli.py`/`service.py` could be
-rewritten to call instead — moving that logic into `workflows/` is Phase
-3's own job (item 2 above, "make workflows the sole operation owners"), and
-Phase 3 has so far relocated only one dependency-free contract type
-(`ResolvedArtifactPlan`); the real per-artifact resolve/execute pipeline
-does not exist yet (see Phase 3's own status note above and
-`workflows/AGENTS.md`). Thinning `cli.py`/`service.py` ahead of that
-pipeline would mean either a wrapper around the same inline logic
-(achieving nothing toward the acceptance criteria) or a second, duplicate
-implementation with nothing shared to delegate to. Documented in
-`abicheck/frontends/AGENTS.md`.
+**The option-cluster half of the blocker below did not survive
+re-measurement** — the third time in this ADR a recorded blocker has turned
+out to describe a tree that had since moved. The note said the cluster's
+"~3,800 combined lines import each other". They do not: an AST scan of the
+six modules found a **star, not a tangle**. Five of them (`cli_params`,
+`cli_profiles`, `cli_options_contract`, `cli_contract_options`, `cli_help`)
+have **zero** intra-cluster imports; only the `cli_options.py` hub imports
+them. Four of the five have zero first-party imports of any kind, which is
+exactly the criterion `secondary_output.py` was moved on.
+
+Those four moved — 1,249 lines, six call sites:
+
+| was | now |
+|---|---|
+| `cli_profiles.py` | `frontends/cli/options/profiles.py` |
+| `cli_contract_options.py` | `frontends/cli/options/contract.py` |
+| `cli_options_contract.py` | `frontends/cli/options/inventory.py` |
+| `cli_help.py` | `frontends/cli/help.py` |
+
+The two renames are deliberate. `cli_options_contract` (the `cli-contract`
+gate's flag inventory and budget ledger) and `cli_contract_options`
+(ADR-049's contract-evaluation options) are unrelated things whose names
+differed only by word order — precisely the "physical ownership is
+ambiguous" problem in this ADR's own Context. `inventory.py` and
+`contract.py` say which is which.
+
+**`cli.py` is now a registration facade: 1959 lines to 128.** Everything else
+moved into this package — `frontends/cli/commands/dump.py`,
+`frontends/cli/commands/compare.py`, `frontends/cli/runtime.py` (verbosity,
+output, provenance, the exit decision) and `frontends/cli/moved.py` (the
+historical import surface). What remains in `cli.py` is the Click root group,
+its `--version`/SIGTERM wiring, the tail-of-module registration imports, and a
+lazy `__getattr__` that keeps every historical `abicheck.cli` spelling
+resolvable through `importlib.import_module` at *access* time — a runtime
+call, not a static import edge, so the facade never grows a top-level
+dependency on the packages that import back into it.
+
+Getting there meant classifying the whole `cli_*` family as `frontends`, which
+surfaced **47 real direction violations**: the CLI reaching past the engine
+into `policy`, `compare` and `extract`. Those were closed, not suppressed. Each
+now routes through a `workflows` re-export surface, and the largest of them is
+this phase's own item 4 made executable — `workflows/gate.py` is the one place
+a frontend gets its process response, because three orthogonal axes feed one
+exit code (verdict, ADR-049 contract-coverage floor, assurance floor) and a
+frontend importing them separately is free to fold two and forget the third.
+`workflows/extraction.py`, `findings.py` and `scan_config.py` cover the rest;
+`scan_config.py` is an owner rather than an alias, holding the three functions
+`service_scan` previously had to import *upward* for. Those were the last
+`ENGINE_CLI_BOUNDARY_ALLOWLIST` entries of their kind: 15 → 4 across Phases 3
+and 4.
+
+Two consequences are worth recording because they are not obvious. A
+`monkeypatch.setattr` against a name resolved through `cli.__getattr__`
+rebinds nothing the real caller reads, and a re-export surface **binds** its
+names at import time, so patching the original module afterwards does not
+reach a caller coming through the facade. Both are ordinary Python semantics
+rather than anything this design invents, but the indirection makes them easy
+to miss; the test suite was repointed accordingly, and doing so found one
+patch target (`abicheck.cli._detect_binary_format`) that had been inert
+*before* this phase — `_normalize_binary_input` always resolved it through
+`cli_resolve`'s own global.
+
+`abicheck.cli` is deliberately **not** added to `architecture/modules.yaml`'s
+`facades` list. That gate's `facade` rule means something narrower than this
+phase's prose does — only imports, inert assignments and a `TYPE_CHECKING`
+block — so any module declaring a Click root group fails it, `main` being a
+`FunctionDef`. Widening it to admit this file would weaken it for the pure
+re-export modules it was written for, so the 150-line budget is pinned in
+`tests/test_cli_moved_surface.py` instead.
+
+`cli_params.py` (452 lines) stays flat: it imports four unclassified flat
+modules (`policies`, `policy_file`, `suppression`,
+`buildsource.scan_levels`), and `frontends/` is a *migrated* package, so a
+module physically inside it is subject to `unclassified-import`. It moves once
+those owners exist.
+
+**Still open: `service.py` (1763 lines) — and re-measuring changed the reason.**
+The recorded blocker was that `workflows/` had nowhere to put its three large
+functions. Phase 3 has since given all three service pipelines `workflows`
+owners and completed the per-artifact `resolve`/`execute` split, so that
+destination now exists. Moving `service.py` into it was attempted and stopped
+against a *different*, sharper obstacle, which is worth recording precisely so
+the next pass does not re-survey it.
+
+`frontends/` and `workflows/` are migrated packages, so anything physically
+inside them is subject to `unclassified-import`. Thinning `service.py` therefore
+means classifying the 28 flat modules it imports. Doing so surfaces 67
+direction violations, and the load-bearing ones share one root cause:
+**`*_metadata.py` conflate a model dataclass with its parser.** `AbiSnapshot`
+has typed fields of `PeMetadata`/`MachoMetadata`/`DwarfMetadata`/
+`AdvancedDwarfMetadata`, and `serialization.py` names 19 such types — so
+classifying those modules `extract` (which is what their parsers are) makes
+`model -> extract` and `storage -> extract`, both forbidden, for nine modules
+totalling ~6,200 lines. The fix is to split each into its dataclass half
+(`model`) and its parser half (`extract`), which is precisely **Phase 5's
+"parsers and catalogs"** scope, not something to fold into a frontend
+translation.
+
+A second, independent inversion sits alongside it: `checker.py` imports
+`policy_file`/`suppression`/`analysis_assurance`, and `checker_types.py`
+imports `policy_file`/`contract_relevance_types` — `compare -> policy` and
+`model -> policy`, where this ADR's direction is the reverse. That one needs a
+design decision about where a policy-parameterised comparison belongs, not a
+mechanical move.
+
+So Phase 4's `service.py` half is **blocked on Phase 5**, with the dependency
+now stated concretely rather than as "the destination does not exist". The
+`cli.py` half is complete.
 
 1. Move command input translation into `frontends/cli/commands` and reusable
    Click-only option declaration into `frontends/cli/options`.

@@ -94,7 +94,7 @@ from .reporter import to_json
 if TYPE_CHECKING:
     from .compile_context import CompileContext
     from .pack_application import PackApplication
-    from .severity import SeverityConfig
+    from .workflows.gate import SeverityConfig
 
 # ---------------------------------------------------------------------------
 # release-comparison engine helpers
@@ -357,8 +357,8 @@ def _compare_one_library(
             # aggregated with max() into the release-level exit code in
             # _exit_compare_release, the same "raises a clean 0 to 1, never
             # lowers a real 2/4" rule a single-pair `compare` applies.
-            from .contract_coverage_exit import coverage_exit_floor
             from .contract_coverage_ledger import coverage_failures_for_context
+            from .workflows.gate import coverage_exit_floor
 
             entry["contract_coverage_exit_contribution"] = coverage_exit_floor(result)
             # The *count* of failures is independent of the exit floor above
@@ -797,7 +797,7 @@ def _collect_matrix_result(
     pack overriding e.g. ``cxx_standard_floor_raised`` must apply here
     identically, not only to the per-library comparisons.
     """
-    from .cli import _load_probe_matrix_changes
+    from .frontends.cli.runtime import _load_probe_matrix_changes
 
     matrix_changes = _load_probe_matrix_changes(probe_matrix_old, probe_matrix_new)
     if not matrix_changes:
@@ -1008,7 +1008,7 @@ def _release_gating_buckets(
     what blocked the release).
     """
     if severity_config is not None:
-        from .severity import categorize_changes, compute_gate_decision
+        from .workflows.gate import categorize_changes, compute_gate_decision
 
         kind_sets = diff._effective_kind_sets()
         # compute_gate_decision (the single canonical gate computation, also
@@ -1604,7 +1604,7 @@ def compare_release_cmd(
                 # agree with it, instead of also silently resolving None and
                 # falling back to the legacy verdict-based exit (Codex review on
                 # #549).
-                from .severity import PRESET_DEFAULT
+                from .workflows.gate import PRESET_DEFAULT
 
                 severity_config = PRESET_DEFAULT
                 severity_preset = "default"
@@ -1666,7 +1666,7 @@ def compare_release_cmd(
                 def _resolve_stranded_library(old_path: Path) -> AbiSnapshot:
                     from .cli_resolve import _resolve_input
                     from .elf_metadata import parse_elf_metadata
-                    from .header_utils import split_public_header_inputs
+                    from .workflows.extraction import split_public_header_inputs
 
                     old_dbg = (
                         resolve_debug_info(old_path, old_debug_dir)

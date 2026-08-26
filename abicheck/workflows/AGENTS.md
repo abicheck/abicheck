@@ -27,13 +27,66 @@ Aggregation currently exposes
 entry point. `workflows.artifact.contracts.ResolvedArtifactPlan` (ADR-061
 Phase 3) is the shared, dependency-free `contracts.py` half of the dump/scan
 artifact-resolution contract — a session type owning cleanup-thunk lifetime
-across a resolve/execute pipeline; its four flat call sites
-(`service_dump_pipeline.py`, `service_input_resolution.py`,
-`cli_dump_helpers.py`, `cli_dump_non_elf.py`) import it from here rather than
-duplicating it, but stay flat themselves until the larger `service_dump_pipeline.py`/
-`service_input_resolution.py` migration (blocked on their own
-`cli_dump_helpers.py`/frontends coupling — see ADR-061's Phase 3 status note)
-lands.
+across a resolve/execute pipeline.
+
+`workflows.artifact` is now complete as a `Request -> ResolvedPlan -> Result`
+trio (ADR-061 Phase 3): `resolve.py` decides what an extraction will do
+without doing it, and `execute.py` runs that plan and reports what it
+achieved. Keeping "decide" runnable without "do" is what lets `dump --dry-run`
+render the same resolved plan a real run consumes -- a preview computed by a
+second resolver looks authoritative while being connected to nothing, which is
+worse than two implementations kept in sync by hand, because nothing fails
+when they drift. `abicheck/service_input_resolution.py` remains as a
+delegating facade; import the owners.
+
+Three narrow re-export surfaces exist so a frontend can reach an operation
+without importing a ring it may not (`frontends` may import only `model`,
+`workflows`, `report`):
+
+| Module | What a frontend reaches through it |
+|---|---|
+| `gate.py` | The whole process response — verdict, contract-coverage floor, assurance floor (ADR-061 Phase 4 item 4) |
+| `extraction.py` | Input-side operations: header expansion, the L2 seed, the L3→L2 fold, build-source embedding |
+| `findings.py` | Finding identity and the probe matrix |
+| `scan_config.py` | Scan config, risk rules, and the public-provenance rule (owned here, not aliased) |
+
+`gate.py` earns its place rather than laundering an import: three orthogonal
+axes feed one exit code, and a frontend importing them separately is free to
+fold two and forget the third. One consequence of the re-export surfaces is
+worth knowing before writing a test against them — `from ..x import y` **binds**
+`y` at import time, so patching `abicheck.x.y` afterwards does not change what
+a caller reaching it through the facade sees. Patch it where the call
+resolves.
+
+`abicheck/service_dump_pipeline.py` is classified `workflows` via
+`legacy_paths`: it is free of CLI imports and owns `DumpRequest ->
+ResolvedDumpRequest -> DumpResult`, but has not moved into this directory
+yet. Know what that classification enforces, because the two gates differ:
+`check_architecture.py` rejects a forbidden *direction* to a classified layer
+(a `workflows -> report` import fails, and reports the cycle), while the CLI
+boundary for a still-flat module is held by the separate
+`engine-cli-boundary` gate. Both are live; neither is decorative.
+
+`service_input_resolution.py` is classified too, since
+`embed_build_source` moved to `buildsource/embed.py`. Only
+`service_compare_pipeline.py` is left: it still imports
+`prepare_embedded_build_source`/`attach_evidence_metrics` from
+`cli_buildsource`.
+
+When you move an engine operation off the CLI layer, the error types are the
+contract, not an implementation detail. `buildsource/embed.py` raises
+`ValidationError` for a usage error (the CLI renders exit 64) and
+`SnapshotError` for an operational one (exit 1); the CLI adapter translates,
+and this package's Tier-2 surface flattens both onto `SnapshotError` because
+that is what its callers already catch. Pin the codes with characterization
+tests *before* moving — see `tests/test_build_source_embed_errors.py`.
+
+Shared vocabulary those modules used to reach into the CLI layer for now
+lives in leaves any layer may depend on: `abicheck/evidence_depth.py` (the
+depth ladder and what depth an artifact reached) and
+`buildsource/pack_shape.py` + `buildsource/inputs_pack.py` (the pack-shape
+predicates). Prefer them over re-deriving; the previous arrangement produced
+four copies of the depth ladder and three of the inputs-pack guard.
 
 ## Tests
 

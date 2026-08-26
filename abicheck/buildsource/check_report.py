@@ -61,6 +61,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from ..checker_types import validate_check_id, validate_evidence_depth
+from ..evidence_depth import DEPTH_RANK, weaker_depth
 from ..schemas import REPORT_SCHEMA_VERSION, SCAN_SCHEMA_VERSION
 from .baseline_set import ALL_OUTCOMES, ResolveOutcome
 
@@ -167,8 +168,10 @@ def build_check_id(
     return check_id
 
 
-#: Ladder order (shallow -> deep), matching EVIDENCE_DEPTH_VALUES.
-_DEPTH_RANK = {"binary": 0, "headers": 1, "build": 2, "source": 3}
+#: Ladder order (shallow -> deep). Owned by ``evidence_depth.DEPTH_RANK``,
+#: which derives it from ``scan_levels.USER_DEPTHS`` -- this used to be a
+#: fourth independent copy of the same four rungs (ADR-061 Phase 3).
+_DEPTH_RANK = DEPTH_RANK
 
 
 def derive_effective_depth(
@@ -205,7 +208,7 @@ def derive_effective_depth(
         and old_d in _DEPTH_RANK
         and new_d in _DEPTH_RANK
     ):
-        achieved = old_d if _DEPTH_RANK[old_d] <= _DEPTH_RANK[new_d] else new_d
+        achieved = weaker_depth(old_d, new_d)
         source = "compare"
     else:
         level = report.get("level")

@@ -59,17 +59,25 @@ from .cli_dump_protocols import (
 )
 from .dumper import dump
 from .dumper_clang_streaming import suppress_streaming_prune
-from .dumper_scoping import dump_manifest_header_roots as _dump_manifest_header_roots
 from .errors import AbicheckError
+from .evidence_depth import (
+    DEPTH_RANK,
+    depth_label_for,
+    gated_source_label,
+    l4_source_abi_was_attempted,
+)
+from .workflows.artifact import ResolvedArtifactPlan
 
 # `attach_build_context_for_parsed_headers` is called directly below by
 # `perform_elf_dump`, so this static edge to `header_conditionals` (a verified
 # leaf module) is structurally required regardless of re-export strategy --
 # unlike the four names in the lazy `__getattr__` shim further down, which
 # nothing in this module calls itself.
-from .header_conditionals import attach_build_context_for_parsed_headers
-from .header_utils import include_operand_dirs
-from .workflows.artifact import ResolvedArtifactPlan
+from .workflows.extraction import (
+    attach_build_context_for_parsed_headers,
+    dump_manifest_header_roots as _dump_manifest_header_roots,
+    include_operand_dirs,
+)
 
 if TYPE_CHECKING:
     from .buildsource.pack import BuildSourcePack
@@ -154,62 +162,24 @@ def evidence_depth_label(
 ) -> str:
     """Report which evidence depth a snapshot *actually* carries (CLI-audit P2).
 
-    Computed purely from what was actually resolved -- ``binary``/
-    ``headers``/``build``/``source`` -- rather than echoing back the
-    requested ``--depth``: an explicit ``--depth source`` with no usable
-    source facts still produces a snapshot that only reaches ``headers`` (or
-    ``binary``), and this makes that honest instead of silently overstating
-    what was collected.
-
-    *build_source*, when given, overrides ``snap.build_source`` -- ``compare``
-    can resolve an out-of-band ``--old/new-sources``/``--old/new-build-info``
-    pack that is never attached back to the snapshot object itself
-    (``_resolve_side_pack`` returns it standalone); without this override, a
-    compare run using only out-of-band packs would report the depth of the
-    *unrelated* embedded (or absent) snapshot payload instead of the pack
-    that was actually used (Codex review). Defaults to ``snap.build_source``
-    for the plain single-artifact (embedded-only) case ``dump -o`` uses.
-
-    Uses the same payload-emptiness checks as ``_write_snapshot_output``'s own
-    fail-loud warning (``cli._layer_payload_empty``): a coverage row / field
-    can be non-``None`` while the embedded payload carries no real facts (e.g.
-    ``_run_inline_source_abi`` returns an empty ``SourceAbiSurface()`` when
-    clang is unavailable after L3 was found) -- checking presence alone would
-    overstate ``source``/``build`` for a layer that ran but linked nothing
-    (CodeRabbit review).
-
-    ``snap.parsed_with_build_context`` (ADR-020a/039: ``-p``/``--compile-db``,
-    a much older, narrower build-context mechanism than the ``BuildSourcePack``
-    machinery above -- it harvests the active ``-D`` set and ``#ifdef``-guarded
-    fields for the L2 header parse, with no ``BuildEvidence``/compile-unit
-    model of its own) also reaches "build": without this, a
-    ``dump lib.so -H api.h -p build/`` run has no ``snap.build_source`` at all
-    and this function would report "headers", even though the error message
-    this feeds (``check_requested_depth_satisfied``) already documents "build
-    via --build-info/a compile database" as a valid way to satisfy
-    ``--depth build`` (Codex review).
+    The embedded-only defaulting wrapper over
+    :func:`abicheck.evidence_depth.depth_label_for`, which owns the rule and
+    documents it. *build_source*, when given, overrides ``snap.build_source``
+    -- ``compare`` can resolve an out-of-band ``--old/new-sources`` pack that
+    is never attached back to the snapshot object (``_resolve_side_pack``
+    returns it standalone), and without this override a compare run using only
+    out-of-band packs would report the depth of the *unrelated* embedded (or
+    absent) snapshot payload (Codex review). The default is what the plain
+    single-artifact ``dump -o`` case wants; the leaf itself deliberately takes
+    the pack explicitly so no other caller can acquire the default by accident.
     """
-    from .cli import _layer_payload_empty
-
-    if build_source is None:
-        build_source = snap.build_source
-    if build_source is not None and (
-        not _layer_payload_empty(build_source, "L4")
-        or not _layer_payload_empty(build_source, "L5")
-    ):
-        return "source"
-    if build_source is not None and not _layer_payload_empty(build_source, "L3"):
-        return "build"
-    if snap.parsed_with_build_context:
-        return "build"
-    if snap.from_headers:
-        return "headers"
-    return "binary"
+    return depth_label_for(snap, snap.build_source if build_source is None else build_source)
 
 
-# Same ordering as buildsource.scan_levels.USER_DEPTHS: each rung is a
-# strict superset of the facts below it.
-_DEPTH_RANK: dict[str, int] = {"binary": 0, "headers": 1, "build": 2, "source": 3}
+#: Compatibility alias. The ladder is owned by ``evidence_depth.DEPTH_RANK``,
+#: which derives it from ``buildsource.scan_levels.USER_DEPTHS`` so the
+#: ordering has one definition rather than a copy per consumer.
+_DEPTH_RANK = DEPTH_RANK
 
 
 def _dump_will_attempt_hybrid_l4_extraction(sources: Path | None) -> bool:
@@ -247,8 +217,8 @@ def _dump_will_attempt_hybrid_l4_extraction(sources: Path | None) -> bool:
       ``check_requested_depth_satisfied``'s own "reached 'headers'/'binary'"
       message, which fires downstream regardless.
     """
-    from .buildsource.inline import is_pack_dir
     from .cli_buildsource_helpers import _is_inputs_pack_dir
+    from .workflows.extraction import is_pack_dir
 
     return sources is not None and not (
         is_pack_dir(sources) or _is_inputs_pack_dir(sources)
@@ -265,103 +235,13 @@ class DumpDepthNotSatisfiedError(click.ClickException):
 
 
 def _l4_source_abi_was_attempted(build_source: BuildSourcePack) -> bool:
-    """True when L4 source-ABI extraction genuinely parsed source, regardless of whether it linked any declarations to a binary.
-
-    Coverage *status* alone (``PRESENT``/``PARTIAL`` vs ``NOT_COLLECTED``) is
-    not enough: ``buildsource.inline._run_inline_source_abi`` stamps L4
-    ``PARTIAL`` (never ``NOT_COLLECTED``) both for the *expected*, warn-only
-    "ran but 0/N symbols matched" outcome of a source-only ``dump --sources``
-    (no binary to link declarations against; see ``_write_snapshot_output``'s
-    G21.7 "collected but linked no facts" warning) **and** for a genuinely
-    *failed* attempt — the selected extractor missing from ``PATH``, or every
-    selected TU failing to parse — which returns the same empty
-    ``SourceAbiSurface()`` shape with the same ``PARTIAL`` status (Codex
-    review, fifth finding: a missing/failing extractor must not satisfy an
-    explicit ``--depth source``, matching representation notwithstanding).
-
-    The reliable signal is the presence of
-    ``SourceAbiSurface.coverage["compile_units_parsed"]`` specifically — set
-    unconditionally by ``source_replay.run_source_replay`` whenever replay
-    actually executes, independent of whether anything downstream matched
-    against binary exports (parsing happens before, and regardless of,
-    linking). The *key* (not just a non-empty ``coverage`` dict) is what
-    matters: it is absent for the tool-unavailable short-circuit, which
-    returns a bare ``SourceAbiSurface()`` before replay ever runs, but a
-    non-empty ``coverage`` dict populated by a *different* stage —
-    ``link_source_abi``'s own ``reachable_declarations``/``matched_symbols``
-    stats, stamped on a Flow-2 ``inputs_pack.ingest_inputs_pack()`` pack that
-    never went through ``run_source_replay`` at all (pure per-TU-facts
-    parsing, no frontend re-run) — must not be mistaken for "replay ran"
-    just because it happens to be truthy. ``NOT_COLLECTED`` still covers the
-    "no extraction attempted at all" cases (no ``--sources``, no L3 to replay
-    against, or ``--ast-frontend hybrid``, which ``_run_inline_source_abi``
-    records as ``"skipped"``).
-
-    Falls back to the payload-based ``_layer_payload_empty`` check whenever
-    the ``compile_units_parsed`` key is absent — covering both the ingested
-    Flow-2 pack above and a hand-built pack (a test fixture, or an
-    out-of-band ``--old/new-sources`` pack assembled without going through
-    ``inline.py``'s replay) with genuine ``source_abi`` facts but no replay
-    coverage stats, so neither is mistaken for "never attempted".
-    """
-    from .buildsource.model import CoverageStatus, DataLayer
-    from .cli import _layer_payload_empty
-
-    cov = build_source.manifest.coverage_for(DataLayer.L4_SOURCE_ABI)
-    if cov is not None and cov.status == CoverageStatus.NOT_COLLECTED:
-        return False
-    surface = build_source.source_abi
-    if surface is not None and "compile_units_parsed" in surface.coverage:
-        try:
-            return int(surface.coverage.get("compile_units_parsed", 0) or 0) > 0
-        except (TypeError, ValueError, OverflowError):
-            return False
-    return not _layer_payload_empty(build_source, "L4")
+    """Compatibility alias for :func:`abicheck.evidence_depth.l4_source_abi_was_attempted`."""
+    return l4_source_abi_was_attempted(build_source)
 
 
 def _gated_source_label(build_source: BuildSourcePack | None, snap: AbiSnapshot) -> str:
-    """Recompute the "source" evidence label for the *strict* depth gate.
-
-    ``evidence_depth_label`` honestly reports "source" whenever L4 or L5
-    carries facts — correct for its own honesty contract, since genuine
-    source-tier collection can legitimately populate L5 (``source_graph``)
-    without L4 (``source_abi``): ``source_graph.build_source_graph`` folds
-    ``BuildEvidence`` structure into a graph even when the L4 surface found
-    nothing. But that L4-or-L5 rule is too permissive for a *gate*: a
-    non-empty L5 can also come from a header-only (L2) declaration graph
-    that never ran any L4/L5 source-tier replay at all —
-    ``service._attach_header_graph`` (always attempted since G29 Phase A when
-    headers are available and no ``--sources``/``--build-info`` triggered a
-    deeper collection) attaches one directly, and
-    ``cli_buildsource.embed_build_source``'s backfill step (see its own
-    comment: "a genuine --sources L5 collection in merged always wins; the
-    header-only graph fills the gap only when merged carries none") can
-    graft that same header-only graph onto an otherwise-real, L3-only
-    ``--build-info`` pack — so "L3 present" does not rule out a
-    header-only-graph L5 either (Codex review, second finding).
-
-    The reliable signal is whether L4 extraction was genuinely *attempted*
-    (``_l4_source_abi_was_attempted``) — a coverage-status check, not a
-    payload-emptiness one: a source-only dump legitimately links zero
-    declarations (no binary to link against) yet must still satisfy an
-    explicit ``--depth source`` the same way it already only warns (not
-    errors) about that case; only a *never-attempted* L4 (the header-graph
-    cases above) is downgraded here, to "build" (real L3, or a ``-p``/
-    ``--compile-db`` build context, per ``evidence_depth_label``) or
-    ``headers``/``binary`` (nothing).
-    """
-    from .cli import _layer_payload_empty
-
-    if build_source is not None and _l4_source_abi_was_attempted(build_source):
-        return "source"
-    if build_source is not None and not _layer_payload_empty(build_source, "L3"):
-        return "build"
-    # ADR-020a/039 build-context capture (-p/--compile-db) has no BuildSourcePack
-    # of its own to check above, but is still a legitimate "build" evidence
-    # source -- see evidence_depth_label's docstring (Codex review).
-    if snap.parsed_with_build_context:
-        return "build"
-    return "headers" if snap.from_headers else "binary"
+    """Compatibility alias for :func:`abicheck.evidence_depth.gated_source_label`."""
+    return gated_source_label(build_source, snap)
 
 
 def check_requested_depth_satisfied(
@@ -717,8 +597,8 @@ def _add_dump_data_layers(
     warning rather than failing the dry run.
     """
     try:
-        from .binary_utils import detect_binary_format, normalize_binary_input
         from .dwarf_snapshot import show_data_sources
+        from .workflows.extraction import detect_binary_format, normalize_binary_input
 
         normalized_path, binary_fmt = normalize_binary_input(so_path)
         if binary_fmt is None:
@@ -1259,7 +1139,7 @@ def perform_elf_dump(
     # so generated/shim headers from -p/--gcc-options keep priority, but still
     # above the standard system dirs) when the compile context supplies its own
     # includes — see its docstring.
-    from .header_utils import (
+    from .workflows.extraction import (
         dedup_paths_preserve_order,
         deferred_token_dirs,
         resolve_inferred_header_roots,
@@ -1296,7 +1176,7 @@ def perform_elf_dump(
     # collect_inline_pack calls for the same --sources tree could otherwise
     # contend on the same inferred-build-query lock and wait up to its 600s
     # timeout (Codex review; see that function's own docstring).
-    from .buildsource.l2_seed import seed_includes_and_fold_compile_context
+    from .workflows.extraction import seed_includes_and_fold_compile_context
 
     # The ADR-039 collector's _user_define_flags() call below must see only
     # the *user's own* global tokens, never the L3 fold's per-header-matched
@@ -1712,7 +1592,7 @@ def perform_elf_dump(
         )
 
     stamp_provenance(snap, git_tag=git_tag, build_id=build_id, no_git=no_git)
-    from .dumper_clang import resolve_source_frontend_clang_bin
+    from .workflows.extraction import resolve_source_frontend_clang_bin
 
     write_snapshot_output(
         snap,

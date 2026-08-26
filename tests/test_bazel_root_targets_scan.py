@@ -41,7 +41,7 @@ from pathlib import Path
 
 from click.testing import CliRunner
 
-from abicheck import cli_buildsource
+from abicheck.buildsource import embed as embed_mod
 from abicheck.cli import main
 from abicheck.elf_metadata import ElfMetadata, ElfSymbol
 from abicheck.model import AbiSnapshot, AccessLevel, Function, ScopeOrigin, Visibility
@@ -111,7 +111,7 @@ def test_scan_cli_build_target_flag_reaches_embed_build_source(
     def _fake_embed(snap, build_info, sources, *, build_targets=(), **kwargs):
         captured["build_targets"] = build_targets
 
-    monkeypatch.setattr(cli_buildsource, "embed_build_source", _fake_embed)
+    monkeypatch.setattr(embed_mod, "embed_build_source", _fake_embed)
 
     runner = CliRunner()
     result = runner.invoke(
@@ -137,7 +137,7 @@ def test_scan_cli_no_build_target_leaves_it_empty(monkeypatch, tmp_path: Path):
     def _fake_embed(snap, build_info, sources, *, build_targets=(), **kwargs):
         captured["build_targets"] = build_targets
 
-    monkeypatch.setattr(cli_buildsource, "embed_build_source", _fake_embed)
+    monkeypatch.setattr(embed_mod, "embed_build_source", _fake_embed)
 
     runner = CliRunner()
     result = runner.invoke(
@@ -159,7 +159,7 @@ def test_scan_cli_artifact_set_build_target_reaches_embed_build_source(
     def _fake_embed(snap, build_info, sources, *, build_targets=(), **kwargs):
         captured.setdefault("build_targets", []).append(build_targets)
 
-    monkeypatch.setattr(cli_buildsource, "embed_build_source", _fake_embed)
+    monkeypatch.setattr(embed_mod, "embed_build_source", _fake_embed)
 
     a = _artifact(tmp_path, "a")
     b = _artifact(tmp_path, "b")
@@ -199,7 +199,7 @@ def test_scan_request_build_targets_reaches_embed_build_source_via_run_scan(
     def _fake_embed(snap, build_info, sources, *, build_targets=(), **kwargs):
         captured["build_targets"] = build_targets
 
-    monkeypatch.setattr(cli_buildsource, "embed_build_source", _fake_embed)
+    monkeypatch.setattr(embed_mod, "embed_build_source", _fake_embed)
 
     req = ScanRequest(
         binaries=[_artifact(tmp_path)],
@@ -219,7 +219,7 @@ def test_scan_request_build_targets_reaches_embed_build_source_via_run_scan_set(
     def _fake_embed(snap, build_info, sources, *, build_targets=(), **kwargs):
         captured.setdefault("build_targets", []).append(build_targets)
 
-    monkeypatch.setattr(cli_buildsource, "embed_build_source", _fake_embed)
+    monkeypatch.setattr(embed_mod, "embed_build_source", _fake_embed)
 
     a = _artifact(tmp_path, "a")
     b = _artifact(tmp_path, "b")

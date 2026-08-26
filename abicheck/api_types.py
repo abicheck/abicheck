@@ -403,9 +403,8 @@ def _path_required_errors(
     is a real, tested CLI shape (the manifest's own ``roots``/translation
     units declare the surface), and an earlier revision of this check that
     named only ``sources``/``build_info`` rejected it — caught by
-    ``tests/test_cli_dump_manifest.py``'s existing dry-run cases, which is
-    exactly the kind of "the model can't say what the CLI accepts" gap this
-    widening exists to close.
+    ``tests/test_cli_dump_manifest.py``'s dry-run cases, exactly the "the model
+    can't say what the CLI accepts" gap this widening exists to close.
     """
     if side.path is not None:
         return []
@@ -415,7 +414,8 @@ def _path_required_errors(
         return [
             f"the {label} side has no path and no sources/build_info/"
             "dump_manifest: a binary-less dump needs at least one of them to "
-            "have anything to extract"
+            "have anything to extract -- pass a binary (SO_PATH), or "
+            "--sources/--build-info for a source-only snapshot"
         ]
     return []
 
