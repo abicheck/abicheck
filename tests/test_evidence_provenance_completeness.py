@@ -203,76 +203,107 @@ class TestClassificationTracksRealProducerBehavior:
             "-- move it to PROVENANCE_STATIC or PROVENANCE_PER_FINDING."
         )
 
-    @pytest.mark.parametrize("mutation", MUTATIONS, ids=lambda m: m.__name__)
-    def test_static_kinds_are_stamped_identically_on_every_finding(self, mutation) -> None:
+    @staticmethod
+    def _emitted_for_kind(kind_value: str) -> list[Change]:
+        """Runs every mutation catalogued for ``kind_value`` and returns the
+        union of real emitted findings across all of them -- not just one
+        mutation's own output. A kind can have several independent producer
+        paths (several `MUTATIONS` entries sharing one `expected_kind`), and
+        `PROVENANCE_STATIC`'s "one constant value for every instance" claim
+        is a claim about the kind as a whole, not about any single
+        construction path in isolation (Codex review, fresh evidence: the
+        prior per-mutation-only checks below let path A always emit one
+        tuple and path B a different tuple while every parametrized case
+        still passed, since no case ever saw both)."""
+        emitted: list[Change] = []
+        for mutation in MUTATIONS:
+            old_extra, new_extra, expected_kind, _ = mutation(tag=1)
+            if expected_kind.value != kind_value:
+                continue
+            old = build_snapshot("1.0", _CONTEXT, old_extra)
+            new = build_snapshot("2.0", _CONTEXT, new_extra)
+            found = [c for c in compare(old, new).changes if c.kind == expected_kind]
+            assert found, f"{mutation.__name__}: expected_kind {expected_kind.name} not emitted"
+            emitted.extend(found)
+        return emitted
+
+    @pytest.mark.parametrize("kind_value", sorted(PROVENANCE_STATIC))
+    def test_static_kinds_are_stamped_identically_on_every_finding(self, kind_value: str) -> None:
         """PROVENANCE_STATIC's own definition is "a constant tuple, the
         same value for every instance of this kind" -- checked exhaustively
-        (every emitted finding, not just one) and checked for value
-        equality, not merely non-None (Codex review: an `any(...)` check
-        would pass a producer that only migrated one of several call sites
-        emitting this kind, or a "static" producer whose tuple actually
-        varies -- the second round-trip test test_unverified_kinds_are_not_
-        yet_actually_stamped already checks exhaustively for the other
-        direction; this makes the STATIC/PER_FINDING direction match)."""
-        old_extra, new_extra, expected_kind, _ = mutation(tag=1)
-        if expected_kind.value not in PROVENANCE_STATIC:
-            pytest.skip(f"{expected_kind.value} is not classified PROVENANCE_STATIC")
-        old = build_snapshot("1.0", _CONTEXT, old_extra)
-        new = build_snapshot("2.0", _CONTEXT, new_extra)
-        emitted = [c for c in compare(old, new).changes if c.kind == expected_kind]
-        assert emitted, f"{mutation.__name__}: expected_kind {expected_kind.name} not emitted"
+        across *every* mutation catalogued for this kind (not just one
+        construction path) and checked for value equality, not merely
+        non-None (Codex review: an `any(...)` check would pass a producer
+        that only migrated one of several call sites emitting this kind, or
+        a "static" producer whose tuple actually varies -- the second
+        round-trip test test_unverified_kinds_are_not_yet_actually_stamped
+        already checks exhaustively for the other direction; this makes the
+        STATIC/PER_FINDING direction match, and aggregating across every
+        `MUTATIONS` entry for the kind -- not just one -- is what catches a
+        second producer path emitting a differing tuple)."""
+        emitted = self._emitted_for_kind(kind_value)
         unstamped = [c for c in emitted if c.evidence_provenance is None]
         assert not unstamped, (
-            f"{expected_kind.value} is classified PROVENANCE_STATIC, but "
+            f"{kind_value} is classified PROVENANCE_STATIC, but "
             f"{len(unstamped)}/{len(emitted)} of its real emitted findings "
             "still leave evidence_provenance unset -- every construction "
             "path for this kind must be wired, not just one."
         )
         distinct_values = {c.evidence_provenance for c in emitted}
         assert len(distinct_values) == 1, (
-            f"{expected_kind.value} is classified PROVENANCE_STATIC (one "
+            f"{kind_value} is classified PROVENANCE_STATIC (one "
             "constant tuple for every instance), but its real producer(s) "
             f"emit {len(distinct_values)} distinct evidence_provenance "
             f"values across findings: {sorted(distinct_values)} -- either "
             "reclassify as PROVENANCE_PER_FINDING, or fix the producer."
         )
 
-    @pytest.mark.parametrize("mutation", MUTATIONS, ids=lambda m: m.__name__)
-    def test_per_finding_kinds_are_stamped_on_every_finding(self, mutation) -> None:
+    @pytest.mark.parametrize("kind_value", sorted(PROVENANCE_PER_FINDING))
+    def test_per_finding_kinds_are_stamped_on_every_finding(self, kind_value: str) -> None:
         """Also checks PROVENANCE_PER_FINDING is not behaviorally
         indistinguishable from PROVENANCE_STATIC (Codex review, fresh
         evidence): a producer that stamps the same constant tuple on
         every finding it emits would still pass a mere non-None check.
-        Caught here only when one mutation emits *multiple* findings of
-        the target kind (the one shape this catalogue can exercise
-        without inventing new, deliberately-distinguishable multi-finding
-        fixtures) -- a single-finding mutation can't distinguish "per
-        finding, happens to match here" from "silently constant," which
-        is exactly why this docstring says so rather than claiming a
+
+        The variation check is deliberately scoped to *across independent
+        mutations* for the kind, not within one mutation's own findings
+        (Codex review, fresh evidence, second round): two findings from the
+        *same* mutation can legitimately compute the identical tuple --
+        e.g. two layout findings both corroborated by the same DWARF
+        evidence -- so requiring inequality within one mutation's output
+        would reject a correct per-finding producer purely because its
+        inputs happened to coincide. Two *different* mutations exercise
+        different symbols/context by construction (`_detector_mutations.py`
+        prefixes every mutation's target identifiers uniquely), so a
+        real per-finding producer varying its computation with its input is
+        overwhelmingly expected to differ across them, while a silently
+        constant producer never will -- this is the signal that actually
+        distinguishes the two, not raw cardinality of one mutation's
+        output. Still partial coverage, stated honestly: a kind covered by
+        only one mutation can't be checked this way at all (the loop below
+        no-ops for it), which is exactly why this docstring doesn't claim a
         stronger guarantee than the test actually gives."""
-        old_extra, new_extra, expected_kind, _ = mutation(tag=1)
-        if expected_kind.value not in PROVENANCE_PER_FINDING:
-            pytest.skip(f"{expected_kind.value} is not classified PROVENANCE_PER_FINDING")
-        old = build_snapshot("1.0", _CONTEXT, old_extra)
-        new = build_snapshot("2.0", _CONTEXT, new_extra)
-        emitted = [c for c in compare(old, new).changes if c.kind == expected_kind]
-        assert emitted, f"{mutation.__name__}: expected_kind {expected_kind.name} not emitted"
+        emitted = self._emitted_for_kind(kind_value)
         unstamped = [c for c in emitted if c.evidence_provenance is None]
         assert not unstamped, (
-            f"{expected_kind.value} is classified PROVENANCE_PER_FINDING, "
+            f"{kind_value} is classified PROVENANCE_PER_FINDING, "
             f"but {len(unstamped)}/{len(emitted)} of its real emitted "
             "findings still leave evidence_provenance unset -- either the "
             "classification is premature, or the producer's own wiring "
             "(for this specific construction path) is incomplete."
         )
-        if len(emitted) > 1:
+        mutations_for_kind = sum(
+            1 for mutation in MUTATIONS if mutation(tag=1)[2].value == kind_value
+        )
+        if mutations_for_kind > 1:
             distinct_values = {c.evidence_provenance for c in emitted}
             assert len(distinct_values) > 1, (
-                f"{expected_kind.value} is classified PROVENANCE_PER_FINDING "
+                f"{kind_value} is classified PROVENANCE_PER_FINDING "
                 "(a value computed per instance, not a detector-wide "
-                f"constant), but all {len(emitted)} of its real findings "
-                f"from {mutation.__name__} share the identical "
+                "constant), but its real producer emits the identical "
                 f"evidence_provenance value {emitted[0].evidence_provenance!r} "
-                "-- either reclassify as PROVENANCE_STATIC, or fix the "
-                "producer to actually vary per finding."
+                f"across all {mutations_for_kind} independently-catalogued "
+                "mutations for this kind -- either reclassify as "
+                "PROVENANCE_STATIC, or fix the producer to actually vary "
+                "with its input."
             )
