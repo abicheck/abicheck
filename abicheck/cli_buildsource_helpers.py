@@ -59,6 +59,7 @@ from .cli_buildsource_merge import (
     _merge_pick_base as _merge_pick_base,
     _merge_print_summary as _merge_print_summary,
 )
+from .errors import SnapshotError
 
 if TYPE_CHECKING:
     from .buildsource.build_evidence import BuildEvidence
@@ -360,12 +361,18 @@ def attach_evidence_metrics(
 
 
 def _load_pack_or_raise(evidence_dir: Path) -> BuildSourcePack:
+    """CLI adapter over ``buildsource.pack_load.load_pack_or_raise``.
+
+    Translates the engine's ``SnapshotError`` into a plain ``ClickException``
+    (**exit 1** -- operational, not a usage error: the command line was
+    well-formed and the pack was not). Message unchanged.
+    """
+    from .buildsource.pack_load import load_pack_or_raise
+
     try:
-        return BuildSourcePack.load(evidence_dir)
-    except (FileNotFoundError, ValueError) as exc:
-        raise click.ClickException(
-            f"Invalid evidence pack at {evidence_dir}: {exc}"
-        ) from exc
+        return load_pack_or_raise(evidence_dir)
+    except SnapshotError as exc:
+        raise click.ClickException(str(exc)) from exc
 
 
 def _is_inputs_pack_dir(path: Path | None) -> bool:
@@ -379,30 +386,22 @@ def _is_inputs_pack_dir(path: Path | None) -> bool:
 def _load_inputs_pack_or_raise(
     path: Path, *, exported_symbols: Iterable[str] = ()
 ) -> BuildSourcePack:
-    """Validate and ingest an ``abicheck_inputs/`` directory into a BuildSourcePack.
+    """CLI adapter over ``buildsource.pack_load.load_inputs_pack_or_raise``.
 
-    Validation happens automatically whenever the pack is consumed -- there is
-    no separate ``inputs validate`` command to run first (ADR-043 D1). A
-    structurally invalid pack is a hard error; non-fatal findings are printed
-    as warnings.
-
-    ``exported_symbols`` — the analyzed binary's L0 exports — seed the L4
-    decl→symbol linking so ``source_decl_to_binary_symbol`` resolves against the
-    DSO instead of leaving ``matched_symbols=0`` (AC-003). When empty (e.g. a
-    source-only pack with no artifact side yet), the surface is relinked against
-    the artifact exports later during ``merge``.
+    Same exit-1 translation as :func:`_load_pack_or_raise`, plus the stderr
+    sink for the loader's non-fatal findings -- the engine returns those
+    through a callback rather than owning a stream.
     """
-    from .buildsource.inputs_pack import ingest_inputs_pack
-    from .buildsource.inputs_validate import validate_inputs_pack
+    from .buildsource.pack_load import load_inputs_pack_or_raise
 
-    report = validate_inputs_pack(path)
-    if report.errors:
-        raise click.ClickException(
-            f"Invalid abicheck_inputs/ pack at {path}: " + "; ".join(report.errors)
+    try:
+        return load_inputs_pack_or_raise(
+            path,
+            exported_symbols=exported_symbols,
+            on_warning=lambda message: click.echo(message, err=True),
         )
-    for warning in report.warnings:
-        click.echo(f"warning: {path}: {warning}", err=True)
-    return ingest_inputs_pack(path, exported_symbols=exported_symbols).pack
+    except SnapshotError as exc:
+        raise click.ClickException(str(exc)) from exc
 
 
 def _load_side_pack_input(

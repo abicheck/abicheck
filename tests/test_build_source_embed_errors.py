@@ -220,3 +220,62 @@ def test_inputs_pack_validation_failure_is_also_operational(tmp_path: Path) -> N
 
     assert excinfo.value.exit_code == 1
     assert "Invalid abicheck_inputs/ pack" in str(excinfo.value)
+
+
+class TestMalformedPackErrorsReachTheTypedContract:
+    """What a Tier-2 caller must catch when embedding fails.
+
+    Before ADR-061 Phase 3 this class asserted that a ``click.ClickException``
+    from the CLI-layer ``embed_build_source`` was translated to
+    ``SnapshotError``. The engine now owns that function and raises the typed
+    errors directly, so there is no CLI exception left to translate -- but the
+    *caller-visible* contract is unchanged, and that is what is pinned here:
+    both error classes still arrive as ``SnapshotError``.
+    """
+
+    def test_snapshot_error_propagates_unchanged(
+        self, snaps: tuple[Path, Path], tmp_path: Path, monkeypatch
+    ):
+        """An invalid pack is already a ``SnapshotError``; nothing rewraps it."""
+        from abicheck import service
+        from abicheck.api_types import DumpRequest, InputSpec
+        from abicheck.buildsource import embed as embed_mod
+        from abicheck.errors import SnapshotError as _SnapshotError
+
+        def _boom(snap, *args, **kwargs):
+            raise _SnapshotError("build pack is malformed")
+
+        monkeypatch.setattr(embed_mod, "embed_build_source", _boom)
+        snap_path, _ = snaps
+        sources = tmp_path / "src"
+        sources.mkdir()
+        with pytest.raises(SnapshotError, match="build pack is malformed"):
+            service.run_dump_request(
+                DumpRequest(input=InputSpec(path=snap_path, sources=sources))
+            )
+
+    def test_validation_error_is_flattened_to_snapshot_error(
+        self, snaps: tuple[Path, Path], tmp_path: Path, monkeypatch
+    ):
+        """A usage-class error is flattened, so callers still catch one type.
+
+        The engine keeps ``ValidationError`` distinct because the CLI derives
+        exit 64 from it; this surface has always presented a single error type
+        to its callers, and widening that would be a breaking API change.
+        """
+        from abicheck import service
+        from abicheck.api_types import DumpRequest, InputSpec
+        from abicheck.buildsource import embed as embed_mod
+        from abicheck.errors import ValidationError
+
+        def _boom(snap, *args, **kwargs):
+            raise ValidationError("build.query must be a string")
+
+        monkeypatch.setattr(embed_mod, "embed_build_source", _boom)
+        snap_path, _ = snaps
+        sources = tmp_path / "src"
+        sources.mkdir()
+        with pytest.raises(SnapshotError, match="build.query must be a string"):
+            service.run_dump_request(
+                DumpRequest(input=InputSpec(path=snap_path, sources=sources))
+            )

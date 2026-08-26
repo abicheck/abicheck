@@ -60,7 +60,8 @@
         "policy"
       ],
       "legacy_paths": [
-        "abicheck/service_dump_pipeline.py"
+        "abicheck/service_dump_pipeline.py",
+        "abicheck/service_input_resolution.py"
       ]
     },
     "report": {

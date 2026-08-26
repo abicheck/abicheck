@@ -50,7 +50,10 @@ from click.testing import CliRunner
 
 from abicheck import __version__ as _abicheck_version
 from abicheck.buildsource.build_evidence import BuildEvidence
-from abicheck.buildsource.merge_support import _detect_merge_layer_conflicts
+from abicheck.buildsource.merge_support import (
+    _combine_packs,
+    _detect_merge_layer_conflicts,
+)
 from abicheck.buildsource.model import ExtractorRecord
 from abicheck.buildsource.pack import BuildSourcePack
 from abicheck.buildsource.redaction import DEFAULT_REDACTION
@@ -3014,7 +3017,6 @@ def test_mixed_build_pack_and_raw_sources_hash_distinguishes_trees(tmp_path):
     from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
     from abicheck.buildsource.pack import BuildSourcePack
     from abicheck.buildsource.source_abi import SourceAbiSurface
-    from abicheck.cli_buildsource import _combine_packs
 
     # On-disk build-info pack.
     bi = BuildSourcePack.empty(tmp_path / "bi")
@@ -3055,7 +3057,6 @@ def test_combined_pack_content_hash_stable_across_source_abi_coverage_timing(
     from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
     from abicheck.buildsource.pack import BuildSourcePack
     from abicheck.buildsource.source_abi import SourceAbiSurface
-    from abicheck.cli_buildsource import _combine_packs
 
     bi = BuildSourcePack.empty(tmp_path / "bi")
     ev = BuildEvidence()
@@ -3116,7 +3117,6 @@ def test_combined_coverage_honors_supplier_present_row():
         LayerCoverage,
     )
     from abicheck.buildsource.pack import BuildSourcePack
-    from abicheck.cli_buildsource import _combine_packs
 
     ev = BuildEvidence()
     ev.compile_units.append(CompileUnit(id="cu://x", source="x.cpp"))
@@ -3149,7 +3149,6 @@ def test_combined_coverage_preserves_empty_placeholder_not_collected():
         LayerCoverage,
     )
     from abicheck.buildsource.pack import BuildSourcePack
-    from abicheck.cli_buildsource import _combine_packs
 
     # Mirrors ingest_inputs_pack for an empty compile DB: a non-None but empty
     # BuildEvidence paired with an honest not_collected L3 row.
@@ -3219,7 +3218,6 @@ def test_raw_sources_inline_wins_l4_l5_over_build_info_pack():
     from abicheck.buildsource.pack import BuildSourcePack
     from abicheck.buildsource.source_abi import SourceAbiSurface
     from abicheck.buildsource.source_graph import SourceGraphSummary
-    from abicheck.cli_buildsource import _combine_packs
 
     bi = BuildSourcePack(
         root=Path(""),
@@ -3262,7 +3260,6 @@ def test_empty_inline_l4_does_not_mask_build_info_pack_l4():
 
     from abicheck.buildsource.pack import BuildSourcePack
     from abicheck.buildsource.source_abi import SourceAbiSurface, SourceEntity
-    from abicheck.cli_buildsource import _combine_packs
 
     # build-info pack with real L4 facts.
     real = SourceAbiSurface(library="libfoo.so")
@@ -3291,7 +3288,6 @@ def test_compare_explicit_build_info_overrides_embedded_l4_l5():
 
     from abicheck.buildsource.pack import BuildSourcePack
     from abicheck.buildsource.source_abi import SourceAbiSurface
-    from abicheck.cli_buildsource import _combine_packs
 
     bi = BuildSourcePack(
         root=Path(""), source_abi=SourceAbiSurface(library="from_build_info_pack")
@@ -3315,7 +3311,6 @@ def test_compare_explicit_empty_pack_overrides_embedded_l4_l5():
 
     from abicheck.buildsource.pack import BuildSourcePack
     from abicheck.buildsource.source_abi import SourceAbiSurface, SourceEntity
-    from abicheck.cli_buildsource import _combine_packs
 
     # Explicit pack: a present-but-empty L4 surface (replay ran, found nothing).
     empty = BuildSourcePack(
@@ -3399,7 +3394,6 @@ def test_combined_coverage_row_comes_from_payload_supplier_not_other_pack():
     )
     from abicheck.buildsource.pack import BuildSourcePack
     from abicheck.buildsource.source_abi import SourceAbiSurface
-    from abicheck.cli_buildsource import _combine_packs
 
     # build-info pack: a stale L4 not_collected row but NO source_abi payload.
     bi = BuildSourcePack(

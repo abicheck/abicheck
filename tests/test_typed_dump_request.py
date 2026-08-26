@@ -1034,10 +1034,11 @@ class TestRawSourceUnderHybridIsRejected:
     ):
         # Only a *raw* tree needs real extraction; a prebuilt pack never feeds
         # L4, so it must not be swept up by the same guard.
-        from abicheck import cli_buildsource, service
+        from abicheck import service
+        from abicheck.buildsource import embed as embed_mod
 
         monkeypatch.setattr(
-            cli_buildsource, "embed_build_source", lambda snap, **kwargs: None
+            embed_mod, "embed_build_source", lambda snap, **kwargs: None
         )
         # A real pack is identified by manifest *content* -- the
         # BuildSourcePack version marker -- not by the file merely existing.
@@ -1055,31 +1056,6 @@ class TestRawSourceUnderHybridIsRejected:
         assert "hybrid" not in str(exc.value)
 
 
-class TestMalformedPackIsTranslated:
-    """`embed_build_source` raises `click.ClickException` on a malformed pack —
-    a CLI concept with no place in this Tier-2 API's contract, so the
-    resolver translates it to `SnapshotError`.
-    """
-
-    def test_click_exception_becomes_snapshot_error(
-        self, snap_path: Path, tmp_path: Path, monkeypatch
-    ):
-        import click
-
-        from abicheck import cli_buildsource, service
-
-        def _boom(snap, **kwargs):
-            raise click.ClickException("build pack is malformed")
-
-        monkeypatch.setattr(cli_buildsource, "embed_build_source", _boom)
-        sources = tmp_path / "src"
-        sources.mkdir()
-        with pytest.raises(SnapshotError, match="build pack is malformed"):
-            service.run_dump_request(
-                DumpRequest(input=InputSpec(path=snap_path, sources=sources))
-            )
-
-
 class TestSourceReplayUsesTheSelectedCompiler:
     """L4 source-ABI replay invokes the compiler the request selected.
 
@@ -1093,11 +1069,11 @@ class TestSourceReplayUsesTheSelectedCompiler:
 
     @pytest.fixture
     def replayed_with(self, monkeypatch):
-        from abicheck import cli_buildsource
+        from abicheck.buildsource import embed as embed_mod
 
         captured: dict[str, object] = {}
         monkeypatch.setattr(
-            cli_buildsource,
+            embed_mod,
             "embed_build_source",
             lambda snap, **kwargs: captured.update(kwargs),
         )
@@ -1899,9 +1875,7 @@ class TestSeedCleanupsDrainBeforeTheEmbedStep:
             events.append("seed")
             return [], None, False, [lambda: events.append("cleanup")]
 
-        monkeypatch.setattr(
-            sir, "_seeded_includes_and_compile_context", _fake_seed
-        )
+        monkeypatch.setattr(sir, "_seeded_includes_and_compile_context", _fake_seed)
 
         def _fake_resolve(*_a, **_k):
             events.append("parse")
@@ -1942,7 +1916,6 @@ class TestSeedCleanupsDrainBeforeTheEmbedStep:
         import pytest
 
         from abicheck import service, service_input_resolution as sir
-        from abicheck.errors import SnapshotError
         from abicheck.service_compare_evidence import SideEvidence
 
         hdr = tmp_path / "widget.h"

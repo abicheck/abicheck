@@ -38,12 +38,19 @@ yet. Know what that classification enforces, because the two gates differ:
 boundary for a still-flat module is held by the separate
 `engine-cli-boundary` gate. Both are live; neither is decorative.
 
-`service_input_resolution.py` and `service_compare_pipeline.py` are **not**
-classified yet: each still imports from `cli_buildsource`, and the former
-also catches `click.ClickException`. That is an operation migration
-(`embed_build_source` plus eight helpers, and an error-type contract with CLI
-exit-code consequences), not a leaf extraction — see ADR-061's Phase 3 status
-note for the measurement.
+`service_input_resolution.py` is classified too, since
+`embed_build_source` moved to `buildsource/embed.py`. Only
+`service_compare_pipeline.py` is left: it still imports
+`prepare_embedded_build_source`/`attach_evidence_metrics` from
+`cli_buildsource`.
+
+When you move an engine operation off the CLI layer, the error types are the
+contract, not an implementation detail. `buildsource/embed.py` raises
+`ValidationError` for a usage error (the CLI renders exit 64) and
+`SnapshotError` for an operational one (exit 1); the CLI adapter translates,
+and this package's Tier-2 surface flattens both onto `SnapshotError` because
+that is what its callers already catch. Pin the codes with characterization
+tests *before* moving — see `tests/test_build_source_embed_errors.py`.
 
 Shared vocabulary those modules used to reach into the CLI layer for now
 lives in leaves any layer may depend on: `abicheck/evidence_depth.py` (the

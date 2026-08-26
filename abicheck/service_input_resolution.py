@@ -970,9 +970,10 @@ def embed_side_build_source(
     private, hence ``dump_manifest_public_roots`` rather than
     ``dump_manifest_header_roots``).
 
-    A malformed pack raises ``click.ClickException`` deep inside
-    ``embed_build_source`` — no place in this Tier-2 API's
-    ``ValidationError``/``SnapshotError`` contract, so it is translated here
+    A malformed pack raises ``SnapshotError`` from
+    ``buildsource.embed.embed_build_source``, which needs no translation; a
+    malformed config raises ``ValidationError`` and is flattened onto
+    ``SnapshotError`` here
     (Codex review).
 
     *changed_paths*/*allow_build_query* (PR 3A, dump/scan resolver
@@ -1053,10 +1054,8 @@ def embed_side_build_source(
       *public_headers*/*public_header_dirs* unchanged, exactly as before this
       parameter existed) for every pre-existing caller.
     """
-    import click
-
     from . import service_compare_evidence as _sce
-    from .cli_buildsource import embed_build_source
+    from .buildsource.embed import embed_build_source
     from .dumper_clang import resolve_source_frontend_clang_bin
     from .dumper_scoping import dump_manifest_public_roots
     from .service_scan import expand_public_header_inputs
@@ -1119,9 +1118,11 @@ def embed_side_build_source(
             public_header_dirs=tuple(str(p) for p in embed_header_dirs)
             + tuple(str(p) for p in manifest_roots),
             defer_cleanup=defer_cleanup,
-            quiet=True,
         )
-    except click.ClickException as exc:
+    except ValidationError as exc:
+        # The engine keeps usage and operational errors distinct (the CLI needs
+        # 64 vs 1); this surface has always flattened both onto SnapshotError,
+        # so preserve that. SnapshotError itself propagates unchanged.
         raise SnapshotError(str(exc)) from exc
 
 

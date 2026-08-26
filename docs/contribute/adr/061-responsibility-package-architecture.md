@@ -823,25 +823,41 @@ verified by probe), but for a `legacy_paths` module it does **not** flag an
 import of an unclassified module, so the CLI boundary is still held by the
 separate `engine-cli-boundary` gate (also verified by probe).
 
-**What remains, measured rather than estimated.** `service_input_resolution.
-py` and `service_compare_pipeline.py` each still hold one `cli_buildsource`
-edge, and the former also imports `click`. These are not leaf extractions
-like the two above; they are operation migrations:
+**`embed_build_source` has since moved**, closing the edge that note
+described. It is now `abicheck/buildsource/embed.py`, and
+`service_input_resolution.py` — free of both `click` and `cli_buildsource` —
+is classified `workflows` alongside `service_dump_pipeline.py`. Of the eight
+helpers the note listed, four were already engine-side in `merge_support.py`;
+the rest moved with it (`buildsource/pack_load.py` for the two pack loaders,
+`buildsource/snapshot_exports.py` for the export set) or had already moved
+(`is_inputs_pack_dir`).
 
-- `embed_build_source` is 262 lines and depends on eight module-scope
-  helpers in `cli_buildsource.py` (`_combine_packs`,
-  `_exported_symbols_from_snapshot`, `_filter_pack_layers`, `_layer_value`,
-  `_load_inputs_pack_or_raise`, `_load_pack_or_raise`,
-  `route_inline_source_supplier`, `_is_inputs_pack_dir`) and raises
-  `click.UsageError`. `service_input_resolution` catches
-  `click.ClickException` and re-raises `SnapshotError` — the engine depending
-  on the CLI's *error type*, which is the inversion in its purest form.
-  Moving it therefore changes where that translation happens, and a
-  malformed pack's CLI exit code depends on getting that right; it needs its
-  own pass with exit-code coverage, not a follow-up edit here.
-- `service_compare_pipeline.py` imports `prepare_embedded_build_source` and
-  `attach_evidence_metrics` from the same module, so it is blocked behind the
-  same migration.
+The error contract was the real work, and it is preserved exactly rather than
+tidied. Two classes leave the engine and they mean different things to a CI
+consumer: `ValidationError` for a malformed `.abicheck.yml` (a *usage* error,
+which the CLI renders as `click.UsageError` and `cli.main` remaps to **exit
+64**) and `SnapshotError` for an invalid pack (*operational* — the invocation
+was well-formed, the data was not, so **exit 1**). Collapsing the two would
+tell a CI consumer the invocation was wrong when the data was. The typed
+surface still flattens both onto `SnapshotError`, because that is what its
+callers have always had to catch; widening it would have been a breaking API
+change made in passing.
+
+Seven characterization tests (`tests/test_build_source_embed_errors.py`) were
+written and committed *before* the move and pass unchanged after it, pinning
+both exit codes at the CLI and both error classes at the function boundary.
+Every code was measured against the real CLI, not read off the source. Two
+things that measurement corrected: the typed bad-config path is unreachable
+through `CompareRequest` (`InputSpec` has no `build_config` field) and is
+reachable only via `embed_side_build_source`'s own keyword; and the
+`cannot parse build config <path>:` prefix is added *above*
+`embed_build_source`, so the two boundaries produce different strings.
+
+**What remains.** `service_compare_pipeline.py` still imports
+`prepare_embedded_build_source` and `attach_evidence_metrics` from
+`cli_buildsource`, so it is the last of the three service modules without a
+`workflows` owner. Those are the same shape of migration, without the
+error-contract risk this one carried.
 
 `resolve.py`/`execute.py` (the request-shaped half of this phase's target
 layout) remain unattempted, and deliberately so: the real per-artifact

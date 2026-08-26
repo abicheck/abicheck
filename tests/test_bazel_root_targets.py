@@ -434,8 +434,8 @@ def test_dump_request_input_carries_build_targets():
 
 
 def test_embed_side_build_source_forwards_build_targets(monkeypatch, tmp_path: Path):
-    from abicheck import cli_buildsource
     from abicheck.api_types import InputSpec
+    from abicheck.buildsource import embed as embed_mod
     from abicheck.model import AbiSnapshot
     from abicheck.service_compare_evidence import SideEvidence
     from abicheck.service_input_resolution import embed_side_build_source
@@ -445,7 +445,7 @@ def test_embed_side_build_source_forwards_build_targets(monkeypatch, tmp_path: P
     def _fake_embed(snap, *, build_info, sources, build_targets=(), **kwargs):
         captured["build_targets"] = build_targets
 
-    monkeypatch.setattr(cli_buildsource, "embed_build_source", _fake_embed)
+    monkeypatch.setattr(embed_mod, "embed_build_source", _fake_embed)
 
     src = tmp_path / "src"
     src.mkdir()
@@ -472,7 +472,7 @@ def test_dump_cli_build_target_flag_reaches_embed_build_source(
 ):
     from click.testing import CliRunner
 
-    from abicheck import cli_buildsource
+    from abicheck.buildsource import embed as embed_mod
     from abicheck.cli import main
 
     captured: dict = {}
@@ -480,7 +480,7 @@ def test_dump_cli_build_target_flag_reaches_embed_build_source(
     def _fake_embed(snap, build_info, sources, *, build_targets=(), **kwargs):
         captured["build_targets"] = build_targets
 
-    monkeypatch.setattr(cli_buildsource, "embed_build_source", _fake_embed)
+    monkeypatch.setattr(embed_mod, "embed_build_source", _fake_embed)
 
     src = tmp_path / "src"
     src.mkdir()
@@ -508,7 +508,7 @@ def test_dump_cli_build_target_flag_reaches_embed_build_source(
 def test_dump_cli_build_target_overrides_config(monkeypatch, tmp_path: Path):
     from click.testing import CliRunner
 
-    from abicheck import cli_buildsource
+    from abicheck.buildsource import embed as embed_mod
     from abicheck.cli import main
 
     captured: dict = {}
@@ -516,7 +516,7 @@ def test_dump_cli_build_target_overrides_config(monkeypatch, tmp_path: Path):
     def _fake_embed(snap, build_info, sources, *, build_targets=(), **kwargs):
         captured["build_targets"] = build_targets
 
-    monkeypatch.setattr(cli_buildsource, "embed_build_source", _fake_embed)
+    monkeypatch.setattr(embed_mod, "embed_build_source", _fake_embed)
 
     src = tmp_path / "src"
     src.mkdir()

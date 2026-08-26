@@ -2212,7 +2212,7 @@ class TestCompareRequestAdr055Evidence:
         def _fake_embed(snap, **kwargs):
             embed_calls.append(kwargs)
 
-        monkeypatch.setattr("abicheck.cli_buildsource.embed_build_source", _fake_embed)
+        monkeypatch.setattr("abicheck.buildsource.embed.embed_build_source", _fake_embed)
         # The real diffing/pack-loading (prepare_embedded_build_source) is
         # exercised by the CLI-path tests already; here we're only asserting
         # that run_compare_request wires sources/collect_mode into
@@ -2237,7 +2237,7 @@ class TestCompareRequestAdr055Evidence:
 
         embed_calls: list[dict] = []
         monkeypatch.setattr(
-            "abicheck.cli_buildsource.embed_build_source",
+            "abicheck.buildsource.embed.embed_build_source",
             lambda snap, **kwargs: embed_calls.append(kwargs),
         )
 
@@ -2263,7 +2263,7 @@ class TestCompareRequestAdr055Evidence:
         src_dir.mkdir()
 
         monkeypatch.setattr(
-            "abicheck.cli_buildsource.embed_build_source", lambda snap, **kwargs: None
+            "abicheck.buildsource.embed.embed_build_source", lambda snap, **kwargs: None
         )
         sentinel_change = Change(
             kind=ChangeKind.FUNC_REMOVED,
@@ -2307,7 +2307,7 @@ class TestCompareRequestAdr055Evidence:
         src_dir.mkdir()
 
         monkeypatch.setattr(
-            "abicheck.cli_buildsource.embed_build_source", lambda snap, **kwargs: None
+            "abicheck.buildsource.embed.embed_build_source", lambda snap, **kwargs: None
         )
         captured_args = {}
 
@@ -2339,7 +2339,7 @@ class TestCompareRequestAdr055Evidence:
 
         embed_calls: list[dict] = []
         monkeypatch.setattr(
-            "abicheck.cli_buildsource.embed_build_source",
+            "abicheck.buildsource.embed.embed_build_source",
             lambda snap, **kwargs: embed_calls.append(kwargs),
         )
         monkeypatch.setattr(
@@ -2373,7 +2373,7 @@ class TestCompareRequestAdr055Evidence:
 
         embed_calls: list[dict] = []
         monkeypatch.setattr(
-            "abicheck.cli_buildsource.embed_build_source",
+            "abicheck.buildsource.embed.embed_build_source",
             lambda snap, **kwargs: embed_calls.append(kwargs),
         )
         monkeypatch.setattr(
@@ -2434,7 +2434,7 @@ class TestCompareRequestAdr055Evidence:
 
         embed_calls: list[dict] = []
         monkeypatch.setattr(
-            "abicheck.cli_buildsource.embed_build_source",
+            "abicheck.buildsource.embed.embed_build_source",
             lambda snap, **kwargs: embed_calls.append(kwargs),
         )
         monkeypatch.setattr(
@@ -2479,7 +2479,7 @@ class TestCompareRequestAdr055Evidence:
 
         embed_calls: list[dict] = []
         monkeypatch.setattr(
-            "abicheck.cli_buildsource.embed_build_source",
+            "abicheck.buildsource.embed.embed_build_source",
             lambda snap, **kwargs: embed_calls.append(kwargs),
         )
         monkeypatch.setattr(
@@ -2522,7 +2522,7 @@ class TestCompareRequestAdr055Evidence:
 
         embed_calls: list[dict] = []
         monkeypatch.setattr(
-            "abicheck.cli_buildsource.embed_build_source",
+            "abicheck.buildsource.embed.embed_build_source",
             lambda snap, **kwargs: embed_calls.append(kwargs),
         )
         monkeypatch.setattr(
@@ -2594,7 +2594,7 @@ class TestCompareRequestAdr055Evidence:
         (pack_dir / "manifest.json").write_text('{"build_source_pack_version": 1}')
 
         monkeypatch.setattr(
-            "abicheck.cli_buildsource.embed_build_source", lambda snap, **kwargs: None
+            "abicheck.buildsource.embed.embed_build_source", lambda snap, **kwargs: None
         )
         monkeypatch.setattr(
             "abicheck.cli_buildsource.prepare_embedded_build_source",
@@ -2620,7 +2620,7 @@ class TestCompareRequestAdr055Evidence:
         build_dir.mkdir()
 
         monkeypatch.setattr(
-            "abicheck.cli_buildsource.embed_build_source", lambda snap, **kwargs: None
+            "abicheck.buildsource.embed.embed_build_source", lambda snap, **kwargs: None
         )
         monkeypatch.setattr(
             "abicheck.cli_buildsource.prepare_embedded_build_source",
@@ -2649,7 +2649,7 @@ class TestCompareRequestAdr055Evidence:
         src_dir.mkdir()
 
         monkeypatch.setattr(
-            "abicheck.cli_buildsource.embed_build_source", lambda snap, **kwargs: None
+            "abicheck.buildsource.embed.embed_build_source", lambda snap, **kwargs: None
         )
         monkeypatch.setattr(
             "abicheck.cli_buildsource.prepare_embedded_build_source",
@@ -2740,7 +2740,7 @@ class TestCompareRequestAdr055Evidence:
 
         embed_calls: list[dict] = []
         monkeypatch.setattr(
-            "abicheck.cli_buildsource.embed_build_source",
+            "abicheck.buildsource.embed.embed_build_source",
             lambda snap, **kwargs: embed_calls.append(kwargs),
         )
         monkeypatch.setattr(
