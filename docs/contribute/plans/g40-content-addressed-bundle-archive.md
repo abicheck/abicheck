@@ -152,8 +152,10 @@ rather than delegating framing to a library-specific codec) — so
 per-member random access and per-member compression both hold, unlike a
 single whole-archive zstd frame. **The dependency contract this rests on,
 made explicit rather than left implicit:** `zstandard` (already a core,
-non-optional dependency per `pyproject.toml`'s `zstandard>=0.21` pin, the
-same package `snapshot_io.py` already depends on) supplies
+non-optional dependency declared in `pyproject.toml` — `zstandard>=0.21`,
+a minimum-version floor, not a pin to one exact release; see
+`pyproject.toml` itself for the current constraint rather than restating
+it here — the same package `snapshot_io.py` already depends on) supplies
 `zstandard.ZstdCompressor`/`zstandard.ZstdDecompressor` for compressing and
 decompressing each member's payload bytes; those bytes are then written
 into the zip archive using zip's `ZIP_STORED` method — not zip's own

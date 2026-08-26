@@ -108,6 +108,40 @@ competing with it):
 evidence_provenance: tuple[str, ...] | None = field(default=None, kw_only=True)
 ```
 
+**Normalization is part of the contract, not left to each call site
+(CodeRabbit review).** A single detector's own construction site never
+needs to dedupe (it names each provider it consulted exactly once), but
+two paths this plan already describes genuinely can produce a duplicate or
+differently-ordered entry for the same logical set: `versioned_symbol_
+scheme.py`'s `_build_scheme_advisory()` roll-up (Phase 1 item 4 below)
+unions the `evidence_provenance` of every matched `Change` in `matched_
+removed`/`matched_added`/`matched_renamed`, where two constituent findings
+can legitimately share the identical provider string (e.g. both matched
+via the same `both:l0:elf_symtab` symbol-table check); and a versioned-
+symbol roll-up more generally can re-order relative to whatever sequence
+its constituents happened to iterate in. An unnormalized union risks
+`("both:l0:elf_symtab", "both:l0:elf_symtab")` or a value that differs only
+in entry order between two otherwise-identical runs — unstable JSON/SARIF/
+JUnit output for the same underlying comparison, which this plan's own
+Phase 2 completeness gate and Phase 3 report-golden tests would then have
+to tolerate as noise instead of catching as a real regression. **Rule:
+every constructor of a non-`None` `evidence_provenance` — a single-source
+detector site, a `BundleFinding` lowering, and every roll-up/union site in
+Phase 1 item 4 alike — MUST return it deduplicated and sorted
+(`tuple(sorted(set(entries)))`), never a raw union or an as-iterated
+sequence.** Sorting is plain lexicographic string sort (no locale
+dependency, no custom vocabulary-aware ordering) — the side/tier/backend
+segments are prefix-delimited (`old:`/`new:`/`both:`, then `l0:`…`l5:`/
+`corroborated:`), so a lexicographic sort already groups entries in a
+stable, predictable way without needing a bespoke comparator. This applies
+uniformly at construction, at every roll-up/union point, and is preserved
+(never re-ordered or re-deduplicated differently) by every downstream
+renderer (JSON, SARIF, JUnit) — a renderer emits the tuple as given, it
+does not itself sort or dedupe. Phase 2's completeness gate gains an
+assertion that every non-`None` `evidence_provenance` it sees is already in
+this normal form, so a call site that unions two tuples without
+normalizing fails the gate rather than shipping non-deterministic output.
+
 Each entry is a stable, namespaced provider-id string, not a bespoke enum —
 mirroring `contract_evidence_refs`' own string-ref shape rather than
 inventing a second typed vocabulary next to `contract_relevance_types.py`'s
@@ -125,6 +159,7 @@ freeze this before that):
 | `l1:btf` | Linux kernel BTF debug info (ELF snapshots) | L1 |
 | `l1:ctf` | Linux kernel CTF debug info (ELF snapshots) | L1 |
 | `l2:castxml` / `l2:clang` | Header-AST backend, named specifically (not just "L2") since the two backends have measurably different fact completeness — see [header-backend-capabilities.md](../../reference/header-backend-capabilities.md) | L2 |
+| `l2:legacy_unknown_backend` | A header snapshot persisted before `ast_producer` was tracked (`from_headers=True`, `ast_producer is None` — see the gap note below) | L2 |
 | `l3:build_context` | ADR-039 build-context collector / L3→L2 fold | L3 |
 | `l4:source_replay` | L4 source-ABI replay | L4 |
 | `l5:source_graph` | L5 source/consumer graph | L5 |
@@ -153,6 +188,36 @@ already identifies for DWARF backfill — is therefore a prerequisite this
 phase's Phase 1 wiring must resolve *before* wiring detectors that could
 draw on PDB/BTF/CTF-derived snapshots, not something to defer to the
 detector-wiring step itself.
+
+**A legacy header snapshot has no truthful `l2:castxml`/`l2:clang` value to
+emit at all, which the vocabulary above has no entry for (Codex review,
+verified against `abicheck/serialization.py::snapshot_from_dict`).** A
+persisted header baseline from before `ast_producer` was tracked (schema
+v9 and earlier) round-trips as `from_headers=True` — a real, deliberately
+explicit fact `snapshot_from_dict` preserves rather than discards — with
+`ast_producer=None`: not "not a header snapshot," but "a header snapshot
+whose backend was never recorded." Phase 1's `AbiSnapshot.ast_producer`
+derivation (point 1 above) enumerates only `"castxml"`/`"clang"`/`"hybrid"`
+/`None`-meaning-non-header, so it has no truthful string for this real,
+supported case; the "non-`None` once Phase 1 completes" property test in
+the Tests section below would then force implementation to either
+fabricate a backend (a false claim, the same failure mode the L1 gap
+above and the `searched:` shape both already refuse to accept) or leave
+the finding's provenance uncomputed, silently failing the very
+completeness contract this field exists to guarantee for an otherwise
+ordinary, comparable header-derived finding. **Resolution: a fourth,
+explicit `l2:` value, `l2:legacy_unknown_backend`** — added to the
+vocabulary table above alongside `l2:castxml`/`l2:clang`, for exactly the
+`from_headers=True, ast_producer is None` case — carries the honest,
+weaker claim "produced by *some* header-AST backend, which of the two is
+not recorded" rather than either fabricating a specific one or leaving the
+field empty. The property test's "non-`None`" invariant is satisfied
+truthfully by this value without widening what `l2:castxml`/`l2:clang`
+themselves are allowed to mean; a migration that backfills `ast_producer`
+onto old persisted snapshots (recovering the real answer where it can be
+determined) remains the better long-term fix and is not precluded by
+adding this fallback, but is a separate, opt-in effort this plan does not
+require Phase 1 to block on.
 
 **The finalized vocabulary needs a single code-level owner, not just this
 table (Codex review).** The field's *type* stays a bare `tuple[str, ...]` —
@@ -257,13 +322,18 @@ package migration (see "Implementation location" above) they already miss
 a real, present-day construction site — `abicheck/impact/use_case_impact.py`
 — and will miss every detector `compare/detectors/{symbols,types,cpp,
 platform,build,source}.py` eventually migrates too. Use
-`git grep -n "Change(" -- 'abicheck/**/*.py'` (recursive: covers the
-flat `diff_*.py`/`buildsource/*.py` modules, any migrated `compare/`/
-`workflows/` package, and every other first-party subtree alike),
-excluding `tests/` (a separate tree entirely, not matched by this
-pathspec), `checker_types.py`'s own `class Change` definition, and
-`diff_helpers.py`'s own factory body, for direct constructions; and
-`git grep -n "make_change(" -- 'abicheck/**/*.py'` for factory calls.
+`git grep -n "Change(" -- 'abicheck/**/*.py' ':(exclude)abicheck/checker_types.py' ':(exclude)abicheck/diff_helpers.py'`
+(recursive: covers the flat `diff_*.py`/`buildsource/*.py` modules, any
+migrated `compare/`/`workflows/` package, and every other first-party
+subtree alike; `tests/` is a separate tree entirely and is not matched by
+this pathspec regardless) — the two `:(exclude)` pathspecs are what
+actually drop `checker_types.py`'s own `class Change` definition and
+`diff_helpers.py`'s own factory body from the results; a bare
+`'abicheck/**/*.py'` glob with no exclusion would otherwise report both of
+those definition sites themselves as "producers," for direct constructions;
+and `git grep -n "make_change(" -- 'abicheck/**/*.py' ':(exclude)abicheck/diff_helpers.py'`
+(same reasoning — excluding `diff_helpers.py`'s own `def make_change(`
+definition) for factory calls.
 
 **A third category this grep pair does not catch at all (Codex review,
 verified against the code): `bundle_models.BundleFinding` construction
@@ -354,21 +424,45 @@ needs." `BundleSignatureEvidence.from_snapshot()` is exactly the seam
 where the full `AbiSnapshot` is still available, so the fix is to compute
 item 1's `<tier>:searched:<backend>` derivation *there*, once per side,
 and carry only the small derived result (not the raw fields) into a new
-`BundleSignatureEvidence` field — e.g. `evidence_backend_tag: str`
-(or a small tuple, for the hybrid multi-backend case item 1 already
-describes) — so `find_unverified_signature_findings` reads that field
-directly instead of re-deriving anything from a snapshot it no longer has.
-This is a real, if small, implementation change `BundleSignatureEvidence`
-itself needs (a new field, populated in `from_snapshot()`), not merely a
-documentation correction — recorded here so Phase 1's implementation
-doesn't discover the gap only after already committing to deriving
-`:backend` at the finding-construction site, where the information no
-longer exists. **This value must survive `to_change()`'s own lowering
-unchanged, not be silently dropped or overwritten** — the same requirement
-the surrounding paragraph already states for `BundleFinding.
+`BundleSignatureEvidence` field — so `find_unverified_signature_findings`
+reads that field directly instead of re-deriving anything from a snapshot
+it no longer has. This is a real, if small, implementation change
+`BundleSignatureEvidence` itself needs (a new field, populated in
+`from_snapshot()`), not merely a documentation correction — recorded here
+so Phase 1's implementation doesn't discover the gap only after already
+committing to deriving `:backend` at the finding-construction site, where
+the information no longer exists. **This value must survive `to_change()`'s
+own lowering unchanged, not be silently dropped or overwritten** — the same
+requirement the surrounding paragraph already states for `BundleFinding.
 evidence_provenance` in general, restated here because a `searched:`-
 shaped value is exactly the kind of "no fact, just a negative result"
 entry a naive lowering step could mistake for "nothing to carry" and omit.
+
+**A single snapshot-level `evidence_backend_tag: str` (or a fixed small
+tuple) is the wrong shape for this field — it must be per-symbol, keyed by
+mangled name (Codex review, verified against the real code: `dumper_hybrid.
+_merge_functions()`/`fact_provenance.py`).** A `--ast-frontend hybrid`
+snapshot does not have one backend "as a whole" — `_merge_functions()`
+keeps every castxml declaration as primary and separately
+`merged.extend(clang_only)`s any function clang saw that castxml didn't,
+recording which backend produced *each individual declaration* in
+`provenance[func_fact_key(mangled, "visibility")]` (`"castxml"` vs.
+`"clang"`, `dumper_hybrid.py`'s own comment: `"visibility" records which
+backend contributed the DECLARATION ITSELF`). Carrying a single
+`("castxml", "clang")` pair forward from `from_snapshot()` would claim both
+backends were searched for every symbol, which is false for a clang-only
+declaration (only clang actually looked at it); carrying one backend
+mislabels whichever symbols came from the other. Since
+`fact_provenance`'s `"visibility"` key is exactly the per-declaration
+answer this paragraph's derivation needs, and it is still available inside
+`from_snapshot()` before the full snapshot is discarded, the field must be
+`evidence_backend_tag: dict[str, str]`, keyed by the same mangled name
+`function_map`/`variable_map` already use, populated by reading
+`snap.fact_provenance[func_fact_key(mangled, "visibility")]` (falling back
+to the snapshot's own single `ast_producer` for a non-hybrid snapshot,
+where no per-declaration `"visibility"` entry is ever written) for every
+symbol `BundleSignatureEvidence` retains — not a single scalar the
+multi-backend case was assumed to fit into a tuple.
 
 **A third, distinct provenance shape is needed for the version-collapse
 path, which does not go through `_symbol_evidence_sufficient` at all
@@ -1106,7 +1200,7 @@ same way: append the property only when the value is non-`None`, mirroring
 run was given `--contract`, so its own append rule *does* keep a
 pre-`--contract` JUnit report byte-for-byte unchanged — `evidence_provenance`
 is Phase 1's whole point: once that phase lands, it is populated on every
-finding regardless of `--contract` (see Phase 1's own vocabulary section
+*finding* regardless of `--contract` (see Phase 1's own vocabulary section
 above and Phase 3's four-projection coverage below), so this addition
 changes JUnit output for the ordinary, contract-free case too, not only the
 `--contract` one. That is an intentional, in-scope consequence of adding a
@@ -1116,6 +1210,34 @@ to every emitted `<testcase>`, and must be called out as such (the same
 `REPORT_SCHEMA_VERSION`/topic-registration discipline the JSON side already
 requires below applies here too), not described as a change confined to
 `--contract` runs.
+
+**"Every emitted `<testcase>`" overstates the reach, though, and needs
+narrowing to "every finding-backed `<testcase>`" (CodeRabbit review,
+verified against `junit_report.py`'s own real code).** JUnit's own
+per-symbol schema (this module's docstring: "Each exported symbol/type
+that was checked is a `<testcase>`") means not every `<testcase>` has a
+backing `Change` at all — `_emit_testcases()` emits one testcase per entry
+in `all_symbols` (every checked symbol, changed or not) and only calls
+`_add_contract_properties`/`_maybe_add_failure` (the function this
+addition hooks into) `if sym in change_by_symbol`; an *unchanged* symbol's
+testcase is emitted with no `<properties>` call at all, since there is no
+`Change` for it to read `evidence_provenance` off of.
+`_emit_missing_contract_testcases()` is a second, structurally distinct
+case: a required-symbol/version/entrypoint gap has "no backing diff
+`Change`" (that function's own docstring) and is rendered through its own
+dedicated path (`sarif._missing_contract_result`'s JUnit counterpart), not
+`_add_contract_properties`, for the identical reason `contract_evidence_refs`
+already has nothing to attach there today. Both categories are therefore
+out of reach for this addition by construction, not by an oversight this
+phase needs to close: an unchanged-symbol testcase and a missing-contract-
+label testcase omit the `abicheck.evidence_provenance` property entirely,
+the same way they already omit `abicheck.contract_evidence_refs` and every
+other per-finding property this module emits — there is no sentinel value
+to substitute, since "no property" already is this module's own convention
+for "no `Change` to read from." The scope of this phase's JUnit change is
+therefore: every `<testcase>` for a symbol with a backing `Change`
+(`sym in change_by_symbol`) gains the property; a checked-but-unchanged
+symbol's testcase and a missing-contract-label testcase are unaffected.
 generated docs (`scripts/gen_detector_spec.py`'s matrix gains a column once
 every kind has a real, non-`UNVERIFIED` classification — gated on Phase 2's
 completeness test, so the docs generator cannot claim more coverage than
