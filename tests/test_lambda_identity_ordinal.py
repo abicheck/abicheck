@@ -249,6 +249,57 @@ class TestPayloadTextIsNeverCorrupted:
         assert "#1)" in snap.types[0].qualified_name
         assert snap.types[0].deprecated == message
 
+    def test_a_variable_initializer_value_matching_the_marker_syntax_is_untouched(
+        self,
+    ) -> None:
+        """Codex review, fresh evidence: ``Variable.value`` (its compile-time
+        constant initializer) is the identical payload shape as
+        ``deprecated``/``default`` -- reached by the dataclass-field walk,
+        not previously excluded."""
+        from abicheck.model import Variable, Visibility
+
+        value = f"text {_closure('x.h', 10, 2)}"
+        var = Variable(
+            name="v",
+            mangled="_ZN1vE",
+            type="const char *",
+            visibility=Visibility.PUBLIC,
+            value=value,
+        )
+        snap = AbiSnapshot(library="lib.so", version="1.0", variables=[var])
+        renumber_anonymous_closure_identities(snap)
+        assert snap.variables[0].value == value
+
+    def test_a_constant_value_matching_the_marker_syntax_is_untouched(self) -> None:
+        """Codex review, fresh evidence: ``AbiSnapshot.constants`` (a
+        ``#define``/``constexpr`` name -> value string dict) is payload,
+        never a type-name spelling -- the generic dict walk previously
+        rewrote its values along with any genuine identity-bearing dict's."""
+        value = f"text {_closure('x.h', 10, 2)}"
+        snap = AbiSnapshot(
+            library="lib.so", version="1.0", constants={"MSG": value}
+        )
+        renumber_anonymous_closure_identities(snap)
+        assert snap.constants["MSG"] == value
+
+    def test_a_constant_value_does_not_fabricate_an_ordinal_for_a_real_closure(
+        self,
+    ) -> None:
+        """Same collection-time exclusion check as the deprecated-message
+        sibling above, for a constant's payload value."""
+        closure_type = f"raii_guard<{_closure('x.h', 5, 1)}>"
+        value = f"text {_closure('x.h', 1, 1)}"
+        rec = _record(closure_type, qualified=f"ns::{closure_type}")
+        snap = AbiSnapshot(
+            library="lib.so",
+            version="1.0",
+            types=[rec],
+            constants={"MSG": value},
+        )
+        renumber_anonymous_closure_identities(snap)
+        assert "#1)" in snap.types[0].qualified_name
+        assert snap.constants["MSG"] == value
+
 
 class TestLegacyPersistedSnapshotsAreRenumberedOnLoad:
     """A snapshot persisted by a pre-fix abicheck still carries the raw

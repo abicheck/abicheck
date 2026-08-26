@@ -477,8 +477,12 @@ def apply_anonymous_type_ordinals(
 #: convention"; ``Param.default``/``TypeField.default`` are documented
 #: "verbatim, value not preserved"), matched by name alone rather than
 #: per-dataclass, since the walk in ``_collect_strings``/
-#: ``_walk_rewrite_strings`` is itself dataclass-agnostic.
-_PAYLOAD_FIELD_EXCLUSIONS: frozenset[str] = frozenset({"deprecated", "default"})
+#: ``_walk_rewrite_strings`` is itself dataclass-agnostic. ``Variable.value``
+#: (its compile-time constant initializer, "if known", model.py's own
+#: docstring) is the identical payload shape -- added after the same
+#: reachable-corruption pattern was found on it too (Codex review, fresh
+#: evidence).
+_PAYLOAD_FIELD_EXCLUSIONS: frozenset[str] = frozenset({"deprecated", "default", "value"})
 
 
 def _collect_strings(value: object, out: list[str]) -> None:
@@ -565,6 +569,16 @@ def _walk_rewrite_strings(value: object, rewrite: _Callable[[str], str]) -> obje
 #: ABI-surface fields above, and a key or value here that doesn't match
 #: any of those tuples is left untouched by
 #: :func:`apply_anonymous_type_ordinals`.
+#: ``constants`` (``#define``/``constexpr`` name -> value string) is
+#: deliberately excluded, unlike every field above: its values are payload
+#: literals, never a type-name spelling a closure marker could legitimately
+#: appear in, and the generic dict walk below cannot tell a payload dict's
+#: values apart from an identity-bearing one's -- rewriting them risked the
+#: same corruption ``_PAYLOAD_FIELD_EXCLUSIONS`` already guards for
+#: ``deprecated``/``default`` (Codex review, fresh evidence: a constant
+#: literally spelled ``"text (lambda:x.h:1:1)"`` was rewritten to ordinal
+#: form and could even consume an ordinal a real closure should have
+#: gotten).
 _LAMBDA_IDENTITY_FIELDS: tuple[str, ...] = (
     "functions",
     "variables",
@@ -572,7 +586,6 @@ _LAMBDA_IDENTITY_FIELDS: tuple[str, ...] = (
     "enums",
     "typedefs",
     "typedefs_qualified",
-    "constants",
     "fact_provenance",
 )
 

@@ -65,3 +65,14 @@
   fixed marker prefix (`(lambda:`/`(unnamed <kind>:`) stays a regex, and
   the first depth-0 `)` always ends the marker, matching a real compiler's
   own basename spelling (never unbalanced).
+- **Fifth follow-up (Codex review): two more payload locations could be
+  corrupted, beyond `deprecated`/`default`.** `Variable.value` (its
+  compile-time constant initializer) is the identical free-text payload
+  shape and is now excluded the same way. `AbiSnapshot.constants` (a
+  `#define`/`constexpr` name -> value string dict) is payload too, but
+  can't be excluded by field name alone -- the generic dict walk treats
+  every dict's keys/values uniformly, and `fact_provenance` (a genuinely
+  identity-bearing dict) needs that same walk to keep working. Removed
+  `constants` from the set of fields renumbering ever reaches at all,
+  since a constant's literal value can never legitimately be a
+  closure-parameterized type spelling.
