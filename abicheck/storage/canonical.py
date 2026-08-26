@@ -175,6 +175,24 @@ def canonical_form(value: Any) -> Any:
     This function normalizes only; it never removes anything. Excluding the
     reserved capture-metadata subtree is :func:`strip_capture_metadata`'s job,
     and it happens once at the document root rather than at every level.
+
+    **Container *type* is deliberately collapsed, and that is not a
+    collision.** JSON has one array type, so a list, a tuple, a set and a
+    frozenset with the same contents all serialize to the same array — which
+    means they are the same *stored document*, and a content address is an
+    address of the document. `{(1, 2)}` and `{frozenset({1, 2})}` were
+    reported as an ambiguity because they are unequal in Python and share a
+    digest; they also share a `canonical_json` output, byte for byte
+    (Codex review, declined with evidence).
+
+    Encoding the collection kind to separate them would be the actively
+    worse choice, not merely an unnecessary one: a reader parsing the stored
+    document back gets lists, so it could not reconstruct the tag, and
+    `semantic_digest(read_back)` would stop matching the digest the document
+    was stored under. That breaks the one property the whole module exists
+    to provide. The invariant that matters — a digest is a pure function of
+    the document, in both directions — is asserted as a property test rather
+    than argued here.
     """
     if value is None or isinstance(value, (str, bool)):
         return value

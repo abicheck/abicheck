@@ -15,6 +15,7 @@ this docstring itself had already drawn by naming two subjects.
 from __future__ import annotations
 
 import array
+import itertools
 import json
 import os
 
@@ -595,3 +596,84 @@ class TestTheDigestPrefixIsTheCanonicalAlgorithmName:
         assert semantic_digest({"x": 1}, algorithm="sha256") != semantic_digest(
             {"x": 1}, algorithm="sha512"
         )
+
+
+class TestTheDigestIsAPureFunctionOfTheDocument:
+    """Why collapsing container *type* is correct rather than a collision.
+
+    `{(1, 2)}` and `{frozenset({1, 2})}` are unequal in Python and share a
+    `semantic_digest`, which was reported as an ambiguity. They also share a
+    `canonical_json` output, byte for byte — JSON has one array type — so
+    they are the same stored document, and a content address addresses the
+    document (Codex review, declined with evidence).
+
+    Encoding the collection kind to separate them would be worse than
+    unnecessary: a reader parsing the document back gets lists and could not
+    reconstruct the tag, so a re-derived digest would stop matching the one
+    the document was stored under.
+
+    The real invariant is stated here as a property, so this reasoning
+    fails loudly if it ever stops holding.
+    """
+
+    _SHAPES: list[object] = [
+        [1, 2],
+        (1, 2),
+        {1, 2},
+        frozenset({1, 2}),
+        [2, 1],
+        [],
+        (),
+        set(),
+        frozenset(),
+        [[1, 2]],
+        {(1, 2)},
+        {frozenset({1, 2})},
+        {"a": 1},
+        [{"a": 1}],
+        "12",
+        ["1", "2"],
+    ]
+
+    def test_the_reported_pair_shares_a_document_not_just_a_digest(self) -> None:
+        ordered = {(1, 2)}
+        unordered = {frozenset({1, 2})}
+
+        assert ordered != unordered
+        assert canonical_json(ordered) == canonical_json(unordered) == "[[1,2]]"
+        assert semantic_digest(ordered) == semantic_digest(unordered)
+
+    def test_equal_documents_and_equal_digests_agree_in_both_directions(
+        self,
+    ) -> None:
+        """The invariant, over every shape rather than the reported pair.
+
+        Both directions matter and fail differently: same document with
+        different digests means identical bytes are unaddressable as one
+        object; different documents with the same digest is a real
+        collision.
+        """
+        for left, right in itertools.combinations(self._SHAPES, 2):
+            same_document = canonical_json(left) == canonical_json(right)
+            same_digest = semantic_digest(left) == semantic_digest(right)
+            assert same_document == same_digest, (
+                f"{left!r} and {right!r} disagree: document-equal="
+                f"{same_document}, digest-equal={same_digest}"
+            )
+
+    @given(_json_values, _json_values)
+    def test_the_property_holds_for_generated_documents(
+        self, left: object, right: object
+    ) -> None:
+        assert (canonical_json(left) == canonical_json(right)) == (
+            semantic_digest(left) == semantic_digest(right)
+        )
+
+    def test_order_still_distinguishes_where_the_document_does(self) -> None:
+        """The control: collapse is about *type*, never about content.
+
+        A list whose order differs is a different document and keeps a
+        different address — so this is not "arrays all hash alike".
+        """
+        assert canonical_json([2, 1]) != canonical_json([1, 2])
+        assert semantic_digest([2, 1]) != semantic_digest([1, 2])
