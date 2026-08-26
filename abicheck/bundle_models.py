@@ -62,6 +62,50 @@ DEFAULT_SYSTEM_PROVIDERS: frozenset[str] = frozenset(
         "libz.so.1",
         "ld-linux-x86-64.so.2",
         "ld-linux-aarch64.so.1",
+        # oneTBB's own malloc/proxy shared libs -- distinct sonames from
+        # libtbb.so above, and commonly DT_NEEDED alongside it by a library
+        # that opts into TBB's scalable allocator (e.g. oneDAL). Given
+        # without an explicit major (`soname_matches_providers`'s stem-match
+        # rule -- see that function's own docstring) so any TBB major
+        # matches, matching how libtbb.so itself needs two explicit-major
+        # entries above only because it changed its own soname convention
+        # between the 2020.x and 2021.x/oneAPI release lines.
+        "libtbbmalloc",
+        "libtbbmalloc_proxy",
+        # Intel oneMKL's own runtime dispatch/threading-layer/compute-kernel
+        # libraries -- real, common DT_NEEDED edges for any library built
+        # against oneMKL (e.g. oneDAL). Not exhaustive over oneMKL's full
+        # kernel-library surface (dozens of per-ISA/per-precision libs), but
+        # covers the libraries an ordinary dynamic link against oneMKL pulls
+        # in regardless of which specific kernels are used. Given without an
+        # explicit major so any oneMKL release's own soname major matches.
+        "libmkl_core",
+        "libmkl_rt",
+        "libmkl_intel_lp64",
+        "libmkl_intel_ilp64",
+        "libmkl_intel_thread",
+        "libmkl_gnu_thread",
+        "libmkl_tbb_thread",
+        "libmkl_sequential",
+        "libmkl_def",
+        "libmkl_avx2",
+        "libmkl_avx512",
+        "libmkl_vml_avx2",
+        "libmkl_vml_avx512",
+        "libmkl_vml_def",
+        "libmkl_sycl",
+        # The Intel compiler/OpenMP runtime libraries a library built with
+        # icc/icx/icpx/dpcpp commonly links against, distinct from the
+        # GCC/LLVM runtime libraries already listed above.
+        "libiomp5",
+        "libimf",
+        "libirng",
+        "libsvml",
+        "libintlc",
+        # The oneAPI Level Zero loader -- the runtime a SYCL library
+        # dispatches to for a Level Zero (as opposed to OpenCL) backend,
+        # alongside libOpenCL.so.1 already listed above.
+        "libze_loader",
     }
 )
 

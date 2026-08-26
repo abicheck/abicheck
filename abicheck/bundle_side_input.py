@@ -80,6 +80,7 @@ if TYPE_CHECKING:
     from .checker_types import DiffResult
     from .compile_context import CompileContext
     from .model import AbiSnapshot
+    from .policy_file import PolicyFile
 
 
 @dataclass(frozen=True)
@@ -112,9 +113,17 @@ class StoredBundleFactsInput:
     :class:`~abicheck.bundle_facts.BundleFacts` file (G38 Phase 2/13).
 
     No binaries are read -- see ``bundle_facts.bundle_snapshot_from_facts``.
+
+    *max_json_object_nodes*, when given, overrides
+    ``bundle_facts.DEFAULT_MAX_JSON_OBJECT_NODES`` for this side's load --
+    forwarded to ``serialization.load_bundle_facts``. A real per-library
+    facts blob can legitimately need well over the default budget to decode
+    (see that constant's own docstring); ``None`` (the default) uses the
+    library default, unchanged from before this field existed.
     """
 
     path: Path
+    max_json_object_nodes: int | None = None
 
 
 #: A bundle side is either a live, on-disk library set or a stored,
@@ -148,7 +157,7 @@ def resolve_bundle_side(side: BundleSideInput) -> ResolvedBundleSide:
     from .serialization import load_bundle_facts
 
     if isinstance(side, StoredBundleFactsInput):
-        facts = load_bundle_facts(side.path)
+        facts = load_bundle_facts(side.path, max_json_object_nodes=side.max_json_object_nodes)
         return ResolvedBundleSide(
             snapshot=bundle_snapshot_from_facts(facts),
             signature_evidence=dict(facts.per_library_snapshots),
@@ -232,7 +241,9 @@ def compare_release_against_bundle_facts(
     system_providers: list[str] | None = None,
     cohorts: list[str] | None = None,
     policy: str = "strict_abi",
+    policy_file: PolicyFile | None = None,
     include_dependencies: bool = False,
+    max_json_object_nodes: int | None = None,
 ) -> BundleDiffResult:
     """End-to-end driver: a stored OLD-side ``BundleFacts`` file compared
     against a live NEW-side directory/package extraction root (G38 Phase 13).
@@ -299,6 +310,24 @@ def compare_release_against_bundle_facts(
     configuration -- use the per-library maps once any library's headers
     need flags another library's don't.
 
+    *policy_file*, when given, is forwarded to each per-library
+    ``service.compare_snapshots()`` call alongside *policy* -- exactly the
+    same ``(policy, policy_file)`` pair the native ``compare``/``scan`` CLIs
+    already pass through together (a ``policy_file`` never replaces
+    *policy*; ``PolicyFile.base_policy``/``overrides``/reclassify rules are
+    applied on top of whichever base *policy* set the per-library kind
+    classification uses). Previously dropped entirely: this driver forwarded
+    only *policy* (a bare base-policy name) to ``service.compare_snapshots``,
+    so a caller's ``--policy-file``-shaped reclassify/override rules (kind
+    overrides, ``ReclassifyRule`` selectors) never reached the per-library
+    diff this function computes, regardless of whether the caller's own
+    ``.abicheck.yml``/policy document declared any -- silently scoring every
+    matched library under the unmodified base policy alone (Codex review;
+    the highest-leverage gap in this driver, since a real policy file's
+    reclassify rules can be the difference between a library reading
+    COMPATIBLE_WITH_RISK and BREAKING). Omitted (the default): behavior is
+    unchanged from before this fix.
+
     *include_dependencies* (default ``False``) mirrors ``--include-system-
     declarations``'s own Click default (``cli_options.
     include_dependencies_option`` -- ``dumper_scoping.py``'s header-origin
@@ -314,6 +343,15 @@ def compare_release_against_bundle_facts(
     AGENTS.md's dependency-scoping entry). Pass ``True`` only when
     *old_facts_path* was itself captured with ``--include-system-
     declarations``.
+
+    *max_json_object_nodes*, when given, overrides ``bundle_facts.
+    DEFAULT_MAX_JSON_OBJECT_NODES`` for loading *old_facts_path* -- a real
+    per-library facts blob (especially a G40 archive-format file for a
+    SYCL/DPC++-heavy library with a large template instantiation surface)
+    can legitimately need well over the default budget to decode; see
+    ``bundle_facts.read_bundle_facts_archive``'s own docstring. ``None``
+    (the default) uses the library default, matching this driver's
+    pre-existing behavior.
     """
     from . import service
     from .bundle_facts import compare_bundle_from_facts
@@ -323,7 +361,7 @@ def compare_release_against_bundle_facts(
     from .package import discover_shared_libraries
     from .serialization import load_bundle_facts
 
-    old_facts = load_bundle_facts(old_facts_path)
+    old_facts = load_bundle_facts(old_facts_path, max_json_object_nodes=max_json_object_nodes)
 
     if new_dir.is_dir():
         new_files = discover_shared_libraries(new_dir, include_private=include_private_dso)
@@ -362,7 +400,9 @@ def compare_release_against_bundle_facts(
             compile=lib_compile,
             include_dependencies=include_dependencies,
         )
-        diff = service.compare_snapshots(old_snapshot, new_snapshot, policy=policy)
+        diff = service.compare_snapshots(
+            old_snapshot, new_snapshot, policy=policy, policy_file=policy_file
+        )
         per_library_results.append(diff)
         new_signature_evidence[key] = BundleSignatureEvidence.from_snapshot(new_snapshot)
 

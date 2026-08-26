@@ -367,7 +367,7 @@ class TestCompareReleaseAgainstBundleFactsResolutionUnit:
         monkeypatch.setattr(
             service_mod,
             "compare_snapshots",
-            lambda old, new, policy: _diff("libcore.so", verdict=Verdict.NO_CHANGE),
+            lambda old, new, policy, policy_file=None: _diff("libcore.so", verdict=Verdict.NO_CHANGE),
         )
 
         compare_release_against_bundle_facts(facts_path, new_dir)
@@ -379,6 +379,57 @@ class TestCompareReleaseAgainstBundleFactsResolutionUnit:
             facts_path, new_dir, include_dependencies=True
         )
         assert captured_kwargs["include_dependencies"] is True
+
+    def test_policy_file_is_forwarded_to_per_library_compare(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Before this fix, this driver forwarded only *policy* (a bare
+        base-policy name) to ``service.compare_snapshots`` for each matched
+        library's per-library diff -- a caller's ``policy_file``-shaped
+        reclassify/override rules never reached that call regardless of
+        whether the caller's own policy document declared any (Codex
+        review; the highest-leverage gap in this driver)."""
+        import abicheck.package as package_mod
+        import abicheck.service as service_mod
+        from abicheck.checker_policy import ChangeKind, Verdict as VerdictEnum
+        from abicheck.policy_file import PolicyFile
+
+        facts_path = self._old_facts(tmp_path)
+        new_dir = tmp_path / "new"
+        new_dir.mkdir()
+        new_so = new_dir / "libcore.so"
+        new_so.write_bytes(b"")
+
+        monkeypatch.setattr(
+            package_mod,
+            "discover_shared_libraries",
+            lambda d, include_private=False: [new_so],
+        )
+
+        def _fake_resolve_input(path, **kwargs):
+            return AbiSnapshot(
+                library="libcore.so",
+                version="new",
+                elf=_meta(soname="libcore.so", exports=["core_fn"]),
+            )
+
+        monkeypatch.setattr(service_mod, "resolve_input", _fake_resolve_input)
+        captured: dict[str, object] = {}
+
+        def _fake_compare_snapshots(old, new, policy, policy_file=None):
+            captured["policy_file"] = policy_file
+            return _diff("libcore.so", verdict=Verdict.NO_CHANGE)
+
+        monkeypatch.setattr(service_mod, "compare_snapshots", _fake_compare_snapshots)
+
+        # Omitted: unchanged behavior, None reaches the per-library call.
+        compare_release_against_bundle_facts(facts_path, new_dir)
+        assert captured["policy_file"] is None
+
+        # Given: forwarded verbatim to every matched library's own compare.
+        pf = PolicyFile(overrides={ChangeKind.FUNC_VISIBILITY_CHANGED: VerdictEnum.BREAKING})
+        compare_release_against_bundle_facts(facts_path, new_dir, policy_file=pf)
+        assert captured["policy_file"] is pf
 
     def test_duplicate_new_side_versions_use_version_aware_selection(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -422,7 +473,7 @@ class TestCompareReleaseAgainstBundleFactsResolutionUnit:
         monkeypatch.setattr(
             service_mod,
             "compare_snapshots",
-            lambda old, new, policy: _diff("libcore.so", verdict=Verdict.NO_CHANGE),
+            lambda old, new, policy, policy_file=None: _diff("libcore.so", verdict=Verdict.NO_CHANGE),
         )
 
         compare_release_against_bundle_facts(facts_path, new_dir)
@@ -467,7 +518,7 @@ class TestCompareReleaseAgainstBundleFactsResolutionUnit:
         monkeypatch.setattr(
             service_mod,
             "compare_snapshots",
-            lambda old, new, policy: _diff("libcore.so", verdict=Verdict.NO_CHANGE),
+            lambda old, new, policy, policy_file=None: _diff("libcore.so", verdict=Verdict.NO_CHANGE),
         )
 
         ctx = CompileContext(
@@ -530,7 +581,7 @@ class TestCompareReleaseAgainstBundleFactsResolutionUnit:
         monkeypatch.setattr(
             service_mod,
             "compare_snapshots",
-            lambda old, new, policy: _diff(new.library, verdict=Verdict.NO_CHANGE),
+            lambda old, new, policy, policy_file=None: _diff(new.library, verdict=Verdict.NO_CHANGE),
         )
 
         uniform_headers = [Path("/include/common")]

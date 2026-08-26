@@ -1947,15 +1947,29 @@ def _validated_filename_map(raw: object) -> dict[str, str]:
     return filenames
 
 
-def load_bundle_facts(path: str | Path, *, format: str = "auto") -> BundleFacts:
-    """Load a BundleFacts; ``format="auto"`` also recognizes G40's archive, see ``bundle_facts.maybe_read_bundle_facts_archive``."""
-    from .bundle_facts import maybe_read_bundle_facts_archive
+def load_bundle_facts(
+    path: str | Path, *, format: str = "auto", max_json_object_nodes: int | None = None
+) -> BundleFacts:
+    """Load a BundleFacts; ``format="auto"`` also recognizes G40's archive, see
+    ``bundle_facts.maybe_read_bundle_facts_archive``. *max_json_object_nodes*
+    overrides ``bundle_facts.DEFAULT_MAX_JSON_OBJECT_NODES`` identically on the
+    archive and plain-JSON paths (``storage.bundle_facts_validation.
+    check_bundle_facts_json_budget``; Codex review -- the plain path
+    previously enforced no budget at all)."""
+    from .bundle_facts import (
+        DEFAULT_MAX_JSON_OBJECT_NODES,
+        maybe_read_bundle_facts_archive,
+    )
     from .snapshot_io import read_snapshot_text
+    from .storage.bundle_facts_validation import check_bundle_facts_json_budget
 
-    archived = maybe_read_bundle_facts_archive(path, format, snapshot_from_dict=snapshot_from_dict)
+    budget = DEFAULT_MAX_JSON_OBJECT_NODES if max_json_object_nodes is None else max_json_object_nodes
+    archived = maybe_read_bundle_facts_archive(path, format, snapshot_from_dict=snapshot_from_dict, max_json_object_nodes=budget)
     if archived is not None:
         return archived
-    return bundle_facts_from_dict(json.loads(read_snapshot_text(path)))
+    raw_text = read_snapshot_text(path)
+    check_bundle_facts_json_budget(raw_text.encode("utf-8"), budget, path=path, description="bundle facts JSON")
+    return bundle_facts_from_dict(json.loads(raw_text))
 
 
 def save_bundle_facts(
