@@ -199,6 +199,23 @@ class TestDemangle:
                 result = _mod.demangle("__ZNOTVALID")
         assert result is None
 
+    def test_macho_prefixed_malformed_name_via_cxxfilt_is_not_demangled(self):
+        """Codex review, fresh evidence: some cxxfilt/__cxa_demangle
+        versions return the input unchanged on failure rather than raising
+        -- this direct cxxfilt path returned unconditionally, with no
+        comparison against `canonical` at all, unlike the batch cxxfilt
+        path which already guards this identically."""
+        mock_cxxfilt = MagicMock()
+        mock_cxxfilt.demangle.side_effect = lambda s: s  # echo back unchanged
+        with patch.dict("sys.modules", {"cxxfilt": mock_cxxfilt}):
+            with patch("subprocess.run") as mock_run:
+                mock_run.return_value = subprocess.CompletedProcess(
+                    args=["c++filt"], returncode=0,
+                    stdout="_ZNOTVALID\n", stderr="",
+                )
+                result = _mod.demangle("__ZNOTVALID")
+        assert result is None
+
 
 # ── demangle_batch() ────────────────────────────────────────────────────────
 

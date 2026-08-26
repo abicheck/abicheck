@@ -148,3 +148,11 @@
   comparisons now check against the canonical input; the in-process
   `cxxfilt` batch path had the identical comparison gap (a `d != s`
   check against the original symbol) and is fixed the same way.
+- **Thirteenth follow-up (Codex review): the single-symbol in-process
+  `cxxfilt` path had no comparison at all.** `demangle()`'s direct
+  `cxxfilt.demangle(canonical)` call returned unconditionally, unlike the
+  batch `cxxfilt` path fixed above -- some `cxxfilt`/`__cxa_demangle`
+  versions return the input unchanged on failure rather than raising, so
+  `demangle("__ZNOTVALID")` returned the bogus `"_ZNOTVALID"` instead of
+  `None` whenever `cxxfilt` (rather than `c++filt`) handled the malformed
+  name. Now compares against `canonical` the same way the batch path does.

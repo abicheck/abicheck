@@ -100,7 +100,15 @@ def demangle(symbol: str) -> str | None:
     try:
         import cxxfilt
 
-        return str(cxxfilt.demangle(canonical))
+        out = str(cxxfilt.demangle(canonical))
+        # Some cxxfilt/__cxa_demangle versions return the input unchanged
+        # on failure rather than raising -- for a malformed `__Z...` token
+        # that echo is the canonical single-underscore form, which must be
+        # compared against `canonical`, not treated as a real demangling
+        # (Codex review, fresh evidence -- the batch cxxfilt path already
+        # guards this identically).
+        if out != canonical:
+            return out
     except Exception:  # noqa: BLE001
         _log.debug("cxxfilt demangling failed for %s", symbol)
     for cmd in _cppfilt_single_commands(canonical):
