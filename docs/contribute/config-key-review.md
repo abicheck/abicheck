@@ -250,7 +250,7 @@ opaque `"old"`/`"new"` — more useful in reports for zero extra typing.
 |------|-----------------|------------------|-----------|
 | `compare --scope-public-headers` | **ON** | Findings are silently filtered out of the report | Keep ON, but always print the filtered count (it does on resolve-fail only) |
 | `compare-release -j/--jobs` | ~~1 (serial)~~ → **0 (auto)** | Was serial by default, making multi-library releases slow | ✅ Implemented: defaults to `0` (auto-detect CPUs); parallel output is deterministic (matched-key order) |
-| `compare --demangle` | **OFF** | Human-readable output shows mangled `_ZN…` names by default | ✅ Implemented: default ON for `markdown`/`review`/`html`; `json`/`sarif` keep mangled. HTML demangles structurally (`<abbr title="mangled">demangled</abbr>`, both sides `html.escape`d), never by string substitution, so it's safe |
+| `compare --demangle` | ~~OFF~~ → **ON** (`markdown`/`review`/`html`) | Was OFF, so human-readable output showed mangled `_ZN…` names by default | ✅ Implemented: default ON for `markdown`/`review`/`html`; `json`/`sarif` keep mangled. HTML demangles structurally (`<abbr title="mangled">demangled</abbr>`, both sides `html.escape`d), never by string substitution, so it's safe |
 | `--lang` | **`c++`** | C libraries parsed as C++ can mis-parse | Reasonable default; add autodetect note |
 | `compat -report-format` | **`html`** | A CLI invocation writes an HTML file by default | ABICC parity — keep, but document |
 | `suggest-suppressions --expiry-days` | **180** | Generated suppressions silently expire in ~6 months | Fine, but state it in the generated file header |
