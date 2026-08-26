@@ -378,14 +378,29 @@ instantiation-order-sensitive fields (Phase 1's hash input).
   `BundleArchive.load_instantiation_manifest()` directly, reproduces the
   identical manifest; a `BundleFacts` with `manifest=None` round-trips to
   `manifest_blob=None` with no `blobs/` member allocated for it.
-- **Partial-load, verified at production scale, not a toy fixture** — per
-  `AGENTS.md`'s own "Third-party-boundary tests must exercise the real
-  public API at realistic scale" convention (the zstd-`max_window_size`
-  incident that convention exists to prevent): a real, multi-library archive
-  (not a two-field stub) where `load_library("one_of_many")` is asserted,
-  via a patched/instrumented `zipfile.ZipExtFile` or a member-read counter,
-  to open and decompress **exactly one** member — proving lazy access is
-  real, not merely API-shaped.
+- **Partial-load proves lazy access, separately from a real zstd round-trip
+  at production scale (Codex review — fresh evidence: an earlier revision
+  of this bullet conflated the two, and a member-read counter alone can
+  pass against tiny stub payloads spread across many members without ever
+  exercising a realistically-sized zstd frame)**. Two distinct assertions,
+  both required, neither substituting for the other:
+  1. *Lazy access is real, not merely API-shaped* — a multi-library archive
+     where `load_library("one_of_many")` is asserted, via a patched/
+     instrumented `zipfile.ZipExtFile` or a member-read counter, to open and
+     decompress **exactly one** member. This one can use small payloads;
+     it's checking *which* member is touched, not the codec.
+  2. *The archive's own zstd codec survives a realistic payload* — per
+     `AGENTS.md`'s own "Third-party-boundary tests must exercise the real
+     public API at realistic scale" convention (the zstd-`max_window_size`
+     incident that convention exists to prevent, and the exact pattern
+     `test_snapshot_compression.py::test_zstd_round_trip_at_production_scale_and_level`
+     already establishes for `snapshot_io.py`'s own zstd path): a real,
+     production-sized `AbiSnapshot` (scaled past the threshold where a
+     window-size/decoded-size regression would actually reproduce, not a
+     two-field stub) written through the real `BundleArchiveWriter` and
+     read back through the real `BundleArchiveReader`/`load_library()` —
+     the actual public chokepoints, not a hand-constructed shortcut into
+     `zstandard`'s own lower-level API.
 - Dedup: an **intra-archive** test only (matching the corrected, honest
   scope above, round 2) — two library names in *one* `BundleFacts` map to
   byte-identical `AbiSnapshot` content (the same object under two keys,

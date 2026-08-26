@@ -323,6 +323,26 @@ time, wire the field there instead — but the sub-task is "cover every
 current `Change`→dict projection," not "extend whichever one happens to be
 literally named `report/`."
 
+**A new public field on an already-published report format is a real
+schema change, not a cosmetic addition (Codex review — a prior revision of
+this phase named all three builders but never said this)**:
+`_change_to_dict`/`_leaf_entry` feed `abicheck/schemas/__init__.py`'s
+`REPORT_SCHEMA_VERSION` (currently `"2.46"`), which must gain at least a
+MINOR bump, and `abicheck/schemas/compare_report.schema.json` must add
+`evidence_provenance` to its `Change`-object definition — mirrored, per the
+repo's existing convention for that file, into
+`docs/reference/schemas/v1/compare_report.schema.json` and
+`site/reference/schemas/v1/compare_report.schema.json` in the same PR.
+`_baseline_finding_dicts` feeds `SCAN_SCHEMA_VERSION` (currently `"1.20"`,
+also in `abicheck/schemas/__init__.py`) the identical way — that format has
+no separate published `.schema.json` mirror today (confirmed: no
+`scan_report.schema.json` exists under `abicheck/schemas/` or
+`docs/reference/schemas/v1/`), so only the version constant itself needs
+bumping for that builder, not a schema file that doesn't exist. Landing
+`evidence_provenance` in any of these three dict builders under an
+*unchanged* schema version would let a new field appear to consumers doing
+schema-version-gated feature detection as if it had always been there.
+
 SARIF and JUnit rendering had not migrated into `report/` at the time this
 plan was written (only JSON and text renderers had) — reaches `sarif.py`'s
 existing `properties` bag (one entry, not a new top-level SARIF concept) if
@@ -346,13 +366,21 @@ produces rather than requiring new extraction.
 
 ## Design
 
-No new extraction anywhere. Every phase above threads a fact the producing
+Almost no new extraction. Every phase above threads a fact the producing
 code already has in scope (which detector module ran, which snapshot field a
-`RecordType`/`Function` value came from, whether `dwarf_layout_coherence`
-backfilled it) into the existing `Change(...)` call — the same "provenance
-plumbing, not a new evidence source" framing `AGENTS.md`'s own entry already
-used to size this at "multi-day, not a quick fix": the *volume* of call
-sites is the cost, not any single site's complexity.
+`RecordType`/`Function` value came from) into the existing `Change(...)`
+call — the same "provenance plumbing, not a new evidence source" framing
+`AGENTS.md`'s own entry already used to size this at "multi-day, not a quick
+fix": the *volume* of call sites is the cost, not any single site's
+complexity. **One real exception, stated in full in Phase 1 step 2 above and
+repeated here so this section doesn't contradict it**: the L2 header-derived
+slice cannot read per-record DWARF-backfill provenance today —
+`DwarfLayoutCoherence.matched` is computed and discarded, and `RecordType`
+carries no per-instance producer/backfill marker — so that one slice needs a
+small, additive extraction/model change (thread `.matched`, or an equivalent
+per-record marker, onto the record or a snapshot-level lookup) *before* its
+detector wiring starts, scoped as its own reviewed sub-step, not folded
+silently into "no new extraction."
 
 Deliberately reuses `contract_evidence_refs`' shape (flat string-tuple, not
 a nested dataclass) rather than introducing a second typed provenance model
