@@ -379,6 +379,104 @@ class TestNarrowingMergesIdentifyingFieldsPerField:
             assert result.producer and result.recipe and result.scope
 
 
+class TestReadDoorsValidateTheirLookupKeys:
+    """Every write door refused a non-string key; the read doors did not.
+
+    That asymmetry is not merely inconsistent, it is unsafe in one
+    direction. A key that can never match resolves *past* whatever is
+    stored: with a `PRESENT` family and a `FAILED` override under
+    `("layout", "1")`, `for_entity("layout", 1)` answered
+    `PRESENT`/comparable, silently skipping the failed evidence rather
+    than reporting it (Codex review).
+    """
+
+    @staticmethod
+    def _ledger() -> AvailabilityLedger:
+        ledger = AvailabilityLedger()
+        ledger.declare("layout", FactAvailability(status=FactStatus.PRESENT))
+        ledger.override("layout", "1", FactAvailability(status=FactStatus.FAILED))
+        return ledger
+
+    def test_the_reported_case_no_longer_licenses_a_conclusion(self) -> None:
+        """The consequence, stated before the guard that prevents it."""
+        ledger = self._ledger()
+
+        assert ledger.for_entity("layout", "1").status is FactStatus.FAILED
+
+        with pytest.raises(TypeError, match="entity must be a string"):
+            ledger.for_entity("layout", 1)
+
+    @pytest.mark.parametrize(
+        "key",
+        [
+            pytest.param(1, id="int"),
+            pytest.param(1.0, id="float"),
+            pytest.param(True, id="bool"),
+            pytest.param(None, id="none"),
+            pytest.param(("layout",), id="tuple"),
+            pytest.param(b"layout", id="bytes"),
+        ],
+    )
+    def test_both_halves_of_both_read_doors_refuse_a_non_string(
+        self, key: object
+    ) -> None:
+        """Parametrized over the key kinds, not just the reported `int`.
+
+        Each half is asserted separately: `for_entity` validates the family
+        itself rather than leaning on its own `for_family` call, which is
+        reached only when no override matches — so relying on it would make
+        the family check conditional on the very lookup it validates.
+        """
+        ledger = self._ledger()
+
+        with pytest.raises(TypeError, match="family must be a string"):
+            ledger.for_family(key)
+        with pytest.raises(TypeError, match="family must be a string"):
+            ledger.for_entity(key, "1")
+        with pytest.raises(TypeError, match="entity must be a string"):
+            ledger.for_entity("layout", key)
+
+    def test_the_family_half_is_checked_even_when_an_override_matches(self) -> None:
+        """The case a `for_family`-delegated check would have missed.
+
+        If the family check only happened via the `for_family` call, a
+        lookup whose override half matched would return before ever
+        reaching it.
+        """
+        ledger = self._ledger()
+
+        with pytest.raises(TypeError, match="family must be a string"):
+            ledger.for_entity(1, "1")
+
+    def test_read_and_write_doors_now_agree(self) -> None:
+        """The invariant behind the fix, rather than another instance of it.
+
+        A key kind the ledger refuses to *store* under must not be one it
+        accepts a *lookup* for — otherwise the two doors disagree about what
+        a key is, which is what let a stored record be skipped.
+        """
+        ledger = self._ledger()
+        avail = FactAvailability(status=FactStatus.PRESENT)
+
+        for door in (
+            lambda: ledger.declare(1, avail),
+            lambda: ledger.override("layout", 1, avail),
+            lambda: ledger.for_family(1),
+            lambda: ledger.for_entity("layout", 1),
+        ):
+            with pytest.raises(TypeError):
+                door()
+
+    def test_valid_lookups_are_untouched(self) -> None:
+        """The control: the guard must not narrow what already worked."""
+        ledger = self._ledger()
+
+        assert ledger.for_family("layout").status is FactStatus.PRESENT
+        assert ledger.for_entity("layout", "1").status is FactStatus.FAILED
+        assert ledger.for_entity("layout", "other").status is FactStatus.PRESENT
+        assert ledger.for_family("undeclared").status is FactStatus.NOT_COLLECTED
+
+
 class TestUnknownFamilyFallbackCannotBeComparable:
     """Codex review: one stored field could defeat the whole module's rule.
 

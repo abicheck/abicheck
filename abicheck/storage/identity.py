@@ -562,6 +562,16 @@ class OccurrenceSet:
         return tuple(self._entities[k] for k in sorted(self._entities))
 
     def occurrences_of(self, entity: EntityId) -> tuple[OccurrenceId, ...]:
+        """Every retained occurrence of one entity, in canonical key order.
+
+        The argument is checked rather than duck-typed. Passing something
+        else raised a bare ``AttributeError`` from the attribute access
+        below, which fails loudly enough not to be the silent-wrong-answer
+        the availability ledger's read doors had — but it names an internal
+        attribute rather than the argument, and this package checks a value
+        where it is used rather than where it happens to break.
+        """
+        _instance_of(entity, EntityId, "entity")
         # Already canonical: `add` maintains each bucket in key order, so no
         # accessor needs to re-sort. A caller must never see producer
         # traversal order through any accessor, or it becomes an accidental

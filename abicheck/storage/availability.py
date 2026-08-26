@@ -551,7 +551,16 @@ class AvailabilityLedger:
         return fallback
 
     def for_family(self, family: str) -> FactAvailability:
-        """Resolve a family's availability, declared or not."""
+        """Resolve a family's availability, declared or not.
+
+        The lookup key is validated, not merely used. Every *write* door —
+        the constructor, ``from_dict``, ``declare``, ``override`` — already
+        refuses a non-string key, but a read door that skips the check does
+        not fail safely: a key that can never match resolves through the
+        fallback or past an override, and the answer it returns can license
+        a conclusion the ledger does not support (Codex review).
+        """
+        _decision_key(family, "family")
         declared = self.families.get(family)
         if declared is not None:
             return declared
@@ -602,7 +611,20 @@ class AvailabilityLedger:
         can tell a declared status from a fallback: ``narrowed`` sees two
         records and cannot know whether the first came from a declaration or
         from a default.
+
+        Both halves of the lookup key are validated for the reason
+        :meth:`for_family` gives. This one is the sharper case: with a
+        ``PRESENT`` family and a ``FAILED`` override stored under
+        ``("layout", "1")``, ``for_entity("layout", 1)`` missed the override
+        and answered ``PRESENT``/comparable — the failed evidence silently
+        skipped rather than reported.
         """
+        # Both halves checked here rather than leaning on the `for_family`
+        # call below: that path is reached only when no override matches, so
+        # relying on it would make the family check conditional on the very
+        # lookup it is meant to validate.
+        _decision_key(family, "family")
+        _decision_key(entity_key, "entity")
         override = self.overrides.get((family, entity_key))
         if override is None:
             return self.for_family(family)

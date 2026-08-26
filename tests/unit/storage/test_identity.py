@@ -949,3 +949,34 @@ class TestAnAsymmetricPredicateStillReportsItsConflict:
         assert forward.conflicts(self._asymmetric) == backward.conflicts(
             self._asymmetric
         )
+
+
+class TestOccurrencesOfChecksItsArgument:
+    """The same read-door sweep as the ledger's, applied to this module.
+
+    Not the same severity, and worth being clear about why: passing a
+    non-`EntityId` already raised — a bare `AttributeError` from the `.key`
+    access — so this never returned the silently-wrong empty tuple that
+    would mean "no occurrences of this entity". What it did was name an
+    internal attribute instead of the argument, which is the convention
+    every other door in this package already follows.
+    """
+
+    def test_a_non_entity_is_refused_by_name(self) -> None:
+        with pytest.raises(TypeError, match="entity must be a EntityId"):
+            OccurrenceSet().occurrences_of("compute")
+
+    def test_a_real_lookup_is_untouched(self) -> None:
+        """The control, including the genuinely-absent case.
+
+        An entity with no occurrences must still answer `()` rather than
+        raising — "absent" and "malformed" are different questions and the
+        guard must not merge them.
+        """
+        entity = EntityId(kind=EntityKind.FUNCTION, qualified_name="compute")
+        absent = EntityId(kind=EntityKind.FUNCTION, qualified_name="missing")
+        occurrences = OccurrenceSet()
+        occurrences.add(OccurrenceId(entity=entity, observation=ObservationKind.AST))
+
+        assert len(occurrences.occurrences_of(entity)) == 1
+        assert occurrences.occurrences_of(absent) == ()
