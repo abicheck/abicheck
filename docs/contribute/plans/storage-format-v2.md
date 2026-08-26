@@ -224,6 +224,15 @@ bytes/objects actually loaded.
 | `abicheck/storage/identity.py` | `EntityKind`, `ObservationKind`, `EntityId`, `OccurrenceId`, `OccurrenceSet`, `IdentityConflict`, `elf_symbol_occurrence` (A0.2/A0.3) |
 | `abicheck/storage/canonical.py` | `canonical_form`, `canonical_json`, `semantic_digest`, `strip_capture_metadata`, `CAPTURE_METADATA_KEY` (A0.4) |
 | `abicheck/storage/versioning.py` | `PACKAGE_FORMAT_VERSION`, `COMPARISON_CONTRACT_VERSION`, `UNSTATED_VERSION`, `StorageVersions`, `ProducerIdentity`, `ReaderCompatibility`, `check_reader_compatibility` (A0.5) |
+| `abicheck/storage/guards.py` | `identity_text`, `decision_key`, `provenance_text`, `diagnostics_from`, `mapping` — internal, not re-exported by the package |
+
+`guards.py` is the one row the package does not re-export: it holds the value
+guards each module used to restate at its own doors. Three copies of one rule
+is how the rule drifts, and review found that drift four separate times on
+this branch — always as one site missing a check its siblings already had —
+so `AGENTS.md` invariant 6's deferred unification was done here rather than
+in Phase 1. Its surface is still pinned by the same table, because "internal"
+describes who imports it, not whether it may go unadvertised.
 
 Each row is exactly that module's `__all__`, and
 `tests/unit/storage/test_landed_surface.py` asserts it — a row advertising a

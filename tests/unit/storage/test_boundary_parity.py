@@ -190,3 +190,64 @@ def test_a_well_formed_value_is_accepted_by_both_doors() -> None:
     ledger.declare("graph", record)
     ledger.override("layout", "E1", record)
     assert AvailabilityLedger.from_dict(ledger.to_dict()) == ledger
+
+
+#: Containers that are not mappings but still *iterate* into values every key
+#: check accepts — the shape that made `AvailabilityLedger(families=["layout"])`
+#: construct successfully and fail later inside `for_family`/`to_dict`.
+NOT_MAPPINGS: list[Any] = ["layout", ["layout"], ("layout",), 1, None]
+
+
+@pytest.mark.parametrize("value", NOT_MAPPINGS)
+def test_ledger_containers_agree(value: Any) -> None:
+    """Validating the keys a container yields is not validating the container.
+
+    A list, a tuple and a string all yield a valid-looking family name, so
+    every key guard passed and only the first real lookup failed — with an
+    `AttributeError` about a missing `get`, from a ledger that had already
+    been accepted.
+    """
+    assert _refused(lambda: AvailabilityLedger(families=value))
+    assert _refused(lambda: AvailabilityLedger(overrides=value))
+    assert _refused(lambda: AvailabilityLedger.from_dict({"families": value}))
+    assert _refused(lambda: AvailabilityLedger.from_dict({"overrides": value}))
+
+
+#: `None` is deliberately absent: at the document door an explicit `null` for
+#: a nested object means "not stated", which is exactly what an absent key
+#: means, and the value it degrades to (`NOT_COLLECTED`) is the fail-closed
+#: one. The constructor has no "unstated" to express, so it refuses. The
+#: asymmetry is pinned below rather than smoothed over.
+NOT_RECORDS: list[Any] = ["x", ["x"], 1, {"status": "nope"}]
+
+
+@pytest.mark.parametrize("value", NOT_RECORDS)
+def test_ledger_record_slots_agree(value: Any) -> None:
+    """A stored record is checked where it is assigned, not where it is read.
+
+    Nothing consults a family's record until a decision needs one, so a value
+    that is not a `FactAvailability` survived construction and surfaced from
+    inside `comparable`/`narrowed`, on whichever branch happened to reach it.
+    """
+    assert _refused(lambda: AvailabilityLedger(families={"layout": value}))
+    assert _refused(lambda: AvailabilityLedger(overrides={("layout", "E"): value}))
+    assert _refused(lambda: AvailabilityLedger(unknown_family_default=value))
+    assert _refused(lambda: AvailabilityLedger.from_dict({"families": {"l": value}}))
+    assert _refused(
+        lambda: AvailabilityLedger.from_dict({"unknown_family_default": value})
+    )
+
+
+def test_a_null_nested_record_reads_as_unstated_not_as_a_record() -> None:
+    """The one place the two doors deliberately differ, pinned.
+
+    `unknown_family_default: null` is a document saying "not stated", and it
+    degrades to the same `NOT_COLLECTED` an absent key gives — the
+    fail-closed value, so nothing is licensed by the tolerance. A constructor
+    has no unstated state to express, so `None` there is a mistake and is
+    refused.
+    """
+    loaded = AvailabilityLedger.from_dict({"unknown_family_default": None})
+    assert loaded.unknown_family_default.status is FactStatus.NOT_COLLECTED
+    assert not loaded.unknown_family_default.comparable
+    assert _refused(lambda: AvailabilityLedger(unknown_family_default=None))

@@ -49,6 +49,12 @@ _MODULES = (
     "abicheck.storage.versioning",
 )
 
+#: Modules the package deliberately does not re-export. They are still
+#: advertised in the plan's table and still have their surface pinned below —
+#: "internal" is a statement about who imports it, not a licence to be absent
+#: from the documented surface.
+_INTERNAL_MODULES = ("abicheck.storage.guards",)
+
 
 def _table_rows() -> dict[str, set[str]]:
     """Parse the module -> advertised-names mapping out of the plan's table."""
@@ -62,7 +68,7 @@ def _table_rows() -> dict[str, set[str]]:
     return rows
 
 
-@pytest.mark.parametrize("module_name", _MODULES)
+@pytest.mark.parametrize("module_name", _MODULES + _INTERNAL_MODULES)
 def test_the_table_matches_the_modules_public_surface(module_name: str) -> None:
     rows = _table_rows()
     assert module_name in rows, f"{module_name} has no row in the plan's table"
@@ -88,7 +94,7 @@ def test_every_storage_module_has_a_row() -> None:
         if path.stem != "__init__"
     }
 
-    assert present == set(_MODULES) == set(_table_rows())
+    assert present == set(_MODULES) | set(_INTERNAL_MODULES) == set(_table_rows())
 
 
 def test_the_package_reexports_exactly_the_modules_public_surface() -> None:
@@ -106,6 +112,8 @@ def test_the_package_reexports_exactly_the_modules_public_surface() -> None:
     nothing about the list looked wrong.
     """
     package = importlib.import_module("abicheck.storage")
+    # `_INTERNAL_MODULES` is excluded on purpose: `guards` holds the doors'
+    # own instruments, which no consumer of this package calls.
     union: set[str] = set()
     for module_name in _MODULES:
         union |= set(importlib.import_module(module_name).__all__)

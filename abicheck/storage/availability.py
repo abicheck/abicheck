@@ -43,9 +43,16 @@ means.
 from __future__ import annotations
 
 import enum
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field, replace
 from typing import Any
+
+from .guards import (
+    decision_key as _decision_key,
+    diagnostics_from as _diagnostics_from,
+    mapping as _mapping,
+    provenance_text as _provenance_text,
+)
 
 __all__ = [
     "AvailabilityLedger",
@@ -124,99 +131,20 @@ _GAP_STATUSES = frozenset(
 _ASSERTS_NO_PRODUCER = frozenset({FactStatus.NOT_COLLECTED})
 
 
-def _diagnostics_from(raw: Any) -> tuple[str, ...]:
-    """Parse a ``diagnostics`` field, refusing a scalar rather than splitting it.
+def _availability(raw: Any, field_name: str) -> None:
+    """A stored record, checked at the door rather than where it is read.
 
-    A string is a ``Sequence``, so ``tuple(str(d) for d in raw)`` turned a
-    hand-edited ``"diagnostics": "parse error"`` into eleven single-character
-    diagnostics and serialized it back as a list of characters — destroying the
-    extraction error a reader needs for auditing, with no error anywhere (Codex
-    review).
-
-    This is the only field in the package where that failure is *silent*. The
-    sibling record lists (``overrides`` here, ``occurrences`` in
-    ``identity``) already reject a scalar, but only incidentally: their
-    elements must be mappings, so iterating a string fails on the first one.
-    Diagnostics are strings, so char-iteration succeeds and looks like data.
-    ``identity._attribute_pair`` guards the same shape explicitly, and this is
-    that rule applied to the one place it was missing.
-
-    Rejecting rather than wrapping is deliberate and matches how this class
-    already treats malformed input — ``FactStatus(data["status"])`` raises on
-    an unknown status rather than downgrading it. Silently promoting a scalar
-    to a one-element list would make a malformed package indistinguishable from
-    a well-formed one, which is how the original defect went unnoticed.
+    Nothing reads a family's record until a decision needs one, so a value
+    that is not a :class:`FactAvailability` survives construction and
+    surfaces as an ``AttributeError`` inside ``comparable``/``narrowed`` —
+    far from the assignment that accepted it, and only on the branch that
+    happens to consult it.
     """
-    if isinstance(raw, (str, bytes)) or not isinstance(raw, Sequence):
+    if not isinstance(raw, FactAvailability):
         raise TypeError(
-            f"diagnostics must be a sequence of strings, not "
-            f"{type(raw).__name__} ({raw!r}); a bare string would be split "
-            "into one diagnostic per character"
+            f"{field_name} must be a FactAvailability, not "
+            f"{type(raw).__name__} ({raw!r})"
         )
-    return tuple(str(d) for d in raw)
-
-
-def _decision_key(raw: Any, field_name: str) -> str:
-    """A key a decision is looked up by, rejected rather than coerced.
-
-    ``str()`` on a mapping key is silently lossy in the one way that matters
-    here: ``{1: {"status": "failed"}, "1": {"status": "present"}}`` — which a
-    YAML loader or a Python adapter can produce — collapses to one entry, and
-    *which* record survives depends on iteration order. Reversing it flips
-    ``for_family("1")`` from non-comparable to comparable, so a discarded
-    ``FAILED`` record can license a conclusion (Codex review).
-
-    This is the same defect ``canonical_form`` already rejects for mapping
-    keys, in the one place that had not adopted the rule. The two modules are
-    leaves and share nothing by design, so the rule is restated rather than
-    imported — which is exactly the drift this branch keeps finding, and the
-    reason both sites now carry a test instead of a comment promising they
-    agree.
-
-    ``versioning``'s ``section_schema_versions`` deliberately keeps its
-    ``str()``: it is one of the five *informational* axes, which parse
-    defensively because no decision reads them, and aborting a load over one
-    would break that contract. Everything here is read by a decision.
-    """
-    if not isinstance(raw, str):
-        raise TypeError(
-            f"{field_name} must be a string, not {type(raw).__name__} "
-            f"({raw!r}); coercing it would let two distinct keys collapse into "
-            "one record, with iteration order deciding which survives"
-        )
-    return raw
-
-
-def _provenance_text(raw: Any, field_name: str) -> str:
-    """A provenance field, rejected rather than coerced if not a string.
-
-    ``str()`` made ``recipe: 1`` and ``recipe: "1"`` deserialize and serialize
-    identically, so two records that a package distinguished became
-    interchangeable (Codex review). That matters more here than it looks:
-    ``recipe`` and ``producer`` are exactly the fields that decide whether two
-    ``PRESENT`` records may be compared, so erasing a distinction between them
-    makes invalid evidence look equivalent to valid evidence.
-
-    This is the third module to restate the same rule — ``canonical_form``
-    refuses a non-string mapping key, ``identity._identity_text`` refuses a
-    coerced identity field, and ``_decision_key`` below refuses a coerced
-    ledger key. They are deliberate restatements rather than one shared
-    helper, because these modules are leaves that import nothing from each
-    other, and a shared private module would have to be declared in the
-    published Phase 0 surface to satisfy the landed-surface check.
-
-    That is a real cost and it is recorded rather than hidden: every site now
-    carries its own test, and ``AGENTS.md`` names the rule so Phase 1 can
-    unify it once there is a shared leaf to put it in. A restated rule drifts,
-    and this branch found four sites where it already had.
-    """
-    if not isinstance(raw, str):
-        raise TypeError(
-            f"{field_name} must be a string, not {type(raw).__name__} "
-            f"({raw!r}); coercing it would make two records a package "
-            "distinguished compare as interchangeable"
-        )
-    return raw
 
 
 @dataclass(frozen=True)
@@ -404,7 +332,21 @@ class FactAvailability:
         conservative one. ``check_reader_compatibility`` in ``versioning.py``
         is where a too-new package is supposed to be refused, with a message
         that says so.
+
+        A non-mapping is refused here rather than reaching ``.get`` and
+        raising ``AttributeError`` from inside the parse. That is not
+        cosmetic: a caller that catches malformed input catches ``TypeError``
+        and ``ValueError``, so an ``AttributeError`` escaping this door reads
+        as a crash rather than as "this package is malformed" — and the
+        ledger reaches this method once per family and per override row, so
+        one scalar in the wrong slot decided how the whole load failed
+        (Codex review).
         """
+        if not isinstance(data, Mapping):
+            raise TypeError(
+                "an availability record must be a mapping, not "
+                f"{type(data).__name__} ({data!r})"
+            )
         raw_status = data.get("status")
         try:
             status = FactStatus(raw_status)
@@ -507,15 +449,32 @@ class AvailabilityLedger:
         # a ledger that lookup and serialization handled inconsistently
         # (Codex review). Validating here means no construction path can
         # produce one.
-        for name in self.families:
+        #
+        # The container itself is checked before its keys, because iterating
+        # is not the same question as indexing: `AvailabilityLedger(
+        # families=["layout"])` yields a perfectly valid family *name* from a
+        # list, so every key check passed and the ledger constructed — then
+        # `for_family` and `to_dict` raised `AttributeError` on the missing
+        # `get`/`items`, while `from_dict` refused the same shape outright
+        # (Codex review). Values are checked for the same reason one step
+        # further in: nothing reads a family's record until a decision needs
+        # it, so a non-record value surfaces as an `AttributeError` deep
+        # inside `narrowed`/`comparable` rather than at the door that
+        # accepted it.
+        _mapping(self.families, "families")
+        _mapping(self.overrides, "overrides")
+        for name, availability in self.families.items():
             _decision_key(name, "family name")
-        for key in self.overrides:
+            _availability(availability, f"families[{name!r}]")
+        for key, availability in self.overrides.items():
             if not isinstance(key, tuple) or len(key) != 2:
                 raise TypeError(
                     f"override key must be a (family, entity) pair, got {key!r}"
                 )
             _decision_key(key[0], "override family")
             _decision_key(key[1], "override entity")
+            _availability(availability, f"overrides[{key!r}]")
+        _availability(self.unknown_family_default, "unknown_family_default")
         if self.unknown_family_default.comparable:
             raise ValueError(
                 "unknown_family_default must not be comparable "
@@ -735,6 +694,11 @@ class AvailabilityLedger:
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> AvailabilityLedger:
+        if not isinstance(data, Mapping):
+            raise TypeError(
+                f"an availability ledger must be a mapping, not "
+                f"{type(data).__name__} ({data!r})"
+            )
         raw_families = data.get("families", {})
         if not isinstance(raw_families, Mapping):
             # `dict()` accepts a sequence of pairs and collapses duplicate

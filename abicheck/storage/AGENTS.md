@@ -74,6 +74,7 @@ re-export surface, not a namespace to import through internally.
 | `identity.py` | `EntityId`/`OccurrenceId`/`OccurrenceSet`/`IdentityConflict` — logical vs. observed identity, with multiplicity preserved (D4) |
 | `canonical.py` | `canonical_form`/`canonical_json`/`semantic_digest` — the one canonical logical encoding (D5) |
 | `versioning.py` | `StorageVersions`/`ProducerIdentity`/`check_reader_compatibility` — the separated version axes (D2) |
+| `guards.py` | the value guards all four apply at their doors — internal, not re-exported (see invariant 6) |
 
 ## Invariants this package must not break
 
@@ -110,14 +111,35 @@ re-export surface, not a namespace to import through internally.
    exception — no decision reads them, and this repo's convention is that a
    hand-edited package must not abort a load.
 
-   **This rule is currently restated in three modules** (`canonical_form`'s
-   mapping keys, `identity._identity_text`, `availability._provenance_text`
-   and `_decision_key`) rather than shared, because these are leaves that
-   import nothing from each other and a shared private module would have to
-   be declared in the published Phase 0 surface. Review found *four*
-   separate sites where the rule had not been applied, one at a time — so
-   treat a new site as likely-missing rather than likely-fine, and unify the
-   helper in Phase 1 once there is a shared leaf to hold it.
+   **The guards live in `guards.py`** — `identity_text`, `decision_key`,
+   `provenance_text`, `diagnostics_from`, `mapping`. They were one copy per
+   module until review found *seven* separate sites where the rule had not
+   been applied, one at a time, always as a site missing a check its siblings
+   already had. That is what three copies of a rule do, so the copies are
+   gone; the module is internal (the package does not re-export it) but its
+   surface is pinned by the same landed-surface table as the four public
+   ones. Add a new guard there, not at a call site.
+
+   `canonical_form` keeps its own mapping-key rejection: it is the *format*
+   refusing to encode a key it cannot round-trip, decided by the value's
+   type at encode time, not a named field a caller passes — and its message
+   is about the document being unencodable rather than about a field.
+
+   The rule reaches further than the value in a field. A **container** a
+   decision looks up in must be checked before its keys: a list, a tuple and
+   a string all iterate into values that pass every key guard, so
+   `AvailabilityLedger(families=["layout"])` constructed and only failed at
+   the first real lookup. A **record slot** must be checked where it is
+   assigned, not where it is read, or a non-record surfaces from inside
+   whichever decision happens to consult it. And a `from_dict` must refuse a
+   non-mapping *cleanly* — a caller separating "malformed package" from
+   "broken reader" catches `TypeError`/`ValueError`, so an `AttributeError`
+   escaping `.get` reads as the second when it is the first. Where a
+   `from_dict` degrades instead of refusing (the informational axes), it
+   must degrade to what an empty document parses to, never to the
+   dataclass defaults: those are the current *writer's* versions, so a
+   malformed versions block would have read as "written by this exact
+   build" and passed `check_reader_compatibility`.
 
 ## Tests
 

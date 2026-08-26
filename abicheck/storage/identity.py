@@ -54,6 +54,8 @@ from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
+from .guards import identity_text as _identity_text
+
 __all__ = [
     "EntityId",
     "EntityKind",
@@ -122,34 +124,6 @@ class ObservationKind(enum.Enum):
     TRANSLATION_UNIT = "translation_unit"
     SOURCE_LOCATION = "source_location"
     BUILD_UNIT = "build_unit"
-
-
-def _identity_text(value: Any, field_name: str) -> str:
-    """An identity-bearing field, rejected rather than coerced if not a string.
-
-    ``str()`` looks harmless on a field that is a string in every well-formed
-    document, and it is not: ``1`` and ``"1"`` are two distinct values in a
-    JSON document that both become ``"1"`` here, so two genuinely different
-    occurrences produce one key and :meth:`OccurrenceSet.add` drops the second
-    as an exact duplicate (Codex review). That is this module's one invariant
-    — never discard an observation — defeated by a type coercion at the
-    document boundary rather than by any logic in the set.
-
-    Rejecting matches what the neighbouring primitives already do with
-    malformed identity-bearing input: ``canonical_form`` refuses a non-string
-    mapping key, and ``FactAvailability.from_dict`` raises on an unknown
-    status rather than downgrading it. The informational version axes parse
-    defensively instead, and the distinction is deliberate — no decision reads
-    those, whereas everything here keys on these.
-    """
-    if not isinstance(value, str):
-        raise TypeError(
-            f"{field_name} must be a string, not {type(value).__name__} "
-            f"({value!r}); identity-bearing fields are never coerced, because "
-            "two distinct values sharing one string form would silently "
-            "collapse into one occurrence"
-        )
-    return value
 
 
 def _attribute_pair(pair: Any) -> tuple[str, str]:

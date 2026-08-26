@@ -231,6 +231,25 @@ class StorageVersions:
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> StorageVersions:
+        if not isinstance(data, Mapping):
+            # Degraded rather than refused, matching `ProducerIdentity`: every
+            # axis this reads is either fail-closed by *value* (an unstated
+            # version is `UNSTATED_VERSION`, which the reader already refuses)
+            # or informational, and this module's contract is that a malformed
+            # informational field never aborts a load. Reaching `.get` on a
+            # scalar instead raised `AttributeError` mid-parse, which is not
+            # the same thing as degrading (Codex review).
+            #
+            # It degrades to what an *empty document* parses to, not to
+            # `cls()`. Writing `cls()` first was wrong in the one direction
+            # that matters: the dataclass defaults are the current *writer's*
+            # versions, so a malformed versions block would have read as "this
+            # package was written by exactly this build" and passed
+            # `check_reader_compatibility`, while an empty mapping stating the
+            # same nothing correctly yields `UNSTATED_VERSION` and is refused.
+            # A degrade must land on the fail-closed value, not the
+            # optimistic one.
+            return cls.from_dict({})
         return cls(
             # Absent defaults to UNSTATED, not to this reader's own version —
             # the same rule as the comparison contract below, for the same

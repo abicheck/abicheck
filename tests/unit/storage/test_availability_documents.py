@@ -17,6 +17,7 @@ they are grouped where that comparison is easy to see.
 from __future__ import annotations
 
 import itertools
+from typing import Any
 
 import pytest
 from hypothesis import given, strategies as st
@@ -28,10 +29,12 @@ from abicheck.storage.availability import (
     FactAvailability,
     FactStatus,
 )
+from abicheck.storage.identity import EntityId, OccurrenceId
 from abicheck.storage.versioning import (
     COMPARISON_CONTRACT_VERSION,
     PACKAGE_FORMAT_VERSION,
     StorageVersions,
+    check_reader_compatibility,
 )
 
 _STATUSES = list(FactStatus)
@@ -573,3 +576,44 @@ class TestTheConstructorAppliesTheDocumentRules:
             ledger.override(key, "E1", FactAvailability(FactStatus.PRESENT))  # type: ignore[arg-type]
         with pytest.raises(TypeError, match="override"):
             ledger.override("layout", key, FactAvailability(FactStatus.PRESENT))  # type: ignore[arg-type]
+
+
+class TestAMalformedDocumentDegradesToTheFailClosedValue:
+    """A versions block that is not a mapping states nothing, and must read so.
+
+    ``StorageVersions.from_dict`` degrades rather than raising, because this
+    module's contract is that a malformed *informational* field never aborts a
+    load. The direction of the degrade is the whole finding: returning
+    ``StorageVersions()`` — the dataclass defaults — makes a malformed block
+    read as "written by exactly this build" and pass
+    ``check_reader_compatibility``, while the same nothing spelled as an empty
+    mapping yields ``UNSTATED_VERSION`` and is refused. Degrading has to land
+    on the fail-closed value, not the optimistic one.
+    """
+
+    @pytest.mark.parametrize("raw", ["x", ["x"], 1, None])
+    def test_a_non_mapping_reads_as_unstated(self, raw: Any) -> None:
+        versions = StorageVersions.from_dict(raw)
+        assert versions == StorageVersions.from_dict({})
+        assert not check_reader_compatibility(versions).readable
+
+    def test_the_writer_defaults_would_have_been_readable(self) -> None:
+        """Pins why the distinction matters, not just that it exists."""
+        assert check_reader_compatibility(StorageVersions()).readable
+
+    @pytest.mark.parametrize(
+        "cls", [FactAvailability, AvailabilityLedger, EntityId, OccurrenceId]
+    )
+    @pytest.mark.parametrize("raw", ["x", ["x"], 1, None])
+    def test_a_decision_bearing_document_is_refused_cleanly(
+        self, cls: Any, raw: Any
+    ) -> None:
+        """Never a raw ``AttributeError`` from inside the parse.
+
+        A caller distinguishing "malformed package" from "this reader is
+        broken" catches ``TypeError``/``ValueError``; an ``AttributeError``
+        escaping ``.get`` on a scalar reads as the second when it is the
+        first.
+        """
+        with pytest.raises((TypeError, ValueError)):
+            cls.from_dict(raw)
