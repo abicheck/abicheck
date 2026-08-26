@@ -651,3 +651,27 @@
   (premise-checked against real `zstandard`, confirmed to fail against
   the pre-fix code with a false "corrupt or truncated" error), one
   confirming a stream made only of skippable frames still raises.
+
+- **G40 bundle archive: one more Codex review finding, investigated in
+  depth, documented rather than fixed with a code change.** For a single
+  blob near `DEFAULT_MAX_BLOB_BYTES` (1 GiB), `read_blob()`'s bounded
+  primary decompression pass and `validate_zstd_frame_completeness()`'s
+  own per-frame re-decompression can each hold a full-size decoded
+  buffer alive at once, so real peak transient memory approaches 2x the
+  configured cap, not 1x, as the docstring previously implied.
+  Investigated running validation *before* the bounded primary pass to
+  avoid the overlap and rejected it: `python-zstandard`'s
+  `decompressobj().decompress()` has no bound or `max_length` (confirmed
+  empirically -- unlike `stream_reader()`'s chunked reads), so validating
+  first means calling this unbounded API on a not-yet-proven-safe input,
+  reintroducing the exact unbounded-decompression-bomb risk the current
+  ordering exists to prevent -- a materially worse failure mode than a
+  transient 2x memory ceiling. Closing this properly needs either a
+  chunked/bounded per-frame decompression primitive this library version
+  doesn't expose, or a larger redesign merging both passes into one --
+  out of proportion to a P2 finding under continued review pressure, per
+  this codebase's own "known gaps over risky reactive patches"
+  convention. Documented the real peak-memory formula directly in
+  `validate_zstd_frame_completeness()`'s own docstring so a caller sizing
+  `max_decoded_bytes` budgets for roughly double that value, rather than
+  leaving the discrepancy implicit.

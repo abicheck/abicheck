@@ -81,6 +81,26 @@ def validate_zstd_frame_completeness(
     already-proven-bounded data a second time for validation cannot exceed
     that same total, whatever this loop's own call granularity is.
 
+    Known, accepted trade-off (Codex review, fresh evidence): the two
+    passes' full outputs -- the caller's own already-materialized primary
+    result and this call's own current-frame ``frame_out`` -- can be
+    alive at once, so peak transient memory for a near-cap single-frame
+    blob (this module's own writer never splits one payload across
+    multiple frames) approaches 2x the configured cap, not 1x. Running
+    this validation *before* the bounded primary pass to avoid the
+    overlap was considered and rejected: that would mean calling this
+    function's own unbounded ``decompress()`` on a not-yet-proven-safe
+    input, reintroducing the exact unbounded-decompression-bomb risk the
+    ordering above exists to prevent -- a materially worse failure mode
+    than a transient 2x memory ceiling. ``python-zstandard``'s
+    ``decompressobj().decompress()`` has no ``max_length``/chunked
+    variant (confirmed empirically) to decode a single frame in bounded
+    increments the way ``stream_reader()`` does for the whole stream, so
+    closing this without either regressing that ordering or a materially
+    larger redesign merging both passes into one is not attempted here.
+    A caller sizing ``max_decoded_bytes`` should budget for roughly
+    double that value as the real peak, not the nominal cap alone.
+
     A frame header parse failure (``get_frame_parameters``/
     ``decompressobj().decompress()`` raising) is itself treated as
     corruption, not swallowed: truncating right after the 4-byte zstd
