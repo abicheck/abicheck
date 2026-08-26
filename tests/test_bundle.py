@@ -303,17 +303,11 @@ class TestIntraDepRemoved:
         DEFAULT_SYSTEM_SYMBOLS) once every one of the consumer's non-intra
         DT_NEEDED edges is covered by the allow-list -- e.g. a vendor C API
         symbol like Acme's acme_custom_op imported from a soname the user
-        explicitly named via --bundle-system-providers. A prior revision
-        gated this allow-list match on the symbol *also* looking
-        system-shaped, which made --bundle-system-providers inert for
-        exactly this case.
-
-        Deliberately uses a fictitious vendor soname, not a real one already
-        in DEFAULT_SYSTEM_PROVIDERS (e.g. oneMKL's libmkl_core) -- this test
-        is about the generic user-override mechanism, and must keep testing
-        it regardless of which real-world libraries the default allow-list
-        grows to cover.
-        """
+        explicitly named via --bundle-system-providers (fictitious vendor,
+        not a real default -- this tests the generic override mechanism).
+        A prior revision gated this allow-list match on the symbol *also*
+        looking system-shaped, which made --bundle-system-providers inert
+        for exactly this case."""
         new = _snapshot(
             {
                 "libfoo.so": _meta(
@@ -346,11 +340,8 @@ class TestIntraDepRemoved:
         """A user-supplied allow-list entry without the real DT_NEEDED
         version suffix (e.g. 'libacme_math', no '.so.2') must still match
         the real, versioned soname -- hand-typed allow-list entries rarely
-        carry the exact runtime version suffix.
-
-        Fictitious vendor soname (not a real DEFAULT_SYSTEM_PROVIDERS entry)
-        for the same reason as the sibling test above.
-        """
+        carry the exact runtime version suffix. Fictitious vendor soname,
+        same reason as the sibling test above."""
         new = _snapshot(
             {
                 "libfoo.so": _meta(

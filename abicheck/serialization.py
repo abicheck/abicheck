@@ -20,7 +20,7 @@ import json
 from collections.abc import Callable
 from dataclasses import asdict
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, TypeVar
+from typing import TYPE_CHECKING, Any, TypeVar, cast
 
 if TYPE_CHECKING:
     from .build_mode import BuildMode
@@ -1947,29 +1947,14 @@ def _validated_filename_map(raw: object) -> dict[str, str]:
     return filenames
 
 
-def load_bundle_facts(
-    path: str | Path, *, format: str = "auto", max_json_object_nodes: int | None = None
-) -> BundleFacts:
-    """Load a BundleFacts; ``format="auto"`` also recognizes G40's archive, see
-    ``bundle_facts.maybe_read_bundle_facts_archive``. *max_json_object_nodes*
-    overrides ``bundle_facts.DEFAULT_MAX_JSON_OBJECT_NODES`` identically on the
-    archive and plain-JSON paths (``storage.bundle_facts_validation.
-    check_bundle_facts_json_budget``; Codex review -- the plain path
-    previously enforced no budget at all)."""
-    from .bundle_facts import (
-        DEFAULT_MAX_JSON_OBJECT_NODES,
-        maybe_read_bundle_facts_archive,
-    )
+def load_bundle_facts(path: str | Path, *, format: str = "auto", max_json_object_nodes: int | None = None) -> BundleFacts:
+    """Load a BundleFacts; see ``storage.bundle_facts_validation.load_bundle_facts_dispatch`` for the ``format="auto"``/G40-archive dispatch and the ``max_json_object_nodes`` budget override."""
+    from . import bundle_facts as _bundle_facts
     from .snapshot_io import read_snapshot_text
-    from .storage.bundle_facts_validation import check_bundle_facts_json_budget
+    from .storage.bundle_facts_validation import load_bundle_facts_dispatch
 
-    budget = DEFAULT_MAX_JSON_OBJECT_NODES if max_json_object_nodes is None else max_json_object_nodes
-    archived = maybe_read_bundle_facts_archive(path, format, snapshot_from_dict=snapshot_from_dict, max_json_object_nodes=budget)
-    if archived is not None:
-        return archived
-    raw_text = read_snapshot_text(path)
-    check_bundle_facts_json_budget(raw_text.encode("utf-8"), budget, path=path, description="bundle facts JSON")
-    return bundle_facts_from_dict(json.loads(raw_text))
+    budget = _bundle_facts.DEFAULT_MAX_JSON_OBJECT_NODES if max_json_object_nodes is None else max_json_object_nodes
+    return cast("BundleFacts", load_bundle_facts_dispatch(path, format, read_snapshot_text=read_snapshot_text, maybe_read_bundle_facts_archive=_bundle_facts.maybe_read_bundle_facts_archive, bundle_facts_from_dict=bundle_facts_from_dict, snapshot_from_dict=snapshot_from_dict, max_json_object_nodes=budget))
 
 
 def save_bundle_facts(
