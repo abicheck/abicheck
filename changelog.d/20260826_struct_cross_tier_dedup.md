@@ -30,3 +30,15 @@
   `Change.qualified_name` directly from the matched `RecordType` pair it
   already has in hand, and `canonicalize_record_symbol` prefers that
   per-finding hint over the (necessarily ambiguous) table lookup.
+- **Follow-up (Codex review): the field-level parent-type match could drop
+  a real, distinct field-level finding.** An AST-tier `TYPE_FIELD_*`
+  finding's `Change.symbol` names only the parent type, never the field —
+  so once the fix above widened `_dedup_cross_kind`'s parent-type match to
+  reach namespaced types, a DWARF-tier `STRUCT_FIELD_*` finding for one
+  field could be silently dropped merely because a *different* field of
+  the same type also changed at the AST tier. The three `TYPE_FIELD_*`
+  emitters (`diff_types.py`) and their `STRUCT_FIELD_*` counterparts
+  (`diff_platform.py`) now stamp a new `Change.field_name`, and
+  `_dedup_cross_kind`'s parent-type match requires it to agree before
+  collapsing two findings; the three `TYPE_FIELD_*` emitters also now
+  stamp `Change.qualified_name`, mirroring the size/alignment fix above.

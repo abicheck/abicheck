@@ -1579,12 +1579,11 @@ def _removed_field_changes(
         new_fields.keys() - old_fields.keys(), new_fields
     )
     reserved_matched: set[str] = set()
-    # Tracks candidates already consumed by a pure-rename match below, so
-    # a second removed field at the same offset (e.g. two overlapping
-    # anonymous-union members collapsing to one field) can't also claim
-    # it — without this, both would report FIELD_RENAMED to the same
-    # target and the fact that one of them was genuinely dropped would
-    # be silently hidden (caught in review).
+    # Tracks candidates already consumed by a pure-rename match below, so a
+    # second removed field at the same offset (overlapping anonymous-union
+    # members) can't also claim it -- otherwise both would report
+    # FIELD_RENAMED to the same target, hiding that one was genuinely
+    # dropped (caught in review).
     rename_matched: set[str] = set()
 
     for fname in removed_names:
@@ -1614,16 +1613,12 @@ def _removed_field_changes(
             # Pure rename: same offset, identical type, different name.
             # Report FIELD_RENAMED (API_BREAK) directly instead of a
             # STRUCT_FIELD_REMOVED that would falsely claim the field no
-            # longer exists — mirrors the rename-skip already done for
-            # enum members below (ENUM_MEMBER_RENAMED). This does not
-            # depend on `_diff_field_renames` (over AbiSnapshot.types, a
-            # different model with its own type-name strings) also firing
-            # for the same pair — relying on that would silently drop the
-            # finding entirely whenever the two independent extractors
-            # spell the type differently (caught in review). Emitting the
-            # same FIELD_RENAMED shape here is safe either way: the
-            # post-processing dedup pass collapses an exact duplicate if
-            # `_diff_field_renames` also matches.
+            # longer exists — mirrors the rename-skip for enum members below
+            # (ENUM_MEMBER_RENAMED). Doesn't depend on `_diff_field_renames`
+            # (a different model, its own type-name strings) also firing for
+            # the pair -- relying on that could silently drop the finding
+            # when the two extractors spell the type differently (caught in
+            # review); the post-processing dedup pass collapses a duplicate.
             # _normalize_type_name is lossy by design (it also strips
             # pointer/reference sigils to compare "struct Foo *" against
             # "Foo" for the *tag-spelling* case), so it alone would equate
@@ -1691,6 +1686,7 @@ def _removed_field_changes(
                 name=name,
                 detail=fname,
                 old_value=f"{old_fields[fname].type_name}",
+                field_name=fname,
             )
         )
     return changes
@@ -1715,6 +1711,7 @@ def _existing_field_changes(
                     detail=fname,
                     old=str(old_f.byte_offset),
                     new=str(new_f.byte_offset),
+                    field_name=fname,
                 )
             )
 
@@ -1748,6 +1745,7 @@ def _existing_field_changes(
                     new=f"{new_f.type_name}({new_f.byte_size}B)",
                     old_value=old_f.type_name,
                     new_value=new_f.type_name,
+                    field_name=fname,
                 )
             )
     return changes

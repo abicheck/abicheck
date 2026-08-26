@@ -38,8 +38,8 @@ from abicheck.checker_policy import ChangeKind
 from abicheck.checker_types import Change
 from abicheck.diff_filtering import _dedup_cross_kind, _deduplicate_ast_dwarf
 from abicheck.diff_helpers import canonicalize_record_symbol, record_canonical_names
-from abicheck.dwarf_metadata import DwarfMetadata, StructLayout
-from abicheck.model import AbiSnapshot, RecordType
+from abicheck.dwarf_metadata import DwarfMetadata, FieldInfo, StructLayout
+from abicheck.model import AbiSnapshot, RecordType, TypeField
 
 
 def _rec(name: str, qualified: str, size_bits: int) -> RecordType:
@@ -196,6 +196,48 @@ class TestDedupCrossKindBridgesBareAndQualified:
         result = _dedup_cross_kind([header_tier, dwarf_tier], names)
         assert len(result) == 1
 
+    def test_field_level_parent_match_requires_the_same_field(self) -> None:
+        """Codex review on PR #873: an AST-tier field-level ``Change.symbol``
+        names only the parent type ("Widget"), never the field -- so a
+        parent-only match would drop a DWARF finding for field ``y`` merely
+        because field ``x`` of the *same* type also changed at the AST tier.
+        Both findings carry a distinct ``field_name`` now, so they must
+        survive as two findings, not collapse into one."""
+        header_tier = Change(
+            kind=ChangeKind.TYPE_FIELD_OFFSET_CHANGED,
+            symbol="Widget",
+            description="d",
+            field_name="x",
+        )
+        dwarf_tier = Change(
+            kind=ChangeKind.STRUCT_FIELD_OFFSET_CHANGED,
+            symbol="ns::Widget::y",
+            description="d",
+            field_name="y",
+        )
+        names = {"Widget": "ns::Widget", "ns::Widget": "ns::Widget"}
+        result = _dedup_cross_kind([header_tier, dwarf_tier], names)
+        assert len(result) == 2, result
+
+    def test_field_level_parent_match_still_bridges_the_same_field(self) -> None:
+        """The field-identity requirement must not regress the ordinary
+        case: the same field changing at both tiers still collapses."""
+        header_tier = Change(
+            kind=ChangeKind.TYPE_FIELD_OFFSET_CHANGED,
+            symbol="Widget",
+            description="d",
+            field_name="x",
+        )
+        dwarf_tier = Change(
+            kind=ChangeKind.STRUCT_FIELD_OFFSET_CHANGED,
+            symbol="ns::Widget::x",
+            description="d",
+            field_name="x",
+        )
+        names = {"Widget": "ns::Widget", "ns::Widget": "ns::Widget"}
+        result = _dedup_cross_kind([header_tier, dwarf_tier], names)
+        assert len(result) == 1
+
 
 # ── End-to-end through compare() ──────────────────────────────────────────
 
@@ -291,3 +333,155 @@ class TestEndToEndOnlyOneFindingSurvivesForANamespacedStruct:
         ]
         assert len(size_changes) == 1, size_changes
         assert size_changes[0].symbol in ("Widget", "a::Widget")
+
+    def test_two_different_fields_changing_at_each_tier_both_survive(self) -> None:
+        """Codex review on PR #873: field ``x`` changes only visibly at the
+        AST tier and field ``y`` only at the DWARF tier (of the same
+        namespaced struct). Before the field-identity fix, the parent-type
+        match in ``_dedup_cross_kind`` would wrongly drop the DWARF ``y``
+        finding merely because *some* field-level AST finding exists for
+        the same parent type -- silently losing a real, distinct change."""
+        old = AbiSnapshot(
+            library="lib.so",
+            version="1",
+            types=[
+                RecordType(
+                    name="Widget",
+                    kind="struct",
+                    qualified_name="ns::Widget",
+                    size_bits=128,
+                    fields=[
+                        TypeField(name="x", type="int", offset_bits=0),
+                        TypeField(name="y", type="int", offset_bits=64),
+                    ],
+                )
+            ],
+            dwarf=DwarfMetadata(
+                has_dwarf=True,
+                structs={
+                    "ns::Widget": StructLayout(
+                        name="ns::Widget",
+                        byte_size=16,
+                        fields=[
+                            FieldInfo(name="x", type_name="int", byte_offset=0, byte_size=4),
+                            FieldInfo(name="y", type_name="int", byte_offset=8, byte_size=4),
+                        ],
+                    )
+                },
+            ),
+        )
+        new = AbiSnapshot(
+            library="lib.so",
+            version="2",
+            types=[
+                RecordType(
+                    name="Widget",
+                    kind="struct",
+                    qualified_name="ns::Widget",
+                    size_bits=128,
+                    fields=[
+                        # x's offset moved -- an AST-tier-only observation.
+                        TypeField(name="x", type="int", offset_bits=32),
+                        TypeField(name="y", type="int", offset_bits=64),
+                    ],
+                )
+            ],
+            dwarf=DwarfMetadata(
+                has_dwarf=True,
+                structs={
+                    "ns::Widget": StructLayout(
+                        name="ns::Widget",
+                        byte_size=16,
+                        fields=[
+                            FieldInfo(name="x", type_name="int", byte_offset=0, byte_size=4),
+                            # y's offset moved -- a DWARF-tier-only observation.
+                            FieldInfo(
+                                name="y", type_name="int", byte_offset=12, byte_size=4
+                            ),
+                        ],
+                    )
+                },
+            ),
+        )
+        result = compare(old, new)
+        offset_changes = [
+            c
+            for c in result.changes
+            if c.kind
+            in (
+                ChangeKind.TYPE_FIELD_OFFSET_CHANGED,
+                ChangeKind.STRUCT_FIELD_OFFSET_CHANGED,
+            )
+        ]
+        field_names = {c.field_name for c in offset_changes}
+        assert field_names == {"x", "y"}, offset_changes
+
+
+# ── Structured identity on the three TYPE_FIELD_* emitters ────────────────
+
+
+class TestTypeFieldEmittersStampStructuredIdentity:
+    """Codex review on PR #873: TYPE_FIELD_REMOVED/_OFFSET_CHANGED/_TYPE_CHANGED
+    must carry both ``qualified_name`` (mirroring
+    ``_append_type_size_and_alignment_changes``) and ``field_name`` (needed
+    by ``_dedup_cross_kind``'s field-identity check above)."""
+
+    def _pair(self, old_fields: list[TypeField], new_fields: list[TypeField]) -> tuple:
+        old = AbiSnapshot(
+            library="lib.so",
+            version="1",
+            types=[
+                RecordType(
+                    name="Widget",
+                    kind="struct",
+                    qualified_name="ns::Widget",
+                    size_bits=64,
+                    fields=old_fields,
+                )
+            ],
+        )
+        new = AbiSnapshot(
+            library="lib.so",
+            version="2",
+            types=[
+                RecordType(
+                    name="Widget",
+                    kind="struct",
+                    qualified_name="ns::Widget",
+                    size_bits=64,
+                    fields=new_fields,
+                )
+            ],
+        )
+        return old, new
+
+    def test_offset_changed_carries_qualified_and_field_name(self) -> None:
+        old, new = self._pair(
+            [TypeField(name="x", type="int", offset_bits=0)],
+            [TypeField(name="x", type="int", offset_bits=32)],
+        )
+        result = compare(old, new)
+        (c,) = [
+            c for c in result.changes if c.kind is ChangeKind.TYPE_FIELD_OFFSET_CHANGED
+        ]
+        assert c.qualified_name == "ns::Widget"
+        assert c.field_name == "x"
+
+    def test_type_changed_carries_qualified_and_field_name(self) -> None:
+        old, new = self._pair(
+            [TypeField(name="x", type="int", offset_bits=0)],
+            [TypeField(name="x", type="double", offset_bits=0)],
+        )
+        result = compare(old, new)
+        (c,) = [
+            c for c in result.changes if c.kind is ChangeKind.TYPE_FIELD_TYPE_CHANGED
+        ]
+        assert c.qualified_name == "ns::Widget"
+        assert c.field_name == "x"
+
+    def test_removed_carries_qualified_and_field_name(self) -> None:
+        old, new = self._pair([TypeField(name="x", type="int", offset_bits=0)], [])
+        result = compare(old, new)
+        (c,) = [c for c in result.changes if c.kind is ChangeKind.TYPE_FIELD_REMOVED]
+        assert c.qualified_name == "ns::Widget"
+        assert c.field_name == "x"

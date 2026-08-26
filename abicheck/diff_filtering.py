@@ -74,9 +74,8 @@ _TYPE_CHANGE_KINDS: frozenset[ChangeKind] = frozenset(
         # Fine-grained class-layout descriptor kinds (layout-closure work): each
         # carries the owner type name in Change.symbol, so affected-symbol
         # enrichment must scan them too — otherwise a layout-only BREAKING
-        # finding (e.g. TRIVIALLY_COPYABLE_LOST on a size-stable type used by an
-        # exported by-value API) gets no affected_symbols and app-compat
-        # filtering could mark a consumer as unaffected (Codex review #345).
+        # finding gets no affected_symbols and app-compat filtering could mark
+        # a consumer as unaffected (Codex review #345).
         ChangeKind.BASE_CLASS_OFFSET_CHANGED,
         ChangeKind.VPTR_INTRODUCED,
         ChangeKind.TRIVIALLY_COPYABLE_LOST,
@@ -579,12 +578,10 @@ def _enrich_affected_symbols(
     # O(types × functions) / O(types × fields) substring cross-product.
     matcher = _SubstringMatcher(affected_types)
 
-    # Build type→functions mapping from old snapshot (FIX-A Part 3).
-    # Store both demangled names (for display) and mangled names (for appcompat matching).
+    # Build type→functions mapping from old snapshot, storing both demangled (display) and mangled (appcompat matching) names (FIX-A Part 3).
     type_to_funcs, type_to_mangled = _build_type_to_funcs(affected_types, old_pub, matcher)
 
-    # Also check if types are embedded in struct fields used by functions
-    # (e.g., Container has a Leaf field → functions taking Container* are affected by Leaf changes)
+    # Also check if types are embedded in struct fields used by functions (Container has a Leaf field → functions taking Container* are affected).
     type_embeds = _build_type_embed_index(affected_types, old, matcher)
 
     # Compute transitive closure: if Leaf is in Container is in Wrapper,
@@ -968,11 +965,10 @@ def _match_root_type(
             if pat.search(c.old_value) and pat.search(c.new_value):
                 return type_name
             # Both sides are known and don't jointly confirm this root type —
-            # the description alone (which may just restate the same
-            # old_value/new_value transition text) must not override that
-            # verdict for this type_name, or the both-sides guard above is a
-            # no-op whenever a covariant-return-style description happens to
-            # echo the old (or new) value's mention of the root (case72).
+            # the description (which may just restate the same old/new
+            # transition text) must not override that, or the both-sides
+            # guard above no-ops whenever a covariant-return-style
+            # description echoes the old/new value's mention (case72).
             continue
         if c.old_value and pat.search(c.old_value):
             return type_name
@@ -1392,14 +1388,21 @@ def _dedup_cross_kind(
     """Pass 3: drop a DWARF finding when an equivalent AST finding exists.
 
     Handles exact and parent-type matches for field-qualified symbols
-    (FIX-F). *record_names* (``diff_helpers.record_canonical_names``)
-    bridges a namespaced type's bare-vs-qualified spelling first.
+    (FIX-F). *record_names* bridges a namespaced type's bare-vs-qualified
+    spelling first. The parent-type match also requires ``field_name``
+    agreement when both findings carry one (Codex review): an AST-tier
+    field symbol names only the parent type, so without this a DWARF
+    finding for one field could be dropped merely because a *different*
+    field of the same type also changed at the AST tier.
     """
     names = record_names or {}
     ast_findings: set[tuple[str, str]] = set()
+    ast_field_findings: set[tuple[str, str, str]] = set()
     for c in changes:
         canon = canonicalize_record_symbol(c.symbol, names, c.qualified_name)
         ast_findings.add((c.kind.value, canon))
+        if c.field_name is not None:
+            ast_field_findings.add((c.kind.value, canon, c.field_name))
 
     _DWARF_FIELD_LEVEL_KINDS = {
         ChangeKind.STRUCT_FIELD_OFFSET_CHANGED,
@@ -1416,12 +1419,18 @@ def _dedup_cross_kind(
             if any((ak.value, canon_symbol) in ast_findings for ak in equiv_ast_kinds):
                 continue
 
-            # Parent-type match (FIX-F): "Point::x" → check "Point"
-            # Only for field-level changes; type-level changes (size, alignment)
-            # must not match parent — "Outer::Inner" is a nested type, not a field.
+            # Parent-type match (FIX-F): "Point::x" → check "Point". Only for
+            # field-level changes; a type-level change (size, alignment) must
+            # not match parent — "Outer::Inner" is a nested type, not a field.
             if c.kind in _DWARF_FIELD_LEVEL_KINDS and "::" in canon_symbol:
                 parent = canon_symbol.rsplit("::", 1)[0]
-                if any((ak.value, parent) in ast_findings for ak in equiv_ast_kinds):
+                if c.field_name is not None:
+                    if any(
+                        (ak.value, parent, c.field_name) in ast_field_findings
+                        for ak in equiv_ast_kinds
+                    ):
+                        continue
+                elif any((ak.value, parent) in ast_findings for ak in equiv_ast_kinds):
                     continue
 
         result.append(c)
@@ -1501,11 +1510,9 @@ def _deduplicate_cross_detector(
         # See this function's own docstring above: the L1 (DWARF)/L2 (header)
         # enum detectors independently report the same ChangeKind for the
         # same enum member change. resolve_change_identity's own
-        # _EQUIVALENT_CHANGE_CATEGORIES already self-maps these four kinds
-        # (so their *discriminator* already collapses regardless of
-        # producer-specific old_value/description spelling) — what was
-        # missing was including them here at all, so identity resolution
-        # (and therefore dedup) is even attempted for them.
+        # _EQUIVALENT_CHANGE_CATEGORIES already self-maps these four kinds --
+        # what was missing was including them here at all, so identity
+        # resolution (and therefore dedup) is even attempted for them.
         ChangeKind.ENUM_MEMBER_REMOVED: "enum_member_removed",
         ChangeKind.ENUM_MEMBER_VALUE_CHANGED: "enum_member_value_changed",
         ChangeKind.ENUM_LAST_MEMBER_VALUE_CHANGED: "enum_last_member_value_changed",
@@ -1515,33 +1522,27 @@ def _deduplicate_cross_detector(
     # symbol during a major release) makes BOTH version detectors fire per
     # symbol with the same old->new transition: SYMBOL_MOVED_VERSION_NODE (the
     # node label moved) and SYMBOL_VERSION_ALIAS_CHANGED (the default version
-    # changed, old not retained as an alias). They describe one event; drop the
-    # alias-change duplicate where a node move already covers the same
+    # changed, old not retained as an alias). They describe one event; drop
+    # the alias-change duplicate where a node move already covers the same
     # (symbol, old -> new), keeping the node-level change. Halves the
     # version-bump noise on real libraries (libLLVM 17->18: ~46k instead of
-    # ~92k risk findings).
-    #
-    # The match keys on (symbol, old_value, new_value): both detectors live in
-    # diff_versioning.py and populate old_value/new_value with the same version
-    # node labels for one bump, so the tuples coincide. If that ever diverges
-    # the dedup simply no-ops (both findings are kept) — a missed dedup, never a
-    # dropped real change — so this stays a safe, best-effort filter.
+    # ~92k risk findings). Matches on (symbol, old_value, new_value): both
+    # detectors live in diff_versioning.py and populate those fields with the
+    # same version node labels for one bump. If that ever diverges the dedup
+    # simply no-ops (both findings kept) — a missed dedup, never a dropped
+    # real change.
     moved_transitions: set[tuple[str, str | None, str | None]] = {
         (c.symbol, c.old_value, c.new_value)
         for c in changes
         if c.kind is ChangeKind.SYMBOL_MOVED_VERSION_NODE
     }
 
-    # This step runs BEFORE EnrichSourceLocations in the default pipeline
-    # (DEFAULT_PIPELINE), so the four enum categories above cannot rely on
-    # that later step to have already bridged a bare/qualified enum-name
-    # spelling mismatch into a matching `Change.qualified_name` --
-    # `resolve_change_identity` would still see the raw, tier-specific
-    # `symbol` and compute two different identities. Do the same bridging
-    # here, early, whenever the caller has the snapshots available (the
-    # pipeline step always does; a caller testing this function directly
-    # with no `old`/`new` degrades to the pre-existing behavior — a missed
-    # dedup for these four kinds, never an incorrect one).
+    # Runs BEFORE EnrichSourceLocations in DEFAULT_PIPELINE, so the four enum
+    # categories above cannot rely on that later step to have already
+    # bridged a bare/qualified enum-name mismatch into `Change.qualified_
+    # name` -- do the same bridging here, early, when the caller has the
+    # snapshots (a caller testing this directly with no `old`/`new` degrades
+    # to a missed dedup for these four kinds, never an incorrect one).
     if old is not None or new is not None:
         old_enum_names = _enum_canonical_names(old)
         new_enum_names = _enum_canonical_names(new)
@@ -1557,11 +1558,10 @@ def _deduplicate_cross_detector(
     result: list[Change] = []
     for c in changes:
         # Only collapse the alias-change into a co-reported node-move when the
-        # old default version is NOT retained as an alias — that is the case the
-        # node-move already fully describes. When the old alias IS retained the
-        # alias-change carries distinct, *compatible* information (old consumers
-        # still resolve) that the node-move's "will not find this symbol"
-        # wording would otherwise misrepresent, so it must survive.
+        # old default version is NOT retained as an alias — the case the
+        # node-move already fully describes. When the alias IS retained it
+        # carries distinct, compatible information the node-move's wording
+        # would otherwise misrepresent, so it must survive.
         if (
             c.kind is ChangeKind.SYMBOL_VERSION_ALIAS_CHANGED
             and SYMBOL_VERSION_ALIAS_NOT_RETAINED_MARKER in (c.description or "")
