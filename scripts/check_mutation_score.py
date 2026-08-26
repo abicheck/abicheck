@@ -1287,6 +1287,14 @@ def main(argv: list[str] | None = None) -> int:
         if diff_text is None:
             return err if err is not None else 1
 
+    # Read early (cheap, side-effect-free) so the scoping decision below can
+    # see them: whether a per-module baseline exists changes whether scoping
+    # is safe at all, not just how a later gate reads. Reused verbatim by the
+    # baseline-comparison block further down instead of re-reading.
+    baseline_modules = load_baseline(Path(args.baseline_file))
+    function_baseline = load_function_baseline(Path(args.baseline_file))
+    total_baseline = args.baseline if args.baseline is not None else SURVIVOR_BASELINE
+
     scope_patterns: list[str] | None = None
     scope_modules: set[str] = set()
     if (
@@ -1305,6 +1313,24 @@ def main(argv: list[str] | None = None) -> int:
         and args.scope_run_to_diff
         and not args.require_baseline
         and not args.write_baseline
+        # A module-scope edit (one outside every function) has no mutant of
+        # its own for check_diff_scoped() to attribute — by design, it is
+        # "scored by the per-module drift gate below" instead (that
+        # function's own docstring). check_per_module() is the only thing
+        # that can catch it under scoping (the global-total gate now skips
+        # itself for a scoped run, on purpose — see that block's own
+        # comment for why comparing a scoped population against a
+        # whole-repository total is unsound). Without a per-module baseline
+        # to run check_per_module() against, a scoped run with only the
+        # legacy global total configured would have *no* gate left standing
+        # for such an edit at all: check_diff_scoped() can't attribute it,
+        # check_per_module() doesn't run (no baseline_modules), and the
+        # global-total check now declines to score a partial population
+        # (Codex review). Falls back to a full run instead — the same
+        # "when in doubt, pay for the full population" answer this predicate
+        # family already gives for every other case it can't establish as
+        # safe, not a new heuristic.
+        and not (total_baseline is not None and baseline_modules is None)
     ):
         # Guaranteed non-None: this branch requires args.diff_scoped, which is
         # exactly the condition under which the block above either set
@@ -1431,9 +1457,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"  {module}: {len(keys)}")
 
     exit_code = 0
-    baseline_modules = load_baseline(Path(args.baseline_file))
-    function_baseline = load_function_baseline(Path(args.baseline_file))
-    total_baseline = args.baseline if args.baseline is not None else SURVIVOR_BASELINE
+    # baseline_modules / function_baseline / total_baseline: read early, above
+    # the run-scoping decision — reused as-is here.
     #: Is there a *drift* reference — the only thing that can answer "did the
     #: survivor set grow", for any function, changed or not?
     baseline_available = baseline_modules is not None or total_baseline is not None
@@ -1681,10 +1706,23 @@ def main(argv: list[str] | None = None) -> int:
     if args.json:
         mutants_measured = None
         mutants_per_second = None
-        if stats is not None:
+        # `stats` is always read from args.mutants_dir's *local* database
+        # (_gather()'s own load_cicd_stats(Path(args.mutants_dir)) call, on
+        # every branch) — for --run or a bare `mutmut results` read, that is
+        # the same database `results_out` was just produced from, so the two
+        # genuinely correspond. --results-file breaks that: `results_out`
+        # comes from an arbitrary external capture the caller supplied, while
+        # `stats` still comes from whatever happens to be sitting in
+        # args.mutants_dir locally — two runs with the same survivor count
+        # (the only field the cross-check above validates) but different
+        # populations would pair a real `total`/`not_checked` from one run
+        # with a saved listing from another, publishing a plausible-looking
+        # but meaningless `mutants_measured`/`mutants_per_second` (Codex
+        # review).
+        if stats is not None and not args.results_file:
             not_checked = stats.get("not_checked", 0)
             mutants_measured = max(stats.get("total", 0) - not_checked, 0)
-            if args.run and not args.results_file and gather_seconds > 0:
+            if args.run and gather_seconds > 0:
                 mutants_per_second = round(mutants_measured / gather_seconds, 3)
         Path(args.json).write_text(
             json.dumps(

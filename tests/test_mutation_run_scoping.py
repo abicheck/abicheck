@@ -1077,6 +1077,13 @@ def test_run_seconds_is_none_for_a_saved_results_file(
     doc = json.loads(receipt.read_text())
     assert doc["run_seconds"] is None
     assert doc["mutants_per_second"] is None
+    # `load_cicd_stats` above is mocked to return a real, non-None dict — the
+    # same shape a stale/unrelated mutants/mutmut-cicd-stats.json left over
+    # from another run would produce, since --results-file's own results
+    # text has no relationship to whatever happens to be in args.mutants_dir.
+    # `mutants_measured` must not be derived from it either (Codex review,
+    # PR #877, sixteenth round).
+    assert doc["mutants_measured"] is None
 
 
 def test_run_scope_mode_is_unknown_for_a_saved_results_file(

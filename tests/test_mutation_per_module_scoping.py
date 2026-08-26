@@ -264,13 +264,16 @@ def test_run_mode_scoped_run_still_catches_a_regression_in_the_scoped_module(
 # ---------------------------------------------------------------------------
 
 
-def test_run_mode_scoped_run_skips_the_global_total_baseline_check(
+def test_scoping_disabled_when_only_a_global_baseline_is_configured(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """A scoped run measuring 0 survivors (nothing outside scope was ever
-    test-executed) must not read as "0 < baseline 5 — please lower the
-    baseline", which would falsely certify an improvement no measurement
-    actually made."""
+    """A module-scope edit (one outside every function) has no mutant of its
+    own for check_diff_scoped() to attribute — by design it can only be
+    caught by check_per_module(), which needs a per-module baseline. With
+    only the legacy global total configured (no per-module baseline file),
+    scoping would leave *no* gate standing for such an edit at all, so it
+    must fall back to a full run instead (Codex review, PR #877, sixteenth
+    round)."""
     (tmp_path / "abicheck").mkdir()
     (tmp_path / "abicheck" / "diff_types.py").write_text(_SOURCE, encoding="utf-8")
     _pyproject_with_only_mutate(
@@ -280,7 +283,10 @@ def test_run_mode_scoped_run_skips_the_global_total_baseline_check(
     monkeypatch.setattr(gate.shutil, "which", lambda name: "/usr/bin/mutmut")
     diff = _write(tmp_path, "d.diff", _DIFF)
 
+    seen_cmds: list[list[str]] = []
+
     def fake_run_mutmut(cmd: list[str]) -> tuple[str, int]:
+        seen_cmds.append(cmd)
         if cmd[:2] == ["mutmut", "run"]:
             return "1/1  🎉 1  🙁 0  🫥 0  ⏰ 0  🤔 0", 0
         return "    abicheck.diff_types.x_alpha__mutmut_1: killed\n", 0
@@ -298,13 +304,84 @@ def test_run_mode_scoped_run_skips_the_global_total_baseline_check(
             diff,
             "--baseline",
             "5",
+            # No --baseline-file pointed at a real per-module baseline; the
+            # default path doesn't exist in tmp_path, so baseline_modules
+            # loads as None — exactly the "only the global fallback is
+            # configured" shape this fix targets.
         ]
     )
     out = capsys.readouterr().out
     assert rc == 0, out
+    # A real, unscoped `mutmut run` — no MUTANT_NAMES restricting it.
+    assert seen_cmds[0] == ["mutmut", "run"]
+    assert "mutation-score: scoping this run to" not in out
+    assert "global-total baseline check skipped" not in out
+    assert "please lower SURVIVOR_BASELINE" in out
+
+
+def test_run_mode_scoped_run_skips_the_global_total_baseline_check(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """With a real per-module baseline also present, scoping proceeds
+    normally, and the global-total gate still declines to score a scoped
+    (necessarily partial) survivor count against a whole-repository total —
+    the fifteenth-round fix, now verified to survive the sixteenth-round
+    scoping-disable check landing right next to it."""
+    (tmp_path / "abicheck").mkdir()
+    (tmp_path / "abicheck" / "diff_types.py").write_text(_SOURCE, encoding="utf-8")
+    _pyproject_with_only_mutate(
+        tmp_path, ["abicheck/diff_types.py", "abicheck/diff_symbols.py"]
+    )
+    monkeypatch.setattr(gate, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(gate.shutil, "which", lambda name: "/usr/bin/mutmut")
+    diff = _write(tmp_path, "d.diff", _DIFF)
+    baseline_file = tmp_path / "mutation-baseline.json"
+    baseline_file.write_text(
+        json.dumps(
+            {
+                "modules": {
+                    "abicheck/diff_types.py": {"survivors": 0, "functions": {}},
+                    "abicheck/diff_symbols.py": {"survivors": 0, "functions": {}},
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    seen_cmds: list[list[str]] = []
+
+    def fake_run_mutmut(cmd: list[str]) -> tuple[str, int]:
+        seen_cmds.append(cmd)
+        if cmd[:2] == ["mutmut", "run"]:
+            return "1/1  🎉 1  🙁 0  🫥 0  ⏰ 0  🤔 0", 0
+        return "    abicheck.diff_types.x_alpha__mutmut_1: killed\n", 0
+
+    monkeypatch.setattr(gate, "_run_mutmut", fake_run_mutmut)
+    monkeypatch.setattr(
+        gate, "load_cicd_stats", lambda _dir: {"total": 1, "survived": 0, "killed": 1}
+    )
+    rc = gate.main(
+        [
+            "--run",
+            "--diff-scoped",
+            "--scope-run-to-diff",
+            "--diff-file",
+            diff,
+            "--baseline",
+            "5",
+            "--baseline-file",
+            str(baseline_file),
+        ]
+    )
+    out = capsys.readouterr().out
+    assert rc == 0, out
+    # A real per-module baseline is present, so scoping proceeds for real.
+    assert any(cmd[:2] == ["mutmut", "run"] and len(cmd) > 2 for cmd in seen_cmds), out
     assert "global-total baseline check skipped" in out
     assert "please lower SURVIVOR_BASELINE" not in out
     assert "OK (0 == baseline 5)" not in out
+    # And check_per_module() itself still gates for real.
+    assert "per-module baseline OK for the scoped module(s)" in out
 
 
 def test_run_mode_unscoped_run_still_gates_the_global_total_baseline(
