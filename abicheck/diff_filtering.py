@@ -1384,7 +1384,7 @@ def _dedup_cross_kind(
     itself, e.g. a stale header vs. inconsistent extractor evidence.
     """
     names = record_names or {}
-    _Transition = tuple[str | None, str | None] | None
+    _Transition = tuple[object, object] | None
     ast_findings: dict[tuple[str, str], set[_Transition]] = {}
     ast_field_findings: dict[tuple[str, str, str], set[_Transition]] = {}
     for c in changes:
