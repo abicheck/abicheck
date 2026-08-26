@@ -86,6 +86,11 @@ __all__ = [
 
 
 def _emit(on_output: EvidenceEmit | None, lines: Iterable[str]) -> None:
+    """Hand ``lines`` to the caller's sink, or drop them when it owns none.
+
+    The engine never writes to a stream of its own: a typed-API caller passes
+    no sink and stays silent, while the CLI passes one that routes to stderr.
+    """
     if on_output is None:
         return
     for line in lines:
@@ -152,6 +157,7 @@ def intrinsic_coverage(snap: AbiSnapshot) -> list[LayerCoverage]:
     """Derive L0/L1/L2 coverage rows from a snapshot (ADR-028 D7)."""
 
     def row(layer: str, present: bool, detail: str) -> LayerCoverage:
+        """One coverage row: presence alone fixes both status and confidence."""
         return LayerCoverage(
             layer=layer,
             status=CoverageStatus.PRESENT if present else CoverageStatus.NOT_COLLECTED,

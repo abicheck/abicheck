@@ -214,6 +214,7 @@ class _AbicheckGroup(_RootGroupBase):
     """
 
     def main(self, *args: Any, standalone_mode: bool = True, **kwargs: Any) -> Any:  # type: ignore[override]
+        """Run the group, remapping only Click's usage exit per the class note."""
         # Call plain click's main (not rich-click's RichGroup.main, our direct
         # super), because rich-click's main renders and exits on a ClickException
         # itself — which would bypass the usage-error→64 remap below. Help still

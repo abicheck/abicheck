@@ -145,6 +145,7 @@ class _FacadeModule(types.ModuleType):
     """
 
     def __setattr__(self, name: str, value: object) -> None:
+        """Reject a moved name; anything else assigns as on a plain module."""
         owner = MOVED.get(name)
         if owner is not None:
             raise AttributeError(
