@@ -228,19 +228,30 @@ class TestDuplicateOverridesAreRefused:
 class TestTheSerializedFallbackIsTheEffectiveOne:
     """Codex review: three consumers of one field, and they disagreed.
 
-    `__post_init__` refuses a comparable `unknown_family_default`,
+    The construction door refuses a comparable `unknown_family_default`,
     `for_family` coerces one, and `to_dict` wrote the raw field. A ledger
-    whose fallback is reassigned after construction — a plain attribute
-    assignment, which runs no `__post_init__`, on a class that is mutable by
-    design — therefore answered `not_collected` while serializing `present`:
-    a document `from_dict` refuses to reload, and that a consumer without
-    that validation would read as available evidence.
+    whose fallback was reassigned after construction therefore answered
+    `not_collected` while serializing `present`: a document `from_dict`
+    refuses to reload, and that a consumer without that validation would read
+    as available evidence.
+
+    A later round closed the assignment itself — `__setattr__` now applies
+    the same rule the constructor does, so *plain* reassignment raises rather
+    than being silently downgraded (`TestAReassignedFallbackIsRefused`
+    below). The read-time coercion these tests cover is kept as the second
+    line: it is what still holds if the state is reached some other way, and
+    that is exactly how these tests now build it. Removing it because the
+    door above it closed would leave the disagreement between `for_family`
+    and `to_dict` live for any path that bypasses assignment.
     """
 
     @staticmethod
     def _reassigned(status: FactStatus) -> AvailabilityLedger:
         ledger = AvailabilityLedger()
-        ledger.unknown_family_default = FactAvailability(status)
+        # Deliberately past `__setattr__`: a plain assignment is refused now,
+        # and the property under test is what happens when the bad state
+        # exists anyway.
+        object.__setattr__(ledger, "unknown_family_default", FactAvailability(status))
         return ledger
 
     @pytest.mark.parametrize("status", [FactStatus.PRESENT, FactStatus.PARTIAL])
@@ -646,3 +657,50 @@ class TestTheInformationalMappingAxisRoundTrips:
         versions = StorageVersions(section_schema_versions={"entities": 3})
 
         assert versions.to_dict()["section_schema_versions"] == {"entities": 3}
+
+
+class TestAReassignedFallbackIsRefused:
+    """The assignment door, closed after the read-time coercion was.
+
+    `AvailabilityLedger` is a mutable dataclass with public fields, so the
+    guards that ran once at construction were bypassed by
+    `ledger.unknown_family_default = ...`. A non-record there made
+    `for_family` and `to_dict` raise `AttributeError` at
+    `fallback.comparable` (Codex review), and a *comparable* record was
+    silently downgraded at read rather than refused — the same value the
+    constructor rejects outright, treated two different ways depending on
+    which door it came through.
+    """
+
+    @pytest.mark.parametrize("value", ["bad", 1, None, ["x"], {"status": "present"}])
+    def test_a_non_record_is_refused(self, value: Any) -> None:
+        ledger = AvailabilityLedger()
+
+        with pytest.raises(TypeError):
+            ledger.unknown_family_default = value
+
+    @pytest.mark.parametrize("status", [FactStatus.PRESENT, FactStatus.PARTIAL])
+    def test_a_comparable_record_is_refused(self, status: FactStatus) -> None:
+        """The same rule the constructor applies, at the same strength."""
+        ledger = AvailabilityLedger()
+
+        with pytest.raises(ValueError, match="must not be comparable"):
+            ledger.unknown_family_default = FactAvailability(status)
+
+    @pytest.mark.parametrize("status", _GAP_STATUSES)
+    def test_a_legitimate_fallback_still_assigns(self, status: FactStatus) -> None:
+        """Refusing the invalid case must not close the valid one."""
+        ledger = AvailabilityLedger()
+
+        ledger.unknown_family_default = FactAvailability(status)
+
+        assert ledger.for_family("undeclared").status is status
+
+    def test_the_other_fields_are_guarded_on_reassignment_too(self) -> None:
+        """One door, not one field: the mappings are rebindable as well."""
+        ledger = AvailabilityLedger()
+
+        with pytest.raises(TypeError):
+            ledger.families = ["layout"]
+        with pytest.raises(TypeError):
+            ledger.overrides = {("layout", "E1"): "not a record"}

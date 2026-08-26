@@ -424,15 +424,28 @@ class TestUnknownFamilyFallbackCannotBeComparable:
 
         assert ledger.for_family("never-declared").status is status
 
+    @staticmethod
+    def _with_bad_fallback(status: FactStatus) -> AvailabilityLedger:
+        """Reach the bad state past the assignment guard, on purpose.
+
+        A plain `ledger.unknown_family_default = ...` is refused now — see
+        `test_availability_documents.py::TestAReassignedFallbackIsRefused`.
+        The read-time coercion below is the second line, so these tests must
+        build the state some other way to exercise it at all. Deleting them
+        because the door above closed would leave `for_family` and `to_dict`
+        free to disagree again for any path that bypasses assignment.
+        """
+        ledger = AvailabilityLedger()
+        object.__setattr__(ledger, "unknown_family_default", FactAvailability(status))
+        return ledger
+
     def test_post_construction_reassignment_is_coerced_at_read(self) -> None:
         """The ledger is mutable by design, so construction checks aren't enough.
 
-        `declare`/`override` mutate it, so the fallback field can be
-        reassigned too. `for_family` re-checks rather than trusting, and errs
-        toward "no conclusion".
+        `for_family` re-checks rather than trusting, and errs toward "no
+        conclusion".
         """
-        ledger = AvailabilityLedger()
-        ledger.unknown_family_default = FactAvailability(FactStatus.PRESENT)
+        ledger = self._with_bad_fallback(FactStatus.PRESENT)
 
         answer = ledger.for_family("layout")
 
@@ -440,14 +453,12 @@ class TestUnknownFamilyFallbackCannotBeComparable:
         assert answer.status is FactStatus.NOT_COLLECTED
 
     def test_the_gap_is_still_reported_after_reassignment(self) -> None:
-        ledger = AvailabilityLedger()
-        ledger.unknown_family_default = FactAvailability(FactStatus.PARTIAL)
+        ledger = self._with_bad_fallback(FactStatus.PARTIAL)
 
         assert ledger.missing_families(["layout", "graph"]) == ("graph", "layout")
 
     def test_for_entity_inherits_the_coerced_fallback(self) -> None:
-        ledger = AvailabilityLedger()
-        ledger.unknown_family_default = FactAvailability(FactStatus.PRESENT)
+        ledger = self._with_bad_fallback(FactStatus.PRESENT)
 
         assert not ledger.for_entity("layout", "ns::Foo").comparable
 

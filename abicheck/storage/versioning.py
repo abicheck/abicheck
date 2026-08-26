@@ -51,6 +51,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
+from .guards import instance_of as _instance_of
+
 __all__ = [
     "UNSTATED_VERSION",
     "PACKAGE_FORMAT_VERSION",
@@ -185,6 +187,20 @@ class StorageVersions:
     source_schema_version: int = 0
     source_producer_generation: str = ""
 
+    def __post_init__(self) -> None:
+        """Validate the one field that is a record rather than a scalar.
+
+        Every other axis here is informational or fail-closed *by value*, so
+        a malformed one degrades. ``producer`` is a nested
+        :class:`ProducerIdentity`, and a scalar in that slot survived
+        construction and then raised ``AttributeError`` from ``to_dict`` —
+        the object could not reach its own serialized form (Codex review).
+        That is a record slot, and record slots are checked where they are
+        assigned, the same rule the ledger and the occurrence identities
+        apply.
+        """
+        _instance_of(self.producer, ProducerIdentity, "producer")
+
     def to_dict(self) -> dict[str, Any]:
         """Canonical mapping form.
 
@@ -235,19 +251,37 @@ class StorageVersions:
                     for k, v in self.section_schema_versions.items()
                 )
             }
-        if self.normalization_recipe:
-            out["normalization_recipe"] = self.normalization_recipe
+        # Every remaining informational axis is normalized the same way, for
+        # the same reason: `normalization_recipe=1` wrote `1` and reloaded as
+        # `"1"`, and a fractional or non-numeric generation wrote itself
+        # verbatim and reloaded as `0` (Codex review). Fixing only the mapping
+        # field in the round before this one was the usual mistake — the site
+        # that was reported rather than the rule that covers all of them.
+        #
+        # `_stated_count`/`str()` rather than a rejection stays the documented
+        # informational-axis exception; the truthiness test is applied to the
+        # *normalized* value, so a field that reads back as absent is written
+        # as absent instead of as an unreadable value.
+        recipe = str(self.normalization_recipe) if self.normalization_recipe else ""
+        if recipe:
+            out["normalization_recipe"] = recipe
         producer = self.producer.to_dict()
         if producer:
             out["producer"] = producer
-        if self.extractor_generation:
-            out["extractor_generation"] = self.extractor_generation
-        if self.resolver_generation:
-            out["resolver_generation"] = self.resolver_generation
-        if self.source_schema_version:
-            out["source_schema_version"] = self.source_schema_version
-        if self.source_producer_generation:
-            out["source_producer_generation"] = self.source_producer_generation
+        for name in ("extractor_generation", "resolver_generation"):
+            count = _stated_count(getattr(self, name))
+            if count:
+                out[name] = count
+        source_schema = _stated_count(self.source_schema_version)
+        if source_schema:
+            out["source_schema_version"] = source_schema
+        source_generation = (
+            str(self.source_producer_generation)
+            if self.source_producer_generation
+            else ""
+        )
+        if source_generation:
+            out["source_producer_generation"] = source_generation
         return out
 
     @classmethod

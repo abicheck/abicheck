@@ -444,47 +444,64 @@ class AvailabilityLedger:
         default_factory=lambda: FactAvailability(FactStatus.NOT_COLLECTED)
     )
 
-    def __post_init__(self) -> None:
-        # The initial mappings bypass every key check `from_dict`, `declare`
-        # and `override` apply, so `AvailabilityLedger(families={1: failed,
-        # "1": present})` was accepted: it reported the string family as
-        # comparable while the failed row stayed reachable only through the
-        # int spelling, and `to_dict` then raised while sorting mixed keys —
-        # a ledger that lookup and serialization handled inconsistently
-        # (Codex review). Validating here means no construction path can
-        # produce one.
-        #
-        # The container itself is checked before its keys, because iterating
-        # is not the same question as indexing: `AvailabilityLedger(
-        # families=["layout"])` yields a perfectly valid family *name* from a
-        # list, so every key check passed and the ledger constructed — then
-        # `for_family` and `to_dict` raised `AttributeError` on the missing
-        # `get`/`items`, while `from_dict` refused the same shape outright
-        # (Codex review). Values are checked for the same reason one step
-        # further in: nothing reads a family's record until a decision needs
-        # it, so a non-record value surfaces as an `AttributeError` deep
-        # inside `narrowed`/`comparable` rather than at the door that
-        # accepted it.
-        _mapping(self.families, "families")
-        _mapping(self.overrides, "overrides")
-        for name, availability in self.families.items():
-            _decision_key(name, "family name")
-            _availability(availability, f"families[{name!r}]")
-        for key, availability in self.overrides.items():
-            if not isinstance(key, tuple) or len(key) != 2:
-                raise TypeError(
-                    f"override key must be a (family, entity) pair, got {key!r}"
+    def __setattr__(self, name: str, value: Any) -> None:
+        """Validate a field wherever it is assigned, construction included.
+
+        The initial mappings bypassed every key check `from_dict`, `declare`
+        and `override` apply, so `AvailabilityLedger(families={1: failed,
+        "1": present})` was accepted: it reported the string family as
+        comparable while the failed row stayed reachable only through the int
+        spelling, and `to_dict` then raised while sorting mixed keys — a
+        ledger that lookup and serialization handled inconsistently (Codex
+        review).
+
+        The container itself is checked before its keys, because iterating is
+        not the same question as indexing: `families=["layout"]` yields a
+        perfectly valid family *name* from a list, so every key check passed
+        and the ledger constructed — then `for_family` and `to_dict` raised
+        `AttributeError` on the missing `get`/`items` (Codex review). Values
+        are checked one step further in for the same reason: nothing reads a
+        family's record until a decision needs it, so a non-record value
+        surfaces from inside `narrowed`/`comparable` rather than at the door
+        that accepted it.
+
+        This lives in `__setattr__` rather than `__post_init__` because this
+        is a mutable dataclass and the fields are public: `ledger.
+        unknown_family_default = "bad"` reproduced the record-slot defect
+        after construction, past guards that only ran once (Codex review).
+        Every assignment is the same door.
+
+        **Residual, stated rather than closed:** mutating *inside* an already
+        validated mapping (`ledger.families["x"] = "bad"`) still bypasses
+        this, since only the rebinding is observable here. Closing it needs a
+        validating mapping type rather than a `dict`, which is a change to
+        the field's public type; `declare` and `override` are the supported
+        mutators and both validate.
+        """
+        if name == "families":
+            _mapping(value, "families")
+            for family, availability in value.items():
+                _decision_key(family, "family name")
+                _availability(availability, f"families[{family!r}]")
+        elif name == "overrides":
+            _mapping(value, "overrides")
+            for key, availability in value.items():
+                if not isinstance(key, tuple) or len(key) != 2:
+                    raise TypeError(
+                        f"override key must be a (family, entity) pair, got {key!r}"
+                    )
+                _decision_key(key[0], "override family")
+                _decision_key(key[1], "override entity")
+                _availability(availability, f"overrides[{key!r}]")
+        elif name == "unknown_family_default":
+            _availability(value, "unknown_family_default")
+            if value.comparable:
+                raise ValueError(
+                    "unknown_family_default must not be comparable "
+                    f"(got {value.status.value!r}): a family no availability "
+                    "record mentions cannot license a conclusion"
                 )
-            _decision_key(key[0], "override family")
-            _decision_key(key[1], "override entity")
-            _availability(availability, f"overrides[{key!r}]")
-        _availability(self.unknown_family_default, "unknown_family_default")
-        if self.unknown_family_default.comparable:
-            raise ValueError(
-                "unknown_family_default must not be comparable "
-                f"(got {self.unknown_family_default.status.value!r}): a family "
-                "no availability record mentions cannot license a conclusion"
-            )
+        object.__setattr__(self, name, value)
 
     def declare(self, family: str, availability: FactAvailability) -> None:
         """Set the family-level default. Last declaration wins.

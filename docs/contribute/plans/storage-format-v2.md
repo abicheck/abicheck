@@ -243,6 +243,43 @@ there, so the table is checked rather than maintained by hand.
 Tests live in `tests/unit/storage/`, stating each primitive's contract as
 invariants alongside the example cases (A0.6).
 
+### Documentation ownership — deliberately not registered yet
+
+`docs/AGENTS.md` requires every **new public-facing feature or surface** to
+register a topic in `docs/_meta/topics.yaml` in the same PR, and a reviewer
+asked why storage v2 has none (Codex review). The answer is that Phase 0 adds
+no such surface: no CLI command or flag, no report field, no config
+namespace, no Action input, and nothing in the product produces, consumes or
+persists these primitives — `SCHEMA_VERSION` stays at 25 and every existing
+document is byte-for-byte unchanged. They are also not part of the documented
+Python API: `abicheck/__init__.py` does not re-export them, and the
+`python-api` topic's `fact_sources` name the `service*` modules that page
+actually describes.
+
+The registry's `canonical_page` is required to be the one *published*
+narrative page a human reads, and every registered topic points at one under
+`learn/`, `use/`, `reference/` or `integration/` — never at `contribute/`.
+Writing such a page now would mean documenting, to users, an API they cannot
+reach. The ADR and this plan are the contributor-facing owners in the
+meantime, which is what `contribute/` is for.
+
+**The trigger is concrete rather than "later":** the PR that first *persists*
+a `ProjectSnapshot` — Phase 1's package writer — is the one that makes this
+user-facing, and it registers:
+
+```yaml
+  project-snapshot-storage:
+    canonical_page: reference/project-snapshot-format.md
+    fact_sources:
+      - abicheck/storage/availability.py
+      - abicheck/storage/identity.py
+      - abicheck/storage/canonical.py
+      - abicheck/storage/versioning.py
+```
+
+alongside the page itself. Recorded here so a future reader finds a decision
+rather than an omission.
+
 **Deliberately not done in Phase 0**, so that no existing behavior changes:
 nothing produces, consumes, or persists these types yet; `AbiSnapshot.index()`
 still resolves first-wins; `SCHEMA_VERSION` is untouched at 25; and no CLI
