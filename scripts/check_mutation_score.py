@@ -1268,8 +1268,21 @@ def main(argv: list[str] | None = None) -> int:
     # below (if requested) and, either way, by the diff-scoped gate further
     # down. See _load_diff_text's own docstring for why this also has to
     # happen before --run, not just before gating.
+    #
+    # Not fetched at all under --write-baseline, even with --diff-scoped also
+    # given: that branch returns before the diff-scoped gate below ever runs
+    # (records the *whole* population, unconditionally), and run-scoping is
+    # separately disabled under --write-baseline already (`and not
+    # args.write_baseline` a few lines down) -- so nothing downstream ever
+    # reads diff_text in this mode. Loading it anyway meant an offline
+    # checkout with no origin/main, a stale --base-ref, or an unreadable
+    # --diff-file could fail a baseline-recording run before the multi-hour
+    # mutmut invocation it exists to protect even started -- exactly the
+    # "fails before paying for the run" case _load_diff_text's own docstring
+    # argues for elsewhere, but here failing the thing that doesn't need the
+    # diff at all (Codex review).
     diff_text: str | None = None
-    if args.diff_scoped:
+    if args.diff_scoped and not args.write_baseline:
         diff_text, err = _load_diff_text(args)
         if diff_text is None:
             return err if err is not None else 1

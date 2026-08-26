@@ -914,6 +914,47 @@ def test_write_baseline_never_scopes_the_run(
     assert seen_cmds[0] == ["mutmut", "run"]
 
 
+def test_write_baseline_never_loads_the_diff(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """--write-baseline (with --diff-scoped also given) must not fail on a
+    diff it never actually consumes: that branch returns before the
+    diff-scoped gate runs, and run-scoping is separately disabled under
+    --write-baseline already — so nothing downstream ever reads diff_text in
+    this mode. Point --diff-file at a path that does not exist at all: if the
+    diff were still being loaded, this would raise (Codex review)."""
+    (tmp_path / "abicheck").mkdir()
+    (tmp_path / "abicheck" / "diff_types.py").write_text(_SOURCE, encoding="utf-8")
+    _pyproject_with_only_mutate(tmp_path, ["abicheck/diff_types.py"])
+    monkeypatch.setattr(gate, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(gate.shutil, "which", lambda name: "/usr/bin/mutmut")
+    monkeypatch.setattr(
+        gate,
+        "_run_mutmut",
+        lambda cmd: (
+            ("1/1  🎉 1  🙁 0", 0)
+            if cmd[:2] == ["mutmut", "run"]
+            else ("    abicheck.diff_types.x_alpha__mutmut_1: killed\n", 0)
+        ),
+    )
+    monkeypatch.setattr(
+        gate, "load_cicd_stats", lambda _dir: {"total": 1, "survived": 0}
+    )
+    rc = gate.main(
+        [
+            "--run",
+            "--diff-scoped",
+            "--diff-file",
+            str(tmp_path / "does-not-exist.diff"),
+            "--write-baseline",
+            "--baseline-file",
+            str(tmp_path / "baseline.json"),
+        ]
+    )
+    assert rc == 0
+    assert (tmp_path / "baseline.json").exists()
+
+
 def test_receipt_records_run_scope(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
