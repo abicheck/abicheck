@@ -305,18 +305,14 @@ def compare_bundle_from_facts(
 # `BundleFacts`/`AbiSnapshot` knowledge -- see that module's own docstring.
 #
 # This glue takes `snapshot_to_dict`/`snapshot_from_dict` as *parameters*
-# rather than importing them from `serialization.py`: `serialization.py`
-# already imports `BundleFacts` from this module (for
-# `bundle_facts_to_dict`/`bundle_facts_from_dict`/`save_bundle_facts`/
-# `load_bundle_facts`), so a `from .serialization import snapshot_to_dict`
-# here -- even function-scoped -- makes the two modules mutually dependent.
-# `scripts/check_ai_readiness.py`'s `import-cycle-growth` check flags this
-# via static AST scanning regardless of whether the import is lazy (caught
-# exactly this the first time this section was drafted, not assumed).
-# `validated_alias_map`/`validated_filename_map` (`bundle_facts_
-# validation.py`, a dependency-free leaf) are duplicates of `serialization`'s
-# own private validators for the same reason -- importing that module
-# directly isn't an option here.
+# rather than importing them from `serialization.py`: that module already
+# imports `BundleFacts` from here, so importing back -- even function-
+# scoped -- makes the two mutually dependent, which `scripts/
+# check_ai_readiness.py`'s `import-cycle-growth` check flags via static
+# AST scanning regardless of laziness (caught on this module's first
+# draft, not assumed). `validated_alias_map`/`validated_filename_map`
+# (`bundle_facts_validation.py`, a dependency-free leaf) duplicate
+# `serialization`'s own private validators for the same reason.
 def maybe_write_bundle_facts_archive(
     facts: BundleFacts,
     path: str | Path,
@@ -361,13 +357,11 @@ def maybe_read_bundle_facts_archive(
         resolved = format
     if resolved == "archive":
         return read_bundle_facts_archive(path, snapshot_from_dict=snapshot_from_dict, _fp=fp)
-    # Known residual gap: when the sniff resolves to "json", *fp* is
-    # closed rather than handed to the caller's own, separate
-    # `read_snapshot_text(path)` call, so the same sniff-then-reopen race
-    # the archive branch above closes still applies in this direction.
-    # Not closed: threading *fp* through `snapshot_io.read_snapshot_bytes`/
-    # `read_snapshot_text` needs a new parameter on that module, which is
-    # `debt.yaml`-locked `no_growth` pending its own ADR-061 migration.
+    # Known residual gap: for "json", *fp* is closed rather than handed to
+    # `read_snapshot_text(path)`'s own separate open, so the sniff-then-
+    # reopen race the archive branch above closes still applies here --
+    # not closed, since threading *fp* through needs a new parameter on a
+    # `debt.yaml`-locked `no_growth` module (its own ADR-061 migration).
     if fp is not None:
         fp.close()
     if resolved != "json":
@@ -398,22 +392,22 @@ def write_bundle_facts_archive(
         BundleArchiveWriter,
         content_hash,
     )
-    from .storage.bundle_archive_json_guard import oversized_raw_string
+    from .storage.bundle_archive_json_guard import (
+        bounded_encode_utf8,
+        oversized_raw_string,
+    )
 
     p = Path(path)
     # Everything below is computed -- and every cap the reader will later
     # enforce is checked -- *before* `BundleArchiveWriter` is ever opened,
-    # so a rejected write never touches disk. Every cap is measured on
-    # the *same* unique-hash map the write further down actually
-    # populates. Sorted by name, not dict insertion order: two logically-
-    # equal BundleFacts populated in a different order would otherwise
-    # produce different archive bytes/stored_sha256 for identical facts.
+    # so a rejected write never touches disk, on the *same* unique-hash
+    # map the write further down populates. Sorted by name, not dict
+    # insertion order: two logically-equal BundleFacts populated in a
+    # different order would otherwise produce different archive bytes.
     # (a) Library-name-count cap, independent of the distinct-blob cap
-    # below: many names can share one blob, so more names than the
-    # reader's own DEFAULT_MAX_LIBRARY_COUNT could write successfully and
-    # then never be reopened. Checked before the serialization loop --
-    # many names referencing one large shared snapshot would otherwise
-    # serialize that payload once per name before this can fire.
+    # below (many names can share one blob) -- checked before the
+    # serialization loop, else many names referencing one large shared
+    # snapshot would serialize that payload once per name first.
     if len(facts.per_library_snapshots) > DEFAULT_MAX_LIBRARY_COUNT:
         raise SnapshotError(
             f"{p}: writing this bundle's {len(facts.per_library_snapshots)} "
@@ -431,32 +425,41 @@ def write_bundle_facts_archive(
     # every snap here stays referenced by `facts.per_library_snapshots`
     # for the loop's duration, so no id() can be reused mid-loop.
     serialized_by_identity: dict[int, tuple[str, bytes]] = {}
+
+    def _oversized_bundle_message() -> str:
+        return (
+            f"{p}: writing this bundle's content already exceeds the "
+            f"{DEFAULT_MAX_BUNDLE_DECODED_BYTES} byte aggregate safety "
+            "limit read_bundle_facts_archive() enforces on load, once "
+            "every duplicate library name's own copy is counted -- "
+            "refusing to write an archive that could not be reopened."
+        )
+
     for name, snap in sorted(facts.per_library_snapshots.items()):
         cached = serialized_by_identity.get(id(snap))
         if cached is not None:
             h, payload = cached
         else:
-            payload = _json.dumps(snapshot_to_dict(snap), indent=2).encode("utf-8")
+            # bounded_encode_utf8() streams against the *remaining*
+            # allowance -- json.dumps()+.encode() would otherwise
+            # materialize a full oversized copy of this one snapshot
+            # before the aggregate check below ever ran (Codex review).
+            remaining = max(DEFAULT_MAX_BUNDLE_DECODED_BYTES - decoded_size_bytes, 0)
+            encoded = bounded_encode_utf8(snapshot_to_dict(snap), remaining)
+            if encoded is None:
+                raise SnapshotError(_oversized_bundle_message())
+            payload = encoded
             h = content_hash(payload)
             serialized_by_identity[id(snap)] = (h, payload)
-        # decoded_size_bytes (every name's own copy, duplicates included)
-        # is checked here, incrementally, not only unique_payloads' own
-        # deduped total -- distinct AbiSnapshot objects that happen to
-        # serialize identically (not the identity-cache case above) still
-        # each cost a real, full serialization before their shared hash is
-        # known, so bounding only the deduped total would let many such
-        # objects perform unbounded work first (Codex review). Already
+        # Charged here too, not only unique_payloads' own deduped total --
+        # distinct AbiSnapshot objects that happen to serialize
+        # identically (not the identity-cache case above) still each cost
+        # a real serialization before their shared hash is known. Already
         # equals what reader_charged_bytes computes for names so far, so
         # this check and that one can never disagree.
         decoded_size_bytes += len(payload)
         if decoded_size_bytes > DEFAULT_MAX_BUNDLE_DECODED_BYTES:
-            raise SnapshotError(
-                f"{p}: writing this bundle's content already exceeds the "
-                f"{DEFAULT_MAX_BUNDLE_DECODED_BYTES} byte aggregate safety "
-                "limit read_bundle_facts_archive() enforces on load, once "
-                "every duplicate library name's own copy is counted -- "
-                "refusing to write an archive that could not be reopened."
-            )
+            raise SnapshotError(_oversized_bundle_message())
         unique_payloads.setdefault(h, payload)
         library_blobs[name] = h
     manifest_blob = None
@@ -486,14 +489,10 @@ def write_bundle_facts_archive(
     hash_counts = Counter(library_blobs.values())
     reader_charged_bytes = sum(len(unique_payloads[h]) * n for h, n in hash_counts.items())
     # manifest_blob's bytes are charged once more, unconditionally,
-    # whenever present -- as _cached_blob()'s raw-fetch charge on a cache
-    # miss (hash not shared), or as the reader's own separate "second
-    # materialization" charge on a cache hit (hash shared with a library).
-    # Either way that's one extra `unique_payloads[manifest_blob]` beyond
-    # what hash_counts counted; charging only the not-shared case (as
-    # before) missed the shared one, letting the writer accept an archive
-    # its own reader rejects (Codex review; repro: a 20-byte shared
-    # payload, a 30-byte cap).
+    # whenever present -- a raw-fetch charge on a cache miss, or the
+    # reader's "second materialization" charge on a hit (hash shared with
+    # a library). Charging only the not-shared case missed the shared
+    # one, letting the writer accept what its own reader rejects.
     if manifest_blob is not None:
         reader_charged_bytes += len(unique_payloads[manifest_blob])
     if reader_charged_bytes > DEFAULT_MAX_BUNDLE_DECODED_BYTES:

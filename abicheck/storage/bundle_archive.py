@@ -148,20 +148,19 @@ def sniff_bundle_archive_format(path: str | Path) -> str:
     Always ``"json"`` for a non-regular-file source (a FIFO, `/dev/stdin`,
     a socket) without reading anything from it: a real bundle archive can
     never be delivered that way regardless -- `zipfile.ZipFile` seeks to
-    the *end* of its input, which a non-seekable stream can't support."""
-    p = Path(path)
-    try:
-        st = p.stat()
-    except OSError as exc:
-        raise SnapshotError(f"Cannot read {p}: {exc}") from exc
-    if not stat.S_ISREG(st.st_mode):
-        return "json"
-    try:
-        with open(p, "rb") as f:
-            prefix = f.read(4)
-    except OSError as exc:
-        raise SnapshotError(f"Cannot read {p}: {exc}") from exc
-    return _classify_prefix(prefix)
+    the *end* of its input, which a non-seekable stream can't support.
+
+    Delegates to `open_regular_file_for_format_sniff()`'s own single-open,
+    nonblocking-then-fstat classification (closing the fd itself, since
+    this caller only wants the classification) rather than a separate
+    `stat()` + `open()` -- the same two-inode TOCTOU window that helper
+    was fixed to close still applied here otherwise: a regular file
+    replaced with a blocking FIFO between the `stat()` and the `open()`
+    could hang this call indefinitely (Codex review, fresh evidence)."""
+    fp, fmt = open_regular_file_for_format_sniff(path)
+    if fp is not None:
+        fp.close()
+    return fmt
 
 
 def _classify_prefix(prefix: bytes) -> str:

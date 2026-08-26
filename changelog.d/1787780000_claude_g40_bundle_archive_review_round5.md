@@ -339,3 +339,26 @@
   stopping as soon as the running total exceeds the limit, so no single
   `encode()` call ever materializes more than a bounded slice regardless
   of the input's total size.
+
+- **G40 bundle archive: two more Codex review findings, both real, both
+  fixed.** (1) `write_bundle_facts_archive()`'s own per-library-snapshot
+  encode still called `json.dumps()`+`.encode()` directly -- materializing
+  a full copy of one oversized snapshot's serialization before the
+  aggregate cap check (checked only *after*) ever got a chance to reject
+  it, even though the loop's own cap was already checked *between*
+  snapshots. Fixed by routing it through a new `bounded_encode_utf8()`
+  helper (`abicheck/storage/bundle_archive_json_guard.py`), which streams
+  against the *remaining* aggregate allowance: a single oversized string
+  field is caught cheaply via the existing `oversized_raw_string()` fast
+  path, and the aggregate size across many individually-bounded fields is
+  caught by streaming `JSONEncoder.iterencode()` and stopping as soon as
+  the running byte count crosses the limit -- never a `json.dumps()` call
+  on the full object. (2) `sniff_bundle_archive_format()` still did its
+  own, separate `Path.stat()` then a separate `open()` -- the exact
+  two-inode TOCTOU window `open_regular_file_for_format_sniff()`'s own
+  identical race had already been fixed for (a regular file swapped for a
+  blocking FIFO between the two calls could hang the second `open()`
+  indefinitely), just never carried over to this sibling function. Fixed
+  by delegating to that same helper's single O_NONBLOCK-open-then-fstat()
+  classification, closing the fd itself since this caller only needs the
+  classification, not the fd.

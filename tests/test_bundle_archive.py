@@ -803,6 +803,79 @@ class TestSniffBundleArchiveFormatNonRegularSource:
         assert result == [(None, "json")]
 
 
+class TestSniffBundleArchiveFormatUsesTheSameSingleOpenClassification:
+    """`sniff_bundle_archive_format()` previously did its own, separate
+    `Path.stat()` then a separate `open()` -- a two-inode TOCTOU window
+    where a concurrent replacement (a regular file swapped for a FIFO)
+    between the two could make the second `open()` block indefinitely,
+    even though `open_regular_file_for_format_sniff()`'s own identical
+    class of race had already been fixed. Now delegates to that helper's
+    single O_NONBLOCK-open-then-fstat() sequence instead (Codex review,
+    fresh evidence)."""
+
+    def test_sniff_never_calls_a_separate_stat_before_opening(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Structural proof, not a timing-dependent race reproduction: a
+        bare `Path.stat()` call is exactly the first half of the
+        vulnerable two-step sequence, so asserting it's never reached at
+        all closes the TOCTOU window by construction rather than merely
+        narrowing it. Confirmed to fail against the pre-fix
+        `p.stat()`-then-`open()` implementation."""
+        import abicheck.storage.bundle_archive as bundle_archive_module
+
+        def _fail_if_called(*a: object, **kw: object) -> object:
+            raise AssertionError(
+                "sniff_bundle_archive_format() must not call a separate "
+                "Path.stat() -- it should classify via the same single "
+                "opened descriptor open_regular_file_for_format_sniff() "
+                "uses, with no preceding stat() at all"
+            )
+
+        monkeypatch.setattr(bundle_archive_module.Path, "stat", _fail_if_called)
+        path = tmp_path / "bundle.archive.zip"
+        path.write_bytes(b"PK\x03\x04junk")
+        assert bundle_archive_module.sniff_bundle_archive_format(path) == "archive"
+
+    def test_classification_is_unaffected_for_json_and_archive_sources(
+        self, tmp_path: Path
+    ) -> None:
+        """Positive control: the delegation must not change the answer
+        for either real classification, only the mechanism."""
+        from abicheck.storage.bundle_archive import sniff_bundle_archive_format
+
+        archive_path = tmp_path / "bundle.archive.zip"
+        archive_path.write_bytes(b"PK\x03\x04junk")
+        assert sniff_bundle_archive_format(archive_path) == "archive"
+
+        json_path = tmp_path / "bundle.json"
+        json_path.write_bytes(b'{"schema_version": 1}')
+        assert sniff_bundle_archive_format(json_path) == "json"
+
+    @pytest.mark.skipif(sys.platform == "win32", reason="no os.mkfifo on Windows")
+    def test_still_does_not_hang_on_a_bare_fifo(self, tmp_path: Path) -> None:
+        """Sibling to `open_regular_file_for_format_sniff`'s own identical
+        test -- run in a thread with a bounded join() since a hang here
+        can't otherwise be distinguished from "still running"."""
+        import threading
+
+        from abicheck.storage.bundle_archive import sniff_bundle_archive_format
+
+        fifo = tmp_path / "no_writer.fifo"
+        os.mkfifo(fifo)
+
+        result: list[str] = []
+
+        def _call() -> None:
+            result.append(sniff_bundle_archive_format(fifo))
+
+        t = threading.Thread(target=_call, daemon=True)
+        t.start()
+        t.join(timeout=5)
+        assert not t.is_alive(), "sniff_bundle_archive_format blocked on a FIFO"
+        assert result == ["json"]
+
+
 class TestOpenRegularFileForFormatSniffClosesOnReadFailure:
     """A failure reading the 4-byte peek itself (e.g. EIO on a network
     filesystem) after open() succeeds must not leak the fd or propagate a

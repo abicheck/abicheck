@@ -13,13 +13,15 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Manifest-encoding size guard for ``bundle_archive.py``/``bundle_facts.py``
+"""JSON-encoding size guards for ``bundle_archive.py``/``bundle_facts.py``
 (G40), split out purely to stay under both callers' ADR-061 800-line
-production cap -- a leaf, dependency-free module with no coupling to either
-caller beyond the one function below.
+production cap -- a leaf module with no coupling to either caller beyond
+the functions below.
 """
 
 from __future__ import annotations
+
+import json
 
 # Chunk size for the incremental UTF-8 byte count below -- large enough to
 # keep the per-chunk encode() call cheap, small enough that no single
@@ -89,3 +91,34 @@ def oversized_raw_string(obj: object, limit: int) -> str | None:
                 return found
         return None
     return None
+
+
+def bounded_encode_utf8(obj: object, limit: int) -> bytes | None:
+    """Serialize *obj* to UTF-8 JSON (``indent=2``) bytes, or `None` if
+    doing so would exceed *limit* bytes -- never materializes the
+    complete oversized payload to find out.
+
+    Two layers, covering both ways an encode can blow past *limit*
+    before a caller-side check gets a chance to run: a single oversized
+    string leaf is caught first and cheaply via `oversized_raw_string()`
+    itself (`iterencode()` alone can't catch this -- see that function's
+    own docstring); the remaining, aggregate size across many
+    individually-bounded fields is then caught by streaming
+    `JSONEncoder.iterencode()` and stopping as soon as the running byte
+    count crosses *limit*, instead of a caller building the whole string
+    with `json.dumps()` first (Codex review, fresh evidence -- reproduced
+    against `write_bundle_facts_archive()`'s own per-library-snapshot
+    encode, previously unbounded within one snapshot even though the
+    loop's own cap was already checked *between* snapshots).
+    """
+    if oversized_raw_string(obj, limit) is not None:
+        return None
+    parts: list[bytes] = []
+    total = 0
+    for chunk in json.JSONEncoder(indent=2).iterencode(obj):
+        chunk_bytes = chunk.encode("utf-8")
+        total += len(chunk_bytes)
+        if total > limit:
+            return None
+        parts.append(chunk_bytes)
+    return b"".join(parts)
