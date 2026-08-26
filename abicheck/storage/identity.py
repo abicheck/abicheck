@@ -188,8 +188,24 @@ class OccurrenceSet:
     varied with producer traversal order.)
     """
 
-    _by_entity: dict[str, list[OccurrenceId]] = field(default_factory=dict)
-    _entities: dict[str, EntityId] = field(default_factory=dict)
+    # `init=False`: these are implementation state, and exposing them as
+    # constructor parameters let a caller install state that `add` would
+    # have refused. `OccurrenceSet(_by_entity={key: ["bad"]})` constructed
+    # happily and `to_dict()` then leaked `AttributeError` — the wrong error
+    # kind for a malformed record, per this package's own contract.
+    #
+    # The sharper half is that the two mappings are one index in two parts,
+    # so a caller could desynchronize them: `_by_entity` holding an
+    # occurrence whose entity is absent from `_entities` made `len()` report
+    # it while `entities()` could not expose it (Codex review). `__len__` is
+    # documented here as "the number nothing may reduce", so that is this
+    # module's own invariant failing through a door it never meant to open.
+    #
+    # Validating the supplied state instead would mean rebuilding it through
+    # `add`, which is the same thing as not accepting it — `add` is already
+    # the only way in, and it is public.
+    _by_entity: dict[str, list[OccurrenceId]] = field(default_factory=dict, init=False)
+    _entities: dict[str, EntityId] = field(default_factory=dict, init=False)
 
     def add(self, occurrence: OccurrenceId) -> None:
         """Record an occurrence. Never replaces or discards an existing one.

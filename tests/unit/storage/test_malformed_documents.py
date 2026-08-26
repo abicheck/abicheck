@@ -342,3 +342,81 @@ class TestConstructorsGuardContainersToo:
             attributes=(("size", "8"),),
         )
         assert occurrence.attributes == (("size", "8"),)
+
+
+class TestImplementationStateIsNotConstructorSurface:
+    """`OccurrenceSet`'s index is two mappings, and both were `__init__` args.
+
+    That let a caller install state `add` would have refused. The milder
+    half leaked `AttributeError` from `to_dict()` — the wrong error kind for
+    a malformed record, per this package's own contract. The sharper half is
+    that the two mappings are *one index in two parts*, so they could be
+    desynchronized: `_by_entity` holding an occurrence whose entity is
+    missing from `_entities` made `len()` report it while `entities()` could
+    not expose it (Codex review).
+
+    `__len__` is documented here as "the number nothing may reduce", so that
+    is this module's own invariant failing through a door it never meant to
+    open.
+    """
+
+    def test_the_index_cannot_be_supplied_at_construction(self) -> None:
+        entity = EntityId(kind=EntityKind.FUNCTION, qualified_name="f")
+        occurrence = OccurrenceId(entity=entity, observation=ObservationKind.AST)
+
+        with pytest.raises(TypeError, match="unexpected keyword argument"):
+            OccurrenceSet(_by_entity={entity.key: ["bad"]})
+
+        with pytest.raises(TypeError, match="unexpected keyword argument"):
+            OccurrenceSet(_by_entity={entity.key: [occurrence]}, _entities={})
+
+    def test_the_supported_way_in_still_works(self) -> None:
+        """`add` is already the only way in, and it is public.
+
+        Validating supplied state instead of refusing it would have meant
+        rebuilding it through `add` — the same thing as not accepting it.
+        """
+        entity = EntityId(kind=EntityKind.FUNCTION, qualified_name="f")
+        occurrence = OccurrenceId(entity=entity, observation=ObservationKind.AST)
+
+        built = OccurrenceSet()
+        built.add(occurrence)
+
+        assert len(built) == 1
+        assert [e.qualified_name for e in built.entities()] == ["f"]
+        assert OccurrenceSet.from_dict(built.to_dict()) == built
+
+    def test_no_dataclass_exposes_private_state_as_a_parameter(self) -> None:
+        """The sweep, since this door was found by review rather than by me.
+
+        `OccurrenceSet` was the only one; this fails if a future dataclass
+        adds a private field without `init=False`.
+        """
+        import ast
+        import pathlib
+
+        exposed: list[str] = []
+        for path in sorted(pathlib.Path("abicheck/storage").glob("*.py")):
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.ClassDef):
+                    continue
+                if not any("dataclass" in ast.unparse(d) for d in node.decorator_list):
+                    continue
+                for stmt in node.body:
+                    if not isinstance(stmt, ast.AnnAssign):
+                        continue
+                    if not isinstance(stmt.target, ast.Name):
+                        continue
+                    if not stmt.target.id.startswith("_"):
+                        continue
+                    default = ast.unparse(stmt.value) if stmt.value else ""
+                    if "init=False" not in default:
+                        exposed.append(
+                            f"{path.name}:{stmt.lineno} {node.name}.{stmt.target.id}"
+                        )
+
+        assert exposed == [], (
+            "these dataclasses expose private state as constructor parameters, "
+            f"so a caller can install what the public mutators refuse: {exposed}"
+        )
