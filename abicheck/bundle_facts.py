@@ -25,18 +25,15 @@ closes that gap with a serializable ``BundleFacts`` object and a
 the primitive already built to construct a fully-functional
 :class:`~abicheck.bundle_models.BundleSnapshot` (cross-DSO ``DT_NEEDED``/
 symbol-version resolution included) from already-parsed
-:class:`~abicheck.elf_metadata.ElfMetadata` alone — which is exactly what
+:class:`~abicheck.elf_metadata.ElfMetadata` alone — exactly what
 :attr:`abicheck.model.AbiSnapshot.elf` already stores for every ELF
-``dump``. ``BundleFacts`` therefore does not duplicate a separate
-resolution-graph/artifact-metadata schema (as an earlier draft of the G38
-plan sketched): it stores the one thing that is not already reconstructible
-from an ``AbiSnapshot`` (the manifest, plus a variant-fingerprint slot G38
-Phase 3 will populate), and derives everything else — the resolution graph,
-provider/consumer tables, SONAME/version data — from each library's own
-``ElfMetadata`` on load, the same way a live ``compare_bundle()`` run does
-from freshly-parsed binaries. This keeps ``BundleFacts`` from drifting out
-of sync with whatever :func:`abicheck.bundle._compute_resolution_graph`
-computes, since there is only ever one implementation of that computation.
+``dump``. ``BundleFacts`` therefore stores only what isn't already
+reconstructible from an ``AbiSnapshot`` (the manifest, plus a
+variant-fingerprint slot G38 Phase 3 will populate), deriving everything
+else — the resolution graph, provider/consumer tables, SONAME/version
+data — from each library's own ``ElfMetadata`` on load, the same way a
+live ``compare_bundle()`` run does, so ``BundleFacts`` can never drift out
+of sync with :func:`abicheck.bundle._compute_resolution_graph`.
 
 This is a leaf module with respect to :mod:`abicheck.bundle`: it imports
 that module only lazily, inside function bodies, to avoid a needless import
@@ -106,40 +103,30 @@ class BundleFacts:
     cross-DSO findings (``bundle_intra_dep_signature_changed``,
     ``bundle_intra_type_changed``, ``bundle_provider_changed``) are not
     derived from the resolution graph alone -- they are each keyed off a
-    *per-library* ``DiffResult`` (``func_params_changed``/
-    ``type_size_changed``/``func_removed``+``func_added`` pairs). A
-    ``BundleFacts`` carrying only resolution-graph-level data would have
-    nowhere for :func:`compare_bundle_from_facts` to get those per-library
-    diffs from when the *old* side is a stored dump rather than a live
-    directory.
+    *per-library* ``DiffResult``. A ``BundleFacts`` carrying only
+    resolution-graph-level data would have nowhere for
+    :func:`compare_bundle_from_facts` to get those per-library diffs from
+    when the *old* side is a stored dump rather than a live directory.
 
     ``filesystem_aliases`` records, per library, the extra soname
     spellings :func:`abicheck.bundle_soname.filesystem_alias_basenames` recovered
-    from the *real* on-disk file at capture time (a resolved symlink
-    target's basename, hard-linked sibling basenames) -- captured once, up
+    from the *real* on-disk file at capture time -- captured once, up
     front, so :func:`bundle_snapshot_from_facts`'s later, metadata-only
     reconstruction can still resolve a ``DT_NEEDED`` edge naming one of
-    those aliases even though it never touches the filesystem itself
-    (Codex review: a live ``build_bundle_snapshot()`` enables filesystem
-    probing for exactly this; a persisted-facts reconstruction otherwise
-    loses it, silently dropping a consumption-gated bundle finding for a
-    provider without a usable ``DT_SONAME``). Empty for a caller that
-    didn't have (or didn't pass) real paths at capture time -- the same
-    "best effort, no aliases on failure" default
-    ``filesystem_alias_basenames`` itself uses.
+    those aliases without touching the filesystem itself (Codex review).
+    Empty for a caller that didn't pass real paths at capture time, same
+    default as ``filesystem_alias_basenames``.
 
     ``library_filenames`` records, per library, the real on-disk
     *basename* at capture time (``libfoo_core.so.1``, not the canonical
     ``libfoo_core.so`` key) -- needed by ``bundle._detect_soname_skew``'s
     own ``path.name`` fallback for a versioned DSO with no usable
-    ``DT_SONAME``: without it, ``bundle_snapshot_from_facts()`` has no real
-    path to reconstruct and falls back to ``Path(canonical_key)``, whose
-    ``.name`` is the canonical, *unversioned* key -- no derivable major, so
-    ``bundle_soname_skew`` silently goes unreported for a stored-baseline
-    comparison that a live one would have caught (Codex review, fresh
-    evidence). Empty for a caller that didn't pass real paths at capture
-    time, same as ``filesystem_aliases``.
-    """
+    ``DT_SONAME``: without it, reconstruction falls back to
+    ``Path(canonical_key)``, whose ``.name`` is the canonical,
+    *unversioned* key -- no derivable major, so ``bundle_soname_skew``
+    silently goes unreported for a stored-baseline comparison a live one
+    would have caught (Codex review). Empty for a caller that didn't pass
+    real paths at capture time, same as ``filesystem_aliases``."""
 
     schema_version: int = BUNDLE_FACTS_SCHEMA_VERSION
     variant_fingerprint: str = DEFAULT_VARIANT_FINGERPRINT
@@ -166,13 +153,11 @@ def capture_bundle_facts(
     *library_paths*, when given, is a ``{library_name: Path}`` map of the
     real on-disk file each snapshot was dumped from -- used both to probe
     filesystem aliases (:func:`abicheck.bundle_soname.filesystem_alias_basenames`)
-    while those files still exist, at the one point in this whole flow
-    (capture time, right after a live comparison) they are guaranteed to,
-    and to record each library's real on-disk *filename*
-    (``BundleFacts.library_filenames``) for the SONAME-skew fallback (see
-    that field's own docstring). A name absent from *library_paths* simply
-    gets no recorded aliases/filename, same as when *library_paths* is
-    omitted entirely.
+    while those files still exist, at the one point in this flow (capture
+    time) they are guaranteed to, and to record each library's real
+    on-disk *filename* (``BundleFacts.library_filenames``) for the
+    SONAME-skew fallback. A name absent from *library_paths* simply gets
+    no recorded aliases/filename, same as when it's omitted entirely.
     """
     from .bundle_soname import filesystem_alias_basenames, resolved_basename
 
@@ -208,28 +193,25 @@ def bundle_snapshot_from_facts(facts: BundleFacts) -> BundleSnapshot:
     A per-library entry whose ``AbiSnapshot.elf`` is ``None`` (a non-ELF or
     header-only dump) is dropped, the same way :func:`abicheck.bundle.
     build_bundle_snapshot` drops a file that doesn't parse as ELF -- both
-    describe "this bundle member contributes no ELF-level bundle facts",
-    not an error.
+    describe "this bundle member contributes no ELF-level bundle facts".
 
     ``facts.filesystem_aliases`` (real symlink-target/hard-link basenames
     captured while the original binaries still existed, see
     :func:`capture_bundle_facts`) is threaded through as
     ``build_bundle_snapshot_from_metadata``'s ``extra_aliases`` so this
     purely metadata-driven reconstruction can still resolve a
-    ``DT_NEEDED`` edge naming one of those aliases -- without probing the
+    ``DT_NEEDED`` edge naming one of those aliases without probing the
     filesystem itself, since the persisted facts may outlive the files
     they were captured from.
 
-    ``facts.library_filenames`` is threaded through as that same function's
-    ``paths`` -- a real on-disk filename (e.g. ``libfoo_core.so.1``)
-    reconstructed as ``Path(filename)`` rather than the default
-    ``Path(canonical_key)`` fallback, so ``bundle._detect_soname_skew``'s
-    own ``path.name`` SONAME-major fallback sees the real, versioned
-    filename instead of the canonical, unversioned key (Codex review, fresh
-    evidence -- see that field's own docstring). A name absent from
-    ``library_filenames`` (no real paths at capture time) falls back to
-    ``build_bundle_snapshot_from_metadata``'s own ``Path(name)`` default,
-    unchanged from before this field existed.
+    ``facts.library_filenames`` is threaded through as that same
+    function's ``paths`` -- a real on-disk filename reconstructed as
+    ``Path(filename)`` rather than the default ``Path(canonical_key)``
+    fallback, so ``bundle._detect_soname_skew``'s own SONAME-major
+    fallback sees the real, versioned filename instead of the canonical,
+    unversioned key (Codex review -- see that field's own docstring). A
+    name absent from ``library_filenames`` falls back to
+    ``build_bundle_snapshot_from_metadata``'s own default, unchanged.
     """
     from .bundle import build_bundle_snapshot_from_metadata
 
@@ -270,11 +252,10 @@ def compare_bundle_from_facts(
     :class:`~abicheck.bundle_models.BundleSnapshot` via
     :func:`bundle_snapshot_from_facts` and then delegates to
     :func:`abicheck.bundle_analysis.analyze_bundle` -- the same orchestrator
-    a live-directory-vs-live-directory ``compare --release`` uses -- so the
-    two entry points share one detection implementation (both the core
-    graph-native/diff-derived suite and, since G38 stabilization Phase 12,
-    the C-boundary signature-evidence gate) and can never independently
-    drift. This is what the mandatory dump/live parity test asserts.
+    a live-directory-vs-live-directory ``compare --release`` uses, so the
+    two entry points share one detection implementation and can never
+    independently drift. This is what the mandatory dump/live parity test
+    asserts.
 
     *manifest*, given explicitly, overrides *old_facts.manifest* (mirroring
     ``compare_bundle()``'s own ``manifest=`` parameter, which always wins
@@ -285,15 +266,12 @@ def compare_bundle_from_facts(
     non-empty, is the NEW side's bundle-canonical-key -> ``AbiSnapshot`` (or
     the compact ``BundleSignatureEvidence`` projection) map for
     ``find_unverified_signature_findings`` -- the OLD side's own map is
-    always *old_facts.per_library_snapshots* itself, which is already
-    exactly this shape (a real, mandatory ``dict[str, AbiSnapshot]`` -- see
-    ``BundleFacts``'s own docstring for why it's mandatory). Omitted (the
-    default): the Phase 4 gate does not run, matching every pre-Phase-12
-    caller of this function exactly -- there is not yet a CLI producer for
-    a live NEW-side evidence map here (G38 Phase 13, "stored-facts CLI
-    consumer", is a separate, not-yet-implemented phase), so this parameter
-    exists for a caller that already has one (a Python-API caller, or a
-    future Phase 13 CLI path) rather than being wired to anything today.
+    always *old_facts.per_library_snapshots* itself, already exactly this
+    shape. Omitted (the default): the Phase 4 gate does not run, matching
+    every pre-Phase-12 caller exactly -- there is not yet a CLI producer
+    for a live NEW-side evidence map here (G38 Phase 13 is separate,
+    not-yet-implemented), so this parameter exists for a caller that
+    already has one rather than being wired to anything today.
     """
     from .bundle_analysis import analyze_bundle
 
@@ -377,18 +355,27 @@ def maybe_read_bundle_facts_archive(
     snapshot_from_dict: Callable[[dict[str, Any]], AbiSnapshot],
 ) -> BundleFacts | None:
     """``serialization.load_bundle_facts``'s ``format=`` dispatch:
-    ``"auto"`` sniffs *path*'s own bytes (delegating to
-    ``storage.bundle_archive.sniff_bundle_archive_format``); returns a real
-    result whenever the resolved format is ``"archive"``, ``None`` for
-    ``"json"`` (fall through to plain-JSON), and raises for anything else.
+    ``"auto"`` sniffs *path*'s own bytes; returns a real result whenever
+    the resolved format is ``"archive"``, ``None`` for ``"json"`` (fall
+    through to plain-JSON), and raises for anything else.
     *snapshot_from_dict* is ``serialization.snapshot_from_dict``, passed in
     rather than imported -- see the module-level comment above.
-    """
-    from .storage.bundle_archive import sniff_bundle_archive_format
 
-    resolved = sniff_bundle_archive_format(path) if format == "auto" else format
+    The sniff and the follow-up archive parse share one fd rather than
+    each opening *path* independently, else a concurrent atomic
+    replacement between the two opens could swap in a different
+    generation the sniff result no longer describes (Codex review)."""
+    from .storage.bundle_archive import open_regular_file_for_format_sniff
+
+    fp = None
+    if format == "auto":
+        fp, resolved = open_regular_file_for_format_sniff(path)
+    else:
+        resolved = format
     if resolved == "archive":
-        return read_bundle_facts_archive(path, snapshot_from_dict=snapshot_from_dict)
+        return read_bundle_facts_archive(path, snapshot_from_dict=snapshot_from_dict, _fp=fp)
+    if fp is not None:
+        fp.close()
     if resolved != "json":
         raise ValueError(f"load_bundle_facts: unknown format {resolved!r}")
     return None
@@ -566,6 +553,7 @@ def read_bundle_facts_archive(
     path: str | Path,
     *,
     snapshot_from_dict: Callable[[dict[str, Any]], AbiSnapshot],
+    _fp: Any | None = None,
 ) -> BundleFacts:
     """Read a G40 content-addressed zip archive at *path* back into a
     :class:`BundleFacts`.
@@ -574,14 +562,22 @@ def read_bundle_facts_archive(
     ``load_bundle_facts``'s own contract) -- a caller wanting only one
     library's snapshot without paying for the rest uses
     ``storage.bundle_archive.BundleArchiveReader`` directly instead.
-    """
+
+    *_fp*, when given, is an already-open fd from
+    ``maybe_read_bundle_facts_archive``'s own format sniff, reused instead
+    of reopening *path* (Codex review, fresh evidence)."""
     import json as _json
 
     from .bundle_manifest import manifest_from_dict
     from .errors import IncompatibleSnapshotSchemaError, SnapshotError
     from .storage.bundle_archive import BundleArchiveReader
 
-    with BundleArchiveReader.open(path) as reader:
+    reader_cm = (
+        BundleArchiveReader.from_open_file(_fp, path)
+        if _fp is not None
+        else BundleArchiveReader.open(path)
+    )
+    with reader_cm as reader:
         manifest = reader.read_manifest()
         # The *container's* own schema_version (BUNDLE_ARCHIVE_SCHEMA_VERSION
         # -- the manifest/blob shape itself) is a separate axis from
@@ -731,6 +727,14 @@ def read_bundle_facts_archive(
         manifest_blob = manifest.get("manifest_blob")
         instantiation_manifest = None
         if manifest_blob is not None:
+            # Same validation as library_blobs' values above -- an
+            # unvalidated non-string reaches blob_cache.get(h), a keyed
+            # dict, raising a raw TypeError (Codex review).
+            if not isinstance(manifest_blob, str):
+                raise ValueError(
+                    "bundle archive: 'manifest_blob' must be a content-hash "
+                    f"string, got {type(manifest_blob).__name__}"
+                )
             instantiation_manifest = manifest_from_dict(
                 _json.loads(_cached_blob(manifest_blob))
             )
@@ -753,12 +757,11 @@ def read_bundle_facts_archive(
 def _validated_alias_map(raw: object) -> dict[str, tuple[str, ...]]:
     """Validate and convert a persisted ``filesystem_aliases`` mapping.
 
-    Duplicated from ``serialization._validated_alias_map`` (not imported --
-    see the module-level comment above): rejects a non-mapping container, a
-    non-list value, and a list with a non-string element, rather than
+    Duplicated from ``serialization._validated_alias_map`` (not imported,
+    see the module-level comment above): rejects a non-mapping container,
+    a non-list value, and a list with a non-string element, rather than
     silently iterating a stray string's characters into single-letter
-    "aliases".
-    """
+    "aliases"."""
     if not isinstance(raw, dict):
         raise ValueError(
             f"bundle facts: 'filesystem_aliases' must be a mapping, got "
@@ -778,11 +781,9 @@ def _validated_alias_map(raw: object) -> dict[str, tuple[str, ...]]:
 def _validated_filename_map(raw: object) -> dict[str, str]:
     """Validate and convert a persisted ``library_filenames`` mapping.
 
-    Duplicated from ``serialization._validated_filename_map`` (not imported
-    -- see the module-level comment above): rejects a non-string value
-    instead of silently coercing it (``str(None)`` -> the fabricated
-    basename ``"None"``).
-    """
+    Duplicated from ``serialization._validated_filename_map`` (not
+    imported, see the module-level comment above): rejects a non-string
+    value instead of silently coercing it (``str(None)`` -> ``"None"``)."""
     if not isinstance(raw, dict):
         raise ValueError(
             f"bundle facts: 'library_filenames' must be a mapping, got "

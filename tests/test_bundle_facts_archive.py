@@ -116,6 +116,33 @@ class TestBundleFactsArchiveFormat:
         assert loaded.per_library_snapshots["libcore.so"].elf is not None
         assert loaded.per_library_snapshots["libcore.so"].elf.soname == "libcore.so"
 
+    def test_auto_format_sniff_and_archive_parse_share_one_open(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A concurrent atomic replacement of *path* between the format
+        sniff and a separate follow-up open could swap in a different,
+        individually-valid generation the sniff result no longer
+        describes -- `load_bundle_facts(format="auto")` must open the
+        path exactly once for the archive resolution, not sniff-then-
+        reopen (Codex review, fresh evidence)."""
+        facts = capture_bundle_facts(_per_library_snapshots(_old_metadata()))
+        out = tmp_path / "old.bundlefacts.archive.zip"
+        save_bundle_facts(facts, out, format="archive")
+
+        opened_paths: list[object] = []
+        real_open = open
+
+        def _tracking_open(file, *a, **kw):  # type: ignore[no-untyped-def]
+            if file == out or file == str(out):
+                opened_paths.append(file)
+            return real_open(file, *a, **kw)
+
+        monkeypatch.setattr("builtins.open", _tracking_open)
+        loaded = load_bundle_facts(out)  # "auto"
+
+        assert set(loaded.per_library_snapshots) == set(facts.per_library_snapshots)
+        assert len(opened_paths) == 1
+
     def test_save_load_round_trip_forced_format(self, tmp_path: Path) -> None:
         facts = capture_bundle_facts(_per_library_snapshots(_old_metadata()))
         out = tmp_path / "old.archive"  # no ".zip" suffix -- format= is explicit
@@ -682,6 +709,23 @@ class TestBundleFactsArchiveFormat:
             writer.write_manifest({"library_blobs": {"a.so": ["not", "a", "hash"]}})
 
         with pytest.raises(ValueError, match="library_blobs\\['a.so'\\]"):
+            load_bundle_facts(out, format="archive")
+
+    def test_load_rejects_a_non_string_manifest_blob(self, tmp_path: Path) -> None:
+        """Same class of bug as 'library_blobs' values above, for the
+        second blob-reference field: a non-string 'manifest_blob' reaches
+        _cached_blob()'s own blob_cache.get(h), a keyed dict, raising a
+        raw unhashable-type TypeError instead of this module's own error
+        vocabulary (Codex review, fresh evidence)."""
+        from abicheck.storage.bundle_archive import BundleArchiveWriter
+
+        out = tmp_path / "bad_manifest_blob.bundlefacts.archive.zip"
+        with BundleArchiveWriter(out) as writer:
+            writer.write_manifest(
+                {"library_blobs": {}, "manifest_blob": ["not", "a", "hash"]}
+            )
+
+        with pytest.raises(ValueError, match="manifest_blob"):
             load_bundle_facts(out, format="archive")
 
     def test_load_rejects_a_library_blob_that_decodes_to_a_non_dict(

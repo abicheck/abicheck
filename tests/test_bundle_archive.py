@@ -17,11 +17,9 @@
 low-level, content-addressed zip-archive primitive.
 
 Exercises the module on its own terms (raw bytes/dicts), since it
-deliberately knows nothing about ``BundleFacts``/``AbiSnapshot`` -- see the
-module's own docstring for why. The ``BundleFacts``-aware round-trip lives
-in ``tests/test_bundle_facts_archive.py``, through
-``serialization.save_bundle_facts``/``load_bundle_facts``.
-"""
+deliberately knows nothing about ``BundleFacts``/``AbiSnapshot``. The
+``BundleFacts``-aware round-trip lives in
+``tests/test_bundle_facts_archive.py``."""
 
 from __future__ import annotations
 
@@ -105,8 +103,7 @@ class TestBundleArchiveWriterReader:
     ) -> None:
         """Production-scale-shaped partial-load proof (AGENTS.md's
         "Third-party-boundary tests" convention): reading one blob from a
-        multi-blob archive touches exactly that member, not the whole
-        archive."""
+        multi-blob archive touches exactly that member."""
         path = tmp_path / "bundle.archive.zip"
         payloads = {
             f"lib{i}.so": f'{{"library": "lib{i}.so", "padding": "{"x" * 5000}"}}'.encode()
@@ -190,10 +187,9 @@ class TestBundleArchiveWriterReader:
     def test_read_blob_rejects_content_that_does_not_match_its_hash(
         self, tmp_path: Path
     ) -> None:
-        """A blob member's name is not itself verified content -- a
-        corrupted or hand-assembled archive storing the wrong bytes under a
-        given hash's member name must be rejected, not handed back silently
-        (Codex review)."""
+        """A blob member's name is not itself verified content -- storing
+        the wrong bytes under a hash's member name must be rejected, not
+        handed back silently (Codex review)."""
         import zstandard
 
         path = tmp_path / "bundle.archive.zip"
@@ -295,9 +291,8 @@ class TestBundleArchiveWriterAtomicity:
         self, tmp_path: Path
     ) -> None:
         """A bare `except OSError:` around the target stat() swallowed
-        ELOOP (a cyclic symlink) the same as genuine absence -- only real
-        absence may be treated that way, anything else must propagate
-        (Codex review, fresh evidence)."""
+        ELOOP the same as genuine absence -- only real absence may be
+        treated that way (Codex review, fresh evidence)."""
         a = tmp_path / "a"
         b = tmp_path / "b"
         a.symlink_to(b)
@@ -311,10 +306,9 @@ class TestBundleArchiveWriterAtomicity:
         assert b.is_symlink()
 
     def test_creates_missing_destination_parent_directory(self, tmp_path: Path) -> None:
-        """save_bundle_facts(..., format="archive") must behave like the
-        format="json" path already does (parent dirs auto-created via
-        snapshot_io.write_snapshot_text), not raise FileNotFoundError on a
-        first write below a not-yet-existing directory (Codex review)."""
+        """Must behave like format="json" (parent dirs auto-created), not
+        raise FileNotFoundError on a first write below a missing
+        directory (Codex review)."""
         path = tmp_path / "does" / "not" / "exist" / "bundle.archive.zip"
         assert not path.parent.exists()
         with BundleArchiveWriter(path) as writer:
@@ -376,10 +370,8 @@ class TestBundleArchiveWriterAtomicity:
     def test_restores_mode_after_ownership_not_before(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """chown() can silently clear a setuid/setgid bit on POSIX --
-        restoring mode before chown let those bits be stripped by the
-        chown that followed (Codex review). Simulated via a fake chown
-        mirroring that kernel behavior."""
+        """chown() can silently clear a setuid/setgid bit -- restoring
+        mode before chown let those bits be stripped (Codex review)."""
         path = tmp_path / "bundle.archive.zip"
         with BundleArchiveWriter(path) as writer:
             h = writer.put_blob(b'{"a": 1}')
@@ -422,6 +414,31 @@ class TestBundleArchiveWriterAtomicity:
         assert list(tmp_path.glob("*.tmp-*")) == []
         assert not path.exists()
 
+    def test_close_failure_removes_temp_file_even_when_wrapper_close_also_fails(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """If _tmp_file.close() itself raises while handling an earlier
+        failure, the temp file must still be unlinked -- a plain sibling
+        statement after a raising close() would never reach it (Codex)."""
+        path = tmp_path / "bundle.archive.zip"
+        writer = BundleArchiveWriter(path)
+        h = writer.put_blob(b'{"a": 1}')
+        writer.write_manifest({"library_blobs": {"a.so": h}})
+
+        def _failing_fsync() -> None:
+            raise OSError(errno.EIO, "simulated fsync failure")
+
+        def _failing_close() -> None:
+            raise OSError(errno.ENOSPC, "simulated close failure")
+
+        monkeypatch.setattr(writer, "_fsync_tmp_file", _failing_fsync)
+        monkeypatch.setattr(writer._tmp_file, "close", _failing_close)
+
+        with pytest.raises(OSError, match="simulated close failure"):
+            writer.close()
+        assert list(tmp_path.glob("*.tmp-*")) == []
+        assert not path.exists()
+
 
 class TestBundleArchiveReaderRejectsNonStoredMembers:
     """Every member BundleArchiveWriter produces is ZIP_STORED
@@ -455,9 +472,7 @@ class TestBundleArchiveReaderRejectsNonStoredMembers:
         self, tmp_path: Path
     ) -> None:
         """Rejecting deflate alone is not a size bound -- a ZIP_STORED
-        member can still claim an oversized payload. Uses a small
-        max_bytes directly rather than read_manifest()'s much larger
-        production default, so the test needn't write 64 MiB (Codex)."""
+        member can still claim an oversized payload (Codex)."""
         path = tmp_path / "bundle.archive.zip"
         with zipfile.ZipFile(path, mode="w") as zf:
             zf.writestr(MANIFEST_MEMBER, b"x" * 2048)
@@ -491,10 +506,9 @@ class TestBundleArchiveReaderRejectsNonStoredMembers:
 
 
 class TestBundleArchiveDeterminism:
-    """Codex review: writestr(name, data) with a bare string name stamps
-    each member with time.localtime() at write time -- content-identical
-    facts saved on different days must still produce byte-identical
-    archives."""
+    """writestr(name, data) with a bare name stamps time.localtime() at
+    write time -- content-identical facts on different days must still
+    produce byte-identical archives (Codex review)."""
 
     def _write(self, path: Path) -> None:
         with BundleArchiveWriter(path) as writer:
@@ -568,10 +582,8 @@ class TestBundleArchiveWriterDurability:
 
 
 class TestBundleArchiveReaderWrapsThirdPartyExceptions:
-    """Codex review: every deliberate failure in this module raises
-    SnapshotError, which the CLI boundary translates into a clean usage
-    error -- a truncated or hand-assembled archive must not surface as a
-    raw zipfile/zstandard traceback instead."""
+    """Every deliberate failure raises SnapshotError -- a truncated or
+    hand-assembled archive must not surface a raw traceback (Codex)."""
 
     def test_opening_a_corrupt_zip_raises_snapshot_error(self, tmp_path: Path) -> None:
         path = tmp_path / "corrupt.zip"
@@ -623,10 +635,8 @@ class TestBundleArchiveReaderWrapsThirdPartyExceptions:
                 reader.read_blob(h)
 
     def test_a_crc_mismatched_member_raises_snapshot_error(self, tmp_path: Path) -> None:
-        """Codex review: ZipExtFile validates a ZIP_STORED member's CRC-32
-        as it is consumed, raising a raw zipfile.BadZipFile on mismatch --
-        that must be wrapped as SnapshotError like every other deliberate
-        failure in this module, not leak as a third-party exception."""
+        """ZipExtFile's CRC-32 mismatch raises raw BadZipFile -- must be
+        wrapped as SnapshotError like every other failure (Codex)."""
         import struct
 
         path = tmp_path / "bundle.archive.zip"
@@ -668,10 +678,9 @@ class TestBundleArchiveReaderWrapsThirdPartyExceptions:
 
 
 class TestBundleArchiveCentralDirectoryGuard:
-    """Codex review: zipfile.ZipFile(...) eagerly parses the whole central
-    directory and builds one ZipInfo per entry before any of this
-    module's own per-member size guards ever run -- a crafted archive
-    with an absurd entry count must be rejected before that parse."""
+    """ZipFile(...) eagerly parses the whole central directory before any
+    per-member size guard runs -- an absurd entry count must be rejected
+    before that parse (Codex review)."""
 
     def test_rejects_an_absurd_central_directory_entry_count(
         self, tmp_path: Path
@@ -720,10 +729,8 @@ class TestBundleArchiveCentralDirectoryGuard:
     def test_rejects_a_zip64_archive_claiming_an_absurd_entry_count(
         self, tmp_path: Path
     ) -> None:
-        """Codex review, fresh evidence: a crafted archive using the ZIP64
-        entry-count sentinel (0xFFFF) in the standard EOCD must not skip
-        the cap outright -- the real count must be recovered from the
-        ZIP64 EOCD locator/record and checked too."""
+        """A ZIP64 entry-count sentinel (0xFFFF) must not skip the cap --
+        the real count is recovered from the locator/record (Codex)."""
         import struct
 
         path = tmp_path / "fake_zip64.zip"
@@ -887,11 +894,9 @@ class TestBundleArchiveReadBlobCompressedSlack:
 
 
 class TestSniffBundleArchiveFormatNonRegularSource:
-    """Codex review: a real bundle archive can never be delivered via a
-    FIFO/pipe regardless (zipfile.ZipFile needs to seek to its end to
-    locate the central directory), so sniffing must never consume bytes
-    from a non-regular source -- doing so would silently lose them for
-    the plain-JSON path's own separate, later open."""
+    """A real bundle archive can never be delivered via a FIFO/pipe
+    (ZipFile needs to seek to its end) -- sniffing must never consume
+    bytes from a non-regular source (Codex review)."""
 
     @pytest.mark.skipif(sys.platform == "win32", reason="no os.mkfifo on Windows")
     def test_sniff_never_reads_a_fifo_source(self, tmp_path: Path) -> None:
@@ -955,11 +960,9 @@ class TestBundleArchiveWriterTempFileCreation:
     def test_a_planted_symlink_at_a_would_be_temp_path_is_never_followed(
         self, tmp_path: Path
     ) -> None:
-        """Simulates the attack directly: pre-create a symlink at every
-        temp-name shape the old "<name>.tmp-<pid>-<id>" scheme could have
-        produced, then confirm a real write still lands correctly and
-        none of the planted symlinks were touched -- proving temp
-        creation no longer uses (or falls back to) a guessable path."""
+        """Pre-creates a symlink at every temp-name shape the old
+        guessable scheme could have produced, then confirms a real write
+        still lands correctly and no planted symlink was touched."""
         path = tmp_path / "bundle.archive.zip"
         evil_target = tmp_path / "evil_target"
         evil_target.write_bytes(b"do not touch me")
@@ -1043,11 +1046,9 @@ class TestBundleArchiveWriterCloseFailureCleanup:
 
 
 class TestBundleArchiveWriterMetadataDurability:
-    """Codex review, fresh evidence: chown/chmod mutate the temp file's
-    inode metadata *after* the first fsync -- without a second fsync
-    after those mutations and before os.replace(), a crash could lose
-    the restored owner/mode even though the file content itself is
-    durable."""
+    """chown/chmod mutate the temp file's inode metadata after the first
+    fsync -- without a second fsync before os.replace(), a crash could
+    lose the restored owner/mode (Codex review, fresh evidence)."""
 
     @pytest.mark.skipif(sys.platform == "win32", reason="POSIX file mode semantics")
     def test_close_fsyncs_again_after_restoring_mode(
@@ -1091,11 +1092,9 @@ class TestBundleArchiveWriterMetadataDurability:
 
 
 class TestBundleArchiveDeterministicCreateSystem:
-    """Codex review, fresh evidence: ZipInfo.__init__ defaults
-    create_system to the host platform (0 Windows, 3 Unix), serialized
-    into the central directory -- identical facts archived on different
-    platforms would otherwise still produce different bytes despite every
-    other reproducibility-affecting field already being pinned."""
+    """ZipInfo.__init__ defaults create_system to the host platform (0
+    Windows, 3 Unix) -- identical facts on different platforms would
+    otherwise produce different bytes (Codex review, fresh evidence)."""
 
     def test_every_member_pins_create_system_to_unix(self, tmp_path: Path) -> None:
         path = tmp_path / "bundle.archive.zip"

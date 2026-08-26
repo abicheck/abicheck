@@ -179,7 +179,40 @@ def sniff_bundle_archive_format(path: str | Path) -> str:
             prefix = f.read(4)
     except OSError as exc:
         raise SnapshotError(f"Cannot read {p}: {exc}") from exc
+    return _classify_prefix(prefix)
+
+
+def _classify_prefix(prefix: bytes) -> str:
     return "archive" if prefix.startswith(_ZIP_MAGIC_PREFIXES) else "json"
+
+
+def open_regular_file_for_format_sniff(
+    path: str | Path,
+) -> tuple[Any | None, str]:
+    """``format="auto"``'s fd-sharing counterpart to
+    `sniff_bundle_archive_format` -- opens *path* once, peeks its 4-byte
+    magic, and returns ``(fp, "archive"|"json")`` with *fp* left at its
+    post-peek position for the caller to reuse (`BundleArchiveReader.
+    from_open_file`) instead of reopening *path* a second time: a
+    concurrent atomic replacement between a separate sniff and a separate
+    later open could swap in a different generation (Codex review, fresh
+    evidence). ``(None, "json")`` for a non-regular-file source, matching
+    `sniff_bundle_archive_format`'s own never-opened contract -- the
+    caller must not call `fp.close()` when *fp* is `None`.
+    """
+    p = Path(path)
+    try:
+        st = p.stat()
+    except OSError as exc:
+        raise SnapshotError(f"Cannot read {p}: {exc}") from exc
+    if not stat.S_ISREG(st.st_mode):
+        return None, "json"
+    try:
+        fp = open(p, "rb")
+    except OSError as exc:
+        raise SnapshotError(f"Cannot read {p}: {exc}") from exc
+    prefix = fp.read(4)
+    return fp, _classify_prefix(prefix)
 
 
 #: A real bundle archive (one manifest member + one per *distinct* content
@@ -445,9 +478,18 @@ class BundleArchiveWriter:
             # a repeated failure (ENOSPC, EIO) would otherwise starve later
             # retries of the space they're trying to free (Codex review).
             # No-op once os.replace() has already succeeded.
-            if not self._tmp_file.closed:
-                self._tmp_file.close()
-            self._tmp_path.unlink(missing_ok=True)
+            #
+            # The unlink is in a nested `finally` -- not a plain sibling
+            # statement -- so it still runs even when close() *itself*
+            # raises (e.g. ENOSPC/EIO flushing buffered bytes during an
+            # exception-driven abort); a plain sibling statement would
+            # never reach the unlink in that case (Codex review, fresh
+            # evidence).
+            try:
+                if not self._tmp_file.closed:
+                    self._tmp_file.close()
+            finally:
+                self._tmp_path.unlink(missing_ok=True)
             raise
         # os.replace()'s directory-entry update isn't durable across a
         # crash until the *parent* dir is fsync'd too (mirrors
@@ -513,16 +555,25 @@ class BundleArchiveReader:
     docstring).
     """
 
-    def __init__(self, path: str | Path) -> None:
+    def __init__(self, path: str | Path, *, _fp: Any | None = None) -> None:
         self._path = Path(path)
         # Opened once; the identical fd is handed to both the preflight
         # below and `zipfile.ZipFile` -- reopening *path* a second time for
         # `ZipFile` would let a concurrent atomic replacement swap in a
         # different generation in between (Codex review, fresh evidence).
-        try:
-            fp = open(self._path, "rb")
-        except OSError as exc:
-            raise SnapshotError(f"{self._path}: not a valid bundle archive: {exc}") from exc
+        # `_fp`, when given, is an already-open fd a caller sniffed the
+        # format from (`from_open_file`) -- extends the identical guarantee
+        # one layer up, to the sniff-then-open gap (see that classmethod).
+        if _fp is not None:
+            fp = _fp
+            fp.seek(0)
+        else:
+            try:
+                fp = open(self._path, "rb")
+            except OSError as exc:
+                raise SnapshotError(
+                    f"{self._path}: not a valid bundle archive: {exc}"
+                ) from exc
         try:
             from .bundle_archive_cd_guard import reject_absurd_central_directory
 
@@ -550,6 +601,16 @@ class BundleArchiveReader:
     @classmethod
     def open(cls, path: str | Path) -> BundleArchiveReader:
         return cls(path)
+
+    @classmethod
+    def from_open_file(cls, fp: Any, path: str | Path) -> BundleArchiveReader:
+        """Construct from an already-open, seekable binary file object at
+        *path* (left at any position -- rewound internally) -- shares the
+        fd a caller used to sniff *path*'s format, closing the gap
+        between "this looked like an archive" and "open it as one" (Codex
+        review, fresh evidence). Takes ownership of *fp* -- closed by this
+        reader's own `close()`/context-manager exit."""
+        return cls(path, _fp=fp)
 
     def _read_stored_member(self, name: str, *, max_bytes: int) -> bytes:
         """Read one zip member's raw bytes, rejecting anything but
