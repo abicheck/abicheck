@@ -239,6 +239,17 @@ class TestClassificationTracksRealProducerBehavior:
 
     @pytest.mark.parametrize("mutation", MUTATIONS, ids=lambda m: m.__name__)
     def test_per_finding_kinds_are_stamped_on_every_finding(self, mutation) -> None:
+        """Also checks PROVENANCE_PER_FINDING is not behaviorally
+        indistinguishable from PROVENANCE_STATIC (Codex review, fresh
+        evidence): a producer that stamps the same constant tuple on
+        every finding it emits would still pass a mere non-None check.
+        Caught here only when one mutation emits *multiple* findings of
+        the target kind (the one shape this catalogue can exercise
+        without inventing new, deliberately-distinguishable multi-finding
+        fixtures) -- a single-finding mutation can't distinguish "per
+        finding, happens to match here" from "silently constant," which
+        is exactly why this docstring says so rather than claiming a
+        stronger guarantee than the test actually gives."""
         old_extra, new_extra, expected_kind, _ = mutation(tag=1)
         if expected_kind.value not in PROVENANCE_PER_FINDING:
             pytest.skip(f"{expected_kind.value} is not classified PROVENANCE_PER_FINDING")
@@ -254,3 +265,14 @@ class TestClassificationTracksRealProducerBehavior:
             "classification is premature, or the producer's own wiring "
             "(for this specific construction path) is incomplete."
         )
+        if len(emitted) > 1:
+            distinct_values = {c.evidence_provenance for c in emitted}
+            assert len(distinct_values) > 1, (
+                f"{expected_kind.value} is classified PROVENANCE_PER_FINDING "
+                "(a value computed per instance, not a detector-wide "
+                f"constant), but all {len(emitted)} of its real findings "
+                f"from {mutation.__name__} share the identical "
+                f"evidence_provenance value {emitted[0].evidence_provenance!r} "
+                "-- either reclassify as PROVENANCE_STATIC, or fix the "
+                "producer to actually vary per finding."
+            )
