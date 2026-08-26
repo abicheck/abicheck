@@ -423,19 +423,11 @@ def write_bundle_facts_archive(
     library_blobs: dict[str, str] = {}
     decoded_size_bytes = 0
     unique_payloads: dict[str, bytes] = {}  # content hash -> its own payload
-    # Running lower bound on reader_charged_bytes below: a distinct payload
-    # contributes its size at least once regardless of later duplicates,
-    # so this sum only grows. Checked incrementally, not just after the
-    # loop, so many large distinct snapshots don't all sit in memory at
-    # once before the aggregate cap gets a chance to fire (Codex review).
-    unique_bytes_seen = 0
     # Keyed by id(snap), not content -- many names can legitimately share
     # the *same* AbiSnapshot object, and re-serializing it once per name
-    # is real, unbounded work the dedup below never prevented (N names
-    # sharing one large snapshot could re-serialize it N times before the
-    # aggregate cap gets a chance to fire). Safe: every snap here stays
-    # referenced by `facts.per_library_snapshots` for the loop's
-    # duration, so no id() can be reused by an unrelated object mid-loop.
+    # is real, unbounded work the dedup below never prevented. Safe:
+    # every snap here stays referenced by `facts.per_library_snapshots`
+    # for the loop's duration, so no id() can be reused mid-loop.
     serialized_by_identity: dict[int, tuple[str, bytes]] = {}
     for name, snap in sorted(facts.per_library_snapshots.items()):
         cached = serialized_by_identity.get(id(snap))
@@ -445,18 +437,27 @@ def write_bundle_facts_archive(
             payload = _json.dumps(snapshot_to_dict(snap), indent=2).encode("utf-8")
             h = content_hash(payload)
             serialized_by_identity[id(snap)] = (h, payload)
+        # decoded_size_bytes (every name's own copy, duplicates included)
+        # is checked here, incrementally, not only unique_payloads' own
+        # deduped total -- distinct AbiSnapshot objects that happen to
+        # serialize identically (not the identity-cache case above) still
+        # each cost a real, full serialization before their shared hash
+        # is known, so bounding only the *deduped* running total would
+        # let many such objects perform unbounded work before the
+        # duplicate-aware check below ever got a chance to fire (Codex
+        # review, fresh evidence). decoded_size_bytes already equals
+        # exactly what reader_charged_bytes would compute for the names
+        # processed so far, so this check and that one can never disagree.
         decoded_size_bytes += len(payload)
-        if h not in unique_payloads:
-            unique_payloads[h] = payload
-            unique_bytes_seen += len(payload)
-            if unique_bytes_seen > DEFAULT_MAX_BUNDLE_DECODED_BYTES:
-                raise SnapshotError(
-                    f"{p}: writing this bundle's content already exceeds "
-                    f"the {DEFAULT_MAX_BUNDLE_DECODED_BYTES} byte aggregate "
-                    "safety limit read_bundle_facts_archive() enforces on "
-                    "load -- refusing to write an archive that could not "
-                    "be reopened."
-                )
+        if decoded_size_bytes > DEFAULT_MAX_BUNDLE_DECODED_BYTES:
+            raise SnapshotError(
+                f"{p}: writing this bundle's content already exceeds the "
+                f"{DEFAULT_MAX_BUNDLE_DECODED_BYTES} byte aggregate safety "
+                "limit read_bundle_facts_archive() enforces on load, once "
+                "every duplicate library name's own copy is counted -- "
+                "refusing to write an archive that could not be reopened."
+            )
+        unique_payloads.setdefault(h, payload)
         library_blobs[name] = h
     manifest_blob = None
     if facts.manifest is not None:

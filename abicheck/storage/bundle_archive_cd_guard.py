@@ -47,6 +47,7 @@ _MAX_CENTRAL_DIRECTORY_BYTES = 8 * 1024 * 1024
 _ZIP64_EOCD_LOCATOR_SIG = b"PK\x06\x07"
 _ZIP64_EOCD_RECORD_SIG = b"PK\x06\x06"
 _ZIP64_EOCD_LOCATOR_SIZE = 20
+_ZIP64_EOCD_RECORD_SIZE = 56  # fixed portion only; no extensible data sector
 
 
 def _actual_central_directory_entry_count(
@@ -173,6 +174,7 @@ def reject_absurd_central_directory(f: Any, path: Path, *, max_entries: int) -> 
                     f"directory-size sentinel set) but {reason} -- "
                     "refusing to open (malformed or hostile archive)."
                 )
+            record_position = eocd_abs
         else:
             zip64_eocd_offset = int.from_bytes(locator[8:16], "little")
             # A crafted locator can name an offset past the platform's
@@ -191,16 +193,38 @@ def reject_absurd_central_directory(f: Any, path: Path, *, max_entries: int) -> 
                     "hostile archive)."
                 )
             f.seek(zip64_eocd_offset)
-            # Fixed portion only (56 bytes) -- signature/total_entries/
-            # cd_size all live within it; no need for the record's own
-            # variable "extensible data sector" tail.
-            record = f.read(56)
-            if len(record) != 56 or not record.startswith(_ZIP64_EOCD_RECORD_SIG):
-                raise SnapshotError(
-                    f"{path}: a ZIP64 EOCD locator precedes the central "
-                    "directory but points at no valid ZIP64 EOCD record -- "
-                    "refusing to open (malformed or hostile archive)."
-                )
+            record = f.read(_ZIP64_EOCD_RECORD_SIZE)
+            record_position = zip64_eocd_offset
+            if not (
+                len(record) == _ZIP64_EOCD_RECORD_SIZE
+                and record.startswith(_ZIP64_EOCD_RECORD_SIG)
+            ):
+                # CPython's own _EndRecData64() doesn't stop here either --
+                # a concatenated/self-extracting archive's locator embeds
+                # an offset relative to the zip data alone, not the whole
+                # file, so the raw claimed offset can miss the record
+                # entirely once prefix bytes are involved. It retries
+                # immediately before the locator itself (a fixed, always-
+                # correct position, assuming no "zip64 extensible data
+                # sector" -- the same simplifying assumption CPython's own
+                # fallback makes) before giving up (Codex review, fresh
+                # evidence: without this, a valid prefixed ZIP64 archive
+                # that `zipfile.ZipFile` opens fine was rejected outright).
+                fallback_position = locator_start - _ZIP64_EOCD_RECORD_SIZE
+                if 0 <= fallback_position != zip64_eocd_offset:
+                    f.seek(fallback_position)
+                    record = f.read(_ZIP64_EOCD_RECORD_SIZE)
+                    record_position = fallback_position
+                if not (
+                    len(record) == _ZIP64_EOCD_RECORD_SIZE
+                    and record.startswith(_ZIP64_EOCD_RECORD_SIG)
+                ):
+                    raise SnapshotError(
+                        f"{path}: a ZIP64 EOCD locator precedes the "
+                        "central directory but points at no valid ZIP64 "
+                        "EOCD record -- refusing to open (malformed or "
+                        "hostile archive)."
+                    )
             total_entries = int.from_bytes(record[32:40], "little")
             cd_size = int.from_bytes(record[40:48], "little")
     except OSError:
@@ -221,7 +245,6 @@ def reject_absurd_central_directory(f: Any, path: Path, *, max_entries: int) -> 
     # the real one (Codex review, fresh evidence, reproduced: a prefixed
     # 20,001-entry archive whose EOCD count was patched to 1 counted zero
     # records here while `ZipFile` materialized all 20,001).
-    record_position = zip64_eocd_offset if has_locator else eocd_abs
     cd_start = record_position - cd_size
     if total_entries > max_entries:
         raise SnapshotError(

@@ -691,6 +691,47 @@ class TestBundleFactsArchiveFormat:
         )
         assert result.decoded_size_bytes == 50 * one_payload_len
 
+    def test_distinct_objects_sharing_content_are_still_bounded_incrementally(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Distinct-but-equal `AbiSnapshot` objects (not the same object
+        identity -- e.g. independently built or deep-copied) miss the
+        identity cache every time, so each is fully, legitimately
+        re-serialized. Only the *deduped* `unique_payloads` total was
+        checked incrementally -- the duplicate-aware total (matching
+        what the reader actually pays per name on load) was still only
+        checked once, at the very end of the loop, letting many such
+        objects perform unbounded serialization work first (Codex
+        review, fresh evidence)."""
+        import copy
+
+        import abicheck.bundle_facts as bundle_facts_module_local
+        from abicheck.serialization import snapshot_to_dict
+
+        base_snap = _per_library_snapshots(_old_metadata())["libcore.so"]
+        facts = BundleFacts(
+            per_library_snapshots={f"lib{i}.so": copy.deepcopy(base_snap) for i in range(3)}
+        )
+
+        calls: list[str] = []
+
+        def _tracking_to_dict(snap: AbiSnapshot) -> dict[str, object]:
+            calls.append(snap.library)
+            return snapshot_to_dict(snap)
+
+        # Each real payload here is ~2987 bytes -- big enough to reject
+        # after the 2nd distinct-but-equal object, not the 1st.
+        monkeypatch.setattr(bundle_facts_module_local, "DEFAULT_MAX_BUNDLE_DECODED_BYTES", 4000)
+        out = tmp_path / "distinct-equal.bundlefacts.archive.zip"
+        with pytest.raises(SnapshotError, match="once every duplicate"):
+            bundle_facts_module_local.write_bundle_facts_archive(
+                facts, out, snapshot_to_dict=_tracking_to_dict
+            )
+        assert not out.exists()
+        # Sorted by name (lib0.so, lib1.so, lib2.so): rejected on the
+        # 2nd, so the 3rd distinct object must never be serialized.
+        assert calls == ["libcore.so", "libcore.so"]
+
     def test_save_rejects_a_write_whose_manifest_blob_alone_would_exceed_the_aggregate_cap(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:

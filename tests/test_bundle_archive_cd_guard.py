@@ -27,6 +27,7 @@ sources, rejecting in-place growth between the preflight and construction).
 
 from __future__ import annotations
 
+import errno
 import os
 import sys
 from pathlib import Path
@@ -209,6 +210,49 @@ class TestBundleArchiveCentralDirectoryGuard:
         with pytest.raises(SnapshotError, match="central directory claims 70000"):
             BundleArchiveReader.open(path)
 
+    def test_zip64_locator_falls_back_to_the_verified_position_when_prefixed(
+        self, tmp_path: Path
+    ) -> None:
+        """Codex review, fresh evidence: a valid ZIP64 archive with self-
+        extracting bytes prepended has a locator whose own claimed record
+        offset is relative to the zip payload alone, not the whole file --
+        wrong once a prefix exists. `zipfile.ZipFile` (via CPython's own
+        `_EndRecData64`) falls back to the fixed position immediately
+        before the locator (assuming no "zip64 extensible data sector")
+        when the raw claimed offset doesn't find a valid record. This
+        guard must do the same, not reject a prefixed archive `ZipFile`
+        itself accepts."""
+        import struct
+
+        from abicheck.storage.bundle_archive_cd_guard import (
+            reject_absurd_central_directory,
+        )
+
+        prefix = b"\x00" * 100  # simulates a self-extracting stub
+        one_record = b"PK\x01\x02" + b"\x00" * 42
+        central_directory = one_record * 2
+        zip64_record = struct.pack(
+            "<IQHHIIQQQQ", 0x06064B50, 44, 0, 0, 0, 0, 0, 2, len(central_directory), 0
+        )
+        # Correct before prepending the prefix; wrong (too small by
+        # len(prefix)) after -- the real record now sits 100 bytes later.
+        claimed_reloff = len(central_directory)
+        zip64_locator = struct.pack("<IIQI", 0x07064B50, 0, claimed_reloff, 1)
+        eocd = struct.pack("<IHHHHIIH", 0x06054B50, 0, 0, 0, 0xFFFF, 0, 0, 0)
+
+        data = bytearray(prefix)
+        data += central_directory
+        data += zip64_record
+        data += zip64_locator
+        data += eocd
+        path = tmp_path / "prefixed_zip64.zip"
+        path.write_bytes(bytes(data))
+
+        with path.open("rb") as f:
+            # Must not raise -- the fallback recovers the real position.
+            validated_size = reject_absurd_central_directory(f, path, max_entries=10)
+        assert validated_size == len(data)
+
     def test_rejects_a_zip64_locator_even_without_a_standard_eocd_sentinel(
         self, tmp_path: Path
     ) -> None:
@@ -369,6 +413,44 @@ class TestBundleArchiveReaderRejectsNonRegularSourcesDirectly:
         assert not t.is_alive(), "BundleArchiveReader.open() blocked on a FIFO"
         assert len(outcomes) == 1
         assert "not a regular file" in str(outcomes[0])
+
+    def test_fstat_failure_closes_the_fd(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Codex review, fresh evidence: `os.open()` succeeding but
+        `os.fstat()` then raising (e.g. EIO) must not leak the fd --
+        previously only the not-S_ISREG branch closed it."""
+        path = tmp_path / "bundle.archive.zip"
+        with BundleArchiveWriter(path) as writer:
+            h = writer.put_blob(b'{"a": 1}')
+            writer.write_manifest({"library_blobs": {"a.so": h}})
+
+        real_open = os.open
+        real_fstat = os.fstat
+        real_close = os.close
+        opened_fds: list[int] = []
+        closed_fds: list[int] = []
+
+        def _tracking_open(*a, **kw):  # type: ignore[no-untyped-def]
+            fd = real_open(*a, **kw)
+            opened_fds.append(fd)
+            return fd
+
+        def _failing_fstat(fd, *a, **kw):  # type: ignore[no-untyped-def]
+            if opened_fds and fd == opened_fds[-1]:
+                raise OSError(errno.EIO, "simulated fstat failure")
+            return real_fstat(fd, *a, **kw)
+
+        def _tracking_close(fd):  # type: ignore[no-untyped-def]
+            closed_fds.append(fd)
+            real_close(fd)
+
+        monkeypatch.setattr(os, "open", _tracking_open)
+        monkeypatch.setattr(os, "fstat", _failing_fstat)
+        monkeypatch.setattr(os, "close", _tracking_close)
+        with pytest.raises(SnapshotError, match="simulated fstat failure"):
+            BundleArchiveReader.open(path)
+        assert opened_fds[-1] in closed_fds
 
 
 class TestBundleArchivePreflightRejectsInPlaceGrowth:

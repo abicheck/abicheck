@@ -184,9 +184,8 @@ def open_regular_file_for_format_sniff(
     different generation (Codex review). ``(None, "json")`` for a
     non-regular-file source -- the caller must not close *fp* then."""
     p = Path(path)
-    # Open first, nonblocking, then fstat() *that* fd -- a plain stat()
-    # then a separate open() risks a concurrent swap to a FIFO, whose
-    # open() blocks until a writer connects; O_NONBLOCK avoids that.
+    # Open first, nonblocking, then fstat() *that* fd -- a separate
+    # stat()/open() risks a concurrent swap to a blocking FIFO.
     nonblock = getattr(os, "O_NONBLOCK", 0)
     try:
         fd = os.open(p, os.O_RDONLY | nonblock)
@@ -331,10 +330,9 @@ class BundleArchiveWriter:
             self._existing_uid = existing_stat.st_uid
             self._existing_gid = existing_stat.st_gid
         self._target.parent.mkdir(parents=True, exist_ok=True)
-        # _open_unique_temp, not a predictable path zipfile.ZipFile could
-        # open separately -- a writable directory could pre-create such a
-        # name as a symlink, which `ZipFile` follows. Randomized, opened
-        # O_CREAT|O_EXCL at umask-filtered 0o666 (not mkstemp's 0600).
+        # _open_unique_temp, not a predictable path -- a writable
+        # directory could pre-create such a name as a symlink `ZipFile`
+        # follows. Randomized, O_CREAT|O_EXCL, umask-filtered 0o666.
         tmp_fd, self._tmp_path = _open_unique_temp(
             self._target.parent, f".{self._target.name}.", ".tmp"
         )
@@ -344,11 +342,10 @@ class BundleArchiveWriter:
         self._zf = zipfile.ZipFile(self._tmp_file, mode="w", compression=zipfile.ZIP_STORED)
         self._written_hashes: set[str] = set()
         self._manifest_written = False
-        #: The published archive's own size/sha256, computed from the still-
-        #: private temp file right before `os.replace()` (see `close()`),
-        #: not by re-reading *path* afterward -- avoids a TOCTOU where a
-        #: concurrent writer replacing the destination would make a later
-        #: re-read describe someone else's write. Set on success only.
+        #: The published archive's size/sha256, computed from the still-
+        #: private temp file before `os.replace()` -- not by re-reading
+        #: *path* afterward, avoiding a TOCTOU where a concurrent writer
+        #: could make a later re-read describe someone else's write.
         self.stored_sha256: str | None = None
         self.stored_size_bytes: int | None = None
 
@@ -374,9 +371,8 @@ class BundleArchiveWriter:
                 "reader's own safety limit) -- refusing to write an "
                 "archive that could not be reopened."
             )
-        # Same reader/writer symmetry as the member-count cap above:
-        # read_blob()'s own default cap is exactly this value -- a direct
-        # caller publishing a bigger payload could never be reopened.
+        # Same symmetry as the member-count cap: read_blob()'s own
+        # default cap is exactly this value.
         if len(payload) > DEFAULT_MAX_BLOB_BYTES:
             raise SnapshotError(
                 f"BundleArchiveWriter: this payload is {len(payload)} "
@@ -395,11 +391,9 @@ class BundleArchiveWriter:
         if self._manifest_written:
             raise SnapshotError("BundleArchiveWriter.write_manifest() called twice")
         encoded = json.dumps(manifest, indent=2)
-        # Enforced here too, not only by bundle_facts.write_bundle_facts_
-        # archive()'s own higher-level preflight -- a direct caller of
-        # this public primitive bypasses that check, and read_manifest()
-        # rejects anything over this same limit unconditionally (Codex
-        # review, fresh evidence).
+        # Enforced here too, not only by write_bundle_facts_archive()'s
+        # own preflight -- a direct caller bypasses that, and
+        # read_manifest() rejects anything over this limit unconditionally.
         encoded_bytes = len(encoded.encode("utf-8"))
         if encoded_bytes > DEFAULT_MAX_MANIFEST_BYTES:
             raise SnapshotError(
@@ -429,10 +423,9 @@ class BundleArchiveWriter:
             # fsync. Best-effort only for "fs doesn't support fsync".
             self._fsync_tmp_file()
             # Ownership before mode: chown() clears setuid/setgid, so mode
-            # first would strip real 06755 bits right after. Not best-
-            # effort -- wrong owner/group revokes access. fchown/fchmod
-            # on the fd, not the path, since a shared directory could
-            # substitute a file there before a path-based reopen.
+            # first would strip 06755 bits right after. Not best-effort --
+            # wrong owner/group revokes access. fchown/fchmod on the fd,
+            # not the path, to dodge a substitution before a reopen.
             if (
                 self._existing_uid is not None or self._existing_gid is not None
             ) and hasattr(os, "fchown"):
@@ -463,11 +456,10 @@ class BundleArchiveWriter:
                     hasher.update(chunk)
             self.stored_sha256 = hasher.hexdigest()
             self._tmp_file.close()
-            # Known residual gap: `os.replace()` is path-based (no
-            # fd-scoped rename in stdlib `os`), so a substitution right
-            # before this call still publishes attacker content -- but
-            # stored_sha256 above was already computed from the real fd,
-            # so a caller verifying against it detects the mismatch.
+            # Known residual gap: `os.replace()` is path-based, so a
+            # substitution right before this call still publishes
+            # attacker content -- but stored_sha256 above was computed
+            # from the real fd, so verifying against it detects it.
             os.replace(self._tmp_path, self._target)
         except BaseException:
             # A failure anywhere above must not leave the potentially
@@ -481,10 +473,8 @@ class BundleArchiveWriter:
             finally:
                 self._tmp_path.unlink(missing_ok=True)
             raise
-        # os.replace()'s directory-entry update isn't durable across a
-        # crash until the *parent* dir is fsync'd too (mirrors
-        # snapshot_io._atomic_write_bytes's identical fsync). Skipped where
-        # there's no O_DIRECTORY concept (Windows).
+        # os.replace()'s directory-entry update isn't durable until the
+        # parent dir is fsync'd too. Skipped where there's no O_DIRECTORY.
         if hasattr(os, "O_DIRECTORY"):
             dir_fd = os.open(self._target.parent, os.O_RDONLY | os.O_DIRECTORY)
             try:
@@ -559,14 +549,19 @@ class BundleArchiveReader:
         else:
             # Same O_NONBLOCK-open + fstat()-classify shape as
             # `open_regular_file_for_format_sniff` -- an explicit
-            # `format="archive"` caller bypasses that sniff's own guard
-            # entirely, so a FIFO with no writer would otherwise hang
-            # here. ZIP input must be seekable regardless, so a non-
-            # regular source is always a usage error, never valid JSON.
+            # `format="archive"` caller bypasses that sniff's own guard,
+            # so a FIFO with no writer would otherwise hang here. ZIP
+            # input must be seekable, so non-regular is always a usage
+            # error, never valid JSON.
             nonblock = getattr(os, "O_NONBLOCK", 0)
             try:
                 fd = os.open(self._path, os.O_RDONLY | nonblock)
-                st = os.fstat(fd)
+                try:
+                    st = os.fstat(fd)
+                except OSError:
+                    # fstat() itself failing (e.g. EIO) must not leak fd.
+                    os.close(fd)
+                    raise
                 if not stat.S_ISREG(st.st_mode):
                     os.close(fd)
                     raise SnapshotError(
@@ -586,10 +581,9 @@ class BundleArchiveReader:
                 fp, self._path, max_entries=MAX_ARCHIVE_MEMBERS
             )
             # Sharing one fd closes a path-substitution race but not an
-            # in-place content one -- the file could still grow between
-            # the preflight returning and ZipFile's own scan below
-            # (reproduced). Re-checked here to narrow, not close, that
-            # window; see reject_absurd_central_directory's own docstring.
+            # in-place one -- the file could still grow before ZipFile's
+            # scan below (reproduced). Re-checked to narrow that window;
+            # see reject_absurd_central_directory's own docstring.
             if validated_size is not None and os.fstat(fp.fileno()).st_size != validated_size:
                 raise SnapshotError(
                     f"{self._path}: changed size while being opened -- "
@@ -599,15 +593,13 @@ class BundleArchiveReader:
             fp.seek(0)
             self._zf = zipfile.ZipFile(fp, mode="r")
         except (zipfile.BadZipFile, OSError, NotImplementedError) as exc:
-            # Every deliberate failure in this module raises SnapshotError,
-            # which the CLI boundary translates into a clean usage error --
-            # a truncated or hand-assembled archive must not surface as a
-            # raw zipfile traceback instead (CodeRabbit review).
-            # sniff_bundle_archive_format() only checks the first 4 bytes,
-            # so a damaged archive routinely passes that detection and
-            # reaches this constructor. NotImplementedError is ZipFile's
-            # own raise for a member's extract_version exceeding what this
-            # zipfile module supports -- not BadZipFile/OSError.
+            # Every deliberate failure in this module raises SnapshotError --
+            # a truncated or hand-assembled archive must not surface a raw
+            # zipfile traceback instead. sniff_bundle_archive_format() only
+            # checks the first 4 bytes, so a damaged archive routinely
+            # passes that detection and reaches this constructor.
+            # NotImplementedError is ZipFile's own raise for a member's
+            # extract_version exceeding what this zipfile module supports.
             fp.close()
             raise SnapshotError(f"{self._path}: not a valid bundle archive: {exc}") from exc
         except BaseException:
@@ -706,7 +698,15 @@ class BundleArchiveReader:
             raise SnapshotError(
                 f"{self._path}: archive has no {MANIFEST_MEMBER!r} member"
             ) from exc
-        value = json.loads(raw)
+        try:
+            value = json.loads(raw)
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            # Invalid UTF-8/JSON syntax must not surface as a raw
+            # exception either -- same SnapshotError contract as every
+            # other corrupt-content failure in this module.
+            raise SnapshotError(
+                f"{self._path}: manifest.json is not valid JSON: {exc}"
+            ) from exc
         if not isinstance(value, dict):
             raise SnapshotError(
                 f"{self._path}: manifest.json must be a JSON object, got "

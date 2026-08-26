@@ -173,3 +173,30 @@
   `except BaseException:` cleanup handler, surfacing a raw traceback
   instead of a clean operational error. Now translated alongside the
   other two exception types.
+
+- **G40 bundle archive: four more Codex review findings, all real, all
+  fixed.** (1) The ZIP64-record fallback the previous round's P1 fix
+  never handled a *prefixed* ZIP64 archive: the locator's own claimed
+  record offset is relative to the zip payload alone, not the whole
+  file, so a self-extracting archive with bytes prepended made the raw
+  offset wrong -- this guard rejected such an archive outright even
+  though `zipfile.ZipFile` (via CPython's own `_EndRecData64`, which
+  falls back to the fixed position immediately before the locator when
+  the raw offset finds nothing) opens it fine. Now retries at that same
+  fallback position before giving up. (2) The incremental aggregate-
+  byte check from an earlier round only bounded the *deduped*
+  `unique_payloads` total -- distinct `AbiSnapshot` objects that happen
+  to serialize identically (not literally the same object, so the
+  identity cache misses) still each cost a full, unbounded serialization
+  before their shared hash was known, and the duplicate-aware total was
+  only checked once, at the very end of the loop. Now `decoded_size_bytes`
+  itself (every name's own copy, duplicates included -- already exactly
+  equal to what the end-of-loop `reader_charged_bytes` check computes for
+  names processed so far) is checked on every iteration. (3) The explicit
+  `format="archive"` open path's `os.open()` succeeding but the following
+  `os.fstat()` then raising (e.g. EIO) never closed the fd -- only the
+  not-regular-file branch did. Now closed on that failure too. (4)
+  `read_manifest()`'s `json.loads(raw)` on invalid UTF-8/JSON bytes raised
+  a raw `UnicodeDecodeError`/`json.JSONDecodeError`, bypassing this
+  module's `SnapshotError` vocabulary the same way corrupt ZIP members and
+  zstd payloads are already translated. Now caught and translated too.

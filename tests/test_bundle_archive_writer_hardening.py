@@ -504,3 +504,30 @@ class TestReaderTranslatesUnsupportedZipVersions:
         monkeypatch.setattr(zipfile.ZipFile, "__init__", _failing_init)
         with pytest.raises(SnapshotError, match="not a valid bundle archive"):
             BundleArchiveReader.open(path)
+
+
+class TestReadManifestTranslatesInvalidEncoding:
+    """`json.loads(raw)` on invalid UTF-8/JSON bytes raises a raw
+    `UnicodeDecodeError`/`json.JSONDecodeError`, bypassing this module's
+    `SnapshotError` vocabulary the same way corrupt ZIP members and zstd
+    payloads are already translated (Codex review, fresh evidence)."""
+
+    def test_invalid_utf8_manifest_raises_snapshot_error(self, tmp_path: Path) -> None:
+        path = tmp_path / "bundle.archive.zip"
+        with zipfile.ZipFile(path, mode="w") as zf:
+            # A lone 0x80 continuation byte with no leading byte is not
+            # valid UTF-8 on its own.
+            zf.writestr(bundle_archive_module.MANIFEST_MEMBER, b"\x80")
+
+        with BundleArchiveReader.open(path) as reader:
+            with pytest.raises(SnapshotError, match="not valid JSON"):
+                reader.read_manifest()
+
+    def test_malformed_json_syntax_raises_snapshot_error(self, tmp_path: Path) -> None:
+        path = tmp_path / "bundle.archive.zip"
+        with zipfile.ZipFile(path, mode="w") as zf:
+            zf.writestr(bundle_archive_module.MANIFEST_MEMBER, b"{not json")
+
+        with BundleArchiveReader.open(path) as reader:
+            with pytest.raises(SnapshotError, match="not valid JSON"):
+                reader.read_manifest()
