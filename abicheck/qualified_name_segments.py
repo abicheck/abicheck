@@ -48,7 +48,16 @@ cannot be made sound with the data available today.
 
 from __future__ import annotations
 
+import dataclasses as _dataclasses
 import re as _re
+from collections.abc import (
+    Callable as _Callable,
+    Iterable as _Iterable,
+    Mapping as _Mapping,
+)
+from typing import TypeVar as _TypeVar
+
+_SnapshotT = _TypeVar("_SnapshotT")
 
 # Matches segment-name shapes commonly used as a versioned inline
 # namespace: ``_V1``, ``__v2``, ``v3``, ``__1``. Anchored to whole
@@ -228,3 +237,282 @@ def raw_segments(qualified: str) -> list[str]:
     if buf:
         out.append("".join(buf).strip())
     return [s for s in out if s]
+
+
+# ---------------------------------------------------------------------------
+# Anonymous/lambda-closure ordinal identity.
+#
+# castxml/clang spell a closure type as ``(lambda at <path>:<line>:<col>)``.
+# ``name_classification.strip_anonymous_type_location`` already reduces the
+# checkout-dependent *path* to just the declaring header's basename, keeping
+# ``:<line>:<col>`` as the only discriminator between two distinct lambdas in
+# one header -- e.g. ``"raii_guard<(lambda:task_group.h:522:26)>"``. An
+# unrelated edit *anywhere earlier* in that header shifts every lambda below
+# it to a new line, so an otherwise-unchanged closure then compares as
+# removed-plus-added between old/new snapshots -- reported against real
+# oneTBB binaries as a spurious ``type_removed``/``type_added`` pair, a
+# paired ``func_removed``/``func_added`` on every ctor/dtor of the
+# instantiation (castxml's synthetic ctor/dtor keys embed the same owner
+# spelling), and a ``declaration_renamed`` RISK finding whose entire content
+# is the line-number text.
+#
+# The functions below replace that ``:<line>:<col>`` discriminator with a
+# stable ordinal -- "the Nth lambda of this marker kind declared in this
+# header" -- computed once per snapshot, mirroring GCC/DWARF's own per-scope
+# ``{lambda(...)#1}`` numbering. As long as an edit doesn't reorder or
+# add/remove same-header, same-kind lambdas relative to each other, both
+# sides of a comparison assign the identical ordinal to the identical
+# closure. Kept in this leaf module (not ``name_classification.py``, which
+# already owns ``strip_anonymous_type_location``) purely to stay within
+# ADR-061's no-growth debt baseline for that already-frozen file -- see
+# ``architecture/debt.yaml``.
+# ---------------------------------------------------------------------------
+
+#: Matches the marker :func:`strip_anonymous_type_location` already produces
+#: (``"(lambda:foo.h:4:37)"``, ``"(unnamed struct:foo.h:56:5)"``) -- NOT the
+#: raw ``at <path>:<line>:<col>`` form that function itself consumes.
+_ANON_TYPE_ORDINAL_RE = _re.compile(
+    r"(\((?:lambda|unnamed\s+\w+)):([^:()]+):(\d+):(\d+)(?=\s*\))"
+)
+
+
+def _quoted_spans(text: str) -> list[tuple[int, int]]:
+    """``[start, end)`` ranges of every ``"..."`` quoted literal in *text*,
+    respecting backslash-escaped quotes.
+
+    A small, local copy of ``name_classification._quoted_spans`` (this
+    module imports nothing from the rest of ``abicheck`` by design -- see
+    the module docstring) so a C++20 fixed-string NTTP argument that merely
+    *looks* like our marker shape (``Tag<"(lambda:a.h:1:2)">``) is never
+    mistaken for a real one.
+    """
+    spans: list[tuple[int, int]] = []
+    start: int | None = None
+    i = 0
+    length = len(text)
+    while i < length:
+        ch = text[i]
+        if ch == "\\" and start is not None:
+            i += 2
+            continue
+        if ch == '"':
+            if start is None:
+                start = i
+            else:
+                spans.append((start, i + 1))
+                start = None
+        i += 1
+    return spans
+
+
+def _anon_type_ordinal_matches(name: str) -> list[_re.Match[str]]:
+    """Every :data:`_ANON_TYPE_ORDINAL_RE` match in *name*, excluding one
+    that falls inside a quoted literal.
+    """
+    if "(" not in name:
+        return []
+    quoted_spans = _quoted_spans(name)
+    return [
+        match
+        for match in _ANON_TYPE_ORDINAL_RE.finditer(name)
+        if not any(start <= match.start() < end for start, end in quoted_spans)
+    ]
+
+
+def collect_anonymous_type_ordinals(
+    names: _Iterable[str],
+) -> dict[tuple[str, str, int, int], int]:
+    """Assign a stable ordinal to every distinct anonymous/lambda-closure
+    declaration referenced across *names* (typically every string field of
+    one ``AbiSnapshot``), grouped by marker kind (``"(lambda"``,
+    ``"(unnamed struct"``, ...) and declaring header basename, ordered by
+    source position (``:line:col``).
+
+    Computed fresh per snapshot (never shared across old/new): as long as
+    the count and relative order of same-header, same-kind lambdas is
+    unchanged between the two sides -- true for pure line drift -- both
+    snapshots assign the identical ordinal to the identical closure.
+
+    Known, accepted limitations (see this module's own docstring for the
+    general shape of the same tradeoff on ``version_strip_segments``):
+    (1) a lambda genuinely inserted/removed earlier in the same header still
+    shifts every later ordinal, the same way it would shift every later
+    ``#N`` in a real compiler's own numbering; (2) the group key is
+    ``(marker, header basename)`` -- the same checkout-independent basename
+    ``strip_anonymous_type_location`` already reduces a full path to -- so
+    two genuinely different files sharing a basename (e.g. two vendored
+    dependencies each shipping their own ``config.h``) share one ordinal
+    sequence, and an edit in one can reorder an unrelated lambda's ordinal
+    in the other. Closing either needs real scope/per-file identity no
+    longer available once castxml/clang have flattened the closure into a
+    type-name string -- not attempted here.
+
+    Returns ``(marker, header_basename, line, col) -> 1-based ordinal``,
+    ready for :func:`apply_anonymous_type_ordinals`.
+    """
+    coordinates: dict[tuple[str, str], set[tuple[int, int]]] = {}
+    for name in names:
+        for match in _anon_type_ordinal_matches(name):
+            marker, header, line, col = match.groups()
+            coordinates.setdefault((marker, header), set()).add((int(line), int(col)))
+
+    ordinals: dict[tuple[str, str, int, int], int] = {}
+    for (marker, header), coords in coordinates.items():
+        for ordinal, (line, col) in enumerate(sorted(coords), start=1):
+            ordinals[(marker, header, line, col)] = ordinal
+    return ordinals
+
+
+def apply_anonymous_type_ordinals(
+    name: str, ordinals: _Mapping[tuple[str, str, int, int], int]
+) -> str:
+    """Rewrite every marker in *name* from its ``:<line>:<col>``
+    discriminator to the stable ``#<ordinal>`` computed by
+    :func:`collect_anonymous_type_ordinals` -- e.g.
+    ``"raii_guard<(lambda:task_group.h:522:26)>"`` becomes
+    ``"raii_guard<(lambda:task_group.h#3)>"``.
+
+    A marker absent from *ordinals* is left completely untouched rather
+    than fabricated.
+    """
+    if "(" not in name:
+        return name
+    quoted_spans = _quoted_spans(name)
+
+    def _replace(match: _re.Match[str]) -> str:
+        if any(start <= match.start() < end for start, end in quoted_spans):
+            return match.group(0)
+        marker, header, line, col = match.groups()
+        ordinal = ordinals.get((marker, header, int(line), int(col)))
+        if ordinal is None:
+            return match.group(0)
+        return f"{marker}:{header}#{ordinal}"
+
+    return _ANON_TYPE_ORDINAL_RE.sub(_replace, name)
+
+
+def _collect_strings(value: object, out: list[str]) -> None:
+    """Append every ``str`` reachable from *value* to *out*, recursing
+    through dataclasses, lists/tuples, and dicts (keys and values).
+    """
+    if isinstance(value, str):
+        out.append(value)
+    elif _dataclasses.is_dataclass(value) and not isinstance(value, type):
+        for f in _dataclasses.fields(value):
+            _collect_strings(getattr(value, f.name), out)
+    elif isinstance(value, (list, tuple)):
+        for item in value:
+            _collect_strings(item, out)
+    elif isinstance(value, dict):
+        for k, v in value.items():
+            if isinstance(k, str):
+                out.append(k)
+            _collect_strings(v, out)
+
+
+def _walk_rewrite_strings(value: object, rewrite: _Callable[[str], str]) -> object:
+    """Rewrite every ``str`` reachable from *value* via ``rewrite(s)``,
+    mutating dataclasses/lists/dicts in place where possible. Returns the
+    (possibly new) value -- a bare ``str`` can't be mutated in place.
+    """
+    if isinstance(value, str):
+        return rewrite(value)
+    if _dataclasses.is_dataclass(value) and not isinstance(value, type):
+        for f in _dataclasses.fields(value):
+            old = getattr(value, f.name)
+            new = _walk_rewrite_strings(old, rewrite)
+            if new is not old:
+                setattr(value, f.name, new)
+        return value
+    if isinstance(value, list):
+        for i, item in enumerate(value):
+            new_item = _walk_rewrite_strings(item, rewrite)
+            if new_item is not item:
+                value[i] = new_item
+        return value
+    if isinstance(value, tuple):
+        return tuple(_walk_rewrite_strings(item, rewrite) for item in value)
+    if isinstance(value, dict):
+        rewritten: dict[object, object] = {}
+        changed = False
+        for k, v in value.items():
+            new_k = rewrite(k) if isinstance(k, str) else k
+            new_v = _walk_rewrite_strings(v, rewrite)
+            rewritten[new_k] = new_v
+            if new_k != k or new_v is not v:
+                changed = True
+        if changed:
+            value.clear()
+            value.update(rewritten)
+        return value
+    return value
+
+
+#: Fields whose string content can embed a castxml/clang closure marker --
+#: scoped to the header-derived ABI surface rather than the whole snapshot,
+#: since ELF/PE/Mach-O/DWARF metadata never carry a demangled C++ type
+#: spelling. Keeping this scoped is what keeps
+#: :func:`renumber_anonymous_closure_identities` cheap even for a snapshot
+#: with a large exported symbol table.
+_LAMBDA_IDENTITY_FIELDS: tuple[str, ...] = (
+    "functions",
+    "variables",
+    "types",
+    "enums",
+    "typedefs",
+    "typedefs_qualified",
+    "constants",
+)
+
+
+def renumber_anonymous_closure_identities(snapshot: _SnapshotT) -> _SnapshotT:
+    """Replace each castxml/clang closure marker's ``:<line>:<col>``
+    discriminator with a stable ordinal among same-header, same-kind
+    closures in *snapshot* alone, mutating it in place. Returns *snapshot*
+    unchanged (for chaining at a call site's own ``return`` statement).
+
+    Call this once, right after an ``AbiSnapshot``'s
+    functions/variables/types/enums/typedefs/constants are fully populated
+    (a fresh dump) or loaded (``snapshot_from_dict``), and BEFORE
+    ``AbiSnapshot.index()`` builds any name-keyed map from them -- a
+    renamed ``RecordType.name`` must be what gets indexed. Idempotent
+    (a snapshot already in ordinal form has nothing left to renumber) and a
+    cheap no-op when nothing in *snapshot* embeds an anonymous/lambda
+    marker at all, which is the common case. Duck-typed on
+    ``getattr(snapshot, field)`` rather than importing ``AbiSnapshot``, to
+    keep this module import-free -- see its own docstring.
+
+    Known, accepted residual (Codex review, fresh evidence): a snapshot
+    written by a version of abicheck *older* than this function's own
+    introduction never carries an ordinal-form marker, and a reader
+    *older* than this function that later loads a snapshot written by a
+    *newer* abicheck (which already carries the ordinal form) has no code
+    path that renumbers it back -- ``serialization.SCHEMA_VERSION`` was not
+    bumped for this representation change, so that older reader has no
+    signal that the identity format it's comparing against differs from
+    what its own dumper would have produced. The reverse direction (an
+    older-format on-disk baseline compared by a current reader) is closed
+    by ``snapshot_from_dict``'s unconditional renumber-on-load. Closing
+    this direction too needs a real schema bump, which ripples into
+    ``docs/`` (the doc-count-sync AI-readiness check) and every test
+    fixture pinning the current schema version -- a real, separate change,
+    not folded into this fix.
+    """
+    containers = [getattr(snapshot, name) for name in _LAMBDA_IDENTITY_FIELDS]
+    strings: list[str] = []
+    for container in containers:
+        _collect_strings(container, strings)
+    if not any("(lambda" in s or "(unnamed " in s for s in strings):
+        return snapshot
+    ordinals = collect_anonymous_type_ordinals(strings)
+    if not ordinals:
+        return snapshot
+
+    def _rewrite(text: str) -> str:
+        return apply_anonymous_type_ordinals(text, ordinals)
+
+    for field_name, container in zip(_LAMBDA_IDENTITY_FIELDS, containers):
+        new_container = _walk_rewrite_strings(container, _rewrite)
+        if new_container is not container:
+            setattr(snapshot, field_name, new_container)
+    return snapshot

@@ -28,7 +28,7 @@ instantiation (via castxml's synthetic ctor/dtor keys, which embed the same
 owner spelling), and a ``declaration_renamed`` RISK finding whose entire
 content is the line-number text.
 
-:meth:`AbiSnapshot.renumber_anonymous_closure_identities` fixes this by
+:func:`~abicheck.qualified_name_segments.renumber_anonymous_closure_identities` fixes this by
 replacing the line:col discriminator with a stable ordinal -- "the Nth
 lambda of this marker kind declared in this header" -- computed once per
 snapshot. As long as an edit doesn't reorder or add/remove same-header,
@@ -42,10 +42,11 @@ from __future__ import annotations
 from abicheck.checker import compare
 from abicheck.checker_policy import ChangeKind
 from abicheck.model import AbiSnapshot, Function, Param, RecordType, Visibility
-from abicheck.name_classification import (
+from abicheck.name_classification import strip_anonymous_type_location
+from abicheck.qualified_name_segments import (
     apply_anonymous_type_ordinals,
     collect_anonymous_type_ordinals,
-    strip_anonymous_type_location,
+    renumber_anonymous_closure_identities,
 )
 from abicheck.serialization import snapshot_from_dict
 
@@ -117,8 +118,8 @@ class TestSnapshotRenumbering:
         old = self._snapshot("2021.13.0", 522, 520)
         new = self._snapshot("2022.3.0", 539, 528)
 
-        old.renumber_anonymous_closure_identities()
-        new.renumber_anonymous_closure_identities()
+        renumber_anonymous_closure_identities(old)
+        renumber_anonymous_closure_identities(new)
 
         assert old.types[0].qualified_name == new.types[0].qualified_name
         assert old.types[1].qualified_name == new.types[1].qualified_name
@@ -139,8 +140,8 @@ class TestSnapshotRenumbering:
         line-number identity would otherwise report."""
         old = self._snapshot("2021.13.0", 522, 520)
         new = self._snapshot("2022.3.0", 539, 528)
-        old.renumber_anonymous_closure_identities()
-        new.renumber_anonymous_closure_identities()
+        renumber_anonymous_closure_identities(old)
+        renumber_anonymous_closure_identities(new)
 
         result = compare(old, new)
         noisy_kinds = {
@@ -161,9 +162,9 @@ class TestSnapshotRenumbering:
 
     def test_renumbering_is_idempotent(self) -> None:
         snap = self._snapshot("2021.13.0", 522, 520)
-        snap.renumber_anonymous_closure_identities()
+        renumber_anonymous_closure_identities(snap)
         once = (snap.types[0].qualified_name, snap.functions[0].mangled)
-        snap.renumber_anonymous_closure_identities()
+        renumber_anonymous_closure_identities(snap)
         twice = (snap.types[0].qualified_name, snap.functions[0].mangled)
         assert once == twice
 
@@ -182,7 +183,7 @@ class TestSnapshotRenumbering:
         )
         before_type = snap.types[0].qualified_name
         before_func = snap.functions[0].mangled
-        snap.renumber_anonymous_closure_identities()
+        renumber_anonymous_closure_identities(snap)
         assert snap.types[0].qualified_name == before_type
         assert snap.functions[0].mangled == before_func
 
@@ -251,7 +252,7 @@ class TestLegacyPersistedSnapshotsAreRenumberedOnLoad:
                 )
             ],
         )
-        fresh.renumber_anonymous_closure_identities()
+        renumber_anonymous_closure_identities(fresh)
 
         assert legacy_baseline.types[0].qualified_name == fresh.types[0].qualified_name
         assert legacy_baseline.functions[0].mangled == fresh.functions[0].mangled

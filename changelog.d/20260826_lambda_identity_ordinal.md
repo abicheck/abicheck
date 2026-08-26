@@ -8,7 +8,7 @@
   2021.13.0 -> 2022.3.0 binaries as a spurious `type_removed`/`type_added`
   pair, a paired `func_removed`/`func_added` on every ctor/dtor/method of
   the instantiation, and a `declaration_renamed` RISK finding whose entire
-  content was the line-number text. `AbiSnapshot.
+  content was the line-number text. `qualified_name_segments.
   renumber_anonymous_closure_identities()` now replaces the
   `:<line>:<col>` discriminator with a stable ordinal -- "the Nth lambda of
   this marker kind declared in this header" -- computed once per snapshot,

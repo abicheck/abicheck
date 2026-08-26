@@ -17,15 +17,9 @@
 from __future__ import annotations
 
 import logging as _logging
-from collections.abc import Callable as _Callable
-from dataclasses import (
-    dataclass,
-    field,
-    fields as _dc_fields,
-    is_dataclass as _is_dataclass,
-)
+from dataclasses import dataclass, field
 from enum import Enum
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING
 
 # Symbol *linkage* (GLOBAL/WEAK/LOCAL/UNIQUE/OTHER, from ELF st_info.bind) —
 # reused directly from elf_metadata rather than duplicated as a second
@@ -45,10 +39,7 @@ from .elf_metadata import SymbolBinding as SymbolBinding
 # keeps type-checking cleanly for the ~9 detector modules that use it.
 from .name_classification import (
     COMPILER_INTERNAL_TYPES as COMPILER_INTERNAL_TYPES,
-    apply_anonymous_type_ordinals as _apply_anonymous_type_ordinals,
     canonicalize_type_name as canonicalize_type_name,
-    collect_anonymous_type_ordinals as _collect_anonymous_type_ordinals,
-    contains_anonymous_type_marker as _contains_anonymous_type_marker,
     cv_qualifiers_only_differ as cv_qualifiers_only_differ,
     func_signature_cv_only_differ as func_signature_cv_only_differ,
     is_abi_surface_type_name as is_abi_surface_type_name,
@@ -112,74 +103,6 @@ def stdlib_namespaces_excluded(old: AbiSnapshot, new: AbiSnapshot) -> bool:
         or is_cxx_runtime_library(getattr(old_elf, "soname", ""))
         or is_cxx_runtime_library(getattr(new_elf, "soname", ""))
     )
-
-
-def _collect_strings(value: object, out: list[str]) -> None:
-    """Append every ``str`` reachable from *value* to *out*, recursing
-    through dataclasses, lists/tuples, and dicts (keys and values).
-
-    A generic reflection-based walk rather than one hand-written per model
-    class: :meth:`AbiSnapshot.renumber_anonymous_closure_identities` needs
-    every string a castxml/clang closure spelling could have flowed into
-    (a type's own name/qualified_name/bases, a function's return type, a
-    param's type, ...), and hand-enumerating those fields would silently
-    miss the next one added to ``Function``/``RecordType``/etc.
-    """
-    if isinstance(value, str):
-        out.append(value)
-    elif _is_dataclass(value) and not isinstance(value, type):
-        for f in _dc_fields(value):
-            _collect_strings(getattr(value, f.name), out)
-    elif isinstance(value, (list, tuple)):
-        for item in value:
-            _collect_strings(item, out)
-    elif isinstance(value, dict):
-        for k, v in value.items():
-            if isinstance(k, str):
-                out.append(k)
-            _collect_strings(v, out)
-
-
-def _walk_rewrite_strings(value: object, rewrite: _Callable[[str], str]) -> object:
-    """Rewrite every ``str`` reachable from *value* via ``rewrite(s)``,
-    mutating dataclasses/lists/dicts in place where possible. Returns the
-    (possibly new) value — a bare ``str`` can't be mutated in place, so a
-    caller replacing a top-level string field must use the return value.
-
-    The mirror-image walk of :func:`_collect_strings`, over the identical
-    shape, so the two can never drift on which fields they reach.
-    """
-    if isinstance(value, str):
-        return rewrite(value)
-    if _is_dataclass(value) and not isinstance(value, type):
-        for f in _dc_fields(value):
-            old = getattr(value, f.name)
-            new = _walk_rewrite_strings(old, rewrite)
-            if new is not old:
-                setattr(value, f.name, new)
-        return value
-    if isinstance(value, list):
-        for i, item in enumerate(value):
-            new_item = _walk_rewrite_strings(item, rewrite)
-            if new_item is not item:
-                value[i] = new_item
-        return value
-    if isinstance(value, tuple):
-        return tuple(_walk_rewrite_strings(item, rewrite) for item in value)
-    if isinstance(value, dict):
-        rewritten: dict[object, object] = {}
-        changed = False
-        for k, v in value.items():
-            new_k = rewrite(k) if isinstance(k, str) else k
-            new_v = _walk_rewrite_strings(v, rewrite)
-            rewritten[new_k] = new_v
-            if new_k != k or new_v is not v:
-                changed = True
-        if changed:
-            value.clear()
-            value.update(rewritten)
-        return value
-    return value
 
 
 # Type-name canonicalization and cv-qualifier helpers
@@ -1177,63 +1100,6 @@ class AbiSnapshot:
     _type_by_name: dict[str, RecordType] | None = field(
         default=None, repr=False, compare=False
     )
-
-    #: Fields whose string content can embed a castxml/clang closure marker
-    #: (see ``name_classification.collect_anonymous_type_ordinals``) --
-    #: scoped to the header-derived ABI surface rather than the whole
-    #: snapshot, since ELF/PE/Mach-O/DWARF metadata never carry a demangled
-    #: C++ type spelling. Keeping this scoped is what keeps
-    #: :meth:`renumber_anonymous_closure_identities` cheap even for a
-    #: snapshot with a large exported symbol table.
-    _LAMBDA_IDENTITY_FIELDS: ClassVar[tuple[str, ...]] = (
-        "functions",
-        "variables",
-        "types",
-        "enums",
-        "typedefs",
-        "typedefs_qualified",
-        "constants",
-    )
-
-    def renumber_anonymous_closure_identities(self) -> None:
-        """Replace each castxml/clang closure marker's checkout-content
-        ``:<line>:<col>`` discriminator (already reduced from a full path
-        by ``name_classification.strip_anonymous_type_location``) with a
-        stable ordinal among same-header, same-kind closures in this
-        snapshot alone — see
-        ``name_classification.collect_anonymous_type_ordinals`` for why
-        this fixes a real reported false-positive class: an unrelated edit
-        earlier in a header shifts every lambda declared below it to a new
-        line, which otherwise makes an unchanged closure-parameterized
-        type/function compare as removed+added between old and new
-        snapshots (AGENTS.md's "Lambda-closure churn" entry, item 2 of the
-        oneTBB report).
-
-        Call this once, right after a header-derived snapshot's
-        functions/variables/types/enums/typedefs/constants are fully
-        populated, and BEFORE :meth:`index` builds any name-keyed map from
-        them — a renamed ``RecordType.name`` must be what gets indexed, not
-        the pre-renumbering spelling. Idempotent (re-running finds nothing
-        left to renumber) and a cheap no-op when nothing in this snapshot
-        embeds an anonymous/lambda marker at all, which is the common case.
-        """
-        containers = [getattr(self, name) for name in self._LAMBDA_IDENTITY_FIELDS]
-        strings: list[str] = []
-        for container in containers:
-            _collect_strings(container, strings)
-        if not any(_contains_anonymous_type_marker(s) for s in strings):
-            return
-        ordinals = _collect_anonymous_type_ordinals(strings)
-        if not ordinals:
-            return
-
-        def _rewrite(text: str) -> str:
-            return _apply_anonymous_type_ordinals(text, ordinals)
-
-        for field_name, container in zip(self._LAMBDA_IDENTITY_FIELDS, containers):
-            new_container = _walk_rewrite_strings(container, _rewrite)
-            if new_container is not container:
-                setattr(self, field_name, new_container)
 
     def index(self) -> None:
         """Build lookup indexes. Uses first-wins for duplicate mangled names.
