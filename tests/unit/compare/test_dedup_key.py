@@ -7,12 +7,19 @@ reusable dedup/grouping primitive is tested directly rather than only
 through its highest-level caller: an example test written to confirm the
 fix just made encodes only the input its author already thought of.
 
-That guidance earned its keep here. The first version of this file drew
-lists and frozensets but never tuples, so its no-overmerge property never
-saw the pair `["a"]` / `("a",)` -- which the implementation collapsed onto
-the same key, the precise failure the property exists to forbid. The
-strategy below therefore generates *heterogeneous* containers, and
-`TestConvertedFormsCannotCollide` pins the specific pairs by hand as well.
+That guidance earned its keep here twice, in both directions a property
+can fail. First the strategy drew lists and frozensets but never tuples,
+so the no-overmerge property never saw the pair `["a"]` / `("a",)`, which
+the implementation collapsed onto one key. Then it drew no `nan` and no
+mappings, so it never saw two unequal `{"v": nan}` dicts, which the `repr`
+fallback also collapsed. Neither property was wrong; both were starved of
+the input that falsifies them, which reads exactly like coverage.
+
+The strategy below therefore mixes container *types* at every nesting
+level and includes `nan` among its leaves -- the one value whose
+inequality with itself makes structural encoding observable. Opaque
+values have their own class, because they satisfy a deliberately weaker
+contract: see `TestOpaqueValuesKeyByIdentity`.
 """
 
 from __future__ import annotations
@@ -27,7 +34,17 @@ from abicheck.compare.dedup_key import hashable_value
 # Leaves a finding's value slot can actually hold. `Change.old_value` is
 # annotated `str | None`, but the annotation is not enforced and
 # `diff_python.py` stores lists there at seven sites.
-_LEAVES = st.none() | st.booleans() | st.integers() | st.text(max_size=3)
+# `nan` is included deliberately: it is unequal to itself, so it is the
+# leaf that distinguishes a structural encoding from one that flattens to
+# text. A `repr`-based fallback keys two unequal `nan`-bearing values
+# identically; a structural one does not.
+_LEAVES = (
+    st.none()
+    | st.booleans()
+    | st.integers()
+    | st.text(max_size=3)
+    | st.floats(allow_nan=True)
+)
 
 # Containers whose *own* equality is exact, so both directions of the
 # equal/unequal invariants hold. Deliberately mixes list and tuple at every
@@ -36,9 +53,26 @@ _LEAVES = st.none() | st.booleans() | st.integers() | st.text(max_size=3)
 _EXACT = st.recursive(
     _LEAVES,
     lambda children: st.lists(children, max_size=3)
-    | st.lists(children, max_size=3).map(tuple),
+    | st.lists(children, max_size=3).map(tuple)
+    | st.dictionaries(st.text(max_size=3), children, max_size=3),
     max_leaves=8,
 )
+
+class _OpaqueFixture:
+    """Unhashable, with no structure to encode: equal to any sibling and
+    represented identically, so only identity distinguishes two of them."""
+
+    __hash__ = None  # type: ignore[assignment]
+
+    def __init__(self, text: str) -> None:
+        self.text = text
+
+    def __eq__(self, other: object) -> bool:
+        return isinstance(other, _OpaqueFixture) and self.text == other.text
+
+    def __repr__(self) -> str:
+        return self.text
+
 
 _UNHASHABLE = [
     pytest.param(["a", "b"], id="list"),
@@ -93,6 +127,18 @@ class TestUnequalValuesKeyDifferently:
     def test_a_list_does_not_collide_with_its_own_string_spelling(self) -> None:
         assert hashable_value(["a"]) != hashable_value("['a']")
 
+    def test_unequal_values_sharing_a_repr_stay_distinct(self) -> None:
+        """Two `nan`-bearing dicts are unequal and print identically."""
+        left = {"v": float("nan")}
+        right = {"v": float("nan")}
+        assert left != right
+        assert hashable_value(left) != hashable_value(right)
+
+    def test_the_same_nan_object_still_keys_equally(self) -> None:
+        """The mirror case: identity makes these equal, so they must merge."""
+        shared = float("nan")
+        assert hashable_value([shared]) == hashable_value([shared])
+
 
 class TestConvertedFormsCannotCollide:
     """Each case below was a real collision before the conversions were tagged."""
@@ -115,21 +161,53 @@ class TestConvertedFormsCannotCollide:
         value = {"a": 1}
         assert hashable_value(value) != hashable_value(repr(value))
 
-    def test_two_unhashable_types_sharing_a_repr_stay_distinct(self) -> None:
-        """The type name is carried for exactly this case."""
+    def test_a_mapping_keys_independently_of_member_order(self) -> None:
+        """Mappings encode as frozensets, so insertion order never reaches
+        the key -- these are equal inputs and must merge."""
+        assert hashable_value({"a": 1, "b": 2}) == hashable_value({"b": 2, "a": 1})
 
-        class Odd:
-            def __hash__(self) -> int:
-                raise TypeError
 
-            def __repr__(self) -> str:
-                return "{'a': 1}"
+class TestOpaqueValuesKeyByIdentity:
+    """A value with no structure to encode satisfies a weaker contract.
 
-        assert hashable_value(Odd()) != hashable_value({"a": 1})
+    No general encoding of an arbitrary object is injective, so one of the
+    two invariants has to give. Identity keeps the one that matters -- it
+    can never over-merge -- and sacrifices the other: two equal but distinct
+    opaque values key apart, duplicating a finding rather than dropping one.
+    """
+
+    @staticmethod
+    def _opaque(text: str) -> object:
+        # `_Opaque` is defined at module scope, not per call: two instances
+        # from separate calls have to be genuinely equal for the
+        # never-over-merge case below to test anything.
+        return _OpaqueFixture(text)
+
+    def test_an_opaque_value_is_hashable(self) -> None:
+        hash(hashable_value(self._opaque("x")))
+
+    def test_the_same_object_keys_equally_every_time(self) -> None:
+        value = self._opaque("x")
+        assert hashable_value(value) == hashable_value(value)
+
+    def test_equal_but_distinct_opaque_values_never_over_merge(self) -> None:
+        """Equal *and* identically represented, so only identity separates
+        them -- and it must."""
+        left, right = self._opaque("same"), self._opaque("same")
+        assert left == right
+        assert hashable_value(left) != hashable_value(right)
+
+    def test_an_opaque_key_does_not_collide_with_a_plain_value(self) -> None:
+        assert hashable_value(self._opaque("same")) != hashable_value("same")
+
+    def test_the_key_holds_the_value_so_its_id_cannot_be_reused(self) -> None:
+        """Identity keying is only sound while the object stays alive."""
+        key = hashable_value(self._opaque("x"))
+        assert getattr(key, "value", None) is not None
 
 
 class TestHashableScalarsArePassedThroughUnchanged:
-    @pytest.mark.parametrize("value", [None, "", "text", 0, False, frozenset({"a"})])
+    @pytest.mark.parametrize("value", [None, "", "text", 0, False, 1.5])
     def test_already_hashable_scalars_are_identical(self, value: object) -> None:
         assert hashable_value(value) is value
 

@@ -12,5 +12,8 @@
   matching old/new entities and identifying a raw change. The flat `diff_*`
   modules remain its declared legacy paths.
 
-  Converted values carry a private tag, so a list and a tuple of the same
-  items stay distinct keys and no detector value can forge a converted one.
+  Containers are encoded structurally under a private tag, so a list and a
+  tuple of the same items stay distinct keys, mapping order never reaches
+  the key, and no detector value can forge a converted one. A value with no
+  structure to encode keys by identity rather than by `repr`, which cannot
+  merge two unequal values that happen to print the same.

@@ -8,6 +8,8 @@ depend on it.
 
 from __future__ import annotations
 
+from typing import Any
+
 
 class _Tag:
     """A private marker that no value under conversion can contain.
@@ -28,10 +30,43 @@ class _Tag:
 
 _LIST = _Tag("list")
 _TUPLE = _Tag("tuple")
-_OPAQUE = _Tag("opaque")
+_DICT = _Tag("dict")
+_SET = _Tag("set")
 
 
-def hashable_value(value: object) -> object:
+class _Opaque:
+    """An identity-based key for a value with no structure to encode.
+
+    Deliberately *not* a `repr`: two unequal values of one type can share a
+    representation -- two independently built ``{"v": float("nan")}`` are
+    unequal, since `nan != nan`, yet print identically -- and keying them
+    together is the over-merge that drops a real finding. Identity cannot
+    do that.
+
+    The trade runs the other way instead: two equal but distinct opaque
+    values key apart, so a dedup reports one finding twice rather than
+    dropping one. That is the direction to fail in.
+
+    Holding the value keeps it alive for the key's lifetime, so an `id`
+    freed and reused cannot resurrect the collision this exists to avoid.
+    """
+
+    __slots__ = ("value",)
+
+    def __init__(self, value: object) -> None:
+        self.value = value
+
+    def __hash__(self) -> int:
+        return hash(("dedup-key opaque", type(self.value).__name__))
+
+    def __eq__(self, other: object) -> bool:
+        return isinstance(other, _Opaque) and self.value is other.value
+
+    def __repr__(self) -> str:  # pragma: no cover - debugging aid only
+        return f"<dedup-key opaque {type(self.value).__name__}>"
+
+
+def hashable_value(value: object) -> Any:
     """A hash-safe stand-in for ``value``, stable across calls.
 
     Detector findings are deduplicated by putting derived key tuples into a
@@ -51,24 +86,35 @@ def hashable_value(value: object) -> object:
       over-merge silently drops a real finding, where an under-merge only
       reports one twice.
 
-    Every converted form is therefore tagged with a private marker object
-    rather than returned as a bare tuple. Without a tag, a list and a tuple
-    of the same items both key as that tuple (``["a"]`` and ``("a",)`` are
-    unequal inputs), and a genuine ``("dict", "{'a': 1}")`` collides with the
-    fallback below. A tag cannot be forged: ``_Tag`` is identity-compared and
-    not exported, so no detector value can contain one.
+    Three rules, in order:
 
-    One limit, stated rather than papered over: the last-resort branch keys
-    on ``repr``, so two *equal* values whose reprs differ -- mappings equal
-    but differently ordered -- key apart. That is the safe direction (an
-    under-merge), and it is unreachable for the lists this exists for.
+    1. A container is encoded *structurally*, recursively, under a private
+       tag. The tag is what keeps ``["a"]`` and ``("a",)`` -- unequal inputs
+       -- from both keying as ``("a",)``, and stops a detector value shaped
+       like a converted one from forging it: `_Tag` is identity-compared and
+       not exported. Mappings and sets encode as frozensets of encoded
+       members, so member order never reaches the key.
+    2. An already-hashable value is returned unchanged. This is exact by
+       construction: the consuming ``set`` then performs the very comparison
+       the original values would have.
+    3. Anything else -- unhashable with no structure to encode -- keys by
+       identity via `_Opaque`, for the reason given there.
     """
     if isinstance(value, list):
         return (_LIST, tuple(hashable_value(item) for item in value))
     if isinstance(value, tuple):
         return (_TUPLE, tuple(hashable_value(item) for item in value))
+    if isinstance(value, dict):
+        return (
+            _DICT,
+            frozenset(
+                (hashable_value(k), hashable_value(v)) for k, v in value.items()
+            ),
+        )
+    if isinstance(value, (set, frozenset)):
+        return (_SET, frozenset(hashable_value(item) for item in value))
     try:
         hash(value)
     except TypeError:
-        return (_OPAQUE, type(value).__name__, repr(value))
+        return _Opaque(value)
     return value
