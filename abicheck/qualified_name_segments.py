@@ -537,8 +537,16 @@ def apply_anonymous_type_ordinals(
 #: (its compile-time constant initializer, "if known", model.py's own
 #: docstring) is the identical payload shape -- added after the same
 #: reachable-corruption pattern was found on it too (Codex review, fresh
-#: evidence).
-_PAYLOAD_FIELD_EXCLUSIONS: frozenset[str] = frozenset({"deprecated", "default", "value"})
+#: evidence). ``source_location``/``source_header`` (ADR-015 provenance --
+#: a filesystem path, optionally with ``:line:col`` appended, never a C++
+#: type/name spelling) are the same shape again: a legal path containing
+#: marker-shaped text of its own (``/tmp/(lambda:a.h:1:2)``) was rewritten
+#: even for a snapshot with no real closure at all, corrupting persisted
+#: declaration provenance and, transitively, any later header-origin/
+#: dependency-scoping decision that reads it (Codex review, fresh evidence).
+_PAYLOAD_FIELD_EXCLUSIONS: frozenset[str] = frozenset(
+    {"deprecated", "default", "value", "source_location", "source_header"}
+)
 
 
 def _collect_strings(value: object, out: list[str]) -> None:

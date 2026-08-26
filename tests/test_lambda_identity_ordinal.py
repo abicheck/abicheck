@@ -300,6 +300,45 @@ class TestPayloadTextIsNeverCorrupted:
         assert "#1)" in snap.types[0].qualified_name
         assert snap.constants["MSG"] == value
 
+    def test_a_source_location_matching_the_marker_syntax_is_untouched(
+        self,
+    ) -> None:
+        """Codex review, fresh evidence: source_location/source_header
+        (ADR-015 provenance -- a filesystem path, never a type/name
+        spelling) is the identical payload shape as deprecated/default/
+        value -- a legal path containing marker-shaped text of its own
+        (e.g. a directory literally named "(lambda:a.h:1:2)") was rewritten
+        even for a snapshot with no real closure at all, corrupting
+        persisted declaration provenance."""
+        path = f"/tmp/{_closure('x.h', 10, 2)}/api.h"
+        rec = replace(
+            _record("Widget", qualified="ns::Widget"),
+            source_location=f"{path}:42",
+            source_header=path,
+        )
+        snap = AbiSnapshot(library="lib.so", version="1.0", types=[rec])
+        renumber_anonymous_closure_identities(snap)
+        assert snap.types[0].source_location == f"{path}:42"
+        assert snap.types[0].source_header == path
+
+    def test_a_source_location_does_not_fabricate_an_ordinal_for_a_real_closure(
+        self,
+    ) -> None:
+        """Same collection-time exclusion check as the deprecated-message/
+        constant siblings above, for source_location/source_header."""
+        closure_type = f"raii_guard<{_closure('x.h', 5, 1)}>"
+        path = f"/tmp/{_closure('x.h', 1, 1)}/api.h"
+        rec = replace(
+            _record(closure_type, qualified=f"ns::{closure_type}"),
+            source_location=f"{path}:42",
+            source_header=path,
+        )
+        snap = AbiSnapshot(library="lib.so", version="1.0", types=[rec])
+        renumber_anonymous_closure_identities(snap)
+        assert "#1)" in snap.types[0].qualified_name
+        assert snap.types[0].source_location == f"{path}:42"
+        assert snap.types[0].source_header == path
+
 
 class TestLegacyPersistedSnapshotsAreRenumberedOnLoad:
     """A snapshot persisted by a pre-fix abicheck still carries the raw

@@ -134,3 +134,12 @@
   defer_closure_identity_renumbering()` now wraps the whole
   `_dump_elf`/`_dump_pe`/`_dump_macho` + `attach_clang_layout` sequence,
   with renumbering applied exactly once at the very end.
+- **Eleventh follow-up (Codex review): `source_location`/`source_header`
+  (ADR-015 provenance -- a filesystem path, never a type/name spelling)
+  were reachable by the same generic dataclass walk `deprecated`/
+  `default`/`value` already needed excluding.** A legal path containing
+  marker-shaped text of its own (`/tmp/(lambda:a.h:1:2)/api.h`) was
+  rewritten even for a snapshot with no real closure at all, corrupting
+  persisted declaration provenance and, transitively, any later
+  header-origin/dependency-scoping decision that reads it. Added to
+  `_PAYLOAD_FIELD_EXCLUSIONS`, the same way.
