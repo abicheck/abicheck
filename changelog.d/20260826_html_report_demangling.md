@@ -209,3 +209,27 @@
   warmed none of them, falling back to one `demangle()` call per row
   instead of the single batched call this prewarm exists for. Now passes
   `accept_macho_prefix=True`, matching the cell it warms for.
+- **Investigated, not fixed (Codex review): a report renderer has no
+  binary-format context to gate `accept_macho_prefix` on.**
+  `demangle_text()`/`prewarm_demangle_batch()` -- the two functions behind
+  every human-readable report renderer (HTML and Markdown/review alike) --
+  unconditionally opt into the Mach-O `__Z...` prefix, regardless of
+  whether the `DiffResult` being rendered actually came from a Mach-O
+  binary. A literal ELF/PE export coincidentally spelled like a
+  Mach-O-prefixed Itanium mangling (e.g. a hand-written assembler alias
+  using a reserved double-underscore identifier) would render with a
+  fabricated demangled label. Not fixed here: neither `DiffResult` nor
+  `LibraryMetadata` carries a binary-format field today (`evidence_tiers`
+  records evidence *sources* -- `elf`/`dwarf`/`header` -- not container
+  format), so a correct fix needs new model plumbing threaded through
+  every report-renderer call site, not a one-line change to this module.
+  The blast radius is bounded in the meantime: the raw mangled/literal
+  name is always preserved verbatim (as the `<abbr>` tooltip in HTML, or
+  simply left alongside the substituted text elsewhere), no `ChangeKind`,
+  verdict, or exit code is affected -- this is purely a cosmetic
+  human-readable label, never a correctness input downstream of the
+  report. `json`/`sarif`/`junit` output is untouched by any of this and
+  always carries the raw symbol. Left as a documented residual per this
+  repo's "known gaps over risky reactive patches" convention (AGENTS.md)
+  rather than a same-PR structural change to add binary-format context
+  to the report pipeline.
