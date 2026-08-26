@@ -130,6 +130,24 @@ class TestDemangle:
                 result = _mod.demangle("_ZN3foo3barEv")
         assert result is None
 
+    def test_cppfilt_file_not_found_is_remembered_across_calls(self):
+        """Codex review, fresh evidence: once a subprocess.run() call proves
+        the c++filt binary itself isn't installed, a later demangle() call
+        for a *different* symbol must not re-attempt the same doomed
+        subprocess launch -- a large HTML report with no demangler installed
+        would otherwise re-launch a fresh subprocess pair per row."""
+        mock_cxxfilt = MagicMock()
+        mock_cxxfilt.demangle.side_effect = RuntimeError("no")
+        with patch.dict("sys.modules", {"cxxfilt": mock_cxxfilt}):
+            with patch("subprocess.run", side_effect=FileNotFoundError) as mock_run:
+                assert _mod.demangle("_ZN3foo3barEv") is None
+                first_call_count = mock_run.call_count
+                assert first_call_count > 0
+                _mod.demangle.cache_clear()  # bypass the lru_cache, not the fix
+                assert _mod.demangle("_ZN3baz4quxEv") is None
+        # No new subprocess.run() calls for the second, different symbol.
+        assert mock_run.call_count == first_call_count
+
     def test_cppfilt_timeout(self):
         """When c++filt times out, return None."""
         mock_cxxfilt = MagicMock()
@@ -279,6 +297,18 @@ class TestDemangleBatch:
             with patch("subprocess.run", side_effect=FileNotFoundError):
                 result = _mod.demangle_batch(["_ZN3foo3barEv"])
         assert result == {}
+
+    def test_cppfilt_file_not_found_is_remembered_across_batch_calls(self):
+        """Codex review, fresh evidence: once one demangle_batch() call proves
+        c++filt itself isn't installed, a later demangle_batch() call for
+        different symbols must not re-attempt the doomed subprocess launch."""
+        with patch.dict("sys.modules", {"cxxfilt": None}):
+            with patch("subprocess.run", side_effect=FileNotFoundError) as mock_run:
+                assert _mod.demangle_batch(["_ZN3foo3barEv"]) == {}
+                first_call_count = mock_run.call_count
+                assert first_call_count > 0
+                assert _mod.demangle_batch(["_ZN3baz4quxEv"]) == {}
+        assert mock_run.call_count == first_call_count
 
     def test_cppfilt_timeout_batch(self):
         with patch.dict("sys.modules", {"cxxfilt": None}):

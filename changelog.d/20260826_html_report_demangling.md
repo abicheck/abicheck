@@ -156,3 +156,16 @@
   `demangle("__ZNOTVALID")` returned the bogus `"_ZNOTVALID"` instead of
   `None` whenever `cxxfilt` (rather than `c++filt`) handled the malformed
   name. Now compares against `canonical` the same way the batch path does.
+- **Fourteenth follow-up (Codex review): a missing `c++filt` binary was
+  re-discovered on every call instead of once per process.** Neither the
+  single-symbol nor the batch `c++filt` fallback remembered a
+  `FileNotFoundError` beyond the call that hit it, since the existing
+  `_BATCH_CACHE_FAIL` is deliberately never populated for that case (a
+  timeout or non-zero exit might be transient/input-specific and is worth
+  retrying, per that code's own comment) -- but a genuinely *missing*
+  binary won't reappear mid-process, so a large HTML report with no
+  demangler installed re-launched a fresh, doomed `subprocess.run()` pair
+  per row instead of degrading once. A new `_cppfilt_binary_confirmed_
+  missing` module flag, set on the first `FileNotFoundError` and checked
+  before every later subprocess attempt, closes this without touching the
+  existing (correct) retry semantics for a timeout/non-zero-exit/OSError.

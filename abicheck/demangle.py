@@ -54,6 +54,17 @@ _log = logging.getLogger(__name__)
 # Whether we have already warned about demangling being unavailable.
 _warned_no_demangler = False
 
+# Set once a subprocess.run() call proves the `c++filt` binary itself isn't
+# installed (FileNotFoundError). Unlike a timeout or a non-zero exit -- both
+# of which the existing FAIL-caching comment below deliberately treats as
+# possibly transient/input-specific and worth retrying -- a missing binary
+# won't reappear mid-process, so there is no reason to keep re-attempting the
+# same doomed subprocess launch for every subsequent demangle()/demangle_
+# batch() call in this process's lifetime (Codex review, fresh evidence: a
+# large HTML report with no demangler installed re-launched a fresh, doomed
+# subprocess pair per row instead of degrading once).
+_cppfilt_binary_confirmed_missing = False
+
 
 def _is_itanium_mangled(symbol: str) -> bool:
     """True for a plain ELF ``_Z...`` name or its Mach-O ``__Z...`` spelling.
@@ -111,26 +122,31 @@ def demangle(symbol: str) -> str | None:
             return out
     except Exception:  # noqa: BLE001
         _log.debug("cxxfilt demangling failed for %s", symbol)
-    for cmd in _cppfilt_single_commands(canonical):
-        try:
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=5,
-            )
-            if result.returncode == 0:
-                out = result.stdout.strip()
-                # Compare against the canonical input, not the original
-                # (possibly Mach-O-prefixed) symbol -- c++filt echoes back
-                # exactly what it was fed on failure, so for a malformed
-                # `__Z...` token that echo is the canonical single-
-                # underscore form, which never equals `symbol` and would
-                # be misread as a real demangling (Codex review).
-                if out and out != canonical:
-                    return out
-        except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
-            pass
+    global _cppfilt_binary_confirmed_missing  # noqa: PLW0603
+    if not _cppfilt_binary_confirmed_missing:
+        for cmd in _cppfilt_single_commands(canonical):
+            try:
+                result = subprocess.run(
+                    cmd,
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
+                )
+                if result.returncode == 0:
+                    out = result.stdout.strip()
+                    # Compare against the canonical input, not the original
+                    # (possibly Mach-O-prefixed) symbol -- c++filt echoes back
+                    # exactly what it was fed on failure, so for a malformed
+                    # `__Z...` token that echo is the canonical single-
+                    # underscore form, which never equals `symbol` and would
+                    # be misread as a real demangling (Codex review).
+                    if out and out != canonical:
+                        return out
+            except FileNotFoundError:
+                _cppfilt_binary_confirmed_missing = True
+                break
+            except (subprocess.TimeoutExpired, OSError):
+                pass
 
     global _warned_no_demangler  # noqa: PLW0603
     if not _warned_no_demangler:
@@ -218,42 +234,48 @@ def _cppfilt_batch_commands() -> tuple[list[str], ...]:
 
 def _batch_phase3_cppfilt(remaining: list[str], result: dict[str, str]) -> None:
     """Fall back to a single batched ``c++filt`` subprocess call."""
+    global _cppfilt_binary_confirmed_missing  # noqa: PLW0603
     unresolved = list(remaining)
     any_cppfilt_succeeded = False
-    for cmd in _cppfilt_batch_commands():
-        if not unresolved:
-            break
-        success_set: set[str] = set()
-        canonical_inputs = [_canonical_mangled(s) for s in unresolved]
-        try:
-            proc = subprocess.run(
-                cmd,
-                input="\n".join(canonical_inputs),
-                capture_output=True,
-                text=True,
-                timeout=30,
-            )
-            if proc.returncode != 0:
+    success_set: set[str] = set()
+    if not _cppfilt_binary_confirmed_missing:
+        for cmd in _cppfilt_batch_commands():
+            if not unresolved:
+                break
+            success_set = set()
+            canonical_inputs = [_canonical_mangled(s) for s in unresolved]
+            try:
+                proc = subprocess.run(
+                    cmd,
+                    input="\n".join(canonical_inputs),
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                )
+                if proc.returncode != 0:
+                    continue
+                any_cppfilt_succeeded = True
+                lines = proc.stdout.strip().split("\n")
+                for mangled, canonical, demangled in zip(
+                    unresolved, canonical_inputs, lines
+                ):
+                    # Compare against the *canonical* input, not the original
+                    # (possibly Mach-O-prefixed) one -- c++filt echoes back
+                    # exactly what it was fed on failure, so for a malformed
+                    # `__Z...` token that echo is the canonical single-
+                    # underscore form, which never equals the double-underscore
+                    # `mangled` key and would be misread as a real demangling
+                    # (Codex review, fresh evidence).
+                    if demangled and demangled != canonical:
+                        result[mangled] = demangled
+                        _batch_cache_record_ok(mangled, demangled)
+                        success_set.add(mangled)
+            except FileNotFoundError:
+                _cppfilt_binary_confirmed_missing = True
+                break
+            except (subprocess.TimeoutExpired, OSError):
                 continue
-            any_cppfilt_succeeded = True
-            lines = proc.stdout.strip().split("\n")
-            for mangled, canonical, demangled in zip(
-                unresolved, canonical_inputs, lines
-            ):
-                # Compare against the *canonical* input, not the original
-                # (possibly Mach-O-prefixed) one -- c++filt echoes back
-                # exactly what it was fed on failure, so for a malformed
-                # `__Z...` token that echo is the canonical single-
-                # underscore form, which never equals the double-underscore
-                # `mangled` key and would be misread as a real demangling
-                # (Codex review, fresh evidence).
-                if demangled and demangled != canonical:
-                    result[mangled] = demangled
-                    _batch_cache_record_ok(mangled, demangled)
-                    success_set.add(mangled)
-        except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
-            continue
-        unresolved = [s for s in unresolved if s not in success_set]
+            unresolved = [s for s in unresolved if s not in success_set]
     # Only cache permanent FAILs when c++filt actually ran to completion
     # (returncode 0). If the binary is missing, timed out, raised OSError,
     # or returned non-zero, leave the symbols un-cached so a future call
@@ -297,8 +319,10 @@ def demangle_batch(symbols: list[str]) -> dict[str, str]:
 
 def _reset_demangle_batch_cache() -> None:
     """Test helper — clear the process-wide cache."""
+    global _cppfilt_binary_confirmed_missing  # noqa: PLW0603
     _BATCH_CACHE_OK.clear()
     _BATCH_CACHE_FAIL.clear()
+    _cppfilt_binary_confirmed_missing = False
 
 
 def strip_signature(demangled: str) -> str:
