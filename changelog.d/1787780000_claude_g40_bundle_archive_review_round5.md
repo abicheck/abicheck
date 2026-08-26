@@ -236,3 +236,18 @@
   instead -- the function's return type narrows from `int | None` to
   `int` accordingly, and the caller's now-impossible `None` case was
   removed too.
+
+- **G40 bundle archive: one more Codex review finding, real, fixed.**
+  `write_bundle_facts_archive`'s own high-level manifest-size preflight
+  (checking the assembled `manifest.json` -- `library_blobs` +
+  `filesystem_aliases` + `library_filenames` -- against
+  `DEFAULT_MAX_MANIFEST_BYTES`) called `json.dumps(container_manifest,
+  indent=2)` to get an encoded string, then `.encode("utf-8")` a second,
+  separate time inside the error message, before ever checking the
+  length -- so a `BundleFacts` with a large `filesystem_aliases`/
+  `library_filenames` mapping could fully materialize two independent
+  oversized copies before this preflight got a chance to reject it, even
+  though `BundleArchiveWriter.write_manifest()`'s own identical check
+  (fixed two rounds ago) no longer has this problem. Now checked
+  incrementally via `json.JSONEncoder(indent=2).iterencode()`, the same
+  fix already applied to the primitive layer.

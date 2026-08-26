@@ -815,6 +815,49 @@ class TestBundleFactsArchiveFormat:
             save_bundle_facts(facts, out, format="archive")
         assert not out.exists()
 
+    def test_the_manifest_cap_is_checked_before_materializing_the_full_string(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Codex review, fresh evidence: this high-level preflight must
+        reject an oversized manifest.json without first fully
+        materializing it via `json.dumps()` (and a second, separate
+        UTF-8-encoded copy of it) -- patches `json.dumps` itself to fail
+        the test if `write_bundle_facts_archive` still calls it."""
+        import json as json_module
+
+        import abicheck.storage.bundle_archive as bundle_archive_module
+
+        monkeypatch.setattr(bundle_archive_module, "DEFAULT_MAX_MANIFEST_BYTES", 200)
+        real_dumps = json_module.dumps
+
+        def _guarded_dumps(obj: object, *a: object, **kw: object) -> str:
+            # Only the container manifest itself (the object this
+            # preflight bounds) must never reach json.dumps() -- the
+            # per-library snapshot/instantiation-manifest blob encodes
+            # earlier in the same function are unrelated and must still
+            # work normally.
+            if isinstance(obj, dict) and "filesystem_aliases" in obj:
+                raise AssertionError(
+                    "write_bundle_facts_archive() must not call "
+                    "json.dumps() on the container manifest for its size "
+                    "preflight -- it should encode incrementally via "
+                    "json.JSONEncoder.iterencode()"
+                )
+            return real_dumps(obj, *a, **kw)  # type: ignore[no-any-return]
+
+        monkeypatch.setattr(json_module, "dumps", _guarded_dumps)
+        facts = BundleFacts(
+            per_library_snapshots=_per_library_snapshots(_old_metadata()),
+            filesystem_aliases={
+                "libcore.so": tuple(f"libcore.so.{i}" for i in range(50)),
+            },
+        )
+        out = tmp_path / "big-manifest-no-materialize.bundlefacts.archive.zip"
+
+        with pytest.raises(SnapshotError, match="200 byte safety limit"):
+            save_bundle_facts(facts, out, format="archive")
+        assert not out.exists()
+
     def test_load_caps_each_blob_read_by_the_remaining_aggregate_allowance(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:

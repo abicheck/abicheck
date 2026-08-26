@@ -384,8 +384,7 @@ def write_bundle_facts_archive(
     Deduplication is whole-per-library-snapshot granularity (see the G40
     plan's own scope note): two libraries whose entire serialized
     ``AbiSnapshot`` is byte-identical share one blob, via
-    ``BundleArchiveWriter.put_blob``'s own hash-addressed dedup -- nothing
-    here decides that; it just calls ``put_blob`` once per library."""
+    ``BundleArchiveWriter.put_blob``'s own hash-addressed dedup."""
     import json as _json
     from collections import Counter
 
@@ -406,12 +405,12 @@ def write_bundle_facts_archive(
     # populates. Sorted by name, not dict insertion order: two logically-
     # equal BundleFacts populated in a different order would otherwise
     # produce different archive bytes/stored_sha256 for identical facts.
-    # (a-) Library-name-count cap, independent of the distinct-blob cap
+    # (a) Library-name-count cap, independent of the distinct-blob cap
     # below: many names can share one blob, so more names than the
     # reader's own DEFAULT_MAX_LIBRARY_COUNT could write successfully and
-    # then never be reopened. Checked before the serialization loop, not
-    # after: many names referencing one large shared snapshot would
-    # otherwise serialize that payload once per name before this can fire.
+    # then never be reopened. Checked before the serialization loop --
+    # many names referencing one large shared snapshot would otherwise
+    # serialize that payload once per name before this can fire.
     if len(facts.per_library_snapshots) > DEFAULT_MAX_LIBRARY_COUNT:
         raise SnapshotError(
             f"{p}: writing this bundle's {len(facts.per_library_snapshots)} "
@@ -441,13 +440,11 @@ def write_bundle_facts_archive(
         # is checked here, incrementally, not only unique_payloads' own
         # deduped total -- distinct AbiSnapshot objects that happen to
         # serialize identically (not the identity-cache case above) still
-        # each cost a real, full serialization before their shared hash
-        # is known, so bounding only the *deduped* running total would
-        # let many such objects perform unbounded work before the
-        # duplicate-aware check below ever got a chance to fire (Codex
-        # review, fresh evidence). decoded_size_bytes already equals
-        # exactly what reader_charged_bytes would compute for the names
-        # processed so far, so this check and that one can never disagree.
+        # each cost a real, full serialization before their shared hash is
+        # known, so bounding only the deduped total would let many such
+        # objects perform unbounded work first (Codex review). Already
+        # equals what reader_charged_bytes computes for names so far, so
+        # this check and that one can never disagree.
         decoded_size_bytes += len(payload)
         if decoded_size_bytes > DEFAULT_MAX_BUNDLE_DECODED_BYTES:
             raise SnapshotError(
@@ -481,16 +478,13 @@ def write_bundle_facts_archive(
             "an archive that could not be reopened."
         )
     # (b) Aggregate decoded-byte cap, mirroring read_bundle_facts_archive()
-    # exactly -- not each unique blob's bytes once, but every *duplicate*
-    # name's own deep-copied AbiSnapshot too, else many names sharing one
-    # blob pass a unique-bytes-only check but exceed the reader's real
-    # per-copy total.
+    # exactly -- every *duplicate* name's own deep-copied AbiSnapshot too,
+    # not each unique blob's bytes once.
     hash_counts = Counter(library_blobs.values())
     reader_charged_bytes = sum(len(unique_payloads[h]) * n for h, n in hash_counts.items())
-    # manifest_blob is fetched exactly once (no duplicate-copy treatment)
-    # -- if its hash isn't already one of the library hashes just summed,
-    # the reader's own _cached_blob() still charges its bytes once on a
-    # cache miss, which this sum would otherwise omit entirely.
+    # manifest_blob is fetched exactly once -- if its hash isn't already
+    # one of the library hashes just summed, the reader's own
+    # _cached_blob() still charges its bytes once on a cache miss.
     if manifest_blob is not None and manifest_blob not in hash_counts:
         reader_charged_bytes += len(unique_payloads[manifest_blob])
     if reader_charged_bytes > DEFAULT_MAX_BUNDLE_DECODED_BYTES:
@@ -519,18 +513,24 @@ def write_bundle_facts_archive(
         },
         "library_filenames": dict(sorted(facts.library_filenames.items())),
     }
-    # A third cap: `manifest.json` itself has its own reader-side size
-    # ceiling, never covered above. Checked against the exact bytes about
-    # to be written, via the identical encoding `write_manifest()` uses.
-    manifest_member_payload = _json.dumps(container_manifest, indent=2)
-    if len(manifest_member_payload.encode("utf-8")) > DEFAULT_MAX_MANIFEST_BYTES:
-        raise SnapshotError(
-            f"{p}: this bundle's manifest.json would be "
-            f"{len(manifest_member_payload.encode('utf-8'))} bytes, exceeding "
-            f"the {DEFAULT_MAX_MANIFEST_BYTES} byte safety limit "
-            "read_bundle_facts_archive() enforces on load -- refusing to "
-            "write an archive that could not be reopened."
-        )
+    # A third cap: manifest.json's own reader-side size ceiling, never
+    # covered above. Checked incrementally via iterencode(), not
+    # `json.dumps()` then `.encode("utf-8")` -- which would fully
+    # materialize the string (and a second UTF-8 copy) before this could
+    # reject an oversized alias/filename map (Codex review).
+    # write_manifest() re-checks identically when writing the member
+    # below; checked here too so a reject happens before any blob write.
+    manifest_member_bytes = 0
+    for chunk in _json.JSONEncoder(indent=2).iterencode(container_manifest):
+        manifest_member_bytes += len(chunk.encode("utf-8"))
+        if manifest_member_bytes > DEFAULT_MAX_MANIFEST_BYTES:
+            raise SnapshotError(
+                f"{p}: this bundle's manifest.json would be more than "
+                f"{manifest_member_bytes} bytes, exceeding the "
+                f"{DEFAULT_MAX_MANIFEST_BYTES} byte safety limit "
+                "read_bundle_facts_archive() enforces on load -- refusing "
+                "to write an archive that could not be reopened."
+            )
 
     with BundleArchiveWriter(p) as writer:
         for h in sorted(unique_payloads):
