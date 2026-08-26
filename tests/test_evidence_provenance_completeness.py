@@ -176,17 +176,53 @@ class TestClassificationTracksRealProducerBehavior:
         )
 
     @pytest.mark.parametrize("mutation", MUTATIONS, ids=lambda m: m.__name__)
-    def test_classified_kinds_are_actually_stamped(self, mutation) -> None:
+    def test_static_kinds_are_stamped_identically_on_every_finding(self, mutation) -> None:
+        """PROVENANCE_STATIC's own definition is "a constant tuple, the
+        same value for every instance of this kind" -- checked exhaustively
+        (every emitted finding, not just one) and checked for value
+        equality, not merely non-None (Codex review: an `any(...)` check
+        would pass a producer that only migrated one of several call sites
+        emitting this kind, or a "static" producer whose tuple actually
+        varies -- the second round-trip test test_unverified_kinds_are_not_
+        yet_actually_stamped already checks exhaustively for the other
+        direction; this makes the STATIC/PER_FINDING direction match)."""
         old_extra, new_extra, expected_kind, _ = mutation(tag=1)
-        if expected_kind.value not in (PROVENANCE_STATIC | PROVENANCE_PER_FINDING):
-            pytest.skip(f"{expected_kind.value} is not classified STATIC/PER_FINDING")
+        if expected_kind.value not in PROVENANCE_STATIC:
+            pytest.skip(f"{expected_kind.value} is not classified PROVENANCE_STATIC")
         old = build_snapshot("1.0", _CONTEXT, old_extra)
         new = build_snapshot("2.0", _CONTEXT, new_extra)
         emitted = [c for c in compare(old, new).changes if c.kind == expected_kind]
         assert emitted, f"{mutation.__name__}: expected_kind {expected_kind.name} not emitted"
-        assert any(c.evidence_provenance is not None for c in emitted), (
-            f"{expected_kind.value} is classified PROVENANCE_STATIC/"
-            "PROVENANCE_PER_FINDING, but its real producer still leaves "
-            "evidence_provenance unset -- either the classification is "
-            "premature, or the producer's own wiring is incomplete."
+        unstamped = [c for c in emitted if c.evidence_provenance is None]
+        assert not unstamped, (
+            f"{expected_kind.value} is classified PROVENANCE_STATIC, but "
+            f"{len(unstamped)}/{len(emitted)} of its real emitted findings "
+            "still leave evidence_provenance unset -- every construction "
+            "path for this kind must be wired, not just one."
+        )
+        distinct_values = {c.evidence_provenance for c in emitted}
+        assert len(distinct_values) == 1, (
+            f"{expected_kind.value} is classified PROVENANCE_STATIC (one "
+            "constant tuple for every instance), but its real producer(s) "
+            f"emit {len(distinct_values)} distinct evidence_provenance "
+            f"values across findings: {sorted(distinct_values)} -- either "
+            "reclassify as PROVENANCE_PER_FINDING, or fix the producer."
+        )
+
+    @pytest.mark.parametrize("mutation", MUTATIONS, ids=lambda m: m.__name__)
+    def test_per_finding_kinds_are_stamped_on_every_finding(self, mutation) -> None:
+        old_extra, new_extra, expected_kind, _ = mutation(tag=1)
+        if expected_kind.value not in PROVENANCE_PER_FINDING:
+            pytest.skip(f"{expected_kind.value} is not classified PROVENANCE_PER_FINDING")
+        old = build_snapshot("1.0", _CONTEXT, old_extra)
+        new = build_snapshot("2.0", _CONTEXT, new_extra)
+        emitted = [c for c in compare(old, new).changes if c.kind == expected_kind]
+        assert emitted, f"{mutation.__name__}: expected_kind {expected_kind.name} not emitted"
+        unstamped = [c for c in emitted if c.evidence_provenance is None]
+        assert not unstamped, (
+            f"{expected_kind.value} is classified PROVENANCE_PER_FINDING, "
+            f"but {len(unstamped)}/{len(emitted)} of its real emitted "
+            "findings still leave evidence_provenance unset -- either the "
+            "classification is premature, or the producer's own wiring "
+            "(for this specific construction path) is incomplete."
         )
