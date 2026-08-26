@@ -1011,3 +1011,89 @@ class TestEveryUnconditionallyWrittenKeyIsRequired:
         for key in optional:
             without = {k: v for k, v in document.items() if k != key}
             type(full).from_dict(without)  # must not raise
+
+
+class TestAContainerThatDisagreesWithItself:
+    """`required_field`'s second arm, which its own comment calls unreachable.
+
+    The comment says "unreachable for a well-behaved mapping, kept because
+    `in` and `[]` are two different methods and a container is free to
+    disagree with itself between them". That is a claim about reachability,
+    and an untested claim about reachability is how the first arm got written
+    wrong in the first place — so it is checked rather than asserted.
+
+    A mapping whose `__contains__` says yes and whose `__getitem__` raises is
+    the exact disagreement named. It still has to land on the documented
+    boundary: `ValueError`, not the raw `KeyError`.
+    """
+
+    class _Liar(dict):  # type: ignore[type-arg]
+        def __contains__(self, key: object) -> bool:
+            return True
+
+    def test_the_second_arm_still_reports_the_documented_error(self) -> None:
+        from abicheck.storage.guards import required_field
+
+        with pytest.raises(ValueError, match="missing required field"):
+            required_field(self._Liar(), "kind", "an entity document")
+
+    def test_a_from_dict_door_survives_the_same_container(self) -> None:
+        """Reached through a real door, not only the guard in isolation."""
+        with pytest.raises(ValueError, match="missing required field"):
+            EntityId.from_dict(self._Liar())
+
+
+class TestRecordOrderingRefusesAForeignOperand:
+    """`__lt__` returns `NotImplemented` rather than guessing an order.
+
+    Python turns that into a `TypeError` at the comparison site, which is the
+    right outcome: these keys order records against records, and an order
+    invented against an unrelated object would sort silently rather than
+    fail. Covered because "it returns NotImplemented" is a contract, and the
+    arm is otherwise never executed by any test in this package.
+    """
+
+    @pytest.mark.parametrize(
+        "record",
+        [
+            pytest.param(EntityId(EntityKind.FUNCTION, "ns::f"), id="entity"),
+            pytest.param(
+                OccurrenceId(
+                    EntityId(EntityKind.FUNCTION, "ns::f"), ObservationKind.AST
+                ),
+                id="occurrence",
+            ),
+        ],
+    )
+    def test_comparing_against_a_foreign_object_is_a_type_error(
+        self, record: Any
+    ) -> None:
+        assert record.__lt__(object()) is NotImplemented
+        with pytest.raises(TypeError):
+            record < object()  # noqa: B015 - the comparison is the subject
+
+
+class TestOverrideKeysMustBeAPair:
+    """The assignment door's own shape check on `overrides` keys.
+
+    `AvailabilityLedger.overrides` is keyed by `(family, entity)`. A key that
+    is not a two-tuple would be validated field-by-field by the two
+    `decision_key` calls below it, which index into it — so the shape has to
+    be established before those run, and this pins that it is.
+    """
+
+    @pytest.mark.parametrize(
+        "key",
+        [
+            pytest.param("layout", id="bare-string"),
+            pytest.param(("layout",), id="one-tuple"),
+            pytest.param(("layout", "ns::Foo", "extra"), id="three-tuple"),
+            pytest.param(4, id="int"),
+            # No list case: an unhashable key raises inside the dict literal,
+            # before any door here sees it — that would test Python, not this
+            # guard.
+        ],
+    )
+    def test_a_non_pair_override_key_is_refused(self, key: Any) -> None:
+        with pytest.raises(TypeError, match="\\(family, entity\\) pair"):
+            AvailabilityLedger(overrides={key: FactAvailability(FactStatus.PRESENT)})
