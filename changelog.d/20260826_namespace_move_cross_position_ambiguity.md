@@ -17,3 +17,14 @@
   candidate independently corroborated) -- the same conservative
   default the existing many-to-many and one-to-many guards already use
   for a genuinely unresolvable case.
+- **Follow-up (Codex review): a key a symbol raised at a locally-ambiguous
+  masking position was invisible to the same tie-break, so a genuine tie
+  could be missed.** The global-support check above only compared a
+  symbol's competing keys among the ones that had already survived the
+  *local* one-to-many filter -- but a key rejected by that local filter
+  (e.g. a masking position matching two distinct added symbols) can still
+  be independently, unambiguously corroborated by a *different* removed
+  symbol at that same key, which is real evidence of a genuine tie. The
+  competing-keys set now comes from every raw candidacy a symbol proposed,
+  not only the ones that produced their own resolved entry, so this case
+  correctly rejects both competing candidates instead of admitting one.

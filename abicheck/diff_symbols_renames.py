@@ -1043,6 +1043,13 @@ def find_namespace_move_groups(
     # function's own stated false-negative-over-false-positive default.
     added_id_to_removed_symbols: dict[str, set[str]] = {}
     removed_id_to_added_symbols: dict[str, set[str]] = {}
+    # Every raw (old_segment, new_segment) key a removed symbol could propose
+    # at ANY masking position, even one `distinct_targets` below locally
+    # rejects (so it never gets an `entries` row) -- the global tie-break
+    # further down still needs to see it, or a key only reachable through a
+    # locally-rejected position looks uncontested when another symbol's raw
+    # candidacy at that key would reveal a genuine tie (Codex review).
+    raw_symbol_keys: dict[str, set[tuple[str, str]]] = {}
     for r_sym in sorted(removed):
         r_resolved = _scope_components(r_sym)
         if r_resolved is None:
@@ -1064,6 +1071,9 @@ def find_namespace_move_groups(
                 cand_id = "::".join(cand_comps)
                 added_id_to_removed_symbols.setdefault(cand_id, set()).add(symbol_id)
                 removed_id_to_added_symbols.setdefault(symbol_id, set()).add(cand_id)
+                raw_symbol_keys.setdefault(symbol_id, set()).add(
+                    (r_comps[i], cand_comps[i])
+                )
             # Reject an AMBIGUOUS substitution at the source (Codex review,
             # fresh evidence): when the SAME masked context (this removed
             # symbol's scope chain with position `i` blanked out) matches
@@ -1106,44 +1116,23 @@ def find_namespace_move_groups(
             entries.append((masked, r_comps, i, a_comps))
 
     # `added_id_to_removed_symbols`/`removed_id_to_added_symbols` were
-    # already fully built above, alongside `entries` -- from every raw
-    # candidacy at every masking position, independent of whether that
-    # position's own local one-to-many check passed. See the comment on
-    # their declaration above for the full history of why this
-    # construction is the sound one: three review rounds each found a
-    # different way of scoping these two dicts to be unsound --
-    # building them only from `entries` (missing evidence discarded by the
-    # LOCAL one-to-many filter before it ever reached `entries`), filtering
-    # by `masked_to_old_segments` (preferring whichever of a removed
-    # symbol's two candidacies happened to be locally clean over one that's
-    # merely contested, when a collision proves the contested claimant
-    # unconfirmable, not the alternate explanation impossible) -- and the
-    # construction above, from every raw candidacy with no filtering at
-    # all, is what survived all three.
+    # already fully built above, from every raw candidacy at every masking
+    # position, independent of whether that position's own local
+    # one-to-many check passed (see their declaration above for the full
+    # history of why building them only from `entries`, or filtering by
+    # `masked_to_old_segments`, is unsound).
     #
     # `added_id_to_removed_symbols` answers: is this added declaration
     # claimed by more than one distinct removed identity, whether they
-    # collide at the SAME masking position (already caught by
-    # `masked_to_old_segments` above) or at DIFFERENT ones (e.g. removed
-    # `p1::old::{f,g}` and `new::p2::{f,g}` vs. added only
-    # `new::old::{f,g}` -- masking positions 0 and 1 respectively, masked
-    # contexts differ, so `masked_to_old_segments` alone sees no collision,
-    # yet the same added declaration cannot simultaneously be evidence for
-    # both `p1 -> new` and `p2 -> old`). Tracked by distinct CLAIMING
-    # REMOVED-SYMBOL IDENTITY, not by distinct substitution key text --
-    # removing `old::new::f` and `new::old::f` while adding only
-    # `new::new::f` has both claims spell the identical key `('old',
-    # 'new')`, so a key-text set would collapse them to size one even
-    # though they are two genuinely different removed originals.
+    # collide at the SAME masking position (`masked_to_old_segments` above)
+    # or at DIFFERENT ones. Tracked by distinct CLAIMING REMOVED-SYMBOL
+    # IDENTITY, not by substitution key text, since two different removed
+    # originals can spell the identical key.
     #
     # `removed_id_to_added_symbols` answers the symmetric question: does
     # this removed symbol resolve to more than one distinct added
-    # declaration across its masking positions -- e.g. removed
-    # `p1::old::{f,g}` with added `new::old::{f,g}` AND `p1::new::{f,g}`,
-    # where `p1::old::f` matches `new::old::f` (masking position 0,
-    # implying `p1 -> new`) and ALSO matches `p1::new::f` (masking
-    # position 1, implying `old -> new`) -- two mutually exclusive
-    # substitutions, both backed by the identical removed symbol.
+    # declaration across its masking positions -- two mutually exclusive
+    # substitutions backed by the identical removed symbol.
 
     # Phase 2: record only the entries whose masked context was claimed by
     # exactly one distinct old segment value (the position-scoped
@@ -1169,16 +1158,15 @@ def find_namespace_move_groups(
     # Cross-position ambiguity (removed_id_to_added_symbols[symbol_id] > 1)
     # need not be a dead end: one candidate key independently reused by a
     # DIFFERENT removed symbol is real corroborating evidence the other
-    # candidate lacks (code-review item 6, "rank by global support"). Built
-    # from `entries` alone (never an already-resolved set) -- not circular;
-    # a genuine tie (both/neither corroborated) still rejects, preserving
-    # the pre-existing false-negative default.
-    symbol_to_keys: dict[str, set[tuple[str, str]]] = {}
+    # candidate lacks (code-review item 6, "rank by global support"). Support
+    # is scored only from `entries` (locally-confirmed); the competing keys
+    # come from `raw_symbol_keys` instead, so a key raised at a
+    # locally-ambiguous position still counts as a competitor even without
+    # its own entry. A genuine tie (both/neither corroborated) still rejects.
     key_support: dict[tuple[str, str], set[str]] = {}
     for masked, r_comps, i, a_comps in entries:
         sid = "::".join(r_comps)
         k = (r_comps[i], a_comps[i])
-        symbol_to_keys.setdefault(sid, set()).add(k)
         key_support.setdefault(k, set()).add(sid)
     for masked, r_comps, i, a_comps in entries:
         if len(masked_to_old_segments[masked]) != 1:
@@ -1191,8 +1179,8 @@ def find_namespace_move_groups(
         if len(removed_id_to_added_symbols[symbol_id]) != 1:
             if not key_support[key] - {symbol_id}:
                 continue
-            other_keys = symbol_to_keys[symbol_id] - {key}
-            if any(key_support[ok] - {symbol_id} for ok in other_keys):
+            other_keys = raw_symbol_keys[symbol_id] - {key}
+            if any(key_support.get(ok, set()) - {symbol_id} for ok in other_keys):
                 continue
         symbol_seen = seen_here.setdefault(symbol_id, set())
         if key in symbol_seen:

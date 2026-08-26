@@ -107,3 +107,33 @@ class TestCrossPositionAmbiguityResolvesViaGlobalSupport:
         added = {"_ZN1P3new1fEv", "_ZN1Q3old1fEv"}
         groups = find_namespace_move_groups(removed, added)
         assert groups == {}
+
+    def test_a_locally_rejected_key_still_counts_as_a_competitor(self) -> None:
+        """Codex review (fresh evidence): ``f``'s own attempt at key
+        ``(P, new)`` is locally ambiguous (masking position 0 matches both
+        ``new::old::f`` and ``Q::old::f``) and so never gets its own
+        ``entries`` row -- but ``h`` independently and unambiguously
+        resolves that same key (``P::old::h`` -> ``new::old::h``), which is
+        real corroboration for it. ``f``'s OTHER candidacy, key
+        ``(old, new)`` at position 1, is independently corroborated by
+        ``g``. Both of f's competing keys are therefore corroborated by a
+        different symbol -- a genuine tie -- so f must be rejected from
+        BOTH groups, leaving each at a single supporting pair (below the
+        2+-pair batch threshold), not a false 2-pair
+        ``SYMBOL_RENAMED_BATCH``."""
+        removed = {"_ZN1P3old1fEv", "_ZN1P3old1gEv", "_ZN1P3old1hEv"}
+        added = {
+            "_ZN1P3new1fEv",
+            "_ZN1P3new1gEv",
+            "_ZN3new3old1fEv",
+            "_ZN3new3old1hEv",
+            "_ZN1Q3old1fEv",
+        }
+        groups = find_namespace_move_groups(removed, added)
+        for pairs in groups.values():
+            assert ("P::old::f", "P::new::f") not in pairs
+            assert ("P::old::f", "new::old::f") not in pairs
+        assert groups.get(("old", "new")) == [("P::old::g", "P::new::g")]
+        assert groups.get(("P", "new")) == [("P::old::h", "new::old::h")]
+        changes = emit_namespace_move_batches(groups)
+        assert changes == []
