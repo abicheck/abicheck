@@ -512,6 +512,42 @@ class TestBundleFactsArchiveFormat:
             save_bundle_facts(facts, out, format="archive")
         assert not out.exists()
 
+    def test_save_rejects_the_library_count_cap_before_serializing_any_entry(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The library-name-count cap must be checked *before* the
+        serialization loop, not after building `library_blobs` from it --
+        many names referencing one large shared snapshot would otherwise
+        serialize that same payload once per name (possibly terabytes of
+        work) before ever getting a chance to reject the write (Codex
+        review, fresh evidence)."""
+        import abicheck.bundle_facts as bundle_facts_module_local
+        import abicheck.serialization as serialization_module
+
+        monkeypatch.setattr(
+            bundle_facts_module_local, "DEFAULT_MAX_LIBRARY_COUNT", 3
+        )
+        serialize_calls = 0
+        real_snapshot_to_dict = serialization_module.snapshot_to_dict
+
+        def _counting_snapshot_to_dict(snap: AbiSnapshot) -> dict:
+            nonlocal serialize_calls
+            serialize_calls += 1
+            return real_snapshot_to_dict(snap)
+
+        monkeypatch.setattr(
+            serialization_module, "snapshot_to_dict", _counting_snapshot_to_dict
+        )
+        shared_snap = _per_library_snapshots(_old_metadata())["libcore.so"]
+        facts = BundleFacts(
+            per_library_snapshots={f"lib{i}.so": shared_snap for i in range(5)}
+        )
+        out = tmp_path / "rejected-before-serializing.bundlefacts.archive.zip"
+
+        with pytest.raises(SnapshotError, match="5 library names.*exceed the 3"):
+            save_bundle_facts(facts, out, format="archive")
+        assert serialize_calls == 0
+
     def test_load_charges_each_duplicate_name_own_copy_against_the_aggregate_cap(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:

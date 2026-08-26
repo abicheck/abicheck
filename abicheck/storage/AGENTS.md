@@ -42,7 +42,10 @@ conversion this format's blobs are built from.
 
 ## Tests
 
-`tests/test_bundle_archive.py`.
+`tests/test_bundle_archive.py` (the core primitive) and
+`tests/test_bundle_archive_writer_hardening.py` (`BundleArchiveWriter`'s
+temp-file/security/metadata hardening -- split out purely to keep both
+under the ADR-061 1200-line test cap).
 
 ## Prohibited responsibilities
 

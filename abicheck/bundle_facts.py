@@ -420,6 +420,23 @@ def write_bundle_facts_archive(
     # order, producing different archive bytes/stored_sha256 for otherwise-
     # identical facts -- undermining the reproducibility the pinned zip
     # timestamps exist to provide.
+    # (a-) Library-name-count cap, independent of the distinct-blob cap
+    # below: many names can share one blob, so a BundleFacts with more
+    # names than the reader's own DEFAULT_MAX_LIBRARY_COUNT could write
+    # successfully -- one blob, one manifest member -- and then never be
+    # reopened (Codex review). Checked *before* the serialization loop,
+    # not after building `library_blobs` from it: many names referencing
+    # one large shared snapshot would otherwise serialize that payload
+    # once per name -- possibly terabytes of work -- before this cap ever
+    # gets a chance to reject the write (Codex review, fresh evidence).
+    if len(facts.per_library_snapshots) > DEFAULT_MAX_LIBRARY_COUNT:
+        raise SnapshotError(
+            f"{p}: writing this bundle's {len(facts.per_library_snapshots)} "
+            f"library names would exceed the {DEFAULT_MAX_LIBRARY_COUNT} "
+            "name safety limit read_bundle_facts_archive() enforces on "
+            "load -- refusing to write an archive that could not be "
+            "reopened."
+        )
     library_blobs: dict[str, str] = {}
     decoded_size_bytes = 0
     unique_payloads: dict[str, bytes] = {}  # content hash -> its own payload
@@ -440,23 +457,9 @@ def write_bundle_facts_archive(
         manifest_blob = content_hash(manifest_payload)
         unique_payloads.setdefault(manifest_blob, manifest_payload)
 
-    # (a-) Library-name-count cap, independent of the distinct-blob cap
-    # below: many names can share one blob (the dedup this format exists
-    # to provide), so a BundleFacts with more names than the reader's own
-    # DEFAULT_MAX_LIBRARY_COUNT could write successfully -- one blob, one
-    # manifest member -- and then never be reopened (Codex review).
-    if len(library_blobs) > DEFAULT_MAX_LIBRARY_COUNT:
-        raise SnapshotError(
-            f"{p}: writing this bundle's {len(library_blobs)} library "
-            f"names would exceed the {DEFAULT_MAX_LIBRARY_COUNT} name "
-            "safety limit read_bundle_facts_archive() enforces on load -- "
-            "refusing to write an archive that could not be reopened."
-        )
     # (a) Member-count cap: one member per *distinct* blob hash, plus one
-    # for the mandatory `manifest.json` container member -- `manifest_
-    # blob`'s own hash is already inside `unique_payloads` above (or
-    # coincides with an existing library blob's hash), so nothing further
-    # to reserve for it here.
+    # for `manifest.json` -- `manifest_blob`'s own hash is already inside
+    # `unique_payloads` above, so nothing further to reserve for it.
     if len(unique_payloads) + 1 > MAX_ARCHIVE_MEMBERS:
         raise SnapshotError(
             f"{p}: writing this bundle's {len(unique_payloads)} distinct "
@@ -464,13 +467,11 @@ def write_bundle_facts_archive(
             "members (the reader's own safety limit) -- refusing to write "
             "an archive that could not be reopened."
         )
-    # (b) Aggregate decoded-byte cap, mirroring exactly what
-    # read_bundle_facts_archive() charges on load -- not each unique
-    # blob's bytes once, but every *duplicate* name's own deep-copied
-    # AbiSnapshot too. A write charging only unique bytes could publish
-    # an archive its own reader then refuses to reopen -- e.g. 1,025
-    # names sharing one 1 MiB blob passes a unique-bytes check but
-    # exceeds the reader's per-copy total (Codex review, fresh evidence).
+    # (b) Aggregate decoded-byte cap, mirroring read_bundle_facts_archive()
+    # exactly -- not each unique blob's bytes once, but every *duplicate*
+    # name's own deep-copied AbiSnapshot too, else 1,025 names sharing one
+    # 1 MiB blob passes a unique-bytes-only check but exceeds the reader's
+    # real per-copy total (Codex review, fresh evidence).
     hash_counts = Counter(library_blobs.values())
     reader_charged_bytes = sum(len(unique_payloads[h]) * n for h, n in hash_counts.items())
     if reader_charged_bytes > DEFAULT_MAX_BUNDLE_DECODED_BYTES:
@@ -499,11 +500,9 @@ def write_bundle_facts_archive(
         },
         "library_filenames": dict(sorted(facts.library_filenames.items())),
     }
-    # A third cap: `manifest.json` (the container member, distinct from
-    # `facts.manifest`/`manifest_blob`) has its own reader-side size
-    # ceiling, never covered above (neither charges the container
-    # manifest's own bytes). Checked against the exact bytes about to be
-    # written, via the identical encoding `write_manifest()` uses.
+    # A third cap: `manifest.json` itself has its own reader-side size
+    # ceiling, never covered above. Checked against the exact bytes about
+    # to be written, via the identical encoding `write_manifest()` uses.
     manifest_member_payload = _json.dumps(container_manifest, indent=2)
     if len(manifest_member_payload.encode("utf-8")) > DEFAULT_MAX_MANIFEST_BYTES:
         raise SnapshotError(

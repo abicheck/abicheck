@@ -378,15 +378,15 @@ class TestBundleArchiveWriterAtomicity:
             writer.write_manifest({"library_blobs": {"a.so": h}})
         os.chmod(path, 0o6755)
 
-        real_chmod = os.chmod
-        real_chown = os.chown
+        real_fchmod = os.fchmod
+        real_fchown = os.fchown
 
-        def _clearing_chown(path_arg: object, uid: int, gid: int) -> None:
-            real_chown(path_arg, uid, gid)
-            current = stat.S_IMODE(os.stat(path_arg).st_mode)
-            real_chmod(path_arg, current & 0o777)  # simulate the kernel clearing setuid/setgid
+        def _clearing_fchown(fd: int, uid: int, gid: int) -> None:
+            real_fchown(fd, uid, gid)
+            current = stat.S_IMODE(os.fstat(fd).st_mode)
+            real_fchmod(fd, current & 0o777)  # simulate the kernel clearing setuid/setgid
 
-        monkeypatch.setattr(os, "chown", _clearing_chown)
+        monkeypatch.setattr(os, "fchown", _clearing_fchown)
 
         with BundleArchiveWriter(path) as writer:
             h = writer.put_blob(b'{"a": 2}')
@@ -939,261 +939,43 @@ class TestSniffBundleArchiveFormatNonRegularSource:
         assert facts.per_library_snapshots == {}
 
 
-class TestBundleArchiveWriterTempFileCreation:
-    """A predictable temp filename in a writable-by-another-account
-    directory can be pre-created as a symlink ZipFile(mode="w") would
-    follow and truncate -- the writer must create its temp file itself,
-    exclusively (Codex review, fresh evidence)."""
+class TestOpenRegularFileForFormatSniffClosesOnReadFailure:
+    """A failure reading the 4-byte peek itself (e.g. EIO on a network
+    filesystem) after open() succeeds must not leak the fd or propagate a
+    raw OSError -- this module's whole error contract is SnapshotError
+    (Codex review, fresh evidence)."""
 
-    def test_round_trip_still_works_through_the_new_temp_file_creation(
-        self, tmp_path: Path
-    ) -> None:
-        path = tmp_path / "bundle.archive.zip"
-        with BundleArchiveWriter(path) as writer:
-            h = writer.put_blob(b'{"a": 1}')
-            writer.write_manifest({"library_blobs": {"a.so": h}})
-        with BundleArchiveReader.open(path) as reader:
-            assert reader.read_manifest()["library_blobs"] == {"a.so": h}
-        assert list(tmp_path.glob("*.tmp")) == []
-
-    @pytest.mark.skipif(sys.platform == "win32", reason="POSIX symlink semantics")
-    def test_a_planted_symlink_at_a_would_be_temp_path_is_never_followed(
-        self, tmp_path: Path
-    ) -> None:
-        """Pre-creates a symlink at every temp-name shape the old
-        guessable scheme could have produced, then confirms a real write
-        still lands correctly and no planted symlink was touched."""
-        path = tmp_path / "bundle.archive.zip"
-        evil_target = tmp_path / "evil_target"
-        evil_target.write_bytes(b"do not touch me")
-        planted = []
-        for guess_id in range(-2, 3):
-            p = tmp_path / f"bundle.archive.zip.tmp-{os.getpid()}-{guess_id:x}"
-            p.symlink_to(evil_target)
-            planted.append(p)
-
-        with BundleArchiveWriter(path) as writer:
-            h = writer.put_blob(b'{"a": 1}')
-            writer.write_manifest({"library_blobs": {"a.so": h}})
-
-        assert path.exists()
-        for p in planted:
-            assert p.is_symlink()
-        assert evil_target.read_bytes() == b"do not touch me"
-
-
-class TestBundleArchiveWriterCloseFailureCleanup:
-    """Codex review, fresh evidence: self._zf.close() itself (the central-
-    directory write) must be inside the same cleanup-on-failure block as
-    the fsync/chown/chmod/replace steps -- a failure there previously
-    left the temp file behind uncleaned."""
-
-    def test_a_failure_while_closing_the_zip_still_removes_the_temp_file(
+    def test_prefix_read_failure_closes_fp_and_raises_snapshot_error(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        from abicheck.storage.bundle_archive import open_regular_file_for_format_sniff
+
         path = tmp_path / "bundle.archive.zip"
-        writer = BundleArchiveWriter(path)
-        h = writer.put_blob(b'{"a": 1}')
-        writer.write_manifest({"library_blobs": {"a.so": h}})
+        path.write_bytes(b"PK\x03\x04junk")
 
-        calls = 0
+        closed: list[bool] = []
+        real_open = open
 
-        def _failing_close(self: zipfile.ZipFile) -> None:
-            nonlocal calls
-            calls += 1
-            if calls == 1:
-                raise OSError(errno.ENOSPC, "simulated disk full while writing central directory")
-            # A later __del__-triggered close() (the underlying fp is
-            # already closed by this class's own cleanup path by then)
-            # must not raise a second, unrelated exception during GC.
+        class _FailingRead:
+            def __init__(self, fp: object) -> None:
+                self._fp = fp
 
-        monkeypatch.setattr(zipfile.ZipFile, "close", _failing_close)
-        with pytest.raises(OSError, match="simulated disk full"):
-            writer.close()
-        assert list(tmp_path.glob("*.tmp")) == []
-        assert not path.exists()
+            def read(self, n: int) -> bytes:
+                raise OSError(errno.EIO, "simulated read failure")
 
-    def test_a_failure_while_aborting_still_removes_the_temp_file(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """CodeRabbit review: _abort() (reached via __exit__ on an
-        exception, or close() with no manifest written) must still unlink
-        the temp file when self._zf.close() itself raises -- not just
-        close()'s own guarded path."""
-        path = tmp_path / "bundle.archive.zip"
-        writer = BundleArchiveWriter(path)
-        h = writer.put_blob(b'{"a": 1}')
+            def close(self) -> None:
+                closed.append(True)
+                self._fp.close()
 
-        calls = 0
+            def fileno(self) -> int:
+                return self._fp.fileno()  # type: ignore[no-any-return, attr-defined]
 
-        def _failing_close(self: zipfile.ZipFile) -> None:
-            nonlocal calls
-            calls += 1
-            if calls == 1:
-                raise OSError(errno.ENOSPC, "simulated disk full during abort")
+        def _tracking_open(file: object, *a: object, **kw: object) -> object:
+            if file == path or file == str(path):
+                return _FailingRead(real_open(file, *a, **kw))
+            return real_open(file, *a, **kw)
 
-        monkeypatch.setattr(zipfile.ZipFile, "close", _failing_close)
-        # No write_manifest() -- close() takes the _abort() branch, and
-        # the abort's own zip-close failure propagates ahead of the
-        # "no manifest written" SnapshotError close() would otherwise
-        # raise -- the fix under test is that the temp file is still
-        # removed either way, not which exception wins.
-        with pytest.raises(OSError, match="simulated disk full during abort"):
-            writer.close()
-        assert list(tmp_path.glob("*.tmp")) == []
-        assert not path.exists()
-        del h  # unused beyond establishing a non-empty archive
-
-
-class TestBundleArchiveWriterMetadataDurability:
-    """chown/chmod mutate the temp file's inode metadata after the first
-    fsync -- without a second fsync before os.replace(), a crash could
-    lose the restored owner/mode (Codex review, fresh evidence)."""
-
-    @pytest.mark.skipif(sys.platform == "win32", reason="POSIX file mode semantics")
-    def test_close_fsyncs_again_after_restoring_mode(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        path = tmp_path / "bundle.archive.zip"
-        with BundleArchiveWriter(path) as writer:
-            h = writer.put_blob(b'{"a": 1}')
-            writer.write_manifest({"library_blobs": {"a.so": h}})
-        os.chmod(path, 0o600)  # gives close() an existing_mode to restore
-
-        events: list[str] = []
-        real_fsync = os.fsync
-        real_chmod = os.chmod
-
-        def _tracking_fsync(fd: int) -> None:
-            events.append("fsync")
-            real_fsync(fd)
-
-        def _tracking_chmod(p: object, mode: int) -> None:
-            events.append("chmod")
-            real_chmod(p, mode)
-
-        monkeypatch.setattr(os, "fsync", _tracking_fsync)
-        monkeypatch.setattr(os, "chmod", _tracking_chmod)
-
-        with BundleArchiveWriter(path) as writer:
-            h = writer.put_blob(b'{"a": 2}')
-            writer.write_manifest({"library_blobs": {"a.so": h}})
-
-        # At least two fsyncs on the temp file's own fd (before and after
-        # the chmod), with the chmod strictly between two of them.
-        fsync_indices = [i for i, e in enumerate(events) if e == "fsync"]
-        chmod_indices = [i for i, e in enumerate(events) if e == "chmod"]
-        assert len(fsync_indices) >= 2
-        assert chmod_indices
-        assert any(
-            fsync_indices[k] < chmod_indices[0] < fsync_indices[k + 1]
-            for k in range(len(fsync_indices) - 1)
-        ), f"expected a fsync both before and after chmod, got order: {events}"
-
-
-class TestBundleArchiveDeterministicCreateSystem:
-    """ZipInfo.__init__ defaults create_system to the host platform (0
-    Windows, 3 Unix) -- identical facts on different platforms would
-    otherwise produce different bytes (Codex review, fresh evidence)."""
-
-    def test_every_member_pins_create_system_to_unix(self, tmp_path: Path) -> None:
-        path = tmp_path / "bundle.archive.zip"
-        with BundleArchiveWriter(path) as writer:
-            h = writer.put_blob(b'{"a": 1}')
-            writer.write_manifest({"library_blobs": {"a.so": h}})
-        with zipfile.ZipFile(path) as zf:
-            for info in zf.infolist():
-                assert info.create_system == 3
-
-
-class TestBundleArchiveWriterNewArchivePermissions:
-    """tempfile.mkstemp() always creates its file at mode 0600 regardless
-    of the process umask -- a brand-new archive must not silently publish
-    more restrictively than `open(..., "wb")` would (Codex review).
-    Implemented via `_open_unique_temp`, not an `os.umask()` dance -- see
-    `TestBundleArchiveWriterDoesNotToggleTheProcessUmask` below."""
-
-    @pytest.mark.skipif(
-        sys.platform == "win32", reason="POSIX permission bits are not meaningful on Windows"
-    )
-    def test_a_new_archive_gets_umask_appropriate_permissions(
-        self, tmp_path: Path
-    ) -> None:
-        path = tmp_path / "bundle.archive.zip"
-        old_umask = os.umask(0o022)
-        try:
-            with BundleArchiveWriter(path) as writer:
-                h = writer.put_blob(b'{"a": 1}')
-                writer.write_manifest({"library_blobs": {"a.so": h}})
-        finally:
-            os.umask(old_umask)
-
-        assert stat.S_IMODE(path.stat().st_mode) == 0o644
-
-    @pytest.mark.skipif(
-        sys.platform == "win32", reason="POSIX permission bits are not meaningful on Windows"
-    )
-    def test_a_new_archive_honors_a_stricter_umask(self, tmp_path: Path) -> None:
-        path = tmp_path / "bundle.archive.zip"
-        old_umask = os.umask(0o077)
-        try:
-            with BundleArchiveWriter(path) as writer:
-                h = writer.put_blob(b'{"a": 1}')
-                writer.write_manifest({"library_blobs": {"a.so": h}})
-        finally:
-            os.umask(old_umask)
-
-        assert stat.S_IMODE(path.stat().st_mode) == 0o600
-
-    @pytest.mark.skipif(
-        sys.platform == "win32", reason="POSIX permission bits are not meaningful on Windows"
-    )
-    def test_overwriting_an_existing_archive_still_preserves_its_mode(
-        self, tmp_path: Path
-    ) -> None:
-        """The umask-based default only applies when there is no
-        pre-existing destination -- overwriting one must still preserve
-        its own mode exactly, unaffected by whatever the umask is."""
-        path = tmp_path / "bundle.archive.zip"
-        with BundleArchiveWriter(path) as writer:
-            h = writer.put_blob(b'{"a": 1}')
-            writer.write_manifest({"library_blobs": {"a.so": h}})
-        os.chmod(path, 0o640)
-
-        old_umask = os.umask(0o022)
-        try:
-            with BundleArchiveWriter(path) as writer:
-                h = writer.put_blob(b'{"a": 2}')
-                writer.write_manifest({"library_blobs": {"b.so": h}})
-        finally:
-            os.umask(old_umask)
-
-        assert stat.S_IMODE(path.stat().st_mode) == 0o640
-
-
-class TestBundleArchiveWriterDoesNotToggleTheProcessUmask:
-    """The earlier `os.umask(0)`/restore sequence is process-wide and not
-    thread-safe -- a concurrent thread could observe the zeroed umask
-    (Codex review, fresh evidence). Confirms the process umask is
-    bit-for-bit unchanged by opening a writer."""
-
-    @pytest.mark.skipif(sys.platform == "win32", reason="POSIX umask semantics")
-    def test_umask_is_never_read_or_modified(self, tmp_path: Path) -> None:
-        path = tmp_path / "bundle.archive.zip"
-        sentinel = 0o037
-        old_umask = os.umask(sentinel)
-        try:
-            with BundleArchiveWriter(path) as writer:
-                # The umask must already be back at *sentinel* here, mid-write
-                # -- not merely restored afterward -- since the old
-                # implementation's zeroed window spanned exactly this scope.
-                during = os.umask(sentinel)
-                os.umask(during)
-                assert during == sentinel
-                h = writer.put_blob(b'{"a": 1}')
-                writer.write_manifest({"library_blobs": {"a.so": h}})
-            after = os.umask(sentinel)
-            os.umask(after)
-            assert after == sentinel
-        finally:
-            os.umask(old_umask)
+        monkeypatch.setattr("builtins.open", _tracking_open)
+        with pytest.raises(SnapshotError, match="simulated read failure"):
+            open_regular_file_for_format_sniff(path)
+        assert closed == [True]

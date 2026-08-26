@@ -24,25 +24,21 @@ module free of any ``model``/``compare``-layer import lets it join
 `storage/` (ADR-061) cleanly, without resolving the pre-existing
 ``bundle_facts.py`` <-> ``checker_types.py`` (``model`` <-> ``compare``)
 coupling a naive "construct a ``BundleFacts`` directly here" design would
-hit (``bundle_facts.py``'s own ``TYPE_CHECKING``-only import of
-``checker_types.DiffResult`` creates a real ``model -> compare -> model``
-cycle once it joins the ``model`` layer).
+hit.
 
 The ``BundleFacts``-aware glue lives in ``serialization.py``'s
 ``save_bundle_facts``/``load_bundle_facts``, same as the plain-JSON format.
 See the G40 design plan,
-``docs/contribute/plans/g40-content-addressed-bundle-archive.md`` (added in
-PR #866, a separate branch -- merge that first if this file isn't present
-yet where you're reading this) for the full design.
+``docs/contribute/plans/g40-content-addressed-bundle-archive.md`` for the
+full design.
 
 Zip, not tar (`.tar.zst`, the original review sketch's own naming): zip
 carries a real end-of-file central directory naming every member's offset
 and independently-compressed length, so `zipfile.ZipFile.open(name)` reads
-and decompresses exactly one member without touching any other -- the
-random-access property this format exists to provide. Each member's own
-*payload* is zstd-compressed independently (``ZIP_STORED``) rather than
-zip's own ``ZIP_DEFLATED``, since zstd is this project's compression codec
-of record (ADR-059) with materially better ratios at comparable speed.
+and decompresses exactly one member without touching any other. Each
+member's own *payload* is zstd-compressed independently (``ZIP_STORED``)
+rather than zip's own ``ZIP_DEFLATED``, since zstd is this project's
+compression codec of record (ADR-059).
 """
 
 from __future__ import annotations
@@ -159,13 +155,10 @@ def sniff_bundle_archive_format(path: str | Path) -> str:
 
     Always ``"json"`` for a non-regular-file source (a FIFO, `/dev/stdin`,
     a socket) without reading anything from it (Codex review): a real
-    bundle archive can never actually be delivered that way regardless --
-    `zipfile.ZipFile` seeks to the *end* of its input to locate the
-    central directory, which a non-seekable stream cannot support -- so
-    consuming this sniff's own 4-byte peek from a non-regular source would
-    only cost the caller's later, separate open (``read_snapshot_text``)
-    those same bytes for no benefit, and could hang or misparse a pipe
-    that isn't rewindable.
+    bundle archive can never be delivered that way regardless --
+    `zipfile.ZipFile` seeks to the *end* of its input, which a
+    non-seekable stream can't support -- so consuming this sniff's own
+    4-byte peek could hang or misparse a pipe that isn't rewindable.
     """
     p = Path(path)
     try:
@@ -193,13 +186,10 @@ def open_regular_file_for_format_sniff(
     `sniff_bundle_archive_format` -- opens *path* once, peeks its 4-byte
     magic, and returns ``(fp, "archive"|"json")`` with *fp* left at its
     post-peek position for the caller to reuse (`BundleArchiveReader.
-    from_open_file`) instead of reopening *path* a second time: a
-    concurrent atomic replacement between a separate sniff and a separate
-    later open could swap in a different generation (Codex review, fresh
-    evidence). ``(None, "json")`` for a non-regular-file source, matching
-    `sniff_bundle_archive_format`'s own never-opened contract -- the
-    caller must not call `fp.close()` when *fp* is `None`.
-    """
+    from_open_file`) instead of reopening *path* a second time, else a
+    concurrent atomic replacement between two opens could swap in a
+    different generation (Codex review). ``(None, "json")`` for a
+    non-regular-file source -- the caller must not close *fp* then."""
     p = Path(path)
     try:
         st = p.stat()
@@ -211,7 +201,15 @@ def open_regular_file_for_format_sniff(
         fp = open(p, "rb")
     except OSError as exc:
         raise SnapshotError(f"Cannot read {p}: {exc}") from exc
-    prefix = fp.read(4)
+    try:
+        prefix = fp.read(4)
+    except OSError as exc:
+        # A failure reading the peek itself (e.g. EIO on a network
+        # filesystem) must not leak the fd or propagate a raw OSError --
+        # this module's whole error contract is SnapshotError (Codex
+        # review, fresh evidence).
+        fp.close()
+        raise SnapshotError(f"Cannot read {p}: {exc}") from exc
     return fp, _classify_prefix(prefix)
 
 
@@ -243,18 +241,17 @@ def content_hash(payload: bytes) -> str:
 
 def _open_unique_temp(parent: Path, prefix: str, suffix: str) -> tuple[int, Path]:
     """Atomically create a unique, exclusively-owned temp file in *parent*,
-    mode ``0o666`` filtered through the umask at creation (``os.O_CREAT``
-    respects umask like a plain ``open(path, "w")``) -- unlike
-    :func:`tempfile.mkstemp`, which hard-codes ``0o600``. Mirrors
-    ``snapshot_io._open_unique_temp`` (not imported, to keep this module
-    dependency-free beyond ``..errors``). Retries on a name collision
-    (vanishingly unlikely, 16-byte random suffix) rather than the
-    process-wide, non-thread-safe ``os.umask()`` read-zero-restore dance a
-    prior revision here used."""
+    mode ``0o666`` filtered through the umask at creation. Mirrors
+    ``snapshot_io._open_unique_temp`` (not imported, to stay dependency-
+    free), except ``O_RDWR`` not ``O_WRONLY``: `BundleArchiveWriter.
+    close()` reads this same fd back (via `os.dup`) to hash what it
+    actually wrote, without a path-based reopen a hostile actor sharing
+    the directory could redirect (Codex review, fresh evidence). Retries
+    on a name collision rather than a process-wide ``os.umask()`` dance."""
     for _ in range(100):
         candidate = parent / f"{prefix}{secrets.token_hex(8)}{suffix}"
         try:
-            fd = os.open(candidate, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o666)
+            fd = os.open(candidate, os.O_RDWR | os.O_CREAT | os.O_EXCL, 0o666)
             return fd, candidate
         except FileExistsError:
             continue
@@ -280,31 +277,25 @@ class BundleArchiveWriter:
     Writes go to a temporary file next to the real destination; *close()*
     (a clean context-manager exit) only ``os.replace()``s it over the
     destination once the archive is fully written, so an in-progress write
-    interrupted by any error (including one from *put_blob*/
-    *write_manifest* themselves) can never leave a truncated archive in the
+    interrupted by any error can never leave a truncated archive in the
     destination's place when it already held a prior, valid one.
 
     If *path* is itself a symlink, the temp file is created next to -- and
     ``close()`` replaces -- the link's *real target*, not the link itself
-    (a bare ``os.replace(tmp, path)`` on a symlink destination would swap
-    the symlink's own directory entry for a regular file, destroying the
-    link for every other reader still following it). Mirrors
+    (a bare ``os.replace(tmp, path)`` on a symlink destination would
+    destroy the link for every other reader still following it). Mirrors
     ``snapshot_io._atomic_write_bytes``'s own symlink handling.
 
     A pre-existing destination with more than one hard link is rejected
-    outright, before any write starts: replacing just this one directory
-    entry would silently desynchronize every other link from it. The
-    destination's existing file mode (and, where supported, owner/group)
-    are preserved onto the replacement, mirroring
-    `snapshot_io._atomic_write_bytes`'s own guard for the plain-JSON path.
-    Ownership restoration is *not* best-effort: a failed `os.chown` aborts
-    the write rather than silently publishing under the wrong owner/group.
+    outright: replacing just this one directory entry would silently
+    desynchronize every other link. The destination's existing file mode
+    (and, where supported, owner/group) are preserved onto the
+    replacement, mirroring `snapshot_io._atomic_write_bytes`'s own guard.
+    Ownership restoration is *not* best-effort: a failed chown aborts the
+    write rather than silently publishing under the wrong owner/group.
 
-    *path*'s parent directory is created (``parents=True``) if missing, so
-    ``save_bundle_facts(..., format="archive")`` behaves like the
-    ``format="json"`` path already does via ``snapshot_io.write_snapshot_text``
-    rather than raising ``FileNotFoundError`` on a first write below a
-    not-yet-existing directory.
+    *path*'s parent directory is created (``parents=True``) if missing,
+    matching the ``format="json"`` path's own behavior.
     """
 
     def __init__(self, path: str | Path) -> None:
@@ -440,37 +431,58 @@ class BundleArchiveWriter:
             # best-effort, mirroring `snapshot_io.py`'s own fix for this
             # exact failure mode: publishing under the wrong owner/group
             # can revoke real access for a shared baseline's other readers.
+            #
+            # fchown/fchmod on `self._tmp_file`'s own fd, not chown/chmod
+            # on `self._tmp_path` -- a shared, non-sticky directory writable
+            # by another account could substitute a file/symlink at that
+            # path between this exclusively-created fd and a later
+            # path-based reopen, so a path-based chown/chmod would follow
+            # the substitution instead of the file actually created here
+            # (Codex review, fresh evidence). The fd this class has held
+            # open since creation cannot be redirected that way.
             if (
                 self._existing_uid is not None or self._existing_gid is not None
-            ) and hasattr(os, "chown"):
-                os.chown(
-                    self._tmp_path,
+            ) and hasattr(os, "fchown"):
+                os.fchown(
+                    self._tmp_file.fileno(),
                     self._existing_uid if self._existing_uid is not None else -1,
                     self._existing_gid if self._existing_gid is not None else -1,
                 )
             # A brand-new archive needs no mode fixup -- `_open_unique_temp`
             # already applied the umask-filtered 0o666 default at creation,
             # without touching the process-wide umask.
-            if self._existing_mode is not None:
-                os.chmod(self._tmp_path, self._existing_mode)
+            if self._existing_mode is not None and hasattr(os, "fchmod"):
+                os.fchmod(self._tmp_file.fileno(), self._existing_mode)
             # Re-sync after chown/chmod, before replace: the earlier fsync
             # only guarantees the *content* reached storage -- chown/chmod
             # mutate inode metadata afterward, which a crash in between
             # could lose even though the content itself is durable (Codex
             # review, fresh evidence).
             self._fsync_tmp_file()
-            # Computed from the still-private temp path, not *self._target*
-            # after publication (see `self.stored_sha256`'s own docstring
-            # for why). `self._tmp_file` is write-only ("wb"), so a second,
-            # read-only fd on the same unpublished path reads it.
+            # Computed from a duplicated fd of `self._tmp_file`, not by
+            # reopening `self._tmp_path` -- the same path-substitution race
+            # above would let this hash verify attacker content instead of
+            # what was actually written. `self._tmp_file`'s own write
+            # position is already finished, so the `os.lseek` below can't
+            # disturb it (`os.dup` shares the open-file description).
             self.stored_size_bytes = os.fstat(self._tmp_file.fileno()).st_size
             hasher = hashlib.sha256()
-            read_fd = os.open(self._tmp_path, os.O_RDONLY)
+            read_fd = os.dup(self._tmp_file.fileno())
+            os.lseek(read_fd, 0, os.SEEK_SET)
             with os.fdopen(read_fd, "rb") as tmp_reader:
                 for chunk in iter(lambda: tmp_reader.read(1024 * 1024), b""):
                     hasher.update(chunk)
             self.stored_sha256 = hasher.hexdigest()
             self._tmp_file.close()
+            # Known residual gap: `os.replace()` is inherently path-based
+            # (no portable fd-scoped rename in stdlib `os`), so a
+            # substitution right before this call still publishes attacker
+            # content -- but stored_sha256/stored_size_bytes above were
+            # already computed from the real fd, so this is no longer a
+            # silent MITM: a caller verifying the published file against
+            # stored_sha256 detects the mismatch. Full closure needs an
+            # OS-specific fd-scoped publish primitive or rejecting unsafe
+            # parent directories -- a separate design question.
             os.replace(self._tmp_path, self._target)
         except BaseException:
             # A failure anywhere above must not leave the -- potentially
@@ -551,9 +563,7 @@ class BundleArchiveReader:
 
     `read_manifest()` and `read_blob()` each touch only the one zip member
     they name -- `zipfile.ZipFile.open()`'s own contract, which is exactly
-    why this format is zip rather than a solid-stream tar (see the module
-    docstring).
-    """
+    why this format is zip rather than a solid-stream tar."""
 
     def __init__(self, path: str | Path, *, _fp: Any | None = None) -> None:
         self._path = Path(path)
@@ -618,17 +628,14 @@ class BundleArchiveReader:
         (Codex review, two rounds).
 
         Every member `BundleArchiveWriter` produces is `ZIP_STORED`
-        deliberately (see the module docstring's "Zip, not tar" section) --
-        so a member's stored size is exactly its (already zstd-compressed,
-        for a blob) payload size, no zip-level amplification. A crafted
-        `ZIP_DEFLATED` member could otherwise expand to an arbitrary
-        in-memory allocation via ``ZipExtFile.read()`` before `read_blob`'s
-        own zstd decoded-size guard runs. Rejecting deflate alone isn't a
-        size bound though: a still-`ZIP_STORED` member can simply claim
-        (and contain) an enormous size -- checked first via the cheap
-        ``ZipInfo.file_size`` metadata, enforced for real via a bounded,
-        chunked read rather than one unbounded ``f.read()`` (in case that
-        metadata were spoofed). Checked here, once, for both
+        deliberately -- a crafted `ZIP_DEFLATED` member could otherwise
+        expand to an arbitrary in-memory allocation via ``ZipExtFile.
+        read()`` before `read_blob`'s own zstd decoded-size guard runs.
+        Rejecting deflate alone isn't a size bound though: a still-
+        `ZIP_STORED` member can simply claim (and contain) an enormous
+        size -- checked first via the cheap ``ZipInfo.file_size``
+        metadata, enforced for real via a bounded, chunked read (in case
+        that metadata were spoofed). Checked here, once, for both
         `read_manifest` and `read_blob`.
         """
         info = self._zf.getinfo(name)
@@ -713,26 +720,20 @@ class BundleArchiveReader:
         *max_decoded_bytes* against the running decoded size (mirroring
         `snapshot_io.py`'s own `_decompress_zstd` pattern) -- a bare
         ``ZstdDecompressor.decompress(data)`` call would allocate the full
-        decoded output regardless of *this* function's own window-size
-        bound, which defeats the point of a per-blob memory guard.
+        decoded output regardless of this function's own window-size bound.
 
         Also re-hashes the decoded payload and checks it against
-        *content_hash_hex* before returning -- the member name alone is
-        just a zip entry name, not a verified property of its content, so a
-        corrupted or hand-assembled archive storing arbitrary bytes under a
-        given hash's member name would otherwise be handed back to the
-        caller unchecked, defeating the whole point of content-addressing
-        (Codex review).
+        *content_hash_hex* -- the member name alone is just a zip entry
+        name, not a verified property of its content, so a corrupted or
+        hand-assembled archive could otherwise hand back unchecked bytes
+        under a given hash's name (Codex review).
 
         The *outer*, still-compressed member read is bounded by
-        *max_decoded_bytes* plus a fixed slack margin, not by
-        *max_decoded_bytes* alone -- zstd's own frame/block overhead can
-        make an incompressible payload's compressed form a handful of
-        bytes *larger* than its decoded size, so using the decoded cap
-        as-is for the outer read would reject a payload that legitimately
-        satisfies the documented decoded-size contract (Codex review).
-        The decoded running-total check below remains the tight,
-        authoritative bound.
+        *max_decoded_bytes* plus a fixed slack margin, not the bare
+        decoded cap -- zstd's own frame/block overhead can make an
+        incompressible payload's compressed form larger than its decoded
+        size (Codex review). The decoded running-total check below
+        remains the tight, authoritative bound.
         """
         member = _blob_member_name(content_hash_hex)
         try:
