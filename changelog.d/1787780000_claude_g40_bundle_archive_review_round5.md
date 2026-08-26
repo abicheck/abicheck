@@ -738,3 +738,25 @@
   both fields, all confirmed to fail against the pre-fix code with
   either a raw `TypeError` or a silent, wrong-typed pass-through)
   exercises this through the public `load_bundle_facts()` entry point.
+
+- **G40 bundle archive: malformed nested snapshot shapes leaked a raw
+  exception instead of this module's own error contract (Codex review,
+  P2).** A content-addressed library blob that decodes to a valid JSON
+  *object* (passing the existing shape check) but has a malformed
+  nested shape -- e.g. `{"functions": [None]}` -- made
+  `snapshot_from_dict()` raise a raw `TypeError`/`KeyError`/
+  `AttributeError`/`IndexError` straight out of
+  `read_bundle_facts_archive()`, so the public
+  `load_bundle_facts(..., format="archive")` path leaked a traceback
+  for a corrupt archive instead of reporting it through this module's
+  `ValueError`/`SnapshotError` vocabulary. Confirmed empirically across
+  a range of malformed shapes (`{"functions": [None]}` ->
+  `TypeError`, `{"elf": "notadict"}` -> `KeyError`, a bare `None`/`str`/
+  `int` top-level value -> `AttributeError`). Fixed with a new
+  `_load_snapshot_dict()` wrapper (mirroring `_load_blob_json`'s own
+  existing translation pattern in this same function) that catches
+  `TypeError`/`KeyError`/`AttributeError`/`IndexError` and re-raises as
+  `SnapshotError` with the offending library named. New regression test
+  (`test_load_translates_a_malformed_nested_snapshot_shape`, confirmed
+  to fail against the pre-fix code with a raw `TypeError`) exercises
+  this through the public `load_bundle_facts()` entry point.

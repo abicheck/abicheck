@@ -33,9 +33,8 @@ will populate), deriving everything else on load the same way a live
 :func:`abicheck.bundle._compute_resolution_graph`.
 
 This is a leaf module with respect to :mod:`abicheck.bundle`: it imports
-that module only lazily, inside function bodies, to avoid a needless import
-cycle (:mod:`abicheck.bundle` already imports :mod:`abicheck.bundle_models`/
-:mod:`abicheck.bundle_manifest` at module scope)."""
+that module only lazily, inside function bodies, avoiding a needless cycle
+(:mod:`abicheck.bundle` already imports :mod:`abicheck.bundle_models`/`.bundle_manifest` at module scope)."""
 
 from __future__ import annotations
 
@@ -163,9 +162,8 @@ def capture_bundle_facts(
                 continue
             # The resolved target's basename, not path.name -- library_paths
             # commonly names a dev symlink (libfoo.so -> libfoo.so.1.2), and
-            # a bare path.name would capture the symlink's own, unversioned
-            # name instead of the real, versioned filename the SONAME-skew
-            # fallback needs (Codex review, fresh evidence).
+            # a bare path.name would capture the unversioned symlink name
+            # instead of the real one the SONAME-skew fallback needs (Codex).
             library_filenames[name] = resolved_basename(path)
             aliases = filesystem_alias_basenames(path)
             if aliases:
@@ -195,8 +193,7 @@ def bundle_snapshot_from_facts(facts: BundleFacts) -> BundleSnapshot:
     ``build_bundle_snapshot_from_metadata``'s ``extra_aliases`` so this
     purely metadata-driven reconstruction can still resolve a
     ``DT_NEEDED`` edge naming one of those aliases without probing the
-    filesystem itself, since the persisted facts may outlive the files
-    they were captured from.
+    filesystem, since the persisted facts may outlive the files captured.
 
     ``facts.library_filenames`` is threaded through as that same
     function's ``paths`` -- a real on-disk filename reconstructed as
@@ -245,8 +242,7 @@ def compare_bundle_from_facts(
     :func:`abicheck.bundle_analysis.analyze_bundle` -- the same orchestrator
     a live-directory-vs-live-directory ``compare --release`` uses, so the
     two entry points share one detection implementation and can never
-    independently drift. This is what the mandatory dump/live parity test
-    asserts.
+    independently drift, per the mandatory dump/live parity test.
 
     *manifest*, given explicitly, overrides *old_facts.manifest* (mirroring
     ``compare_bundle()``'s own ``manifest=`` parameter); otherwise the
@@ -395,14 +391,13 @@ def write_bundle_facts_archive(
     )
 
     p = Path(path)
-    # Everything below is computed -- and every cap the reader will later
-    # enforce is checked -- *before* `BundleArchiveWriter` is ever opened,
-    # on the *same* unique-hash map the write further down populates.
-    # Sorted by name, not dict insertion order: two logically-equal
-    # BundleFacts populated differently would else produce different
-    # archive bytes. (a) Library-name-count cap, independent of the distinct-
-    # blob cap below -- checked before the loop, else many names sharing
-    # one large snapshot would serialize it once per name first.
+    # Everything below is computed -- every cap the reader will later
+    # enforce is checked -- *before* `BundleArchiveWriter` is opened, on
+    # the *same* unique-hash map the write further down populates. Sorted
+    # by name, not dict insertion order: two logically-equal BundleFacts
+    # populated differently would else produce different archive bytes.
+    # (a) Library-name-count cap, checked before the loop, else many
+    # names sharing one large snapshot would serialize it once per name.
     if len(facts.per_library_snapshots) > DEFAULT_MAX_LIBRARY_COUNT:
         raise SnapshotError(
             f"{p}: writing this bundle's {len(facts.per_library_snapshots)} "
@@ -414,10 +409,10 @@ def write_bundle_facts_archive(
     library_blobs: dict[str, str] = {}
     decoded_size_bytes = 0
     unique_payloads: dict[str, bytes] = {}  # content hash -> its own payload
-    # Keyed by id(snap), not content -- many names can share the *same*
-    # AbiSnapshot object; re-serializing it per name is unbounded work the
-    # content dedup below never prevented. Safe: every snap stays referenced
-    # by `facts.per_library_snapshots` for the loop, so no id() reuse.
+    # Keyed by id(snap): many names can share one AbiSnapshot object, and
+    # re-serializing it per name is unbounded work the content dedup below
+    # never prevented. Safe: every snap stays referenced by
+    # `facts.per_library_snapshots` for the loop, so no id() reuse.
     serialized_by_identity: dict[int, tuple[str, bytes]] = {}
 
     def _oversized_bundle_message() -> str:
@@ -486,10 +481,9 @@ def write_bundle_facts_archive(
     # not each unique blob's bytes once.
     hash_counts = Counter(library_blobs.values())
     reader_charged_bytes = sum(len(unique_payloads[h]) * n for h, n in hash_counts.items())
-    # manifest_blob's bytes are charged once more, unconditionally, whenever
-    # present (a raw-fetch or a shared-hash "second materialization" charge
-    # on the reader side) -- charging only the not-shared case let the
-    # writer accept what its own reader rejects.
+    # manifest_blob's bytes are charged once more, whenever present --
+    # charging only the not-shared case let the writer accept what its
+    # own reader rejects.
     if manifest_blob is not None:
         reader_charged_bytes += len(unique_payloads[manifest_blob])
     if reader_charged_bytes > DEFAULT_MAX_BUNDLE_DECODED_BYTES:
@@ -518,12 +512,11 @@ def write_bundle_facts_archive(
     }
     # A third cap: manifest.json's own reader-side size ceiling, never
     # covered above. Checked incrementally via iterencode(), not
-    # `json.dumps()`+`.encode("utf-8")` (would fully materialize the string
-    # first, Codex review). write_manifest() re-checks identically when
-    # writing the member; checked here too so a reject happens before any
-    # blob write. A single oversized string value needs its own pre-check
-    # first -- iterencode() yields one whole escaped string as a single
-    # chunk, so the loop below can't reject it on its own.
+    # `json.dumps()`+`.encode("utf-8")` (fully materializes the string
+    # first, Codex). write_manifest() re-checks identically when writing
+    # the member; checked here too so a reject happens before any blob
+    # write. iterencode() yields one whole escaped string as a single
+    # chunk, so a single oversized value needs its own pre-check first.
     oversized = oversized_raw_string(container_manifest, DEFAULT_MAX_MANIFEST_BYTES)
     if oversized is not None:
         _, oversized_bytes = oversized
@@ -610,6 +603,15 @@ def read_bundle_facts_archive(
             raise SnapshotError(f"{path}: manifest {field} must be an integer, got {value!r}")
         return int(value)
 
+    def _load_snapshot_dict(blob: dict[str, Any], description: str) -> AbiSnapshot:
+        # snapshot_from_dict() can leak a raw TypeError/KeyError/
+        # AttributeError for a malformed nested shape (e.g. {"functions":
+        # [None]}) instead of this module's own SnapshotError (Codex).
+        try:
+            return snapshot_from_dict(blob)
+        except (TypeError, KeyError, AttributeError, IndexError) as exc:
+            raise SnapshotError(f"{path}: {description} has a malformed snapshot shape: {exc}") from exc
+
     reader_cm = (
         BundleArchiveReader.from_open_file(_fp, path)
         if _fp is not None
@@ -662,10 +664,9 @@ def read_bundle_facts_archive(
                     f"content-hash string, got {type(_h).__name__}"
                 )
         # Bound the *name count* independently of decoded-byte size: each
-        # *name* referencing a shared blob still gets its own materialized
-        # AbiSnapshot object graph (snapshot_cache's own deep copy), so an
-        # oversized manifest could amplify one small blob into an
-        # unbounded object count. Checked before any blob is read.
+        # name referencing a shared blob still materializes its own
+        # AbiSnapshot object graph, so a manifest could amplify one small
+        # blob into an unbounded object count -- checked before any read.
         if len(library_blobs) > DEFAULT_MAX_LIBRARY_COUNT:
             raise SnapshotError(
                 f"{path}: this bundle archive's manifest names "
@@ -709,11 +710,10 @@ def read_bundle_facts_archive(
         # snapshot_cache is keyed by hash too, alongside blob_cache above,
         # avoiding a repeat snapshot_from_dict() call per name sharing one
         # blob. Each *name* still gets its own AbiSnapshot instance in the
-        # returned mapping (AbiSnapshot is mutable, BundleFacts is public
-        # API, so no two names may alias one object): the first-built
-        # instance is held unmodified, every later name sharing that hash
-        # gets a deep copy, matching `bundle_facts_from_dict()`'s own
-        # one-instance-per-entry contract.
+        # returned mapping (mutable, public API, so no two names may alias
+        # one object): the first-built instance is held unmodified, every
+        # later name sharing that hash gets a deep copy, matching
+        # `bundle_facts_from_dict()`'s own one-instance-per-entry contract.
         snapshot_cache: dict[str, AbiSnapshot] = {}
         snapshot_blob_len: dict[str, int] = {}
         per_library_snapshots: dict[str, AbiSnapshot] = {}
@@ -747,7 +747,7 @@ def read_bundle_facts_archive(
                     f"bundle archive: blob for library {name!r} must decode "
                     f"to a JSON object, got {type(blob).__name__}"
                 )
-            snap = snapshot_from_dict(blob)
+            snap = _load_snapshot_dict(blob, f"blob for library {name!r}")
             snapshot_cache[h] = snap
             snapshot_blob_len[h] = len(raw)
             per_library_snapshots[name] = snap

@@ -507,6 +507,26 @@ class TestBundleFactsArchiveFormat:
         with pytest.raises(ValueError, match="must decode to a JSON object"):
             load_bundle_facts(out, format="archive")
 
+    def test_load_translates_a_malformed_nested_snapshot_shape(
+        self, tmp_path: Path
+    ) -> None:
+        """A library blob that decodes to a JSON *object* (passing the
+        prior check) but has a malformed nested shape -- e.g. a null
+        entry in `functions` -- makes `snapshot_from_dict()` leak a raw
+        TypeError/KeyError/AttributeError instead of this module's own
+        error vocabulary (Codex review, fresh evidence)."""
+        import json as json_module
+
+        from abicheck.storage.bundle_archive import BundleArchiveWriter
+
+        out = tmp_path / "malformed_snapshot_shape.bundlefacts.archive.zip"
+        with BundleArchiveWriter(out) as writer:
+            h = writer.put_blob(json_module.dumps({"functions": [None]}).encode("utf-8"))
+            writer.write_manifest({"library_blobs": {"a.so": h}})
+
+        with pytest.raises(SnapshotError, match="malformed snapshot shape"):
+            load_bundle_facts(out, format="archive")
+
     def test_load_translates_a_deeply_nested_library_blob(self, tmp_path: Path) -> None:
         """A content-addressed library blob is just as reachable by a
         hostile archive as manifest.json is -- a deeply nested payload
