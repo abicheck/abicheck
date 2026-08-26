@@ -16,6 +16,28 @@
 
 Used by dwarf_snapshot.py (FIX-B) and appcompat.py (FIX-A Part 3) for
 cross-format symbol matching.
+
+Itanium-mangled (``_Z...``) names only -- MSVC-decorated names (``?run@Foo@@
+QEAAXXZ``) are never demangled anywhere in this module (Codex review on
+PR #874, fresh evidence): both ``cxxfilt`` (a binding to libstdc++'s
+``__cxa_demangle``) and the GNU ``c++filt`` fallback support only the
+Itanium ABI's mangling grammar -- confirmed against real ``c++filt``
+(GNU Binutils), whose own ``-s {none,auto,gnu-v3,java,gnat,dlang,rust}``
+format list has no MSVC/Microsoft entry at all. There is no equivalent
+lightweight, cross-platform tool this codebase already depends on: real
+MSVC demangling needs either the Windows-only ``undname``/``dbghelp.dll``
+(part of the MSVC toolchain, not installable standalone on Linux/macOS CI)
+or a third-party pure-Python MSVC demangler package -- a new runtime
+dependency this deliberately lightweight tool has no other reason to carry
+(see AGENTS.md's "Don't add dependencies without strong justification").
+Consequence: a PE/COFF report (HTML or otherwise) for an MSVC-built C++
+library shows every exported symbol in its raw decorated form regardless
+of ``--demangle``/the HTML default -- confirmed by reading
+``pdb_parser.py``/``pdb_metadata.py`` too: the PDB pipeline extracts
+already-demangled *type*/struct/field names straight from CodeView debug
+records (those are never mangled to begin with), but nothing in this
+codebase demangles a PE export table's own decorated *symbol* names. Not
+attempted here.
 """
 
 from __future__ import annotations

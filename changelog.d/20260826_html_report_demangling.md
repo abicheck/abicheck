@@ -25,3 +25,20 @@
   subprocess per row; `demangle.prewarm_demangle_batch` now batches
   every symbol/description across the whole report into one upfront
   `demangle_batch()` call, so every later per-row call is a cache hit.
+- **Docs follow-up (Codex review):** `docs/contribute/config-key-review.md`
+  still stated twice that HTML output always stays mangled, contradicting
+  the new default. Corrected to describe HTML's actual, safe structural
+  demangling (`<abbr title="mangled">demangled</abbr>`, both sides
+  `html.escape`d).
+- **Known gap, investigated and documented rather than fixed here
+  (Codex review):** this module's `demangle()`/`demangle_batch()` only
+  recognize Itanium-mangled (`_Z...`) names -- an MSVC-decorated PE/COFF
+  export (`?run@Foo@@QEAAXXZ`) is never demangled anywhere in this
+  codebase. Confirmed against real `c++filt` (GNU Binutils): its own
+  `-s {none,auto,gnu-v3,java,gnat,dlang,rust}` format list has no MSVC
+  entry, and `cxxfilt` (a binding to the identical libstdc++
+  `__cxa_demangle`) is equally Itanium-only. Real MSVC demangling needs
+  either the Windows-only `undname`/`dbghelp.dll` or a third-party
+  pure-Python MSVC demangler package -- a new runtime dependency this
+  deliberately lightweight tool has no other reason to carry. Documented
+  in `demangle.py`'s own module docstring.
