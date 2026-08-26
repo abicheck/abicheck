@@ -1628,9 +1628,9 @@ implementation covering only the `reporter.py`-owned builders (and
 `compare --release`'s JSON summary and `scan --artifact-set`'s JSON output
 both silently missing `evidence_provenance` on every bundle/matrix finding
 and every per-library capped finding, even once every other JSON surface
-carries it. Add the field to all four dict literals (`_release_json_
-summary`'s two, `_release_finding_dicts`'s one, `ScanSetResult.to_dict`'s
-one) explicitly, and extend the same schema-version-bump discipline
+carries it. Add the field to all four dict literals (`_format_release_json`'s two,
+`_release_finding_dicts`'s one, `ScanSetResult.to_dict`'s one) explicitly,
+and extend the same schema-version-bump discipline
 established above to whichever schema each summary format is gated by —
 `compare --release`'s summary JSON has no dedicated `.schema.json` today
 (confirmed: none exists under `abicheck/schemas/` or `docs/reference/
@@ -1684,8 +1684,8 @@ these two, not a schema file to update.
 ledger, is missing from this inventory entirely — it names no `Change`→dict
 builder at all today, and it is a distinct ledger from
 `_suppressed_change_entry` above, not a duplicate of it (Codex review,
-fresh evidence, confirmed by reading `cli_compare_fold.py` directly, PR
-#866 round 30).** `_fold_suppression_audit_into_text()`'s JSON branch
+fresh evidence, confirmed by reading `cli_compare_fold.py` directly,
+PR #866 round 30).** `_fold_suppression_audit_into_text()`'s JSON branch
 independently serializes each `(rule, change)` pair in
 `audit.high_risk_matches` — the `SuppressionAudit` findings where a
 suppression rule matched a `BREAKING` change — into
