@@ -337,7 +337,10 @@ class TestExecutionConsumesTheResolvedPlan:
     """
 
     def _spy(self, monkeypatch):
-        from abicheck import cli as cli_mod
+        # ADR-061 Phase 4: patch the implementation owner. `abicheck.cli` is a
+        # registration facade now; a `setattr` there rebinds nothing the
+        # caller reads -- and `raising=False` below would have hidden that.
+        from abicheck.frontends.cli.commands import dump as cli_mod
 
         seen: dict[str, object] = {}
 
@@ -415,7 +418,10 @@ class TestExecutionConsumesTheResolvedPlan:
         """
         import inspect
 
-        from abicheck import cli as cli_mod
+        # ADR-061 Phase 4: patch the implementation owner. `abicheck.cli` is a
+        # registration facade now; a `setattr` there rebinds nothing the
+        # caller reads -- and `raising=False` below would have hidden that.
+        from abicheck.frontends.cli.commands import dump as cli_mod
 
         # `dump_cmd` is a Click RichCommand at module level; the
         # undecorated function is on `.callback`.

@@ -29,42 +29,55 @@ same property that made `artifact_plan.py` a safe Phase 3 vertical slice: a
 physical relocation with no first-party imports cannot change any
 import-cycle or dependency-direction fact about the rest of the codebase.
 
-Four more modules have since joined it — `options/profiles.py`,
-`options/contract.py`, `options/inventory.py` and `help.py` — on the same
-criterion. The blocker note this section used to carry, that the option
-cluster's modules "import each other", did not survive an AST scan: the
-cluster is a **star**, with `cli_options.py` as the hub and its five
-siblings holding zero intra-cluster imports. Four of the five had no
-first-party imports at all and moved directly.
+Four more modules joined it on the same criterion — `options/profiles.py`,
+`options/contract.py`, `options/inventory.py` and `help.py`. The blocker note
+this section used to carry, that the option cluster's modules "import each
+other", did not survive an AST scan: the cluster is a **star**, with
+`cli_options.py` as the hub and its five siblings holding zero intra-cluster
+imports.
 
-`cli_params.py` did not, and the reason is the rule to remember when adding
-anything here: **this is a migrated package, so `unclassified-import`
-applies to every module physically inside it.** `cli_params.py` imports four
-unclassified flat modules (`policies`, `policy_file`, `suppression`,
-`buildsource.scan_levels`); it can only move once those have owners. Check a
-candidate's full first-party import set before moving it, not just whether
-it looks leaf-shaped.
+ADR-061 Phase 4 then moved the real weight here. `cli.py` went from **1959
+lines to 128** and is now a registration facade: the Click root group, its
+`--version`/SIGTERM wiring, the tail-of-module registration imports, and one
+lazy compatibility shim. Everything else lives in this package:
 
-Everything else Phase 4 names — the bulk of `cli_options.py`, command input
-translation for `dump`/`compare`/`scan`, and reducing `cli.py`/`service.py`
-themselves — is **not** attempted yet:
-**`cli.py`/`service.py` cannot shrink until `workflows/` actually owns the
-operations they currently implement inline.** `service.py`'s
-`resolve_input`/`_run_dump_uncached`/`compare_snapshots` (hundreds of lines
-each) *are* the current dump/compare implementation, not adapters over an
-already-existing workflow object Phase 4 could point them at instead —
-moving that logic into `workflows/` is Phase 3's job. Phase 3 has since
-given `service_dump_pipeline.py` and `service_input_resolution.py`
-`workflows` owners, but `service.py` itself still holds the implementation
-and the real per-artifact resolve/execute pipeline does not exist yet (see
-`workflows/AGENTS.md` and ADR-061's Phase 3 section). Thinning
-`cli.py`/`service.py` before that pipeline exists would mean either leaving
-the real logic in place under a thin wrapper (achieving nothing) or
-duplicating it into a new home with no shared implementation to delegate to
-(a second copy that can drift, exactly what this migration exists to
-prevent).
+| Module | What it owns |
+|---|---|
+| `cli/commands/dump.py` | `dump`'s ~30 Click parameters → one `DumpRequest`, resolved once and consumed by both the dry run and the real run |
+| `cli/commands/compare.py` | The single-pair compare, the release fan-out, and inline build-source embedding |
+| `cli/runtime.py` | Verbosity, output writing, provenance stamping, and the process-exit decision |
+| `cli/moved.py` | The historical `abicheck.cli` import surface → its current owner |
 
-Documented in ADR-061's Phase 4 status note.
+Two things about that shim are worth knowing before adding to it. It exists
+because `abicheck.cli` has long been the documented import path for a list of
+private helpers, and it resolves through `importlib.import_module` at *access*
+time — a runtime call, not a static import edge — so `cli.py` never grows a
+top-level dependency on the packages that import back into it. But a
+`monkeypatch.setattr` against a name resolved through it **rebinds nothing the
+real caller reads**: patch the owner. `tests/test_cli_moved_surface.py`
+resolves every entry and separately checks that the map covers what the tree
+actually imports, because a lazy shim is exactly the sort of compatibility
+layer that rots silently — a stale entry raises only when someone imports that
+one name.
+
+The move required classifying the whole `cli_*` family as `frontends`, which
+surfaced ~47 real direction violations (the CLI reaching past the engine into
+`policy`, `compare` and `extract`). Those are closed, not suppressed: each now
+routes through a `workflows` re-export surface (`gate`, `extraction`,
+`findings`, `scan_config`) — see `workflows/AGENTS.md`. Four inversions in the
+other direction closed too, taking `ENGINE_CLI_BOUNDARY_ALLOWLIST` from 15
+entries to 4 over this phase and the last.
+
+`cli_params.py` (452 lines) is still flat, and the reason is the rule to
+remember when adding anything here: **this is a migrated package, so
+`unclassified-import` applies to every module physically inside it.** Check a
+candidate's full first-party import set before moving it, not just whether it
+looks leaf-shaped.
+
+**Still open:** `service.py` (1763 lines) has not been thinned. Its
+`resolve_input`/`_run_dump_uncached`/`compare_snapshots` *are* the dump/compare
+implementation, and moving them is `workflows`' job, not this package's — see
+`workflows/AGENTS.md` and ADR-061's Phase 4 status note.
 
 ## Tests
 

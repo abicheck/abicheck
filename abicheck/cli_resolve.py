@@ -38,14 +38,14 @@ import click
 from .buildsource.build_query import PRUNED_HEADER_DIR_SEGMENTS
 from .compat.abicc_dump_import import looks_like_perl_dump
 from .errors import SnapshotError
-from .header_utils import iter_directory_headers
+from .workflows.extraction import iter_directory_headers
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from .dump_manifest import DumpManifest
     from .model import AbiSnapshot
     from .service_scan import CompileContext
+    from .workflows.extraction import DumpManifest
 
 
 def _click_notify(message: str) -> None:
@@ -140,7 +140,7 @@ def _detect_binary_format(path: Path) -> str | None:
 
     Returns 'elf', 'pe', 'macho', or None for non-binary / unknown.
     """
-    from .binary_utils import detect_binary_format
+    from .workflows.extraction import detect_binary_format
 
     return detect_binary_format(path)
 
@@ -153,7 +153,7 @@ def _resolve_linker_script(path: Path) -> tuple[Path | None, bool]:
     even when no target file could be located); ``resolved_path`` is the first
     ``INPUT()``/``GROUP()`` member that exists next to the script, or *None*.
     """
-    from .binary_utils import resolve_linker_script
+    from .workflows.extraction import resolve_linker_script
 
     return resolve_linker_script(path)
 

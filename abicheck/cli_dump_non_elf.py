@@ -43,8 +43,8 @@ from .cli_dump_protocols import (
 )
 from .dumper_clang_streaming import suppress_streaming_prune
 from .errors import AbicheckError
-from .header_utils import include_operand_dirs
 from .workflows.artifact import ResolvedArtifactPlan
+from .workflows.extraction import include_operand_dirs
 
 if TYPE_CHECKING:
     from .model import AbiSnapshot
@@ -143,7 +143,7 @@ def handle_non_elf_dump(
     # only: identical cleanup thunks, identical single-drain timing (the
     # `finally` below, the only place this function's original code drained
     # cleanups).
-    from .buildsource.l2_seed import seed_includes_and_fold_compile_context
+    from .workflows.extraction import seed_includes_and_fold_compile_context
 
     _artifact_plan = ResolvedArtifactPlan()
     try:
@@ -239,7 +239,7 @@ def handle_non_elf_dump(
     ):
         snap.parsed_with_build_context = True
     stamp_provenance(snap, git_tag=git_tag, build_id=build_id, no_git=no_git)
-    from .dumper_clang import resolve_source_frontend_clang_bin
+    from .workflows.extraction import resolve_source_frontend_clang_bin
 
     write_snapshot_output(
         snap,

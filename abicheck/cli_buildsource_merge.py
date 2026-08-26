@@ -59,8 +59,8 @@ def _ingest_inputs_pack_snapshot(path: Path) -> AbiSnapshot:
     existing ``merge`` fold combines them with the artifact-side dump — no
     compiler frontend is re-run.
     """
-    from .buildsource.inputs_pack import ingest_inputs_pack
     from .model import AbiSnapshot
+    from .workflows.extraction import ingest_inputs_pack
 
     ingested = ingest_inputs_pack(path)
     snap = AbiSnapshot(
@@ -78,8 +78,8 @@ def _merge_load_snapshots(inputs: tuple[Path, ...]) -> list[tuple[Path, AbiSnaps
     directory (ADR-035 D5); the latter is ingested into a source-side snapshot so
     build-emitted facts ride the existing fold.
     """
-    from .buildsource.inputs_pack import is_inputs_pack
     from .serialization import load_snapshot
+    from .workflows.extraction import is_inputs_pack
 
     if len(inputs) < 2:
         raise click.UsageError("merge needs at least two inputs.")
@@ -181,12 +181,12 @@ def _relink_combined_against_exports(
         and not (combined.source_abi.roots.get("exported_symbols"))
     ):
         from .buildsource.build_evidence import BuildEvidence
-        from .buildsource.inline import build_inline_coverage
         from .buildsource.source_graph import (
             build_source_graph,
             mark_source_edges_extractor_coverage,
         )
         from .buildsource.source_link import relink_surface_exports
+        from .workflows.extraction import build_inline_coverage
 
         relink_surface_exports(combined.source_abi, base_exports)
         # L5: rebuild source graph so L5 mapping/localization is not inert.

@@ -870,9 +870,9 @@ def merge_compile_config(
     intended ``compile:`` settings and still exit 0 — but best-effort (warn +
     CLI-only fallback) for an **auto-discovered** config the user didn't bind to.
     """
-    from .buildsource.inline import discover_build_config, load_build_config
     from .config_paths import project_root_for_config
     from .service_scan import CompileContext
+    from .workflows.extraction import discover_build_config, load_build_config
 
     explicit_config = build_config is not None
     cfg = build_config if explicit_config else discover_build_config(sources)

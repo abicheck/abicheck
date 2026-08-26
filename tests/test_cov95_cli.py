@@ -385,7 +385,9 @@ class TestSmallHelpers:
         # old "will be ignored" warning is gone and the context reaches the dump.
         import struct
 
-        import abicheck.cli as cli_mod
+        # ADR-061 Phase 4: patch the implementation owner. `abicheck.cli` is a
+        # registration facade now; a `setattr` there rebinds nothing the caller reads.
+        import abicheck.frontends.cli.commands.dump as cli_mod
 
         dylib = tmp_path / "fake.dylib"
         dylib.write_bytes(struct.pack("<I", 0xFEEDFACF) + b"\x00" * 64)
@@ -412,7 +414,9 @@ class TestSmallHelpers:
         import json
         import struct
 
-        import abicheck.cli as cli_mod
+        # ADR-061 Phase 4: patch the implementation owner. `abicheck.cli` is a
+        # registration facade now; a `setattr` there rebinds nothing the caller reads.
+        import abicheck.frontends.cli.commands.dump as cli_mod
 
         header = tmp_path / "foo.h"
         header.write_text("int f();\n", encoding="utf-8")
@@ -2641,13 +2645,18 @@ class TestLogDebugResolution:
         # Force a binary format and a resolved artifact so the echo branch runs.
         from types import SimpleNamespace
 
-        import abicheck.cli as cli_mod
+        # ADR-061 Phase 4: patch the implementation owner -- `abicheck.cli` resolves
+        # these lazily now, so a `setattr` there rebinds nothing the caller reads.
+        import abicheck.frontends.cli.runtime as cli_mod
 
         binary = tmp_path / "lib.so"
         binary.write_bytes(b"\x7fELF" + b"\x00" * 50)
         monkeypatch.setattr(cli_mod, "_detect_binary_format", lambda p: "elf")
         monkeypatch.setattr(
-            "abicheck.debug_resolver.resolve_debug_info",
+            # ADR-061 Phase 4: the CLI reaches this through
+            # `workflows.extraction`, which binds the name at import time, so
+            # that is where the call resolves (see that module's docstring).
+            "abicheck.workflows.extraction.resolve_debug_info",
             lambda *a, **k: SimpleNamespace(source="/path/to/lib.debug"),
         )
         cli_mod._log_one_side_debug(
@@ -2969,13 +2978,18 @@ class TestResolveDebugArtifact:
     def test_delegates_to_resolver(self, tmp_path, monkeypatch) -> None:
         from types import SimpleNamespace
 
-        import abicheck.cli as cli_mod
+        # ADR-061 Phase 4: patch the implementation owner -- `abicheck.cli` resolves
+        # these lazily now, so a `setattr` there rebinds nothing the caller reads.
+        import abicheck.frontends.cli.runtime as cli_mod
 
         binary = tmp_path / "lib.so"
         binary.write_bytes(b"\x7fELF" + b"\x00" * 50)
         sentinel = SimpleNamespace(source="x.debug")
         monkeypatch.setattr(
-            "abicheck.debug_resolver.resolve_debug_info",
+            # ADR-061 Phase 4: the CLI reaches this through
+            # `workflows.extraction`, which binds the name at import time, so
+            # that is where the call resolves (see that module's docstring).
+            "abicheck.workflows.extraction.resolve_debug_info",
             lambda *a, **k: sentinel,
         )
         out = cli_mod._resolve_debug_artifact(
@@ -2994,7 +3008,9 @@ class TestLogDebugResolutionBothSides:
     def test_both_sides_logged(self, tmp_path, monkeypatch, capsys) -> None:
         from types import SimpleNamespace
 
-        import abicheck.cli as cli_mod
+        # ADR-061 Phase 4: patch the implementation owner -- `abicheck.cli` resolves
+        # these lazily now, so a `setattr` there rebinds nothing the caller reads.
+        import abicheck.frontends.cli.runtime as cli_mod
 
         old_b = tmp_path / "old.so"
         new_b = tmp_path / "new.so"
@@ -3002,7 +3018,10 @@ class TestLogDebugResolutionBothSides:
         new_b.write_bytes(b"\x7fELF" + b"\x00" * 50)
         monkeypatch.setattr(cli_mod, "_detect_binary_format", lambda p: "elf")
         monkeypatch.setattr(
-            "abicheck.debug_resolver.resolve_debug_info",
+            # ADR-061 Phase 4: the CLI reaches this through
+            # `workflows.extraction`, which binds the name at import time, so
+            # that is where the call resolves (see that module's docstring).
+            "abicheck.workflows.extraction.resolve_debug_info",
             lambda *a, **k: SimpleNamespace(source="art"),
         )
         cli_mod._log_debug_resolution(

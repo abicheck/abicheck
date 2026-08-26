@@ -392,18 +392,8 @@
       "review_by": "2026-11-30"
     },
     {
-      "path": "abicheck/cli.py",
-      "baseline_lines": 1959,
-      "target": "workflows-or-frontends",
-      "rule": "no_growth",
-      "category": "legacy_workflow_or_frontend_monolith",
-      "owner": "abicheck maintainers",
-      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
-      "review_by": "2026-11-30"
-    },
-    {
       "path": "abicheck/cli_buildsource_helpers.py",
-      "baseline_lines": 1407,
+      "baseline_lines": 1064,
       "target": "workflows-or-frontends",
       "rule": "no_growth",
       "category": "legacy_workflow_or_frontend_monolith",
@@ -513,7 +503,7 @@
     },
     {
       "path": "abicheck/cli_scan_baseline.py",
-      "baseline_lines": 1362,
+      "baseline_lines": 1347,
       "target": "workflows-or-frontends",
       "rule": "no_growth",
       "category": "legacy_workflow_or_frontend_monolith",
@@ -1053,7 +1043,7 @@
     },
     {
       "path": "abicheck/scan_engine.py",
-      "baseline_lines": 1485,
+      "baseline_lines": 1483,
       "target": "workflows-or-frontends",
       "rule": "no_growth",
       "category": "legacy_workflow_or_frontend_monolith",
@@ -1084,16 +1074,6 @@
     {
       "path": "abicheck/service.py",
       "baseline_lines": 1763,
-      "target": "workflows-or-frontends",
-      "rule": "no_growth",
-      "category": "legacy_workflow_or_frontend_monolith",
-      "owner": "abicheck maintainers",
-      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
-      "review_by": "2026-11-30"
-    },
-    {
-      "path": "abicheck/service_input_resolution.py",
-      "baseline_lines": 1166,
       "target": "workflows-or-frontends",
       "rule": "no_growth",
       "category": "legacy_workflow_or_frontend_monolith",
@@ -2313,7 +2293,7 @@
     },
     {
       "path": "tests/test_typed_dump_request.py",
-      "baseline_lines": 1978,
+      "baseline_lines": 1954,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "category": "legacy_oversized_test_module",

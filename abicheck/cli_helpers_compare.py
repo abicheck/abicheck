@@ -36,19 +36,21 @@ from typing import TYPE_CHECKING, Any
 
 import click
 
-from ._compiler_options import has_explicit_std
-from .binary_utils import strip_vendor_hash as strip_vendor_hash
 from .config_paths import find_config_in_dir
 from .service_scan import pair_wide_cxx20_std_override
+from .workflows.extraction import (
+    has_explicit_std,
+    strip_vendor_hash as strip_vendor_hash,
+)
 
 if TYPE_CHECKING:
-    from .buildsource.inline import BuildConfig
     from .checker_types import Change, DiffResult
     from .compatibility_evaluation_frontend import PublicSymbolsList
     from .model import AbiSnapshot
     from .policy_file import PolicyFile
     from .service_scan import CompileContext
-    from .severity import SeverityConfig
+    from .workflows.extraction import BuildConfig
+    from .workflows.gate import SeverityConfig
 
 
 def _provenance_timestamp(source_date_epoch: str | None) -> str:
@@ -387,7 +389,9 @@ def _collect_additions(result: DiffResult) -> list[object]:
 #: importing ``bundle.discover_artifact_set``, which itself needs this
 #: function. Re-exported here for every existing caller of
 #: ``cli_helpers_compare._canonical_library_key`` (notably ``cli.py``).
-from .binary_utils import _canonical_library_key as _canonical_library_key  # noqa: E402
+from .workflows.extraction import (  # noqa: E402
+    _canonical_library_key as _canonical_library_key,
+)
 
 
 def _version_sort_key(
@@ -515,7 +519,7 @@ def _resolve_severity(
     addition: str | None,
 ) -> tuple[SeverityConfig, bool]:
     """Resolve severity configuration and return (config, explicitly_set)."""
-    from .severity import resolve_severity_config
+    from .workflows.gate import resolve_severity_config
 
     explicitly_set = any(
         v is not None
@@ -604,7 +608,7 @@ def resolve_compare_config(
     been removed from the CLI, so ``.abicheck.yml`` is now their only source
     and they are read straight off *cfg*.
     """
-    from .severity import resolve_severity_config
+    from .workflows.gate import resolve_severity_config
 
     def _pick(cli: object, conf: object, default: object) -> object:
         if cli is not None:
@@ -936,7 +940,7 @@ def _scoped_exit_code(
     otherwise return 0 (Codex review).
     """
     if exit_code_scheme == "severity":
-        from .severity import compute_exit_code, missing_contract_exit_code
+        from .workflows.gate import compute_exit_code, missing_contract_exit_code
 
         code = compute_exit_code(
             relevant_changes,
@@ -976,7 +980,7 @@ def _scoped_severity_summary(
     single ABI break would be counted twice (Codex review follow-up).
     """
     from .appcompat import uncovered_missing_symbols
-    from .severity import (
+    from .workflows.gate import (
         IssueCategory,
         SeverityLevel,
         categorize_changes,

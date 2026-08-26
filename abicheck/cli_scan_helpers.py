@@ -309,7 +309,7 @@ def resolve_effective_allow_query(
     ):
         return allow_build_query, None
 
-    from .buildsource.inline import load_build_config
+    from .workflows.extraction import load_build_config
 
     try:
         _cfg = load_build_config(build_config)

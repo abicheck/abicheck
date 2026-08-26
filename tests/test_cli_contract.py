@@ -788,9 +788,10 @@ def test_gate_flags_missing_decorator(
     import scripts.check_ai_readiness as gate
 
     pkg = tmp_path / "abicheck"
-    pkg.mkdir()
+    cmds = pkg / "frontends" / "cli" / "commands"
+    cmds.mkdir(parents=True)
     # A `compare` command that composes only some of the required families.
-    (pkg / "cli.py").write_text(
+    (cmds / "compare.py").write_text(
         "import click\n"
         '@main.command("compare")\n'
         "@two_sided_input_options\n"
@@ -821,9 +822,10 @@ def test_gate_flags_missing_command(
     import scripts.check_ai_readiness as gate
 
     pkg = tmp_path / "abicheck"
-    pkg.mkdir()
-    # cli.py exists but the `compare` command has been removed from it.
-    (pkg / "cli.py").write_text("def helper():\n    return 1\n")
+    cmds = pkg / "frontends" / "cli" / "commands"
+    cmds.mkdir(parents=True)
+    # The module exists but the `compare` command has been removed from it.
+    (cmds / "compare.py").write_text("def helper():\n    return 1\n")
     monkeypatch.setattr(gate, "PKG", pkg)
     monkeypatch.setattr(gate, "ROOT", tmp_path)
 

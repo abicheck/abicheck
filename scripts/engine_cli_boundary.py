@@ -124,10 +124,6 @@ ENGINE_CLI_BOUNDARY_ALLOWLIST: frozenset[str] = frozenset(
         "abicheck/scan_engine.py::from .cli_scan_baseline import ...::1",
         "abicheck/scan_engine.py::from .cli_scan_helpers import ...::1",
         "abicheck/service_scan.py::import click::1",
-        "abicheck/service_scan.py::from .cli_scan_baseline import ...::1",
-        "abicheck/service_scan.py::from .cli_scan_receipt import ...::1",
-        "abicheck/service_scan.py::from .cli_scan_baseline import ...::2",
-        "abicheck/service_scan.py::from .cli_scan_baseline import ...::3",
     }
 )
 

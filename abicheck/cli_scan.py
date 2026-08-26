@@ -70,7 +70,6 @@ from .buildsource.poi import (  # noqa: F401 - re-export for tests
 from .buildsource.preprocessor_scan import (
     run_preprocessor_scan,  # noqa: F401 - re-export for tests
 )
-from .buildsource.risk import RiskScore, score_changed_paths
 from .buildsource.scan_levels import (
     EvidenceDepth,
     ScanMode,
@@ -150,6 +149,7 @@ from .scan_engine import (  # noqa: F401 - several re-exported for tests/service
     _load_exports_for_poi,
     run_scan_core,
 )
+from .workflows.scan_config import RiskScore, score_changed_paths
 
 #: Back-compat alias — the resolver moved to ``cli_options`` (ADR-037 D3: one
 #: resolver shared by compare/dump/scan). Kept importable from here for existing
@@ -624,7 +624,7 @@ def _emit_scan_report(
     # that gap gets explained -- so it must fire whenever *either* renderer
     # in play is `text`, not only when the primary one is.
     if fmt != "json" or secondary_fmt == "text":
-        from .contract_coverage_exit import coverage_diagnostic_from_summary
+        from .workflows.gate import coverage_diagnostic_from_summary
 
         # `outcome.exit_code` has ALREADY had the coverage floor folded in
         # by `_run_baseline_compare`, so passing it would make the notice
@@ -1107,7 +1107,7 @@ def _discover_scan_project_config(
     a config the user never explicitly bound to shouldn't fail a run it wasn't
     asked to affect.
     """
-    from .buildsource.inline import discover_build_config
+    from .workflows.extraction import discover_build_config
 
     explicit_config = build_config is not None
     cfg_path = build_config if explicit_config else discover_build_config(sources)

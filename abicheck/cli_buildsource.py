@@ -108,7 +108,7 @@ def embed_build_source(
     * **The stream.** ``quiet`` is preserved as this layer's spelling; it
       simply decides whether a stderr writer is handed to the engine.
     """
-    from .buildsource.embed import embed_build_source as _embed
+    from .workflows.extraction import embed_build_source as _embed
 
     try:
         _embed(
@@ -177,8 +177,8 @@ def dump_source_only(
     honors the same compiler override a binary dump would.
     """
     from .cli import _stamp_provenance
-    from .dumper_clang import resolve_source_frontend_clang_bin
     from .model import AbiSnapshot
+    from .workflows.extraction import resolve_source_frontend_clang_bin
 
     if sources is None and build_info is None:
         raise click.UsageError(
@@ -498,7 +498,7 @@ def _write_snapshot_output(
     # check_requested_depth_satisfied's docstring. Checked last, after every
     # embed step above has had its chance to fill in build_source.
     check_requested_depth_satisfied(depth, snap)
-    from .dumper_scoping import resolve_dependency_scope
+    from .workflows.extraction import resolve_dependency_scope
     snap = resolve_dependency_scope(snap, include_dependencies, header_roots)
     # ADR-059: one payload dict, one JSON encode -- previously this built a
     # full JSON *string* via snapshot_to_json(), then fold_dump_provenance_

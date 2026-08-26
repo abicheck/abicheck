@@ -472,8 +472,14 @@ def test_dump_cli_build_target_flag_reaches_embed_build_source(
 ):
     from click.testing import CliRunner
 
-    from abicheck.buildsource import embed as embed_mod
     from abicheck.cli import main
+
+    # ADR-061 Phase 4: the CLI write path reaches `embed_build_source` through
+    # `workflows.extraction` (a frontend may not import the `extract` ring
+    # directly), and a re-export binds the name there at import time -- so that
+    # module is where this call resolves. The typed-API test above still patches
+    # `buildsource.embed`, which is what *its* caller reads.
+    from abicheck.workflows import extraction as embed_mod
 
     captured: dict = {}
 
@@ -508,8 +514,14 @@ def test_dump_cli_build_target_flag_reaches_embed_build_source(
 def test_dump_cli_build_target_overrides_config(monkeypatch, tmp_path: Path):
     from click.testing import CliRunner
 
-    from abicheck.buildsource import embed as embed_mod
     from abicheck.cli import main
+
+    # ADR-061 Phase 4: the CLI write path reaches `embed_build_source` through
+    # `workflows.extraction` (a frontend may not import the `extract` ring
+    # directly), and a re-export binds the name there at import time -- so that
+    # module is where this call resolves. The typed-API test above still patches
+    # `buildsource.embed`, which is what *its* caller reads.
+    from abicheck.workflows import extraction as embed_mod
 
     captured: dict = {}
 

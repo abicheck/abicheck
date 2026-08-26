@@ -228,7 +228,7 @@ def _load_pack_or_raise(evidence_dir: Path) -> BuildSourcePack:
 def _is_inputs_pack_dir(path: Path | None) -> bool:
     """Alias for ``buildsource.inputs_pack.is_inputs_pack_dir`` (ADR-035 D5),
     which has owned it since ADR-061 Phase 3."""
-    from .buildsource.inputs_pack import is_inputs_pack_dir
+    from .workflows.extraction import is_inputs_pack_dir
 
     return is_inputs_pack_dir(path)
 

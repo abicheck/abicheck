@@ -29,6 +29,35 @@ Phase 3) is the shared, dependency-free `contracts.py` half of the dump/scan
 artifact-resolution contract — a session type owning cleanup-thunk lifetime
 across a resolve/execute pipeline.
 
+`workflows.artifact` is now complete as a `Request -> ResolvedPlan -> Result`
+trio (ADR-061 Phase 3): `resolve.py` decides what an extraction will do
+without doing it, and `execute.py` runs that plan and reports what it
+achieved. Keeping "decide" runnable without "do" is what lets `dump --dry-run`
+render the same resolved plan a real run consumes -- a preview computed by a
+second resolver looks authoritative while being connected to nothing, which is
+worse than two implementations kept in sync by hand, because nothing fails
+when they drift. `abicheck/service_input_resolution.py` remains as a
+delegating facade; import the owners.
+
+Three narrow re-export surfaces exist so a frontend can reach an operation
+without importing a ring it may not (`frontends` may import only `model`,
+`workflows`, `report`):
+
+| Module | What a frontend reaches through it |
+|---|---|
+| `gate.py` | The whole process response — verdict, contract-coverage floor, assurance floor (ADR-061 Phase 4 item 4) |
+| `extraction.py` | Input-side operations: header expansion, the L2 seed, the L3→L2 fold, build-source embedding |
+| `findings.py` | Finding identity and the probe matrix |
+| `scan_config.py` | Scan config, risk rules, and the public-provenance rule (owned here, not aliased) |
+
+`gate.py` earns its place rather than laundering an import: three orthogonal
+axes feed one exit code, and a frontend importing them separately is free to
+fold two and forget the third. One consequence of the re-export surfaces is
+worth knowing before writing a test against them — `from ..x import y` **binds**
+`y` at import time, so patching `abicheck.x.y` afterwards does not change what
+a caller reaching it through the facade sees. Patch it where the call
+resolves.
+
 `abicheck/service_dump_pipeline.py` is classified `workflows` via
 `legacy_paths`: it is free of CLI imports and owns `DumpRequest ->
 ResolvedDumpRequest -> DumpResult`, but has not moved into this directory

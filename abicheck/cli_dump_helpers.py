@@ -59,7 +59,6 @@ from .cli_dump_protocols import (
 )
 from .dumper import dump
 from .dumper_clang_streaming import suppress_streaming_prune
-from .dumper_scoping import dump_manifest_header_roots as _dump_manifest_header_roots
 from .errors import AbicheckError
 from .evidence_depth import (
     DEPTH_RANK,
@@ -67,15 +66,18 @@ from .evidence_depth import (
     gated_source_label,
     l4_source_abi_was_attempted,
 )
+from .workflows.artifact import ResolvedArtifactPlan
 
 # `attach_build_context_for_parsed_headers` is called directly below by
 # `perform_elf_dump`, so this static edge to `header_conditionals` (a verified
 # leaf module) is structurally required regardless of re-export strategy --
 # unlike the four names in the lazy `__getattr__` shim further down, which
 # nothing in this module calls itself.
-from .header_conditionals import attach_build_context_for_parsed_headers
-from .header_utils import include_operand_dirs
-from .workflows.artifact import ResolvedArtifactPlan
+from .workflows.extraction import (
+    attach_build_context_for_parsed_headers,
+    dump_manifest_header_roots as _dump_manifest_header_roots,
+    include_operand_dirs,
+)
 
 if TYPE_CHECKING:
     from .buildsource.pack import BuildSourcePack
@@ -215,8 +217,8 @@ def _dump_will_attempt_hybrid_l4_extraction(sources: Path | None) -> bool:
       ``check_requested_depth_satisfied``'s own "reached 'headers'/'binary'"
       message, which fires downstream regardless.
     """
-    from .buildsource.inline import is_pack_dir
     from .cli_buildsource_helpers import _is_inputs_pack_dir
+    from .workflows.extraction import is_pack_dir
 
     return sources is not None and not (
         is_pack_dir(sources) or _is_inputs_pack_dir(sources)
@@ -595,8 +597,8 @@ def _add_dump_data_layers(
     warning rather than failing the dry run.
     """
     try:
-        from .binary_utils import detect_binary_format, normalize_binary_input
         from .dwarf_snapshot import show_data_sources
+        from .workflows.extraction import detect_binary_format, normalize_binary_input
 
         normalized_path, binary_fmt = normalize_binary_input(so_path)
         if binary_fmt is None:
@@ -1137,7 +1139,7 @@ def perform_elf_dump(
     # so generated/shim headers from -p/--gcc-options keep priority, but still
     # above the standard system dirs) when the compile context supplies its own
     # includes — see its docstring.
-    from .header_utils import (
+    from .workflows.extraction import (
         dedup_paths_preserve_order,
         deferred_token_dirs,
         resolve_inferred_header_roots,
@@ -1174,7 +1176,7 @@ def perform_elf_dump(
     # collect_inline_pack calls for the same --sources tree could otherwise
     # contend on the same inferred-build-query lock and wait up to its 600s
     # timeout (Codex review; see that function's own docstring).
-    from .buildsource.l2_seed import seed_includes_and_fold_compile_context
+    from .workflows.extraction import seed_includes_and_fold_compile_context
 
     # The ADR-039 collector's _user_define_flags() call below must see only
     # the *user's own* global tokens, never the L3 fold's per-header-matched
@@ -1590,7 +1592,7 @@ def perform_elf_dump(
         )
 
     stamp_provenance(snap, git_tag=git_tag, build_id=build_id, no_git=no_git)
-    from .dumper_clang import resolve_source_frontend_clang_bin
+    from .workflows.extraction import resolve_source_frontend_clang_bin
 
     write_snapshot_output(
         snap,

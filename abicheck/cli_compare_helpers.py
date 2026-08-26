@@ -36,21 +36,6 @@ from typing import TYPE_CHECKING, Any
 import click
 
 from . import cli
-from .cli import (
-    _EXIT_NOT_COMPARABLE,
-    _announce_exit_scheme,
-    _embed_inline_source_side,
-    _exit_with_severity_or_verdict,
-    _finalize_compare_result,
-    _load_probe_matrix_changes,
-    _log_debug_resolution,
-    _reject_application_operand,
-    _render_output,
-    _setup_verbosity,
-    _source_is_pack,
-    _warn_unused_set_flags,
-    _write_or_echo,
-)
 from .cli_audit import echo_pattern_modulations
 from .cli_compare_fold import (
     _fold_scoped_compat_into_text as _fold_scoped_compat_into_text,
@@ -106,17 +91,28 @@ from .cli_resolve import (
     classify_compare_operand,
     resolve_directory_compile_context,
 )
-from .contract_coverage_exit import announce_coverage_floor, fold_coverage_exit
 from .contract_scoped_promotion import stamp_scoped_result_findings
 from .errors import AbicheckError, ProfileMismatchError, ScopeMismatchError
 from .frontends.cli.options import reject_incoherent_secondary_output
+from .frontends.cli.runtime import (
+    _EXIT_NOT_COMPARABLE,
+    _announce_exit_scheme,
+    _exit_with_severity_or_verdict,
+    _finalize_compare_result,
+    _load_probe_matrix_changes,
+    _log_debug_resolution,
+    _render_output,
+    _setup_verbosity,
+    _write_or_echo,
+)
 from .service_render import ONELINE_FORMAT
+from .workflows.gate import announce_coverage_floor, fold_coverage_exit
 
 if TYPE_CHECKING:
     from .cli_helpers_compare import ResolvedCompareConfig
-    from .dump_manifest import DumpManifest
     from .model import AbiSnapshot
     from .policy_file import PolicyFile
+    from .workflows.extraction import DumpManifest
 
 
 def _resolve_compare_config(
@@ -288,6 +284,7 @@ def _needs_inline_embed(
     Those sides get dumped inline at --depth so their L3-L5 facts ride embedded in
     the snapshot; pre-built packs fall through to prepare_embedded_build_source.
     """
+    from .frontends.cli.commands.compare import _source_is_pack  # cycle
     def _raw_evidence(p: Path | None) -> bool:
         return p is not None and not _source_is_pack(p)
 
@@ -332,6 +329,7 @@ def _classify_and_reject_operands(
     per-library comparison; an application/PIE operand is not a library `compare`
     can pair (hint at `appcompat`). A single .so / snapshot / dump falls through.
     """
+    from .frontends.cli.commands.compare import _reject_application_operand  # cycle
     old_kind = classify_compare_operand(old_input)
     new_kind = classify_compare_operand(new_input)
     if old_kind == "app" or new_kind == "app":
@@ -549,8 +547,8 @@ def _preflight_manifests_and_audit(
     old_manifest_obj: DumpManifest | None = None
     new_manifest_obj: DumpManifest | None = None
     if old_dump_manifest is not None or new_dump_manifest is not None:
-        from .dump_manifest import load_manifest
         from .errors import ManifestValidationError
+        from .workflows.extraction import load_manifest
 
         try:
             if old_dump_manifest is not None:
@@ -728,8 +726,11 @@ def _embed_inline_source_sides(
     # just without a flag to have explicitly asked for it. See
     # docs/contribute/plans/g31-header-graph-default-on-followup.md for
     # extending graph coverage to this path.
+    # Function-local: `commands.compare` imports this module (cycle).
     import shutil
     import tempfile
+
+    from .frontends.cli.commands.compare import _embed_inline_source_side  # cycle
 
     # CLI-over-config explicitness read from compare's *real* ctx (where
     # --ast-frontend/--nostdinc are genuine COMMANDLINE params); the inline
@@ -1140,8 +1141,8 @@ def _report_compare_result(
     # cheap (pure pack-directory metadata load, no diffing) and mirrors the
     # identical, already-reviewed fix _fold_evidence_depth_into_json applies
     # for the same class of gap on old_evidence_depth/new_evidence_depth.
-    from .analysis_assurance import compute_analysis_assurance
     from .cli_buildsource_helpers import _resolve_side_pack
+    from .workflows.gate import compute_analysis_assurance
 
     result.analysis_assurance = compute_analysis_assurance(
         result, old, new,
@@ -1185,7 +1186,7 @@ def _report_compare_result(
     # (cli.py) applies both floors immediately after computing its own base
     # exit code and before returning control to its caller.
     if scoped_exit_code is not None:
-        from .analysis_assurance import (
+        from .workflows.gate import (
             assurance_floor_diagnostic,
             fold_analysis_assurance_exit,
         )
@@ -1372,7 +1373,9 @@ def run_compare(
     require_complete_analysis: bool = False,
 ) -> None:
     """Run the single-pair (or set fan-out) ``compare`` flow and exit accordingly."""
+    # Function-local: `commands.compare` imports this module (cycle).
     from .dry_run import reject_dry_run_with_output
+    from .frontends.cli.commands.compare import _warn_unused_set_flags  # cycle
 
     reject_dry_run_with_output(dry_run, output)
     _reject_incoherent_compare_flags(

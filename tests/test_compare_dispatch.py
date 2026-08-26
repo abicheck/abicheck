@@ -290,7 +290,10 @@ def test_embed_inline_source_forwards_toolchain_and_collects(
 ) -> None:
     """A raw source tree on a native side dumps inline at the requested depth and
     forwards the resolved compile/toolchain context (gcc/sysroot/nostdinc)."""
-    import abicheck.cli as climod
+    # ADR-061 Phase 4: patch the implementation owner. `abicheck.cli` still
+    # resolves this name for readers, but through a lazy `__getattr__`, so a
+    # `setattr` there rebinds nothing the real caller reads.
+    import abicheck.frontends.cli.commands.compare as climod
     from abicheck.service_scan import CompileContext
 
     tree = tmp_path / "src"
@@ -351,7 +354,10 @@ def test_embed_inline_source_forwards_lang_explicit(
     `frontend_explicit`/`nostdinc_explicit` already exist to work around),
     auto-detecting instead of honoring the request on a language-ambiguous
     header."""
-    import abicheck.cli as climod
+    # ADR-061 Phase 4: patch the implementation owner. `abicheck.cli` still
+    # resolves this name for readers, but through a lazy `__getattr__`, so a
+    # `setattr` there rebinds nothing the real caller reads.
+    import abicheck.frontends.cli.commands.compare as climod
     from abicheck.service_scan import CompileContext
 
     tree = tmp_path / "src"
@@ -385,7 +391,10 @@ def test_embed_inline_source_forwards_debug_roots(tmp_path: Path, monkeypatch) -
     even though the non-inline compare path was already fixed."""
     import inspect
 
-    import abicheck.cli as climod
+    # ADR-061 Phase 4: patch the implementation owner. `abicheck.cli` still
+    # resolves this name for readers, but through a lazy `__getattr__`, so a
+    # `setattr` there rebinds nothing the real caller reads.
+    import abicheck.frontends.cli.commands.compare as climod
     from abicheck.service_scan import CompileContext
 
     tree = tmp_path / "src"
@@ -421,7 +430,10 @@ def test_embed_inline_source_merges_tree_config_but_cli_wins(
     """The side's source-root .abicheck.yml compile: block is merged into the
     frozen context (so dump --sources behavior is preserved), but an explicit CLI
     override still wins over the config frontend (both Codex findings)."""
-    import abicheck.cli as climod
+    # ADR-061 Phase 4: patch the implementation owner. `abicheck.cli` still
+    # resolves this name for readers, but through a lazy `__getattr__`, so a
+    # `setattr` there rebinds nothing the real caller reads.
+    import abicheck.frontends.cli.commands.compare as climod
     from abicheck.service_scan import CompileContext
 
     tree = tmp_path / "src"
@@ -483,7 +495,10 @@ def test_embed_inline_source_ignored_when_depth_collects_nothing(
 ) -> None:
     """At a depth that collects no source (collect_mode 'off') a raw tree is
     ignored rather than silently deepening the run."""
-    import abicheck.cli as climod
+    # ADR-061 Phase 4: patch the implementation owner. `abicheck.cli` still
+    # resolves this name for readers, but through a lazy `__getattr__`, so a
+    # `setattr` there rebinds nothing the real caller reads.
+    import abicheck.frontends.cli.commands.compare as climod
     from abicheck.service_scan import CompileContext
 
     tree = tmp_path / "src"
@@ -516,7 +531,10 @@ def test_embed_inline_source_drops_raw_build_info_when_tree_ignored(
     --build-info dir is dropped too — otherwise prepare_embedded_build_source would
     try to load it as a pack and abort with 'Invalid evidence pack' (Codex review).
     A build-info that *is* a validated pack survives so it can still be applied."""
-    import abicheck.cli as climod
+    # ADR-061 Phase 4: patch the implementation owner. `abicheck.cli` still
+    # resolves this name for readers, but through a lazy `__getattr__`, so a
+    # `setattr` there rebinds nothing the real caller reads.
+    import abicheck.frontends.cli.commands.compare as climod
     from abicheck.service_scan import CompileContext
 
     tree = tmp_path / "src"
@@ -548,7 +566,10 @@ def test_embed_inline_collects_raw_build_info_without_sources(
     """A raw --build-info on a native side with no --sources still triggers the
     inline dump (so L3 is collected/embedded) rather than falling through to the
     pack loader and aborting with 'Invalid evidence pack' (Codex review)."""
-    import abicheck.cli as climod
+    # ADR-061 Phase 4: patch the implementation owner. `abicheck.cli` still
+    # resolves this name for readers, but through a lazy `__getattr__`, so a
+    # `setattr` there rebinds nothing the real caller reads.
+    import abicheck.frontends.cli.commands.compare as climod
     from abicheck.service_scan import CompileContext
 
     raw_build = tmp_path / "build"  # raw build dir, NOT a pack
@@ -582,7 +603,10 @@ def test_embed_inline_raw_build_info_on_snapshot_is_ignored(
 ) -> None:
     """A raw --build-info on a snapshot input (can't re-dump) is warned about and
     cleared, so it never reaches the pack loader (Codex review)."""
-    import abicheck.cli as climod
+    # ADR-061 Phase 4: patch the implementation owner. `abicheck.cli` still
+    # resolves this name for readers, but through a lazy `__getattr__`, so a
+    # `setattr` there rebinds nothing the real caller reads.
+    import abicheck.frontends.cli.commands.compare as climod
     from abicheck.service_scan import CompileContext
 
     raw_build = tmp_path / "build"
@@ -611,7 +635,10 @@ def test_embed_inline_raw_build_info_dropped_at_off_depth(
 ) -> None:
     """A raw --build-info with a no-collect depth (collect_mode 'off') is dropped
     rather than reaching the pack loader."""
-    import abicheck.cli as climod
+    # ADR-061 Phase 4: patch the implementation owner. `abicheck.cli` still
+    # resolves this name for readers, but through a lazy `__getattr__`, so a
+    # `setattr` there rebinds nothing the real caller reads.
+    import abicheck.frontends.cli.commands.compare as climod
     from abicheck.service_scan import CompileContext
 
     raw_build = tmp_path / "build"
@@ -648,7 +675,10 @@ def test_embed_inline_source_rejects_hybrid_frontend_at_depth_source(
     hybrid would give for the same tree. This must raise the same
     UsageError, without ever calling ctx.invoke (which would run a real,
     silently-degraded L4 replay)."""
-    import abicheck.cli as climod
+    # ADR-061 Phase 4: patch the implementation owner. `abicheck.cli` still
+    # resolves this name for readers, but through a lazy `__getattr__`, so a
+    # `setattr` there rebinds nothing the real caller reads.
+    import abicheck.frontends.cli.commands.compare as climod
     from abicheck.service_scan import CompileContext
 
     tree = tmp_path / "src"
@@ -685,7 +715,10 @@ def test_the_hybrid_rejection_names_only_live_flags(
     and ``--sources`` are side-aware now -- so following the instruction
     produced a second, unrelated unknown-option error (Codex review).
     """
-    import abicheck.cli as climod
+    # ADR-061 Phase 4: patch the implementation owner. `abicheck.cli` still
+    # resolves this name for readers, but through a lazy `__getattr__`, so a
+    # `setattr` there rebinds nothing the real caller reads.
+    import abicheck.frontends.cli.commands.compare as climod
     from abicheck.service_scan import CompileContext
 
     tree = tmp_path / "src"
@@ -726,7 +759,10 @@ def _embed_side_capturing_warning(
     build_info_raw: bool = False,
 ) -> str:
     """Drive one ignored-evidence warning path and return what it printed."""
-    import abicheck.cli as climod
+    # ADR-061 Phase 4: patch the implementation owner. `abicheck.cli` still
+    # resolves this name for readers, but through a lazy `__getattr__`, so a
+    # `setattr` there rebinds nothing the real caller reads.
+    import abicheck.frontends.cli.commands.compare as climod
     from abicheck.service_scan import CompileContext
 
     tree = tmp_path / "src"
@@ -807,7 +843,10 @@ def test_embed_inline_source_hybrid_not_rejected_below_depth_source(
     """The hybrid rejection is scoped to --depth source specifically (mirrors
     dump_cmd's own scoping) -- hybrid is the normal, supported dual-backend
     choice for the L2 header AST at every other depth."""
-    import abicheck.cli as climod
+    # ADR-061 Phase 4: patch the implementation owner. `abicheck.cli` still
+    # resolves this name for readers, but through a lazy `__getattr__`, so a
+    # `setattr` there rebinds nothing the real caller reads.
+    import abicheck.frontends.cli.commands.compare as climod
     from abicheck.service_scan import CompileContext
 
     tree = tmp_path / "src"
