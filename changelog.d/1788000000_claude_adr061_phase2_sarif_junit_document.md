@@ -13,5 +13,8 @@
   facts. Output is byte-for-byte identical for every format and mode; the one
   observable difference is that `ET.indent` now mutates the rebuilt tree
   rather than the caller's suite. `compare`'s NOT_COMPARABLE (ADR-050 D2)
-  `--format json`/`--format sarif` output crosses the same boundary too, via
-  a new `sarif.to_sarif_not_comparable_str`.
+  `--format json`/`--format sarif` output crosses the same boundary too: the
+  JSON refusal report moved to a new `report/not_comparable.py`, and the SARIF
+  one renders the existing `sarif.to_sarif_not_comparable` mapping through
+  `report.render_json.render_mapping_as_json`. No public function was removed
+  or renamed.

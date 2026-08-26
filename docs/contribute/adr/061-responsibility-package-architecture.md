@@ -635,11 +635,18 @@ first non-JSON format to do so.
 
 **SARIF and JUnit now cross the boundary too.** `sarif.to_sarif_str` projects
 its completed SARIF log through `ReportDocument` + `render_json` — SARIF is
-itself a JSON format, so it needs no format-specific serializer — and the
-ADR-050 D2 refusal log gained a `to_sarif_not_comparable_str` sibling so the
-`compare` CLI's NOT_COMPARABLE `json`/`sarif` output crosses the same boundary
-instead of calling `json.dumps` on a raw mapping. JUnit needed one new
-primitive, `report/render_xml.py`: a `ReportDocument` stores JSON values only
+itself a JSON format, so it needs no format-specific serializer. The ADR-050
+D2 refusal documents cross the same boundary rather than calling `json.dumps`
+on a raw mapping: the JSON one moved to `report/not_comparable.py`, and the
+SARIF one renders `sarif.to_sarif_not_comparable`'s existing mapping through
+`render_mapping_as_json`. That helper, and its XML counterpart
+`render_element_as_xml`, are the one-step "freeze a completed report and
+render it" forms; they exist because the three-step spelling reads as
+ceremony, which is how a caller talks itself back into `json.dumps` and
+silently leaves the boundary — and because the debt-tracked renderers this
+phase touches are on a no-growth rule, so a new wrapper belongs in `report/`
+rather than in `sarif.py`/`junit_report.py`. JUnit needed one new primitive,
+`report/render_xml.py`: a `ReportDocument` stores JSON values only
 — deliberately, so a renderer is never handed a live object graph it could
 mutate — which an `ElementTree` is not, so `element_to_mapping`/
 `element_from_mapping` are its lossless `tag`/`attrib`/`text`/`tail`/
