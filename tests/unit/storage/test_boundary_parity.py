@@ -56,6 +56,7 @@ from abicheck.storage.identity import (
     ObservationKind,
     OccurrenceId,
     OccurrenceSet,
+    elf_symbol_occurrence,
 )
 from abicheck.storage.versioning import (
     ProducerIdentity,
@@ -857,3 +858,53 @@ class TestASurrogatePairCannotShareAnAddress:
     def test_canonical_json_still_distinguishes_them(self) -> None:
         """Which is why sharing an address was a disagreement, not a choice."""
         assert canonical_json({"k": self.PAIR}) != canonical_json({"k": self.SCALAR})
+
+
+class TestAnElfSymbolFlagIsABooleanNotATruthyValue:
+    """A coercion two lines from the key it defeats.
+
+    `elf_symbol_occurrence` encoded its two flags with `"1" if x else "0"`, so
+    an adapter passing a parsed `"false"` produced `"1"` — the occurrence
+    claimed the symbol was defined and default, took the same key as one built
+    with `True`, and `OccurrenceSet.add` discarded it as a duplicate (Codex
+    review). That is this module's one invariant — never drop an observation —
+    broken by a truthiness test, not by the set.
+    """
+
+    BASE = {"name": "foo", "artifact_id": "lib.so"}
+
+    @pytest.mark.parametrize(
+        "value", ["false", "true", "", 1, 0, None, [], {"k": 1}, 1.0]
+    )
+    @pytest.mark.parametrize("field", ["defined", "default_version"])
+    def test_a_non_boolean_flag_is_refused(self, field: str, value: Any) -> None:
+        """`1` and `0` are refused too: a flag is not a parsed int.
+
+        A caller holding an int has a value it has not finished parsing, and
+        the point of the guard is to make that visible rather than to guess.
+        """
+        assert _refused(lambda: elf_symbol_occurrence(**self.BASE, **{field: value}))
+
+    def test_the_string_false_no_longer_reads_as_true(self) -> None:
+        """The exact reported shape, stated as the collision it caused."""
+        with pytest.raises(TypeError):
+            elf_symbol_occurrence(**self.BASE, defined="false", default_version="false")
+
+    def test_real_flags_stay_distinct(self) -> None:
+        """Refusing the coercion must not blur the values it was hiding."""
+        cleared = elf_symbol_occurrence(
+            **self.BASE, defined=False, default_version=False
+        )
+        set_ = elf_symbol_occurrence(**self.BASE, defined=True, default_version=True)
+
+        assert cleared.key != set_.key
+        assert dict(cleared.attributes)["defined"] == "0"
+        assert dict(set_.attributes)["defined"] == "1"
+
+    def test_both_are_retained_by_the_set(self) -> None:
+        """The invariant the collision broke, asserted directly."""
+        occurrences = OccurrenceSet()
+        occurrences.add(elf_symbol_occurrence(**self.BASE, defined=False))
+        occurrences.add(elf_symbol_occurrence(**self.BASE, defined=True))
+
+        assert len(occurrences) == 2

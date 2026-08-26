@@ -718,6 +718,20 @@ def elf_symbol_occurrence(
     independent lifetimes, and a format that cannot say so cannot report the
     removal of one of them.
     """
+    # The two flags are validated rather than read for truthiness, because
+    # truthiness is what makes them lossy: an adapter passing a parsed
+    # `"false"` encoded it as `"1"`, so the occurrence claimed the symbol was
+    # defined and default, took the same key as one built with `True`, and
+    # `OccurrenceSet.add` then discarded it as a duplicate (Codex review) —
+    # this module's one invariant, defeated by a coercion two lines from the
+    # key that enforces it.
+    #
+    # `isinstance(x, bool)` also rejects `1`/`0`, which is deliberate: the
+    # attribute is a flag, and a caller with an int has a parsed value it has
+    # not finished parsing. Every string parameter is already checked by
+    # `EntityId`/`OccurrenceId` themselves.
+    _instance_of(default_version, bool, "default_version")
+    _instance_of(defined, bool, "defined")
     return OccurrenceId(
         entity=EntityId(
             kind=EntityKind.SYMBOL,
