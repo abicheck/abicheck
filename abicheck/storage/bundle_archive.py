@@ -19,38 +19,33 @@ A pure, format-only primitive: a zip file with one uncompressed
 ``manifest.json`` member plus one ``blobs/<sha256-hex>.json.zst`` member per
 *unique* content hash. Nothing here knows what a ``BundleFacts`` or an
 ``AbiSnapshot`` is -- callers hand this module raw bytes and a manifest
-``dict``, and get raw bytes back. That split is deliberate, not incidental:
-this module is `storage/`'s (ADR-061) content-addressed-container primitive,
-and keeping it free of any ``model``/``compare``-layer import means it joins
-`storage/` cleanly today, without first having to resolve the pre-existing
+``dict``, and get raw bytes back. That split is deliberate: keeping this
+module free of any ``model``/``compare``-layer import lets it join
+`storage/` (ADR-061) cleanly today, without resolving the pre-existing
 ``bundle_facts.py`` <-> ``checker_types.py`` (``model`` <-> ``compare``)
-coupling a naive "make ``storage/bundle_archive.py`` construct a
-``BundleFacts`` directly" design would immediately hit (confirmed by running
-``scripts/check_architecture.py`` against exactly that shape before writing
-this module: ``bundle_facts.py``'s own ``TYPE_CHECKING``-only import of
-``checker_types.DiffResult`` creates a real ``model -> compare -> model``
-cycle the moment ``bundle_facts.py`` joins the ``model`` layer -- a genuine,
-pre-existing coupling this module does not attempt to resolve).
+coupling a naive "construct a ``BundleFacts`` directly here" design would
+hit (confirmed via ``scripts/check_architecture.py``: ``bundle_facts.py``'s
+own ``TYPE_CHECKING``-only import of ``checker_types.DiffResult`` creates a
+real ``model -> compare -> model`` cycle the moment it joins the ``model``
+layer).
 
-The ``BundleFacts``-aware glue -- turning a real ``BundleFacts`` into the
-blobs/manifest shape this module writes, and back -- lives in
-``serialization.py``'s ``save_bundle_facts``/``load_bundle_facts``, exactly
-where that conversion already lives for the plain-JSON format. See the G40
-design plan, ``docs/contribute/plans/g40-content-addressed-bundle-archive.md``
-(added in PR #866, a separate branch -- merge that PR first if this file
-isn't present yet where you're reading this) for the full design.
+The ``BundleFacts``-aware glue lives in ``serialization.py``'s
+``save_bundle_facts``/``load_bundle_facts``, same as the plain-JSON format.
+See the G40 design plan,
+``docs/contribute/plans/g40-content-addressed-bundle-archive.md`` (added in
+PR #866, a separate branch -- merge that first if this file isn't present
+yet where you're reading this) for the full design.
 
 Zip, not tar (`.tar.zst`, the original review sketch's own naming): zip
 carries a real end-of-file central directory naming every member's offset
 and independently-compressed length, so `zipfile.ZipFile.open(name)` reads
 and decompresses exactly one member without touching any other -- the
 random-access property this format exists to provide. Each member's own
-*payload* is zstd-compressed independently (stored in the zip with
-``ZIP_STORED``, matching how ``snapshot_io.py`` already treats zstd as a
-payload transform independent of its outer container) rather than relying
-on zip's own built-in ``ZIP_DEFLATED``, since zstd is already this
-project's compression codec of record (ADR-059) and gives materially better
-ratios than deflate at comparable speed.
+*payload* is zstd-compressed independently (``ZIP_STORED``, matching how
+``snapshot_io.py`` already treats zstd as a payload transform independent
+of its outer container) rather than zip's own ``ZIP_DEFLATED``, since zstd
+is this project's compression codec of record (ADR-059) and gives
+materially better ratios than deflate at comparable speed.
 """
 
 from __future__ import annotations
@@ -159,14 +154,11 @@ def _deterministic_zipinfo(name: str) -> zipfile.ZipInfo:
     # A fixed, portable permission bit (rw-r--r--) rather than whatever
     # `ZipInfo`'s own platform-dependent default would otherwise stamp.
     info.external_attr = 0o644 << 16
-    # `ZipInfo.__init__` defaults `create_system` to the *host* platform
-    # (0 for Windows, 3 for Unix) and that value is itself serialized into
-    # the central directory -- identical facts archived on Windows vs.
-    # Linux/macOS CI would otherwise still produce different bytes and
-    # `stored_sha256` despite every other reproducibility-affecting field
-    # already being pinned (Codex review, fresh evidence). Pinned to 3
-    # (Unix) unconditionally, matching this project's actual CI/release
-    # platforms.
+    # `ZipInfo.__init__` defaults `create_system` to the *host* platform (0
+    # Windows, 3 Unix), serialized into the central directory -- identical
+    # facts on Windows vs. Linux/macOS CI would otherwise still differ in
+    # bytes and `stored_sha256`. Pinned to 3 (Unix) unconditionally,
+    # matching this project's actual CI/release platforms.
     info.create_system = 3
     return info
 
@@ -428,23 +420,20 @@ class BundleArchiveWriter:
             self._existing_gid = existing_stat.st_gid
         self._target.parent.mkdir(parents=True, exist_ok=True)
         # tempfile.mkstemp (not a predictable "<name>.tmp-<pid>-<id>" path
-        # opened separately by zipfile.ZipFile itself) -- Codex review,
-        # fresh evidence: a predictable temp filename in a directory
-        # writable by another account can be pre-created as a symlink,
-        # and `ZipFile(path, mode="w")`'s own `open(path, "w+b")` follows
-        # a symlink and truncates whatever it points at. mkstemp both
-        # randomizes the name and opens it itself with O_CREAT|O_EXCL
-        # (refusing to follow or replace a pre-existing entry, symlink or
-        # otherwise), so the fd this class holds is guaranteed to name a
-        # file *we* just created, not one an attacker planted.
+        # opened separately by zipfile.ZipFile itself) -- a predictable temp
+        # name in a directory writable by another account could be
+        # pre-created as a symlink, and `ZipFile(path, mode="w")` follows
+        # symlinks. mkstemp randomizes the name and opens it with
+        # O_CREAT|O_EXCL, so the fd this class holds always names a file we
+        # just created.
         tmp_fd, tmp_name = tempfile.mkstemp(
             dir=self._target.parent, prefix=f".{self._target.name}.", suffix=".tmp"
         )
         self._tmp_path = Path(tmp_name)
         self._tmp_file = os.fdopen(tmp_fd, "wb")
         # A file object, not a path, is passed here deliberately -- see
-        # above; `ZipFile` does not close a fileobj it didn't open itself,
-        # so close()/_abort() below own closing `self._tmp_file`.
+        # above; ZipFile doesn't close a fileobj it didn't open itself, so
+        # close()/_abort() below own closing self._tmp_file.
         self._zf = zipfile.ZipFile(self._tmp_file, mode="w", compression=zipfile.ZIP_STORED)
         self._written_hashes: set[str] = set()
         self._manifest_written = False
@@ -528,6 +517,16 @@ class BundleArchiveWriter:
                 )
             if self._existing_mode is not None:
                 os.chmod(self._tmp_path, self._existing_mode)
+            else:
+                # mkstemp() always creates its file at mode 0600 regardless
+                # of umask (Codex review): for a brand-new archive, leaving
+                # that in place publishes more restrictively than a normal
+                # `open(..., "wb")` would, silently breaking shared-baseline
+                # read access on a format switch. os.umask() has no "peek"
+                # mode, so read-then-immediately-restore is the only way.
+                current_umask = os.umask(0)
+                os.umask(current_umask)
+                os.chmod(self._tmp_path, 0o666 & ~current_umask)
             # Re-sync after chown/chmod, before replace (Codex review,
             # fresh evidence): the earlier fsync only guarantees the
             # *file content* reached storage -- chown/chmod mutate the
@@ -552,14 +551,11 @@ class BundleArchiveWriter:
                 self._tmp_file.close()
             self._tmp_path.unlink(missing_ok=True)
             raise
-        # os.replace()'s directory-entry update is not itself durable
-        # across a crash until the *parent* directory is fsync'd too --
-        # the file-content fsync above only guarantees the new data
-        # reached storage, not that the rename pointing at it survives a
-        # power loss (mirrors snapshot_io._atomic_write_bytes's identical
-        # parent-directory fsync, including its narrow best-effort
-        # unsupported-filesystem carve-out). Never runs on a platform with
-        # no O_DIRECTORY concept (Windows).
+        # os.replace()'s directory-entry update isn't durable across a
+        # crash until the *parent* dir is fsync'd too (mirrors
+        # snapshot_io._atomic_write_bytes's identical parent-directory
+        # fsync, same best-effort unsupported-filesystem carve-out). Never
+        # runs where there's no O_DIRECTORY concept (Windows).
         if hasattr(os, "O_DIRECTORY"):
             dir_fd = os.open(self._target.parent, os.O_RDONLY | os.O_DIRECTORY)
             try:
@@ -571,15 +567,11 @@ class BundleArchiveWriter:
                 os.close(dir_fd)
 
     def _fsync_tmp_file(self) -> None:
-        """Flush this class's own userspace write buffer and fsync the
-        result -- `self._zf.close()` writes the central directory through
-        `self._tmp_file`'s own buffered wrapper (from `os.fdopen`), so a
-        bare `os.fsync(fd)` without first flushing that buffer would only
-        durability-guarantee whatever had already reached the kernel,
-        silently skipping anything still sitting in the Python-level
-        buffer. Best-effort only for "this filesystem/platform doesn't
-        support fsync" (EINVAL/ENOTSUP/EOPNOTSUPP); a real storage
-        failure propagates."""
+        """Flush this class's userspace write buffer and fsync the result --
+        a bare `os.fsync(fd)` without first flushing `self._tmp_file`'s
+        buffered wrapper (`os.fdopen`) would skip whatever's still sitting
+        in the Python-level buffer. Best-effort only for "no fsync support"
+        (EINVAL/ENOTSUP/EOPNOTSUPP); a real storage failure propagates."""
         self._tmp_file.flush()
         try:
             os.fsync(self._tmp_file.fileno())
@@ -645,20 +637,17 @@ class BundleArchiveReader:
 
         Every member `BundleArchiveWriter` produces is `ZIP_STORED`
         deliberately (see the module docstring's "Zip, not tar" section) --
-        so a member's own stored size is exactly its (already
-        zstd-compressed, for a blob) payload size, with no zip-level
-        amplification. A crafted archive using `ZIP_DEFLATED` for a member
-        could otherwise expand to an arbitrary in-memory allocation via
-        ``ZipExtFile.read()`` *before* `read_blob`'s own zstd decoded-size
-        guard ever runs. Rejecting deflate alone is not itself a size bound,
-        though: a still-`ZIP_STORED` member can simply claim (and actually
-        contain) an enormous size, exhausting memory on the read itself
-        before any downstream guard runs -- checked first via the cheap
-        ``ZipInfo.file_size`` metadata (a fast pre-read rejection for the
-        common case), and enforced for real via a bounded, chunked read
-        rather than one unbounded ``f.read()`` (in case that metadata were
-        ever spoofed relative to the member's actual stored bytes). Checked
-        here, once, for both `read_manifest` and `read_blob`.
+        so a member's stored size is exactly its (already zstd-compressed,
+        for a blob) payload size, no zip-level amplification. A crafted
+        `ZIP_DEFLATED` member could otherwise expand to an arbitrary
+        in-memory allocation via ``ZipExtFile.read()`` before `read_blob`'s
+        own zstd decoded-size guard runs. Rejecting deflate alone isn't a
+        size bound though: a still-`ZIP_STORED` member can simply claim
+        (and contain) an enormous size -- checked first via the cheap
+        ``ZipInfo.file_size`` metadata, enforced for real via a bounded,
+        chunked read rather than one unbounded ``f.read()`` (in case that
+        metadata were spoofed). Checked here, once, for both
+        `read_manifest` and `read_blob`.
         """
         info = self._zf.getinfo(name)
         if info.compress_type != zipfile.ZIP_STORED:
@@ -676,19 +665,29 @@ class BundleArchiveReader:
                 "member)."
             )
         out = io.BytesIO()
-        with self._zf.open(name) as f:
-            while True:
-                chunk = f.read(1024 * 1024)
-                if not chunk:
-                    break
-                out.write(chunk)
-                if out.tell() > max_bytes:
-                    raise SnapshotError(
-                        f"{self._path}: member {name!r} exceeds the "
-                        f"{max_bytes} byte safety limit while streaming -- "
-                        "refusing to continue reading (its declared "
-                        "file_size did not match its actual stored bytes)."
-                    )
+        try:
+            with self._zf.open(name) as f:
+                while True:
+                    chunk = f.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    out.write(chunk)
+                    if out.tell() > max_bytes:
+                        raise SnapshotError(
+                            f"{self._path}: member {name!r} exceeds the "
+                            f"{max_bytes} byte safety limit while streaming -- "
+                            "refusing to continue reading (its declared "
+                            "file_size did not match its actual stored bytes)."
+                        )
+        except zipfile.BadZipFile as exc:
+            # ZipExtFile validates the member's CRC-32 as it's consumed,
+            # raising BadZipFile (typically at the `with` block's own close)
+            # on a mismatch -- otherwise a raw zipfile exception escaping
+            # this module's "every failure raises SnapshotError" contract.
+            raise SnapshotError(
+                f"{self._path}: member {name!r} failed its CRC-32 check -- "
+                "the archive is corrupted or was tampered with."
+            ) from exc
         return out.getvalue()
 
     def read_manifest(self) -> dict[str, Any]:

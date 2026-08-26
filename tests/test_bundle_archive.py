@@ -621,6 +621,50 @@ class TestBundleArchiveReaderWrapsThirdPartyExceptions:
             with pytest.raises(SnapshotError, match="failed to decompress"):
                 reader.read_blob(h)
 
+    def test_a_crc_mismatched_member_raises_snapshot_error(self, tmp_path: Path) -> None:
+        """Codex review: ZipExtFile validates a ZIP_STORED member's CRC-32
+        as it is consumed, raising a raw zipfile.BadZipFile on mismatch --
+        that must be wrapped as SnapshotError like every other deliberate
+        failure in this module, not leak as a third-party exception."""
+        import struct
+
+        path = tmp_path / "bundle.archive.zip"
+        with BundleArchiveWriter(path) as writer:
+            h = writer.put_blob(b'{"a": 1}')
+            writer.write_manifest({"library_blobs": {"a.so": h}})
+
+        member = f"blobs/{h}.json.zst"
+        with zipfile.ZipFile(path) as zf:
+            info = zf.getinfo(member)
+            offset = info.header_offset
+
+        raw = bytearray(path.read_bytes())
+        # Local file header is a fixed 30 bytes, then the filename, then
+        # any extra field -- corrupt one byte of the *stored data* that
+        # follows without touching the header's own CRC-32 field, so the
+        # header's recorded CRC no longer matches the (now-different)
+        # bytes it is checked against on read.
+        (
+            _sig,
+            _ver,
+            _flags,
+            _comp,
+            _mtime,
+            _mdate,
+            _crc,
+            _csize,
+            _usize,
+            fname_len,
+            extra_len,
+        ) = struct.unpack_from("<4sHHHHHLLLHH", raw, offset)
+        data_start = offset + 30 + fname_len + extra_len
+        raw[data_start] ^= 0xFF
+        path.write_bytes(bytes(raw))
+
+        with BundleArchiveReader.open(path) as reader:
+            with pytest.raises(SnapshotError, match="CRC-32"):
+                reader.read_blob(h)
+
 
 class TestBundleArchiveCentralDirectoryGuard:
     """Codex review: zipfile.ZipFile(...) eagerly parses the whole central
@@ -927,3 +971,68 @@ class TestBundleArchiveDeterministicCreateSystem:
         with zipfile.ZipFile(path) as zf:
             for info in zf.infolist():
                 assert info.create_system == 3
+
+
+class TestBundleArchiveWriterNewArchivePermissions:
+    """Codex review, fresh evidence: tempfile.mkstemp() always creates its
+    file at mode 0600 regardless of the process umask -- a brand-new
+    archive (no pre-existing destination whose mode to preserve) must not
+    silently publish more restrictively than a normal `open(..., "wb")`
+    would under the same umask."""
+
+    @pytest.mark.skipif(
+        sys.platform == "win32", reason="POSIX permission bits are not meaningful on Windows"
+    )
+    def test_a_new_archive_gets_umask_appropriate_permissions(
+        self, tmp_path: Path
+    ) -> None:
+        path = tmp_path / "bundle.archive.zip"
+        old_umask = os.umask(0o022)
+        try:
+            with BundleArchiveWriter(path) as writer:
+                h = writer.put_blob(b'{"a": 1}')
+                writer.write_manifest({"library_blobs": {"a.so": h}})
+        finally:
+            os.umask(old_umask)
+
+        assert stat.S_IMODE(path.stat().st_mode) == 0o644
+
+    @pytest.mark.skipif(
+        sys.platform == "win32", reason="POSIX permission bits are not meaningful on Windows"
+    )
+    def test_a_new_archive_honors_a_stricter_umask(self, tmp_path: Path) -> None:
+        path = tmp_path / "bundle.archive.zip"
+        old_umask = os.umask(0o077)
+        try:
+            with BundleArchiveWriter(path) as writer:
+                h = writer.put_blob(b'{"a": 1}')
+                writer.write_manifest({"library_blobs": {"a.so": h}})
+        finally:
+            os.umask(old_umask)
+
+        assert stat.S_IMODE(path.stat().st_mode) == 0o600
+
+    @pytest.mark.skipif(
+        sys.platform == "win32", reason="POSIX permission bits are not meaningful on Windows"
+    )
+    def test_overwriting_an_existing_archive_still_preserves_its_mode(
+        self, tmp_path: Path
+    ) -> None:
+        """The umask-based default only applies when there is no
+        pre-existing destination -- overwriting one must still preserve
+        its own mode exactly, unaffected by whatever the umask is."""
+        path = tmp_path / "bundle.archive.zip"
+        with BundleArchiveWriter(path) as writer:
+            h = writer.put_blob(b'{"a": 1}')
+            writer.write_manifest({"library_blobs": {"a.so": h}})
+        os.chmod(path, 0o640)
+
+        old_umask = os.umask(0o022)
+        try:
+            with BundleArchiveWriter(path) as writer:
+                h = writer.put_blob(b'{"a": 2}')
+                writer.write_manifest({"library_blobs": {"b.so": h}})
+        finally:
+            os.umask(old_umask)
+
+        assert stat.S_IMODE(path.stat().st_mode) == 0o640
