@@ -89,10 +89,13 @@ DEFAULT_MAX_MANIFEST_BYTES = 64 * 1024 * 1024
 #: fresh evidence). Same default as `bundle_facts.py`'s per-blob budget.
 DEFAULT_MAX_MANIFEST_JSON_CONTAINER_NODES = DEFAULT_MAX_JSON_CONTAINER_NODES
 
-#: Slack for the *outer*, still-compressed blob member read -- zstd
-#: overhead can inflate an incompressible payload; the decoded running-
-#: total check below still catches a real bomb.
-_ZSTD_FRAME_OVERHEAD_SLACK_BYTES = 1024 * 1024
+#: Independent ceiling on a blob member's *stored* (still-compressed) size --
+#: NOT derived from `max_decoded_bytes` (mirrors `snapshot_io.py`'s own
+#: `DEFAULT_MAX_STORED_BYTES`/reasoning: a low `max_decoded_bytes` budget
+#: must not reject a valid blob carrying several MiB of leading zstd
+#: skippable-frame metadata ahead of a tiny real frame -- the bomb defense
+#: is the incremental decoded-size check below, not this stored precheck).
+DEFAULT_MAX_STORED_BLOB_BYTES = 2 * 1024 * 1024 * 1024
 
 
 def _zstd_module() -> Any:
@@ -728,15 +731,12 @@ class BundleArchiveReader:
         Streams the decompression in bounded chunks against
         *max_decoded_bytes* (a bare ``ZstdDecompressor.decompress(data)``
         call would allocate the full output regardless). Re-hashes the
-        decoded payload against *content_hash_hex*. The outer,
-        still-compressed read is bounded by *max_decoded_bytes* plus a
-        fixed slack margin, with the decoded running total the tight
-        bound."""
+        decoded payload against *content_hash_hex*. The outer, still-
+        compressed read is bounded by `DEFAULT_MAX_STORED_BLOB_BYTES`
+        (independent of *max_decoded_bytes* -- see its own docstring)."""
         member = _blob_member_name(content_hash_hex)
         try:
-            compressed = self._read_stored_member(
-                member, max_bytes=max_decoded_bytes + _ZSTD_FRAME_OVERHEAD_SLACK_BYTES
-            )
+            compressed = self._read_stored_member(member, max_bytes=DEFAULT_MAX_STORED_BLOB_BYTES)
         except KeyError as exc:
             raise SnapshotError(
                 f"{self._path}: manifest references blob {content_hash_hex!r} "
