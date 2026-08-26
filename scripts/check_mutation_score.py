@@ -828,6 +828,16 @@ def main(argv: list[str] | None = None) -> int:
     scope_modules: set[str] = set()
     if (
         args.run
+        # _gather() checks --results-file *before* --run and returns those
+        # saved results unconditionally when both are given (a pre-existing
+        # quirk, unchanged here) — so --run alone does not mean mutmut is
+        # about to be re-executed. Scoping (and the scope-aware unresolved
+        # gate below, which depends on it) must not activate over a saved
+        # results file: nothing there is guaranteed to reflect a scoped run,
+        # and treating its out-of-scope "not checked"/timeout/etc. records as
+        # exempt could mask a real gap in what was actually measured (Codex
+        # review).
+        and not args.results_file
         and args.diff_scoped
         and args.scope_run_to_diff
         and not args.require_baseline

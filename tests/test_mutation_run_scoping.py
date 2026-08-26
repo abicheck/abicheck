@@ -347,3 +347,48 @@ def test_receipt_records_run_scope(
     assert doc["run_scope"]["mode"] == "diff"
     assert doc["run_scope"]["modules"] == ["abicheck/diff_types.py"]
     assert doc["run_scope"]["requested"] is True
+
+
+def test_scoping_never_applies_over_a_saved_results_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`--run --results-file ... --diff-scoped --scope-run-to-diff`: `_gather()`
+    checks `--results-file` before `--run` and returns those saved results
+    unconditionally (a pre-existing quirk, unrelated to this feature) — so
+    `--run` being set does not mean mutmut is about to be re-executed
+    scoped. Nothing here proves the saved file reflects a scoped run, so an
+    out-of-scope unresolved record in it must still fail the gate exactly as
+    it would without --scope-run-to-diff (Codex review, PR #877)."""
+    (tmp_path / "abicheck").mkdir()
+    (tmp_path / "abicheck" / "diff_types.py").write_text(_SOURCE, encoding="utf-8")
+    _pyproject_with_only_mutate(
+        tmp_path, ["abicheck/diff_types.py", "abicheck/diff_symbols.py"]
+    )
+    monkeypatch.setattr(gate, "REPO_ROOT", tmp_path)
+    diff = _write(tmp_path, "d.diff", _DIFF)
+    results = _write(
+        tmp_path,
+        "r.txt",
+        "    abicheck.diff_types.x_alpha__mutmut_1: killed\n"
+        # Out of scope (diff_symbols.py, never touched by this diff) *and*
+        # genuinely unresolved — must not be exempted just because
+        # --scope-run-to-diff was passed.
+        "    abicheck.diff_symbols.x_beta__mutmut_1: timeout\n",
+    )
+    monkeypatch.setattr(
+        gate,
+        "load_cicd_stats",
+        lambda _dir: {"total": 2, "survived": 0, "killed": 1, "timeout": 1},
+    )
+    rc = gate.main(
+        [
+            "--run",
+            "--results-file",
+            results,
+            "--diff-scoped",
+            "--scope-run-to-diff",
+            "--diff-file",
+            diff,
+        ]
+    )
+    assert rc == 1
