@@ -221,6 +221,7 @@ bytes/objects actually loaded.
 | Module | Contract |
 |---|---|
 | `abicheck/storage/availability.py` | `FactStatus`, `Confidence`, `FactAvailability`, `AvailabilityLedger` (A0.1) |
+| `abicheck/storage/fact_availability.py` | `FactAvailability` — internal record leaf, re-exported by `availability.py` |
 | `abicheck/storage/availability_status.py` | `FactStatus`, `Confidence`, `COMPARABLE_STATUSES`, `GAP_STATUSES`, `ASSERTS_NO_PRODUCER`, `STATUS_ORDER`, `CONFIDENCE_ORDER`, `worse_status`, `worse_confidence` — internal vocabulary leaf, re-exported by `availability.py` only for `FactStatus`/`Confidence` |
 | `abicheck/storage/identity.py` | `EntityKind`, `ObservationKind`, `EntityId`, `OccurrenceId`, `OccurrenceSet`, `IdentityConflict`, `elf_symbol_occurrence` (A0.2/A0.3) |
 | `abicheck/storage/entity_ids.py` | `EntityId`, `EntityKind`, `ObservationKind`, `OccurrenceId`, `elf_symbol_occurrence` — internal identifier leaf, re-exported in full by `identity.py` |
@@ -274,6 +275,7 @@ user-facing, and it registers:
     canonical_page: reference/project-snapshot-format.md
     fact_sources:
       - abicheck/storage/availability.py
+      - abicheck/storage/fact_availability.py
       - abicheck/storage/availability_status.py
       - abicheck/storage/identity.py
       - abicheck/storage/entity_ids.py

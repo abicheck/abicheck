@@ -842,13 +842,18 @@ class TestNotApplicableIsNotAGap:
         future status added to neither set is neither usable evidence nor a
         reported gap, which must be a deliberate choice rather than a default.
         """
-        from abicheck.storage.availability import (
-            _COMPARABLE_STATUSES,
-            _GAP_STATUSES as gaps,
+        # Imported from `availability_status`, which owns them, rather than
+        # through `availability`'s alias: the module split made that alias
+        # unused there, and importing a name through a module that merely
+        # re-exports it is how a test ends up pinned to a forwarding detail
+        # instead of to the rule.
+        from abicheck.storage.availability_status import (
+            COMPARABLE_STATUSES,
+            GAP_STATUSES as gaps,
         )
 
-        assert not (_COMPARABLE_STATUSES & gaps)
-        assert set(FactStatus) - _COMPARABLE_STATUSES - gaps == {
+        assert not (COMPARABLE_STATUSES & gaps)
+        assert set(FactStatus) - COMPARABLE_STATUSES - gaps == {
             FactStatus.NOT_APPLICABLE
         }
 

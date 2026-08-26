@@ -58,6 +58,7 @@ _INTERNAL_MODULES = (
     "abicheck.storage.guards",
     "abicheck.storage.availability_status",
     "abicheck.storage.entity_ids",
+    "abicheck.storage.fact_availability",
 )
 
 
