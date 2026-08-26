@@ -227,6 +227,10 @@ module = [
     "abicheck.buildsource.project_targets",
     "abicheck.buildsource.toolchain_bindings",
     "abicheck.cli_compare_receipt",
+    # ADR-061 Phase 4 moved this out of the flat root into `workflows/`; the
+    # override did not follow it, so `mypy abicheck/` reports one error on a
+    # clean `main` in any environment where the stubs are not visible.
+    "abicheck.workflows.scan_config",
 ]
 disable_error_code = ["import-untyped"]
 
