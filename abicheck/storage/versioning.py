@@ -123,6 +123,31 @@ def _stated_count(raw: object) -> int:
     return value if value > 0 else 0
 
 
+def _stated_text(raw: object) -> str:
+    """An informational *text* field, or ``""`` if it is not one.
+
+    The text counterpart of :func:`_stated_count`, and it was `str()` at both
+    doors until a review round showed what that buys (Codex review):
+
+    * ``producer.name: null`` became the literal producer name ``"None"`` — a
+      fabricated identity, persisted by ``to_dict`` and indistinguishable
+      from a producer that really is called that;
+    * a mapping became its **insertion-ordered** ``repr``, so
+      ``{"a": 1, "b": 2}`` and ``{"b": 2, "a": 1}`` — the same document to
+      any reader — produced different field values, different documents, and
+      therefore **different semantic digests**. In a content-addressed store
+      that is the one failure mode the canonical form exists to rule out, and
+      it arrived through a field nothing about it looked dangerous.
+
+    Degrading rather than rejecting keeps this module's informational
+    contract: no decision reads these, and a malformed one must not abort a
+    load. Degrading to *empty* rather than to a stringification is what makes
+    the degrade honest — "not stated" instead of a value invented from the
+    shape of the input.
+    """
+    return raw if isinstance(raw, str) else ""
+
+
 @dataclass(frozen=True)
 class ProducerIdentity:
     """What emitted a set of facts.
@@ -151,8 +176,7 @@ class ProducerIdentity:
         """
         out: dict[str, Any] = {}
         for field_name in ("name", "version", "binary_digest"):
-            raw = getattr(self, field_name)
-            text = str(raw) if raw else ""
+            text = _stated_text(getattr(self, field_name))
             if text:
                 out[field_name] = text
         return out
@@ -163,9 +187,9 @@ class ProducerIdentity:
             # A scalar where an object belongs is malformed, not fatal.
             return cls()
         return cls(
-            name=str(data.get("name", "")),
-            version=str(data.get("version", "")),
-            binary_digest=str(data.get("binary_digest", "")),
+            name=_stated_text(data.get("name")),
+            version=_stated_text(data.get("version")),
+            binary_digest=_stated_text(data.get("binary_digest")),
         )
 
 
@@ -270,7 +294,7 @@ class StorageVersions:
         # informational-axis exception; the truthiness test is applied to the
         # *normalized* value, so a field that reads back as absent is written
         # as absent instead of as an unreadable value.
-        recipe = str(self.normalization_recipe) if self.normalization_recipe else ""
+        recipe = _stated_text(self.normalization_recipe)
         if recipe:
             out["normalization_recipe"] = recipe
         producer = self.producer.to_dict()
@@ -283,11 +307,7 @@ class StorageVersions:
         source_schema = _stated_count(self.source_schema_version)
         if source_schema:
             out["source_schema_version"] = source_schema
-        source_generation = (
-            str(self.source_producer_generation)
-            if self.source_producer_generation
-            else ""
-        )
+        source_generation = _stated_text(self.source_producer_generation)
         if source_generation:
             out["source_producer_generation"] = source_generation
         return out
@@ -335,7 +355,7 @@ class StorageVersions:
                 if isinstance(data.get("section_schema_versions"), Mapping)
                 else {}
             ),
-            normalization_recipe=str(data.get("normalization_recipe", "")),
+            normalization_recipe=_stated_text(data.get("normalization_recipe")),
             producer=ProducerIdentity.from_dict(data.get("producer", {})),
             extractor_generation=_stated_count(data.get("extractor_generation")),
             resolver_generation=_stated_count(data.get("resolver_generation")),
@@ -352,7 +372,9 @@ class StorageVersions:
                 data.get("comparison_contract_version", UNSTATED_VERSION)
             ),
             source_schema_version=_stated_count(data.get("source_schema_version")),
-            source_producer_generation=str(data.get("source_producer_generation", "")),
+            source_producer_generation=_stated_text(
+                data.get("source_producer_generation")
+            ),
         )
 
 

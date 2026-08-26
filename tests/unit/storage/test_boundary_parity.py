@@ -45,6 +45,7 @@ from abicheck.storage.availability import (
     FactAvailability,
     FactStatus,
 )
+from abicheck.storage.canonical import semantic_digest
 from abicheck.storage.identity import (
     EntityId,
     EntityKind,
@@ -458,7 +459,18 @@ _ROUND_TRIP_CASES: list[tuple[str, Callable[[Any], Any], Any]] = [
 
 #: Values a *directly constructed* informational field can legitimately hold
 #: while still being odd enough to serialize differently from how it reads.
-ODD_INFORMATIONAL_VALUES: list[Any] = [1, 1.5, True, "1", "x", ["x"], 0, ""]
+ODD_INFORMATIONAL_VALUES: list[Any] = [
+    1,
+    1.5,
+    True,
+    "1",
+    "x",
+    ["x"],
+    0,
+    "",
+    None,
+    {"a": 1, "b": 2},
+]
 
 
 @pytest.mark.parametrize("value", ODD_INFORMATIONAL_VALUES)
@@ -546,3 +558,79 @@ def test_every_record_sequence_refuses_a_non_record(value: Any) -> None:
 def test_a_conflicts_occurrence_container_is_a_sequence(value: Any) -> None:
     """A bare string is a `Sequence`, so it needs its own refusal."""
     assert _refused(lambda: IdentityConflict(reason="r", occurrences=value))
+
+
+class TestAnInformationalTextFieldDegradesRatherThanFabricates:
+    """`str()` at a text door invents a value out of the shape of the input.
+
+    Both doors of every informational text field used it, which produced two
+    distinct defects from one line (Codex review): `null` became the literal
+    producer name `"None"` — persisted, and indistinguishable from a producer
+    that really is called that — and a mapping became its *insertion-ordered*
+    `repr`, so two spellings of the same document produced different values.
+
+    Degrading rather than rejecting is this module's informational contract.
+    Degrading to **empty** rather than to a stringification is what makes the
+    degrade honest: "not stated", instead of a value invented from the shape
+    of the input.
+    """
+
+    @pytest.mark.parametrize("value", [None, 1, 1.5, True, ["x"], {"k": 1}, b"b"])
+    @pytest.mark.parametrize(
+        ("build", "read"),
+        [
+            (lambda v: ProducerIdentity.from_dict({"name": v}), lambda o: o.name),
+            (lambda v: ProducerIdentity.from_dict({"version": v}), lambda o: o.version),
+            (
+                lambda v: ProducerIdentity.from_dict({"binary_digest": v}),
+                lambda o: o.binary_digest,
+            ),
+            (
+                lambda v: StorageVersions.from_dict({"normalization_recipe": v}),
+                lambda o: o.normalization_recipe,
+            ),
+            (
+                lambda v: StorageVersions.from_dict({"source_producer_generation": v}),
+                lambda o: o.source_producer_generation,
+            ),
+        ],
+    )
+    def test_a_non_string_reads_as_unstated(
+        self,
+        build: Callable[[Any], Any],
+        read: Callable[[Any], str],
+        value: Any,
+    ) -> None:
+        assert read(build(value)) == ""
+
+    def test_a_real_string_is_untouched(self) -> None:
+        """Degrading the invalid case must not disturb the valid one."""
+        producer = ProducerIdentity.from_dict(
+            {"name": "castxml", "version": "0.7.0", "binary_digest": "abc"}
+        )
+
+        assert (producer.name, producer.version, producer.binary_digest) == (
+            "castxml",
+            "0.7.0",
+            "abc",
+        )
+
+    def test_two_spellings_of_one_mapping_do_not_change_the_digest(self) -> None:
+        """The half that matters most for a content-addressed store.
+
+        A mapping stringified through `repr` carries its insertion order, so
+        two documents a reader cannot tell apart addressed differently — the
+        exact failure the canonical form exists to rule out, arriving through
+        a field that looks like plain metadata.
+        """
+        left = ProducerIdentity.from_dict({"name": {"a": 1, "b": 2}})
+        right = ProducerIdentity.from_dict({"name": {"b": 2, "a": 1}})
+
+        assert left == right
+        assert semantic_digest(left.to_dict()) == semantic_digest(right.to_dict())
+
+    def test_a_fabricated_identity_is_never_persisted(self) -> None:
+        """`null` must not round-trip into a producer literally named "None"."""
+        emitted = ProducerIdentity.from_dict({"name": None}).to_dict()
+
+        assert "name" not in emitted
