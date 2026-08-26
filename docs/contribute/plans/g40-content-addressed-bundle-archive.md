@@ -7,7 +7,28 @@ generated: false
 
 # G40 — Content-addressed bundle archive format
 
-**Status:** Proposed; not started.
+**Status:** Substantially implemented (PR #869) —
+`abicheck/storage/bundle_archive.py` (`BundleArchiveWriter`/
+`BundleArchiveReader`), `abicheck/storage/bundle_archive_cd_guard.py`,
+`abicheck/storage/bundle_archive_json_guard.py`, and
+`abicheck/bundle_facts.py`'s `write_bundle_facts_archive()`/
+`read_bundle_facts_archive()` ship the design below on the
+`claude/g40-bundle-archive-impl` branch, verified against several rounds
+of review (the "Codex review, fresh evidence, verified against the real
+implementation in PR #869" annotations throughout this document, added as
+the implementation and this plan were revised together). This document now
+also serves as a retrospective design record for that implementation, not
+only a forward-looking proposal — where a section still reads as
+prescriptive ("must", "should"), that reflects a requirement the shipped
+code satisfies, not a requirement still pending. The one still-open item
+identified during that work is the manifest-integrity gap in Phase 2 below
+(no reader-side binding on `manifest.json` itself), left as an explicit,
+documented known limitation rather than blocking the rest of the design —
+see that section for what closing it would need. Historical framing below
+("the container format decision", "Phase 0", "Phase 1", etc.) is
+unchanged; treat "the writer"/"the reader" language throughout as
+describing the shipped `BundleArchiveWriter`/`BundleArchiveReader`, not a
+still-hypothetical design.
 
 **Routing note (ADR-061):** this plan's implementation targets are qualified
 against the root `AGENTS.md`'s "Task routing and dependency direction"
@@ -114,13 +135,26 @@ decompresses exactly one member without touching any other — which is
 acceptance criterion (a) directly, using a well-understood standard library
 module rather than hand-rolling seek logic over a zstd frame boundary. Each
 member is stored zstd-compressed *individually* (Python 3.14's stdlib
-`zipfile` gains native Zstandard support; until this project's floor
-(3.10+, per `AGENTS.md`) allows relying on that unconditionally, member
-payloads are zstd-compressed bytes stored with zip's own `ZIP_STORED`
-method, mirroring how `snapshot_io.py` already treats zstd as a payload
-transform independent of the outer container rather than delegating framing
-to a library-specific codec) — so per-member random access and per-member
-compression both hold, unlike a single whole-archive zstd frame.
+`zipfile` gains native Zstandard support; until this project's own minimum
+supported Python version — `pyproject.toml`'s `requires-python`, per
+`AGENTS.md`, which is the one fact owner for that number — allows relying
+on that unconditionally, member payloads are zstd-compressed bytes stored
+with zip's own `ZIP_STORED` method, mirroring how `snapshot_io.py` already
+treats zstd as a payload transform independent of the outer container
+rather than delegating framing to a library-specific codec) — so
+per-member random access and per-member compression both hold, unlike a
+single whole-archive zstd frame. **The dependency contract this rests on,
+made explicit rather than left implicit:** `zstandard` (already a core,
+non-optional dependency per `pyproject.toml`'s `zstandard>=0.21` pin, the
+same package `snapshot_io.py` already depends on) supplies
+`zstandard.ZstdCompressor`/`zstandard.ZstdDecompressor` for compressing and
+decompressing each member's payload bytes; those bytes are then written
+into the zip archive using zip's `ZIP_STORED` method — not zip's own
+`ZIP_ZSTANDARD` compression method constant (`zipfile.ZIP_ZSTANDARD`,
+Python 3.14+) — so there is no zip-extension version guard to write: the
+compression happens entirely at the payload-bytes layer, before the zip
+container ever sees them, and the container itself just stores whatever
+bytes it's given.
 
 ### Phase 1 — content-addressed store, whole-snapshot granularity (M)
 
@@ -205,6 +239,44 @@ with no error. The reader **must** recompute the decompressed payload's
 hash and reject a mismatch before returning it — part of Phase 2's
 acceptance criteria, with a dedicated corruption test in Phase 2's own
 test list below.
+
+**Known limitation: `manifest.json` itself has no integrity binding a
+reader checks (Codex review) — the per-blob hash check above protects each
+*blob* against the manifest naming the wrong one, but nothing protects the
+manifest's own content.** A tampered `manifest.json` — still valid JSON,
+still naming real (or attacker-supplied) blob hashes — could redirect
+`library_blobs` to point a library at a different, still-hash-valid blob,
+or silently rewrite `variant_fingerprint`/aliases/filenames, and every
+check this format defines would still pass: each blob's bytes genuinely
+match the hash the (tampered) manifest asks for, so the mismatch is
+invisible to `BundleArchiveReader.read_blob()`'s own verification. The one
+mechanism this format provides toward closing this is write-time only:
+`BundleArchiveWriter.stored_sha256`/`stored_size_bytes` (computed over the
+*entire* published archive file — `manifest.json` included, not just the
+blob store) are returned to the writer's caller
+(`write_bundle_facts_archive()`'s own result), so a caller that persists
+that digest in an external, independently-trusted channel (a release's own
+publish manifest, a signed provenance record) can bind the whole archive
+— manifest and all — to that record. But `BundleArchiveReader`/
+`read_bundle_facts_archive()` accept **no** expected-digest parameter of
+their own, so nothing in this format's *read* path enforces that binding
+— a reader that opens an archive without independently re-checking
+`stored_sha256` against some other trusted value has no protection against
+this class of tampering. Closing this for real needs one of two follow-ups,
+neither attempted by this plan: (a) an optional `expected_sha256` parameter
+on `BundleArchiveReader.open()`/`read_bundle_facts_archive()`, so a caller
+that already has a trusted digest (from a publish manifest, a signature) can
+ask the reader to enforce it before returning anything; or (b) each
+`library_blobs`/`manifest_blob` reference itself carrying a second,
+manifest-external integrity anchor is not really possible without
+restructuring what "the manifest" means, so (a) is the more natural fit.
+Until either lands, a consumer of this format who needs tamper-evidence on
+`manifest.json` itself must arrange whole-file digest verification outside
+this module — this format's own reader offers none. A regression test
+belongs alongside whichever of (a)/(b) actually lands (rewrite
+`manifest.json` while keeping the surrounding zip and blob content
+otherwise valid, and confirm the reader rejects it) — not added here, since
+there is no enforcement mechanism yet for it to exercise.
 
 `manifest_blob` is `None` exactly when `BundleFacts.manifest is None` (no
 instantiation manifest was captured), matching that field's own existing
@@ -793,24 +865,47 @@ instantiation-order-sensitive fields (Phase 1's hash input).
 
 ## Files & surfaces
 
-- `abicheck/storage/bundle_archive.py` — new: `BundleArchiveManifest`,
-  `BundleArchive`, `convert_to_archive` (see Phase 1's routing note above
-  for why this is `storage/`, not a new flat root module).
-- `abicheck/serialization.py` — `save_bundle_facts`/`load_bundle_facts`
-  gain the `format` parameter described in Phase 3; delegate to
-  `storage/bundle_archive.py` for the archive branch. This module is
-  itself pre-ADR-061 flat-root — whether it stays the public entry point or
-  becomes a thin delegation facade over a `storage/`-owned equivalent by
-  implementation time is a call for whoever lands this plan, informed by
-  how far the `storage/` migration has progressed by then; either way, the
-  archive *logic* lives in `storage/bundle_archive.py`, not duplicated here.
+**Corrected against the shipped implementation (PR #869) — an earlier
+revision of this list named a `BundleArchiveManifest`/`BundleArchive`/
+`convert_to_archive` shape that was never built; the real symbols below are
+what actually shipped.**
+
+- `abicheck/storage/bundle_archive.py` — the content-addressed zip-container
+  primitive this whole plan is about (see Phase 1's routing note above for
+  why this is `storage/`, not a new flat root module): `BundleArchiveWriter`
+  (`put_blob`/`write_manifest`/`close`, the `stored_sha256`/
+  `stored_size_bytes` attributes), `BundleArchiveReader`
+  (`open`/`from_open_file`/`read_manifest`/`read_blob`), plus the
+  module-level helpers `content_hash`, `sniff_bundle_archive_format`, and
+  `open_regular_file_for_format_sniff`.
+- `abicheck/storage/bundle_archive_cd_guard.py` — the central-directory
+  bomb guard (`reject_absurd_central_directory`,
+  `looks_like_zip_from_tail`), checked once by `BundleArchiveReader`'s own
+  `__init__` before `zipfile.ZipFile` ever scans a candidate archive.
+- `abicheck/storage/bundle_archive_json_guard.py` — the `manifest.json`
+  size-preflight helpers (`oversized_raw_string`, `bounded_encode_utf8`)
+  `BundleArchiveWriter.write_manifest()` uses to reject an oversized
+  manifest before it fully materializes.
+- `abicheck/storage/bundle_facts_validation.py` — shared alias/filename-map
+  validation (`validated_alias_map`, `validated_filename_map`) used by both
+  the plain-JSON and archive `BundleFacts` read paths.
+- `abicheck/bundle_facts.py` — the `BundleFacts`-level entry points that
+  call the `storage/bundle_archive.py` primitives above:
+  `write_bundle_facts_archive`/`read_bundle_facts_archive` (the direct,
+  archive-only pair), and `maybe_write_bundle_facts_archive`/
+  `maybe_read_bundle_facts_archive` (the `format`-dispatching wrappers a
+  caller not committed to one format uses).
 - `abicheck/snapshot_io.py` — no changes; `storage/bundle_archive.py`
   follows its precedent rather than extending it (the archive's own
   zip-member framing is a different mechanism from the single-stream
   plain/gzip/zstd detection `snapshot_io.py` owns, so this stays a sibling
   module, not a modification to a leaf module several other formats already
   depend on).
-- `tests/test_bundle_archive.py` — new.
+- `tests/test_bundle_archive.py`, `tests/test_bundle_archive_cd_guard.py`,
+  `tests/test_bundle_archive_writer_hardening.py` — the `storage/`-layer
+  primitive tests. `tests/test_bundle_facts_archive.py`/
+  `tests/test_bundle_facts_archive_hardening.py` — the `BundleFacts`-level
+  archive read/write tests.
 
 ## Tests
 
@@ -970,7 +1065,13 @@ already-small, already-isolated pair of functions
 FP-rate/mutation-score gate involvement (this plan touches storage, not
 detectors). Main risk is getting the zip random-access contract right under
 `AGENTS.md`'s own "third-party-boundary" testing discipline — verified via
-the partial-load test above, not asserted from documentation alone.
+the partial-load test above, not asserted from documentation alone. As the
+Status line above states, this sizing was borne out rather than merely
+estimated: PR #869 shipped this scope (plus the several correctness rounds
+this document's own "Codex review, fresh evidence" annotations record) with
+no detector-logic changes and no FP-rate/mutation-score involvement, exactly
+as sized here — the manifest-integrity known limitation is the one item
+that grew the scope beyond this original estimate, and it remains open.
 
 ## Out of scope
 

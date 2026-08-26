@@ -96,9 +96,13 @@ this field is not itself a reason to force the `model/` migration forward.
 
 Add one new, additive field to `Change`, following the existing
 `contract_evidence_refs` precedent exactly (flat `tuple[str, ...] | None`,
-`field(default=None, kw_only=True)`, lazy-imported enum for its value
-vocabulary to avoid a circular import the same way `ContractRelevance` is
-avoided at module scope):
+`field(default=None, kw_only=True)`): the field itself stays a bare
+`tuple[str, ...]` of validated strings, never a typed enum — see "The
+finalized vocabulary needs a single code-level owner" below for the
+registry that is the single source of truth for which strings are valid
+(a frozenset/enum-of-strings, following this codebase's own established
+pattern for a stable, checked vocabulary — not a second, enum-typed field
+competing with it):
 
 ```python
 evidence_provenance: tuple[str, ...] | None = field(default=None, kw_only=True)
@@ -114,8 +118,11 @@ freeze this before that):
 | Prefix | Meaning | Existing analogue |
 |---|---|---|
 | `l0:elf_symtab` | ELF `.dynsym`/export table alone | `evidence_tiers.py`'s L0 |
-| `l1:dwarf` | DWARF debug info | L1 |
-| `l2:castxml` / `l2:clang` | Header-AST backend, named specifically (not just "L2") since the two backends have measurably different fact completeness — see `docs/reference/header-backend-capabilities.md` | L2 |
+| `l1:dwarf` | DWARF debug info (ELF) | L1 |
+| `l1:pdb` | Windows PDB debug info (PE snapshots) | L1 |
+| `l1:btf` | Linux kernel BTF debug info (ELF snapshots) | L1 |
+| `l1:ctf` | Linux kernel CTF debug info (ELF snapshots) | L1 |
+| `l2:castxml` / `l2:clang` | Header-AST backend, named specifically (not just "L2") since the two backends have measurably different fact completeness — see [header-backend-capabilities.md](../../reference/header-backend-capabilities.md) | L2 |
 | `l3:build_context` | ADR-039 build-context collector / L3→L2 fold | L3 |
 | `l4:source_replay` | L4 source-ABI replay | L4 |
 | `l5:source_graph` | L5 source/consumer graph | L5 |
@@ -126,6 +133,24 @@ site), distinguished from `()` meaning "computed, and genuinely no provider
 claims this finding" (should not occur in practice once Phase 1 completes,
 but the distinction matters for the completeness gate in Phase 3 the same
 way it already matters for `contract_evidence_refs`).
+
+**`l1:pdb`/`l1:btf`/`l1:ctf` name a real gap, not just a missing table row
+(Codex review).** A PE snapshot populated from PDB, or an ELF snapshot using
+BTF/CTF instead of (or alongside) DWARF, is normalized into the same
+`AbiSnapshot` type records DWARF populates — `pdb_metadata.py`/
+`btf_metadata.py`/`ctf_metadata.py` all feed the same `RecordType`/
+`Function`/`Variable` model DWARF does — and nothing on the model records
+*which* L1 producer actually resolved a given fact once it's merged in.
+Stamping `l1:dwarf` on a PDB- or BTF/CTF-derived finding would be a false
+claim; leaving `evidence_provenance` uncomputed for every such finding is a
+real completeness gap Phase 3's gate would have to special-case. Retaining
+enough producer identity to select the correct one of these four L1 ids
+per finding — likely a small, additive per-record or per-snapshot marker,
+in the same spirit as the layout-provenance model gap Phase 1 item 2 above
+already identifies for DWARF backfill — is therefore a prerequisite this
+phase's Phase 1 wiring must resolve *before* wiring detectors that could
+draw on PDB/BTF/CTF-derived snapshots, not something to defer to the
+detector-wiring step itself.
 
 **The finalized vocabulary needs a single code-level owner, not just this
 table (Codex review).** The field's *type* stays a bare `tuple[str, ...]` —
@@ -341,8 +366,8 @@ structure already in place:
    both sides contributed a fact, when only one did and the other
    contributed a negative result. The fix is the identical `searched:`
    shape item 3 below establishes for `crosscheck.py`'s own negative
-   `_check_*` findings (`l2:searched:<frontend>`, recording which complete
-   surface was consulted and found nothing, not which fact produced a
+   `_check_*` findings (`current:l2:searched:<frontend>`, recording which
+   complete surface was consulted and found nothing, not which fact produced a
    result): generalize it here rather than treating it as a `crosscheck.py`
    -specific vocabulary entry. For a removal, `evidence_provenance` records
    the *matched* side's real per-fact provenance (whichever tier actually
@@ -374,8 +399,9 @@ structure already in place:
    `l0:`/`l1:`/`l2:`-plus-backend-id vocabulary the table above and item 3
    below both already use, with `searched` inserted before the concrete
    backend id rather than replacing it (matching item 3's own
-   `l2:searched:<frontend>` shape, generalized here with the side prefix
-   item 3's single-snapshot crosscheck findings don't need). **A
+   `current:l2:searched:<frontend>` shape, generalized here with the side
+   prefix item 3's single-snapshot crosscheck findings use `current:` for
+   instead). **A
    multi-provider search records one entry per provider actually
    consulted, never one collapsed tag** — the same "one tier-bearing entry
    per provider" rule item 3 states for its own multi-`PROVIDER_*` checks
@@ -647,10 +673,11 @@ structure already in place:
    surface(s) were searched, not which fact produced it** — a distinct,
    additive provenance shape from the positive, per-fact case points 1-3
    above cover, not a variant of it. Concretely, `evidence_provenance` for
-   this shape carries a `l2:searched:<frontend>` entry per backend whose
-   public-header surface was exhaustively built and consulted for the
-   symbol in question (`l2:searched:castxml`, `l2:searched:clang`, or both
-   for a hybrid snapshot where both surfaces were checked), rather than
+   this shape carries a `current:l2:searched:<frontend>` entry per backend
+   whose public-header surface was exhaustively built and consulted for the
+   symbol in question (`current:l2:searched:castxml`,
+   `current:l2:searched:clang`, or both for a hybrid snapshot where both
+   surfaces were checked), rather than
    attempting to name a producer for a fact that does not exist. This
    generalizes beyond `_check_exported_not_public`: any other check in this
    module whose finding rests on an *absence* across a searched surface
@@ -835,7 +862,15 @@ SARIF and JUnit rendering had not migrated into `report/` at the time this
 plan was written (only JSON and text renderers had) — reaches `sarif.py`'s
 existing `properties` bag (one entry, not a new top-level SARIF concept) if
 that's still the live SARIF renderer at implementation time, or `report/
-render_sarif.py` if that migration has landed by then. Also reaches the
+render_sarif.py` if that migration has landed by then. **JUnit is not out
+of scope here — `junit_report.py`'s `_add_contract_properties` already
+projects per-finding contract detail onto each `<testcase>`'s `<properties>`
+block (`abicheck.contract_relevance`, `abicheck.contract_evidence_refs`,
+...), mirroring `reporter.py`'s JSON `properties` bag and `sarif.py`'s own
+one-to-one — so this phase adds `abicheck.evidence_provenance` there the
+same way, gated the same way `contract_evidence_refs` already is (append
+only when the value is non-`None`, keeping every pre-`--contract` JUnit
+report byte-for-byte unchanged).** Also reaches the
 generated docs (`scripts/gen_detector_spec.py`'s matrix gains a column once
 every kind has a real, non-`UNVERIFIED` classification — gated on Phase 2's
 completeness test, so the docs generator cannot claim more coverage than
@@ -901,9 +936,23 @@ above, which this list intentionally does not re-duplicate.
 - `abicheck/buildsource/*.py` (stays `buildsource/`, per its own scoped
   `AGENTS.md` — not part of the `compare/` migration) — the L3-L5 detectors
   already carrying `evidence_category`.
-- `abicheck/report/render_json.py`/`document.py` (already `report/`),
-  `abicheck/reporter.py`/`sarif.py` as long as either remains the live
-  legacy renderer for its format — Phase 3.
+- `abicheck/reporter.py` — Phase 3's real `Change`→dict projection point
+  (`_change_to_dict`, `_leaf_entry`, `_out_of_surface_entry`,
+  `_add_reconciled`, `_filtered_internal_entry`, `_suppressed_change_entry`)
+  — not `abicheck/report/render_json.py`/`document.py`, which only
+  serialize an already-built mapping and never project a `Change`
+  themselves (see Phase 3's own correction above). If `report/`'s
+  migration has absorbed one or more of these six builders by
+  implementation time, the successor module is the surface instead — same
+  rule as Phase 3's own "cover every current projection, not whichever one
+  happens to be literally named `report/`."
+- `abicheck/cli_scan_baseline.py`'s `_baseline_finding_dicts` — `scan
+  --against`'s own, separate projection; not reached by any of the six
+  `reporter.py` builders above.
+- `abicheck/sarif.py`'s `properties` bag and `abicheck/junit_report.py`'s
+  `_add_contract_properties` — Phase 3's SARIF/JUnit surfaces (or their
+  `report/`-migrated successors, e.g. `report/render_sarif.py`, if that
+  migration has landed by implementation time).
 - `tests/test_evidence_provenance_completeness.py` — Phase 2 (new).
 - `scripts/gen_detector_spec.py`, `docs/reference/detector-spec.md` — Phase 3.
 
@@ -918,10 +967,26 @@ above, which this list intentionally does not re-duplicate.
 - A property test (`test_detector_properties.py`, `slow`) stating the
   general invariant: for any generated snapshot pair, every emitted
   `Change.evidence_provenance` is non-`None` once Phase 1 completes for that
-  kind's producing detector (mirrors the property-test discipline
-  `AGENTS.md`'s "Primitive-level property tests" section already
-  establishes for reusable primitives — this is the same idea applied to a
-  cross-cutting field rather than a merge primitive).
+  kind (mirrors the property-test discipline `AGENTS.md`'s "Primitive-level
+  property tests" section already establishes for reusable primitives —
+  this is the same idea applied to a cross-cutting field rather than a
+  merge primitive). **Gated on *every* independent producer of that kind,
+  not on "a" producing detector being wired (Codex review) — this plan's
+  own Phase 1 item 3 above already names a kind that can be emitted from
+  two unrelated modules (e.g. both a `diff_symbols.py` path and a
+  `diff_platform.py` path), and Phase 2's own gate is explicitly silent on
+  exactly this multi-producer case (see "What this gate does and does not
+  prove" above).** Hypothesis's snapshot generation cannot itself target
+  "route the mutation through producer B specifically," so this property
+  is only trustworthy once the per-kind inventory this plan derives at
+  implementation time (Phase 1's own `git grep` inventory) records, per
+  `ChangeKind`, the complete set of call sites that can emit it — the
+  property is then enabled for a kind only once every entry in that
+  kind's own set is wired, not the first one. Until a kind's full producer
+  set is known and fully wired, the assertion stays scoped to the specific
+  call path a given generator/mutation actually exercises (a path-specific
+  assertion) rather than asserted as a kind-wide invariant it cannot yet
+  back.
 
 ## Example fixtures
 
