@@ -15,7 +15,8 @@ from __future__ import annotations
 
 import pytest
 
-from abicheck.storage.availability import AvailabilityLedger
+from abicheck.storage.availability import AvailabilityLedger, FactAvailability
+from abicheck.storage.availability_status import FactStatus
 from abicheck.storage.entity_ids import EntityKind, ObservationKind
 from abicheck.storage.identity import (
     EntityId,
@@ -492,3 +493,84 @@ class TestEveryContainerGuardRefusesABinaryBuffer:
         assert row_sequence([1, 2], "field") == (1, 2)
         key_collection(["layout"], "field")
         item_iterable(iter([1, 2]), "field")
+
+
+class TestRecordOperandsAreCheckedBeforeUse:
+    """`narrowed` was the one record-taking method without an operand check.
+
+    `record.narrowed(None)` leaked `AttributeError` from `other.status` —
+    neither arm of the `TypeError`/`ValueError` pair this package documents
+    as "the package is malformed", so a caller separating a corrupt package
+    from a broken reader read it as the second (Codex review).
+    """
+
+    @pytest.mark.parametrize(
+        "operand",
+        [
+            pytest.param(None, id="none"),
+            pytest.param("x", id="str"),
+            pytest.param({"status": "present"}, id="parsed-mapping"),
+            pytest.param(1, id="int"),
+        ],
+    )
+    def test_narrowed_refuses_a_non_record(self, operand: object) -> None:
+        record = FactAvailability(status=FactStatus.PRESENT)
+
+        with pytest.raises(TypeError, match="other must be a FactAvailability"):
+            record.narrowed(operand)
+
+    def test_a_real_narrowing_is_untouched(self) -> None:
+        """The control — the guard must not disturb the combining rule."""
+        family = FactAvailability(status=FactStatus.PRESENT)
+        override = FactAvailability(status=FactStatus.FAILED)
+
+        assert family.narrowed(override).status is FactStatus.FAILED
+
+    def test_every_record_taking_method_checks_its_operand(self) -> None:
+        """The sweep, which is how `narrowed` turned out to be the only one.
+
+        Every sibling already guarded — `declare`, `override`, `add`,
+        `occurrences_of`, `is_ambiguous` — so this was a single hole rather
+        than a class. It is a test anyway, because "the only one" is the
+        kind of claim this branch has repeatedly had falsified.
+        """
+        import ast
+        import pathlib
+
+        records = {
+            "AvailabilityLedger",
+            "EntityId",
+            "FactAvailability",
+            "IdentityConflict",
+            "OccurrenceId",
+            "OccurrenceSet",
+            "ProducerIdentity",
+            "StorageVersions",
+        }
+        unguarded: list[str] = []
+        for path in sorted(pathlib.Path("abicheck/storage").glob("*.py")):
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.ClassDef):
+                    continue
+                for fn in node.body:
+                    if not isinstance(fn, ast.FunctionDef):
+                        continue
+                    if fn.name.startswith("_"):
+                        continue
+                    body = ast.unparse(fn)
+                    for arg in fn.args.args:
+                        if arg.arg == "self" or arg.annotation is None:
+                            continue
+                        if ast.unparse(arg.annotation).strip('"') not in records:
+                            continue
+                        if "_instance_of" in body or "_availability" in body:
+                            continue
+                        unguarded.append(
+                            f"{path.name}:{fn.lineno} {node.name}.{fn.name}({arg.arg})"
+                        )
+
+        assert unguarded == [], (
+            "these public methods dereference a record operand without checking "
+            f"it, so a non-record leaks AttributeError: {unguarded}"
+        )

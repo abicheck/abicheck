@@ -198,6 +198,15 @@ class FactAvailability:
         # belongs in its own pass with the decision recorded, not here. The
         # misattribution that mattered — naming the wrong *producer* for a
         # failure — is closed.
+        # The operand, before the first attribute of it is read. Every
+        # sibling that takes a record already checks one — `declare`,
+        # `override`, `add`, `occurrences_of`, `is_ambiguous` — and this was
+        # the one that did not, so `record.narrowed(None)` leaked
+        # `AttributeError` from `other.status`. That is neither arm of the
+        # `TypeError`/`ValueError` pair this package documents as "the
+        # package is malformed", so a caller separating a corrupt package
+        # from a broken reader read it as the second (Codex review).
+        _availability(other, "other")
         status = _worse_status(self.status, other.status)
         winner, loser = (other, self) if other.status is status else (self, other)
         if status in _ASSERTS_NO_PRODUCER and loser.status is not status:
