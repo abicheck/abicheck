@@ -70,3 +70,13 @@
   prewarm via a direct `demangle_batch` call, since `missing_symbols` is a
   plain list of raw strings rather than change objects
   `prewarm_demangle_batch`'s attribute-based extraction can read.
+- **Fifth follow-up (Codex review): the Missing Symbols fix above replaced
+  the raw text outright, losing distinguishability between two
+  ABI-distinct mangled names that happen to demangle identically** --
+  `_ZN3FooC1Ev` (the complete-object constructor) and `_ZN3FooC2Ev` (the
+  base-object constructor) both demangle to `Foo::Foo()`, so a report
+  with both in `missing_symbols` showed two identical, indistinguishable
+  rows with the exact linker names gone entirely. A new
+  `_missing_symbol_cell` helper mirrors `_symbol_cell`'s own contract: the
+  demangled text is shown with the raw mangled name preserved as an
+  `<abbr>` tooltip.

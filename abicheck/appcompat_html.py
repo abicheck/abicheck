@@ -32,6 +32,19 @@ from .html_report import _changes_table
 from .html_template import _VERDICT_STYLE, render_document, render_footer
 
 
+def _missing_symbol_cell(raw: str) -> str:
+    """Render one missing-symbol entry: demangled text with the raw
+    mangled name as an ``<abbr>`` tooltip -- mirrors html_report._symbol_
+    cell's contract so two ABI-distinct mangled names that happen to
+    demangle identically (e.g. a class's C1/C2 constructor variants, both
+    `Foo::Foo()`) don't read as duplicate, indistinguishable rows (Codex
+    review, fresh evidence)."""
+    mangled, demangled = html.escape(raw), html.escape(demangle_text(raw))
+    if demangled and demangled != mangled and mangled:
+        return f'<abbr title="{html.escape(mangled, quote=True)}">{demangled}</abbr>'
+    return demangled or mangled
+
+
 def appcompat_to_html(result: object) -> str:
     """Generate a self-contained HTML report for an AppCompatResult."""
     h = html.escape
@@ -130,7 +143,7 @@ def appcompat_to_html(result: object) -> str:
     missing_html = ""
     if missing:
         rows = "\n".join(
-            f"<tr><td><code>{h(demangle_text(s))}</code></td></tr>" for s in missing
+            f"<tr><td><code>{_missing_symbol_cell(s)}</code></td></tr>" for s in missing
         )
         missing_html = f"""<div class='section section-removed'>
   <h3>\u26d4 Missing Symbols ({len(missing)})</h3>

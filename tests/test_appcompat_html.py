@@ -93,6 +93,22 @@ def test_html_demangles_missing_symbols() -> None:
     assert "Foo::Foo()" in out
 
 
+def test_html_preserves_mangled_identity_for_missing_symbols() -> None:
+    """Codex review, fresh evidence: _ZN3FooC1Ev (the complete-object
+    constructor) and _ZN3FooC2Ev (the base-object constructor) are two
+    ABI-distinct linker symbols that both demangle to the identical
+    "Foo::Foo()" text. Plain text replacement made them read as duplicate,
+    indistinguishable rows with the exact linker names gone entirely;
+    each mangled name must survive as an <abbr> tooltip, mirroring
+    html_report._symbol_cell's own contract."""
+    out = appcompat_to_html(
+        _appcompat_result(missing=["_ZN3FooC1Ev", "_ZN3FooC2Ev"])
+    )
+    assert out.count("Foo::Foo()") == 2
+    assert '<abbr title="_ZN3FooC1Ev">Foo::Foo()</abbr>' in out
+    assert '<abbr title="_ZN3FooC2Ev">Foo::Foo()</abbr>' in out
+
+
 def test_html_shows_file_metadata() -> None:
     out = appcompat_to_html(_appcompat_result(with_metadata=True))
     assert "Library Files" in out
