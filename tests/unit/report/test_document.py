@@ -135,7 +135,8 @@ def test_not_comparable_sarif_crosses_document_boundary(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """ADR-050 D2's refusal log is a report too, so it crosses the boundary."""
-    from abicheck.sarif import to_sarif_not_comparable_str
+    from abicheck.report.render_json import render_mapping_as_json
+    from abicheck.sarif import to_sarif_not_comparable
 
     calls = 0
     original = ReportDocument.from_mapping
@@ -148,7 +149,9 @@ def test_not_comparable_sarif_crosses_document_boundary(
     monkeypatch.setattr(ReportDocument, "from_mapping", staticmethod(recording_builder))
 
     log = json.loads(
-        to_sarif_not_comparable_str("lib.so", "1", "2", "profile_mismatch", "why")
+        render_mapping_as_json(
+            to_sarif_not_comparable("lib.so", "1", "2", "profile_mismatch", "why")
+        )
     )
 
     assert log["runs"][0]["invocations"][0]["executionSuccessful"] is False

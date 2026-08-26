@@ -1112,21 +1112,10 @@ def to_junit_xml_multi(
 
 
 def _to_xml_string(root: ET.Element) -> str:
-    """Serialize a completed JUnit element tree to an XML string.
+    """Serialize a JUnit element tree to XML (via ``report.render_xml``)."""
+    from .report.render_xml import render_element_as_xml
 
-    ADR-061 Phase 2: the finished suite crosses the canonical
-    :class:`~abicheck.report.document.ReportDocument` boundary before it is
-    serialized, via :func:`~abicheck.report.render_xml.element_to_mapping`'s
-    lossless JSON encoding of the tree — so the projection formats a frozen
-    description of the report and cannot mutate the element tree, reach back
-    into the ``DiffResult`` it came from, or re-run policy. Indentation and
-    the XML declaration are formatting, so they belong to the projection
-    rather than to the document.
-    """
-    from .report.document import ReportDocument
-    from .report.render_xml import element_to_mapping, render_xml_document
-
-    return render_xml_document(ReportDocument.from_mapping(element_to_mapping(root)))
+    return render_element_as_xml(root)
 
 
 def to_junit_xml_not_comparable(

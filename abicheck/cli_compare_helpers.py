@@ -475,9 +475,10 @@ def _report_not_comparable(
             ),
         )
     elif fmt == "sarif":
-        from .sarif import to_sarif_not_comparable_str
+        from .report.render_json import render_mapping_as_json
+        from .sarif import to_sarif_not_comparable
 
-        _write_or_echo(output, to_sarif_not_comparable_str(*refusal))
+        _write_or_echo(output, render_mapping_as_json(to_sarif_not_comparable(*refusal)))
     elif fmt == "junit":
         from .junit_report import to_junit_xml_not_comparable
 

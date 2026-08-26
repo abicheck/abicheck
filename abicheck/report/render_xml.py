@@ -84,3 +84,17 @@ def render_xml_document(
     buf = io.BytesIO()
     ET.ElementTree(root).write(buf, encoding=encoding, xml_declaration=True)
     return buf.getvalue().decode(encoding)
+
+
+def render_element_as_xml(root: ET.Element, *, indent: bool = True) -> str:
+    """Freeze a completed element tree as a report document and render it.
+
+    The XML counterpart of
+    :func:`~abicheck.report.render_json.render_mapping_as_json`, and the entry
+    point a builder that assembles an element tree should call: it makes the
+    freeze one step rather than three, so a caller cannot skip it by reaching
+    straight for ``ElementTree.write``.
+    """
+    return render_xml_document(
+        ReportDocument.from_mapping(element_to_mapping(root)), indent=indent
+    )
