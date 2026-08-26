@@ -55,6 +55,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .guards import (
+    decision_key as _decision_key,
     enum_member as _enum_member,
     identity_text as _identity_text,
     instance_of as _instance_of,
@@ -328,7 +329,15 @@ class OccurrenceId:
         serialized form is a list of pairs rather than a mapping precisely so
         that a producer recording two values does not silently lose one. This
         is the accessor that shows both.
+
+        The name is validated, not merely compared. An unnormalized name
+        misses every stored pair and answers "no such attribute", which a
+        conflict predicate or resolver reads as *captured evidence absent* —
+        so a real contradiction goes unreported (Codex review). Same shape as
+        the ledger's read doors: a key that cannot match resolves past what
+        is stored rather than failing.
         """
+        _decision_key(name, "name")
         return tuple(value for key, value in self.attributes if key == name)
 
     def attribute(self, name: str, default: str = "") -> str:
@@ -584,7 +593,14 @@ class OccurrenceSet:
         Note this is *not* the same question as "is this a conflict" — a
         function legitimately observed in both DWARF and the export table is
         ambiguous by this predicate and not a conflict by :meth:`conflicts`.
+
+        The argument is checked for the reason :meth:`occurrences_of` gives.
+        This one is the worse of the pair: it returns ``False`` for a
+        malformed entity — a plain "no, not ambiguous" — where its sibling at
+        least raised. A caller gating on it would proceed as though identity
+        had been checked.
         """
+        _instance_of(entity, EntityId, "entity")
         return len(self._by_entity.get(entity.key, ())) > 1
 
     def same_site_observations(self) -> tuple[tuple[OccurrenceId, ...], ...]:

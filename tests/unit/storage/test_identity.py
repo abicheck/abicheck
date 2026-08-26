@@ -980,3 +980,140 @@ class TestOccurrencesOfChecksItsArgument:
 
         assert len(occurrences.occurrences_of(entity)) == 1
         assert occurrences.occurrences_of(absent) == ()
+
+
+class TestAttributeLookupNamesAreValidated:
+    """The same read-door rule, at the attribute accessors.
+
+    An unnormalized name misses every stored pair and answers "no such
+    attribute". A conflict predicate or resolver reads that as *captured
+    evidence absent*, so a real contradiction goes unreported — the silent
+    direction, not the loud one (Codex review).
+    """
+
+    @staticmethod
+    def _occurrence() -> OccurrenceId:
+        return OccurrenceId(
+            entity=EntityId(kind=EntityKind.FUNCTION, qualified_name="compute"),
+            observation=ObservationKind.AST,
+            attributes=(("size", "8"),),
+        )
+
+    @pytest.mark.parametrize(
+        "name",
+        [
+            pytest.param(1, id="int"),
+            pytest.param(True, id="bool"),
+            pytest.param(None, id="none"),
+            pytest.param(("size",), id="tuple"),
+            pytest.param(b"size", id="bytes"),
+        ],
+    )
+    def test_both_accessors_refuse_a_non_string_name(self, name: object) -> None:
+        occurrence = self._occurrence()
+
+        with pytest.raises(TypeError, match="name must be a string"):
+            occurrence.attribute_values(name)
+        with pytest.raises(TypeError, match="name must be a string"):
+            occurrence.attribute(name)
+
+    def test_one_guard_covers_both_accessors(self) -> None:
+        """`attribute` delegates to `attribute_values`, so the check is not
+        written twice — which is the arrangement that cannot drift.
+        """
+        assert self._occurrence().attribute("size") == "8"
+        assert self._occurrence().attribute_values("size") == ("8",)
+        assert self._occurrence().attribute("absent") == ""
+
+
+class TestIsAmbiguousChecksItsArgument:
+    """The door the previous round's sweep missed.
+
+    Worse than its `occurrences_of` sibling: that one raised, while this
+    returned a plain `False` for a malformed entity, so a caller gating on
+    it proceeded as though identity had been checked.
+    """
+
+    def test_a_non_entity_is_refused(self) -> None:
+        with pytest.raises(TypeError, match="entity must be a EntityId"):
+            OccurrenceSet().is_ambiguous("compute")
+
+    def test_real_answers_are_untouched(self) -> None:
+        entity = EntityId(kind=EntityKind.FUNCTION, qualified_name="compute")
+        occurrences = OccurrenceSet()
+        occurrences.add(OccurrenceId(entity=entity, observation=ObservationKind.AST))
+        assert occurrences.is_ambiguous(entity) is False
+
+        occurrences.add(OccurrenceId(entity=entity, observation=ObservationKind.DWARF))
+        assert occurrences.is_ambiguous(entity) is True
+
+
+class TestEveryKeyTakingDoorIsGuarded:
+    """The sweep as a test, because doing it by hand missed three doors.
+
+    The `for_family`/`for_entity` round claimed `occurrences_of` was "the
+    only other door taking a caller-supplied lookup key". It was not:
+    `attribute_values`, `attribute` and `is_ambiguous` were all unguarded,
+    and the first two were found by review rather than by that claim. An
+    informal sweep is not evidence, so this enumerates the doors instead of
+    asserting the conclusion.
+    """
+
+    def test_no_public_key_taking_method_is_unguarded(self) -> None:
+        import ast
+        import pathlib
+
+        guards = ("_decision_key", "_identity_text", "_instance_of")
+        bodies: dict[str, tuple[str, str]] = {}
+        for path in sorted(pathlib.Path("abicheck/storage").glob("*.py")):
+            if path.name == "guards.py":
+                # The guards themselves take a `field_name` label, which is
+                # the *subject* of a check rather than a lookup key.
+                continue
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.ClassDef):
+                    continue
+                for fn in node.body:
+                    if not isinstance(fn, ast.FunctionDef) or fn.name.startswith("_"):
+                        continue
+                    keyish = [
+                        arg.arg
+                        for arg in fn.args.args
+                        if arg.arg != "self"
+                        and arg.annotation is not None
+                        and ast.unparse(arg.annotation) in ("str", "EntityId")
+                    ]
+                    if not keyish:
+                        continue
+                    bodies[f"{path.name}:{node.name}.{fn.name}"] = (
+                        ast.unparse(fn),
+                        node.name,
+                    )
+
+        # A method that delegates to a guarded sibling *is* guarded, and that
+        # is the arrangement to prefer: `attribute` calls `attribute_values`,
+        # so the rule is written once. Resolved to a fixpoint rather than one
+        # level deep, so a longer delegation chain is not a false positive.
+        guarded: set[str] = set()
+        changed = True
+        while changed:
+            changed = False
+            for name, (body, owner) in bodies.items():
+                if name in guarded:
+                    continue
+                delegates = any(
+                    f"self.{other.rsplit('.', 1)[1]}(" in body
+                    for other in guarded
+                    if other.split(":")[1].split(".")[0] == owner
+                )
+                if any(guard in body for guard in guards) or delegates:
+                    guarded.add(name)
+                    changed = True
+
+        unguarded = sorted(set(bodies) - guarded)
+
+        assert unguarded == [], (
+            "these public methods take a lookup key without validating it, "
+            f"so a malformed key resolves past what is stored: {unguarded}"
+        )
