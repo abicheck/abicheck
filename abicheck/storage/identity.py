@@ -414,6 +414,22 @@ class IdentityConflict:
         # review). Same boundary-only-guard gap already closed on
         # `EntityId.qualified_name`, at the one site that still had it.
         object.__setattr__(self, "reason", _identity_text(self.reason, "reason"))
+        # The container and every element, before anything reads `.key`. A
+        # non-`OccurrenceId` in the sequence leaked `AttributeError` out of
+        # the sort, which a caller separating a malformed package from a
+        # broken reader classifies as the second (Codex review). A bare
+        # string is a `Sequence` too, so it is refused explicitly rather than
+        # iterated one character at a time — the same shape `diagnostics_from`
+        # guards against.
+        if isinstance(self.occurrences, (str, bytes)) or not isinstance(
+            self.occurrences, Sequence
+        ):
+            raise TypeError(
+                "occurrences must be a sequence of OccurrenceId, not "
+                f"{type(self.occurrences).__name__} ({self.occurrences!r})"
+            )
+        for index, occurrence in enumerate(self.occurrences):
+            _instance_of(occurrence, OccurrenceId, f"occurrences[{index}]")
         # Sorted so a conflict's own membership does not depend on the order
         # its occurrences were collected in, and deduplicated by key for the
         # same reason `OccurrenceSet.add` is idempotent: one observation
@@ -496,7 +512,14 @@ class OccurrenceSet:
         An exactly-identical occurrence (same key) is idempotent — that is a
         re-observation of one thing, not a second thing — so a producer that
         walks the same DIE twice does not inflate the set.
+
+        The record is checked here, at the mutation boundary, for the same
+        reason the ledger's `declare`/`override` check theirs: a non-record
+        otherwise raised `AttributeError` from `occurrence.entity`, which
+        classifies a malformed input as a reader crash. `extend` inherits
+        this, since it is a loop over `add`.
         """
+        _instance_of(occurrence, OccurrenceId, "occurrence")
         entity_key = occurrence.entity.key
         bucket = self._by_entity.setdefault(entity_key, [])
         self._entities.setdefault(entity_key, occurrence.entity)

@@ -53,6 +53,11 @@ from abicheck.storage.identity import (
     OccurrenceId,
     OccurrenceSet,
 )
+from abicheck.storage.versioning import (
+    ProducerIdentity,
+    StorageVersions,
+    check_reader_compatibility,
+)
 
 #: Values no identity-bearing or provenance field may accept. `True` and `1.0`
 #: are here deliberately: both coerce to something a real value could equal.
@@ -409,3 +414,135 @@ def test_a_real_diagnostic_list_still_loads() -> None:
 
     assert record.diagnostics == ("parse error", "x")
     assert FactAvailability.from_dict(record.to_dict()) == record
+
+
+#: One entry per public document-bearing class: a factory taking a value, and
+#: the class itself. The values are deliberately the *accepted-but-odd* ones —
+#: a rejected value never reaches serialization, so it cannot break the
+#: property below.
+_ROUND_TRIP_CASES: list[tuple[str, Callable[[Any], Any], Any]] = [
+    (
+        "versions.normalization_recipe",
+        lambda v: StorageVersions(normalization_recipe=v),
+        None,
+    ),
+    (
+        "versions.extractor_generation",
+        lambda v: StorageVersions(extractor_generation=v),
+        None,
+    ),
+    (
+        "versions.resolver_generation",
+        lambda v: StorageVersions(resolver_generation=v),
+        None,
+    ),
+    (
+        "versions.source_schema_version",
+        lambda v: StorageVersions(source_schema_version=v),
+        None,
+    ),
+    (
+        "versions.source_producer_generation",
+        lambda v: StorageVersions(source_producer_generation=v),
+        None,
+    ),
+    (
+        "versions.section_schema_versions",
+        lambda v: StorageVersions(section_schema_versions={"s": v}),
+        None,
+    ),
+    ("producer.name", lambda v: ProducerIdentity(name=v), None),
+    ("producer.version", lambda v: ProducerIdentity(version=v), None),
+    ("producer.binary_digest", lambda v: ProducerIdentity(binary_digest=v), None),
+]
+
+#: Values a *directly constructed* informational field can legitimately hold
+#: while still being odd enough to serialize differently from how it reads.
+ODD_INFORMATIONAL_VALUES: list[Any] = [1, 1.5, True, "1", "x", ["x"], 0, ""]
+
+
+@pytest.mark.parametrize("value", ODD_INFORMATIONAL_VALUES)
+@pytest.mark.parametrize(
+    ("label", "build"), [(label, build) for label, build, _ in _ROUND_TRIP_CASES]
+)
+def test_a_document_is_what_its_own_reader_produces(
+    label: str, build: Callable[[Any], Any], value: Any
+) -> None:
+    """The property three separate findings were instances of.
+
+    Every one was "an informational field writes itself raw while `from_dict`
+    normalizes it", found one field at a time — `section_schema_versions`,
+    then the scalar axes, then the nested `ProducerIdentity`. Stating it once,
+    over every field, is what stops the fourth.
+
+    A field that reads back as absent must also be *written* as absent, so the
+    check is on the emitted document rather than on the reloaded object.
+    """
+    emitted = build(value).to_dict()
+
+    assert type(build(value)).from_dict(emitted).to_dict() == emitted
+
+
+@pytest.mark.parametrize("value", ODD_INFORMATIONAL_VALUES)
+def test_a_decision_reads_the_value_the_format_stores(value: Any) -> None:
+    """Serialization agreeing with the reader is not enough on its own.
+
+    `check_reader_compatibility` compared `extractor_generation` raw, so a
+    directly constructed `"1"` reported drift against a reader generation of
+    `0` while the same object after a round trip reported none — the advice
+    depended on whether it had been serialized first (Codex review).
+    """
+    versions = StorageVersions(extractor_generation=value)
+    reloaded = StorageVersions.from_dict(versions.to_dict())
+
+    assert (
+        check_reader_compatibility(
+            versions, reader_extractor_generation=0
+        ).semantics_differ
+        == check_reader_compatibility(
+            reloaded, reader_extractor_generation=0
+        ).semantics_differ
+    )
+
+
+def test_a_real_generation_drift_is_still_reported() -> None:
+    """The normalization must not flatten the signal it runs under."""
+    versions = StorageVersions(extractor_generation=4)
+
+    assert check_reader_compatibility(
+        versions, reader_extractor_generation=3
+    ).semantics_differ
+    assert not check_reader_compatibility(
+        versions, reader_extractor_generation=4
+    ).semantics_differ
+
+
+@pytest.mark.parametrize("value", NOT_RECORDS + [None])
+def test_every_record_sequence_refuses_a_non_record(value: Any) -> None:
+    """A sequence *of* records, not just a record slot.
+
+    `IdentityConflict.occurrences` leaked `AttributeError` out of its sort,
+    and `OccurrenceSet.add`/`extend` out of `occurrence.entity` (Codex
+    review; the set was the sibling the report did not name).
+    """
+    good = OccurrenceId(
+        entity=EntityId(EntityKind.TYPE, "S"), observation=ObservationKind.DWARF
+    )
+    other = OccurrenceId(
+        entity=EntityId(EntityKind.TYPE, "S"),
+        observation=ObservationKind.DWARF,
+        container="b.o",
+    )
+
+    assert _refused(lambda: IdentityConflict(reason="r", occurrences=(good, value)))
+    assert _refused(lambda: OccurrenceSet().add(value))
+    assert _refused(lambda: OccurrenceSet().extend([value]))
+
+    # And the control: a genuine pair still builds.
+    assert len(IdentityConflict(reason="r", occurrences=(good, other)).occurrences) == 2
+
+
+@pytest.mark.parametrize("value", NOT_MAPPINGS)
+def test_a_conflicts_occurrence_container_is_a_sequence(value: Any) -> None:
+    """A bare string is a `Sequence`, so it needs its own refusal."""
+    assert _refused(lambda: IdentityConflict(reason="r", occurrences=value))

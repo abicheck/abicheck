@@ -140,13 +140,21 @@ class ProducerIdentity:
     binary_digest: str = ""
 
     def to_dict(self) -> dict[str, Any]:
+        """Normalized the way :meth:`from_dict` reads it.
+
+        Writing the fields raw meant `ProducerIdentity(name=1)` emitted `1`
+        and reloaded as `"1"` — a record that emits a document interpreted
+        differently from itself (Codex review). Same rule as the outer
+        `StorageVersions` axes, which was applied there and not here: these
+        are informational, so they are normalized rather than rejected, and
+        the truthiness test reads the normalized value.
+        """
         out: dict[str, Any] = {}
-        if self.name:
-            out["name"] = self.name
-        if self.version:
-            out["version"] = self.version
-        if self.binary_digest:
-            out["binary_digest"] = self.binary_digest
+        for field_name in ("name", "version", "binary_digest"):
+            raw = getattr(self, field_name)
+            text = str(raw) if raw else ""
+            if text:
+                out[field_name] = text
         return out
 
     @classmethod
@@ -451,13 +459,28 @@ def check_reader_compatibility(
                 "it could produce a wrong verdict"
             ),
         )
+    # `_stated_count` on the package's own value, because that is what both
+    # doors of the document already apply: a directly-constructed
+    # `extractor_generation="1"` compared raw here and reported drift against
+    # a reader generation of `0`, while the *same object after its documented
+    # round trip* reported none — so whether a rebuild was advised depended on
+    # whether it had been serialized first (Codex review). A decision reading
+    # a field must read the same value the format stores.
     drifted = [
         name
         for name, reader_value, package_value in (
-            ("extractor", reader_extractor_generation, versions.extractor_generation),
-            ("resolver", reader_resolver_generation, versions.resolver_generation),
+            (
+                "extractor",
+                reader_extractor_generation,
+                _stated_count(versions.extractor_generation),
+            ),
+            (
+                "resolver",
+                reader_resolver_generation,
+                _stated_count(versions.resolver_generation),
+            ),
         )
-        if reader_value is not None and package_value != reader_value
+        if reader_value is not None and package_value != _stated_count(reader_value)
     ]
     if drifted:
         return ReaderCompatibility(
