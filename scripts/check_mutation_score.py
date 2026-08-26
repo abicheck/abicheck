@@ -1609,19 +1609,30 @@ def main(argv: list[str] | None = None) -> int:
                     ),
                     "mutants_measured": mutants_measured,
                     "mutants_per_second": mutants_per_second,
-                    #: "unknown" rather than "full" whenever the measurement
-                    #: came from a saved --results-file: that file's own
-                    #: content carries no record of whether the run that
-                    #: produced it was itself scoped, so labeling it "full"
-                    #: would assert a fact this invocation cannot see —
-                    #: misleading trend/budget tooling that trusts this
-                    #: field the same way "full" is otherwise never a guess
-                    #: (Codex review).
+                    #: "unknown" rather than "full" whenever this invocation
+                    #: didn't itself execute an unscoped `mutmut run` — a
+                    #: saved --results-file, or (Codex review, PR #877,
+                    #: twelfth round on this finding) a bare `--json` with
+                    #: neither --run nor --results-file, which reads the
+                    #: existing mutmut database as-is (the `mutmut results`
+                    #: path). Either way the measurement's own provenance
+                    #: carries no record of whether the run that produced it
+                    #: was itself scoped, so labeling it "full" would assert
+                    #: a fact this invocation cannot see — misleading trend/
+                    #: budget tooling that trusts this field the same way
+                    #: "full" is otherwise never a guess. Reuses the exact
+                    #: `args.run and not args.results_file` predicate
+                    #: `run_seconds` above already uses for "did this
+                    #: invocation actually invoke mutmut itself".
                     "run_scope": {
                         "mode": (
-                            "unknown"
-                            if args.results_file
-                            else ("diff" if scope_modules else "full")
+                            "diff"
+                            if scope_modules
+                            else (
+                                "full"
+                                if args.run and not args.results_file
+                                else "unknown"
+                            )
                         ),
                         "modules": sorted(scope_modules),
                         "requested": bool(args.scope_run_to_diff),

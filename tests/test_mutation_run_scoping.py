@@ -1026,3 +1026,34 @@ def test_run_scope_mode_is_unknown_for_a_saved_results_file(
     assert rc == 0
     doc = json.loads(receipt.read_text())
     assert doc["run_scope"]["mode"] == "unknown"
+
+
+def test_run_scope_mode_is_unknown_for_a_bare_database_read(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Neither `--run` nor `--results-file`: `_gather()` reads the existing
+    mutmut database as-is (the `mutmut results` path) without executing
+    anything itself. That database may have been left by an earlier
+    *scoped* run, so labeling this receipt's `run_scope.mode` "full" would
+    be the identical unverifiable assertion the `--results-file` fix above
+    already closed for a different input shape (Codex review, PR #877,
+    twelfth round)."""
+    (tmp_path / "abicheck").mkdir()
+    (tmp_path / "abicheck" / "diff_types.py").write_text(_SOURCE, encoding="utf-8")
+    _pyproject_with_only_mutate(tmp_path, ["abicheck/diff_types.py"])
+    monkeypatch.setattr(gate, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(gate.shutil, "which", lambda name: "/usr/bin/mutmut")
+    monkeypatch.setattr(
+        gate,
+        "_run_mutmut",
+        lambda cmd: ("    abicheck.diff_types.x_alpha__mutmut_1: killed\n", 0),
+    )
+    monkeypatch.setattr(
+        gate, "load_cicd_stats", lambda _dir: {"total": 1, "survived": 0, "killed": 1}
+    )
+    receipt = tmp_path / "receipt.json"
+    rc = gate.main(["--json", str(receipt)])
+    assert rc == 0
+    doc = json.loads(receipt.read_text())
+    assert doc["run_scope"]["mode"] == "unknown"
+    assert doc["run_seconds"] is None
