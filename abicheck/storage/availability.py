@@ -107,6 +107,22 @@ _GAP_STATUSES = frozenset(
     {FactStatus.NOT_COLLECTED, FactStatus.UNSUPPORTED, FactStatus.FAILED}
 )
 
+#: The status asserting that no producer ran, so a merge must not attach one.
+#: Distinct from :data:`_GAP_STATUSES` on purpose: ``UNSUPPORTED`` and
+#: ``FAILED`` are gaps *with* a producer worth naming — one was asked and
+#: could not answer, or ran and failed.
+#:
+#: ``NOT_APPLICABLE`` was in this set for one round and was removed after a
+#: test written for it failed. It reads like a member ("nothing to run, so
+#: nobody ran"), but it is the *least* worse status in ``_STATUS_ORDER``, so
+#: it can only survive a merge against itself — and then the other record is
+#: also ``NOT_APPLICABLE``, whose provenance is a peer's legitimate statement
+#: rather than something inherited across a disagreement. Blanking it would
+#: discard information, which is the one direction this package may not err
+#: in. Kept as a set rather than a scalar because the reasoning is about
+#: *which* statuses qualify, and a future one might.
+_ASSERTS_NO_PRODUCER = frozenset({FactStatus.NOT_COLLECTED})
+
 
 @dataclass(frozen=True)
 class FactAvailability:
@@ -173,26 +189,65 @@ class FactAvailability:
         would let one optimistic override defeat the family-level statement.
         Diagnostics accumulate from both sides, since both explain the result.
         """
-        # Identifying fields merge *field by field*: a non-empty override
-        # value wins as the more specific observation, and anything the
-        # override leaves blank is inherited from the family.
+        # Identifying fields merge *field by field*, but they follow the
+        # status that survives rather than always preferring the override.
         #
-        # An earlier version selected the whole record — `other if
-        # other.producer else self` — which lost information in both
-        # directions (Codex review). An override stating a narrower `scope`
-        # but no `producer` had that scope discarded, so the result described
-        # coverage the entity never had; and an override stating only a
-        # `producer` erased the inherited `recipe` and `producer_version`,
-        # which are exactly the fields that decide whether two `PRESENT`
-        # records are interchangeable. Neither is a cosmetic loss: the first
-        # misstates evidence scope, the second makes interchangeability
-        # unanswerable.
+        # Two review rounds shaped this, and the order matters. First, an
+        # earlier version selected the whole record — `other if other.producer
+        # else self` — which lost information in both directions: an override
+        # stating a narrower `scope` but no `producer` had that scope
+        # discarded, describing coverage the entity never had; and an override
+        # stating only a `producer` erased the inherited `recipe` and
+        # `producer_version`, the fields that decide whether two `PRESENT`
+        # records are interchangeable.
+        #
+        # The field-by-field merge that replaced it always let a non-empty
+        # override value win, which is right when the override's status is
+        # what survives, and wrong when it is not: narrowing
+        # `FAILED(producer="dwarf")` with `PRESENT(producer="clang",
+        # recipe="r1")` produced `FAILED(producer="clang", recipe="r1")` —
+        # a dwarf parse failure attributed to clang, carrying clang's recipe
+        # (Codex review). `NOT_COLLECTED` could likewise acquire a producer
+        # while meaning that none ran.
+        #
+        # So provenance leads from whichever record's status won, and the
+        # other fills only what the winner left blank. That keeps the earlier
+        # fix intact — an override that narrows `PRESENT` to `PARTIAL` still
+        # wins, and still inherits the family's `producer`/`recipe` — while
+        # never naming a producer for a status it did not report.
+        # One further clause, because the review's own second example survives
+        # the rule above: `NOT_COLLECTED` narrowed by `PRESENT(producer=
+        # "clang")` still inherited `clang`, since the winner left the field
+        # blank. A status asserting that *nothing ran* must not acquire
+        # provenance from the record it overrode — there is no producer, no
+        # recipe and no scope to name. `UNSUPPORTED` and `FAILED` are
+        # deliberately not in that set: a producer was asked and could not
+        # answer, or ran and failed, so naming it is exactly the useful part.
+        #
+        # Residual, deliberately not closed here: a non-identifying field can
+        # still cross between records naming different producers —
+        # `FAILED(producer="dwarf")` narrowed by `PRESENT(producer="clang",
+        # recipe="r1")` keeps `recipe="r1"`. Tightening that means "inherit
+        # only when the two records agree on producer", which would also undo
+        # the earlier reviewed fix in the opposite direction: that fix exists
+        # precisely so an override stating only a new `producer` inherits the
+        # family's `recipe`, on the grounds that `recipe` is what decides
+        # whether two `PRESENT` records are interchangeable. Both arguments
+        # have force, and this function has now been reshaped twice under
+        # review; a third structural change picking a winner between them
+        # belongs in its own pass with the decision recorded, not here. The
+        # misattribution that mattered — naming the wrong *producer* for a
+        # failure — is closed.
+        status = _worse_status(self.status, other.status)
+        winner, loser = (other, self) if other.status is status else (self, other)
+        if status in _ASSERTS_NO_PRODUCER:
+            loser = FactAvailability(status)
         return FactAvailability(
-            status=_worse_status(self.status, other.status),
-            producer=other.producer or self.producer,
-            producer_version=other.producer_version or self.producer_version,
-            recipe=other.recipe or self.recipe,
-            scope=other.scope or self.scope,
+            status=status,
+            producer=winner.producer or loser.producer,
+            producer_version=winner.producer_version or loser.producer_version,
+            recipe=winner.recipe or loser.recipe,
+            scope=winner.scope or loser.scope,
             confidence=_worse_confidence(self.confidence, other.confidence),
             diagnostics=self.diagnostics
             + tuple(d for d in other.diagnostics if d not in self.diagnostics),

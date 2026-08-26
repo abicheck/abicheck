@@ -1018,3 +1018,99 @@ class TestAnAgreeingOverrideDoesNotContradictItsFallback:
         ledger.override("vtables", "E1", FactAvailability(FactStatus.NOT_APPLICABLE))
 
         assert ledger.for_entity("vtables", "E1").status is FactStatus.NOT_APPLICABLE
+
+
+class TestProvenanceFollowsTheSurvivingStatus:
+    """Codex review: a failure could be attributed to the wrong producer.
+
+    The field-by-field merge always let a non-empty override value win, which
+    is right when the override's status survives and wrong when it does not:
+    narrowing `FAILED(producer="dwarf")` with `PRESENT(producer="clang",
+    recipe="r1")` produced `FAILED(producer="clang", recipe="r1")` — a dwarf
+    parse failure attributed to clang.
+    """
+
+    def test_a_failure_keeps_its_own_producer(self) -> None:
+        result = FactAvailability(FactStatus.FAILED, producer="dwarf").narrowed(
+            FactAvailability(FactStatus.PRESENT, producer="clang", recipe="r1")
+        )
+
+        assert result.status is FactStatus.FAILED
+        assert result.producer == "dwarf"
+
+    def test_not_collected_acquires_no_provenance(self) -> None:
+        """The review's second example, which its proposed rule did not close.
+
+        "Winner leads, loser fills gaps" still let `NOT_COLLECTED` inherit a
+        producer, because the winner left the field blank. A status meaning
+        nothing ran must name nobody.
+        """
+        result = FactAvailability(FactStatus.NOT_COLLECTED).narrowed(
+            FactAvailability(
+                FactStatus.PRESENT, producer="clang", recipe="r1", scope="all"
+            )
+        )
+
+        assert result.status is FactStatus.NOT_COLLECTED
+        assert (result.producer, result.recipe, result.scope) == ("", "", "")
+
+    def test_not_applicable_keeps_a_peers_provenance(self) -> None:
+        """Written expecting the opposite, and it failed — correctly.
+
+        `NOT_APPLICABLE` reads like it belongs with `NOT_COLLECTED`: nothing to
+        run, so nobody ran. But it is the *least* worse status, so it can only
+        survive a merge against itself, and then the other record is also
+        `NOT_APPLICABLE` — a peer's legitimate statement, not provenance
+        inherited across a disagreement. Blanking it would discard
+        information, which is the one direction this package may not err in.
+        """
+        result = FactAvailability(FactStatus.NOT_APPLICABLE).narrowed(
+            FactAvailability(FactStatus.NOT_APPLICABLE, producer="clang")
+        )
+
+        assert result.status is FactStatus.NOT_APPLICABLE
+        assert result.producer == "clang"
+
+    def test_an_explicitly_stated_producer_survives(self) -> None:
+        """Refusing *inherited* provenance must not erase a stated one."""
+        result = FactAvailability(FactStatus.NOT_COLLECTED, producer="stated").narrowed(
+            FactAvailability(FactStatus.PRESENT, producer="clang")
+        )
+
+        assert result.producer == "stated"
+
+    @pytest.mark.parametrize("status", [FactStatus.UNSUPPORTED, FactStatus.FAILED])
+    def test_a_gap_with_a_producer_still_names_it(self, status: FactStatus) -> None:
+        """`UNSUPPORTED`/`FAILED` are gaps *with* a producer worth naming."""
+        result = FactAvailability(status, producer="castxml").narrowed(
+            FactAvailability(FactStatus.PRESENT, producer="clang")
+        )
+
+        assert result.producer == "castxml"
+
+    def test_the_earlier_narrowing_fix_is_intact(self) -> None:
+        """An override that narrows still wins, and still inherits.
+
+        This is the case the previous review round added; the fix for this one
+        must not undo it.
+        """
+        result = FactAvailability(
+            FactStatus.PRESENT, producer="clang", recipe="r1", scope="all"
+        ).narrowed(FactAvailability(FactStatus.PARTIAL, scope="headers-only"))
+
+        assert result.status is FactStatus.PARTIAL
+        assert (result.producer, result.recipe, result.scope) == (
+            "clang",
+            "r1",
+            "headers-only",
+        )
+
+    def test_diagnostics_from_both_sides_are_kept(self) -> None:
+        """Provenance narrowing must not drop evidence either side recorded."""
+        result = FactAvailability(
+            FactStatus.FAILED, producer="dwarf", diagnostics=("parse error",)
+        ).narrowed(
+            FactAvailability(FactStatus.PRESENT, producer="clang", diagnostics=("ok",))
+        )
+
+        assert set(result.diagnostics) == {"parse error", "ok"}
