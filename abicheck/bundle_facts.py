@@ -20,21 +20,19 @@ files — there is no way to get a bundle-level verdict from a *stored*
 baseline the way every other surface this tool supports (``scan
 --against``, a persisted per-library ``dump``) already can. This module
 closes that gap with a serializable ``BundleFacts`` object and a
-``compare_bundle_from_facts()`` entry point, without adding any new
-*extraction*: it reuses :func:`abicheck.bundle.build_bundle_snapshot_from_metadata`,
-already built to construct a fully-functional
-:class:`~abicheck.bundle_models.BundleSnapshot` from already-parsed
-:class:`~abicheck.elf_metadata.ElfMetadata` alone — exactly what
-:attr:`abicheck.model.AbiSnapshot.elf` already stores. ``BundleFacts``
-therefore stores only what isn't already reconstructible from an
-``AbiSnapshot`` (the manifest, plus a variant-fingerprint slot G38 Phase 3
-will populate), deriving everything else on load the same way a live
-``compare_bundle()`` run does, so it can never drift out of sync with
+``compare_bundle_from_facts()`` entry point, reusing
+:func:`abicheck.bundle.build_bundle_snapshot_from_metadata` (already built
+to construct a fully-functional :class:`~abicheck.bundle_models.
+BundleSnapshot` from already-parsed :class:`~abicheck.elf_metadata.
+ElfMetadata` alone) rather than adding new *extraction*. ``BundleFacts``
+stores only what isn't already reconstructible from an ``AbiSnapshot``
+(the manifest, plus a variant-fingerprint slot G38 Phase 3 will
+populate), deriving the rest on load the same way a live
+``compare_bundle()`` run does, so it never drifts out of sync with
 :func:`abicheck.bundle._compute_resolution_graph`.
 
-This is a leaf module with respect to :mod:`abicheck.bundle`: it imports
-that module only lazily, inside function bodies, avoiding a needless cycle
-(:mod:`abicheck.bundle` already imports :mod:`abicheck.bundle_models`/`.bundle_manifest` at module scope)."""
+This is a leaf module w.r.t. :mod:`abicheck.bundle`: it imports that module
+only lazily, inside function bodies, avoiding a needless cycle."""
 
 from __future__ import annotations
 
@@ -81,12 +79,23 @@ DEFAULT_MAX_BUNDLE_DECODED_BYTES = 1024 * 1024 * 1024
 #: own AbiSnapshot object graph). No real bundle approaches this.
 DEFAULT_MAX_LIBRARY_COUNT = 20_000
 
+#: Object-node budget for one blob's JSON decode -- json.loads() has no
+#: cap on *node count*, and many small objects under an ignored key can
+#: inflate real memory far past decoded byte size (~150MB RSS from a 6MB
+#: payload of ~2M empty objects, confirmed empirically, Codex review).
+DEFAULT_MAX_JSON_OBJECT_NODES = 1_000_000
+
 #: The fingerprint value used when no multibuild variant applies (every
 #: caller today) -- G38 Phase 3 populates a real per-variant fingerprint;
 #: Phase 2 only needs the field to always be present so a future
 #: Phase-3-aware comparability check has something to compare against
 #: unconditionally, never `None`/absent on an older-shaped facts file.
 DEFAULT_VARIANT_FINGERPRINT = "default"
+
+
+class _JsonObjectBudgetExceeded(Exception):
+    """Not a ValueError -- must not be caught by _load_blob_json's own
+    `except (UnicodeDecodeError, ValueError)`."""
 
 
 @dataclass
@@ -106,12 +115,11 @@ class BundleFacts:
 
     ``filesystem_aliases`` records, per library, the extra soname
     spellings :func:`abicheck.bundle_soname.filesystem_alias_basenames` recovered
-    from the *real* on-disk file at capture time -- captured once, up
-    front, so :func:`bundle_snapshot_from_facts`'s later, metadata-only
+    from the *real* on-disk file at capture time -- captured once, up front,
+    so :func:`bundle_snapshot_from_facts`'s later, metadata-only
     reconstruction can still resolve a ``DT_NEEDED`` edge naming one of
     those aliases without touching the filesystem itself (Codex review).
-    Empty for a caller that didn't pass real paths at capture time, same
-    default as ``filesystem_alias_basenames``.
+    Empty for a caller that didn't pass real paths at capture time.
 
     ``library_filenames`` records, per library, the real on-disk
     *basename* at capture time (``libfoo_core.so.1``, not the canonical
@@ -390,13 +398,12 @@ def write_bundle_facts_archive(
     )
 
     p = Path(path)
-    # Everything below is computed -- every cap the reader will later
-    # enforce is checked -- *before* `BundleArchiveWriter` is opened, on
-    # the *same* unique-hash map the write further down populates. Sorted
-    # by name, not dict insertion order: two logically-equal BundleFacts
-    # populated differently would else produce different archive bytes.
-    # (a) Library-name-count cap, checked before the loop, else many
-    # names sharing one large snapshot would serialize it once per name.
+    # Everything below is computed -- every cap the reader enforces is
+    # checked *before* `BundleArchiveWriter` opens, on the *same* unique-
+    # hash map the write further down populates. Sorted by name so two
+    # logically-equal BundleFacts don't produce different archive bytes.
+    # (a) Library-name-count cap, checked first, else many names sharing
+    # one large snapshot would serialize it once per name.
     if len(facts.per_library_snapshots) > DEFAULT_MAX_LIBRARY_COUNT:
         raise SnapshotError(
             f"{p}: writing this bundle's {len(facts.per_library_snapshots)} "
@@ -409,9 +416,8 @@ def write_bundle_facts_archive(
     decoded_size_bytes = 0
     unique_payloads: dict[str, bytes] = {}  # content hash -> its own payload
     # Keyed by id(snap): many names can share one AbiSnapshot object, and
-    # re-serializing it per name is unbounded work the content dedup below
-    # never prevented. Safe: every snap stays referenced by
-    # `facts.per_library_snapshots` for the loop, so no id() reuse.
+    # re-serializing it per name is unbounded work content dedup doesn't
+    # prevent. Safe: every snap stays referenced for the loop's duration.
     serialized_by_identity: dict[int, tuple[str, bytes]] = {}
 
     def _oversized_bundle_message() -> str:
@@ -428,10 +434,8 @@ def write_bundle_facts_archive(
         if cached is not None:
             h, payload = cached
         else:
-            # bounded_encode_utf8() streams against the *remaining*
-            # allowance -- json.dumps()+.encode() would otherwise
-            # materialize a full oversized copy of this one snapshot
-            # before the aggregate check below ever ran (Codex review).
+            # Streamed against the *remaining* allowance -- json.dumps()+
+            # .encode() would fully materialize an oversized copy first.
             remaining = max(DEFAULT_MAX_BUNDLE_DECODED_BYTES - decoded_size_bytes, 0)
             encoded = bounded_encode_utf8(snapshot_to_dict(snap), remaining)
             if encoded is None:
@@ -439,11 +443,9 @@ def write_bundle_facts_archive(
             payload = encoded
             h = content_hash(payload)
             serialized_by_identity[id(snap)] = (h, payload)
-        # Charged here too, not only unique_payloads' own deduped total --
-        # distinct AbiSnapshot objects serializing identically (not the
-        # identity-cache case above) still each cost a real serialization
-        # before their shared hash is known. Already equals what
-        # reader_charged_bytes computes for names so far, so these agree.
+        # Charged here too: distinct AbiSnapshot objects serializing
+        # identically still each cost a real serialization before their
+        # shared hash is known -- agrees with reader_charged_bytes below.
         decoded_size_bytes += len(payload)
         if decoded_size_bytes > DEFAULT_MAX_BUNDLE_DECODED_BYTES:
             raise SnapshotError(_oversized_bundle_message())
@@ -453,9 +455,7 @@ def write_bundle_facts_archive(
     if facts.manifest is not None:
         from .bundle_manifest import manifest_to_dict
 
-        # Streamed the same way the per-snapshot loop above is: only
-        # snapshots were bounded, so an InstantiationManifest itself could
-        # still exhaust memory via a full json.dumps()+.encode() (Codex).
+        # Streamed the same way the per-snapshot loop above is.
         remaining = max(DEFAULT_MAX_BUNDLE_DECODED_BYTES - decoded_size_bytes, 0)
         encoded_manifest = bounded_encode_utf8(manifest_to_dict(facts.manifest), remaining)
         if encoded_manifest is None:
@@ -478,9 +478,7 @@ def write_bundle_facts_archive(
     # every *duplicate* name's own copy, not each unique blob's bytes once.
     hash_counts = Counter(library_blobs.values())
     reader_charged_bytes = sum(len(unique_payloads[h]) * n for h, n in hash_counts.items())
-    # manifest_blob's bytes are charged once more, whenever present --
-    # charging only the not-shared case let the writer accept what its
-    # own reader rejects.
+    # manifest_blob is charged once more, whenever present.
     if manifest_blob is not None:
         reader_charged_bytes += len(unique_payloads[manifest_blob])
     if reader_charged_bytes > DEFAULT_MAX_BUNDLE_DECODED_BYTES:
@@ -499,21 +497,16 @@ def write_bundle_facts_archive(
         "variant_fingerprint": facts.variant_fingerprint,
         "library_blobs": library_blobs,
         "manifest_blob": manifest_blob,
-        # Also sorted, same reasoning -- unordered-by-name key/value data,
-        # not order-sensitive like an instantiation manifest's `provides:`
-        # list (deliberately left untouched, per the same review).
+        # Also sorted -- unordered-by-name key/value data.
         "filesystem_aliases": {
             name: list(aliases) for name, aliases in sorted(facts.filesystem_aliases.items())
         },
         "library_filenames": dict(sorted(facts.library_filenames.items())),
     }
-    # A third cap: manifest.json's own reader-side size ceiling, never
-    # covered above. Checked incrementally via iterencode(), not
-    # `json.dumps()`+`.encode("utf-8")` (fully materializes the string
-    # first, Codex). write_manifest() re-checks identically when writing
-    # the member; checked here too so a reject happens before any blob
-    # write. iterencode() yields one whole escaped string as a single
-    # chunk, so a single oversized value needs its own pre-check first.
+    # A third cap: manifest.json's own reader-side size ceiling. Checked
+    # incrementally via iterencode() (fully materializing the string
+    # first would defeat the point, Codex); a single oversized value
+    # needs its own pre-check since iterencode() yields it as one chunk.
     oversized = oversized_raw_string(container_manifest, DEFAULT_MAX_MANIFEST_BYTES)
     if oversized is not None:
         _, oversized_bytes = oversized
@@ -549,12 +542,9 @@ def write_bundle_facts_archive(
     assert writer.stored_size_bytes is not None
     return SnapshotWriteResult(
         path=p,
-        # NONE, not ZSTD: `compression` describes the *outer envelope*
-        # `detect_snapshot_compression()` would independently discover by
-        # sniffing `path`'s own magic bytes -- a ZIP (`PK\x03\x04`), which
-        # neither sniffer recognizes as zstd. The zstd is real but internal
-        # (per-member), so claiming ZSTD here would mislead a caller
-        # cross-checking against an independent sniff.
+        # NONE, not ZSTD: `compression` describes the *outer envelope* --
+        # a ZIP (`PK\x03\x04`). The zstd is real but internal (per-member),
+        # so claiming ZSTD here would mislead an independent sniff.
         compression=SnapshotCompression.NONE,
         decoded_size_bytes=decoded_size_bytes,
         stored_size_bytes=writer.stored_size_bytes,
@@ -585,8 +575,25 @@ def read_bundle_facts_archive(
     def _load_blob_json(raw: bytes, description: str) -> Any:
         # Mirrors read_manifest()'s own translation -- neither invalid
         # JSON nor a RecursionError may surface raw here either (Codex).
+        # object_pairs_hook fires per JSON object node (incl. in arrays),
+        # aborting decode immediately once the budget is exceeded (Codex).
+        object_count = 0
+
+        def _counting_hook(pairs: Any) -> dict[Any, Any]:
+            nonlocal object_count
+            object_count += 1
+            if object_count > DEFAULT_MAX_JSON_OBJECT_NODES:
+                raise _JsonObjectBudgetExceeded
+            return dict(pairs)
+
         try:
-            return _json.loads(raw)
+            return _json.loads(raw, object_pairs_hook=_counting_hook)
+        except _JsonObjectBudgetExceeded:
+            raise SnapshotError(
+                f"{path}: {description} contains more than "
+                f"{DEFAULT_MAX_JSON_OBJECT_NODES} JSON objects -- refusing "
+                "to decode (possible object-count amplification attack)"
+            ) from None
         except (UnicodeDecodeError, ValueError) as exc:
             raise SnapshotError(f"{path}: {description} is not valid JSON: {exc}") from exc
         except RecursionError as exc:
@@ -618,27 +625,25 @@ def read_bundle_facts_archive(
         manifest = reader.read_manifest()
         # The *container's* own schema_version (manifest/blob shape) is a
         # separate axis from bundle_facts_schema_version (the BundleFacts
-        # shape it encodes) -- see the two constants' own comments.
-        archive_schema_version = _require_int_schema_version(
-            manifest.get("schema_version", 1), field="schema_version"
-        )
-        # Below 1 (never existed) or above MAX (too new) alike -- 0/negative
-        # must not silently masquerade as the current, well-understood
-        # format any more than a future version may (Codex).
-        if not 1 <= archive_schema_version <= BUNDLE_ARCHIVE_SCHEMA_VERSION:
-            raise IncompatibleSnapshotSchemaError(
-                f"Bundle archive container schema_version {archive_schema_version} "
-                f"is not a version this abicheck supports (1..{BUNDLE_ARCHIVE_SCHEMA_VERSION})."
-            )
-        bundle_facts_schema_version = _require_int_schema_version(
-            manifest.get("bundle_facts_schema_version", BUNDLE_FACTS_SCHEMA_VERSION),
-            field="bundle_facts_schema_version",
-        )
-        if not 1 <= bundle_facts_schema_version <= BUNDLE_FACTS_SCHEMA_VERSION:
-            raise IncompatibleSnapshotSchemaError(
-                f"Bundle facts schema_version {bundle_facts_schema_version} is "
-                f"not a version this abicheck supports (1..{BUNDLE_FACTS_SCHEMA_VERSION})."
-            )
+        # shape it encodes) -- see the two constants' own comments. Both
+        # keys are required, not defaulted: no pre-v1 layout ever existed,
+        # so an absent key must not silently masquerade as v1 either (Codex).
+        for _field, _max in (
+            ("schema_version", BUNDLE_ARCHIVE_SCHEMA_VERSION),
+            ("bundle_facts_schema_version", BUNDLE_FACTS_SCHEMA_VERSION),
+        ):
+            if _field not in manifest:
+                raise IncompatibleSnapshotSchemaError(
+                    f"{path}: manifest is missing required key {_field!r}."
+                )
+            _v = _require_int_schema_version(manifest[_field], field=_field)
+            if not 1 <= _v <= _max:
+                raise IncompatibleSnapshotSchemaError(
+                    f"{path}: manifest {_field} {_v} is not a version this "
+                    f"abicheck supports (1..{_max})."
+                )
+            if _field == "bundle_facts_schema_version":
+                bundle_facts_schema_version = _v
         if "library_blobs" not in manifest:
             raise ValueError(
                 "bundle archive: manifest.json is missing required key "
@@ -670,9 +675,7 @@ def read_bundle_facts_archive(
                 "continue loading (possible object-count amplification "
                 "attack, or a genuinely oversized bundle)."
             )
-        # Aggregate cap across the whole load, plus a cache keyed by hash
-        # so many library names sharing one blob decompress it once, not
-        # once per name.
+        # Aggregate cap plus a cache keyed by hash so shared blobs decompress once.
         total_decoded = 0
         blob_cache: dict[str, bytes] = {}
 
@@ -704,11 +707,10 @@ def read_bundle_facts_archive(
         #
         # snapshot_cache is keyed by hash too, alongside blob_cache above,
         # avoiding a repeat snapshot_from_dict() call per name sharing one
-        # blob. Each *name* still gets its own AbiSnapshot instance in the
-        # returned mapping (mutable, public API, so no two names may alias
-        # one object): the first-built instance is held unmodified, every
-        # later name sharing that hash gets a deep copy, matching
-        # `bundle_facts_from_dict()`'s own one-instance-per-entry contract.
+        # blob. Each *name* still gets its own AbiSnapshot instance
+        # (mutable, so no two names may alias one object): the first-built
+        # instance is held unmodified, every later name sharing that hash
+        # gets a deep copy.
         snapshot_cache: dict[str, AbiSnapshot] = {}
         snapshot_blob_len: dict[str, int] = {}
         per_library_snapshots: dict[str, AbiSnapshot] = {}
@@ -762,12 +764,10 @@ def read_bundle_facts_archive(
                     "bundle archive: 'manifest_blob' must be a content-hash "
                     f"string, got {type(manifest_blob).__name__}"
                 )
-            # _cached_blob() only charges a hash's raw bytes once, on its
-            # first fetch -- but the decode below always builds a *fresh*
-            # object graph regardless of cache hit, so a shared hash's
-            # "duplicate materialization" must be re-charged here too, the
-            # same as the per-library-name loop above (Codex review). The
-            # writer mirrors this exact accounting in its own preflight.
+            # _cached_blob() charges a hash's raw bytes once; the decode
+            # below always builds a fresh object graph regardless of cache
+            # hit, so a shared hash's own duplicate materialization must
+            # be re-charged here too, same as the per-name loop above.
             was_cached = manifest_blob in blob_cache
             raw_manifest = _cached_blob(manifest_blob)
             if was_cached:

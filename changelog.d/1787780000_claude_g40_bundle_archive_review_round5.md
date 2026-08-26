@@ -785,3 +785,33 @@
   all confirmed to fail against the pre-fix code (a raw `RecursionError`
   for the first, a silent pass-through for the second) before applying
   the fix.
+
+- **G40 bundle archive: two more Codex review findings, both real, both
+  fixed.** (1) `json.loads()` has no cap on the *number* of container
+  nodes it materializes -- only decoded *byte* size was bounded, so a
+  highly compressible payload of many small objects under a key
+  `snapshot_from_dict()` ignores could inflate real memory far past its
+  own byte size (confirmed empirically: ~150MB RSS from a 6MB payload
+  of ~2M empty objects, well within every existing byte cap). Fixed by
+  feeding `_load_blob_json()`'s `json.loads()` call an `object_pairs_
+  hook` that counts every JSON object node (confirmed to fire for
+  objects nested inside arrays too) and raises once a
+  `DEFAULT_MAX_JSON_OBJECT_NODES` (1,000,000) budget is exceeded --
+  confirmed empirically to abort decoding immediately, with no further
+  materialization, once the budget trips. (2) `schema_version`/
+  `bundle_facts_schema_version` were read via `manifest.get(key,
+  default)`, silently defaulting to 1 whenever either key was absent --
+  since no pre-v1 archive layout ever existed, an unrelated or
+  incomplete manifest containing only `library_blobs` could masquerade
+  as the current format. Fixed by requiring both keys present,
+  raising `IncompatibleSnapshotSchemaError` otherwise, consolidated
+  into one loop over both fields to fit the ADR-061 line cap. This
+  required updating ~15 existing test fixtures across
+  `test_bundle_facts_archive.py`/`test_bundle_facts_archive_hardening.py`
+  that incidentally omitted these keys (their own point was testing an
+  unrelated failure mode -- missing `library_blobs`, a malformed blob
+  shape, etc. -- and would otherwise now fail for the wrong reason).
+  New regression tests for both
+  (`test_load_bounds_object_allocation_during_blob_decoding`,
+  `test_load_rejects_a_manifest_missing_a_schema_version_key`), all
+  confirmed to fail against the pre-fix code before applying the fix.

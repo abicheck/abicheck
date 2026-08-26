@@ -431,7 +431,11 @@ class TestBundleFactsArchiveFormat:
         from abicheck.storage.bundle_archive import BundleArchiveWriter
 
         out = tmp_path / "never_existed_schema_version.bundlefacts.archive.zip"
-        manifest: dict[str, object] = {"schema_version": 1, "library_blobs": {}}
+        manifest: dict[str, object] = {
+            "schema_version": 1,
+            "bundle_facts_schema_version": 1,
+            "library_blobs": {},
+        }
         manifest[field] = value
         with BundleArchiveWriter(out) as writer:
             writer.write_manifest(manifest)
@@ -465,7 +469,11 @@ class TestBundleFactsArchiveFormat:
         from abicheck.storage.bundle_archive import BundleArchiveWriter
 
         out = tmp_path / "bad-schema-version.bundlefacts.archive.zip"
-        manifest: dict[str, object] = {"schema_version": 1, "library_blobs": {}}
+        manifest: dict[str, object] = {
+            "schema_version": 1,
+            "bundle_facts_schema_version": 1,
+            "library_blobs": {},
+        }
         manifest[field] = value
         with BundleArchiveWriter(out) as writer:
             writer.write_manifest(manifest)
@@ -481,7 +489,7 @@ class TestBundleFactsArchiveFormat:
 
         out = tmp_path / "malformed.bundlefacts.archive.zip"
         with BundleArchiveWriter(out) as writer:
-            writer.write_manifest({"schema_version": 1})
+            writer.write_manifest({"schema_version": 1, "bundle_facts_schema_version": 1})
 
         with pytest.raises(ValueError, match="library_blobs"):
             load_bundle_facts(out, format="archive")
@@ -496,7 +504,13 @@ class TestBundleFactsArchiveFormat:
 
         out = tmp_path / "bad_value.bundlefacts.archive.zip"
         with BundleArchiveWriter(out) as writer:
-            writer.write_manifest({"library_blobs": {"a.so": ["not", "a", "hash"]}})
+            writer.write_manifest(
+                {
+                    "schema_version": 1,
+                    "bundle_facts_schema_version": 1,
+                    "library_blobs": {"a.so": ["not", "a", "hash"]},
+                }
+            )
 
         with pytest.raises(ValueError, match="library_blobs\\['a.so'\\]"):
             load_bundle_facts(out, format="archive")
@@ -512,7 +526,12 @@ class TestBundleFactsArchiveFormat:
         out = tmp_path / "bad_manifest_blob.bundlefacts.archive.zip"
         with BundleArchiveWriter(out) as writer:
             writer.write_manifest(
-                {"library_blobs": {}, "manifest_blob": ["not", "a", "hash"]}
+                {
+                    "schema_version": 1,
+                    "bundle_facts_schema_version": 1,
+                    "library_blobs": {},
+                    "manifest_blob": ["not", "a", "hash"],
+                }
             )
 
         with pytest.raises(ValueError, match="manifest_blob"):
@@ -530,7 +549,9 @@ class TestBundleFactsArchiveFormat:
         out = tmp_path / "bad_shape.bundlefacts.archive.zip"
         with BundleArchiveWriter(out) as writer:
             h = writer.put_blob(b"[1, 2, 3]")
-            writer.write_manifest({"library_blobs": {"a.so": h}})
+            writer.write_manifest(
+                {"schema_version": 1, "bundle_facts_schema_version": 1, "library_blobs": {"a.so": h}}
+            )
 
         with pytest.raises(ValueError, match="must decode to a JSON object"):
             load_bundle_facts(out, format="archive")
@@ -550,7 +571,9 @@ class TestBundleFactsArchiveFormat:
         out = tmp_path / "malformed_snapshot_shape.bundlefacts.archive.zip"
         with BundleArchiveWriter(out) as writer:
             h = writer.put_blob(json_module.dumps({"functions": [None]}).encode("utf-8"))
-            writer.write_manifest({"library_blobs": {"a.so": h}})
+            writer.write_manifest(
+                {"schema_version": 1, "bundle_facts_schema_version": 1, "library_blobs": {"a.so": h}}
+            )
 
         with pytest.raises(SnapshotError, match="malformed snapshot shape"):
             load_bundle_facts(out, format="archive")
@@ -567,7 +590,9 @@ class TestBundleFactsArchiveFormat:
         deeply_nested = ("[" * 10_000) + ("]" * 10_000)
         with BundleArchiveWriter(out) as writer:
             h = writer.put_blob(deeply_nested.encode("utf-8"))
-            writer.write_manifest({"library_blobs": {"a.so": h}})
+            writer.write_manifest(
+                {"schema_version": 1, "bundle_facts_schema_version": 1, "library_blobs": {"a.so": h}}
+            )
 
         with pytest.raises(SnapshotError, match="too deeply nested"):
             load_bundle_facts(out, format="archive")
@@ -581,7 +606,14 @@ class TestBundleFactsArchiveFormat:
         deeply_nested = ("[" * 10_000) + ("]" * 10_000)
         with BundleArchiveWriter(out) as writer:
             h = writer.put_blob(deeply_nested.encode("utf-8"))
-            writer.write_manifest({"library_blobs": {}, "manifest_blob": h})
+            writer.write_manifest(
+                {
+                    "schema_version": 1,
+                    "bundle_facts_schema_version": 1,
+                    "library_blobs": {},
+                    "manifest_blob": h,
+                }
+            )
 
         with pytest.raises(SnapshotError, match="too deeply nested"):
             load_bundle_facts(out, format="archive")
@@ -609,7 +641,13 @@ class TestBundleFactsArchiveFormat:
         )
         with BundleArchiveWriter(out) as writer:
             h = writer.put_blob(payload.encode("utf-8"))
-            writer.write_manifest({"library_blobs": {"a.so": h, "b.so": h}})
+            writer.write_manifest(
+                {
+                    "schema_version": 1,
+                    "bundle_facts_schema_version": 1,
+                    "library_blobs": {"a.so": h, "b.so": h},
+                }
+            )
 
         with pytest.raises(SnapshotError, match="too deeply nested"):
             load_bundle_facts(out, format="archive")
@@ -623,7 +661,9 @@ class TestBundleFactsArchiveFormat:
         out = tmp_path / "invalid_json_blob.bundlefacts.archive.zip"
         with BundleArchiveWriter(out) as writer:
             h = writer.put_blob(b"{not valid json")
-            writer.write_manifest({"library_blobs": {"a.so": h}})
+            writer.write_manifest(
+                {"schema_version": 1, "bundle_facts_schema_version": 1, "library_blobs": {"a.so": h}}
+            )
 
         with pytest.raises(SnapshotError, match="not valid JSON"):
             load_bundle_facts(out, format="archive")

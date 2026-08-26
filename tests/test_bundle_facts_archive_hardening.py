@@ -111,6 +111,55 @@ class TestBundleFactsArchiveResourceLimits:
         with pytest.raises(SnapshotError, match="safety limit"):
             load_bundle_facts(out, format="archive")
 
+    def test_load_bounds_object_allocation_during_blob_decoding(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A library blob's decoded *byte* size is bounded, but json.loads()
+        has no cap on the *number* of container nodes it materializes --
+        many small objects under a key snapshot_from_dict() ignores can
+        inflate real memory far past the payload's own byte size (Codex
+        review, fresh evidence: ~150MB RSS from a 6MB payload of ~2M empty
+        objects). A small monkeypatched budget makes this fast to exercise
+        without actually allocating at that scale."""
+        import abicheck.bundle_facts as bundle_facts_module
+        from abicheck.storage.bundle_archive import BundleArchiveWriter
+
+        monkeypatch.setattr(bundle_facts_module, "DEFAULT_MAX_JSON_OBJECT_NODES", 100)
+        out = tmp_path / "wide-object-blob.bundlefacts.archive.zip"
+        payload = b'{"library":"a.so","version":"1","junk":[' + (b"{}," * 500) + b"{}]}"
+        with BundleArchiveWriter(out) as writer:
+            h = writer.put_blob(payload)
+            writer.write_manifest(
+                {
+                    "schema_version": 1,
+                    "bundle_facts_schema_version": 1,
+                    "library_blobs": {"a.so": h},
+                }
+            )
+
+        with pytest.raises(SnapshotError, match="more than 100 JSON objects"):
+            load_bundle_facts(out, format="archive")
+
+    @pytest.mark.parametrize("missing_field", ["schema_version", "bundle_facts_schema_version"])
+    def test_load_rejects_a_manifest_missing_a_schema_version_key(
+        self, tmp_path: Path, missing_field: str
+    ) -> None:
+        """No pre-v1 archive layout ever existed -- a manifest silently
+        defaulting an absent discriminator to v1 could let an unrelated
+        or incomplete manifest masquerade as the current format (Codex
+        review, fresh evidence)."""
+        from abicheck.errors import IncompatibleSnapshotSchemaError
+        from abicheck.storage.bundle_archive import BundleArchiveWriter
+
+        out = tmp_path / "missing-schema-version.bundlefacts.archive.zip"
+        manifest = {"schema_version": 1, "bundle_facts_schema_version": 1, "library_blobs": {}}
+        del manifest[missing_field]
+        with BundleArchiveWriter(out) as writer:
+            writer.write_manifest(manifest)
+
+        with pytest.raises(IncompatibleSnapshotSchemaError, match=missing_field):
+            load_bundle_facts(out, format="archive")
+
     def test_load_rejects_a_manifest_naming_too_many_libraries(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -136,7 +185,11 @@ class TestBundleFactsArchiveResourceLimits:
         with BundleArchiveWriter(out) as writer:
             h = writer.put_blob(b'{"library": "shared.so"}')
             writer.write_manifest(
-                {"library_blobs": {f"lib{i}.so": h for i in range(5)}}
+                {
+                    "schema_version": 1,
+                    "bundle_facts_schema_version": 1,
+                    "library_blobs": {f"lib{i}.so": h for i in range(5)},
+                }
             )
 
         real_read_blob = BundleArchiveReader.read_blob
@@ -785,6 +838,8 @@ class TestBundleFactsArchiveResourceLimits:
             h = writer.put_blob(payload)
             writer.write_manifest(
                 {
+                    "schema_version": 1,
+                    "bundle_facts_schema_version": 1,
                     "library_blobs": {"libcore.so": h},
                     "manifest_blob": h,
                     "filesystem_aliases": {},
@@ -820,6 +875,8 @@ class TestBundleFactsArchiveResourceLimits:
             h = writer.put_blob(payload)
             writer.write_manifest(
                 {
+                    "schema_version": 1,
+                    "bundle_facts_schema_version": 1,
                     "library_blobs": {"libcore.so": h},
                     "manifest_blob": h,
                     "filesystem_aliases": {},
