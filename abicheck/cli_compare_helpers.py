@@ -726,7 +726,6 @@ def _embed_inline_source_sides(
     # just without a flag to have explicitly asked for it. See
     # docs/contribute/plans/g31-header-graph-default-on-followup.md for
     # extending graph coverage to this path.
-    # Function-local: `commands.compare` imports this module (cycle).
     import shutil
     import tempfile
 
@@ -1373,7 +1372,6 @@ def run_compare(
     require_complete_analysis: bool = False,
 ) -> None:
     """Run the single-pair (or set fan-out) ``compare`` flow and exit accordingly."""
-    # Function-local: `commands.compare` imports this module (cycle).
     from .dry_run import reject_dry_run_with_output
     from .frontends.cli.commands.compare import _warn_unused_set_flags  # cycle
 

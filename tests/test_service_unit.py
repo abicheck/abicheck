@@ -2589,8 +2589,7 @@ class TestCompareRequestAdr055Evidence:
         new_p = self._make_snap_file(tmp_path, "libtest", "2.0")
         pack_dir = tmp_path / "pack"
         pack_dir.mkdir()
-        # Real manifest, not a patched predicate: is_pack_dir only reads this
-        # file, so this stays independent of which module owns it.
+        # Real manifest, not a patched predicate: is_pack_dir only reads it.
         (pack_dir / "manifest.json").write_text('{"build_source_pack_version": 1}')
 
         monkeypatch.setattr(
@@ -5535,10 +5534,8 @@ class TestComparePipelinePhases:
         def _fake_attach(result, metrics, extra, **_kwargs):
             attached.append((result, metrics, extra))
 
-        # ADR-061 Phase 3: patch the *implementation owner*. These moved out of
-        # `cli_buildsource` into the engine, and `classify_compare_pair` now
-        # imports them from there -- patching the old facade would leave this
-        # test asserting against the real functions.
+        # ADR-061 Phase 3: patch the owner -- these moved to the engine, and
+        # `classify_compare_pair` imports them from there.
         monkeypatch.setattr(
             evidence_report, "prepare_embedded_build_source", _fake_prepare
         )

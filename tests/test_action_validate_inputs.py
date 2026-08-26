@@ -648,16 +648,9 @@ class TestCompareFormatAllowlistMatchesCli:
         validator_formats = self._extract_allowlist(
             "only 'json', 'markdown', and 'junit' are available"
         )
-        cli_source = (
-            # ADR-061 Phase 4: `compare`'s body (and this constant with it)
-            # moved out of the now-facade `cli.py`.
-            Path(__file__).resolve().parents[1]
-            / "abicheck"
-            / "frontends"
-            / "cli"
-            / "commands"
-            / "compare.py"
-        ).read_text(encoding="utf-8")
+        # ADR-061 Phase 4 moved `compare`'s body out of the `cli.py` facade.
+        cmd = "abicheck/frontends/cli/commands/compare.py"
+        cli_source = (Path(__file__).resolve().parents[1] / cmd).read_text("utf-8")
         m = re.search(r"_RELEASE_FORMATS = frozenset\(\{([^}]+)\}\)", cli_source)
         assert m, "could not find _RELEASE_FORMATS in the compare command module"
         cli_formats = {f.strip().strip('"') for f in m.group(1).split(",")}

@@ -1239,9 +1239,7 @@ def test_compare_json_without_evidence_omits_metrics(tmp_path):
 def test_evidence_metrics_helpers_edge_branches(capsys):
     """ADR-033 D6/D9 helper edge cases: empty-metrics no-ops, the
     missing-duration echo path, and the _layer_status fallback."""
-    # ADR-061 Phase 3: the engine renders these lines
-    # (`evidence_policy.evidence_metrics_lines`); the CLI owns the stream, so
-    # the stderr-writing spelling this test exercises lives with the adapter.
+    # ADR-061 Phase 3: the engine renders the lines; the CLI owns the stream.
     from abicheck.buildsource.evidence_policy import _layer_status
     from abicheck.buildsource.model import CoverageStatus, DataLayer, LayerCoverage
     from abicheck.checker_types import DiffResult, Verdict
@@ -2966,13 +2964,9 @@ def test_dump_source_only_include_dependencies_is_noop(tmp_path):
 def test_dump_with_no_binary_and_no_inputs_errors(extra):
     """A bare `dump` (no SO_PATH, no --sources/--build-info) errors clearly.
 
-    Parametrized over `--dry-run` since ADR-061 Phase 3: `dump_cmd` resolves
-    one `ResolvedDumpRequest` above that branch, so the *same* invalid input
-    now gets the *same* message either way. Before, it got two different ones
-    -- the real run's from `perform_source_only_dump`, the preview's from
-    `DumpRequest.validate()` -- which is the "dry-run describes a different
-    run" split that hoisting the resolve exists to close. The surviving
-    message keeps the real run's flag-naming guidance.
+    Parametrized over `--dry-run` since ADR-061 Phase 3: `dump_cmd` resolves one
+    `ResolvedDumpRequest` above that branch, so the same invalid input now gets
+    one message, not two ("dry-run describes a different run").
     """
     result = CliRunner().invoke(main, ["dump", *extra])
     assert result.exit_code == 64

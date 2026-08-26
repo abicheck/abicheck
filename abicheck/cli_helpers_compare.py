@@ -304,10 +304,9 @@ def _warn_ignored_flags(
 #: Moved to ``compatibility_evaluation_frontend.py`` (a leaf module) so the
 #: ADR-049 configuration resolver can merge the same two ``--public-symbol``/
 #: ``--public-symbols-list`` sources into ``surface.explicit_scope`` without
-#: importing this CLI-layer module — the resolver reading only the inline
-#: tuple made a list-file-only invocation resolve to no explicit scope at all
-#: (Codex review). Re-exported here for every existing caller, the same
-#: pattern ``_canonical_library_key`` already follows below.
+#: importing this CLI-layer module — the resolver reading only the inline tuple
+#: made a list-file-only invocation resolve to no explicit scope at all (Codex
+#: review). Re-exported here, the same pattern ``_canonical_library_key`` uses.
 from .compatibility_evaluation_frontend import (  # noqa: E402
     collect_force_public_symbols,
 )
@@ -383,13 +382,10 @@ def _collect_additions(result: DiffResult) -> list[object]:
     return [c for c in result.changes if c.kind in addition_kinds]
 
 
-#: Moved to ``binary_utils.py`` (a true leaf module) to break an import
-#: cycle (`bundle -> cli_helpers_compare -> service -> service_scan ->
-#: bundle`, ADR-056) introduced when ``service_scan.run_scan_set`` started
-#: importing ``bundle.discover_artifact_set``, which itself needs this
-#: function. Re-exported here for every existing caller of
-#: ``cli_helpers_compare._canonical_library_key`` (notably ``cli.py``).
-from .workflows.extraction import (  # noqa: E402
+#: Owned by ``binary_utils.py`` (a true leaf) to break the ADR-056 cycle
+#: `bundle -> cli_helpers_compare -> service -> service_scan -> bundle`; reached
+#: via ``workflows.extraction`` since ADR-061 P4. Re-exported for every caller.
+from .workflows.extraction import (  # noqa: E402,I001
     _canonical_library_key as _canonical_library_key,
 )
 

@@ -788,9 +788,9 @@ def test_gate_flags_missing_decorator(
     import scripts.check_ai_readiness as gate
 
     pkg = tmp_path / "abicheck"
-    cmds = pkg / "frontends" / "cli" / "commands"
+    cmds = pkg / "frontends/cli/commands"
     cmds.mkdir(parents=True)
-    # A `compare` command that composes only some of the required families.
+    # A `compare` command composing only some required families.
     (cmds / "compare.py").write_text(
         "import click\n"
         '@main.command("compare")\n'
@@ -822,17 +822,15 @@ def test_gate_flags_missing_command(
     import scripts.check_ai_readiness as gate
 
     pkg = tmp_path / "abicheck"
-    cmds = pkg / "frontends" / "cli" / "commands"
+    cmds = pkg / "frontends/cli/commands"
     cmds.mkdir(parents=True)
-    # The module exists but the `compare` command has been removed from it.
     (cmds / "compare.py").write_text("def helper():\n    return 1\n")
     monkeypatch.setattr(gate, "PKG", pkg)
     monkeypatch.setattr(gate, "ROOT", tmp_path)
 
     findings = gate.Findings()
     gate.check_cli_contract(findings)
-    msgs = [m for c, m in findings.errors if c == "cli-contract"]
-    assert any("`compare` was not found" in m for m in msgs), msgs
+    assert any("`compare` was not found" in m for _c, m in findings.errors), findings.errors
 
 
 def test_intentional_subset_decorator_is_not_flagged(

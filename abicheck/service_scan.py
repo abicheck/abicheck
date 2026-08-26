@@ -1042,28 +1042,22 @@ def _load_risk_rules_for_service(risk_rules_path: Path) -> Any:
     `_run_scan_one_member`), as a plain `ValueError`.
 
     `risk_rules_path` is a plain `ScanRequest` field a direct Python API caller
-    can set without ever importing click, so this boundary must not leak a
-    click-flavored failure: `run_scan_set_subprocess`'s generic
-    exception-to-string handling would otherwise surface one to a caller that
-    never imported click (CodeRabbit review).
-
-    ADR-061 Phase 4 moved the loader into the engine
-    (`workflows.scan_config.load_risk_rules`), where a malformed profile is a
-    `SnapshotError`. That is not a `ValueError` either, so the translation
-    stayed necessary; only the caught class changed. `ClickException` is still
-    caught: the CLI-side `_load_risk_rules` adapter still raises it.
+    can set without importing click, so this boundary must not leak a
+    click-flavored failure (CodeRabbit review). ADR-061 Phase 4 moved the loader
+    into the engine, where a malformed profile is a `SnapshotError` -- also not
+    a `ValueError`, so only the caught class changed; `ClickException` is still
+    caught because the CLI-side adapter raises it.
     """
     import click
 
     from .errors import SnapshotError
-    from .workflows.scan_config import load_risk_rules as _load_risk_rules
+    from .workflows.scan_config import load_risk_rules as _load
 
     try:
-        return _load_risk_rules(risk_rules_path)
-    except click.ClickException as exc:
-        raise ValueError(str(exc.format_message())) from exc
-    except SnapshotError as exc:
-        raise ValueError(str(exc)) from exc
+        return _load(risk_rules_path)
+    except (click.ClickException, SnapshotError) as exc:
+        msg = exc.format_message() if isinstance(exc, click.ClickException) else str(exc)
+        raise ValueError(str(msg)) from exc
 
 
 #: Every ``ScanRequest`` field meaningful only for a baseline comparison,
