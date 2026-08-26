@@ -485,3 +485,32 @@ class TestBundleFactsArchiveFormat:
                 facts, tmp_path / "x.zip", format="archive", compression="gzip"
             )
 
+    def test_save_rejects_zstd_compression_for_archive_format(
+        self, tmp_path: Path
+    ) -> None:
+        """Same as the gzip case above -- an explicit outer "zstd" request
+        is equally meaningless for a format whose blobs are already always
+        zstd-compressed, one layer down."""
+        facts = capture_bundle_facts(_per_library_snapshots(_old_metadata()))
+        with pytest.raises(ValueError, match="compression"):
+            save_bundle_facts(
+                facts, tmp_path / "x.zip", format="archive", compression="zstd"
+            )
+
+    def test_save_accepts_explicit_none_compression_for_archive_format(
+        self, tmp_path: Path
+    ) -> None:
+        """compression="none" is semantically compatible with
+        format="archive": the archive format has no *outer* envelope
+        compression layer regardless (each blob is independently
+        zstd-compressed inside it), which is exactly what "none" already
+        means -- unlike "gzip"/"zstd", it must be accepted as a no-op, not
+        rejected identically to those (Codex review, fresh evidence: the
+        previous check rejected any value other than the literal string
+        "auto", "none" included, even though it's compatible)."""
+        facts = capture_bundle_facts(_per_library_snapshots(_old_metadata()))
+        out = tmp_path / "x.zip"
+        save_bundle_facts(facts, out, format="archive", compression="none")
+        loaded = load_bundle_facts(out, format="archive")
+        assert loaded.per_library_snapshots.keys() == facts.per_library_snapshots.keys()
+

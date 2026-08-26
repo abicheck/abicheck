@@ -425,3 +425,35 @@
   classification when the byte-0 check says `"json"` -- a cheap
   "is it worth trying" scan, not full validation; an archive that passes
   it can still be rejected by the real preflight/`zipfile.ZipFile` itself.
+
+- **G40 bundle archive: three more Codex review findings, all real, all
+  fixed.** (1) `looks_like_zip_from_tail()` (the previous round's own
+  fallback classification fix) accepted a bare 4-byte `PK\x05\x06` match
+  anywhere in the tail with no further structural check -- a valid,
+  gzip-compressed `BundleFacts` JSON file can coincidentally contain that
+  signature in its compressed tail (gzip's own header comment field, or
+  just compressed-data bytes), misclassifying a perfectly good
+  `format="json"` file as `"archive"` and failing the documented
+  `format="auto"` default outright even though `format="json"` on the
+  identical path succeeds. Reproduced with a real, decodable gzip stream
+  carrying a crafted `FCOMMENT` header field embedding the signature.
+  Fixed by additionally requiring the signature's own EOCD comment-length
+  field to account exactly for every byte between it and the file's true
+  end -- the same structural fact a real, unmodified EOCD always
+  satisfies (none of this module's own writers ever emit a non-empty
+  archive comment), ruling out all but a vanishingly rare coincidence.
+  (2) `BundleArchiveReader.read_manifest()`'s `json.loads(raw)` call
+  caught `UnicodeDecodeError`/`json.JSONDecodeError` but not
+  `RecursionError` -- a small `manifest.json` nested a few thousand
+  levels deep (`[[[...]]]`) blows Python's json decoder's own recursion
+  budget, a distinct exception class, so it escaped as a raw traceback
+  instead of this module's `SnapshotError` contract. Now caught
+  separately and translated the same way. (3) `save_bundle_facts()`
+  rejected *any* `compression=` value other than the literal string
+  `"auto"` for `format="archive"`, including `"none"` -- even though
+  `"none"` is semantically compatible with the archive format's own
+  always-on per-blob zstd compression (no *outer* envelope layer applies
+  either way, which is exactly what `"none"` already means): only
+  `"gzip"`/`"zstd"` are genuinely incompatible outer-envelope requests.
+  Now `"auto"`/`"none"` are both accepted as no-ops; `"gzip"`/`"zstd"`
+  still reject.

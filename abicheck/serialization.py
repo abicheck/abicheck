@@ -1966,11 +1966,11 @@ def save_bundle_facts(
     compression: str = "auto",
 ) -> SnapshotWriteResult:
     """Save *facts*; ``format="archive"`` writes G40's zip container, see
-    ``bundle_facts.maybe_write_bundle_facts_archive`` (``compression`` is JSON-only)."""
+    ``bundle_facts.maybe_write_bundle_facts_archive`` (``compression`` is JSON-only; ``"auto"``/``"none"`` no-op for it, only ``"gzip"``/``"zstd"`` reject -- Codex)."""
     from .bundle_facts import maybe_write_bundle_facts_archive
     from .snapshot_io import SnapshotCompression, write_snapshot_text
 
-    if format == "archive" and compression != "auto":
+    if format == "archive" and SnapshotCompression(compression) not in (SnapshotCompression.AUTO, SnapshotCompression.NONE):
         raise ValueError('compression= is JSON-only; format="archive" is always zstd')
     archived = maybe_write_bundle_facts_archive(facts, path, format, snapshot_to_dict=snapshot_to_dict)
     if archived is not None:

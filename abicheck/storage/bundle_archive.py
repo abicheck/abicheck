@@ -137,24 +137,19 @@ _ZIP_MAGIC_PREFIXES = (b"PK\x03\x04", b"PK\x05\x06")
 
 def sniff_bundle_archive_format(path: str | Path) -> str:
     """``"archive"`` if *path*'s own bytes start with a zip local-file-header
-    or empty-archive magic, or its tail contains a plausible EOCD signature
-    (a concatenated/self-extracting archive with an arbitrary prefix, per
-    `looks_like_zip_from_tail()`); ``"json"`` otherwise (including gzip/
-    zstd, which the plain-JSON ``BundleFacts`` path already detects and
-    transparently decompresses from those same magic-byte conventions).
-    Used by ``serialization.load_bundle_facts``'s ``format="auto"``.
-    Always ``"json"`` for a non-regular-file source (a FIFO, `/dev/stdin`,
-    a socket) without reading anything from it: a real bundle archive can
-    never be delivered that way regardless -- `zipfile.ZipFile` seeks to
-    the *end* of its input, which a non-seekable stream can't support.
+    or empty-archive magic, or its tail contains a structurally plausible
+    EOCD (a concatenated/self-extracting archive with an arbitrary prefix,
+    per `looks_like_zip_from_tail()`); ``"json"`` otherwise (including
+    gzip/zstd, which the plain-JSON ``BundleFacts`` path already detects
+    and transparently decompresses). Used by ``serialization.load_bundle_
+    facts``'s ``format="auto"``. Always ``"json"`` for a non-regular-file
+    source (a FIFO, `/dev/stdin`, a socket) without reading anything from
+    it: a real bundle archive can never be delivered that way regardless.
 
     Delegates to `open_regular_file_for_format_sniff()`'s own single-open,
-    nonblocking-then-fstat classification (closing the fd itself, since
-    this caller only wants the classification) rather than a separate
-    `stat()` + `open()` -- the same two-inode TOCTOU window that helper
-    was fixed to close still applied here otherwise: a regular file
-    replaced with a blocking FIFO between the `stat()` and the `open()`
-    could hang this call indefinitely (Codex review, fresh evidence)."""
+    nonblocking-then-fstat classification (closing the fd itself) rather
+    than a separate `stat()` + `open()` -- closing the same two-inode
+    TOCTOU window that helper was fixed for (Codex review)."""
     fp, fmt = open_regular_file_for_format_sniff(path)
     if fp is not None:
         fp.close()
@@ -202,9 +197,8 @@ def open_regular_file_for_format_sniff(
         raise SnapshotError(f"Cannot read {p}: {exc}") from exc
     fmt = _classify_prefix(prefix)
     if fmt == "json":
-        # A prefixed archive's byte-0 magic misses it (Codex review) --
-        # see looks_like_zip_from_tail()'s own docstring. from_open_file()
-        # rewinds *fp* internally regardless of where this leaves it.
+        # A prefixed archive's byte-0 magic misses it -- see
+        # looks_like_zip_from_tail()'s own docstring (Codex review).
         from .bundle_archive_cd_guard import looks_like_zip_from_tail
 
         if looks_like_zip_from_tail(fp):
@@ -243,9 +237,9 @@ def _open_unique_temp(parent: Path, prefix: str, suffix: str) -> tuple[int, Path
     _open_unique_temp`` (not imported, to stay dependency-free), except
     ``O_RDWR`` not ``O_WRONLY``: `BundleArchiveWriter.close()` reads this
     same fd back (via `os.dup`) to hash what it actually wrote, without a
-    path-based reopen a hostile actor sharing the directory could
-    redirect. Retries on a name collision rather than a process-wide
-    ``os.umask()`` dance."""
+    path-based reopen a hostile actor sharing the directory could redirect.
+    Retries on a name collision rather than a process-wide ``os.umask()``
+    dance."""
     for _ in range(100):
         candidate = parent / f"{prefix}{secrets.token_hex(8)}{suffix}"
         try:
@@ -393,11 +387,10 @@ class BundleArchiveWriter:
             raise SnapshotError("BundleArchiveWriter.write_manifest() called twice")
         # Enforced here too, not only by write_bundle_facts_archive()'s own
         # preflight -- read_manifest() rejects anything over this limit
-        # unconditionally. A single oversized string is pre-checked first
-        # (see oversized_raw_string()'s own docstring), then the rest is
-        # encoded via iterencode() and checked chunk-by-chunk, not
-        # `json.dumps()` first, so an oversized manifest never gets fully
-        # materialized.
+        # unconditionally. A single oversized string is pre-checked first,
+        # then the rest streams via iterencode() chunk-by-chunk rather than
+        # `json.dumps()` first, so an oversized manifest never fully
+        # materializes (see oversized_raw_string()'s own docstring).
         from .bundle_archive_json_guard import oversized_raw_string
 
         oversized = oversized_raw_string(manifest, DEFAULT_MAX_MANIFEST_BYTES)
@@ -474,9 +467,9 @@ class BundleArchiveWriter:
             # content -- but stored_sha256 (from the real fd) detects it.
             os.replace(self._tmp_path, self._target)
         except BaseException:
-            # A failure anywhere above must not leave the potentially large
-            # temp file behind. No-op once os.replace() has succeeded.
-            # Nested `finally` so the unlink runs even if close() raises.
+            # Must not leave the potentially large temp file behind; a
+            # no-op once os.replace() succeeded. Nested `finally` so the
+            # unlink runs even if close() itself raises.
             try:
                 if not self._tmp_file.closed:
                     self._tmp_file.close()
@@ -551,12 +544,11 @@ class BundleArchiveReader:
         # Opened once; the identical fd is handed to both the preflight
         # below and `zipfile.ZipFile` -- reopening *path* would let a
         # concurrent atomic replacement swap in a different generation.
-        # `_fp`, when given, is an already-open fd sniffed the format
-        # from (`from_open_file`) -- extends the same guarantee up.
+        # `_fp`, when given, is an already-open fd the format was sniffed
+        # from (`from_open_file`), extending the same guarantee up.
         if _fp is not None:
             # Rewound inside the guarded try below, not here -- a seek()
-            # failure outside any handler that closes it would leak the
-            # caller-owned fd and escape as a raw OSError.
+            # failure outside any handler that closes it would leak fp.
             fp = _fp
         else:
             # Same O_NONBLOCK-open + fstat()-classify shape as
@@ -605,16 +597,15 @@ class BundleArchiveReader:
             fp.seek(0)
             self._zf = zipfile.ZipFile(fp, mode="r")
         except (zipfile.BadZipFile, OSError, NotImplementedError) as exc:
-            # Every deliberate failure in this module raises SnapshotError --
-            # a truncated or hand-assembled archive must not surface a raw
-            # zipfile traceback. NotImplementedError is ZipFile's own raise
-            # for a member's extract_version exceeding what this supports.
+            # Every deliberate failure here raises SnapshotError -- a
+            # truncated/hand-assembled archive must not surface a raw
+            # zipfile traceback (NotImplementedError: ZipFile's own raise
+            # for an unsupported extract_version).
             fp.close()
             raise SnapshotError(f"{self._path}: not a valid bundle archive: {exc}") from exc
         except BaseException:
-            # SnapshotError from the preflight itself, or anything else --
-            # the fd must not leak even on a rejection this constructor
-            # doesn't translate.
+            # SnapshotError from the preflight, or anything else -- fp
+            # must not leak even on a rejection this doesn't translate.
             fp.close()
             raise
         self._fp = fp
@@ -685,8 +676,8 @@ class BundleArchiveReader:
                         )
         except zipfile.BadZipFile as exc:
             # ZipExtFile validates the member's CRC-32 as it's consumed,
-            # raising BadZipFile (typically at the `with` block's own
-            # close) on a mismatch -- otherwise a raw zipfile exception.
+            # raised (typically at the `with` block's own close) on a
+            # mismatch -- otherwise this is a raw zipfile exception.
             raise SnapshotError(
                 f"{self._path}: member {name!r} failed its CRC-32 check -- "
                 "the archive is corrupted or was tampered with."
@@ -710,6 +701,13 @@ class BundleArchiveReader:
             # other corrupt-content failure in this module.
             raise SnapshotError(
                 f"{self._path}: manifest.json is not valid JSON: {exc}"
+            ) from exc
+        except RecursionError as exc:
+            # A small but deeply nested manifest.json (`[[[...]]]`) blows
+            # json's recursion budget -- a distinct exception class from
+            # JSONDecodeError, so it needs its own catch (Codex review).
+            raise SnapshotError(
+                f"{self._path}: manifest.json is too deeply nested to parse"
             ) from exc
         if not isinstance(value, dict):
             raise SnapshotError(

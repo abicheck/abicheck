@@ -28,6 +28,7 @@ sources, rejecting in-place growth between the preflight and construction).
 from __future__ import annotations
 
 import errno
+import json
 import os
 import sys
 from pathlib import Path
@@ -574,3 +575,142 @@ class TestBundleArchivePreflightFailsClosedOnIoErrors:
         )
         with pytest.raises(SnapshotError, match="could not read the actual central"):
             BundleArchiveReader.open(path)
+
+
+class TestLooksLikeZipFromTail:
+    """`looks_like_zip_from_tail()` -- the `format="auto"` sniff's tail-scan
+    fallback -- must require the EOCD's own declared comment length to land
+    exactly on the file's true end, not merely find the 4-byte signature
+    anywhere in the tail. A bare substring search misclassified a valid
+    ``format="json"`` (gzip-compressed) ``BundleFacts`` file as an archive
+    whenever its compressed tail happened to contain the signature by
+    coincidence, failing the documented ``format="auto"`` default outright
+    even though ``format="json"`` on the identical path succeeds (Codex
+    review, fresh evidence, reproduced)."""
+
+    def _eocd(self, *, comment_len: int, comment: bytes = b"") -> bytes:
+        import struct
+
+        return (
+            struct.pack("<IHHHHIIH", 0x06054B50, 0, 0, 0, 0, 0, 0, comment_len)
+            + comment
+        )
+
+    def test_a_real_eocd_at_the_true_end_of_file_is_accepted(
+        self, tmp_path: Path
+    ) -> None:
+        from abicheck.storage.bundle_archive_cd_guard import looks_like_zip_from_tail
+
+        path = tmp_path / "real.zip"
+        path.write_bytes(b"leading prefix bytes" + self._eocd(comment_len=0))
+        with open(path, "rb") as f:
+            assert looks_like_zip_from_tail(f) is True
+
+    def test_a_real_eocd_with_a_matching_nonempty_comment_is_accepted(
+        self, tmp_path: Path
+    ) -> None:
+        from abicheck.storage.bundle_archive_cd_guard import looks_like_zip_from_tail
+
+        path = tmp_path / "real-commented.zip"
+        comment = b"a real trailing archive comment"
+        path.write_bytes(self._eocd(comment_len=len(comment), comment=comment))
+        with open(path, "rb") as f:
+            assert looks_like_zip_from_tail(f) is True
+
+    def test_a_spurious_signature_with_a_mismatched_comment_length_is_rejected(
+        self, tmp_path: Path
+    ) -> None:
+        """The load-bearing case: the 4-byte signature appears, but the
+        two bytes immediately after it (read as the EOCD's own comment
+        length) do not account for the bytes actually remaining to the
+        end of the file -- exactly what a coincidental match inside
+        compressed/arbitrary data looks like, never what a real,
+        unmodified EOCD looks like."""
+        from abicheck.storage.bundle_archive_cd_guard import looks_like_zip_from_tail
+
+        path = tmp_path / "spurious.bin"
+        # A spurious signature followed by two comment-length bytes that
+        # don't match the 20 bytes of trailing junk that actually follow.
+        path.write_bytes(b"PK\x05\x06" + b"\x00" * 18 + b"trailing junk bytes!")
+        with open(path, "rb") as f:
+            assert looks_like_zip_from_tail(f) is False
+
+    def test_a_spurious_signature_embedded_in_gzip_header_comment_is_rejected(
+        self, tmp_path: Path
+    ) -> None:
+        """The real-world repro: a valid gzip stream whose FCOMMENT header
+        field happens to contain the raw EOCD signature bytes (gzip's own
+        comment field is attacker/coincidence-controlled free-form text) --
+        the file decodes as ordinary gzip-compressed JSON, but a bare
+        substring scan over its tail still finds the signature."""
+        import gzip
+        import struct
+        import zlib
+
+        from abicheck.storage.bundle_archive_cd_guard import looks_like_zip_from_tail
+
+        payload = b'{"schema_version": 1, "per_library_snapshots": {}}'
+        comment = b"junk PK\x05\x06 more junk"
+        co = zlib.compressobj(9, zlib.DEFLATED, -15)
+        compressed = co.compress(payload) + co.flush()
+        header = (
+            b"\x1f\x8b\x08"
+            + bytes([0x10])  # FLG = FCOMMENT
+            + struct.pack("<I", 0)  # MTIME
+            + b"\x02\xff"  # XFL, OS
+            + comment
+            + b"\x00"
+        )
+        trailer = struct.pack("<I", zlib.crc32(payload) & 0xFFFFFFFF) + struct.pack(
+            "<I", len(payload) & 0xFFFFFFFF
+        )
+        data = header + compressed + trailer
+        assert b"PK\x05\x06" in data  # premise: the coincidental match exists
+        path = tmp_path / "coincidental.json.gz"
+        path.write_bytes(data)
+
+        # Premise: it's still a perfectly valid, decodable gzip stream.
+        with gzip.GzipFile(path, mode="rb") as gz:
+            assert gz.read() == payload
+
+        with open(path, "rb") as f:
+            assert looks_like_zip_from_tail(f) is False
+
+    def test_sniff_and_load_bundle_facts_treat_the_coincidental_gzip_as_json(
+        self, tmp_path: Path
+    ) -> None:
+        """End-to-end pin through the public loader (Codex review asked
+        for gzip coverage specifically): the documented `format="auto"`
+        default must still succeed on a real gzip `BundleFacts` file whose
+        tail coincidentally contains the EOCD signature."""
+        import struct
+        import zlib
+
+        from abicheck.bundle_facts import capture_bundle_facts
+        from abicheck.serialization import bundle_facts_to_dict, load_bundle_facts
+        from abicheck.storage.bundle_archive import sniff_bundle_archive_format
+
+        facts = capture_bundle_facts({})
+        payload = json.dumps(bundle_facts_to_dict(facts), indent=2).encode("utf-8")
+        comment = b"junk PK\x05\x06 more junk"
+        co = zlib.compressobj(9, zlib.DEFLATED, -15)
+        compressed = co.compress(payload) + co.flush()
+        header = (
+            b"\x1f\x8b\x08"
+            + bytes([0x10])
+            + struct.pack("<I", 0)
+            + b"\x02\xff"
+            + comment
+            + b"\x00"
+        )
+        trailer = struct.pack("<I", zlib.crc32(payload) & 0xFFFFFFFF) + struct.pack(
+            "<I", len(payload) & 0xFFFFFFFF
+        )
+        data = header + compressed + trailer
+        assert b"PK\x05\x06" in data
+        path = tmp_path / "coincidental-facts.json.gz"
+        path.write_bytes(data)
+
+        assert sniff_bundle_archive_format(path) == "json"
+        loaded = load_bundle_facts(path)  # format="auto" default
+        assert loaded.per_library_snapshots == facts.per_library_snapshots

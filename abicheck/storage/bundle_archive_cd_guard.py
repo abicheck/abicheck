@@ -51,8 +51,10 @@ _ZIP64_EOCD_RECORD_SIZE = 56  # fixed portion only; no extensible data sector
 
 
 def looks_like_zip_from_tail(f: Any) -> bool:
-    """Cheap classification only, not validation: does *f*'s tail contain
-    a plausible EOCD signature (``PK\\x05\\x06``)?
+    """Cheap classification only, not full validation: does *f*'s tail
+    contain a *structurally plausible* EOCD (``PK\\x05\\x06`` whose own
+    declared comment length accounts for every byte between it and the
+    file's end)?
 
     Robust to arbitrary bytes before the zip data (a concatenated or
     self-extracting archive), unlike a bare "does this start with `PK`"
@@ -62,14 +64,30 @@ def looks_like_zip_from_tail(f: Any) -> bool:
     its first 4 bytes weren't the local-file-header magic, so `load_
     bundle_facts(prefixed_path)` (the documented default) failed even
     though `format="archive"` on the identical path succeeded (Codex
-    review, fresh evidence). An archive that passes this cheap check can
-    still be rejected by the real preflight/`zipfile.ZipFile` itself --
-    this only answers "is it worth trying", using the same search window
-    `reject_absurd_central_directory()` does, without any of its
-    entry-count/size validation. Leaves *f* at an unspecified position;
-    a caller that cares must seek before reuse. Fails closed (`False`) on
-    any `OSError`, the same as this module's other tail-scanning code --
-    a transient read failure here must not silently misclassify."""
+    review, fresh evidence).
+
+    A bare "does the tail contain this 4-byte signature anywhere" check
+    -- the first version of this function -- is too loose: a valid
+    gzip-compressed ``BundleFacts`` JSON file can coincidentally contain
+    ``PK\\x05\\x06`` in its compressed tail (gzip's own header comment
+    field, or just compressed-data bytes), misclassifying a perfectly
+    good ``format="json"`` file as ``"archive"`` and failing the default
+    ``format="auto"`` load outright even though ``format="json"`` on the
+    identical path succeeds (Codex review, fresh evidence, reproduced).
+    Requiring the signature's own EOCD-comment-length field to land
+    exactly on the file's true end rules out all but a vanishingly rare
+    coincidence (matching both the 4-byte signature *and* a specific
+    2-byte length value), the same structural fact a real, unmodified
+    EOCD always satisfies since none of this module's own writers ever
+    emit a non-empty archive comment.
+
+    An archive that passes this check can still be rejected by the real
+    preflight/`zipfile.ZipFile` itself -- this only answers "is it worth
+    trying", not full EOCD/ZIP64 validation. Leaves *f* at an unspecified
+    position; a caller that cares must seek before reuse. Fails closed
+    (`False`) on any `OSError`, the same as this module's other
+    tail-scanning code -- a transient read failure here must not
+    silently misclassify."""
     try:
         size = os.fstat(f.fileno()).st_size
         tail_len = min(size, _EOCD_SEARCH_WINDOW_BYTES)
@@ -77,7 +95,18 @@ def looks_like_zip_from_tail(f: Any) -> bool:
         tail = f.read(tail_len)
     except OSError:
         return False
-    return bool(tail.rfind(b"PK\x05\x06") != -1)
+    tail_start = size - tail_len
+    idx = tail.rfind(b"PK\x05\x06")
+    while idx != -1:
+        if idx + 22 <= len(tail):
+            comment_len = int.from_bytes(tail[idx + 20 : idx + 22], "little")
+            if tail_start + idx + 22 + comment_len == size:
+                return True
+        # That occurrence didn't structurally check out -- keep searching
+        # backward in case an earlier one (nearer the true zip data, past
+        # some spurious match closer to EOF) does.
+        idx = tail.rfind(b"PK\x05\x06", 0, idx)
+    return False
 
 
 def _actual_central_directory_entry_count(

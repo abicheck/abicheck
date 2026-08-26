@@ -458,6 +458,31 @@ class TestBundleArchiveWriterAtomicity:
         assert not path.exists()
 
 
+class TestReadManifestTranslatesRecursionError:
+    """A small manifest.json can still nest deeply enough to blow
+    Python's json decoder's own recursion budget (e.g. a few thousand
+    levels of ``[[[...]]]``) -- `RecursionError` is a distinct exception
+    class from `json.JSONDecodeError`/`UnicodeDecodeError`, so it must be
+    caught separately or it surfaces as a raw traceback instead of this
+    module's `SnapshotError` contract (Codex review, fresh evidence)."""
+
+    def test_a_deeply_nested_manifest_raises_snapshot_error_not_recursion_error(
+        self, tmp_path: Path
+    ) -> None:
+        path = tmp_path / "bundle.archive.zip"
+        deeply_nested = ("[" * 10_000) + ("]" * 10_000)
+        with zipfile.ZipFile(path, mode="w") as zf:
+            zf.writestr(
+                zipfile.ZipInfo(MANIFEST_MEMBER),
+                deeply_nested,
+                compress_type=zipfile.ZIP_STORED,
+            )
+
+        with BundleArchiveReader.open(path) as reader:
+            with pytest.raises(SnapshotError, match="too deeply nested"):
+                reader.read_manifest()
+
+
 class TestBundleArchiveReaderRejectsNonStoredMembers:
     """Every member BundleArchiveWriter produces is ZIP_STORED
     deliberately -- ZIP_DEFLATED could expand to an arbitrary in-memory
