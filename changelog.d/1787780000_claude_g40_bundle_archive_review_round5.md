@@ -497,3 +497,17 @@
   leak a raw exception for a hostile/malformed blob. Both call sites now
   route through a new, shared `_load_blob_json()` helper mirroring
   `read_manifest()`'s own translation.
+
+- **G40 bundle archive: two more Codex review findings, both real, both
+  fixed.** (1) `BundleArchiveReader.__init__()` constructed `zipfile.
+  ZipFile` inside a `try` block that didn't catch `UnicodeDecodeError` --
+  a central-directory filename marked UTF-8 (general-purpose flag bit
+  11) but storing invalid UTF-8 bytes makes `ZipFile` raise that
+  exception while building its own file list, escaping this module's
+  `SnapshotError` contract. Now caught alongside the other constructor
+  failure classes. (2) `_read_stored_member()` only proactively checked
+  the "encrypted" flag bit (`0x1`) before opening a member -- flag bits
+  5/6 (compressed-patched data, strong encryption) make `ZipFile.
+  open()` raise a bare `NotImplementedError`, at lazy-open time rather
+  than construction, so this also escaped untranslated. Now rejected
+  proactively the same way the encrypted bit already is.
