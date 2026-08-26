@@ -118,6 +118,17 @@ MUTMUT_RUN_TIMEOUT_SECONDS = 14_400
 #: ``@@ -old,cnt +new,cnt @@`` — we only need the new-side range.
 _HUNK = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
 
+#: ``Binary files a/<path> and b/<path> differ`` — GNU diffutils' own binary
+#: marker, emitted by plain ``diff``/``diff -u`` (not just ``git diff``) with
+#: no ``diff --git`` header at all. The two path forms it's used against
+#: (git's ``a/``/``b/``-prefixed style, and diffutils' own bare-path style
+#: from ``diff file1 file2``) are both matched, greedily-but-anchored so a
+#: literal " and " inside a filename doesn't split it wrong more often than
+#: necessary — deliberately permissive, since over-matching here only ever
+#: widens what `diff_lacks_git_headers_for_its_hunks` treats as needing a
+#: header, never narrows it.
+_BINARY_MARKER = re.compile(r"^Binary files (.+) and (.+) differ$")
+
 #: ``diff --git a/<path> b/<path>`` — present on *every* diff entry regardless
 #: of what follows (a hunk, a binary-file marker, a rename with no content
 #: change, a mode-only change). Deliberately not anchored past the two
@@ -268,8 +279,29 @@ def diff_has_unparseable_git_header(diff_text: str) -> bool:
     )
 
 
+def _binary_marker_paths(diff_text: str) -> set[str]:
+    """Paths named by a GNU-diffutils/git ``Binary files ... differ`` line.
+
+    Unlike a rename (``rename from``/``rename to``) or a mode-only change
+    (``old mode``/``new mode``), which are pure ``git diff`` vocabulary that
+    never appears without a preceding ``diff --git`` header, this one line
+    shape is also emitted by plain ``diff``/``diff -u`` comparing two binary
+    files directly — a real, reachable headerless source, not a hypothetical
+    one (Codex review, PR #877, eighth round on this same predicate).
+    """
+    paths: set[str] = set()
+    for line in diff_text.splitlines():
+        m = _BINARY_MARKER.match(line)
+        if not m:
+            continue
+        for group in m.group(1), m.group(2):
+            paths.add(group[2:] if group.startswith(("a/", "b/")) else group)
+    return paths
+
+
 def diff_lacks_git_headers_for_its_hunks(diff_text: str) -> bool:
-    """True when some hunk's file isn't named by any ``diff --git`` header.
+    """True when some hunk's (or binary marker's) file isn't named by any
+    ``diff --git`` header.
 
     A "headerless" unified diff — e.g. produced by plain ``diff -u`` rather
     than ``git diff``, or a hand-assembled/stripped patch file passed via
@@ -291,7 +323,10 @@ def diff_lacks_git_headers_for_its_hunks(diff_text: str) -> bool:
     file set each reader actually sees: every path `_hunks()` names must
     also appear in `diff_touched_paths()`'s header-derived set, or a real
     hunk exists that the header-based reader — and therefore
-    `diff_touches_outside_only_mutate` — cannot see at all.
+    `diff_touches_outside_only_mutate` — cannot see at all. A hunk isn't
+    the only content shape carrying file identity, though: a headerless
+    binary-file diff has no ``@@`` hunk either, so `_binary_marker_paths`
+    is folded into the same comparison (eighth round).
     """
     hunk_paths: set[str] = set()
     for old, new, _, _ in _hunks(diff_text):
@@ -299,6 +334,7 @@ def diff_lacks_git_headers_for_its_hunks(diff_text: str) -> bool:
             hunk_paths.add(old)
         if new is not None:
             hunk_paths.add(new)
+    hunk_paths |= _binary_marker_paths(diff_text)
     if not hunk_paths:
         return False
     return not hunk_paths <= diff_touched_paths(diff_text)

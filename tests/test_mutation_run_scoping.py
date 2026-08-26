@@ -439,6 +439,61 @@ def test_diff_touches_outside_only_mutate_falls_back_on_a_mixed_diff() -> None:
     assert gate.diff_touches_outside_only_mutate(diff, _ONLY_MUTATE_TWO) is True
 
 
+def test_binary_marker_paths_reads_both_sides_of_a_git_style_marker() -> None:
+    diff = "Binary files a/examples/oracle.bin and b/examples/oracle.bin differ\n"
+    assert gate.diff_lacks_git_headers_for_its_hunks(diff) is True
+    # Pin the extracted paths directly, a/b prefix stripped.
+    assert gate._binary_marker_paths(diff) == {"examples/oracle.bin"}
+
+
+def test_binary_marker_paths_reads_the_plain_diffutils_form() -> None:
+    """GNU diffutils' own bare-path form (`diff file1 file2`, no a/b prefix)."""
+    diff = "Binary files old.bin and new.bin differ\n"
+    assert gate._binary_marker_paths(diff) == {"old.bin", "new.bin"}
+
+
+def test_diff_lacks_git_headers_for_its_hunks_ignores_a_headed_binary_marker() -> None:
+    """An ordinary git binary diff (marker immediately after a real
+    `diff --git` header) must not be flagged — the marker's path is already
+    covered by the header."""
+    diff = (
+        "diff --git a/tests/fixtures/blob.bin b/tests/fixtures/blob.bin\n"
+        "index abc123..def456 100644\n"
+        "Binary files a/tests/fixtures/blob.bin and b/tests/fixtures/blob.bin differ\n"
+    )
+    assert gate.diff_lacks_git_headers_for_its_hunks(diff) is False
+
+
+def test_diff_lacks_git_headers_for_its_hunks_detects_a_headerless_binary_marker() -> (
+    None
+):
+    """A diff mixing one properly-headed entry with a headerless GNU-diffutils
+    binary marker — reachable via plain `diff`/`diff -u` on binary files,
+    not just a hypothetical construction (Codex review, PR #877, eighth
+    round on this same check)."""
+    diff = (
+        "diff --git a/abicheck/diff_types.py b/abicheck/diff_types.py\n"
+        "--- a/abicheck/diff_types.py\n+++ b/abicheck/diff_types.py\n"
+        "@@ -1,0 +2,1 @@\n+    pass\n"
+        "Binary files a/examples/oracle.bin and b/examples/oracle.bin differ\n"
+    )
+    assert gate.diff_lacks_git_headers_for_its_hunks(diff) is True
+    # Pin why: the header-based reader only ever saw the in-scope module.
+    assert gate.diff_touched_paths(diff) == {"abicheck/diff_types.py"}
+
+
+def test_diff_touches_outside_only_mutate_falls_back_on_a_headerless_binary_marker() -> (
+    None
+):
+    diff = (
+        "diff --git a/abicheck/diff_types.py b/abicheck/diff_types.py\n"
+        "--- a/abicheck/diff_types.py\n+++ b/abicheck/diff_types.py\n"
+        "@@ -1,0 +2,1 @@\n+    pass\n"
+        "Binary files a/examples/oracle.bin and b/examples/oracle.bin differ\n"
+    )
+    assert gate.diff_touches_outside_only_mutate(diff, _ONLY_MUTATE_TWO) is True
+
+
 def test_mutant_run_scope_is_none_when_a_shared_test_fixture_is_touched() -> None:
     """The scenario `--require-baseline` alone cannot rule out: a production
     module and a *shared* test fixture both change, but the fixture doesn't
