@@ -1566,5 +1566,3 @@ def test_a_module_scope_change_uses_per_module_drift_not_absolute_debt(
     )
     assert rc == 0
     assert "per-module baseline OK" in capsys.readouterr().out
-
-
