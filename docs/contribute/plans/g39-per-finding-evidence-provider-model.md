@@ -445,19 +445,43 @@ structure already in place:
       correct for an ELF snapshot.** `crosscheck_base._exported_symbol_
       names()` — the function every one of these checks actually calls —
       branches on `snapshot.elf`/`snapshot.pe`/`snapshot.macho` and reads a
-      structurally different export table for each; a `PROVIDER_BINARY_
-      EXPORTS` entry on a PE or Mach-O snapshot names the PE export
-      directory or the Mach-O export trie, never `.dynsym`, so hard-coding
-      the ELF spelling would publish false provenance for either supported
-      non-ELF platform. Resolution: add `l0:pe_export_table` and
-      `l0:macho_export_trie` alongside the existing `l0:elf_symtab` to
-      Phase 0's vocabulary table, and derive the `l0:` suffix for a
-      `PROVIDER_BINARY_EXPORTS` entry from the same platform branch
-      `_exported_symbol_names()` itself takes (`snapshot.elf is not None` /
-      `snapshot.pe is not None` / `snapshot.macho is not None`, in that
-      order) — at finding-construction time, the identical "read it off the
-      snapshot, never hard-code it" discipline point 1 above already
-      establishes for the `l2:` suffix.
+      structurally different export table for each, so hard-coding the ELF
+      spelling would publish false provenance for either supported non-ELF
+      platform. Resolution: add `l0:pe_export_table` alongside the
+      existing `l0:elf_symtab` to Phase 0's vocabulary table for the PE
+      case, and derive the `l0:` suffix for a `PROVIDER_BINARY_EXPORTS`
+      entry from the same platform branch `_exported_symbol_names()`
+      itself takes (`snapshot.elf is not None` / `snapshot.pe is not None`
+      / `snapshot.macho is not None`, in that order) — at
+      finding-construction time, the identical "read it off the snapshot,
+      never hard-code it" discipline point 1 above already establishes for
+      the `l2:` suffix. **The Mach-O case needs a differently-named
+      provider than the PE case, not the same treatment (Codex review,
+      fresh evidence, correcting this bullet's own earlier draft, which
+      had proposed `l0:macho_export_trie`).** Unlike the PE export
+      directory (populated by exactly one function, `_parse_pe_exports()`,
+      so `l0:pe_export_table` names a genuine single source), Mach-O's own
+      `MachoMetadata.exports` (`abicheck/macho_metadata.py`) is a *merged*
+      list: `_parse()` first populates it from the classic symbol table
+      (`_parse_macho_symbols()`) and then `_parse_export_trie()` merges in
+      any trie-only exports the symbol table missed, plus upgrades the
+      weak/re-export flags of entries already present — with no per-entry
+      marker recording which mechanism actually produced a given export.
+      Since `_exported_symbol_names()` reads this already-merged list, a
+      given Mach-O finding's export fact is not necessarily trie-derived
+      at all — it just as often comes from the classic symbol table alone
+      — so stamping every Mach-O cross-check finding with
+      `l0:macho_export_trie` would publish false, overly-specific
+      provenance for the (equally common) symbol-table-only case.
+      Resolution: name the Mach-O entry `l0:macho_exports` — a generic
+      label for the combined export fact this codebase actually retains,
+      matching what the data model can support today, rather than a
+      trie-specific claim it cannot back per finding. Retaining true
+      per-export source identity (symtab vs. trie) would need
+      `MachoExport` itself to carry that distinction — a real, separate
+      `macho_metadata.py` model change, out of scope for this phase, which
+      only wires the provenance vocabulary through to what already
+      exists.
 
    **A fourth gap, distinct from the three above and not fixable by adding
    another platform/backend branch: some `_check_*` findings are negative,

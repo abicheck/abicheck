@@ -450,9 +450,15 @@ outer guards close this, both ahead of `zipfile.ZipFile` ever running:
 a central-directory preflight (`reject_absurd_central_directory`) that
 parses the EOCD/ZIP64 record directly — without invoking `ZipFile`'s own
 parse — and rejects an archive whose declared *or* actually-walked entry
-count exceeds a fixed cap (`MAX_ARCHIVE_MEMBERS`, 20,000) or whose
-central-directory byte size exceeds a fixed cap
-(`_MAX_CENTRAL_DIRECTORY_BYTES`, 8 MiB); and a bounded read of the
+count exceeds a fixed cap (`abicheck/storage/bundle_archive.py`'s own
+`MAX_ARCHIVE_MEMBERS`) or whose central-directory byte size exceeds a
+fixed cap (`abicheck/storage/bundle_archive_cd_guard.py`'s own
+`_MAX_CENTRAL_DIRECTORY_BYTES`) — both constants own their current
+values, not copied here, for the same reason this document already
+refers to `BUNDLE_FACTS_SCHEMA_VERSION` rather than hand-copying its
+number (Codex review; `AGENTS.md`'s own "don't hand-copy a table,
+count, or version number that already has a fact owner elsewhere"
+rule) — and a bounded read of the
 uncompressed `manifest.json` member itself
 (`DEFAULT_MAX_MANIFEST_BYTES`), checked incrementally rather than after
 fully materializing it. Both are enforced symmetrically on the write
@@ -477,6 +483,30 @@ shipped implementation (`abicheck/storage/bundle_archive.py`, PR #869)
 already does this correctly (`ZstdDecompressor(max_window_size=1 <<
 _ZSTD_MAX_WINDOW_LOG)`); this plan's own resource-limit inventory above
 was simply missing the requirement, not describing a gap in the code.
+
+**These guards bound only central-directory metadata and the decoded
+*output* of a blob's decompression — each `blobs/<hash>.json.zst`
+member is itself a `ZIP_STORED` zip entry, and reading *that* stored
+member's own bytes needs its own, independent ceiling before
+decompression ever starts (Codex review, fresh evidence, verified
+against the real implementation in PR #869).** A malicious archive can
+carry a tiny manifest and central directory yet name one multi-gigabyte
+`ZIP_STORED` blob member; nothing above stops that member's raw,
+still-compressed bytes from being read into memory in one shot before
+the bounded zstd decoder in the previous paragraph ever runs. The
+shipped implementation already closes this the same way
+`snapshot_io.py` bounds its own stored/compressed reads: every member
+read — both `manifest.json` and each blob — goes through one shared
+helper, `BundleArchiveReader._read_stored_member()`, which streams the
+member in bounded chunks and aborts as soon as the running total
+exceeds the caller's own byte ceiling, rather than reading the whole
+member into a buffer first. For a blob specifically, that ceiling is
+`max_decoded_bytes` plus a small fixed zstd-frame-overhead slack, not
+the raw member size, so an incompressible payload's slightly larger
+compressed form is still accepted without loosening the bound. This
+plan's own resource-limit inventory above was, again, simply missing
+the requirement — the code already reads the compressed member and the
+decoded decompression output as two independently bounded steps.
 
 ### Phase 3 — CLI/API wiring (S)
 
@@ -538,6 +568,44 @@ was there to encode," not "how many bytes did the store end up holding");
 size and sha256 digest, streamed rather than read fully into memory, since
 this bookkeeping step has no reason to hold a second full copy of a
 potentially large multi-library archive just to size/hash it.
+
+**`decoded_size_bytes` deliberately excludes the archive's own container
+`manifest.json` (verified against the shipped `write_bundle_facts_archive()`,
+`abicheck/bundle_facts.py`, PR #869 — Codex review, fresh evidence).**
+The function accumulates `decoded_size_bytes` only from the per-library
+`AbiSnapshot` payloads and, when present, the `InstantiationManifest`
+payload — the two things that land in the blob store. The container
+manifest (`BundleArchiveManifest`'s own JSON: `schema_version`,
+`library_blobs`, `filesystem_aliases`, `library_filenames`) is serialized
+and size-checked separately, into a local `manifest_member_bytes`, and
+that value is never folded into the returned `decoded_size_bytes` — so
+even the simplest single-library archive returns a `decoded_size_bytes`
+smaller than the true total logical bytes encoded into the file, and the
+gap grows with however many filesystem aliases and library filenames the
+container manifest carries. This differs from the plain-JSON path's own
+`decoded_size_bytes` (`snapshot_io.py`), which is `len(data)` for the
+*entire* document written — there is no analogous "container vs. payload"
+split for a single JSON file, so that field's existing meaning there is
+"all the logical bytes this write encoded," full stop. Carrying the same
+field name into the archive format with a narrower definition is a real,
+if minor, semantic divergence worth stating plainly rather than assuming
+readers will infer it: `SnapshotWriteResult.ratio` (`stored_size_bytes /
+decoded_size_bytes`) is therefore not a like-for-like compression ratio
+for the archive format the way it is for the plain-JSON format —
+`stored_size_bytes` is the real, whole zip file's size (container
+manifest included), while `decoded_size_bytes` excludes that same
+manifest's logical bytes. This is accepted as the archive format's
+scope for this plan: the field answers "how much per-library fact
+content was there to encode," which is the number a caller comparing
+archive efficiency across bundles actually wants, and re-defining it to
+include the container manifest would mean re-deriving it from
+`manifest_member_bytes` — itself an implementation-internal encoding
+detail (`_json.JSONEncoder(indent=2).iterencode(...)`) not otherwise
+exposed on this return type. A future revision that wants a
+byte-for-byte-accurate `ratio()` for the archive format should introduce
+a distinct field (e.g. `container_manifest_bytes`) rather than folding a
+differently-scoped number into `decoded_size_bytes` under the name this
+document's own plain-JSON contract already gives a stricter meaning.
 **`save_bundle_facts(facts, path, format="archive", compression="gzip")` must
 be rejected, not silently ignored (Codex review, fresh evidence, correcting
 an earlier draft of this section that specified the opposite).** An earlier
@@ -764,6 +832,16 @@ instantiation-order-sensitive fields (Phase 1's hash input).
      size of what it eventually returns, per the requirement introduced
      above; a real, ordinarily-windowed blob must still decompress
      cleanly (a positive control, matching this list's existing pattern).
+  8. *Oversized stored (still-compressed) blob member* — a `ZIP_STORED`
+     blob member whose own declared/actual size (before decompression)
+     exceeds the reader's bound is rejected while streaming that member's
+     raw bytes, never fully buffered into memory first — the guard this
+     plan's own "these guards bound only central-directory metadata and
+     the decoded *output*" note above describes, distinct from both the
+     central-directory preflight (guards 4-5) and the decoded-window
+     bound (guard 7): a tiny manifest and central directory naming one
+     multi-gigabyte stored member must still be rejected before any
+     zstd decoding is attempted.
 - Back-compat: every existing plain-JSON `BundleFacts` fixture in this
   repo's test suite still loads unchanged via the `"auto"`-sniffing path
   once this plan ships, with **no** re-save required.
