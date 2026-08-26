@@ -240,7 +240,37 @@ structure already in place:
    is a static fact of which module produced the `Change`, not a per-call
    derivation, so this slice is close to mechanical: one constant tuple per
    detector function, passed through the existing `make_change(...)`/
-   `Change(...)` call. **`diff_symbols.py` does NOT belong in this
+   `Change(...)` call. **`diff_platform.py` itself is not uniformly
+   mechanical, and treating the whole file as one fixed-tier module would
+   mislabel its own mixed-evidence detectors (Codex review, verified against
+   the code)** — the same carve-out `diff_symbols.py` needed below applies
+   *within* this file too, not just to the sibling module. `_diff_elf_deleted_
+   fallback` (`elf_deleted_fallback`) is the concrete case: it reads
+   `old.elf`/`new.elf` (genuine L0 symbol-table evidence) to detect a symbol
+   vanishing from `.dynsym`, but it gates that on `_public_functions(old)`
+   and `new.function_map` — the *declaration*-side `Function` records those
+   calls return, whose own evidence can rest on DWARF, castxml, or clang
+   depending on how each snapshot was produced (the identical fallback-to-
+   header/DWARF and synthetic-constructor/destructor behavior the
+   `diff_symbols.py` carve-out below documents for `_public_functions()`
+   itself). A `Change` this detector emits is therefore never purely L0: it
+   names an L0 fact (the symbol's absence from the export table) *and* an
+   L1/L2 declaration fact (that the symbol is still declared, still public,
+   and not already marked deleted/inline) jointly, and a module-level
+   constant tuple can state only the first half honestly. This slice's own
+   audit must therefore go call-site by call-site *within*
+   `diff_platform.py`, exactly as slice 2 (`diff_types.py`) and the
+   `crosscheck.py` sub-slice already do — a detector reading only
+   `old_elf`/`new_elf` (most of the ELF/PE/Mach-O-specific findings this file
+   holds) is genuinely static and keeps its one-constant-tuple treatment; a
+   detector that also reads a declaration-side record for gating (
+   `elf_deleted_fallback`, and any sibling detector found to share the same
+   shape during the audit) is not, and needs the same per-finding, multi-
+   provider treatment `diff_symbols.py`'s own slice already prescribes. This
+   is Phase 1 budget, not an afterthought discovered mid-implementation —
+   the "close to mechanical" framing above describes the *common* case in
+   this file, not a blanket exemption from the audit every other slice
+   already requires. **`diff_symbols.py` does NOT belong in this
    mechanical sub-slice** despite being symbol-table-driven on its face
    (Codex review, verified against the code): `_public_functions()` falls
    back to the complete header/DWARF function set when live ELF evidence is
@@ -408,6 +438,64 @@ structure already in place:
       `tuple[str, ...]` (rather than a single string) was always meant to
       support; Phase 0's vocabulary table simply hadn't yet stated that a
       multi-provider check must use more than one slot.
+   3. **`PROVIDER_BINARY_EXPORTS` names a platform-selectable evidence
+      source too, exactly like `PROVIDER_PUBLIC_HEADER_AST` does for the
+      backend (Codex review, verified against the code) — the fixed
+      `"current:l0:elf_symtab"` spelling used in the example above is only
+      correct for an ELF snapshot.** `crosscheck_base._exported_symbol_
+      names()` — the function every one of these checks actually calls —
+      branches on `snapshot.elf`/`snapshot.pe`/`snapshot.macho` and reads a
+      structurally different export table for each; a `PROVIDER_BINARY_
+      EXPORTS` entry on a PE or Mach-O snapshot names the PE export
+      directory or the Mach-O export trie, never `.dynsym`, so hard-coding
+      the ELF spelling would publish false provenance for either supported
+      non-ELF platform. Resolution: add `l0:pe_export_table` and
+      `l0:macho_export_trie` alongside the existing `l0:elf_symtab` to
+      Phase 0's vocabulary table, and derive the `l0:` suffix for a
+      `PROVIDER_BINARY_EXPORTS` entry from the same platform branch
+      `_exported_symbol_names()` itself takes (`snapshot.elf is not None` /
+      `snapshot.pe is not None` / `snapshot.macho is not None`, in that
+      order) — at finding-construction time, the identical "read it off the
+      snapshot, never hard-code it" discipline point 1 above already
+      establishes for the `l2:` suffix.
+
+   **A fourth gap, distinct from the three above and not fixable by adding
+   another platform/backend branch: some `_check_*` findings are negative,
+   and `fact_provenance` has no fact to name for a negative result (Codex
+   review, verified against the code).** `_check_exported_not_public` does
+   not merely read a `PROVIDER_PUBLIC_HEADER_AST` fact — for its own
+   central finding, it emits *because* no declaration anywhere in the
+   snapshot's public-header surface accounts for a given export
+   (`sym not in public_syms`, `decl_by_sym.get(sym)` absent or private).
+   `AbiSnapshot.fact_provenance` (G28 Phase 3) is keyed per *existing*
+   fact on a *specific* declaration (`func_fact_key`/`var_fact_key`/
+   `field_fact_key`) — it can answer "which backend produced this field on
+   this record," never "which backend(s) were exhaustively searched and
+   found nothing." There is no declaration to look the fact up on, so
+   point 1's "read the per-fact provenance via `fact_provenance.py`"
+   instruction has no key to query for this shape of finding, and choosing
+   `l2:castxml`/`l2:clang` for it either by guessing the run's configured
+   frontend or by defaulting to one would misrepresent what was actually
+   established: not "castxml said this symbol is undeclared" but "every
+   declaration this run's public-header surface could produce, from
+   whichever backend(s) actually ran, was searched and none matched."
+   **Resolution: a negative finding records which complete backend
+   surface(s) were searched, not which fact produced it** — a distinct,
+   additive provenance shape from the positive, per-fact case points 1-3
+   above cover, not a variant of it. Concretely, `evidence_provenance` for
+   this shape carries a `l2:searched:<frontend>` entry per backend whose
+   public-header surface was exhaustively built and consulted for the
+   symbol in question (`l2:searched:castxml`, `l2:searched:clang`, or both
+   for a hybrid snapshot where both surfaces were checked), rather than
+   attempting to name a producer for a fact that does not exist. This
+   generalizes beyond `_check_exported_not_public`: any other check in this
+   module whose finding rests on an *absence* across a searched surface
+   (audited alongside the positive-fact cases, function by function, per
+   the same discipline below) needs the identical `searched:` shape rather
+   than a `PROVIDER_*`-to-`l*:`-fact translation that assumes a fact
+   exists. Phase 0's vocabulary table gains this `searched:` form
+   alongside the existing per-fact `l*:` entries as part of this slice's
+   work, not as a follow-up.
 
    The function → tier examples this bullet originally gave —
    `_check_odr_type_variant -> "current:l4:source_replay"` and
@@ -416,14 +504,19 @@ structure already in place:
    and neither is multi-provider, so a fixed single-tier mapping is sound
    for those two specifically. They were never wrong; they were presented
    as instances of a rule general enough to cover every `_check_*`
-   function in the module, which — per the two gaps above — they are not.
-   The verification discipline is unchanged and now covers both dimensions
-   explicitly: for each `_check_*` function, read its body to determine
-   (a) every `PROVIDER_*` constant it can stamp into `providers` for a
-   given call, and (b) for any `PROVIDER_PUBLIC_HEADER_AST` entry, the
+   function in the module, which — per the four gaps above — they are not.
+   The verification discipline is unchanged and now covers all four
+   dimensions explicitly: for each `_check_*` function, read its body to
+   determine (a) every `PROVIDER_*` constant it can stamp into `providers`
+   for a given call, (b) for any `PROVIDER_PUBLIC_HEADER_AST` entry, the
    snapshot field or hybrid-provenance lookup that names the backend that
-   actually produced it — function by function, never assumed uniformly
-   from another function's shape or from the constant's name alone.
+   actually produced it, (c) for any `PROVIDER_BINARY_EXPORTS` entry, the
+   platform branch that names which export-table format was read, and (d)
+   whether the finding is positive (a fact was found and can be named) or
+   negative (an exhaustive search found nothing, and must be recorded as
+   `searched:`, not misattributed to a fact) — function by function, never
+   assumed uniformly from another function's shape or from the constant's
+   name alone.
 4. **Cross-cutting post-processing and roll-up emitters**
    (`post_processing.py`, `post_processing_reachability.py`,
    `pattern_verdicts.py`, `internal_leak.py`, `bundle_models.py`,

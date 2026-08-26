@@ -220,9 +220,49 @@ every blob and the manifest have been written successfully — inside
 before that point (a raised exception from `put_blob`/`write_manifest`, an
 exception propagating out of the `with` block) must leave the destination
 path completely untouched — a `SnapshotError`, a full disk, or a killed
-process must never partially overwrite a previously-valid baseline, and
-the abandoned temporary file must be cleaned up rather than left behind. A
-destination that is itself a symlink is replaced at its resolved real
+process must never partially overwrite a previously-valid baseline.
+
+**The abandoned-temp-file cleanup guarantee must be scoped honestly — it
+covers only a failure whose handling code actually gets to run, not every
+way a write can stop (Codex review, fresh evidence).** This paragraph
+previously stated flatly that "the abandoned temporary file must be
+cleaned up rather than left behind," with no qualification — that promise
+cannot be kept universally, and stating it unqualified invites a reader to
+trust a guarantee no user-space code can deliver. If the writer process is
+terminated with `SIGKILL`, the machine loses power, or the process is
+OOM-killed, no `except`/`finally` block, no context-manager `__exit__`,
+and no `atexit` hook runs — there is no code left executing to delete
+anything, by construction, regardless of how carefully the writer is
+implemented. The guarantee this contract can actually make, and the one
+`BundleArchiveWriter` implements, is narrower and code-reachable: **on any
+failure that unwinds through Python's own exception machinery** — a raised
+exception from `put_blob`/`write_manifest`, an exception propagating out of
+the `with` block, an explicit `close()`/`abort()` call — the writer's own
+cleanup code runs and removes its temp file before control leaves the
+writer. That boundary is exhaustive for every failure this plan's own test
+list can inject (all of them are raised-and-caught Python exceptions), but
+it is **not** a guarantee against a `SIGKILL`, a power loss, or an
+OOM-killer termination — those leave a stale, uniquely-named temp file
+behind in the destination's parent directory, and no writer-side code
+change can close that gap, since the same mechanism that would need to run
+the cleanup is the one that was killed. This does not weaken the atomicity
+guarantee immediately above: a `SIGKILL`-abandoned temp file is inert dead
+weight, never `os.replace()`d onto the destination (that call happens only
+at the very end of a clean `close()`), so the destination path itself
+stays exactly as untouched as the atomicity guarantee already promises —
+only the *disk-space reclamation* of the orphaned temp file is out of
+scope here, not the correctness of the published archive. Reclaiming an
+orphaned temp file left behind by a killed process is therefore a
+**separate, explicitly out-of-scope concern for this plan**: it would need
+a GC-style sweep over stale `*.tmp`-named siblings in a destination's
+parent directory (e.g. by age, run opportunistically or on a schedule) —
+a different mechanism from anything a single `BundleArchiveWriter` call
+can implement on its own behalf — and no such sweep is designed or
+scheduled as part of G40. Recorded here as a known, accepted gap rather
+than left as an implicit assumption a reader could mistake for a
+delivered guarantee.
+
+A destination that is itself a symlink is replaced at its resolved real
 target, not by clobbering the link, mirroring `snapshot_io.
 _atomic_write_bytes`'s existing symlink handling for the plain-JSON path —
 this format should not invent a second convention for the identical
@@ -232,7 +272,11 @@ below): write a real archive to a path, then attempt a second write that
 is made to fail partway through (an injected error after some blobs are
 written but before `write_manifest`/`close()`), and assert the original
 file at that path is byte-for-byte unchanged — a failure-preserves-old-file
-test, not merely a happy-path round-trip. (The shipped implementation
+test, not merely a happy-path round-trip. This test — like the whole
+cleanup guarantee it exercises — proves cleanup only for a catchable,
+in-process failure (an injected exception); it says nothing about, and
+cannot say anything about, a `SIGKILL`/power-loss/OOM-kill scenario, per
+the scoping above. (The shipped implementation
 already does this: `BundleArchiveWriter` writes to a randomized,
 `O_CREAT|O_EXCL` sibling temp file and calls `os.replace()` only from
 `close()`, using `fchown`/`fchmod` on the temp file's own open descriptor
@@ -654,7 +698,12 @@ instantiation-order-sensitive fields (Phase 1's hash input).
   through (an injected exception between a successful `put_blob` and
   `write_manifest`/`close()`); assert both that the destination's bytes
   are byte-for-byte identical to the first write's, and that no leftover
-  temp file survives in the destination's parent directory.
+  temp file survives in the destination's parent directory. This test
+  proves cleanup only for the code-reachable failure class the "must be
+  scoped honestly" note above describes (a raised, in-process exception) —
+  it cannot exercise, and makes no claim about, a `SIGKILL`/power-loss/
+  OOM-kill termination, where no cleanup code runs at all; don't read a
+  pass here as evidence against that residual gap.
 - **Every declared resource-limit guard needs its own adversarial test, not
   just the intra-archive dedup/round-trip happy path above (Codex review,
   fresh evidence — the decompression-bomb and central-directory guards
