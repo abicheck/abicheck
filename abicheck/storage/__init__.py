@@ -53,6 +53,7 @@ from .identity import (
 from .versioning import (
     COMPARISON_CONTRACT_VERSION,
     PACKAGE_FORMAT_VERSION,
+    UNSTATED_VERSION,
     ProducerIdentity,
     ReaderCompatibility,
     StorageVersions,
@@ -60,10 +61,9 @@ from .versioning import (
 )
 
 __all__ = [
-    "COMPARISON_CONTRACT_VERSION",
-    "PACKAGE_FORMAT_VERSION",
-    "CAPTURE_METADATA_KEY",
     "AvailabilityLedger",
+    "CAPTURE_METADATA_KEY",
+    "COMPARISON_CONTRACT_VERSION",
     "Confidence",
     "EntityId",
     "EntityKind",
@@ -73,9 +73,11 @@ __all__ = [
     "ObservationKind",
     "OccurrenceId",
     "OccurrenceSet",
+    "PACKAGE_FORMAT_VERSION",
     "ProducerIdentity",
     "ReaderCompatibility",
     "StorageVersions",
+    "UNSTATED_VERSION",
     "canonical_form",
     "canonical_json",
     "check_reader_compatibility",

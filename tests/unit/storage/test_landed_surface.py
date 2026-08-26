@@ -89,3 +89,31 @@ def test_every_storage_module_has_a_row() -> None:
     }
 
     assert present == set(_MODULES) == set(_table_rows())
+
+
+def test_the_package_reexports_exactly_the_modules_public_surface() -> None:
+    """The package's `__all__` is the union of its modules', in sorted order.
+
+    Same mechanism as the plan table above, one layer in: a hand-maintained
+    list of names beside a set of modules that moved four times during review.
+    It had already drifted — `UNSTATED_VERSION` was exported by
+    `versioning` and absent here, so a consumer reading
+    `StorageVersions.package_format_version == 0` had no name for what that
+    zero means — and the ordering had drifted too (CodeRabbit review).
+
+    Sorted is asserted rather than merely preferred because an unsorted list
+    is how the missing entry stayed invisible: with no order to violate,
+    nothing about the list looked wrong.
+    """
+    package = importlib.import_module("abicheck.storage")
+    union: set[str] = set()
+    for module_name in _MODULES:
+        union |= set(importlib.import_module(module_name).__all__)
+
+    assert set(package.__all__) == union, (
+        f"package re-export drift: missing {sorted(union - set(package.__all__))}, "
+        f"extra {sorted(set(package.__all__) - union)}"
+    )
+    assert list(package.__all__) == sorted(package.__all__)
+    for name in package.__all__:
+        assert hasattr(package, name), f"{name} is in __all__ but not importable"
