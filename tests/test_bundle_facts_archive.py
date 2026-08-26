@@ -336,10 +336,17 @@ class TestBundleFactsArchiveFormat:
         """storage.bundle_archive.read_blob's own max_decoded_bytes only
         bounds ONE blob at a time -- many distinct, individually-small
         blobs must still be bounded in aggregate across the whole load
-        (Codex review)."""
+        (Codex review).
+
+        Written *before* the cap is lowered (an archive written under a
+        real/looser cap -- an older abicheck, or one written before a later
+        security tightening -- being read back under a stricter one is the
+        realistic shape of this scenario): the write path enforces the
+        identical aggregate cap now too (see the sibling write-side test
+        below), so writing under the already-lowered cap would raise here
+        instead of at load."""
         import abicheck.bundle_facts as bundle_facts_module
 
-        monkeypatch.setattr(bundle_facts_module, "DEFAULT_MAX_BUNDLE_DECODED_BYTES", 100)
         metadata = {
             f"lib{i}.so": _meta(soname=f"lib{i}.so", exports=[f"sym{i}"]) for i in range(5)
         }
@@ -347,6 +354,7 @@ class TestBundleFactsArchiveFormat:
         out = tmp_path / "many.bundlefacts.archive.zip"
         save_bundle_facts(facts, out, format="archive")
 
+        monkeypatch.setattr(bundle_facts_module, "DEFAULT_MAX_BUNDLE_DECODED_BYTES", 100)
         with pytest.raises(SnapshotError, match="safety limit"):
             load_bundle_facts(out, format="archive")
 
@@ -412,6 +420,34 @@ class TestBundleFactsArchiveFormat:
         out = tmp_path / "too-many-members.bundlefacts.archive.zip"
 
         with pytest.raises(SnapshotError, match="more than 3 zip members"):
+            save_bundle_facts(facts, out, format="archive")
+        assert not out.exists()
+
+    def test_save_rejects_a_write_that_would_exceed_the_reader_own_aggregate_cap(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Codex review, fresh evidence: nothing on the write path checked
+        the aggregate decoded-byte budget either -- several distinct,
+        individually-small library snapshots could sum past
+        `DEFAULT_MAX_BUNDLE_DECODED_BYTES` and still write successfully,
+        producing an archive `read_bundle_facts_archive()`'s own aggregate
+        cap would then always refuse once its remaining allowance runs out.
+        The check must be dedup-aware -- charging each *unique* blob's
+        bytes once, mirroring the reader's own cache -- not the informational
+        `decoded_size_bytes` total, which intentionally counts every name's
+        payload regardless of dedup; this is verified by having every
+        payload be genuinely distinct (soname differs per entry, so none of
+        them share a blob)."""
+        import abicheck.bundle_facts as bundle_facts_module
+
+        monkeypatch.setattr(bundle_facts_module, "DEFAULT_MAX_BUNDLE_DECODED_BYTES", 100)
+        metadata = {
+            f"lib{i}.so": _meta(soname=f"lib{i}.so", exports=[f"sym{i}"]) for i in range(5)
+        }
+        facts = capture_bundle_facts(_per_library_snapshots(metadata))
+        out = tmp_path / "too-much-content.bundlefacts.archive.zip"
+
+        with pytest.raises(SnapshotError, match="100 byte aggregate safety limit"):
             save_bundle_facts(facts, out, format="archive")
         assert not out.exists()
 

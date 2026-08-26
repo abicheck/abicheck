@@ -419,7 +419,11 @@ def write_bundle_facts_archive(
 
     from .errors import SnapshotError
     from .snapshot_io import SnapshotCompression, SnapshotWriteResult
-    from .storage.bundle_archive import MAX_ARCHIVE_MEMBERS, BundleArchiveWriter
+    from .storage.bundle_archive import (
+        MAX_ARCHIVE_MEMBERS,
+        BundleArchiveWriter,
+        content_hash,
+    )
 
     p = Path(path)
     # Reject up front, before writing anything, rather than producing an
@@ -448,6 +452,35 @@ def write_bundle_facts_archive(
         )
     library_blobs: dict[str, str] = {}
     decoded_size_bytes = 0
+    # A *second*, dedup-aware running total, distinct from the informational
+    # `decoded_size_bytes` above (which intentionally counts every name's
+    # own payload length, dedup or not -- see the return value's own
+    # docstring). This one mirrors exactly what `read_bundle_facts_archive`'s
+    # own aggregate cap charges: each *unique* blob's decoded bytes, once
+    # (its own `blob_cache` there). Checked here, incrementally, so a write
+    # whose unique content already exceeds `DEFAULT_MAX_BUNDLE_DECODED_
+    # BYTES` fails before completing, rather than succeeding and producing
+    # an archive the paired public loader would then always refuse to
+    # reopen once its own remaining aggregate allowance is exhausted
+    # (Codex review, fresh evidence).
+    unique_decoded_bytes = 0
+    seen_hashes: set[str] = set()
+
+    def _charge_unique_bytes(payload: bytes, h: str) -> None:
+        nonlocal unique_decoded_bytes
+        if h in seen_hashes:
+            return
+        seen_hashes.add(h)
+        unique_decoded_bytes += len(payload)
+        if unique_decoded_bytes > DEFAULT_MAX_BUNDLE_DECODED_BYTES:
+            raise SnapshotError(
+                f"{p}: writing this bundle's distinct content would exceed "
+                f"the {DEFAULT_MAX_BUNDLE_DECODED_BYTES} byte aggregate "
+                "safety limit read_bundle_facts_archive() enforces on load "
+                "-- refusing to write an archive that could not be "
+                "reopened."
+            )
+
     with BundleArchiveWriter(p) as writer:
         # Sorted by name, not `facts.per_library_snapshots`' own dict
         # insertion order (Codex review, fresh evidence): two BundleFacts
@@ -461,6 +494,8 @@ def write_bundle_facts_archive(
         for name, snap in sorted(facts.per_library_snapshots.items()):
             payload = _json.dumps(snapshot_to_dict(snap), indent=2).encode("utf-8")
             decoded_size_bytes += len(payload)
+            h = content_hash(payload)
+            _charge_unique_bytes(payload, h)
             library_blobs[name] = writer.put_blob(payload)
         manifest_blob = None
         if facts.manifest is not None:
@@ -470,6 +505,8 @@ def write_bundle_facts_archive(
                 manifest_to_dict(facts.manifest), indent=2
             ).encode("utf-8")
             decoded_size_bytes += len(manifest_payload)
+            h = content_hash(manifest_payload)
+            _charge_unique_bytes(manifest_payload, h)
             manifest_blob = writer.put_blob(manifest_payload)
         writer.write_manifest(
             {
