@@ -513,6 +513,45 @@ class TestNoteIfSameBinaryCompared:
         note_if_same_binary_compared(result)
         assert result.coverage_warnings == []
 
+    def test_real_findings_without_header_tier_also_qualify_the_claim(self):
+        """Codex review, fresh evidence: L3-L5 build/source-pack evidence
+        can detect and report a real change without ever setting "header"
+        in evidence_tiers (that list only reflects snapshot-level elf/
+        dwarf/header/pe/macho facts) -- a non-empty result.changes already
+        contradicts "cannot detect a change" regardless of which tier
+        produced it."""
+        from abicheck.checker_policy import ChangeKind
+        from abicheck.checker_types import Change
+        from abicheck.confidence import note_if_same_binary_compared
+
+        result = self._result(
+            old_sha="a" * 64, new_sha="a" * 64, evidence_tiers=["elf", "dwarf"]
+        )
+        result.changes = [
+            Change(ChangeKind.FUNC_REMOVED, symbol="f", description="removed")
+        ]
+        note_if_same_binary_compared(result)
+        assert any(
+            "cannot detect a change" not in w and "byte-identical" in w
+            for w in result.coverage_warnings
+        ), result.coverage_warnings
+
+    def test_symvers_manifest_appends_no_warning_at_all(self, tmp_path):
+        """Codex review, fresh evidence: two identical `Module.symvers`
+        kABI manifests are not binaries at all, so `collect_metadata` must
+        read `None` for them the same way it already does for a JSON/Perl
+        snapshot -- this predicate must never claim "old and new binaries
+        are byte-identical" for a comparison with no binary artifact."""
+        from abicheck.service import collect_metadata
+
+        text = "0x12345678\tfoo\tvmlinux\tEXPORT_SYMBOL\n"
+        old_p = tmp_path / "old.symvers"
+        new_p = tmp_path / "new.symvers"
+        old_p.write_text(text)
+        new_p.write_text(text)
+        assert collect_metadata(old_p) is None
+        assert collect_metadata(new_p) is None
+
     def test_missing_old_metadata_is_a_noop(self):
         from abicheck.confidence import note_if_same_binary_compared
 

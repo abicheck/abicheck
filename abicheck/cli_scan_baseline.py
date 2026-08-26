@@ -1161,20 +1161,17 @@ def _run_baseline_compare(
         contract_evaluation=contract_evaluation,
         contract_mode=contract_mode,
     )
-    # Codex review: stamp metadata so the same-binary warning below fires
-    # here too (a no-op for JSON/Perl). Best-effort (mocked resolve_input
-    # tests may pass a path with no real file -- all-or-nothing). Hash
-    # through the full GNU ld linker-script chain to its final resolved
-    # target -- the same binary resolve_input() already followed above --
-    # so a (possibly multi-hop) script vs. its target DSO still reads as
-    # byte-identical (Codex review). Routed through `workflows.extraction`,
-    # not `binary_utils` directly -- this module is `frontends` layer under
-    # ADR-061, which may not import `extract` (where `binary_utils` lives).
+    # Codex review: stamp metadata so the same-binary warning below fires here too (a no-op for JSON/Perl/symvers). Best-effort (mocked resolve_input tests may pass a path with no real file -- all-or-nothing). Hash through the full GNU ld linker-script chain to its final resolved target -- the same binary resolve_input() already followed above -- so a (possibly multi-hop) script vs. its target DSO still reads as byte-identical. Routed through `workflows.extraction`, not `binary_utils` directly -- this module is `frontends` layer under ADR-061, which may not import `extract` (where `binary_utils` lives).
     from .workflows.extraction import resolve_linker_script_chain
 
+    def _hashable_path(p: Path) -> Path:  # skip linker-script resolution for a text snapshot/manifest, which can coincidentally match the INPUT()/GROUP() probe (Codex review)
+        from .service import sniff_text_format
+
+        return p if sniff_text_format(p) in ("json", "perl", "symvers") else resolve_linker_script_chain(p)
+
     try:
-        old_meta = collect_metadata(resolve_linker_script_chain(baseline))
-        new_meta = collect_metadata(resolve_linker_script_chain(binary))
+        old_meta = collect_metadata(_hashable_path(baseline))
+        new_meta = collect_metadata(_hashable_path(binary))
     except OSError:
         pass
     else:

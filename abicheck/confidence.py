@@ -306,7 +306,14 @@ def note_if_same_binary_compared(result: DiffResult) -> None:
     # claim is only true when no such evidence was in play (Codex review,
     # fresh evidence: the original wording overclaimed for exactly this
     # case).
-    header_evidence_used = "header" in result.evidence_tiers
+    # Also true whenever the comparison already produced a real finding:
+    # L3-L5 build/source-pack evidence can detect and report a change
+    # without ever setting "header" in evidence_tiers (that list only
+    # reflects snapshot-level elf/dwarf/header/pe/macho facts), so a
+    # non-empty result.changes directly contradicts "cannot detect a
+    # change" regardless of which tier produced it (Codex review, fresh
+    # evidence).
+    header_evidence_used = "header" in result.evidence_tiers or bool(result.changes)
     if header_evidence_used:
         detection_note = (
             "any ABI/API difference this run could still catch would have "

@@ -144,3 +144,25 @@
   already surfaces. Now copied from the real `DiffResult` the same way
   every other format does (`if result.coverage_warnings: ...`), absent
   rather than an empty list when there's nothing to warn about.
+- **Twelfth follow-up (Codex review, three findings): three real false
+  positives/negatives in the predicate itself.** (1) `scan --against`'s
+  metadata resolution ran the GNU ld linker-script probe on the raw
+  operand path even when it was a JSON/Perl snapshot -- a snapshot's own
+  serialized text can coincidentally match the `INPUT()`/`GROUP()` regex
+  (e.g. a `library` field spelled `"INPUT(libfoo.so)"`), misresolving it
+  to a same-named real DSO on disk and hashing *that* instead of
+  correctly reading `None` for the snapshot. Fixed by checking
+  `sniff_text_format` before ever attempting linker-script resolution.
+  (2) `collect_metadata`'s text-format check covered only JSON/Perl
+  snapshots, so two identical `Module.symvers` kABI manifests -- not
+  binaries at all -- still produced a "binaries are byte-identical"
+  claim. `sniff_text_format` now also recognizes a symvers manifest
+  (reusing `symvers_metadata.looks_like_symvers`, the same detector
+  `service.py`'s own snapshot-resolution dispatch already uses), and
+  `collect_metadata` returns `None` for it exactly like JSON/Perl. (3)
+  The header-evidence qualification only checked `"header" in
+  evidence_tiers`, but L3-L5 build/source-pack evidence can produce a
+  real finding without ever setting that tier -- a non-empty
+  `result.changes` now also qualifies the claim, since detecting and
+  reporting a change already contradicts "cannot detect a change"
+  regardless of which tier produced it.

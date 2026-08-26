@@ -187,3 +187,52 @@ def test_scan_against_distinct_binaries_does_not_warn() -> None:
         payload = json.loads(out_path.read_text())
         warnings = payload["diff"].get("coverage_warnings", [])
         assert not any("byte-identical" in w for w in warnings), payload
+
+
+def test_scan_against_snapshot_text_matching_linker_script_regex_does_not_warn() -> None:
+    """Codex review, fresh evidence: a JSON snapshot whose serialized text
+    happens to contain something matching the INPUT()/GROUP() linker-script
+    probe (e.g. a library name embedded verbatim) was resolved as if it
+    were a linker script pointing at the real DSO of that name -- hashing
+    that DSO's real bytes instead of correctly reading `None` for a
+    text-based snapshot, producing a false "byte-identical" claim even
+    though the old side was serialized snapshot data, not a binary."""
+    from abicheck.serialization import snapshot_to_json
+
+    with CliRunner().isolated_filesystem() as tmp_dir:
+        real_so = Path(tmp_dir) / "libfoo.so"
+        real_so.write_bytes(b"\x7fELF" + b"\x00" * 200)
+
+        # A perfectly valid AbiSnapshot whose own `library` field happens to
+        # read as `INPUT(libfoo.so)` once serialized -- exactly the shape
+        # `binary_utils.resolve_linker_script`'s regex probe matches.
+        baseline_snap = AbiSnapshot(
+            library="INPUT(libfoo.so)", version="1.0", functions=[]
+        )
+        baseline_path = Path(tmp_dir) / "baseline.abicheck.json"
+        baseline_path.write_text(snapshot_to_json(baseline_snap), encoding="utf-8")
+        assert "INPUT(libfoo.so)" in baseline_path.read_text()
+
+        candidate_snap = AbiSnapshot(library="libfoo.so", version="1.0", functions=[])
+        out_path = Path(tmp_dir) / "scan.json"
+
+        with mock.patch.object(
+            dumper_mod, "dump", mock.MagicMock(return_value=candidate_snap)
+        ):
+            result = CliRunner().invoke(
+                main,
+                [
+                    "scan",
+                    str(real_so),
+                    "--against",
+                    str(baseline_path),
+                    "--format",
+                    "json",
+                    "-o",
+                    str(out_path),
+                ],
+            )
+        assert result.exit_code == 0, result.output
+        payload = json.loads(out_path.read_text())
+        warnings = payload["diff"].get("coverage_warnings", [])
+        assert not any("byte-identical" in w for w in warnings), payload
