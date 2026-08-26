@@ -342,10 +342,8 @@ class BundleArchiveWriter:
         self._zf = zipfile.ZipFile(self._tmp_file, mode="w", compression=zipfile.ZIP_STORED)
         self._written_hashes: set[str] = set()
         self._manifest_written = False
-        #: The published archive's size/sha256, computed from the still-
-        #: private temp file before `os.replace()` -- avoids a TOCTOU
-        #: where a concurrent writer's re-read describes someone else's
-        #: write.
+        #: The published archive's size/sha256, from the still-private
+        #: temp file -- avoids a TOCTOU vs. a concurrent writer's re-read.
         self.stored_sha256: str | None = None
         self.stored_size_bytes: int | None = None
 
@@ -389,10 +387,8 @@ class BundleArchiveWriter:
     def write_manifest(self, manifest: dict[str, Any]) -> None:
         if self._manifest_written:
             raise SnapshotError("BundleArchiveWriter.write_manifest() called twice")
-        # Enforced here too, not only by write_bundle_facts_archive()'s own
-        # preflight. A single oversized string is pre-checked first, then
-        # the rest streams via iterencode() chunk-by-chunk rather than
-        # `json.dumps()`, so an oversized manifest never fully materializes.
+        # Enforced here too, not only by write_bundle_facts_archive()'s
+        # preflight. Streams via iterencode(), so it never fully materializes.
         from .bundle_archive_json_guard import oversized_raw_string
 
         oversized = oversized_raw_string(manifest, DEFAULT_MAX_MANIFEST_BYTES)
@@ -464,9 +460,9 @@ class BundleArchiveWriter:
                     hasher.update(chunk)
             self.stored_sha256 = hasher.hexdigest()
             self._tmp_file.close()
-            # Known residual gap: os.replace() is path-based, so a
-            # substitution right before this call still publishes attacker
-            # content -- but stored_sha256 (from the real fd) detects it.
+            # Known residual gap: os.replace() is path-based, so a swap
+            # right before this call still publishes attacker content --
+            # but stored_sha256 (real fd) detects it.
             os.replace(self._tmp_path, self._target)
         except BaseException:
             # Must not leave the potentially large temp file behind; a
@@ -525,9 +521,8 @@ class BundleArchiveWriter:
         return self
 
     def __exit__(self, *exc_info: object) -> None:
-        # Only close() (validate + os.replace()) on a clean exit -- an
-        # exception mid-write should propagate as-is, not be masked by "no
-        # manifest written yet". Either way the temp file is discarded.
+        # Only close() on a clean exit -- an exception mid-write should
+        # propagate as-is, not be masked by "no manifest written yet".
         if exc_info[0] is None:
             self.close()
         else:
@@ -543,9 +538,8 @@ class BundleArchiveReader:
 
     def __init__(self, path: str | Path, *, _fp: Any | None = None) -> None:
         self._path = Path(path)
-        # Opened once; the identical fd is handed to both the preflight
-        # below and `zipfile.ZipFile` -- reopening would let a concurrent
-        # atomic replacement swap in a different generation.
+        # Opened once; handed to both the preflight and `zipfile.ZipFile`
+        # -- reopening would let a concurrent replacement swap generations.
         if _fp is not None:
             # Rewound inside the guarded try below, not here -- a seek()
             # failure outside any handler that closes it would leak fp.
@@ -585,9 +579,8 @@ class BundleArchiveReader:
                 fp, self._path, max_entries=MAX_ARCHIVE_MEMBERS
             )
             # Sharing one fd closes a path-substitution race but not an
-            # in-place one -- the file could still grow before ZipFile's
-            # scan below (reproduced). Re-checked to narrow that window;
-            # see reject_absurd_central_directory's own docstring.
+            # in-place one -- re-checked to narrow that window (see
+            # reject_absurd_central_directory's own docstring).
             if os.fstat(fp.fileno()).st_size != validated_size:
                 raise SnapshotError(
                     f"{self._path}: changed size while being opened -- "
@@ -596,11 +589,11 @@ class BundleArchiveReader:
                 )
             fp.seek(0)
             self._zf = zipfile.ZipFile(fp, mode="r")
-        except (zipfile.BadZipFile, OSError, NotImplementedError) as exc:
-            # Every deliberate failure here raises SnapshotError -- a
-            # truncated/hand-assembled archive must not surface a raw
-            # zipfile traceback (NotImplementedError: ZipFile's own raise
-            # for an unsupported extract_version).
+        except (zipfile.BadZipFile, OSError, NotImplementedError, UnicodeDecodeError) as exc:
+            # Every deliberate failure raises SnapshotError -- a truncated/
+            # hand-assembled archive must not surface a raw zipfile
+            # traceback (NotImplementedError: unsupported extract_version;
+            # UnicodeDecodeError: an invalid UTF-8-flagged filename).
             fp.close()
             raise SnapshotError(f"{self._path}: not a valid bundle archive: {exc}") from exc
         except BaseException:
@@ -631,10 +624,10 @@ class BundleArchiveReader:
         Every member `BundleArchiveWriter` produces is `ZIP_STORED`
         deliberately -- a crafted `ZIP_DEFLATED` member could otherwise
         expand to an arbitrary in-memory allocation via ``ZipExtFile.
-        read()``. Rejecting deflate alone isn't a size bound though: a
-        still-`ZIP_STORED` member can claim (and contain) an enormous size
-        -- checked via `ZipInfo.file_size`, enforced via a bounded, chunked
-        read. Checked here, once, for both `read_manifest` and `read_blob`."""
+        read()``. Rejecting deflate alone isn't a size bound: a still-
+        `ZIP_STORED` member can claim (and contain) an enormous size --
+        checked via `ZipInfo.file_size`, enforced via a bounded, chunked
+        read. Checked once here for both `read_manifest`/`read_blob`."""
         info = self._zf.getinfo(name)
         if info.compress_type != zipfile.ZIP_STORED:
             raise SnapshotError(
@@ -657,6 +650,14 @@ class BundleArchiveReader:
                 f"{self._path}: member {name!r} is encrypted -- not a "
                 "BundleArchiveWriter-produced archive, or a corrupted/"
                 "hostile one."
+            )
+        # Flag bits 5/6 (patched data, strong encryption) make `open()`
+        # raise a bare `NotImplementedError` -- same reason as above.
+        if info.flag_bits & 0x60:
+            raise SnapshotError(
+                f"{self._path}: member {name!r} uses an unsupported "
+                "general-purpose flag -- not a BundleArchiveWriter-"
+                "produced archive, or a corrupted/hostile one."
             )
         out = io.BytesIO()
         try:
@@ -705,9 +706,8 @@ class BundleArchiveReader:
                 f"{self._path}: manifest.json is not valid JSON: {exc}"
             ) from exc
         except RecursionError as exc:
-            # A small but deeply nested manifest.json (`[[[...]]]`) blows
-            # json's recursion budget -- a distinct exception class from
-            # JSONDecodeError, so it needs its own catch (Codex review).
+            # A deeply nested manifest.json (`[[[...]]]`) blows json's
+            # own recursion budget -- a distinct class from JSONDecodeError.
             raise SnapshotError(
                 f"{self._path}: manifest.json is too deeply nested to parse"
             ) from exc

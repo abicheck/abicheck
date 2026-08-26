@@ -28,9 +28,12 @@ sources, rejecting in-place growth between the preflight and construction).
 from __future__ import annotations
 
 import errno
+import io
 import json
 import os
+import struct
 import sys
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -714,3 +717,72 @@ class TestLooksLikeZipFromTail:
         assert sniff_bundle_archive_format(path) == "json"
         loaded = load_bundle_facts(path)  # format="auto" default
         assert loaded.per_library_snapshots == facts.per_library_snapshots
+
+
+class TestBundleArchiveReaderRejectsInvalidUtf8Filenames:
+    """A central-directory entry marked UTF-8 (general-purpose flag bit
+    11) but storing bytes that aren't valid UTF-8 makes `zipfile.ZipFile`
+    raise a bare `UnicodeDecodeError` while building its own file list --
+    a different exception class than the ones this constructor already
+    translates (Codex review, fresh evidence)."""
+
+    def _zip_with_invalid_utf8_filename(self) -> bytes:
+        name = b"\xff\xfe invalid utf8"
+        data = b"hello"
+        flags = 0x0800  # general-purpose flag bit 11: filename is UTF-8
+        crc = zipfile.crc32(data) & 0xFFFFFFFF
+        lfh = (
+            struct.pack(
+                "<IHHHHHIIIHH",
+                0x04034B50,
+                20,
+                flags,
+                0,
+                0,
+                0,
+                crc,
+                len(data),
+                len(data),
+                len(name),
+                0,
+            )
+            + name
+            + data
+        )
+        cd = (
+            struct.pack(
+                "<IHHHHHHIIIHHHHHII",
+                0x02014B50,
+                20,
+                20,
+                flags,
+                0,
+                0,
+                0,
+                crc,
+                len(data),
+                len(data),
+                len(name),
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+            )
+            + name
+        )
+        eocd = struct.pack("<IHHHHIIH", 0x06054B50, 0, 0, 1, 1, len(cd), len(lfh), 0)
+        return lfh + cd + eocd
+
+    def test_raises_snapshot_error_not_unicode_decode_error(self, tmp_path: Path) -> None:
+        # Premise: real zipfile really does raise UnicodeDecodeError for
+        # this construction, confirming the fixture reproduces the bug.
+        data = self._zip_with_invalid_utf8_filename()
+        with pytest.raises(UnicodeDecodeError):
+            zipfile.ZipFile(io.BytesIO(data), mode="r")
+
+        path = tmp_path / "bad_filename.zip"
+        path.write_bytes(data)
+        with pytest.raises(SnapshotError, match="not a valid bundle archive"):
+            BundleArchiveReader.open(path)

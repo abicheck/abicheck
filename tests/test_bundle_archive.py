@@ -704,6 +704,26 @@ class TestBundleArchiveReaderWrapsThirdPartyExceptions:
             with pytest.raises(SnapshotError, match="is encrypted"):
                 reader.read_blob(h)
 
+    @pytest.mark.parametrize("flag_bit", [0x20, 0x40])
+    def test_an_unsupported_flag_bit_raises_snapshot_error(
+        self, tmp_path: Path, flag_bit: int
+    ) -> None:
+        """Flag bit 5 (compressed-patched data) or 6 (strong encryption)
+        makes `ZipFile.open()` raise a bare `NotImplementedError` -- same
+        class of gap as the encrypted-bit check above, and the same
+        proactive-check fix (Codex review, fresh evidence)."""
+        path = tmp_path / "bundle.archive.zip"
+        with BundleArchiveWriter(path) as writer:
+            h = writer.put_blob(b'{"a": 1}')
+            writer.write_manifest({"library_blobs": {"a.so": h}})
+
+        member = f"blobs/{h}.json.zst"
+        with BundleArchiveReader.open(path) as reader:
+            info = reader._zf.getinfo(member)
+            info.flag_bits |= flag_bit
+            with pytest.raises(SnapshotError, match="unsupported general-purpose flag"):
+                reader.read_blob(h)
+
     def test_a_crc_mismatched_member_raises_snapshot_error(self, tmp_path: Path) -> None:
         """ZipExtFile's CRC-32 mismatch raises raw BadZipFile -- must be
         wrapped as SnapshotError like every other failure (Codex)."""
