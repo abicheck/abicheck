@@ -700,3 +700,41 @@
   bound) exercises this through the public `BundleArchiveReader.
   read_blob()` entry point at the same scale the finding was reported
   against, not just the shared helper in isolation.
+
+- **G40 bundle archive: two more Codex review findings, both real, both
+  fixed.** (1) The real-data-frame path had its own, independent copy
+  of the just-fixed skippable-frame quadratic shape: feeding a whole
+  (potentially huge) memoryview to `decompressobj().decompress()` in
+  one call per real frame makes `.unused_data` materialize a fresh
+  copy of *everything* after the frame -- confirmed empirically at ~8s
+  for 160,000 empty real data frames (~1.4 MiB), a real DoS vector on
+  the same public `BundleArchiveReader.read_blob()`/`read_snapshot_
+  bytes()` paths. Fixed by feeding each real frame incrementally in
+  small, geometrically-growing chunks (starting at 256 bytes, doubling
+  up to a 1 MiB cap) and stopping as soon as `decompressobj.eof`
+  flips -- `python-zstandard` supports feeding one frame across
+  multiple `decompress()` calls on the same `decompressobj()`
+  (confirmed empirically), so `.unused_data`'s copy cost is bounded by
+  the last chunk fed rather than the whole remaining stream. The same
+  160,000-frame case now completes in ~0.5s; a single large
+  low-compressibility frame (20 MiB) still validates in ~9ms since the
+  chunk size grows geometrically to the 1 MiB cap. New regression test
+  (`test_read_blob_walks_many_small_real_frames_in_near_linear_time`,
+  confirmed to fail against the pre-fix code at ~8.2s against a 5s
+  bound) exercises this through the public `read_blob()` entry point
+  at the reported scale. (2) `read_bundle_facts_archive`'s manifest
+  `schema_version`/`bundle_facts_schema_version` fields were coerced
+  via a bare `int()` call, which silently truncates `1.9` to `1`,
+  accepts `True`/`False` as `1`/`0` (bool is an int subclass), parses
+  the JSON string `"1"` as if it were a real integer, and leaks a raw
+  `TypeError` for `None` instead of this module's own `SnapshotError`
+  contract -- a malformed or hostile manifest could read as a
+  supported schema version, or crash with the wrong exception type,
+  instead of failing closed. Fixed with a new
+  `_require_int_schema_version()` helper that rejects anything that
+  isn't a real, non-bool `int` before it ever reaches the version
+  comparison. New parametrized regression test
+  (`test_load_rejects_a_non_integer_schema_version`, 8 cases across
+  both fields, all confirmed to fail against the pre-fix code with
+  either a raw `TypeError` or a silent, wrong-typed pass-through)
+  exercises this through the public `load_bundle_facts()` entry point.

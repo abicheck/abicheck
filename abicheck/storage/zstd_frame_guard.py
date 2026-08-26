@@ -40,6 +40,16 @@ from ..errors import SnapshotError
 _SKIPPABLE_FRAME_MAGIC_LOW = 0x184D2A50
 _SKIPPABLE_FRAME_MAGIC_HIGH = 0x184D2A5F
 
+#: Real-data-frame chunk-feed sizing: start small so a stream of many tiny
+#: real frames (the common minimal-payload case) reaches `dobj.eof` within
+#: the first chunk, bounding `decompressobj().unused_data`'s own copy to
+#: roughly one chunk's worth rather than the entire unread tail; grow
+#: geometrically so a single large frame still finishes in O(log) calls
+#: rather than one call per few hundred bytes (Codex review, fresh
+#: evidence -- see `validate_zstd_frame_completeness`'s own docstring).
+_INITIAL_FRAME_CHUNK_BYTES = 256
+_MAX_FRAME_CHUNK_BYTES = 1 << 20
+
 
 def validate_zstd_frame_completeness(
     zstandard: Any, dctx: Any, data: bytes, *, source: str
@@ -135,7 +145,24 @@ def validate_zstd_frame_completeness(
     cost either. ``decompressobj().unused_data`` still returns a fresh
     ``bytes`` copy of whatever follows the frame it consumed -- rewrapped
     in a ``memoryview`` immediately so a real data frame followed by more
-    skippable frames doesn't reintroduce the same quadratic slicing."""
+    skippable frames doesn't reintroduce the same quadratic slicing.
+
+    The real-data-frame path has its own, independent copy of the same
+    quadratic shape: feeding a whole (potentially huge) ``remaining``
+    memoryview to ``decompressobj().decompress()`` in one call makes
+    ``.unused_data`` materialize a fresh ``bytes`` copy of *everything*
+    after the frame, so a stream of many small real data frames still
+    walked in O(n^2) -- confirmed empirically at ~8s for 160,000 empty
+    data frames (~1.4 MiB) before this fix (Codex review, fresh
+    evidence). Fixed by feeding each frame incrementally in small,
+    geometrically-growing chunks and stopping as soon as
+    ``decompressobj.eof`` flips: ``.unused_data`` then only ever holds
+    the tail of the *last chunk fed*, not the whole remaining stream, so
+    its copy cost is bounded by chunk size rather than input size.
+    ``python-zstandard`` supports feeding one frame across multiple
+    ``decompress()`` calls on the same ``decompressobj()`` (confirmed
+    empirically) -- ``.eof``/``.unused_data`` reflect the position
+    reached across all calls, not just the most recent one."""
     remaining = memoryview(data)
     saw_data_frame = False
     while remaining:
@@ -157,10 +184,18 @@ def validate_zstd_frame_completeness(
                     )
                 remaining = remaining[total:]  # zero-copy memoryview slice
                 continue
+        total_len = len(remaining)
         try:
             frame_declared = zstandard.get_frame_parameters(remaining).content_size
             dobj = dctx.decompressobj()
-            frame_out = dobj.decompress(remaining)
+            frame_out_len = 0
+            consumed = 0
+            chunk_size = _INITIAL_FRAME_CHUNK_BYTES
+            while not dobj.eof and consumed < total_len:
+                end = min(consumed + chunk_size, total_len)
+                frame_out_len += len(dobj.decompress(remaining[consumed:end]))
+                consumed = end
+                chunk_size = min(chunk_size * 4, _MAX_FRAME_CHUNK_BYTES)
         except Exception as exc:
             raise SnapshotError(
                 f"{source}: corrupt or truncated zstd stream (failed to "
@@ -168,14 +203,19 @@ def validate_zstd_frame_completeness(
             ) from exc
         if not dobj.eof or (
             frame_declared != zstandard.CONTENTSIZE_UNKNOWN
-            and len(frame_out) != frame_declared
+            and frame_out_len != frame_declared
         ):
             raise SnapshotError(
                 f"{source}: corrupt or truncated zstd stream (a frame "
                 f"declares {frame_declared} bytes but only "
-                f"{len(frame_out)} decoded)"
+                f"{frame_out_len} decoded)"
             )
         saw_data_frame = True
-        remaining = memoryview(dobj.unused_data)
+        # .unused_data is bounded by the last chunk fed, not the whole
+        # remaining stream -- slice the *original* memoryview by position
+        # rather than rewrapping .unused_data itself, so this stays
+        # zero-copy for the (common) case where the frame consumed
+        # everything and there is nothing left to slice.
+        remaining = remaining[consumed - len(dobj.unused_data) :]
     if not saw_data_frame:
         raise SnapshotError(f"{source}: corrupt or truncated zstd stream (no data frame at all)")

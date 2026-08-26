@@ -1081,6 +1081,40 @@ class TestReadBlobHandlesSkippableFrames:
         assert decoded == b"hello world"
         assert elapsed < 5.0, f"expected near-linear walk, took {elapsed:.2f}s for {n_frames} frames"
 
+    def test_read_blob_walks_many_small_real_frames_in_near_linear_time(
+        self, tmp_path: Path
+    ) -> None:
+        """A separate, independent quadratic shape from the skippable-frame
+        one above: feeding a whole (potentially huge) remaining buffer to
+        ``decompressobj().decompress()`` in one call per real data frame
+        makes ``.unused_data`` materialize a fresh copy of the *entire*
+        unread tail each time -- confirmed empirically at ~8s for 160,000
+        empty real data frames (~1.4 MiB) before the fix to incremental,
+        geometrically-growing chunk feeding. A generous 5s bound
+        comfortably separates the ~0.5s post-fix time from the ~8s
+        pre-fix time without flaking on a loaded CI runner."""
+        import time
+
+        import zstandard
+
+        n_frames = 160_000
+        one_empty_frame = zstandard.ZstdCompressor().compress(b"")
+        stream = one_empty_frame * (n_frames - 1)
+        stream += zstandard.ZstdCompressor().compress(b"hello world")
+        h = content_hash(b"hello world")
+        path = tmp_path / "bundle.archive.zip"
+        with zipfile.ZipFile(path, mode="w") as zf:
+            zf.writestr(MANIFEST_MEMBER, json.dumps({"library_blobs": {"a.so": h}}))
+            zf.writestr(f"blobs/{h}.json.zst", stream, compress_type=zipfile.ZIP_STORED)
+
+        with BundleArchiveReader.open(path) as reader:
+            manifest = reader.read_manifest()
+            t0 = time.monotonic()
+            decoded = reader.read_blob(manifest["library_blobs"]["a.so"])
+            elapsed = time.monotonic() - t0
+        assert decoded == b"hello world"
+        assert elapsed < 5.0, f"expected near-linear walk, took {elapsed:.2f}s for {n_frames} frames"
+
 
 class TestSniffDoesNotConsumeAOneShotFifoProducer:
     """A *thread*-based writer doesn't reliably reproduce this: Python

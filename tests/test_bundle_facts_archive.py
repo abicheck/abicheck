@@ -411,6 +411,40 @@ class TestBundleFactsArchiveFormat:
         with pytest.raises(IncompatibleSnapshotSchemaError, match="999"):
             load_bundle_facts(out, format="archive")
 
+    @pytest.mark.parametrize(
+        ("field", "value"),
+        [
+            ("schema_version", 1.9),
+            ("schema_version", True),
+            ("schema_version", "1"),
+            ("schema_version", None),
+            ("bundle_facts_schema_version", 1.9),
+            ("bundle_facts_schema_version", True),
+            ("bundle_facts_schema_version", "1"),
+            ("bundle_facts_schema_version", None),
+        ],
+    )
+    def test_load_rejects_a_non_integer_schema_version(
+        self, tmp_path: Path, field: str, value: object
+    ) -> None:
+        """A bare ``int()`` coercion silently truncates 1.9 -> 1, accepts
+        True/False as 1/0 (bool is an int subclass), parses the string
+        "1" as if it were a real JSON integer, and leaks a raw TypeError
+        for None -- a malformed or hostile manifest could otherwise read
+        as a supported schema version, or crash with the wrong exception
+        type, instead of failing this module's own SnapshotError contract
+        (Codex review, fresh evidence)."""
+        from abicheck.storage.bundle_archive import BundleArchiveWriter
+
+        out = tmp_path / "bad-schema-version.bundlefacts.archive.zip"
+        manifest: dict[str, object] = {"schema_version": 1, "library_blobs": {}}
+        manifest[field] = value
+        with BundleArchiveWriter(out) as writer:
+            writer.write_manifest(manifest)
+
+        with pytest.raises(SnapshotError, match=f"{field} must be an integer"):
+            load_bundle_facts(out, format="archive")
+
     def test_load_rejects_a_manifest_missing_library_blobs(self, tmp_path: Path) -> None:
         """A manifest.json with no 'library_blobs' key at all (a malformed
         or unrelated zip) must be rejected outright rather than silently
