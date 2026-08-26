@@ -166,3 +166,10 @@
   `result.changes` now also qualifies the claim, since detecting and
   reporting a change already contradicts "cannot detect a change"
   regardless of which tier produced it.
+- **Thirteenth follow-up (Codex review): the release Markdown report
+  never rendered per-library `coverage_warnings` either.** The eleventh
+  follow-up's JSON/summary.json fix left the release Markdown table
+  (`_release_md_libraries_table`, library/verdict/counts only) silently
+  omitting the same signal. New `_release_md_coverage_warnings` renders
+  a `## ⚠️ Coverage Warnings` section listing each library's warnings,
+  absent entirely when no library carries any.

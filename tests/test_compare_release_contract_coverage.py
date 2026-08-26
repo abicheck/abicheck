@@ -258,6 +258,38 @@ def test_compare_one_library_omits_coverage_warnings_key_when_none(
     assert "coverage_warnings" not in entry
 
 
+def test_release_markdown_renders_the_per_library_coverage_warnings() -> None:
+    """Codex review, fresh evidence: the release Markdown table only
+    renders library/verdict/counts -- a byte-identical matched library
+    otherwise still presents a clean report with no warning at all in
+    this format."""
+    from abicheck.cli_compare_release import _format_release_markdown
+
+    libs = [
+        {
+            "library": "liba.so",
+            "verdict": "NO_CHANGE",
+            "coverage_warnings": ["old and new binaries are byte-identical (sha256 abc...)"],
+        },
+        {"library": "libb.so", "verdict": "NO_CHANGE"},
+    ]
+    md = _format_release_markdown(
+        "NO_CHANGE", Path("/o"), Path("/n"), libs, [], [], {}, {}, None, None
+    )
+    assert "## ⚠️ Coverage Warnings" in md
+    assert "`liba.so`: old and new binaries are byte-identical" in md
+
+
+def test_release_markdown_omits_the_section_when_no_library_carries_a_warning() -> None:
+    from abicheck.cli_compare_release import _format_release_markdown
+
+    libs = [{"library": "liba.so", "verdict": "NO_CHANGE"}]
+    md = _format_release_markdown(
+        "NO_CHANGE", Path("/o"), Path("/n"), libs, [], [], {}, {}, None, None
+    )
+    assert "Coverage Warnings" not in md
+
+
 def test_release_json_carries_the_per_library_coverage_warnings_through() -> None:
     """`_format_release_json` embeds `library_results` verbatim -- no
     separate wiring is needed for this field to reach the release JSON."""
