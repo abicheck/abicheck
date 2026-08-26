@@ -127,6 +127,33 @@ claims this finding" (should not occur in practice once Phase 1 completes,
 but the distinction matters for the completeness gate in Phase 3 the same
 way it already matters for `contract_evidence_refs`).
 
+**The finalized vocabulary needs a single code-level owner, not just this
+table (Codex review).** The field's *type* stays a bare `tuple[str, ...]` —
+that part of the design is settled above and is not reopened here — but the
+provider-id strings themselves (every `l0:`/`l1:`/`l2:`/`l3:`/`l4:`/`l5:`/
+`corroborated:` combination this plan documents, expanded across Phase 1's
+call-site work into the full `searched:`/side-prefixed forms items 1 and 3
+below establish) must be defined exactly once in real code — a frozenset or
+enum of validated strings, following this codebase's own established
+pattern for a stable, checked vocabulary (`ChangeKind` in
+`checker_policy.py`, validated via `change_registry.py`'s completeness
+assertion; `contract_relevance_types.py`'s reserved reason-code registry) —
+rather than left as free-text literals a detector call site hand-writes to
+match this table by eye. Whatever validates a report's shape once this
+field is emitted (a schema check, a completeness gate, a test) must check
+provenance strings against that same registry, not accept an arbitrary
+string — the goal is that a typo'd or independently-invented tag at a new
+call site (`l2:serched:clang` for `l2:searched:clang`, say) fails a check
+instead of silently shipping as an unrecognized, unmatched value no
+consumer can ever key off. This plan does not pick the registry's exact
+module or type here — Phase 1 is where real call sites get wired and the
+actual granularity is known (per the paragraph above), and the registry
+should be finalized alongside that work, not designed speculatively ahead
+of it — but landing Phase 1 without *some* single source of truth for the
+string set repeats the exact drift this table's own multi-round Codex
+history (the `searched:`/side-prefix corrections in items 1 and 3 below)
+shows this vocabulary is prone to.
+
 **A flat, unqualified tuple cannot distinguish which *side* a provider
 applies to, and that distinction is load-bearing (Codex review, fresh
 evidence).** A changed fact's `Change` spans two `AbiSnapshot`s (old and
@@ -383,6 +410,33 @@ structure already in place:
    per-backend vocabulary (`l2:castxml`/`l2:clang`/`l0:elf_symtab`/
    `l0:pe_export_table`/`l0:macho_exports`), not two independently-drifting
    spellings of the same idea.
+
+   **`VAR_REMOVED`/`VAR_ADDED` need their own derivation, not a copy of the
+   function one above (Codex review, verified against the code): the two
+   functions do not draw from the same provider set.** `_public_functions()`
+   narrows via two steps — a `visibility`/`is_abi_relevant_elf_symbol` filter
+   over `snap.function_map`, *then*, only when `snap.elf.symbols` is present,
+   a second narrowing against the live ELF export table
+   (`exported_symbol_names(elf, FUNCTION_SYMBOL_TYPES, ...)`), which is what
+   licenses an `l0:searched:elf_symtab` entry for the function case above.
+   `_public_variables()` has no second step: it applies only the first
+   filter (`visibility`/`is_abi_relevant_elf_symbol`/`_is_local_type_rtti`
+   over `snap.variable_map`) and returns directly — it never calls
+   `exported_symbol_names()` or consults `snap.elf.symbols` at all. So the
+   rule above must not be applied to variables by extension: a
+   `VAR_REMOVED`/`VAR_ADDED` finding's `searched:` entry for the empty side
+   must never include `l0:searched:elf_symtab` (or a PE/Mach-O export-table
+   equivalent), on an ELF, PE, or Mach-O snapshot alike, since no such
+   narrowing step exists for variables to license one. It records only
+   whichever tier actually populated `variable_map` for that snapshot — the
+   same `l1:searched:dwarf` / `l2:searched:castxml` / `l2:searched:clang`
+   vocabulary this item already establishes, just without the extra ELF/PE/
+   Mach-O tier that only applies on the function path. This is a difference
+   in what evidence exists, not a stylistic simplification — if a later pass
+   ever gives `_public_variables()` its own ELF/PE/Mach-O narrowing step
+   (matching how functions already treat `= delete`), the vocabulary above
+   generalizes then and only then; until it does, applying it to variables
+   would fabricate export-table provenance the join never actually consulted.
 2. **L2 header-derived detectors** (`diff_types.py`'s struct/enum/typedef
    findings, `diff_type_spellings.py`) — provenance here genuinely varies
    per finding (which backend produced *this specific* `RecordType`, and
