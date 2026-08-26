@@ -39,12 +39,14 @@ import os
 import subprocess
 import sys
 from collections.abc import Callable
+from types import MappingProxyType
 from typing import Any
 
 import pytest
 
 from abicheck.storage.availability import (
     AvailabilityLedger,
+    Confidence,
     FactAvailability,
     FactStatus,
 )
@@ -1057,3 +1059,91 @@ class TestTheSectionMappingIsFrozenAndDropsUnstatedEntries:
         emitted = StorageVersions(section_schema_versions={"entities": 3}).to_dict()
 
         assert type(emitted["section_schema_versions"]) is dict
+
+
+class TestConfidenceComesFromRecordsThatCarryEvidence:
+    """`Confidence` weights a `PRESENT`/`PARTIAL` fact, so only those may vote.
+
+    Taking the worst of both unconditionally let a `NOT_APPLICABLE` family
+    with `UNKNOWN` — a ledger saying "there is nothing here to be missing",
+    not weak evidence — degrade a real `PRESENT`/`HIGH` entity override to
+    `UNKNOWN` (Codex review).
+    """
+
+    def test_an_inapplicable_family_does_not_degrade_a_real_fact(self) -> None:
+        family = FactAvailability(
+            FactStatus.NOT_APPLICABLE, confidence=Confidence.UNKNOWN
+        )
+        override = FactAvailability(FactStatus.PRESENT, confidence=Confidence.HIGH)
+
+        assert family.narrowed(override).status is FactStatus.PRESENT
+        assert family.narrowed(override).confidence is Confidence.HIGH
+        assert override.narrowed(family).confidence is Confidence.HIGH
+
+    def test_two_real_facts_still_narrow_to_the_weaker(self) -> None:
+        """The case the worst-of rule was written for, unchanged."""
+        strong = FactAvailability(FactStatus.PRESENT, confidence=Confidence.HIGH)
+        weak = FactAvailability(FactStatus.PARTIAL, confidence=Confidence.REDUCED)
+
+        assert strong.narrowed(weak).confidence is Confidence.REDUCED
+        assert weak.narrowed(strong).confidence is Confidence.REDUCED
+
+    def test_a_gap_that_wins_does_not_advertise_high_confidence(self) -> None:
+        """The direction this fix must not err in.
+
+        When the surviving status is not usable evidence the old rule stands:
+        confidence is inert there, and worst-of is the reading that cannot
+        overclaim. A `FAILED` record must never carry `HIGH`.
+        """
+        present = FactAvailability(FactStatus.PRESENT, confidence=Confidence.HIGH)
+        failed = FactAvailability(FactStatus.FAILED, confidence=Confidence.UNKNOWN)
+
+        assert present.narrowed(failed).status is FactStatus.FAILED
+        assert present.narrowed(failed).confidence is Confidence.UNKNOWN
+
+    @pytest.mark.parametrize("left", list(FactStatus))
+    @pytest.mark.parametrize("right", list(FactStatus))
+    def test_the_merge_stays_order_independent(
+        self, left: FactStatus, right: FactStatus
+    ) -> None:
+        """Over every status pair, not the four that were reasoned about."""
+        a = FactAvailability(left, confidence=Confidence.HIGH)
+        b = FactAvailability(right, confidence=Confidence.UNKNOWN)
+
+        assert a.narrowed(b).confidence is b.narrowed(a).confidence
+        assert a.narrowed(b).status is b.narrowed(a).status
+
+
+class TestTheLedgerOwnsItsMappings:
+    """A container admitted at the door must support the advertised operations.
+
+    `AvailabilityLedger(families=MappingProxyType({}))` passed every guard and
+    then made the documented mutator fail — `declare` raised `TypeError:
+    'mappingproxy' object does not support item assignment` (Codex review).
+    `StorageVersions` answers the same question by freezing, because its
+    records are immutable; this one is mutable by design, so it owns a copy.
+    """
+
+    def test_a_read_only_mapping_still_supports_declare(self) -> None:
+        ledger = AvailabilityLedger(families=MappingProxyType({}))
+
+        ledger.declare("layout", FactAvailability(FactStatus.PRESENT))
+
+        assert ledger.for_family("layout").status is FactStatus.PRESENT
+
+    def test_a_read_only_mapping_still_supports_override(self) -> None:
+        ledger = AvailabilityLedger(overrides=MappingProxyType({}))
+
+        ledger.override("layout", "E1", FactAvailability(FactStatus.FAILED))
+
+        assert ledger.for_entity("layout", "E1").status is FactStatus.FAILED
+
+    def test_the_caller_s_mapping_cannot_reach_the_state(self) -> None:
+        """Owning a copy closes the aliasing the guards could not see."""
+        supplied = {"layout": FactAvailability(FactStatus.PRESENT)}
+        ledger = AvailabilityLedger(families=supplied)
+
+        supplied["sneak"] = "not a record"
+
+        assert list(ledger.families) == ["layout"]
+        assert AvailabilityLedger.from_dict(ledger.to_dict()) == ledger

@@ -54,7 +54,10 @@ _MODULES = (
 #: advertised in the plan's table and still have their surface pinned below —
 #: "internal" is a statement about who imports it, not a licence to be absent
 #: from the documented surface.
-_INTERNAL_MODULES = ("abicheck.storage.guards",)
+_INTERNAL_MODULES = (
+    "abicheck.storage.guards",
+    "abicheck.storage.availability_status",
+)
 
 
 def _table_rows() -> dict[str, set[str]]:

@@ -38,15 +38,31 @@ The rule this module exists to enforce is one sentence:
 ``FactAvailability.comparable`` is that rule as a single predicate, so a call
 site cannot accidentally invent its own convention for what a missing value
 means.
+
+The vocabulary itself — :class:`~abicheck.storage.availability_status.FactStatus`,
+:class:`~abicheck.storage.availability_status.Confidence`, and the severity
+orders that decide which of two survives a narrowing — lives next door in
+:mod:`abicheck.storage.availability_status`, and is re-exported here so a
+caller still has one import to reach for. This module owns the stored record
+and the ledger that indexes it.
 """
 
 from __future__ import annotations
 
-import enum
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field, replace
 from typing import Any
 
+from .availability_status import (
+    ASSERTS_NO_PRODUCER as _ASSERTS_NO_PRODUCER,
+    COMPARABLE_STATUSES as _COMPARABLE_STATUSES,
+    CONFIDENCE_ORDER as _CONFIDENCE_ORDER,
+    GAP_STATUSES as _GAP_STATUSES,
+    Confidence,
+    FactStatus,
+    worse_confidence as _worse_confidence,
+    worse_status as _worse_status,
+)
 from .guards import (
     decision_key as _decision_key,
     diagnostics_from as _diagnostics_from,
@@ -61,75 +77,6 @@ __all__ = [
     "FactAvailability",
     "FactStatus",
 ]
-
-
-class FactStatus(enum.Enum):
-    """Why a fact family is, or is not, present in stored evidence.
-
-    Deliberately six *distinct* members rather than a boolean plus a note:
-    a reader that collapses ``UNSUPPORTED`` and ``FAILED`` into one "no data"
-    case cannot tell a permanent producer limitation (re-running changes
-    nothing) from a transient extraction error (re-running may well fix it),
-    and a reader that collapses either into ``PRESENT`` reintroduces the bug
-    this whole module exists to close.
-    """
-
-    #: The producer ran, covered the requested scope, and established the
-    #: facts — including establishing that a collection is legitimately empty.
-    PRESENT = "present"
-    #: The producer ran but covered only part of the requested scope. Usable,
-    #: with reduced confidence; the uncovered part is unknown, not absent.
-    PARTIAL = "partial"
-    #: The producer was never invoked for this family (e.g. the run was
-    #: capped at a shallower evidence level). Says nothing about the facts.
-    NOT_COLLECTED = "not_collected"
-    #: This producer cannot express this family at all. Re-running the same
-    #: producer will never help; a different producer might.
-    UNSUPPORTED = "unsupported"
-    #: The producer was invoked and errored. Diagnostics should say how.
-    FAILED = "failed"
-    #: The family is meaningless for this artifact kind (e.g. vtables for a
-    #: C-only artifact). Not a gap — nothing is missing.
-    NOT_APPLICABLE = "not_applicable"
-
-
-class Confidence(enum.Enum):
-    """How much weight a consumer may put on a ``PRESENT``/``PARTIAL`` fact."""
-
-    HIGH = "high"
-    REDUCED = "reduced"
-    UNKNOWN = "unknown"
-
-
-#: Statuses a comparison may draw a compatibility conclusion from. Every other
-#: status means the evidence is absent for a reason, so a comparison that
-#: needs the family must degrade explicitly (``NOT_COMPARABLE`` or a
-#: reduced-confidence result) rather than read an empty collection as "fine".
-_COMPARABLE_STATUSES = frozenset({FactStatus.PRESENT, FactStatus.PARTIAL})
-
-#: Statuses that mean "evidence is missing for a reason". Deliberately not the
-#: complement of :data:`_COMPARABLE_STATUSES`: ``NOT_APPLICABLE`` is neither
-#: usable evidence nor a gap — it is a ledger stating that there is nothing
-#: here to be missing, which is an answer rather than an absence.
-_GAP_STATUSES = frozenset(
-    {FactStatus.NOT_COLLECTED, FactStatus.UNSUPPORTED, FactStatus.FAILED}
-)
-
-#: The status asserting that no producer ran, so a merge must not attach one.
-#: Distinct from :data:`_GAP_STATUSES` on purpose: ``UNSUPPORTED`` and
-#: ``FAILED`` are gaps *with* a producer worth naming — one was asked and
-#: could not answer, or ran and failed.
-#:
-#: ``NOT_APPLICABLE`` was in this set for one round and was removed after a
-#: test written for it failed. It reads like a member ("nothing to run, so
-#: nobody ran"), but it is the *least* worse status in ``_STATUS_ORDER``, so
-#: it can only survive a merge against itself — and then the other record is
-#: also ``NOT_APPLICABLE``, whose provenance is a peer's legitimate statement
-#: rather than something inherited across a disagreement. Blanking it would
-#: discard information, which is the one direction this package may not err
-#: in. Kept as a set rather than a scalar because the reasoning is about
-#: *which* statuses qualify, and a future one might.
-_ASSERTS_NO_PRODUCER = frozenset({FactStatus.NOT_COLLECTED})
 
 
 def _availability(raw: Any, field_name: str) -> None:
@@ -298,7 +245,7 @@ class FactAvailability:
             producer_version=winner.producer_version or loser.producer_version,
             recipe=winner.recipe or loser.recipe,
             scope=winner.scope or loser.scope,
-            confidence=_worse_confidence(self.confidence, other.confidence),
+            confidence=_merged_confidence(status, self, other),
             diagnostics=self.diagnostics
             + tuple(d for d in other.diagnostics if d not in self.diagnostics),
         )
@@ -377,34 +324,33 @@ class FactAvailability:
         )
 
 
-#: Status severity order, worst last. ``narrowed`` picks the later of two.
-#: ``NOT_APPLICABLE`` sits *below* ``PRESENT`` rather than at the top: a family
-#: that does not apply to an artifact is not a gap, so a per-entity
-#: "not applicable" must not drag a family-level ``PRESENT`` down to it, and a
-#: family-level "not applicable" is superseded by an entity that really does
-#: carry the fact.
-_STATUS_ORDER: tuple[FactStatus, ...] = (
-    FactStatus.NOT_APPLICABLE,
-    FactStatus.PRESENT,
-    FactStatus.PARTIAL,
-    FactStatus.NOT_COLLECTED,
-    FactStatus.UNSUPPORTED,
-    FactStatus.FAILED,
-)
+def _merged_confidence(
+    status: FactStatus, left: FactAvailability, right: FactAvailability
+) -> Confidence:
+    """The confidence a merged record may claim.
 
-_CONFIDENCE_ORDER: tuple[Confidence, ...] = (
-    Confidence.HIGH,
-    Confidence.REDUCED,
-    Confidence.UNKNOWN,
-)
+    ``Confidence`` is documented as the weight a consumer may put on a
+    ``PRESENT``/``PARTIAL`` fact, so a record carrying neither has no
+    confidence worth propagating. Taking the worst of both unconditionally let
+    a ``NOT_APPLICABLE`` family with ``UNKNOWN`` — a ledger saying "there is
+    nothing here to be missing", not weak evidence — degrade a real
+    ``PRESENT``/``HIGH`` entity override to ``UNKNOWN`` (Codex review).
 
+    So when the surviving status *is* usable evidence, the confidence is the
+    worst among the records that actually carry some. Two ``PRESENT`` records
+    still narrow to the weaker of the two, which is the case the rule was
+    written for; a record with no usable evidence simply stops voting on how
+    much to trust one.
 
-def _worse_status(left: FactStatus, right: FactStatus) -> FactStatus:
-    return max(left, right, key=_STATUS_ORDER.index)
-
-
-def _worse_confidence(left: Confidence, right: Confidence) -> Confidence:
-    return max(left, right, key=_CONFIDENCE_ORDER.index)
+    When the surviving status is **not** usable evidence the old rule stands,
+    deliberately. Confidence is inert on such a record, and "worst of both" is
+    the reading that cannot overclaim — a `PRESENT`/`HIGH` narrowed by a
+    `FAILED` must not leave a `FAILED` record advertising `HIGH`.
+    """
+    if status not in _COMPARABLE_STATUSES:
+        return _worse_confidence(left.confidence, right.confidence)
+    carrying = [record for record in (left, right) if record.comparable]
+    return max((record.confidence for record in carrying), key=_CONFIDENCE_ORDER.index)
 
 
 @dataclass
@@ -501,6 +447,23 @@ class AvailabilityLedger:
                     f"(got {value.status.value!r}): a family no availability "
                     "record mentions cannot license a conclusion"
                 )
+        if name in ("families", "overrides"):
+            # Stored as an owned `dict`, not as whatever mapping arrived. A
+            # read-only `Mapping` passed every check here and then made the
+            # documented mutators fail: `AvailabilityLedger(families=
+            # MappingProxyType({}))` constructed, and `declare` raised
+            # `TypeError: 'mappingproxy' object does not support item
+            # assignment` (Codex review). A container admitted at the
+            # assignment boundary has to support the operations this class
+            # advertises.
+            #
+            # Copying also stops the caller's own mapping aliasing the state:
+            # mutating it afterwards used to reach straight past every guard
+            # above. `StorageVersions` answers the same question by freezing,
+            # because its records are immutable; this one is mutable by
+            # design — `declare`/`override` are its API — so it owns a copy
+            # instead.
+            value = dict(value)
         object.__setattr__(self, name, value)
 
     def declare(self, family: str, availability: FactAvailability) -> None:
