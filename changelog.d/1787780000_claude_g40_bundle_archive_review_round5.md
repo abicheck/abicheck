@@ -457,3 +457,13 @@
   `"gzip"`/`"zstd"` are genuinely incompatible outer-envelope requests.
   Now `"auto"`/`"none"` are both accepted as no-ops; `"gzip"`/`"zstd"`
   still reject.
+
+- **G40 bundle archive: one more Codex review finding, real, fixed.**
+  `read_manifest()`'s `json.loads(raw)` call caught `UnicodeDecodeError`/
+  `json.JSONDecodeError` but not the bare `ValueError` Python 3.11+'s own
+  integer-string-conversion digit limit (`sys.get_int_max_str_digits()`,
+  4300 by default) raises for a manifest containing an oversized integer
+  literal -- a different exception than `JSONDecodeError` (which is
+  itself a `ValueError` subclass, but this failure isn't raised through
+  it), so it escaped this module's `SnapshotError` contract. Now widened
+  to catch `ValueError` directly, which subsumes `JSONDecodeError` too.
