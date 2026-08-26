@@ -77,8 +77,7 @@ ZSTD_LEVEL = 19
 #: Same reasoning as `snapshot_io.py`'s own `_ZSTD_MAX_WINDOW_LOG`: bound
 #: decompression memory to a window a legitimate blob will never need,
 #: rather than trusting an archive's own embedded frame parameters --
-#: applied per-blob here, so one oversized blob cannot exhaust memory on
-#: a request for an unrelated, small blob elsewhere in the archive.
+#: per-blob, so one oversized blob can't exhaust memory on an unrelated one.
 _ZSTD_MAX_WINDOW_LOG = 27  # 128 MiB
 
 #: Per-blob decompressed-size cap, mirroring `snapshot_io.py`'s own
@@ -188,8 +187,11 @@ def sniff_bundle_archive_format(path: str | Path) -> str:
 #: claiming more is rejected before `zipfile.ZipFile` is constructed, since
 #: `ZipFile.__init__` eagerly parses the whole central directory and
 #: builds one `ZipInfo` per entry. Below 0xFFFF (the non-ZIP64 EOCD
-#: sentinel, "read the real count from ZIP64 instead", handled below).
-_MAX_ARCHIVE_MEMBERS = 20_000
+#: sentinel, "read the real count from ZIP64 instead", handled below). Public
+#: (no leading underscore): `bundle_facts.py` aligns its own writer-side
+#: member-count budget to this reader-side cap so it can never write an
+#: archive it wouldn't itself agree to reopen (Codex review, fresh evidence).
+MAX_ARCHIVE_MEMBERS = 20_000
 
 #: Bytes to search from the end of the file for the End-Of-Central-
 #: Directory record's signature -- the record itself is 22 bytes plus up
@@ -214,7 +216,7 @@ _ZIP64_EOCD_LOCATOR_SIZE = 20
 
 def _reject_absurd_central_directory(path: Path) -> None:
     """Reject *path* if its central directory claims more than
-    `_MAX_ARCHIVE_MEMBERS` entries or `_MAX_CENTRAL_DIRECTORY_BYTES` --
+    `MAX_ARCHIVE_MEMBERS` entries or `_MAX_CENTRAL_DIRECTORY_BYTES` --
     read directly from the EOCD (and, when present, the ZIP64 EOCD
     locator/record), without invoking `zipfile.ZipFile`'s own
     central-directory parse (the unbounded work this preflights against).
@@ -268,10 +270,10 @@ def _reject_absurd_central_directory(path: Path) -> None:
                 cd_size = int.from_bytes(record[40:48], "little")
     except OSError:
         return
-    if total_entries > _MAX_ARCHIVE_MEMBERS:
+    if total_entries > MAX_ARCHIVE_MEMBERS:
         raise SnapshotError(
             f"{path}: central directory claims {total_entries} entries, "
-            f"exceeding the {_MAX_ARCHIVE_MEMBERS} safety limit -- refusing "
+            f"exceeding the {MAX_ARCHIVE_MEMBERS} safety limit -- refusing "
             "to open (possible memory-exhaustion attack, or a genuinely "
             "malformed archive)."
         )
@@ -285,12 +287,10 @@ def _reject_absurd_central_directory(path: Path) -> None:
 
 
 def content_hash(payload: bytes) -> str:
-    """The content-address of *payload* -- sha256 hex digest.
-
-    A public function (not folded into the writer) so a caller can compute
-    a hash to check against an already-known manifest entry without opening
-    the archive at all.
-    """
+    """The content-address of *payload* -- sha256 hex digest. A public
+    function (not folded into the writer) so a caller can compute a hash to
+    check against an already-known manifest entry without opening the
+    archive at all."""
     return hashlib.sha256(payload).hexdigest()
 
 
@@ -333,39 +333,31 @@ class BundleArchiveWriter:
     Writes go to a temporary file next to the real destination; *close()*
     (a clean context-manager exit) only ``os.replace()``s it over the
     destination once the archive is fully written, so an in-progress write
-    -- interrupted by any error, including one from *put_blob*/
-    *write_manifest* themselves -- can never leave a truncated archive in
-    the destination's place when it already held a prior, valid one (Codex
-    review: the original revision opened *path* directly with ``mode="w"``,
-    which truncates immediately).
+    interrupted by any error (including one from *put_blob*/
+    *write_manifest* themselves) can never leave a truncated archive in the
+    destination's place when it already held a prior, valid one.
 
-    If *path* is itself a symlink, the temp file is created next to --
-    and ``close()`` replaces -- the link's *real target*, not the link
-    (Codex review: a bare ``os.replace(tmp, path)`` on a symlink
-    destination swaps the symlink's own directory entry for a regular
-    file, destroying the link; every other reader still following that
-    link would then see nothing written here). Mirrors
+    If *path* is itself a symlink, the temp file is created next to -- and
+    ``close()`` replaces -- the link's *real target*, not the link itself
+    (a bare ``os.replace(tmp, path)`` on a symlink destination would swap
+    the symlink's own directory entry for a regular file, destroying the
+    link for every other reader still following it). Mirrors
     ``snapshot_io._atomic_write_bytes``'s own symlink handling.
 
     A pre-existing destination with more than one hard link is rejected
-    outright, before any write starts (Codex review): replacing just this
-    one directory entry would silently desynchronize every other link from
-    it, leaving them pointing at the old, now-stale content while this
-    call reports success. The destination's existing file mode (and,
-    where supported, owner/group) are preserved onto the replacement --
-    without this, the temp file's fresh-file permissions/ownership would
-    silently replace a shared baseline's real access, mirroring
+    outright, before any write starts: replacing just this one directory
+    entry would silently desynchronize every other link from it. The
+    destination's existing file mode (and, where supported, owner/group)
+    are preserved onto the replacement, mirroring
     `snapshot_io._atomic_write_bytes`'s own guard for the plain-JSON path.
     Ownership restoration is *not* best-effort: a failed `os.chown` aborts
-    the write rather than silently publishing under the wrong owner/group
-    (same hard-won lesson as `snapshot_io.py`'s own two-round fix for this
-    exact failure mode -- see that function's docstring).
+    the write rather than silently publishing under the wrong owner/group.
 
     *path*'s parent directory is created (``parents=True``) if missing, so
     ``save_bundle_facts(..., format="archive")`` behaves like the
     ``format="json"`` path already does via ``snapshot_io.write_snapshot_text``
-    (Codex review) rather than raising ``FileNotFoundError`` on a first
-    write below a not-yet-existing directory.
+    rather than raising ``FileNotFoundError`` on a first write below a
+    not-yet-existing directory.
     """
 
     def __init__(self, path: str | Path) -> None:
@@ -436,6 +428,14 @@ class BundleArchiveWriter:
         self._zf = zipfile.ZipFile(self._tmp_file, mode="w", compression=zipfile.ZIP_STORED)
         self._written_hashes: set[str] = set()
         self._manifest_written = False
+        #: The published archive's own size/sha256, computed from the still-
+        #: private temp file right before `os.replace()` (see `close()`),
+        #: not by re-reading *path* afterward -- avoids a real TOCTOU where
+        #: a concurrent writer replacing the same destination in between
+        #: would make a later re-read describe someone else's write instead
+        #: of this one's (Codex review, fresh evidence). Set on success only.
+        self.stored_sha256: str | None = None
+        self.stored_size_bytes: int | None = None
 
     def put_blob(self, payload: bytes) -> str:
         """Write *payload* (zstd-compressed) if not already present under
@@ -474,38 +474,25 @@ class BundleArchiveWriter:
                 "resulting archive would have no manifest.json member"
             )
         try:
-            # self._zf.close() is now *inside* the guarded block (Codex
-            # review, fresh evidence): a failure while writing the central
-            # directory (ENOSPC/EIO) previously happened before the try,
-            # leaving the temp file behind uncleaned.
+            # Inside the guarded block (Codex review): a failure writing the
+            # central directory (ENOSPC/EIO) previously happened before the
+            # try, leaving the temp file behind uncleaned.
             self._zf.close()
-            # Durability (Codex review, mirroring snapshot_io._atomic_write_bytes's
-            # own two-part fsync): ZipFile.close() only flushes to the OS's
-            # buffer cache via the underlying file object's own close(),
-            # which is not itself a durability guarantee -- a power loss
-            # between here and os.replace() could leave the temp file's
-            # data unflushed to actual storage even though close() reported
-            # success. fsync's the *same* fd this class already holds open
-            # (self._tmp_file, from _open_unique_temp) rather than reopening
-            # the path -- no reason to pay a second open when the fd is
-            # already ours. Best-effort only in the narrow sense of "this
-            # filesystem/platform doesn't support fsync" (EINVAL/ENOTSUP/
-            # EOPNOTSUPP); a real storage failure (ENOSPC, EIO, EROFS) must
-            # propagate rather than let os.replace() publish unconfirmed
-            # content over a known-good archive.
+            # ZipFile.close() only flushes to the OS buffer cache, not
+            # storage -- fsync's the same fd this class already holds
+            # (self._tmp_file), mirroring snapshot_io._atomic_write_bytes's
+            # own two-part fsync. Best-effort only for "fs doesn't support
+            # fsync" (EINVAL/ENOTSUP/EOPNOTSUPP); a real storage failure
+            # must propagate rather than let os.replace() publish
+            # unconfirmed content over a known-good archive.
             self._fsync_tmp_file()
-            # Ownership restored *before* mode (Codex review, fresh
-            # evidence): on POSIX, chown() silently clears a file's
-            # setuid/setgid bits as a security measure -- restoring mode
-            # first and chown second (the original order) let a real
-            # 06755 destination's setuid/setgid bits survive the chmod
-            # only to be stripped by the chown that followed it, so
-            # rewriting such a destination silently downgraded it to
-            # 0755. Not best-effort (mirroring `snapshot_io.py`'s own
-            # two-round fix for this exact failure mode): silently
-            # proceeding after a failed ownership restoration would
-            # publish under the wrong owner/group, which can revoke real
-            # access for a shared baseline's other readers.
+            # Ownership restored *before* mode: chown() silently clears
+            # setuid/setgid on POSIX, so restoring mode first would let a
+            # real 06755 destination's bits survive the chmod only to be
+            # stripped by chown right after (Codex review). Not
+            # best-effort, mirroring `snapshot_io.py`'s own fix for this
+            # exact failure mode: publishing under the wrong owner/group
+            # can revoke real access for a shared baseline's other readers.
             if (
                 self._existing_uid is not None or self._existing_gid is not None
             ) and hasattr(os, "chown"):
@@ -514,42 +501,44 @@ class BundleArchiveWriter:
                     self._existing_uid if self._existing_uid is not None else -1,
                     self._existing_gid if self._existing_gid is not None else -1,
                 )
-            # A brand-new archive needs no mode fixup here at all --
-            # `_open_unique_temp` already applied the umask-filtered
-            # 0o666 default at creation, atomically and without touching
-            # the process-wide umask (the earlier read-zero-restore
-            # dance was not thread-safe).
+            # A brand-new archive needs no mode fixup -- `_open_unique_temp`
+            # already applied the umask-filtered 0o666 default at creation,
+            # without touching the process-wide umask.
             if self._existing_mode is not None:
                 os.chmod(self._tmp_path, self._existing_mode)
-            # Re-sync after chown/chmod, before replace (Codex review,
-            # fresh evidence): the earlier fsync only guarantees the
-            # *file content* reached storage -- chown/chmod mutate the
-            # inode's own metadata afterward, which a crash between here
-            # and os.replace() could then lose even though the content
-            # itself is durable, silently publishing the wrong owner/
-            # mode after a successful-looking write survives a reboot.
+            # Re-sync after chown/chmod, before replace: the earlier fsync
+            # only guarantees the *content* reached storage -- chown/chmod
+            # mutate inode metadata afterward, which a crash in between
+            # could lose even though the content itself is durable (Codex
+            # review, fresh evidence).
             self._fsync_tmp_file()
+            # Computed from the still-private temp path, not *self._target*
+            # after publication (see `self.stored_sha256`'s own docstring
+            # for why). `self._tmp_file` is write-only ("wb"), so a second,
+            # read-only fd on the same unpublished path reads it.
+            self.stored_size_bytes = os.fstat(self._tmp_file.fileno()).st_size
+            hasher = hashlib.sha256()
+            read_fd = os.open(self._tmp_path, os.O_RDONLY)
+            with os.fdopen(read_fd, "rb") as tmp_reader:
+                for chunk in iter(lambda: tmp_reader.read(1024 * 1024), b""):
+                    hasher.update(chunk)
+            self.stored_sha256 = hasher.hexdigest()
             self._tmp_file.close()
             os.replace(self._tmp_path, self._target)
         except BaseException:
-            # Codex review: a failure anywhere in this block (closing the
-            # zip, the fsync, the ownership/mode restoration, or the
-            # replace itself) must not leave the -- potentially very
+            # A failure anywhere above must not leave the -- potentially
             # large -- temp file behind next to the untouched destination;
-            # a repeated failure (ENOSPC, EIO) would otherwise accumulate
-            # temp files and starve later retries of the very space
-            # they're trying to free up. A no-op once os.replace() has
-            # actually succeeded, since the temp path no longer exists at
-            # that point.
+            # a repeated failure (ENOSPC, EIO) would otherwise starve later
+            # retries of the space they're trying to free (Codex review).
+            # No-op once os.replace() has already succeeded.
             if not self._tmp_file.closed:
                 self._tmp_file.close()
             self._tmp_path.unlink(missing_ok=True)
             raise
         # os.replace()'s directory-entry update isn't durable across a
         # crash until the *parent* dir is fsync'd too (mirrors
-        # snapshot_io._atomic_write_bytes's identical parent-directory
-        # fsync, same best-effort unsupported-filesystem carve-out). Never
-        # runs where there's no O_DIRECTORY concept (Windows).
+        # snapshot_io._atomic_write_bytes's identical fsync). Skipped where
+        # there's no O_DIRECTORY concept (Windows).
         if hasattr(os, "O_DIRECTORY"):
             dir_fd = os.open(self._target.parent, os.O_RDONLY | os.O_DIRECTORY)
             try:
@@ -592,11 +581,9 @@ class BundleArchiveWriter:
         return self
 
     def __exit__(self, *exc_info: object) -> None:
-        # Only close (which validates a manifest was written, then does the
-        # real os.replace()) on a clean exit -- an exception mid-write
-        # should propagate as-is, not be masked by "no manifest written
-        # yet" when the real cause is upstream. Either way the temp file is
-        # discarded rather than left behind or promoted over *path*.
+        # Only close() (validate + os.replace()) on a clean exit -- an
+        # exception mid-write should propagate as-is, not be masked by "no
+        # manifest written yet". Either way the temp file is discarded.
         if exc_info[0] is None:
             self.close()
         else:
@@ -664,6 +651,19 @@ class BundleArchiveReader:
                 f"exceeding the {max_bytes} byte safety limit -- refusing to "
                 "read (possible decompression bomb, or a genuinely oversized "
                 "member)."
+            )
+        # The zip "encrypted" bit (bit 0 of `flag_bits`) makes `ZipFile.
+        # open()` raise a bare `RuntimeError`, not `BadZipFile` -- the only
+        # exception the except clause below translates -- so it would leak
+        # past this module's SnapshotError contract (Codex review, fresh
+        # evidence). No member this writer produces is ever encrypted, so
+        # checked here rather than caught after (RuntimeError is too
+        # generic to safely narrow in an except clause).
+        if info.flag_bits & 0x1:
+            raise SnapshotError(
+                f"{self._path}: member {name!r} is encrypted -- not a "
+                "BundleArchiveWriter-produced archive, or a corrupted/"
+                "hostile one."
             )
         out = io.BytesIO()
         try:

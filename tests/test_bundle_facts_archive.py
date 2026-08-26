@@ -69,6 +69,34 @@ def _per_library_snapshots(metadata: dict[str, ElfMetadata]) -> dict[str, AbiSna
     }
 
 
+def _graph_heavy_snapshot(n: int) -> AbiSnapshot:
+    """Real, if repeated, JSON-compressible content at production scale --
+    mirrors ``tests/test_snapshot_compression.py``'s identically-named
+    helper (not imported from there: that module's own fixture is scoped
+    to the plain-JSON snapshot format's compression boundary, and this
+    format's own boundary -- a per-*blob* zstd frame inside a zip, not a
+    whole-document one -- deserves its own local fixture per this file's
+    module docstring). Used by
+    ``TestBundleFactsArchiveFormat::test_save_load_round_trip_at_production_scale``
+    per AGENTS.md's "Third-party-boundary tests" convention: a toy-sized
+    payload's auto-selected zstd window collapses to the content size and
+    never exercises the reader's real 128 MiB ``max_window_size`` contract."""
+    from abicheck.model import Function, Param, Visibility
+
+    funcs = [
+        Function(
+            name=f"widget_call_{i}",
+            mangled=f"_ZN6widget4callE{i}i",
+            return_type="int",
+            params=[Param(name="x", type="int"), Param(name="y", type="const char*")],
+            visibility=Visibility.PUBLIC,
+            source_location=f"/usr/include/widget/detail/generated_{i % 20}.h:{i}",
+        )
+        for i in range(n)
+    ]
+    return AbiSnapshot(library="libwidget.so", version="1.0", functions=funcs)
+
+
 class TestBundleFactsArchiveFormat:
     """G40: ``format="archive"``'s content-addressed zip container, exercised
     at the ``BundleFacts`` level (the low-level container primitive itself
@@ -116,6 +144,57 @@ class TestBundleFactsArchiveFormat:
 
         assert result.compression == SnapshotCompression.NONE
         assert detect_snapshot_compression(out) == result.compression
+
+    @pytest.mark.slow
+    def test_save_load_round_trip_at_production_scale(self, tmp_path: Path) -> None:
+        """The postmortem-shaped counterpart to
+        ``test_snapshot_compression.py::test_zstd_round_trip_at_production_scale_and_level``
+        (ADR-059 §12), for *this* format's own compression boundary
+        (Codex review, fresh evidence): the existing archive-format fixtures
+        (this file, ``tests/test_bundle_archive.py``) all use ~5 KiB blobs,
+        which exercise the container's *shape* -- dedup, member layout,
+        manifest round-trip -- but never the reader's real 128 MiB
+        ``max_window_size`` contract or production-level-19 compression
+        behavior, since a payload that small collapses zstd's auto-selected
+        window straight down to the content size regardless of the cap.
+        Scaled past the same ~8 MiB threshold that fixture's own comment
+        documents as where the window stops collapsing, and driven through
+        the actual public entry points (``save_bundle_facts``/
+        ``load_bundle_facts``), not the lower-level ``BundleArchiveWriter``/
+        ``BundleArchiveReader`` primitives directly."""
+        import json
+
+        zstandard = pytest.importorskip("zstandard")
+        from abicheck.serialization import snapshot_to_dict
+
+        snap = _graph_heavy_snapshot(n=8600)
+        facts = capture_bundle_facts({"libwidget.so": snap})
+        serialized_size = len(json.dumps(snapshot_to_dict(snap)).encode())
+        assert serialized_size > 8 * 1024 * 1024  # past the window-collapse point
+
+        out = tmp_path / "production_scale.bundlefacts.archive.zip"
+        result = save_bundle_facts(facts, out, format="archive")
+
+        # Sanity-check the premise before trusting the round trip below:
+        # the real per-blob writer (level=19, no explicit window override)
+        # must actually produce a non-trivial window -- if a future
+        # zstandard/libzstd upgrade changed that auto-selection, this
+        # assertion (not a silent pass) is what would say the fixture needs
+        # revisiting, mirroring the snapshot_io.py sibling test's own
+        # reasoning exactly.
+        with zipfile.ZipFile(out) as zf:
+            blob_names = [n for n in zf.namelist() if n.startswith("blobs/")]
+            assert len(blob_names) == 1
+            raw_frame = zf.read(blob_names[0])
+        frame = zstandard.get_frame_parameters(raw_frame)
+        assert frame.window_size >= 4 * 1024 * 1024  # nowhere near collapsed to 0
+
+        loaded = load_bundle_facts(out, format="archive")
+        loaded_snap = loaded.per_library_snapshots["libwidget.so"]
+        assert loaded_snap.functions is not None
+        assert len(loaded_snap.functions) == len(snap.functions)
+        assert loaded_snap.functions[-1].name == snap.functions[-1].name
+        assert result.stored_sha256 is not None
 
     def test_round_trip_with_non_null_instantiation_manifest(
         self, tmp_path: Path
@@ -305,6 +384,36 @@ class TestBundleFactsArchiveFormat:
         with pytest.raises(SnapshotError, match="exceeding the 3 safety limit"):
             load_bundle_facts(out, format="archive")
         assert blob_reads == []
+
+    def test_save_rejects_a_write_that_would_exceed_the_reader_own_member_cap(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Codex review, fresh evidence: nothing on the write path checked
+        member count at all -- a manifest naming exactly
+        `MAX_ARCHIVE_MEMBERS` distinct-content libraries wrote successfully,
+        producing `MAX_ARCHIVE_MEMBERS + 1` zip members (one blob per
+        library plus `manifest.json`), which the reader's own preflight
+        (checked directly against `MAX_ARCHIVE_MEMBERS` in
+        tests/test_bundle_archive.py) would then refuse to reopen. The
+        write must fail up front instead, before producing an archive the
+        reader can never open."""
+        import abicheck.storage.bundle_archive as bundle_archive_module
+
+        monkeypatch.setattr(bundle_archive_module, "MAX_ARCHIVE_MEMBERS", 3)
+        # Four *distinct*-content snapshots (soname differs per entry) --
+        # each gets its own blob, so this can't be sidestepped by dedup the
+        # way test_load_rejects_a_manifest_naming_too_many_libraries's
+        # shared-blob fixture deliberately is.
+        metadata = {
+            f"lib{i}.so": _meta(soname=f"lib{i}.so", exports=[f"f{i}"])
+            for i in range(4)
+        }
+        facts = capture_bundle_facts(_per_library_snapshots(metadata))
+        out = tmp_path / "too-many-members.bundlefacts.archive.zip"
+
+        with pytest.raises(SnapshotError, match="more than 3 zip members"):
+            save_bundle_facts(facts, out, format="archive")
+        assert not out.exists()
 
     def test_load_caps_each_blob_read_by_the_remaining_aggregate_allowance(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

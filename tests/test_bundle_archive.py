@@ -621,6 +621,30 @@ class TestBundleArchiveReaderWrapsThirdPartyExceptions:
             with pytest.raises(SnapshotError, match="failed to decompress"):
                 reader.read_blob(h)
 
+    def test_an_encrypted_member_raises_snapshot_error(self, tmp_path: Path) -> None:
+        """Codex review, fresh evidence: a member with the zip 'encrypted'
+        general-purpose bit set makes `ZipFile.open()` raise a bare
+        `RuntimeError("... is encrypted, password required ...")`, not
+        `BadZipFile` -- the only exception the CRC-mismatch handling below
+        translates -- so it must be rejected explicitly, not left to leak
+        a raw RuntimeError past this module's SnapshotError contract."""
+        path = tmp_path / "bundle.archive.zip"
+        with BundleArchiveWriter(path) as writer:
+            h = writer.put_blob(b'{"a": 1}')
+            writer.write_manifest({"library_blobs": {"a.so": h}})
+
+        member = f"blobs/{h}.json.zst"
+        with BundleArchiveReader.open(path) as reader:
+            # Flip the general-purpose "encrypted" bit (bit 0) on the
+            # already-parsed ZipInfo -- the exact field `_read_stored_
+            # member`'s new guard inspects, without needing to hand-craft
+            # real zip encryption (which the stdlib zipfile writer can't
+            # produce anyway).
+            info = reader._zf.getinfo(member)
+            info.flag_bits |= 0x1
+            with pytest.raises(SnapshotError, match="is encrypted"):
+                reader.read_blob(h)
+
     def test_a_crc_mismatched_member_raises_snapshot_error(self, tmp_path: Path) -> None:
         """Codex review: ZipExtFile validates a ZIP_STORED member's CRC-32
         as it is consumed, raising a raw zipfile.BadZipFile on mismatch --

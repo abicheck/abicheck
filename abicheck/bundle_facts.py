@@ -415,13 +415,37 @@ def write_bundle_facts_archive(
     in this function decides that; it simply calls ``put_blob`` once per
     library and lets identical payloads collapse on their own.
     """
-    import hashlib as _hashlib
     import json as _json
 
+    from .errors import SnapshotError
     from .snapshot_io import SnapshotCompression, SnapshotWriteResult
-    from .storage.bundle_archive import BundleArchiveWriter
+    from .storage.bundle_archive import MAX_ARCHIVE_MEMBERS, BundleArchiveWriter
 
     p = Path(path)
+    # Reject up front, before writing anything, rather than producing an
+    # archive `read_bundle_facts_archive()`'s own `MAX_ARCHIVE_MEMBERS`
+    # preflight would then refuse to reopen (Codex review, fresh evidence:
+    # a manifest naming exactly `DEFAULT_MAX_LIBRARY_COUNT` (20,000)
+    # distinct-content libraries wrote successfully -- nothing on this
+    # write path checked member count at all -- but produced 20,001+ zip
+    # members (one blob per library plus `manifest.json`, plus one more
+    # when `facts.manifest` is non-null), exceeding the reader's own
+    # `MAX_ARCHIVE_MEMBERS` cap). `len(facts.per_library_snapshots)` is an
+    # upper bound on the number of *distinct* blob members this write will
+    # actually produce -- content dedup (two libraries sharing one blob)
+    # can only make the real count smaller, never larger, so checking the
+    # name count here can only reject archives that were never going to
+    # need every name's own blob anyway, never accept one the reader would
+    # then refuse.
+    reserved_metadata_members = 1 + (1 if facts.manifest is not None else 0)
+    if len(facts.per_library_snapshots) + reserved_metadata_members > MAX_ARCHIVE_MEMBERS:
+        raise SnapshotError(
+            f"{p}: writing {len(facts.per_library_snapshots)} libraries "
+            f"would produce more than {MAX_ARCHIVE_MEMBERS} zip members "
+            "(the reader's own safety limit) even before accounting for "
+            "content dedup -- refusing to write an archive that could "
+            "not be reopened."
+        )
     library_blobs: dict[str, str] = {}
     decoded_size_bytes = 0
     with BundleArchiveWriter(p) as writer:
@@ -466,14 +490,17 @@ def write_bundle_facts_archive(
                 "library_filenames": dict(sorted(facts.library_filenames.items())),
             }
         )
-    # Stream the completed archive through sha256 rather than
-    # `p.read_bytes()` -- a large multi-library bundle's archive can itself
-    # be large, and this bookkeeping step has no reason to hold a second
-    # full in-memory copy of it just to size/hash it (Codex review).
-    hasher = _hashlib.sha256()
-    with open(p, "rb") as f:
-        for chunk in iter(lambda: f.read(1024 * 1024), b""):
-            hasher.update(chunk)
+    # `writer.stored_sha256`/`writer.stored_size_bytes` are computed by
+    # BundleArchiveWriter.close() from the still-private temp file, before
+    # os.replace() publishes it -- not re-derived here via a fresh
+    # `open(p, "rb")`/`p.stat()` after the `with` block (Codex review,
+    # fresh evidence): a concurrent writer publishing a *different*
+    # generation to the same destination between this writer's own
+    # publish and a separate re-open here could otherwise make the
+    # reported hash/size describe someone else's write, not this one's --
+    # a real hazard for `SnapshotWriteResult` used as an artifact receipt.
+    assert writer.stored_sha256 is not None
+    assert writer.stored_size_bytes is not None
     return SnapshotWriteResult(
         path=p,
         # NONE, not ZSTD: `compression` describes the *outer envelope*
@@ -490,8 +517,8 @@ def write_bundle_facts_archive(
         # evidence).
         compression=SnapshotCompression.NONE,
         decoded_size_bytes=decoded_size_bytes,
-        stored_size_bytes=p.stat().st_size,
-        stored_sha256=hasher.hexdigest(),
+        stored_size_bytes=writer.stored_size_bytes,
+        stored_sha256=writer.stored_sha256,
     )
 
 
