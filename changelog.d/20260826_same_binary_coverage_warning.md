@@ -134,3 +134,13 @@
   document with boilerplate testcases. New leaf module
   `junit_coverage_warnings.py` (kept out of `junit_report.py` to respect
   its ADR-061 debt-no-growth baseline).
+- **Eleventh follow-up (Codex review): `compare`'s directory/package
+  release fan-out never copied `coverage_warnings` into its per-library
+  entry either.** `cli_compare_release._compare_one_library`'s entry
+  dict (embedded verbatim into both the primary release JSON's
+  `"libraries"` list and `--output-dir`'s `summary.json`) had no
+  `coverage_warnings` key at all, so a same-binary pair inside a larger
+  release comparison silently lost the warning a single-pair `compare`
+  already surfaces. Now copied from the real `DiffResult` the same way
+  every other format does (`if result.coverage_warnings: ...`), absent
+  rather than an empty list when there's nothing to warn about.

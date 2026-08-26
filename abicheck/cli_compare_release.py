@@ -336,6 +336,7 @@ def _compare_one_library(
             "compatible_additions": len(result.compatible),
             "quality_issues": n_quality,
             "_diff_result": result,
+            **({"coverage_warnings": list(result.coverage_warnings)} if result.coverage_warnings else {}),  # e.g. same-binary; never reached this entry before (Codex review)
         }
         if collect_diff_results:
             # See this function's own docstring (CodeRabbit review #798;
@@ -392,11 +393,7 @@ def _compare_one_library(
         # abicheck bug), so it gets its own "not_comparable" verdict string
         # instead of falling into the same "ERROR"/exit-4 bucket a genuine
         # crash uses — see _RELEASE_VERDICT_ORDER's dedicated rank for it.
-        kind = (
-            "profile_mismatch"
-            if isinstance(exc, ProfileMismatchError)
-            else "scope_mismatch"
-        )
+        kind = "profile_mismatch" if isinstance(exc, ProfileMismatchError) else "scope_mismatch"
         if output_dir:
             from .schemas import REPORT_SCHEMA_VERSION
 
