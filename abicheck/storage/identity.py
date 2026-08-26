@@ -50,7 +50,7 @@ from __future__ import annotations
 import bisect
 import enum
 import functools
-from collections.abc import Iterable, Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -412,53 +412,85 @@ class OccurrenceSet:
         """
         return len(self._by_entity.get(entity.key, ())) > 1
 
-    def conflicts(self) -> tuple[IdentityConflict, ...]:
-        """Entities whose occurrences cannot all describe one thing.
+    def same_site_observations(self) -> tuple[tuple[OccurrenceId, ...], ...]:
+        """Groups of two or more occurrences of one entity from one site.
 
-        The rule is deliberately narrow: several occurrences of one entity
-        from *different* observation kinds are the normal case (the same
-        function seen in DWARF and in the export table), several from the
-        *same* kind but different containers are also normal (one header
-        declaration reached through two translation units), and — the case
-        this rule originally got wrong — several from different *producers*
-        are normal too. What is not normal is two occurrences from one
-        producer, one observation kind and one container, differing only in
-        their attributes: that is a single producer reporting two
-        incompatible answers about one thing in one place, and it is
-        precisely what a first-wins index used to resolve by discarding the
-        second answer.
+        A purely *structural* fact — one producer, one observation kind and
+        one container reported several distinct observations of one entity —
+        which this layer can always determine from identity alone. Whether
+        such a group is a genuine contradiction is a different question, and
+        not one identity data can answer: see :meth:`conflicts`.
 
-        Grouping by :attr:`OccurrenceId.site` rather than by
-        ``(observation, container)`` is what makes the producer case normal.
-        Without it, Clang and CastXML both describing one entity in one
-        translation unit read as irreconcilable — which is not a corner case
-        here, since ``--ast-frontend hybrid`` exists to produce exactly that
-        (Codex review).
-
-        Returning conflicts rather than raising is intentional: a package
-        must remain writable with conflicts in it, so that the ambiguity is
-        preserved for a reader instead of aborting the capture that found it.
+        Deterministic: groups are ordered by entity key then by site, and the
+        occurrences within each group are already in key order.
         """
-        found: list[IdentityConflict] = []
+        found: list[tuple[OccurrenceId, ...]] = []
         for entity_key in sorted(self._by_entity):
             by_site: dict[tuple[str, str, str], list[OccurrenceId]] = {}
             for occurrence in self._by_entity[entity_key]:
                 by_site.setdefault(occurrence.site, []).append(occurrence)
-            for (observation, container, producer), group in sorted(by_site.items()):
-                if len(group) < 2:
-                    continue
-                where = f" in {container}" if container else ""
-                by_whom = f" from {producer}" if producer else ""
-                found.append(
-                    IdentityConflict(
-                        reason=(
-                            f"{len(group)} irreconcilable {observation} observations"
-                            f"{by_whom}{where} for "
-                            f"{self._entities[entity_key].qualified_name}"
-                        ),
-                        occurrences=tuple(group),
-                    )
+            for _site, group in sorted(by_site.items()):
+                if len(group) > 1:
+                    found.append(tuple(group))
+        return tuple(found)
+
+    def conflicts(
+        self,
+        irreconcilable: Callable[[OccurrenceId, OccurrenceId], bool],
+    ) -> tuple[IdentityConflict, ...]:
+        """Same-site groups the caller's predicate judges contradictory.
+
+        ``irreconcilable(a, b)`` is **required**, and that is a deliberate
+        narrowing of what this method used to do (Codex review, third finding
+        on the same rule). Earlier versions decided by themselves that every
+        same-site group was a contradiction, and the site tuple grew a
+        dimension each time that turned out to be wrong: first the observation
+        kind and container, then the producer — because ``--ast-frontend
+        hybrid`` has two producers describe one translation unit — and then a
+        forward declaration followed by its definition, which is one producer
+        legitimately reporting two *different declarations* of one entity in
+        one file rather than two answers about one declaration.
+
+        Three rounds of adding a dimension is the signal that the question was
+        misplaced rather than under-specified. "Do these two observations
+        contradict each other" requires knowing what the attributes *mean* —
+        that ``is_definition`` differing is ordinary while a differing size is
+        not — and this package deliberately holds no such domain knowledge
+        (``AGENTS.md``: a storage module that needs to know a verdict or a
+        ``ChangeKind`` is in the wrong layer). So the structural half stays
+        here, in :meth:`same_site_observations`, and the semantic half is the
+        caller's.
+
+        Returning conflicts rather than raising is unchanged and intentional:
+        a package must remain writable with conflicts in it, so the ambiguity
+        reaches a reader instead of aborting the capture that found it.
+        """
+        found: list[IdentityConflict] = []
+        for group in self.same_site_observations():
+            members = [
+                occurrence
+                for index, occurrence in enumerate(group)
+                if any(
+                    irreconcilable(occurrence, other)
+                    for position, other in enumerate(group)
+                    if position != index
                 )
+            ]
+            if len(members) < 2:
+                continue
+            first = members[0]
+            where = f" in {first.container}" if first.container else ""
+            by_whom = f" from {first.producer}" if first.producer else ""
+            found.append(
+                IdentityConflict(
+                    reason=(
+                        f"{len(members)} irreconcilable "
+                        f"{first.observation.value} observations"
+                        f"{by_whom}{where} for {first.entity.qualified_name}"
+                    ),
+                    occurrences=tuple(members),
+                )
+            )
         return tuple(found)
 
     def to_dict(self) -> dict[str, Any]:

@@ -44,7 +44,7 @@ from __future__ import annotations
 
 import enum
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 __all__ = [
@@ -358,30 +358,39 @@ class AvailabilityLedger:
         by it, so an override cannot claim availability the family never had
         — see :meth:`FactAvailability.narrowed`.
 
-        An **undeclared** family is narrowed from ``NOT_COLLECTED``, not from
-        :attr:`unknown_family_default`, and that distinction is load-bearing
-        (Codex review). ``NOT_APPLICABLE`` is a permitted fallback and sits
-        *below* ``PRESENT`` in the status order, deliberately: an entity that
-        genuinely carries a fact supersedes a family declared inapplicable.
-        But that is a *supersession* rule, and it is only sound when a family
-        record actually says "inapplicable". With no record at all, the same
-        ordering let an override alone manufacture a comparable answer for a
-        family nobody ever declared — availability inferred from the override
-        that was supposed to be constrained by it.
+        For an **undeclared** family, a ``NOT_APPLICABLE`` fallback has its
+        *status* substituted before narrowing, and that narrow scope is the
+        point. ``NOT_APPLICABLE`` is the only permitted fallback that sits
+        *below* ``PRESENT`` in the status order — deliberately, so an entity
+        that genuinely carries a fact supersedes a family declared
+        inapplicable. That supersession rule is sound only when a record
+        actually says "inapplicable"; with no record at all it became an
+        upgrade path, letting an override manufacture availability for a
+        family nobody declared.
 
-        The fix belongs here rather than in :meth:`FactAvailability.narrowed`
-        because this is the only layer that can tell a declared status from a
-        fallback: ``narrowed`` sees two records and cannot know whether the
-        first came from a declaration or from a default.
+        ``NOT_COLLECTED``, ``UNSUPPORTED`` and ``FAILED`` need no special
+        case: each already ranks *worse* than ``PRESENT``, so ``narrowed``
+        blocks the upgrade on its own. A first version of this guard replaced
+        the base with a bare ``NOT_COLLECTED`` for every undeclared family,
+        which blocked the upgrade but also discarded the fallback's own
+        status, producer and diagnostics — a ``FAILED`` fallback carrying a
+        parse error resolved to an unannotated ``NOT_COLLECTED`` while
+        :meth:`for_family` still reported the real failure (Codex review).
+        Substituting only the one status that can be upgraded, via
+        :func:`dataclasses.replace`, keeps every other field intact.
+
+        The guard belongs here rather than in
+        :meth:`FactAvailability.narrowed` because this is the only layer that
+        can tell a declared status from a fallback: ``narrowed`` sees two
+        records and cannot know whether the first came from a declaration or
+        from a default.
         """
         override = self.overrides.get((family, entity_key))
         if override is None:
             return self.for_family(family)
-        base = (
-            self.for_family(family)
-            if family in self.families
-            else FactAvailability(FactStatus.NOT_COLLECTED)
-        )
+        base = self.for_family(family)
+        if family not in self.families and base.status is FactStatus.NOT_APPLICABLE:
+            base = replace(base, status=FactStatus.NOT_COLLECTED)
         return base.narrowed(override)
 
     def comparable_families(self) -> frozenset[str]:

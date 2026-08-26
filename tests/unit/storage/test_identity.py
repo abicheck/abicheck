@@ -43,6 +43,19 @@ def _occurrence(
     )
 
 
+def _any_attribute_disagrees(left: OccurrenceId, right: OccurrenceId) -> bool:
+    """A stand-in domain predicate for `conflicts`.
+
+    Roughly what `conflicts()` used to decide by itself, supplied explicitly
+    now that the semantic judgement belongs to the caller. Real callers will
+    know which attributes may legitimately differ (a forward declaration and
+    its definition disagree on `is_definition`, and that is ordinary); this
+    one treats every difference as a contradiction, which is what the tests
+    below that assert conflict *detection* need.
+    """
+    return left.attributes != right.attributes
+
+
 # --------------------------------------------------------------------------
 # The central invariant: nothing is ever dropped.
 # --------------------------------------------------------------------------
@@ -118,7 +131,9 @@ class TestNothingIsEverDropped:
 
         assert list(shuffled) == list(reference)
         assert shuffled.entities() == reference.entities()
-        assert shuffled.conflicts() == reference.conflicts()
+        assert shuffled.conflicts(_any_attribute_disagrees) == reference.conflicts(
+            _any_attribute_disagrees
+        )
 
 
 class TestAttributesSeparateOccurrences:
@@ -198,7 +213,7 @@ class TestConflictsAreReportedNotResolved:
         occurrences.add(_occurrence("f", container="a.cpp", ret="int"))
         occurrences.add(_occurrence("f", container="a.cpp", ret="long"))
 
-        conflicts = occurrences.conflicts()
+        conflicts = occurrences.conflicts(_any_attribute_disagrees)
 
         assert len(conflicts) == 1
         # Both survive — the point of the design.
@@ -211,7 +226,7 @@ class TestConflictsAreReportedNotResolved:
         occurrences.add(_occurrence("f", ObservationKind.DWARF, "lib.so"))
         occurrences.add(_occurrence("f", ObservationKind.EXPORT_TABLE, "lib.so"))
 
-        assert occurrences.conflicts() == ()
+        assert occurrences.conflicts(_any_attribute_disagrees) == ()
         assert occurrences.is_ambiguous(EntityId(EntityKind.FUNCTION, "f"))
 
     def test_different_containers_are_not_a_conflict(self) -> None:
@@ -220,7 +235,7 @@ class TestConflictsAreReportedNotResolved:
         occurrences.add(_occurrence("f", container="a.cpp"))
         occurrences.add(_occurrence("f", container="b.cpp"))
 
-        assert occurrences.conflicts() == ()
+        assert occurrences.conflicts(_any_attribute_disagrees) == ()
 
     @given(
         st.lists(
@@ -237,7 +252,7 @@ class TestConflictsAreReportedNotResolved:
         occurrences.extend(built)
         before = len(occurrences)
 
-        occurrences.conflicts()
+        occurrences.conflicts(_any_attribute_disagrees)
 
         assert len(occurrences) == before == len({o.key for o in built})
 
@@ -251,7 +266,7 @@ class TestConflictsAreReportedNotResolved:
         for ret in ("int", "long", "short"):
             occurrences.add(_occurrence("f", container="a.cpp", ret=ret))
 
-        conflicts = occurrences.conflicts()
+        conflicts = occurrences.conflicts(_any_attribute_disagrees)
 
         assert len(conflicts[0].occurrences) == 3
 
@@ -320,7 +335,7 @@ class TestElfSymbolOccurrences:
         assert len(occurrences) == 2
         assert len(occurrences.entities()) == 2
         # Not a conflict — both are legitimate, simultaneous definitions.
-        assert occurrences.conflicts() == ()
+        assert occurrences.conflicts(_any_attribute_disagrees) == ()
 
     def test_binding_is_preserved_per_version(self) -> None:
         """The coin-flip a bare-name map produces for `binding` is the bug.
@@ -549,7 +564,7 @@ class TestProducerIsPartOfTheObservationSite:
                 )
             )
 
-        assert occurrences.conflicts() == ()
+        assert occurrences.conflicts(_any_attribute_disagrees) == ()
         # Still two occurrences — grouping them is not merging them.
         assert len(occurrences) == 2
 
@@ -568,7 +583,7 @@ class TestProducerIsPartOfTheObservationSite:
                 )
             )
 
-        conflicts = occurrences.conflicts()
+        conflicts = occurrences.conflicts(_any_attribute_disagrees)
 
         assert len(conflicts) == 1
         assert "clang" in conflicts[0].reason
@@ -743,3 +758,120 @@ class TestStoredStateIsCanonicalNotJustItsViews:
         assert shuffled == reference
         assert repr(shuffled) == repr(reference)
         assert shuffled.to_dict() == reference.to_dict()
+
+
+class TestTheSemanticJudgementBelongsToTheCaller:
+    """Codex review, third finding on the same site tuple.
+
+    Earlier versions decided by themselves that every same-site group was a
+    contradiction, and the tuple grew a dimension each time that proved wrong:
+    observation kind and container, then producer (`--ast-frontend hybrid`),
+    then a forward declaration followed by its definition — one producer
+    legitimately reporting two *different declarations* of one entity in one
+    file, not two answers about one declaration.
+
+    Three rounds of adding a dimension is the signal that the question was in
+    the wrong layer, not under-specified. The structural half stays here; the
+    semantic half is the caller's.
+    """
+
+    @staticmethod
+    def _forward_declaration_then_definition() -> OccurrenceSet:
+        entity = EntityId(EntityKind.TYPE, "Foo")
+        occurrences = OccurrenceSet()
+        for line, is_definition in (("3", "0"), ("9", "1")):
+            occurrences.add(
+                OccurrenceId(
+                    entity,
+                    ObservationKind.AST,
+                    "a.cpp",
+                    (("line", line), ("is_definition", is_definition)),
+                    producer="clang",
+                )
+            )
+        return occurrences
+
+    def test_the_structural_fact_is_still_reported(self) -> None:
+        """This layer can always determine same-site multiplicity."""
+        occurrences = self._forward_declaration_then_definition()
+
+        groups = occurrences.same_site_observations()
+
+        assert len(groups) == 1
+        assert len(groups[0]) == 2
+
+    def test_a_declaration_and_its_definition_are_not_a_conflict(self) -> None:
+        """The reported false positive, under a predicate that knows better."""
+
+        def size_disagrees(left: OccurrenceId, right: OccurrenceId) -> bool:
+            return bool(left.attribute("size")) and left.attribute(
+                "size"
+            ) != right.attribute("size")
+
+        assert (
+            self._forward_declaration_then_definition().conflicts(size_disagrees) == ()
+        )
+
+    def test_a_genuine_contradiction_is_still_reported(self) -> None:
+        def size_disagrees(left: OccurrenceId, right: OccurrenceId) -> bool:
+            return bool(left.attribute("size")) and left.attribute(
+                "size"
+            ) != right.attribute("size")
+
+        entity = EntityId(EntityKind.TYPE, "Foo")
+        occurrences = OccurrenceSet()
+        for size in ("8", "16"):
+            occurrences.add(
+                OccurrenceId(
+                    entity,
+                    ObservationKind.AST,
+                    "a.cpp",
+                    (("size", size),),
+                    producer="clang",
+                )
+            )
+
+        conflicts = occurrences.conflicts(size_disagrees)
+
+        assert len(conflicts) == 1
+        assert len(conflicts[0].occurrences) == 2
+
+    def test_a_predicate_that_never_fires_reports_nothing(self) -> None:
+        """No same-site group is a conflict by structure alone."""
+        occurrences = self._forward_declaration_then_definition()
+
+        assert occurrences.conflicts(lambda left, right: False) == ()
+        # ...while the occurrences themselves are all still there.
+        assert len(occurrences) == 2
+
+    def test_same_site_groups_are_deterministic(self) -> None:
+        entity = EntityId(EntityKind.TYPE, "Foo")
+        built = [
+            OccurrenceId(entity, ObservationKind.AST, "a.cpp", (("n", "2"),)),
+            OccurrenceId(entity, ObservationKind.AST, "a.cpp", (("n", "1"),)),
+        ]
+        forward, backward = OccurrenceSet(), OccurrenceSet()
+        forward.extend(built)
+        backward.extend(reversed(built))
+
+        assert forward.same_site_observations() == backward.same_site_observations()
+
+    def test_only_the_members_the_predicate_names_are_reported(self) -> None:
+        """A group can hold one contradictory pair and one innocent member."""
+
+        def size_disagrees(left: OccurrenceId, right: OccurrenceId) -> bool:
+            return bool(left.attribute("size")) and left.attribute(
+                "size"
+            ) != right.attribute("size")
+
+        entity = EntityId(EntityKind.TYPE, "Foo")
+        occurrences = OccurrenceSet()
+        for attributes in ((("size", "8"),), (("size", "16"),), (("note", "x"),)):
+            occurrences.add(
+                OccurrenceId(entity, ObservationKind.AST, "a.cpp", attributes)
+            )
+
+        conflicts = occurrences.conflicts(size_disagrees)
+
+        assert len(conflicts) == 1
+        assert {o.attribute("size") for o in conflicts[0].occurrences} == {"8", "16"}

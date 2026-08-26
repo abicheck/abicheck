@@ -78,16 +78,25 @@ re-export surface, not a namespace to import through internally.
 ## Invariants this package must not break
 
 1. **Never resolve identity by discarding an occurrence.** Ambiguity is
-   recorded as an `IdentityConflict` and both occurrences are kept. The
-   first-wins behavior in `AbiSnapshot.index()` is exactly what D4 exists to
-   replace; do not reproduce it here.
-2. **Never let a default value stand in for missing evidence.** An empty
+   recorded and both occurrences are kept. The first-wins behavior in
+   `AbiSnapshot.index()` is exactly what D4 exists to replace; do not
+   reproduce it here.
+2. **Never decide, in this package, whether two observations contradict
+   each other.** That needs to know what an attribute *means*, which is
+   domain knowledge this layer does not hold. `OccurrenceSet` reports the
+   structural fact (`same_site_observations`); the caller supplies the
+   predicate (`conflicts`). Three review rounds were spent adding one more
+   dimension to a site tuple before this was separated — treat a fourth
+   proposed dimension as evidence the question is in the wrong layer again.
+3. **Never let a default value stand in for missing evidence.** An empty
    collection means "the producer ran and established nothing is there".
    Anything else needs a `FactAvailability` status.
-3. **Never make a semantic digest depend on incidental order.** Unordered
+4. **Never make a semantic digest depend on incidental order.** This is a
+   claim about the stored *state*, not only about accessors: a canonical
+   view over non-canonical state leaves `__eq__` and `repr` exposed. Unordered
    collections get an explicit sort key; anything whose order carries
    meaning is an array, never a map relying on insertion order.
-4. **Never add a fifth meaning to one version integer.** A new kind of
+5. **Never add a fifth meaning to one version integer.** A new kind of
    compatibility question gets its own axis in `StorageVersions`.
 
 ## Tests

@@ -31,10 +31,18 @@ Two consequences follow, and both are load-bearing:
 * adding an optional display field forces a bump that reads, to every
   consumer, like a new evidence recipe.
 
-So the axes are split. Only :attr:`StorageVersions.comparison_contract_version`
-fails closed on a newer value — the others are informational to a reader
-that does not recognize them, which is exactly what lets a display-only
-addition ship without locking out existing readers.
+So the axes are split. Exactly two fail closed, for two different reasons:
+:attr:`StorageVersions.package_format_version` (a reader may not be able to
+*locate* a newer container's structures) and
+:attr:`StorageVersions.comparison_contract_version` (comparing without
+understanding the change could produce a *wrong verdict*). Each also fails
+closed when the package does not state it validly, since an axis that exists
+to refuse unknown semantics cannot treat "unknown" as agreement.
+
+The remaining five are informational to a reader that does not recognize
+them, which is exactly what lets a display-only addition ship without
+locking out existing readers, and they parse defensively: a malformed
+informational value must never abort a load, because no decision reads it.
 """
 
 from __future__ import annotations

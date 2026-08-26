@@ -641,3 +641,67 @@ class TestAnOverrideCannotManufactureAnUndeclaredFamily:
 
         assert ledger.for_entity("f", "e").status is FactStatus.NOT_APPLICABLE
         assert ledger.for_family("f").status is FactStatus.NOT_APPLICABLE
+
+
+class TestANonComparableFallbackKeepsItsEvidence:
+    """Codex review: the previous guard was over-broad.
+
+    Blocking the undeclared-family upgrade by replacing the base with a bare
+    `NOT_COLLECTED` also discarded the fallback's own status, producer and
+    diagnostics — so a `FAILED` fallback carrying a parse error resolved to an
+    unannotated `NOT_COLLECTED` while `for_family` still reported the real
+    failure. Only `NOT_APPLICABLE` ranks below `PRESENT`, so only it needed
+    handling at all.
+    """
+
+    @pytest.mark.parametrize(
+        "status", [FactStatus.NOT_COLLECTED, FactStatus.UNSUPPORTED, FactStatus.FAILED]
+    )
+    def test_an_already_worse_fallback_is_passed_through_untouched(
+        self, status: FactStatus
+    ) -> None:
+        ledger = AvailabilityLedger(
+            unknown_family_default=FactAvailability(
+                status, producer="dwarf", diagnostics=("parse error",)
+            )
+        )
+        ledger.override("layout", "ns::Foo", FactAvailability(FactStatus.PRESENT))
+
+        answer = ledger.for_entity("layout", "ns::Foo")
+
+        assert answer.status is status
+        assert answer.producer == "dwarf"
+        assert "parse error" in answer.diagnostics
+
+    def test_for_entity_and_for_family_agree_on_the_fallback_evidence(self) -> None:
+        """The tell that something was dropped: the two disagreed."""
+        ledger = AvailabilityLedger(
+            unknown_family_default=FactAvailability(
+                FactStatus.FAILED, producer="dwarf", diagnostics=("parse error",)
+            )
+        )
+        ledger.override("layout", "ns::Foo", FactAvailability(FactStatus.PRESENT))
+
+        entity = ledger.for_entity("layout", "ns::Foo")
+        family = ledger.for_family("layout")
+
+        assert entity.status is family.status
+        assert entity.producer == family.producer
+
+    def test_not_applicable_still_blocks_the_upgrade_but_keeps_its_evidence(
+        self,
+    ) -> None:
+        ledger = AvailabilityLedger(
+            unknown_family_default=FactAvailability(
+                FactStatus.NOT_APPLICABLE, producer="policy", diagnostics=("C only",)
+            )
+        )
+        ledger.override("vtables", "e", FactAvailability(FactStatus.PRESENT))
+
+        answer = ledger.for_entity("vtables", "e")
+
+        assert not answer.comparable
+        assert answer.status is FactStatus.NOT_COLLECTED
+        # Only the one upgradeable status is substituted; nothing else is lost.
+        assert answer.producer == "policy"
+        assert "C only" in answer.diagnostics
