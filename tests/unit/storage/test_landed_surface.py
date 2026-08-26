@@ -34,6 +34,7 @@ import re
 from pathlib import Path
 
 import pytest
+from adr062_scope import adr062_module_paths
 
 _PLAN = (
     Path(__file__).resolve().parents[3]
@@ -93,12 +94,7 @@ def test_the_table_matches_the_modules_public_surface(module_name: str) -> None:
 
 def test_every_storage_module_has_a_row() -> None:
     """A new Phase 0 module must be advertised, not silently absent."""
-    package = Path(importlib.import_module("abicheck.storage").__file__ or "").parent
-    present = {
-        f"abicheck.storage.{path.stem}"
-        for path in package.glob("*.py")
-        if path.stem != "__init__"
-    }
+    present = {f"abicheck.storage.{path.stem}" for path in adr062_module_paths()}
 
     assert present == set(_MODULES) | set(_INTERNAL_MODULES) == set(_table_rows())
 
@@ -166,4 +162,22 @@ def test_no_docstring_carries_a_lone_surrogate() -> None:
     assert offenders == [], (
         "a lone surrogate in a docstring cannot be encoded to UTF-8, and the "
         f"module carrying one may fail to import: {offenders}"
+    )
+
+
+def test_every_excluded_module_actually_exists() -> None:
+    """The exclusion list cannot rot into a silent blanket.
+
+    `NON_ADR062_MODULES` is what lets a module escape every ADR-062 sweep in
+    this directory, so a stale name in it is an exemption nobody is watching
+    — and if a G40 module is ever renamed or removed, the entry that named it
+    would go on quietly excusing nothing while looking deliberate.
+    """
+    from adr062_scope import NON_ADR062_MODULES, STORAGE_PACKAGE
+
+    present = {path.stem for path in STORAGE_PACKAGE.glob("*.py")}
+    stale = NON_ADR062_MODULES - present
+    assert stale == set(), (
+        f"these modules are excluded from the ADR-062 sweeps but do not exist: "
+        f"{sorted(stale)}"
     )

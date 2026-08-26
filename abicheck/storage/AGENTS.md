@@ -29,38 +29,27 @@ storage module that needs to know a verdict, a `ChangeKind`, or a CLI flag
 is in the wrong layer. `scripts/check_architecture.py` enforces this.
 
 In practice today the package imports even less than that allows. The
-bundle-archive modules import only `abicheck.errors` (`SnapshotError`, the
-project-wide error vocabulary) and no `model`/`compare` type at all — see
-`bundle_archive.py`'s own docstring for why: the `BundleFacts`/`AbiSnapshot`-
-aware glue that would need a `model` import stays in `bundle_facts.py`/
-`serialization.py` (still flat-root, not yet part of this migration) rather
-than being pulled in here prematurely, since `bundle_facts.py` itself cannot
-yet join `model` cleanly (a pre-existing `TYPE_CHECKING`-only coupling to
-`checker_types.DiffResult` would create a `model -> compare -> model` cycle —
-confirmed by running `scripts/check_architecture.py`, not assumed). The
-ADR-062 primitives import nothing from `abicheck` at all, which is what lets
-them ship ahead of the `abicheck/model` package that the flat
-`abicheck/model.py` has not yet migrated into.
-
-A future module that genuinely needs a `model`-owned type should import it
-directly once that type has actually joined `model` — not via
-`serialization.py`.
+bundle-archive modules import only `abicheck.errors` and no `model`/`compare`
+type at all — the `BundleFacts`-aware glue that would need one stays in
+`bundle_facts.py`/`serialization.py` (still flat-root), which cannot yet join
+`model` cleanly; see `bundle_archive.py`'s own docstring for the cycle that
+blocks it. The ADR-062 primitives import nothing from `abicheck` at all,
+which lets them ship ahead of the `model` package the flat `model.py` has not
+yet migrated into. A future module needing a `model`-owned type imports it
+directly once that type has joined `model` — not via `serialization.py`.
 
 ## Canonical entry points
 
 ### Bundle archive (G40)
 
-`bundle_archive.py`'s `BundleArchiveWriter`/`BundleArchiveReader` are a
-pure, content-addressed zip-container primitive — write/read a manifest plus
-content-hash-addressed blobs, nothing more.
-`bundle_archive_cd_guard.py`'s `reject_absurd_central_directory` is its own
-central-directory bomb guard, called from `BundleArchiveReader.__init__`
-before `zipfile.ZipFile` ever parses the archive. Callers that want a real
-`BundleFacts` written to or read from one of these archives go through
+`bundle_archive.py`'s `BundleArchiveWriter`/`BundleArchiveReader` are a pure,
+content-addressed zip-container primitive — write/read a manifest plus
+content-hash-addressed blobs, nothing more. `bundle_archive_cd_guard.py`'s
+`reject_absurd_central_directory` is its central-directory bomb guard, called
+from `BundleArchiveReader.__init__` before `zipfile.ZipFile` parses anything.
+Callers wanting a real `BundleFacts` in one of these archives go through
 `serialization.py`'s `save_bundle_facts`/`load_bundle_facts`
-(`format="archive"`), which delegates the actual glue to `bundle_facts.py`
-(still flat-root), the module that already owns the `BundleFacts`-to-dict
-conversion this format's blobs are built from.
+(`format="archive"`), which delegates the glue to `bundle_facts.py`.
 
 ### ADR-062 Phase 0 primitives
 
@@ -143,16 +132,14 @@ re-export surface, not a namespace to import through internally.
 
 ## Tests
 
-`tests/test_bundle_archive.py` (the core archive primitive) and
+`tests/test_bundle_archive.py` and
 `tests/test_bundle_archive_writer_hardening.py` (`BundleArchiveWriter`'s
-temp-file/security/metadata hardening — split out purely to keep both under
-the ADR-061 1200-line test cap); `tests/unit/storage/` for the ADR-062
-primitives.
-
-A reusable primitive here gets a property-style test class stating its
-contract as invariants — see the root `AGENTS.md` "Primitive-level property
-tests" section for why example-only tests are not sufficient for
-merge/dedupe/grouping primitives.
+temp-file/security/metadata hardening — split out to keep both under the
+ADR-061 1200-line test cap); `tests/unit/storage/` for the ADR-062
+primitives. A reusable primitive here gets a property-style test class
+stating its contract as invariants — see the root `AGENTS.md`
+"Primitive-level property tests" for why example-only tests are not
+sufficient for merge/dedupe/grouping primitives.
 
 ## Prohibited responsibilities
 

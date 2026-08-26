@@ -16,6 +16,7 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
+from adr062_scope import adr062_module_paths
 
 from abicheck.storage.availability import AvailabilityLedger, FactAvailability
 from abicheck.storage.availability_status import FactStatus
@@ -126,10 +127,9 @@ class TestMalformedDocumentsRaiseTheDocumentedErrorKinds:
         rather than in review.
         """
         import ast
-        import pathlib
 
         offenders: list[str] = []
-        for path in sorted(pathlib.Path("abicheck/storage").glob("*.py")):
+        for path in adr062_module_paths():
             tree = ast.parse(path.read_text(encoding="utf-8"))
             for node in ast.walk(tree):
                 if not isinstance(node, ast.FunctionDef) or node.name != "from_dict":
@@ -164,7 +164,6 @@ class TestMalformedDocumentsRaiseTheDocumentedErrorKinds:
         `from_dict` added later fails here instead of in review.
         """
         import ast
-        import pathlib
 
         def guards_container_first(fn: ast.FunctionDef) -> bool:
             for stmt in fn.body:
@@ -186,7 +185,7 @@ class TestMalformedDocumentsRaiseTheDocumentedErrorKinds:
             return False
 
         unguarded: list[str] = []
-        for path in sorted(pathlib.Path("abicheck/storage").glob("*.py")):
+        for path in adr062_module_paths():
             tree = ast.parse(path.read_text(encoding="utf-8"))
             for node in ast.walk(tree):
                 if not isinstance(node, ast.FunctionDef) or node.name != "from_dict":
@@ -217,7 +216,6 @@ class TestMalformedDocumentsRaiseTheDocumentedErrorKinds:
         function.
         """
         import ast
-        import pathlib
 
         def guarded_names(fn: ast.FunctionDef) -> set[str]:
             names = set()
@@ -236,7 +234,7 @@ class TestMalformedDocumentsRaiseTheDocumentedErrorKinds:
             return names
 
         offenders: list[str] = []
-        for path in sorted(pathlib.Path("abicheck/storage").glob("*.py")):
+        for path in adr062_module_paths():
             tree = ast.parse(path.read_text(encoding="utf-8"))
             for node in ast.walk(tree):
                 if not isinstance(node, ast.FunctionDef) or node.name != "from_dict":
@@ -378,10 +376,9 @@ class TestRowSequenceFieldsRejectEveryWrongContainer:
         review.
         """
         import ast
-        import pathlib
 
         offenders: list[str] = []
-        for path in sorted(pathlib.Path("abicheck/storage").glob("*.py")):
+        for path in adr062_module_paths():
             tree = ast.parse(path.read_text(encoding="utf-8"))
             for node in ast.walk(tree):
                 if not isinstance(node, ast.FunctionDef) or node.name != "from_dict":
@@ -536,10 +533,9 @@ class TestImplementationStateIsNotConstructorSurface:
         adds a private field without `init=False`.
         """
         import ast
-        import pathlib
 
         exposed: list[str] = []
-        for path in sorted(pathlib.Path("abicheck/storage").glob("*.py")):
+        for path in adr062_module_paths():
             tree = ast.parse(path.read_text(encoding="utf-8"))
             for node in ast.walk(tree):
                 if not isinstance(node, ast.ClassDef):
@@ -677,7 +673,6 @@ class TestRecordOperandsAreCheckedBeforeUse:
         kind of claim this branch has repeatedly had falsified.
         """
         import ast
-        import pathlib
 
         records = {
             "AvailabilityLedger",
@@ -690,7 +685,7 @@ class TestRecordOperandsAreCheckedBeforeUse:
             "StorageVersions",
         }
         unguarded: list[str] = []
-        for path in sorted(pathlib.Path("abicheck/storage").glob("*.py")):
+        for path in adr062_module_paths():
             tree = ast.parse(path.read_text(encoding="utf-8"))
             for node in ast.walk(tree):
                 if not isinstance(node, ast.ClassDef):

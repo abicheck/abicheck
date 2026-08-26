@@ -15,6 +15,7 @@ from __future__ import annotations
 import itertools
 
 import pytest
+from adr062_scope import adr062_module_paths
 from hypothesis import given, strategies as st
 
 from abicheck.storage.identity import (
@@ -1061,11 +1062,10 @@ class TestEveryKeyTakingDoorIsGuarded:
 
     def test_no_public_key_taking_method_is_unguarded(self) -> None:
         import ast
-        import pathlib
 
         guards = ("_decision_key", "_identity_text", "_instance_of")
         bodies: dict[str, tuple[str, str]] = {}
-        for path in sorted(pathlib.Path("abicheck/storage").glob("*.py")):
+        for path in adr062_module_paths():
             if path.name == "guards.py":
                 # The guards themselves take a `field_name` label, which is
                 # the *subject* of a check rather than a lookup key.
