@@ -167,7 +167,7 @@ def test_mutant_run_scope_narrows_to_the_touched_module() -> None:
 _ONLY_MUTATE_TWO = ["abicheck/diff_types.py", "abicheck/diff_symbols.py"]
 
 
-def test_diff_touches_non_scoped_python_detects_a_shared_test_fixture() -> None:
+def test_diff_touches_outside_only_mutate_detects_a_shared_test_fixture() -> None:
     diff_touching_a_shared_fixture = (
         "diff --git a/abicheck/diff_types.py b/abicheck/diff_types.py\n"
         "--- a/abicheck/diff_types.py\n+++ b/abicheck/diff_types.py\n"
@@ -177,7 +177,7 @@ def test_diff_touches_non_scoped_python_detects_a_shared_test_fixture() -> None:
         "@@ -1,0 +2,1 @@\n+    pass\n"
     )
     assert (
-        gate.diff_touches_non_scoped_python(
+        gate.diff_touches_outside_only_mutate(
             diff_touching_a_shared_fixture, _ONLY_MUTATE_TWO
         )
         is True
@@ -189,16 +189,17 @@ def test_diff_touches_non_scoped_python_detects_a_shared_test_fixture() -> None:
         "@@ -1,0 +2,1 @@\n+    pass\n"
     )
     assert (
-        gate.diff_touches_non_scoped_python(
+        gate.diff_touches_outside_only_mutate(
             diff_touching_only_production, _ONLY_MUTATE_TWO
         )
         is False
     )
 
 
-def test_diff_touches_non_scoped_python_detects_a_shared_production_helper() -> None:
-    """The residual gap the tests/-only check missed: a non-`only_mutate`
-    production module an untouched module imports (Codex review, PR #877)."""
+def test_diff_touches_outside_only_mutate_detects_a_shared_production_helper() -> None:
+    """A non-`only_mutate` production module an untouched module imports
+    (Codex review, PR #877) — a residual gap an earlier, `tests/`-only
+    version of this check missed."""
     diff = (
         "diff --git a/abicheck/diff_types.py b/abicheck/diff_types.py\n"
         "--- a/abicheck/diff_types.py\n+++ b/abicheck/diff_types.py\n"
@@ -207,14 +208,30 @@ def test_diff_touches_non_scoped_python_detects_a_shared_production_helper() -> 
         "--- a/abicheck/model.py\n+++ b/abicheck/model.py\n"
         "@@ -1,0 +2,1 @@\n+    pass\n"
     )
-    assert gate.diff_touches_non_scoped_python(diff, _ONLY_MUTATE_TWO) is True
+    assert gate.diff_touches_outside_only_mutate(diff, _ONLY_MUTATE_TWO) is True
 
 
-def test_diff_touches_non_scoped_python_ignores_non_python_paths() -> None:
-    """A changelog fragment / doc / YAML change must not disable scoping —
-    this repo's own changelog-fragment convention touches a `changelog.d/
-    *.md` file on nearly every real PR, so gating on any non-Python path
-    would leave scoping firing on almost nothing."""
+def test_diff_touches_outside_only_mutate_detects_a_non_python_fixture_input() -> None:
+    """A non-`.py` `also_copy` input (an `examples/**/*.json` fixture, say)
+    read as test fixture/oracle data — a second residual gap an earlier,
+    Python-only version of this check missed (Codex review, PR #877)."""
+    diff = (
+        "diff --git a/abicheck/diff_types.py b/abicheck/diff_types.py\n"
+        "--- a/abicheck/diff_types.py\n+++ b/abicheck/diff_types.py\n"
+        "@@ -1,0 +2,1 @@\n+    pass\n"
+        "diff --git a/examples/ground_truth.json b/examples/ground_truth.json\n"
+        "--- a/examples/ground_truth.json\n+++ b/examples/ground_truth.json\n"
+        '@@ -1,0 +2,1 @@\n+  "x": 1,\n'
+    )
+    assert gate.diff_touches_outside_only_mutate(diff, _ONLY_MUTATE_TWO) is True
+
+
+def test_diff_touches_outside_only_mutate_still_disables_on_a_changelog_fragment() -> (
+    None
+):
+    """No allowlist survives at all now, deliberately — see this predicate's
+    own docstring for why a changelog-fragment exemption (an earlier
+    revision's allowance) was removed rather than patched a third time."""
     diff = (
         "diff --git a/abicheck/diff_types.py b/abicheck/diff_types.py\n"
         "--- a/abicheck/diff_types.py\n+++ b/abicheck/diff_types.py\n"
@@ -223,10 +240,10 @@ def test_diff_touches_non_scoped_python_ignores_non_python_paths() -> None:
         "--- a/changelog.d/foo.md\n+++ b/changelog.d/foo.md\n"
         "@@ -1,0 +2,1 @@\n+### Fixed\n"
     )
-    assert gate.diff_touches_non_scoped_python(diff, _ONLY_MUTATE_TWO) is False
+    assert gate.diff_touches_outside_only_mutate(diff, _ONLY_MUTATE_TWO) is True
 
 
-def test_diff_touches_non_scoped_python_detects_pyproject_toml() -> None:
+def test_diff_touches_outside_only_mutate_detects_pyproject_toml() -> None:
     diff = (
         "diff --git a/abicheck/diff_types.py b/abicheck/diff_types.py\n"
         "--- a/abicheck/diff_types.py\n+++ b/abicheck/diff_types.py\n"
@@ -235,7 +252,7 @@ def test_diff_touches_non_scoped_python_detects_pyproject_toml() -> None:
         "--- a/pyproject.toml\n+++ b/pyproject.toml\n"
         "@@ -1,0 +2,1 @@\n+mutate_only_covered_lines = true\n"
     )
-    assert gate.diff_touches_non_scoped_python(diff, _ONLY_MUTATE_TWO) is True
+    assert gate.diff_touches_outside_only_mutate(diff, _ONLY_MUTATE_TWO) is True
 
 
 def test_mutant_run_scope_is_none_when_a_shared_test_fixture_is_touched() -> None:

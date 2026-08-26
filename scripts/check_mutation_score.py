@@ -213,41 +213,49 @@ def diff_touched_only_mutate_modules(
     return touched & only_mutate_set
 
 
-def diff_touches_non_scoped_python(diff_text: str, only_mutate: list[str]) -> bool:
-    """Any changed/removed ``.py`` file outside ``only_mutate``, or ``pyproject.toml``.
+def diff_touches_outside_only_mutate(diff_text: str, only_mutate: list[str]) -> bool:
+    """Any changed/removed path — of *any* kind — that isn't itself in ``only_mutate``.
 
-    The safety check `mutant_run_scope` needs beyond mere "which
-    `only_mutate` files did this diff touch": every mutant, however scoped,
-    is tested against the diff's *entire* current tree — mutmut's own
-    `copy_src_dir`/`copy_also_copy_files` copy every source file, mutated or
-    not, fresh from what's checked out — so an untouched module's *behavior
-    under test* is not actually invariant just because its own file and its
-    own dedicated test file didn't change. A shared production helper an
-    untouched module imports, or a shared test fixture (`tests/conftest.py`
-    and the like — this subsumes "any `tests/` path", the narrower check an
-    earlier revision of this function used), can each change what an
-    untouched module's mutants would have done if tested — and scoping
-    means they never are, so a regression there reads as zero survivors
-    regardless of what actually happened (CodeRabbit + Codex review, PR
-    #877). `pyproject.toml` is included too: `[tool.mutmut]` itself lives
-    there, and a changed `do_not_mutate`/`mutate_only_covered_lines`/etc
-    could alter every module's mutant population without touching a single
-    `.py` file.
+    Three widening review rounds on this same predicate (Codex + CodeRabbit,
+    PR #877) each found the previous version's allowlist still let through a
+    real class of file that could change an *untouched* module's behavior
+    under mutation without touching that module's own file: first "any
+    `tests/` path" (a shared fixture), then "any `.py` file, of any kind"
+    (a shared production helper an untouched module imports), and finally
+    a non-Python `also_copy` input (`examples/**/*.json` and the like,
+    `[tool.mutmut].also_copy` — read as fixture/oracle data by tests that
+    exercise mutated modules, e.g. `test_reachability_examples.py`).
 
-    Deliberately **not** blocked on: `only_mutate` files themselves (the
-    normal case scoping exists for), and any non-Python path (docs, a
-    changelog fragment, YAML) — those cannot change what a mutmut-generated
-    mutant does when Python-executed, so gating on them would just make
-    scoping fire on almost nothing, given this repo's own changelog-fragment
-    convention touches a `changelog.d/*.md` file on nearly every PR that
-    would otherwise qualify.
+    Every mutant, however scoped, is tested against the diff's *entire*
+    current tree — mutmut's own `copy_src_dir`/`copy_also_copy_files` copy
+    every source file *and* every `also_copy` path (which, per
+    pyproject.toml's own comment, is deliberately generous rather than
+    minimal: `docs`, `examples`, `scripts`, `.github`, lockfiles, ...) fresh
+    from what's checked out. Given that surface, trying to name every
+    input a test *might* read as fixture/oracle data and enumerate it as
+    "safe" is exactly the reactive whack-a-mole this repository's own
+    "Known gaps" convention (AGENTS.md) warns against repeating a third
+    time for one predicate. The only version of this check that cannot be
+    falsified by a fourth review round is the one with no allowlist at
+    all: if literally nothing outside `only_mutate` changed, no other
+    file's content — read by any test, in any way this function does not
+    have to know about — differs from what any other measurement (a prior
+    baseline, a full run) already reflects.
+
+    Costs real applicability: this repo's own changelog-fragment
+    convention (a `changelog.d/*.md` addition, required for most
+    `abicheck/**/*.py` changes) means a real `fix:`/`perf:`/`security:` PR
+    touching one `only_mutate` module will usually also touch a changelog
+    fragment, and this predicate treats that the same as anything else —
+    disabling scoping for it. Deliberate: a reviewed, narrow allowlist for
+    a handful of paths verified never to be read as test fixture/oracle
+    content (`changelog.d/`, say) is a real, separate improvement, not
+    attempted here after three consecutive rounds of "the previous
+    allowlist wasn't narrow enough."
     """
     touched = set(parse_changed_lines(diff_text)) | set(parse_removed_lines(diff_text))
     only_mutate_set = set(only_mutate)
-    return any(
-        p == "pyproject.toml" or (p.endswith(".py") and p not in only_mutate_set)
-        for p in touched
-    )
+    return any(p not in only_mutate_set for p in touched)
 
 
 def mutant_run_scope(
@@ -261,12 +269,12 @@ def mutant_run_scope(
     infrastructure changed — just not one this function can attribute to a
     mutated module), every ``only_mutate`` module touched (scoping would
     filter nothing, so it's not worth the extra mutmut invocation shape),
-    or any non-``only_mutate`` ``.py``/``pyproject.toml`` path touched at
-    all (see `diff_touches_non_scoped_python`).
+    or the diff touches *anything at all* outside ``only_mutate`` (see
+    `diff_touches_outside_only_mutate`).
     """
     if diff_text is None or not only_mutate:
         return None
-    if diff_touches_non_scoped_python(diff_text, only_mutate):
+    if diff_touches_outside_only_mutate(diff_text, only_mutate):
         return None
     touched = diff_touched_only_mutate_modules(diff_text, only_mutate)
     if not touched or touched >= set(only_mutate):
