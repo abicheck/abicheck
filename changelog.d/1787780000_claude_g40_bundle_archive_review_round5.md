@@ -45,3 +45,19 @@
   bundle_facts_archive`'s own higher-level preflight) could publish a
   manifest larger than what `read_manifest()` unconditionally accepts.
   Now enforced in the primitive itself too.
+
+- **G40 bundle archive: two more Codex review findings, both real, both
+  fixed.** (1) `BundleArchiveWriter.put_blob()` never checked the total
+  member count against `MAX_ARCHIVE_MEMBERS` -- a direct caller of this
+  primitive adding exactly that many distinct blobs, then calling
+  `write_manifest()`, would publish an archive one member over what the
+  reader's own central-directory preflight accepts, unreadable the
+  moment it was written. Now enforced in `put_blob()` itself, with one
+  slot reserved for the mandatory manifest member (a byte-identical
+  duplicate payload is still a dedup no-op and never counts against the
+  cap). (2) `reject_absurd_central_directory()`'s ZIP64-locator path
+  seeked to an attacker-controlled 8-byte offset with no bound -- an
+  offset like `2**64-1` raises `ValueError` from `f.seek()`, which the
+  surrounding `except OSError:` does not catch, so it escaped as a raw
+  exception instead of this module's documented `SnapshotError`
+  contract. Now bounded against the file's own size before seeking.

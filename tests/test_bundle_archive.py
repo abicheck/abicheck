@@ -848,6 +848,30 @@ class TestBundleArchiveCentralDirectoryGuard:
         with pytest.raises(SnapshotError, match="no valid ZIP64 EOCD record"):
             BundleArchiveReader.open(path)
 
+    def test_rejects_a_zip64_locator_offset_beyond_the_file_size(
+        self, tmp_path: Path
+    ) -> None:
+        """Codex review, fresh evidence: a crafted locator can name an
+        offset the platform's f.seek() would raise ValueError for (e.g.
+        2**64-1), which the surrounding `except OSError:` does not catch --
+        this must surface as SnapshotError, not a raw exception, matching
+        this module's own documented error vocabulary. Bounding against
+        the file's own size rejects both the huge-offset case and any
+        offset merely past EOF, without depending on seek() to fail."""
+        import struct
+
+        path = tmp_path / "fake_zip64_huge_offset.zip"
+        absurd_offset = 2**64 - 1
+        zip64_locator = struct.pack("<IIQI", 0x07064B50, 0, absurd_offset, 1)
+        eocd = struct.pack("<IHHHHIIH", 0x06054B50, 0, 0, 0, 0xFFFF, 0, 0, 0)
+
+        data = bytearray(zip64_locator)
+        data += eocd
+        path.write_bytes(bytes(data))
+
+        with pytest.raises(SnapshotError, match="beyond the file's own size"):
+            BundleArchiveReader.open(path)
+
 
 class TestBundleArchivePreflightUsesTheSameFdAsZipFile:
     """Codex review, fresh evidence: the earlier preflight reopened *path*

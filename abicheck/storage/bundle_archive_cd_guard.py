@@ -124,6 +124,21 @@ def reject_absurd_central_directory(f: Any, path: Path, *, max_entries: int) -> 
                 )
         else:
             zip64_eocd_offset = int.from_bytes(locator[8:16], "little")
+            # A crafted locator can name an offset past the platform's
+            # representable file-offset range (e.g. 2**64-1); f.seek()
+            # raises ValueError for that, not OSError, so it would
+            # otherwise escape the except clause below as a raw
+            # exception instead of this module's SnapshotError contract
+            # (Codex review, fresh evidence). Bounding against the
+            # file's own size also rejects it as the malformed archive
+            # it is, without relying on the seek call to fail at all.
+            if zip64_eocd_offset >= size:
+                raise SnapshotError(
+                    f"{path}: a ZIP64 EOCD locator names an offset "
+                    f"({zip64_eocd_offset}) at or beyond the file's own "
+                    f"size ({size}) -- refusing to open (malformed or "
+                    "hostile archive)."
+                )
             f.seek(zip64_eocd_offset)
             # Fixed portion only (56 bytes) -- signature/total_entries/
             # cd_size all live within it; no need for the record's own

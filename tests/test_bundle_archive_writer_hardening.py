@@ -36,6 +36,8 @@ from pathlib import Path
 
 import pytest
 
+import abicheck.storage.bundle_archive as bundle_archive_module
+from abicheck.errors import SnapshotError
 from abicheck.storage.bundle_archive import BundleArchiveReader, BundleArchiveWriter
 
 
@@ -363,3 +365,60 @@ class TestBundleArchiveWriterDoesNotToggleTheProcessUmask:
             assert after == sentinel
         finally:
             os.umask(old_umask)
+
+
+class TestPutBlobReservesTheManifestMemberSlot:
+    """`put_blob()` must itself refuse to exceed MAX_ARCHIVE_MEMBERS, not
+    only `bundle_facts.write_bundle_facts_archive()`'s own higher-level
+    preflight -- a direct caller of this public primitive bypasses that
+    check entirely, and a mandatory manifest.json member always follows
+    (Codex review, fresh evidence: a writer that let `put_blob` fill every
+    slot would publish an archive one member over the reader's own
+    central-directory cap, unreadable the moment it was written)."""
+
+    def test_put_blob_raises_before_exceeding_the_reader_cap(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(bundle_archive_module, "MAX_ARCHIVE_MEMBERS", 3)
+        path = tmp_path / "bundle.archive.zip"
+        with BundleArchiveWriter(path) as writer:
+            # 2 distinct blobs + 1 reserved manifest slot == the cap; a
+            # 3rd distinct blob must be rejected before it is ever written.
+            h1 = writer.put_blob(b'{"a": 1}')
+            h2 = writer.put_blob(b'{"a": 2}')
+            with pytest.raises(SnapshotError, match="more than 3 zip members"):
+                writer.put_blob(b'{"a": 3}')
+            # A caller recovering from the rejection can still finish the
+            # archive with what was already accepted.
+            writer.write_manifest({"library_blobs": {"a.so": h1, "b.so": h2}})
+
+    def test_a_duplicate_payload_never_counts_against_the_cap(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(bundle_archive_module, "MAX_ARCHIVE_MEMBERS", 3)
+        path = tmp_path / "bundle.archive.zip"
+        with BundleArchiveWriter(path) as writer:
+            h1 = writer.put_blob(b'{"a": 1}')
+            # Re-writing the identical payload is a dedup no-op, not a new
+            # member -- must not itself trip the cap.
+            h2 = writer.put_blob(b'{"a": 1}')
+            assert h1 == h2
+            writer.put_blob(b'{"a": 2}')
+            writer.write_manifest({"library_blobs": {"a.so": h1, "b.so": h1}})
+        with BundleArchiveReader(path) as reader:
+            assert reader.read_manifest()["library_blobs"]["a.so"] == h1
+
+    def test_exactly_at_the_cap_round_trips(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(bundle_archive_module, "MAX_ARCHIVE_MEMBERS", 3)
+        path = tmp_path / "bundle.archive.zip"
+        with BundleArchiveWriter(path) as writer:
+            h1 = writer.put_blob(b'{"a": 1}')
+            h2 = writer.put_blob(b'{"a": 2}')
+            writer.write_manifest({"library_blobs": {"a.so": h1, "b.so": h2}})
+        # The reader's own cap must accept exactly what the writer allowed.
+        with BundleArchiveReader(path) as reader:
+            manifest = reader.read_manifest()
+            assert manifest["library_blobs"]["a.so"] == h1
+            assert manifest["library_blobs"]["b.so"] == h2

@@ -134,10 +134,9 @@ def _deterministic_zipinfo(name: str) -> zipfile.ZipInfo:
     # `ZipInfo`'s own platform-dependent default would otherwise stamp.
     info.external_attr = 0o644 << 16
     # `ZipInfo.__init__` defaults `create_system` to the *host* platform (0
-    # Windows, 3 Unix), serialized into the central directory -- identical
-    # facts on Windows vs. Linux/macOS CI would otherwise still differ in
-    # bytes and `stored_sha256`. Pinned to 3 (Unix) unconditionally,
-    # matching this project's actual CI/release platforms.
+    # Windows, 3 Unix) -- identical facts on Windows vs. Linux/macOS CI
+    # would otherwise differ in bytes and `stored_sha256`. Pinned to 3
+    # (Unix) unconditionally, matching this project's CI/release platforms.
     info.create_system = 3
     return info
 
@@ -205,8 +204,7 @@ def open_regular_file_for_format_sniff(
     except OSError as exc:
         # A failure reading the peek itself (e.g. EIO on a network
         # filesystem) must not leak the fd or propagate a raw OSError --
-        # this module's whole error contract is SnapshotError (Codex
-        # review, fresh evidence).
+        # this module's whole error contract is SnapshotError.
         fp.close()
         raise SnapshotError(f"Cannot read {p}: {exc}") from exc
     return fp, _classify_prefix(prefix)
@@ -383,6 +381,17 @@ class BundleArchiveWriter:
         h = content_hash(payload)
         if h in self._written_hashes:
             return h
+        # Enforced here too, not only by write_bundle_facts_archive()'s own
+        # preflight -- a direct caller adding MAX_ARCHIVE_MEMBERS blobs
+        # then write_manifest() would else exceed the reader's own cap.
+        # +1 for this blob, +1 reserved for the mandatory manifest member.
+        if len(self._written_hashes) + 1 + 1 > MAX_ARCHIVE_MEMBERS:
+            raise SnapshotError(
+                f"BundleArchiveWriter: writing this blob would produce "
+                f"more than {MAX_ARCHIVE_MEMBERS} zip members (the "
+                "reader's own safety limit) -- refusing to write an "
+                "archive that could not be reopened."
+            )
         zstandard = _zstd_module()
         compressor = zstandard.ZstdCompressor(level=ZSTD_LEVEL)
         compressed = compressor.compress(payload)
@@ -423,29 +432,23 @@ class BundleArchiveWriter:
             # try, leaving the temp file behind uncleaned.
             self._zf.close()
             # ZipFile.close() only flushes to the OS buffer cache, not
-            # storage -- fsync's the same fd this class already holds
-            # (self._tmp_file), mirroring snapshot_io._atomic_write_bytes's
-            # own two-part fsync. Best-effort only for "fs doesn't support
-            # fsync" (EINVAL/ENOTSUP/EOPNOTSUPP); a real storage failure
-            # must propagate rather than let os.replace() publish
-            # unconfirmed content over a known-good archive.
+            # storage -- fsync's the same fd this class already holds,
+            # mirroring snapshot_io._atomic_write_bytes's own two-part
+            # fsync. Best-effort only for "fs doesn't support fsync".
             self._fsync_tmp_file()
             # Ownership restored *before* mode: chown() silently clears
             # setuid/setgid on POSIX, so restoring mode first would let a
             # real 06755 destination's bits survive the chmod only to be
             # stripped by chown right after (Codex review). Not
-            # best-effort, mirroring `snapshot_io.py`'s own fix for this
-            # exact failure mode: publishing under the wrong owner/group
-            # can revoke real access for a shared baseline's other readers.
+            # best-effort, mirroring `snapshot_io.py`'s own fix: publishing
+            # under the wrong owner/group can revoke real access.
             #
-            # fchown/fchmod on `self._tmp_file`'s own fd, not chown/chmod
-            # on `self._tmp_path` -- a shared, non-sticky directory writable
-            # by another account could substitute a file/symlink at that
-            # path between this exclusively-created fd and a later
-            # path-based reopen, so a path-based chown/chmod would follow
-            # the substitution instead of the file actually created here
-            # (Codex review, fresh evidence). The fd this class has held
-            # open since creation cannot be redirected that way.
+            # fchown/fchmod on `self._tmp_file`'s own fd, not chown/chmod on
+            # `self._tmp_path` -- a shared, non-sticky directory writable by
+            # another account could substitute a file/symlink at that path
+            # between this exclusively-created fd and a later path-based
+            # reopen (Codex review, fresh evidence). The fd held open since
+            # creation cannot be redirected that way.
             if (
                 self._existing_uid is not None or self._existing_gid is not None
             ) and hasattr(os, "fchown"):
@@ -460,17 +463,15 @@ class BundleArchiveWriter:
             if self._existing_mode is not None and hasattr(os, "fchmod"):
                 os.fchmod(self._tmp_file.fileno(), self._existing_mode)
             # Re-sync after chown/chmod, before replace: the earlier fsync
-            # only guarantees the *content* reached storage -- chown/chmod
-            # mutate inode metadata afterward, which a crash in between
-            # could lose even though the content itself is durable (Codex
-            # review, fresh evidence).
+            # only guarantees content reached storage -- chown/chmod mutate
+            # inode metadata afterward, which a crash could lose otherwise.
             self._fsync_tmp_file()
             # Computed from a duplicated fd of `self._tmp_file`, not by
             # reopening `self._tmp_path` -- the same path-substitution race
             # above would let this hash verify attacker content instead of
-            # what was actually written. `self._tmp_file`'s own write
-            # position is already finished, so the `os.lseek` below can't
-            # disturb it (`os.dup` shares the open-file description).
+            # what was actually written. Write position is already
+            # finished, so the `os.lseek` below can't disturb it (`os.dup`
+            # shares the open-file description).
             self.stored_size_bytes = os.fstat(self._tmp_file.fileno()).st_size
             hasher = hashlib.sha256()
             read_fd = os.dup(self._tmp_file.fileno())
@@ -787,9 +788,8 @@ class BundleArchiveReader:
         return decoded
 
     def close(self) -> None:
-        # ZipFile.close() does not close a file object it was *given*
-        # (only one it opened itself from a path) -- self._fp is ours to
-        # close.
+        # ZipFile.close() does not close a file object it was *given* --
+        # self._fp is ours to close.
         self._zf.close()
         self._fp.close()
 
