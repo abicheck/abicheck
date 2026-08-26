@@ -249,6 +249,15 @@ def compute_confidence(
 _compute_confidence = compute_confidence
 
 
+#: Substring every ``note_if_same_binary_compared`` message shares, regardless
+#: of which variant fires -- the one stable marker a consumer can filter
+#: `coverage_warnings` on to isolate this specific warning from the rest
+#: (detector-disabled notices, missing-metadata notes), used by both
+#: ``cli_compare_options.echo_coverage_warnings``'s ``--profile quick`` filter
+#: and ``junit_coverage_warnings``'s JUnit rendering.
+SAME_BINARY_WARNING_MARKER = "byte-identical"
+
+
 def note_if_same_binary_compared(result: DiffResult) -> None:
     """Append an L0 coverage warning when *result*'s two compared binaries
     are byte-for-byte identical.
@@ -310,6 +319,6 @@ def note_if_same_binary_compared(result: DiffResult) -> None:
             "intended -- verify the correct build artifacts were provided"
         )
     result.coverage_warnings.append(
-        "old and new binaries are byte-identical (sha256 "
+        f"old and new binaries are {SAME_BINARY_WARNING_MARKER} (sha256 "
         f"{old_meta.sha256[:12]}...); {detection_note}"
     )

@@ -121,3 +121,16 @@
   coverage-warning banner) only runs in full mode; `--report-mode
   leaf`/`root-cause` share a different preamble (`_view_preamble`), which
   now carries the same banner.
+- **Tenth follow-up (Codex review): the warning was invisible in
+  `--format junit` too.** A same-binary comparison rendered as an empty
+  passing `<testsuite>` with no indication the artifacts were duplicates.
+  `to_junit_xml`/`to_junit_xml_multi` now append a
+  `abicheck.coverage_warnings.<library>` suite with one passing
+  `<testcase>`/`<system-out>` per matching entry -- scoped to the
+  same-binary marker specifically (a new shared
+  `confidence.SAME_BINARY_WARNING_MARKER`), not every `coverage_warnings`
+  entry, since an ordinary comparison already carries a dozen routine
+  detector-disabled notices there that would otherwise flood every JUnit
+  document with boilerplate testcases. New leaf module
+  `junit_coverage_warnings.py` (kept out of `junit_report.py` to respect
+  its ADR-061 debt-no-growth baseline).
