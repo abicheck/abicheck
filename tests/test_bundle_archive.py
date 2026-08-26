@@ -1005,6 +1005,97 @@ class TestSniffDetectsAPrefixedArchive:
         assert sniff_bundle_archive_format(path) == "json"
 
 
+class TestSniffSkipsTailScanForRecognizedCompressionEnvelopes:
+    """A gzip/zstd `BundleFacts` JSON file's own magic bytes already
+    unambiguously identify its format (the plain-JSON path transparently
+    decompresses from that same magic), so `looks_like_zip_from_tail()`'s
+    tail-scan fallback must never run against one -- a crafted gzip
+    `FEXTRA` sub-field (unlike `FCOMMENT`, already closed) can embed a
+    `PK\\x05\\x06` whose own comment-length field still lands exactly at
+    the file's true end, satisfying the earlier structural-EOCD check
+    without being a real EOCD (Codex review, fresh evidence)."""
+
+    def _gzip_with_eocd_in_extra_field(self, payload: bytes) -> bytes:
+        """A real, independently-decodable gzip stream whose FEXTRA field
+        embeds a structurally-plausible empty-ZIP EOCD (comment length
+        crafted to reach exactly to the file's own end)."""
+        import struct
+        import zlib
+
+        co = zlib.compressobj(9, zlib.DEFLATED, -15)
+        compressed = co.compress(payload) + co.flush()
+        trailer = struct.pack("<I", zlib.crc32(payload) & 0xFFFFFFFF) + struct.pack(
+            "<I", len(payload) & 0xFFFFFFFF
+        )
+        tail_after_header = compressed + trailer
+        header_prefix = (
+            b"\x1f\x8b\x08"
+            + bytes([0x04])  # FLG = FEXTRA
+            + struct.pack("<I", 0)  # MTIME
+            + b"\x02\xff"  # XFL, OS
+        )
+        # Subfield: SI1 SI2 LEN(2) DATA -- DATA is a 22-byte empty-ZIP EOCD
+        # whose comment_len is set so the "comment" runs to the file's end.
+        si = b"AB"
+        eocd_offset_in_file = len(header_prefix) + 2 + len(si) + 2
+        comment_len = len(tail_after_header)
+        eocd = struct.pack(
+            "<IHHHHIIH", 0x06054B50, 0, 0, 0, 0, 0, 0, comment_len
+        )
+        subfield = si + struct.pack("<H", len(eocd)) + eocd
+        data = header_prefix + struct.pack("<H", len(subfield)) + subfield + tail_after_header
+        assert b"PK\x05\x06" in data  # premise: the coincidental match exists
+        assert eocd_offset_in_file + 22 + comment_len == len(data)  # premise: structurally "valid"
+        return data
+
+    def test_looks_like_zip_from_tail_would_be_fooled_by_this_construction(
+        self, tmp_path: Path
+    ) -> None:
+        """Premise check: confirms the crafted bytes really do satisfy the
+        structural EOCD check on their own -- so the *sniff*-level fix
+        below is what's actually being tested, not a bad fixture."""
+        from abicheck.storage.bundle_archive_cd_guard import looks_like_zip_from_tail
+
+        path = tmp_path / "premise.gz"
+        path.write_bytes(self._gzip_with_eocd_in_extra_field(b'{"a": 1}'))
+        with open(path, "rb") as f:
+            assert looks_like_zip_from_tail(f) is True
+
+    def test_sniff_bundle_archive_format_still_classifies_it_as_json(
+        self, tmp_path: Path
+    ) -> None:
+        import gzip
+
+        from abicheck.storage.bundle_archive import sniff_bundle_archive_format
+
+        payload = b'{"schema_version": 1, "per_library_snapshots": {}}'
+        data = self._gzip_with_eocd_in_extra_field(payload)
+        path = tmp_path / "envelope.json.gz"
+        path.write_bytes(data)
+
+        # Premise: still a perfectly valid, decodable gzip stream.
+        with gzip.GzipFile(path, mode="rb") as gz:
+            assert gz.read() == payload
+
+        assert sniff_bundle_archive_format(path) == "json"
+
+    def test_sniff_and_load_bundle_facts_treat_it_as_json(self, tmp_path: Path) -> None:
+        """End-to-end pin through the public loader: the real regression
+        this guards against."""
+        from abicheck.bundle_facts import capture_bundle_facts
+        from abicheck.serialization import bundle_facts_to_dict, load_bundle_facts
+        from abicheck.storage.bundle_archive import sniff_bundle_archive_format
+
+        facts = capture_bundle_facts({})
+        payload = json.dumps(bundle_facts_to_dict(facts), indent=2).encode("utf-8")
+        path = tmp_path / "envelope-facts.json.gz"
+        path.write_bytes(self._gzip_with_eocd_in_extra_field(payload))
+
+        assert sniff_bundle_archive_format(path) == "json"
+        loaded = load_bundle_facts(path)  # format="auto" default
+        assert loaded.per_library_snapshots == facts.per_library_snapshots
+
+
 class TestOpenRegularFileForFormatSniffClosesOnReadFailure:
     """A failure reading the 4-byte peek itself (e.g. EIO on a network
     filesystem) after open() succeeds must not leak the fd or propagate a

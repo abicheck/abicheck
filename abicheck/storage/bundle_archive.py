@@ -134,17 +134,24 @@ def _deterministic_zipinfo(name: str) -> zipfile.ZipInfo:
 
 _ZIP_MAGIC_PREFIXES = (b"PK\x03\x04", b"PK\x05\x06")
 
+#: gzip/zstd magic -- a matching prefix already unambiguously identifies a
+#: compressed `BundleFacts` JSON envelope, so `looks_like_zip_from_tail()`
+#: must never run against one: a crafted gzip `FEXTRA` sub-field (unlike
+#: `FCOMMENT`, already closed) can embed a `PK\x05\x06` whose comment-length
+#: field still lands exactly at the file's true end (Codex review). A local
+#: copy, not an import from `snapshot_io` -- see the module docstring.
+_JSON_ENVELOPE_MAGIC_PREFIXES = (b"\x1f\x8b", b"\x28\xb5\x2f\xfd")
+
 
 def sniff_bundle_archive_format(path: str | Path) -> str:
     """``"archive"`` if *path*'s own bytes start with a zip local-file-header
-    or empty-archive magic, or its tail contains a structurally plausible
-    EOCD (a concatenated/self-extracting archive with an arbitrary prefix,
-    per `looks_like_zip_from_tail()`); ``"json"`` otherwise (including
-    gzip/zstd, which the plain-JSON ``BundleFacts`` path already detects
-    and transparently decompresses). Used by ``serialization.load_bundle_
-    facts``'s ``format="auto"``. Always ``"json"`` for a non-regular-file
-    source (a FIFO, `/dev/stdin`, a socket) without reading anything from
-    it: a real bundle archive can never be delivered that way regardless.
+    or empty-archive magic, or (for a prefix matching neither that nor a
+    recognized gzip/zstd envelope) its tail contains a structurally
+    plausible EOCD, per `looks_like_zip_from_tail()`; ``"json"`` otherwise
+    (gzip/zstd is never tail-scanned -- their own magic already resolves the
+    format). Used by ``serialization.load_bundle_facts``'s ``format="auto"``.
+    Always ``"json"`` for a non-regular-file source (a FIFO, `/dev/stdin`, a
+    socket): a real bundle archive can never be delivered that way regardless.
 
     Delegates to `open_regular_file_for_format_sniff()`'s own single-open,
     nonblocking-then-fstat classification (closing the fd itself) rather
@@ -196,9 +203,10 @@ def open_regular_file_for_format_sniff(
         fp.close()
         raise SnapshotError(f"Cannot read {p}: {exc}") from exc
     fmt = _classify_prefix(prefix)
-    if fmt == "json":
-        # A prefixed archive's byte-0 magic misses it -- see
-        # looks_like_zip_from_tail()'s own docstring (Codex review).
+    if fmt == "json" and not prefix.startswith(_JSON_ENVELOPE_MAGIC_PREFIXES):
+        # A prefixed archive's byte-0 magic misses it -- see looks_like_
+        # zip_from_tail()'s docstring. Skipped for a recognized gzip/zstd
+        # envelope -- see _JSON_ENVELOPE_MAGIC_PREFIXES's own comment.
         from .bundle_archive_cd_guard import looks_like_zip_from_tail
 
         if looks_like_zip_from_tail(fp):
@@ -296,8 +304,7 @@ class BundleArchiveWriter:
             existing_stat = self._target.stat()
         except (FileNotFoundError, NotADirectoryError):
             # Only genuine absence means "no pre-existing destination" --
-            # any other OSError (e.g. ELOOP on a cyclic symlink) must
-            # propagate, not bypass the checks below.
+            # any other OSError (e.g. ELOOP) must propagate, not bypass this.
             existing_stat = None
         self._existing_mode: int | None = None
         self._existing_uid: int | None = None
@@ -325,9 +332,8 @@ class BundleArchiveWriter:
             self._existing_uid = existing_stat.st_uid
             self._existing_gid = existing_stat.st_gid
         self._target.parent.mkdir(parents=True, exist_ok=True)
-        # _open_unique_temp, not a predictable path -- a writable
-        # directory could pre-create such a name as a symlink `ZipFile`
-        # follows. Randomized, O_CREAT|O_EXCL, umask-filtered 0o666.
+        # _open_unique_temp, not a predictable path a writable directory
+        # could pre-create as a symlink. Randomized, O_CREAT|O_EXCL.
         tmp_fd, self._tmp_path = _open_unique_temp(
             self._target.parent, f".{self._target.name}.", ".tmp"
         )
@@ -357,8 +363,7 @@ class BundleArchiveWriter:
         if h in self._written_hashes:
             return h
         # Enforced here too, not only by write_bundle_facts_archive()'s own
-        # preflight -- a direct caller could else exceed the reader's own
-        # cap. +1 for this blob, +1 reserved for the manifest member.
+        # preflight. +1 for this blob, +1 reserved for the manifest member.
         if len(self._written_hashes) + 1 + 1 > MAX_ARCHIVE_MEMBERS:
             raise SnapshotError(
                 f"BundleArchiveWriter: writing this blob would produce "
@@ -544,8 +549,7 @@ class BundleArchiveReader:
         # Opened once; the identical fd is handed to both the preflight
         # below and `zipfile.ZipFile` -- reopening *path* would let a
         # concurrent atomic replacement swap in a different generation.
-        # `_fp`, when given, is an already-open fd the format was sniffed
-        # from (`from_open_file`), extending the same guarantee up.
+        # `_fp` extends the same guarantee up from `from_open_file`.
         if _fp is not None:
             # Rewound inside the guarded try below, not here -- a seek()
             # failure outside any handler that closes it would leak fp.
@@ -675,9 +679,8 @@ class BundleArchiveReader:
                             "file_size did not match its actual stored bytes)."
                         )
         except zipfile.BadZipFile as exc:
-            # ZipExtFile validates the member's CRC-32 as it's consumed,
-            # raised (typically at the `with` block's own close) on a
-            # mismatch -- otherwise this is a raw zipfile exception.
+            # ZipExtFile validates the member's CRC-32 as consumed, raised
+            # (typically at the `with` block's close) on a mismatch.
             raise SnapshotError(
                 f"{self._path}: member {name!r} failed its CRC-32 check -- "
                 "the archive is corrupted or was tampered with."
@@ -697,9 +700,7 @@ class BundleArchiveReader:
             value = json.loads(raw)
         except (UnicodeDecodeError, ValueError) as exc:
             # Invalid UTF-8/JSON syntax (or Python 3.11+'s integer-digit
-            # limit, a bare `ValueError` not `JSONDecodeError`) must not
-            # surface raw -- same SnapshotError contract as every other
-            # corrupt-content failure here (Codex review).
+            # limit, a bare `ValueError`) must not surface raw (Codex).
             raise SnapshotError(
                 f"{self._path}: manifest.json is not valid JSON: {exc}"
             ) from exc

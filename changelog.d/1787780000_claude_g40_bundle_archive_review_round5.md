@@ -467,3 +467,16 @@
   itself a `ValueError` subclass, but this failure isn't raised through
   it), so it escaped this module's `SnapshotError` contract. Now widened
   to catch `ValueError` directly, which subsumes `JSONDecodeError` too.
+
+- **G40 bundle archive: one more Codex review finding, real, fixed.**
+  The `format="auto"` sniff's structural-EOCD tail-scan fallback (the
+  previous round's own fix) could still be fooled by a valid, independently
+  decodable gzip-compressed `BundleFacts` JSON file: unlike the already-
+  closed `FCOMMENT` header field, a gzip `FEXTRA` sub-field can embed a
+  `PK\x05\x06` whose comment-length field is crafted to land exactly at the
+  file's true end, satisfying the structural check without being a real
+  EOCD. Fixed by never running the tail-scan fallback against a prefix that
+  already matches a recognized gzip/zstd magic -- that magic alone already
+  resolves the format unambiguously (the plain-JSON path transparently
+  decompresses from it), so there's nothing for the fallback to add and
+  every reason not to trust its tail for such a file.
