@@ -355,6 +355,58 @@ def test_diff_touches_outside_only_mutate_falls_back_on_a_quoted_path() -> None:
     assert gate.diff_touched_paths(diff) == {"abicheck/diff_types.py"}
 
 
+def test_diff_lacks_git_headers_for_its_hunks_is_false_for_an_ordinary_diff() -> None:
+    diff = (
+        "diff --git a/abicheck/diff_types.py b/abicheck/diff_types.py\n"
+        "--- a/abicheck/diff_types.py\n+++ b/abicheck/diff_types.py\n"
+        "@@ -1,0 +2,1 @@\n+    pass\n"
+    )
+    assert gate.diff_lacks_git_headers_for_its_hunks(diff) is False
+
+
+def test_diff_lacks_git_headers_for_its_hunks_is_false_for_no_hunks_at_all() -> None:
+    """An empty/no-hunk diff has nothing this predicate needs to guard —
+    `mutant_run_scope`'s own no-diff/nothing-touched fallbacks already
+    handle it."""
+    assert gate.diff_lacks_git_headers_for_its_hunks("") is False
+
+
+def test_diff_lacks_git_headers_for_its_hunks_detects_a_headerless_diff() -> None:
+    """A unified diff with real `---`/`+++`/`@@` hunks but no `diff --git`
+    line at all — e.g. from plain `diff -u` rather than `git diff`, or a
+    hand-assembled `--diff-file` — still parses fine under `_hunks()`, but
+    `diff_touched_paths` (keyed on `diff --git` headers alone) sees nothing
+    (Codex review, PR #877, sixth round on this same check)."""
+    diff = (
+        "--- a/abicheck/diff_types.py\n+++ b/abicheck/diff_types.py\n"
+        "@@ -1,0 +2,1 @@\n+    pass\n"
+    )
+    assert gate.diff_lacks_git_headers_for_its_hunks(diff) is True
+    # Pin why: the header-based reader really does see nothing here.
+    assert gate.diff_touched_paths(diff) == set()
+
+
+def test_diff_touches_outside_only_mutate_falls_back_on_a_headerless_diff() -> None:
+    """End-to-end: a headerless diff editing an in-scope module plus a
+    shared test fixture must not be scoped, even though `diff_touched_paths`
+    sees nothing at all in either hunk — the hunk-based reader
+    (`diff_touched_only_mutate_modules`) would have silently detected only
+    the in-scope module, letting a scoped run through despite the fixture
+    change, if this guard didn't fire first."""
+    diff = (
+        "--- a/abicheck/diff_types.py\n+++ b/abicheck/diff_types.py\n"
+        "@@ -1,0 +2,1 @@\n+    pass\n"
+        "--- a/tests/conftest.py\n+++ b/tests/conftest.py\n"
+        "@@ -1,0 +2,1 @@\n+    pass\n"
+    )
+    assert gate.diff_touches_outside_only_mutate(diff, _ONLY_MUTATE_TWO) is True
+    # Pin why: the header-based reader alone would have missed this entirely.
+    assert gate.diff_touched_paths(diff) == set()
+    assert gate.diff_touched_only_mutate_modules(diff, _ONLY_MUTATE_TWO) == {
+        "abicheck/diff_types.py"
+    }
+
+
 def test_mutant_run_scope_is_none_when_a_shared_test_fixture_is_touched() -> None:
     """The scenario `--require-baseline` alone cannot rule out: a production
     module and a *shared* test fixture both change, but the fixture doesn't
