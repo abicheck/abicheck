@@ -5345,6 +5345,122 @@ Once a root command genuinely clears the bar above, pick the right home:
   verdict. That is a new correlation pass with its own identity question
   (which finding covers which), not a marker-list edit.
 
+  **Update: the ctor/dtor half of (1) is now closed via binary evidence,
+  not annotation.** A later report against real oneTBB 2021.13.0 →
+  2022.3.0 binaries reproduced exactly this shape at scale:
+  `demote_lambda_closure_unexported_findings` (`diff_templates.py`) had
+  already been added to demote a `FUNC_PARAMS_CHANGED`/
+  `TEMPLATE_PARAM_TYPE_CHANGED`/`TEMPLATE_RETURN_TYPE_CHANGED` finding
+  whose reported symbol is confirmed absent from BOTH sides' real ELF
+  exported symbol table (never escalates; fails closed when no ELF
+  evidence exists on either side) — but it deliberately excluded every
+  castxml-synthesized ctor/dtor key
+  (`dumper_castxml.is_synthetic_ctor_key`/`is_synthetic_dtor_key`), on the
+  correct-as-far-as-it-went grounds that such a key is *never* itself a
+  real exported symbol (castxml synthesizes it specifically because it
+  could not produce one), so a membership check against the key text
+  would always read "confirmed absent" — vacuously, not because anything
+  was actually verified. That exclusion left every destructor/constructor
+  of a closure-parameterized instantiation permanently un-demotable,
+  which is exactly the residual (1) describes and exactly what the oneTBB
+  report reproduced: 5 breaking `func_removed` findings, all on synthetic
+  ctor/dtor keys naming
+  `tbb::detail::raii_guard<(lambda:task_group.h:522:26)>`/
+  `try_call_proxy<...>`/`task_arena_function<...>`/
+  `delegated_function<...>`, paired 1:1 with 5 compatible `func_added`
+  findings differing only in the lambda's line number.
+
+  Fixed by asking the binary a question the synthetic key's *text* can
+  answer honestly, even though the key itself is not a real symbol: is
+  the owning class/class-template exported under ANY instantiation at
+  all, on either side?
+  `finding_identity_ctor_dtor.synthetic_ctor_dtor_template_base_name`
+  recovers the owning scope from the key (that same module's own
+  `synthetic_ctor_scope` for a ctor key's
+  depth-aware `scope(params)` split; a plain prefix strip for a dtor key),
+  reduces it to the bare, template-argument-stripped template name via
+  `type_reachability._bare_type_name` plus a top-level `<` scan
+  (`raii_guard<(lambda:...)>` → `raii_guard`), and
+  `finding_identity_ctor_dtor.itanium_source_name_token` renders that name
+  as its Itanium `<source-name>` encoding (`"raii_guard"` → `"10raii_guard"`,
+  keyed on the identifier's encoded UTF-8 **byte** length rather than its
+  Python character count, so a non-ASCII class name still produces the
+  correct token) — a literal substring every real mangled symbol naming
+  that class as a scope component must contain (Itanium C++ ABI §5.1.1),
+  checked directly against the raw exported names with no external
+  demangler invoked, the same "structural, not textual" preference
+  `diff_cxx_rules.itanium_scope_components` already established for this
+  codebase. Both helpers live in `finding_identity_ctor_dtor.py`, not
+  `diff_templates.py` itself (which only keeps the classification/
+  modulation entry point, `demote_lambda_closure_unexported_findings`):
+  `diff_templates.py` is one of ADR-061's `debt.yaml`-tracked
+  no-growth-baselined legacy files, `finding_identity_ctor_dtor.py` already
+  owns every other castxml synthetic-ctor/dtor-key helper and had headroom
+  under the flat 800-line production limit, and a brand-new flat `diff_*`
+  sibling module is explicitly rejected by `scripts/check_architecture.py`'s
+  `frozen_root_families` list (confirmed by trying it — `[frozen-root-family]`
+  and `[root-module]` findings) — while a real `policy/` package migration
+  for just this one function was investigated and found to cascade into
+  `unclassified-import` findings for every one of its ~8 currently-flat,
+  not-yet-layer-classified dependencies (`checker_policy`, `diff_symbols`,
+  `dumper_castxml`, `elf_symbol_filter`, `type_reachability`,
+  `name_classification`, ...), which is its own separate, much larger
+  ADR-061 migration slice, not a follow-up to this fix. A template with
+  zero exported members under any instantiation on either side is demoted
+  (`Verdict.COMPATIBLE_WITH_RISK`,
+  `modulation_rule="lambda_closure_never_exported"`, same ADR-025 hook,
+  never removed); a template that *does* export some other instantiation
+  is left exactly as severe as the detector made it, since this check
+  cannot rule out that the specific closure-parameterized instantiation
+  was the one a consumer actually linked against.
+
+  Deliberately narrower than reconstructing the *exact* per-instantiation
+  mangling: the real Itanium mangling of a closure-type template argument
+  uses the compiler's own unnamed-type encoding (`Ul<parameter-types>E_`),
+  never castxml's `(lambda:file:line:col)` spelling, so there is no way to
+  derive the precise mangled substring for one specific instantiation from
+  the snapshot text alone — checking the template's own name is the safe,
+  strictly more conservative substitute this function's whole design
+  (fail closed, never escalate) already calls for. See
+  `tests/test_lambda_closure_function_demotion.py`'s
+  `TestSyntheticCtorDtorKeysDemotedWhenTemplateNeverExported`/
+  `TestSyntheticCtorDtorKeysNotDemotedWhenTemplateIsExported` for both
+  directions, verified against the exact class names from the oneTBB
+  report.
+
+  **A review round on the same fix found a real gap in the substring
+  search itself, not in the demotion logic around it.** Six `std::` names
+  (`allocator`, `basic_string`, `basic_istream`, `basic_ostream`,
+  `basic_iostream`) carry a *fixed, mandatory* Itanium ABI substitution
+  (`Sa`/`Sb`/`Si`/`So`/`Sd`, C++ Itanium ABI §5.1.2) — the mangler always
+  emits the abbreviation instead of the literal source-name, even on the
+  first occurrence in a symbol. A real `std::allocator<int>::allocator()`
+  mangles to `_ZNSaIiEC1Ev`, never to anything containing the literal
+  substring `"9allocator"` — so a synthetic `std::allocator<(lambda:...)>`
+  finding's literal-token search would read that class as "never
+  exported" regardless of the truth, silently demoting a genuine removal.
+  Fixed with `finding_identity_ctor_dtor.itanium_standard_substitution_
+  token`, checked alongside the literal token whenever the owning class's
+  qualified name is exactly one of the six; see
+  `tests/test_lambda_closure_function_demotion.py`'s
+  `TestStdAllocatorSyntheticKeyNotFalselyDemoted` for the exact
+  counterexample from review, reproduced and fixed.
+
+  Two related residuals from the same report, deliberately not addressed
+  here: the *type-level* churn among these same symbols (the compatible
+  `func_added`/risk `declaration_renamed` findings the same 5 removals
+  pair with, and 7 further `declaration_renamed` findings elsewhere in the
+  same report) is pure noise from the lambda's identity embedding its
+  source `line:col` rather than an ordinal position — closing that needs
+  changing how a closure is *identified*, a materially larger change to
+  `name_classification`/the castxml and clang backends' own closure
+  naming than this fix's binary-evidence check, and is not attempted
+  here. And a public-surface filter gap (ELF-only, mangled-only symbols
+  such as `std::once_flag::_Prepare_execution<lambda>`'s internal guard
+  thunks, which `surface.py` cannot scope-classify because it never
+  demangles) is a separate detector, not this one, and is likewise not
+  addressed here.
+
   (2) *A constructor key rendering a literal `?` parameter.* Traced to two
   legitimate "type not recoverable" sentinels rather than to a formatting
   bug: `dwarf_snapshot._process_param` returns `Param(type="?")` for a

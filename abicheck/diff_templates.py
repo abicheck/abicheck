@@ -1238,17 +1238,10 @@ _LAMBDA_CLOSURE_DEMOTABLE_KINDS: frozenset[ChangeKind] = frozenset(
 
 
 def _change_mentions_lambda_closure(change: Change) -> bool:
-    """Whether *change*'s own recorded text embeds a lambda-closure marker.
-
-    Checks every field a producer could have put the closure's spelling
-    into: ``symbol`` (a castxml-synthesized ctor/dtor key embeds the
-    owning class's full qualified name, closure spelling included —
-    ``dumper_castxml.SYNTHETIC_CTOR_KEY_PREFIX``/``is_synthetic_dtor_key``),
-    and ``old_value``/``new_value`` (a parameter or return-type spelling for
-    ``FUNC_PARAMS_CHANGED``/``TEMPLATE_PARAM_TYPE_CHANGED``/
-    ``TEMPLATE_RETURN_TYPE_CHANGED``, see :func:`_check_params_change`/
-    :func:`_diff_template_inner_types` in their respective modules).
-    """
+    """Whether *change*'s own recorded text embeds a lambda-closure marker
+    (``symbol``, ``old_value``, or ``new_value`` -- every field a producer
+    could have put a castxml synthetic ctor/dtor key or parameter/return
+    spelling into)."""
     from .name_classification import contains_anonymous_type_marker
 
     return (
@@ -1267,71 +1260,62 @@ def demote_lambda_closure_unexported_findings(
     never actually exported/defined in EITHER binary's real symbol table.
 
     A template instantiated over a local lambda's closure type has no
-    user-nameable identity: no consumer source can ever spell the type, so
-    the marker-list fix (``name_classification._ANONYMOUS_TYPE_MARKERS``)
-    already stops such a *type* from being treated as ABI surface — an
-    unrelated edit that merely shifts the lambda's source line must not
-    manufacture a spurious ``type_removed``/``type_added`` pair for it.
+    user-nameable identity, so the marker-list fix
+    (``name_classification._ANONYMOUS_TYPE_MARKERS``) already stops such a
+    *type* from being treated as ABI surface — an unrelated edit that merely
+    shifts the lambda's source line must not manufacture a spurious
+    ``type_removed``/``type_added`` pair for it. That fix does not reach
+    *function*-level findings (a destructor of such an instantiation, or a
+    function taking the closure-parameterized type by value): the mangled
+    symbol and/or parameter-type spelling embed the closure's source
+    coordinates directly (see AGENTS.md's "Lambda-closure churn survives at
+    the function level" entry for the full investigation).
 
-    That fix does not reach *function*-level findings: a destructor of such
-    an instantiation (reported ``FUNC_REMOVED``/``FUNC_REMOVED`` next to a
-    same-shaped ``FUNC_ADDED``), or a function taking the closure-
-    parameterized type by value (``FUNC_PARAMS_CHANGED``/
-    ``TEMPLATE_PARAM_TYPE_CHANGED``/``TEMPLATE_RETURN_TYPE_CHANGED``), still
-    fires purely from the closure's embedded source coordinates shifting —
-    because the mangled symbol and/or the parameter-type spelling embed
-    those coordinates directly (see AGENTS.md's "Lambda-closure churn
-    survives at the function level" entry for the full investigation).
-
-    Broadly demoting every such finding was considered and rejected there:
-    a symbol that a consumer's *already-compiled binary* linked against by
-    exact spelling can genuinely break on renumbering, even though no new
-    consumer could ever *write source* against it. What makes that risk
-    real is that the symbol was actually **exported** — an already-linked
-    consumer can only have resolved a name the dynamic linker actually
-    offered. So this demotes only when the finding's own symbol is
-    confirmed absent from BOTH sides' real ELF exported symbol table
-    (:func:`elf_symbol_filter.exported_symbol_names`, the same ``.dynsym``
-    evidence :func:`_public_functions <abicheck.diff_symbols._public_functions>`
-    narrows against) — never from DWARF/header evidence alone, which is
-    exactly the axis :func:`detect_missing_instantiations` above answers a
-    *different* question from (an instantiation genuinely present in the
-    old export table and genuinely gone from the new one, i.e. a real
-    break).
+    Broadly demoting every such finding was considered and rejected there: a
+    symbol an already-compiled consumer linked against by exact spelling can
+    genuinely break on renumbering, even though no new consumer could ever
+    *write source* against it. So this demotes only when the finding's own
+    symbol is confirmed absent from BOTH sides' real ELF exported symbol
+    table (:func:`elf_symbol_filter.exported_symbol_names`) — never from
+    DWARF/header evidence alone, the different question
+    :func:`detect_missing_instantiations` above answers (an instantiation
+    present in the old export table and gone from the new one).
 
     A castxml-synthesized ctor/dtor key
     (``dumper_castxml.is_synthetic_ctor_key``/``is_synthetic_dtor_key``) is
-    deliberately excluded even when it embeds the marker: such a key is
-    *never* a real exported symbol by construction (see
-    ``dumper_castxml._function_mangled_name``'s own comment), so a bare
-    membership check against it would always report "confirmed absent"
-    regardless of whether the real, castxml-omitted mangled symbol was
-    actually exported — a vacuous, unsafe confirmation this function must
-    not act on. Demotion is therefore reachable only for a finding whose
-    ``symbol`` is a real (possibly still-changing) mangled/exported name,
-    which in practice is the ``FUNC_PARAMS_CHANGED``/
-    ``TEMPLATE_PARAM_TYPE_CHANGED``/``TEMPLATE_RETURN_TYPE_CHANGED`` shape
-    (the same function persists — same mangled key both sides — only its
-    recorded parameter/return spelling shifted).
+    itself *never* a real exported symbol by construction — castxml
+    synthesizes it because it could not produce a real mangled name for this
+    overload, typically because one of its (or its enclosing template's)
+    arguments is an unnameable local lambda closure type. A bare membership
+    check of the key text would therefore always read "confirmed absent"
+    vacuously, so instead this asks whether the owning class/class-template
+    is exported under *any* instantiation at all, on either side
+    (``finding_identity_ctor_dtor.synthetic_ctor_dtor_template_base_name`` +
+    ``itanium_source_name_token``, a dependency-free Itanium ``<source-name>``
+    substring match against the raw exported symbols). Zero exported members
+    under any instantiation means no consumer could have linked against this
+    one either; some other instantiation being exported leaves the demotion
+    unconfirmed, since it can't rule out that the specific closure-
+    parameterized instantiation was the one exported (see AGENTS.md's
+    "Lambda-closure churn survives at the function level" entry, item 1).
 
     Like :func:`abicheck.diff_versioning.demote_internal_version_node_findings`,
-    this uses the per-finding ``effective_verdict`` modulation hook
-    (ADR-025) rather than removing anything from *changes* — the finding
-    stays fully visible, annotated with why it no longer drives the
-    verdict, matching this codebase's "annotate, never remove" precedent
-    (see AGENTS.md's ``LAYOUT_UNVERIFIABLE``/vtable entry). Conservative in
-    both directions: only already-BREAKING/API_BREAK findings are touched
-    (never escalates), findings already carrying a prior
-    ``effective_verdict`` are left untouched, and "no ELF symbol table on
-    one or both sides" is treated as "not confirmed" (fails closed) rather
-    than as evidence of absence.
-
-    Mutates and returns ``changes``.
+    this uses the per-finding ``effective_verdict`` modulation hook (ADR-025)
+    rather than removing anything from *changes* (annotate, never remove).
+    Conservative: only already-BREAKING/API_BREAK findings are touched
+    (never escalates), a prior ``effective_verdict`` is left untouched, and
+    missing ELF evidence on either side fails closed. Mutates and returns
+    ``changes``.
     """
     from .checker_policy import API_BREAK_KINDS, BREAKING_KINDS, Verdict
     from .diff_symbols import _public_functions
     from .dumper_castxml import is_synthetic_ctor_key, is_synthetic_dtor_key
     from .elf_symbol_filter import FUNCTION_SYMBOL_TYPES, exported_symbol_names
+    from .finding_identity_ctor_dtor import (
+        itanium_source_name_token,
+        itanium_standard_substitution_token,
+        synthetic_ctor_dtor_template_base_name,
+    )
 
     old_elf = getattr(old, "elf", None)
     new_elf = getattr(new, "elf", None)
@@ -1346,17 +1330,11 @@ def demote_lambda_closure_unexported_findings(
         return changes
     old_exported = exported_symbol_names(old_elf, FUNCTION_SYMBOL_TYPES)
     new_exported = exported_symbol_names(new_elf, FUNCTION_SYMBOL_TYPES)
-    # `change.symbol` is the dict *key* the detector matched functions
-    # through -- for a function retained only via `_public_functions`'s own
-    # bare-name export fallback (a guessed/incomplete mangling that never
-    # equals the real export), that key can differ from the function's
-    # actual accepted export spelling, `Function.name` (Codex review, fresh
-    # evidence: the fallback exists specifically because castxml/DWARF can
-    # under-mangle a name that the real ELF export table still carries
-    # correctly). Checking `symbol` alone can therefore declare a subject
-    # "confirmed absent" even though the SAME function is genuinely exported
-    # under its `.name` spelling and a real consumer could have bound it --
-    # resolve both accepted spellings before ever claiming absence.
+    # `change.symbol` (the detector's match key) can differ from a function's
+    # real accepted export spelling, `Function.name` -- `_public_functions`'s
+    # own bare-name export fallback exists because castxml/DWARF can
+    # under-mangle a name the real ELF table still carries correctly, so both
+    # spellings must be checked before ever claiming absence.
     old_map = _public_functions(old)
     new_map = _public_functions(new)
 
@@ -1370,11 +1348,36 @@ def demote_lambda_closure_unexported_findings(
         symbol = change.symbol or ""
         if not symbol:
             continue
-        if is_synthetic_ctor_key(symbol) or is_synthetic_dtor_key(symbol):
-            # Never a real export by construction -- absence here is
-            # vacuous, not confirmed. See the docstring above.
-            continue
         if not _change_mentions_lambda_closure(change):
+            continue
+        if is_synthetic_ctor_key(symbol) or is_synthetic_dtor_key(symbol):
+            base_name = synthetic_ctor_dtor_template_base_name(symbol)
+            if base_name is None:
+                continue  # scope unrecoverable -- fail closed
+            # A std:: owner may mangle via a fixed Itanium substitution
+            # instead of its literal source-name -- see
+            # itanium_standard_substitution_token's own docstring.
+            tokens = {itanium_source_name_token(base_name)}
+            std_token = itanium_standard_substitution_token(symbol)
+            if std_token is not None:
+                tokens.add(std_token)
+            if any(
+                any(token in exported for token in tokens)
+                for exported in (*old_exported, *new_exported)
+            ):
+                # Exported under SOME instantiation on at least one side --
+                # can't rule out it was this one, so stays as severe as made.
+                continue
+            change.effective_verdict = Verdict.COMPATIBLE_WITH_RISK
+            change.modulation_reason = (
+                "subject is a constructor/destructor of a template "
+                "instantiated over a local lambda closure type, and the "
+                "owning class/class-template is confirmed absent from both "
+                "the old and new binary's exported symbol table under any "
+                "instantiation -- no consumer, past or present, could have "
+                "linked against it"
+            )
+            change.modulation_rule = "lambda_closure_never_exported"
             continue
         candidate_spellings = {symbol}
         old_fn = old_map.get(symbol)
@@ -1384,11 +1387,8 @@ def demote_lambda_closure_unexported_findings(
         if new_fn is not None:
             candidate_spellings.add(new_fn.name)
         if candidate_spellings & (old_exported | new_exported):
-            # Genuinely exported on at least one side, under either the
-            # dict-key spelling or the matched function's own accepted
-            # export alias: an already-linked consumer could really have
-            # resolved this exact spelling, so the finding stays exactly as
-            # severe as the detector made it.
+            # Genuinely exported under the key or the matched function's own
+            # export alias: stays exactly as severe as the detector made it.
             continue
         change.effective_verdict = Verdict.COMPATIBLE_WITH_RISK
         change.modulation_reason = (
