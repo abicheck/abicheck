@@ -46,6 +46,7 @@ cycle (:mod:`abicheck.bundle` already imports :mod:`abicheck.bundle_models`/
 
 from __future__ import annotations
 
+import copy
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -580,16 +581,27 @@ def read_bundle_facts_archive(
         # AbiSnapshot object graph for each one, so a manifest naming many
         # libraries against one shared blob could still amplify one valid,
         # size-capped blob into many times its own memory footprint in live
-        # Python objects. Sharing one AbiSnapshot instance across every
-        # name mapped to the same hash is safe here because this loader's
-        # only output is a read-only mapping handed back to the caller --
-        # nothing in this module mutates a loaded snapshot in place.
+        # Python objects.
+        #
+        # Each *name* still gets its own AbiSnapshot instance in the
+        # returned mapping (CodeRabbit review): AbiSnapshot is a plain,
+        # mutable dataclass and BundleFacts is public API -- no internal
+        # consumer mutates a loaded snapshot today, but that isn't a
+        # contract this loader can impose on every future caller of the
+        # public Python API. `snapshot_cache` holds the *first* built
+        # instance for a hash (handed out to its first name unmodified);
+        # every subsequent name sharing that hash gets a deep copy of it,
+        # so no two names in the returned mapping ever alias the same
+        # object, matching `serialization.bundle_facts_from_dict()`'s own
+        # one-instance-per-entry contract. The cost this pays is a deep
+        # copy instead of a second parse -- cheaper, and still linear in
+        # the number of *duplicate* names, not in blob size.
         snapshot_cache: dict[str, AbiSnapshot] = {}
         per_library_snapshots: dict[str, AbiSnapshot] = {}
         for name, h in library_blobs.items():
             cached_snapshot = snapshot_cache.get(h)
             if cached_snapshot is not None:
-                per_library_snapshots[name] = cached_snapshot
+                per_library_snapshots[name] = copy.deepcopy(cached_snapshot)
                 continue
             blob = _json.loads(_cached_blob(h))
             if not isinstance(blob, dict):

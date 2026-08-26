@@ -153,22 +153,29 @@ class TestBundleFactsArchiveFormat:
         loaded = load_bundle_facts(out)
         assert set(loaded.per_library_snapshots) == {"a.so", "b.so"}
 
-    def test_load_shares_one_snapshot_object_across_names_sharing_a_blob(
+    def test_load_gives_each_name_its_own_snapshot_object_even_when_sharing_a_blob(
         self, tmp_path: Path
     ) -> None:
-        """Codex review, fresh evidence: blob_cache alone only avoids
-        repeated *decompression* -- without a parsed-object cache too,
-        several library names sharing one blob would each still
-        materialize their own separate AbiSnapshot object graph,
-        amplifying one valid, size-capped blob into many times its own
-        memory footprint in live Python objects."""
+        """CodeRabbit review: two library names sharing one content-hash
+        blob must still get *independent* AbiSnapshot objects in the
+        loaded mapping -- AbiSnapshot is a mutable dataclass and
+        BundleFacts is public API, so a caller mutating one entry must
+        never be able to reach through to another entry's own object
+        (matching serialization.bundle_facts_from_dict()'s existing
+        one-instance-per-entry contract). Parsed-object *caching* (the
+        thing the dedup this test's predecessor guarded) is preserved
+        separately -- this only asserts the returned objects don't alias."""
         snap = _per_library_snapshots(_old_metadata())["libcore.so"]
         facts = BundleFacts(per_library_snapshots={"a.so": snap, "b.so": snap})
         out = tmp_path / "dup.bundlefacts.archive.zip"
         save_bundle_facts(facts, out, format="archive")
 
         loaded = load_bundle_facts(out)
-        assert loaded.per_library_snapshots["a.so"] is loaded.per_library_snapshots["b.so"]
+        assert loaded.per_library_snapshots["a.so"] is not loaded.per_library_snapshots["b.so"]
+        assert loaded.per_library_snapshots["a.so"] == loaded.per_library_snapshots["b.so"]
+        # Mutating one must not leak into the other.
+        loaded.per_library_snapshots["a.so"].version = "mutated"
+        assert loaded.per_library_snapshots["b.so"].version != "mutated"
 
     def test_save_produces_identical_bytes_regardless_of_dict_insertion_order(
         self, tmp_path: Path
