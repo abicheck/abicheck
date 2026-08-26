@@ -80,7 +80,9 @@ def test_compare_frontend_context_device_threaded_for_directory_inputs(
     `--ast-frontend`/`--compiler`), threaded to the release fan-out's
     resolved `CompileContext` rather than rejected (fix: whole-product-
     bundle known-gap entry, AGENTS.md)."""
-    import abicheck.cli as cli_mod
+    # ADR-061 Phase 4: patch the implementation owner -- `abicheck.cli` resolves
+    # these lazily now, so a `setattr` there rebinds nothing the caller reads.
+    import abicheck.frontends.cli.commands.compare as cli_mod
 
     old_dir = tmp_path / "old"
     old_dir.mkdir()
@@ -105,7 +107,9 @@ def test_compare_frontend_context_host_threaded_for_directory_inputs(
     """Same threading, with the (default-looking) value ``host``, so the
     only thing that could make this fail is cli_resolve.py's set-input
     guard itself still rejecting an explicit ``--frontend-context``."""
-    import abicheck.cli as cli_mod
+    # ADR-061 Phase 4: patch the implementation owner -- `abicheck.cli` resolves
+    # these lazily now, so a `setattr` there rebinds nothing the caller reads.
+    import abicheck.frontends.cli.commands.compare as cli_mod
 
     old_dir = tmp_path / "old"
     old_dir.mkdir()

@@ -66,7 +66,10 @@ from .api_types import CompareRequest, CompareResult, InputSpec, required_path
 from .compile_context import CompileContext
 from .dependency_info import populate_pair_dependency_info
 from .errors import ValidationError
-from .service_input_resolution import enforce_requested_depth, resolve_side_snapshot
+from .workflows.artifact.execute import (
+    enforce_requested_depth,
+    resolve_side_snapshot,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -221,7 +224,7 @@ def _reject_unsupported_frontends(
     shared with ``dump``'s own typed path; the ``android`` half names
     ``run_compare_request`` in its message and stays here.
     """
-    from .service_input_resolution import (
+    from .workflows.artifact.resolve import (
         is_raw_source_tree,
         reject_hybrid_source_frontend,
     )
@@ -407,7 +410,10 @@ def classify_compare_pair(
     :func:`abicheck.service.run_compare_request`.
     """
     from . import service
-    from .cli_buildsource import attach_evidence_metrics, prepare_embedded_build_source
+    from .buildsource.evidence_report import (
+        attach_evidence_metrics,
+        prepare_embedded_build_source,
+    )
 
     old, new = pair.old, pair.new
     suppression, pf = service.load_suppression_and_policy(
@@ -452,7 +458,6 @@ def classify_compare_pair(
         None,
         None,
         policy_file=pf,
-        quiet=True,
     )
     result = service.compare_snapshots(
         old,
@@ -479,7 +484,7 @@ def classify_compare_pair(
     )
     if layer_coverage_rows:
         result.layer_coverage = layer_coverage_rows
-    attach_evidence_metrics(result, evidence_metrics, extra_changes or [], quiet=True)
+    attach_evidence_metrics(result, evidence_metrics, extra_changes or [])
     result.old_metadata = service.collect_metadata(required_path(request.old, "old"))
     result.new_metadata = service.collect_metadata(required_path(request.new, "new"))
 

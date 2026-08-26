@@ -17,14 +17,27 @@ Use explicit implementation modules rather than broad compatibility facades.
 During ADR-061 migration, each moved projection names its workflow result in
 the module name. `aggregate.py` projects `AggregateResult` to JSON-compatible
 mapping or text. `document.py` is the shared immutable `ReportDocument`
-Phase 2 is establishing across every output format; `render_json.py` is its
-pure JSON projection and `render_text.py` is its pure one-line stat/text
-projection (`render_stat_document`). Markdown, HTML, SARIF, and JUnit remain
-explicit follow-up slices — see this package's own module docstrings and
-ADR-061's Phase 2 status note for what still builds its output outside a
-`ReportDocument`, and why (a pre-existing `compare -> policy` coupling in
-`checker_types.py`/`checker.py` blocks moving any severity-touching builder
-physically into this package until that coupling is resolved separately).
+Phase 2 is establishing across every output format. Its projections are
+`render_json.py` (JSON, and therefore SARIF — SARIF is a JSON format and
+needs no serializer of its own), `render_text.py` (the one-line `--stat`
+summary, `render_stat_document`), and `render_xml.py` (JUnit).
+
+`render_xml.py` exists because a `ReportDocument` holds JSON values only —
+so a renderer can never be handed a live object graph to mutate — and an
+`ElementTree` is not one. `element_to_mapping`/`element_from_mapping` are its
+lossless encoding; `render_xml_document` is the projection. Put a report
+*fact* (a tag, an attribute, text) in the document and a *formatting* choice
+(indentation, the XML declaration) in the projection.
+
+Markdown's richer modes (`to_markdown`, `to_review_digest`) and HTML remain
+explicit follow-up slices: they emit prose straight from a `DiffResult`
+rather than building a structured value first, so each needs its own rewrite
+against its golden output. See ADR-061's Phase 2 status note for the second
+open half — renderers that still call `severity.compute_gate_decision` /
+`effective_verdict_for_change` themselves, and the `cli_compare_fold.py`
+post-render folds — and for why a pre-existing `compare -> policy` coupling
+in `checker_types.py`/`checker.py` still blocks moving a severity-touching
+builder physically into this package.
 
 ## Tests
 

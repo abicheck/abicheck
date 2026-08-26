@@ -18,7 +18,7 @@ Targets uncovered error paths, output-format branches, help text and exit-code
 logic in ``abicheck.cli``, ``abicheck.cli_compare_release`` and
 ``abicheck.cli_appcompat``. Pure-Python only: no gcc/castxml/abidiff/abicc.
 Binary-dependent CLI flows are exercised by calling the internal helpers
-directly with pre-built JSON ``AbiSnapshot`` files / mocks instead.
+directly with pre-built JSON ``AbiSnapshot`` files / mocks instead.ADR-061 Phase 4, throughout: patch the owner, not ``abicheck.cli`` -- its lazy ``__getattr__`` means a ``setattr`` there rebinds nothing the caller reads.
 """
 
 from __future__ import annotations
@@ -385,7 +385,7 @@ class TestSmallHelpers:
         # old "will be ignored" warning is gone and the context reaches the dump.
         import struct
 
-        import abicheck.cli as cli_mod
+        import abicheck.frontends.cli.commands.dump as cli_mod
 
         dylib = tmp_path / "fake.dylib"
         dylib.write_bytes(struct.pack("<I", 0xFEEDFACF) + b"\x00" * 64)
@@ -412,7 +412,7 @@ class TestSmallHelpers:
         import json
         import struct
 
-        import abicheck.cli as cli_mod
+        import abicheck.frontends.cli.commands.dump as cli_mod
 
         header = tmp_path / "foo.h"
         header.write_text("int f();\n", encoding="utf-8")
@@ -2641,13 +2641,13 @@ class TestLogDebugResolution:
         # Force a binary format and a resolved artifact so the echo branch runs.
         from types import SimpleNamespace
 
-        import abicheck.cli as cli_mod
+        import abicheck.frontends.cli.runtime as cli_mod
 
         binary = tmp_path / "lib.so"
         binary.write_bytes(b"\x7fELF" + b"\x00" * 50)
         monkeypatch.setattr(cli_mod, "_detect_binary_format", lambda p: "elf")
         monkeypatch.setattr(
-            "abicheck.debug_resolver.resolve_debug_info",
+            "abicheck.workflows.extraction.resolve_debug_info",
             lambda *a, **k: SimpleNamespace(source="/path/to/lib.debug"),
         )
         cli_mod._log_one_side_debug(
@@ -2969,13 +2969,13 @@ class TestResolveDebugArtifact:
     def test_delegates_to_resolver(self, tmp_path, monkeypatch) -> None:
         from types import SimpleNamespace
 
-        import abicheck.cli as cli_mod
+        import abicheck.frontends.cli.runtime as cli_mod
 
         binary = tmp_path / "lib.so"
         binary.write_bytes(b"\x7fELF" + b"\x00" * 50)
         sentinel = SimpleNamespace(source="x.debug")
         monkeypatch.setattr(
-            "abicheck.debug_resolver.resolve_debug_info",
+            "abicheck.workflows.extraction.resolve_debug_info",
             lambda *a, **k: sentinel,
         )
         out = cli_mod._resolve_debug_artifact(
@@ -2994,7 +2994,7 @@ class TestLogDebugResolutionBothSides:
     def test_both_sides_logged(self, tmp_path, monkeypatch, capsys) -> None:
         from types import SimpleNamespace
 
-        import abicheck.cli as cli_mod
+        import abicheck.frontends.cli.runtime as cli_mod
 
         old_b = tmp_path / "old.so"
         new_b = tmp_path / "new.so"
@@ -3002,7 +3002,7 @@ class TestLogDebugResolutionBothSides:
         new_b.write_bytes(b"\x7fELF" + b"\x00" * 50)
         monkeypatch.setattr(cli_mod, "_detect_binary_format", lambda p: "elf")
         monkeypatch.setattr(
-            "abicheck.debug_resolver.resolve_debug_info",
+            "abicheck.workflows.extraction.resolve_debug_info",
             lambda *a, **k: SimpleNamespace(source="art"),
         )
         cli_mod._log_debug_resolution(

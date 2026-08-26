@@ -48,13 +48,15 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from .errors import AstContextMissingError, ValidationError
-from .service_input_resolution import (
+from .workflows.artifact import ResolvedArtifactPlan
+from .workflows.artifact.execute import (
     _resolve_side_snapshot_impl,
     enforce_requested_depth,
+)
+from .workflows.artifact.resolve import (
     is_raw_source_tree,
     reject_hybrid_source_frontend,
 )
-from .workflows.artifact import ResolvedArtifactPlan
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -469,8 +471,8 @@ def execute_dump_request(
             :func:`~abicheck.cli_buildsource.dump_source_only`).
         SnapshotError: If the input cannot be loaded.
     """
-    from .cli_dump_helpers import _gated_source_label
     from .dependency_info import populate_side_dependency_info
+    from .evidence_depth import gated_source_label
 
     request = resolved.request
     side = request.input
@@ -546,7 +548,7 @@ def execute_dump_request(
         # raising, so _gated_source_label still falls through to its own
         # L3/build-context checks (Codex review, two rounds); this except
         # is a defensive backstop only, matching that same fallback label.
-        effective_depth = _gated_source_label(snap.build_source, snap)
+        effective_depth = gated_source_label(snap.build_source, snap)
     except (TypeError, ValueError, OverflowError):
         effective_depth = "headers" if snap.from_headers else "binary"
     return DumpResult(

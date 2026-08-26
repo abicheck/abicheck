@@ -88,7 +88,7 @@ def test_scan_l2_seed_cleanup_runs_before_embed(monkeypatch, tmp_path):
         fake_seed_and_fold,
     )
     monkeypatch.setattr("abicheck.service.resolve_input", fake_resolve)
-    monkeypatch.setattr("abicheck.cli_buildsource.embed_build_source", fake_embed)
+    monkeypatch.setattr("abicheck.buildsource.embed.embed_build_source", fake_embed)
 
     sources = tmp_path / "src"
     sources.mkdir()
@@ -193,7 +193,7 @@ def test_scan_candidate_folds_l3_compile_context_into_header_parse(
 
     monkeypatch.setattr("abicheck.service.resolve_input", fake_resolve)
     monkeypatch.setattr(
-        "abicheck.cli_buildsource.embed_build_source", lambda *a, **k: None
+        "abicheck.buildsource.embed.embed_build_source", lambda *a, **k: None
     )
 
     _res = _build_new_snapshot(
@@ -251,7 +251,7 @@ def test_scan_candidate_lang_c_omits_conflicting_derived_cxx_standard(
 
     monkeypatch.setattr("abicheck.service.resolve_input", fake_resolve)
     monkeypatch.setattr(
-        "abicheck.cli_buildsource.embed_build_source", lambda *a, **k: None
+        "abicheck.buildsource.embed.embed_build_source", lambda *a, **k: None
     )
 
     _build_new_snapshot(
@@ -288,7 +288,7 @@ def test_scan_returns_seeded_includes_for_baseline(monkeypatch, tmp_path):
         "abicheck.service.resolve_input", lambda *a, **k: _stub_snapshot()
     )
     monkeypatch.setattr(
-        "abicheck.cli_buildsource.embed_build_source", lambda *a, **k: None
+        "abicheck.buildsource.embed.embed_build_source", lambda *a, **k: None
     )
 
     _res = _build_new_snapshot(
@@ -344,7 +344,7 @@ def test_scan_candidate_expands_public_header_dirs_before_embed(monkeypatch, tmp
     def fake_embed(*args, **kwargs):
         embed_kwargs.update(kwargs)
 
-    monkeypatch.setattr("abicheck.cli_buildsource.embed_build_source", fake_embed)
+    monkeypatch.setattr("abicheck.buildsource.embed.embed_build_source", fake_embed)
 
     _build_new_snapshot(
         # Empty `headers` (PR 3A, dump/scan L4 root-set convergence): this
@@ -408,7 +408,7 @@ def test_scan_candidate_widens_l4_roots_with_a_lone_header_file(monkeypatch, tmp
     def fake_embed(*args, **kwargs):
         embed_kwargs.update(kwargs)
 
-    monkeypatch.setattr("abicheck.cli_buildsource.embed_build_source", fake_embed)
+    monkeypatch.setattr("abicheck.buildsource.embed.embed_build_source", fake_embed)
 
     _build_new_snapshot(
         binary=tmp_path / "lib.so",
