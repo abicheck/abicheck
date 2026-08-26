@@ -35,7 +35,11 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 from .checker_policy import HasKind
-from .demangle import demangle_text, prewarm_demangle_batch
+from .demangle import (
+    demangle as _demangle_symbol,
+    demangle_text,
+    prewarm_demangle_batch,
+)
 
 # Page chrome (DOCTYPE/head/stylesheet/body frame, verdict palette, footer) now
 # lives in one shared seam (``html_template``). ``_VERDICT_STYLE`` /
@@ -144,11 +148,21 @@ def _abbr_symbol_text(raw: str, demangle: bool = True) -> str:
     """Demangled text with the mangled name as an ``<abbr>`` tooltip --
     shared by any caller rendering one bare symbol string, so two mangled
     names that demangle identically (C1/C2 ctor variants) don't collapse
-    into indistinguishable text. Demangles before ``html.escape``."""
-    mangled, demangled = html.escape(raw), html.escape(demangle_text(raw) if demangle else raw)
-    if demangled and demangled != mangled and mangled:
-        return f'<abbr title="{html.escape(mangled, quote=True)}">{demangled}</abbr>'
-    return demangled or mangled
+    into indistinguishable text. Demangles before ``html.escape``.
+
+    Whole-string demangling (:func:`demangle`), not :func:`demangle_text`'s
+    embedded-token scan -- *raw* is one symbol field, not prose, and a
+    substring scan risks corrupting a real non-mangled name that merely
+    contains a `_Z...`-shaped substring (e.g. `prefix_Z3foov`) (Codex
+    review, fresh evidence)."""
+    mangled = html.escape(raw)
+    result = _demangle_symbol(raw, accept_macho_prefix=True) if demangle and raw else None
+    if not result:
+        return mangled
+    demangled = html.escape(result)
+    if demangled == mangled:
+        return demangled
+    return f'<abbr title="{html.escape(mangled, quote=True)}">{demangled}</abbr>'
 
 
 def _symbol_cell(change: object, demangle: bool = True) -> str:
@@ -437,9 +451,8 @@ def _generate_compat_html(
     """
     h = html.escape
 
-    # Classify type vs symbol vs other problems by severity.
-    # "other" catches ELF-layer kinds (soname_, symbol_, needed_, rpath_, …)
-    # that are neither type-scoped nor symbol/interface-scoped.
+    # Classify type vs symbol vs other (ELF-layer: soname_/symbol_/needed_/
+    # rpath_, …) problems by severity.
     type_problems: dict[str, list[object]] = {"High": [], "Medium": [], "Low": []}
     symbol_problems: dict[str, list[object]] = {"High": [], "Medium": [], "Low": []}
     other_problems: dict[str, list[object]] = {"High": [], "Medium": [], "Low": []}
@@ -561,7 +574,7 @@ def _generate_compat_html(
 {_compat_changes_table(items, show_severity=True)}
 </div>""")
 
-    # Other problems (ELF-layer: soname, symbol versioning, calling convention, etc.)
+    # Other problems (ELF-layer: soname, symbol versioning, calling convention)
     other_all = (
         other_problems["High"] + other_problems["Medium"] + other_problems["Low"]
     )
@@ -614,8 +627,6 @@ def _confidence_html(result: object) -> str:
     policy_file = getattr(result, "policy_file", None)
 
     h = html.escape
-
-    # Confidence colour
     conf_color = {"high": "#1b5e20", "medium": "#e65100", "low": "#b71c1c"}.get(
         conf_val, "#212121"
     )
@@ -724,10 +735,8 @@ def _gate_card_html(
 ) -> str:
     """Render the CI-gate card, or ``""`` when no severity gate is configured.
 
-    Split out of :func:`generate_html_report`; the reasoning behind the
-    scoped-vs-full gate split and the blocking-category naming is kept with the
-    code below.
-    """
+    Split out of :func:`generate_html_report`; the scoped-vs-full gate split
+    and blocking-category naming reasoning is kept with the code below."""
     if severity_config is None:
         return ""
     from .severity import compute_gate_decision
@@ -741,15 +750,12 @@ def _gate_card_html(
         policy_file=getattr(result, "policy_file", None),
     )
     # `--used-by`/`--required-symbol(s)` scoping (ADR-043): the CLI exits on
-    # the *scoped* gate, not this full-library one -- without this, the card
-    # could say "FAIL" for a run that exited 0 (CodeRabbit review). Mirrors
-    # the JSON severity block's full_severity/severity split.
+    # the *scoped* gate, not this full-library one (CodeRabbit review).
     scoped_exit_code = getattr(result, "scoped_exit_code", None)
     scoped_exit_code_scheme = getattr(result, "scoped_exit_code_scheme", None)
     gate_exit_code: int
-    # blocking_categories only corresponds 1:1 to full_gate below; the scoped
-    # exit code can fail for a reason full_gate's categories don't describe
-    # (e.g. a missing --required-symbol entrypoint), so it's left blank there.
+    # blocking_categories only corresponds 1:1 to full_gate below; left blank
+    # for a scoped-only failure (e.g. a missing --required-symbol entrypoint).
     gate_blocking_categories: tuple[str, ...] = ()
     if scoped_exit_code is not None and scoped_exit_code_scheme == "severity":
         gate_passed = scoped_exit_code == 0
@@ -867,9 +873,7 @@ def generate_html_report(
     suppressed: list[object] = list(getattr(result, "suppressed_changes", None) or [])
     suppressed_count: int = getattr(result, "suppressed_count", len(suppressed))
 
-    # Split display changes into buckets (for rendering). Duck-typed via
-    # getattr (like the compatibility_metrics call below) so a lightweight
-    # stub result without a real DiffResult's policy machinery still renders.
+    # Split display changes into buckets; duck-typed like compatibility_metrics.
     _effective_verdict_fn = getattr(result, "_effective_verdict_for_change", None)
     # ADR-049 D1: a NOT_EVALUATED finding is partitioned out of the three
     # verdict buckets before they are built, the same way Markdown's own
@@ -902,19 +906,15 @@ def generate_html_report(
     # banner above: without them, a policy-demoted removal still counts
     # toward breaking_count by its raw kind, producing e.g. "0.0% binary
     # compatibility" on the same page whose verdict reads COMPATIBLE.
-    # Duck-typed via getattr (like the rest of this function) so a
-    # lightweight stub result without a real DiffResult's policy machinery
-    # still renders — compatibility_metrics falls back to raw-kind counting
-    # when kind_sets is None.
-    # ADR-049 D1, same reasoning one level up in `report_summary.
-    # build_summary`: a finding contract evaluation left NOT_EVALUATED is not
-    # on the compatibility axis, so counting it here would put "0.0% binary
-    # compatibility" on a page whose verdict banner reads NO_CHANGE -- the
-    # exact disagreement the policy/kind_sets note above already guards
-    # against for the demotion case. Filtered via the shared predicate rather
-    # than `result._evaluated_changes()`: `all_changes` here is the render
-    # set, which a stub result need not expose, and this function is
-    # duck-typed throughout.
+    # Duck-typed via getattr so a lightweight stub result without a real
+    # DiffResult's policy machinery still renders (falls back to raw-kind
+    # counting when kind_sets is None). ADR-049 D1, same reasoning one level
+    # up in `report_summary.build_summary`: a NOT_EVALUATED finding is off
+    # the compatibility axis, so counting it here would produce the same
+    # kind of disagreement (a page whose banner reads NO_CHANGE showing
+    # "0.0% binary compatibility") the policy/kind_sets note above already
+    # guards against. Filtered via the shared predicate rather than
+    # `result._evaluated_changes()` since a stub result need not expose it.
     from .contract_gating import is_evaluated
 
     _eff_kind_sets_fn = getattr(result, "_effective_kind_sets", None)

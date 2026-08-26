@@ -27,22 +27,17 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 # Shared page chrome (document frame, verdict palette, footer) + the change table.
-from .demangle import demangle_batch, demangle_text, prewarm_demangle_batch
-from .html_report import _changes_table
+from .demangle import demangle_batch, prewarm_demangle_batch
+from .html_report import _abbr_symbol_text, _changes_table
 from .html_template import _VERDICT_STYLE, render_document, render_footer
 
 
 def _missing_symbol_cell(raw: str, demangle: bool = True) -> str:
-    """Render one missing-symbol entry: demangled text with the raw
-    mangled name as an ``<abbr>`` tooltip -- mirrors html_report._symbol_
-    cell's contract so two ABI-distinct mangled names that happen to
-    demangle identically (e.g. a class's C1/C2 constructor variants, both
-    `Foo::Foo()`) don't read as duplicate, indistinguishable rows (Codex
-    review, fresh evidence)."""
-    mangled, demangled = html.escape(raw), html.escape(demangle_text(raw) if demangle else raw)
-    if demangled and demangled != mangled and mangled:
-        return f'<abbr title="{html.escape(mangled, quote=True)}">{demangled}</abbr>'
-    return demangled or mangled
+    """Render one missing-symbol entry -- a thin alias for
+    html_report._abbr_symbol_text (a bare linker name, not prose, so it
+    shares that function's whole-string-not-substring-scan contract; see
+    its own docstring)."""
+    return _abbr_symbol_text(raw, demangle)
 
 
 def appcompat_to_html(result: object, *, demangle: bool = True) -> str:

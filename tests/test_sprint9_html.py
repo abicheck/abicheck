@@ -1104,6 +1104,27 @@ class TestRealDemanglingThroughTheProductionChangeDataclass:
         assert "<Bar>" not in out
         assert "foo<Bar>" not in out
 
+    def test_non_mangled_symbol_containing_a_valid_mangled_substring_is_untouched(
+        self,
+    ) -> None:
+        """Codex review, fresh evidence: a real, non-mangled export can
+        legally contain a substring that is itself a complete, valid
+        Itanium mangling (`_Z3foov` demangles to `foo()`) -- e.g. the legal
+        C identifier `prefix_Z3foov`. A symbol/value cell must demangle the
+        *whole* field, not scan for an embedded token the way free-form
+        description prose deliberately still does (Codex review: "retaining
+        embedded-token replacement only for prose descriptions"), or this
+        renders as the bogus `prefixfoo()` with the real export name gone.
+        Scoped to the symbol-cell helper directly, not the whole page,
+        since the description field's own prose-scanning behavior is
+        unaffected by this fix and out of scope for this assertion."""
+        from abicheck.html_report import _abbr_symbol_text
+
+        real_symbol = "prefix_Z3foov"
+        out = _abbr_symbol_text(real_symbol)
+        assert real_symbol in out
+        assert "prefixfoo()" not in out
+
     def test_prewarms_the_demangle_cache_before_rendering_rows(
         self, monkeypatch
     ) -> None:

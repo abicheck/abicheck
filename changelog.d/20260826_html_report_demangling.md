@@ -184,3 +184,19 @@
   matching-critical caller to put at risk -- opt in. The gate runs before
   any cache lookup, so a permissive caller's cached result can never leak
   into a stricter caller's answer for the same symbol.
+- **Sixteenth follow-up (Codex review): a non-mangled symbol containing an
+  embedded valid Itanium substring was corrupted.** `_abbr_symbol_text()`
+  (the shared helper behind every symbol/value/affected-symbol cell) called
+  `demangle_text()` -- built for scanning free-form prose for an embedded
+  mangled token -- on a field that is itself always exactly one symbol, not
+  prose. A real, non-mangled export whose name happens to contain a
+  complete, valid Itanium mangling as a substring (e.g. the legal C
+  identifier `prefix_Z3foov`, which embeds `_Z3foov` -> `foo()`) rendered
+  as the bogus `prefixfoo()`, with the real export name surviving only in
+  the `<abbr>` tooltip. `_abbr_symbol_text()` now demangles the *whole*
+  string via `demangle()` directly, which requires the entire value to be
+  valid Itanium mangling rather than merely containing a substring that
+  is; `appcompat_html._missing_symbol_cell()` (which had the identical
+  duplicated logic) is now a thin alias for it. The description field
+  deliberately keeps `demangle_text()`'s embedded-token scan, since it is
+  genuine prose that can legitimately name a mangled symbol inline.
