@@ -50,6 +50,8 @@ import math
 from collections.abc import Mapping, Sequence
 from typing import Any
 
+from .guards import binary_buffer as _is_binary_buffer
+
 __all__ = [
     "CAPTURE_METADATA_KEY",
     "canonical_form",
@@ -133,33 +135,6 @@ def _set_member(value: Any) -> Any:
     if isinstance(value, frozenset):
         return frozenset(_set_member(item) for item in value)
     return value
-
-
-def _is_binary_buffer(value: Any) -> bool:
-    """Whether a value is a binary payload rather than logical content.
-
-    Tested by the **buffer protocol** rather than against a list of types.
-    An enumerated guard (``bytes``, ``bytearray``) is only as complete as the
-    list: ``memoryview`` is a ``Sequence``, so it fell through and encoded as
-    a list of integers, taking the same digest as a genuine integer list —
-    an inline binary payload silently reinterpreted, and deduplicated against
-    unrelated logical content (Codex review). ``array.array`` and
-    ``mmap.mmap`` are the same shape, and the next such type would have been
-    the third instance of one bug.
-
-    ``memoryview(value)`` succeeds exactly when a value exposes a buffer, so
-    it asks the question the rule is actually about. ``str`` does not expose
-    one and is handled earlier regardless.
-
-    :func:`canonical_form` is the one caller and reaches this before its
-    ``Sequence`` branch, which is what the ordering has to be: every one of
-    these types would otherwise be caught by a broader branch first.
-    """
-    try:
-        memoryview(value)
-    except TypeError:
-        return False
-    return True
 
 
 def canonical_form(value: Any) -> Any:

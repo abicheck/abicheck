@@ -41,6 +41,7 @@ from typing import Any
 #: landed-surface check that pins the four public modules pins this one too,
 #: and a new guard cannot appear here unadvertised.
 __all__ = [
+    "binary_buffer",
     "decision_key",
     "item_iterable",
     "row_sequence",
@@ -227,7 +228,7 @@ def key_collection(raw: Any, field_name: str) -> None:
     item guard, but that is the item guard's accident rather than this
     one's intent.
     """
-    if isinstance(raw, (str, bytes)):
+    if isinstance(raw, str) or binary_buffer(raw):
         raise TypeError(
             f"{field_name} must be a collection of keys, not a bare "
             f"{type(raw).__name__} ({raw!r}); iterating it yields characters, "
@@ -260,7 +261,7 @@ def row_sequence(raw: Any, field_name: str) -> tuple[Any, ...]:
     (:func:`diagnostics_from`, ``_attribute_pair``, ``IdentityConflict``)
     before it was a guard, which is the drift this module exists to stop.
     """
-    if isinstance(raw, (str, bytes)) or not isinstance(raw, Sequence):
+    if isinstance(raw, str) or binary_buffer(raw) or not isinstance(raw, Sequence):
         raise TypeError(
             f"{field_name} must be a sequence of rows, not "
             f"{type(raw).__name__} ({raw!r}); iterating a mapping yields its "
@@ -268,6 +269,38 @@ def row_sequence(raw: Any, field_name: str) -> tuple[Any, ...]:
             "there are none'"
         )
     return tuple(raw)
+
+
+def binary_buffer(value: Any) -> bool:
+    """Whether a value is a binary payload rather than a container of records.
+
+    Tested by the **buffer protocol**, not against a list of types, because
+    an enumerated list is only ever as complete as the list. This module
+    learned that the expensive way: three guards here checked
+    ``(str, bytes)`` and so accepted ``bytearray`` and ``memoryview``. An
+    empty one yielded nothing — the "producer established there are none"
+    reading — and a non-empty one sailed past ``row_sequence`` and
+    ``key_collection`` outright, since both are ``Sequence``s that are not
+    ``bytes`` (Codex review).
+
+    ``memoryview(value)`` succeeds exactly when a value exposes a buffer, so
+    it asks the question the rule is actually about, and covers
+    ``array.array`` and ``mmap.mmap`` without naming them. ``str`` exposes
+    no buffer, so every caller checks it separately.
+
+    **This predicate is shared with** :mod:`abicheck.storage.canonical`,
+    which reached the same rule first for its own binary-payload branch and
+    kept a private copy. An earlier note in this module argued the two leaves
+    should restate rules rather than import them, with tests pinning that
+    they agree — and then the enumerated-list version drifted here anyway,
+    which is the outcome that note itself predicted. One definition, in the
+    module whose job is shared guards.
+    """
+    try:
+        memoryview(value)
+    except TypeError:
+        return False
+    return True
 
 
 def item_iterable(raw: Any, field_name: str) -> Any:
@@ -292,12 +325,12 @@ def item_iterable(raw: Any, field_name: str) -> Any:
     container has no items.** That is the general form of the mistake, and
     it is worth stating once rather than rediscovering per door.
     """
-    if isinstance(raw, (str, bytes)):
+    if isinstance(raw, str) or binary_buffer(raw):
         raise TypeError(
             f"{field_name} must be an iterable of records, not a bare "
             f"{type(raw).__name__} ({raw!r}); a non-empty one yields "
-            "characters and an empty one yields nothing, which would read as "
-            "'the producer established there are none'"
+            "characters or bytes and an empty one yields nothing, which "
+            "would read as 'the producer established there are none'"
         )
     if isinstance(raw, Mapping):
         raise TypeError(

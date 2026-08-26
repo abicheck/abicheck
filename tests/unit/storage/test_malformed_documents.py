@@ -420,3 +420,75 @@ class TestImplementationStateIsNotConstructorSurface:
             "these dataclasses expose private state as constructor parameters, "
             f"so a caller can install what the public mutators refuse: {exposed}"
         )
+
+
+class TestEveryContainerGuardRefusesABinaryBuffer:
+    """The enumerated-list mistake, made twice in one branch.
+
+    `canonical.py` was told earlier in this PR that checking `(bytes,
+    bytearray)` is only as complete as the list, and switched to the buffer
+    protocol. I then wrote three new guards here checking `(str, bytes)`,
+    so `bytearray` and `memoryview` walked straight through (Codex review).
+
+    Worse for two of them than the empty-scalar case: `bytearray` and
+    `memoryview` are `Sequence`s that are not `bytes`, so a **non-empty**
+    one passed `row_sequence` and `key_collection` outright and would have
+    yielded ints as rows.
+    """
+
+    @pytest.mark.parametrize(
+        "buffer",
+        [
+            pytest.param(bytearray(), id="empty-bytearray"),
+            pytest.param(bytearray(b"ab"), id="bytearray"),
+            pytest.param(memoryview(b""), id="empty-memoryview"),
+            pytest.param(memoryview(b"ab"), id="memoryview"),
+            pytest.param(b"", id="empty-bytes"),
+            pytest.param(b"ab", id="bytes"),
+        ],
+    )
+    def test_all_three_guards_refuse_it(self, buffer: object) -> None:
+        from abicheck.storage.guards import (
+            item_iterable,
+            key_collection,
+            row_sequence,
+        )
+
+        for guard in (row_sequence, key_collection, item_iterable):
+            with pytest.raises(TypeError):
+                guard(buffer, "field")
+
+    def test_the_doors_that_use_them_refuse_it_too(self) -> None:
+        """The guards are only worth what their call sites do with them."""
+        from abicheck.storage.identity import OccurrenceSet, group_by_entity
+
+        for buffer in (bytearray(), memoryview(b""), bytearray(b"ab")):
+            with pytest.raises(TypeError):
+                OccurrenceSet().extend(buffer)
+            with pytest.raises(TypeError):
+                group_by_entity(buffer)
+
+    def test_the_predicate_has_one_definition(self) -> None:
+        """`canonical` and `guards` had reached this rule separately.
+
+        An earlier note argued the two leaves should restate rules rather
+        than import them, with tests pinning agreement — and the enumerated
+        version then drifted into `guards` anyway, which is what that note
+        predicted. They share the definition now, so agreement is structural
+        rather than promised.
+        """
+        from abicheck.storage import canonical, guards
+
+        assert canonical._is_binary_buffer is guards.binary_buffer
+
+    def test_real_containers_are_untouched(self) -> None:
+        """The control: a buffer is refused, an ordinary container is not."""
+        from abicheck.storage.guards import (
+            item_iterable,
+            key_collection,
+            row_sequence,
+        )
+
+        assert row_sequence([1, 2], "field") == (1, 2)
+        key_collection(["layout"], "field")
+        item_iterable(iter([1, 2]), "field")
