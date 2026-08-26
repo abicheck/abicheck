@@ -187,6 +187,38 @@ def _decision_key(raw: Any, field_name: str) -> str:
     return raw
 
 
+def _provenance_text(raw: Any, field_name: str) -> str:
+    """A provenance field, rejected rather than coerced if not a string.
+
+    ``str()`` made ``recipe: 1`` and ``recipe: "1"`` deserialize and serialize
+    identically, so two records that a package distinguished became
+    interchangeable (Codex review). That matters more here than it looks:
+    ``recipe`` and ``producer`` are exactly the fields that decide whether two
+    ``PRESENT`` records may be compared, so erasing a distinction between them
+    makes invalid evidence look equivalent to valid evidence.
+
+    This is the third module to restate the same rule — ``canonical_form``
+    refuses a non-string mapping key, ``identity._identity_text`` refuses a
+    coerced identity field, and ``_decision_key`` below refuses a coerced
+    ledger key. They are deliberate restatements rather than one shared
+    helper, because these modules are leaves that import nothing from each
+    other, and a shared private module would have to be declared in the
+    published Phase 0 surface to satisfy the landed-surface check.
+
+    That is a real cost and it is recorded rather than hidden: every site now
+    carries its own test, and ``AGENTS.md`` names the rule so Phase 1 can
+    unify it once there is a shared leaf to put it in. A restated rule drifts,
+    and this branch found four sites where it already had.
+    """
+    if not isinstance(raw, str):
+        raise TypeError(
+            f"{field_name} must be a string, not {type(raw).__name__} "
+            f"({raw!r}); coercing it would make two records a package "
+            "distinguished compare as interchangeable"
+        )
+    return raw
+
+
 @dataclass(frozen=True)
 class FactAvailability:
     """One fact family's availability, with the evidence for the claim.
@@ -365,10 +397,12 @@ class FactAvailability:
             raise ValueError(f"unknown confidence {raw_confidence!r}") from exc
         return cls(
             status=status,
-            producer=str(data.get("producer", "")),
-            producer_version=str(data.get("producer_version", "")),
-            recipe=str(data.get("recipe", "")),
-            scope=str(data.get("scope", "")),
+            producer=_provenance_text(data.get("producer", ""), "producer"),
+            producer_version=_provenance_text(
+                data.get("producer_version", ""), "producer_version"
+            ),
+            recipe=_provenance_text(data.get("recipe", ""), "recipe"),
+            scope=_provenance_text(data.get("scope", ""), "scope"),
             confidence=confidence,
             diagnostics=_diagnostics_from(data.get("diagnostics", ())),
         )

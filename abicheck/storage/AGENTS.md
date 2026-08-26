@@ -99,6 +99,26 @@ re-export surface, not a namespace to import through internally.
 5. **Never add a fifth meaning to one version integer.** A new kind of
    compatibility question gets its own axis in `StorageVersions`.
 
+6. **Never coerce a value a decision reads.** `str()` on a field that
+   identifies something is silently lossy in the one way that matters: `1` and
+   `"1"` become the same value, so two things a package distinguished stop
+   being distinguishable, and where the field is a mapping key, iteration
+   order decides which record survives. Reject instead. This applies to
+   identity fields, mapping keys, ledger family names, override key halves,
+   and provenance (`producer`/`recipe` decide whether two `PRESENT` records
+   are interchangeable). Informational version axes are the deliberate
+   exception — no decision reads them, and this repo's convention is that a
+   hand-edited package must not abort a load.
+
+   **This rule is currently restated in three modules** (`canonical_form`'s
+   mapping keys, `identity._identity_text`, `availability._provenance_text`
+   and `_decision_key`) rather than shared, because these are leaves that
+   import nothing from each other and a shared private module would have to
+   be declared in the published Phase 0 surface. Review found *four*
+   separate sites where the rule had not been applied, one at a time — so
+   treat a new site as likely-missing rather than likely-fine, and unify the
+   helper in Phase 1 once there is a shared leaf to hold it.
+
 ## Tests
 
 `tests/test_bundle_archive.py` (the core archive primitive) and

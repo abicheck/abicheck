@@ -301,4 +301,25 @@ def semantic_digest(value: Any, *, algorithm: str = "sha256") -> str:
         sort_keys=True,
         separators=(",", ":"),
     ).encode("ascii")
-    return f"{algorithm}:{hashlib.new(algorithm, payload).hexdigest()}"
+    digester = hashlib.new(algorithm, payload)
+    if digester.digest_size == 0:
+        # SHAKE and friends are extendable-output functions: `hashlib.new`
+        # accepts them, but `hexdigest()` requires a length, so a caller
+        # selecting one got a bare `TypeError: hexdigest() missing required
+        # argument 'length'` from inside a digest call (Codex review).
+        # `algorithm` is public and exists so a future algorithm change is
+        # expressible, which makes an unusable-but-accepted value a real trap
+        # rather than a theoretical one.
+        #
+        # Detected by `digest_size == 0` rather than an allowlist of names: an
+        # allowlist would also refuse a future fixed-length algorithm, which is
+        # the opposite of what this parameter is for. Refusing rather than
+        # picking a length is the point — an arbitrary output length chosen
+        # here would silently become part of every digest this build writes,
+        # and no reader could know which length produced one.
+        raise ValueError(
+            f"{algorithm!r} is an extendable-output function with no fixed "
+            "digest size; a content address needs a fixed-length digest, so "
+            "choose a fixed-length algorithm such as sha256"
+        )
+    return f"{algorithm}:{digester.hexdigest()}"

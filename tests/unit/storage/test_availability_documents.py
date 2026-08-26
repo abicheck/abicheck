@@ -429,3 +429,50 @@ class TestDecisionKeysAreRejectedNotCoerced:
         )
 
         assert versions.section_schema_versions == {"1": 2}
+
+
+class TestProvenanceIsRejectedNotCoerced:
+    """Codex review: `recipe: 1` and `recipe: "1"` became the same record.
+
+    `recipe` and `producer` are the fields that decide whether two `PRESENT`
+    records may be compared, so erasing a distinction between them makes
+    invalid evidence look equivalent to valid evidence — a worse outcome than
+    the coercion's size suggests.
+    """
+
+    @pytest.mark.parametrize(
+        "field", ["producer", "producer_version", "recipe", "scope"]
+    )
+    @pytest.mark.parametrize("value", [1, 1.0, True, None, ["r1"], {"r": 1}])
+    def test_a_non_string_provenance_field_is_refused(
+        self, field: str, value: object
+    ) -> None:
+        with pytest.raises(TypeError, match=field):
+            FactAvailability.from_dict({"status": "present", field: value})
+
+    def test_the_reported_collapse_no_longer_happens(self) -> None:
+        """`1` and `"1"` must not deserialize to the same record."""
+        with pytest.raises(TypeError, match="recipe"):
+            FactAvailability.from_dict({"status": "present", "recipe": 1})
+
+        assert (
+            FactAvailability.from_dict({"status": "present", "recipe": "1"}).recipe
+            == "1"
+        )
+
+    def test_absent_fields_still_default_to_empty(self) -> None:
+        loaded = FactAvailability.from_dict({"status": "present"})
+
+        assert (loaded.producer, loaded.producer_version) == ("", "")
+        assert (loaded.recipe, loaded.scope) == ("", "")
+
+    def test_a_fully_populated_record_round_trips(self) -> None:
+        original = FactAvailability(
+            FactStatus.PRESENT,
+            producer="clang",
+            producer_version="18.1.0",
+            recipe="r1",
+            scope="headers-only",
+        )
+
+        assert FactAvailability.from_dict(original.to_dict()) == original

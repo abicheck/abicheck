@@ -1068,3 +1068,42 @@ class TestNestedBooleansInSetMembersAgree:
         """Collapsing must not merge sets that are not equal."""
         assert semantic_digest({"s": {(1,)}}) != semantic_digest({"s": {(2,)}})
         assert semantic_digest({"s": {(1, 2)}}) != semantic_digest({"s": {(1,)}})
+
+
+class TestExtendableOutputAlgorithmsAreRefused:
+    """Codex review: `hashlib.new` accepts SHAKE, `hexdigest()` does not.
+
+    SHAKE is an extendable-output function, so a caller selecting one got a
+    bare `TypeError: hexdigest() missing required argument 'length'` from
+    inside a digest call. `algorithm` is public and exists so a future
+    algorithm change is expressible, which makes an accepted-but-unusable
+    value a real trap rather than a theoretical one.
+    """
+
+    @pytest.mark.parametrize("algorithm", ["shake_128", "shake_256"])
+    def test_a_variable_length_algorithm_is_refused(self, algorithm: str) -> None:
+        with pytest.raises(ValueError, match="extendable-output"):
+            semantic_digest({"a": 1}, algorithm=algorithm)
+
+    @pytest.mark.parametrize(
+        "algorithm", ["sha256", "sha512", "sha3_256", "blake2b", "blake2s"]
+    )
+    def test_fixed_length_algorithms_still_work(self, algorithm: str) -> None:
+        """Detection is by digest size, not an allowlist of names.
+
+        An allowlist would also refuse a future fixed-length algorithm, which
+        is the opposite of what this parameter is for — so every fixed-length
+        algorithm hashlib offers must keep working, not just sha256.
+        """
+        digest = semantic_digest({"a": 1}, algorithm=algorithm)
+
+        assert digest.startswith(f"{algorithm}:")
+        assert len(digest.split(":", 1)[1]) > 0
+
+    def test_an_unknown_algorithm_still_reports_itself(self) -> None:
+        """The pre-existing error must not be swallowed by the new guard."""
+        with pytest.raises(ValueError, match="unsupported hash type"):
+            semantic_digest({"a": 1}, algorithm="definitely-not-a-hash")
+
+    def test_the_digest_names_the_algorithm_that_produced_it(self) -> None:
+        assert semantic_digest({"a": 1}, algorithm="sha512").split(":")[0] == "sha512"
