@@ -157,3 +157,19 @@
   guard and preflight-safety test classes, split out of
   `tests/test_bundle_archive.py` purely to keep both under the ADR-061
   1200-line test cap after these additions.
+
+- **G40 bundle archive: two more Codex review findings, both real, both
+  fixed.** (1) `BundleArchiveWriter.put_blob()` never checked a payload's
+  size against `DEFAULT_MAX_BLOB_BYTES` before compressing and writing
+  it -- `read_blob()`'s own default cap is exactly this value, and the
+  high-level bundle loader never grants a larger allowance, so a direct
+  caller of this primitive could publish an archive its own paired
+  reader could never reopen. Now enforced in `put_blob()` itself, same
+  reader/writer symmetry as the member-count cap. (2) A central-
+  directory member whose `extract_version` exceeds what `zipfile`
+  supports makes `zipfile.ZipFile.__init__` raise a bare
+  `NotImplementedError` -- neither `BadZipFile` nor `OSError`, so it
+  escaped this module's `SnapshotError` contract via the generic
+  `except BaseException:` cleanup handler, surfacing a raw traceback
+  instead of a clean operational error. Now translated alongside the
+  other two exception types.

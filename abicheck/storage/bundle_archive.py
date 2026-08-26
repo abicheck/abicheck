@@ -185,10 +185,8 @@ def open_regular_file_for_format_sniff(
     non-regular-file source -- the caller must not close *fp* then."""
     p = Path(path)
     # Open first, nonblocking, then fstat() *that* fd -- a plain stat()
-    # then a separate open() leaves a window where a concurrent
-    # replacement swaps a regular file for e.g. a FIFO, whose open() then
-    # blocks until a writer connects. O_NONBLOCK keeps open() from
-    # blocking either way, and fstat() names the exact inode read below.
+    # then a separate open() risks a concurrent swap to a FIFO, whose
+    # open() blocks until a writer connects; O_NONBLOCK avoids that.
     nonblock = getattr(os, "O_NONBLOCK", 0)
     try:
         fd = os.open(p, os.O_RDONLY | nonblock)
@@ -206,9 +204,8 @@ def open_regular_file_for_format_sniff(
     try:
         prefix = fp.read(4)
     except OSError as exc:
-        # A failure reading the peek itself must not leak the fd or
-        # propagate a raw OSError -- this module's error contract is
-        # SnapshotError throughout.
+        # A failure reading the peek must not leak the fd or propagate a
+        # raw OSError -- this module's error contract is SnapshotError.
         fp.close()
         raise SnapshotError(f"Cannot read {p}: {exc}") from exc
     return fp, _classify_prefix(prefix)
@@ -314,9 +311,8 @@ class BundleArchiveWriter:
         if existing_stat is not None:
             if not stat.S_ISREG(existing_stat.st_mode):
                 # os.replace() would destroy a pre-existing FIFO/socket/
-                # device -- this writer builds incrementally into a temp
-                # file and can only publish via atomic rename, so there
-                # is no way to "write through" such a destination.
+                # device -- this writer can only publish via atomic
+                # rename, so there is no way to "write through" it.
                 raise SnapshotError(
                     f"{self._target}: already exists and is not a regular "
                     "file (a FIFO, socket, or device) -- refusing to "
@@ -336,10 +332,9 @@ class BundleArchiveWriter:
             self._existing_gid = existing_stat.st_gid
         self._target.parent.mkdir(parents=True, exist_ok=True)
         # _open_unique_temp, not a predictable path zipfile.ZipFile could
-        # open separately -- a directory writable by another account
-        # could pre-create such a name as a symlink, which `ZipFile`
-        # follows. Randomized and opened O_CREAT|O_EXCL at 0o666 filtered
-        # by umask (not mkstemp's more-restrictive hardcoded 0600).
+        # open separately -- a writable directory could pre-create such a
+        # name as a symlink, which `ZipFile` follows. Randomized, opened
+        # O_CREAT|O_EXCL at umask-filtered 0o666 (not mkstemp's 0600).
         tmp_fd, self._tmp_path = _open_unique_temp(
             self._target.parent, f".{self._target.name}.", ".tmp"
         )
@@ -370,15 +365,24 @@ class BundleArchiveWriter:
         if h in self._written_hashes:
             return h
         # Enforced here too, not only by write_bundle_facts_archive()'s own
-        # preflight -- a direct caller adding MAX_ARCHIVE_MEMBERS blobs
-        # then write_manifest() would else exceed the reader's own cap.
-        # +1 for this blob, +1 reserved for the mandatory manifest member.
+        # preflight -- a direct caller could else exceed the reader's own
+        # cap. +1 for this blob, +1 reserved for the manifest member.
         if len(self._written_hashes) + 1 + 1 > MAX_ARCHIVE_MEMBERS:
             raise SnapshotError(
                 f"BundleArchiveWriter: writing this blob would produce "
                 f"more than {MAX_ARCHIVE_MEMBERS} zip members (the "
                 "reader's own safety limit) -- refusing to write an "
                 "archive that could not be reopened."
+            )
+        # Same reader/writer symmetry as the member-count cap above:
+        # read_blob()'s own default cap is exactly this value -- a direct
+        # caller publishing a bigger payload could never be reopened.
+        if len(payload) > DEFAULT_MAX_BLOB_BYTES:
+            raise SnapshotError(
+                f"BundleArchiveWriter: this payload is {len(payload)} "
+                f"bytes, exceeding the {DEFAULT_MAX_BLOB_BYTES} byte "
+                "safety limit read_blob() enforces on load by default -- "
+                "refusing to write an archive that could not be reopened."
             )
         zstandard = _zstd_module()
         compressor = zstandard.ZstdCompressor(level=ZSTD_LEVEL)
@@ -424,12 +428,11 @@ class BundleArchiveWriter:
             # mirroring snapshot_io._atomic_write_bytes's own two-part
             # fsync. Best-effort only for "fs doesn't support fsync".
             self._fsync_tmp_file()
-            # Ownership before mode: chown() clears setuid/setgid on
-            # POSIX, so mode first would strip real 06755 bits right
-            # after. Not best-effort -- wrong owner/group revokes access.
-            # fchown/fchmod on the fd, not the path: a shared directory
-            # could substitute a file at that path before a path-based
-            # reopen; the held-open fd cannot be redirected that way.
+            # Ownership before mode: chown() clears setuid/setgid, so mode
+            # first would strip real 06755 bits right after. Not best-
+            # effort -- wrong owner/group revokes access. fchown/fchmod
+            # on the fd, not the path, since a shared directory could
+            # substitute a file there before a path-based reopen.
             if (
                 self._existing_uid is not None or self._existing_gid is not None
             ) and hasattr(os, "fchown"):
@@ -467,13 +470,11 @@ class BundleArchiveWriter:
             # so a caller verifying against it detects the mismatch.
             os.replace(self._tmp_path, self._target)
         except BaseException:
-            # A failure anywhere above must not leave the -- potentially
-            # large -- temp file behind; a repeated failure (ENOSPC, EIO)
-            # would otherwise starve later retries of the space they're
-            # trying to free. No-op once os.replace() has succeeded.
-            #
-            # Nested `finally`, not a plain sibling statement, so the
-            # unlink still runs even when close() itself raises.
+            # A failure anywhere above must not leave the potentially
+            # large temp file behind (a repeated ENOSPC/EIO would starve
+            # later retries of the space they need). No-op once
+            # os.replace() has succeeded. Nested `finally`, not a plain
+            # sibling statement, so the unlink runs even if close() raises.
             try:
                 if not self._tmp_file.closed:
                     self._tmp_file.close()
@@ -558,11 +559,10 @@ class BundleArchiveReader:
         else:
             # Same O_NONBLOCK-open + fstat()-classify shape as
             # `open_regular_file_for_format_sniff` -- an explicit
-            # `format="archive"` caller bypasses that sniff's own non-
-            # regular-source guard entirely, so a FIFO with no writer
-            # would otherwise hang here. ZIP input must be seekable
-            # regardless, so a non-regular source is always a usage
-            # error here, never a valid "reads as JSON".
+            # `format="archive"` caller bypasses that sniff's own guard
+            # entirely, so a FIFO with no writer would otherwise hang
+            # here. ZIP input must be seekable regardless, so a non-
+            # regular source is always a usage error, never valid JSON.
             nonblock = getattr(os, "O_NONBLOCK", 0)
             try:
                 fd = os.open(self._path, os.O_RDONLY | nonblock)
@@ -598,14 +598,16 @@ class BundleArchiveReader:
                 )
             fp.seek(0)
             self._zf = zipfile.ZipFile(fp, mode="r")
-        except (zipfile.BadZipFile, OSError) as exc:
+        except (zipfile.BadZipFile, OSError, NotImplementedError) as exc:
             # Every deliberate failure in this module raises SnapshotError,
             # which the CLI boundary translates into a clean usage error --
             # a truncated or hand-assembled archive must not surface as a
             # raw zipfile traceback instead (CodeRabbit review).
             # sniff_bundle_archive_format() only checks the first 4 bytes,
             # so a damaged archive routinely passes that detection and
-            # reaches this constructor.
+            # reaches this constructor. NotImplementedError is ZipFile's
+            # own raise for a member's extract_version exceeding what this
+            # zipfile module supports -- not BadZipFile/OSError.
             fp.close()
             raise SnapshotError(f"{self._path}: not a valid bundle archive: {exc}") from exc
         except BaseException:
@@ -660,11 +662,9 @@ class BundleArchiveReader:
                 "member)."
             )
         # The zip "encrypted" bit makes `ZipFile.open()` raise a bare
-        # `RuntimeError`, not the `BadZipFile` the except clause below
-        # translates, leaking past this module's SnapshotError contract.
-        # No member this writer produces is ever encrypted, so checked
-        # here rather than caught after (RuntimeError is too generic to
-        # safely narrow in an except clause).
+        # `RuntimeError`, not the `BadZipFile` translated below. No
+        # member this writer produces is ever encrypted, so checked here
+        # (RuntimeError is too generic to safely narrow in an except).
         if info.flag_bits & 0x1:
             raise SnapshotError(
                 f"{self._path}: member {name!r} is encrypted -- not a "

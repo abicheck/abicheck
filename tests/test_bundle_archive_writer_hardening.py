@@ -446,3 +446,61 @@ class TestPutBlobReservesTheManifestMemberSlot:
             manifest = reader.read_manifest()
             assert manifest["library_blobs"]["a.so"] == h1
             assert manifest["library_blobs"]["b.so"] == h2
+
+
+class TestPutBlobRejectsPayloadsTheReaderCannotDecode:
+    """`put_blob()` must itself refuse a payload bigger than
+    `DEFAULT_MAX_BLOB_BYTES`, not just accept and publish it -- `read_
+    blob()`'s own default cap is exactly this value, and the high-level
+    bundle loader never grants a larger allowance, so a direct caller of
+    this primitive could otherwise create an archive its own paired
+    reader could never reopen (Codex review, fresh evidence)."""
+
+    def test_put_blob_raises_before_writing_an_oversized_payload(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(bundle_archive_module, "DEFAULT_MAX_BLOB_BYTES", 100)
+        path = tmp_path / "bundle.archive.zip"
+        with BundleArchiveWriter(path) as writer:
+            with pytest.raises(SnapshotError, match="exceeding the 100 byte"):
+                writer.put_blob(b"x" * 101)
+            # A caller recovering from the rejection can still finish the
+            # archive with whatever else was already accepted.
+            writer.write_manifest({"library_blobs": {}})
+
+    def test_a_payload_at_the_cap_still_succeeds(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(bundle_archive_module, "DEFAULT_MAX_BLOB_BYTES", 100)
+        path = tmp_path / "bundle.archive.zip"
+        with BundleArchiveWriter(path) as writer:
+            h = writer.put_blob(b"x" * 100)
+            writer.write_manifest({"library_blobs": {"a.so": h}})
+        with BundleArchiveReader(path) as reader:
+            assert reader.read_blob(h) == b"x" * 100
+
+
+class TestReaderTranslatesUnsupportedZipVersions:
+    """`zipfile.ZipFile` raises a bare `NotImplementedError` (not
+    `BadZipFile`) for a central-directory member whose extract_version
+    exceeds what this zipfile module supports -- previously escaped this
+    module's SnapshotError contract entirely (Codex review, fresh
+    evidence)."""
+
+    def test_unsupported_extract_version_raises_snapshot_error(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        path = tmp_path / "bundle.archive.zip"
+        with BundleArchiveWriter(path) as writer:
+            h = writer.put_blob(b'{"a": 1}')
+            writer.write_manifest({"library_blobs": {"a.so": h}})
+
+        real_init = zipfile.ZipFile.__init__
+
+        def _failing_init(self, *a, **kw):  # type: ignore[no-untyped-def]
+            real_init(self, *a, **kw)
+            raise NotImplementedError("zip file version 9.9")
+
+        monkeypatch.setattr(zipfile.ZipFile, "__init__", _failing_init)
+        with pytest.raises(SnapshotError, match="not a valid bundle archive"):
+            BundleArchiveReader.open(path)
