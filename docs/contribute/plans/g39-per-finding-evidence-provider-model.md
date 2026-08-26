@@ -1425,24 +1425,87 @@ structure already in place:
    `both:l0:searched:elf_symtab`; `both.pe` emits
    `both:l0:searched:pe_export_table`; `both.macho` emits
    `both:l0:searched:macho_exports`; `both.dwarf`/`both.dwarf_advanced`
-   present on both sides emits `both:l1:searched:dwarf`; and a header-AST
-   snapshot on both sides emits `both:l2:searched:castxml`/
-   `both:l2:searched:clang` (never a bare `l2`), naming whichever backend(s)
-   actually produced it — one entry per provider actually consulted, the
-   same "no collapsed composite tag" rule item 1 states for its own
-   multi-provider case, rather than a single `both:l2:searched:headers`
-   placeholder. A field only one side carries is either omitted from the
-   negative component entirely (the conservative choice — this plan's own
-   `AGENTS.md`-derived preference for a documented false-negative gap over a
-   fabricated positive applies here too) or, if a single-sided claim is
-   wanted, spelled with the honest `old:`/`new:` prefix for that side alone,
-   never `both:`. This makes the claim actually true in the problem cases
-   round 27 and round 28 already identified — non-empty even when
-   `changes == []`, independent of which findings were emitted — *and* true
-   in the case round 29 adds: it never asserts a side was searched when only
-   the other side's snapshot carried the evidence, and it never asserts
-   anything about L3–L5, which this tier inventory has no visibility into
-   at all.
+   present on both sides emits `both:l1:searched:dwarf`. A field only one
+   side carries is either omitted from the negative component entirely (the
+   conservative choice — this plan's own `AGENTS.md`-derived preference for
+   a documented false-negative gap over a fabricated positive applies here
+   too) or, if a single-sided claim is wanted, spelled with the honest
+   `old:`/`new:` prefix for that side alone, never `both:`.
+
+   **The header-AST (`l2`) field needs its own, narrower rule than "field
+   present on both sides ⇒ `both:`" — `from_headers` being `True` on both
+   sides does not mean every backend that produced either side's headers
+   ran on *both* sides (Codex review, verified against the real code, PR
+   #866 round 31).** `AbiSnapshot.ast_producer` (`model.py`) is a single
+   per-snapshot value — `"castxml"` / `"clang"` / `"hybrid"` / `None` — set
+   independently on each side, so an asymmetric pairing (old dumped with
+   `--ast-frontend castxml`, new with `--ast-frontend clang`, an entirely
+   ordinary shape for a `scan --against` a baseline dumped with a different
+   default than the live binary's frontend) is not a hypothetical edge
+   case. An earlier draft of this paragraph derived "whichever backend(s)
+   actually produced it" as the *union* of both sides' backends and
+   emitted every member of that union under one blanket `both:` prefix —
+   which asserts, falsely, that castxml searched the new side and that
+   clang searched the old side, neither of which happened. The fix is to
+   reuse this document's own `snapshot_backend_tag` derivation (above,
+   `l2` branch) *per side, independently* — expanding `"hybrid"` to both
+   `l2:castxml` and `l2:clang` and a legacy `None` (pre-schema-v10) to
+   `l2:legacy_unknown_backend`, exactly as that derivation already does —
+   to get `old_backends`/`new_backends`, each a tuple of the `l2:<backend>`
+   tags that snapshot's own header-AST layer actually used. Only then is
+   the `both:`/`old:`/`new:` prefix decided, per backend tag rather than
+   per field: a backend present in both tuples emits
+   `both:l2:searched:<backend>`; a backend present in only one emits
+   `<that side>:l2:searched:<backend>` for that side alone. So
+   old-castxml/new-clang emits `old:l2:searched:castxml` +
+   `new:l2:searched:clang` (never a `both:` on either); old-hybrid/
+   new-clang emits `both:l2:searched:clang` (clang ran on both, once
+   directly and once as hybrid's clang half) + `old:l2:searched:castxml`
+   (only old's hybrid half used castxml); and old-castxml/new-castxml
+   emits `both:l2:searched:castxml` alone, matching the pre-existing
+   both-sides-identical case exactly. This is the same "no collapsed
+   composite tag" rule item 1 states for its own multi-provider case,
+   rather than a single `both:l2:searched:headers` placeholder, now applied
+   with the side prefix computed honestly per backend instead of per field.
+
+   This makes the claim actually true in the problem cases round 27 and
+   round 28 already identified — non-empty even when `changes == []`,
+   independent of which findings were emitted — *and* true in the case
+   round 29 adds: it never asserts a side was searched when only the other
+   side's snapshot carried the evidence — *and* true in the asymmetric-
+   backend case round 31 adds: it never asserts a backend searched a side
+   it never actually ran against — and it never asserts anything about
+   L3–L5, which this tier inventory has no visibility into at all.
+
+   **The `l0:elf_symtab` tag in this negative component is a deliberately
+   different claim from the positive `l0:elf_dynamic` component
+   `SONAME_BUMP_UNNECESSARY` already carries above, not a mislabeling of it
+   (CodeRabbit review, PR #866 round 31, considered and not applied).** A
+   review pass proposed dropping `l0:searched:elf_symtab` from this
+   negative component on the grounds that `check_soname_bump_policy()`
+   itself reads only `old_elf.soname`/`new_elf.soname` (the `.dynamic`
+   section, `l0:elf_dynamic`) and never touches `.dynsym`/export-table data
+   directly — true, but not the claim this tag makes. The two components
+   answer two different questions, unioned rather than substituted for one
+   another, exactly as round 27 above establishes: `l0:elf_dynamic` backs
+   *this function's own* SONAME comparison; the negative `searched:`
+   component backs the separate, `changes`-independent claim that *other*
+   detectors — the ones this policy's `has_breaking` check summarizes,
+   which do read `.dynsym`-derived function/variable data — had ELF
+   evidence available on the side(s) named. Keeping only `l0:elf_dynamic`,
+   as that review pass suggested, would not fix a mislabel; it would delete
+   the finding's only claim about why "no other breaking change" is
+   trustworthy, regressing exactly the gap round 28 opened this whole
+   negative-component design to close. The broader concern underneath the
+   proposal — that snapshot-field presence approximates, rather than
+   proves, that a specific detector actually consulted that field for this
+   comparison — is real and already acknowledged as an accepted limitation
+   two paragraphs above ("Building a genuine per-side, per-detector 'what
+   was actually searched and completed' receipt does not exist anywhere in
+   this codebase today... explicitly out of scope here"); it is not
+   specific to `elf_symtab` versus `elf_dynamic` and applies identically to
+   every tag this negative component emits, `l1:dwarf`/`l2:castxml`/
+   `l2:clang` included, not only the ELF one.
 
 Each slice, once wired, gets its own FP-rate/mutation-score gate re-run
 before merging — never the whole inventory behind one PR. The FP-rate/
