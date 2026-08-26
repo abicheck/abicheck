@@ -525,3 +525,150 @@ class TestKeysAreInjectionProof:
         b = EntityId(EntityKind.FUNCTION, name + discriminator, "")
 
         assert (a == b) == (a.key == b.key)
+
+
+class TestProducerIsPartOfTheObservationSite:
+    """Codex review: two producers read as one producer contradicting itself.
+
+    Not a corner case in this codebase — `--ast-frontend hybrid` exists to
+    have Clang and CastXML both describe one translation unit, and
+    `fact_provenance` records which produced what.
+    """
+
+    def test_two_ast_producers_in_one_tu_are_not_a_conflict(self) -> None:
+        entity = EntityId(EntityKind.FUNCTION, "f")
+        occurrences = OccurrenceSet()
+        for producer in ("clang", "castxml"):
+            occurrences.add(
+                OccurrenceId(
+                    entity,
+                    ObservationKind.AST,
+                    "a.cpp",
+                    (("size", "8"),),
+                    producer=producer,
+                )
+            )
+
+        assert occurrences.conflicts() == ()
+        # Still two occurrences — grouping them is not merging them.
+        assert len(occurrences) == 2
+
+    def test_one_producer_contradicting_itself_is_still_a_conflict(self) -> None:
+        """The narrowing must not weaken what the rule is actually for."""
+        entity = EntityId(EntityKind.FUNCTION, "f")
+        occurrences = OccurrenceSet()
+        for size in ("8", "16"):
+            occurrences.add(
+                OccurrenceId(
+                    entity,
+                    ObservationKind.AST,
+                    "a.cpp",
+                    (("size", size),),
+                    producer="clang",
+                )
+            )
+
+        conflicts = occurrences.conflicts()
+
+        assert len(conflicts) == 1
+        assert "clang" in conflicts[0].reason
+        assert len(conflicts[0].occurrences) == 2
+
+    def test_producer_separates_occurrences_in_the_key(self) -> None:
+        entity = EntityId(EntityKind.FUNCTION, "f")
+        clang = OccurrenceId(entity, ObservationKind.AST, "a.cpp", producer="clang")
+        castxml = OccurrenceId(entity, ObservationKind.AST, "a.cpp", producer="castxml")
+
+        assert clang != castxml
+        assert clang.key != castxml.key
+
+    def test_producer_is_keyword_only(self) -> None:
+        """Adding it must not change what any positional call means."""
+        with pytest.raises(TypeError):
+            OccurrenceId(  # type: ignore[misc]
+                EntityId(EntityKind.FUNCTION, "f"),
+                ObservationKind.AST,
+                "a.cpp",
+                (),
+                "clang",
+            )
+
+    def test_producer_round_trips(self) -> None:
+        occurrence = OccurrenceId(
+            EntityId(EntityKind.FUNCTION, "f"),
+            ObservationKind.AST,
+            "a.cpp",
+            producer="clang",
+        )
+
+        assert OccurrenceId.from_dict(occurrence.to_dict()) == occurrence
+
+    def test_site_names_all_three_axes(self) -> None:
+        occurrence = OccurrenceId(
+            EntityId(EntityKind.FUNCTION, "f"),
+            ObservationKind.DWARF,
+            "lib.so",
+            producer="dwarf",
+        )
+
+        assert occurrence.site == ("dwarf", "lib.so", "dwarf")
+
+
+class TestIdentifiersAreOrderable:
+    """Codex review: `order=True` advertised an ordering that raised.
+
+    The generated comparison goes field by field and reaches a plain
+    `enum.Enum`, which does not implement `<` — so `sorted()` raised
+    `TypeError` for any two identifiers differing at the enum field. Both
+    types were affected, not only `OccurrenceId`.
+    """
+
+    def test_occurrences_differing_by_observation_kind_sort(self) -> None:
+        entity = EntityId(EntityKind.FUNCTION, "f")
+        pair = [
+            OccurrenceId(entity, ObservationKind.DWARF),
+            OccurrenceId(entity, ObservationKind.AST),
+        ]
+
+        assert sorted(pair) == sorted(pair, key=lambda o: o.key)
+
+    def test_entities_differing_by_kind_sort(self) -> None:
+        pair = [EntityId(EntityKind.TYPE, "a"), EntityId(EntityKind.FUNCTION, "a")]
+
+        assert sorted(pair) == sorted(pair, key=lambda e: e.key)
+
+    @given(
+        st.lists(
+            st.tuples(
+                st.sampled_from(list(EntityKind)),
+                st.sampled_from(["a", "b", "ns::c"]),
+            ),
+            max_size=8,
+        )
+    )
+    def test_entity_ordering_is_total_over_every_kind(
+        self, raw: list[tuple[EntityKind, str]]
+    ) -> None:
+        """No pair of identifiers may be unorderable."""
+        entities = [EntityId(kind, name) for kind, name in raw]
+
+        assert sorted(entities) == sorted(entities, key=lambda e: e.key)
+
+    def test_ordering_agrees_with_the_module_s_own_accessors(self) -> None:
+        """Sorting identifiers must match how the set already orders them."""
+        occurrences = OccurrenceSet()
+        built = [
+            OccurrenceId(EntityId(EntityKind.TYPE, "z"), ObservationKind.AST),
+            OccurrenceId(EntityId(EntityKind.FUNCTION, "a"), ObservationKind.DWARF),
+        ]
+        occurrences.extend(built)
+
+        assert list(occurrences) == sorted(built)
+
+    def test_the_full_comparison_set_is_available(self) -> None:
+        entity = EntityId(EntityKind.FUNCTION, "f")
+        low = OccurrenceId(entity, ObservationKind.AST)
+        high = OccurrenceId(entity, ObservationKind.DWARF)
+
+        assert (low < high) and (low <= high)
+        assert (high > low) and (high >= low)

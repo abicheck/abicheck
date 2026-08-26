@@ -48,6 +48,7 @@ module gives them somewhere honest to land.
 from __future__ import annotations
 
 import enum
+import functools
 from collections.abc import Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
@@ -122,7 +123,8 @@ class ObservationKind(enum.Enum):
     BUILD_UNIT = "build_unit"
 
 
-@dataclass(frozen=True, order=True)
+@functools.total_ordering
+@dataclass(frozen=True)
 class EntityId:
     """A logical entity's identity.
 
@@ -144,6 +146,20 @@ class EntityId:
         """Flat, collision-free string key. Stable across runs and releases."""
         return _packed(self.kind.value, self.qualified_name, self.discriminator)
 
+    def __lt__(self, other: object) -> bool:
+        """Order by :attr:`key`, which is total and stable.
+
+        The dataclass-generated ordering (``order=True``) was wrong and
+        advertised as working (Codex review): it compares field by field, so
+        it reaches ``kind`` — a plain ``enum.Enum``, which does not implement
+        ``<`` — and ``sorted()`` raised ``TypeError`` for any two entities of
+        different kinds. Comparing keys instead is total over every pair, and
+        agrees with the order every accessor in this module already uses.
+        """
+        if not isinstance(other, EntityId):
+            return NotImplemented
+        return self.key < other.key
+
     def to_dict(self) -> dict[str, Any]:
         out: dict[str, Any] = {
             "kind": self.kind.value,
@@ -162,7 +178,8 @@ class EntityId:
         )
 
 
-@dataclass(frozen=True, order=True)
+@functools.total_ordering
+@dataclass(frozen=True)
 class OccurrenceId:
     """One observation of an entity.
 
@@ -179,6 +196,15 @@ class OccurrenceId:
     #: the observation is not scoped to one (e.g. a whole-project graph node).
     container: str = ""
     attributes: tuple[tuple[str, str], ...] = ()
+    #: Which tool produced this observation (``"clang"``, ``"castxml"``, ...).
+    #: A first-class part of the observation *site*, not one attribute among
+    #: many, because two producers answering about one entity in one
+    #: translation unit is an ordinary configuration — this codebase ships
+    #: ``--ast-frontend hybrid`` and records per-fact ``fact_provenance``
+    #: precisely for it. Keyword-only so that adding it cannot change what any
+    #: existing positional call means, following the same per-field
+    #: ``kw_only`` precedent as ``Change`` and ``AbiSnapshot``.
+    producer: str = field(default="", kw_only=True)
 
     def __post_init__(self) -> None:
         # Sort attributes so two occurrences built with the same facts in a
@@ -203,8 +229,26 @@ class OccurrenceId:
             self.entity.key,
             self.observation.value,
             self.container,
+            self.producer,
             *flat_attributes,
         )
+
+    @property
+    def site(self) -> tuple[str, str, str]:
+        """Where this was observed: observation kind, container, producer.
+
+        The unit :meth:`OccurrenceSet.conflicts` groups by. Producer belongs
+        here rather than in ``attributes`` because two *different* producers
+        describing one entity are two independent answers, not one producer
+        contradicting itself.
+        """
+        return (self.observation.value, self.container, self.producer)
+
+    def __lt__(self, other: object) -> bool:
+        """Order by :attr:`key`. See :meth:`EntityId.__lt__` for why."""
+        if not isinstance(other, OccurrenceId):
+            return NotImplemented
+        return self.key < other.key
 
     def attribute(self, name: str, default: str = "") -> str:
         for key, value in self.attributes:
@@ -219,6 +263,8 @@ class OccurrenceId:
         }
         if self.container:
             out["container"] = self.container
+        if self.producer:
+            out["producer"] = self.producer
         if self.attributes:
             # A list of pairs, not a mapping: ADR-062 D5 reserves maps for
             # keys that are unique and order-free, and round-tripping through
@@ -232,6 +278,7 @@ class OccurrenceId:
             entity=EntityId.from_dict(data["entity"]),
             observation=ObservationKind(data["observation"]),
             container=str(data.get("container", "")),
+            producer=str(data.get("producer", "")),
             attributes=tuple(
                 (str(pair[0]), str(pair[1])) for pair in data.get("attributes", ())
             ),
@@ -349,14 +396,23 @@ class OccurrenceSet:
 
         The rule is deliberately narrow: several occurrences of one entity
         from *different* observation kinds are the normal case (the same
-        function seen in DWARF and in the export table), and several from the
+        function seen in DWARF and in the export table), several from the
         *same* kind but different containers are also normal (one header
-        declaration reached through two translation units). What is not
-        normal is two occurrences from the same observation kind, in the same
-        container, differing only in their attributes — that is one producer
-        reporting two incompatible answers about one thing in one place, and
-        it is precisely the case a first-wins index used to resolve by
-        discarding the second answer.
+        declaration reached through two translation units), and — the case
+        this rule originally got wrong — several from different *producers*
+        are normal too. What is not normal is two occurrences from one
+        producer, one observation kind and one container, differing only in
+        their attributes: that is a single producer reporting two
+        incompatible answers about one thing in one place, and it is
+        precisely what a first-wins index used to resolve by discarding the
+        second answer.
+
+        Grouping by :attr:`OccurrenceId.site` rather than by
+        ``(observation, container)`` is what makes the producer case normal.
+        Without it, Clang and CastXML both describing one entity in one
+        translation unit read as irreconcilable — which is not a corner case
+        here, since ``--ast-frontend hybrid`` exists to produce exactly that
+        (Codex review).
 
         Returning conflicts rather than raising is intentional: a package
         must remain writable with conflicts in it, so that the ambiguity is
@@ -364,19 +420,20 @@ class OccurrenceSet:
         """
         found: list[IdentityConflict] = []
         for entity_key in sorted(self._by_entity):
-            by_site: dict[tuple[str, str], list[OccurrenceId]] = {}
+            by_site: dict[tuple[str, str, str], list[OccurrenceId]] = {}
             for occurrence in self._by_entity[entity_key]:
-                site = (occurrence.observation.value, occurrence.container)
-                by_site.setdefault(site, []).append(occurrence)
-            for (observation, container), group in sorted(by_site.items()):
+                by_site.setdefault(occurrence.site, []).append(occurrence)
+            for (observation, container, producer), group in sorted(by_site.items()):
                 if len(group) < 2:
                     continue
                 where = f" in {container}" if container else ""
+                by_whom = f" from {producer}" if producer else ""
                 found.append(
                     IdentityConflict(
                         reason=(
                             f"{len(group)} irreconcilable {observation} observations"
-                            f"{where} for {self._entities[entity_key].qualified_name}"
+                            f"{by_whom}{where} for "
+                            f"{self._entities[entity_key].qualified_name}"
                         ),
                         occurrences=tuple(group),
                     )

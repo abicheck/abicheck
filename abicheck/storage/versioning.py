@@ -61,9 +61,31 @@ PACKAGE_FORMAT_VERSION = 1
 #: never for a field a reader can ignore.
 COMPARISON_CONTRACT_VERSION = 1
 
-#: A version axis the package did not state. Distinct from any real version so
-#: that "unknown" can never be mistaken for "the same as mine".
+#: A version axis the package did not state, or stated unusably. Distinct from
+#: any real version so that "unknown" can never be mistaken for "the same as
+#: mine".
 UNSTATED_VERSION = 0
+
+
+def _stated_version(raw: object) -> int:
+    """A package's version value, or :data:`UNSTATED_VERSION` if unusable.
+
+    A real version is a positive integer. Anything else — absent, fractional,
+    zero, negative, or not a number at all — is recorded as unstated, so a
+    fail-closed axis refuses it rather than acting on a value it cannot mean.
+
+    ``int()`` alone was not enough (Codex review). A package stating ``1.5``
+    became ``1`` and read as this build's own supported version, and ``-1``
+    survived as ``-1``, which is neither equal to ``UNSTATED_VERSION`` nor
+    greater than the supported version — so both malformed values failed
+    *open*, which is the one direction a fail-closed axis must never fail in.
+    """
+    if isinstance(raw, bool) or not isinstance(raw, (int, float)):
+        return UNSTATED_VERSION
+    if isinstance(raw, float) and not raw.is_integer():
+        return UNSTATED_VERSION
+    value = int(raw)
+    return value if value > 0 else UNSTATED_VERSION
 
 
 @dataclass(frozen=True)
@@ -154,7 +176,7 @@ class StorageVersions:
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> StorageVersions:
         return cls(
-            package_format_version=int(
+            package_format_version=_stated_version(
                 data.get("package_format_version", PACKAGE_FORMAT_VERSION)
             ),
             section_schema_versions={
@@ -174,7 +196,7 @@ class StorageVersions:
             # review). Parsing stays defensive, per this repo's convention
             # that a hand-edited package must not abort a load; the refusal
             # belongs at the decision point, not here.
-            comparison_contract_version=int(
+            comparison_contract_version=_stated_version(
                 data.get("comparison_contract_version", UNSTATED_VERSION)
             ),
             source_schema_version=int(data.get("source_schema_version", 0)),
@@ -236,12 +258,20 @@ def check_reader_compatibility(
                 f"this build's v{supported_package_format}; upgrade abicheck to read it"
             ),
         )
+    if versions.package_format_version == UNSTATED_VERSION:
+        return ReaderCompatibility(
+            readable=False,
+            reason=(
+                "package does not state a usable package format version, so its "
+                "layout is unknown; this reader may not locate its structures"
+            ),
+        )
     if versions.comparison_contract_version == UNSTATED_VERSION:
         return ReaderCompatibility(
             readable=False,
             reason=(
-                "package does not state a comparison contract version, so its "
-                "comparison semantics are unknown; comparing against it could "
+                "package does not state a usable comparison contract version, so "
+                "its comparison semantics are unknown; comparing against it could "
                 "produce a wrong verdict"
             ),
         )

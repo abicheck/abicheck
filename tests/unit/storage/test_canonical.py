@@ -484,7 +484,7 @@ class TestUnstatedComparisonContractFailsClosed:
         result = check_reader_compatibility(versions)
 
         assert not result.readable
-        assert "does not state a comparison contract version" in result.reason
+        assert "usable comparison contract version" in result.reason
 
     def test_parsing_stays_defensive(self) -> None:
         """The refusal belongs at the decision point, not at the parse.
@@ -551,3 +551,58 @@ class TestExactlyTwoAxesFailClosed:
         new evidence recipe.
         """
         assert check_reader_compatibility(versions).readable
+
+
+class TestMalformedVersionsFailClosed:
+    """Codex review: `int()` let malformed values through as usable.
+
+    A fail-closed axis must never fail *open*, and two shapes did: a package
+    stating `1.5` became `1` and read as this build's own supported version,
+    and `-1` survived intact — neither equal to `UNSTATED_VERSION` nor greater
+    than the supported version, so it passed both guards.
+    """
+
+    @pytest.mark.parametrize("raw", [1.5, -1, 0, 0.9, "1", "x", None, True, [1]])
+    def test_no_malformed_value_is_ever_treated_as_usable(self, raw: object) -> None:
+        versions = StorageVersions.from_dict({"comparison_contract_version": raw})
+
+        assert versions.comparison_contract_version == UNSTATED_VERSION
+        assert not check_reader_compatibility(versions).readable
+
+    def test_a_fractional_version_does_not_truncate_into_the_supported_one(
+        self,
+    ) -> None:
+        """The literal counterexample: `1.5` must not read as v1."""
+        versions = StorageVersions.from_dict({"comparison_contract_version": 1.5})
+
+        assert versions.comparison_contract_version != COMPARISON_CONTRACT_VERSION
+        assert not check_reader_compatibility(versions).readable
+
+    def test_an_integral_float_is_accepted(self) -> None:
+        """JSON has one number type, so a valid version can arrive as 1.0."""
+        versions = StorageVersions.from_dict(
+            {"comparison_contract_version": float(COMPARISON_CONTRACT_VERSION)}
+        )
+
+        assert versions.comparison_contract_version == COMPARISON_CONTRACT_VERSION
+        assert check_reader_compatibility(versions).readable
+
+    @pytest.mark.parametrize("raw", [1.5, -1, 0, "x"])
+    def test_the_package_format_axis_is_validated_the_same_way(
+        self, raw: object
+    ) -> None:
+        """Both fail-closed axes must treat "not validly stated" alike.
+
+        Validating one and not the other would leave the same hole in the
+        axis whose job is to say whether this reader can locate the
+        package's structures at all.
+        """
+        versions = StorageVersions.from_dict({"package_format_version": raw})
+
+        assert not check_reader_compatibility(versions).readable
+
+    def test_bool_is_not_a_version(self) -> None:
+        """`True` is an `int` in Python; it is not a version number."""
+        versions = StorageVersions.from_dict({"comparison_contract_version": True})
+
+        assert versions.comparison_contract_version == UNSTATED_VERSION
