@@ -28,7 +28,6 @@ SARIF spec: https://docs.oasis-open.org/sarif/sarif/v2.1.0/sarif-v2.1.0.html
 from __future__ import annotations
 
 import hashlib
-import json
 from importlib.metadata import version as _pkg_version
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
@@ -49,6 +48,8 @@ from abicheck.contract_gating import (
 from abicheck.contract_relevance_types import CompatibilityEvaluationStatus
 from abicheck.finding_identity import missing_contract_kind
 from abicheck.impact import assess_change
+from abicheck.report.document import ReportDocument
+from abicheck.report.render_json import render_json
 from abicheck.report_model import VERDICT_TO_SARIF_LEVEL as _VERDICT_TO_SARIF_LEVEL
 from abicheck.reporter import (
     _finding_id,
@@ -1259,6 +1260,26 @@ def to_sarif_not_comparable(
     }
 
 
+def to_sarif_not_comparable_str(
+    library: str,
+    old_version: str,
+    new_version: str,
+    kind: str,
+    message: str,
+    *,
+    indent: int = 2,
+) -> str:
+    """Serialize the NOT_COMPARABLE SARIF log (ADR-050 D2) as a JSON string.
+
+    The string form exists so this refusal log crosses the same
+    :class:`~abicheck.report.document.ReportDocument` boundary the ordinary
+    SARIF report does; :func:`to_sarif_not_comparable` keeps returning the
+    mapping for callers that embed it.
+    """
+    log = to_sarif_not_comparable(library, old_version, new_version, kind, message)
+    return render_json(ReportDocument.from_mapping(log), indent=indent)
+
+
 def to_sarif_str(
     result: DiffResult,
     indent: int = 2,
@@ -1267,16 +1288,22 @@ def to_sarif_str(
     report_mode: str = "full",
     severity_config: SeverityConfig | None = None,
 ) -> str:
-    """Serialize DiffResult to a SARIF JSON string."""
-    return json.dumps(
-        to_sarif(
-            result,
-            show_only=show_only,
-            report_mode=report_mode,
-            severity_config=severity_config,
-        ),
-        indent=indent,
+    """Serialize DiffResult to a SARIF JSON string.
+
+    ADR-061 Phase 2: the completed SARIF log crosses the canonical
+    :class:`~abicheck.report.document.ReportDocument` boundary before it is
+    serialized, so the projection cannot mutate the log or recover a fact by
+    running policy a second time. SARIF is itself a JSON format, so the
+    projection is the shared :func:`~abicheck.report.render_json.render_json`
+    rather than a SARIF-specific serializer.
+    """
+    log = to_sarif(
+        result,
+        show_only=show_only,
+        report_mode=report_mode,
+        severity_config=severity_config,
     )
+    return render_json(ReportDocument.from_mapping(log), indent=indent)
 
 
 def write_sarif(result: DiffResult, path: Path) -> None:

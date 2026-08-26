@@ -629,12 +629,61 @@ exists; the relevant debt entries shrink or disappear.
 Implementation status: the immutable, JSON-shaped ``ReportDocument`` and its
 pure JSON projection are established, and all native JSON report modes (full,
 stat, leaf, and root-cause) now cross that boundary. The `--stat` one-line
-text summary (`reporter_markdown.to_stat`) now also builds and renders a
+text summary (`reporter_markdown.to_stat`) also builds and renders a
 `ReportDocument` via `report/render_text.py`'s `render_stat_document`, the
-first non-JSON format to do so. Markdown's richer modes (`to_markdown`,
-`to_review_digest`), HTML, SARIF, and JUnit remain explicit follow-up slices;
-this partial status must not be read as the phase acceptance criteria having
-been met.
+first non-JSON format to do so.
+
+**SARIF and JUnit now cross the boundary too.** `sarif.to_sarif_str` projects
+its completed SARIF log through `ReportDocument` + `render_json` — SARIF is
+itself a JSON format, so it needs no format-specific serializer — and the
+ADR-050 D2 refusal log gained a `to_sarif_not_comparable_str` sibling so the
+`compare` CLI's NOT_COMPARABLE `json`/`sarif` output crosses the same boundary
+instead of calling `json.dumps` on a raw mapping. JUnit needed one new
+primitive, `report/render_xml.py`: a `ReportDocument` stores JSON values only
+— deliberately, so a renderer is never handed a live object graph it could
+mutate — which an `ElementTree` is not, so `element_to_mapping`/
+`element_from_mapping` are its lossless `tag`/`attrib`/`text`/`tail`/
+`children` encoding and `render_xml_document` is the projection.  The split
+follows the phase's own rule about what is a fact and what is formatting:
+the tree's structure and values belong to the document, while indentation and
+the XML declaration belong to the projection. All four JUnit entry points
+(`to_junit_xml`, `to_junit_xml_multi`, `to_junit_xml_not_comparable`, and the
+release fan-out's multi-library suite) route through the one `_to_xml_string`
+chokepoint, so all four moved at once, byte-for-byte identically — `ET.indent`
+now mutates the rebuilt tree rather than the caller's, which is the observable
+half of "a renderer cannot alter its input".
+
+**Not met yet, and this partial status must not be read as the acceptance
+criteria having been met.** Two distinct gaps remain, and they are different
+sizes:
+
+1. *Markdown's richer modes (`to_markdown`, `to_review_digest`) and HTML.*
+   Unlike JSON/SARIF/JUnit, these do not build a structured value and then
+   serialize it — they emit prose directly from a `DiffResult` across
+   ~3,200 combined lines of helpers that read `Change` attributes one at a
+   time. Routing them through a JSON-shaped document is a real rewrite of
+   both modules against their golden output, i.e. its own vertical slice
+   (plausibly one per format), not a follow-on edit to a serialization
+   change.
+2. *Items 4 and 5 — decisions and post-render mutation.* Every renderer
+   still reaches into policy itself: `sarif._severity_gate_properties`,
+   `html_report`'s gate card, and `reporter._build_severity_json` each call
+   `severity.compute_gate_decision`, and `junit_report`/`html_report`/
+   `reporter_markdown` each resolve a per-finding verdict through
+   `effective_verdict_for_change`. These are calls to *the single canonical*
+   resolver rather than drifting reimplementations, so the risk today is
+   ownership rather than disagreement — but D9 says a projection consumes
+   decisions, it does not make them, so closing this needs one
+   decisions-computed-once value carried into document construction and read
+   by every format. Separately, `cli_compare_fold.py`'s
+   `_fold_scoped_compat_into_text`/`_fold_suppression_audit_into_text`/
+   `_fold_use_case_impact_into_text` and `cli_compare_helpers.
+   _fold_evidence_depth_into_json` are exactly the "post-render mutation"
+   item 5 names: they re-parse rendered JSON (or append to rendered
+   Markdown) to add facts the workflow result should have carried in the
+   first place. Both are behavior-visible changes across every format at
+   once, so neither belongs in a slice whose parity argument is
+   byte-identical output.
 
 **The `compare -> policy` blocker this section previously recorded is
 closed**, and how it was re-measured is worth keeping: the earlier note

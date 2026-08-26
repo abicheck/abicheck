@@ -41,7 +41,6 @@ Mapping rules:
 from __future__ import annotations
 
 import hashlib
-import io
 import xml.etree.ElementTree as ET
 from typing import TYPE_CHECKING, cast
 
@@ -1113,12 +1112,21 @@ def to_junit_xml_multi(
 
 
 def _to_xml_string(root: ET.Element) -> str:
-    """Serialize an ElementTree element to an XML string with declaration."""
-    ET.indent(root)
-    tree = ET.ElementTree(root)
-    buf = io.BytesIO()
-    tree.write(buf, encoding="UTF-8", xml_declaration=True)
-    return buf.getvalue().decode("UTF-8")
+    """Serialize a completed JUnit element tree to an XML string.
+
+    ADR-061 Phase 2: the finished suite crosses the canonical
+    :class:`~abicheck.report.document.ReportDocument` boundary before it is
+    serialized, via :func:`~abicheck.report.render_xml.element_to_mapping`'s
+    lossless JSON encoding of the tree — so the projection formats a frozen
+    description of the report and cannot mutate the element tree, reach back
+    into the ``DiffResult`` it came from, or re-run policy. Indentation and
+    the XML declaration are formatting, so they belong to the projection
+    rather than to the document.
+    """
+    from .report.document import ReportDocument
+    from .report.render_xml import element_to_mapping, render_xml_document
+
+    return render_xml_document(ReportDocument.from_mapping(element_to_mapping(root)))
 
 
 def to_junit_xml_not_comparable(

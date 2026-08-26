@@ -463,23 +463,21 @@ def _report_not_comparable(
         'assurance: "none") if you understand the risk.',
         err=True,
     )
+    refusal = (old.library, old.version, new.version, kind, message)
     if fmt == "json":
+        from .report.not_comparable import render_not_comparable_json
         from .schemas import REPORT_SCHEMA_VERSION
 
-        doc = {
-            "report_schema_version": REPORT_SCHEMA_VERSION,
-            "library": old.library,
-            "old_version": old.version,
-            "new_version": new.version,
-            "verdict": None,
-            "reason": {"kind": kind, "message": message},
-        }
-        _write_or_echo(output, json.dumps(doc, indent=2))
+        _write_or_echo(
+            output,
+            render_not_comparable_json(
+                *refusal, report_schema_version=REPORT_SCHEMA_VERSION
+            ),
+        )
     elif fmt == "sarif":
-        from .sarif import to_sarif_not_comparable
+        from .sarif import to_sarif_not_comparable_str
 
-        doc = to_sarif_not_comparable(old.library, old.version, new.version, kind, message)
-        _write_or_echo(output, json.dumps(doc, indent=2))
+        _write_or_echo(output, to_sarif_not_comparable_str(*refusal))
     elif fmt == "junit":
         from .junit_report import to_junit_xml_not_comparable
 
