@@ -154,6 +154,7 @@ freeze this before that):
 | `l0:elf_symtab` | ELF `.dynsym`/export table alone | `evidence_tiers.py`'s L0 |
 | `l0:pe_export_table` | PE export directory (`_parse_pe_exports()`) — the `PROVIDER_BINARY_EXPORTS` platform-selectable counterpart to `l0:elf_symtab` for a PE snapshot; see the "Multi-provider `evidence_provenance`" discussion below for why this platform branch exists | L0 |
 | `l0:macho_exports` | Mach-O's merged export list (`MachoMetadata.exports` — classic symbol table plus any trie-only additions, with no per-entry source marker; a generic label rather than a trie-specific claim the data model can't back per finding — see the discussion below) | L0 |
+| `l0:elf_dynamic` | ELF `.dynamic` section entries read directly (not via the `.dynsym` export table `l0:elf_symtab` names) — `ElfMetadata.soname`/`DT_SONAME` is the first consumer (Codex review, PR #866 round 27; see `check_soname_bump_policy()` below) | L0 (new) |
 | `l1:dwarf` | DWARF debug info (ELF) | L1 |
 | `l1:pdb` | Windows PDB debug info (PE snapshots) | L1 |
 | `l1:btf` | Linux kernel BTF debug info (ELF snapshots) | L1 |
@@ -1283,12 +1284,39 @@ structure already in place:
    receives the full `Change` list as its first parameter — no signature
    change is needed to reach the constituent findings, only to compute and
    attach the union while building the `SONAME_BUMP_RECOMMENDED`
-   `make_change(...)` call. `SONAME_BUMP_UNNECESSARY`, the function's other
-   emitted kind, is a *negative* result (no breaking change qualified) and
-   is unaffected by this — see item 3's `searched:`/negative-finding
-   discussion above for the shape a genuinely evidence-free "nothing
-   qualified" finding should take instead, verified separately for this
-   emitter rather than assumed from the roll-up case.
+   `make_change(...)` call.
+
+   **`SONAME_BUMP_UNNECESSARY`, the function's other emitted kind, is
+   *not* the genuinely evidence-free case round 26 first described it as
+   — it rests on real, positive L0 evidence, and treating it as a pure
+   `searched:` negative would drop that evidence from the finding (Codex
+   review, verified against the real code, PR #866 round 27).**
+   `check_soname_bump_policy()` reads `old_elf.soname`/`new_elf.soname`
+   directly — real `DT_SONAME` entries from each side's ELF `.dynamic`
+   section — computes `both_have_soname`/`soname_bumped` by comparing
+   them (vendor-hash-stripped), and only then emits
+   `SONAME_BUMP_UNNECESSARY` when `soname_bumped` is `True` alongside
+   `has_breaking` being `False`. That comparison is exactly the kind of
+   fact this whole model exists to attribute: two concrete field reads,
+   not an exhaustive-search-found-nothing result. The existing
+   vocabulary had no provider id for it, since `l0:elf_symtab` names the
+   `.dynsym`/export-table evidence stream, not the `.dynamic` section —
+   closed above with a new `l0:elf_dynamic` entry. `SONAME_BUMP_
+   UNNECESSARY`'s `evidence_provenance` therefore carries **two**
+   independent components, neither one alone: the positive SONAME-read
+   evidence (`"both:l0:elf_dynamic"`, since both sides' `.dynamic`
+   sections were read and compared to reach `soname_bumped`), unioned
+   with the negative "no breaking change qualified" `searched:` roll-up
+   item 3's discussion already describes (the same shape
+   `SONAME_BUMP_RECOMMENDED`'s own `has_breaking=True` branch draws its
+   union from, mirrored here for `has_breaking=False` — a `searched:`
+   entry per side/tier the comparison's own `changes` list was drawn
+   from, since "no constituent qualified" is itself a claim about what
+   was searched). Dropping the `l0:elf_dynamic` half — the mistake round
+   26's framing made — would leave a reader unable to tell "this
+   recommendation rests on a real read of both SONAMEs" from "nothing
+   here was ever actually consulted," exactly the misattribution this
+   model exists to prevent.
 
 Each slice, once wired, gets its own FP-rate/mutation-score gate re-run
 before merging — never the whole inventory behind one PR. The FP-rate/
@@ -1446,6 +1474,48 @@ established above to whichever schema each summary format is gated by —
 schemas/v1/` for it, the same as the scan-report case already noted below),
 so for that one only the "don't add a field silently to an unversioned
 format" caution applies, not a schema file to update.
+
+**A fifth projection family, `stack_report.py`'s own `Change`-to-dict
+builders, is missing from this inventory even though this same section
+already names one of its two functions in a quoted docstring — it was
+never actually added to the required list (Codex review, fresh evidence,
+confirmed by reading `stack_report.py` directly, PR #866 round 27).**
+`_stack_finding_dicts()` independently serializes each per-library
+`Change` from `diff.breaking`/`diff.source_breaks`/`diff.risk` into a
+capped dict (`bucket`/`kind`/`symbol`/`description`/`source_location`) —
+the same "small, capped dict" shape `_release_finding_dicts`'s own
+docstring cites it as a sibling of two paragraphs above — and
+`stack_to_json()` separately builds `d["binding_changes"]` straight off
+`StackCheckResult.binding_changes` (`list[Change]`, populated by
+`diff_runtime_bindings()` — the cross-environment rebound-provider
+findings `abicheck stack`'s two-environment mode reports), rendering each
+one's `kind`/`symbol`/`description`/`old_value`/`new_value` by hand.
+Neither routes through `to_change()`, `_change_to_dict`, `_leaf_entry`, or
+any of the four builders in this family — `_stack_finding_dicts` is
+`stack_to_json`'s own helper, called once per library while building
+`d["stack_changes"]`, and `binding_changes` is a structurally different
+list (cross-environment provider rebinding, not a single-comparison
+diff) with no per-library `diff` object to draw a bucket from at all.
+Implementing this phase against only the first four families would leave
+`abicheck stack --format json` — the one command whose JSON output this
+inventory has not yet named — silently missing `evidence_provenance` on
+every per-library stack finding and every runtime-binding-provider
+finding, even once every other JSON surface (including the sibling
+`_baseline_finding_dicts`/`_release_finding_dicts` this same function's
+docstring already lists it alongside) carries it. Add the field to both
+dict literals (`_stack_finding_dicts`'s per-finding dict, `stack_to_json`'s
+`binding_changes` dict comprehension) explicitly, and give both their own
+test coverage the way this phase requires of every other builder — a
+`stack --format json` fixture asserting `evidence_provenance` reaches both
+`stack_changes[].findings[]` and `binding_changes[]`, mirroring the
+existing per-builder pattern (`test_reporter_evidence_provenance.py`-
+shaped) rather than assumed to follow from the `reporter.py`/release-JSON
+coverage above. `stack`'s own JSON output has no dedicated
+`.schema.json` today either (confirmed: no `stack_report.schema.json`
+exists under `abicheck/schemas/` or `docs/reference/schemas/v1/`), so —
+like `_baseline_finding_dicts`/the release-JSON family above — only the
+"don't add a field silently to an unversioned format" caution applies to
+these two, not a schema file to update.
 
 **A new public field on an already-published report format is a real
 schema change, not a cosmetic addition (Codex review — a prior revision of
@@ -1634,6 +1704,13 @@ above, which this list intentionally does not re-duplicate.
   --release`'s and `scan --artifact-set`'s independent `Change`/
   `BundleFinding` dict builders, none reached by `reporter.py`'s six
   builders or by `_baseline_finding_dicts`.
+- `abicheck/stack_report.py`'s `_stack_finding_dicts` and `stack_to_json`
+  (its `binding_changes` dict comprehension) — Phase 3's fifth projection
+  family (see that phase's own correction above): `abicheck stack
+  --format json`'s independent per-library and runtime-binding `Change`
+  dict builders, none reached by `reporter.py`'s six builders or by
+  `_baseline_finding_dicts`/`_release_finding_dicts` despite the latter's
+  own docstring naming `_stack_finding_dicts` as a sibling shape.
 - `abicheck/sarif.py`'s `properties` bag and `abicheck/junit_report.py`'s
   `_add_contract_properties` — Phase 3's SARIF/JUnit surfaces (or their
   `report/`-migrated successors, e.g. `report/render_sarif.py`, if that
