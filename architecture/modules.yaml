@@ -58,6 +58,9 @@
         "extract",
         "compare",
         "policy"
+      ],
+      "legacy_paths": [
+        "abicheck/service_dump_pipeline.py"
       ]
     },
     "report": {

@@ -771,20 +771,84 @@ behavior change; its four flat call sites (`service_dump_pipeline.py`,
 `service_input_resolution.py`, `cli_dump_helpers.py`, `cli_dump_non_elf.py`)
 now import it from the new location but are themselves unchanged.
 
-Known blocker for the remaining convergence: those four call sites'
-*owning* modules cannot yet move into `workflows/` themselves.
-`service_dump_pipeline.py` and `service_input_resolution.py` both reach into
-`cli_dump_helpers.py` (a `frontends`-destined module, per its `cli_` prefix
-family) for CLI-resolved facts (`_gated_source_label` and similar) — moving
-either service module into `workflows/` while that import stays would
-create a `workflows -> frontends` inversion, the exact same shape of
-dependency-direction problem Phase 2 hit between `compare` and `policy`.
-Resolving it needs that shared logic pulled out to a leaf both sides can
-depend on (mirroring how `contracts.py` itself was extractable only because
-it already had zero first-party dependencies) — a real, scoped migration of
-its own, not a follow-up edit to this vertical slice. Resolve/execute
-(`resolve.py`/`execute.py`, the request-shaped half of this phase's own
-target layout) are unaffected either way and remain unattempted.
+**That blocker is now partly closed, and re-measuring it first changed the
+scope** — the same lesson Phase 2 recorded. The note above described a
+general coupling; the tree held exactly **four** import edges from the two
+service pipelines into `cli_*` modules. But the coupling had leaked much
+further than those four edges, because engine-side code that could not
+import upward kept private copies instead:
+
+- The depth ladder existed **four** times: `buildsource.scan_levels.
+  USER_DEPTHS` plus three independent `_DEPTH_RANK` dicts in
+  `cli_dump_helpers.py`, `analysis_assurance.py`, and
+  `buildsource/check_report.py`. `analysis_assurance.py` additionally carried
+  a hand-copied `evidence_depth_label`, its own comment recording why:
+  "duplicated rather than imported ... avoiding a CLI-layer import from this
+  leaf-ish module."
+- The `abicheck_inputs/` guard `_is_inputs_pack_dir` existed **three** times
+  (`cli_buildsource_helpers.py`, `buildsource/l2_seed.py`,
+  `cli_dump_dry_run_build_query.py`), each copy's docstring explaining that
+  it was a copy and why.
+
+So the blocker was not only an obstacle to moving modules; it was already
+being paid for, in duplication, by modules that had no intention of moving.
+
+Two leaves now own that shared logic, exactly as this phase prescribed:
+
+- `abicheck/evidence_depth.py` (classified `model`, the innermost ring, since
+  one consumer is `extract`-destined and an extract-to-policy edge would be a
+  new inversion) owns `DEPTH_RANK`, `depth_rank`, `weaker_depth`,
+  `layer_payload_empty`, `depth_label_for`, `l4_source_abi_was_attempted` and
+  `gated_source_label`. `DEPTH_RANK` is *derived* from `USER_DEPTHS`, so the
+  ordering has one definition and a new rung cannot leave a copy disagreeing.
+- `abicheck/buildsource/pack_shape.py` owns `is_pack_dir` (moved out of the
+  oversized `inline.py`, which re-exports it), and
+  `buildsource/inputs_pack.py` gained `is_inputs_pack_dir` and
+  `is_any_pack_dir`. The pair is split across two modules deliberately:
+  putting both in `pack_shape.py` closes `inline -> pack_shape ->
+  inputs_pack -> inline`, which `import-cycle-growth` correctly rejects, and
+  which is the very cycle the three private copies existed to dodge.
+
+Every prior spelling remains as a delegating alias, so no caller changed.
+
+**Result: `service_dump_pipeline.py` is now free of CLI imports entirely and
+is classified `workflows` in `architecture/modules.yaml`** — the first
+service pipeline to get a responsibility owner. Three engine-CLI boundary
+allowlist entries are gone (15 -> 12); that gate fails on a stale entry, so
+the closures are proven rather than asserted. Be precise about what the
+classification buys, since the two gates differ: `check_architecture.py`
+enforces dependency *direction* against classified layers (a
+`workflows -> report` import is rejected, and the resulting cycle reported —
+verified by probe), but for a `legacy_paths` module it does **not** flag an
+import of an unclassified module, so the CLI boundary is still held by the
+separate `engine-cli-boundary` gate (also verified by probe).
+
+**What remains, measured rather than estimated.** `service_input_resolution.
+py` and `service_compare_pipeline.py` each still hold one `cli_buildsource`
+edge, and the former also imports `click`. These are not leaf extractions
+like the two above; they are operation migrations:
+
+- `embed_build_source` is 262 lines and depends on eight module-scope
+  helpers in `cli_buildsource.py` (`_combine_packs`,
+  `_exported_symbols_from_snapshot`, `_filter_pack_layers`, `_layer_value`,
+  `_load_inputs_pack_or_raise`, `_load_pack_or_raise`,
+  `route_inline_source_supplier`, `_is_inputs_pack_dir`) and raises
+  `click.UsageError`. `service_input_resolution` catches
+  `click.ClickException` and re-raises `SnapshotError` — the engine depending
+  on the CLI's *error type*, which is the inversion in its purest form.
+  Moving it therefore changes where that translation happens, and a
+  malformed pack's CLI exit code depends on getting that right; it needs its
+  own pass with exit-code coverage, not a follow-up edit here.
+- `service_compare_pipeline.py` imports `prepare_embedded_build_source` and
+  `attach_evidence_metrics` from the same module, so it is blocked behind the
+  same migration.
+
+`resolve.py`/`execute.py` (the request-shaped half of this phase's target
+layout) remain unattempted, and deliberately so: the real per-artifact
+resolve/execute pipeline is `service_input_resolution._resolve_side_snapshot_
+impl`, which cannot move while the edge above stands, and this ADR requires
+real implementations rather than empty scaffolding ("a directory is created
+only when at least one implementation and its tests move into it").
 
 Use the pattern already emerging in the typed compare, dump, input-resolution,
 and artifact-plan code:

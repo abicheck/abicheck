@@ -27,13 +27,30 @@ Aggregation currently exposes
 entry point. `workflows.artifact.contracts.ResolvedArtifactPlan` (ADR-061
 Phase 3) is the shared, dependency-free `contracts.py` half of the dump/scan
 artifact-resolution contract — a session type owning cleanup-thunk lifetime
-across a resolve/execute pipeline; its four flat call sites
-(`service_dump_pipeline.py`, `service_input_resolution.py`,
-`cli_dump_helpers.py`, `cli_dump_non_elf.py`) import it from here rather than
-duplicating it, but stay flat themselves until the larger `service_dump_pipeline.py`/
-`service_input_resolution.py` migration (blocked on their own
-`cli_dump_helpers.py`/frontends coupling — see ADR-061's Phase 3 status note)
-lands.
+across a resolve/execute pipeline.
+
+`abicheck/service_dump_pipeline.py` is classified `workflows` via
+`legacy_paths`: it is free of CLI imports and owns `DumpRequest ->
+ResolvedDumpRequest -> DumpResult`, but has not moved into this directory
+yet. Know what that classification enforces, because the two gates differ:
+`check_architecture.py` rejects a forbidden *direction* to a classified layer
+(a `workflows -> report` import fails, and reports the cycle), while the CLI
+boundary for a still-flat module is held by the separate
+`engine-cli-boundary` gate. Both are live; neither is decorative.
+
+`service_input_resolution.py` and `service_compare_pipeline.py` are **not**
+classified yet: each still imports from `cli_buildsource`, and the former
+also catches `click.ClickException`. That is an operation migration
+(`embed_build_source` plus eight helpers, and an error-type contract with CLI
+exit-code consequences), not a leaf extraction — see ADR-061's Phase 3 status
+note for the measurement.
+
+Shared vocabulary those modules used to reach into the CLI layer for now
+lives in leaves any layer may depend on: `abicheck/evidence_depth.py` (the
+depth ladder and what depth an artifact reached) and
+`buildsource/pack_shape.py` + `buildsource/inputs_pack.py` (the pack-shape
+predicates). Prefer them over re-deriving; the previous arrangement produced
+four copies of the depth ladder and three of the inputs-pack guard.
 
 ## Tests
 
