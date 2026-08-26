@@ -35,9 +35,10 @@ pre-existing coupling this module does not attempt to resolve).
 The ``BundleFacts``-aware glue -- turning a real ``BundleFacts`` into the
 blobs/manifest shape this module writes, and back -- lives in
 ``serialization.py``'s ``save_bundle_facts``/``load_bundle_facts``, exactly
-where that conversion already lives for the plain-JSON format. See
-``docs/contribute/plans/g40-content-addressed-bundle-archive.md`` for the
-full design.
+where that conversion already lives for the plain-JSON format. See the G40
+design plan, ``docs/contribute/plans/g40-content-addressed-bundle-archive.md``
+(added in PR #866, a separate branch -- merge that PR first if this file
+isn't present yet where you're reading this) for the full design.
 
 Zip, not tar (`.tar.zst`, the original review sketch's own naming): zip
 carries a real end-of-file central directory naming every member's offset
@@ -60,6 +61,7 @@ import io
 import json
 import os
 import stat
+import tempfile
 import zipfile
 from pathlib import Path
 from typing import Any
@@ -157,6 +159,15 @@ def _deterministic_zipinfo(name: str) -> zipfile.ZipInfo:
     # A fixed, portable permission bit (rw-r--r--) rather than whatever
     # `ZipInfo`'s own platform-dependent default would otherwise stamp.
     info.external_attr = 0o644 << 16
+    # `ZipInfo.__init__` defaults `create_system` to the *host* platform
+    # (0 for Windows, 3 for Unix) and that value is itself serialized into
+    # the central directory -- identical facts archived on Windows vs.
+    # Linux/macOS CI would otherwise still produce different bytes and
+    # `stored_sha256` despite every other reproducibility-affecting field
+    # already being pinned (Codex review, fresh evidence). Pinned to 3
+    # (Unix) unconditionally, matching this project's actual CI/release
+    # platforms.
+    info.create_system = 3
     return info
 
 
@@ -195,20 +206,14 @@ def sniff_bundle_archive_format(path: str | Path) -> str:
     return "archive" if prefix.startswith(_ZIP_MAGIC_PREFIXES) else "json"
 
 
-#: A real bundle archive (one manifest member + one member per *distinct*
-#: content hash) is never expected to have anywhere near this many
-#: members -- a crafted archive claiming more is rejected outright before
-#: `zipfile.ZipFile` is ever constructed (Codex review): `ZipFile.__init__`
-#: eagerly parses the *entire* central directory and builds one `ZipInfo`
-#: per entry, so an archive with an enormous entry count can exhaust
-#: memory merely by being opened, before any of this module's own
-#: per-member size guards ever run. Deliberately well below 0xFFFF
-#: (65535): the non-ZIP64 EOCD record's own 2-byte entry-count field
-#: cannot represent 65535 itself (that value is reserved as the "read the
-#: real count from the ZIP64 EOCD instead" sentinel _reject_absurd_
-#: central_directory doesn't parse), so a cap anywhere near that ceiling
-#: would be unreachable for the common, non-ZIP64 archives this check
-#: actually covers.
+#: A real bundle archive (one manifest member + one per *distinct* content
+#: hash) never needs anywhere near this many members -- a crafted archive
+#: claiming more is rejected before `zipfile.ZipFile` is constructed
+#: (Codex review): `ZipFile.__init__` eagerly parses the whole central
+#: directory and builds one `ZipInfo` per entry, so an enormous entry
+#: count can exhaust memory merely by being opened. Below 0xFFFF (65535,
+#: the non-ZIP64 EOCD sentinel meaning "read the real count from ZIP64
+#: instead", handled separately below).
 _MAX_ARCHIVE_MEMBERS = 20_000
 
 #: Bytes to search from the end of the file for the End-Of-Central-
@@ -217,20 +222,37 @@ _MAX_ARCHIVE_MEMBERS = 20_000
 #: is 2 bytes), so this comfortably covers the worst case.
 _EOCD_SEARCH_WINDOW_BYTES = 65536 + 22
 
+#: Cap on the central directory's own declared byte size (Codex review):
+#: the entry-*count* cap above isn't itself a byte-size bound -- a low
+#: `total_entries` can still pair with an enormous `cd_size`, which
+#: `zipfile.ZipFile` reads and parses until fully consumed regardless of
+#: the entry count. A real archive's directory is small (~120 bytes per
+#: `blobs/<64-hex-sha256>.json.zst` record); generous but bounded.
+_MAX_CENTRAL_DIRECTORY_BYTES = 8 * 1024 * 1024
+
+#: ZIP64 End-Of-Central-Directory Locator (20 bytes, always immediately
+#: preceding the standard EOCD when ZIP64 is in play) and Record
+#: signatures -- recover the real count/size when the standard EOCD's
+#: 2-/4-byte fields overflow to their ZIP64 sentinels.
+_ZIP64_EOCD_LOCATOR_SIG = b"PK\x06\x07"
+_ZIP64_EOCD_RECORD_SIG = b"PK\x06\x06"
+_ZIP64_EOCD_LOCATOR_SIZE = 20
+
 
 def _reject_absurd_central_directory(path: Path) -> None:
-    """Reject *path* if its End-Of-Central-Directory record claims more
-    than `_MAX_ARCHIVE_MEMBERS` entries -- read directly, without invoking
-    `zipfile.ZipFile`'s own central-directory parse (which is exactly the
-    unbounded work this check exists to preflight against).
+    """Reject *path* if its central directory claims more than
+    `_MAX_ARCHIVE_MEMBERS` entries or more than `_MAX_CENTRAL_DIRECTORY_
+    BYTES` -- read directly from the EOCD (and, when present, the ZIP64
+    EOCD locator/record), without invoking `zipfile.ZipFile`'s own
+    central-directory parse (which is exactly the unbounded work this
+    check exists to preflight against).
 
-    Best-effort: if the EOCD record can't be found in the search window
-    (a genuinely malformed archive, or one requiring the ZIP64 EOCD
-    variant this function doesn't parse), this silently returns rather
-    than raising -- `zipfile.ZipFile`'s own error, or its own central-
-    directory read, is authoritative for those cases; this function only
-    ever *adds* an earlier rejection for the common, easily-recognized
-    attack shape, never a false one.
+    Best-effort: if the EOCD record can't be found in the search window,
+    or a present ZIP64 locator/record can't be read, this silently
+    returns rather than raising -- `zipfile.ZipFile`'s own error, or its
+    own central-directory read, is authoritative for those cases; this
+    function only ever *adds* an earlier rejection for the common,
+    easily-recognized attack shapes, never a false one.
     """
     try:
         size = path.stat().st_size
@@ -241,23 +263,54 @@ def _reject_absurd_central_directory(path: Path) -> None:
         with open(path, "rb") as f:
             f.seek(size - tail_len)
             tail = f.read(tail_len)
+            idx = tail.rfind(b"PK\x05\x06")
+            if idx == -1 or idx + 22 > len(tail):
+                return
+            # EOCD layout: signature(4) this_disk(2) cd_start_disk(2)
+            # entries_this_disk(2) total_entries(2) cd_size(4) cd_offset(4)
+            # comment_len(2) [comment...]
+            total_entries = int.from_bytes(tail[idx + 10 : idx + 12], "little")
+            cd_size = int.from_bytes(tail[idx + 12 : idx + 16], "little")
+            if total_entries == 0xFFFF or cd_size == 0xFFFFFFFF:
+                # ZIP64: the real values live in the ZIP64 EOCD record, whose
+                # own locator is always the fixed 20 bytes immediately
+                # preceding this standard EOCD's signature.
+                eocd_abs = (size - tail_len) + idx
+                locator_start = eocd_abs - _ZIP64_EOCD_LOCATOR_SIZE
+                if locator_start < 0:
+                    return
+                f.seek(locator_start)
+                locator = f.read(_ZIP64_EOCD_LOCATOR_SIZE)
+                if len(locator) != _ZIP64_EOCD_LOCATOR_SIZE or not locator.startswith(
+                    _ZIP64_EOCD_LOCATOR_SIG
+                ):
+                    return
+                zip64_eocd_offset = int.from_bytes(locator[8:16], "little")
+                f.seek(zip64_eocd_offset)
+                # Fixed portion only (56 bytes) -- everything this function
+                # needs (signature, total_entries, cd_size) lives within it;
+                # no need to read the record's own variable "extensible
+                # data sector" tail.
+                record = f.read(56)
+                if len(record) != 56 or not record.startswith(_ZIP64_EOCD_RECORD_SIG):
+                    return
+                total_entries = int.from_bytes(record[32:40], "little")
+                cd_size = int.from_bytes(record[40:48], "little")
     except OSError:
         return
-    idx = tail.rfind(b"PK\x05\x06")
-    if idx == -1 or idx + 12 > len(tail):
-        return
-    # EOCD layout: signature(4) this_disk(2) cd_start_disk(2)
-    # entries_this_disk(2) total_entries(2) cd_size(4) cd_offset(4)
-    # comment_len(2) [comment...]
-    total_entries = int.from_bytes(tail[idx + 10 : idx + 12], "little")
-    if total_entries == 0xFFFF:
-        return  # ZIP64 marker -- the real count lives in the ZIP64 EOCD, not parsed here
     if total_entries > _MAX_ARCHIVE_MEMBERS:
         raise SnapshotError(
             f"{path}: central directory claims {total_entries} entries, "
             f"exceeding the {_MAX_ARCHIVE_MEMBERS} safety limit -- refusing "
             "to open (possible memory-exhaustion attack, or a genuinely "
             "malformed archive)."
+        )
+    if cd_size > _MAX_CENTRAL_DIRECTORY_BYTES:
+        raise SnapshotError(
+            f"{path}: central directory claims {cd_size} bytes, exceeding "
+            f"the {_MAX_CENTRAL_DIRECTORY_BYTES} byte safety limit -- "
+            "refusing to open (possible memory-exhaustion attack, or a "
+            "genuinely malformed archive)."
         )
 
 
@@ -374,10 +427,25 @@ class BundleArchiveWriter:
             self._existing_uid = existing_stat.st_uid
             self._existing_gid = existing_stat.st_gid
         self._target.parent.mkdir(parents=True, exist_ok=True)
-        self._tmp_path = self._target.with_name(
-            f"{self._target.name}.tmp-{os.getpid()}-{id(self):x}"
+        # tempfile.mkstemp (not a predictable "<name>.tmp-<pid>-<id>" path
+        # opened separately by zipfile.ZipFile itself) -- Codex review,
+        # fresh evidence: a predictable temp filename in a directory
+        # writable by another account can be pre-created as a symlink,
+        # and `ZipFile(path, mode="w")`'s own `open(path, "w+b")` follows
+        # a symlink and truncates whatever it points at. mkstemp both
+        # randomizes the name and opens it itself with O_CREAT|O_EXCL
+        # (refusing to follow or replace a pre-existing entry, symlink or
+        # otherwise), so the fd this class holds is guaranteed to name a
+        # file *we* just created, not one an attacker planted.
+        tmp_fd, tmp_name = tempfile.mkstemp(
+            dir=self._target.parent, prefix=f".{self._target.name}.", suffix=".tmp"
         )
-        self._zf = zipfile.ZipFile(self._tmp_path, mode="w", compression=zipfile.ZIP_STORED)
+        self._tmp_path = Path(tmp_name)
+        self._tmp_file = os.fdopen(tmp_fd, "wb")
+        # A file object, not a path, is passed here deliberately -- see
+        # above; `ZipFile` does not close a fileobj it didn't open itself,
+        # so close()/_abort() below own closing `self._tmp_file`.
+        self._zf = zipfile.ZipFile(self._tmp_file, mode="w", compression=zipfile.ZIP_STORED)
         self._written_hashes: set[str] = set()
         self._manifest_written = False
 
@@ -417,30 +485,27 @@ class BundleArchiveWriter:
                 "BundleArchiveWriter closed without write_manifest() -- the "
                 "resulting archive would have no manifest.json member"
             )
-        self._zf.close()
         try:
+            # self._zf.close() is now *inside* the guarded block (Codex
+            # review, fresh evidence): a failure while writing the central
+            # directory (ENOSPC/EIO) previously happened before the try,
+            # leaving the temp file behind uncleaned.
+            self._zf.close()
             # Durability (Codex review, mirroring snapshot_io._atomic_write_bytes's
             # own two-part fsync): ZipFile.close() only flushes to the OS's
             # buffer cache via the underlying file object's own close(),
             # which is not itself a durability guarantee -- a power loss
             # between here and os.replace() could leave the temp file's
             # data unflushed to actual storage even though close() reported
-            # success. Reopening the just-written temp file to fsync it is
-            # safe: fsync operates on the inode's dirty pages regardless of
-            # which fd wrote them, so a fresh read-only fd is sufficient.
-            # Best-effort only in the narrow sense of "this filesystem/
-            # platform doesn't support fsync" (EINVAL/ENOTSUP/EOPNOTSUPP);
-            # a real storage failure (ENOSPC, EIO, EROFS) must propagate
-            # rather than let os.replace() publish unconfirmed content
-            # over a known-good archive.
-            tmp_fd = os.open(self._tmp_path, os.O_RDONLY)
-            try:
-                os.fsync(tmp_fd)
-            except OSError as exc:
-                if exc.errno not in (errno.EINVAL, errno.ENOTSUP, errno.EOPNOTSUPP):
-                    raise
-            finally:
-                os.close(tmp_fd)
+            # success. fsync's the *same* fd this class already holds open
+            # (self._tmp_file, from tempfile.mkstemp) rather than reopening
+            # the path -- no reason to pay a second open when the fd is
+            # already ours. Best-effort only in the narrow sense of "this
+            # filesystem/platform doesn't support fsync" (EINVAL/ENOTSUP/
+            # EOPNOTSUPP); a real storage failure (ENOSPC, EIO, EROFS) must
+            # propagate rather than let os.replace() publish unconfirmed
+            # content over a known-good archive.
+            self._fsync_tmp_file()
             # Ownership restored *before* mode (Codex review, fresh
             # evidence): on POSIX, chown() silently clears a file's
             # setuid/setgid bits as a security measure -- restoring mode
@@ -463,16 +528,28 @@ class BundleArchiveWriter:
                 )
             if self._existing_mode is not None:
                 os.chmod(self._tmp_path, self._existing_mode)
+            # Re-sync after chown/chmod, before replace (Codex review,
+            # fresh evidence): the earlier fsync only guarantees the
+            # *file content* reached storage -- chown/chmod mutate the
+            # inode's own metadata afterward, which a crash between here
+            # and os.replace() could then lose even though the content
+            # itself is durable, silently publishing the wrong owner/
+            # mode after a successful-looking write survives a reboot.
+            self._fsync_tmp_file()
+            self._tmp_file.close()
             os.replace(self._tmp_path, self._target)
         except BaseException:
-            # Codex review: a failure anywhere in this block (the fsync,
-            # the ownership/mode restoration, or the replace itself) must
-            # not leave the -- potentially very large -- temp file behind
-            # next to the untouched destination; a repeated failure
-            # (ENOSPC, EIO) would otherwise accumulate temp files and
-            # starve later retries of the very space they're trying to
-            # free up. A no-op once os.replace() has actually succeeded,
-            # since the temp path no longer exists at that point.
+            # Codex review: a failure anywhere in this block (closing the
+            # zip, the fsync, the ownership/mode restoration, or the
+            # replace itself) must not leave the -- potentially very
+            # large -- temp file behind next to the untouched destination;
+            # a repeated failure (ENOSPC, EIO) would otherwise accumulate
+            # temp files and starve later retries of the very space
+            # they're trying to free up. A no-op once os.replace() has
+            # actually succeeded, since the temp path no longer exists at
+            # that point.
+            if not self._tmp_file.closed:
+                self._tmp_file.close()
             self._tmp_path.unlink(missing_ok=True)
             raise
         # os.replace()'s directory-entry update is not itself durable
@@ -493,10 +570,29 @@ class BundleArchiveWriter:
             finally:
                 os.close(dir_fd)
 
+    def _fsync_tmp_file(self) -> None:
+        """Flush this class's own userspace write buffer and fsync the
+        result -- `self._zf.close()` writes the central directory through
+        `self._tmp_file`'s own buffered wrapper (from `os.fdopen`), so a
+        bare `os.fsync(fd)` without first flushing that buffer would only
+        durability-guarantee whatever had already reached the kernel,
+        silently skipping anything still sitting in the Python-level
+        buffer. Best-effort only for "this filesystem/platform doesn't
+        support fsync" (EINVAL/ENOTSUP/EOPNOTSUPP); a real storage
+        failure propagates."""
+        self._tmp_file.flush()
+        try:
+            os.fsync(self._tmp_file.fileno())
+        except OSError as exc:
+            if exc.errno not in (errno.EINVAL, errno.ENOTSUP, errno.EOPNOTSUPP):
+                raise
+
     def _abort(self) -> None:
         """Close the in-progress zip handle and discard its temp file --
         *path* (if it already held a prior archive) is never touched."""
         self._zf.close()
+        if not self._tmp_file.closed:
+            self._tmp_file.close()
         self._tmp_path.unlink(missing_ok=True)
 
     def __enter__(self) -> BundleArchiveWriter:

@@ -9,5 +9,7 @@
   share one blob. `load_bundle_facts(path)`'s existing `format="auto"` now
   also sniffs the zip magic and reads it transparently; every existing
   plain-JSON `BundleFacts` file keeps loading unchanged, and
-  `save_bundle_facts`'s own default stays `format="json"`. See
-  `docs/contribute/plans/g40-content-addressed-bundle-archive.md`.
+  `save_bundle_facts`'s own default stays `format="json"`. See the G40
+  design plan (`docs/contribute/plans/g40-content-addressed-bundle-archive.md`,
+  added in PR #866 — merge that PR first if this file isn't present yet on
+  the branch you're reading this from).

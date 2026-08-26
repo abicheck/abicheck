@@ -655,6 +655,54 @@ class TestBundleArchiveCentralDirectoryGuard:
         with BundleArchiveReader.open(path) as reader:
             assert reader.read_manifest()["library_blobs"] == {"a.so": h}
 
+    def test_rejects_a_central_directory_claiming_an_absurd_byte_size(
+        self, tmp_path: Path
+    ) -> None:
+        """Codex review, fresh evidence: the entry-count cap alone isn't a
+        byte-size bound -- a crafted archive can pair a low total_entries
+        with an enormous cd_size, which zipfile.ZipFile reads and parses
+        until fully consumed regardless of the entry count."""
+        import struct
+
+        path = tmp_path / "fake.zip"
+        # Low entry count (10, well under the cap), huge cd_size (200 MiB).
+        eocd = struct.pack("<IHHHHIIH", 0x06054B50, 0, 0, 0, 10, 200 * 1024 * 1024, 0, 0)
+        path.write_bytes(b"PK\x03\x04" + b"junk" + eocd)
+
+        with pytest.raises(SnapshotError, match="central directory claims"):
+            BundleArchiveReader.open(path)
+
+    def test_rejects_a_zip64_archive_claiming_an_absurd_entry_count(
+        self, tmp_path: Path
+    ) -> None:
+        """Codex review, fresh evidence: a crafted archive using the ZIP64
+        entry-count sentinel (0xFFFF) in the standard EOCD must not skip
+        the cap outright -- the real count must be recovered from the
+        ZIP64 EOCD locator/record and checked too."""
+        import struct
+
+        path = tmp_path / "fake_zip64.zip"
+        zip64_eocd_offset = 4  # arbitrary; only this test's own bytes matter
+        # ZIP64 EOCD record: sig(4) size_of_record(8) ver_made_by(2)
+        # ver_needed(2) disk(4) disk_start_cd(4) entries_this_disk(8)
+        # total_entries(8) cd_size(8) cd_offset(8) = 56 bytes fixed portion.
+        zip64_record = struct.pack(
+            "<IQHHIIQQQQ", 0x06064B50, 44, 0, 0, 0, 0, 0, 70_000, 1024, 0
+        )
+        # ZIP64 EOCD locator: sig(4) disk_with_zip64_eocd(4) offset(8) total_disks(4)
+        zip64_locator = struct.pack("<IIQI", 0x07064B50, 0, zip64_eocd_offset, 1)
+        # Standard EOCD with the 0xFFFF sentinel for total_entries.
+        eocd = struct.pack("<IHHHHIIH", 0x06054B50, 0, 0, 0, 0xFFFF, 0, 0, 0)
+
+        data = bytearray(b"\x00" * zip64_eocd_offset)
+        data += zip64_record
+        data += zip64_locator
+        data += eocd
+        path.write_bytes(bytes(data))
+
+        with pytest.raises(SnapshotError, match="central directory claims 70000"):
+            BundleArchiveReader.open(path)
+
 
 class TestBundleArchiveReadBlobCompressedSlack:
     """Codex review: zstd frame/block overhead can make an incompressible
@@ -734,3 +782,148 @@ class TestSniffBundleArchiveFormatNonRegularSource:
         finally:
             t.join()
         assert facts.per_library_snapshots == {}
+
+
+class TestBundleArchiveWriterTempFileCreation:
+    """Codex review, fresh evidence: a predictable temp filename in a
+    directory writable by another account can be pre-created as a
+    symlink, and ZipFile(path, mode="w")'s own open(path, "w+b") follows
+    it and truncates whatever it points at. The writer must create its
+    temp file itself, exclusively, so it can never be tricked into
+    writing through an attacker-planted entry."""
+
+    def test_round_trip_still_works_through_the_new_temp_file_creation(
+        self, tmp_path: Path
+    ) -> None:
+        path = tmp_path / "bundle.archive.zip"
+        with BundleArchiveWriter(path) as writer:
+            h = writer.put_blob(b'{"a": 1}')
+            writer.write_manifest({"library_blobs": {"a.so": h}})
+        with BundleArchiveReader.open(path) as reader:
+            assert reader.read_manifest()["library_blobs"] == {"a.so": h}
+        assert list(tmp_path.glob("*.tmp")) == []
+
+    @pytest.mark.skipif(sys.platform == "win32", reason="POSIX symlink semantics")
+    def test_a_planted_symlink_at_a_would_be_temp_path_is_never_followed(
+        self, tmp_path: Path
+    ) -> None:
+        """Simulates the attack directly: pre-create a symlink at every
+        temp-name shape the old "<name>.tmp-<pid>-<id>" scheme could have
+        produced, then confirm a real write still lands correctly and
+        none of the planted symlinks were touched -- proving temp
+        creation no longer uses (or falls back to) a guessable path."""
+        path = tmp_path / "bundle.archive.zip"
+        evil_target = tmp_path / "evil_target"
+        evil_target.write_bytes(b"do not touch me")
+        planted = []
+        for guess_id in range(-2, 3):
+            p = tmp_path / f"bundle.archive.zip.tmp-{os.getpid()}-{guess_id:x}"
+            p.symlink_to(evil_target)
+            planted.append(p)
+
+        with BundleArchiveWriter(path) as writer:
+            h = writer.put_blob(b'{"a": 1}')
+            writer.write_manifest({"library_blobs": {"a.so": h}})
+
+        assert path.exists()
+        for p in planted:
+            assert p.is_symlink()
+        assert evil_target.read_bytes() == b"do not touch me"
+
+
+class TestBundleArchiveWriterCloseFailureCleanup:
+    """Codex review, fresh evidence: self._zf.close() itself (the central-
+    directory write) must be inside the same cleanup-on-failure block as
+    the fsync/chown/chmod/replace steps -- a failure there previously
+    left the temp file behind uncleaned."""
+
+    def test_a_failure_while_closing_the_zip_still_removes_the_temp_file(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        path = tmp_path / "bundle.archive.zip"
+        writer = BundleArchiveWriter(path)
+        h = writer.put_blob(b'{"a": 1}')
+        writer.write_manifest({"library_blobs": {"a.so": h}})
+
+        calls = 0
+
+        def _failing_close(self: zipfile.ZipFile) -> None:
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                raise OSError(errno.ENOSPC, "simulated disk full while writing central directory")
+            # A later __del__-triggered close() (the underlying fp is
+            # already closed by this class's own cleanup path by then)
+            # must not raise a second, unrelated exception during GC.
+
+        monkeypatch.setattr(zipfile.ZipFile, "close", _failing_close)
+        with pytest.raises(OSError, match="simulated disk full"):
+            writer.close()
+        assert list(tmp_path.glob("*.tmp")) == []
+        assert not path.exists()
+
+
+class TestBundleArchiveWriterMetadataDurability:
+    """Codex review, fresh evidence: chown/chmod mutate the temp file's
+    inode metadata *after* the first fsync -- without a second fsync
+    after those mutations and before os.replace(), a crash could lose
+    the restored owner/mode even though the file content itself is
+    durable."""
+
+    @pytest.mark.skipif(sys.platform == "win32", reason="POSIX file mode semantics")
+    def test_close_fsyncs_again_after_restoring_mode(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        path = tmp_path / "bundle.archive.zip"
+        with BundleArchiveWriter(path) as writer:
+            h = writer.put_blob(b'{"a": 1}')
+            writer.write_manifest({"library_blobs": {"a.so": h}})
+        os.chmod(path, 0o600)  # gives close() an existing_mode to restore
+
+        events: list[str] = []
+        real_fsync = os.fsync
+        real_chmod = os.chmod
+
+        def _tracking_fsync(fd: int) -> None:
+            events.append("fsync")
+            real_fsync(fd)
+
+        def _tracking_chmod(p: object, mode: int) -> None:
+            events.append("chmod")
+            real_chmod(p, mode)
+
+        monkeypatch.setattr(os, "fsync", _tracking_fsync)
+        monkeypatch.setattr(os, "chmod", _tracking_chmod)
+
+        with BundleArchiveWriter(path) as writer:
+            h = writer.put_blob(b'{"a": 2}')
+            writer.write_manifest({"library_blobs": {"a.so": h}})
+
+        # At least two fsyncs on the temp file's own fd (before and after
+        # the chmod), with the chmod strictly between two of them.
+        fsync_indices = [i for i, e in enumerate(events) if e == "fsync"]
+        chmod_indices = [i for i, e in enumerate(events) if e == "chmod"]
+        assert len(fsync_indices) >= 2
+        assert chmod_indices
+        assert any(
+            fsync_indices[k] < chmod_indices[0] < fsync_indices[k + 1]
+            for k in range(len(fsync_indices) - 1)
+        ), f"expected a fsync both before and after chmod, got order: {events}"
+
+
+class TestBundleArchiveDeterministicCreateSystem:
+    """Codex review, fresh evidence: ZipInfo.__init__ defaults
+    create_system to the host platform (0 Windows, 3 Unix) and that value
+    is itself serialized into the central directory -- identical facts
+    archived on different platforms would otherwise still produce
+    different bytes despite every other reproducibility-affecting field
+    already being pinned."""
+
+    def test_every_member_pins_create_system_to_unix(self, tmp_path: Path) -> None:
+        path = tmp_path / "bundle.archive.zip"
+        with BundleArchiveWriter(path) as writer:
+            h = writer.put_blob(b'{"a": 1}')
+            writer.write_manifest({"library_blobs": {"a.so": h}})
+        with zipfile.ZipFile(path) as zf:
+            for info in zf.infolist():
+                assert info.create_system == 3
