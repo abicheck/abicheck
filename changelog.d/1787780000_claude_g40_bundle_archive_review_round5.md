@@ -362,3 +362,33 @@
   by delegating to that same helper's single O_NONBLOCK-open-then-fstat()
   classification, closing the fd itself since this caller only needs the
   classification, not the fd.
+
+- **G40 bundle archive: three more Codex review findings, all real, all
+  fixed.** (1) `_utf8_length_exceeds()`'s chunked fallback still called
+  `.encode("utf-8")` with strict error handling, which raises
+  `UnicodeEncodeError` for a lone surrogate (e.g. from a POSIX filename
+  captured through `os.fsdecode()`'s `surrogateescape` handling of
+  non-UTF-8 bytes) -- even though `json.dumps()`'s own `ensure_ascii=True`
+  escaping round-trips the identical value fine as a plain `\uXXXX`
+  sequence, so a value the ordinary JSON writer handles correctly could
+  crash `save_bundle_facts(..., format="archive")` before ever writing
+  anything. Fixed by encoding with `errors="surrogatepass"` in the
+  pre-check (the real `iterencode()`-based encode elsewhere never sees a
+  raw surrogate, since JSON's own ASCII escaping already turns it into
+  plain ASCII text first). (2) Both `write_manifest()`'s and
+  `write_bundle_facts_archive()`'s own oversized-string error messages
+  re-encoded the already-rejected string a second time
+  (`len(oversized.encode('utf-8'))`) purely to report its size --
+  recreating the exact allocation the preflight exists to avoid. Fixed by
+  having `oversized_raw_string()` return the byte count it already
+  computed while detecting the oversize (`tuple[str, int] | None` instead
+  of `str | None`), which both callers now use directly instead of
+  re-encoding; both messages now read "at least N bytes" (an honest lower
+  bound, not a claimed exact total, since a bare `len(s) > limit` fast
+  path never computes -- or needs -- the real one). (3)
+  `write_bundle_facts_archive()`'s `InstantiationManifest` payload still
+  called `json.dumps()`+`.encode()` directly -- the identical unbounded-
+  materialization gap the per-snapshot fix (previous round) closed one
+  level down, just never carried up to the manifest itself. Fixed by
+  routing it through `bounded_encode_utf8()` too, streamed against the
+  same remaining allowance.

@@ -671,7 +671,7 @@ class TestOversizedRawStringNeverEncodesTheWholeString:
         # Character count alone (10) already exceeds the limit (5), so no
         # encode() call is needed -- or permitted -- to answer the question.
         s = _TrackedStr("x" * 10)
-        assert _utf8_length_exceeds(s, 5) is True
+        assert _utf8_length_exceeds(s, 5) == 10
         assert _TrackedStr.encode_calls == []
 
     def test_a_string_near_the_limit_is_encoded_only_in_bounded_chunks(self) -> None:
@@ -703,7 +703,7 @@ class TestOversizedRawStringNeverEncodesTheWholeString:
         char_count = _CHUNK_CHARS * 3
         s = _TrackedStr("a" * char_count)
         result = _utf8_length_exceeds(s, char_count + 1000)
-        assert result is False
+        assert result is None
         assert _TrackedStr.encode_calls
         assert all(n <= _CHUNK_CHARS for n in _TrackedStr.encode_calls)
 
@@ -718,8 +718,26 @@ class TestOversizedRawStringNeverEncodesTheWholeString:
 
         s = "é" * 10  # 'é', 2 bytes each in UTF-8 -> 20 bytes total
         assert len(s) == 10
-        assert _utf8_length_exceeds(s, 15) is True
-        assert _utf8_length_exceeds(s, 20) is False
+        assert _utf8_length_exceeds(s, 15) == 20
+        assert _utf8_length_exceeds(s, 20) is None
+
+    def test_a_lone_surrogate_is_counted_instead_of_raising(self) -> None:
+        """Codex review, fresh evidence: a lone surrogate (e.g. from a
+        POSIX filename captured through `os.fsdecode`'s
+        `surrogateescape` handling of non-UTF-8 bytes) makes a strict
+        `.encode("utf-8")` raise `UnicodeEncodeError`, even though
+        `json.dumps()`'s own `ensure_ascii=True` escaping round-trips the
+        identical value fine as a plain `\\uXXXX` sequence -- so this
+        pre-check must never crash on one either."""
+        from abicheck.storage.bundle_archive_json_guard import _utf8_length_exceeds
+
+        s = "bad\udcffname"
+        # Confirms the premise: strict encode() really does raise here.
+        with pytest.raises(UnicodeEncodeError):
+            s.encode("utf-8")
+
+        assert _utf8_length_exceeds(s, 100) is None
+        assert _utf8_length_exceeds(s, 1) is not None
 
 
 class TestReaderClosesTheOwnedFdWhenRewindFails:

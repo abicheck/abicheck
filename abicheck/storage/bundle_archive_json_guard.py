@@ -30,9 +30,11 @@ import json
 _CHUNK_CHARS = 65536
 
 
-def _utf8_length_exceeds(s: str, limit: int) -> bool:
-    """Return whether *s*'s UTF-8 encoding exceeds *limit* bytes, without
-    ever encoding the whole string in one call.
+def _utf8_length_exceeds(s: str, limit: int) -> int | None:
+    """Return a byte count already known to exceed *limit* if *s*'s UTF-8
+    encoding does, else `None` -- without ever encoding the whole string
+    in one call, and without a caller needing to re-encode it a second
+    time just to report a size.
 
     A prior revision called ``obj.encode("utf-8")`` on the whole string
     before comparing its length -- for a guaranteed-oversized value (a
@@ -42,24 +44,34 @@ def _utf8_length_exceeds(s: str, limit: int) -> bool:
     length in *characters* is always a lower bound on its UTF-8 length in
     *bytes* (each codepoint encodes to 1-4 bytes), so a character count
     alone already over *limit* proves the byte count is too, with no
-    encoding at all. Otherwise the character count is already `<= limit`,
-    but encoding it in one call could still allocate up to `4 * limit`
-    bytes at once -- so the remainder is encoded incrementally, in bounded
-    chunks, stopping as soon as the running total exceeds *limit*.
+    encoding at all (returned as the lower-bound count itself). Otherwise
+    the character count is already `<= limit`, but encoding it in one call
+    could still allocate up to `4 * limit` bytes at once -- so the
+    remainder is encoded incrementally, in bounded chunks via
+    ``errors="surrogatepass"`` (a lone surrogate -- e.g. from a POSIX
+    filename captured through ``os.fsdecode``'s ``surrogateescape``
+    handling of non-UTF-8 bytes -- raises `UnicodeEncodeError` under the
+    default strict handling, even though `json.dumps()`'s own
+    `ensure_ascii=True` escaping round-trips it just fine as a plain
+    `\\uXXXX` sequence; Codex review, fresh evidence), stopping as soon as
+    the running total exceeds *limit* and returning that real, already-
+    computed partial total.
     """
     if len(s) > limit:
-        return True
+        return len(s)
     total = 0
     for start in range(0, len(s), _CHUNK_CHARS):
-        total += len(s[start : start + _CHUNK_CHARS].encode("utf-8"))
+        total += len(s[start : start + _CHUNK_CHARS].encode("utf-8", errors="surrogatepass"))
         if total > limit:
-            return True
-    return False
+            return total
+    return None
 
 
-def oversized_raw_string(obj: object, limit: int) -> str | None:
-    """Return the first string leaf found in *obj* whose own raw UTF-8
-    byte length already exceeds *limit*, or `None` if none does.
+def oversized_raw_string(obj: object, limit: int) -> tuple[str, int] | None:
+    """Return ``(string, byte_count)`` for the first string leaf found in
+    *obj* whose own raw UTF-8 byte length already exceeds *limit* --
+    *byte_count* a real, already-computed lower bound on that length, not
+    an exact total -- or `None` if no leaf does.
 
     Used to reject a manifest whose JSON encoding cannot possibly fit
     *limit* without ever materializing that (potentially far larger)
@@ -71,10 +83,14 @@ def oversized_raw_string(obj: object, limit: int) -> str | None:
     chunk-by-chunk length check alone can't reject an oversized string
     before that one allocation already happened (Codex review, fresh
     evidence) -- this check runs first, over the original, unescaped
-    strings, so the oversized allocation never happens at all.
+    strings, so the oversized allocation never happens at all. Returning
+    the byte count already found lets a caller report *some* real size in
+    an error message without re-encoding the (potentially still huge)
+    string a second time just to do so (Codex review, fresh evidence).
     """
     if isinstance(obj, str):
-        return obj if _utf8_length_exceeds(obj, limit) else None
+        count = _utf8_length_exceeds(obj, limit)
+        return (obj, count) if count is not None else None
     if isinstance(obj, dict):
         for k, v in obj.items():
             found = oversized_raw_string(k, limit) if isinstance(k, str) else None

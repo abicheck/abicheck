@@ -395,10 +395,11 @@ class BundleArchiveWriter:
 
         oversized = oversized_raw_string(manifest, DEFAULT_MAX_MANIFEST_BYTES)
         if oversized is not None:
+            _, oversized_bytes = oversized
             raise SnapshotError(
-                f"manifest.json contains a single string value of "
-                f"{len(oversized.encode('utf-8'))} bytes, alone exceeding "
-                f"the {DEFAULT_MAX_MANIFEST_BYTES} byte safety limit "
+                f"manifest.json contains a single string value of at "
+                f"least {oversized_bytes} bytes, alone exceeding the "
+                f"{DEFAULT_MAX_MANIFEST_BYTES} byte safety limit "
                 "read_manifest() enforces on load -- refusing to write an "
                 "archive that could not be reopened."
             )

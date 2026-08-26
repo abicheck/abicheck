@@ -358,9 +358,8 @@ def maybe_read_bundle_facts_archive(
     if resolved == "archive":
         return read_bundle_facts_archive(path, snapshot_from_dict=snapshot_from_dict, _fp=fp)
     # Known residual gap: for "json", *fp* is closed rather than handed to
-    # `read_snapshot_text(path)`'s own separate open, so the sniff-then-
-    # reopen race the archive branch above closes still applies here --
-    # not closed, since threading *fp* through needs a new parameter on a
+    # `read_snapshot_text(path)`'s own open, so the sniff-then-reopen race
+    # closed above still applies here -- needs a new parameter on a
     # `debt.yaml`-locked `no_growth` module (its own ADR-061 migration).
     if fp is not None:
         fp.close()
@@ -400,14 +399,13 @@ def write_bundle_facts_archive(
     p = Path(path)
     # Everything below is computed -- and every cap the reader will later
     # enforce is checked -- *before* `BundleArchiveWriter` is ever opened,
-    # so a rejected write never touches disk, on the *same* unique-hash
-    # map the write further down populates. Sorted by name, not dict
-    # insertion order: two logically-equal BundleFacts populated in a
-    # different order would otherwise produce different archive bytes.
-    # (a) Library-name-count cap, independent of the distinct-blob cap
-    # below (many names can share one blob) -- checked before the
-    # serialization loop, else many names referencing one large shared
-    # snapshot would serialize that payload once per name first.
+    # on the *same* unique-hash map the write further down populates.
+    # Sorted by name, not dict insertion order: two logically-equal
+    # BundleFacts populated differently would else produce different
+    # archive bytes. (a) Library-name-count cap, independent of the
+    # distinct-blob cap below (many names can share one blob) -- checked
+    # before the loop, else many names sharing one large snapshot would
+    # serialize it once per name first.
     if len(facts.per_library_snapshots) > DEFAULT_MAX_LIBRARY_COUNT:
         raise SnapshotError(
             f"{p}: writing this bundle's {len(facts.per_library_snapshots)} "
@@ -466,9 +464,15 @@ def write_bundle_facts_archive(
     if facts.manifest is not None:
         from .bundle_manifest import manifest_to_dict
 
-        manifest_payload = _json.dumps(
-            manifest_to_dict(facts.manifest), indent=2
-        ).encode("utf-8")
+        # Streamed the same way the per-snapshot loop above is (Codex
+        # review, fresh evidence): only snapshots were bounded, so an
+        # InstantiationManifest itself could still exhaust memory via a
+        # full json.dumps()+.encode() before this check ever ran.
+        remaining = max(DEFAULT_MAX_BUNDLE_DECODED_BYTES - decoded_size_bytes, 0)
+        encoded_manifest = bounded_encode_utf8(manifest_to_dict(facts.manifest), remaining)
+        if encoded_manifest is None:
+            raise SnapshotError(_oversized_bundle_message())
+        manifest_payload = encoded_manifest
         decoded_size_bytes += len(manifest_payload)
         manifest_blob = content_hash(manifest_payload)
         unique_payloads.setdefault(manifest_blob, manifest_payload)
@@ -523,24 +527,23 @@ def write_bundle_facts_archive(
     }
     # A third cap: manifest.json's own reader-side size ceiling, never
     # covered above. Checked incrementally via iterencode(), not
-    # `json.dumps()` then `.encode("utf-8")` -- which would fully
-    # materialize the string (and a second UTF-8 copy) before this could
-    # reject an oversized alias/filename map (Codex review).
-    # write_manifest() re-checks identically when writing the member
-    # below; checked here too so a reject happens before any blob write.
-    # A single oversized string value needs its own pre-check first
-    # (Codex review, fresh evidence, same reasoning as write_manifest()'s
-    # own docstring): iterencode() yields one whole escaped string as a
-    # single chunk, so the chunk-by-chunk loop below can't reject it
-    # before that one allocation already happened.
+    # `json.dumps()` then `.encode("utf-8")`, which would fully
+    # materialize the string (and a second UTF-8 copy) first (Codex
+    # review). write_manifest() re-checks identically when writing the
+    # member below; checked here too so a reject happens before any blob
+    # write. A single oversized string value needs its own pre-check
+    # first, same reasoning as write_manifest()'s own docstring:
+    # iterencode() yields one whole escaped string as a single chunk, so
+    # the chunk-by-chunk loop below can't reject it on its own.
     oversized = oversized_raw_string(container_manifest, DEFAULT_MAX_MANIFEST_BYTES)
     if oversized is not None:
+        _, oversized_bytes = oversized
         raise SnapshotError(
             f"{p}: this bundle's manifest.json contains a single string "
-            f"value of {len(oversized.encode('utf-8'))} bytes, alone "
-            f"exceeding the {DEFAULT_MAX_MANIFEST_BYTES} byte safety "
-            "limit read_bundle_facts_archive() enforces on load -- "
-            "refusing to write an archive that could not be reopened."
+            f"value of at least {oversized_bytes} bytes, alone exceeding "
+            f"the {DEFAULT_MAX_MANIFEST_BYTES} byte safety limit "
+            "read_bundle_facts_archive() enforces on load -- refusing to "
+            "write an archive that could not be reopened."
         )
     manifest_member_bytes = 0
     for chunk in _json.JSONEncoder(indent=2).iterencode(container_manifest):
@@ -560,13 +563,11 @@ def write_bundle_facts_archive(
         writer.write_manifest(container_manifest)
     # `writer.stored_sha256`/`writer.stored_size_bytes` are computed by
     # BundleArchiveWriter.close() from the still-private temp file, before
-    # os.replace() publishes it -- not re-derived here via a fresh
-    # `open(p, "rb")`/`p.stat()` after the `with` block (Codex review,
-    # fresh evidence): a concurrent writer publishing a *different*
-    # generation to the same destination between this writer's own
-    # publish and a separate re-open here could otherwise make the
-    # reported hash/size describe someone else's write, not this one's --
-    # a real hazard for `SnapshotWriteResult` used as an artifact receipt.
+    # os.replace() publishes it -- not re-derived via a fresh `open(p,
+    # "rb")`/`p.stat()` after the `with` block: a concurrent writer
+    # publishing a *different* generation to the same destination in
+    # between could otherwise make the reported hash/size describe
+    # someone else's write, a real hazard for a receipt (Codex review).
     assert writer.stored_sha256 is not None
     assert writer.stored_size_bytes is not None
     return SnapshotWriteResult(

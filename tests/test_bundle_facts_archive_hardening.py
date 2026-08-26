@@ -478,7 +478,13 @@ class TestBundleFactsArchiveResourceLimits:
         facts = capture_bundle_facts({}, manifest=manifest)  # no library snapshots at all
         out = tmp_path / "oversized-manifest-only.bundlefacts.archive.zip"
 
-        with pytest.raises(SnapshotError, match="exceed the 100"):
+        # Matches either raise site: the manifest's own now-bounded encode
+        # may reject it directly (a real correctness *improvement* from a
+        # later fix -- rejecting before the aggregate check even runs,
+        # rather than only after), or the aggregate check below it if not.
+        # Both share this phrase; which one fires is an implementation
+        # detail, not what this test is pinning.
+        with pytest.raises(SnapshotError, match="byte aggregate safety limit"):
             save_bundle_facts(facts, out, format="archive")
         assert not out.exists()
 
@@ -556,6 +562,62 @@ class TestBundleFactsArchiveResourceLimits:
         snap = AbiSnapshot(library="libbig.so", version="x" * 5000)
         facts = BundleFacts(per_library_snapshots={"libbig.so": snap})
         out = tmp_path / "oversized-snapshot-field.bundlefacts.archive.zip"
+
+        with pytest.raises(SnapshotError, match="1000 byte aggregate safety limit"):
+            save_bundle_facts(facts, out, format="archive")
+        assert not out.exists()
+
+    def test_write_routes_the_instantiation_manifest_through_bounded_encode_utf8(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Codex review, fresh evidence: only the per-library-snapshot
+        encode above was routed through `bounded_encode_utf8()` -- the
+        `InstantiationManifest` payload still called `json.dumps()` +
+        `.encode()` directly, the identical unbounded-materialization gap
+        one level up. Same routing proof as the snapshot-level test."""
+        import abicheck.storage.bundle_archive_json_guard as guard_module
+
+        real_fn = guard_module.bounded_encode_utf8
+        calls: list[object] = []
+
+        def _tracking(obj: object, limit: int) -> bytes | None:
+            calls.append(obj)
+            return real_fn(obj, limit)
+
+        monkeypatch.setattr(guard_module, "bounded_encode_utf8", _tracking)
+
+        manifest = InstantiationManifest(
+            entries=(ManifestEntry(symbol="core_mul", optional_provider=False),)
+        )
+        facts = BundleFacts(
+            per_library_snapshots=_per_library_snapshots(_old_metadata()),
+            manifest=manifest,
+        )
+        out = tmp_path / "manifest-routes-through-bounded-encode.bundlefacts.archive.zip"
+        save_bundle_facts(facts, out, format="archive")
+
+        # One call per library snapshot, plus exactly one more for the
+        # manifest itself -- a dict with "provides", never "library".
+        manifest_calls = [c for c in calls if isinstance(c, dict) and "provides" in c]
+        assert len(manifest_calls) == 1
+
+    def test_write_rejects_an_oversized_instantiation_manifest(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Functional correctness companion: an `InstantiationManifest`
+        whose own serialization alone exceeds the cap must still be
+        rejected with the correct error, not exhaust memory first."""
+        import abicheck.bundle_facts as bundle_facts_module
+
+        monkeypatch.setattr(bundle_facts_module, "DEFAULT_MAX_BUNDLE_DECODED_BYTES", 1000)
+        manifest = InstantiationManifest(
+            entries=tuple(
+                ManifestEntry(symbol=f"sym_{i}" * 50, optional_provider=False)
+                for i in range(50)
+            )
+        )
+        facts = BundleFacts(per_library_snapshots={}, manifest=manifest)
+        out = tmp_path / "oversized-manifest.bundlefacts.archive.zip"
 
         with pytest.raises(SnapshotError, match="1000 byte aggregate safety limit"):
             save_bundle_facts(facts, out, format="archive")
