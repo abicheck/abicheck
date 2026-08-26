@@ -2401,7 +2401,60 @@ same category as the JSON/SARIF/JUnit work above — not the UI/report-
 rendering *redesign* the "Out of scope" section below disclaims, and that
 section is corrected accordingly.
 
-### Phase 4 — one real consumer (M, optional/stretch)
+**`_changes_table` does not render every HTML finding row, and
+`stack_to_markdown()` is a third, wholly independent human-facing
+renderer this section's inventory missed entirely — both confirmed
+against the real code, not the round-38 correction's own claims (Codex
+review, PR #866 round 39).** `html_report._build_sections_html()`
+renders its `not_evaluated` section (ADR-049 D1 — findings a selected
+`--contract` domain excluded from every verdict bucket) via its own
+hand-built row loop (`html_report.py`, the `if not_evaluated:` block),
+not through `_changes_table` at all — it builds `<tr>` markup directly
+from `ch.symbol`/`ch.kind`/`ch.contract_reason_code`/
+`ch.correlated_change_kind`, with no call to `_changes_table` or any
+shared per-finding renderer anywhere in that block. So the fix prescribed
+above for `_changes_table` — adding an `"evidence_provenance: ..."` line
+"immediately alongside its existing `contract_evidence_refs`
+rendering" — provably cannot reach a `not_evaluated` row: that row is
+never built by `_changes_table` in the first place. A finding excluded
+by `--contract` is exactly the shape most likely to need its evidence
+provenance explained (a reader asking "why wasn't this scored" is the
+same reader who'd want to know *what evidence was searched*), making this
+the higher-value gap of the two HTML paths, not a minor omission.
+Closing it needs the identical rendering added a second time, directly
+in `_build_sections_html`'s own row-building loop (mirroring how
+`correlated_change_kind`'s "See also" line is already added there
+independently of `_changes_table`), with its own HTML fixture test
+asserting the `not_evaluated` table's own `<tr>` markup carries the
+evidence-provenance text — a `--contract` run's fixture, not the
+plain-comparison one the `_changes_table` fixture above already covers.
+
+Separately, `stack_report.stack_to_markdown()` (the Markdown renderer for
+`abicheck compat-stack`/`abicheck deps --check` results, not covered by
+either `_changes_table` or `reporter_markdown.py`) has two of its own
+independent per-`Change` rendering loops: `_render_stack_changes_section`
+renders each library's own gating findings directly off
+`sc.abi_diff.breaking` (`f"  - `{c.kind.value}`: {c.description}"`, no
+other field read), and `_render_binding_changes_section` renders runtime
+binding-provider findings the same way
+(`f"- `{bc.kind.value}`: {bc.description}"`). Neither reads
+`evidence_provenance`, `contract_evidence_refs`, or any other per-finding
+metadata field — both are pure `kind`/`description` bullet lists. This is
+not the same gap `stack_report.py`'s existing JSON coverage already
+closes: `_stack_finding_dicts` (used only by `stack_to_json`, this
+section's already-covered "fifth projection family") and
+`stack_to_markdown` are two entirely separate code paths over the same
+underlying `Change` objects — fixing the dict projection changes nothing
+about what the Markdown bullets render, and vice versa. Closing this
+needs its own additive line in each of the two render loops (matching the
+`- `{c.kind.value}`: {c.description}` bullet's own established style,
+e.g. an indented `- Evidence: ...` line rendered only when
+`evidence_provenance` is set, so a plain `stack_to_markdown()` run with no
+evidence data produces byte-identical output to today), plus its own
+Markdown fixture test — a `stack_to_markdown()` snapshot over a
+`StackCheckResult` carrying a `Change` with `evidence_provenance` set,
+distinct from the HTML/plain-`reporter_markdown.py` fixtures already
+required above, since neither of those exercises this module at all.
 
 Explicitly **not required** for this plan's acceptance criteria, named here
 so a future PR doesn't have to re-derive the target: once real, per-finding

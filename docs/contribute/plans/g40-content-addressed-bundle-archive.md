@@ -722,7 +722,33 @@ exceeds the caller's own byte ceiling, rather than reading the whole
 member into a buffer first. For a blob specifically, that ceiling is
 `max_decoded_bytes` plus a small fixed zstd-frame-overhead slack, not
 the raw member size, so an incompressible payload's slightly larger
-compressed form is still accepted without loosening the bound. This
+compressed form is still accepted without loosening the bound.
+
+**The streaming cap above bounds only what `_read_stored_member()` itself
+reads chunk-by-chunk — it does nothing for a member whose *own* declared
+compression method isn't `ZIP_STORED` in the first place, since
+`zipfile.ZipFile.open()` performs that *outer* decompression (LZMA/BZIP2/
+DEFLATE) internally, before this format's chunked-read loop ever sees a
+single byte (Codex review, fresh evidence, verified against the real
+implementation in PR #869).** This format's own writer only ever emits
+`ZIP_STORED` members (`_deterministic_zipinfo()` pins
+`info.compress_type = zipfile.ZIP_STORED` unconditionally), so a
+legitimately-produced archive never exercises this — but a hand-crafted
+or corrupted one can set any `ZipInfo.compress_type` the zip format
+allows for a member named `manifest.json` or `blobs/<hash>.json.zst`. A
+member flagged `ZIP_LZMA`, in particular, lets `ZipExtFile.read()` build
+an LZMA decoder with an attacker-chosen dictionary size *before*
+`_read_stored_member()`'s running-total check observes any output at
+all — the byte-ceiling check the paragraph above describes runs on
+`f.read(1024 * 1024)`'s returned chunks, which is already too late for
+an allocation `zipfile`'s own decompressor made internally to produce
+that first chunk. `_read_stored_member()` closes this by checking
+`info.compress_type != zipfile.ZIP_STORED` — read from the central
+directory entry the earlier preflight already validated, so this check
+itself requires no additional parsing — and raising before `self._zf.
+open(name)` is ever called for that member, for both `manifest.json` and
+every blob alike, one shared check ahead of the one shared streaming
+read. This
 plan's own resource-limit inventory above was, again, simply missing
 the requirement — the code already reads the compressed member and the
 decoded decompression output as two independently bounded steps.
@@ -1219,6 +1245,29 @@ what actually shipped.**
      bound (guard 7): a tiny manifest and central directory naming one
      multi-gigabyte stored member must still be rejected before any
      zstd decoding is attempted.
+  9. *Non-`ZIP_STORED` member (`ZIP_DEFLATED`, and by the same blanket
+     `!= ZIP_STORED` check, `ZIP_LZMA`/`ZIP_BZIP2` too)* — a
+     `manifest.json` or blob member whose `ZipInfo.compress_type` is
+     anything other than `ZIP_STORED` must be rejected by
+     `_read_stored_member()`'s own compress-type check, adversarially,
+     through the public reader (`BundleArchiveReader.read_manifest()`/
+     `read_blob()`, not the private helper directly) — before
+     `zipfile.ZipFile.open()` is ever asked to open that member, since
+     that call is what would otherwise perform the outer decompression
+     internally, ahead of and unbounded by this format's own
+     chunked-read cap (guard 8's "streaming, never fully buffered"
+     property only applies once the member is already `ZIP_STORED`).
+     The shipped implementation already carries this coverage —
+     `tests/test_bundle_archive.py::TestBundleArchiveReaderRejectsNonStoredMembers`
+     (`test_read_manifest_rejects_a_deflated_manifest_member`,
+     `test_read_blob_rejects_a_deflated_blob_member`) — constructing the
+     adversarial fixture with a real `zipfile.ZipFile(..., compression=
+     zipfile.ZIP_DEFLATED)` write rather than hand-editing headers, since
+     this format's own `BundleArchiveWriter` never produces a non-`ZIP_
+     STORED` member to test against otherwise; the check itself is a
+     blanket inequality against `zipfile.ZIP_STORED`, not a per-method
+     allowlist, so the `ZIP_DEFLATED` coverage already exercises the
+     identical code path an `LZMA`/`BZIP2` member would hit.
 - Back-compat: every existing plain-JSON `BundleFacts` fixture in this
   repo's test suite still loads unchanged via the `"auto"`-sniffing path
   once this plan ships, with **no** re-save required.
