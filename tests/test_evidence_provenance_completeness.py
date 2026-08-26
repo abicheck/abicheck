@@ -150,7 +150,29 @@ class TestVerifiedBucketsHaveProducerCoverage:
     against. Vacuously true today (both verified buckets are still
     empty -- Phase 1 hasn't started), which is exactly the point: it
     starts enforcing the invariant from the first kind moved into either
-    bucket, rather than after the gap is already there."""
+    bucket, rather than after the gap is already there.
+
+    Known, stated limit (Codex review, fresh evidence): "covered" here
+    means *a* mutation-catalogue entry exists for the kind, not that
+    *every* independent producer path for it does. A kind with two
+    genuinely separate emitters -- e.g. FUNC_REMOVED's function-model
+    path in diff_symbols.py alongside a PE/Mach-O export-delta path in
+    diff_platform.py -- could be reclassified on the strength of only
+    one path's mutation, leaving the other silently unverified while
+    this gate, `TestClassificationTracksRealProducerBehavior`, and every
+    exhaustiveness test above all report green. Closing that needs a
+    real per-kind producer-path inventory (which call sites in which
+    diff_*.py modules can emit each kind) that does not exist anywhere
+    in this codebase today -- `changekind-detector`
+    (`scripts/check_ai_readiness.py`) only answers "is this kind
+    produced at all", the same single-path blind spot. Building that
+    inventory is Phase 1 infrastructure in its own right, not a Phase
+    0/2 completeness-gate fix, and doing it before any real producer
+    exists to validate its shape against risks guessing wrong. Until
+    then: a Phase 1 PR reclassifying a kind with more than one known
+    producer path must manually confirm every path is covered, not just
+    the one its own mutation catalogue entry happens to exercise --
+    review discipline stands in for the missing mechanical check."""
 
     def test_every_verified_kind_has_a_mutation_catalogue_entry(self) -> None:
         covered = {mutation(tag=1)[2].value for mutation in MUTATIONS}
@@ -282,7 +304,29 @@ class TestClassificationTracksRealProducerBehavior:
         output. Still partial coverage, stated honestly: a kind covered by
         only one mutation can't be checked this way at all (the loop below
         no-ops for it), which is exactly why this docstring doesn't claim a
-        stronger guarantee than the test actually gives."""
+        stronger guarantee than the test actually gives.
+
+        Known, stated residual (Codex review, fresh evidence, third
+        round): "overwhelmingly expected to differ" is not "guaranteed
+        to differ" -- two independent mutations for a genuinely
+        PROVENANCE_PER_FINDING kind can still legitimately compute the
+        identical tuple (e.g. both findings corroborated by the same
+        single evidence provider), which this check cannot distinguish
+        from a producer that is silently constant. A fully sound version
+        needs each MUTATIONS entry to state its own *expected*
+        evidence_provenance value and compare against that directly,
+        rather than inferring per-instance-ness from cross-mutation
+        inequality -- deliberately not built here, since authoring
+        expected-value fixtures ahead of any real Phase 1 producer would
+        mean guessing at a shape nothing has committed to yet. This
+        assertion is therefore a heuristic, kept because it still catches
+        the common, real failure mode (a producer that never varies at
+        all) at the cost of a narrow false-positive risk on a coincidence
+        Phase 1 will need to watch for by hand: if this assertion ever
+        rejects a producer that is genuinely per-finding but happened to
+        coincide across its catalogued mutations, the fix is to add a
+        mutation exercising a case where the two providers differ for
+        real, not to weaken or remove this check."""
         emitted = self._emitted_for_kind(kind_value)
         unstamped = [c for c in emitted if c.evidence_provenance is None]
         assert not unstamped, (
