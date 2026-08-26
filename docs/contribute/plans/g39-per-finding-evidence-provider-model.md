@@ -1409,10 +1409,30 @@ structure already in place:
    each snapshot's own fields — `old.elf is not None`, `new.elf is not
    None`, and identically for `dwarf`/`dwarf_advanced`/`pe`/`macho`/headers
    — the same predicates `_detect_evidence_tiers` already applies, just
-   evaluated once per snapshot instead of OR'd together. Emit
-   `both:l0:searched:<tier>` only for a tier both sides independently carry;
-   a tier only one side carries is either omitted from the negative
-   component entirely (the conservative choice — this plan's own
+   evaluated once per snapshot instead of OR'd together.
+
+   **The tier and backend segments must be derived per field, not
+   hard-coded to `l0` regardless of which field matched (Codex review,
+   verified against the real code, PR #866 round 30) — an earlier draft of
+   this paragraph wrote the emitted shape as a single `both:l0:searched:
+   <tier>` template for every one of `elf`/`dwarf`/`dwarf_advanced`/`pe`/
+   `macho`/headers alike, which would mislabel every DWARF- or
+   header-only tier as `l0` and would also put the tier name in the
+   backend slot instead of naming a real backend.** The correct shape is
+   the same `<side>:<tier>:searched:<backend>` vocabulary item 1 above
+   already establishes, applied per matched field with `both:` as the side
+   prefix: `both.elf` present on both sides emits
+   `both:l0:searched:elf_symtab`; `both.pe` emits
+   `both:l0:searched:pe_export_table`; `both.macho` emits
+   `both:l0:searched:macho_exports`; `both.dwarf`/`both.dwarf_advanced`
+   present on both sides emits `both:l1:searched:dwarf`; and a header-AST
+   snapshot on both sides emits `both:l2:searched:castxml`/
+   `both:l2:searched:clang` (never a bare `l2`), naming whichever backend(s)
+   actually produced it — one entry per provider actually consulted, the
+   same "no collapsed composite tag" rule item 1 states for its own
+   multi-provider case, rather than a single `both:l2:searched:headers`
+   placeholder. A field only one side carries is either omitted from the
+   negative component entirely (the conservative choice — this plan's own
    `AGENTS.md`-derived preference for a documented false-negative gap over a
    fabricated positive applies here too) or, if a single-sided claim is
    wanted, spelled with the honest `old:`/`new:` prefix for that side alone,
@@ -1660,6 +1680,47 @@ like `_baseline_finding_dicts`/the release-JSON family above — only the
 "don't add a field silently to an unversioned format" caution applies to
 these two, not a schema file to update.
 
+**A sixth projection family, `cli_compare_fold.py`'s `--audit-suppressions`
+ledger, is missing from this inventory entirely — it names no `Change`→dict
+builder at all today, and it is a distinct ledger from
+`_suppressed_change_entry` above, not a duplicate of it (Codex review,
+fresh evidence, confirmed by reading `cli_compare_fold.py` directly, PR
+#866 round 30).** `_fold_suppression_audit_into_text()`'s JSON branch
+independently serializes each `(rule, change)` pair in
+`audit.high_risk_matches` — the `SuppressionAudit` findings where a
+suppression rule matched a `BREAKING` change — into
+`suppression_audit.high_risk_matches`, a hand-built dict of `rule`/
+`kind.value`/`symbol` straight off the `Change` object, with no call to
+`to_change()`, `_change_to_dict()`, `_leaf_entry()`, or any of the other
+five families above. This is a genuinely separate surface from
+`_suppressed_change_entry` (the ordinary suppressed-change ledger already
+named in the "Files & surfaces" list): that builder records every
+*ordinarily* suppressed finding, while `high_risk_matches` is
+`--audit-suppressions`'s own report — specifically the subset of
+suppressions the audit flags as risky because they matched a BREAKING
+change — and it is reachable only when `--audit-suppressions` is passed,
+independent of whether ordinary suppression bookkeeping ran at all.
+Implementing this phase against only the first five families would leave
+`compare --format json --audit-suppressions`'s `high_risk_matches` entries
+silently missing `evidence_provenance` even once the ordinary suppressed-
+change ledger carries it — exactly the auditability gap the fourth
+family's own paragraph above warns about, just on the audit surface that
+exists specifically to justify *why* a suppression was allowed to hide a
+BREAKING change. Add `evidence_provenance` to `high_risk_matches`'s dict
+literal explicitly, and give it its own test coverage — a `compare
+--format json --audit-suppressions` fixture asserting
+`suppression_audit.high_risk_matches[].evidence_provenance` is present when
+a rule matches a BREAKING change, mirroring the existing per-builder
+pattern rather than assumed to follow from the ordinary suppressed-change
+ledger's own coverage. `compare`'s JSON output already has a dedicated
+schema (`REPORT_SCHEMA_VERSION`/`compare_report.schema.json`, the same one
+`_change_to_dict`/`_leaf_entry` feed), so this field addition is not
+exempt the way the unversioned scan/release/stack surfaces above are —
+it needs the identical schema-version bump and `compare_report.schema.json`
+update the next paragraph already requires for `_change_to_dict`/
+`_leaf_entry`, applied to `suppression_audit`'s own definition too, in the
+same PR.
+
 **A new public field on an already-published report format is a real
 schema change, not a cosmetic addition (Codex review — a prior revision of
 this phase named all three builders but never said this)**:
@@ -1884,6 +1945,12 @@ above, which this list intentionally does not re-duplicate.
   dict builders, none reached by `reporter.py`'s six builders or by
   `_baseline_finding_dicts`/`_release_finding_dicts` despite the latter's
   own docstring naming `_stack_finding_dicts` as a sibling shape.
+- `abicheck/cli_compare_fold.py`'s `_fold_suppression_audit_into_text` —
+  Phase 3's sixth projection family (see that phase's own correction
+  above): `compare --format json --audit-suppressions`'s independent
+  `suppression_audit.high_risk_matches` dict builder, a distinct ledger
+  from `_suppressed_change_entry` above, not reached by `reporter.py`'s
+  six builders or by any of the other projection families.
 - `abicheck/sarif.py`'s `properties` bag, its two run-level audit-ledger
   dict projections (`surfaceScope.outOfSurfaceChanges`,
   `buildContextReconciled.changes`), and `abicheck/junit_report.py`'s
