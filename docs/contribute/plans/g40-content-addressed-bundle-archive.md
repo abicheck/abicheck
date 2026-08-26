@@ -47,8 +47,11 @@ separate storage-architecture project on the scale of
 [ADR-059](../adr/059-compressed-snapshot-storage.md) (snapshot compression)
 or [G32](g32-comparability-contract-and-multi-tu-manifest.md) (multi-TU
 manifest)", not a sub-step of making the bundle layer stored-data-capable.
-This document is that separate scope: a design, not an implementation. No
-code changes ship with this plan.
+This document was originally that separate scope as a design-only proposal.
+Per the "Status" note above, the design has since been implemented on the
+`claude/g40-bundle-archive-impl` branch (PR #869) — not yet merged to
+`main`. No code changes ship with **this** plan-document PR; the
+implementation itself is tracked and reviewed separately in PR #869.
 
 ## Problem
 
@@ -174,22 +177,34 @@ added: `bundle_` is already a frozen root family
 shipped), and that check rejects a *new* sibling in a frozen family outright
 ("new root sibling is forbidden; create the responsibility package owner").
 `abicheck/bundle_facts.py`/`bundle_manifest.py` (the existing G38 modules
-this plan's `BundleArchive` reads from) stay where they are — this plan adds
-a new storage-format module, not a migration of those.
+`write_bundle_facts_archive`/`read_bundle_facts_archive` read from) stay
+where they are — this plan adds a new storage-format module, not a
+migration of those.
 
-New module, `abicheck/storage/bundle_archive.py`:
+New module, `abicheck/storage/bundle_archive.py`. **As shipped (PR #869),
+`abicheck/storage/bundle_archive.py` deliberately knows nothing about
+`BundleFacts`/`AbiSnapshot` (see that module's own docstring, quoted under
+"Files & surfaces" below) — there is no `BundleArchiveManifest` dataclass
+in it; the manifest is a plain `dict[str, Any]`, written via
+`BundleArchiveWriter.write_manifest(manifest: dict)` and read back via
+`BundleArchiveReader.read_manifest() -> dict`. The `BundleFacts`-aware
+shape below is `abicheck/bundle_facts.py`'s own manifest-dict *contract*
+with that primitive — the keys `write_bundle_facts_archive()`/
+`read_bundle_facts_archive()` write and expect, not a type either module
+defines:
 
 ```python
-@dataclass(frozen=True)
-class BundleArchiveManifest:
-    schema_version: int  # the *container's own* layout version
-    bundle_facts_schema_version: int  # the encoded BundleFacts' own version
-    variant_fingerprint: str
+# manifest.json's shape, as a dict -- not a dataclass:
+{
+    "schema_version": int,  # the *container's own* layout version
+    "bundle_facts_schema_version": int,  # the encoded BundleFacts' own version
+    "variant_fingerprint": str,
     # canonical_library_name -> content hash of its serialized AbiSnapshot
-    library_blobs: dict[str, str]
-    manifest_blob: str | None  # InstantiationManifest, if present
-    filesystem_aliases: dict[str, tuple[str, ...]]
-    library_filenames: dict[str, str]
+    "library_blobs": dict[str, str],
+    "manifest_blob": str | None,  # InstantiationManifest, if present
+    "filesystem_aliases": dict[str, list[str]],
+    "library_filenames": dict[str, str],
+}
 ```
 
 **Two independent schema versions, not one (Codex review, fresh evidence):**
@@ -209,7 +224,7 @@ for the plain-JSON path, so both axes reject a too-new value independently
 and the two consumers (the archive reader, `BundleFacts`'s own loader) each
 answer only the question they own.
 
-Layout inside the zip: `manifest.json` (the `BundleArchiveManifest` above,
+Layout inside the zip: `manifest.json` (the manifest dict above,
 uncompressed member — always readable without touching the blob store,
 mirroring `bundle_facts.py`'s existing top-level fields) plus one member per
 *unique* content hash under `blobs/<sha256-hex>.json.zst`. The blob store is
@@ -523,19 +538,32 @@ attempted here (see "Out of scope").
 
 ### Phase 2 — lazy reader (S)
 
+**As shipped (PR #869), lazy per-library access is composed by the caller
+from `storage/bundle_archive.py`'s own primitives — there is no dedicated
+`BundleArchive`/`load_library()` wrapper class.** `BundleArchiveReader`
+(the primitive module's own class; see "Files & surfaces" below) exposes
+`open(path)`, `read_manifest() -> dict`, and `read_blob(content_hash, ...)
+-> bytes`; a caller wanting one library's `AbiSnapshot` reads the manifest
+dict, looks up that library's content hash in `manifest["library_blobs"]`,
+and calls `read_blob()` on that hash, deserializing the returned bytes
+itself (`snapshot_from_dict`). The `InstantiationManifest` blob, when
+present, is read the identical way via `manifest["manifest_blob"]`. The
+sketch below states this as the conceptual per-library read operation this
+phase's acceptance criteria are about — not a literal typed method that
+ships:
+
 ```python
-class BundleArchive:
-    @classmethod
-    def open(cls, path: Path) -> "BundleArchive": ...
-    def manifest(self) -> BundleArchiveManifest: ...              # reads only manifest.json
-    def load_library(self, name: str) -> AbiSnapshot: ...         # reads only that library's blob
-    def load_instantiation_manifest(self) -> InstantiationManifest | None: ...
-        # reads only the manifest_blob member, or returns None without
-        # touching the blob store when BundleArchiveManifest.manifest_blob is None
-    def close(self) -> None: ...
+# Conceptual: what "load one library, lazily" means over the real,
+# shipped primitives (storage/bundle_archive.py's BundleArchiveReader) --
+# not a class this format defines.
+with BundleArchiveReader.open(path) as reader:
+    manifest = reader.read_manifest()            # reads only manifest.json
+    content_hash = manifest["library_blobs"][name]
+    payload = reader.read_blob(content_hash)      # reads only that library's blob
+    snapshot = snapshot_from_dict(json.loads(payload))
 ```
 
-`load_library` decompresses and parses exactly the one referenced blob member
+This per-library read decompresses and parses exactly the one referenced blob member
 (acceptance criterion (a)); a caller wanting every library still pays the
 full cost, but a caller wanting one library out of a fifty-library release
 (the CLI-blocked-but-real `compare_release_against_bundle_facts()` per-
@@ -546,16 +574,16 @@ no longer pays for the other forty-nine.
 Decompression-bomb limits mirror `snapshot_io.py`'s existing discipline for
 the plain-JSON path (ADR-059) — applied per-member here rather than to one
 whole-document read, so a single oversized blob can't exhaust memory on a
-`load_library` call for an unrelated, small library elsewhere in the same
+per-library `read_blob()` call for an unrelated, small library elsewhere in the same
 archive.
 
 **A per-member cap alone is not sufficient for a *whole-bundle* load, and
-this is not merely a `load_library()` design note — it's already load-bearing
+this is not merely a per-library `read_blob()` design note — it's already load-bearing
 in the shipped implementation (Codex review, fresh evidence).** Bounding
 each blob individually stops one oversized member from being a bomb on its
 own, but an archive can name many blobs each just under the per-member
 ceiling — a whole-bundle load (`load_bundle_facts()`/
-`read_bundle_facts_archive()`, not the lazy per-library `load_library()`
+`read_bundle_facts_archive()`, not the lazy per-library `read_blob()` read
 this phase otherwise describes) would decompress and parse an unbounded
 *aggregate* before returning, since nothing stops the per-member checks from
 each individually passing. `read_bundle_facts_archive()` therefore also
@@ -569,12 +597,12 @@ entries a manifest may name (`DEFAULT_MAX_LIBRARY_COUNT`), since many
 library names can cheaply share one small, size-capped blob and each still
 materializes its own full `AbiSnapshot` object graph on load — a
 Python-object-count amplification the byte-level caps alone don't bound.
-`load_library()`'s own single-blob read correctly keeps only the per-member
+The per-library `read_blob()` read correctly keeps only the per-member
 cap — it has no aggregate to bound, by construction, since it never touches
 more than one blob.
 
 **A per-member/aggregate decoded-payload cap alone is not sufficient
-either — it runs too late to protect `BundleArchive.open()` itself against
+either — it runs too late to protect `BundleArchiveReader.open()` itself against
 an untrusted archive, and this plan's earlier text never named the guard
 the shipped implementation had to add to close it (Codex review, fresh
 evidence, verified against the real implementation in PR #869).**
@@ -583,7 +611,7 @@ moment it is constructed, before any per-member or aggregate-decoded-byte
 check above ever runs — so a crafted archive naming millions of tiny,
 unreferenced entries (or one with an enormous, uncompressed
 `manifest.json`, itself never mentioned above either) can exhaust memory
-purely from that construction, regardless of how tightly `load_library`/
+purely from that construction, regardless of how tightly the per-library `read_blob()` read/
 `read_bundle_facts_archive` bound the blobs they actually read. Two
 outer guards close this, both ahead of `zipfile.ZipFile` ever running:
 a central-directory preflight (`reject_absurd_central_directory`) that
@@ -714,7 +742,7 @@ potentially large multi-library archive just to size/hash it.
 The function accumulates `decoded_size_bytes` only from the per-library
 `AbiSnapshot` payloads and, when present, the `InstantiationManifest`
 payload — the two things that land in the blob store. The container
-manifest (`BundleArchiveManifest`'s own JSON: `schema_version`,
+manifest (the manifest dict's own JSON: `schema_version`,
 `library_blobs`, `filesystem_aliases`, `library_filenames`) is serialized
 and size-checked separately, into a local `manifest_member_bytes`, and
 that value is never folded into the returned `decoded_size_bytes` — so
@@ -809,22 +837,24 @@ than matching the shipped guard's current, too-strict behavior.
 `BundleFacts` itself is unchanged — this plan is a storage-layer addition
 underneath the existing dataclass, not a new in-memory shape;
 `load_bundle_facts()` still returns a plain `BundleFacts` when a caller
-wants the whole-bundle load path unchanged, with `BundleArchive` as the new,
-separate lazy-access API for a caller that specifically wants per-library
-loading.
+wants the whole-bundle load path unchanged, with the
+`BundleArchiveReader`-based lazy per-library read above (not a dedicated
+`BundleArchive` class — see Phase 2's own correction) as the new API for a
+caller that specifically wants per-library loading.
 
 **Docs-ownership registration (`docs/AGENTS.md`'s topic-ownership
 contract):** the `format="archive"` option on `save_bundle_facts`/
-`load_bundle_facts` and the new lazy `BundleArchive` API are new
-public-facing surface, so this phase must register them in
-`docs/_meta/topics.yaml` in the same PR. `bundle-analysis`
+`load_bundle_facts` and the new lazy per-library read via
+`storage/bundle_archive.py`'s `BundleArchiveReader` are new public-facing
+surface, so this phase must register them in `docs/_meta/topics.yaml` in
+the same PR. `bundle-analysis`
 (`canonical_page: use/multi-binary.md`) is the existing topic that already
 documents `load_bundle_facts()` (see that page's own "Comparing two release
 bundles from saved facts" example) — extend its `fact_sources` with the new
 `abicheck/storage/bundle_archive.py` module (see Phase 1's ADR-061 routing
 note above for why that's the implementation location) rather than
-registering a separate topic, and add the archive format/`BundleArchive`
-usage to `use/multi-binary.md` itself as part of this phase's PR.
+registering a separate topic, and add the archive format/lazy-per-library-
+read usage to `use/multi-binary.md` itself as part of this phase's PR.
 
 ### Phase 4 — migration (S)
 
@@ -839,10 +869,12 @@ follows the identical discipline for the report and scan schema versions it
 cites elsewhere). A plain-JSON `BundleFacts` file
 is not "archive format at that version", it's simply not an archive at all, and
 `load_bundle_facts()`'s `"auto"` sniff routes it through the unchanged
-plain-JSON path forever. A converter,
-`abicheck/storage/bundle_archive.py`'s `convert_to_archive(src: Path, dst:
-Path)`, is provided for a caller who wants to opportunistically re-save an
-existing plain-JSON `BundleFacts` file in the new format; never required.
+plain-JSON path forever. **As shipped (PR #869), no dedicated converter
+function exists** — a caller who wants to opportunistically re-save an
+existing plain-JSON `BundleFacts` file in the new format does so with the
+existing primitives: `load_bundle_facts(path)` (its `"auto"` sniff reads
+the plain-JSON file) followed by `write_bundle_facts_archive(facts,
+new_path, ...)`; never required.
 
 ## Design
 
@@ -910,14 +942,15 @@ what actually shipped.**
 ## Tests
 
 - Round-trip: a multi-library `BundleFacts` saved as an archive and reloaded
-  (both via `load_bundle_facts()`'s `"auto"` sniff and via `BundleArchive.open`
-  directly) reproduces the identical per-library `AbiSnapshot`s.
+  (both via `load_bundle_facts()`'s `"auto"` sniff and via `BundleArchiveReader.open`
+  directly, per-library, per Phase 2's own correction) reproduces the identical per-library `AbiSnapshot`s.
 - **Round-trip with a non-null `InstantiationManifest`** — the manifest-blob
   gap an earlier draft of this plan left unspecified (see Phase 1's own
   correction note): a `BundleFacts` whose `manifest` is populated, saved as
   an archive, reloaded via both `load_bundle_facts()` (which must populate
   `BundleFacts.manifest` from the archive, not silently drop it) and
-  `BundleArchive.load_instantiation_manifest()` directly, reproduces the
+  a `BundleArchiveReader.read_blob()` call against `manifest["manifest_blob"]`
+  directly, reproduces the
   identical manifest; a `BundleFacts` with `manifest=None` round-trips to
   `manifest_blob=None` with no `blobs/` member allocated for it.
 - **Partial-load proves lazy access, separately from a real zstd round-trip
@@ -927,7 +960,7 @@ what actually shipped.**
   exercising a realistically-sized zstd frame)**. Two distinct assertions,
   both required, neither substituting for the other:
   1. *Lazy access is real, not merely API-shaped* — a multi-library archive
-     where `load_library("one_of_many")` is asserted, via a patched/
+     where the per-library `read_blob()` read for `"one_of_many"` is asserted, via a patched/
      instrumented `zipfile.ZipExtFile` or a member-read counter, to open and
      decompress **exactly one** member. This one can use small payloads;
      it's checking *which* member is touched, not the codec.
@@ -940,7 +973,7 @@ what actually shipped.**
      production-sized `AbiSnapshot` (scaled past the threshold where a
      window-size/decoded-size regression would actually reproduce, not a
      two-field stub) written through the real `BundleArchiveWriter` and
-     read back through the real `BundleArchiveReader`/`load_library()` —
+     read back through the real `BundleArchiveReader`'s per-library `read_blob()` read —
      the actual public chokepoints, not a hand-constructed shortcut into
      `zstandard`'s own lower-level API.
 - Dedup: an **intra-archive** test only (matching the corrected, honest
@@ -1046,8 +1079,10 @@ what actually shipped.**
 - Back-compat: every existing plain-JSON `BundleFacts` fixture in this
   repo's test suite still loads unchanged via the `"auto"`-sniffing path
   once this plan ships, with **no** re-save required.
-- Migration round-trip: `convert_to_archive` over an existing plain-JSON
-  fixture, then load via both paths, asserting identical `BundleFacts`.
+- Migration round-trip: `load_bundle_facts()` over an existing plain-JSON
+  fixture followed by `write_bundle_facts_archive()` to re-save it (see
+  Phase 4's own correction — no dedicated converter function ships), then
+  load via both paths, asserting identical `BundleFacts`.
 
 ## Example fixtures
 

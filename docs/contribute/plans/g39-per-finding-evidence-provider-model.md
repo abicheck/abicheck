@@ -118,6 +118,8 @@ freeze this before that):
 | Prefix | Meaning | Existing analogue |
 |---|---|---|
 | `l0:elf_symtab` | ELF `.dynsym`/export table alone | `evidence_tiers.py`'s L0 |
+| `l0:pe_export_table` | PE export directory (`_parse_pe_exports()`) — the `PROVIDER_BINARY_EXPORTS` platform-selectable counterpart to `l0:elf_symtab` for a PE snapshot; see the "Multi-provider `evidence_provenance`" discussion below for why this platform branch exists | L0 |
+| `l0:macho_exports` | Mach-O's merged export list (`MachoMetadata.exports` — classic symbol table plus any trie-only additions, with no per-entry source marker; a generic label rather than a trie-specific claim the data model can't back per finding — see the discussion below) | L0 |
 | `l1:dwarf` | DWARF debug info (ELF) | L1 |
 | `l1:pdb` | Windows PDB debug info (PE snapshots) | L1 |
 | `l1:btf` | Linux kernel BTF debug info (ELF snapshots) | L1 |
