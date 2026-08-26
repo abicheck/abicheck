@@ -675,3 +675,28 @@
   `validate_zstd_frame_completeness()`'s own docstring so a caller sizing
   `max_decoded_bytes` budgets for roughly double that value, rather than
   leaving the discrepancy implicit.
+
+- **G40 bundle archive: skippable-frame walk was quadratic in stored
+  size (P1, real DoS).** `validate_zstd_frame_completeness()`'s
+  skippable-frame loop advanced with `remaining = remaining[total:]` on
+  a plain `bytes` object -- each slice copies the entire unread suffix,
+  so a stream made of many tiny skippable frames ahead of one real data
+  frame walks in O(n^2) rather than O(n). Confirmed empirically: 200,000
+  skippable frames (~1.6 MiB of stored bytes, well within the archive
+  reader's near-1-GiB stored-member cap) took ~11s to validate. Fixed by
+  switching the walk to a zero-copy `memoryview` cursor --
+  `struct.unpack_from()`, `zstandard.get_frame_parameters()`, and
+  `decompressobj().decompress()` all accept a `memoryview` directly
+  (confirmed empirically), so no frame's own processing pays a
+  conversion cost either; `decompressobj().unused_data` still returns a
+  fresh `bytes` copy of what follows a real data frame, immediately
+  rewrapped in a `memoryview` so a real frame followed by more skippable
+  frames doesn't reintroduce the same quadratic slicing. The same
+  200,000-frame case now completes in ~0.1s. New regression test
+  (`tests/test_bundle_archive_cd_guard.py::
+  TestReadBlobHandlesSkippableFrames::
+  test_read_blob_walks_many_skippable_frames_in_near_linear_time`,
+  confirmed to fail against the pre-fix code at ~10.6s against a 5s
+  bound) exercises this through the public `BundleArchiveReader.
+  read_blob()` entry point at the same scale the finding was reported
+  against, not just the shared helper in isolation.

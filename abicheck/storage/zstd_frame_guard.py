@@ -120,8 +120,23 @@ def validate_zstd_frame_completeness(
     the walk, rather than up front -- a leading skippable frame ahead of
     a real one is legitimate and must not be rejected (Codex review,
     fresh evidence, two rounds: the first fix skipped skippable frames
-    but didn't also re-check this invariant afterward)."""
-    remaining = data
+    but didn't also re-check this invariant afterward).
+
+    Advances via a zero-copy ``memoryview`` rather than re-slicing
+    ``bytes`` on every skippable-frame iteration: a plain ``remaining =
+    remaining[total:]`` on ``bytes`` copies the entire unread suffix each
+    time, making the walk quadratic in stored size -- confirmed
+    empirically at ~11s for 200,000 tiny skippable frames (~1.6 MiB)
+    before this fix, a real DoS vector given the archive reader permits
+    stored blobs near 1 GiB (Codex review, fresh evidence).
+    ``struct.unpack_from``/``get_frame_parameters``/``decompressobj().
+    decompress()`` all accept a ``memoryview`` directly (confirmed
+    empirically), so no data frame's own decompression pays a conversion
+    cost either. ``decompressobj().unused_data`` still returns a fresh
+    ``bytes`` copy of whatever follows the frame it consumed -- rewrapped
+    in a ``memoryview`` immediately so a real data frame followed by more
+    skippable frames doesn't reintroduce the same quadratic slicing."""
+    remaining = memoryview(data)
     saw_data_frame = False
     while remaining:
         if len(remaining) >= 4:
@@ -140,7 +155,7 @@ def validate_zstd_frame_completeness(
                         f"skippable frame declares {frame_size} bytes of "
                         f"user data but only {len(remaining) - 8} remain)"
                     )
-                remaining = remaining[total:]
+                remaining = remaining[total:]  # zero-copy memoryview slice
                 continue
         try:
             frame_declared = zstandard.get_frame_parameters(remaining).content_size
@@ -161,6 +176,6 @@ def validate_zstd_frame_completeness(
                 f"{len(frame_out)} decoded)"
             )
         saw_data_frame = True
-        remaining = dobj.unused_data
+        remaining = memoryview(dobj.unused_data)
     if not saw_data_frame:
         raise SnapshotError(f"{source}: corrupt or truncated zstd stream (no data frame at all)")

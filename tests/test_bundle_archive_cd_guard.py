@@ -1048,6 +1048,39 @@ class TestReadBlobHandlesSkippableFrames:
             with pytest.raises(SnapshotError, match="corrupt or truncated zstd stream"):
                 reader.read_blob(manifest["library_blobs"]["a.so"])
 
+    def test_read_blob_walks_many_skippable_frames_in_near_linear_time(
+        self, tmp_path: Path
+    ) -> None:
+        """A naive ``remaining = remaining[total:]`` on ``bytes`` copies
+        the entire unread suffix on every skippable-frame iteration,
+        making the walk quadratic in stored size -- confirmed empirically
+        at ~11s for 200,000 tiny skippable frames (~1.6 MiB) before the
+        fix to a zero-copy ``memoryview`` cursor, a real DoS vector since
+        the archive reader permits stored blobs near 1 GiB (Codex
+        review). A generous 5s bound comfortably separates the ~0.1s
+        post-fix time from the ~11s pre-fix time without flaking on a
+        loaded CI runner."""
+        import time
+
+        import zstandard
+
+        n_frames = 200_000
+        stream = self._skippable(payload=b"") * n_frames
+        stream += zstandard.ZstdCompressor().compress(b"hello world")
+        h = content_hash(b"hello world")
+        path = tmp_path / "bundle.archive.zip"
+        with zipfile.ZipFile(path, mode="w") as zf:
+            zf.writestr(MANIFEST_MEMBER, json.dumps({"library_blobs": {"a.so": h}}))
+            zf.writestr(f"blobs/{h}.json.zst", stream, compress_type=zipfile.ZIP_STORED)
+
+        with BundleArchiveReader.open(path) as reader:
+            manifest = reader.read_manifest()
+            t0 = time.monotonic()
+            decoded = reader.read_blob(manifest["library_blobs"]["a.so"])
+            elapsed = time.monotonic() - t0
+        assert decoded == b"hello world"
+        assert elapsed < 5.0, f"expected near-linear walk, took {elapsed:.2f}s for {n_frames} frames"
+
 
 class TestSniffDoesNotConsumeAOneShotFifoProducer:
     """A *thread*-based writer doesn't reliably reproduce this: Python
