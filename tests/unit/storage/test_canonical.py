@@ -909,19 +909,48 @@ class TestSurrogateEscapedContentIsHashable:
     `semantic_digest` could not address.
     """
 
-    #: A real path shape, not a synthetic code point: a latin-1 byte in a
-    #: POSIX filename, decoded the way `os` decodes every path it hands back.
-    SURROGATE_PATH = os.fsdecode(b"/src/caf\xe9.h")
+    #: A real path shape, not a synthetic code point: exactly what `os` hands
+    #: back for a latin-1 byte in a POSIX filename.
+    #:
+    #: Spelled literally rather than as `os.fsdecode(b"/src/caf\xe9.h")`.
+    #: `fsdecode` uses the *host's* filesystem encoding and error handler, and
+    #: on Windows that is UTF-8 with `surrogatepass`, which cannot decode a
+    #: bare `\xe9` at all — so the call raised `UnicodeDecodeError` at class-
+    #: body time and took the whole module's collection with it, on a platform
+    #: this branch's CI had not yet completed a run on (CodeRabbit review,
+    #: filed as portability; the import break is the sharper half). Under a
+    #: latin-1 locale it fails the other way, returning `"/src/café.h"` with
+    #: no lone surrogate, which quietly makes these tests assert nothing.
+    #:
+    #: `test_the_literal_is_what_fsdecode_produces` keeps the literal honest
+    #: where the host can produce it.
+    SURROGATE_PATH = "/src/caf\udce9.h"
 
     def test_a_surrogate_escaped_path_can_be_digested(self) -> None:
         assert semantic_digest({"path": self.SURROGATE_PATH}).startswith("sha256:")
 
     def test_the_digest_is_stable_across_calls(self) -> None:
-        again = os.fsdecode(b"/src/caf\xe9.h")
+        again = "/src/caf\udce9.h"
 
         assert semantic_digest({"path": self.SURROGATE_PATH}) == semantic_digest(
             {"path": again}
         )
+
+    def test_the_literal_is_what_fsdecode_produces(self) -> None:
+        """The fixture claims to be a real path shape; this checks the claim.
+
+        Skipped where the host cannot produce one — that is the whole reason
+        the fixture is a literal — so the check runs wherever it is meaningful
+        and never decides the module's importability.
+        """
+        try:
+            decoded = os.fsdecode(b"/src/caf\xe9.h")
+        except UnicodeDecodeError:  # pragma: no cover - platform-dependent
+            pytest.skip("this host's filesystem encoding cannot produce one")
+        if "\udce9" not in decoded:  # pragma: no cover - platform-dependent
+            pytest.skip(f"this host decodes the byte as {decoded!r}")
+
+        assert decoded == self.SURROGATE_PATH
 
     def test_it_does_not_collide_with_the_ascii_spelling(self) -> None:
         """Escaping must stay injective — the whole point of a content address."""
@@ -935,7 +964,7 @@ class TestSurrogateEscapedContentIsHashable:
             "café",  # ordinary non-ASCII
             "日本語",  # non-latin
             "😀",  # non-BMP, escapes as a surrogate pair
-            os.fsdecode(b"\xff\xfe"),  # two lone surrogates
+            "\udcff\udcfe",  # two lone surrogates, as `os.fsdecode(b"\xff\xfe")`
             "a\udce9b\udcffc",  # surrogates interleaved with ASCII
         ],
     )
@@ -998,19 +1027,26 @@ class TestVersionSerializationAgreesWithTheReader:
 
         assert StorageVersions.from_dict(emitted).to_dict() == emitted
 
-    def test_serialization_agrees_with_the_readers_verdict(self) -> None:
-        """The general contract: what is written reads back the same way."""
-        for value in (1.5, True, -1, 0, "2", None, PACKAGE_FORMAT_VERSION):
-            versions = StorageVersions(
-                package_format_version=value,  # type: ignore[arg-type]
-                comparison_contract_version=COMPARISON_CONTRACT_VERSION,
-            )
-            reloaded = StorageVersions.from_dict(versions.to_dict())
+    @pytest.mark.parametrize(
+        "value", [1.5, True, -1, 0, "2", None, PACKAGE_FORMAT_VERSION]
+    )
+    def test_serialization_agrees_with_the_readers_verdict(self, value: object) -> None:
+        """The general contract: what is written reads back the same way.
 
-            assert (
-                check_reader_compatibility(versions).readable
-                == check_reader_compatibility(reloaded).readable
-            )
+        Parametrized rather than looped: a loop stops at the first failing
+        value, so the rest go unchecked and the failure does not name the one
+        that broke.
+        """
+        versions = StorageVersions(
+            package_format_version=value,  # type: ignore[arg-type]
+            comparison_contract_version=COMPARISON_CONTRACT_VERSION,
+        )
+        reloaded = StorageVersions.from_dict(versions.to_dict())
+
+        assert (
+            check_reader_compatibility(versions).readable
+            == check_reader_compatibility(reloaded).readable
+        )
 
     def test_a_valid_version_is_written_unchanged(self) -> None:
         emitted = StorageVersions().to_dict()
@@ -1101,8 +1137,15 @@ class TestExtendableOutputAlgorithmsAreRefused:
         assert len(digest.split(":", 1)[1]) > 0
 
     def test_an_unknown_algorithm_still_reports_itself(self) -> None:
-        """The pre-existing error must not be swallowed by the new guard."""
-        with pytest.raises(ValueError, match="unsupported hash type"):
+        """The pre-existing error must not be swallowed by the new guard.
+
+        The exception *type* is the contract; the message is not. `hashlib`
+        raises `ValueError` for an algorithm it cannot provide, but the
+        wording varies with the Python version and with which OpenSSL
+        provider is available, so matching it would pin an upstream string
+        rather than this function's behaviour (CodeRabbit review).
+        """
+        with pytest.raises(ValueError):
             semantic_digest({"a": 1}, algorithm="definitely-not-a-hash")
 
     def test_the_digest_names_the_algorithm_that_produced_it(self) -> None:

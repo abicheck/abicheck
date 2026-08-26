@@ -393,9 +393,23 @@ class IdentityConflict:
     occurrences: tuple[OccurrenceId, ...]
 
     def __post_init__(self) -> None:
+        # `reason` is validated here and not only in `from_dict`, which used
+        # to coerce it with `str()` — so `IdentityConflict(reason=1, ...)`
+        # was accepted, wrote `1` into the document, and read back as `"1"`:
+        # an object that does not equal its own round trip (CodeRabbit
+        # review). Same boundary-only-guard gap already closed on
+        # `EntityId.qualified_name`, at the one site that still had it.
+        object.__setattr__(self, "reason", _identity_text(self.reason, "reason"))
         # Sorted so a conflict's own membership does not depend on the order
-        # its occurrences were collected in.
-        ordered = tuple(sorted(self.occurrences, key=lambda o: o.key))
+        # its occurrences were collected in, and deduplicated by key for the
+        # same reason `OccurrenceSet.add` is idempotent: one observation
+        # recorded twice is one observation, and listing it twice inflates
+        # what a reader sees as the size of the disagreement. Lossless — the
+        # key is a function of every field, so two occurrences sharing one
+        # are equal.
+        ordered = tuple(
+            {o.key: o for o in sorted(self.occurrences, key=lambda o: o.key)}.values()
+        )
         if len({o.key for o in ordered}) < 2:
             # A conflict needs two occurrences that actually disagree. Zero,
             # one, or the same occurrence twice were all accepted, so a reader
@@ -423,7 +437,10 @@ class IdentityConflict:
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> IdentityConflict:
         return cls(
-            reason=str(data["reason"]),
+            # Not `str(...)`: the constructor validates it, and coercing
+            # here would reintroduce exactly the round-trip asymmetry that
+            # validation exists to remove.
+            reason=data["reason"],
             occurrences=tuple(
                 OccurrenceId.from_dict(raw) for raw in data.get("occurrences", ())
             ),

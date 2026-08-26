@@ -280,6 +280,42 @@ class TestAConflictNeedsSomethingToDisagreeAbout:
         with pytest.raises(ValueError, match="distinct"):
             IdentityConflict(reason="r", occurrences=(one, one))
 
+    @pytest.mark.parametrize("reason", [1, 1.0, True, None, ["x"], {"k": 1}, b"b"])
+    def test_a_non_string_reason_is_refused(self, reason: object) -> None:
+        """The last field in this package still guarded only at one door.
+
+        `from_dict` coerced it with `str()` while the constructor accepted
+        anything, so `IdentityConflict(reason=1, ...)` wrote `1` and read back
+        as `"1"` — an object that does not equal its own round trip
+        (CodeRabbit review).
+        """
+        pair = (self._occurrence("8"), self._occurrence("16"))
+
+        with pytest.raises(TypeError):
+            IdentityConflict(reason=reason, occurrences=pair)  # type: ignore[arg-type]
+
+        with pytest.raises(TypeError):
+            IdentityConflict.from_dict(
+                {"reason": reason, "occurrences": [o.to_dict() for o in pair]}
+            )
+
+    def test_a_duplicate_occurrence_is_recorded_once(self) -> None:
+        """One observation recorded twice must not inflate the disagreement.
+
+        `OccurrenceSet.add` is already idempotent for an identical key; a
+        conflict listing the same occurrence three times reported a
+        three-way ambiguity that does not exist. Lossless, because the key is
+        a function of every field.
+        """
+        left, right = self._occurrence("8"), self._occurrence("16")
+
+        conflict = IdentityConflict(reason="r", occurrences=(left, left, right))
+
+        assert (
+            conflict.occurrences
+            == IdentityConflict(reason="r", occurrences=(left, right)).occurrences
+        )
+
     def test_a_genuine_pair_is_kept_and_ordered(self) -> None:
         conflict = IdentityConflict(
             reason="r", occurrences=(self._occurrence("16"), self._occurrence("8"))

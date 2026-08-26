@@ -820,6 +820,54 @@ class TestProvenanceFollowsTheSurvivingStatus:
 
         assert result.producer == "stated"
 
+    @pytest.mark.parametrize("swap", [False, True])
+    def test_a_stated_producer_survives_a_tie_in_either_order(self, swap: bool) -> None:
+        """The blanking must not fire on a record stating the same status.
+
+        A tie picks a winner by operand position, and the loser was blanked
+        unconditionally — so two `NOT_COLLECTED` records, one naming a
+        producer, kept it in one order and dropped it in the other
+        (CodeRabbit review). Both orders are asserted rather than the one that
+        reproduced, because "which side was written first" is exactly what a
+        merge may not depend on.
+        """
+        stated = FactAvailability(FactStatus.NOT_COLLECTED, producer="stated")
+        silent = FactAvailability(FactStatus.NOT_COLLECTED)
+        left, right = (silent, stated) if swap else (stated, silent)
+
+        result = left.narrowed(right)
+
+        assert result.status is FactStatus.NOT_COLLECTED
+        assert result.producer == "stated"
+
+    @pytest.mark.parametrize("swap", [False, True])
+    def test_a_tie_does_not_invent_provenance(self, swap: bool) -> None:
+        """The control: neither side stating one must not produce one."""
+        left = FactAvailability(FactStatus.NOT_COLLECTED)
+        right = FactAvailability(FactStatus.NOT_COLLECTED)
+        if swap:
+            left, right = right, left
+
+        assert left.narrowed(right).producer == ""
+
+    @pytest.mark.parametrize("swap", [False, True])
+    def test_provenance_still_does_not_cross_from_a_different_status(
+        self, swap: bool
+    ) -> None:
+        """The rule the blanking exists for, unchanged by the tie fix.
+
+        A `PRESENT` record's producer must not be inherited by a
+        `NOT_COLLECTED` result: nothing ran, so there is no producer to name.
+        """
+        collected = FactAvailability(FactStatus.PRESENT, producer="clang")
+        absent = FactAvailability(FactStatus.NOT_COLLECTED)
+        left, right = (absent, collected) if swap else (collected, absent)
+
+        result = left.narrowed(right)
+
+        assert result.status is FactStatus.NOT_COLLECTED
+        assert result.producer == ""
+
     @pytest.mark.parametrize("status", [FactStatus.UNSUPPORTED, FactStatus.FAILED])
     def test_a_gap_with_a_producer_still_names_it(self, status: FactStatus) -> None:
         """`UNSUPPORTED`/`FAILED` are gaps *with* a producer worth naming."""

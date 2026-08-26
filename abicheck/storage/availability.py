@@ -286,7 +286,16 @@ class FactAvailability:
         # failure — is closed.
         status = _worse_status(self.status, other.status)
         winner, loser = (other, self) if other.status is status else (self, other)
-        if status in _ASSERTS_NO_PRODUCER:
+        if status in _ASSERTS_NO_PRODUCER and loser.status is not status:
+            # Only the record that did *not* report this status is blanked.
+            # Without that clause the tie — both `NOT_COLLECTED`, one of them
+            # naming a producer — dropped the stated producer in one operand
+            # order and kept it in the other, so a merge's provenance depended
+            # on which side it was written from (CodeRabbit review). The rule
+            # this blanking exists for is "do not let provenance *cross* from
+            # a record that made a different statement"; a record stating the
+            # surviving status is stating its own, and there is nothing to
+            # inherit from.
             loser = FactAvailability(status)
         return FactAvailability(
             status=status,

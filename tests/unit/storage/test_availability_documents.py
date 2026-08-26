@@ -270,10 +270,7 @@ class TestTheSerializedFallbackIsTheEffectiveOne:
             == ledger.for_family("undeclared").to_dict()
         )
 
-    @pytest.mark.parametrize(
-        "status",
-        [FactStatus.NOT_COLLECTED, FactStatus.UNSUPPORTED, FactStatus.FAILED],
-    )
+    @pytest.mark.parametrize("status", _GAP_STATUSES)
     def test_a_legitimate_fallback_is_serialized_untouched(
         self, status: FactStatus
     ) -> None:

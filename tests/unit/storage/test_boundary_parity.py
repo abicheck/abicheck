@@ -48,6 +48,7 @@ from abicheck.storage.availability import (
 from abicheck.storage.identity import (
     EntityId,
     EntityKind,
+    IdentityConflict,
     ObservationKind,
     OccurrenceId,
 )
@@ -251,3 +252,49 @@ def test_a_null_nested_record_reads_as_unstated_not_as_a_record() -> None:
     assert loaded.unknown_family_default.status is FactStatus.NOT_COLLECTED
     assert not loaded.unknown_family_default.comparable
     assert _refused(lambda: AvailabilityLedger(unknown_family_default=None))
+
+
+@pytest.mark.parametrize("value", BAD_VALUES)
+def test_conflict_reason_agrees(value: Any) -> None:
+    """The class this file did not cover when it was written.
+
+    `IdentityConflict` was the last text field guarded at one door only — the
+    constructor took anything and `from_dict` coerced with `str()`. It is
+    covered here now for the reason this file exists: an exhaustiveness
+    question is not answered by remembering to check.
+    """
+    pair = (
+        OccurrenceId(
+            entity=EntityId(EntityKind.TYPE, "S"),
+            observation=ObservationKind.DWARF,
+            container="a.o",
+        ),
+        OccurrenceId(
+            entity=EntityId(EntityKind.TYPE, "S"),
+            observation=ObservationKind.DWARF,
+            container="b.o",
+        ),
+    )
+    document = {"reason": value, "occurrences": [o.to_dict() for o in pair]}
+
+    assert _refused(lambda: IdentityConflict(reason=value, occurrences=pair))
+    assert _refused(lambda: IdentityConflict.from_dict(document))
+
+
+def test_a_well_formed_conflict_is_accepted_by_both_doors() -> None:
+    """The parity must not be satisfied by refusing everything."""
+    pair = (
+        OccurrenceId(
+            entity=EntityId(EntityKind.TYPE, "S"),
+            observation=ObservationKind.DWARF,
+            container="a.o",
+        ),
+        OccurrenceId(
+            entity=EntityId(EntityKind.TYPE, "S"),
+            observation=ObservationKind.DWARF,
+            container="b.o",
+        ),
+    )
+    conflict = IdentityConflict(reason="size", occurrences=pair)
+
+    assert IdentityConflict.from_dict(conflict.to_dict()) == conflict
