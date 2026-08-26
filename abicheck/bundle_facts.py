@@ -416,7 +416,16 @@ def write_bundle_facts_archive(
     library_blobs: dict[str, str] = {}
     decoded_size_bytes = 0
     with BundleArchiveWriter(p) as writer:
-        for name, snap in facts.per_library_snapshots.items():
+        # Sorted by name, not `facts.per_library_snapshots`' own dict
+        # insertion order (Codex review, fresh evidence): two BundleFacts
+        # values that are logically equal but built by populating this
+        # mapping in a different order would otherwise write their blobs
+        # in different orders (and so the manifest's `library_blobs` keys
+        # in different orders too, since dict order is insertion order),
+        # producing different archive bytes and stored_sha256 for
+        # otherwise-identical facts -- undermining the same reproducibility
+        # the pinned zip timestamps exist to provide.
+        for name, snap in sorted(facts.per_library_snapshots.items()):
             payload = _json.dumps(snapshot_to_dict(snap), indent=2).encode("utf-8")
             decoded_size_bytes += len(payload)
             library_blobs[name] = writer.put_blob(payload)
@@ -436,11 +445,16 @@ def write_bundle_facts_archive(
                 "variant_fingerprint": facts.variant_fingerprint,
                 "library_blobs": library_blobs,
                 "manifest_blob": manifest_blob,
+                # Also sorted, same reasoning -- these two maps are
+                # unordered-by-name key/value data (a library's own set of
+                # aliases/filename), not order-sensitive content the way
+                # an instantiation manifest's `provides:` list is (that
+                # one is deliberately left untouched, per the same review).
                 "filesystem_aliases": {
                     name: list(aliases)
-                    for name, aliases in facts.filesystem_aliases.items()
+                    for name, aliases in sorted(facts.filesystem_aliases.items())
                 },
-                "library_filenames": dict(facts.library_filenames),
+                "library_filenames": dict(sorted(facts.library_filenames.items())),
             }
         )
     # Stream the completed archive through sha256 rather than
@@ -557,15 +571,35 @@ def read_bundle_facts_archive(
         # snapshot_from_dict's own d.get(...) calls and raise a raw
         # AttributeError instead of this module's normal error type
         # (CodeRabbit review).
+        #
+        # snapshot_cache is keyed by hash too, alongside blob_cache above
+        # (Codex review, fresh evidence): blob_cache only avoids repeated
+        # *decompression* for several library names sharing one blob --
+        # without this second cache, snapshot_from_dict() still runs once
+        # per *name*, materializing a separate (if structurally identical)
+        # AbiSnapshot object graph for each one, so a manifest naming many
+        # libraries against one shared blob could still amplify one valid,
+        # size-capped blob into many times its own memory footprint in live
+        # Python objects. Sharing one AbiSnapshot instance across every
+        # name mapped to the same hash is safe here because this loader's
+        # only output is a read-only mapping handed back to the caller --
+        # nothing in this module mutates a loaded snapshot in place.
+        snapshot_cache: dict[str, AbiSnapshot] = {}
         per_library_snapshots: dict[str, AbiSnapshot] = {}
         for name, h in library_blobs.items():
+            cached_snapshot = snapshot_cache.get(h)
+            if cached_snapshot is not None:
+                per_library_snapshots[name] = cached_snapshot
+                continue
             blob = _json.loads(_cached_blob(h))
             if not isinstance(blob, dict):
                 raise ValueError(
                     f"bundle archive: blob for library {name!r} must decode "
                     f"to a JSON object, got {type(blob).__name__}"
                 )
-            per_library_snapshots[name] = snapshot_from_dict(blob)
+            snap = snapshot_from_dict(blob)
+            snapshot_cache[h] = snap
+            per_library_snapshots[name] = snap
         manifest_blob = manifest.get("manifest_blob")
         instantiation_manifest = None
         if manifest_blob is not None:

@@ -153,6 +153,45 @@ class TestBundleFactsArchiveFormat:
         loaded = load_bundle_facts(out)
         assert set(loaded.per_library_snapshots) == {"a.so", "b.so"}
 
+    def test_load_shares_one_snapshot_object_across_names_sharing_a_blob(
+        self, tmp_path: Path
+    ) -> None:
+        """Codex review, fresh evidence: blob_cache alone only avoids
+        repeated *decompression* -- without a parsed-object cache too,
+        several library names sharing one blob would each still
+        materialize their own separate AbiSnapshot object graph,
+        amplifying one valid, size-capped blob into many times its own
+        memory footprint in live Python objects."""
+        snap = _per_library_snapshots(_old_metadata())["libcore.so"]
+        facts = BundleFacts(per_library_snapshots={"a.so": snap, "b.so": snap})
+        out = tmp_path / "dup.bundlefacts.archive.zip"
+        save_bundle_facts(facts, out, format="archive")
+
+        loaded = load_bundle_facts(out)
+        assert loaded.per_library_snapshots["a.so"] is loaded.per_library_snapshots["b.so"]
+
+    def test_save_produces_identical_bytes_regardless_of_dict_insertion_order(
+        self, tmp_path: Path
+    ) -> None:
+        """Codex review, fresh evidence: two logically-equal BundleFacts
+        values populated in different insertion order must still produce
+        byte-identical archives -- library_blobs/filesystem_aliases/
+        library_filenames are unordered-by-name maps, not order-sensitive
+        content, so their key order in the written manifest must not leak
+        Python dict insertion order into the archive's own bytes."""
+        snaps = _per_library_snapshots(_old_metadata())
+        forward = BundleFacts(per_library_snapshots=dict(snaps.items()))
+        reversed_facts = BundleFacts(
+            per_library_snapshots=dict(reversed(list(snaps.items())))
+        )
+        out_forward = tmp_path / "forward.bundlefacts.archive.zip"
+        out_reversed = tmp_path / "reversed.bundlefacts.archive.zip"
+        r1 = save_bundle_facts(forward, out_forward, format="archive")
+        r2 = save_bundle_facts(reversed_facts, out_reversed, format="archive")
+
+        assert r1.stored_sha256 == r2.stored_sha256
+        assert out_forward.read_bytes() == out_reversed.read_bytes()
+
     def test_load_reads_a_shared_blob_exactly_once_across_library_names(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:

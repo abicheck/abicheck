@@ -332,7 +332,15 @@ class BundleArchiveWriter:
         )
         try:
             existing_stat = self._target.stat()
-        except OSError:
+        except (FileNotFoundError, NotADirectoryError):
+            # Only genuine absence is treated as "no pre-existing
+            # destination" -- any other OSError (Codex review, fresh
+            # evidence: a cyclic symlink raises ELOOP here) must propagate
+            # rather than be silently treated as absence, which would
+            # bypass the regular-file/hard-link/metadata-preservation
+            # checks below for a destination whose real type was never
+            # actually established. Mirrors
+            # `snapshot_io._atomic_write_bytes`'s own identical rule.
             existing_stat = None
         self._existing_mode: int | None = None
         self._existing_uid: int | None = None

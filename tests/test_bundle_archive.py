@@ -295,6 +295,28 @@ class TestBundleArchiveWriterAtomicity:
         assert list(tmp_path.glob("*.tmp-*")) == []
         assert list(real_dir.glob("*.tmp-*")) == []
 
+    @pytest.mark.skipif(sys.platform == "win32", reason="POSIX symlink semantics")
+    def test_cyclic_symlink_destination_raises_instead_of_being_overwritten(
+        self, tmp_path: Path
+    ) -> None:
+        """Codex review, fresh evidence: a bare `except OSError:` around
+        the target stat() swallowed ELOOP (a cyclic symlink) the same as
+        genuine absence, letting os.replace() silently destroy the cyclic
+        symlink and install a regular zip in its place. Only real absence
+        (FileNotFoundError/NotADirectoryError) may be treated that way --
+        anything else must propagate."""
+        a = tmp_path / "a"
+        b = tmp_path / "b"
+        a.symlink_to(b)
+        b.symlink_to(a)  # a <-> b cycle
+
+        with pytest.raises(OSError):
+            BundleArchiveWriter(a)
+
+        # Neither link in the cycle was touched.
+        assert a.is_symlink()
+        assert b.is_symlink()
+
     def test_creates_missing_destination_parent_directory(self, tmp_path: Path) -> None:
         """save_bundle_facts(..., format="archive") must behave like the
         format="json" path already does (parent dirs auto-created via
