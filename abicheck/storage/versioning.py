@@ -221,6 +221,17 @@ class ProducerIdentity:
     version: str = ""
     binary_digest: str = ""
 
+    def __post_init__(self) -> None:
+        """Canonicalize the state, for the reason :class:`StorageVersions` does.
+
+        A record whose ``to_dict`` normalizes but whose fields do not is a
+        record that serializes equal and compares unequal.
+        """
+        for field_name in ("name", "version", "binary_digest"):
+            object.__setattr__(
+                self, field_name, _stated_text(getattr(self, field_name))
+            )
+
     def to_dict(self) -> dict[str, Any]:
         """Normalized the way :meth:`from_dict` reads it.
 
@@ -277,18 +288,44 @@ class StorageVersions:
     source_producer_generation: str = ""
 
     def __post_init__(self) -> None:
-        """Validate the one field that is a record rather than a scalar.
+        """Validate the record slot, and canonicalize the state itself.
 
-        Every other axis here is informational or fail-closed *by value*, so
-        a malformed one degrades. ``producer`` is a nested
-        :class:`ProducerIdentity`, and a scalar in that slot survived
-        construction and then raised ``AttributeError`` from ``to_dict`` —
-        the object could not reach its own serialized form (Codex review).
-        That is a record slot, and record slots are checked where they are
-        assigned, the same rule the ledger and the occurrence identities
-        apply.
+        ``producer`` is a nested :class:`ProducerIdentity`, and a scalar in
+        that slot survived construction and then raised ``AttributeError``
+        from ``to_dict`` — the object could not reach its own serialized form
+        (Codex review). That is a record slot, and record slots are checked
+        where they are assigned, the same rule the ledger and the occurrence
+        identities apply.
+
+        Every other axis is informational or fail-closed *by value*, so a
+        malformed one degrades — and the degrade belongs in the **state**,
+        not only in ``to_dict``. Normalizing on the way out alone left
+        ``StorageVersions(normalization_recipe=1)`` and
+        ``StorageVersions(normalization_recipe=None)`` comparing unequal with
+        different ``repr``s while serializing to one document and one digest
+        (Codex review), so equality and every diagnostic depended on
+        malformed input the format deliberately discards.
+
+        This is `AGENTS.md` invariant 4 in its own words — "a claim about the
+        stored *state*, not only about accessors: a canonical view over
+        non-canonical state leaves ``__eq__`` and ``repr`` exposed" — and it
+        is the second time this branch has hit it. ``OccurrenceSet`` kept
+        insertion order in state behind a sorted ``__iter__`` for exactly the
+        same reason, and a property test caught that one. The invariant was
+        written down from that round and then not applied here.
         """
         _instance_of(self.producer, ProducerIdentity, "producer")
+        for field_name, normalize in (
+            ("package_format_version", _stated_version),
+            ("comparison_contract_version", _stated_version),
+            ("section_schema_versions", _stated_sections),
+            ("normalization_recipe", _stated_text),
+            ("extractor_generation", _stated_count),
+            ("resolver_generation", _stated_count),
+            ("source_schema_version", _stated_count),
+            ("source_producer_generation", _stated_text),
+        ):
+            object.__setattr__(self, field_name, normalize(getattr(self, field_name)))
 
     def to_dict(self) -> dict[str, Any]:
         """Canonical mapping form.

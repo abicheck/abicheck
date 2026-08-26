@@ -908,3 +908,82 @@ class TestAnElfSymbolFlagIsABooleanNotATruthyValue:
         occurrences.add(elf_symbol_occurrence(**self.BASE, defined=True))
 
         assert len(occurrences) == 2
+
+
+class TestTheStateIsCanonicalNotJustTheDocument:
+    """`AGENTS.md` invariant 4, at the second place this branch has broken it.
+
+    Normalizing on the way out alone left two objects that serialize to one
+    document and one digest comparing **unequal**, with different `repr`s —
+    so equality and every diagnostic depended on malformed input the format
+    deliberately discards (Codex review).
+
+    The invariant already says this in its own words: "a claim about the
+    stored *state*, not only about accessors: a canonical view over
+    non-canonical state leaves `__eq__` and `repr` exposed". It was written
+    down after `OccurrenceSet` kept insertion order in state behind a sorted
+    `__iter__`, and then not applied here.
+    """
+
+    @pytest.mark.parametrize(
+        ("left", "right"),
+        [
+            ({"normalization_recipe": 1}, {"normalization_recipe": None}),
+            ({"extractor_generation": 1.5}, {"extractor_generation": "x"}),
+            ({"resolver_generation": -1}, {"resolver_generation": None}),
+            ({"source_schema_version": "2"}, {"source_schema_version": 0}),
+            ({"source_producer_generation": 7}, {"source_producer_generation": ["x"]}),
+            ({"section_schema_versions": ["x"]}, {"section_schema_versions": {}}),
+            ({"package_format_version": "x"}, {"package_format_version": -1}),
+            (
+                {"comparison_contract_version": 1.5},
+                {"comparison_contract_version": None},
+            ),
+        ],
+    )
+    def test_values_that_serialize_alike_compare_alike(
+        self, left: Any, right: Any
+    ) -> None:
+        a, b = StorageVersions(**left), StorageVersions(**right)
+
+        assert a.to_dict() == b.to_dict(), "premise: these serialize identically"
+        assert a == b
+        assert repr(a) == repr(b)
+
+    @pytest.mark.parametrize(
+        ("left", "right"),
+        [
+            ({"name": 1}, {"name": None}),
+            ({"version": ["x"]}, {"version": {"k": 1}}),
+            ({"binary_digest": 0}, {"binary_digest": b"x"}),
+        ],
+    )
+    def test_the_nested_record_canonicalizes_too(self, left: Any, right: Any) -> None:
+        """A record that serializes equal and compares unequal is the same bug."""
+        a, b = ProducerIdentity(**left), ProducerIdentity(**right)
+
+        assert a.to_dict() == b.to_dict()
+        assert a == b
+
+    def test_a_well_formed_object_is_untouched(self) -> None:
+        """Canonicalizing the malformed case must not disturb the valid one."""
+        versions = StorageVersions(
+            normalization_recipe="canonical/1",
+            extractor_generation=4,
+            section_schema_versions={"entities": 3},
+            producer=ProducerIdentity(name="castxml", version="0.7.0"),
+        )
+
+        assert versions.normalization_recipe == "canonical/1"
+        assert versions.extractor_generation == 4
+        assert versions.section_schema_versions == {"entities": 3}
+        assert versions.producer.name == "castxml"
+        assert StorageVersions.from_dict(versions.to_dict()) == versions
+
+    def test_the_reader_still_refuses_an_unstated_document(self) -> None:
+        """Normalizing state must not turn a fail-closed axis into a pass."""
+        assert check_reader_compatibility(StorageVersions()).readable
+        assert not check_reader_compatibility(StorageVersions.from_dict({})).readable
+        assert not check_reader_compatibility(
+            StorageVersions(package_format_version="x")
+        ).readable
