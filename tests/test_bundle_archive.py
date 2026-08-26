@@ -16,11 +16,11 @@
 """Unit tests for :mod:`abicheck.storage.bundle_archive` (G40) -- the
 low-level, content-addressed zip-archive primitive.
 
-These tests exercise the module on its own terms (raw bytes/dicts) since it
+Exercises the module on its own terms (raw bytes/dicts), since it
 deliberately knows nothing about ``BundleFacts``/``AbiSnapshot`` -- see the
 module's own docstring for why. The ``BundleFacts``-aware round-trip lives
-in ``tests/test_bundle_facts.py``'s own archive-format tests, exercised
-through ``serialization.save_bundle_facts``/``load_bundle_facts``.
+in ``tests/test_bundle_facts_archive.py``, through
+``serialization.save_bundle_facts``/``load_bundle_facts``.
 """
 
 from __future__ import annotations
@@ -220,11 +220,10 @@ class TestBundleArchiveWriterReader:
 
 
 class TestBundleArchiveWriterAtomicity:
-    """Codex review: the original revision opened *path* directly with
-    ``mode="w"``, which truncates any pre-existing archive immediately --
-    a later error would then leave a partial file where a valid prior
-    archive used to be. Writes now go to a temp file, promoted only on a
-    fully successful close()."""
+    """Codex review: the original revision opened *path* with ``mode="w"``,
+    truncating any pre-existing archive immediately -- a later error would
+    leave a partial file where a valid prior archive used to be. Writes go
+    to a temp file now, promoted only on a fully successful close()."""
 
     def test_close_without_manifest_leaves_existing_destination_untouched(
         self, tmp_path: Path
@@ -635,11 +634,9 @@ class TestBundleArchiveReaderWrapsThirdPartyExceptions:
 
         member = f"blobs/{h}.json.zst"
         with BundleArchiveReader.open(path) as reader:
-            # Flip the general-purpose "encrypted" bit (bit 0) on the
-            # already-parsed ZipInfo -- the exact field `_read_stored_
-            # member`'s new guard inspects, without needing to hand-craft
-            # real zip encryption (which the stdlib zipfile writer can't
-            # produce anyway).
+            # Flip the "encrypted" bit on the already-parsed ZipInfo --
+            # avoids hand-crafting real zip encryption (which stdlib
+            # zipfile can't write anyway).
             info = reader._zf.getinfo(member)
             info.flag_bits |= 0x1
             with pytest.raises(SnapshotError, match="is encrypted"):
@@ -770,6 +767,84 @@ class TestBundleArchiveCentralDirectoryGuard:
 
         with pytest.raises(SnapshotError, match="central directory claims 70000"):
             BundleArchiveReader.open(path)
+
+    @pytest.mark.parametrize(
+        ("build_prefix", "match"),
+        [
+            # No room before the EOCD for a 20-byte locator at all.
+            (lambda offset: b"", "too short to hold a ZIP64 EOCD locator"),
+            # Bytes precede the EOCD, but aren't a real ZIP64 locator.
+            (lambda offset: b"\x00" * 20, "no valid ZIP64 EOCD locator"),
+        ],
+    )
+    def test_rejects_a_zip64_sentinel_with_no_usable_locator(
+        self, tmp_path: Path, build_prefix, match
+    ) -> None:
+        """Codex review, fresh evidence: a ZIP64 sentinel whose locator
+        can't be found/validated must be rejected outright, not silently
+        passed through to zipfile.ZipFile's own fallback onto the
+        (sentinel, unverified) standard EOCD fields."""
+        import struct
+
+        path = tmp_path / "fake_zip64.zip"
+        eocd = struct.pack("<IHHHHIIH", 0x06054B50, 0, 0, 0, 0xFFFF, 0, 0, 0)
+        path.write_bytes(build_prefix(None) + bytes(eocd))
+
+        with pytest.raises(SnapshotError, match=match):
+            BundleArchiveReader.open(path)
+
+    def test_rejects_a_zip64_locator_pointing_at_a_malformed_record(
+        self, tmp_path: Path
+    ) -> None:
+        """Codex review, fresh evidence: the locator itself is well-formed
+        and points somewhere, but what's there isn't a real ZIP64 EOCD
+        record (wrong signature/too short) -- also rejected outright."""
+        import struct
+
+        path = tmp_path / "fake_zip64_bad_record.zip"
+        zip64_eocd_offset = 4
+        junk_record = b"\x00" * 56  # 56 bytes, but not the ZIP64 record signature
+        zip64_locator = struct.pack("<IIQI", 0x07064B50, 0, zip64_eocd_offset, 1)
+        eocd = struct.pack("<IHHHHIIH", 0x06054B50, 0, 0, 0, 0xFFFF, 0, 0, 0)
+
+        data = bytearray(b"\x00" * zip64_eocd_offset)
+        data += junk_record
+        data += zip64_locator
+        data += eocd
+        path.write_bytes(bytes(data))
+
+        with pytest.raises(SnapshotError, match="no valid ZIP64 EOCD record"):
+            BundleArchiveReader.open(path)
+
+
+class TestBundleArchivePreflightUsesTheSameFdAsZipFile:
+    """Codex review, fresh evidence: the earlier preflight reopened *path*
+    a second time for `zipfile.ZipFile` -- a concurrent atomic replacement
+    between the two opens could swap in a different generation, bypassing
+    the preflight entirely. Both now read through one shared fd."""
+
+    def test_preflight_and_zipfile_share_one_open(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        path = tmp_path / "bundle.archive.zip"
+        with BundleArchiveWriter(path) as writer:
+            h = writer.put_blob(b'{"a": 1}')
+            writer.write_manifest({"library_blobs": {"a.so": h}})
+
+        opened_paths: list[object] = []
+        real_open = open
+
+        def _tracking_open(file, *a, **kw):  # type: ignore[no-untyped-def]
+            if file == path or file == str(path):
+                opened_paths.append(file)
+            return real_open(file, *a, **kw)
+
+        monkeypatch.setattr("builtins.open", _tracking_open)
+        with BundleArchiveReader.open(path) as reader:
+            assert reader.read_blob(h) == b'{"a": 1}'
+        # Exactly one open() of *path* -- zipfile.ZipFile receives the
+        # already-open fd, not the path again.
+        assert len(opened_paths) == 1
 
 
 class TestBundleArchiveReadBlobCompressedSlack:
@@ -1012,11 +1087,10 @@ class TestBundleArchiveWriterMetadataDurability:
 
 class TestBundleArchiveDeterministicCreateSystem:
     """Codex review, fresh evidence: ZipInfo.__init__ defaults
-    create_system to the host platform (0 Windows, 3 Unix) and that value
-    is itself serialized into the central directory -- identical facts
-    archived on different platforms would otherwise still produce
-    different bytes despite every other reproducibility-affecting field
-    already being pinned."""
+    create_system to the host platform (0 Windows, 3 Unix), serialized
+    into the central directory -- identical facts archived on different
+    platforms would otherwise still produce different bytes despite every
+    other reproducibility-affecting field already being pinned."""
 
     def test_every_member_pins_create_system_to_unix(self, tmp_path: Path) -> None:
         path = tmp_path / "bundle.archive.zip"
@@ -1031,18 +1105,12 @@ class TestBundleArchiveDeterministicCreateSystem:
 class TestBundleArchiveWriterNewArchivePermissions:
     """Codex review, fresh evidence: tempfile.mkstemp() always creates its
     file at mode 0600 regardless of the process umask -- a brand-new
-    archive (no pre-existing destination whose mode to preserve) must not
-    silently publish more restrictively than a normal `open(..., "wb")`
-    would under the same umask.
-
-    Now implemented via `_open_unique_temp` (`os.O_CREAT` filtered through
-    the umask by the kernel at creation), not the process-wide, non-
-    thread-safe `os.umask()` read-zero-restore dance an earlier revision
-    used (a second Codex review round: two concurrent saves could
-    interleave and leave the process umask corrupted, or briefly expose an
-    unrelated file created during the zeroed window) -- see
-    `TestBundleArchiveWriterDoesNotToggleTheProcessUmask` below for a
-    direct regression test on that specific hazard."""
+    archive must not silently publish more restrictively than a normal
+    `open(..., "wb")` would under the same umask. Implemented via
+    `_open_unique_temp` (`os.O_CREAT` filtered through the umask by the
+    kernel at creation), not a process-wide `os.umask()` read-zero-restore
+    dance -- see `TestBundleArchiveWriterDoesNotToggleTheProcessUmask`
+    below for that specific hazard's own regression test."""
 
     @pytest.mark.skipif(
         sys.platform == "win32", reason="POSIX permission bits are not meaningful on Windows"
@@ -1110,9 +1178,7 @@ class TestBundleArchiveWriterDoesNotToggleTheProcessUmask:
     fix directly: the process umask is bit-for-bit unchanged by opening a
     writer for a brand-new archive."""
 
-    @pytest.mark.skipif(
-        sys.platform == "win32", reason="POSIX umask semantics"
-    )
+    @pytest.mark.skipif(sys.platform == "win32", reason="POSIX umask semantics")
     def test_umask_is_never_read_or_modified(self, tmp_path: Path) -> None:
         path = tmp_path / "bundle.archive.zip"
         sentinel = 0o037

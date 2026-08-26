@@ -372,9 +372,11 @@ class TestBundleFactsArchiveFormat:
         from abicheck.storage.bundle_archive import BundleArchiveReader
 
         monkeypatch.setattr(bundle_facts_module, "DEFAULT_MAX_LIBRARY_COUNT", 3)
-        # All five names deliberately share one snapshot/blob -- proving
-        # the cap fires on name *count*, not decoded size (a shared,
-        # trivially small blob would otherwise sail under any byte cap).
+        # This cap is on name *count* alone (`len(library_blobs)`), not
+        # decoded size or blob-content sharing -- these five snapshots each
+        # still stamp their own distinct `AbiSnapshot.library`, so each gets
+        # its own small blob too, proving the cap fires independently of
+        # whether content happens to be shared.
         metadata = {f"lib{i}.so": _meta(soname="shared.so") for i in range(5)}
         facts = capture_bundle_facts(_per_library_snapshots(metadata))
         out = tmp_path / "many-names.bundlefacts.archive.zip"
@@ -408,10 +410,11 @@ class TestBundleFactsArchiveFormat:
         import abicheck.storage.bundle_archive as bundle_archive_module
 
         monkeypatch.setattr(bundle_archive_module, "MAX_ARCHIVE_MEMBERS", 3)
-        # Four *distinct*-content snapshots (soname differs per entry) --
-        # each gets its own blob, so this can't be sidestepped by dedup the
-        # way test_load_rejects_a_manifest_naming_too_many_libraries's
-        # shared-blob fixture deliberately is.
+        # Four *distinct*-content snapshots (soname differs per entry, and
+        # each gets its own stamped `AbiSnapshot.library`) -- each gets its
+        # own blob, so this can't be sidestepped by dedup the way
+        # test_save_does_not_over_reject_many_names_sharing_one_blob's
+        # deliberately-shared-object fixture is.
         metadata = {
             f"lib{i}.so": _meta(soname=f"lib{i}.so", exports=[f"f{i}"])
             for i in range(4)
@@ -422,6 +425,37 @@ class TestBundleFactsArchiveFormat:
         with pytest.raises(SnapshotError, match="more than 3 zip members"):
             save_bundle_facts(facts, out, format="archive")
         assert not out.exists()
+
+    def test_save_does_not_over_reject_many_names_sharing_one_blob(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Codex review, fresh evidence: the member-cap check's first
+        revision counted raw *names*, not *distinct* blobs -- so a manifest
+        naming far more names than the cap, but all sharing one identical
+        snapshot, was incorrectly rejected even though the real archive
+        needs only one blob member. Ten shared-content names against a
+        member cap of 3 (1 blob + 1 manifest.json = 2 real members) must
+        still succeed.
+
+        The *literal same* `AbiSnapshot` object is deliberately reused
+        under all ten keys (per the G40 plan's own "Round 1" finding,
+        documented in `docs/contribute/plans/g40-content-addressed-
+        bundle-archive.md`): `AbiSnapshot.library` is always stamped with
+        the dict key by `_per_library_snapshots`, so two *different*-keyed
+        entries built the ordinary way can never serialize byte-identical
+        -- true dedup across names is only observable this way."""
+        import abicheck.storage.bundle_archive as bundle_archive_module
+
+        monkeypatch.setattr(bundle_archive_module, "MAX_ARCHIVE_MEMBERS", 3)
+        shared_snap = _per_library_snapshots(_old_metadata())["libcore.so"]
+        facts = BundleFacts(
+            per_library_snapshots={f"lib{i}.so": shared_snap for i in range(10)}
+        )
+        out = tmp_path / "shared-blob-many-names.bundlefacts.archive.zip"
+
+        save_bundle_facts(facts, out, format="archive")
+        loaded = load_bundle_facts(out, format="archive")
+        assert set(loaded.per_library_snapshots) == {f"lib{i}.so" for i in range(10)}
 
     def test_save_rejects_a_write_that_would_exceed_the_reader_own_aggregate_cap(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -448,6 +482,32 @@ class TestBundleFactsArchiveFormat:
         out = tmp_path / "too-much-content.bundlefacts.archive.zip"
 
         with pytest.raises(SnapshotError, match="100 byte aggregate safety limit"):
+            save_bundle_facts(facts, out, format="archive")
+        assert not out.exists()
+
+    def test_save_rejects_a_write_whose_manifest_json_would_exceed_the_reader_cap(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Codex review, fresh evidence: neither the member-count nor the
+        aggregate-decoded-bytes cap charges the *container* `manifest.json`
+        member's own bytes -- both only cover blob content. A `BundleFacts`
+        with a large `filesystem_aliases` mapping could otherwise write a
+        `manifest.json` the reader's own `DEFAULT_MAX_MANIFEST_BYTES` cap
+        would then always refuse. Verified with a small library set (so
+        neither of the other two caps fires) and a large filesystem_aliases
+        mapping to inflate manifest.json specifically."""
+        import abicheck.storage.bundle_archive as bundle_archive_module
+
+        monkeypatch.setattr(bundle_archive_module, "DEFAULT_MAX_MANIFEST_BYTES", 200)
+        facts = BundleFacts(
+            per_library_snapshots=_per_library_snapshots(_old_metadata()),
+            filesystem_aliases={
+                "libcore.so": tuple(f"libcore.so.{i}" for i in range(50)),
+            },
+        )
+        out = tmp_path / "big-manifest.bundlefacts.archive.zip"
+
+        with pytest.raises(SnapshotError, match="200 byte safety limit"):
             save_bundle_facts(facts, out, format="archive")
         assert not out.exists()
 

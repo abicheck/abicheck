@@ -193,97 +193,11 @@ def sniff_bundle_archive_format(path: str | Path) -> str:
 #: archive it wouldn't itself agree to reopen (Codex review, fresh evidence).
 MAX_ARCHIVE_MEMBERS = 20_000
 
-#: Bytes to search from the end of the file for the End-Of-Central-
-#: Directory record's signature -- the record itself is 22 bytes plus up
-#: to a 64 KiB archive comment (the zip format's own comment-length field
-#: is 2 bytes), so this comfortably covers the worst case.
-_EOCD_SEARCH_WINDOW_BYTES = 65536 + 22
-
-#: Cap on the central directory's own declared byte size: the entry-
-#: *count* cap above isn't itself a byte-size bound -- a low
-#: `total_entries` can still pair with an enormous `cd_size`, parsed in
-#: full regardless of entry count. A real archive's directory is small
-#: (~120 bytes/record); generous but bounded.
-_MAX_CENTRAL_DIRECTORY_BYTES = 8 * 1024 * 1024
-
-#: ZIP64 EOCD Locator (20 bytes, always immediately preceding the
-#: standard EOCD when ZIP64 is in play) and Record signatures -- recover
-#: the real count/size when the standard EOCD's fields overflow.
-_ZIP64_EOCD_LOCATOR_SIG = b"PK\x06\x07"
-_ZIP64_EOCD_RECORD_SIG = b"PK\x06\x06"
-_ZIP64_EOCD_LOCATOR_SIZE = 20
-
-
-def _reject_absurd_central_directory(path: Path) -> None:
-    """Reject *path* if its central directory claims more than
-    `MAX_ARCHIVE_MEMBERS` entries or `_MAX_CENTRAL_DIRECTORY_BYTES` --
-    read directly from the EOCD (and, when present, the ZIP64 EOCD
-    locator/record), without invoking `zipfile.ZipFile`'s own
-    central-directory parse (the unbounded work this preflights against).
-
-    Best-effort: if the EOCD (or a present ZIP64 locator/record) can't be
-    found/read, this silently returns rather than raising --
-    `zipfile.ZipFile`'s own error/read is authoritative for those cases;
-    this only ever *adds* an earlier rejection for common attack shapes,
-    never a false one.
-    """
-    try:
-        size = path.stat().st_size
-    except OSError:
-        return
-    tail_len = min(size, _EOCD_SEARCH_WINDOW_BYTES)
-    try:
-        with open(path, "rb") as f:
-            f.seek(size - tail_len)
-            tail = f.read(tail_len)
-            idx = tail.rfind(b"PK\x05\x06")
-            if idx == -1 or idx + 22 > len(tail):
-                return
-            # EOCD layout: signature(4) this_disk(2) cd_start_disk(2)
-            # entries_this_disk(2) total_entries(2) cd_size(4) cd_offset(4)
-            # comment_len(2) [comment...]
-            total_entries = int.from_bytes(tail[idx + 10 : idx + 12], "little")
-            cd_size = int.from_bytes(tail[idx + 12 : idx + 16], "little")
-            if total_entries == 0xFFFF or cd_size == 0xFFFFFFFF:
-                # ZIP64: the real values live in the ZIP64 EOCD record, whose
-                # own locator is always the fixed 20 bytes immediately
-                # preceding this standard EOCD's signature.
-                eocd_abs = (size - tail_len) + idx
-                locator_start = eocd_abs - _ZIP64_EOCD_LOCATOR_SIZE
-                if locator_start < 0:
-                    return
-                f.seek(locator_start)
-                locator = f.read(_ZIP64_EOCD_LOCATOR_SIZE)
-                if len(locator) != _ZIP64_EOCD_LOCATOR_SIZE or not locator.startswith(
-                    _ZIP64_EOCD_LOCATOR_SIG
-                ):
-                    return
-                zip64_eocd_offset = int.from_bytes(locator[8:16], "little")
-                f.seek(zip64_eocd_offset)
-                # Fixed portion only (56 bytes) -- signature/total_entries/
-                # cd_size all live within it; no need for the record's own
-                # variable "extensible data sector" tail.
-                record = f.read(56)
-                if len(record) != 56 or not record.startswith(_ZIP64_EOCD_RECORD_SIG):
-                    return
-                total_entries = int.from_bytes(record[32:40], "little")
-                cd_size = int.from_bytes(record[40:48], "little")
-    except OSError:
-        return
-    if total_entries > MAX_ARCHIVE_MEMBERS:
-        raise SnapshotError(
-            f"{path}: central directory claims {total_entries} entries, "
-            f"exceeding the {MAX_ARCHIVE_MEMBERS} safety limit -- refusing "
-            "to open (possible memory-exhaustion attack, or a genuinely "
-            "malformed archive)."
-        )
-    if cd_size > _MAX_CENTRAL_DIRECTORY_BYTES:
-        raise SnapshotError(
-            f"{path}: central directory claims {cd_size} bytes, exceeding "
-            f"the {_MAX_CENTRAL_DIRECTORY_BYTES} byte safety limit -- "
-            "refusing to open (possible memory-exhaustion attack, or a "
-            "genuinely malformed archive)."
-        )
+#: Central-directory bomb guard (EOCD/ZIP64 preflight) lives in a sibling
+#: module, `bundle_archive_cd_guard.py`, split out purely to stay under
+#: this module's ADR-061 800-line production cap -- see that module's own
+#: docstring. `reject_absurd_central_directory` is imported below, at each
+#: call site, rather than aliased here.
 
 
 def content_hash(payload: bytes) -> str:
@@ -601,9 +515,20 @@ class BundleArchiveReader:
 
     def __init__(self, path: str | Path) -> None:
         self._path = Path(path)
-        _reject_absurd_central_directory(self._path)
+        # Opened once; the identical fd is handed to both the preflight
+        # below and `zipfile.ZipFile` -- reopening *path* a second time for
+        # `ZipFile` would let a concurrent atomic replacement swap in a
+        # different generation in between (Codex review, fresh evidence).
         try:
-            self._zf = zipfile.ZipFile(self._path, mode="r")
+            fp = open(self._path, "rb")
+        except OSError as exc:
+            raise SnapshotError(f"{self._path}: not a valid bundle archive: {exc}") from exc
+        try:
+            from .bundle_archive_cd_guard import reject_absurd_central_directory
+
+            reject_absurd_central_directory(fp, self._path, max_entries=MAX_ARCHIVE_MEMBERS)
+            fp.seek(0)
+            self._zf = zipfile.ZipFile(fp, mode="r")
         except (zipfile.BadZipFile, OSError) as exc:
             # Every deliberate failure in this module raises SnapshotError,
             # which the CLI boundary translates into a clean usage error --
@@ -612,7 +537,15 @@ class BundleArchiveReader:
             # sniff_bundle_archive_format() only checks the first 4 bytes,
             # so a damaged archive routinely passes that detection and
             # reaches this constructor.
+            fp.close()
             raise SnapshotError(f"{self._path}: not a valid bundle archive: {exc}") from exc
+        except BaseException:
+            # SnapshotError from the preflight itself, or anything else --
+            # the fd must not leak even on a rejection this constructor
+            # doesn't translate.
+            fp.close()
+            raise
+        self._fp = fp
 
     @classmethod
     def open(cls, path: str | Path) -> BundleArchiveReader:
@@ -791,7 +724,11 @@ class BundleArchiveReader:
         return decoded
 
     def close(self) -> None:
+        # ZipFile.close() does not close a file object it was *given*
+        # (only one it opened itself from a path) -- self._fp is ours to
+        # close.
         self._zf.close()
+        self._fp.close()
 
     def __enter__(self) -> BundleArchiveReader:
         return self

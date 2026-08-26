@@ -420,113 +420,120 @@ def write_bundle_facts_archive(
     from .errors import SnapshotError
     from .snapshot_io import SnapshotCompression, SnapshotWriteResult
     from .storage.bundle_archive import (
+        DEFAULT_MAX_MANIFEST_BYTES,
         MAX_ARCHIVE_MEMBERS,
         BundleArchiveWriter,
         content_hash,
     )
 
     p = Path(path)
-    # Reject up front, before writing anything, rather than producing an
-    # archive `read_bundle_facts_archive()`'s own `MAX_ARCHIVE_MEMBERS`
-    # preflight would then refuse to reopen (Codex review, fresh evidence:
-    # a manifest naming exactly `DEFAULT_MAX_LIBRARY_COUNT` (20,000)
-    # distinct-content libraries wrote successfully -- nothing on this
-    # write path checked member count at all -- but produced 20,001+ zip
-    # members (one blob per library plus `manifest.json`, plus one more
-    # when `facts.manifest` is non-null), exceeding the reader's own
-    # `MAX_ARCHIVE_MEMBERS` cap). `len(facts.per_library_snapshots)` is an
-    # upper bound on the number of *distinct* blob members this write will
-    # actually produce -- content dedup (two libraries sharing one blob)
-    # can only make the real count smaller, never larger, so checking the
-    # name count here can only reject archives that were never going to
-    # need every name's own blob anyway, never accept one the reader would
-    # then refuse.
-    reserved_metadata_members = 1 + (1 if facts.manifest is not None else 0)
-    if len(facts.per_library_snapshots) + reserved_metadata_members > MAX_ARCHIVE_MEMBERS:
-        raise SnapshotError(
-            f"{p}: writing {len(facts.per_library_snapshots)} libraries "
-            f"would produce more than {MAX_ARCHIVE_MEMBERS} zip members "
-            "(the reader's own safety limit) even before accounting for "
-            "content dedup -- refusing to write an archive that could "
-            "not be reopened."
-        )
+    # Everything below is computed -- and every cap the reader will later
+    # enforce is checked -- *before* `BundleArchiveWriter` is ever opened,
+    # so a rejected write never touches disk. This two-pass shape (compute,
+    # then write) replaced an earlier incremental version that charged the
+    # write-side member/byte caps against raw *name* count rather than
+    # *distinct content* -- over-rejecting whenever multiple names share
+    # one blob (the "one snapshot, many aliases" shape this format's own
+    # dedup exists to provide) on both axes at once, since the informational
+    # `decoded_size_bytes` total is deliberately name-count-based too (see
+    # its own docstring below) and the aggregate-bytes cap previously reused
+    # it (Codex review, fresh evidence, two findings on the incremental
+    # design). Both caps are now measured on the *same* unique-hash map the
+    # write below actually populates -- no separate reasoning about what
+    # the writer will do, just what it did.
+    # Sorted by name, not `facts.per_library_snapshots`' own dict insertion
+    # order (Codex review, fresh evidence): two BundleFacts values that are
+    # logically equal but built by populating this mapping in a different
+    # order would otherwise write their blobs in different orders (and so
+    # the manifest's `library_blobs` keys in different orders too, since
+    # dict order is insertion order), producing different archive bytes and
+    # stored_sha256 for otherwise-identical facts -- undermining the same
+    # reproducibility the pinned zip timestamps exist to provide.
     library_blobs: dict[str, str] = {}
     decoded_size_bytes = 0
-    # A *second*, dedup-aware running total, distinct from the informational
-    # `decoded_size_bytes` above (which intentionally counts every name's
-    # own payload length, dedup or not -- see the return value's own
-    # docstring). This one mirrors exactly what `read_bundle_facts_archive`'s
-    # own aggregate cap charges: each *unique* blob's decoded bytes, once
-    # (its own `blob_cache` there). Checked here, incrementally, so a write
-    # whose unique content already exceeds `DEFAULT_MAX_BUNDLE_DECODED_
-    # BYTES` fails before completing, rather than succeeding and producing
-    # an archive the paired public loader would then always refuse to
-    # reopen once its own remaining aggregate allowance is exhausted
-    # (Codex review, fresh evidence).
-    unique_decoded_bytes = 0
-    seen_hashes: set[str] = set()
+    unique_payloads: dict[str, bytes] = {}  # content hash -> its own payload
+    for name, snap in sorted(facts.per_library_snapshots.items()):
+        payload = _json.dumps(snapshot_to_dict(snap), indent=2).encode("utf-8")
+        decoded_size_bytes += len(payload)
+        h = content_hash(payload)
+        unique_payloads.setdefault(h, payload)
+        library_blobs[name] = h
+    manifest_blob = None
+    if facts.manifest is not None:
+        from .bundle_manifest import manifest_to_dict
 
-    def _charge_unique_bytes(payload: bytes, h: str) -> None:
-        nonlocal unique_decoded_bytes
-        if h in seen_hashes:
-            return
-        seen_hashes.add(h)
-        unique_decoded_bytes += len(payload)
-        if unique_decoded_bytes > DEFAULT_MAX_BUNDLE_DECODED_BYTES:
-            raise SnapshotError(
-                f"{p}: writing this bundle's distinct content would exceed "
-                f"the {DEFAULT_MAX_BUNDLE_DECODED_BYTES} byte aggregate "
-                "safety limit read_bundle_facts_archive() enforces on load "
-                "-- refusing to write an archive that could not be "
-                "reopened."
-            )
+        manifest_payload = _json.dumps(
+            manifest_to_dict(facts.manifest), indent=2
+        ).encode("utf-8")
+        decoded_size_bytes += len(manifest_payload)
+        manifest_blob = content_hash(manifest_payload)
+        unique_payloads.setdefault(manifest_blob, manifest_payload)
+
+    # (a) Member-count cap: one member per *distinct* blob hash, plus
+    # exactly one for the mandatory `manifest.json` container member --
+    # `manifest_blob`'s own hash is already inside `unique_payloads` above
+    # (or coincides with an existing library blob's hash, in which case it
+    # doesn't add a member at all), so there is nothing further to reserve
+    # for it here.
+    if len(unique_payloads) + 1 > MAX_ARCHIVE_MEMBERS:
+        raise SnapshotError(
+            f"{p}: writing this bundle's {len(unique_payloads)} distinct "
+            f"blobs would produce more than {MAX_ARCHIVE_MEMBERS} zip "
+            "members (the reader's own safety limit) -- refusing to write "
+            "an archive that could not be reopened."
+        )
+    # (b) Aggregate decoded-byte cap, mirroring exactly what
+    # `read_bundle_facts_archive`'s own `blob_cache`-based aggregate cap
+    # charges on load: each unique blob's bytes, once.
+    unique_decoded_bytes = sum(len(payload) for payload in unique_payloads.values())
+    if unique_decoded_bytes > DEFAULT_MAX_BUNDLE_DECODED_BYTES:
+        raise SnapshotError(
+            f"{p}: writing this bundle's distinct content ({unique_decoded_bytes} "
+            f"bytes) would exceed the {DEFAULT_MAX_BUNDLE_DECODED_BYTES} byte "
+            "aggregate safety limit read_bundle_facts_archive() enforces on "
+            "load -- refusing to write an archive that could not be reopened."
+        )
+
+    container_manifest = {
+        "schema_version": BUNDLE_ARCHIVE_SCHEMA_VERSION,
+        "bundle_facts_schema_version": facts.schema_version,
+        "variant_fingerprint": facts.variant_fingerprint,
+        "library_blobs": library_blobs,
+        "manifest_blob": manifest_blob,
+        # Also sorted, same reasoning -- these two maps are unordered-by-
+        # name key/value data (a library's own set of aliases/filename),
+        # not order-sensitive content the way an instantiation manifest's
+        # `provides:` list is (that one is deliberately left untouched,
+        # per the same review).
+        "filesystem_aliases": {
+            name: list(aliases) for name, aliases in sorted(facts.filesystem_aliases.items())
+        },
+        "library_filenames": dict(sorted(facts.library_filenames.items())),
+    }
+    # A third cap: `manifest.json` (the container member above, distinct
+    # from `facts.manifest`/`manifest_blob`) has its own size ceiling on
+    # the reader side (`read_manifest()`'s `DEFAULT_MAX_MANIFEST_BYTES`),
+    # never covered by either cap above -- neither charges the container
+    # manifest's own bytes, only blob content. A `BundleFacts` with a large
+    # `filesystem_aliases`/`library_filenames` mapping could otherwise
+    # write a `manifest.json` the reader would then always refuse (Codex
+    # review, fresh evidence). Checked against the exact bytes about to be
+    # written, via the identical `json.dumps(..., indent=2)` encoding
+    # `write_manifest()` itself uses.
+    manifest_member_payload = _json.dumps(container_manifest, indent=2)
+    if len(manifest_member_payload.encode("utf-8")) > DEFAULT_MAX_MANIFEST_BYTES:
+        raise SnapshotError(
+            f"{p}: this bundle's manifest.json would be "
+            f"{len(manifest_member_payload.encode('utf-8'))} bytes, exceeding "
+            f"the {DEFAULT_MAX_MANIFEST_BYTES} byte safety limit "
+            "read_bundle_facts_archive() enforces on load -- refusing to "
+            "write an archive that could not be reopened."
+        )
 
     with BundleArchiveWriter(p) as writer:
-        # Sorted by name, not `facts.per_library_snapshots`' own dict
-        # insertion order (Codex review, fresh evidence): two BundleFacts
-        # values that are logically equal but built by populating this
-        # mapping in a different order would otherwise write their blobs
-        # in different orders (and so the manifest's `library_blobs` keys
-        # in different orders too, since dict order is insertion order),
-        # producing different archive bytes and stored_sha256 for
-        # otherwise-identical facts -- undermining the same reproducibility
-        # the pinned zip timestamps exist to provide.
-        for name, snap in sorted(facts.per_library_snapshots.items()):
-            payload = _json.dumps(snapshot_to_dict(snap), indent=2).encode("utf-8")
-            decoded_size_bytes += len(payload)
-            h = content_hash(payload)
-            _charge_unique_bytes(payload, h)
-            library_blobs[name] = writer.put_blob(payload)
-        manifest_blob = None
-        if facts.manifest is not None:
-            from .bundle_manifest import manifest_to_dict
-
-            manifest_payload = _json.dumps(
-                manifest_to_dict(facts.manifest), indent=2
-            ).encode("utf-8")
-            decoded_size_bytes += len(manifest_payload)
-            h = content_hash(manifest_payload)
-            _charge_unique_bytes(manifest_payload, h)
-            manifest_blob = writer.put_blob(manifest_payload)
-        writer.write_manifest(
-            {
-                "schema_version": BUNDLE_ARCHIVE_SCHEMA_VERSION,
-                "bundle_facts_schema_version": facts.schema_version,
-                "variant_fingerprint": facts.variant_fingerprint,
-                "library_blobs": library_blobs,
-                "manifest_blob": manifest_blob,
-                # Also sorted, same reasoning -- these two maps are
-                # unordered-by-name key/value data (a library's own set of
-                # aliases/filename), not order-sensitive content the way
-                # an instantiation manifest's `provides:` list is (that
-                # one is deliberately left untouched, per the same review).
-                "filesystem_aliases": {
-                    name: list(aliases)
-                    for name, aliases in sorted(facts.filesystem_aliases.items())
-                },
-                "library_filenames": dict(sorted(facts.library_filenames.items())),
-            }
-        )
+        for h in sorted(unique_payloads):
+            writer.put_blob(unique_payloads[h])
+        writer.write_manifest(container_manifest)
     # `writer.stored_sha256`/`writer.stored_size_bytes` are computed by
     # BundleArchiveWriter.close() from the still-private temp file, before
     # os.replace() publishes it -- not re-derived here via a fresh
