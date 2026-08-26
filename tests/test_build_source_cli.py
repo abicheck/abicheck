@@ -2962,11 +2962,22 @@ def test_dump_source_only_include_dependencies_is_noop(tmp_path):
     assert out.exists()
 
 
-def test_dump_with_no_binary_and_no_inputs_errors():
-    """A bare `dump` (no SO_PATH, no --sources/--build-info) errors clearly."""
-    result = CliRunner().invoke(main, ["dump"])
-    assert result.exit_code != 0
+@pytest.mark.parametrize("extra", [[], ["--dry-run"]])
+def test_dump_with_no_binary_and_no_inputs_errors(extra):
+    """A bare `dump` (no SO_PATH, no --sources/--build-info) errors clearly.
+
+    Parametrized over `--dry-run` since ADR-061 Phase 3: `dump_cmd` resolves
+    one `ResolvedDumpRequest` above that branch, so the *same* invalid input
+    now gets the *same* message either way. Before, it got two different ones
+    -- the real run's from `perform_source_only_dump`, the preview's from
+    `DumpRequest.validate()` -- which is the "dry-run describes a different
+    run" split that hoisting the resolve exists to close. The surviving
+    message keeps the real run's flag-naming guidance.
+    """
+    result = CliRunner().invoke(main, ["dump", *extra])
+    assert result.exit_code == 64
     assert "source-only" in result.output
+    assert "--sources/--build-info" in result.output
 
 
 def test_dump_source_only_then_merge_with_binary(tmp_path):

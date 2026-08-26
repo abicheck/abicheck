@@ -553,26 +553,22 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
     # under them. Same partition `compare` applies to its own -H list, so a
     # `dump -H include/` and the equivalent `compare -H include/` describe one
     # public surface rather than two.
-    from .header_utils import split_public_header_inputs
-
     # Resolve the evidence-depth preset into the collect mode, apply --depth binary
     # suppression, and warn on an explicitly-requested deep depth without sources.
     collect_mode, headers = resolve_dump_collect_context(
         depth, _resolved_collect_mode, sources, build_info, headers,
     )
-
-    # Derived from the *post-suppression* headers, not the raw ones: at
-    # --depth binary `resolve_dump_collect_context` clears the header-AST
-    # inputs, and provenance roots split off beforehand survived that and were
-    # still stamped into the snapshot's scope contract. Two binary-depth
-    # snapshots taken with different -H sets then carried different scope
-    # fingerprints and `compare` rejected the pair with ScopeMismatchError --
-    # at the one depth that is supposed to ignore headers entirely (Codex
-    # review). Deriving after the clear makes them empty exactly when the
-    # headers they describe are.
-    _public_header_files, _public_header_dirs = split_public_header_inputs(headers)
-    public_headers = tuple(_public_header_files)
-    public_header_dirs = tuple(_public_header_dirs)
+    # The public-header/-dir split this command used to compute here is now
+    # read off the resolved plan (`_resolved.public_headers` /
+    # `.public_header_dirs`, ADR-061 Phase 3), so there is one derivation
+    # rather than two that agreed. `resolve_dump_request` keeps the invariant
+    # that made this tricky: derive from the *post-suppression* headers, since
+    # `--depth binary` clears the header-AST inputs and a provenance root
+    # split off beforehand would otherwise survive into the scope contract --
+    # two binary-depth snapshots taken with different -H sets then carried
+    # different scope fingerprints and `compare` rejected the pair with
+    # ScopeMismatchError, at the one depth that is supposed to ignore headers
+    # entirely (Codex review). See that function's own comment.
     # The L2 compile database is whatever --build-info names, read back after
     # --depth binary has had its say about the headers (a headerless dump has
     # no header AST for a database to parameterize).
@@ -701,13 +697,22 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
     # it. See `cli_dump_request.py`'s own module docstring for why that
     # direction matters.
     #
-    # Built here, before the branch, rather than inside `if dry_run:` -- and
-    # only `--dry-run` consumes it today. That is deliberate and worth being
-    # plain about: the real ELF/PE/Mach-O run still executes through
-    # `perform_elf_dump`/`handle_non_elf_dump` below (three obstacles remain,
-    # recorded in the plan's PR 3A section), so this is the object that
-    # migration will build from, positioned where both branches can reach it
-    # rather than tucked inside the one that currently does.
+    # Built AND resolved here, before the branch, because both branches now
+    # consume the same resolved plan -- which is ADR-061 Phase 3's acceptance
+    # criterion "dry-run renders the same resolved plan normal execution
+    # consumes", stated as a structural fact rather than a claim. A preview
+    # computed by a second resolver looks authoritative while being connected
+    # to nothing; that is worse than two implementations kept in sync by hand,
+    # because nothing fails when they drift.
+    #
+    # The real ELF/PE/Mach-O run still *executes* through `perform_elf_dump`/
+    # `handle_non_elf_dump` rather than `execute_dump_request` (that migration
+    # needs the ADR-039 collector's CLI-only inputs represented in the typed
+    # API, and `_write_snapshot_output`'s provenance/`--inputs`/depth-gate
+    # sequence reordered around a resolve-time embed). What changed is which
+    # object supplies its *resolved inputs*: they now come from
+    # `ResolvedDumpRequest`, not from a parallel set of locals that merely
+    # happened to agree.
     _dump_request = build_dump_request(
         so_path=so_path, headers=headers, includes=includes,
         version=version, lang=lang, lang_explicit=lang_explicit,
@@ -725,6 +730,14 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
         resolved_collect_mode=_resolved_collect_mode,
         compile_db_filter=compile_db_filter,
     )
+    # `resolve_dump_request` runs no castxml/clang and writes nothing, so
+    # hoisting it above the branch keeps `--dry-run` inside its own "cheap,
+    # read-only resolution" contract while giving the real run the same
+    # object. Its validations are ones this command already performs
+    # independently a few lines above (`TestResolvedRequestAgreesWithTheCliLocals`
+    # pins the two in agreement), so this raises no error the real path did
+    # not already raise -- it raises the same ones from one place.
+    _resolved = resolve_dump_request_for_cli(_dump_request)
 
     if dry_run:
         from .buildsource.inline import is_pack_dir
@@ -733,13 +746,6 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
         from .cli_dump_helpers import render_dump_dry_run
         from .cli_helpers_compare import dry_run_compile_db_matched
 
-        # The dry-run report is now rendered from a real `ResolvedDumpRequest`
-        # -- the resolve-only half of the same pipeline `run_dump_request`
-        # executes -- instead of from `dump_cmd`'s own hand-derived locals.
-        # `resolve_dump_request` runs no castxml/clang and writes nothing, so
-        # this stays inside `render_dump_dry_run`'s own "cheap, read-only
-        # resolution" contract.
-        _resolved = resolve_dump_request_for_cli(_dump_request)
         _dry_matched = dry_run_compile_db_matched(
             compile_db_path, None, headers, compile_db_filter,
         )
@@ -850,18 +856,25 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
             if effective_gcc_options != _cc.gcc_options
             else _cc
         )
+        # Same rule as the ELF call below: the resolved plan supplies every
+        # field it owns, so the PE/Mach-O run consumes exactly what
+        # `--dry-run` rendered.
         handle_non_elf_dump(
-            so_path, binary_fmt, headers, includes, version, lang, pdb_path,
+            so_path, binary_fmt, _resolved.headers, includes, version,
+            _resolved.lang, pdb_path,
             follow_deps, git_tag, build_id, no_git, output,
             _dump_native_binary, _stamp_provenance, _write_snapshot_output_fn,
-            public_headers, public_header_dirs, build_info, sources, build_config,
-            allow_build_query, collect_mode, build_query, build_compile_db,
+            _resolved.public_headers, _resolved.public_header_dirs,
+            build_info, sources, build_config,
+            allow_build_query, _resolved.collect_mode, build_query,
+            build_compile_db,
             build_targets=build_targets,
-            header_backend=header_backend, compile_context=native_cc,
-            depth=depth, compile_db_context_matched=compile_db_matched,
+            header_backend=_resolved.header_backend, compile_context=native_cc,
+            depth=_resolved.requested_depth,
+            compile_db_context_matched=compile_db_matched,
             include_dependencies=include_dependencies,
             snapshot_compression=snapshot_compression,
-            lang_explicit=lang_explicit,
+            lang_explicit=_resolved.lang_explicit,
         )
         return
 
@@ -879,14 +892,19 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
             if artifact.dwarf_path and artifact.dwarf_path.resolve() != so_path.resolve():
                 debug_info_path = artifact.dwarf_path
 
+    # ADR-061 Phase 3: every field below that the resolved plan owns is read
+    # off `_resolved`, not off the local that happened to agree with it. The
+    # two were pinned equal by `TestResolvedRequestAgreesWithTheCliLocals`;
+    # reading the plan makes the agreement structural instead of tested, so
+    # `--dry-run` cannot describe a plan the run did not consume.
     perform_elf_dump(
         so_path=so_path,
         debug_info_path=debug_info_path,
-        headers=headers,
+        headers=_resolved.headers,
         includes=includes,
         version=version,
-        lang=lang,
-        lang_explicit=lang_explicit,
+        lang=_resolved.lang,
+        lang_explicit=_resolved.lang_explicit,
         gcc_path=gcc_path,
         gcc_prefix=gcc_prefix,
         effective_gcc_options=effective_gcc_options,
@@ -897,9 +915,9 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
         nostdinc=nostdinc,
         dwarf_only=dwarf_only,
         effective_debug_format=effective_debug_format,
-        public_headers=public_headers,
-        public_header_dirs=public_header_dirs,
-        header_backend=header_backend,
+        public_headers=_resolved.public_headers,
+        public_header_dirs=_resolved.public_header_dirs,
+        header_backend=_resolved.header_backend,
         effective_compile_db=effective_compile_db,
         follow_deps=follow_deps,
         search_paths=search_paths,
@@ -912,7 +930,7 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
         sources=sources,
         build_config=build_config,
         allow_build_query=allow_build_query,
-        collect_mode=collect_mode,
+        collect_mode=_resolved.collect_mode,
         expand_header_inputs=_expand_header_inputs,
         populate_dependency_info=_populate_dependency_info,
         stamp_provenance=_stamp_provenance,
@@ -921,7 +939,7 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
         build_compile_db=build_compile_db,
         build_targets=build_targets,
         compile_context=_cc,
-        depth=depth,
+        depth=_resolved.requested_depth,
         compile_db_context_matched=compile_db_matched,
         dump_manifest=parsed_dump_manifest,
         include_labels=_resolved_include_labels,

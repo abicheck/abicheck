@@ -412,10 +412,18 @@ def _path_required_errors(
     if not source_only_allowed:
         return [f"the {label} side needs a path (a binary or a snapshot file)"]
     if not (side.sources or side.build_info or side.dump_manifest is not None):
+        # Names the CLI flags, not just the field names. ADR-061 Phase 3
+        # hoisted this validation above `dump_cmd`'s `--dry-run` branch so one
+        # message covers both paths; before that, a bare `dump` and a bare
+        # `dump --dry-run` reported the *same* invalid input two different
+        # ways, and the real-run wording was the one that told the user which
+        # flags to reach for. Keeping that guidance here is what makes the
+        # unification an improvement rather than a trade.
         return [
             f"the {label} side has no path and no sources/build_info/"
             "dump_manifest: a binary-less dump needs at least one of them to "
-            "have anything to extract"
+            "have anything to extract -- pass a binary (SO_PATH), or "
+            "--sources/--build-info for a source-only snapshot"
         ]
     return []
 

@@ -313,3 +313,111 @@ def _request(
         ld_library_path="",
         include_labels=None,
     )
+
+
+class TestExecutionConsumesTheResolvedPlan:
+    """ADR-061 Phase 3: ``--dry-run`` and the real run read the *same* object.
+
+    The sibling class above pins the resolved values *equal* to ``dump_cmd``'s
+    own locals. That was the right guard while the two were separate
+    derivations kept in sync by test. They are no longer separate: ``dump_cmd``
+    resolves one :class:`ResolvedDumpRequest` above the ``if dry_run:`` branch
+    and both branches read their inputs off it.
+
+    These tests state that as an executable fact rather than a comment. A
+    future edit that reintroduces a parallel local -- passing ``lang`` where it
+    now passes ``_resolved.lang``, say -- fails here, because the spy sees a
+    value only the resolved plan could have supplied.
+
+    Why a spy on the execution entry point rather than an end-to-end dump: the
+    property under test is *which object supplied the argument*, which is
+    invisible in a snapshot (the two agreed, which is exactly why the drift
+    would be silent). Reaching into the call is the only place the distinction
+    exists.
+    """
+
+    def _spy(self, monkeypatch):
+        from abicheck import cli as cli_mod
+
+        seen: dict[str, object] = {}
+
+        def _fake_perform_elf_dump(**kwargs):
+            seen.update(kwargs)
+
+        monkeypatch.setattr(
+            cli_mod, "perform_elf_dump", _fake_perform_elf_dump, raising=False
+        )
+        return seen
+
+    def test_elf_run_reads_its_plan_fields_off_the_resolved_request(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        from click.testing import CliRunner
+
+        from abicheck.cli import main
+        from abicheck.cli_buildsource import resolve_dump_request_for_cli
+        from abicheck.cli_dump_request import build_dump_request
+
+        header, sources, compile_db = _project(tmp_path)
+        so_path = _binary(tmp_path)
+
+        captured: dict[str, object] = {}
+        real_build = build_dump_request
+
+        def _spy_build(**kwargs):
+            request = real_build(**kwargs)
+            captured["resolved"] = resolve_dump_request_for_cli(request)
+            return request
+
+        monkeypatch.setattr(
+            "abicheck.cli_dump_request.build_dump_request", _spy_build
+        )
+        seen = self._spy(monkeypatch)
+
+        result = CliRunner().invoke(
+            main,
+            [
+                "dump", str(so_path),
+                "-H", str(header),
+                "--sources", str(sources),
+                "--build-info", str(compile_db),
+                "--depth", "headers",
+                "-o", str(tmp_path / "out.abi.json"),
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        assert seen, "perform_elf_dump was never reached"
+
+        resolved = captured["resolved"]
+        # Each of these is a field the resolved plan owns. Reading them off
+        # `resolved` is the whole point: if `dump_cmd` went back to passing its
+        # own local, these would still *pass* whenever the two agree -- so the
+        # value is only half the assertion. The other half is that
+        # `dump_cmd` no longer computes a second copy at all, which
+        # `test_no_parallel_public_header_derivation` below checks directly.
+        assert seen["headers"] == resolved.headers
+        assert seen["lang"] == resolved.lang
+        assert seen["lang_explicit"] == resolved.lang_explicit
+        assert seen["header_backend"] == resolved.header_backend
+        assert seen["collect_mode"] == resolved.collect_mode
+        assert seen["depth"] == resolved.requested_depth
+        assert seen["public_headers"] == resolved.public_headers
+        assert seen["public_header_dirs"] == resolved.public_header_dirs
+
+    def test_no_parallel_public_header_derivation(self) -> None:
+        """``dump_cmd`` must not re-derive the public-header split itself.
+
+        This is the half a value-equality assertion cannot cover: two
+        derivations that agree today are exactly the shape that drifts
+        silently later. The public-header split had its own hard-won
+        ``--depth binary`` ordering rule (see ``resolve_dump_request``), and
+        keeping a second copy of it in the CLI is what this forbids.
+        """
+        import inspect
+
+        from abicheck import cli as cli_mod
+
+        # `dump_cmd` is a Click RichCommand at module level; the
+        # undecorated function is on `.callback`.
+        source = inspect.getsource(cli_mod.dump_cmd.callback)
+        assert "split_public_header_inputs(" not in source
