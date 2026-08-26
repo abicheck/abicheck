@@ -325,9 +325,17 @@ left at a JSON-envelope default (Codex review, fresh evidence):** an
 earlier revision of this section defined the new `format=` argument's
 behavior but never stated what the archive branch returns, which could
 otherwise degrade to `None` or to values that describe a JSON envelope, not
-a zip. `compression=SnapshotCompression.ZSTD` (every blob is zstd, so this
-is never ambiguous the way `format="json"`'s configurable `compression=`
-is); `decoded_size_bytes` is the sum of every serialized payload actually
+a zip. `compression=SnapshotCompression.NONE` — **not** `ZSTD`, despite every blob
+being zstd-compressed (Codex review, fresh evidence, correcting an earlier
+draft of this section): `compression` describes the *outer envelope*
+`detect_snapshot_compression()`/`read_snapshot_storage_info()` would
+independently discover by sniffing the written file's own magic bytes, and
+that envelope is a ZIP (`PK\x03\x04`), which neither sniffer recognizes as a
+zstd frame — they report `NONE`. The per-blob zstd compression is real but
+internal to individual zip members, not a fact about the file as a whole;
+claiming `ZSTD` here would disagree with an independent sniff of the same
+file, or mislead a caller that tries to feed the raw file bytes to a zstd
+decoder directly; `decoded_size_bytes` is the sum of every serialized payload actually
 written to the blob store — one library's snapshot plus the instantiation
 manifest, if present, each counted once even when `put_blob`'s own content
 dedup collapses two libraries onto one blob (this field answers "how much
