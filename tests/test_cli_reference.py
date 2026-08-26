@@ -155,3 +155,33 @@ def test_option_row_hides_click_internal_unset_sentinel():
     row = gen._option_row(_FakeParam())
     assert "Sentinel" not in row
     assert "| `--manifest` | no | — | Some help text. |" == row
+
+
+def test_option_row_renders_false_for_an_is_flag_sentinel_default():
+    """Click 8.5 widened the same internal "no default given" sentinel to
+    *every* `is_flag=True` option with no explicit override -- not just
+    genuinely optionless ones (click 8.4.2 reports a concrete `False` for
+    this exact param shape; click 8.5.0 reports the sentinel instead). An
+    omitted flag still resolves to `False` at parse time either way, so a
+    flag param must render `False`, not "—", even when its own `.default`
+    is the sentinel -- unlike a non-flag option (the sibling test above),
+    which correctly still hides a sentinel default behind "—"."""
+    gen = _load_gen()
+
+    class _FakeSentinel:
+        pass
+
+    _FakeSentinel.__name__ = "Sentinel"
+
+    class _FakeParam:
+        opts = ("--allow-unsupported-castxml",)
+        secondary_opts = ()
+        default = _FakeSentinel()
+        is_flag = True
+        required = False
+        help = "Proceed anyway."
+        type = None
+
+    row = gen._option_row(_FakeParam())
+    assert "Sentinel" not in row
+    assert "| `--allow-unsupported-castxml` | no | `False` | Proceed anyway. |" == row
