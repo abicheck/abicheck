@@ -186,6 +186,39 @@ def test_read_snapshot_bytes_cap_selection_sees_past_leading_skippable_frame(tmp
     assert read_snapshot_bytes(p, max_decoded_bytes=100) == b"{}"
 
 
+def test_read_snapshot_bytes_cap_selection_survives_escalation_ceiling(tmp_path):
+    """Fifth-order follow-up (Codex review, fresh evidence): the escalated
+    probe `_read_past_leading_skippable_frames()` uses to see past a
+    leading skippable frame is deliberately bounded
+    (`_BOUNDED_PREFIX_MAX_RAW_BYTES`, 1 MiB) so classifying an adversarial
+    file with an enormous/unbounded run of leading skippable frames can't
+    force an unbounded read. When *legitimate* leading skippable-frame
+    metadata exceeds that bound, the escalation can hit its ceiling
+    without ever reaching the real data frame's own magic -- and cap
+    selection previously fell all the way back to treating the file as
+    uncompressed (`compression_hint is NONE`), applying the small decoded-
+    size cap to the file's real, much larger stored size. Matches the
+    finding's own repro: a 2 MiB skippable frame (past the 1 MiB probe
+    ceiling) ahead of a real zstd frame decoding to ``{}`` (2 bytes), read
+    with a 100-byte *decoded*-size limit that only the wrong (stored-size)
+    cap would reject. The cheap, no-I/O leading-magic check alone already
+    proves the file is zstd-family, independent of whether the bounded
+    escalation manages to resolve the exact frame structure."""
+    zstandard = pytest.importorskip("zstandard")
+
+    # User data comfortably past the 1 MiB escalation ceiling, so the
+    # escalated read exhausts its cap before finding the real zstd magic.
+    user_data = b"\x00" * (2 * 1024 * 1024)
+    blob = _leading_skippable_zstd_bytes(b"{}", zstandard, user_data=user_data)
+    assert len(blob) > 1024 * 1024  # past the escalation ceiling
+    assert len(blob) > 100  # stored size still exceeds the decoded-size limit below
+
+    p = tmp_path / "leading_skippable_past_escalation_ceiling.abicheck.json.zst"
+    p.write_bytes(blob)
+
+    assert read_snapshot_bytes(p, max_decoded_bytes=100) == b"{}"
+
+
 def test_read_snapshot_bytes_handles_many_leading_skippable_frames_at_realistic_scale(tmp_path):
     """Covers the public reader end-to-end at the same realistic frame
     count the primitive-level test above uses directly, per the review

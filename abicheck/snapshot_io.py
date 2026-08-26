@@ -500,7 +500,14 @@ def read_snapshot_bytes(
         # `stored_size > cap` check just below still catches an oversized
         # file even when this escalation itself reads far more than a
         # small `cap` would otherwise allow.
-        if starts_with_skippable_frame_magic(prefix):
+        # Codex review (fifth-order follow-up): the bare leading magic alone
+        # already proves this is zstd-family, even if the bounded 1 MiB
+        # escalation below hits its ceiling before the real data frame --
+        # don't let `compression_hint` fall back to `NONE` for cap selection
+        # then (a >1 MiB lead-in was misread as uncompressed and checked
+        # against the small decoded cap instead of the stored one).
+        known_compressed = starts_with_skippable_frame_magic(prefix)
+        if known_compressed:
             prefix = _read_past_leading_skippable_frames(f, prefix)
         compression_hint = detect_compression_from_bytes(prefix)
         # Codex review: `max(limit, _max_stored_bytes())` let a raised
@@ -515,7 +522,7 @@ def read_snapshot_bytes(
         # a side effect of raising the unrelated decoded-size one.
         cap = (
             limit
-            if compression_hint is SnapshotCompression.NONE
+            if compression_hint is SnapshotCompression.NONE and not known_compressed
             else _max_stored_bytes()
         )
         if stored_size > cap:

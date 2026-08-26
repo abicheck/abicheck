@@ -1020,3 +1020,39 @@
   in `tests/test_snapshot_compression_skippable_frames.py`, matching the
   finding's own repro shape exactly. Confirmed to fail against the
   pre-fix code before applying the fix.
+
+- **A fifth, fourth-order follow-up on the same skippable-frame saga: the
+  previous fix's own bounded escalation ceiling has an edge case (Codex
+  review, fresh evidence).** The fourth-round fix above escalates
+  `read_snapshot_bytes()`'s cap-selection probe past a leading skippable
+  frame, but that escalation is deliberately bounded
+  (`_BOUNDED_PREFIX_MAX_RAW_BYTES`, 1 MiB) so an adversarial file with an
+  enormous/unbounded run of leading skippable frames can't force an
+  unbounded read just to classify it -- correct, and unchanged here. The
+  gap: when *legitimate* leading skippable-frame metadata happens to
+  exceed that 1 MiB bound, the escalated read hits its ceiling without
+  ever reaching the real data frame's own magic, and `compression_hint`
+  fell all the way back to `NONE` -- applying the small *decoded*-size cap
+  to the file's real, much larger *stored* size. Reproduced exactly as
+  reported: a 2 MiB skippable frame ahead of a real zstd frame decoding to
+  `{}` (2 bytes), read with `max_decoded_bytes=100`, was rejected against
+  the 100-byte stored-size cap. Fixed by recognizing that the bare leading
+  4-byte magic alone (`starts_with_skippable_frame_magic()`, cheap and
+  no-I/O) already proves the file is zstd-family, independent of whether
+  the bounded escalation manages to resolve the exact frame structure --
+  decoupling "is this compressed, for cap selection" (answerable
+  unconditionally from the leading magic) from "what exact frame structure
+  does it have" (which may legitimately not resolve within the bounded
+  probe). Only the cap picked at this one call site changes; the 1 MiB
+  escalation ceiling itself is untouched, and the decisive full-buffer
+  classification (`compression`) and the actual decompression/frame-
+  completeness validation further down still run exactly as before, so a
+  malformed/hostile file that merely *starts* with skippable-frame magic
+  is still fully validated rather than trusted outright.
+
+  New test:
+  `test_read_snapshot_bytes_cap_selection_survives_escalation_ceiling` in
+  `tests/test_snapshot_compression_skippable_frames.py`, matching the
+  finding's own repro shape (a 2 MiB skippable frame, past the 1 MiB
+  escalation ceiling). Confirmed to fail against the pre-fix code with the
+  same wrong-cap `SnapshotError` before applying the fix.
