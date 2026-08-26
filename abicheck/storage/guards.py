@@ -42,6 +42,7 @@ from typing import Any
 #: and a new guard cannot appear here unadvertised.
 __all__ = [
     "decision_key",
+    "row_sequence",
     "required_field",
     "key_collection",
     "enum_member",
@@ -174,13 +175,7 @@ def diagnostics_from(raw: Any) -> tuple[str, ...]:
     the entire reason this field is guarded, so silently manufacturing a
     plausible one defeats it exactly as the character-splitting did.
     """
-    if isinstance(raw, (str, bytes)) or not isinstance(raw, Sequence):
-        raise TypeError(
-            f"diagnostics must be a sequence of strings, not "
-            f"{type(raw).__name__} ({raw!r}); a bare string would be split "
-            "into one diagnostic per character"
-        )
-    entries = tuple(raw)
+    entries = row_sequence(raw, "diagnostics")
     for index, entry in enumerate(entries):
         if not isinstance(entry, str):
             raise TypeError(
@@ -238,6 +233,40 @@ def key_collection(raw: Any, field_name: str) -> None:
             "each of which is a valid key, so the result would look answered "
             "rather than wrong"
         )
+
+
+def row_sequence(raw: Any, field_name: str) -> tuple[Any, ...]:
+    """A document field holding *rows*, checked before it is iterated.
+
+    A JSON array is the only shape this can be, but Python is happy to
+    iterate several others into something plausible, and each failure is
+    silent rather than loud:
+
+    * a ``Mapping`` yields its **keys**, so
+      ``attributes={("size", "8"): "discarded"}`` was read as the attribute
+      ``("size", "8")`` with the value dropped — identity manufactured from
+      one half of a mapping;
+    * a ``str`` yields characters;
+    * a ``set`` yields in an order that varies by process, which for a field
+      whose rows become part of a key is a determinism bug;
+    * and every one of them, when empty, yields nothing — so a malformed or
+      unparsed field became the *claim* that the producer established there
+      are no rows. That is precisely the "absence is not evidence" reading
+      this package exists to prevent (Codex review).
+
+    A ``Mapping`` and a ``set`` are not ``Sequence``s, so the one check
+    covers all of it. This rule already existed inline in three places
+    (:func:`diagnostics_from`, ``_attribute_pair``, ``IdentityConflict``)
+    before it was a guard, which is the drift this module exists to stop.
+    """
+    if isinstance(raw, (str, bytes)) or not isinstance(raw, Sequence):
+        raise TypeError(
+            f"{field_name} must be a sequence of rows, not "
+            f"{type(raw).__name__} ({raw!r}); iterating a mapping yields its "
+            "keys and an empty one would read as 'the producer established "
+            "there are none'"
+        )
+    return tuple(raw)
 
 
 def required_field(document: Any, key: str, record: str) -> Any:

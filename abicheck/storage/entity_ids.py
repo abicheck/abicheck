@@ -42,6 +42,7 @@ from .guards import (
     identity_text as _identity_text,
     instance_of as _instance_of,
     required_field as _required_field,
+    row_sequence as _row_sequence,
 )
 
 __all__ = [
@@ -384,7 +385,8 @@ class OccurrenceId:
             container=_identity_text(data.get("container", ""), "container"),
             producer=_identity_text(data.get("producer", ""), "producer"),
             attributes=tuple(
-                _attribute_pair(pair) for pair in data.get("attributes", ())
+                _attribute_pair(pair)
+                for pair in _row_sequence(data.get("attributes", ()), "attributes")
             ),
         )
 

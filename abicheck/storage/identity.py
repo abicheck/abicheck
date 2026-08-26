@@ -71,6 +71,7 @@ from .guards import (
     instance_of as _instance_of,
     mapping as _mapping,
     required_field as _required_field,
+    row_sequence as _row_sequence,
 )
 
 __all__ = [
@@ -164,7 +165,8 @@ class IdentityConflict:
             # validation exists to remove.
             reason=_required_field(data, "reason", "an identity conflict document"),
             occurrences=tuple(
-                OccurrenceId.from_dict(raw) for raw in data.get("occurrences", ())
+                OccurrenceId.from_dict(raw)
+                for raw in _row_sequence(data.get("occurrences", ()), "occurrences")
             ),
         )
 
@@ -393,7 +395,8 @@ class OccurrenceSet:
         _mapping(data, "an occurrence set document")
         result = cls()
         result.extend(
-            OccurrenceId.from_dict(raw) for raw in data.get("occurrences", ())
+            OccurrenceId.from_dict(raw)
+            for raw in _row_sequence(data.get("occurrences", ()), "occurrences")
         )
         return result
 

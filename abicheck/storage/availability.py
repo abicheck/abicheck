@@ -64,6 +64,7 @@ from .guards import (
     key_collection as _key_collection,
     mapping as _mapping,
     required_field as _required_field,
+    row_sequence as _row_sequence,
 )
 
 __all__ = [
@@ -484,7 +485,7 @@ class AvailabilityLedger:
             for name, raw in raw_families.items()
         }
         overrides: dict[tuple[str, str], FactAvailability] = {}
-        for raw in data.get("overrides", []):
+        for raw in _row_sequence(data.get("overrides", []), "overrides"):
             key = (
                 _decision_key(
                     _required_field(raw, "family", "an override document"),

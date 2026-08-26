@@ -16,7 +16,12 @@ from __future__ import annotations
 import pytest
 
 from abicheck.storage.availability import AvailabilityLedger
-from abicheck.storage.identity import EntityId, OccurrenceId
+from abicheck.storage.identity import (
+    EntityId,
+    IdentityConflict,
+    OccurrenceId,
+    OccurrenceSet,
+)
 from abicheck.storage.versioning import StorageVersions, check_reader_compatibility
 
 
@@ -134,4 +139,121 @@ class TestMalformedDocumentsRaiseTheDocumentedErrorKinds:
         assert offenders == [], (
             "these `from_dict` sites read a required field by raw subscript, so a "
             f"truncated document raises KeyError instead of ValueError: {offenders}"
+        )
+
+
+class TestRowSequenceFieldsRejectEveryWrongContainer:
+    """A field holding rows is a JSON array, and nothing else iterates safely.
+
+    Python will iterate a mapping (yielding its **keys**), a string
+    (characters), or a set (in an order that varies by process) into
+    something plausible. Every one of those failures is silent, and when the
+    container is empty all of them produce the *claim* that the producer
+    established there are no rows — the "absence is not evidence" reading
+    this package exists to prevent (Codex review).
+    """
+
+    _ENTITY = {"kind": "function", "qualified_name": "f"}
+
+    @pytest.mark.parametrize(
+        "container",
+        [
+            pytest.param({}, id="empty-mapping"),
+            pytest.param({"a": 1}, id="mapping"),
+            pytest.param("", id="empty-str"),
+            pytest.param("ab", id="str"),
+            pytest.param(set(), id="empty-set"),
+            pytest.param(b"", id="bytes"),
+        ],
+    )
+    def test_every_row_field_refuses_it(self, container: object) -> None:
+        """All four sites, not the three that were reported.
+
+        `IdentityConflict.from_dict`'s own occurrences field had the
+        identical gap and was not named — found by sweeping for the shape
+        rather than fixing the reports.
+        """
+        cases = [
+            lambda: AvailabilityLedger.from_dict({"overrides": container}),
+            lambda: OccurrenceId.from_dict(
+                {
+                    "entity": self._ENTITY,
+                    "observation": "ast",
+                    "attributes": container,
+                }
+            ),
+            lambda: OccurrenceSet.from_dict({"occurrences": container}),
+            lambda: IdentityConflict.from_dict(
+                {"reason": "r", "occurrences": container}
+            ),
+        ]
+        for call in cases:
+            with pytest.raises(TypeError, match="must be a sequence of rows"):
+                call()
+
+    def test_a_mapping_would_have_manufactured_identity(self) -> None:
+        """The sharpest instance, stated as its consequence.
+
+        `{("size", "8"): "discarded"}` was read as the attribute
+        `("size", "8")` with the mapping's value dropped — an identity
+        component invented from one half of a mapping, which then decides
+        what `OccurrenceSet.add` treats as a duplicate.
+        """
+        with pytest.raises(TypeError, match="attributes must be a sequence"):
+            OccurrenceId.from_dict(
+                {
+                    "entity": self._ENTITY,
+                    "observation": "ast",
+                    "attributes": {("size", "8"): "discarded"},
+                }
+            )
+
+    def test_real_arrays_and_absent_fields_still_work(self) -> None:
+        """The control. An *omitted* field is not a malformed one.
+
+        The default is a real empty tuple, so absence still means "no rows
+        stated" — only a wrongly-typed container is refused.
+        """
+        assert OccurrenceSet.from_dict({}).to_dict() == {"occurrences": []}
+        assert OccurrenceSet.from_dict({"occurrences": []}).to_dict() == {
+            "occurrences": []
+        }
+        assert (
+            OccurrenceId.from_dict(
+                {"entity": self._ENTITY, "observation": "ast"}
+            ).attributes
+            == ()
+        )
+        assert AvailabilityLedger.from_dict({"overrides": []}).overrides == {}
+
+    def test_no_document_field_is_iterated_without_a_container_check(self) -> None:
+        """The sweep as a test, since three rounds of these were reported.
+
+        Walks every `from_dict` and fails on a `data.get(...)` used directly
+        as an iterable, so the next such field is caught here rather than in
+        review.
+        """
+        import ast
+        import pathlib
+
+        offenders: list[str] = []
+        for path in sorted(pathlib.Path("abicheck/storage").glob("*.py")):
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.FunctionDef) or node.name != "from_dict":
+                    continue
+                for sub in ast.walk(node):
+                    iterables = []
+                    if isinstance(sub, ast.comprehension):
+                        iterables.append(sub.iter)
+                    elif isinstance(sub, ast.For):
+                        iterables.append(sub.iter)
+                    for iterable in iterables:
+                        text = ast.unparse(iterable)
+                        if ".get(" in text and "_row_sequence" not in text:
+                            offenders.append(f"{path.name}:{sub.lineno} {text}")
+
+        assert offenders == [], (
+            "these document fields are iterated without checking the container, "
+            f"so a mapping yields keys and an empty one reads as 'none': {offenders}"
         )
