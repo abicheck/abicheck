@@ -1050,6 +1050,12 @@ def find_namespace_move_groups(
     # locally-rejected position looks uncontested when another symbol's raw
     # candidacy at that key would reveal a genuine tie (Codex review).
     raw_symbol_keys: dict[str, set[tuple[str, str]]] = {}
+    # A repeated bare segment can make two DIFFERENT added declarations
+    # collapse to the identical key for the SAME removed symbol (Codex
+    # review): removed "old::old::f" against added "new::old::f" (position
+    # 0) AND "old::new::f" (position 1) both key as ("old", "new") -- a
+    # shared key must not be treated as agreement. Keyed by (symbol_id, key), not merged into `raw_symbol_keys`, so a single-target key is unaffected.
+    raw_symbol_key_targets: dict[tuple[str, tuple[str, str]], set[str]] = {}
     for r_sym in sorted(removed):
         r_resolved = _scope_components(r_sym)
         if r_resolved is None:
@@ -1071,9 +1077,9 @@ def find_namespace_move_groups(
                 cand_id = "::".join(cand_comps)
                 added_id_to_removed_symbols.setdefault(cand_id, set()).add(symbol_id)
                 removed_id_to_added_symbols.setdefault(symbol_id, set()).add(cand_id)
-                raw_symbol_keys.setdefault(symbol_id, set()).add(
-                    (r_comps[i], cand_comps[i])
-                )
+                rkey = (r_comps[i], cand_comps[i])
+                raw_symbol_keys.setdefault(symbol_id, set()).add(rkey)
+                raw_symbol_key_targets.setdefault((symbol_id, rkey), set()).add(cand_id)
             # Reject an AMBIGUOUS substitution at the source (Codex review,
             # fresh evidence): when the SAME masked context (this removed
             # symbol's scope chain with position `i` blanked out) matches
@@ -1177,6 +1183,11 @@ def find_namespace_move_groups(
             continue
         key = (r_comps[i], a_comps[i])
         if len(removed_id_to_added_symbols[symbol_id]) != 1:
+            # This key itself may resolve to >1 distinct target for this
+            # symbol (see raw_symbol_key_targets's docstring) -- reject
+            # before considering corroboration.
+            if len(raw_symbol_key_targets[(symbol_id, key)]) != 1:
+                continue
             if not key_support[key] - {symbol_id}:
                 continue
             other_keys = raw_symbol_keys[symbol_id] - {key}

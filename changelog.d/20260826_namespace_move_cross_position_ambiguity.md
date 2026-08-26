@@ -28,3 +28,18 @@
   competing-keys set now comes from every raw candidacy a symbol proposed,
   not only the ones that produced their own resolved entry, so this case
   correctly rejects both competing candidates instead of admitting one.
+- **Second follow-up (Codex review): a repeated bare segment could make
+  two genuinely different added declarations key identically for the
+  same removed symbol, defeating the tie-break's own corroboration
+  check.** Removing `old::old::{f,g}` while adding both `new::old::{f,g}`
+  (a position-0 substitution) and `old::new::{f,g}` (a position-1
+  substitution) makes every removed symbol resolve to two distinct added
+  targets that both happen to key as the identical `(old, new)` text --
+  the corroboration check saw no *competing* key at all (both candidacies
+  share one key string) and let the first-seen candidacy through,
+  silently dropping the other target and fabricating a 2-pair
+  `SYMBOL_RENAMED_BATCH`. The tie-break now also checks, per symbol and
+  per key, whether that key itself resolves to more than one distinct
+  added declaration -- rejecting before corroboration is even
+  considered, since two different targets sharing identical key text
+  can never be told apart by which other symbol supports that text.

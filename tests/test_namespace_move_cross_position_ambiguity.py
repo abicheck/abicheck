@@ -137,3 +137,27 @@ class TestCrossPositionAmbiguityResolvesViaGlobalSupport:
         assert groups.get(("P", "new")) == [("P::old::h", "new::old::h")]
         changes = emit_namespace_move_batches(groups)
         assert changes == []
+
+    def test_a_repeated_segment_producing_the_same_key_stays_ambiguous(self) -> None:
+        """Codex review (fresh evidence): removing ``old::old::{f,g}`` while
+        adding both ``new::old::{f,g}`` (position-0 substitution) and
+        ``old::new::{f,g}`` (position-1 substitution) makes every removed
+        symbol resolve to TWO distinct added declarations that both happen
+        to key as the identical ``(old, new)`` text -- the corroboration
+        check alone cannot tell them apart (both keys are literally the
+        same string), so the earlier fix's `other_keys` computation saw no
+        competing key at all and let the first-seen candidacy through,
+        silently dropping the other target. There is no way to tell
+        whether ``old::old`` moved to ``new::old`` or to ``old::new``, so
+        this must reject entirely -- not report either as a fabricated
+        2-pair batch."""
+        removed = {"_ZN3old3old1fEv", "_ZN3old3old1gEv"}
+        added = {
+            "_ZN3new3old1fEv",
+            "_ZN3new3old1gEv",
+            "_ZN3old3new1fEv",
+            "_ZN3old3new1gEv",
+        }
+        groups = find_namespace_move_groups(removed, added)
+        assert groups == {}
+        assert emit_namespace_move_batches(groups) == []
