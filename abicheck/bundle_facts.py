@@ -91,9 +91,8 @@ DEFAULT_MAX_LIBRARY_COUNT = 20_000
 #: See `storage.json_budget` for the shared object+array pre-scan (Codex).
 #: A *default*, not a hard ceiling: a real, large per-library facts blob
 #: (e.g. SYCL/DPC++ with a large template surface) can legitimately need
-#: well over this to decode -- `read_bundle_facts_archive`/`maybe_read_
-#: bundle_facts_archive`/`serialization.load_bundle_facts` all accept a
-#: `max_json_object_nodes` override for exactly this case (Codex review).
+#: well over this to decode -- `read_bundle_facts_archive` and friends
+#: accept a `max_json_object_nodes` override for this (Codex review).
 DEFAULT_MAX_JSON_OBJECT_NODES = 1_000_000
 
 #: The fingerprint value used when no multibuild variant applies (every
@@ -244,6 +243,7 @@ def compare_bundle_from_facts(
     system_providers: Any = None,
     cohorts: list[str] | None = None,
     policy: str = "strict_abi",
+    policy_file: Any = None,
     new_signature_evidence: dict[str, Any] | None = None,
 ) -> BundleDiffResult:
     """Bundle-level comparison with the *old* side loaded from a stored
@@ -281,6 +281,7 @@ def compare_bundle_from_facts(
         system_providers=system_providers,
         cohorts=cohorts,
         policy=policy,
+        policy_file=policy_file,
         old_signature_evidence=old_facts.per_library_snapshots,
         new_signature_evidence=new_signature_evidence,
     )

@@ -179,6 +179,7 @@ def compare_bundle_sides(
     system_providers: list[str] | None = None,
     cohorts: list[str] | None = None,
     policy: str = "strict_abi",
+    policy_file: PolicyFile | None = None,
 ) -> BundleDiffResult:
     """Bundle-level comparison over any live/stored pairing of *old*/*new*.
 
@@ -218,6 +219,7 @@ def compare_bundle_sides(
         system_providers=system_providers,
         cohorts=cohorts,
         policy=policy,
+        policy_file=policy_file,
         old_signature_evidence=old_resolved.signature_evidence or None,
         new_signature_evidence=new_resolved.signature_evidence or None,
     )
@@ -326,7 +328,10 @@ def compare_release_against_bundle_facts(
     the highest-leverage gap in this driver, since a real policy file's
     reclassify rules can be the difference between a library reading
     COMPATIBLE_WITH_RISK and BREAKING). Omitted (the default): behavior is
-    unchanged from before this fix.
+    unchanged from before this fix. Also forwarded to the final
+    ``compare_bundle_from_facts`` call, so ``BundleDiffResult.bundle_verdict``
+    (the ``BUNDLE_*``-kind aggregate) is scored under it too, not just the
+    per-library diffs (Codex review, same PR).
 
     *include_dependencies* (default ``False``) mirrors ``--include-system-
     declarations``'s own Click default (``cli_options.
@@ -423,5 +428,6 @@ def compare_release_against_bundle_facts(
         system_providers=system_providers,
         cohorts=cohorts,
         policy=policy,
+        policy_file=policy_file,
         new_signature_evidence=dict(new_signature_evidence),
     )

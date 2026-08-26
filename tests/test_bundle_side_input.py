@@ -431,6 +431,52 @@ class TestCompareReleaseAgainstBundleFactsResolutionUnit:
         compare_release_against_bundle_facts(facts_path, new_dir, policy_file=pf)
         assert captured["policy_file"] is pf
 
+    def test_policy_file_also_reaches_bundle_level_verdict(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Codex review (P2, follow-up on the same PR): the fix above threaded
+        ``policy_file`` into each per-library ``service.compare_snapshots``
+        call, but the final ``compare_bundle_from_facts`` call this driver
+        makes for its own bundle-level (``BUNDLE_*``-kind) findings still
+        received only the bare ``policy`` name -- ``BundleDiffResult.
+        bundle_verdict`` never saw the policy file at all. Pinned end to end
+        via the real returned ``BundleDiffResult``, not a mock."""
+        import abicheck.package as package_mod
+        import abicheck.service as service_mod
+        from abicheck.policy_file import PolicyFile
+
+        facts_path = self._old_facts(tmp_path)
+        new_dir = tmp_path / "new"
+        new_dir.mkdir()
+        new_so = new_dir / "libcore.so"
+        new_so.write_bytes(b"")
+
+        monkeypatch.setattr(
+            package_mod,
+            "discover_shared_libraries",
+            lambda d, include_private=False: [new_so],
+        )
+        monkeypatch.setattr(
+            service_mod,
+            "resolve_input",
+            lambda path, **kwargs: AbiSnapshot(
+                library="libcore.so",
+                version="new",
+                elf=_meta(soname="libcore.so", exports=["core_fn"]),
+            ),
+        )
+        monkeypatch.setattr(
+            service_mod,
+            "compare_snapshots",
+            lambda old, new, policy, policy_file=None: _diff(
+                "libcore.so", verdict=Verdict.NO_CHANGE
+            ),
+        )
+
+        pf = PolicyFile()
+        result = compare_release_against_bundle_facts(facts_path, new_dir, policy_file=pf)
+        assert result.policy_file is pf
+
     def test_duplicate_new_side_versions_use_version_aware_selection(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:

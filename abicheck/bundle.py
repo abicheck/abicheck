@@ -95,6 +95,7 @@ from .elf_metadata import ElfMetadata, ElfSymbol, SymbolBinding, parse_elf_metad
 
 if TYPE_CHECKING:
     from .diff_cpp_patterns import BundleMember
+    from .policy_file import PolicyFile
 
 log = logging.getLogger(__name__)
 
@@ -765,6 +766,7 @@ def compare_bundle(
     system_providers: Iterable[str] | None = None,
     cohorts: list[str] | None = None,
     policy: str = "strict_abi",
+    policy_file: PolicyFile | None = None,
 ) -> BundleDiffResult:
     """Compute bundle-level findings from per-library diffs and bundle snapshots.
 
@@ -854,6 +856,7 @@ def compare_bundle(
         per_library=list(per_library_results),
         bundle_findings=findings,
         policy=policy,
+        policy_file=policy_file,
     )
 
 
@@ -991,14 +994,11 @@ def _detect_intra_dep_removed(
             # ever provided this symbol, OR the user explicitly asserted a
             # remaining soname) -> trust it unconditionally. Otherwise fall
             # through to the symbol-name check (docstring above).
-            # Known limitations (Codex review, pre-existing -- shared by the
-            # audit-mode sibling below): (1) this is absence of a *bundle*
-            # regression, not proof of a system export (no export-table
-            # parse); (2) `all()` below is over *every* extra edge, not
-            # just whichever provides `symbol`, so one unrecognized edge
-            # floods findings a recognized sibling would explain. Both need
-            # an export-table probe; DEFAULT_SYSTEM_PROVIDERS was broadened
-            # (oneTBB/oneMKL/Intel runtime/Level Zero) to reduce (2) meanwhile.
+            # Known limitations (Codex review, shared by the audit-mode
+            # sibling below): (1) absence of a *bundle* regression is not
+            # proof of a system export (no export-table parse); (2) `all()`
+            # below is over every extra edge, not just whichever provides
+            # `symbol`. DEFAULT_SYSTEM_PROVIDERS broadened to reduce (2).
             extra_needed = new.resolution.extra_needed.get(consumer.library, [])
             if (
                 extra_needed

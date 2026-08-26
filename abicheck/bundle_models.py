@@ -29,12 +29,16 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from .checker_policy import ChangeKind, Verdict, compute_verdict, effective_category
 from .checker_types import Change, DiffResult
 from .contract_gating import is_evaluated
 from .model import AbiSnapshot, Function, Variable
 from .model.elf_facts import ElfMetadata
+
+if TYPE_CHECKING:
+    from .policy_file import PolicyFile
 
 # Symbols imported by virtually every C/C++ shared library that are
 # provided by the system loader, not by the bundle. Resolution against the
@@ -640,10 +644,21 @@ class BundleDiffResult:
     #: coverage ledger (mirroring `contract_coverage_ledger.py`) would add
     #: beyond this.
     analysis_errors: list[str] = field(default_factory=list)
+    #: Optional :class:`~abicheck.policy_file.PolicyFile`, applied on top of
+    #: *policy* when scoring ``bundle_verdict`` -- previously bundle-level
+    #: findings were always scored under the bare *policy* name alone, even
+    #: when a caller supplied a policy file whose overrides/reclassify rules
+    #: it wanted applied everywhere (Codex review, fresh evidence: a
+    #: `policy_file` selecting `plugin_abi`-style downgrades for per-library
+    #: findings had no effect on `BUNDLE_*` findings). ``None`` (the
+    #: default): behavior is unchanged from before this field existed.
+    policy_file: PolicyFile | None = None
 
     @property
     def bundle_verdict(self) -> Verdict:
         changes = [f.to_change() for f in self.bundle_findings]
+        if self.policy_file is not None:
+            return self.policy_file.compute_verdict(changes)
         return compute_verdict(changes, policy=self.policy)
 
     @property

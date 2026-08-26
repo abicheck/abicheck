@@ -12,7 +12,13 @@
   bundle_facts` (and the `StoredBundleFactsInput`/`resolve_bundle_side`
   chain it shares) now accept and forward `policy_file` alongside
   `policy`, matching how the native `compare`/`scan` CLIs already pass
-  the two together.
+  the two together. `policy_file` also now reaches bundle-level
+  (`BUNDLE_*`-kind) scoring: `BundleDiffResult.policy_file`,
+  `bundle.compare_bundle`, `bundle_analysis.analyze_bundle`,
+  `bundle_facts.compare_bundle_from_facts`, and
+  `bundle_side_input.compare_bundle_sides` all accept and forward it, so
+  `BundleDiffResult.bundle_verdict` is no longer scored under the bare
+  `policy` name alone when a policy file overrides a `BUNDLE_*` kind.
 - **The G40 bundle-facts archive format's per-blob JSON container-node
   budget (`DEFAULT_MAX_JSON_OBJECT_NODES`, 1,000,000) had no override,**
   so a real per-library facts blob for a large, template-instantiation-
