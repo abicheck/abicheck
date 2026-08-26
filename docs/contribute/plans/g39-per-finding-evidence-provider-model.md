@@ -293,12 +293,27 @@ structure already in place:
    lookup the detector can consult per `RecordType.qualified_name`. Scope
    that model change as its own reviewed sub-step of this slice, not a
    simultaneous side effect of the detector wiring itself.
-3. **L3-L5 build/source detectors** (`buildsource/*.py`) — already carry
-   `evidence_category`; extend rather than duplicate — a detector that
-   already knows its own `evidence_category` value knows enough to also
-   state a `l3:`/`l4:`/`l5:` `evidence_provenance` entry with no new
-   information gathering, only a second field set from data already in
-   scope at the call site.
+3. **L3-L5 build/source detectors** (`buildsource/*.py`) — **not** simply
+   "already carry `evidence_category`; extend rather than duplicate" as an
+   earlier draft of this plan said (Codex review, verified against the
+   code: `evidence_category` is a coarse binary tag,
+   `"source_only"`/`"build_context"` only — `evidence_policy.
+   tag_evidence_category` and the two direct call sites in
+   `crosscheck_coherence.py`/`diff_reconcile.py` are the only producers,
+   and it cannot express a finding that rests on more than one evidence
+   *kind*, e.g. `exported_not_public` (binary exports + L2 header AST) or
+   `header_build_context_mismatch` (L2 header AST + L3 build context)).
+   `buildsource/crosscheck.py`'s `run_crosschecks()` already records the
+   real, specific sources for every one of its checks in each
+   `_CheckOutput.providers` list — a sequence of `PROVIDER_*` constants
+   (`PROVIDER_BINARY_EXPORTS`, `PROVIDER_PUBLIC_HEADER_AST`,
+   `PROVIDER_BUILD_CONFIG`, `PROVIDER_SOURCE_INDEX`, each mapping cleanly
+   to an `l0:`/`l2:`/`l3:`/`l4:` prefix), one entry per evidence kind the
+   check actually consulted, already present at every one of this file's
+   `_check_*` call sites. This slice's wiring derives `evidence_provenance`
+   from that `providers` list directly, not from `evidence_category` — the
+   richer, already-collected fact, not the coarser tag layered on top of a
+   subset of it.
 4. **Cross-cutting post-processing and roll-up emitters**
    (`post_processing.py`, `post_processing_reachability.py`,
    `pattern_verdicts.py`, `internal_leak.py`, `bundle_models.py`,

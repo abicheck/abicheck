@@ -346,6 +346,31 @@ Python-object-count amplification the byte-level caps alone don't bound.
 cap — it has no aggregate to bound, by construction, since it never touches
 more than one blob.
 
+**A per-member/aggregate decoded-payload cap alone is not sufficient
+either — it runs too late to protect `BundleArchive.open()` itself against
+an untrusted archive, and this plan's earlier text never named the guard
+the shipped implementation had to add to close it (Codex review, fresh
+evidence, verified against the real implementation in PR #869).**
+`zipfile.ZipFile` eagerly parses the *entire* central directory the
+moment it is constructed, before any per-member or aggregate-decoded-byte
+check above ever runs — so a crafted archive naming millions of tiny,
+unreferenced entries (or one with an enormous, uncompressed
+`manifest.json`, itself never mentioned above either) can exhaust memory
+purely from that construction, regardless of how tightly `load_library`/
+`read_bundle_facts_archive` bound the blobs they actually read. Two
+outer guards close this, both ahead of `zipfile.ZipFile` ever running:
+a central-directory preflight (`reject_absurd_central_directory`) that
+parses the EOCD/ZIP64 record directly — without invoking `ZipFile`'s own
+parse — and rejects an archive whose declared *or* actually-walked entry
+count exceeds a fixed cap (`MAX_ARCHIVE_MEMBERS`, 20,000) or whose
+central-directory byte size exceeds a fixed cap
+(`_MAX_CENTRAL_DIRECTORY_BYTES`, 8 MiB); and a bounded read of the
+uncompressed `manifest.json` member itself
+(`DEFAULT_MAX_MANIFEST_BYTES`), checked incrementally rather than after
+fully materializing it. Both are enforced symmetrically on the write
+side too — `BundleArchiveWriter` refuses to publish an archive its own
+paired reader could not reopen.
+
 ### Phase 3 — CLI/API wiring (S)
 
 **`load`/`save` get separate, unambiguous contracts — deliberately not one
