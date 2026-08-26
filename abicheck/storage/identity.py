@@ -195,6 +195,27 @@ class EntityId:
         """Flat, collision-free string key. Stable across runs and releases."""
         return _packed(self.kind.value, self.qualified_name, self.discriminator)
 
+    def __post_init__(self) -> None:
+        """Validate identity text here, not only in :meth:`from_dict`.
+
+        A directly-constructed ``EntityId(EntityKind.TYPE, 1)`` was accepted,
+        emitted the integer from ``to_dict``, raised from ``_packed`` on
+        :attr:`key`, and was rejected by ``from_dict`` — so the object could
+        not survive its own round trip, and ``OccurrenceSet.add`` failed
+        before it could preserve the observation (Codex review). Same
+        boundary-only-guard gap as the sibling fields on
+        :class:`OccurrenceId`, which had been fixed one commit earlier while
+        this one was missed.
+        """
+        object.__setattr__(
+            self,
+            "qualified_name",
+            _identity_text(self.qualified_name, "qualified_name"),
+        )
+        object.__setattr__(
+            self, "discriminator", _identity_text(self.discriminator, "discriminator")
+        )
+
     def __lt__(self, other: object) -> bool:
         """Order by :attr:`key`, which is total and stable.
 

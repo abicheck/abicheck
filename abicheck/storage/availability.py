@@ -499,6 +499,23 @@ class AvailabilityLedger:
     )
 
     def __post_init__(self) -> None:
+        # The initial mappings bypass every key check `from_dict`, `declare`
+        # and `override` apply, so `AvailabilityLedger(families={1: failed,
+        # "1": present})` was accepted: it reported the string family as
+        # comparable while the failed row stayed reachable only through the
+        # int spelling, and `to_dict` then raised while sorting mixed keys —
+        # a ledger that lookup and serialization handled inconsistently
+        # (Codex review). Validating here means no construction path can
+        # produce one.
+        for name in self.families:
+            _decision_key(name, "family name")
+        for key in self.overrides:
+            if not isinstance(key, tuple) or len(key) != 2:
+                raise TypeError(
+                    f"override key must be a (family, entity) pair, got {key!r}"
+                )
+            _decision_key(key[0], "override family")
+            _decision_key(key[1], "override entity")
         if self.unknown_family_default.comparable:
             raise ValueError(
                 "unknown_family_default must not be comparable "
