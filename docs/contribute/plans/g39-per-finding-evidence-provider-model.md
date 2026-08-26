@@ -658,11 +658,41 @@ attempted here — the identity of *which* version's evidence to search for
 is itself ambiguous, so `:searched:` would misrepresent an unresolved
 identity question as a completed, empty search. This needs its own,
 clearly distinguished tag — `<side>:ambiguous:version_collapsed` (no
-`:tier:`/`:backend`, since no evidence source was consulted; `<side>` is
-always `both:` for this branch, since the collapse check runs once per
-`provider_entry` and sets both flags together) — so an implementation
-cannot accidentally conflate "we looked and found nothing" with "we
-couldn't even tell what to look for." This mirrors the same
+`:tier:`/`:backend`, since no *signature*-evidence source was consulted
+for this specific version; `<side>` is always `both:` for this branch,
+since the collapse check runs once per `provider_entry` and sets both
+flags together) — so an implementation cannot accidentally conflate "we
+looked and found nothing" with "we couldn't even tell what to look for."
+
+**The `:ambiguous:` tag is narrowly scoped to the unresolved signature
+question, not a claim that the finding rests on no evidence at all (Codex
+review, verified against `_bare_name_version_collapsed`/
+`find_unverified_signature_findings` directly, PR #866 round 26).**
+`_bare_name_version_collapsed()` itself reads real L0 evidence —
+`snapshot.resolution.provides.get(symbol, [])`, the bundle resolution
+graph's own per-version `ProviderEntry` list — to establish that more than
+one GNU symbol version genuinely coexists; that is what makes the version
+ambiguous, not a guess. And by the point a `version_collapsed` finding
+reaches this branch, `find_unverified_signature_findings`'s surrounding
+loop has already consulted further L0 resolution facts to confirm the
+finding's own preconditions: `_symbol_was_exported` (the symbol was a real
+old-side export, not an unrelated private declaration),
+`_provider_entry_retained_from_old` (this exact version/entry, not a
+freshly-added one, has old-side evidence), and the consumer-reachability
+chain (`_reachable`, `_consumer_matches_provider`,
+`_consumer_retained_from_old` — a real `DT_NEEDED` path and a genuine
+old-side match, not a bare name-only pairing). So `evidence_provenance`
+for this finding should carry the `both:ambiguous:version_collapsed`
+marker *alongside* — not instead of — side-scoped provenance for that
+resolution/export evidence (the same `l0:elf_symtab`/platform-selected
+tag the rest of this document already uses for export-table facts, since
+`BundleSnapshot.resolution` is itself derived from each library's own
+export surface), so the finding's provenance tuple documents both "the
+per-version signature could not be safely attributed" and "here is the
+real resolution-graph evidence that established the ambiguity and the
+finding's other preconditions" — omitting the latter would misstate a
+finding that rests on genuine L0 evidence as though nothing had been
+consulted at all. This mirrors the same
 `searched:`/no-evidence-consulted distinction item 1 and item 3 already
 draw for their own negative results, generalized to a third case those
 items don't have: not "insufficient evidence was found" but "no specific
@@ -1229,6 +1259,37 @@ structure already in place:
    matched findings (or their provenance) rather than only the bare
    `pairs`/`eligible` counts it takes today.
 
+   **`_build_scheme_advisory()` is not this list's only many-to-one
+   roll-up — `diff_versioning.check_soname_bump_policy()` is the identical
+   shape and belongs in this same slice (Codex review, verified against
+   the real code, PR #866 round 26).** It, too, receives the complete
+   `changes` list (not a single source `Change`) and derives
+   `SONAME_BUMP_RECOMMENDED` from whether *any* constituent counts as
+   effectively breaking (`has_breaking = any(_is_effectively_breaking(c)
+   for c in changes)`, `_is_effectively_breaking` itself reading each
+   `Change.effective_verdict`/`.kind`) — the same "summarize N matched
+   findings into one advisory" shape `_build_scheme_advisory()` has, just
+   over the raw `changes` list rather than a matched-triple mapping. A
+   fixed, static `diff_versioning`/ELF-only provenance tuple on the
+   resulting `SONAME_BUMP_RECOMMENDED` finding would be wrong whenever the
+   breaking constituent that actually triggered the recommendation came
+   from L2/L3-L5 evidence rather than ELF alone — the recommendation is
+   only ever as trustworthy as the break(s) that justify it, so it needs
+   the identical union/rollup treatment: `evidence_provenance` for
+   `SONAME_BUMP_RECOMMENDED` is the union of `evidence_provenance` from
+   every `Change` for which `_is_effectively_breaking(c)` is `True`, not a
+   value fixed to this function's own module/platform. Unlike
+   `_build_scheme_advisory()`, `check_soname_bump_policy()` already
+   receives the full `Change` list as its first parameter — no signature
+   change is needed to reach the constituent findings, only to compute and
+   attach the union while building the `SONAME_BUMP_RECOMMENDED`
+   `make_change(...)` call. `SONAME_BUMP_UNNECESSARY`, the function's other
+   emitted kind, is a *negative* result (no breaking change qualified) and
+   is unaffected by this — see item 3's `searched:`/negative-finding
+   discussion above for the shape a genuinely evidence-free "nothing
+   qualified" finding should take instead, verified separately for this
+   emitter rather than assumed from the roll-up case.
+
 Each slice, once wired, gets its own FP-rate/mutation-score gate re-run
 before merging — never the whole inventory behind one PR. The FP-rate/
 mutation-score gates exist precisely because a previous incident in this
@@ -1346,6 +1407,45 @@ registration steps above to cover these four projections' own output shape
 (the `surface_scope.out_of_surface_changes`/`scope.filtered_internal_changes`/
 reconciliation-ledger/suppressed-changes JSON blocks), not just the three
 originally named.
+
+**A fourth family of projections sits entirely outside `reporter.py` and
+must be inventoried separately: the release/artifact-set JSON summaries
+each build their own independent `Change`/`BundleFinding` dict, never
+routing through `to_change()` or any of the seven builders above (Codex
+review, fresh evidence, confirmed by reading all four directly).**
+`cli_compare_release_helpers.py`'s `_format_release_json` builds
+`summary["bundle_findings"]` as a hand-written dict straight off each
+`BundleFinding`'s own fields (`kind`/`symbol`/`consumer_library`/
+`provider_library`/`description`/`old_value`/`new_value`/
+`affected_libraries`) and `summary["matrix_findings"]` as a hand-written
+dict straight off each matrix-comparison `Change` (`kind`/`symbol`/
+`description`/`old_value`/`new_value`) — neither calls `BundleFinding.
+to_change()` or `_change_to_dict`. `cli_compare_release.py`'s
+`_release_finding_dicts` is a third, deliberately separate "small, capped
+dict" projection (its own docstring: "Same shape as `cli_scan_baseline.
+_baseline_finding_dicts`/`stack_report._stack_finding_dicts`") feeding the
+per-library `findings` array in the release summary — capped and shaped
+differently from `_change_to_dict`, so it needs the field added to its own
+dict literal, not inherited. And `service_scan.py`'s `ScanSetResult.
+to_dict()` — the `--artifact-set` sibling of the single-binary `scan`
+result the existing `_baseline_finding_dicts` entry above already covers —
+builds its own `bundle_findings` list with a comment stating it
+deliberately mirrors `cli_compare_release_helpers.py`'s dict shape
+field-for-field, which is exactly why it shares that shape's gap: an
+implementation covering only the `reporter.py`-owned builders (and
+`_baseline_finding_dicts` for scan's single-binary path) would leave
+`compare --release`'s JSON summary and `scan --artifact-set`'s JSON output
+both silently missing `evidence_provenance` on every bundle/matrix finding
+and every per-library capped finding, even once every other JSON surface
+carries it. Add the field to all four dict literals (`_release_json_
+summary`'s two, `_release_finding_dicts`'s one, `ScanSetResult.to_dict`'s
+one) explicitly, and extend the same schema-version-bump discipline
+established above to whichever schema each summary format is gated by —
+`compare --release`'s summary JSON has no dedicated `.schema.json` today
+(confirmed: none exists under `abicheck/schemas/` or `docs/reference/
+schemas/v1/` for it, the same as the scan-report case already noted below),
+so for that one only the "don't add a field silently to an unversioned
+format" caution applies, not a schema file to update.
 
 **A new public field on an already-published report format is a real
 schema change, not a cosmetic addition (Codex review — a prior revision of
@@ -1526,6 +1626,14 @@ above, which this list intentionally does not re-duplicate.
 - `abicheck/cli_scan_baseline.py`'s `_baseline_finding_dicts` — `scan
   --against`'s own, separate projection; not reached by any of the six
   `reporter.py` builders above.
+- `abicheck/cli_compare_release_helpers.py`'s `_format_release_json`
+  (`summary["bundle_findings"]`/`summary["matrix_findings"]`),
+  `abicheck/cli_compare_release.py`'s `_release_finding_dicts`, and
+  `abicheck/service_scan.py`'s `ScanSetResult.to_dict` — Phase 3's fourth
+  projection family (see that phase's own correction above): `compare
+  --release`'s and `scan --artifact-set`'s independent `Change`/
+  `BundleFinding` dict builders, none reached by `reporter.py`'s six
+  builders or by `_baseline_finding_dicts`.
 - `abicheck/sarif.py`'s `properties` bag and `abicheck/junit_report.py`'s
   `_add_contract_properties` — Phase 3's SARIF/JUnit surfaces (or their
   `report/`-migrated successors, e.g. `report/render_sarif.py`, if that
