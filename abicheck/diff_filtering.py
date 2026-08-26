@@ -23,6 +23,7 @@ from .checker_policy import ChangeKind
 from .checker_types import SYMBOL_VERSION_ALIAS_NOT_RETAINED_MARKER, Change
 from .diff_helpers import (
     canonicalize_record_symbol,
+    cross_tier_transition,
     make_change,
     record_canonical_names,
 )
@@ -71,11 +72,7 @@ _TYPE_CHANGE_KINDS: frozenset[ChangeKind] = frozenset(
         ChangeKind.STRUCT_FIELD_REMOVED,
         ChangeKind.STRUCT_FIELD_TYPE_CHANGED,
         ChangeKind.STRUCT_ALIGNMENT_CHANGED,
-        # Fine-grained class-layout descriptor kinds (layout-closure work): each
-        # carries the owner type name in Change.symbol, so affected-symbol
-        # enrichment must scan them too — otherwise a layout-only BREAKING
-        # finding gets no affected_symbols and app-compat filtering could mark
-        # a consumer as unaffected (Codex review #345).
+        # Fine-grained class-layout descriptor kinds (layout-closure work): each carries the owner type name in Change.symbol, so affected-symbol enrichment must scan them too — otherwise a layout-only BREAKING finding gets no affected_symbols and app-compat filtering could mark a consumer as unaffected (Codex review #345).
         ChangeKind.BASE_CLASS_OFFSET_CHANGED,
         ChangeKind.VPTR_INTRODUCED,
         ChangeKind.TRIVIALLY_COPYABLE_LOST,
@@ -221,18 +218,7 @@ def _qualified_name_for_change(
     return None
 
 
-#: The four enum kinds the bare/qualified bridge (`_enum_canonical_names`/
-#: `_canonicalize_enum_symbol`) applies to -- deliberately a NARROWER set
-#: than `_DEDUP_CATEGORIES` (which also covers function/variable/version
-#: dedup categories unrelated to enums). Codex review, fresh evidence: an
-#: earlier revision gated the bridging on `c.kind in _DEDUP_CATEGORIES`
-#: directly, so an unrelated symbol from any OTHER category whose spelling
-#: happened to coincide with a registered enum alias (e.g. an extern-C
-#: `FUNC_REMOVED` named "Color" when a `detail::Color` enum exists) had its
-#: `Change.qualified_name` incorrectly rewritten to the enum's qualified
-#: spelling -- corrupting an unrelated finding's identity, and doing so
-#: permanently, since the later `EnrichSourceLocations` step refuses to
-#: overwrite an already-populated `qualified_name`.
+#: The four enum kinds the bare/qualified bridge (`_enum_canonical_names`/`_canonicalize_enum_symbol`) applies to -- deliberately a NARROWER set than `_DEDUP_CATEGORIES` (which also covers function/variable/version dedup categories unrelated to enums). Codex review, fresh evidence: an earlier revision gated the bridging on `c.kind in _DEDUP_CATEGORIES` directly, so an unrelated symbol from any OTHER category whose spelling happened to coincide with a registered enum alias (e.g. an extern-C `FUNC_REMOVED` named "Color" when a `detail::Color` enum exists) had its `Change.qualified_name` incorrectly rewritten to the enum's qualified spelling -- corrupting an unrelated finding's identity, and doing so permanently, since the later `EnrichSourceLocations` step refuses to overwrite an already-populated `qualified_name`.
 _ENUM_QUALIFICATION_KINDS = frozenset(
     {
         ChangeKind.ENUM_MEMBER_REMOVED,
@@ -362,11 +348,7 @@ def _enrich_source_locations(
         if not c.qualified_name:
             qual = _qualified_name_for_change(c, old_qualified, new_qualified)
             if not qual and c.kind in _ENUM_QUALIFICATION_KINDS:
-                # Scoped to the four enum kinds the bridge is meant for --
-                # see _ENUM_QUALIFICATION_KINDS's own docstring (Codex
-                # review, fresh evidence: a second unconditional call site,
-                # this one in the enrichment pass rather than the dedup
-                # pass, had the identical unrelated-symbol-collision risk).
+                # Scoped to the four enum kinds the bridge is meant for -- see _ENUM_QUALIFICATION_KINDS's own docstring (Codex review, fresh evidence: a second unconditional call site, this one in the enrichment pass rather than the dedup pass, had the identical unrelated-symbol-collision risk).
                 qual = _canonicalize_enum_symbol(
                     c.symbol, old_enum_names
                 ) or _canonicalize_enum_symbol(c.symbol, new_enum_names)
@@ -968,11 +950,7 @@ def _match_root_type(
         if c.old_value and c.new_value:
             if pat.search(c.old_value) and pat.search(c.new_value):
                 return type_name
-            # Both sides are known and don't jointly confirm this root type —
-            # the description (which may just restate the same old/new
-            # transition text) must not override that, or the both-sides
-            # guard above no-ops whenever a covariant-return-style
-            # description echoes the old/new value's mention (case72).
+            # Both sides are known and don't jointly confirm this root type — the description (which may just restate the same old/new transition text) must not override that, or the both-sides guard above no-ops whenever a covariant-return-style description echoes the old/new value's mention (case72).
             continue
         if c.old_value and pat.search(c.old_value):
             return type_name
@@ -1397,18 +1375,38 @@ def _dedup_cross_kind(
     agreement when both findings carry one (Codex review): an AST-tier
     field symbol names only the parent type, so without this a DWARF
     finding for one field could be dropped merely because a *different*
-    field of the same type also changed at the AST tier.
+    field of the same type also changed at the AST tier. A match also
+    requires the two findings' own old/new transitions to agree (see
+    :func:`cross_tier_transition`) -- a mere kind+symbol match is not
+    enough when the header and DWARF evidence disagree on the transition
+    itself, e.g. a stale header vs. inconsistent extractor evidence.
     """
     names = record_names or {}
-    ast_findings: set[tuple[str, str]] = set()
-    ast_field_findings: set[tuple[str, str, str]] = set()
+    _Transition = tuple[str | None, str | None] | None
+    ast_findings: dict[tuple[str, str], set[_Transition]] = {}
+    ast_field_findings: dict[tuple[str, str, str], set[_Transition]] = {}
     for c in changes:
         canon = canonicalize_record_symbol(
             c.symbol, names, c.qualified_name, c.field_name
         )
-        ast_findings.add((c.kind.value, canon))
+        transition = cross_tier_transition(c)
+        ast_findings.setdefault((c.kind.value, canon), set()).add(transition)
         if c.field_name is not None:
-            ast_field_findings.add((c.kind.value, canon, c.field_name))
+            ast_field_findings.setdefault(
+                (c.kind.value, canon, c.field_name), set()
+            ).add(transition)
+
+    def _matches(
+        transitions: set[_Transition] | None,
+        dwarf_transition: _Transition,
+    ) -> bool:
+        # None (no transitions recorded for a key never seen) -> not present.
+        # A None entry inside the set itself means "kind with no
+        # independent transition" (e.g. a removal) -- kind+symbol alone is
+        # agreement there, matching the pre-value-gate behavior.
+        if not transitions:
+            return False
+        return dwarf_transition is None or dwarf_transition in transitions
 
     _DWARF_FIELD_LEVEL_KINDS = {
         ChangeKind.STRUCT_FIELD_OFFSET_CHANGED,
@@ -1423,8 +1421,15 @@ def _dedup_cross_kind(
             canon_symbol = canonicalize_record_symbol(
                 c.symbol, names, None, c.field_name
             )
+            dwarf_transition = cross_tier_transition(c)
+
             # Exact symbol match
-            if any((ak.value, canon_symbol) in ast_findings for ak in equiv_ast_kinds):
+            if any(
+                _matches(
+                    ast_findings.get((ak.value, canon_symbol)), dwarf_transition
+                )
+                for ak in equiv_ast_kinds
+            ):
                 continue
 
             # Parent-type match (FIX-F): "Point::x" → check "Point". Only for
@@ -1434,11 +1439,17 @@ def _dedup_cross_kind(
                 parent = canon_symbol.rsplit("::", 1)[0]
                 if c.field_name is not None:
                     if any(
-                        (ak.value, parent, c.field_name) in ast_field_findings
+                        _matches(
+                            ast_field_findings.get((ak.value, parent, c.field_name)),
+                            dwarf_transition,
+                        )
                         for ak in equiv_ast_kinds
                     ):
                         continue
-                elif any((ak.value, parent) in ast_findings for ak in equiv_ast_kinds):
+                elif any(
+                    _matches(ast_findings.get((ak.value, parent)), dwarf_transition)
+                    for ak in equiv_ast_kinds
+                ):
                     continue
 
         result.append(c)
@@ -1524,15 +1535,7 @@ def _deduplicate_cross_detector(
         ChangeKind.ENUM_LAST_MEMBER_VALUE_CHANGED: "enum_last_member_value_changed",
         ChangeKind.ENUM_UNDERLYING_SIZE_CHANGED: "enum_underlying_size_changed",
     }
-    # A symbol-version-node bump (e.g. LLVM_17 -> LLVM_18.1 on every symbol
-    # in a major release) makes BOTH version detectors fire per symbol with
-    # the same old->new transition: SYMBOL_MOVED_VERSION_NODE (node label
-    # moved) and SYMBOL_VERSION_ALIAS_CHANGED (default version changed, old
-    # not retained as an alias). Drop the alias-change duplicate where a
-    # node move already covers the same (symbol, old -> new) -- halves the
-    # version-bump noise on real libraries (libLLVM 17->18: ~46k instead of
-    # ~92k risk findings). Matches on (symbol, old_value, new_value); if
-    # that ever diverges the dedup simply no-ops (both findings kept).
+    # A symbol-version-node bump (e.g. LLVM_17 -> LLVM_18.1 on every symbol in a major release) makes BOTH version detectors fire per symbol with the same old->new transition: SYMBOL_MOVED_VERSION_NODE (node label moved) and SYMBOL_VERSION_ALIAS_CHANGED (default version changed, old not retained as an alias). Drop the alias-change duplicate where a node move already covers the same (symbol, old -> new) -- halves the version-bump noise on real libraries (libLLVM 17->18: ~46k instead of ~92k risk findings). Matches on (symbol, old_value, new_value); if that ever diverges the dedup simply no-ops (both findings kept).
     moved_transitions: set[tuple[str, str | None, str | None]] = {
         (c.symbol, c.old_value, c.new_value)
         for c in changes
@@ -1557,11 +1560,7 @@ def _deduplicate_cross_detector(
     seen: set[str] = set()
     result: list[Change] = []
     for c in changes:
-        # Only collapse the alias-change into a co-reported node-move when the
-        # old default version is NOT retained as an alias — the case the
-        # node-move already fully describes. When the alias IS retained it
-        # carries distinct, compatible information the node-move's wording
-        # would otherwise misrepresent, so it must survive.
+        # Only collapse the alias-change into a co-reported node-move when the old default version is NOT retained as an alias — the case the node-move already fully describes. When the alias IS retained it carries distinct, compatible information the node-move's wording would otherwise misrepresent, so it must survive.
         if (
             c.kind is ChangeKind.SYMBOL_VERSION_ALIAS_CHANGED
             and SYMBOL_VERSION_ALIAS_NOT_RETAINED_MARKER in (c.description or "")

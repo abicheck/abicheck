@@ -386,15 +386,38 @@ class TestDeduplication:
         """DWARF findings that duplicate AST findings are removed."""
         from abicheck.checker import _deduplicate_ast_dwarf
 
+        # TYPE_SIZE_CHANGED (AST tier) is bit-based (RecordType.size_bits);
+        # STRUCT_SIZE_CHANGED (DWARF tier) is byte-based (DW_AT_byte_size) --
+        # 8/16 bytes == 64/128 bits, a genuinely identical transition.
         changes = [
-            Change(ChangeKind.TYPE_SIZE_CHANGED, "MyStruct", "Type size changed: MyStruct (8 → 16)",
-                   old_value="8", new_value="16"),
+            Change(ChangeKind.TYPE_SIZE_CHANGED, "MyStruct", "Type size changed: MyStruct (64 → 128)",
+                   old_value="64", new_value="128"),
             Change(ChangeKind.STRUCT_SIZE_CHANGED, "MyStruct", "Type size changed: MyStruct (8 → 16)",
                    old_value="8", new_value="16"),
         ]
         result = _deduplicate_ast_dwarf(changes)
         assert len(result) == 1
         assert result[0].kind == ChangeKind.TYPE_SIZE_CHANGED
+
+    def test_ast_dwarf_conflicting_transition_not_deduped(self):
+        """A DWARF finding whose own transition disagrees with the AST
+        finding's must survive, not be silently dropped (Codex review): a
+        stale header or inconsistent extractor evidence can make the two
+        tiers report genuinely different old/new values for the same kind
+        and symbol, and hiding one is worse than showing both."""
+        from abicheck.checker import _deduplicate_ast_dwarf
+
+        changes = [
+            Change(ChangeKind.TYPE_SIZE_CHANGED, "MyStruct", "Type size changed: MyStruct (64 → 128)",
+                   old_value="64", new_value="128"),
+            # DWARF reports 64 -> 96 bits (8 -> 12 bytes) -- a real
+            # disagreement with the AST finding's 64 -> 128, not a
+            # duplicate.
+            Change(ChangeKind.STRUCT_SIZE_CHANGED, "MyStruct", "Type size changed: MyStruct (8 → 12)",
+                   old_value="8", new_value="12"),
+        ]
+        result = _deduplicate_ast_dwarf(changes)
+        assert len(result) == 2
 
     def test_exact_dedup_same_kind(self):
         """Exact duplicates by (kind, description) are removed."""
@@ -440,15 +463,33 @@ class TestDeduplication:
         """DWARF finding for same field as AST should be collapsed."""
         from abicheck.checker import _deduplicate_ast_dwarf
 
+        # TYPE_FIELD_OFFSET_CHANGED (AST tier) is bit-based (offset_bits);
+        # STRUCT_FIELD_OFFSET_CHANGED (DWARF tier) is byte-based
+        # (byte_offset) -- 0/8 bytes == 0/64 bits.
         changes = [
             Change(ChangeKind.TYPE_FIELD_OFFSET_CHANGED, "S::a",
-                   "Field offset changed: S::a (0 → 8)", old_value="0", new_value="8"),
+                   "Field offset changed: S::a (0 → 64)", old_value="0", new_value="64"),
             Change(ChangeKind.STRUCT_FIELD_OFFSET_CHANGED, "S::a",
                    "Field offset changed: S::a (0 → 8)", old_value="0", new_value="8"),
         ]
         result = _deduplicate_ast_dwarf(changes)
         assert len(result) == 1
         assert result[0].kind == ChangeKind.TYPE_FIELD_OFFSET_CHANGED
+
+    def test_conflicting_field_offset_transition_not_deduped(self):
+        """Same field-offset symbol, disagreeing transitions -> keep both
+        (Codex review), mirroring the whole-struct-size case above."""
+        from abicheck.checker import _deduplicate_ast_dwarf
+
+        changes = [
+            Change(ChangeKind.TYPE_FIELD_OFFSET_CHANGED, "S::a",
+                   "Field offset changed: S::a (0 → 64)", old_value="0", new_value="64"),
+            # DWARF reports 0 -> 4 bytes (32 bits), not 0 -> 8 bytes (64 bits).
+            Change(ChangeKind.STRUCT_FIELD_OFFSET_CHANGED, "S::a",
+                   "Field offset changed: S::a (0 → 4)", old_value="0", new_value="4"),
+        ]
+        result = _deduplicate_ast_dwarf(changes)
+        assert len(result) == 2
 
 
 # ---------------------------------------------------------------------------

@@ -23,7 +23,7 @@ from .binary_utils import strip_vendor_hash
 from .checker_policy import ChangeKind
 from .checker_types import SYMBOL_VERSION_ALIAS_NOT_RETAINED_MARKER, Change
 from .detector_registry import registry
-from .diff_helpers import is_sentinel_enum_member, make_change
+from .diff_helpers import _normalize_type_name, is_sentinel_enum_member, make_change
 from .diff_platform_elf_dynamic import (
     _INTERNAL_NAME_PATTERNS as _INTERNAL_NAME_PATTERNS,
     _RELRO_RANK as _RELRO_RANK,
@@ -1442,63 +1442,6 @@ def _diff_dwarf(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     changes.extend(_diff_struct_layouts(filtered_old, filtered_new))
     changes.extend(_diff_enum_layouts(filtered_old, filtered_new))
     return changes
-
-
-# Synthesized placeholder names for anonymous/unnamed aggregate member types,
-# which differ across DWARF / castxml / PDB readers (``<unnamed-tag>``,
-# ``<unnamed-type-u>``, ``<anonymous union>``, ``<unnamed struct at …>``, …).
-# The aggregate *kind* (when the placeholder names one) is captured so a real
-# union→struct change is preserved while the unstable identifier suffix is not.
-_ANON_TYPE_RE = re.compile(
-    r"<\s*(?:unnamed|anonymous)(?:\s+(union|struct|class|enum)\b)?", re.IGNORECASE
-)
-
-
-def _normalize_type_name(name: str) -> str:
-    """Normalize a C/C++ type name for stable DWARF↔castxml comparison.
-
-    Strips leading/trailing whitespace, CV-qualifiers, pointer/reference
-    decorations, and 'struct'/'class'/'union' tag keywords so that semantically
-    equivalent names compare equal regardless of DWARF vs castxml source:
-
-    Examples::
-
-        "struct Foo"     → "Foo"
-        "const struct Foo *" → "Foo"
-        "class Bar &"    → "Bar"
-        "union U"        → "U"
-        "int"            → "int"   (unchanged)
-
-    Note: this normalizer is intentionally lossy for comparison purposes only.
-    The original type names are still preserved in Change.old_value/new_value.
-    """
-    s = name.strip()
-    # Remove trailing pointer/reference decorators and CV-qualifiers
-    s = re.sub(r"[\s*&]+$", "", s).strip()
-    # Remove leading CV-qualifiers
-    s = re.sub(r"^(const|volatile)(\s+(const|volatile))?\s+", "", s).strip()
-    # Remove struct/class/union tag keyword, remembering it: for an anonymous
-    # placeholder spelled with a *leading* tag ("union <anonymous>") the tag
-    # carries the aggregate kind, which must survive the collapse below.
-    lead = re.match(r"^(struct|class|union)\s+", s)
-    lead_kind = lead.group(1) if lead else None
-    if lead:
-        s = s[lead.end() :].strip()
-    # Anonymous/unnamed member types have no stable *name* across DWARF / castxml
-    # / PDB extraction — the same anonymous union can be spelled "<unnamed-tag>"
-    # by one reader and "Parent::<unnamed-type-u>" by another (observed on the
-    # Windows SDK _TP_CALLBACK_ENVIRON_V3::u between two MSVC builds). Collapse
-    # those placeholders to a token keyed on the aggregate *kind* — taken from
-    # the placeholder itself ("<anonymous union>") or the leading tag ("union
-    # <anonymous>") — so the unstable identifier suffix no longer drives a false
-    # positive while a genuine kind change (anonymous union → anonymous struct)
-    # is still reported. Size drift remains caught by the separate byte_size
-    # comparison.
-    anon = _ANON_TYPE_RE.search(s)
-    if anon is not None:
-        kind = anon.group(1) or lead_kind
-        return f"<anonymous {kind.lower()}>" if kind else "<anonymous>"
-    return s
 
 
 def _diff_struct_layouts(o: object, n: object) -> list[Change]:

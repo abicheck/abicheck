@@ -35,6 +35,7 @@ new policy.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable, ItemsView, Iterable, Iterator, Mapping, ValuesView
 from typing import Any, Protocol, TypeVar, cast
 
@@ -651,3 +652,134 @@ def canonicalize_record_symbol(
     else:
         canonical_parent = record_names.get(parent, parent)
     return f"{canonical_parent}{suffix}" if suffix is not None else canonical_parent
+
+
+# Synthesized placeholder names for anonymous/unnamed aggregate member types,
+# which differ across DWARF / castxml / PDB readers (``<unnamed-tag>``,
+# ``<unnamed-type-u>``, ``<anonymous union>``, ``<unnamed struct at …>``, …).
+# The aggregate *kind* (when the placeholder names one) is captured so a real
+# union→struct change is preserved while the unstable identifier suffix is not.
+_ANON_TYPE_RE = re.compile(
+    r"<\s*(?:unnamed|anonymous)(?:\s+(union|struct|class|enum)\b)?", re.IGNORECASE
+)
+
+
+def _normalize_type_name(name: str) -> str:
+    """Normalize a C/C++ type name for stable DWARF↔castxml comparison.
+
+    Strips leading/trailing whitespace, CV-qualifiers, pointer/reference
+    decorations, and 'struct'/'class'/'union' tag keywords so that semantically
+    equivalent names compare equal regardless of DWARF vs castxml source:
+
+    Examples::
+
+        "struct Foo"     → "Foo"
+        "const struct Foo *" → "Foo"
+        "class Bar &"    → "Bar"
+        "union U"        → "U"
+        "int"            → "int"   (unchanged)
+
+    Note: this normalizer is intentionally lossy for comparison purposes only.
+    The original type names are still preserved in Change.old_value/new_value.
+
+    Moved here from ``diff_platform.py`` (Codex review, fresh evidence):
+    ``cross_tier_transition`` below needs it too, and ``diff_platform.py``
+    already imports from this module, so importing it back from
+    ``diff_platform`` would grow the ``import-cycle-growth`` gate's tracked
+    SCC set -- ``diff_platform.py`` now imports this function from here
+    instead, preserving the one-directional dependency.
+    """
+    s = name.strip()
+    # Remove trailing pointer/reference decorators and CV-qualifiers
+    s = re.sub(r"[\s*&]+$", "", s).strip()
+    # Remove leading CV-qualifiers
+    s = re.sub(r"^(const|volatile)(\s+(const|volatile))?\s+", "", s).strip()
+    # Remove struct/class/union tag keyword, remembering it: for an anonymous
+    # placeholder spelled with a *leading* tag ("union <anonymous>") the tag
+    # carries the aggregate kind, which must survive the collapse below.
+    lead = re.match(r"^(struct|class|union)\s+", s)
+    lead_kind = lead.group(1) if lead else None
+    if lead:
+        s = s[lead.end() :].strip()
+    # Anonymous/unnamed member types have no stable *name* across DWARF / castxml
+    # / PDB extraction — the same anonymous union can be spelled "<unnamed-tag>"
+    # by one reader and "Parent::<unnamed-type-u>" by another (observed on the
+    # Windows SDK _TP_CALLBACK_ENVIRON_V3::u between two MSVC builds). Collapse
+    # those placeholders to a token keyed on the aggregate *kind* — taken from
+    # the placeholder itself ("<anonymous union>") or the leading tag ("union
+    # <anonymous>") — so the unstable identifier suffix no longer drives a false
+    # positive while a genuine kind change (anonymous union → anonymous struct)
+    # is still reported. Size drift remains caught by the separate byte_size
+    # comparison.
+    anon = _ANON_TYPE_RE.search(s)
+    if anon is not None:
+        kind = anon.group(1) or lead_kind
+        return f"<anonymous {kind.lower()}>" if kind else "<anonymous>"
+    return s
+
+
+# DWARF-tier kinds whose old_value/new_value are byte-based (DW_AT_byte_size/
+# DW_AT_alignment/byte_offset), unlike their AST-tier equivalent (diff_
+# filtering._DWARF_TO_AST_EQUIV), which is always bit-based (RecordType.
+# size_bits/alignment_bits, TypeField.offset_bits) -- see diff_platform.py's/
+# diff_types.py's own construction sites. A transition comparison across
+# tiers must convert one side before comparing, or a genuinely identical
+# transition (e.g. 64 -> 96 bytes vs. 512 -> 768 bits) would never match.
+_DWARF_BYTE_VALUE_KINDS = frozenset(
+    {
+        ChangeKind.STRUCT_SIZE_CHANGED,
+        ChangeKind.STRUCT_ALIGNMENT_CHANGED,
+        ChangeKind.STRUCT_FIELD_OFFSET_CHANGED,
+    }
+)
+
+# Kinds whose old_value/new_value hold a C/C++ type spelling rather than a
+# byte/bit count -- compared via _normalize_type_name (already built for
+# exactly this DWARF<->castxml spelling gap) rather than raw string equality,
+# so "struct Foo *" and "Foo *" aren't treated as disagreeing transitions.
+_TYPE_SPELLING_VALUE_KINDS = frozenset(
+    {
+        ChangeKind.STRUCT_FIELD_TYPE_CHANGED,
+        ChangeKind.TYPE_FIELD_TYPE_CHANGED,
+    }
+)
+
+
+def _bits_str_from_bytes_str(value: str | None) -> str | None:
+    """Convert a plain byte-count string to its bit-count string equivalent.
+
+    Defensive on anything that isn't a plain integer (returns it unchanged)
+    -- a value this shape-mismatched can never legitimately equal the AST
+    tier's own bit-based value anyway, so failing the comparison closed
+    (not matching, i.e. keeping both findings) is the safe outcome.
+    """
+    if value is None:
+        return None
+    try:
+        return str(int(value) * 8)
+    except ValueError:
+        return value
+
+
+def cross_tier_transition(c: Change) -> tuple[str | None, str | None] | None:
+    """The (old_value, new_value) pair to require agreement on across tiers.
+
+    Returns ``None`` for a kind with no independent transition to disagree
+    about (a removal reports only that the field is gone, on both tiers
+    alike) -- the caller then dedups on kind+symbol alone, same as before
+    this value gate existed (Codex review: a cross-tier dedup that only
+    matched on kind+symbol could silently drop a DWARF finding whose own
+    old/new values genuinely disagreed with the AST finding's -- e.g. header
+    evidence reporting a size change 64->128 while DWARF reports 64->96).
+    """
+    if c.kind in (ChangeKind.STRUCT_FIELD_REMOVED, ChangeKind.TYPE_FIELD_REMOVED):
+        return None
+    old, new = c.old_value, c.new_value
+    if c.kind in _DWARF_BYTE_VALUE_KINDS:
+        return _bits_str_from_bytes_str(old), _bits_str_from_bytes_str(new)
+    if c.kind in _TYPE_SPELLING_VALUE_KINDS:
+        return (
+            _normalize_type_name(old) if old is not None else None,
+            _normalize_type_name(new) if new is not None else None,
+        )
+    return old, new

@@ -72,3 +72,23 @@
   `snap.dwarf.structs`/`snap.dwarf.enums`'s own keys directly, registering
   a namespaced DWARF-only key as an ordinary qualified candidate and a bare
   global DWARF-only key as the same competing-identity sentinel.
+- **Follow-up (Codex review): a kind+symbol match alone could drop a DWARF
+  finding whose own transition genuinely disagreed with the AST finding's**
+  — e.g. header evidence reporting a struct's size change 64→128 while
+  DWARF reports 64→96 for the same symbol. `_dedup_cross_kind` now also
+  requires the two findings' `(old_value, new_value)` transitions to
+  agree before collapsing them, via a new `diff_helpers.
+  cross_tier_transition`: it converts a byte-based DWARF-tier value
+  (`STRUCT_SIZE_CHANGED`/`STRUCT_ALIGNMENT_CHANGED`/
+  `STRUCT_FIELD_OFFSET_CHANGED`) to bits before comparing against its
+  always-bit-based AST-tier equivalent (a genuinely identical transition
+  otherwise never matches, since the two tiers use different units), and
+  compares a type-spelling transition (`STRUCT_FIELD_TYPE_CHANGED`/
+  `TYPE_FIELD_TYPE_CHANGED`) via the existing `_normalize_type_name`
+  DWARF↔castxml spelling bridge rather than raw string equality. A
+  removal kind (no independent transition to disagree about) still dedups
+  on kind+symbol alone. `_normalize_type_name` moved from
+  `diff_platform.py` into `diff_helpers.py` (which `diff_platform.py`
+  already imports from) so this new comparison doesn't need a
+  `diff_helpers -> diff_platform` edge back into a module that already
+  imports `diff_helpers` — a cycle the `import-cycle-growth` gate rejects.
