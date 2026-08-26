@@ -1761,6 +1761,67 @@ structure already in place:
    `changes`-independent, two-field SONAME comparison can honestly claim
    for itself.
 
+5. **Cross-detector deduplication (`diff_filtering.py`) is a distinct
+   failure shape from the roll-up/transform emitters in item 4 above, and
+   this inventory omitted it entirely (Codex review, verified against the
+   real code, PR #866 round 40).** `_dedup_exact()`, `_dedup_enum_same_kind()`,
+   `_dedup_cross_kind()` (chained by `dedup_and_prioritize()`), and the
+   later, separately-run `_deduplicate_cross_detector()` do not build a new
+   `Change` by transforming or summarizing an existing one — each keeps
+   exactly one already-fully-formed `Change` object from a set of two or
+   more that collapse to the same identity, and discards the rest outright.
+   `_deduplicate_cross_detector()`'s own docstring names the case this
+   plan's earlier phases already document as real: the L1 (DWARF) and L2
+   (header-AST) enum detectors independently emit the *same*
+   `ENUM_MEMBER_REMOVED`/`ENUM_MEMBER_VALUE_CHANGED`/etc. finding for one
+   enum member, "first occurrence wins" (import order puts the DWARF-tier
+   finding first), and the header-tier duplicate is dropped. Once Phase 1
+   lands, that dropped duplicate is not evidence-free — it is a second,
+   independent corroboration of the same finding from a different tier
+   (`l1:dwarf` vs. `l2:castxml`/`l2:clang`), and today's "first wins, rest
+   discarded" behavior silently throws that corroboration away, leaving the
+   survivor's `evidence_provenance` naming only the tier that happened to
+   run first. `_dedup_exact()` (same `(kind, description)` key) and
+   `_dedup_enum_same_kind()` (same `(kind, symbol)` key, choosing whichever
+   entry has populated `old_value`/`new_value` or the longer description)
+   have the identical shape: a real dedup decision between two independently
+   detected findings, not a lowering of one finding into a report format.
+
+   **This is exactly the gap Phase 2's completeness gate (below) cannot
+   catch, which is why it must be called out here rather than left for that
+   gate to find**: the gate's own contract (see Phase 2's discussion) checks
+   that every kept `Change` has a non-`None` `evidence_provenance` — a
+   dedup pass that keeps the first occurrence and drops the rest always
+   satisfies that check, since the survivor already carries its own valid,
+   non-`None` tuple. The completeness gate has no way to know a second,
+   differently-tagged tuple existed on the entry that got dropped.
+
+   **Fix: when two or more `Change`s collapse to one under any of these
+   four functions, the retained `Change`'s `evidence_provenance` must be
+   the union of the retained and every discarded entry's own tuples**, not
+   simply whichever happened to survive the existing selection rule (first
+   occurrence for `_dedup_exact`/`_deduplicate_cross_detector`; the
+   populated-values/longer-description winner for `_dedup_enum_same_kind`;
+   the AST-side survivor for `_dedup_cross_kind`) — the selection rule
+   itself is unchanged, only what gets attached to its result changes.
+   Concretely: at the point each function currently does `continue`/`pass`
+   to drop a losing entry, fold that entry's own `evidence_provenance`
+   tuple into the survivor's (deduplicated union, preserving this plan's
+   established ordering/no-re-sort convention for the field) rather than
+   discarding it unread. `_deduplicate_cross_detector()`'s own L1/L2 enum
+   case is the one with real, already-anticipated dual-tier evidence to
+   union today; the other three functions' dedup keys are narrow enough
+   (exact description match, or a single detector's own multiple emission
+   paths) that a union may often be a no-op — verify per function rather
+   than assuming every collapse actually has two distinct tags to merge, the
+   same case-by-case discipline this whole section already applies
+   elsewhere. Needs its own test: two `Change`s built with different
+   `evidence_provenance` tuples and a shared dedup key, asserting the single
+   surviving `Change` carries both tags after `dedup_and_prioritize()`/
+   `_deduplicate_cross_detector()` runs — not merely that a non-`None` tuple
+   is present, which the existing completeness-gate style of assertion
+   would pass even with the union step missing.
+
 Each slice, once wired, gets its own FP-rate/mutation-score gate re-run
 before merging — never the whole inventory behind one PR. The FP-rate/
 mutation-score gates exist precisely because a previous incident in this
@@ -2455,6 +2516,63 @@ Markdown fixture test — a `stack_to_markdown()` snapshot over a
 `StackCheckResult` carrying a `Change` with `evidence_provenance` set,
 distinct from the HTML/plain-`reporter_markdown.py` fixtures already
 required above, since neither of those exercises this module at all.
+
+**Three more human-facing renderers sit outside `stack_to_markdown()`'s own
+module and outside `_changes_table`/`reporter_markdown.py`, and none is
+reached by anything named above (Codex review, verified against the real
+code, PR #866 round 40).** `stack_html.stack_to_html()` — the HTML renderer
+both `deps tree --format html` and `deps compare --format html`
+(`cli_stack.py`) route through — has its own, third independent per-
+`Change` rendering loop for `result.binding_changes` (the same
+`list[Change]` `stack_to_json`'s `d["binding_changes"]`/
+`stack_to_markdown()`'s `_render_binding_changes_section` already render
+elsewhere): `f"<tr><td><code>{h(bc.kind.value)}</code></td>
+<td>{h(bc.description)}</td></tr>"`, kind and description only, no other
+field read. This is a fourth, wholly separate code path over the same
+`BindingChange`-carried `Change` objects — fixing `stack_to_json`'s dict
+projection or `stack_to_markdown()`'s bullet list changes nothing about
+what this HTML `<tr>` renders. Closing it needs its own additive
+`<td>`/line in this one loop (rendered only when `evidence_provenance` is
+set, so a run with no evidence data produces byte-identical HTML to
+today), plus its own HTML fixture test distinct from the `_changes_table`
+HTML fixture required above, since that fixture never exercises
+`stack_html.py`.
+
+Separately, `bundle.render_bundle_findings_markdown()` — shared, per its
+own docstring, by `cli_compare_release_helpers._release_md_bundle_findings`
+(the `compare --release` Markdown summary's bundle-findings section) and
+`cli_scan._render_artifact_set_text` (`scan --artifact-set`'s text output)
+— renders each `BundleFinding` directly (`kind`/`symbol`/
+`consumer_library`/`provider_library`/`description`), never through
+`BundleFinding.to_change()`. This is the identical "carrier bypasses
+`to_change()`" gap the JSON-projection inventory above already establishes
+for `_format_release_json`'s `summary["bundle_findings"]` dict and
+`ScanSetResult.to_dict()`'s `bundle_findings` list — except here the two
+*Markdown* call sites of the same underlying function are missing
+entirely, not merely under-covered. Since this plan already requires
+`evidence_provenance` on `BundleFinding` itself (not only on its
+`to_change()` lowering — see the `BundleFinding` construction-sites
+discussion above), this one function needs an additive
+`- Evidence: ...` line (rendered only when set) to cover both call sites
+at once, plus its own Markdown fixture — a `render_bundle_findings_markdown()`
+snapshot over a `BundleFinding` with `evidence_provenance` set, distinct
+from `_release_finding_dicts`'/`ScanSetResult.to_dict()`'s JSON fixtures,
+since neither exercises this Markdown function.
+
+`cli_compare_release_helpers._release_md_matrix_findings()` is a third,
+independent Markdown path in the same module as the `BundleFinding`
+renderer above, but over ordinary matrix-comparison `Change` objects, not
+`BundleFinding`s: `f"- **{c.kind.value}**" + (...symbol...)`, then
+`f"  - {c.description}"` — kind, symbol, and description only, mirroring
+the exact gap the JSON-side sibling `_format_release_json`'s
+`summary["matrix_findings"]` dict already has and that the inventory above
+already requires closing, except this is the *Markdown* rendering of the
+identical `matrix_result.changes`, reached by neither `_changes_table` nor
+`reporter_markdown.py` (both of which render the primary comparison's
+findings, not the release fan-out's per-configuration matrix findings).
+Needs the same additive `- Evidence: ...` line, gated on
+`evidence_provenance` being set, plus its own Markdown fixture over a
+matrix `Change` carrying `evidence_provenance`.
 
 Explicitly **not required** for this plan's acceptance criteria, named here
 so a future PR doesn't have to re-derive the target: once real, per-finding
