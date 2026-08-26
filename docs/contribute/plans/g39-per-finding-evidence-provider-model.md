@@ -366,10 +366,14 @@ report time — so a bare `git grep -n "Change("` never matches the literal
 text `"BundleFinding("` at all (the substring `Change(` does not occur in
 it), even though every `BundleFinding` becomes a real, user-visible
 `Change` once `to_change()` runs. Search separately with
-`git grep -n "BundleFinding(" -- 'abicheck/**/*.py'`, excluding
-`bundle_models.py`'s own dataclass definition. The real construction sites
-are `bundle.py`, `bundle_signature_evidence.py`, `bundle_multibuild.py`,
-and `product_baseline.py`. This is not merely a naming gap in the
+`git grep -n "BundleFinding(" -- 'abicheck/*.py' 'abicheck/**/*.py' ':(exclude)abicheck/bundle_models.py'`
+(the same root-level-plus-recursive pathspec pair used above, since all
+four real construction sites below are flat `abicheck/*.py` files — a
+bare `'abicheck/**/*.py'` alone matches none of them and returns zero
+results, confirmed by running it; adding `'abicheck/*.py'` finds all 16),
+excluding `bundle_models.py`'s own dataclass definition. The real
+construction sites are `bundle.py`, `bundle_signature_evidence.py`,
+`bundle_multibuild.py`, and `product_baseline.py`. This is not merely a naming gap in the
 inventory: several `BundleFinding` instances combine evidence
 `to_change()` cannot see by the time it runs. `bundle.py`'s
 `BUNDLE_INTRA_TYPE_CHANGED` finding, for example, is built from a
@@ -480,12 +484,28 @@ mislabels whichever symbols came from the other. Since
 answer this paragraph's derivation needs, and it is still available inside
 `from_snapshot()` before the full snapshot is discarded, the field must be
 `evidence_backend_tag: dict[str, str]`, keyed by the same mangled name
-`function_map`/`variable_map` already use, populated by reading
-`snap.fact_provenance[func_fact_key(mangled, "visibility")]` (falling back
-to the snapshot's own single `ast_producer` for a non-hybrid snapshot,
-where no per-declaration `"visibility"` entry is ever written) for every
-symbol `BundleSignatureEvidence` retains — not a single scalar the
-multi-backend case was assumed to fit into a tuple.
+`function_map`/`variable_map` already use. **The lookup must branch on
+which map retains the symbol, not always use `func_fact_key` (Codex
+review, verified against the real code, PR #866 round 21):**
+`dumper_hybrid.py`'s own `_merge_variables()` sibling records a variable
+declaration's producer under `var_fact_key(v.mangled, "visibility")`, a
+distinct key namespace from `func_fact_key` (`fact_provenance.py`'s two
+helpers prefix the same mangled name differently precisely so a function
+and a variable sharing no relationship don't collide in one dict) — so
+for a symbol retained via `AbiSnapshot.variable_map`, populate the entry
+by reading `snap.fact_provenance[var_fact_key(mangled, "visibility")]`
+instead; only a symbol retained via `function_map` reads
+`func_fact_key(mangled, "visibility")`. Deriving every entry through
+`func_fact_key` unconditionally would silently miss every real per-variable
+provenance record (the key would never exist in `fact_provenance` for a
+variable) and fall back to the snapshot-wide `ast_producer` for every
+insufficient hybrid variable signature, masking exactly the
+castxml-vs-clang distinction this field exists to carry. (Falling back to
+the snapshot's own single `ast_producer` still applies, for either map, on
+a non-hybrid snapshot where no per-declaration `"visibility"` entry is
+ever written.) Not a single scalar the multi-backend case was assumed to
+fit into a tuple, and not a single helper the two symbol kinds were
+assumed to share.
 
 **A third, distinct provenance shape is needed for the version-collapse
 path, which does not go through `_symbol_evidence_sufficient` at all
