@@ -30,7 +30,7 @@ import sys
 from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import click
 
@@ -1230,6 +1230,7 @@ def _format_release_markdown(
             f"({bundle_count} cross-library finding{'s' if bundle_count != 1 else ''}) |",
         )
     lines += _release_md_libraries_table(library_results, _VERDICT_EMOJI)
+    lines += _release_md_coverage_warnings(library_results)
     lines += _release_md_changed_libraries(removed_keys, added_keys, old_map, new_map)
     lines += _release_md_bundle_findings(bundle_result)
     lines += _release_md_matrix_findings(matrix_result)
@@ -1258,13 +1259,18 @@ def _release_md_libraries_table(
     return lines
 
 
+def _release_md_coverage_warnings(library_results: list[dict[str, object]]) -> list[str]:
+    """Per-library `coverage_warnings` (e.g. same-binary) -- absent when none carry any (Codex review: the release table alone omits this signal)."""
+    entries = [f"- `{lib['library']}`: {w}" for lib in library_results for w in cast(list[str], lib.get("coverage_warnings") or [])]
+    return ["", "## ⚠️ Coverage Warnings", "", *entries] if entries else []
+
+
 def _release_md_changed_libraries(
     removed_keys: list[str],
     added_keys: list[str],
     old_map: dict[str, Path],
     new_map: dict[str, Path],
-) -> list[str]:
-    """Markdown sections listing removed/added libraries."""
+) -> list[str]:  # Markdown sections listing removed/added libraries.
     lines: list[str] = []
     if removed_keys:
         lines += ["", "## ⚠️ Removed Libraries", ""]
@@ -1276,13 +1282,7 @@ def _release_md_changed_libraries(
 
 
 def _release_md_bundle_findings(bundle_result: BundleDiffResult | None) -> list[str]:
-    """Markdown section for cross-library (bundle) findings.
-
-    G38 P0-D: a partial ``analysis_errors`` warning is rendered even when
-    ``bundle_findings`` is empty -- an empty finding list after a raised
-    exception means "nothing was checked", not "nothing was found", and a
-    reader must not conflate the two.
-    """
+    """Markdown section for cross-library (bundle) findings. G38 P0-D: a partial ``analysis_errors`` warning is rendered even when ``bundle_findings`` is empty -- an empty finding list after a raised exception means "nothing was checked", not "nothing was found", and a reader must not conflate the two."""
     lines: list[str] = []
     if bundle_result is not None and bundle_result.analysis_errors:
         lines += ["", "## ⚠️ Bundle Analysis Warnings", ""]

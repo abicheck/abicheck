@@ -300,3 +300,9 @@ def _warn_force_public_ignored(
             "effect with --scope-public-headers; ignoring the widening overlay.",
             err=True,
         )
+
+
+def echo_coverage_warnings(warnings: list[str]) -> None:
+    """Echo each of *warnings* to stderr, prefixed "Warning: " -- the one-line format's own rendered summary is a fixed, machine-parseable string with no room for a coverage_warnings entry, unlike every other format, which already surfaces them inline (Codex review, fresh evidence)."""
+    for w in warnings:
+        click.echo(f"Warning: {w}", err=True)

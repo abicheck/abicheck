@@ -101,12 +101,7 @@ def _expand_header_inputs(inputs: list[Path]) -> list[Path]:
 
 
 def _sniff_text_format(path: Path) -> str:
-    """Read a small header chunk and return 'json', 'perl', or 'unknown'.
-
-    ADR-059: a gzip/zstd-compressed snapshot is recognized via a bounded
-    decoded prefix, mirroring ``service.sniff_text_format`` (kept as a
-    separate copy here rather than importing that one, matching this
-    module's existing "no cross-import for this exact helper" shape)."""
+    """Read a small header chunk and return 'json', 'perl', 'symvers', or 'unknown'. ADR-059: a gzip/zstd-compressed snapshot is recognized via a bounded decoded prefix, mirroring ``service.sniff_text_format`` (kept as a separate copy here rather than importing that one, matching this module's existing "no cross-import for this exact helper" shape)."""
     from .snapshot_io import bounded_decoded_prefix, detect_snapshot_compression
 
     try:
@@ -132,7 +127,9 @@ def _sniff_text_format(path: Path) -> str:
         return "perl"
     if head.startswith("{"):
         return "json"
-    return "unknown"
+    from .symvers_metadata import looks_like_symvers
+
+    return "symvers" if looks_like_symvers(head) else "unknown"
 
 
 def _detect_binary_format(path: Path) -> str | None:

@@ -34,6 +34,13 @@ Re-export only: every name below keeps its own owner's definition and
 semantics. Nothing is re-implemented here, so there is no second opinion to
 drift, and ``severity``/``contract_coverage_exit``/``analysis_assurance``/
 ``exit_decision`` remain the modules to read and to change.
+
+``note_if_same_binary_compared`` (Codex review) is not an exit-code axis, but
+it belongs here rather than in ``extraction.py`` for the same reason as the
+axes above: it decides part of the *process response* a completed comparison
+returns (a coverage warning surfaced in every report format), not an
+operation performed on an input before extraction -- which is exactly what
+``extraction.py``'s own docstring scopes that module to.
 """
 
 from __future__ import annotations
@@ -45,6 +52,7 @@ from ..analysis_assurance import (
     compute_analysis_assurance,
     fold_analysis_assurance_exit,
 )
+from ..confidence import note_if_same_binary_compared
 from ..contract_coverage_exit import (
     announce_coverage_floor,
     coverage_diagnostic_from_summary,
@@ -88,6 +96,7 @@ __all__ = [
     "fold_coverage_exit",
     "legacy_exit_code",
     "missing_contract_exit_code",
+    "note_if_same_binary_compared",
     "resolve_compare_exit_decision",
     "resolve_severity_config",
 ]

@@ -45,6 +45,7 @@ from ..binary_utils import (
     detect_binary_format,
     normalize_binary_input,
     resolve_linker_script,
+    resolve_linker_script_chain,
     strip_vendor_hash,
 )
 from ..buildsource.embed import embed_build_source
@@ -111,6 +112,7 @@ __all__ = [
     "resolve_dependency_scope",
     "resolve_inferred_header_roots",
     "resolve_linker_script",
+    "resolve_linker_script_chain",
     "resolve_source_frontend_clang_bin",
     "seed_includes_and_fold_compile_context",
     "sniff_build_info_format",

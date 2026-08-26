@@ -64,6 +64,7 @@ from typing import TYPE_CHECKING, Any
 
 from .api_types import CompareRequest, CompareResult, InputSpec, required_path
 from .compile_context import CompileContext
+from .confidence import note_if_same_binary_compared
 from .dependency_info import populate_pair_dependency_info
 from .errors import ValidationError
 from .workflows.artifact.execute import (
@@ -485,8 +486,20 @@ def classify_compare_pair(
     if layer_coverage_rows:
         result.layer_coverage = layer_coverage_rows
     attach_evidence_metrics(result, evidence_metrics, extra_changes or [])
-    result.old_metadata = service.collect_metadata(required_path(request.old, "old"))
-    result.new_metadata = service.collect_metadata(required_path(request.new, "new"))
+    # Hash through the full GNU ld linker-script chain to its final resolved
+    # target -- resolve_side_snapshot() already followed the identical chain
+    # to produce `old`/`new` above -- so a (possibly multi-hop) script vs.
+    # its target DSO given as the other `CompareRequest` side still reads as
+    # byte-identical (Codex review, fresh evidence; mirrors the same fix on
+    # `cli_scan_baseline._run_baseline_compare`).
+    from .binary_utils import resolve_linker_script_chain
+
+    def _hashable_path(p: Path) -> Path:  # a text snapshot/manifest can coincidentally match the INPUT()/GROUP() probe -- skip linker-script resolution for it (Codex review)
+        return p if service.sniff_text_format(p) in ("json", "perl", "symvers") else resolve_linker_script_chain(p)
+
+    result.old_metadata = service.collect_metadata(_hashable_path(required_path(request.old, "old")))
+    result.new_metadata = service.collect_metadata(_hashable_path(required_path(request.new, "new")))
+    note_if_same_binary_compared(result)
 
     # P0.4 follow-up (P2 review, discussion_r3787839902): `DiffResult.
     # requested_depth`/`analysis_assurance.requested_depth`/`depth_satisfied`

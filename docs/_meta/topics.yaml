@@ -368,6 +368,8 @@ topics:
       - abicheck/finding_identity.py
       - abicheck/cli_compare_fold.py
       - abicheck/effective_config_digest.py
+      - abicheck/confidence.py
+      - abicheck/junit_coverage_warnings.py
     allowed_summaries:
       - start/first-report.md
       - start/choose-your-workflow.md

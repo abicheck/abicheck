@@ -52,6 +52,7 @@
         "model"
       ],
       "legacy_paths": [
+        "abicheck/confidence.py",
         "abicheck/diff_build_config.py",
         "abicheck/diff_cxx_rules.py",
         "abicheck/finding_identity.py",
@@ -540,6 +541,7 @@
     "html_template.py",
     "idioms.py",
     "internal_leak.py",
+    "junit_coverage_warnings.py",
     "junit_report.py",
     "l0_export_delta.py",
     "macho_metadata.py",

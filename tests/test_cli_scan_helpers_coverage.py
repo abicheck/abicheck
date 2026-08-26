@@ -419,6 +419,27 @@ def test_render_baseline_none_and_populated() -> None:
     assert "breaking=1 api_break=2 risk=3 compatible=4" in text
 
 
+def test_render_baseline_lines_shows_coverage_warnings() -> None:
+    """Codex review (item 4 follow-up): the JSON summary has carried
+    ``coverage_warnings`` (e.g. the byte-identical-binaries warning) since
+    ``_baseline_summary`` first surfaced it, but the text renderer -- the
+    *default* format -- never printed it, leaving the warning invisible in
+    an ordinary ``scan --against`` console run."""
+    out = SimpleNamespace(
+        diff_summary={
+            "breaking": 0,
+            "api_break": 0,
+            "risk": 0,
+            "compatible": 0,
+            "coverage_warnings": [
+                "old and new binaries are byte-identical (sha256 match)"
+            ],
+        }
+    )
+    text = "\n".join(render_baseline_lines(out))
+    assert "byte-identical" in text
+
+
 def test_render_baseline_lines_lists_findings_not_just_counts() -> None:
     """A failing baseline compare must name the broken symbol, not just count it."""
     out = SimpleNamespace(

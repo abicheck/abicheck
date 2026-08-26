@@ -459,6 +459,12 @@ def render_baseline_lines(out: Any, *, show_suppressed: bool = False) -> list[st
     if suppressed_count:
         counts_line += f" suppressed={suppressed_count}"
     lines = ["", "Baseline comparison", counts_line]
+    # Codex review: the JSON summary has carried this since
+    # `_baseline_summary` first surfaced it, but the text renderer (the
+    # *default* format) never printed it — a byte-identical-binaries warning
+    # was invisible in an ordinary `scan --against` run's console output.
+    for warning in out.diff_summary.get("coverage_warnings", []):
+        lines.append(f"  Warning: {warning}")
     for f in out.diff_summary.get("findings", []):
         loc = f" ({f['source_location']})" if f.get("source_location") else ""
         symbol = f.get("symbol") or "?"

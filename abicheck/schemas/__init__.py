@@ -983,10 +983,9 @@ REPORT_SCHEMA_VERSION = "2.46"
 #:        ``effective_config_digest``/``effective_config_fields`` --
 #:        `compare`'s report_schema_version 2.45 counterpart, computed by
 #:        the identical ``effective_config_digest.effective_config_fields``
-#:        call with this comparison's own ``sev_config``/``exit_scheme``
-#:        (the same pair the ``exit`` block immediately above was resolved
-#:        from). Additive keys, absent only for the same NOT_COMPARABLE/
-#:        audit-only shapes ``exit``/``analysis_assurance`` themselves are.
+#:        call with this comparison's own ``sev_config``/``exit_scheme`` (the
+#:        same pair the ``exit`` block immediately above was resolved from).
+#:        Additive keys, absent only for the same NOT_COMPARABLE/audit-only shapes ``exit``/``analysis_assurance`` themselves are.
 #: 1.20 -- ``effective_config_fields`` (1.19, above) gains
 #:        ``gate.require_complete_analysis`` and ``gate.scope`` -- `compare`'s
 #:        report_schema_version 2.46 counterpart, same fields, same reasons
@@ -1011,7 +1010,8 @@ REPORT_SCHEMA_VERSION = "2.46"
 #:        ``policy.reconcile_build_context`` was added, same round. One
 #:        more: ``surface.scope_to_public_surface_requested`` was added,
 #:        same round as `compare`'s report_schema_version 2.46 entry.
-SCAN_SCHEMA_VERSION = "1.20"
+#: 1.21 -- ``scan --against``'s baseline summary gains ``coverage_warnings`` (Codex review), mirroring `compare`'s own top-level field of the same name/shape -- e.g. a byte-identical-binaries warning. Additive key, omitted when empty.
+SCAN_SCHEMA_VERSION = "1.21"
 
 _SCHEMA_DIR = Path(__file__).resolve().parent
 COMPARE_REPORT_SCHEMA_PATH = _SCHEMA_DIR / "compare_report.schema.json"

@@ -54,6 +54,7 @@ from .cli_compare_options import (
     _resolve_debug_roots,
     _resolve_demangle,
     _warn_force_public_ignored,
+    echo_coverage_warnings,
 )
 from .cli_dump_helpers import resolve_dump_depth
 from .cli_helpers_compare import (
@@ -484,10 +485,7 @@ def _report_not_comparable(
         _write_or_echo(output, xml)
 
 
-#: The ``compare`` parameters that can set a gate field on the command line.
-#: ``exit_code_scheme`` is its own field; the rest all feed one resolved
-#: :class:`~abicheck.severity.SeverityConfig`, so any one of them being typed
-#: makes the resolved severity explicitly CLI-selected.
+#: The ``compare`` parameters that can set a gate field on the command line. ``exit_code_scheme`` is its own field; the rest all feed one resolved :class:`~abicheck.severity.SeverityConfig`, so any one of them being typed makes the resolved severity explicitly CLI-selected.
 
 def _reject_incoherent_compare_flags(
     *,
@@ -1152,8 +1150,9 @@ def _report_compare_result(
     if explain_patterns:
         echo_pattern_modulations(result)
 
+    # used_by_old_input/used_by_new_input are the *original* library paths, captured before _embed_inline_source_sides may have rewritten old_input/new_input to a temporary embedded-snapshot .abi.json path (Codex review) -- passing the post-embed operands here would silently drop the same-binary coverage warning for a --old/new-sources or raw --build-info comparison even when the two real binaries are identical.
     _finalize_compare_result(
-        result, old_input, new_input,
+        result, used_by_old_input, used_by_new_input,
         show_redundant=show_redundant, show_filtered=show_filtered,
         severity_config=report_severity,
         contract_evaluation=contract_evaluation,
@@ -1230,14 +1229,14 @@ def _report_compare_result(
     # both stayed permanently unstamped even when --contract was
     # given. This must run before _render_output below serializes
     # result.changes, and mirrors the identical fix already applied to the
-    # MCP abi_compare tool (mcp_server.py) -- both share the same traversal
-    # (CodeRabbit review: hand-copying it here previously let one call site
-    # drift out of sync with the other).
+    # MCP abi_compare tool (mcp_server.py) -- both share the same traversal (CodeRabbit review: hand-copying it here previously let one call site drift out of sync with the other).
     if contract_evaluation:
         from .reporter import _finding_id
 
         stamp_scoped_result_findings(result, finding_id=_finding_id)
-
+    # Only the same-binary warning, not every pre-existing coverage_warnings entry ("no binary metadata"/detector-disabled reasons) -- those are deliberately absent from the one-line summary today (existing tests pin exactly zero extra lines).
+    if fmt == ONELINE_FORMAT:
+        echo_coverage_warnings([w for w in result.coverage_warnings if "byte-identical" in w])
     _write_or_echo(
         output,
         _render_compare_report(

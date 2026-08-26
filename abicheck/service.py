@@ -152,7 +152,7 @@ def detect_binary_format(path: Path) -> str | None:
 
 
 def sniff_text_format(path: Path) -> str:
-    """Read a small header chunk and return ``'json'``, ``'perl'``, or ``'unknown'``.
+    """Read a small header chunk and return ``'json'``, ``'perl'``, ``'symvers'``, or ``'unknown'``.
 
     ADR-059: a gzip/zstd-compressed snapshot (``.abicheck.json.gz``/``.zst``,
     or any neutrally-named file carrying those magic bytes) is detected here
@@ -186,6 +186,10 @@ def sniff_text_format(path: Path) -> str:
         return "perl"
     if head.startswith("{"):
         return "json"
+    from .symvers_metadata import looks_like_symvers
+
+    if looks_like_symvers(head):
+        return "symvers"
     return "unknown"
 
 
@@ -1465,13 +1469,9 @@ def _dump_macho(
 
 
 def collect_metadata(path: Path) -> LibraryMetadata | None:
-    """Compute SHA-256 and file size for a library artifact.
-
-    Returns *None* when *path* is a text-based snapshot (JSON or Perl dump)
-    so that reports don't display misleading metadata for the serialised file.
-    """
+    """Compute SHA-256 and file size for a library artifact, or ``None`` for a text-based snapshot/manifest (JSON, Perl dump, ``Module.symvers``) -- not a binary, so a same-binary comparison must never claim it."""
     text_fmt = sniff_text_format(path)
-    if text_fmt in ("json", "perl"):
+    if text_fmt in ("json", "perl", "symvers"):
         return None
 
     data = path.read_bytes()
