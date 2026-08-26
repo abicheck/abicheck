@@ -524,21 +524,31 @@ class TestRequiredFamiliesMustBeACollection:
         """
         assert self._ledger().missing_families(required) == ("layout",)
 
-    def test_only_string_item_collections_are_vulnerable(self) -> None:
-        """Why this is the package's only door of its kind, not an assertion.
+    def test_sibling_doors_refuse_a_bare_string_whether_empty_or_not(self) -> None:
+        """This test previously asserted a claim that was false.
 
-        A per-item guard already covers a collection whose items are not
-        strings: `extend("abc")` raises on `"a"`, since a character is not
-        an `OccurrenceId`. Only a collection *of strings* is defeated,
-        because there a character is a perfectly valid item — so the sweep
-        for this class has exactly one member, provably.
+        It said `missing_families` was "the package's only door of its
+        kind, provably", because a per-item guard already covers a
+        collection whose items are not strings — `extend("abc")` raises on
+        `"a"`. That reasoning holds only for a *non-empty* string.
+        `extend("")` iterated zero times and silently produced an empty
+        set, and `group_by_entity("")` returned `{}` (Codex review; the
+        second was not reported, and came out of re-checking the claim the
+        first falsified).
+
+        **A per-item guard is never a container guard, because an empty
+        container has no items.** Both doors now check the container, so
+        the empty and non-empty cases are asserted together — the pair is
+        the point, since testing only the non-empty one is what let the
+        original claim look proven.
         """
         from abicheck.storage.identity import OccurrenceSet, group_by_entity
 
-        with pytest.raises(TypeError, match="must be a OccurrenceId"):
-            OccurrenceSet().extend("abc")
-        with pytest.raises(TypeError, match="must be a OccurrenceId"):
-            group_by_entity("abc")
+        for scalar in ("abc", "", b"ab", b""):
+            with pytest.raises(TypeError):
+                OccurrenceSet().extend(scalar)
+            with pytest.raises(TypeError):
+                group_by_entity(scalar)
 
 
 class TestUnknownFamilyFallbackCannotBeComparable:

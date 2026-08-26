@@ -69,6 +69,7 @@ from .entity_ids import (
 from .guards import (
     identity_text as _identity_text,
     instance_of as _instance_of,
+    item_iterable as _item_iterable,
     mapping as _mapping,
     required_field as _required_field,
     row_sequence as _row_sequence,
@@ -244,19 +245,21 @@ class OccurrenceSet:
         dropped — the same silent loss as `attributes={pair: value}`, and
         this class has exactly one invariant it cannot lose.
 
-        Deliberately *not* `row_sequence`: this takes an `Iterable`, so a
-        generator is a legitimate caller and that guard would reject one. A
-        `set` is accepted for a reason worth stating rather than assuming —
-        `add` keeps each bucket in key order, so the resulting state is
-        canonical no matter what order a set iterated in. Only the mapping
-        changes what the call means.
+        Deliberately `item_iterable` and not `row_sequence`: this takes an
+        `Iterable`, so a generator is a legitimate caller and that guard
+        would reject one. A `set` is accepted for a reason worth stating
+        rather than assuming — `add` keeps each bucket in key order, so the
+        resulting state is canonical no matter what order a set iterated in.
+
+        An earlier version of this guard refused only a `Mapping`, on the
+        reasoning that a bare string was "already loud" because
+        `extend("abc")` raises from the per-item check. That holds for a
+        *non-empty* string and fails for `extend("")`, which iterates zero
+        times and leaves the set serializing as `{"occurrences": []}`
+        (Codex review). A per-item guard is never a container guard,
+        because an empty container has no items.
         """
-        if isinstance(occurrences, Mapping):
-            raise TypeError(
-                "occurrences must not be a mapping "
-                f"({occurrences!r}); iterating one yields its keys and "
-                "silently drops every value"
-            )
+        _item_iterable(occurrences, "occurrences")
         for occurrence in occurrences:
             self.add(occurrence)
 
@@ -434,10 +437,16 @@ def group_by_entity(
 ) -> dict[EntityId, tuple[OccurrenceId, ...]]:
     """Group occurrences by entity, preserving every one.
 
+    Takes a `Sequence`, so `row_sequence` is the right guard here where
+    `OccurrenceSet.extend` needs the weaker `item_iterable` — the contract
+    differs, not the caution. This had the same empty-scalar gap `extend`
+    did (`group_by_entity("")` returned `{}`) and was not reported; it came
+    out of re-checking the claim that finding falsified.
+
     A convenience over :class:`OccurrenceSet` for callers that already hold a
     complete sequence. Deliberately returns tuples rather than single values
     so that no call site can be written as if grouping produced a winner.
     """
     result = OccurrenceSet()
-    result.extend(occurrences)
+    result.extend(_row_sequence(occurrences, "occurrences"))
     return {entity: result.occurrences_of(entity) for entity in result.entities()}

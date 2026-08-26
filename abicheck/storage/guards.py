@@ -42,6 +42,7 @@ from typing import Any
 #: and a new guard cannot appear here unadvertised.
 __all__ = [
     "decision_key",
+    "item_iterable",
     "row_sequence",
     "required_field",
     "key_collection",
@@ -267,6 +268,43 @@ def row_sequence(raw: Any, field_name: str) -> tuple[Any, ...]:
             "there are none'"
         )
     return tuple(raw)
+
+
+def item_iterable(raw: Any, field_name: str) -> Any:
+    """An iterable of records, for a door that must still accept a generator.
+
+    The weaker sibling of :func:`row_sequence`, and the difference is the
+    contract rather than the caution: a parameter annotated ``Iterable`` has
+    generators as legitimate callers, and ``row_sequence`` rejects one. So
+    this refuses only the containers whose *shape* changes what the call
+    means — a ``str``/``bytes``, and a ``Mapping`` whose values would be
+    silently dropped — and passes everything else through untouched.
+
+    The empty case is the whole reason this is a container check and not an
+    item check. ``extend("abc")`` really does raise, from the per-item
+    guard, on the first character — which is what led me to claim a bare
+    string was "already loud" here. ``extend("")`` iterates zero times, so
+    no per-item guard can ever fire, and the set then serializes as
+    ``{"occurrences": []}``: malformed input made indistinguishable from a
+    producer that established there were none (Codex review).
+
+    **A per-item guard is never a container guard, because an empty
+    container has no items.** That is the general form of the mistake, and
+    it is worth stating once rather than rediscovering per door.
+    """
+    if isinstance(raw, (str, bytes)):
+        raise TypeError(
+            f"{field_name} must be an iterable of records, not a bare "
+            f"{type(raw).__name__} ({raw!r}); a non-empty one yields "
+            "characters and an empty one yields nothing, which would read as "
+            "'the producer established there are none'"
+        )
+    if isinstance(raw, Mapping):
+        raise TypeError(
+            f"{field_name} must not be a mapping ({raw!r}); iterating one "
+            "yields its keys and silently drops every value"
+        )
+    return raw
 
 
 def required_field(document: Any, key: str, record: str) -> Any:
