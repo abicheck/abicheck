@@ -815,3 +815,99 @@
   (`test_load_bounds_object_allocation_during_blob_decoding`,
   `test_load_rejects_a_manifest_missing_a_schema_version_key`), all
   confirmed to fail against the pre-fix code before applying the fix.
+
+- **G40 bundle archive: three more Codex review findings, all real, all
+  fixed, plus a shared primitive to close both together.** (1) The
+  object-count budget above only ever fires for JSON *object* nodes --
+  `object_pairs_hook` has no array counterpart, so a payload of many
+  empty `[]` nodes under an ignored key sailed through untouched
+  (confirmed empirically: a 100,000-array payload still loaded under a
+  budget sized just above a real snapshot's own mapping count). (2)
+  `BundleArchiveReader.read_manifest()` never enforced any container-node
+  budget at all -- a sub-64 MiB `manifest.json` could still hold millions
+  of container nodes under a field its own schema checks never look at,
+  materializing a multi-gigabyte object graph before validation. (3) A
+  zstd stream produced by an external tool may legitimately start with a
+  standard skippable frame (e.g. metadata) ahead of the real data frame --
+  `validate_zstd_frame_completeness` already handles this correctly once
+  reached, but `read_snapshot_bytes()`'s own compression *detection* only
+  ever looked at a bare 4-byte prefix, classified the leading skippable
+  magic as uncompressed, and raised a suffix/magic mismatch instead of
+  ever reaching decompression.
+
+  Findings (1) and (2) share one root cause and one fix: a new
+  `abicheck.storage.json_budget` module (`storage/` rather than
+  `bundle_facts.py`, since ADR-061 forbids `storage/` importing the
+  latter) provides a single linear pre-scan, `check_json_container_
+  budget()`, that counts every `{`/`[` container-node start outside a
+  string literal -- skipping whole string tokens so a bracket inside a
+  string value is never miscounted -- and raises before `json.loads()`
+  ever runs. Considered and rejected: forcing `json`'s pure-Python
+  scanner via a `JSONDecoder.parse_array` override (the only way to reach
+  a genuine array-parsing hook) measured ~3.7x slower on an ordinary 2 MB
+  snapshot blob, a real cost on every legitimate load, not just an
+  adversarial one -- the pre-scan pays no such tax. `bundle_facts.py`'s
+  `_load_blob_json` and `bundle_archive.py`'s `read_manifest()` both now
+  call this one primitive instead of `_load_blob_json`'s previous,
+  object-only `_counting_hook`.
+
+  Finding (3) is fixed in the same shared module the frame-completeness
+  validator already lives in: a new `skip_leading_skippable_frames()` in
+  `storage/zstd_frame_guard.py` (reusing that module's existing
+  skippable-frame magic/size-field constants) is now consulted by
+  `detect_compression_from_bytes()` before checking gzip/zstd magic --
+  a no-op for a bare 4-byte prefix too short to contain a full skippable
+  frame, so every existing 4-byte-prefix-only caller is unaffected.
+  `read_snapshot_bytes()`'s second classification call now passes its
+  already-fully-buffered `raw` (not just `raw[:4]`) so it can actually
+  see past an arbitrarily-sized leading skippable frame.
+
+  **A fourth, independent finding surfaced while adding regression tests
+  for the above: Python 3.14 no longer raises `RecursionError` for a
+  pathologically deep `[[[...]]]` payload at all** (confirmed empirically:
+  10,000 levels of array nesting parses cleanly into a `list` on 3.14,
+  where every earlier Python version raised). Both `_load_blob_json`'s and
+  `read_manifest()`'s existing `except RecursionError` translations
+  silently stopped firing on that version, letting a deeply nested blob/
+  manifest reach downstream code expecting a `dict` and fail with an
+  untranslated, unrelated `ValueError` instead of this module's own
+  `SnapshotError` contract -- caught by CI's `unit-tests (ubuntu-latest,
+  3.14, ...)` lane on three existing tests. Fixed by having the same
+  `check_json_container_budget()` pre-scan also track nesting depth
+  (independent of node count) and raise a new `JsonNestingTooDeepError`
+  once a `DEFAULT_MAX_JSON_NESTING_DEPTH` (2,000 -- comfortably above the
+  900-level depth an existing, deliberately-boundary-cased test relies on
+  `json.loads()` itself still succeeding at, and comfortably below any
+  realistic hostile payload) is exceeded, translated to the identical
+  "too deeply nested" `SnapshotError` both call sites already raised --
+  now the primitive actually enforcing it, with the pre-existing
+  `except RecursionError` kept only as a fallback net. New primitive-level
+  tests in `tests/test_json_budget.py` pin the Python-3.14 regression
+  directly, independent of either call site.
+
+  A fifth, unrelated CI failure on the same commit -- `windows-latest`
+  only -- was also root-caused and fixed: `TestBundleArchiveWriterAtomicity
+  ::test_close_failure_removes_temp_file_even_when_wrapper_close_also_
+  fails`'s fault-injection double for a failing `close()` fully replaced
+  the method without calling the real implementation, so the real OS
+  file handle was never actually released. On POSIX that's harmless (an
+  unlinked-but-open file keeps its inode alive), but on Windows the
+  test's own subsequent cleanup `unlink()` then failed with a genuine
+  `WinError 32` ("used by another process"), masking the simulated
+  failure the test means to assert on. Confirmed empirically that a real
+  Python file object releases its underlying fd even when `close()`
+  itself raises (e.g. from a failing `flush()`) -- so this was a test
+  fault-injection gap, not a production close-ordering bug. Fixed by
+  having the test double call the real `close()` first, then raise,
+  matching real close-failure semantics and letting the simulated error
+  surface deterministically on every platform.
+
+  New tests: `tests/test_bundle_facts_archive_hardening.py`'s
+  `test_load_bounds_array_allocation_during_blob_decoding`/
+  `test_load_bounds_container_allocation_while_decoding_the_manifest`;
+  `tests/test_snapshot_compression_skippable_frames.py` (new file, split
+  out of `test_snapshot_compression.py` to stay under its own ADR-061
+  no-growth baseline) for the leading-skippable-frame detection fix;
+  `tests/test_json_budget.py` (new file) for the shared primitive itself,
+  including the Python-3.14 depth regression. All confirmed to fail
+  against the pre-fix code before applying each fix.

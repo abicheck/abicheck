@@ -79,10 +79,12 @@ DEFAULT_MAX_BUNDLE_DECODED_BYTES = 1024 * 1024 * 1024
 #: own AbiSnapshot object graph). No real bundle approaches this.
 DEFAULT_MAX_LIBRARY_COUNT = 20_000
 
-#: Object-node budget for one blob's JSON decode -- json.loads() has no
-#: cap on *node count*, and many small objects under an ignored key can
-#: inflate real memory far past decoded byte size (~150MB RSS from a 6MB
-#: payload of ~2M empty objects, confirmed empirically, Codex review).
+#: Container-node budget for one blob's JSON decode -- json.loads() has no
+#: cap on *node count*; many small containers under an ignored key inflate
+#: real memory regardless of container shape (~150MB RSS from a 6MB
+#: payload of ~2M empty objects; an array-only payload bypassed an
+#: earlier, object-only cap identically -- both confirmed empirically).
+#: See `storage.json_budget` for the shared object+array pre-scan (Codex).
 DEFAULT_MAX_JSON_OBJECT_NODES = 1_000_000
 
 #: The fingerprint value used when no multibuild variant applies (every
@@ -91,11 +93,6 @@ DEFAULT_MAX_JSON_OBJECT_NODES = 1_000_000
 #: Phase-3-aware comparability check has something to compare against
 #: unconditionally, never `None`/absent on an older-shaped facts file.
 DEFAULT_VARIANT_FINGERPRINT = "default"
-
-
-class _JsonObjectBudgetExceeded(Exception):
-    """Not a ValueError -- must not be caught by _load_blob_json's own
-    `except (UnicodeDecodeError, ValueError)`."""
 
 
 @dataclass
@@ -571,29 +568,32 @@ def read_bundle_facts_archive(
     from .bundle_manifest import manifest_from_dict
     from .errors import IncompatibleSnapshotSchemaError, SnapshotError
     from .storage.bundle_archive import BundleArchiveReader
+    from .storage.json_budget import (
+        JsonContainerBudgetExceeded,
+        JsonNestingTooDeepError,
+        check_json_container_budget,
+    )
 
     def _load_blob_json(raw: bytes, description: str) -> Any:
         # Mirrors read_manifest()'s own translation -- neither invalid
         # JSON nor a RecursionError may surface raw here either (Codex).
-        # object_pairs_hook fires per JSON object node (incl. in arrays),
-        # aborting decode immediately once the budget is exceeded (Codex).
-        object_count = 0
-
-        def _counting_hook(pairs: Any) -> dict[Any, Any]:
-            nonlocal object_count
-            object_count += 1
-            if object_count > DEFAULT_MAX_JSON_OBJECT_NODES:
-                raise _JsonObjectBudgetExceeded
-            return dict(pairs)
-
+        # The shared pre-scan bounds both container-node count (object
+        # AND array, unlike object_pairs_hook alone) and nesting depth
+        # before json.loads() ever runs -- the latter because relying on
+        # json.loads() itself to raise RecursionError isn't portable
+        # (Python 3.14 parses 10,000 levels of `[[[...]]]` with none).
         try:
-            return _json.loads(raw, object_pairs_hook=_counting_hook)
-        except _JsonObjectBudgetExceeded:
+            check_json_container_budget(raw, DEFAULT_MAX_JSON_OBJECT_NODES)
+        except JsonContainerBudgetExceeded:
             raise SnapshotError(
                 f"{path}: {description} contains more than "
-                f"{DEFAULT_MAX_JSON_OBJECT_NODES} JSON objects -- refusing "
-                "to decode (possible object-count amplification attack)"
+                f"{DEFAULT_MAX_JSON_OBJECT_NODES} JSON containers -- refusing "
+                "to decode (possible container-count amplification attack)"
             ) from None
+        except JsonNestingTooDeepError:
+            raise SnapshotError(f"{path}: {description} is too deeply nested to parse") from None
+        try:
+            return _json.loads(raw)
         except (UnicodeDecodeError, ValueError) as exc:
             raise SnapshotError(f"{path}: {description} is not valid JSON: {exc}") from exc
         except RecursionError as exc:

@@ -219,3 +219,27 @@ def validate_zstd_frame_completeness(
         remaining = remaining[consumed - len(dobj.unused_data) :]
     if not saw_data_frame:
         raise SnapshotError(f"{source}: corrupt or truncated zstd stream (no data frame at all)")
+
+
+def skip_leading_skippable_frames(data: bytes) -> bytes:
+    """Return *data* with any leading, well-formed zstd skippable frames
+    stripped off -- so a *format-detection* magic-byte check sees the real
+    frame's own magic instead of a skippable metadata frame's (Codex
+    review, fresh evidence: an externally produced ``.json.zst`` starting
+    with one skippable frame was classified as uncompressed, since a bare
+    4-byte prefix check never looks past it).
+
+    Detection-only: a truncated/malformed skippable frame is left alone
+    rather than raising -- that is `validate_zstd_frame_completeness`'s
+    job, once real decompression is attempted, not this cheap pre-check's."""
+    remaining = data
+    while len(remaining) >= 8:
+        (magic,) = struct.unpack_from("<I", remaining, 0)
+        if not (_SKIPPABLE_FRAME_MAGIC_LOW <= magic <= _SKIPPABLE_FRAME_MAGIC_HIGH):
+            break
+        (frame_size,) = struct.unpack_from("<I", remaining, 4)
+        total = 8 + frame_size
+        if len(remaining) < total:
+            break  # truncated -- leave it for the real decode path to report
+        remaining = remaining[total:]
+    return remaining

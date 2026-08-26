@@ -44,7 +44,10 @@ from pathlib import Path
 from typing import Any
 
 from .errors import SnapshotError
-from .storage.zstd_frame_guard import validate_zstd_frame_completeness
+from .storage.zstd_frame_guard import (
+    skip_leading_skippable_frames,
+    validate_zstd_frame_completeness,
+)
 
 # ── Compression selector ────────────────────────────────────────────────────
 
@@ -209,7 +212,15 @@ def _zstd_module() -> Any:
 
 
 def detect_compression_from_bytes(prefix: bytes) -> SnapshotCompression:
-    """Classify a byte prefix by magic bytes. Never trusts a filename."""
+    """Classify a byte prefix by magic bytes. Never trusts a filename.
+
+    Skips past any leading zstd skippable frame(s) first (Codex review,
+    fresh evidence: an externally produced zstd stream can legitimately
+    start with one, e.g. a metadata frame ahead of the real data frame) --
+    a no-op when *prefix* is too short to contain a full skippable-frame
+    header/body, or when it doesn't start with one at all, so a caller
+    passing only a bare 4-byte prefix keeps its existing behavior exactly."""
+    prefix = skip_leading_skippable_frames(prefix)
     if prefix.startswith(GZIP_MAGIC):
         return SnapshotCompression.GZIP
     if prefix.startswith(ZSTD_MAGIC):
@@ -483,7 +494,12 @@ def read_snapshot_bytes(
     if len(raw) > cap:
         raise SnapshotError(f"{p}: stored file exceeds the {cap} byte safety limit.")
 
-    compression = detect_compression_from_bytes(raw[:4])
+    # The whole buffered `raw` (not just its first 4 bytes) is handed in
+    # here -- unlike the earlier `compression_hint` probe above, `raw` is
+    # already fully read at this point, so this is the one call site that
+    # can actually see past a leading skippable frame of any size up to
+    # `cap` (Codex review, fresh evidence).
+    compression = detect_compression_from_bytes(raw)
     suffix_hint = suffix_compression(p)
     if (
         suffix_hint is not None

@@ -137,8 +137,73 @@ class TestBundleFactsArchiveResourceLimits:
                 }
             )
 
-        with pytest.raises(SnapshotError, match="more than 100 JSON objects"):
+        with pytest.raises(SnapshotError, match="more than 100 JSON containers"):
             load_bundle_facts(out, format="archive")
+
+    def test_load_bounds_array_allocation_during_blob_decoding(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The sibling of the object-node test above, for JSON *arrays* --
+        `object_pairs_hook` (this budget's original mechanism) never fires
+        for an array node at all, so a payload of many empty `[]` nodes
+        under an ignored key sailed straight through an object-only
+        budget with no error at all (Codex review, fresh evidence: a
+        100,000-array payload still loaded under a budget sized just
+        above the base snapshot's own mapping count). The shared
+        `storage.json_budget` pre-scan counts both container shapes into
+        one combined budget, so this must raise the identical way the
+        object-node test above does."""
+        import abicheck.bundle_facts as bundle_facts_module
+        from abicheck.storage.bundle_archive import BundleArchiveWriter
+
+        monkeypatch.setattr(bundle_facts_module, "DEFAULT_MAX_JSON_OBJECT_NODES", 100)
+        out = tmp_path / "wide-array-blob.bundlefacts.archive.zip"
+        payload = b'{"library":"a.so","version":"1","junk":[' + (b"[]," * 500) + b"[]]}"
+        with BundleArchiveWriter(out) as writer:
+            h = writer.put_blob(payload)
+            writer.write_manifest(
+                {
+                    "schema_version": 1,
+                    "bundle_facts_schema_version": 1,
+                    "library_blobs": {"a.so": h},
+                }
+            )
+
+        with pytest.raises(SnapshotError, match="more than 100 JSON containers"):
+            load_bundle_facts(out, format="archive")
+
+    def test_load_bounds_container_allocation_while_decoding_the_manifest(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The manifest.json member itself is just as reachable by this
+        attack as a library blob is -- a sub-`DEFAULT_MAX_MANIFEST_BYTES`
+        manifest can still hold millions of container nodes under a field
+        the manifest's own schema checks never look at, materializing the
+        whole object graph before those checks ever run (Codex review,
+        fresh evidence). `read_manifest()` shares the identical
+        `storage.json_budget` primitive, not an independent copy of it."""
+        import abicheck.storage.bundle_archive as bundle_archive_module
+        from abicheck.storage.bundle_archive import (
+            BundleArchiveReader,
+            BundleArchiveWriter,
+        )
+
+        monkeypatch.setattr(bundle_archive_module, "DEFAULT_MAX_MANIFEST_JSON_CONTAINER_NODES", 100)
+        out = tmp_path / "wide-manifest.bundlefacts.archive.zip"
+        with BundleArchiveWriter(out) as writer:
+            h = writer.put_blob(b'{"library":"a.so","version":"1"}')
+            writer.write_manifest(
+                {
+                    "schema_version": 1,
+                    "bundle_facts_schema_version": 1,
+                    "library_blobs": {"a.so": h},
+                    "junk": [{} for _ in range(500)],
+                }
+            )
+
+        with pytest.raises(SnapshotError, match="more than 100 JSON containers"):
+            with BundleArchiveReader.open(out) as reader:
+                reader.read_manifest()
 
     @pytest.mark.parametrize("missing_field", ["schema_version", "bundle_facts_schema_version"])
     def test_load_rejects_a_manifest_missing_a_schema_version_key(

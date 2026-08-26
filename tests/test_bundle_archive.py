@@ -191,8 +191,7 @@ class TestBundleArchiveWriterReader:
         manifest, not only `bundle_facts.write_bundle_facts_archive`'s own
         higher-level preflight -- a caller using this public primitive
         directly bypasses that check entirely, and `read_manifest()`
-        rejects anything over this same limit unconditionally (Codex
-        review, fresh evidence)."""
+        rejects anything over this same limit unconditionally (Codex)."""
         import abicheck.storage.bundle_archive as bundle_archive_module
 
         monkeypatch.setattr(bundle_archive_module, "DEFAULT_MAX_MANIFEST_BYTES", 100)
@@ -446,7 +445,17 @@ class TestBundleArchiveWriterAtomicity:
         def _failing_fsync() -> None:
             raise OSError(errno.EIO, "simulated fsync failure")
 
+        # A real close() failure still releases the underlying OS fd
+        # (confirmed empirically: CPython's buffered writer marks itself
+        # closed even when close() itself raises, e.g. a failing flush).
+        # A double that skips the real close() entirely leaves a
+        # genuinely open handle, harmless on POSIX but making the
+        # cleanup `unlink()` below fail with a real "file in use" error
+        # on Windows -- masking the simulated failure (Codex, Windows CI).
+        real_close = writer._tmp_file.close
+
         def _failing_close() -> None:
+            real_close()
             raise OSError(errno.ENOSPC, "simulated close failure")
 
         monkeypatch.setattr(writer, "_fsync_tmp_file", _failing_fsync)
@@ -460,11 +469,11 @@ class TestBundleArchiveWriterAtomicity:
 
 class TestReadManifestTranslatesRecursionError:
     """A small manifest.json can still nest deeply enough to blow
-    Python's json decoder's own recursion budget (e.g. a few thousand
-    levels of ``[[[...]]]``) -- `RecursionError` is a distinct exception
-    class from `json.JSONDecodeError`/`UnicodeDecodeError`, so it must be
-    caught separately or it surfaces as a raw traceback instead of this
-    module's `SnapshotError` contract (Codex review, fresh evidence)."""
+    Python's json decoder's own recursion budget (a few thousand levels
+    of ``[[[...]]]``) -- `RecursionError` is a distinct exception class
+    caught separately, else it surfaces raw. On Python 3.14 this specific
+    payload no longer raises RecursionError at all, so `read_manifest()`'s
+    own container-node/nesting-depth pre-scan enforces it instead."""
 
     def test_a_deeply_nested_manifest_raises_snapshot_error_not_recursion_error(
         self, tmp_path: Path
@@ -486,12 +495,10 @@ class TestReadManifestTranslatesRecursionError:
 class TestReadManifestTranslatesIntegerDigitLimit:
     """Python 3.11+'s own integer-string-conversion digit limit
     (`sys.get_int_max_str_digits()`, 4300 by default) makes `json.loads()`
-    raise a bare `ValueError` for a manifest containing an integer literal
-    with more digits than that -- a different exception than
-    `json.JSONDecodeError` (which is itself a `ValueError` subclass, but
-    this one isn't raised through that subclass), so it bypassed both
-    existing handlers and escaped as a raw exception instead of this
-    module's `SnapshotError` contract (Codex review, fresh evidence)."""
+    raise a bare `ValueError` for an integer literal with more digits than
+    that -- a different exception than `json.JSONDecodeError` (a
+    `ValueError` subclass, but not raised through it here), so it
+    bypassed both handlers and escaped raw instead of `SnapshotError`."""
 
     def test_an_oversized_integer_literal_raises_snapshot_error(
         self, tmp_path: Path
@@ -917,8 +924,7 @@ class TestSniffBundleArchiveFormatUsesTheSameSingleOpenClassification:
     between the two could make the second `open()` block indefinitely,
     even though `open_regular_file_for_format_sniff()`'s own identical
     class of race had already been fixed. Now delegates to that helper's
-    single O_NONBLOCK-open-then-fstat() sequence instead (Codex review,
-    fresh evidence)."""
+    single O_NONBLOCK-open-then-fstat() sequence instead (Codex)."""
 
     def test_sniff_never_calls_a_separate_stat_before_opening(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -990,8 +996,7 @@ class TestSniffDetectsAPrefixedArchive:
     check `sniff_bundle_archive_format()`/`open_regular_file_for_format_
     sniff()` used misclassified one as "json", so `load_bundle_facts()`'s
     documented default (`format="auto"`) failed on a path the identical
-    call with `format="archive"` opens fine (Codex review, fresh
-    evidence)."""
+    call with `format="archive"` opens fine (Codex)."""
 
     def _prefixed_archive(self, tmp_path: Path) -> Path:
         real = tmp_path / "real.bundlefacts.archive.zip"
@@ -1068,7 +1073,7 @@ class TestSniffSkipsTailScanForRecognizedCompressionEnvelopes:
     `FEXTRA` sub-field (unlike `FCOMMENT`, already closed) can embed a
     `PK\\x05\\x06` whose own comment-length field still lands exactly at
     the file's true end, satisfying the earlier structural-EOCD check
-    without being a real EOCD (Codex review, fresh evidence)."""
+    without being a real EOCD (Codex)."""
 
     def _gzip_with_eocd_in_extra_field(self, payload: bytes) -> bytes:
         """A real, independently-decodable gzip stream whose FEXTRA field
