@@ -164,7 +164,10 @@ def test_mutant_run_scope_narrows_to_the_touched_module() -> None:
     assert gate.mutant_run_scope(diff, only_mutate) == ["abicheck.diff_types.*"]
 
 
-def test_diff_touches_tests_detects_any_tests_path() -> None:
+_ONLY_MUTATE_TWO = ["abicheck/diff_types.py", "abicheck/diff_symbols.py"]
+
+
+def test_diff_touches_non_scoped_python_detects_a_shared_test_fixture() -> None:
     diff_touching_a_shared_fixture = (
         "diff --git a/abicheck/diff_types.py b/abicheck/diff_types.py\n"
         "--- a/abicheck/diff_types.py\n+++ b/abicheck/diff_types.py\n"
@@ -173,14 +176,66 @@ def test_diff_touches_tests_detects_any_tests_path() -> None:
         "--- a/tests/conftest.py\n+++ b/tests/conftest.py\n"
         "@@ -1,0 +2,1 @@\n+    pass\n"
     )
-    assert gate.diff_touches_tests(diff_touching_a_shared_fixture) is True
+    assert (
+        gate.diff_touches_non_scoped_python(
+            diff_touching_a_shared_fixture, _ONLY_MUTATE_TWO
+        )
+        is True
+    )
 
     diff_touching_only_production = (
         "diff --git a/abicheck/diff_types.py b/abicheck/diff_types.py\n"
         "--- a/abicheck/diff_types.py\n+++ b/abicheck/diff_types.py\n"
         "@@ -1,0 +2,1 @@\n+    pass\n"
     )
-    assert gate.diff_touches_tests(diff_touching_only_production) is False
+    assert (
+        gate.diff_touches_non_scoped_python(
+            diff_touching_only_production, _ONLY_MUTATE_TWO
+        )
+        is False
+    )
+
+
+def test_diff_touches_non_scoped_python_detects_a_shared_production_helper() -> None:
+    """The residual gap the tests/-only check missed: a non-`only_mutate`
+    production module an untouched module imports (Codex review, PR #877)."""
+    diff = (
+        "diff --git a/abicheck/diff_types.py b/abicheck/diff_types.py\n"
+        "--- a/abicheck/diff_types.py\n+++ b/abicheck/diff_types.py\n"
+        "@@ -1,0 +2,1 @@\n+    pass\n"
+        "diff --git a/abicheck/model.py b/abicheck/model.py\n"
+        "--- a/abicheck/model.py\n+++ b/abicheck/model.py\n"
+        "@@ -1,0 +2,1 @@\n+    pass\n"
+    )
+    assert gate.diff_touches_non_scoped_python(diff, _ONLY_MUTATE_TWO) is True
+
+
+def test_diff_touches_non_scoped_python_ignores_non_python_paths() -> None:
+    """A changelog fragment / doc / YAML change must not disable scoping —
+    this repo's own changelog-fragment convention touches a `changelog.d/
+    *.md` file on nearly every real PR, so gating on any non-Python path
+    would leave scoping firing on almost nothing."""
+    diff = (
+        "diff --git a/abicheck/diff_types.py b/abicheck/diff_types.py\n"
+        "--- a/abicheck/diff_types.py\n+++ b/abicheck/diff_types.py\n"
+        "@@ -1,0 +2,1 @@\n+    pass\n"
+        "diff --git a/changelog.d/foo.md b/changelog.d/foo.md\n"
+        "--- a/changelog.d/foo.md\n+++ b/changelog.d/foo.md\n"
+        "@@ -1,0 +2,1 @@\n+### Fixed\n"
+    )
+    assert gate.diff_touches_non_scoped_python(diff, _ONLY_MUTATE_TWO) is False
+
+
+def test_diff_touches_non_scoped_python_detects_pyproject_toml() -> None:
+    diff = (
+        "diff --git a/abicheck/diff_types.py b/abicheck/diff_types.py\n"
+        "--- a/abicheck/diff_types.py\n+++ b/abicheck/diff_types.py\n"
+        "@@ -1,0 +2,1 @@\n+    pass\n"
+        "diff --git a/pyproject.toml b/pyproject.toml\n"
+        "--- a/pyproject.toml\n+++ b/pyproject.toml\n"
+        "@@ -1,0 +2,1 @@\n+mutate_only_covered_lines = true\n"
+    )
+    assert gate.diff_touches_non_scoped_python(diff, _ONLY_MUTATE_TWO) is True
 
 
 def test_mutant_run_scope_is_none_when_a_shared_test_fixture_is_touched() -> None:

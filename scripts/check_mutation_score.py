@@ -213,26 +213,41 @@ def diff_touched_only_mutate_modules(
     return touched & only_mutate_set
 
 
-def diff_touches_tests(diff_text: str) -> bool:
-    """Any changed/removed path under ``tests/``.
+def diff_touches_non_scoped_python(diff_text: str, only_mutate: list[str]) -> bool:
+    """Any changed/removed ``.py`` file outside ``only_mutate``, or ``pyproject.toml``.
 
-    The safety check `mutant_run_scope` needs beyond mere `only_mutate`
-    membership: mutation.yml's `require_baseline` decision only forces a
-    full (unscoped) run when a changed test file matches one of the
-    *per-module* globs in `resolve`'s `mutated_tests` filter — a shared
-    fixture/helper (`tests/conftest.py` and the like, matching none of
-    those globs) does not set it. Such a change can weaken what an
-    *untouched* module's tests actually verify without editing that
-    module's own source at all — exactly the shape `check_per_module`'s
-    per-module drift gate exists to catch, and exactly what scoping would
-    silently blind it to, since an untested module's mutants read as zero
-    survivors regardless of whether anything regressed (CodeRabbit review,
-    PR #877). So any touched `tests/` path at all disables scoping, not
-    just one matching a specific module's own glob — cheaper to be
-    conservative here than to try to model which test changes are "safe".
+    The safety check `mutant_run_scope` needs beyond mere "which
+    `only_mutate` files did this diff touch": every mutant, however scoped,
+    is tested against the diff's *entire* current tree — mutmut's own
+    `copy_src_dir`/`copy_also_copy_files` copy every source file, mutated or
+    not, fresh from what's checked out — so an untouched module's *behavior
+    under test* is not actually invariant just because its own file and its
+    own dedicated test file didn't change. A shared production helper an
+    untouched module imports, or a shared test fixture (`tests/conftest.py`
+    and the like — this subsumes "any `tests/` path", the narrower check an
+    earlier revision of this function used), can each change what an
+    untouched module's mutants would have done if tested — and scoping
+    means they never are, so a regression there reads as zero survivors
+    regardless of what actually happened (CodeRabbit + Codex review, PR
+    #877). `pyproject.toml` is included too: `[tool.mutmut]` itself lives
+    there, and a changed `do_not_mutate`/`mutate_only_covered_lines`/etc
+    could alter every module's mutant population without touching a single
+    `.py` file.
+
+    Deliberately **not** blocked on: `only_mutate` files themselves (the
+    normal case scoping exists for), and any non-Python path (docs, a
+    changelog fragment, YAML) — those cannot change what a mutmut-generated
+    mutant does when Python-executed, so gating on them would just make
+    scoping fire on almost nothing, given this repo's own changelog-fragment
+    convention touches a `changelog.d/*.md` file on nearly every PR that
+    would otherwise qualify.
     """
     touched = set(parse_changed_lines(diff_text)) | set(parse_removed_lines(diff_text))
-    return any(p.startswith("tests/") for p in touched)
+    only_mutate_set = set(only_mutate)
+    return any(
+        p == "pyproject.toml" or (p.endswith(".py") and p not in only_mutate_set)
+        for p in touched
+    )
 
 
 def mutant_run_scope(
@@ -246,11 +261,12 @@ def mutant_run_scope(
     infrastructure changed — just not one this function can attribute to a
     mutated module), every ``only_mutate`` module touched (scoping would
     filter nothing, so it's not worth the extra mutmut invocation shape),
-    or any ``tests/`` path touched at all (see `diff_touches_tests`).
+    or any non-``only_mutate`` ``.py``/``pyproject.toml`` path touched at
+    all (see `diff_touches_non_scoped_python`).
     """
     if diff_text is None or not only_mutate:
         return None
-    if diff_touches_tests(diff_text):
+    if diff_touches_non_scoped_python(diff_text, only_mutate):
         return None
     touched = diff_touched_only_mutate_modules(diff_text, only_mutate)
     if not touched or touched >= set(only_mutate):
