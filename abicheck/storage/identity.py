@@ -54,7 +54,7 @@ from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
-from .guards import identity_text as _identity_text
+from .guards import enum_member as _enum_member, identity_text as _identity_text
 
 __all__ = [
     "EntityId",
@@ -181,6 +181,7 @@ class EntityId:
         :class:`OccurrenceId`, which had been fixed one commit earlier while
         this one was missed.
         """
+        object.__setattr__(self, "kind", _enum_member(self.kind, EntityKind, "kind"))
         object.__setattr__(
             self,
             "qualified_name",
@@ -265,6 +266,11 @@ class OccurrenceId:
         # a duplicate (Codex review). The document path already validated rows
         # this way; the constructor did not, which is the same
         # boundary-only-guard gap as the provenance and diagnostics fields.
+        object.__setattr__(
+            self,
+            "observation",
+            _enum_member(self.observation, ObservationKind, "observation"),
+        )
         object.__setattr__(
             self,
             "attributes",

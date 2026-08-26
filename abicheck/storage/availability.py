@@ -499,6 +499,7 @@ class AvailabilityLedger:
         real family. Last-wins itself is unchanged — see :meth:`override` for
         why that contract is left to whoever owns it.
         """
+        _availability(availability, f"availability for family {family!r}")
         self.families[_decision_key(family, "family name")] = availability
 
     def override(
@@ -531,6 +532,12 @@ class AvailabilityLedger:
         """
         family = _decision_key(family, "override family")
         entity_key = _decision_key(entity_key, "override entity")
+        # Before the duplicate check: a malformed argument is wrong whatever
+        # the ledger already holds, and reporting the duplicate first would
+        # answer a question the caller did not get to ask.
+        _availability(
+            availability, f"availability for override {(family, entity_key)!r}"
+        )
         if (family, entity_key) in self.overrides:
             raise ValueError(
                 f"an availability override for family {family!r} and entity "

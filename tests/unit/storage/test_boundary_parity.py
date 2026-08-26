@@ -298,3 +298,56 @@ def test_a_well_formed_conflict_is_accepted_by_both_doors() -> None:
     conflict = IdentityConflict(reason="size", occurrences=pair)
 
     assert IdentityConflict.from_dict(conflict.to_dict()) == conflict
+
+
+#: Values no *vocabulary* field may accept. The string spelling is first on
+#: purpose: it is what the document carries, so it is the one a caller is
+#: most likely to hand the constructor by mistake — and the one `from_dict`
+#: legitimately accepts, which is why the two doors differ here in what they
+#: take and must not differ in what they *reject*.
+NOT_ENUM_MEMBERS: list[Any] = ["type", "dwarf", 1, None, ["x"], object()]
+
+
+@pytest.mark.parametrize("value", NOT_ENUM_MEMBERS)
+def test_entity_kind_is_a_vocabulary_member(value: Any) -> None:
+    """A field whose type is the vocabulary, not a string.
+
+    The text guards were added one door at a time and this field was not one
+    of them, so `EntityId(kind="type", ...)` constructed and then failed on
+    `.value` from inside `key` and `to_dict` — an object that cannot reach
+    its own serialized form (Codex review).
+    """
+    assert _refused(lambda: EntityId(value, "S"))
+
+
+@pytest.mark.parametrize("value", NOT_ENUM_MEMBERS)
+def test_observation_kind_is_a_vocabulary_member(value: Any) -> None:
+    """The sibling the report did not name, fixed with it."""
+    assert _refused(
+        lambda: OccurrenceId(entity=EntityId(EntityKind.TYPE, "S"), observation=value)
+    )
+
+
+@pytest.mark.parametrize("value", NOT_RECORDS)
+def test_the_ledger_mutators_check_the_record_too(value: Any) -> None:
+    """A guard added at the constructor must reach the mutators.
+
+    `_availability` was applied in `__post_init__` and not in `declare`/
+    `override`, so the same malformed record was refused at one door and
+    stored at another — the shape this file exists to catch, reappearing for
+    a guard added *by* this file's own round (Codex review). `override` is
+    the sibling the report did not name.
+    """
+
+    def _declare() -> object:
+        ledger = AvailabilityLedger()
+        ledger.declare("layout", value)
+        return ledger
+
+    def _override() -> object:
+        ledger = AvailabilityLedger()
+        ledger.override("layout", "E1", value)
+        return ledger
+
+    assert _refused(_declare)
+    assert _refused(_override)

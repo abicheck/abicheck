@@ -42,6 +42,7 @@ from typing import Any
 #: and a new guard cannot appear here unadvertised.
 __all__ = [
     "decision_key",
+    "enum_member",
     "diagnostics_from",
     "identity_text",
     "mapping",
@@ -190,3 +191,22 @@ def mapping(raw: Any, field_name: str) -> None:
             f"({raw!r}); a sequence yields valid-looking keys but answers "
             "neither lookup nor serialization"
         )
+
+
+def enum_member(raw: Any, enum_class: type, field_name: str) -> Any:
+    """A closed vocabulary, checked where it is assigned.
+
+    `from_dict` builds these by calling the enum, so a document naming an
+    unknown member is refused there. A direct constructor took the raw value:
+    `EntityId(kind="type", ...)` was accepted, and both `key` and `to_dict`
+    then failed with `AttributeError` on the missing `.value` — the same
+    boundary-only-guard shape as the text fields, on the fields whose type is
+    the vocabulary rather than a string (Codex review).
+    """
+    if not isinstance(raw, enum_class):
+        raise TypeError(
+            f"{field_name} must be a {enum_class.__name__}, not "
+            f"{type(raw).__name__} ({raw!r}); the string spelling is what a "
+            "document carries, not what an in-memory record holds"
+        )
+    return raw
