@@ -1368,15 +1368,61 @@ structure already in place:
    `checker.py`'s call site (line 565) runs before `evidence_tiers` is
    computed (line 1023) — so this is a real, if narrow, signature and
    sequencing change, not just a lookup: thread the two `AbiSnapshot`
-   objects (or the already-computed tier list, if the call is moved to run
-   after confidence computation instead) into `check_soname_bump_policy()`,
-   and derive the negative component as one `searched:<tier>` entry per
-   tier `evidence_tiers` names, mirroring item 3's `current:l2:searched:
-   <frontend>` spelling but at comparison scope rather than per-declaration
-   scope. This makes the claim actually true in both problem cases above:
-   it names real, independently-established evidence coverage rather than
-   an artifact of which findings happened to be emitted, and it is
-   non-empty even when `changes == []`.
+   objects into `check_soname_bump_policy()`.
+
+   **`DiffResult.evidence_tiers` itself cannot be read off directly as
+   described above without over-claiming — it is a two-sided union, not a
+   per-side receipt, and this plan's own mandatory `<side>:` prefix
+   convention (established earlier in this document) requires the negative
+   component to say which *side* was actually searched, not merely that the
+   tier existed somewhere (Codex review, verified against the real code,
+   PR #866 round 29).** `_detect_evidence_tiers(old, new)` computes each
+   boolean with a bare `or` across both snapshots —
+   `has_elf = old.elf is not None or new.elf is not None`, and identically
+   for `has_dwarf`/`has_dwarf_advanced`/`has_pe`/`has_macho`/`has_headers` —
+   so a tier appearing in `evidence_tiers` proves only "at least one side had
+   this evidence," never "both sides did." A `searched:<tier>` entry
+   spelled with the `both:` prefix (the natural reading of "we searched this
+   tier" for a comparison-scoped claim) would therefore be false whenever
+   only one side actually carried that tier's data — an entirely ordinary
+   shape, e.g. a DWARF-only baseline compared against a header-parsed live
+   binary, or a `scan --against` pairing snapshots taken at two different
+   `--depth` levels. Separately, `_detect_evidence_tiers` has no notion of
+   L3–L5 (build-context/source-graph) evidence at all — that evidence
+   reaches `DiffResult` through the independent `extra_changes` mechanism
+   (`checker.py`'s `compare(..., extra_changes=...)` parameter), never
+   through this tier inventory — so no `searched:<tier>` entry derived from
+   `evidence_tiers` can honestly speak to whether L3–L5 evidence was
+   consulted either way. Building a genuine per-side, per-detector "what was
+   actually searched and completed" receipt does not exist anywhere in this
+   codebase today (`extra_changes` is a plain `list[Change]`, not a
+   coverage/completion ledger) — that would be new tracking infrastructure
+   on the scale of its own G-numbered plan, not a narrow fix to this one
+   finding's provenance, and is explicitly out of scope here.
+
+   **The fix that stays within what the codebase can support today is
+   narrower on two axes at once: side-aware, and scoped to exactly the L0–L2
+   tiers `_detect_evidence_tiers` actually inventories.** Since
+   `check_soname_bump_policy()` is being given the two real `AbiSnapshot`
+   objects anyway (not merely the pre-computed, already-unioned
+   `evidence_tiers` list), derive tier membership *per side* directly from
+   each snapshot's own fields — `old.elf is not None`, `new.elf is not
+   None`, and identically for `dwarf`/`dwarf_advanced`/`pe`/`macho`/headers
+   — the same predicates `_detect_evidence_tiers` already applies, just
+   evaluated once per snapshot instead of OR'd together. Emit
+   `both:l0:searched:<tier>` only for a tier both sides independently carry;
+   a tier only one side carries is either omitted from the negative
+   component entirely (the conservative choice — this plan's own
+   `AGENTS.md`-derived preference for a documented false-negative gap over a
+   fabricated positive applies here too) or, if a single-sided claim is
+   wanted, spelled with the honest `old:`/`new:` prefix for that side alone,
+   never `both:`. This makes the claim actually true in the problem cases
+   round 27 and round 28 already identified — non-empty even when
+   `changes == []`, independent of which findings were emitted — *and* true
+   in the case round 29 adds: it never asserts a side was searched when only
+   the other side's snapshot carried the evidence, and it never asserts
+   anything about L3–L5, which this tier inventory has no visibility into
+   at all.
 
 Each slice, once wired, gets its own FP-rate/mutation-score gate re-run
 before merging — never the whole inventory behind one PR. The FP-rate/
@@ -1443,6 +1489,43 @@ the producer-behavior failure mode (a classified kind whose real emitter, or
 one of several, never got wired) — dropping either one reopens exactly the
 class of gap PR #753 → #759 already demonstrated this codebase needs a
 mechanical check for, not a reviewer's memory.
+
+**The gate as just described covers a `Change`-producing *wrapper* — starting
+with `diff_helpers.bool_transition()`, which constructs its `Change(...)`
+calls inside its own body — only if its call sites are scanned by name, not
+by walking `Change(...)`/`make_change(...)`/`BundleFinding(...)` call
+expressions alone (Codex review, fresh evidence, PR #866 round 29).**
+`bool_transition()` (`diff_helpers.py`) has no `evidence_provenance`
+parameter today, and a call site like `diff_hidden_friends.py`'s own
+`bool_transition(...)` call contains none of the three literal construction
+forms the gate walks — this is exactly why Phase 1's own inventory section
+above needs a *third* grep for `bool_transition(` specifically, and says so
+explicitly ("neither grep above finds that specific line even though the
+*file* it's in is still caught via its other, direct calls"). An AST walk
+that only recognizes `Change(...)`/`make_change(...)`/`BundleFinding(...)`
+node shapes inherits the identical blind spot: it would see no
+`Change(...)`-shaped node at a `bool_transition(...)` call site and pass it
+regardless of whether that call actually threads a real
+`evidence_provenance` value through to `bool_transition()`'s own internal
+`Change(...)` constructions. Closing this needs one of two things, and the
+gate's own implementation must pick one rather than leaving it implicit: (a)
+extend the AST walk to also recognize calls to `bool_transition()` and any
+further reusable `Change`-producing wrapper this repo grows (the same
+generalization Phase 1's own construction-path-gate paragraph above already
+states — "the three-grep pattern above, generalized to any further reusable
+wrapper this repo grows beyond `bool_transition()`" — restated here because
+this section's own, shorter description of the same gate dropped that
+qualifier and could be read as scoping the walk to the three literal
+construction forms only); or (b) give `bool_transition()` (and any sibling
+wrapper) a required, no-default `evidence_provenance` parameter, so an
+incomplete caller fails with a plain `TypeError`/lint error independent of
+the AST gate at all, rather than being invisible to it. Either is acceptable
+implementation-time judgment; leaving the gate scoped to the three literal
+construction forms with no wrapper-call recognition and no required
+parameter on the wrapper is not, since it reopens exactly the "second,
+unwired producer path" failure mode this gate exists to close, just one
+level of indirection removed from the `Change(...)`/`make_change(...)`
+sites it does catch.
 
 ### Phase 3 — report/schema surface (S)
 
@@ -1832,10 +1915,23 @@ above, which this list intentionally does not re-duplicate.
   real construction sites populates `BundleFinding.evidence_provenance`
   with the shape that site's own evidence supports — the per-side
   `<side>:<tier>:searched:<backend>` form for the `_symbol_evidence_
-  sufficient` sites, the distinct `both:ambiguous:version_collapsed` form
-  for the version-collapse branch, never a bare positive tag standing in
-  for an unresolved case; and (2) `BundleFinding.to_change()` carries that
-  exact value through onto the lowered `Change.evidence_provenance`
+  sufficient` sites, never a bare positive tag standing in for an unresolved
+  case; and, for the version-collapse branch specifically, **the complete
+  tuple round 26's correction above establishes, not the bare marker alone
+  (Codex review, fresh evidence, PR #866 round 29 — this bullet previously
+  described only `both:ambiguous:version_collapsed`, which is stale against
+  lines 668–695's later correction and would let a test pass on an
+  implementation that drops the accompanying resolution/export evidence)**:
+  the `both:ambiguous:version_collapsed` marker *alongside* the side-scoped
+  `l0:elf_symtab` resolution/export provenance that
+  `_bare_name_version_collapsed()` and the surrounding `_symbol_was_
+  exported`/`_provider_entry_retained_from_old`/reachability checks actually
+  establish — asserting the marker in isolation must fail this test, the
+  same way asserting the accompanying evidence in isolation (with the
+  marker dropped) must also fail it, since either one alone misstates what
+  the finding rests on; and (2) `BundleFinding.to_change()` carries that
+  exact value — the full tuple, both before and after lowering, not just the
+  marker half of it — through onto the lowered `Change.evidence_provenance`
   unchanged, the same way it already carries `effective_verdict`/
   `modulation_reason`/`modulation_rule` — a regression here is otherwise
   invisible to the "kind partition and ordinary snapshot-pair detector
