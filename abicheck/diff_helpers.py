@@ -42,6 +42,7 @@ from typing import Any, Protocol, TypeVar, cast
 from .change_registry import REGISTRY
 from .checker_policy import ChangeKind
 from .checker_types import Change
+from .compare.dedup_key import hashable_value
 from .fact_provenance import (
     both_known_backed_fact_qualified,
     same_producer_backed_fact_qualified,
@@ -762,7 +763,7 @@ def _bits_str_from_bytes_str(value: str | None) -> str | None:
         return value
 
 
-def cross_tier_transition(c: Change) -> tuple[str | None, str | None] | None:
+def cross_tier_transition(c: Change) -> tuple[object, object] | None:
     """The (old_value, new_value) pair to require agreement on across tiers.
 
     Returns ``None`` for a kind with no independent transition to disagree
@@ -772,6 +773,11 @@ def cross_tier_transition(c: Change) -> tuple[str | None, str | None] | None:
     matched on kind+symbol could silently drop a DWARF finding whose own
     old/new values genuinely disagreed with the AST finding's -- e.g. header
     evidence reporting a size change 64->128 while DWARF reports 64->96).
+
+    The caller keys on this result through a ``set``, so a value slot
+    returned unchanged goes through :func:`~abicheck.compare.dedup_key.
+    hashable_value` -- the annotation on those slots is not enforced and
+    real detectors do store lists in them.
     """
     if c.kind in (ChangeKind.STRUCT_FIELD_REMOVED, ChangeKind.TYPE_FIELD_REMOVED):
         return None
@@ -787,4 +793,4 @@ def cross_tier_transition(c: Change) -> tuple[str | None, str | None] | None:
             if new is not None
             else None,
         )
-    return old, new
+    return hashable_value(old), hashable_value(new)

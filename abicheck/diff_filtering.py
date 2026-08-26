@@ -1384,7 +1384,7 @@ def _dedup_cross_kind(
     itself, e.g. a stale header vs. inconsistent extractor evidence. Only indexes the AST-tier kinds this dedup ever looks up (``_DWARF_TO_AST_EQUIV``'s values) -- indexing every kind unconditionally crashed on a kind (e.g. ``PYTHON_STABLE_ABI_VIOLATION``) whose ``old_value``/``new_value`` is a list, unhashable for the transition-agreement set below (Codex review).
     """
     names = record_names or {}
-    _Transition = tuple[str | None, str | None] | None
+    _Transition = tuple[object, object] | None
     ast_findings: dict[tuple[str, str], set[_Transition]] = {}
     ast_field_findings: dict[tuple[str, str, str], set[_Transition]] = {}
     _relevant_ast = {ak for aks in _DWARF_TO_AST_EQUIV.values() for ak in aks}
