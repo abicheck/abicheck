@@ -543,10 +543,21 @@ def read_bundle_facts_archive(
             blob_cache[h] = raw
             return raw
 
-        per_library_snapshots = {
-            name: snapshot_from_dict(_json.loads(_cached_blob(h)))
-            for name, h in library_blobs.items()
-        }
+        # reader.read_blob() verifies the blob's *hash*, not its JSON
+        # *shape* -- a blob that legitimately decodes (valid zstd, valid
+        # JSON) to a list or scalar would otherwise reach
+        # snapshot_from_dict's own d.get(...) calls and raise a raw
+        # AttributeError instead of this module's normal error type
+        # (CodeRabbit review).
+        per_library_snapshots: dict[str, AbiSnapshot] = {}
+        for name, h in library_blobs.items():
+            blob = _json.loads(_cached_blob(h))
+            if not isinstance(blob, dict):
+                raise ValueError(
+                    f"bundle archive: blob for library {name!r} must decode "
+                    f"to a JSON object, got {type(blob).__name__}"
+                )
+            per_library_snapshots[name] = snapshot_from_dict(blob)
         manifest_blob = manifest.get("manifest_blob")
         instantiation_manifest = None
         if manifest_blob is not None:

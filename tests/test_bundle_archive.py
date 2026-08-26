@@ -25,6 +25,7 @@ through ``serialization.save_bundle_facts``/``load_bundle_facts``.
 
 from __future__ import annotations
 
+import errno
 import json
 import os
 import stat
@@ -326,6 +327,24 @@ class TestBundleArchiveWriterAtomicity:
         assert other_link.read_bytes() == original_bytes
         assert list(tmp_path.glob("*.tmp-*")) == []
 
+    @pytest.mark.skipif(sys.platform == "win32", reason="no os.mkfifo on Windows")
+    def test_rejects_a_non_regular_destination_before_any_write(
+        self, tmp_path: Path
+    ) -> None:
+        """A pre-existing FIFO/socket/device destination is rejected
+        outright rather than being silently replaced by os.replace() with
+        a regular zip file (Codex review) -- unlike the hard-link case,
+        there's no way to "write through" such a destination with this
+        writer's atomic-rename design."""
+        path = tmp_path / "bundle.archive.zip"
+        os.mkfifo(path)
+
+        with pytest.raises(SnapshotError, match="not a regular file"):
+            BundleArchiveWriter(path)
+
+        assert stat.S_ISFIFO(path.stat().st_mode)
+        assert list(tmp_path.glob("*.tmp-*")) == []
+
     @pytest.mark.skipif(sys.platform == "win32", reason="POSIX file mode semantics")
     def test_preserves_the_existing_destinations_file_mode(self, tmp_path: Path) -> None:
         path = tmp_path / "bundle.archive.zip"
@@ -411,3 +430,117 @@ class TestBundleArchiveReaderRejectsNonStoredMembers:
         with BundleArchiveReader.open(path) as reader:
             with pytest.raises(SnapshotError, match="safety limit"):
                 reader.read_blob(h, max_decoded_bytes=16)
+
+
+class TestBundleArchiveDeterminism:
+    """Codex review: writestr(name, data) with a bare string name stamps
+    each member with time.localtime() at write time -- content-identical
+    facts saved on different days must still produce byte-identical
+    archives."""
+
+    def _write(self, path: Path) -> None:
+        with BundleArchiveWriter(path) as writer:
+            h = writer.put_blob(b'{"a": 1}')
+            writer.write_manifest({"library_blobs": {"a.so": h}})
+
+    def test_identical_content_written_twice_produces_identical_bytes(
+        self, tmp_path: Path
+    ) -> None:
+        first = tmp_path / "first.zip"
+        second = tmp_path / "second.zip"
+        self._write(first)
+        self._write(second)
+        assert first.read_bytes() == second.read_bytes()
+
+    def test_member_timestamps_are_pinned_to_the_zip_epoch(self, tmp_path: Path) -> None:
+        path = tmp_path / "bundle.archive.zip"
+        self._write(path)
+        with zipfile.ZipFile(path) as zf:
+            for info in zf.infolist():
+                assert info.date_time == (1980, 1, 1, 0, 0, 0)
+
+
+class TestBundleArchiveWriterDurability:
+    """Codex review: ZipFile.close() only flushes to the OS buffer cache,
+    not to storage -- close() must fsync the completed temp file before
+    os.replace() and the parent directory afterward."""
+
+    def test_close_fsyncs_the_temp_file_before_replacing(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        path = tmp_path / "bundle.archive.zip"
+        fsynced_fds: list[int] = []
+        real_fsync = os.fsync
+
+        def _tracking_fsync(fd: int) -> None:
+            fsynced_fds.append(fd)
+            real_fsync(fd)
+
+        monkeypatch.setattr(os, "fsync", _tracking_fsync)
+        with BundleArchiveWriter(path) as writer:
+            h = writer.put_blob(b'{"a": 1}')
+            writer.write_manifest({"library_blobs": {"a.so": h}})
+
+        # At least one fsync for the temp file's own data, and (POSIX) one
+        # for the parent directory entry -- both best-effort in the narrow
+        # "unsupported" sense only, both real here since tmp_path is a real
+        # filesystem.
+        assert len(fsynced_fds) >= 1
+        assert path.exists()
+
+    def test_close_propagates_a_real_fsync_failure(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A genuine storage failure (not an unsupported-fs errno) must
+        abort the write rather than silently proceeding to os.replace()
+        with unconfirmed data."""
+        path = tmp_path / "bundle.archive.zip"
+
+        def _failing_fsync(fd: int) -> None:
+            raise OSError(errno.EIO, "simulated storage failure")
+
+        writer = BundleArchiveWriter(path)
+        h = writer.put_blob(b'{"a": 1}')
+        writer.write_manifest({"library_blobs": {"a.so": h}})
+        monkeypatch.setattr(os, "fsync", _failing_fsync)
+
+        with pytest.raises(OSError, match="simulated storage failure"):
+            writer.close()
+        assert not path.exists()
+
+
+class TestBundleArchiveReaderWrapsThirdPartyExceptions:
+    """Codex review: every deliberate failure in this module raises
+    SnapshotError, which the CLI boundary translates into a clean usage
+    error -- a truncated or hand-assembled archive must not surface as a
+    raw zipfile/zstandard traceback instead."""
+
+    def test_opening_a_corrupt_zip_raises_snapshot_error(self, tmp_path: Path) -> None:
+        path = tmp_path / "corrupt.zip"
+        # Passes sniff_bundle_archive_format()'s 4-byte magic check but is
+        # not a valid zip beyond that.
+        path.write_bytes(b"PK\x03\x04" + b"not a real zip" * 4)
+
+        with pytest.raises(SnapshotError, match="not a valid bundle archive"):
+            BundleArchiveReader.open(path)
+
+    def test_a_non_zstd_blob_payload_raises_snapshot_error(self, tmp_path: Path) -> None:
+        path = tmp_path / "bundle.archive.zip"
+        with BundleArchiveWriter(path) as writer:
+            h = writer.put_blob(b'{"a": 1}')
+            writer.write_manifest({"library_blobs": {"a.so": h}})
+
+        # Overwrite the blob member's bytes with something that is not a
+        # valid zstd frame at all (still ZIP_STORED, still under the
+        # original hash's member name).
+        member = f"blobs/{h}.json.zst"
+        with zipfile.ZipFile(path) as zf:
+            other = {n: zf.read(n) for n in zf.namelist() if n != member}
+        with zipfile.ZipFile(path, mode="w") as zf:
+            for n, data in other.items():
+                zf.writestr(n, data)
+            zf.writestr(member, b"not a zstd frame at all")
+
+        with BundleArchiveReader.open(path) as reader:
+            with pytest.raises(SnapshotError, match="failed to decompress"):
+                reader.read_blob(h)

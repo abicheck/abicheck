@@ -265,3 +265,33 @@ class TestBundleFactsArchiveFormat:
 
         with pytest.raises(ValueError, match="library_blobs"):
             load_bundle_facts(out, format="archive")
+
+    def test_load_rejects_a_library_blob_that_decodes_to_a_non_dict(
+        self, tmp_path: Path
+    ) -> None:
+        """reader.read_blob() verifies the blob's *hash*, not its JSON
+        *shape* -- a blob that legitimately decodes to a list or scalar
+        must raise this module's normal error type, not a raw
+        AttributeError out of snapshot_from_dict (CodeRabbit review)."""
+        from abicheck.storage.bundle_archive import BundleArchiveWriter
+
+        out = tmp_path / "bad_shape.bundlefacts.archive.zip"
+        with BundleArchiveWriter(out) as writer:
+            h = writer.put_blob(b"[1, 2, 3]")
+            writer.write_manifest({"library_blobs": {"a.so": h}})
+
+        with pytest.raises(ValueError, match="must decode to a JSON object"):
+            load_bundle_facts(out, format="archive")
+
+    def test_save_rejects_a_non_default_compression_for_archive_format(
+        self, tmp_path: Path
+    ) -> None:
+        """compression= is JSON-format-only -- an archive's blobs are
+        always zstd (ADR-059), so a non-default request against
+        format="archive" must be a usage error, not silently ignored
+        (CodeRabbit review)."""
+        facts = capture_bundle_facts(_per_library_snapshots(_old_metadata()))
+        with pytest.raises(ValueError, match="compression"):
+            save_bundle_facts(
+                facts, tmp_path / "x.zip", format="archive", compression="gzip"
+            )

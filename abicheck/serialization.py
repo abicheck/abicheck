@@ -1948,8 +1948,7 @@ def _validated_filename_map(raw: object) -> dict[str, str]:
 
 
 def load_bundle_facts(path: str | Path, *, format: str = "auto") -> BundleFacts:
-    """Load a BundleFacts; ``format="auto"`` also recognizes G40's archive,
-    see ``bundle_facts.maybe_read_bundle_facts_archive``."""
+    """Load a BundleFacts; ``format="auto"`` also recognizes G40's archive, see ``bundle_facts.maybe_read_bundle_facts_archive``."""
     from .bundle_facts import maybe_read_bundle_facts_archive
     from .snapshot_io import read_snapshot_text
 
@@ -1967,18 +1966,19 @@ def save_bundle_facts(
     compression: str = "auto",
 ) -> SnapshotWriteResult:
     """Save *facts*; ``format="archive"`` writes G40's zip container, see
-    ``bundle_facts.maybe_write_bundle_facts_archive``."""
+    ``bundle_facts.maybe_write_bundle_facts_archive`` (``compression`` is JSON-only)."""
     from .bundle_facts import maybe_write_bundle_facts_archive
     from .snapshot_io import SnapshotCompression, write_snapshot_text
 
+    if format == "archive" and compression != "auto":
+        raise ValueError('compression= is JSON-only; format="archive" is always zstd')
     archived = maybe_write_bundle_facts_archive(facts, path, format, snapshot_to_dict=snapshot_to_dict)
     if archived is not None:
         return archived
 
-    # sort_keys=True (matching no other writer here) would re-sort a
-    # manifest entry's own instantiations dict, whose order IS the C++
-    # template argument order -- corrupting a valid "T, U" contract into
-    # one matching no real symbol (Codex review).
+    # sort_keys=True (unlike other writers here) would re-sort a manifest
+    # entry's own instantiations dict, whose order IS the C++ template
+    # argument order -- corrupting a "T, U" contract (Codex review).
     return write_snapshot_text(
         json.dumps(bundle_facts_to_dict(facts), indent=2),
         path,

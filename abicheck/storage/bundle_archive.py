@@ -54,6 +54,7 @@ ratios than deflate at comparable speed.
 
 from __future__ import annotations
 
+import errno
 import hashlib
 import io
 import json
@@ -122,6 +123,31 @@ def _zstd_module() -> Any:
 
 def _blob_member_name(content_hash: str) -> str:
     return f"{_BLOB_PREFIX}{content_hash}{_BLOB_SUFFIX}"
+
+
+#: A fixed zip timestamp (the zip format's own epoch floor -- 1980-01-01,
+#: since DOS-style zip timestamps cannot represent anything earlier) used
+#: for every member this module writes. `ZipFile.writestr(name, data)`
+#: with a bare string `name` builds its own `ZipInfo` stamped with
+#: `time.localtime()` at write time -- so saving byte-identical facts on
+#: two different days would otherwise produce two different archives (and
+#: two different `SnapshotWriteResult.stored_sha256` values) for content
+#: that a caller has every reason to expect is reproducible (Codex
+#: review).
+_ZIP_EPOCH = (1980, 1, 1, 0, 0, 0)
+
+
+def _deterministic_zipinfo(name: str) -> zipfile.ZipInfo:
+    """A ``ZipInfo`` for member *name* with every reproducibility-affecting
+    field pinned, so the bytes this module writes depend only on the
+    member's own name and content -- never on when or by whom it was
+    written."""
+    info = zipfile.ZipInfo(name, date_time=_ZIP_EPOCH)
+    info.compress_type = zipfile.ZIP_STORED
+    # A fixed, portable permission bit (rw-r--r--) rather than whatever
+    # `ZipInfo`'s own platform-dependent default would otherwise stamp.
+    info.external_attr = 0o644 << 16
+    return info
 
 
 _ZIP_MAGIC_PREFIXES = (b"PK\x03\x04", b"PK\x05\x06")
@@ -220,7 +246,22 @@ class BundleArchiveWriter:
         self._existing_uid: int | None = None
         self._existing_gid: int | None = None
         if existing_stat is not None:
-            if stat.S_ISREG(existing_stat.st_mode) and existing_stat.st_nlink > 1:
+            if not stat.S_ISREG(existing_stat.st_mode):
+                # os.replace() would silently destroy a pre-existing FIFO/
+                # socket/device by installing a regular zip in its place --
+                # unlike snapshot_io._atomic_write_bytes (which can write
+                # straight through a non-regular destination, since it
+                # already holds the complete payload as one bytes object),
+                # this writer builds a zip incrementally into a temp file
+                # and only ever publishes via an atomic rename, so there is
+                # no way to "write through" such a destination at all
+                # (Codex review).
+                raise SnapshotError(
+                    f"{self._target}: already exists and is not a regular "
+                    "file (a FIFO, socket, or device) -- refusing to "
+                    "replace it with a zip archive."
+                )
+            if existing_stat.st_nlink > 1:
                 raise SnapshotError(
                     f"{self._target}: has {existing_stat.st_nlink} hard links -- "
                     "an atomic rewrite would silently desynchronize the other "
@@ -257,14 +298,16 @@ class BundleArchiveWriter:
         zstandard = _zstd_module()
         compressor = zstandard.ZstdCompressor(level=ZSTD_LEVEL)
         compressed = compressor.compress(payload)
-        self._zf.writestr(_blob_member_name(h), compressed)
+        self._zf.writestr(_deterministic_zipinfo(_blob_member_name(h)), compressed)
         self._written_hashes.add(h)
         return h
 
     def write_manifest(self, manifest: dict[str, Any]) -> None:
         if self._manifest_written:
             raise SnapshotError("BundleArchiveWriter.write_manifest() called twice")
-        self._zf.writestr(MANIFEST_MEMBER, json.dumps(manifest, indent=2))
+        self._zf.writestr(
+            _deterministic_zipinfo(MANIFEST_MEMBER), json.dumps(manifest, indent=2)
+        )
         self._manifest_written = True
 
     def close(self) -> None:
@@ -275,6 +318,27 @@ class BundleArchiveWriter:
                 "resulting archive would have no manifest.json member"
             )
         self._zf.close()
+        # Durability (Codex review, mirroring snapshot_io._atomic_write_bytes's
+        # own two-part fsync): ZipFile.close() only flushes to the OS's
+        # buffer cache via the underlying file object's own close(), which
+        # is not itself a durability guarantee -- a power loss between here
+        # and os.replace() could leave the temp file's data unflushed to
+        # actual storage even though close() reported success. Reopening
+        # the just-written temp file to fsync it is safe: fsync operates on
+        # the inode's dirty pages regardless of which fd wrote them, so a
+        # fresh read-only fd is sufficient. Best-effort only in the narrow
+        # sense of "this filesystem/platform doesn't support fsync"
+        # (EINVAL/ENOTSUP/EOPNOTSUPP); a real storage failure (ENOSPC, EIO,
+        # EROFS) must propagate rather than let os.replace() publish
+        # unconfirmed content over a known-good archive.
+        tmp_fd = os.open(self._tmp_path, os.O_RDONLY)
+        try:
+            os.fsync(tmp_fd)
+        except OSError as exc:
+            if exc.errno not in (errno.EINVAL, errno.ENOTSUP, errno.EOPNOTSUPP):
+                os.close(tmp_fd)
+                raise
+        os.close(tmp_fd)
         if self._existing_mode is not None:
             os.chmod(self._tmp_path, self._existing_mode)
         if (self._existing_uid is not None or self._existing_gid is not None) and hasattr(
@@ -297,6 +361,23 @@ class BundleArchiveWriter:
                 self._tmp_path.unlink(missing_ok=True)
                 raise
         os.replace(self._tmp_path, self._target)
+        # os.replace()'s directory-entry update is not itself durable
+        # across a crash until the *parent* directory is fsync'd too --
+        # the file-content fsync above only guarantees the new data
+        # reached storage, not that the rename pointing at it survives a
+        # power loss (mirrors snapshot_io._atomic_write_bytes's identical
+        # parent-directory fsync, including its narrow best-effort
+        # unsupported-filesystem carve-out). Never runs on a platform with
+        # no O_DIRECTORY concept (Windows).
+        if hasattr(os, "O_DIRECTORY"):
+            dir_fd = os.open(self._target.parent, os.O_RDONLY | os.O_DIRECTORY)
+            try:
+                os.fsync(dir_fd)
+            except OSError as exc:
+                if exc.errno not in (errno.EINVAL, errno.ENOTSUP, errno.EOPNOTSUPP):
+                    raise
+            finally:
+                os.close(dir_fd)
 
     def _abort(self) -> None:
         """Close the in-progress zip handle and discard its temp file --
@@ -330,7 +411,17 @@ class BundleArchiveReader:
 
     def __init__(self, path: str | Path) -> None:
         self._path = Path(path)
-        self._zf = zipfile.ZipFile(self._path, mode="r")
+        try:
+            self._zf = zipfile.ZipFile(self._path, mode="r")
+        except (zipfile.BadZipFile, OSError) as exc:
+            # Every deliberate failure in this module raises SnapshotError,
+            # which the CLI boundary translates into a clean usage error --
+            # a truncated or hand-assembled archive must not surface as a
+            # raw zipfile traceback instead (CodeRabbit review).
+            # sniff_bundle_archive_format() only checks the first 4 bytes,
+            # so a damaged archive routinely passes that detection and
+            # reaches this constructor.
+            raise SnapshotError(f"{self._path}: not a valid bundle archive: {exc}") from exc
 
     @classmethod
     def open(cls, path: str | Path) -> BundleArchiveReader:
@@ -441,19 +532,30 @@ class BundleArchiveReader:
             max_window_size=1 << _ZSTD_MAX_WINDOW_LOG
         )
         out = io.BytesIO()
-        with decompressor.stream_reader(io.BytesIO(compressed)) as reader:
-            while True:
-                chunk = reader.read(1024 * 1024)
-                if not chunk:
-                    break
-                out.write(chunk)
-                if out.tell() > max_decoded_bytes:
-                    raise SnapshotError(
-                        f"{self._path}: decompressed blob {content_hash_hex!r} "
-                        f"exceeds the {max_decoded_bytes} byte safety limit "
-                        "-- refusing to continue decompressing (possible "
-                        "decompression bomb, or a genuinely oversized blob)."
-                    )
+        try:
+            with decompressor.stream_reader(io.BytesIO(compressed)) as reader:
+                while True:
+                    chunk = reader.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    out.write(chunk)
+                    if out.tell() > max_decoded_bytes:
+                        raise SnapshotError(
+                            f"{self._path}: decompressed blob {content_hash_hex!r} "
+                            f"exceeds the {max_decoded_bytes} byte safety limit "
+                            "-- refusing to continue decompressing (possible "
+                            "decompression bomb, or a genuinely oversized blob)."
+                        )
+        except zstandard.ZstdError as exc:
+            # Not a SnapshotError already (this is the third-party
+            # decompressor's own exception type) -- a corrupted or
+            # non-zstd payload stored under a valid-looking hash-named
+            # member must still surface as this module's normal error
+            # type, not a raw zstandard traceback (CodeRabbit review).
+            raise SnapshotError(
+                f"{self._path}: blob {content_hash_hex!r} failed to "
+                f"decompress: {exc}"
+            ) from exc
         decoded = out.getvalue()
         actual_hash = content_hash(decoded)
         if actual_hash != content_hash_hex:

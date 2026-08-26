@@ -10,10 +10,11 @@ caching behavior, and their schemas/migrations, per ADR-061 D1. It answers
 ## Permitted imports
 
 Per ADR-061 D1, `storage/` may depend only on `model`. In practice, today,
-this package's one module (`bundle_archive.py`) depends on nothing
-first-party at all -- see that module's own docstring for why: the
-`BundleFacts`/`AbiSnapshot`-aware glue that would need a `model` import
-stays in `serialization.py` (still flat-root, not yet part of this
+this package's one module (`bundle_archive.py`) imports only
+`abicheck.errors` (`SnapshotError`, the project-wide error vocabulary) and
+no `model`/`compare` type at all -- see that module's own docstring for
+why: the `BundleFacts`/`AbiSnapshot`-aware glue that would need a `model`
+import stays in `serialization.py` (still flat-root, not yet part of this
 migration) rather than being pulled into this package prematurely, since
 `bundle_facts.py` itself cannot yet join `model` cleanly (a pre-existing
 `TYPE_CHECKING`-only coupling to `checker_types.DiffResult` would create a
