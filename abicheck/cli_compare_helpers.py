@@ -1229,15 +1229,14 @@ def _report_compare_result(
     # both stayed permanently unstamped even when --contract was
     # given. This must run before _render_output below serializes
     # result.changes, and mirrors the identical fix already applied to the
-    # MCP abi_compare tool (mcp_server.py) -- both share the same traversal
-    # (CodeRabbit review: hand-copying it here previously let one call site
-    # drift out of sync with the other).
+    # MCP abi_compare tool (mcp_server.py) -- both share the same traversal (CodeRabbit review: hand-copying it here previously let one call site drift out of sync with the other).
     if contract_evaluation:
         from .reporter import _finding_id
 
         stamp_scoped_result_findings(result, finding_id=_finding_id)
+    # Only the same-binary warning, not every pre-existing coverage_warnings entry ("no binary metadata"/detector-disabled reasons) -- those are deliberately absent from the one-line summary today (existing tests pin exactly zero extra lines).
     if fmt == ONELINE_FORMAT:
-        echo_coverage_warnings(result.coverage_warnings)
+        echo_coverage_warnings([w for w in result.coverage_warnings if "byte-identical" in w])
     _write_or_echo(
         output,
         _render_compare_report(

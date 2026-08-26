@@ -584,6 +584,43 @@ class TestNoteIfSameBinaryCompared:
         )
         assert "byte-identical" in result.output, result.output
 
+    def test_oneline_profile_still_omits_unrelated_coverage_warnings(
+        self, tmp_path
+    ):
+        """Codex review, fresh evidence: an earlier revision of the fix
+        above echoed *every* `coverage_warnings` entry in `--profile
+        quick`, not just the same-binary one -- breaking the pre-existing,
+        tested one-line contract for the common case of comparing two
+        JSON snapshots with no binary metadata (which appends a "no
+        binary metadata available" warning, unrelated to this feature).
+        Only the same-binary warning may ever reach the one-line output."""
+        from click.testing import CliRunner
+
+        from abicheck.cli import main
+        from abicheck.model import AbiSnapshot, Function, Visibility
+        from abicheck.serialization import snapshot_to_json
+
+        snap = AbiSnapshot(
+            library="libtest.so", version="1.0",
+            functions=[
+                Function(
+                    name="foo", mangled="_Z3foov", return_type="int",
+                    visibility=Visibility.PUBLIC,
+                )
+            ],
+        )
+        old_p = tmp_path / "old.json"
+        new_p = tmp_path / "new.json"
+        old_p.write_text(snapshot_to_json(snap), encoding="utf-8")
+        new_p.write_text(snapshot_to_json(snap), encoding="utf-8")
+
+        result = CliRunner().invoke(
+            main, ["compare", str(old_p), str(new_p), "--profile", "quick"]
+        )
+        assert result.exit_code == 0, result.output
+        assert result.output.strip().count("\n") == 0, result.output
+        assert "Warning:" not in result.output, result.output
+
     def test_native_compare_cli_hashes_through_a_multi_hop_linker_script_chain(
         self, tmp_path, monkeypatch
     ):
