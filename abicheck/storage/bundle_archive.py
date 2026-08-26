@@ -301,12 +301,10 @@ class BundleArchiveWriter:
             existing_stat = self._target.stat()
         except (FileNotFoundError, NotADirectoryError):
             # Only genuine absence is treated as "no pre-existing
-            # destination" -- any other OSError (Codex review, fresh
-            # evidence: a cyclic symlink raises ELOOP here) must propagate
-            # rather than be silently treated as absence, which would
-            # bypass the regular-file/hard-link/metadata-preservation
-            # checks below for a destination whose real type was never
-            # actually established. Mirrors
+            # destination" -- any other OSError (e.g. a cyclic symlink
+            # raising ELOOP) must propagate rather than be silently
+            # treated as absence, which would bypass the regular-file/
+            # hard-link/metadata-preservation checks below. Mirrors
             # `snapshot_io._atomic_write_bytes`'s own identical rule.
             existing_stat = None
         self._existing_mode: int | None = None
@@ -345,11 +343,10 @@ class BundleArchiveWriter:
         # opened separately by zipfile.ZipFile -- such a name in a
         # directory writable by another account could be pre-created as a
         # symlink, and `ZipFile(path, mode="w")` follows symlinks. This
-        # randomizes the name and opens it O_CREAT|O_EXCL, so the fd this
-        # class holds always names a file we just created, at a
+        # randomizes the name and opens it O_CREAT|O_EXCL, at a
         # umask-filtered 0o666 rather than tempfile.mkstemp's hardcoded
-        # 0600 (a brand-new archive under a typical umask must not be more
-        # restrictive than the plain-JSON path's ordinary `open()` mode).
+        # 0600 (must not be more restrictive than the plain-JSON path's
+        # ordinary `open()` mode).
         tmp_fd, self._tmp_path = _open_unique_temp(
             self._target.parent, f".{self._target.name}.", ".tmp"
         )
@@ -362,10 +359,9 @@ class BundleArchiveWriter:
         self._manifest_written = False
         #: The published archive's own size/sha256, computed from the still-
         #: private temp file right before `os.replace()` (see `close()`),
-        #: not by re-reading *path* afterward -- avoids a real TOCTOU where
-        #: a concurrent writer replacing the same destination in between
-        #: would make a later re-read describe someone else's write instead
-        #: of this one's (Codex review, fresh evidence). Set on success only.
+        #: not by re-reading *path* afterward -- avoids a TOCTOU where a
+        #: concurrent writer replacing the destination would make a later
+        #: re-read describe someone else's write. Set on success only.
         self.stored_sha256: str | None = None
         self.stored_size_bytes: int | None = None
 
@@ -541,15 +537,18 @@ class BundleArchiveWriter:
         """Close the in-progress zip handle and discard its temp file --
         *path* (if it already held a prior archive) is never touched.
 
-        `self._zf.close()` itself can raise (CodeRabbit review: ENOSPC/EIO
-        while writing the central directory) -- guarded so the temp file
-        is still unlinked either way rather than left behind next to an
-        untouched destination."""
+        `self._zf.close()` and `self._tmp_file.close()` can each raise
+        (ENOSPC/EIO) -- both nested in their own `finally` so the unlink
+        always runs regardless of which one fails (Codex review: a bare
+        `finally` around only the first close skipped the unlink if the
+        *second* close raised)."""
         try:
-            self._zf.close()
+            try:
+                self._zf.close()
+            finally:
+                if not self._tmp_file.closed:
+                    self._tmp_file.close()
         finally:
-            if not self._tmp_file.closed:
-                self._tmp_file.close()
             self._tmp_path.unlink(missing_ok=True)
 
     def __enter__(self) -> BundleArchiveWriter:

@@ -594,14 +594,56 @@ class TestBundleFactsArchiveFormat:
         )
         out = tmp_path / "too-many-duplicate-copies.bundlefacts.archive.zip"
 
-        # A cap big enough for one copy (the unique-bytes check alone
-        # would pass) but not for all five duplicate copies together.
+        # A cap big enough for one copy (~2987 bytes; the incremental
+        # unique-bytes check the loop itself now performs would pass --
+        # every one of these 5 names shares the identical content, so
+        # only one distinct payload is ever added to unique_payloads) but
+        # not for all five duplicate copies together (~14935 bytes).
         monkeypatch.setattr(
-            bundle_facts_module_local, "DEFAULT_MAX_BUNDLE_DECODED_BYTES", 500
+            bundle_facts_module_local, "DEFAULT_MAX_BUNDLE_DECODED_BYTES", 5000
         )
-        with pytest.raises(SnapshotError, match="exceed the 500"):
+        with pytest.raises(SnapshotError, match="once every duplicate"):
             save_bundle_facts(facts, out, format="archive")
         assert not out.exists()
+
+    def test_the_aggregate_cap_is_enforced_incrementally_during_serialization(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The aggregate-byte cap must be checked *while* distinct
+        snapshots are being serialized, not only after every one of them
+        has already been held in memory at once -- otherwise many large
+        distinct snapshots could consume far more memory than the cap
+        itself before the rejection ever fires (Codex review, fresh
+        evidence). Confirmed here by counting `snapshot_to_dict` calls: a
+        cap that rejects after the 2nd of 3 distinct snapshots must never
+        let the 3rd be serialized at all."""
+        import abicheck.bundle_facts as bundle_facts_module_local
+        from abicheck.serialization import snapshot_to_dict
+
+        metadata = {
+            f"lib{i}.so": _meta(soname=f"lib{i}.so", exports=[f"sym{i}"]) for i in range(3)
+        }
+        facts = BundleFacts(per_library_snapshots=_per_library_snapshots(metadata))
+
+        calls: list[str] = []
+
+        def _tracking_to_dict(snap: AbiSnapshot) -> dict[str, object]:
+            calls.append(snap.library)
+            return snapshot_to_dict(snap)
+
+        # Each real per-library blob here is ~2.7 KiB (per the sibling
+        # cap-shrinking test above) -- big enough to reject after the 2nd
+        # distinct snapshot but not the 1st.
+        monkeypatch.setattr(bundle_facts_module_local, "DEFAULT_MAX_BUNDLE_DECODED_BYTES", 4000)
+        out = tmp_path / "incremental-cap.bundlefacts.archive.zip"
+        with pytest.raises(SnapshotError, match="already exceeds"):
+            bundle_facts_module_local.write_bundle_facts_archive(
+                facts, out, snapshot_to_dict=_tracking_to_dict
+            )
+        assert not out.exists()
+        # Sorted by name (lib0.so, lib1.so, lib2.so): the cap trips on the
+        # 2nd, so the 3rd must never have been serialized at all.
+        assert calls == ["lib0.so", "lib1.so"]
 
     def test_save_rejects_a_write_whose_manifest_blob_alone_would_exceed_the_aggregate_cap(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

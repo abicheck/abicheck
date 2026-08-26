@@ -61,3 +61,17 @@
   surrounding `except OSError:` does not catch, so it escaped as a raw
   exception instead of this module's documented `SnapshotError`
   contract. Now bounded against the file's own size before seeking.
+
+- **G40 bundle archive: two more Codex review findings, both real, both
+  fixed.** (1) `write_bundle_facts_archive`'s aggregate-byte cap held
+  every serialized payload in `unique_payloads` before checking the
+  limit -- many large distinct snapshots (e.g. 100 x 100 MiB) could
+  consume far more memory than the cap itself before the rejection ever
+  fired. Now checked incrementally as each distinct payload is added, so
+  a bundle whose already-serialized content alone exceeds the cap is
+  rejected without serializing the rest. (2) `BundleArchiveWriter._abort()`'s
+  single `finally` around `self._zf.close()` skipped the temp-file
+  unlink when the *second* close -- `self._tmp_file.close()` -- itself
+  raised (ENOSPC/EIO), leaving a potentially large temp archive behind.
+  Now both closes are nested in their own `finally` so the unlink always
+  runs regardless of which one fails.

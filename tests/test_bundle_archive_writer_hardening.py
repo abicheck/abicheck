@@ -146,6 +146,30 @@ class TestBundleArchiveWriterCloseFailureCleanup:
         assert not path.exists()
         del h  # unused beyond establishing a non-empty archive
 
+    def test_a_failure_closing_the_tmp_file_itself_still_removes_it(
+        self, tmp_path: Path
+    ) -> None:
+        """Codex review, fresh evidence: `_abort()`'s original single
+        `finally` around only `self._zf.close()` skipped the unlink when
+        the *second* close -- `self._tmp_file.close()` -- itself raised.
+        Both closes must be nested in their own `finally` so the unlink
+        always runs regardless of which one fails."""
+        path = tmp_path / "bundle.archive.zip"
+        writer = BundleArchiveWriter(path)
+        writer.put_blob(b'{"a": 1}')
+
+        real_close = writer._tmp_file.close
+
+        def _failing_tmp_close() -> None:
+            real_close()
+            raise OSError(errno.EIO, "simulated I/O error closing tmp file")
+
+        writer._tmp_file.close = _failing_tmp_close  # type: ignore[method-assign]
+        with pytest.raises(OSError, match="simulated I/O error"):
+            writer._abort()
+        assert list(tmp_path.glob("*.tmp")) == []
+        assert not path.exists()
+
 
 class TestBundleArchiveWriterAvoidsPathBasedReopen:
     """A hostile actor sharing a non-sticky, writable directory could
