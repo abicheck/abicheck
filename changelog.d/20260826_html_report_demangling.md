@@ -89,3 +89,12 @@
   indistinguishable text. `_symbol_cell`'s rendering logic is now shared
   via a new `_abbr_symbol_text` helper, used by both `_symbol_cell` and
   the `affected_symbols` loop.
+- **Seventh follow-up (Codex review): the same ambiguity in
+  `old_value`/`new_value`.** A `SOURCE_TO_BINARY_MAPPING_CHANGED` finding
+  changing between two ABI-distinct linker names that demangle
+  identically rendered both value cells as identical text with neither
+  exact linker name recoverable -- the row's own primary symbol is the
+  source declaration label, not either mangled value, so there's no other
+  tooltip to fall back on. `old_val`/`new_val` now render through the
+  same `_abbr_symbol_text` helper instead of a bare `demangle_text` +
+  `html.escape`.

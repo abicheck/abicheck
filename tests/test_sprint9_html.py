@@ -926,6 +926,37 @@ class TestRealDemanglingThroughTheProductionChangeDataclass:
         assert "Foo::Foo()" in out
         assert "Bar::run()" in out
 
+    def test_old_and_new_value_preserve_mangled_identity(self) -> None:
+        """Codex review, fresh evidence: a SOURCE_TO_BINARY_MAPPING_CHANGED
+        finding changing between two ABI-distinct linker names that
+        demangle identically (C1/C2 constructor variants, both
+        `Foo::Foo()`) must not render both value cells as identical text
+        with the exact linker names gone -- the row's own primary symbol
+        is the source declaration label, not either mangled value, so
+        there's no other tooltip to recover them from."""
+        from abicheck.checker import Change, DiffResult, Verdict
+        from abicheck.checker_policy import ChangeKind
+
+        old_mangled, new_mangled = "_ZN3FooC1Ev", "_ZN3FooC2Ev"
+        change = Change(
+            kind=ChangeKind.SOURCE_TO_BINARY_MAPPING_CHANGED,
+            symbol="Foo::Foo",
+            description="Source-to-binary mapping changed",
+            old_value=old_mangled,
+            new_value=new_mangled,
+        )
+        result = DiffResult(
+            old_version="1.0",
+            new_version="2.0",
+            library="libtest.so.1",
+            changes=[change],
+            verdict=Verdict.BREAKING,
+        )
+        out = generate_html_report(result)
+        assert out.count("Foo::Foo()") == 2
+        assert '<abbr title="_ZN3FooC1Ev">Foo::Foo()</abbr>' in out
+        assert '<abbr title="_ZN3FooC2Ev">Foo::Foo()</abbr>' in out
+
     def test_default_demangles_affected_symbols(self) -> None:
         """Codex review: a finding's `affected_symbols` list (as
         `diff_cpp_patterns.py` populates) was rendered raw, so the default
