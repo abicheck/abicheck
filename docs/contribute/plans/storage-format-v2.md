@@ -94,9 +94,12 @@ and `BundleFacts` document is bit-for-bit unchanged.
 - **A0.5** The version axes of ADR-062 D2 are separate fields. Two fail
   closed — `package_format_version` (the reader may not locate the
   structures) and `comparison_contract_version` (the verdict could be
-  wrong), the latter also when the package does not state it — and the
-  remaining five are informational. Imported legacy snapshots preserve their
-  source schema/producer generation.
+  wrong) — and **both** also fail closed on a value the package does not
+  state validly: absent, malformed, non-integral or non-positive alike,
+  re-checked where the reader decides rather than trusted from the
+  deserializer. The remaining five are informational and parse defensively.
+  Imported legacy snapshots preserve their source schema/producer
+  generation.
 - **A0.6** Property-style tests state each primitive's contract as
   invariants (not only example cases), per the root `AGENTS.md`
   "Primitive-level property tests" guidance.

@@ -145,17 +145,30 @@ Exactly two axes fail closed, for two different reasons: a newer
 `package_format_version` means the reader may not be able to *locate* the
 package's structures at all, and a newer `comparison_contract_version` means
 comparing without understanding the change could produce a *wrong verdict*.
-`comparison_contract_version` also fails closed when the package does not
-state it, since unknown comparison semantics are exactly what that axis
-guards. The remaining five are informational to a reader that does not
-recognize them, which is what lets an optional display field ship without
-implying a new evidence recipe.
+**Both** also fail closed when the package does not state the axis validly —
+absent, malformed, non-integral or non-positive alike. An axis that exists to
+refuse unknown semantics cannot treat "unknown" as agreement, and that
+reasoning is symmetric: a package that never says what layout it has is no
+more parseable than one whose layout is too new. Neither axis is validated
+only by the deserializer; a reader must re-check both where it decides,
+because the version object is constructible directly.
 
-(An earlier draft of this paragraph said only `comparison_contract_version`
-fails closed, which contradicted the implementation — Codex review caught the
-disagreement. The prose was the wrong half: weakening the container-layout
-axis to match it would let a reader silently misparse a package whose layout
-it does not understand, which is a worse failure than refusing to read it.)
+The remaining five are informational to a reader that does not recognize
+them, which is what lets an optional display field ship without implying a
+new evidence recipe.
+
+(Three drafts of this paragraph were wrong in the same direction and each was
+caught by review. The first said only `comparison_contract_version` fails
+closed at all; the second granted that both do but kept the
+absent-value rule for the contract axis alone, so a consumer implementing the
+ADR could synthesize a current format version for a package whose layout is
+unknown; and the implementation itself had to be corrected twice before it
+matched — a negative version, then a fractional one, each slipping past the
+guard written for the previous case. Recorded rather than tidied away,
+because the repeated direction is the finding: it is always the
+container-layout axis that gets quietly weakened to match the narrower rule,
+and weakening it lets a reader silently misparse a package instead of
+refusing it.)
 
 Capability is stated explicitly rather than derived from schema
 history, and an imported legacy snapshot preserves its

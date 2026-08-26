@@ -124,6 +124,54 @@ class ObservationKind(enum.Enum):
     BUILD_UNIT = "build_unit"
 
 
+def _identity_text(value: Any, field_name: str) -> str:
+    """An identity-bearing field, rejected rather than coerced if not a string.
+
+    ``str()`` looks harmless on a field that is a string in every well-formed
+    document, and it is not: ``1`` and ``"1"`` are two distinct values in a
+    JSON document that both become ``"1"`` here, so two genuinely different
+    occurrences produce one key and :meth:`OccurrenceSet.add` drops the second
+    as an exact duplicate (Codex review). That is this module's one invariant
+    — never discard an observation — defeated by a type coercion at the
+    document boundary rather than by any logic in the set.
+
+    Rejecting matches what the neighbouring primitives already do with
+    malformed identity-bearing input: ``canonical_form`` refuses a non-string
+    mapping key, and ``FactAvailability.from_dict`` raises on an unknown
+    status rather than downgrading it. The informational version axes parse
+    defensively instead, and the distinction is deliberate — no decision reads
+    those, whereas everything here keys on these.
+    """
+    if not isinstance(value, str):
+        raise TypeError(
+            f"{field_name} must be a string, not {type(value).__name__} "
+            f"({value!r}); identity-bearing fields are never coerced, because "
+            "two distinct values sharing one string form would silently "
+            "collapse into one occurrence"
+        )
+    return value
+
+
+def _attribute_pair(pair: Any) -> tuple[str, str]:
+    """One ``(name, value)`` attribute row from a document.
+
+    The length is checked as well as the types: indexing ``pair[0]``/
+    ``pair[1]`` accepts a row of any length and silently ignores whatever
+    follows, which is the same "malformation read as a valid answer" shape as
+    the coercion above.
+    """
+    if isinstance(pair, (str, bytes)) or not isinstance(pair, Sequence):
+        raise TypeError(f"attribute row must be a two-element sequence, got {pair!r}")
+    if len(pair) != 2:
+        raise ValueError(
+            f"attribute row must have exactly two elements, got {len(pair)}: {pair!r}"
+        )
+    return (
+        _identity_text(pair[0], "attribute name"),
+        _identity_text(pair[1], "attribute value"),
+    )
+
+
 @functools.total_ordering
 @dataclass(frozen=True)
 class EntityId:
@@ -174,8 +222,10 @@ class EntityId:
     def from_dict(cls, data: Mapping[str, Any]) -> EntityId:
         return cls(
             kind=EntityKind(data["kind"]),
-            qualified_name=str(data["qualified_name"]),
-            discriminator=str(data.get("discriminator", "")),
+            qualified_name=_identity_text(data["qualified_name"], "qualified_name"),
+            discriminator=_identity_text(
+                data.get("discriminator", ""), "discriminator"
+            ),
         )
 
 
@@ -216,7 +266,15 @@ class OccurrenceId:
         object.__setattr__(
             self,
             "attributes",
-            tuple(sorted((str(k), str(v)) for k, v in self.attributes)),
+            tuple(
+                sorted(
+                    (
+                        _identity_text(k, "attribute name"),
+                        _identity_text(v, "attribute value"),
+                    )
+                    for k, v in self.attributes
+                )
+            ),
         )
 
     @property
@@ -278,10 +336,10 @@ class OccurrenceId:
         return cls(
             entity=EntityId.from_dict(data["entity"]),
             observation=ObservationKind(data["observation"]),
-            container=str(data.get("container", "")),
-            producer=str(data.get("producer", "")),
+            container=_identity_text(data.get("container", ""), "container"),
+            producer=_identity_text(data.get("producer", ""), "producer"),
             attributes=tuple(
-                (str(pair[0]), str(pair[1])) for pair in data.get("attributes", ())
+                _attribute_pair(pair) for pair in data.get("attributes", ())
             ),
         )
 

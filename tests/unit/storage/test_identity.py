@@ -875,3 +875,100 @@ class TestTheSemanticJudgementBelongsToTheCaller:
 
         assert len(conflicts) == 1
         assert {o.attribute("size") for o in conflicts[0].occurrences} == {"8", "16"}
+
+
+class TestIdentityFieldsAreRejectedNotCoerced:
+    """Codex review: `str()` at the document boundary destroyed multiplicity.
+
+    A document holding two occurrences whose `qualified_name` values are `1`
+    and `"1"` — two distinct JSON values — coerced both to `"1"`, produced one
+    key, and `OccurrenceSet.add` dropped the second as an exact duplicate.
+    This module's one invariant, defeated by a type coercion rather than by
+    anything in the set logic.
+
+    Rejecting matches the neighbouring primitives: `canonical_form` refuses a
+    non-string mapping key, and `FactAvailability.from_dict` raises on an
+    unknown status rather than downgrading it.
+    """
+
+    @staticmethod
+    def _row(name: object) -> dict[str, object]:
+        return {
+            "entity": {"kind": "function", "qualified_name": name},
+            "observation": "dwarf",
+        }
+
+    def test_the_reported_collapse_is_refused(self) -> None:
+        """The literal case from review: `1` and `"1"` in one document."""
+        with pytest.raises(TypeError, match="qualified_name"):
+            OccurrenceSet.from_dict({"occurrences": [self._row(1), self._row("1")]})
+
+    @pytest.mark.parametrize("value", [1, 1.0, True, None, ["x"], {"a": 1}])
+    @pytest.mark.parametrize(
+        "field_name", ["qualified_name", "discriminator", "container", "producer"]
+    )
+    def test_every_identity_bearing_field_refuses_a_non_string(
+        self, field_name: str, value: object
+    ) -> None:
+        row: dict[str, object] = {
+            "entity": {"kind": "function", "qualified_name": "f"},
+            "observation": "dwarf",
+        }
+        if field_name in {"qualified_name", "discriminator"}:
+            entity = dict(row["entity"])  # type: ignore[arg-type]
+            entity[field_name] = value
+            row["entity"] = entity
+        else:
+            row[field_name] = value
+
+        with pytest.raises(TypeError, match=field_name):
+            OccurrenceId.from_dict(row)
+
+    @pytest.mark.parametrize("value", [1, True, None, ["x"]])
+    def test_attribute_names_and_values_refuse_a_non_string(
+        self, value: object
+    ) -> None:
+        with pytest.raises(TypeError, match="attribute"):
+            OccurrenceId(
+                entity=EntityId(EntityKind.FUNCTION, "f"),
+                observation=ObservationKind.DWARF,
+                attributes=((value, "x"),),  # type: ignore[arg-type]
+            )
+        with pytest.raises(TypeError, match="attribute"):
+            OccurrenceId(
+                entity=EntityId(EntityKind.FUNCTION, "f"),
+                observation=ObservationKind.DWARF,
+                attributes=(("x", value),),  # type: ignore[arg-type]
+            )
+
+    @pytest.mark.parametrize("row", [["a"], ["a", "b", "c"], [], "ab"])
+    def test_a_malformed_attribute_row_is_refused(self, row: object) -> None:
+        """Indexing `pair[0]`/`pair[1]` accepted any length and ignored the rest.
+
+        Same shape as the coercion: a malformation read as a valid answer.
+        `"ab"` is included because a bare string is a `Sequence` of length two
+        whose elements are strings, so it would otherwise pass every check
+        while meaning something the producer never wrote.
+        """
+        with pytest.raises((TypeError, ValueError)):
+            OccurrenceId.from_dict(
+                {
+                    "entity": {"kind": "function", "qualified_name": "f"},
+                    "observation": "dwarf",
+                    "attributes": [row],
+                }
+            )
+
+    def test_a_well_formed_document_still_round_trips(self) -> None:
+        """The guard must not cost anything a real producer writes."""
+        original = elf_symbol_occurrence(
+            artifact_id="libfoo.so",
+            name="foo",
+            version="GLIBC_2.14",
+            default_version=True,
+            binding="global",
+            symbol_type="func",
+            visibility="default",
+        )
+
+        assert OccurrenceId.from_dict(original.to_dict()) == original
