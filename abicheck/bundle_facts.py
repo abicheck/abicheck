@@ -403,9 +403,8 @@ def write_bundle_facts_archive(
     # Sorted by name, not dict insertion order: two logically-equal
     # BundleFacts populated differently would else produce different
     # archive bytes. (a) Library-name-count cap, independent of the
-    # distinct-blob cap below (many names can share one blob) -- checked
-    # before the loop, else many names sharing one large snapshot would
-    # serialize it once per name first.
+    # distinct-blob cap below -- checked before the loop, else many names
+    # sharing one large snapshot would serialize it once per name first.
     if len(facts.per_library_snapshots) > DEFAULT_MAX_LIBRARY_COUNT:
         raise SnapshotError(
             f"{p}: writing this bundle's {len(facts.per_library_snapshots)} "
@@ -527,14 +526,13 @@ def write_bundle_facts_archive(
     }
     # A third cap: manifest.json's own reader-side size ceiling, never
     # covered above. Checked incrementally via iterencode(), not
-    # `json.dumps()` then `.encode("utf-8")`, which would fully
-    # materialize the string (and a second UTF-8 copy) first (Codex
-    # review). write_manifest() re-checks identically when writing the
-    # member below; checked here too so a reject happens before any blob
-    # write. A single oversized string value needs its own pre-check
-    # first, same reasoning as write_manifest()'s own docstring:
-    # iterencode() yields one whole escaped string as a single chunk, so
-    # the chunk-by-chunk loop below can't reject it on its own.
+    # `json.dumps()`+`.encode("utf-8")`, which would fully materialize
+    # the string first (Codex review). write_manifest() re-checks
+    # identically when writing the member; checked here too so a reject
+    # happens before any blob write. A single oversized string value
+    # needs its own pre-check first -- iterencode() yields one whole
+    # escaped string as a single chunk, so the loop below can't reject
+    # it on its own.
     oversized = oversized_raw_string(container_manifest, DEFAULT_MAX_MANIFEST_BYTES)
     if oversized is not None:
         _, oversized_bytes = oversized
@@ -561,25 +559,21 @@ def write_bundle_facts_archive(
         for h in sorted(unique_payloads):
             writer.put_blob(unique_payloads[h])
         writer.write_manifest(container_manifest)
-    # `writer.stored_sha256`/`writer.stored_size_bytes` are computed by
-    # BundleArchiveWriter.close() from the still-private temp file, before
-    # os.replace() publishes it -- not re-derived via a fresh `open(p,
-    # "rb")`/`p.stat()` after the `with` block: a concurrent writer
-    # publishing a *different* generation to the same destination in
-    # between could otherwise make the reported hash/size describe
-    # someone else's write, a real hazard for a receipt (Codex review).
+    # `writer.stored_sha256`/`writer.stored_size_bytes` come from
+    # BundleArchiveWriter.close()'s own still-private temp file, before
+    # os.replace() publishes it -- not re-derived via a fresh open()/
+    # stat() after the `with` block, which a concurrent writer's
+    # different generation could otherwise make describe (Codex review).
     assert writer.stored_sha256 is not None
     assert writer.stored_size_bytes is not None
     return SnapshotWriteResult(
         path=p,
         # NONE, not ZSTD: `compression` describes the *outer envelope*
-        # `detect_snapshot_compression()`/`read_snapshot_storage_info()`
-        # would independently discover by sniffing `path`'s own magic
-        # bytes -- and the envelope here is a ZIP (`PK\x03\x04`), which
-        # neither sniffer recognizes as a zstd frame. The zstd compression
-        # is real but internal, applied per-member to each
-        # `blobs/<hash>.json.zst` entry -- claiming ZSTD here would
-        # mislead a caller cross-checking against an independent sniff.
+        # `detect_snapshot_compression()` would independently discover by
+        # sniffing `path`'s own magic bytes -- a ZIP (`PK\x03\x04`), which
+        # neither sniffer recognizes as zstd. The zstd is real but internal
+        # (per-member), so claiming ZSTD here would mislead a caller
+        # cross-checking against an independent sniff.
         compression=SnapshotCompression.NONE,
         decoded_size_bytes=decoded_size_bytes,
         stored_size_bytes=writer.stored_size_bytes,
@@ -606,6 +600,16 @@ def read_bundle_facts_archive(
     from .bundle_manifest import manifest_from_dict
     from .errors import IncompatibleSnapshotSchemaError, SnapshotError
     from .storage.bundle_archive import BundleArchiveReader
+
+    def _load_blob_json(raw: bytes, description: str) -> Any:
+        # Mirrors read_manifest()'s own translation -- neither invalid
+        # JSON nor a RecursionError may surface raw here either (Codex).
+        try:
+            return _json.loads(raw)
+        except (UnicodeDecodeError, ValueError) as exc:
+            raise SnapshotError(f"{path}: {description} is not valid JSON: {exc}") from exc
+        except RecursionError as exc:
+            raise SnapshotError(f"{path}: {description} is too deeply nested to parse") from exc
 
     reader_cm = (
         BundleArchiveReader.from_open_file(_fp, path)
@@ -737,7 +741,7 @@ def read_bundle_facts_archive(
                 per_library_snapshots[name] = copy.deepcopy(cached_snapshot)
                 continue
             raw = _cached_blob(h)
-            blob = _json.loads(raw)
+            blob = _load_blob_json(raw, f"blob for library {name!r}")
             if not isinstance(blob, dict):
                 raise ValueError(
                     f"bundle archive: blob for library {name!r} must decode "
@@ -758,16 +762,12 @@ def read_bundle_facts_archive(
                     "bundle archive: 'manifest_blob' must be a content-hash "
                     f"string, got {type(manifest_blob).__name__}"
                 )
-            # _cached_blob() only charges a hash's raw bytes against
-            # total_decoded once, on its first fetch -- but json.loads()+
-            # manifest_from_dict() below always build a *fresh* object
-            # graph regardless of cache hit. On a hit (manifest_blob shares
-            # a hash with an already-fetched library blob) this is the same
-            # "duplicate materialization" the per-library-name loop above
-            # already re-charges for its own deep-copied AbiSnapshot --
-            # uncharged here would let a shared blob parse twice, billed
-            # once (Codex review, fresh evidence). The writer mirrors this
-            # exact accounting in its own aggregate-byte preflight.
+            # _cached_blob() only charges a hash's raw bytes once, on its
+            # first fetch -- but the decode below always builds a *fresh*
+            # object graph regardless of cache hit, so a shared hash's
+            # "duplicate materialization" must be re-charged here too, the
+            # same as the per-library-name loop above (Codex review). The
+            # writer mirrors this exact accounting in its own preflight.
             was_cached = manifest_blob in blob_cache
             raw_manifest = _cached_blob(manifest_blob)
             if was_cached:
@@ -783,7 +783,7 @@ def read_bundle_facts_archive(
                         "genuinely oversized bundle)."
                     )
                 total_decoded += copy_bytes
-            instantiation_manifest = manifest_from_dict(_json.loads(raw_manifest))
+            instantiation_manifest = manifest_from_dict(_load_blob_json(raw_manifest, "manifest_blob"))
         return BundleFacts(
             schema_version=bundle_facts_schema_version,
             variant_fingerprint=str(

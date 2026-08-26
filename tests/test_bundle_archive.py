@@ -746,6 +746,41 @@ class TestBundleArchiveReaderWrapsThirdPartyExceptions:
             with pytest.raises(SnapshotError, match="CRC-32"):
                 reader.read_blob(h)
 
+    def test_a_transient_io_failure_while_streaming_a_member_raises_snapshot_error(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A read failure partway through streaming a member (e.g. EIO on
+        a network filesystem) raises a raw `OSError` from `ZipExtFile.
+        read()` -- only `BadZipFile` was translated, so this escaped this
+        module's `SnapshotError` contract (Codex review, fresh evidence)."""
+        path = tmp_path / "bundle.archive.zip"
+        with BundleArchiveWriter(path) as writer:
+            h = writer.put_blob(b'{"a": 1}')
+            writer.write_manifest({"library_blobs": {"a.so": h}})
+
+        with BundleArchiveReader.open(path) as reader:
+            real_open = reader._zf.open
+
+            class _FailingRead:
+                def __init__(self, fp: object) -> None:
+                    self._fp = fp
+
+                def read(self, n: int) -> bytes:
+                    raise OSError("simulated transient I/O failure")
+
+                def __enter__(self) -> _FailingRead:
+                    return self
+
+                def __exit__(self, *exc_info: object) -> None:
+                    self._fp.__exit__(*exc_info)  # type: ignore[attr-defined]
+
+            def _tracking_open(name: str) -> object:
+                return _FailingRead(real_open(name))
+
+            monkeypatch.setattr(reader._zf, "open", _tracking_open)
+            with pytest.raises(SnapshotError, match="could not be read"):
+                reader.read_blob(h)
+
 
 class TestBundleArchiveReadBlobCompressedSlack:
     """Codex review: zstd frame/block overhead can make an incompressible

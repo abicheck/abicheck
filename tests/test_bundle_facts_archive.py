@@ -32,6 +32,7 @@ import pytest
 from abicheck.bundle_facts import BundleFacts, capture_bundle_facts
 from abicheck.bundle_manifest import InstantiationManifest, ManifestEntry
 from abicheck.elf_metadata import ElfImport, ElfMetadata, ElfSymbol
+from abicheck.errors import SnapshotError
 from abicheck.model import AbiSnapshot
 from abicheck.serialization import load_bundle_facts, save_bundle_facts
 
@@ -470,6 +471,51 @@ class TestBundleFactsArchiveFormat:
             writer.write_manifest({"library_blobs": {"a.so": h}})
 
         with pytest.raises(ValueError, match="must decode to a JSON object"):
+            load_bundle_facts(out, format="archive")
+
+    def test_load_translates_a_deeply_nested_library_blob(self, tmp_path: Path) -> None:
+        """A content-addressed library blob is just as reachable by a
+        hostile archive as manifest.json is -- a deeply nested payload
+        (`[[[...]]]`) blows Python's json decoder's own recursion budget,
+        which must not surface as a raw `RecursionError` (Codex review,
+        fresh evidence)."""
+        from abicheck.storage.bundle_archive import BundleArchiveWriter
+
+        out = tmp_path / "deeply_nested_blob.bundlefacts.archive.zip"
+        deeply_nested = ("[" * 10_000) + ("]" * 10_000)
+        with BundleArchiveWriter(out) as writer:
+            h = writer.put_blob(deeply_nested.encode("utf-8"))
+            writer.write_manifest({"library_blobs": {"a.so": h}})
+
+        with pytest.raises(SnapshotError, match="too deeply nested"):
+            load_bundle_facts(out, format="archive")
+
+    def test_load_translates_a_deeply_nested_manifest_blob(self, tmp_path: Path) -> None:
+        """Same as above, for the second blob-decode site (`manifest_blob`,
+        the `InstantiationManifest` payload)."""
+        from abicheck.storage.bundle_archive import BundleArchiveWriter
+
+        out = tmp_path / "deeply_nested_manifest_blob.bundlefacts.archive.zip"
+        deeply_nested = ("[" * 10_000) + ("]" * 10_000)
+        with BundleArchiveWriter(out) as writer:
+            h = writer.put_blob(deeply_nested.encode("utf-8"))
+            writer.write_manifest({"library_blobs": {}, "manifest_blob": h})
+
+        with pytest.raises(SnapshotError, match="too deeply nested"):
+            load_bundle_facts(out, format="archive")
+
+    def test_load_translates_invalid_json_in_a_library_blob(self, tmp_path: Path) -> None:
+        """Even ordinary malformed JSON (not just a recursion-limit
+        payload) in a blob must translate to this module's own error
+        vocabulary, not a raw `json.JSONDecodeError`."""
+        from abicheck.storage.bundle_archive import BundleArchiveWriter
+
+        out = tmp_path / "invalid_json_blob.bundlefacts.archive.zip"
+        with BundleArchiveWriter(out) as writer:
+            h = writer.put_blob(b"{not valid json")
+            writer.write_manifest({"library_blobs": {"a.so": h}})
+
+        with pytest.raises(SnapshotError, match="not valid JSON"):
             load_bundle_facts(out, format="archive")
 
     def test_save_rejects_a_non_default_compression_for_archive_format(

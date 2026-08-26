@@ -204,9 +204,8 @@ def open_regular_file_for_format_sniff(
         raise SnapshotError(f"Cannot read {p}: {exc}") from exc
     fmt = _classify_prefix(prefix)
     if fmt == "json" and not prefix.startswith(_JSON_ENVELOPE_MAGIC_PREFIXES):
-        # A prefixed archive's byte-0 magic misses it -- see looks_like_
-        # zip_from_tail()'s docstring. Skipped for a recognized gzip/zstd
-        # envelope -- see _JSON_ENVELOPE_MAGIC_PREFIXES's own comment.
+        # A prefixed archive's byte-0 magic misses it (see looks_like_zip_
+        # from_tail()); skipped for a recognized gzip/zstd envelope.
         from .bundle_archive_cd_guard import looks_like_zip_from_tail
 
         if looks_like_zip_from_tail(fp):
@@ -391,11 +390,9 @@ class BundleArchiveWriter:
         if self._manifest_written:
             raise SnapshotError("BundleArchiveWriter.write_manifest() called twice")
         # Enforced here too, not only by write_bundle_facts_archive()'s own
-        # preflight -- read_manifest() rejects anything over this limit
-        # unconditionally. A single oversized string is pre-checked first,
-        # then the rest streams via iterencode() chunk-by-chunk rather than
-        # `json.dumps()` first, so an oversized manifest never fully
-        # materializes (see oversized_raw_string()'s own docstring).
+        # preflight. A single oversized string is pre-checked first, then
+        # the rest streams via iterencode() chunk-by-chunk rather than
+        # `json.dumps()`, so an oversized manifest never fully materializes.
         from .bundle_archive_json_guard import oversized_raw_string
 
         oversized = oversized_raw_string(manifest, DEFAULT_MAX_MANIFEST_BYTES)
@@ -547,9 +544,8 @@ class BundleArchiveReader:
     def __init__(self, path: str | Path, *, _fp: Any | None = None) -> None:
         self._path = Path(path)
         # Opened once; the identical fd is handed to both the preflight
-        # below and `zipfile.ZipFile` -- reopening *path* would let a
-        # concurrent atomic replacement swap in a different generation.
-        # `_fp` extends the same guarantee up from `from_open_file`.
+        # below and `zipfile.ZipFile` -- reopening would let a concurrent
+        # atomic replacement swap in a different generation.
         if _fp is not None:
             # Rewound inside the guarded try below, not here -- a seek()
             # failure outside any handler that closes it would leak fp.
@@ -655,8 +651,7 @@ class BundleArchiveReader:
                 "member)."
             )
         # The zip "encrypted" bit makes `ZipFile.open()` raise a bare
-        # `RuntimeError`, not the `BadZipFile` translated below -- checked
-        # here since `RuntimeError` is too generic to narrow in an except.
+        # `RuntimeError` -- too generic to narrow in an except, so checked here.
         if info.flag_bits & 0x1:
             raise SnapshotError(
                 f"{self._path}: member {name!r} is encrypted -- not a "
@@ -684,6 +679,11 @@ class BundleArchiveReader:
             raise SnapshotError(
                 f"{self._path}: member {name!r} failed its CRC-32 check -- "
                 "the archive is corrupted or was tampered with."
+            ) from exc
+        except OSError as exc:
+            # A transient I/O failure (e.g. EIO) must not escape raw either.
+            raise SnapshotError(
+                f"{self._path}: member {name!r} could not be read: {exc}"
             ) from exc
         return out.getvalue()
 
