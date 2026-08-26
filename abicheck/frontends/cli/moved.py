@@ -34,6 +34,8 @@ rebinds nothing the real caller reads.
 
 from __future__ import annotations
 
+import types
+
 MOVED: dict[str, str] = {
     # Snapshot write path (moved earlier, to `cli_buildsource`).
     "_classify_missing_layers": "abicheck.cli_buildsource",
@@ -125,3 +127,35 @@ MOVED: dict[str, str] = {
     "_warn_stub_flags": "abicheck.compat.cli",
     "_write_affected_list": "abicheck.compat.cli",
 }
+
+
+class _FacadeModule(types.ModuleType):
+    """A module that refuses to have a moved name *set* on it.
+
+    ``abicheck.cli`` resolves every name in :data:`MOVED` lazily through a
+    module-level ``__getattr__``, which only fires while the name is absent
+    from that module's globals -- so anything that assigns one permanently
+    shadows the lazy lookup with a frozen reference. A ``monkeypatch.setattr``
+    against the facade is enough: it records the lazily-resolved original and
+    re-assigns it on undo. Every later caller then reads that stale original,
+    and every later test that patches the *true* owner is silently ignored.
+    Not hypothetical -- it landed as an order-dependent CI failure two test
+    files away from the one that caused it. Raising turns the whole class of
+    leak into an error at the point of the mistake, naming the owner to patch.
+    """
+
+    def __setattr__(self, name: str, value: object) -> None:
+        owner = MOVED.get(name)
+        if owner is not None:
+            raise AttributeError(
+                f"{self.__name__}.{name} is a compatibility alias resolved "
+                f"lazily from {owner!r}; setting it here would shadow that "
+                f"lookup for the rest of the process. "
+                f"Patch {owner}.{name} instead."
+            )
+        super().__setattr__(name, value)
+
+
+def install_facade_guard(module: types.ModuleType) -> None:
+    """Make ``module`` reject assignment of any name :data:`MOVED` owns."""
+    module.__class__ = _FacadeModule

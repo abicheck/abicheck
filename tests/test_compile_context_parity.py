@@ -1400,7 +1400,7 @@ def test_compare_set_inputs_applies_config_compile_block(
     block must apply it (not silently drop it, and no longer just warn) --
     the fan-out now threads the L2 context (fix: whole-product-bundle
     known-gap entry, AGENTS.md)."""
-    import abicheck.cli as cli_mod
+    import abicheck.frontends.cli.commands.compare as cli_mod
 
     old_dir = tmp_path / "old"
     new_dir = tmp_path / "new"
@@ -1437,7 +1437,7 @@ def test_compare_set_inputs_forwards_config_include_dirs(
     configured include root could fail or parse incompletely despite the
     compile: block otherwise being applied.
     """
-    import abicheck.cli as cli_mod
+    import abicheck.frontends.cli.commands.compare as cli_mod
 
     old_dir = tmp_path / "old"
     new_dir = tmp_path / "new"

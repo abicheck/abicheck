@@ -357,7 +357,7 @@ class TestCompareReleaseErrorPaths:
         fake = [self._matrix_change()]
         old_m, new_m = tmp_path / "o.json", tmp_path / "n.json"
         with patch(
-            "abicheck.cli._load_probe_matrix_changes", return_value=fake,
+            "abicheck.frontends.cli.runtime._load_probe_matrix_changes", return_value=fake,
         ):
             result, verdict = cli_compare_release._collect_matrix_result(
                 old_m, new_m, "strict_abi", "COMPATIBLE",
@@ -383,7 +383,7 @@ class TestCompareReleaseErrorPaths:
         fake = [self._matrix_change()]
         old_m, new_m = tmp_path / "o.json", tmp_path / "n.json"
         with patch(
-            "abicheck.cli._load_probe_matrix_changes", return_value=fake,
+            "abicheck.frontends.cli.runtime._load_probe_matrix_changes", return_value=fake,
         ):
             _, verdict = cli_compare_release._collect_matrix_result(
                 old_m, new_m, "strict_abi", "COMPATIBLE",
@@ -411,7 +411,7 @@ class TestCompareReleaseErrorPaths:
         fake = [self._matrix_change()]
         old_m, new_m = tmp_path / "o.json", tmp_path / "n.json"
         with patch(
-            "abicheck.cli._load_probe_matrix_changes", return_value=fake,
+            "abicheck.frontends.cli.runtime._load_probe_matrix_changes", return_value=fake,
         ):
             _, verdict = cli_compare_release._collect_matrix_result(
                 old_m, new_m, "strict_abi", "COMPATIBLE",
@@ -439,7 +439,7 @@ class TestCompareReleaseErrorPaths:
         fake = [self._matrix_change()]
         old_m, new_m = tmp_path / "o.json", tmp_path / "n.json"
         with patch(
-            "abicheck.cli._load_probe_matrix_changes", return_value=fake,
+            "abicheck.frontends.cli.runtime._load_probe_matrix_changes", return_value=fake,
         ):
             result, verdict = cli_compare_release._collect_matrix_result(
                 old_m, new_m, "strict_abi", "COMPATIBLE",

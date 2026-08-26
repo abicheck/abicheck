@@ -797,7 +797,7 @@ def _collect_matrix_result(
     pack overriding e.g. ``cxx_standard_floor_raised`` must apply here
     identically, not only to the per-library comparisons.
     """
-    from .cli import _load_probe_matrix_changes
+    from .frontends.cli.runtime import _load_probe_matrix_changes
 
     matrix_changes = _load_probe_matrix_changes(probe_matrix_old, probe_matrix_new)
     if not matrix_changes:

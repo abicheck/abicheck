@@ -49,7 +49,7 @@ import click
 from . import __version__ as _abicheck_version, deadline
 from .compat.cli import compat_group
 from .frontends.cli import help as cli_help
-from .frontends.cli.moved import MOVED
+from .frontends.cli.moved import MOVED, install_facade_guard
 from .frontends.cli.runtime import _AbicheckGroup
 
 __all__ = ["main"]
@@ -89,6 +89,9 @@ def __getattr__(name: str) -> Any:
 
         return getattr(importlib.import_module(owner), name)
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+install_facade_guard(sys.modules[__name__])
 
 
 # ---------------------------------------------------------------------------

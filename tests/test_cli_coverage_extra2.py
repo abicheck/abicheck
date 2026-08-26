@@ -298,7 +298,6 @@ class TestWriteSnapshotOutput:
         capsys: pytest.CaptureFixture[str],
     ) -> None:
         """G21.7: a requested layer that comes back empty triggers a loud warning."""
-        import abicheck.cli as cli_mod
         import abicheck.cli_buildsource as cbs_mod
 
         snap = AbiSnapshot(library="lib.so", version="1.0")
@@ -310,8 +309,10 @@ class TestWriteSnapshotOutput:
             pass  # leave build_source None; the patched helper drives the warning
 
         monkeypatch.setattr(cbs_mod, "embed_build_source", _fake_embed)
+        # ADR-061 Phase 4: the owner is cli_buildsource; assigning a moved
+        # name on the `abicheck.cli` facade shadows its lazy lookup process-wide.
         monkeypatch.setattr(
-            cli_mod,
+            cbs_mod,
             "_missing_requested_evidence_layers",
             lambda pack, mode: ["L4", "L5"],
         )
@@ -433,7 +434,6 @@ class TestClassifyMissingLayers:
         self, tmp_path, monkeypatch, capsys
     ) -> None:
         """The dump warning must not tell users to install tools that already ran."""
-        import abicheck.cli as cli_mod
         import abicheck.cli_buildsource as cbs_mod
         from abicheck.buildsource.model import (
             CoverageStatus,
@@ -456,8 +456,10 @@ class TestClassifyMissingLayers:
             s.build_source = pack
 
         monkeypatch.setattr(cbs_mod, "embed_build_source", _fake_embed)
+        # ADR-061 Phase 4: the owner is cli_buildsource; assigning a moved
+        # name on the `abicheck.cli` facade shadows its lazy lookup process-wide.
         monkeypatch.setattr(
-            cli_mod,
+            cbs_mod,
             "_missing_requested_evidence_layers",
             lambda p, mode: ["L4_source_abi", "L5_source_graph"],
         )

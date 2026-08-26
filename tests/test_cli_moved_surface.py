@@ -102,3 +102,65 @@ def test_facade_declares_all_and_stays_small() -> None:
     source = pathlib.Path(cli.__file__).read_text(encoding="utf-8")
     assert cli.__all__ == ["main"]
     assert len(source.splitlines()) < 150
+
+
+class TestFacadeRejectsMovedNameAssignment:
+    """The lazy facade must fail loudly when a moved name is *assigned*.
+
+    ``abicheck.cli.__getattr__`` only fires while the name is absent from the
+    module's globals, so any assignment -- a ``monkeypatch.setattr`` against
+    the facade included, since undo re-assigns the value it read -- freezes a
+    stale reference for the rest of the process and silently defeats every
+    later patch of the true owner. This shipped once as an order-dependent CI
+    failure in a test file two removes from the one that caused it.
+    """
+
+    def test_assigning_a_moved_name_raises_and_names_the_owner(self) -> None:
+        import abicheck.cli as cli_mod
+
+        with pytest.raises(AttributeError) as excinfo:
+            cli_mod._dispatch_release_compare = lambda *a, **k: None
+        message = str(excinfo.value)
+        assert "abicheck.frontends.cli.commands.compare" in message
+        assert "Patch " in message
+
+    def test_a_name_the_facade_owns_is_still_assignable(self) -> None:
+        """The guard is scoped to moved names -- it is not a frozen module."""
+        import abicheck.cli as cli_mod
+
+        try:
+            cli_mod._probe_not_a_moved_name = 1
+            assert cli_mod._probe_not_a_moved_name == 1
+        finally:
+            del cli_mod._probe_not_a_moved_name
+
+    def test_no_test_module_patches_a_moved_name_on_the_facade(self) -> None:
+        """The static half: nothing in the suite targets the facade by name."""
+        import re
+
+        offenders: list[str] = []
+        for path in sorted(pathlib.Path(__file__).parent.glob("test_*.py")):
+            text = path.read_text(encoding="utf-8")
+            aliases = set(re.findall(r"import abicheck\.cli as (\w+)", text))
+            aliases |= set(re.findall(r"from abicheck import cli as (\w+)", text))
+            if "from abicheck import cli\n" in text:
+                aliases.add("cli")
+            for alias in aliases:
+                for name in re.findall(
+                    rf"setattr\(\s*{alias}\s*,\s*[\"'](\w+)[\"']", text
+                ):
+                    if name in MOVED:
+                        offenders.append(f"{path.name}: {alias}.{name}")
+                for name in re.findall(
+                    rf"patch\.object\(\s*{alias}\s*,\s*[\"'](\w+)[\"']", text
+                ):
+                    if name in MOVED:
+                        offenders.append(f"{path.name}: {alias}.{name}")
+            # The string-target form, which no alias scan can see.
+            for name in re.findall(r"[\"']abicheck\.cli\.(\w+)[\"']", text):
+                if name in MOVED:
+                    offenders.append(f"{path.name}: abicheck.cli.{name}")
+        assert not offenders, (
+            "patch the owner named in MOVED, not the abicheck.cli facade: "
+            + ", ".join(offenders)
+        )

@@ -35,7 +35,7 @@ from typing import TYPE_CHECKING, Any
 
 import click
 
-from . import cli
+from . import cli_resolve
 from .cli_audit import echo_pattern_modulations
 from .cli_compare_fold import (
     _fold_scoped_compat_into_text as _fold_scoped_compat_into_text,
@@ -1627,14 +1627,13 @@ def run_compare(
             compiler_path=compiler_path, compiler_prefix=compiler_prefix,
             compiler_option_tokens=compiler_option_tokens,
         )
-        # Dirs the config appended past the CLI -I roots (mirrors the
-        # single-pair path's `config_includes` split below): must survive a
-        # per-library-pair `--old-include`/`--new-include` override, which
-        # otherwise fully replaces `includes` for that side.
+        # Dirs the config appended past the CLI -I roots (mirrors the single-pair
+        # `config_includes` split below): must survive a per-library-pair
+        # `--old/new-include` override, which otherwise replaces `includes`.
         directory_config_includes = tuple(directory_includes[len(includes) :])
-        # Via the ``cli`` module (not a by-name import) so a test that
-        # monkeypatches ``abicheck.cli._dispatch_release_compare`` is honoured.
-        cli._dispatch_release_compare(
+        # Off the owner, never via ``abicheck.cli`` (see install_facade_guard).
+        from .frontends.cli.commands.compare import _dispatch_release_compare
+        _dispatch_release_compare(
             ctx,
             old_dir=old_input, new_dir=new_input,
             headers=headers, includes=directory_includes,
@@ -1787,15 +1786,15 @@ def run_compare(
     # script) drives format detection, metadata, and dependency analysis.
     # Through the ``cli`` module so a monkeypatch on ``abicheck.cli._normalize_binary_input``
     # is honoured (pre-split resolution semantics); the name is re-exported there.
-    old_input, old_fmt = cli._normalize_binary_input(old_input)
-    new_input, new_fmt = cli._normalize_binary_input(new_input)
+    old_input, old_fmt = cli_resolve._normalize_binary_input(old_input)
+    new_input, new_fmt = cli_resolve._normalize_binary_input(new_input)
     # Same linker-script resolution for the paths --used-by/--required-symbol
     # scoping will parse — these were captured before the inline-embed rewrite
     # above may have replaced old_input/new_input with a temporary snapshot, so
     # they need their own normalization rather than inheriting it from old_input/
     # new_input (which, in that case, no longer point at the original library).
-    used_by_old_input, _ = cli._normalize_binary_input(used_by_old_input)
-    used_by_new_input, _ = cli._normalize_binary_input(used_by_new_input)
+    used_by_old_input, _ = cli_resolve._normalize_binary_input(used_by_old_input)
+    used_by_new_input, _ = cli_resolve._normalize_binary_input(used_by_new_input)
     _reject_manifest_non_elf(old_manifest_obj, new_manifest_obj, old_fmt, new_fmt)
     _reject_debug_format_for_non_elf(effective_debug_format, old_fmt, new_fmt)
     _warn_ignored_flags(
