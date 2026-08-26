@@ -494,6 +494,67 @@ def test_diff_touches_outside_only_mutate_falls_back_on_a_headerless_binary_mark
     assert gate.diff_touches_outside_only_mutate(diff, _ONLY_MUTATE_TWO) is True
 
 
+def test_hunk_file_targets_reads_the_bare_path_form() -> None:
+    """Plain `diff -u file1 file2` (and `git diff --no-prefix`) emit
+    `--- file.py` / `+++ file.py` with no `a/`/`b/` prefix at all —
+    `_hunks()` requires that prefix and yields nothing for this shape."""
+    diff = "--- old/file.py\n+++ new/file.py\n@@ -1,0 +2,1 @@\n+    pass\n"
+    assert gate._hunk_file_targets(diff) == {"old/file.py", "new/file.py"}
+    # Pin why: _hunks() itself really does see nothing here.
+    assert list(gate._hunks(diff)) == []
+
+
+def test_hunk_file_targets_strips_a_gnu_diff_timestamp_suffix() -> None:
+    """Real `diff -u` output tab-separates a timestamp after the path."""
+    diff = (
+        "--- old/file.py\t2024-01-01 10:00:00.000000000 +0000\n"
+        "+++ new/file.py\t2024-01-01 10:00:01.000000000 +0000\n"
+        "@@ -1,0 +2,1 @@\n+    pass\n"
+    )
+    assert gate._hunk_file_targets(diff) == {"old/file.py", "new/file.py"}
+
+
+def test_hunk_file_targets_still_strips_the_a_b_prefix_when_present() -> None:
+    diff = (
+        "--- a/abicheck/diff_types.py\n+++ b/abicheck/diff_types.py\n"
+        "@@ -1,0 +2,1 @@\n+    pass\n"
+    )
+    assert gate._hunk_file_targets(diff) == {"abicheck/diff_types.py"}
+
+
+def test_diff_lacks_git_headers_for_its_hunks_detects_a_bare_path_mixed_diff() -> None:
+    """A diff mixing one properly-headed entry with a bare-path (no `a/`/
+    `b/` prefix) headerless section — real output of plain `diff -u` or
+    `git diff --no-prefix`, invisible to `_hunks()` itself regardless of
+    whether a `diff --git` header exists anywhere (Codex review, PR #877,
+    ninth round on this same check)."""
+    diff = (
+        "diff --git a/abicheck/diff_types.py b/abicheck/diff_types.py\n"
+        "--- a/abicheck/diff_types.py\n+++ b/abicheck/diff_types.py\n"
+        "@@ -1,0 +2,1 @@\n+    pass\n"
+        "--- tests/conftest.py\n+++ tests/conftest.py\n"
+        "@@ -1,0 +2,1 @@\n+    pass\n"
+    )
+    assert gate.diff_lacks_git_headers_for_its_hunks(diff) is True
+    # Pin why: _hunks() alone sees only the a/b-prefixed entry.
+    assert {
+        p for old, new, _, _ in gate._hunks(diff) for p in (old, new) if p is not None
+    } == {"abicheck/diff_types.py"}
+
+
+def test_diff_touches_outside_only_mutate_falls_back_on_a_bare_path_mixed_diff() -> (
+    None
+):
+    diff = (
+        "diff --git a/abicheck/diff_types.py b/abicheck/diff_types.py\n"
+        "--- a/abicheck/diff_types.py\n+++ b/abicheck/diff_types.py\n"
+        "@@ -1,0 +2,1 @@\n+    pass\n"
+        "--- tests/conftest.py\n+++ tests/conftest.py\n"
+        "@@ -1,0 +2,1 @@\n+    pass\n"
+    )
+    assert gate.diff_touches_outside_only_mutate(diff, _ONLY_MUTATE_TWO) is True
+
+
 def test_mutant_run_scope_is_none_when_a_shared_test_fixture_is_touched() -> None:
     """The scenario `--require-baseline` alone cannot rule out: a production
     module and a *shared* test fixture both change, but the fixture doesn't

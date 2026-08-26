@@ -299,14 +299,62 @@ def _binary_marker_paths(diff_text: str) -> set[str]:
     return paths
 
 
+def _hunk_file_targets(diff_text: str) -> set[str]:
+    """Every ``--- ``/``+++ `` hunk-header target this diff names, whether or
+    not it carries git's own ``a/``/``b/`` prefix.
+
+    `_hunks()` deliberately requires the ``a/``/``b/`` prefix before trusting
+    a ``--- ``/``+++ `` line as naming a real path — correct for its own
+    job (feeding `parse_changed_lines`/`parse_removed_lines`'s per-line
+    attribution, where a bare, unprefixed target would be genuinely
+    ambiguous to resolve against the repo tree) — but that means a bare-path
+    unified-diff header (``--- file.py`` / ``+++ file.py``, with no ``a/``/
+    ``b/`` at all — real output of plain ``diff -u file1 file2``, or of
+    ``git diff --no-prefix``) yields *nothing* from `_hunks()`: both sides
+    read `None`, and the line-635 guard skips the hunk entirely (Codex
+    review, PR #877, ninth round on this same predicate — the eighth
+    round's fix covered a headerless *binary* marker; this is a headerless
+    *text* hunk whose header shape itself, not its absence, is what defeats
+    `_hunks()`). This function exists purely to answer "is there a file
+    identity here at all" for `diff_lacks_git_headers_for_its_hunks`'s own
+    safety comparison, not to resolve one precisely, so it accepts the bare
+    form too — stripping a leading ``a/``/``b/`` when present, keeping the
+    bare path otherwise, and (matching real GNU diff output) trimming a
+    trailing ``\\t<timestamp>`` some ``--- ``/``+++ `` lines carry.
+    """
+    old_target: str | None = None
+    new_target: str | None = None
+    targets: set[str] = set()
+    for line in diff_text.splitlines():
+        if line.startswith("diff --git "):
+            old_target = new_target = None
+            continue
+        if line.startswith("--- "):
+            raw = line[4:].split("\t", 1)[0].strip()
+            old_target = None if raw == "/dev/null" else raw
+            continue
+        if line.startswith("+++ "):
+            raw = line[4:].split("\t", 1)[0].strip()
+            new_target = None if raw == "/dev/null" else raw
+            continue
+        if old_target is None and new_target is None:
+            continue
+        if _HUNK.match(line):
+            for target in (old_target, new_target):
+                if target is not None:
+                    prefix = target[:2]
+                    targets.add(target[2:] if prefix in ("a/", "b/") else target)
+    return targets
+
+
 def diff_lacks_git_headers_for_its_hunks(diff_text: str) -> bool:
     """True when some hunk's (or binary marker's) file isn't named by any
     ``diff --git`` header.
 
     A "headerless" unified diff — e.g. produced by plain ``diff -u`` rather
     than ``git diff``, or a hand-assembled/stripped patch file passed via
-    ``--diff-file`` — still parses fine under `_hunks()` (which keys off the
-    ``--- ``/``+++ `` file markers, not ``diff --git``), so
+    ``--diff-file`` — still parses fine under `_hunk_file_targets()` (which
+    keys off the ``--- ``/``+++ `` file markers, not ``diff --git``), so
     `diff_touched_only_mutate_modules` can still name a touched
     ``only_mutate`` module from it. But `diff_touched_paths` (and
     `diff_has_unparseable_git_header`) can only ever see a path named by a
@@ -320,20 +368,18 @@ def diff_lacks_git_headers_for_its_hunks(diff_text: str) -> bool:
     (Codex review, PR #877, seventh round on this same predicate — the
     sixth round's fix closed a diff with *zero* headers; this is a diff
     with *some*, just not covering every hunk). Fixed by comparing the
-    file set each reader actually sees: every path `_hunks()` names must
+    file set each reader actually sees: every path a real hunk names must
     also appear in `diff_touched_paths()`'s header-derived set, or a real
     hunk exists that the header-based reader — and therefore
     `diff_touches_outside_only_mutate` — cannot see at all. A hunk isn't
     the only content shape carrying file identity, though: a headerless
     binary-file diff has no ``@@`` hunk either, so `_binary_marker_paths`
-    is folded into the same comparison (eighth round).
+    is folded into the same comparison (eighth round); nor is git's own
+    ``a/``/``b/``-prefixed hunk-header spelling the only shape a real hunk
+    can carry, so this reads targets via `_hunk_file_targets` rather than
+    `_hunks()` directly, to also catch a bare-path header (ninth round).
     """
-    hunk_paths: set[str] = set()
-    for old, new, _, _ in _hunks(diff_text):
-        if old is not None:
-            hunk_paths.add(old)
-        if new is not None:
-            hunk_paths.add(new)
+    hunk_paths = _hunk_file_targets(diff_text)
     hunk_paths |= _binary_marker_paths(diff_text)
     if not hunk_paths:
         return False
