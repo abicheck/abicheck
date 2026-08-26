@@ -486,3 +486,91 @@ class TestBundleArchivePreflightRejectsInPlaceGrowth:
         )
         with pytest.raises(SnapshotError, match="changed size while being opened"):
             BundleArchiveReader.open(path)
+
+
+class TestBundleArchivePreflightFailsClosedOnIoErrors:
+    """A transient I/O failure partway through this preflight (fstat(),
+    or any seek()/read() while locating the EOCD/ZIP64 record/central
+    directory) must not be treated as "skip the check, trust ZipFile" --
+    an attacker able to trigger such a failure at the right moment could
+    otherwise bypass every entry-count/byte-size bound this preflight
+    exists to enforce entirely (Codex review, fresh evidence)."""
+
+    def test_a_failing_fstat_raises_instead_of_skipping_the_guard(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import abicheck.storage.bundle_archive_cd_guard as cd_guard_module
+
+        path = tmp_path / "bundle.archive.zip"
+        with BundleArchiveWriter(path) as writer:
+            h1 = writer.put_blob(b'{"a": 1}')
+            h2 = writer.put_blob(b'{"a": 2}')
+            writer.write_manifest({"library_blobs": {"a.so": h1, "b.so": h2}})
+
+        # Simulate os.fstat() raising -- reproduces directly against
+        # `reject_absurd_central_directory()`, the load-bearing unit for
+        # this fix.
+        def _failing_fstat(fd: int) -> os.stat_result:
+            raise OSError(errno.EIO, "simulated transient I/O error")
+
+        with open(path, "rb") as f:
+            monkeypatch.setattr(cd_guard_module.os, "fstat", _failing_fstat)
+            with pytest.raises(SnapshotError, match="could not stat the archive"):
+                cd_guard_module.reject_absurd_central_directory(f, path, max_entries=1)
+
+    def test_a_failing_fstat_on_the_reader_itself_raises_snapshot_error(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """End-to-end pin: opening a real archive through
+        `BundleArchiveReader` while `os.fstat()` fails must surface
+        `SnapshotError`, not silently construct `zipfile.ZipFile` with no
+        bound applied at all (reproduced against the pre-fix code: a
+        two-entry archive opened past a one-entry cap when this `fstat()`
+        alone raised)."""
+        import abicheck.storage.bundle_archive_cd_guard as cd_guard_module
+
+        path = tmp_path / "bundle.archive.zip"
+        with BundleArchiveWriter(path) as writer:
+            h1 = writer.put_blob(b'{"a": 1}')
+            h2 = writer.put_blob(b'{"a": 2}')
+            writer.write_manifest({"library_blobs": {"a.so": h1, "b.so": h2}})
+
+        # os.fstat() is a single, process-wide function -- the *first*
+        # real call inside BundleArchiveReader.__init__ is the explicit-
+        # open path's own regular-file classification check, not the
+        # guard's; the guard's own initial fstat() is the *second* call.
+        real_fstat = os.fstat
+        calls = 0
+
+        def _failing_on_second_call(fd: int) -> os.stat_result:
+            nonlocal calls
+            calls += 1
+            if calls == 2:
+                raise OSError(errno.EIO, "simulated transient I/O error")
+            return real_fstat(fd)
+
+        monkeypatch.setattr(cd_guard_module.os, "fstat", _failing_on_second_call)
+        with pytest.raises(SnapshotError, match="could not stat the archive"):
+            BundleArchiveReader.open(path)
+
+    def test_a_failing_read_while_scanning_actual_records_raises_snapshot_error(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The second, independent OSError fallback -- reading the
+        actual central-directory bytes to count real records -- must
+        also fail closed, not just the initial fstat()."""
+        import abicheck.storage.bundle_archive_cd_guard as cd_guard_module
+
+        path = tmp_path / "bundle.archive.zip"
+        with BundleArchiveWriter(path) as writer:
+            h = writer.put_blob(b'{"a": 1}')
+            writer.write_manifest({"library_blobs": {"a.so": h}})
+
+        def _failing_count(*a: object, **kw: object) -> int:
+            raise OSError(errno.EIO, "simulated transient I/O error")
+
+        monkeypatch.setattr(
+            cd_guard_module, "_actual_central_directory_entry_count", _failing_count
+        )
+        with pytest.raises(SnapshotError, match="could not read the actual central"):
+            BundleArchiveReader.open(path)

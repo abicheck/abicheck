@@ -217,3 +217,22 @@
   `SnapshotError` contract. Now the rewind happens inside that same
   guarded block, so a failure there is translated and the fd is closed
   like every other failure path in this constructor.
+
+- **G40 bundle archive: a real central-directory-guard bypass (P1) from
+  Codex review, fresh evidence.** `reject_absurd_central_directory()`
+  treated an `OSError` from its own `fstat()`/`seek()`/`read()` calls as
+  "the check couldn't run, trust `zipfile.ZipFile`" -- returning `None`
+  (or, from two later fallbacks, the file's own size) instead of
+  rejecting. That is correct for "the EOCD signature itself can't be
+  found in the tail" (a genuinely truncated/non-zip file, handled
+  separately without raising), but wrong for an I/O failure partway
+  through: a transient error (or one an attacker can trigger
+  deliberately) at exactly that moment skipped every entry-count/
+  central-directory-byte-size bound this preflight exists to enforce,
+  letting `zipfile.ZipFile` eagerly parse an unbounded central directory
+  right after. Reproduced: a two-entry archive opened past a one-entry
+  cap when the guard's own `fstat()` alone raised. Now every one of the
+  three `OSError` fallbacks in this function raises `SnapshotError`
+  instead -- the function's return type narrows from `int | None` to
+  `int` accordingly, and the caller's now-impossible `None` case was
+  removed too.

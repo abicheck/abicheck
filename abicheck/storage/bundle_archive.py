@@ -590,7 +590,7 @@ class BundleArchiveReader:
             # in-place one -- the file could still grow before ZipFile's
             # scan below (reproduced). Re-checked to narrow that window;
             # see reject_absurd_central_directory's own docstring.
-            if validated_size is not None and os.fstat(fp.fileno()).st_size != validated_size:
+            if os.fstat(fp.fileno()).st_size != validated_size:
                 raise SnapshotError(
                     f"{self._path}: changed size while being opened -- "
                     "refusing to parse a central directory that may no "

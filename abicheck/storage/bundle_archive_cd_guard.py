@@ -85,7 +85,7 @@ def _actual_central_directory_entry_count(
     return count
 
 
-def reject_absurd_central_directory(f: Any, path: Path, *, max_entries: int) -> int | None:
+def reject_absurd_central_directory(f: Any, path: Path, *, max_entries: int) -> int:
     """Reject *path* if its central directory claims more than *max_entries*
     entries or `_MAX_CENTRAL_DIRECTORY_BYTES` -- read directly from the EOCD
     (and, when present, the ZIP64 EOCD locator/record), without invoking
@@ -99,41 +99,55 @@ def reject_absurd_central_directory(f: Any, path: Path, *, max_entries: int) -> 
     own open swap in a different generation, bypassing every guard here.
     Left at its own read position on return.
 
-    Returns the file's own size as observed at the *start* of this check
-    (or `None` if even that couldn't be determined) -- the caller re-
-    fstat()s immediately before constructing `zipfile.ZipFile` and rejects
-    a mismatch, since sharing one fd closes a *path-substitution* race but
-    not an *in-place content* one: another writer with access to this
-    same inode could still grow the file between this check returning and
-    `ZipFile`'s own independent, unbounded scan from the (by-then-larger)
-    current end of file (Codex review, fresh evidence, reproduced: a
-    one-entry file grown to four entries after this check returned still
-    had all four parsed by `ZipFile` despite a three-entry limit). This
-    narrows that window to the two adjacent statements at the call site
-    rather than closing it outright -- true immutability would need a
-    stable, separately-materialized copy of the archive bytes, a much
-    larger change than this preflight's own scope.
+    Returns the file's own size as observed at the *start* of this check --
+    the caller re-fstat()s immediately before constructing `zipfile.
+    ZipFile` and rejects a mismatch, since sharing one fd closes a
+    *path-substitution* race but not an *in-place content* one: another
+    writer with access to this same inode could still grow the file
+    between this check returning and `ZipFile`'s own independent,
+    unbounded scan from the (by-then-larger) current end of file (Codex
+    review, fresh evidence, reproduced: a one-entry file grown to four
+    entries after this check returned still had all four parsed by
+    `ZipFile` despite a three-entry limit). This narrows that window to
+    the two adjacent statements at the call site rather than closing it
+    outright -- true immutability would need a stable, separately-
+    materialized copy of the archive bytes, a much larger change than
+    this preflight's own scope.
 
-    Best-effort only for "the EOCD itself can't be found/read" (a
-    genuinely truncated/non-zip file) -- `zipfile.ZipFile`'s own error is
-    authoritative there. The ZIP64 EOCD locator is inspected
-    *unconditionally*, not only when the standard EOCD's own
-    `total_entries`/`cd_size` fields overflow to their sentinel values
-    (`0xFFFF`/`0xFFFFFFFF`): CPython's own `zipfile._EndRecData` always
-    looks for a locator immediately preceding the EOCD and, when a valid
-    one is found, always prefers its record's values -- regardless of
-    whether the standard EOCD's fields happen to signal an overflow. A
-    hostile archive can therefore leave small, sentinel-free values in the
-    standard EOCD while a real ZIP64 locator/record right behind it names
-    an oversized directory; gating the locator lookup on the sentinel
-    would let that straight through this preflight (Codex review, fresh
-    evidence). A sentinel set with no locator to back it up, or a locator
-    pointing at no valid record, is still rejected outright either way.
+    Best-effort *only* for "the EOCD signature itself can't be found in
+    the tail" (a genuinely truncated/non-zip file, checked below without
+    any exception involved) -- `zipfile.ZipFile`'s own error is
+    authoritative there. An I/O failure (`OSError`) partway through this
+    preflight -- `fstat()`, or any of the `seek()`/`read()` calls below --
+    is a different case and fails *closed*: it means this function cannot
+    determine whether the archive is safe to hand to `zipfile.ZipFile` at
+    all, and treating that as "skip the check" would let a transient I/O
+    error (or one an attacker can trigger deliberately) bypass every
+    bound below entirely (Codex review, fresh evidence: reproduced a
+    two-entry archive opening past a one-entry cap when `fstat()` alone
+    raised). Raises `SnapshotError` instead.
+
+    The ZIP64 EOCD locator is inspected *unconditionally*, not only when
+    the standard EOCD's own `total_entries`/`cd_size` fields overflow to
+    their sentinel values (`0xFFFF`/`0xFFFFFFFF`): CPython's own `zipfile.
+    _EndRecData` always looks for a locator immediately preceding the
+    EOCD and, when a valid one is found, always prefers its record's
+    values -- regardless of whether the standard EOCD's fields happen to
+    signal an overflow. A hostile archive can therefore leave small,
+    sentinel-free values in the standard EOCD while a real ZIP64 locator/
+    record right behind it names an oversized directory; gating the
+    locator lookup on the sentinel would let that straight through this
+    preflight (Codex review, fresh evidence). A sentinel set with no
+    locator to back it up, or a locator pointing at no valid record, is
+    still rejected outright either way.
     """
     try:
         size = os.fstat(f.fileno()).st_size
-    except OSError:
-        return None
+    except OSError as exc:
+        raise SnapshotError(
+            f"{path}: could not stat the archive to bound its central "
+            f"directory before parsing it: {exc}"
+        ) from exc
     tail_len = min(size, _EOCD_SEARCH_WINDOW_BYTES)
     try:
         f.seek(size - tail_len)
@@ -227,8 +241,16 @@ def reject_absurd_central_directory(f: Any, path: Path, *, max_entries: int) -> 
                     )
             total_entries = int.from_bytes(record[32:40], "little")
             cd_size = int.from_bytes(record[40:48], "little")
-    except OSError:
-        return size
+    except OSError as exc:
+        # An I/O failure partway through this preflight's own seek()/
+        # read() calls -- not "no EOCD found in the tail" (handled above
+        # without raising) -- fails closed for the identical reason the
+        # initial fstat() does: this function can no longer vouch for the
+        # archive being safe to hand to zipfile.ZipFile unbounded.
+        raise SnapshotError(
+            f"{path}: could not read the archive to bound its central "
+            f"directory before parsing it: {exc}"
+        ) from exc
     # Where CPython's own zipfile._RealGetContents() actually seeks for
     # the central directory: `start_dir = offset_cd + concat`, where
     # `concat = eocd_location - size_cd - offset_cd` -- the claimed
@@ -273,8 +295,12 @@ def reject_absurd_central_directory(f: Any, path: Path, *, max_entries: int) -> 
             actual_entries = _actual_central_directory_entry_count(
                 f, cd_offset=cd_start, cd_size=cd_size, max_entries=max_entries
             )
-        except OSError:
-            return size
+        except OSError as exc:
+            # Same fail-closed reasoning as the two OSError handlers above.
+            raise SnapshotError(
+                f"{path}: could not read the actual central directory to "
+                f"bound its entry count before parsing it: {exc}"
+            ) from exc
         if actual_entries > max_entries:
             raise SnapshotError(
                 f"{path}: central directory actually contains more than "
