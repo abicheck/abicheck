@@ -1177,18 +1177,15 @@ def _run_baseline_compare(
     # Codex review: stamp metadata so the same-binary warning below fires
     # here too (a no-op for JSON/Perl). Best-effort (mocked resolve_input
     # tests may pass a path with no real file -- all-or-nothing). Hash
-    # through a GNU ld linker script to its resolved target -- the same
-    # binary resolve_input() already followed above -- so a script vs. its
-    # target DSO still reads as byte-identical (Codex review).
-    from .binary_utils import resolve_linker_script
-
-    def _hash_target(p: Path) -> Path:
-        t, is_ld = resolve_linker_script(p)
-        return t if is_ld and t is not None else p
+    # through the full GNU ld linker-script chain to its final resolved
+    # target -- the same binary resolve_input() already followed above --
+    # so a (possibly multi-hop) script vs. its target DSO still reads as
+    # byte-identical (Codex review).
+    from .binary_utils import resolve_linker_script_chain
 
     try:
-        old_meta = collect_metadata(_hash_target(baseline))
-        new_meta = collect_metadata(_hash_target(binary))
+        old_meta = collect_metadata(resolve_linker_script_chain(baseline))
+        new_meta = collect_metadata(resolve_linker_script_chain(binary))
     except OSError:
         pass
     else:

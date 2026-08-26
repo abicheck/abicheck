@@ -124,6 +124,40 @@ def test_scan_against_linker_script_and_its_target_warns() -> None:
         assert any("byte-identical" in w for w in warnings), payload
 
 
+def test_scan_against_a_multi_hop_linker_script_chain_warns() -> None:
+    """Follow-up (Codex review): a linker script can itself point at
+    another linker script -- `resolve_input()` follows the whole chain
+    recursively, so hashing must too, not just one hop."""
+    with CliRunner().isolated_filesystem() as tmp_dir:
+        real_so = Path(tmp_dir) / "libfoo.so.1.2.3"
+        real_so.write_bytes(b"\x7fELF" + b"\x00" * 200)
+        middle_script = Path(tmp_dir) / "libfoo.so.1"
+        middle_script.write_text("INPUT(libfoo.so.1.2.3)\n")
+        outer_script = Path(tmp_dir) / "libfoo.so"
+        outer_script.write_text("INPUT(libfoo.so.1)\n")
+        snap = AbiSnapshot(library="libfoo.so", version="1.0", functions=[])
+        out_path = Path(tmp_dir) / "scan.json"
+
+        with mock.patch.object(dumper_mod, "dump", mock.MagicMock(return_value=snap)):
+            result = CliRunner().invoke(
+                main,
+                [
+                    "scan",
+                    str(real_so),
+                    "--against",
+                    str(outer_script),
+                    "--format",
+                    "json",
+                    "-o",
+                    str(out_path),
+                ],
+            )
+        assert result.exit_code == 0, result.output
+        payload = json.loads(out_path.read_text())
+        warnings = payload["diff"].get("coverage_warnings", [])
+        assert any("byte-identical" in w for w in warnings), payload
+
+
 def test_scan_against_distinct_binaries_does_not_warn() -> None:
     """Negative control: two genuinely different binaries must not trip
     the warning, and the summary must not even carry the key."""

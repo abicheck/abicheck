@@ -43,3 +43,18 @@
   differently-written scripts targeting the same DSO) went unrecognized.
   The metadata stamp now resolves each operand through the same GNU ld
   linker-script following before hashing.
+- **Fourth follow-up (Codex review, two findings): a multi-hop linker-script
+  chain, and the typed `CompareRequest`/Python API path, still didn't
+  warn.** The single-hop resolution the third follow-up added missed a
+  linker script pointing at *another* linker script (e.g. a dev symlink ->
+  a soname script -> the real versioned file) -- `resolve_input()` follows
+  the whole chain recursively via its own self-call, so hashing needed the
+  identical multi-hop behavior. New shared `binary_utils.
+  resolve_linker_script_chain()` loops until no further hop resolves
+  (bounded, to guard against a pathological cycle), used by both
+  `cli_scan_baseline._run_baseline_compare` and, separately,
+  `service_compare_pipeline.classify_compare_pair` -- the shared
+  typed-API/Python-API compare path, which had the identical single-hop-vs-
+  original-operand gap `compare`'s own CLI path never had (it stamps
+  metadata from the CLI's own already-resolved input, not from the request
+  object).

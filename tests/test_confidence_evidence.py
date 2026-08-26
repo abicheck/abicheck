@@ -519,3 +519,34 @@ class TestNoteIfSameBinaryCompared:
         runner = CliRunner()
         result = runner.invoke(main, ["compare", str(so_path), str(so_path)])
         assert "byte-identical" in result.stdout, result.stdout
+
+    def test_typed_compare_request_hashes_through_a_linker_script(
+        self, tmp_path, monkeypatch
+    ):
+        """Follow-up (Codex review): the typed ``CompareRequest``/
+        ``run_compare_request`` path -- shared by the Python API and any
+        other Tier-2 caller -- collected metadata from the caller's
+        original operand path, not the artifact ``resolve_side_snapshot()``
+        actually resolved through. A GNU ld linker script named as one side
+        against its own resolved target DSO on the other therefore never
+        warned, even though both sides resolve to the same binary."""
+        from unittest.mock import MagicMock
+
+        from abicheck import dumper as dumper_mod
+        from abicheck.api_types import CompareRequest, InputSpec
+        from abicheck.service_compare_pipeline import run_compare_request
+
+        real_so = tmp_path / "libfoo.so.1"
+        real_so.write_bytes(b"\x7fELF" + b"\x00" * 200)
+        script_so = tmp_path / "libfoo.so"
+        script_so.write_text("INPUT(libfoo.so.1)\n")
+        snap = AbiSnapshot(library="libfoo.so", version="1.0", functions=[])
+        monkeypatch.setattr(dumper_mod, "dump", MagicMock(side_effect=[snap, snap]))
+
+        request = CompareRequest(
+            old=InputSpec.of(real_so), new=InputSpec.of(script_so)
+        )
+        result = run_compare_request(request)
+        assert any("byte-identical" in w for w in result.diff.coverage_warnings), (
+            result.diff.coverage_warnings
+        )

@@ -481,8 +481,20 @@ def classify_compare_pair(
     if layer_coverage_rows:
         result.layer_coverage = layer_coverage_rows
     attach_evidence_metrics(result, evidence_metrics, extra_changes or [], quiet=True)
-    result.old_metadata = service.collect_metadata(required_path(request.old, "old"))
-    result.new_metadata = service.collect_metadata(required_path(request.new, "new"))
+    # Hash through the full GNU ld linker-script chain to its final resolved
+    # target -- resolve_side_snapshot() already followed the identical chain
+    # to produce `old`/`new` above -- so a (possibly multi-hop) script vs.
+    # its target DSO given as the other `CompareRequest` side still reads as
+    # byte-identical (Codex review, fresh evidence; mirrors the same fix on
+    # `cli_scan_baseline._run_baseline_compare`).
+    from .binary_utils import resolve_linker_script_chain
+
+    result.old_metadata = service.collect_metadata(
+        resolve_linker_script_chain(required_path(request.old, "old"))
+    )
+    result.new_metadata = service.collect_metadata(
+        resolve_linker_script_chain(required_path(request.new, "new"))
+    )
     note_if_same_binary_compared(result)
 
     # P0.4 follow-up (P2 review, discussion_r3787839902): `DiffResult.
