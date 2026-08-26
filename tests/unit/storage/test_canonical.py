@@ -11,6 +11,7 @@ invariant under sequence order. Everything here tests one half of that.
 from __future__ import annotations
 
 import json
+import os
 
 import pytest
 from hypothesis import given, strategies as st
@@ -895,3 +896,65 @@ class TestTheDecisionPointRejectsNonIntegralVersions:
             check_reader_compatibility(sanitized).readable
             == check_reader_compatibility(direct).readable
         )
+
+
+class TestSurrogateEscapedContentIsHashable:
+    """Codex review: a real POSIX path could make a package unaddressable.
+
+    A filesystem path carrying a non-UTF-8 byte decodes through
+    `surrogateescape` into a lone surrogate — `os.fsdecode(b"caf\\xe9")` is
+    `"caf\\udce9"` — and encoding that to UTF-8 raises `UnicodeEncodeError`.
+    The failure was asymmetric, which is what made it worse than a refusal:
+    `canonical_json` accepted the value, so a document could be produced that
+    `semantic_digest` could not address.
+    """
+
+    #: A real path shape, not a synthetic code point: a latin-1 byte in a
+    #: POSIX filename, decoded the way `os` decodes every path it hands back.
+    SURROGATE_PATH = os.fsdecode(b"/src/caf\xe9.h")
+
+    def test_a_surrogate_escaped_path_can_be_digested(self) -> None:
+        assert semantic_digest({"path": self.SURROGATE_PATH}).startswith("sha256:")
+
+    def test_the_digest_is_stable_across_calls(self) -> None:
+        again = os.fsdecode(b"/src/caf\xe9.h")
+
+        assert semantic_digest({"path": self.SURROGATE_PATH}) == semantic_digest(
+            {"path": again}
+        )
+
+    def test_it_does_not_collide_with_the_ascii_spelling(self) -> None:
+        """Escaping must stay injective — the whole point of a content address."""
+        assert semantic_digest({"path": self.SURROGATE_PATH}) != semantic_digest(
+            {"path": "/src/cafe.h"}
+        )
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "café",  # ordinary non-ASCII
+            "日本語",  # non-latin
+            "😀",  # non-BMP, escapes as a surrogate pair
+            os.fsdecode(b"\xff\xfe"),  # two lone surrogates
+            "a\udce9b\udcffc",  # surrogates interleaved with ASCII
+        ],
+    )
+    def test_every_string_shape_is_hashable_and_distinct(self, text: str) -> None:
+        digest = semantic_digest({"k": text})
+
+        assert digest.startswith("sha256:")
+        assert digest != semantic_digest({"k": "placeholder"})
+
+    def test_canonical_json_still_accepts_it(self) -> None:
+        """Pinning the asymmetry rather than pretending it is gone.
+
+        The stored document deliberately keeps `ensure_ascii=False` for
+        readability, so this succeeds while a UTF-8 encode of its output would
+        not. The digest path is the one that had to be made total; a Phase 1
+        writer's handling of such a path is its own explicit decision.
+        """
+        rendered = canonical_json({"path": self.SURROGATE_PATH})
+
+        assert "caf" in rendered
+        with pytest.raises(UnicodeEncodeError):
+            rendered.encode("utf-8")

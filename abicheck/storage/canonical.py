@@ -221,6 +221,16 @@ def canonical_json(
     affects only presentation — :func:`semantic_digest` never reads this
     function's output, so a pretty-printed object and a compact one are the
     same content by construction rather than by convention.
+
+    This keeps ``ensure_ascii=False``, unlike :func:`semantic_digest`: the
+    stored document is meant to be read, and escaping every non-ASCII
+    identifier would make it materially worse for that. The consequence is
+    that a value containing a lone surrogate (a ``surrogateescape``-decoded
+    POSIX path) round-trips through *this* function but cannot be encoded to
+    UTF-8 by whatever eventually writes it. The digest path is what had to be
+    made total, since an unaddressable package is worse than an unwritable
+    one; how a Phase 1 writer handles such a path is that writer's decision to
+    make explicitly rather than to discover.
     """
     return json.dumps(
         strip_capture_metadata(value)
@@ -234,17 +244,41 @@ def canonical_json(
 
 
 def semantic_digest(value: Any, *, algorithm: str = "sha256") -> str:
-    """Content digest of a value's canonical form, volatile keys excluded.
+    """Content digest of a value's canonical form, capture metadata excluded.
 
     Returned as ``"<algorithm>:<hex>"`` rather than a bare hex string so that
     a stored digest names the function that produced it. A package written
     today and read after an algorithm change must be able to say "this digest
     is sha256" instead of leaving a reader to assume.
+
+    The hash payload is deliberately **ASCII** (``ensure_ascii=True``), unlike
+    :func:`canonical_json`'s stored document. Two reasons, and the first is a
+    real defect this closes: a POSIX path carrying a non-UTF-8 byte decodes
+    through ``surrogateescape`` into a lone surrogate — ``os.fsdecode(b"caf\xe9")``
+    is ``"caf\udce9"``, which is an ordinary source path on a real filesystem —
+    and encoding that to UTF-8 raises ``UnicodeEncodeError``. So a supported
+    string could make a package unaddressable, and worse, asymmetrically:
+    ``canonical_json`` accepted the same value happily, since only the encode
+    step failed (Codex review). Standard JSON escaping represents a lone
+    surrogate as ``\udce9`` and the payload encodes cleanly.
+
+    Second, an ASCII payload is re-derivable by any implementation that can
+    produce the same JSON escaping, rather than requiring agreement on UTF-8
+    byte sequences or on Python's ``surrogatepass`` — which was the other
+    candidate fix and would have written WTF-8 no other reader is obliged to
+    understand. A content-addressed store that other tools may re-derive
+    digests for should not depend on the quirks of one runtime's encoder.
+
+    This changes the digest of any value containing non-ASCII content
+    relative to earlier revisions of this module. That is free precisely
+    because Phase 0 persists nothing: no stored package carries a digest
+    computed the old way. It would not be free later, which is why it is
+    settled now.
     """
     payload = json.dumps(
         strip_capture_metadata(value),
-        ensure_ascii=False,
+        ensure_ascii=True,
         sort_keys=True,
         separators=(",", ":"),
-    ).encode("utf-8")
+    ).encode("ascii")
     return f"{algorithm}:{hashlib.new(algorithm, payload).hexdigest()}"
