@@ -159,6 +159,33 @@ def test_read_past_leading_skippable_frames_stays_linear(tmp_path):
     assert elapsed < 5.0, f"expected near-linear walk, took {elapsed:.2f}s for {n_frames} frames"
 
 
+def test_read_snapshot_bytes_cap_selection_sees_past_leading_skippable_frame(tmp_path):
+    """`read_snapshot_bytes()`'s own cap-selection probe (the code just
+    above the decisive, full-buffer `compression = detect_compression_
+    from_bytes(raw)` call) read only a bare 4-byte prefix to decide
+    whether `max_decoded_bytes` (the decoded-size cap) or
+    `_max_stored_bytes()` (the independent, much larger stored-size cap)
+    applies -- so a skippable-frame-prefixed zstd file was misclassified
+    as uncompressed *for cap-selection purposes* and checked against the
+    stored-file cap instead, even though the later decisive classification
+    correctly sees it as zstd (Codex review, fresh evidence, third-order
+    follow-up to the leading-skippable-frame fixes above). Matches the
+    finding's own repro shape: a 200-byte skippable frame (192 bytes of
+    user data) ahead of a real zstd frame decoding to ``{}`` (2 bytes),
+    read with a 100-byte *decoded*-size limit that only the wrong
+    (stored-size) cap would reject."""
+    zstandard = pytest.importorskip("zstandard")
+
+    user_data = b"\x00" * 192
+    blob = _leading_skippable_zstd_bytes(b"{}", zstandard, user_data=user_data)
+    assert len(blob) > 100  # stored size exceeds the decoded-size limit below
+
+    p = tmp_path / "leading_skippable_small_payload.abicheck.json.zst"
+    p.write_bytes(blob)
+
+    assert read_snapshot_bytes(p, max_decoded_bytes=100) == b"{}"
+
+
 def test_read_snapshot_bytes_handles_many_leading_skippable_frames_at_realistic_scale(tmp_path):
     """Covers the public reader end-to-end at the same realistic frame
     count the primitive-level test above uses directly, per the review

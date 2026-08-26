@@ -989,3 +989,34 @@
   facts.py`/`storage/*`/`snapshot_io.py`) has any bearing on, and not
   fixed here per this repo's CI-red convention (pre-existing on the base
   branch).
+
+- **A fourth, third-order follow-up on the same skippable-frame saga:
+  `read_snapshot_bytes()`'s own *cap-selection* probe -- the code that
+  decides whether the decoded-size limit (`max_decoded_bytes`) or the
+  independent, much larger stored-size ceiling (`_max_stored_bytes()`)
+  applies -- still only read a bare 4-byte prefix, one step ahead of the
+  three probes already fixed above (Codex review, fresh evidence).** A
+  zstd file starting with a leading skippable frame therefore had
+  `compression_hint` stay `NONE` at that point (the same "4 bytes can't
+  see past a skippable-frame header" gap the other three fixes closed),
+  so the *stored*-size cap was wrongly applied instead of the decoded-size
+  one -- even though the decisive, full-buffer classification a few lines
+  later (`compression = detect_compression_from_bytes(raw)`) already sees
+  the real zstd frame correctly. Reproduced exactly as reported: a
+  219-byte stream (a 200-byte skippable frame ahead of a real zstd frame
+  decoding to `{}`) read with `max_decoded_bytes=100` was rejected against
+  the 100-byte *stored*-size cap, even though only 2 bytes are actually
+  decoded. Fixed by escalating this probe past a leading skippable frame
+  too, via the same shared `starts_with_skippable_frame_magic()`/
+  `read_past_leading_skippable_frames()` primitives the other three call
+  sites already use -- the escalated prefix can never exceed the file's
+  real stored size (it's read forward from the same fd), so the
+  pre-existing `stored_size > cap` check just below still catches an
+  oversized file even when this escalation itself reads well past a small
+  `cap`.
+
+  New test:
+  `test_read_snapshot_bytes_cap_selection_sees_past_leading_skippable_frame`
+  in `tests/test_snapshot_compression_skippable_frames.py`, matching the
+  finding's own repro shape exactly. Confirmed to fail against the
+  pre-fix code before applying the fix.

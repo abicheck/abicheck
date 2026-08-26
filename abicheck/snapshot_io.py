@@ -485,6 +485,23 @@ def read_snapshot_bytes(
     with open(p, "rb") as f:
         stored_size = os.fstat(f.fileno()).st_size
         prefix = f.read(4)
+        # Codex review, fresh evidence: escalate past a leading zstd
+        # skippable frame *before* selecting the cap below, the same way
+        # this module's other three prefix probes already do (`detect_
+        # snapshot_compression`, `read_snapshot_storage_info`,
+        # `bounded_decoded_prefix`). A bare 4-byte prefix can't see past a
+        # leading skippable frame, so `compression_hint` stayed `NONE` for
+        # a genuinely-compressed skippable-frame-prefixed file, and the cap
+        # selection just below then applied the wrong (stored-size, not
+        # decoded-size) ceiling to it -- even though `compression` a few
+        # lines down (computed from the fully-buffered `raw`) already sees
+        # the real zstd frame correctly. `prefix` can never grow past
+        # `stored_size` (it's read forward from this same file), so the
+        # `stored_size > cap` check just below still catches an oversized
+        # file even when this escalation itself reads far more than a
+        # small `cap` would otherwise allow.
+        if starts_with_skippable_frame_magic(prefix):
+            prefix = _read_past_leading_skippable_frames(f, prefix)
         compression_hint = detect_compression_from_bytes(prefix)
         # Codex review: `max(limit, _max_stored_bytes())` let a raised
         # `max_decoded_bytes` (a caller's tolerance for large *decoded*
