@@ -20,11 +20,15 @@ the implementation and this plan were revised together). This document now
 also serves as a retrospective design record for that implementation, not
 only a forward-looking proposal — where a section still reads as
 prescriptive ("must", "should"), that reflects a requirement the shipped
-code satisfies, not a requirement still pending. The one still-open item
-identified during that work is the manifest-integrity gap in Phase 2 below
-(no reader-side binding on `manifest.json` itself), left as an explicit,
-documented known limitation rather than blocking the rest of the design —
-see that section for what closing it would need. Historical framing below
+code satisfies, not a requirement still pending. Two still-open items were
+identified during that work, both left as explicit, documented known
+limitations rather than blocking the rest of the design: the
+manifest-integrity gap in Phase 2 below (no reader-side binding on
+`manifest.json` itself), and a lazy per-library reader's missing
+`bundle_facts_schema_version` check (`BundleArchiveReader.read_manifest()`/
+`read_blob()` perform no schema check at all, unlike the whole-bundle
+`read_bundle_facts_archive()` path) — see those sections for what closing
+each would need. Historical framing below
 ("the container format decision", "Phase 0", "Phase 1", etc.) is
 unchanged; treat "the writer"/"the reader" language throughout as
 describing the shipped `BundleArchiveWriter`/`BundleArchiveReader`, not a

@@ -240,20 +240,31 @@ table, count, or version number that already has a fact owner elsewhere"
 rule, which this section now follows instead of fighting).** An earlier
 draft cited "~45 `Change(...)` construction sites"; a later revision
 "corrected" that to "about 14 sites" plus "~350" `make_change()` calls —
-also wrong, confirmed by a fresh `git grep -n "Change(" -- 'abicheck/*.py'
-'abicheck/buildsource/*.py'` at implementation time finding several dozen
-direct-construction sites in `buildsource/` alone (`build_diff.py`,
-`crosscheck_base.py`, `evidence_policy.py`, `graph_reconcile.py`,
-`source_diff.py`, `source_graph_findings.py`, ...), none of which the
-prior revision's file list named. A hand-copied count in a plan document
-goes stale the moment any PR adds, removes, or refactors a detector, and
-this plan's own history is now direct proof of that. **Derive the real
-inventory at implementation time instead of trusting any number written
-here**: `git grep -n "Change(" -- 'abicheck/*.py' 'abicheck/buildsource/*.py'`
-for direct constructions (filter out the `class Change` definition itself,
-type annotations, and `diff_helpers.py`'s own factory body), and
-`git grep -n "make_change(" -- 'abicheck/*.py' 'abicheck/buildsource/*.py'`
-for factory calls. The dominant path is still `diff_helpers.make_change()`,
+also wrong, confirmed by a fresh `git grep -n "Change(" -- 'abicheck/**/*.py'`
+at implementation time finding several dozen direct-construction sites in
+`buildsource/` alone (`build_diff.py`, `crosscheck_base.py`,
+`evidence_policy.py`, `graph_reconcile.py`, `source_diff.py`,
+`source_graph_findings.py`, ...), none of which the prior revision's file
+list named. A hand-copied count in a plan document goes stale the moment
+any PR adds, removes, or refactors a detector, and this plan's own history
+is now direct proof of that. **Derive the real inventory at implementation
+time instead of trusting any number written here — and search
+recursively, not the flat `abicheck/*.py`/`abicheck/buildsource/*.py`
+globs an earlier revision of this section used.** Those two glob patterns
+only match one directory level each (`git grep`'s pathspec `*` does not
+cross a `/`), so as of ADR-061's incremental `compare/`/`workflows/`
+package migration (see "Implementation location" above) they already miss
+a real, present-day construction site — `abicheck/impact/use_case_impact.py`
+— and will miss every detector `compare/detectors/{symbols,types,cpp,
+platform,build,source}.py` eventually migrates too. Use
+`git grep -n "Change(" -- 'abicheck/**/*.py'` (recursive: covers the
+flat `diff_*.py`/`buildsource/*.py` modules, any migrated `compare/`/
+`workflows/` package, and every other first-party subtree alike),
+excluding `tests/` (a separate tree entirely, not matched by this
+pathspec), `checker_types.py`'s own `class Change` definition, and
+`diff_helpers.py`'s own factory body, for direct constructions; and
+`git grep -n "make_change(" -- 'abicheck/**/*.py'` for factory calls. The
+dominant path is still `diff_helpers.make_change()`,
 which already forwards arbitrary keyword arguments straight to
 `Change(...)` unchanged (`**change_kwargs: Any` in its signature) — a real,
 favorable, count-independent consequence: **`make_change()` itself needs
@@ -458,16 +469,16 @@ structure already in place:
    Mach-O snapshot alike, since no such narrowing step exists for variables
    to license one.
 
-   **This does not mean `l0:searched:elf_symtab` (or its PE/Mach-O
-   siblings) is categorically unreachable for a variable finding — an
-   earlier draft of this rule said exactly that, and it was wrong (Codex
-   review, verified against the code): the tag must be derived from *how
-   `variable_map` was populated in the first place*, not from a blanket
-   always/never rule.** For a snapshot with headers or DWARF, `variable_map`
-   is genuinely L1/L2-derived and the rule above stands unchanged: record
-   only the `l1:searched:dwarf` / `l2:searched:castxml` / `l2:searched:clang`
-   tier that populated it, since no ELF/PE/Mach-O narrowing step touched it.
-   But for a symbols-only snapshot — `elf_only_mode`/`_is_stripped_symbols_
+   **This does not mean `l0:searched:elf_symtab` (or its Mach-O sibling) is
+   categorically unreachable for a variable finding — an earlier draft of
+   this rule said exactly that, and it was wrong (Codex review, verified
+   against the code): the tag must be derived from *how `variable_map` was
+   populated in the first place*, not from a blanket always/never rule.**
+   For a snapshot with headers or DWARF, `variable_map` is genuinely
+   L1/L2-derived and the rule above stands unchanged: record only the
+   `l1:searched:dwarf` / `l2:searched:castxml` / `l2:searched:clang` tier
+   that populated it, since no ELF/PE/Mach-O narrowing step touched it. But
+   for a symbols-only snapshot — `elf_only_mode`/`_is_stripped_symbols_
    only()`, the identical condition item 1's function-side rule already
    names above — `variable_map` is not narrowed by export-table evidence,
    it is *built directly from it*: `dumper_elf_fallback.py`'s symbol-only
@@ -479,20 +490,33 @@ structure already in place:
    `VAR_REMOVED`/`VAR_ADDED` search over such a snapshot's `variable_map` is
    therefore purely L0 evidence by construction, and the emitted tag must
    say so — `new:l0:searched:elf_symtab` for the ELF fallback, the matching
-   `new:l0:searched:pe_export_table` / `new:l0:searched:macho_exports` for
-   the PE/Mach-O siblings — mirroring the function path's own `elf_only_mode`
-   branch above, not omitting the empty side's real provider. Implement
-   this the same way item 1 already requires for functions: inspect
-   whether the snapshot side is symbols-only before choosing the vocabulary,
-   rather than encoding a fixed per-`ChangeKind` answer. This is a
+   `new:l0:searched:macho_exports` for the Mach-O sibling — mirroring the
+   function path's own `elf_only_mode` branch above, not omitting the empty
+   side's real provider. **PE has no counterpart here, and this is not an
+   oversight to fix by adding one:** `dumper.py`'s PE symbols-only path
+   (`_dump_pe`'s no-headers branch, confirmed by reading it directly) builds
+   its `AbiSnapshot` with `functions=[...]` from `exported_dynamic` but no
+   `variables=` argument at all, so `variable_map` stays the dataclass's
+   empty-list default — PE variable-symbol extraction from the export
+   directory does not exist in this codebase yet, on any path, so
+   `l0:searched:pe_export_table` cannot occur for a `VAR_REMOVED`/
+   `VAR_ADDED` finding today. Implement this the same way item 1 already
+   requires for functions: inspect whether the snapshot side is
+   symbols-only before choosing the vocabulary (ELF or Mach-O only, never
+   PE), rather than encoding a fixed per-`ChangeKind` answer. This is a
    difference in what evidence exists per snapshot shape, not a stylistic
    simplification — if a later pass ever gives `_public_variables()` its own
-   ELF/PE/Mach-O *narrowing* step over an otherwise header/DWARF-populated
+   ELF/Mach-O *narrowing* step over an otherwise header/DWARF-populated
    `variable_map` (matching how functions already treat `= delete`), the
    two-entry composite vocabulary item 1 describes generalizes then and only
-   then; until it does, claiming a narrowing tag for that case would
-   fabricate export-table provenance the join never actually consulted —
-   the one part of the original rule that remains correct.
+   then for those two platforms; and if a later pass ever gives PE dumping
+   its own variable-export extraction (a real, separate feature addition,
+   out of scope for this plan), `l0:searched:pe_export_table` becomes
+   reachable for variables at that point and this rule should be revisited
+   — until either happens, claiming a narrowing or symbols-only tag for a
+   case the code cannot produce would fabricate export-table provenance the
+   join never actually consulted — the one part of the original rule that
+   remains correct.
 2. **L2 header-derived detectors** (`diff_types.py`'s struct/enum/typedef
    findings, `diff_type_spellings.py`) — provenance here genuinely varies
    per finding (which backend produced *this specific* `RecordType`, and
