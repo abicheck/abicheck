@@ -351,6 +351,79 @@ structure already in place:
    still resolve to a single fixed prefix in practice — the point is that
    this must be verified per constant, function by function, not assumed
    uniformly from the constant's name.
+
+   **The per-`_check_*`-function fixed-tier mapping above is itself
+   insufficient, and needs correcting rather than just caveating (Codex
+   review, fresh evidence, verified against the code).** It fixed the
+   `PROVIDER_SOURCE_INDEX` ambiguity (one constant, two tiers depending on
+   which function emits it) by keying the mapping on the emitting function
+   instead of the constant — but a fixed *function* → tier table has two
+   further gaps a single static mapping cannot express, both real for
+   checks this same module already contains:
+
+   - **`PROVIDER_PUBLIC_HEADER_AST` names a backend-*selectable* evidence
+     source, not a fixed tier.** Every check that lists it in `providers`
+     (`_check_exported_not_public`, `_check_public_not_exported`,
+     `_check_header_build_context_mismatch`, `_check_private_header_leak`,
+     `_check_rtti_for_internal_type`) runs against whichever L2 header-AST
+     backend actually produced the snapshot being checked — castxml,
+     clang, or hybrid, selected per run via `--ast-frontend`/
+     `AbiSnapshot.ast_frontend`, not per detector function. Phase 0's own
+     vocabulary table above deliberately distinguishes `l2:castxml` from
+     `l2:clang` because the two backends have measurably different fact
+     completeness, so a `_check_exported_not_public -> "l2:..."` table
+     entry fixed at design time cannot know, for any given run, which of
+     the two it should actually say — that is a fact of the *snapshot*
+     the check consulted, not of the function's source code.
+   - **A check's own `providers` list can name more than one tier at
+     once, and the finding genuinely rests on all of them jointly.**
+     `_check_exported_not_public`'s `providers = [PROVIDER_BINARY_EXPORTS,
+     PROVIDER_PUBLIC_HEADER_AST]` (and `_check_public_not_exported`'s
+     identical pair, `_check_header_build_context_mismatch`'s
+     `[PROVIDER_BUILD_CONFIG, PROVIDER_PUBLIC_HEADER_AST]`,
+     `_check_rtti_for_internal_type`'s `[PROVIDER_BINARY_EXPORTS,
+     PROVIDER_PUBLIC_HEADER_AST]`) are each gated on an ELF/binary-export
+     fact **and** a header-AST fact agreeing — the finding would not exist
+     without both. Collapsing that to one tier string, however derived,
+     discards which of the two providers the consumer is actually being
+     told corroborated the finding.
+
+   **Resolution: derive per finding, from the specific check invocation,
+   not from a static function-keyed table.** Two changes to the wiring
+   this bullet prescribes, both additive to Phase 0's existing shape
+   rather than a redesign of it:
+
+   1. For a `PROVIDER_PUBLIC_HEADER_AST` entry specifically, the `l2:`
+      suffix is read off the snapshot the check actually ran against —
+      `AbiSnapshot.ast_frontend` (or, for a hybrid snapshot, the relevant
+      per-fact provenance via `fact_provenance.py`, mirroring slice 1's
+      own hybrid-snapshot carve-out earlier in this document) — at the
+      point the finding is constructed, never hard-coded per function.
+   2. For a check whose `providers` list carries more than one `PROVIDER_*`
+      entry, `evidence_provenance` carries one tier-bearing entry per
+      provider actually consulted for that finding, not a single collapsed
+      value — e.g. `_check_exported_not_public` under a `--ast-frontend
+      clang` run stamps `("current:l0:elf_symtab", "current:l2:clang")`,
+      not either alone. This is exactly what `evidence_provenance` being
+      `tuple[str, ...]` (rather than a single string) was always meant to
+      support; Phase 0's vocabulary table simply hadn't yet stated that a
+      multi-provider check must use more than one slot.
+
+   The function → tier examples this bullet originally gave —
+   `_check_odr_type_variant -> "current:l4:source_replay"` and
+   `_check_public_to_internal_dependency -> "current:l5:source_graph"` —
+   remain correct as written: neither lists `PROVIDER_PUBLIC_HEADER_AST`,
+   and neither is multi-provider, so a fixed single-tier mapping is sound
+   for those two specifically. They were never wrong; they were presented
+   as instances of a rule general enough to cover every `_check_*`
+   function in the module, which — per the two gaps above — they are not.
+   The verification discipline is unchanged and now covers both dimensions
+   explicitly: for each `_check_*` function, read its body to determine
+   (a) every `PROVIDER_*` constant it can stamp into `providers` for a
+   given call, and (b) for any `PROVIDER_PUBLIC_HEADER_AST` entry, the
+   snapshot field or hybrid-provenance lookup that names the backend that
+   actually produced it — function by function, never assumed uniformly
+   from another function's shape or from the constant's name alone.
 4. **Cross-cutting post-processing and roll-up emitters**
    (`post_processing.py`, `post_processing_reachability.py`,
    `pattern_verdicts.py`, `internal_leak.py`, `bundle_models.py`,

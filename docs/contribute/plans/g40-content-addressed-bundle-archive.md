@@ -415,6 +415,25 @@ fully materializing it. Both are enforced symmetrically on the write
 side too — `BundleArchiveWriter` refuses to publish an archive its own
 paired reader could not reopen.
 
+**A decoded-byte cap alone does not bound the *decompressor's own*
+allocation for a per-blob zstd frame, and this plan's earlier text never
+named the guard that closes it (Codex review, fresh evidence, verified
+against the real implementation in PR #869).** `snapshot_io._decompress_zstd()`
+already treats an unbounded declared zstd window as an independent bomb
+vector, separate from the decoded-output-size caps above: a crafted frame
+can declare a very large window *before* the decoder produces any bounded
+output at all, so a per-member/aggregate decoded-byte budget that only
+checks the *result* size does not stop the decompressor from allocating
+that window on the way there. Every zstd-compressed blob member this
+format reads must therefore construct its `zstandard.ZstdDecompressor`
+with the identical runtime-clamped `max_window_size` bound
+`snapshot_io._decompress_zstd()` already applies to the whole-document
+path, rather than relying on the decoded-byte caps above alone — the
+shipped implementation (`abicheck/storage/bundle_archive.py`, PR #869)
+already does this correctly (`ZstdDecompressor(max_window_size=1 <<
+_ZSTD_MAX_WINDOW_LOG)`); this plan's own resource-limit inventory above
+was simply missing the requirement, not describing a gap in the code.
+
 ### Phase 3 — CLI/API wiring (S)
 
 **`load`/`save` get separate, unambiguous contracts — deliberately not one
@@ -475,12 +494,27 @@ was there to encode," not "how many bytes did the store end up holding");
 size and sha256 digest, streamed rather than read fully into memory, since
 this bookkeeping step has no reason to hold a second full copy of a
 potentially large multi-library archive just to size/hash it.
-`save_bundle_facts(facts, path, format="archive", compression="gzip")` is
-therefore not a contradiction to reject: `compression` is silently
-inapplicable to that branch (ignored, not an error) since the archive
-format has no whole-document compression envelope of its own for it to
-select — stated explicitly here so the implementation doesn't have to
-invent a rejection rule this plan never asked for.
+**`save_bundle_facts(facts, path, format="archive", compression="gzip")` must
+be rejected, not silently ignored (Codex review, fresh evidence, correcting
+an earlier draft of this section that specified the opposite).** An earlier
+revision of this paragraph said `compression` is "silently inapplicable ...
+(ignored, not an error)" for `format="archive"` — that would let a caller's
+explicit, stated storage requirement (`compression="gzip"`/`"zstd"`) produce
+an uncompressed-envelope archive with no error, which contradicts this
+module's own existing `resolve_write_compression()` contract elsewhere: an
+explicit compression selection is either honored or rejected loudly when
+it can't be, never silently discarded. The correct rule distinguishes the
+implicit default from a genuine explicit request: `compression="auto"` (the
+parameter's own default — i.e. the caller never stated a preference) is
+accepted for `format="archive"` and simply has no effect, since the archive
+format has no whole-document compression envelope of its own to select; any
+other explicit value (`"gzip"`, `"zstd"`, `"none"`, ...) is rejected with a
+clear `ValueError` before any archive is written, the same way an
+incompatible explicit selection is rejected elsewhere in this module. The
+shipped implementation (`abicheck/serialization.py`, PR #869) already
+implements exactly this rule (`if format == "archive" and compression !=
+"auto": raise ValueError(...)`); this plan's own text was the one that had
+it backwards, not the code.
 
 `BundleFacts` itself is unchanged — this plan is a storage-layer addition
 underneath the existing dataclass, not a new in-memory shape;
@@ -504,9 +538,16 @@ usage to `use/multi-binary.md` itself as part of this phase's PR.
 
 ### Phase 4 — migration (S)
 
-No breaking change to any existing file: `BundleFacts.schema_version`
-(currently `1`) is untouched by this plan — a plain-JSON `BundleFacts` file
-is not "archive format at version 1", it's simply not an archive at all, and
+No breaking change to any existing file: `BundleFacts.schema_version` — the
+value `abicheck/bundle_facts.py`'s own `BUNDLE_FACTS_SCHEMA_VERSION` constant
+owns, not a number copied here — is untouched by this plan. Referring to the
+owned constant rather than hand-copying its current value keeps this
+paragraph correct even after a future PR bumps it independently of this plan
+landing (`AGENTS.md`'s own "don't hand-copy a table, count, or version
+number that already has a fact owner elsewhere" rule; this document already
+follows the identical discipline for the report and scan schema versions it
+cites elsewhere). A plain-JSON `BundleFacts` file
+is not "archive format at that version", it's simply not an archive at all, and
 `load_bundle_facts()`'s `"auto"` sniff routes it through the unchanged
 plain-JSON path forever. A converter,
 `abicheck/storage/bundle_archive.py`'s `convert_to_archive(src: Path, dst:
@@ -664,6 +705,16 @@ instantiation-order-sensitive fields (Phase 1's hash input).
      reader-side guards to catch what the writer already knows would be
      illegitimate output — a real gap if the writer can silently emit
      something only the reader's adversarial-input guards happen to catch.
+  7. *Oversized declared zstd window* — a blob member whose zstd frame
+     header declares a window size larger than the reader's clamped
+     `max_window_size` bound is rejected by the decompressor itself
+     (`zstandard.ZstdDecompressionError`, or this format's own wrapping of
+     it) before any decoded bytes are produced, distinct from the
+     decoded-*output*-size cases above — this is the one guard in this
+     list that bounds the decompressor's own allocation rather than the
+     size of what it eventually returns, per the requirement introduced
+     above; a real, ordinarily-windowed blob must still decompress
+     cleanly (a positive control, matching this list's existing pattern).
 - Back-compat: every existing plain-JSON `BundleFacts` fixture in this
   repo's test suite still loads unchanged via the `"auto"`-sniffing path
   once this plan ships, with **no** re-save required.
