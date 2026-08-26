@@ -763,17 +763,46 @@ def load_function_baseline(path: Path) -> dict[tuple[str, str], int]:
 
 
 def check_per_module(
-    records: list[MutantRecord], baseline: dict[str, int]
-) -> list[str]:
-    """Modules whose survivor count rose above their own recorded number."""
+    records: list[MutantRecord],
+    baseline: dict[str, int],
+    scope_modules: set[str] | None = None,
+) -> tuple[list[str], list[str]]:
+    """Modules whose survivor count rose above their own recorded number.
+
+    Returns ``(failures, skipped)``. ``skipped`` is every baseline module this
+    call declined to compare because it was outside ``scope_modules`` — never
+    silently folded into "no failures".
+
+    A scoped run's own mutant *test-execution* never touches a module outside
+    ``scope_modules`` (see ``--scope-run-to-diff``'s own docstring): every
+    mutant there reads ``not checked``, so `survivors_by_module` reports zero
+    survivors for it regardless of the module's true state. Comparing that
+    unconditionally against `baseline` would read as "still within baseline"
+    for a module this run never measured at all — a false "OK" the caller
+    could print unchallenged, exactly the "false 'safe to scope' is a
+    correctness bug" failure mode this file's own diff-parsing predicates are
+    built to avoid elsewhere (Codex review: modules in `only_mutate` can
+    import each other, e.g. ``diff_types.py`` imports ``diff_symbols``, so a
+    diff touching only one can change what an *omitted* module's mutants
+    would report without ever touching a path the scoping predicate would
+    reject). So when `scope_modules` is given and non-empty, comparison is
+    restricted to it — mirroring `unresolved_for_gate`'s identical scoping in
+    `main()` — and every other baseline module is reported as skipped rather
+    than silently scored as unchanged.
+    """
     current = {m: len(k) for m, k in survivors_by_module(records).items()}
+    universe = set(current) | set(baseline)
+    skipped: list[str] = []
+    if scope_modules:
+        skipped = sorted(m for m in universe if m not in scope_modules)
+        universe = {m for m in universe if m in scope_modules}
     failures = []
-    for module in sorted(set(current) | set(baseline)):
+    for module in sorted(universe):
         now = current.get(module, 0)
         was = baseline.get(module, 0)
         if now > was:
             failures.append(f"  {module}: {was} -> {now} (+{now - was})")
-    return failures
+    return failures, skipped
 
 
 # ---------------------------------------------------------------------------
@@ -1563,7 +1592,21 @@ def main(argv: list[str] | None = None) -> int:
             print("mutation-score: diff-scoped OK (no survivors in changed functions)")
 
     if baseline_modules is not None:
-        failures = check_per_module(records, baseline_modules)
+        failures, skipped_modules = check_per_module(
+            records, baseline_modules, scope_modules
+        )
+        if skipped_modules:
+            # A scoped run's own mutant test-execution never touched these
+            # modules (see check_per_module's own docstring) — say so rather
+            # than letting the "OK" below imply they were re-verified this
+            # run. Their baseline counts stand unchanged until a full
+            # (unscoped) run measures them again.
+            print(
+                "mutation-score: per-module baseline check skipped "
+                f"{len(skipped_modules)} module(s) this scoped run did not "
+                "test-execute (their baseline count was not re-verified): "
+                + ", ".join(skipped_modules)
+            )
         if failures:
             print(
                 "ERROR: per-module survivor count rose above baseline — a test "
@@ -1571,6 +1614,11 @@ def main(argv: list[str] | None = None) -> int:
             )
             print("\n".join(failures))
             exit_code = 1
+        elif scope_modules:
+            print(
+                "mutation-score: per-module baseline OK for the scoped "
+                f"module(s): {', '.join(sorted(scope_modules))}"
+            )
         else:
             print("mutation-score: per-module baseline OK")
     else:

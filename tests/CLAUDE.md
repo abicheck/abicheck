@@ -46,7 +46,15 @@ finishes in ~45 seconds.
   refusing to scope at all whenever any `tests/` path is also touched or the
   measurement comes from a saved `--results-file`) — split into its own file
   so `test_mutation_score_gate.py` didn't grow further past the file-size
-  soft limit.
+  soft limit. `test_mutation_per_module_scoping.py` covers the sibling gap in
+  the *per-module baseline* gate (`check_per_module`): a scoped run never
+  test-executes a mutant outside `scope_modules`, so comparing its
+  (necessarily incomplete) survivor counts against the full baseline
+  unconditionally let an out-of-scope module always read "still within
+  baseline" — even one it never re-tested — silently missing a regression
+  coupling could introduce (`only_mutate` modules import each other). Split
+  out once `test_mutation_run_scoping.py` itself grew past the architecture
+  gate's 1200-line test-file cap.
 - `test_canonical_finding_id_completeness.py` — every `ChangeKind` must be
   classified for canonical identity, so an omission cannot be silent the way
   the #753 -> #759 escape was. Pins both directions: a declared type-bearing
