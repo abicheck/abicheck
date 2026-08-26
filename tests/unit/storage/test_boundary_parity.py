@@ -35,6 +35,9 @@ than waiting for a reviewer to find it.
 
 from __future__ import annotations
 
+import os
+import subprocess
+import sys
 from collections.abc import Callable
 from typing import Any
 
@@ -707,3 +710,94 @@ class TestTheSectionVersionMappingIsNormalizedAtBothDoors:
             "entities": 3,
         }
         assert StorageVersions.from_dict(versions.to_dict()) == versions
+
+
+class TestASectionKeyHasAProcessStableName:
+    """Hashable is not the property a content address needs.
+
+    `str()` on a `frozenset` renders its members in hash order, which for
+    strings varies with `PYTHONHASHSEED` — so one logical versions block
+    emitted three different section names and three different semantic
+    digests across three interpreters (Codex review). Sorting cannot repair
+    it, because sorting runs after the conversion.
+
+    Verified across real interpreters in
+    `test_a_frozenset_key_is_unstable_across_processes` rather than only
+    asserted here, since the whole claim is about behaviour this process
+    cannot see.
+    """
+
+    @pytest.mark.parametrize("key", [frozenset({"a", "b"}), object(), (1, 2), b"k"])
+    def test_an_unstable_key_is_dropped(self, key: Any) -> None:
+        """`(1, 2)` and `b"k"` are dropped too, and that is deliberate.
+
+        Their `str()` happens to be stable, so this is stricter than the
+        stated rule requires. The allowlist is enumerated rather than
+        inferred precisely so that a type nobody has reasoned about is
+        excluded by default — a tuple of *frozensets* is not stable, and no
+        rule short of a recursive walk separates it from `(1, 2)`. A JSON
+        document never has such a key, so nothing real is lost.
+        """
+        emitted = StorageVersions(section_schema_versions={key: 1}).to_dict()
+
+        assert "section_schema_versions" not in emitted
+
+    @pytest.mark.parametrize("key", ["entities", 7, True, 1.5, None])
+    def test_a_stable_key_is_kept(self, key: Any) -> None:
+        """Dropping the unstable case must not drop the ordinary ones."""
+        emitted = StorageVersions(section_schema_versions={key: 3}).to_dict()
+
+        assert emitted["section_schema_versions"] == {str(key): 3}
+
+    def test_a_mixed_mapping_keeps_only_the_stable_keys(self) -> None:
+        versions = StorageVersions(
+            section_schema_versions={"entities": 3, frozenset({"a", "b"}): 9}
+        )
+
+        assert versions.to_dict()["section_schema_versions"] == {"entities": 3}
+
+    def test_a_frozenset_key_is_unstable_across_processes(self) -> None:
+        """The premise, measured — not taken on trust.
+
+        Three real interpreters with different `PYTHONHASHSEED` values. If
+        this ever stops holding, the guard above is still harmless, but the
+        reason recorded for it would be wrong, and a future reader should
+        find that out from a failure rather than from the docstring.
+        """
+        script = "print(str(frozenset({'alpha', 'beta', 'gamma', 'delta', 'epsilon'})))"
+        renderings = {
+            subprocess.run(
+                [sys.executable, "-c", script],
+                env={**os.environ, "PYTHONHASHSEED": seed},
+                capture_output=True,
+                text=True,
+                check=True,
+            ).stdout.strip()
+            for seed in ("1", "2", "3", "4", "5")
+        }
+
+        assert len(renderings) > 1, (
+            "expected `str(frozenset)` to vary with PYTHONHASHSEED; if it no "
+            f"longer does, the stated reason for _STABLE_KEY_TYPES is stale: {renderings}"
+        )
+
+    def test_the_digest_is_the_same_in_every_process(self) -> None:
+        """What the guard is actually for, measured end to end."""
+        script = (
+            "from abicheck.storage.versioning import StorageVersions;"
+            "from abicheck.storage.canonical import semantic_digest;"
+            "print(semantic_digest(StorageVersions(section_schema_versions={"
+            "frozenset({'alpha','beta','gamma'}): 1, 'entities': 3}).to_dict()))"
+        )
+        digests = {
+            subprocess.run(
+                [sys.executable, "-c", script],
+                env={**os.environ, "PYTHONHASHSEED": seed},
+                capture_output=True,
+                text=True,
+                check=True,
+            ).stdout.strip()
+            for seed in ("1", "2", "3")
+        }
+
+        assert len(digests) == 1, digests

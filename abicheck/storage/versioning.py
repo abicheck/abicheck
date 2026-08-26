@@ -148,6 +148,13 @@ def _stated_text(raw: object) -> str:
     return raw if isinstance(raw, str) else ""
 
 
+#: Key types whose ``str()`` is the same in every process. Deliberately an
+#: allowlist: hashability is not the property that matters here, and the
+#: types that fail it (``frozenset``, any object rendering its address) are
+#: exactly the ones an inference would have to guess about.
+_STABLE_KEY_TYPES = (str, bool, int, float)
+
+
 def _stated_sections(raw: object) -> dict[str, int]:
     """The section-version mapping, normalized identically at both doors.
 
@@ -168,14 +175,32 @@ def _stated_sections(raw: object) -> dict[str, int]:
     Sorting is what makes the collapse deterministic: the surviving value is
     decided by the ``(key, count)`` pair's own order, not by how the caller's
     mapping happened to be traversed. Keys keep their ``str()`` rather than
-    being rejected — a key *names* its entry, so degrading one to empty would
-    collide with every other degraded key, and only a hashable can reach a
-    key position at all, which rules out the mapping and list shapes that
-    made :func:`_stated_text` necessary for values.
+    being degraded to empty — a key *names* its entry, so every degraded key
+    would name the same entry.
+
+    A key must have a *process-stable* string form, though, and being
+    hashable does not give it one (Codex review). ``str()`` on a
+    ``frozenset`` renders its members in hash order, which for strings varies
+    with ``PYTHONHASHSEED``: one logical versions block emitted three
+    different section names — and three different semantic digests — across
+    three interpreters. An object without ``__str__`` renders its address.
+    Sorting cannot repair either, because it runs *after* the conversion.
+
+    So the accepted key types are enumerated rather than inferred from
+    hashability, and an unsupported key is dropped. Dropping loses an
+    informational entry, which is the lesser harm: the alternative is a
+    content address that depends on which process wrote it. A document
+    parsed from JSON is unaffected either way — its keys are always strings.
     """
     if not isinstance(raw, Mapping):
         return {}
-    return dict(sorted((str(k), _stated_count(v)) for k, v in raw.items()))
+    return dict(
+        sorted(
+            (str(k), _stated_count(v))
+            for k, v in raw.items()
+            if isinstance(k, _STABLE_KEY_TYPES) or k is None
+        )
+    )
 
 
 @dataclass(frozen=True)
