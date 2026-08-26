@@ -106,3 +106,9 @@
   and forwards a keyword-only `demangle` parameter (default `True`,
   matching `generate_html_report`'s own default -- no behavior change for
   an existing caller that omits it).
+- **Ninth follow-up (Codex review): the identical gap on the appcompat
+  entry points.** `appcompat_to_html()`/`write_appcompat_html()` had no
+  `demangle` parameter either, so a Python-API caller of the appcompat
+  report had no way to opt out of demangling at all. Both now accept a
+  keyword-only `demangle` parameter (default `True`), threaded into the
+  prewarm calls, `_changes_table`, and `_missing_symbol_cell`.

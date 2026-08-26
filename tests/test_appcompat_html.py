@@ -251,3 +251,42 @@ def test_prewarms_the_demangle_cache_before_rendering_rows(monkeypatch) -> None:
     )
     assert calls, "demangle_batch was never called"
     assert {"_ZN3FooC1Ev", "_ZN3Bar3runEv"} <= set(calls[0]), calls
+
+
+def test_demangle_false_keeps_missing_symbols_raw() -> None:
+    """Codex review, fresh evidence: appcompat_to_html() had no equivalent
+    to the CLI's --no-demangle -- it always demangled unconditionally."""
+    out = appcompat_to_html(
+        _appcompat_result(missing=["_ZN3FooC1Ev"]), demangle=False
+    )
+    assert "_ZN3FooC1Ev" in out
+    assert "Foo::Foo()" not in out
+
+
+def test_demangle_false_keeps_breaking_changes_raw() -> None:
+    from abicheck.checker import Change
+    from abicheck.checker_policy import ChangeKind
+
+    change = Change(
+        kind=ChangeKind.FUNC_REMOVED,
+        symbol="_ZN3FooC1Ev",
+        description="Function removed: _ZN3FooC1Ev",
+    )
+    out = appcompat_to_html(
+        _appcompat_result(verdict=Verdict.BREAKING, breaking=[change]),
+        demangle=False,
+    )
+    assert "_ZN3FooC1Ev" in out
+    assert "Foo::Foo()" not in out
+
+
+def test_write_appcompat_html_passes_demangle_through(tmp_path) -> None:
+    from abicheck.appcompat_html import write_appcompat_html
+
+    out = tmp_path / "report.html"
+    write_appcompat_html(
+        _appcompat_result(missing=["_ZN3FooC1Ev"]), out, demangle=False
+    )
+    content = out.read_text()
+    assert "_ZN3FooC1Ev" in content
+    assert "Foo::Foo()" not in content
