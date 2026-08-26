@@ -9,7 +9,11 @@
   same internal sentinel Click already used for a truly-unset option). An
   omitted flag still resolves to `False` at parse time either way, so
   `_option_row` now treats a sentinel default as `False` specifically for
-  `is_flag` options, preserving the reference's existing distinction
+  single-value `is_bool_flag` options (not `is_flag`, which Click also
+  sets for a non-boolean `flag_value=` option that genuinely has no
+  default; and excluding `multiple=True`, which resolves to `()` rather
+  than `False`) -- preserving the reference's existing distinction
   between "a disabled-by-default flag" and "no default at all" instead of
   collapsing every boolean flag into the latter the moment Click 8.5 is
-  installed.
+  installed. A non-boolean `flag_value=` option and a `multiple=True`
+  option both still correctly render "—".
