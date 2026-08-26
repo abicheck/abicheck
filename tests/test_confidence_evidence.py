@@ -721,6 +721,33 @@ class TestNoteIfSameBinaryCompared:
             result.diff.coverage_warnings
         )
 
+    def test_typed_compare_request_snapshot_matching_linker_script_regex_does_not_warn(
+        self, tmp_path, monkeypatch
+    ):
+        """Codex review, fresh evidence: the typed `CompareRequest` path had
+        the identical snapshot-misclassified-as-linker-script gap already
+        fixed for `scan --against` -- a JSON snapshot whose own serialized
+        text matches the INPUT()/GROUP() probe must never be resolved as a
+        linker script pointing at a same-named real DSO."""
+        from abicheck.api_types import CompareRequest, InputSpec
+        from abicheck.serialization import snapshot_to_json
+        from abicheck.service_compare_pipeline import run_compare_request
+
+        real_so = tmp_path / "libfoo.so"
+        real_so.write_bytes(b"\x7fELF" + b"\x00" * 200)
+        old_snap = AbiSnapshot(library="INPUT(libfoo.so)", version="1.0", functions=[])
+        old_path = tmp_path / "old.abicheck.json"
+        old_path.write_text(snapshot_to_json(old_snap), encoding="utf-8")
+        new_path = tmp_path / "new.abicheck.json"
+        new_snap = AbiSnapshot(library="INPUT(libfoo.so)", version="1.0", functions=[])
+        new_path.write_text(snapshot_to_json(new_snap), encoding="utf-8")
+
+        request = CompareRequest(old=InputSpec.of(old_path), new=InputSpec.of(new_path))
+        result = run_compare_request(request)
+        assert not any(
+            "byte-identical" in w for w in result.diff.coverage_warnings
+        ), result.diff.coverage_warnings
+
     def test_native_compare_cli_hashes_the_pre_embed_paths(
         self, tmp_path, monkeypatch
     ):
@@ -780,6 +807,29 @@ class TestNoteIfSameBinaryCompared:
             ],
         )
         assert "byte-identical" in result.stdout, result.output
+
+    def test_native_compare_cli_excludes_symvers_manifests(self, tmp_path):
+        """Codex review, fresh evidence: `_finalize_compare_result`'s own
+        `_collect_metadata` (a separate, frontends-layer copy of
+        `service.collect_metadata`) still excluded only JSON/Perl -- two
+        identical `Module.symvers` manifests, not binaries at all, still
+        produced a false "old and new binaries are byte-identical" claim
+        through the native `compare` CLI."""
+        from click.testing import CliRunner
+
+        from abicheck.cli import main
+
+        text = "0x12345678\tfoo\tvmlinux\tEXPORT_SYMBOL\n"
+        old_p = tmp_path / "old.symvers"
+        new_p = tmp_path / "new.symvers"
+        old_p.write_text(text)
+        new_p.write_text(text)
+
+        result = CliRunner().invoke(
+            main, ["compare", str(old_p), str(new_p), "--format", "json"]
+        )
+        assert result.exit_code == 0, result.output
+        assert "byte-identical" not in result.output, result.output
 
     def test_finalize_compare_result_does_not_hash_a_json_snapshot_path(
         self, tmp_path

@@ -494,12 +494,11 @@ def classify_compare_pair(
     # `cli_scan_baseline._run_baseline_compare`).
     from .binary_utils import resolve_linker_script_chain
 
-    result.old_metadata = service.collect_metadata(
-        resolve_linker_script_chain(required_path(request.old, "old"))
-    )
-    result.new_metadata = service.collect_metadata(
-        resolve_linker_script_chain(required_path(request.new, "new"))
-    )
+    def _hashable_path(p: Path) -> Path:  # a text snapshot/manifest can coincidentally match the INPUT()/GROUP() probe -- skip linker-script resolution for it (Codex review)
+        return p if service.sniff_text_format(p) in ("json", "perl", "symvers") else resolve_linker_script_chain(p)
+
+    result.old_metadata = service.collect_metadata(_hashable_path(required_path(request.old, "old")))
+    result.new_metadata = service.collect_metadata(_hashable_path(required_path(request.new, "new")))
     note_if_same_binary_compared(result)
 
     # P0.4 follow-up (P2 review, discussion_r3787839902): `DiffResult.

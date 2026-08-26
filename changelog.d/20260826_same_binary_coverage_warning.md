@@ -81,8 +81,10 @@
   `compare` (its own docstring already states it "depends only on the
   snapshot model and the policy enums", matching that layer's shape).
   Both `frontends/cli/runtime.py` and `cli_scan_baseline.py` now import
-  both functions from `workflows.extraction`; `service.py`'s own
-  now-unnecessary re-exports were removed.
+  both functions from `workflows.extraction` (superseded by the ninth
+  follow-up below, which moves `note_if_same_binary_compared` to
+  `workflows.gate` specifically); `service.py`'s own now-unnecessary
+  re-exports were removed.
 - **Seventh follow-up (Codex review): `scan --against`'s new
   `coverage_warnings` key shipped without the required
   `SCAN_SCHEMA_VERSION` bump.** Every additive key in the baseline
@@ -173,3 +175,20 @@
   omitting the same signal. New `_release_md_coverage_warnings` renders
   a `## ⚠️ Coverage Warnings` section listing each library's warnings,
   absent entirely when no library carries any.
+- **Fourteenth follow-up (Codex review, two findings): the twelfth
+  follow-up's two fixes only reached `scan --against`, not the typed
+  `CompareRequest` path or the native `compare` CLI.** (1)
+  `service_compare_pipeline.classify_compare_pair` still ran the GNU ld
+  linker-script probe on the raw operand path before ever checking
+  `sniff_text_format` -- the identical snapshot-misclassified-as-
+  linker-script gap, just on the shared typed-API/Python-API path
+  instead of `scan`. (2) `frontends/cli/runtime.py`'s own
+  `_collect_metadata` (a separate, frontends-layer copy of
+  `service.collect_metadata`, kept apart to respect the module's
+  no-cross-import shape) still excluded only JSON/Perl, so two identical
+  `Module.symvers` manifests still produced a false claim through the
+  native `compare` CLI even after `service.collect_metadata` itself was
+  fixed. Both now apply the identical `sniff_text_format`-first guard
+  and `symvers` exclusion `scan --against` already got, including the
+  frontends-layer `cli_resolve._sniff_text_format` copy gaining the same
+  `symvers` recognition as `service.sniff_text_format`.

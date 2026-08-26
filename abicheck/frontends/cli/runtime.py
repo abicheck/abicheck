@@ -142,13 +142,9 @@ def _stamp_provenance(
 
 
 def _collect_metadata(path: Path) -> LibraryMetadata | None:
-    """Compute SHA-256 and file size for a library artifact.
-
-    Returns *None* when *path* is a text-based snapshot (JSON or Perl dump)
-    so that reports don't display misleading metadata for the serialised file.
-    """
+    """Compute SHA-256 and file size for a library artifact, or ``None`` for a text-based snapshot/manifest (JSON, Perl dump, ``Module.symvers``) -- not a binary, so a same-binary comparison must never claim it."""
     text_fmt = _sniff_text_format(path)
-    if text_fmt in ("json", "perl"):
+    if text_fmt in ("json", "perl", "symvers"):
         return None
 
     import hashlib
@@ -523,12 +519,11 @@ def _finalize_compare_result(
     from ...workflows.extraction import resolve_linker_script_chain
     from ...workflows.gate import note_if_same_binary_compared
 
-    result.old_metadata = _collect_metadata(
-        resolve_linker_script_chain(metadata_old_input)
-    )
-    result.new_metadata = _collect_metadata(
-        resolve_linker_script_chain(metadata_new_input)
-    )
+    def _hashable_path(p: Path) -> Path:  # a text snapshot/manifest can coincidentally match the INPUT()/GROUP() probe -- skip linker-script resolution for it (Codex review)
+        return p if _sniff_text_format(p) in ("json", "perl", "symvers") else resolve_linker_script_chain(p)
+
+    result.old_metadata = _collect_metadata(_hashable_path(metadata_old_input))
+    result.new_metadata = _collect_metadata(_hashable_path(metadata_new_input))
     note_if_same_binary_compared(result)
 
     if show_redundant and result.redundant_changes:
