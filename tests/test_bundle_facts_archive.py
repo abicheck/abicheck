@@ -95,6 +95,28 @@ class TestBundleFactsArchiveFormat:
         loaded = load_bundle_facts(out, format="archive")
         assert set(loaded.per_library_snapshots) == set(facts.per_library_snapshots)
 
+    def test_write_result_reports_the_outer_envelope_not_the_inner_codec(
+        self, tmp_path: Path
+    ) -> None:
+        """Codex review, fresh evidence: the saved file is a ZIP (uncompressed
+        manifest + zstd-compressed per-blob members), not a raw zstd stream --
+        ``detect_snapshot_compression()``/``read_snapshot_storage_info()``
+        sniff a file's own magic bytes and would report ``NONE`` for this ZIP
+        envelope, never ``ZSTD``. The write result must agree with what an
+        independent sniff of the same file would say, not describe an internal
+        per-member codec as if it were the whole file's compression."""
+        from abicheck.snapshot_io import (
+            SnapshotCompression,
+            detect_snapshot_compression,
+        )
+
+        facts = capture_bundle_facts(_per_library_snapshots(_old_metadata()))
+        out = tmp_path / "old.bundlefacts.archive.zip"
+        result = save_bundle_facts(facts, out, format="archive")
+
+        assert result.compression == SnapshotCompression.NONE
+        assert detect_snapshot_compression(out) == result.compression
+
     def test_round_trip_with_non_null_instantiation_manifest(
         self, tmp_path: Path
     ) -> None:

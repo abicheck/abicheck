@@ -476,7 +476,19 @@ def write_bundle_facts_archive(
             hasher.update(chunk)
     return SnapshotWriteResult(
         path=p,
-        compression=SnapshotCompression.ZSTD,
+        # NONE, not ZSTD: `compression` describes the *outer envelope*
+        # `detect_snapshot_compression()`/`read_snapshot_storage_info()`
+        # would independently discover by sniffing `path`'s own magic
+        # bytes -- and the envelope here is a ZIP (`PK\x03\x04`), which
+        # neither sniffer recognizes as a zstd frame. The zstd compression
+        # is real but internal, applied per-member by `BundleArchiveWriter`
+        # to each `blobs/<hash>.json.zst` entry -- a fact about individual
+        # zip members, not about `path` as a whole. Claiming ZSTD here
+        # would mislead a caller that cross-checks this field against an
+        # independent sniff of the same file, or attempts to feed the raw
+        # file bytes to a zstd decoder directly (Codex review, fresh
+        # evidence).
+        compression=SnapshotCompression.NONE,
         decoded_size_bytes=decoded_size_bytes,
         stored_size_bytes=p.stat().st_size,
         stored_sha256=hasher.hexdigest(),
