@@ -1,7 +1,7 @@
 # ADR-061: Responsibility-Package Architecture and Flat-Namespace Migration
 
 **Date:** 2026-08-24
-**Status:** Accepted — Phases 0-1 implemented; Phases 2-4 in progress; Phase 5 begun (the `model` package and the `*_metadata.py` dataclass/parser split have landed) and otherwise incremental.
+**Status:** Accepted — Phases 0-1 implemented; Phases 2-4 in progress; Phase 5 begun (the `model` package, the `*_metadata.py` dataclass/parser split, and the change-catalog partition/registry-validation item have landed) and otherwise incremental.
 **Decision maker:** abicheck maintainers
 
 ## Context
@@ -1105,19 +1105,39 @@ owed. Splitting it means separating a dataclass from its own load/write
 methods without changing what `BuildSourcePack(...)` constructs for callers
 this repository cannot see, which is its own slice.
 
-The remaining Phase 5 work, unchanged:
+**Item 3 (partition the change catalog by taxonomy and validate one assembled
+registry) is done, found already satisfied on inspection rather than
+requiring new work.** The catalog was already split by taxonomy —
+`change_registry.py` plus `change_registry_{buildsource,castxml,composition,
+coverage,numpy,suppression,wheel,types}.py`, none importing anything under
+`abicheck/` beyond `change_registry_types` (verified by grep: every one of
+these eight files has zero `from abicheck...`/`from .` imports outside the
+family itself, so "no parser imports policy/report/workflows/frontends"
+holds trivially — there is no parser in this family at all, only leaf catalog
+data). Global uniqueness and completeness are both already enforced, not
+merely assumed: `ChangeKindRegistry.__init__` raises `ValueError` on a
+duplicate `kind` at import time (so `REGISTRY` existing at all is proof of
+uniqueness), pinned by `tests/test_architecture_refactor.py::
+TestChangeKindRegistry.test_duplicate_entry_raises`; and completeness in both
+directions — every `ChangeKind` member has a registry entry, and the registry
+has no entry beyond the enum — is pinned by that same class's
+`test_registry_has_all_changekind_members`/`test_registry_no_extra_entries`.
+`scripts/check_ai_readiness.py`'s `changekind-partition`/`changekind-detector`/
+`changekind-docs` checks additionally gate that every kind is categorized,
+produced by some detector, and documented. No code or test changes were
+needed for this item; it is recorded here so the phase's remaining scope
+reflects what is actually still open.
+
+The remaining Phase 5 work:
 
 1. split CastXML and Clang parsing by entity and shared parser context;
-2. separate source-graph values, construction, and comparison;
-3. partition the change catalog by taxonomy and validate one assembled
-   registry; and
-4. remove superseded private re-exports, migration edges, and cycle
+2. separate source-graph values, construction, and comparison; and
+3. remove superseded private re-exports, migration edges, and cycle
    exceptions.
 
 **Acceptance:** parser fixtures demonstrate byte/fact parity where applicable;
-catalog validation proves global uniqueness and complete metadata; no parser
-imports policy/report/workflows/frontends; corresponding debt entries are
-removed.
+no parser imports policy/report/workflows/frontends; corresponding debt
+entries are removed.
 
 ## Migration rules for every phase
 
