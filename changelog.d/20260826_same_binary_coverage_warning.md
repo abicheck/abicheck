@@ -34,3 +34,12 @@
   render_baseline_lines` -- the text renderer, which is the *default*
   format printed with no `--format`/`-o` at all -- never read that key.
   It now prints each warning right under the counts line.
+- **Third follow-up (Codex review): a GNU ld linker script vs. its own
+  resolved target DSO still didn't warn.** `resolve_input()` follows a
+  linker script to the shared library it points at before dumping, but
+  the metadata stamp above hashed the original operand paths -- a script
+  and its target necessarily differ in content, so a comparison of the
+  same underlying binary via one side named by a linker script (or two
+  differently-written scripts targeting the same DSO) went unrecognized.
+  The metadata stamp now resolves each operand through the same GNU ld
+  linker-script following before hashing.

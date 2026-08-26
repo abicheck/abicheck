@@ -375,22 +375,13 @@ def _add_severity_blocking_compatible_findings(
     added = _baseline_finding_dicts(
         blocking, "compatible", policy_file=getattr(diff, "policy_file", None)
     )
-    # Both groups get a share; neither may evict the other outright. Two
-    # opposite failures were found here in successive reviews, and each fix
-    # caused the next:
-    #
-    # - appending only if there was room let the legacy buckets spend all 20
-    #   slots on findings a demoting preset had made non-blocking, dropping
-    #   the compatible finding that actually failed the run; then
-    # - reserving the whole cap for the compatible blockers did the mirror
-    #   image -- 20+ error-level additions alongside an ABI break exited 4
-    #   while itemizing only additions (Codex review).
-    #
-    # So severity decides the *order* (the legacy buckets are already sorted
-    # breaking -> api_break -> risk, and drive the higher exit), while a
-    # reserved floor guarantees the compatible blockers are represented at
-    # all. Both are causes of the exit code; a report that names only one is
-    # wrong whichever one it names.
+    # Both groups get a share; neither may evict the other outright --
+    # appending only if there's room lets the legacy buckets starve a
+    # compatible blocker that actually failed the run, while reserving the
+    # whole cap for compatible blockers does the mirror image (20+
+    # error-level additions alongside an ABI break exiting 4 while itemizing
+    # only additions). Severity decides the *order*; a reserved floor keeps
+    # both causes of the exit code represented (Codex review).
     reserved = min(len(added), max(1, cap // 4))
     head = findings[: cap - reserved]
     tail = added[: cap - len(head)]
@@ -1184,13 +1175,20 @@ def _run_baseline_compare(
         contract_mode=contract_mode,
     )
     # Codex review: stamp metadata so the same-binary warning below fires
-    # here too (a no-op for a JSON/Perl snapshot baseline). Best-effort: a
-    # test (or a caller mocking resolve_input above) may pass a path with
-    # no real file backing it, and this enrichment must not turn a
-    # perfectly good comparison into a hard failure over a missing file --
-    # all-or-nothing, so a partial failure never leaves one side stamped.
+    # here too (a no-op for JSON/Perl). Best-effort (mocked resolve_input
+    # tests may pass a path with no real file -- all-or-nothing). Hash
+    # through a GNU ld linker script to its resolved target -- the same
+    # binary resolve_input() already followed above -- so a script vs. its
+    # target DSO still reads as byte-identical (Codex review).
+    from .binary_utils import resolve_linker_script
+
+    def _hash_target(p: Path) -> Path:
+        t, is_ld = resolve_linker_script(p)
+        return t if is_ld and t is not None else p
+
     try:
-        old_meta, new_meta = collect_metadata(baseline), collect_metadata(binary)
+        old_meta = collect_metadata(_hash_target(baseline))
+        new_meta = collect_metadata(_hash_target(binary))
     except OSError:
         pass
     else:

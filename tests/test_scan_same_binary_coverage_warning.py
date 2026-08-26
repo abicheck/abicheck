@@ -89,6 +89,41 @@ def test_scan_against_byte_identical_binary_warns_in_default_text_output() -> No
         assert "byte-identical" in result.output, result.output
 
 
+def test_scan_against_linker_script_and_its_target_warns() -> None:
+    """Follow-up (Codex review): `resolve_input()` follows a GNU ld linker
+    script to its resolved target DSO, but the same-binary warning must
+    hash *that* resolved target too -- hashing the original script text
+    instead would always differ from the target's own hash, silently
+    missing a linker-script-vs-DSO comparison of the same underlying
+    binary."""
+    with CliRunner().isolated_filesystem() as tmp_dir:
+        real_so = Path(tmp_dir) / "libfoo.so.1"
+        real_so.write_bytes(b"\x7fELF" + b"\x00" * 200)
+        script_so = Path(tmp_dir) / "libfoo.so"
+        script_so.write_text("INPUT(libfoo.so.1)\n")
+        snap = AbiSnapshot(library="libfoo.so", version="1.0", functions=[])
+        out_path = Path(tmp_dir) / "scan.json"
+
+        with mock.patch.object(dumper_mod, "dump", mock.MagicMock(return_value=snap)):
+            result = CliRunner().invoke(
+                main,
+                [
+                    "scan",
+                    str(real_so),
+                    "--against",
+                    str(script_so),
+                    "--format",
+                    "json",
+                    "-o",
+                    str(out_path),
+                ],
+            )
+        assert result.exit_code == 0, result.output
+        payload = json.loads(out_path.read_text())
+        warnings = payload["diff"].get("coverage_warnings", [])
+        assert any("byte-identical" in w for w in warnings), payload
+
+
 def test_scan_against_distinct_binaries_does_not_warn() -> None:
     """Negative control: two genuinely different binaries must not trip
     the warning, and the summary must not even carry the key."""
