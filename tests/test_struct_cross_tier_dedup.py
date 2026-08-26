@@ -33,6 +33,8 @@ finding.
 
 from __future__ import annotations
 
+from hypothesis import given, strategies as st
+
 from abicheck.checker import compare
 from abicheck.checker_policy import ChangeKind
 from abicheck.checker_types import Change
@@ -458,8 +460,12 @@ class TestEndToEndOnlyOneFindingSurvivesForANamespacedStruct:
                         name="ns::Widget",
                         byte_size=16,
                         fields=[
-                            FieldInfo(name="x", type_name="int", byte_offset=0, byte_size=4),
-                            FieldInfo(name="y", type_name="int", byte_offset=8, byte_size=4),
+                            FieldInfo(
+                                name="x", type_name="int", byte_offset=0, byte_size=4
+                            ),
+                            FieldInfo(
+                                name="y", type_name="int", byte_offset=8, byte_size=4
+                            ),
                         ],
                     )
                 },
@@ -488,7 +494,9 @@ class TestEndToEndOnlyOneFindingSurvivesForANamespacedStruct:
                         name="ns::Widget",
                         byte_size=16,
                         fields=[
-                            FieldInfo(name="x", type_name="int", byte_offset=0, byte_size=4),
+                            FieldInfo(
+                                name="x", type_name="int", byte_offset=0, byte_size=4
+                            ),
                             # y's offset moved -- a DWARF-tier-only observation.
                             FieldInfo(
                                 name="y", type_name="int", byte_offset=12, byte_size=4
@@ -580,3 +588,165 @@ class TestTypeFieldEmittersStampStructuredIdentity:
         (c,) = [c for c in result.changes if c.kind is ChangeKind.TYPE_FIELD_REMOVED]
         assert c.qualified_name == "ns::Widget"
         assert c.field_name == "x"
+
+
+# ── Primitive-level property tests (Codex review) ──────────────────────────
+#
+# The fixed examples above are each shaped to confirm one specific bug this
+# module's own review history already found; per this repo's own "Primitive-
+# level property tests" convention (AGENTS.md), a reusable identity-merge
+# primitive additionally needs invariant-style tests that search the input
+# space the way an adversarial reviewer does, rather than only re-checking
+# the inputs a fix's own author already thought of.
+
+_BARE_NAMES = ("Widget", "Gadget")
+_NAMESPACES = (None, "a", "b")  # None == global/unqualified
+
+
+def _qualify(ns: str | None, bare: str) -> str:
+    return f"{ns}::{bare}" if ns is not None else bare
+
+
+@st.composite
+def _record_specs(draw):
+    """A small, collision-prone population of (bare, namespace) pairs, each
+    independently placed as a header ``RecordType``, a DWARF-only key, or
+    both -- exactly the two competitor sources ``record_canonical_names``
+    reads."""
+    n = draw(st.integers(min_value=0, max_value=4))
+    specs = []
+    for _ in range(n):
+        bare = draw(st.sampled_from(_BARE_NAMES))
+        ns = draw(st.sampled_from(_NAMESPACES))
+        source = draw(st.sampled_from(("header", "dwarf", "both")))
+        specs.append((bare, ns, source))
+    return specs
+
+
+def _build_snapshot(specs) -> AbiSnapshot:
+    types = []
+    dwarf_structs: dict[str, StructLayout] = {}
+    for bare, ns, source in specs:
+        qualified = _qualify(ns, bare)
+        if source in ("header", "both"):
+            types.append(
+                RecordType(
+                    name=bare,
+                    kind="struct",
+                    qualified_name=(qualified if ns is not None else None),
+                )
+            )
+        if source in ("dwarf", "both"):
+            dwarf_structs[qualified] = StructLayout(name=qualified, byte_size=1)
+    return AbiSnapshot(
+        library="lib.so",
+        version="1",
+        types=types,
+        dwarf=DwarfMetadata(has_dwarf=True, structs=dwarf_structs),
+    )
+
+
+def _competing_identities(specs, bare: str) -> set[str | None]:
+    """Every identity (a qualified name, or ``None`` for a global/unqualified
+    competitor) *any* source in *specs* registers for *bare* -- the ground
+    truth ``record_canonical_names`` must agree with."""
+    out: set[str | None] = set()
+    for spec_bare, ns, _source in specs:
+        if spec_bare != bare:
+            continue
+        out.add(_qualify(ns, bare) if ns is not None else None)
+    return out
+
+
+class TestRecordCanonicalNamesProperties:
+    @given(specs=_record_specs())
+    def test_never_fabricates_an_identity_not_present_in_the_input(self, specs) -> None:
+        """Every ``bare -> qualified`` entry in the output must be an
+        identity some record in the snapshot actually declared -- the
+        primitive may omit a bare name (real ambiguity), but it may never
+        invent a mapping to a qualified spelling nothing in the input used."""
+        snap = _build_snapshot(specs)
+        names = record_canonical_names(snap)
+        for bare, qualified in names.items():
+            # A qualified spelling always maps to itself too (identity, not
+            # a bridge guess) -- only a *bare* key's mapping needs checking
+            # against what the input actually declared under that bare name.
+            assert qualified == bare or qualified in _competing_identities(specs, bare)
+
+    @given(specs=_record_specs())
+    def test_never_bridges_a_bare_name_with_two_or_more_competitors(
+        self, specs
+    ) -> None:
+        """A bare name backed by two or more distinct identities (including
+        an unqualified/global competitor, encoded as ``None``) must not
+        appear in the output at all -- silently preferring one guess over
+        another is exactly the false-bridge bug this module's own review
+        history repeatedly found."""
+        snap = _build_snapshot(specs)
+        names = record_canonical_names(snap)
+        for bare in _BARE_NAMES:
+            competitors = _competing_identities(specs, bare)
+            if len(competitors) >= 2:
+                assert bare not in names
+
+    @given(specs=_record_specs())
+    def test_a_uniquely_identified_bare_name_is_always_bridged(self, specs) -> None:
+        """The converse of the ambiguity guard: when exactly one qualified
+        identity backs a bare name (no competing global or differently-
+        namespaced declaration), the bridge must actually fire -- an
+        overly conservative primitive that never bridges anything would
+        vacuously satisfy the ambiguity property above without doing its
+        job."""
+        snap = _build_snapshot(specs)
+        names = record_canonical_names(snap)
+        for bare in _BARE_NAMES:
+            competitors = _competing_identities(specs, bare)
+            if len(competitors) == 1:
+                (only,) = competitors
+                if only is not None:
+                    assert names.get(bare) == only
+
+    @given(specs=_record_specs(), seed=st.integers())
+    def test_order_independent(self, specs, seed) -> None:
+        """The result must not depend on the order records happen to appear
+        in the snapshot -- a real castxml/DWARF dump's own declaration
+        order is not a semantic signal this primitive should key on."""
+        import random
+
+        shuffled = list(specs)
+        random.Random(seed).shuffle(shuffled)
+        assert record_canonical_names(_build_snapshot(specs)) == record_canonical_names(
+            _build_snapshot(shuffled)
+        )
+
+
+class TestCanonicalizeRecordSymbolProperties:
+    @given(
+        symbol=st.text(min_size=0, max_size=12),
+        qualified_hint=st.text(min_size=1, max_size=12),
+        field_name=st.one_of(st.none(), st.text(min_size=1, max_size=8)),
+    )
+    def test_qualified_hint_always_wins_when_field_name_matches(
+        self, symbol, qualified_hint, field_name
+    ) -> None:
+        """An explicit ``qualified_hint`` (the emitting detector already
+        knows exactly which type it matched) must always be used verbatim
+        for the type portion, regardless of what the ambiguity table would
+        have guessed -- that table is intentionally not even consulted
+        when a hint is given."""
+        if field_name is not None:
+            symbol = f"{symbol}::{field_name}"
+        result = canonicalize_record_symbol(symbol, {}, qualified_hint, field_name)
+        expected = f"{qualified_hint}::{field_name}" if field_name else qualified_hint
+        assert result == expected
+
+    @given(symbol=st.text(min_size=0, max_size=16))
+    def test_empty_table_and_no_hint_is_always_identity(self, symbol) -> None:
+        """With no bridging information at all (record_names empty, no
+        qualified_hint), the symbol is returned byte-for-byte unchanged --
+        regardless of how many ``::`` it contains -- since field_name is
+        the only signal that ever triggers a split (Codex review: an
+        earlier revision guessed field-qualification from a bare ``"::" in
+        symbol`` check, corrupting a scoped whole-type symbol like a
+        template specialization over a namespaced argument)."""
+        assert canonicalize_record_symbol(symbol, {}, None, None) == symbol

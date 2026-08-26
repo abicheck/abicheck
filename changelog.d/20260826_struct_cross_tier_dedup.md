@@ -122,3 +122,20 @@
   `strip_indirection=False`, so it still bridges a tag-keyword spelling
   difference (`"struct Foo"` vs `"Foo"`) but no longer collapses a real
   pointer/reference-level disagreement.
+- **Follow-up (Codex review): the fixed-example tests for
+  `record_canonical_names`/`canonicalize_record_symbol` had no standalone
+  property-test coverage**, despite both being reusable merge/dedup
+  primitives whose review history (the several follow-ups above) is
+  exactly the "successive fixed examples each individually catch only the
+  bug their author already thought of" pattern this repo's own AGENTS.md
+  calls out for this class of primitive. Added
+  `TestRecordCanonicalNamesProperties`/`TestCanonicalizeRecordSymbolProperties`
+  in `tests/test_struct_cross_tier_dedup.py`: Hypothesis-generated
+  snapshots over randomized bare-name/namespace/evidence-source
+  combinations, checking the primitive never fabricates an identity absent
+  from the input, never bridges a bare name backed by two or more
+  competing identities, always bridges one backed by exactly one, is
+  order-independent with respect to declaration order, and that
+  `canonicalize_record_symbol`'s explicit `qualified_hint` always wins
+  over the ambiguity table while an unhinted, unrecognized symbol is
+  always returned unchanged.
