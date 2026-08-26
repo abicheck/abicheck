@@ -41,6 +41,7 @@ from .guards import (
     enum_member as _enum_member,
     identity_text as _identity_text,
     instance_of as _instance_of,
+    mapping as _mapping,
     required_field as _required_field,
     row_sequence as _row_sequence,
 )
@@ -203,6 +204,16 @@ class EntityId:
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> EntityId:
+        # The container is checked before any field is read. `required_field`
+        # alone is not that check: it reaches a key by subscript, so an object
+        # supplying `__getitem__` without `.get` cleared it and then leaked
+        # `AttributeError` from the optional field below — which a caller
+        # separating a malformed package from a broken reader classifies as
+        # the second (Codex review). Every sibling `from_dict` in this package
+        # already validated its container first; these two were the gap, and
+        # `test_every_from_dict_validates_its_container_first` now pins the
+        # rule rather than leaving it to hold by habit.
+        _mapping(data, "an entity document")
         return cls(
             kind=EntityKind(_required_field(data, "kind", "an entity document")),
             qualified_name=_identity_text(
@@ -388,6 +399,8 @@ class OccurrenceId:
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> OccurrenceId:
+        # Same rule, same reason as `EntityId.from_dict` above.
+        _mapping(data, "an occurrence document")
         return cls(
             entity=EntityId.from_dict(
                 _required_field(data, "entity", "an occurrence document")

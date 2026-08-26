@@ -143,6 +143,57 @@ class TestMalformedDocumentsRaiseTheDocumentedErrorKinds:
             f"truncated document raises KeyError instead of ValueError: {offenders}"
         )
 
+    def test_every_from_dict_validates_its_container_first(self) -> None:
+        """The container's *shape* is checked before any field is read.
+
+        `required_field` is not that check: it reaches a key by subscript, so
+        an object supplying `__getitem__` without `.get` clears it and then
+        leaks `AttributeError` when an optional field is read through `.get` —
+        the boundary this package documents as "the reader is broken", for
+        input that is merely malformed. Both `entity_ids.py` doors had exactly
+        that gap while every sibling already guarded, which is the shape a
+        per-site habit produces and a rule does not.
+
+        Enumerating the doors rather than asserting the conclusion: a
+        `from_dict` added later fails here instead of in review.
+        """
+        import ast
+        import pathlib
+
+        def guards_container_first(fn: ast.FunctionDef) -> bool:
+            for stmt in fn.body:
+                if isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Constant):
+                    continue  # docstring
+                if isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Call):
+                    call = stmt.value
+                    if isinstance(call.func, ast.Name) and call.func.id in (
+                        "_mapping",
+                        "mapping",
+                    ):
+                        return True
+                if isinstance(stmt, ast.If):
+                    # `if not isinstance(data, Mapping): ...` -- the degrading
+                    # form `versioning.py` uses deliberately, which is still a
+                    # container check made before any field is read.
+                    return "isinstance" in ast.unparse(stmt.test)
+                return False
+            return False
+
+        unguarded: list[str] = []
+        for path in sorted(pathlib.Path("abicheck/storage").glob("*.py")):
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.FunctionDef) or node.name != "from_dict":
+                    continue
+                if not guards_container_first(node):
+                    unguarded.append(f"{path.name}:{node.lineno}")
+
+        assert unguarded == [], (
+            "these `from_dict` doors read a field before checking their container "
+            "is a mapping, so a dict-like object without `.get` leaks "
+            f"AttributeError instead of TypeError: {unguarded}"
+        )
+
 
 class TestRowSequenceFieldsRejectEveryWrongContainer:
     """A field holding rows is a JSON array, and nothing else iterates safely.
@@ -574,3 +625,64 @@ class TestRecordOperandsAreCheckedBeforeUse:
             "these public methods dereference a record operand without checking "
             f"it, so a non-record leaks AttributeError: {unguarded}"
         )
+
+
+class TestIdentityDocumentsRefuseADictLikeWithoutGet:
+    """The reported shape: `__getitem__` present, `.get` absent.
+
+    An adapter handing back a row proxy, a `dbm`-style store, or any mapping
+    look-alike that never inherited `Mapping` satisfies every required field
+    by subscript and then fails on the first optional one. The failure is
+    real either way; what matters is which side of the boundary it lands on,
+    because a caller catching `TypeError`/`ValueError` around a load treats
+    an `AttributeError` as its own bug rather than as bad input.
+    """
+
+    class _SubscriptOnly:
+        """Supplies `__getitem__` and nothing else -- not a `Mapping`."""
+
+        def __init__(self, **fields: object) -> None:
+            self._fields = fields
+
+        def __getitem__(self, key: str) -> object:
+            return self._fields[key]
+
+    def test_entity_from_dict_refuses_it(self) -> None:
+        import pytest
+
+        from abicheck.storage import EntityId
+
+        doc = self._SubscriptOnly(kind="function", qualified_name="ns::f")
+        with pytest.raises(TypeError, match="entity document"):
+            EntityId.from_dict(doc)  # type: ignore[arg-type]
+
+    def test_occurrence_from_dict_refuses_it(self) -> None:
+        import pytest
+
+        from abicheck.storage import OccurrenceId
+
+        doc = self._SubscriptOnly(
+            entity={"kind": "function", "qualified_name": "ns::f"},
+            observation="export_table",
+        )
+        with pytest.raises(TypeError, match="occurrence document"):
+            OccurrenceId.from_dict(doc)  # type: ignore[arg-type]
+
+    def test_a_real_mapping_still_round_trips(self) -> None:
+        """The control: guarding the door must not close it.
+
+        A guard on a parse is one edit away from rejecting the valid input it
+        was meant to admit, and the round trip is the property that would
+        actually be lost.
+        """
+        from abicheck.storage import OccurrenceId
+
+        original = OccurrenceId.from_dict(
+            {
+                "entity": {"kind": "function", "qualified_name": "ns::f"},
+                "observation": "export_table",
+                "container": "libfoo.so",
+                "attributes": [["version", "GLIBC_2.2"]],
+            }
+        )
+        assert OccurrenceId.from_dict(original.to_dict()) == original
