@@ -1286,6 +1286,25 @@ structure already in place:
    attach the union while building the `SONAME_BUMP_RECOMMENDED`
    `make_change(...)` call.
 
+   **The constituent union is not the whole story for
+   `SONAME_BUMP_RECOMMENDED` either — the recommendation itself also
+   rests on a direct read of both SONAMEs, the identical `l0:elf_dynamic`
+   fact `SONAME_BUMP_UNNECESSARY` below is built on (Codex review,
+   verified against the real code, PR #866 round 28).** The `has_breaking
+   and not soname_bumped and old_elf.soname` guard reads `old_elf.soname`/
+   `new_elf.soname` (via the same `both_have_soname`/`soname_bumped`
+   computation `SONAME_BUMP_UNNECESSARY` shares) to establish that the new
+   side did *not* bump its SONAME — that comparison is exactly as much a
+   deciding fact for this finding as it is for its sibling, and omitting
+   it would leave a header-derived break's advisory carrying only L2
+   provenance, with no record of the L0 `.dynamic`-section read that is
+   what turns "a breaking change exists" into "…and no bump covers it."
+   `SONAME_BUMP_RECOMMENDED`'s `evidence_provenance` therefore unions
+   **two** components, exactly mirroring `SONAME_BUMP_UNNECESSARY`'s own
+   two below: the breaking-constituent union described above, and
+   `"both:l0:elf_dynamic"` for the SONAME comparison that gates whether
+   the recommendation fires at all.
+
    **`SONAME_BUMP_UNNECESSARY`, the function's other emitted kind, is
    *not* the genuinely evidence-free case round 26 first described it as
    — it rests on real, positive L0 evidence, and treating it as a pure
@@ -1306,17 +1325,58 @@ structure already in place:
    independent components, neither one alone: the positive SONAME-read
    evidence (`"both:l0:elf_dynamic"`, since both sides' `.dynamic`
    sections were read and compared to reach `soname_bumped`), unioned
-   with the negative "no breaking change qualified" `searched:` roll-up
-   item 3's discussion already describes (the same shape
-   `SONAME_BUMP_RECOMMENDED`'s own `has_breaking=True` branch draws its
-   union from, mirrored here for `has_breaking=False` — a `searched:`
-   entry per side/tier the comparison's own `changes` list was drawn
-   from, since "no constituent qualified" is itself a claim about what
-   was searched). Dropping the `l0:elf_dynamic` half — the mistake round
-   26's framing made — would leave a reader unable to tell "this
-   recommendation rests on a real read of both SONAMEs" from "nothing
-   here was ever actually consulted," exactly the misattribution this
-   model exists to prevent.
+   with a negative "no breaking change qualified" component. Dropping
+   the `l0:elf_dynamic` half — the mistake round 26's framing made —
+   would leave a reader unable to tell "this recommendation rests on a
+   real read of both SONAMEs" from "nothing here was ever actually
+   consulted," exactly the misattribution this model exists to prevent.
+
+   **The negative half cannot actually be "a `searched:` entry per
+   side/tier the comparison's own `changes` list was drawn from," as
+   round 27 first phrased it — that derivation is unsound, not merely
+   underspecified (Codex review, verified against the real code, PR #866
+   round 28).** Two independent problems, not one: first, the degenerate
+   but entirely ordinary case where a release bumps its SONAME and the
+   comparison detects *no* other change at all —
+   `check_soname_bump_policy()` is then called with `changes=[]`, so
+   there is no constituent `Change` left to read a side/tier off of; the
+   "per side/tier the comparison's own `changes` list was drawn from"
+   construction has nothing to construct from. Second, and more
+   fundamentally, even a non-empty `changes` list only records findings
+   *emitted* by detectors — it is not, and was never meant to be, an
+   inventory of which evidence tiers/backends the comparison actually
+   consulted. Treating "no constituent qualified" as itself a completed
+   `searched:` claim conflates "nothing broke, among what was checked"
+   with "here is everything that was checked," which `changes` alone
+   cannot distinguish. Item 3's own `searched:` shape does not have this
+   problem, because it derives its backend list from the specific
+   check's own known consultation (e.g. "which frontend(s) built the
+   public-header surface this symbol was searched against"), never from
+   an emitted-findings list — round 27's phrasing borrowed the
+   `searched:` vocabulary from item 3 without borrowing its actual
+   derivation, and that substitution is the bug.
+
+   **Resolution: derive the negative component from the comparison's own
+   evidence-tier inventory, not from `changes`.** `DiffResult.
+   evidence_tiers` (`checker_types.py`) is exactly this: a comparison-level
+   record of which evidence tiers were actually available/consulted (ELF,
+   DWARF, header AST, ...), computed by `confidence._detect_evidence_tiers`
+   purely from the two `AbiSnapshot` objects being compared — independent
+   of what findings were or weren't emitted, and well-defined even when
+   `changes` is empty. `check_soname_bump_policy()` does not currently
+   receive the snapshots (only `changes`, `old_elf`, `new_elf`), and
+   `checker.py`'s call site (line 565) runs before `evidence_tiers` is
+   computed (line 1023) — so this is a real, if narrow, signature and
+   sequencing change, not just a lookup: thread the two `AbiSnapshot`
+   objects (or the already-computed tier list, if the call is moved to run
+   after confidence computation instead) into `check_soname_bump_policy()`,
+   and derive the negative component as one `searched:<tier>` entry per
+   tier `evidence_tiers` names, mirroring item 3's `current:l2:searched:
+   <frontend>` spelling but at comparison scope rather than per-declaration
+   scope. This makes the claim actually true in both problem cases above:
+   it names real, independently-established evidence coverage rather than
+   an artifact of which findings happened to be emitted, and it is
+   non-empty even when `changes == []`.
 
 Each slice, once wired, gets its own FP-rate/mutation-score gate re-run
 before merging — never the whole inventory behind one PR. The FP-rate/
@@ -1562,7 +1622,37 @@ SARIF and JUnit rendering had not migrated into `report/` at the time this
 plan was written (only JSON and text renderers had) — reaches `sarif.py`'s
 existing `properties` bag (one entry, not a new top-level SARIF concept) if
 that's still the live SARIF renderer at implementation time, or `report/
-render_sarif.py` if that migration has landed by then. **JUnit is not out
+render_sarif.py` if that migration has landed by then.
+
+**That one entry covers only the ordinary per-result `properties` bag —
+`sarif.py` also builds two *audit-ledger* `Change`→dict projections
+independently, and both are outside this coverage as stated (Codex review,
+verified against the real code, PR #866 round 28).** `sarif.py`'s
+`runs[].properties.surfaceScope.outOfSurfaceChanges` (the ADR-024 §D4/D5
+header-scope ledger, ~line 1139) and `runs[].properties.
+buildContextReconciled.changes` (the ADR-039 reconciliation ledger, ~line
+1167) each build a compact, hand-written dict — `kind`/`symbol`/
+`description`/`sourceLocation`/`reason` — straight off `result.
+out_of_surface_changes`/`result.reconciled_changes`, at run-level scope
+rather than per-result scope, and neither routes through the per-result
+`properties` construction this paragraph's "one entry" describes. This is
+the identical gap Phase 3 already found and closed on the JSON side for
+exactly these same two excluded-finding categories: `reporter.py`'s
+`_out_of_surface_entry`/`_add_reconciled` (see the "four more `Change`→dict
+projections" discussion above) are the audit-ledger siblings of these two
+SARIF projections, and Phase 3 explicitly requires `evidence_provenance` on
+both so an audit trail doesn't go silent on exactly the findings a reader
+most needs the evidence for. Add `evidence_provenance` to both SARIF dict
+literals the same way (one field per ledger entry, mirroring the JSON
+ledgers' own shape rather than inventing a new spelling), and give both
+their own test coverage — a SARIF fixture asserting
+`runs[].properties.surfaceScope.outOfSurfaceChanges[].evidenceProvenance`
+and `runs[].properties.buildContextReconciled.changes[].evidenceProvenance`
+are populated, mirroring the JSON-side `_out_of_surface_entry`/
+`_add_reconciled` test coverage rather than assumed to follow from the
+ordinary per-result SARIF coverage below.
+
+**JUnit is not out
 of scope here — `junit_report.py`'s `_add_contract_properties` already
 projects per-finding contract detail onto each `<testcase>`'s `<properties>`
 block (`abicheck.contract_relevance`, `abicheck.contract_evidence_refs`,
@@ -1711,7 +1801,9 @@ above, which this list intentionally does not re-duplicate.
   dict builders, none reached by `reporter.py`'s six builders or by
   `_baseline_finding_dicts`/`_release_finding_dicts` despite the latter's
   own docstring naming `_stack_finding_dicts` as a sibling shape.
-- `abicheck/sarif.py`'s `properties` bag and `abicheck/junit_report.py`'s
+- `abicheck/sarif.py`'s `properties` bag, its two run-level audit-ledger
+  dict projections (`surfaceScope.outOfSurfaceChanges`,
+  `buildContextReconciled.changes`), and `abicheck/junit_report.py`'s
   `_add_contract_properties` — Phase 3's SARIF/JUnit surfaces (or their
   `report/`-migrated successors, e.g. `report/render_sarif.py`, if that
   migration has landed by implementation time).
