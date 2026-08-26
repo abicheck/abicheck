@@ -138,8 +138,25 @@ CONFIDENCE_ORDER: tuple[Confidence, ...] = (
 
 
 def worse_status(left: FactStatus, right: FactStatus) -> FactStatus:
+    """The status that survives a narrowing, per :data:`STATUS_ORDER`.
+
+    "Worse" is that order's ranking, which is deliberately not "least
+    evidence": ``NOT_APPLICABLE`` sits *below* ``PRESENT``, so a family
+    declared inapplicable is superseded by an entity that really does carry
+    the fact rather than dragging it down. Reading this as a plain severity
+    scale is the mistake the order's own comment exists to prevent.
+    """
     return max(left, right, key=STATUS_ORDER.index)
 
 
 def worse_confidence(left: Confidence, right: Confidence) -> Confidence:
+    """The lower of two confidence levels, per :data:`CONFIDENCE_ORDER`.
+
+    Deliberately *not* the whole rule for merging confidence: a record whose
+    status carries no usable evidence has no confidence worth propagating,
+    so :func:`abicheck.storage.availability._merged_confidence` decides which
+    records vote before reaching for this. Applied unconditionally, it let a
+    ``NOT_APPLICABLE``/``UNKNOWN`` family degrade a real ``PRESENT``/``HIGH``
+    override to ``UNKNOWN``.
+    """
     return max(left, right, key=CONFIDENCE_ORDER.index)
