@@ -1,7 +1,7 @@
 # ADR-061: Responsibility-Package Architecture and Flat-Namespace Migration
 
 **Date:** 2026-08-24
-**Status:** Accepted — Phases 0-1 implemented; Phases 2-4 in progress; Phase 5 begun (the `model` package and the `*_metadata.py` dataclass/parser split have landed; the change catalog's registry-validation is already satisfied but its D9 taxonomy repartition is not) and otherwise incremental.
+**Status:** Accepted — partially implemented (Phases 0-1 implemented; Phases 2-4 in progress; Phase 5 begun — the `model` package and the `*_metadata.py` dataclass/parser split have landed, and the change catalog's registry-validation is already satisfied but its D9 taxonomy repartition is not — and otherwise incremental).
 **Decision maker:** abicheck maintainers
 
 ## Context
