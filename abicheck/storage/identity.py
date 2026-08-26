@@ -309,11 +309,48 @@ class OccurrenceId:
             return NotImplemented
         return self.key < other.key
 
+    def attribute_values(self, name: str) -> tuple[str, ...]:
+        """Every value recorded under ``name``, in canonical order.
+
+        A repeated attribute name is legal and deliberately preserved: the
+        serialized form is a list of pairs rather than a mapping precisely so
+        that a producer recording two values does not silently lose one. This
+        is the accessor that shows both.
+        """
+        return tuple(value for key, value in self.attributes if key == name)
+
     def attribute(self, name: str, default: str = "") -> str:
-        for key, value in self.attributes:
-            if key == name:
-                return value
-        return default
+        """The single value recorded under ``name``.
+
+        Raises when the name is recorded more than once, rather than returning
+        one of them. The previous implementation returned the first match, and
+        since ``__post_init__`` sorts the pairs, "first" meant *lexicographically
+        smallest value* — so an occurrence recording ``size=8`` and ``size=16``
+        answered ``"16"`` and discarded the other, with nothing to indicate a
+        choice had been made (Codex review).
+
+        That is this module's own defect in miniature: it exists because a
+        first-wins index discarded losers, and an accessor doing the same
+        thing one layer down is no better for being smaller. A caller that
+        genuinely expects several values has :meth:`attribute_values`; one
+        that expects a single value gets told when its expectation is wrong,
+        which is the only outcome that cannot silently corrupt a
+        caller-supplied :meth:`OccurrenceSet.conflicts` predicate.
+
+        Note the review's second claim does not hold, and it is worth being
+        precise about which half was real: two occurrences differing in a
+        repeated attribute do **not** compare equal, because every pair
+        contributes to :attr:`key`. Verified directly. The defect was confined
+        to this accessor.
+        """
+        values = self.attribute_values(name)
+        if len(values) > 1:
+            raise ValueError(
+                f"attribute {name!r} is recorded {len(values)} times "
+                f"({values!r}); use attribute_values() — returning one of them "
+                "would discard an observation this format deliberately kept"
+            )
+        return values[0] if values else default
 
     def to_dict(self) -> dict[str, Any]:
         out: dict[str, Any] = {

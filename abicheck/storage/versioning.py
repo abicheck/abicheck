@@ -186,9 +186,29 @@ class StorageVersions:
     source_producer_generation: str = ""
 
     def to_dict(self) -> dict[str, Any]:
+        """Canonical mapping form.
+
+        The two fail-closed axes are written through the same
+        :func:`_stated_version` rule the reader applies, not as the field
+        holds them. Writing the raw value let a directly-constructed
+        ``StorageVersions(package_format_version=1.5)`` emit ``1.5``, which
+        ``from_dict`` then restored as ``UNSTATED_VERSION`` — a document that
+        does not round-trip and that this build refuses to read, describing an
+        object whose own guard had already ruled the value out (Codex review).
+
+        Same rule as ``AvailabilityLedger.to_dict``, and for the same reason:
+        a serializer that disagrees with its own reader emits documents that
+        mean something other than the object they came from. Refusing at write
+        time was the alternative and is rejected for the same reason it was
+        there — it would be a *third* behaviour, failing a write for an object
+        the guard already handles safely. Normalizing states plainly what the
+        package can be read as: nothing usable.
+        """
         out: dict[str, Any] = {
-            "package_format_version": self.package_format_version,
-            "comparison_contract_version": self.comparison_contract_version,
+            "package_format_version": _stated_version(self.package_format_version),
+            "comparison_contract_version": _stated_version(
+                self.comparison_contract_version
+            ),
         }
         if self.section_schema_versions:
             out["section_schema_versions"] = dict(

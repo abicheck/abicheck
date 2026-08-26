@@ -958,3 +958,71 @@ class TestSurrogateEscapedContentIsHashable:
         assert "caf" in rendered
         with pytest.raises(UnicodeEncodeError):
             rendered.encode("utf-8")
+
+
+class TestVersionSerializationAgreesWithTheReader:
+    """Codex review: `to_dict` wrote a value its own reader rules out.
+
+    A directly-constructed `StorageVersions(package_format_version=1.5)`
+    serialized as `1.5`, which `from_dict` restored as `UNSTATED_VERSION` — a
+    document that does not round-trip and that this build refuses to read,
+    describing an object whose own guard had already ruled the value out.
+
+    Same defect as `AvailabilityLedger.to_dict` earlier in this branch: a
+    serializer disagreeing with its reader emits documents that mean something
+    other than the object they came from.
+    """
+
+    @pytest.mark.parametrize("value", [1.5, 0.5, True, -1, 0, "2", None])
+    def test_a_malformed_fail_closed_axis_serializes_as_unstated(
+        self, value: object
+    ) -> None:
+        versions = StorageVersions(
+            package_format_version=value,  # type: ignore[arg-type]
+            comparison_contract_version=COMPARISON_CONTRACT_VERSION,
+        )
+
+        assert versions.to_dict()["package_format_version"] == UNSTATED_VERSION
+
+    @pytest.mark.parametrize("value", [1.5, True, -1, "2", None])
+    @pytest.mark.parametrize(
+        "axis", ["package_format_version", "comparison_contract_version"]
+    )
+    def test_the_document_round_trips(self, axis: str, value: object) -> None:
+        axes: dict[str, object] = {
+            "package_format_version": PACKAGE_FORMAT_VERSION,
+            "comparison_contract_version": COMPARISON_CONTRACT_VERSION,
+        }
+        axes[axis] = value
+        emitted = StorageVersions(**axes).to_dict()  # type: ignore[arg-type]
+
+        assert StorageVersions.from_dict(emitted).to_dict() == emitted
+
+    def test_serialization_agrees_with_the_readers_verdict(self) -> None:
+        """The general contract: what is written reads back the same way."""
+        for value in (1.5, True, -1, 0, "2", None, PACKAGE_FORMAT_VERSION):
+            versions = StorageVersions(
+                package_format_version=value,  # type: ignore[arg-type]
+                comparison_contract_version=COMPARISON_CONTRACT_VERSION,
+            )
+            reloaded = StorageVersions.from_dict(versions.to_dict())
+
+            assert (
+                check_reader_compatibility(versions).readable
+                == check_reader_compatibility(reloaded).readable
+            )
+
+    def test_a_valid_version_is_written_unchanged(self) -> None:
+        emitted = StorageVersions().to_dict()
+
+        assert emitted["package_format_version"] == PACKAGE_FORMAT_VERSION
+        assert emitted["comparison_contract_version"] == COMPARISON_CONTRACT_VERSION
+
+    def test_an_integral_float_is_written_as_an_integer(self) -> None:
+        """`1.0` is a real version; it must not survive as a float in JSON."""
+        emitted = StorageVersions(
+            package_format_version=float(PACKAGE_FORMAT_VERSION),  # type: ignore[arg-type]
+        ).to_dict()
+
+        assert emitted["package_format_version"] == PACKAGE_FORMAT_VERSION
+        assert isinstance(emitted["package_format_version"], int)

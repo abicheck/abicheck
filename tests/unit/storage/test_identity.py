@@ -972,3 +972,70 @@ class TestIdentityFieldsAreRejectedNotCoerced:
         )
 
         assert OccurrenceId.from_dict(original.to_dict()) == original
+
+
+class TestARepeatedAttributeIsNotSilentlyResolved:
+    """Codex review: the accessor discarded a value the format kept.
+
+    The serialized form is a list of pairs rather than a mapping precisely so
+    a repeated attribute name does not lose a value. `attribute()` then
+    returned the first match — and since `__post_init__` sorts the pairs,
+    "first" meant lexicographically smallest *value*, so `size=8` alongside
+    `size=16` answered `"16"` with nothing to indicate a choice was made.
+
+    This module exists because a first-wins index discarded losers; an
+    accessor doing the same one layer down is no better for being smaller.
+    """
+
+    @staticmethod
+    def _repeated() -> OccurrenceId:
+        return OccurrenceId(
+            entity=EntityId(EntityKind.TYPE, "S"),
+            observation=ObservationKind.DWARF,
+            attributes=(("size", "8"), ("size", "16"), ("binding", "global")),
+        )
+
+    def test_every_value_is_reachable(self) -> None:
+        assert set(self._repeated().attribute_values("size")) == {"8", "16"}
+
+    def test_the_singular_accessor_refuses_rather_than_choosing(self) -> None:
+        with pytest.raises(ValueError, match="recorded 2 times"):
+            self._repeated().attribute("size")
+
+    def test_an_unrepeated_name_still_answers_normally(self) -> None:
+        """Refusing ambiguity must not cost the ordinary case."""
+        occurrence = self._repeated()
+
+        assert occurrence.attribute("binding") == "global"
+        assert occurrence.attribute("absent") == ""
+        assert occurrence.attribute("absent", "fallback") == "fallback"
+
+    def test_attribute_values_is_empty_for_an_absent_name(self) -> None:
+        assert self._repeated().attribute_values("absent") == ()
+
+    def test_repeated_values_still_distinguish_two_occurrences(self) -> None:
+        """The review's second claim, checked rather than assumed.
+
+        It said an occurrence with both values "can compare equal to one
+        containing only the selected value". It cannot: every pair contributes
+        to `key`. The defect was confined to the accessor, and saying so
+        precisely matters more than agreeing with the whole comment.
+        """
+        both = self._repeated()
+        one = OccurrenceId(
+            entity=EntityId(EntityKind.TYPE, "S"),
+            observation=ObservationKind.DWARF,
+            attributes=(("size", "16"), ("binding", "global")),
+        )
+
+        assert both != one
+        assert both.key != one.key
+
+    def test_a_repeated_attribute_survives_a_round_trip(self) -> None:
+        """The reason the accessor had to change rather than the storage."""
+        original = self._repeated()
+
+        assert OccurrenceId.from_dict(original.to_dict()) == original
+        assert OccurrenceId.from_dict(original.to_dict()).attribute_values(
+            "size"
+        ) == original.attribute_values("size")
