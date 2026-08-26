@@ -180,6 +180,25 @@ class TestDemangle:
         assert "_ZN3foo3barEv" in called_args
         assert "__ZN3foo3barEv" not in called_args
 
+    def test_macho_prefixed_malformed_name_via_cppfilt_is_not_demangled(self):
+        """Codex review, fresh evidence: c++filt exits 0 and simply echoes
+        back its input for a name it can't demangle. Comparing that echo
+        against the *original* (double-underscore) symbol instead of the
+        canonical (single-underscore) input it was actually given made a
+        malformed `__Z...` token that isn't real Itanium mangling silently
+        succeed -- the echoed `_ZNOTVALID` never equals the original
+        `__ZNOTVALID`, so it read as a real demangling result."""
+        mock_cxxfilt = MagicMock()
+        mock_cxxfilt.demangle.side_effect = RuntimeError("no")
+        with patch.dict("sys.modules", {"cxxfilt": mock_cxxfilt}):
+            with patch("subprocess.run") as mock_run:
+                mock_run.return_value = subprocess.CompletedProcess(
+                    args=["c++filt"], returncode=0,
+                    stdout="_ZNOTVALID\n", stderr="",
+                )
+                result = _mod.demangle("__ZNOTVALID")
+        assert result is None
+
 
 # ── demangle_batch() ────────────────────────────────────────────────────────
 
@@ -335,6 +354,36 @@ class TestDemangleBatch:
         assert result == {"__ZN3foo3barEv": "foo::bar()"}
         sent_input = mock_run.call_args[1]["input"]
         assert sent_input == "_ZN3foo3barEv"
+
+    def test_macho_prefixed_malformed_name_is_not_demangled_via_cppfilt(self):
+        """Codex review, fresh evidence: `demangle_batch(["__ZNOTVALID"])`
+        must not silently succeed. c++filt exits 0 and echoes back its
+        input (the *canonical* single-underscore form) for a name it can't
+        demangle -- comparing that echo against the original double-
+        underscore symbol instead of the canonical input it was actually
+        given made this read as a real (and wrong) demangling."""
+        with patch.dict("sys.modules", {"cxxfilt": None}):
+            with patch("subprocess.run") as mock_run:
+                mock_run.return_value = subprocess.CompletedProcess(
+                    args=["c++filt"], returncode=0,
+                    stdout="_ZNOTVALID\n", stderr="",
+                )
+                result = _mod.demangle_batch(["__ZNOTVALID"])
+        assert result == {}
+
+    def test_macho_prefixed_malformed_name_is_not_demangled_via_cxxfilt(self):
+        """Same failure mode, one layer up: some cxxfilt/__cxa_demangle
+        versions return the input unchanged on failure rather than raising."""
+        mock_cxxfilt = MagicMock()
+        mock_cxxfilt.demangle.side_effect = lambda s: s  # echo back unchanged
+        with patch.dict("sys.modules", {"cxxfilt": mock_cxxfilt}):
+            with patch("subprocess.run") as mock_run:
+                mock_run.return_value = subprocess.CompletedProcess(
+                    args=["c++filt"], returncode=0,
+                    stdout="_ZNOTVALID\n", stderr="",
+                )
+                result = _mod.demangle_batch(["__ZNOTVALID"])
+        assert result == {}
 
 
 # ── base_name() ─────────────────────────────────────────────────────────────

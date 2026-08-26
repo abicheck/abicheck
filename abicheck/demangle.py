@@ -113,7 +113,13 @@ def demangle(symbol: str) -> str | None:
             )
             if result.returncode == 0:
                 out = result.stdout.strip()
-                if out and out != symbol:
+                # Compare against the canonical input, not the original
+                # (possibly Mach-O-prefixed) symbol -- c++filt echoes back
+                # exactly what it was fed on failure, so for a malformed
+                # `__Z...` token that echo is the canonical single-
+                # underscore form, which never equals `symbol` and would
+                # be misread as a real demangling (Codex review).
+                if out and out != canonical:
                     return out
         except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
             pass
@@ -172,8 +178,16 @@ def _batch_phase2_cxxfilt(uncached: list[str], result: dict[str, str]) -> list[s
 
         for s in uncached:
             try:
-                d = cxxfilt.demangle(_canonical_mangled(s))
-                if d and d != s:
+                canonical = _canonical_mangled(s)
+                d = cxxfilt.demangle(canonical)
+                # Compare against the canonical input, not the original
+                # (possibly Mach-O-prefixed) symbol -- some cxxfilt/
+                # __cxa_demangle versions return the input unchanged on
+                # failure rather than raising, and for a `__Z...` token
+                # that echo is the canonical single-underscore form,
+                # which never equals `s` and would be misread as a real
+                # demangling (Codex review).
+                if d and d != canonical:
                     result[s] = d
                     _batch_cache_record_ok(s, d)
                 else:
@@ -215,8 +229,17 @@ def _batch_phase3_cppfilt(remaining: list[str], result: dict[str, str]) -> None:
                 continue
             any_cppfilt_succeeded = True
             lines = proc.stdout.strip().split("\n")
-            for mangled, demangled in zip(unresolved, lines):
-                if demangled and demangled != mangled:
+            for mangled, canonical, demangled in zip(
+                unresolved, canonical_inputs, lines
+            ):
+                # Compare against the *canonical* input, not the original
+                # (possibly Mach-O-prefixed) one -- c++filt echoes back
+                # exactly what it was fed on failure, so for a malformed
+                # `__Z...` token that echo is the canonical single-
+                # underscore form, which never equals the double-underscore
+                # `mangled` key and would be misread as a real demangling
+                # (Codex review, fresh evidence).
+                if demangled and demangled != canonical:
                     result[mangled] = demangled
                     _batch_cache_record_ok(mangled, demangled)
                     success_set.add(mangled)

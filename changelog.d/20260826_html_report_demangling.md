@@ -136,3 +136,15 @@
   the HTML report specifically, since every consumer of `demangle()`/
   `demangle_text()` across the codebase (DWARF export matching, appcompat
   symbol matching, detector logic) shared the identical gap.
+- **Twelfth follow-up (Codex review): the Mach-O fix above could read a
+  `c++filt` echo-back as a real demangling for a malformed name.** GNU
+  `c++filt` exits 0 and simply echoes back its input when it can't
+  demangle a name; the batch and single-symbol `c++filt` fallbacks
+  compared that echo against the *original* (possibly Mach-O-prefixed)
+  symbol rather than the *canonical* form actually sent to the
+  subprocess, so a malformed `__Z...`-looking token (not real Itanium
+  mangling) silently "succeeded" -- `demangle_batch(["__ZNOTVALID"])`
+  returned `{"__ZNOTVALID": "_ZNOTVALID"}` instead of `{}`. Both
+  comparisons now check against the canonical input; the in-process
+  `cxxfilt` batch path had the identical comparison gap (a `d != s`
+  check against the original symbol) and is fixed the same way.
