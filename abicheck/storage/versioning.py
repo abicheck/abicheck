@@ -283,15 +283,26 @@ def check_reader_compatibility(
 ) -> ReaderCompatibility:
     """Decide whether this build may read a package, per ADR-062 D2.
 
-    Both fail-closed axes are checked for being *usable* (``> UNSTATED_VERSION``)
-    rather than merely for equality with the sentinel. ``from_dict`` already
-    sanitizes, but ``StorageVersions`` is public and constructible directly, so
-    a loader or migration adapter that builds one without going through
-    ``from_dict`` could hand this function a negative version — which is
-    neither equal to the sentinel nor newer than supported, and so passed both
-    guards as readable (Codex review). The sanitizer and the decision point
-    must each be safe on their own; a guard that relies on its callers having
-    already cleaned the input is not a fail-closed guard.
+    Both fail-closed axes are re-validated here through the same
+    :func:`_stated_version` rule ``from_dict`` applies, rather than being
+    compared as given. ``StorageVersions`` is public and constructible
+    directly, so a loader or migration adapter that builds one without going
+    through ``from_dict`` hands this function whatever it was given — and two
+    successive review rounds found the guard here failing open on exactly
+    that path. First a negative version, which is neither equal to the
+    sentinel nor newer than supported; comparing ``<= UNSTATED_VERSION``
+    instead of ``==`` closed that one but not the class, because the
+    remaining malformed shapes are not *ordered* the way that fix assumed:
+    ``0.5`` is greater than the sentinel and not greater than the supported
+    version, so it read as compatible; ``True`` is ``1`` under comparison, so
+    it was accepted as v1; and a string raised ``TypeError`` out of the
+    comparison itself instead of failing closed (Codex review).
+
+    Sharing one rule with the sanitizer is the point rather than an
+    optimization: a second, differently-spelled notion of "a usable version"
+    at the decision point is what let these three diverge from the one
+    ``_stated_version`` already stated. The sanitizer and the decision point
+    must each be safe on their own, and they must agree on what safe means.
 
     Two axes fail closed and the rest do not, which is the whole point of
     splitting them:
@@ -310,15 +321,17 @@ def check_reader_compatibility(
     given, and a consumer that cares must be able to see that rather than
     have the package silently refused or silently reinterpreted.
     """
-    if versions.package_format_version > supported_package_format:
+    package_format = _stated_version(versions.package_format_version)
+    comparison_contract = _stated_version(versions.comparison_contract_version)
+    if package_format > supported_package_format:
         return ReaderCompatibility(
             readable=False,
             reason=(
-                f"package format v{versions.package_format_version} is newer than "
+                f"package format v{package_format} is newer than "
                 f"this build's v{supported_package_format}; upgrade abicheck to read it"
             ),
         )
-    if versions.package_format_version <= UNSTATED_VERSION:
+    if package_format <= UNSTATED_VERSION:
         return ReaderCompatibility(
             readable=False,
             reason=(
@@ -326,7 +339,7 @@ def check_reader_compatibility(
                 "layout is unknown; this reader may not locate its structures"
             ),
         )
-    if versions.comparison_contract_version <= UNSTATED_VERSION:
+    if comparison_contract <= UNSTATED_VERSION:
         return ReaderCompatibility(
             readable=False,
             reason=(
@@ -335,11 +348,11 @@ def check_reader_compatibility(
                 "produce a wrong verdict"
             ),
         )
-    if versions.comparison_contract_version > supported_comparison_contract:
+    if comparison_contract > supported_comparison_contract:
         return ReaderCompatibility(
             readable=False,
             reason=(
-                f"comparison contract v{versions.comparison_contract_version} is newer "
+                f"comparison contract v{comparison_contract} is newer "
                 f"than this build's v{supported_comparison_contract}; comparing without "
                 "it could produce a wrong verdict"
             ),

@@ -217,10 +217,16 @@ bytes/objects actually loaded.
 
 | Module | Contract |
 |---|---|
-| `abicheck/storage/availability.py` | `FactStatus`, `FactAvailability`, `AvailabilityLedger` (A0.1) |
-| `abicheck/storage/identity.py` | `EntityKind`, `EntityId`, `OccurrenceId`, `OccurrenceSet`, `IdentityConflict`, `elf_symbol_occurrence` (A0.2/A0.3) |
-| `abicheck/storage/canonical.py` | `canonical_form`, `canonical_json`, `semantic_digest`, `VOLATILE_KEYS` (A0.4) |
-| `abicheck/storage/versioning.py` | `StorageVersions`, `ProducerIdentity`, `ReaderCompatibility`, `check_reader_compatibility` (A0.5) |
+| `abicheck/storage/availability.py` | `FactStatus`, `Confidence`, `FactAvailability`, `AvailabilityLedger` (A0.1) |
+| `abicheck/storage/identity.py` | `EntityKind`, `ObservationKind`, `EntityId`, `OccurrenceId`, `OccurrenceSet`, `IdentityConflict`, `elf_symbol_occurrence` (A0.2/A0.3) |
+| `abicheck/storage/canonical.py` | `canonical_form`, `canonical_json`, `semantic_digest`, `strip_capture_metadata`, `CAPTURE_METADATA_KEY` (A0.4) |
+| `abicheck/storage/versioning.py` | `PACKAGE_FORMAT_VERSION`, `COMPARISON_CONTRACT_VERSION`, `UNSTATED_VERSION`, `StorageVersions`, `ProducerIdentity`, `ReaderCompatibility`, `check_reader_compatibility` (A0.5) |
+
+Each row is exactly that module's `__all__`, and
+`tests/unit/storage/test_landed_surface.py` asserts it — a row advertising a
+primitive that no longer exists (`VOLATILE_KEYS`, replaced by
+`CAPTURE_METADATA_KEY`) sent a reviewer looking for an API that was never
+there, so the table is checked rather than maintained by hand.
 
 Tests live in `tests/unit/storage/`, stating each primitive's contract as
 invariants alongside the example cases (A0.6).
