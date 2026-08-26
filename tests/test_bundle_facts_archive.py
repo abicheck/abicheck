@@ -32,6 +32,7 @@ import pytest
 from abicheck.bundle_facts import BundleFacts, capture_bundle_facts
 from abicheck.bundle_manifest import InstantiationManifest, ManifestEntry
 from abicheck.elf_metadata import ElfImport, ElfMetadata, ElfSymbol
+from abicheck.errors import SnapshotError
 from abicheck.model import AbiSnapshot
 from abicheck.serialization import load_bundle_facts, save_bundle_facts
 
@@ -151,6 +152,56 @@ class TestBundleFactsArchiveFormat:
 
         loaded = load_bundle_facts(out)
         assert set(loaded.per_library_snapshots) == {"a.so", "b.so"}
+
+    def test_load_reads_a_shared_blob_exactly_once_across_library_names(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Two library names sharing one blob (the dedup this format
+        provides) decompress that blob once on load, not once per name --
+        both a CPU-waste fix and a step toward the aggregate cap actually
+        bounding real distinct content rather than being trivially defeated
+        by re-reading the same bytes repeatedly (Codex review)."""
+        import abicheck.storage.bundle_archive as bundle_archive_module
+
+        snap = _per_library_snapshots(_old_metadata())["libcore.so"]
+        facts = BundleFacts(per_library_snapshots={"a.so": snap, "b.so": snap})
+        out = tmp_path / "dup.bundlefacts.archive.zip"
+        save_bundle_facts(facts, out, format="archive")
+
+        real_read_blob = bundle_archive_module.BundleArchiveReader.read_blob
+        call_count = 0
+
+        def _counting_read_blob(self, content_hash_hex, **kw):  # type: ignore[no-untyped-def]
+            nonlocal call_count
+            call_count += 1
+            return real_read_blob(self, content_hash_hex, **kw)
+
+        monkeypatch.setattr(
+            bundle_archive_module.BundleArchiveReader, "read_blob", _counting_read_blob
+        )
+        loaded = load_bundle_facts(out)
+        assert set(loaded.per_library_snapshots) == {"a.so", "b.so"}
+        assert call_count == 1
+
+    def test_load_rejects_a_bundle_exceeding_the_aggregate_decoded_size_cap(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """storage.bundle_archive.read_blob's own max_decoded_bytes only
+        bounds ONE blob at a time -- many distinct, individually-small
+        blobs must still be bounded in aggregate across the whole load
+        (Codex review)."""
+        import abicheck.bundle_facts as bundle_facts_module
+
+        monkeypatch.setattr(bundle_facts_module, "DEFAULT_MAX_BUNDLE_DECODED_BYTES", 100)
+        metadata = {
+            f"lib{i}.so": _meta(soname=f"lib{i}.so", exports=[f"sym{i}"]) for i in range(5)
+        }
+        facts = capture_bundle_facts(_per_library_snapshots(metadata))
+        out = tmp_path / "many.bundlefacts.archive.zip"
+        save_bundle_facts(facts, out, format="archive")
+
+        with pytest.raises(SnapshotError, match="safety limit"):
+            load_bundle_facts(out, format="archive")
 
     def test_back_compat_plain_json_fixture_still_loads_via_auto(
         self, tmp_path: Path

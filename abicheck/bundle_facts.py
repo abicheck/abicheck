@@ -74,6 +74,17 @@ BUNDLE_FACTS_SCHEMA_VERSION = 1
 #: reason that field is independent of `AbiSnapshot.SCHEMA_VERSION`.
 BUNDLE_ARCHIVE_SCHEMA_VERSION = 1
 
+#: Aggregate decoded-size cap for a whole read_bundle_facts_archive() load
+#: -- same 1 GiB value as `snapshot_io.DEFAULT_MAX_DECODED_BYTES`, the cap
+#: the plain-JSON BundleFacts loader already enforces on its own single
+#: whole-document read. `storage.bundle_archive.read_blob`'s own
+#: `max_decoded_bytes` only bounds ONE blob at a time -- a crafted archive
+#: with many individually-valid blobs (or many library names referencing
+#: one large blob) could otherwise amplify past that per-call limit across
+#: the whole load even though every single `read_blob()` call passes its
+#: own guard (Codex review).
+DEFAULT_MAX_BUNDLE_DECODED_BYTES = 1024 * 1024 * 1024
+
 #: The fingerprint value used when no multibuild variant applies (every
 #: caller today) -- G38 Phase 3 populates a real per-variant fingerprint;
 #: Phase 2 only needs the field to always be present so a future
@@ -465,7 +476,7 @@ def read_bundle_facts_archive(
     import json as _json
 
     from .bundle_manifest import manifest_from_dict
-    from .errors import IncompatibleSnapshotSchemaError
+    from .errors import IncompatibleSnapshotSchemaError, SnapshotError
     from .storage.bundle_archive import BundleArchiveReader
 
     with BundleArchiveReader.open(path) as reader:
@@ -507,15 +518,40 @@ def read_bundle_facts_archive(
                 "bundle archive: 'library_blobs' must be a mapping, got "
                 f"{type(library_blobs).__name__}"
             )
+        # Aggregate cap across the whole load, plus a cache keyed by hash
+        # so a manifest with many library names sharing one blob (the
+        # dedup this format exists to provide) decompresses that blob
+        # once, not once per name (Codex review).
+        total_decoded = 0
+        blob_cache: dict[str, bytes] = {}
+
+        def _cached_blob(h: str) -> bytes:
+            nonlocal total_decoded
+            cached = blob_cache.get(h)
+            if cached is not None:
+                return cached
+            raw = reader.read_blob(h)
+            total_decoded += len(raw)
+            if total_decoded > DEFAULT_MAX_BUNDLE_DECODED_BYTES:
+                raise SnapshotError(
+                    f"{path}: this bundle archive's total decoded size "
+                    f"exceeds the {DEFAULT_MAX_BUNDLE_DECODED_BYTES} byte "
+                    "safety limit across its library_blobs -- refusing to "
+                    "continue loading (possible decompression bomb, or a "
+                    "genuinely oversized bundle)."
+                )
+            blob_cache[h] = raw
+            return raw
+
         per_library_snapshots = {
-            name: snapshot_from_dict(_json.loads(reader.read_blob(h)))
+            name: snapshot_from_dict(_json.loads(_cached_blob(h)))
             for name, h in library_blobs.items()
         }
         manifest_blob = manifest.get("manifest_blob")
         instantiation_manifest = None
         if manifest_blob is not None:
             instantiation_manifest = manifest_from_dict(
-                _json.loads(reader.read_blob(manifest_blob))
+                _json.loads(_cached_blob(manifest_blob))
             )
         return BundleFacts(
             schema_version=bundle_facts_schema_version,
