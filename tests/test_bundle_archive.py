@@ -1009,7 +1009,16 @@ class TestBundleArchiveWriterNewArchivePermissions:
     file at mode 0600 regardless of the process umask -- a brand-new
     archive (no pre-existing destination whose mode to preserve) must not
     silently publish more restrictively than a normal `open(..., "wb")`
-    would under the same umask."""
+    would under the same umask.
+
+    Now implemented via `_open_unique_temp` (`os.O_CREAT` filtered through
+    the umask by the kernel at creation), not the process-wide, non-
+    thread-safe `os.umask()` read-zero-restore dance an earlier revision
+    used (a second Codex review round: two concurrent saves could
+    interleave and leave the process umask corrupted, or briefly expose an
+    unrelated file created during the zeroed window) -- see
+    `TestBundleArchiveWriterDoesNotToggleTheProcessUmask` below for a
+    direct regression test on that specific hazard."""
 
     @pytest.mark.skipif(
         sys.platform == "win32", reason="POSIX permission bits are not meaningful on Windows"
@@ -1067,3 +1076,35 @@ class TestBundleArchiveWriterNewArchivePermissions:
             os.umask(old_umask)
 
         assert stat.S_IMODE(path.stat().st_mode) == 0o640
+
+
+class TestBundleArchiveWriterDoesNotToggleTheProcessUmask:
+    """Codex review, fresh evidence: the earlier `os.umask(0)`/
+    `os.umask(current_umask)` read-zero-restore sequence is process-wide
+    and not thread-safe -- a concurrent thread creating any file during
+    that window could observe the temporarily-zeroed umask. Confirms the
+    fix directly: the process umask is bit-for-bit unchanged by opening a
+    writer for a brand-new archive."""
+
+    @pytest.mark.skipif(
+        sys.platform == "win32", reason="POSIX umask semantics"
+    )
+    def test_umask_is_never_read_or_modified(self, tmp_path: Path) -> None:
+        path = tmp_path / "bundle.archive.zip"
+        sentinel = 0o037
+        old_umask = os.umask(sentinel)
+        try:
+            with BundleArchiveWriter(path) as writer:
+                # The umask must already be back at *sentinel* here, mid-write
+                # -- not merely restored afterward -- since the old
+                # implementation's zeroed window spanned exactly this scope.
+                during = os.umask(sentinel)
+                os.umask(during)
+                assert during == sentinel
+                h = writer.put_blob(b'{"a": 1}')
+                writer.write_manifest({"library_blobs": {"a.so": h}})
+            after = os.umask(sentinel)
+            os.umask(after)
+            assert after == sentinel
+        finally:
+            os.umask(old_umask)

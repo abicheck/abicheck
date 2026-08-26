@@ -86,6 +86,14 @@ BUNDLE_ARCHIVE_SCHEMA_VERSION = 1
 #: own guard (Codex review).
 DEFAULT_MAX_BUNDLE_DECODED_BYTES = 1024 * 1024 * 1024
 
+#: Hard cap on the number of `library_blobs` entries one archive manifest
+#: may name -- independent of any byte-size cap (see
+#: `read_bundle_facts_archive`'s own check for why: a shared blob's decoded
+#: bytes are charged once, but each name sharing it still materializes its
+#: own AbiSnapshot object graph). No real bundle approaches this; a real
+#: multi-library release is hundreds of libraries, not tens of thousands.
+DEFAULT_MAX_LIBRARY_COUNT = 20_000
+
 #: The fingerprint value used when no multibuild variant applies (every
 #: caller today) -- G38 Phase 3 populates a real per-variant fingerprint;
 #: Phase 2 only needs the field to always be present so a future
@@ -532,6 +540,26 @@ def read_bundle_facts_archive(
             raise ValueError(
                 "bundle archive: 'library_blobs' must be a mapping, got "
                 f"{type(library_blobs).__name__}"
+            )
+        # Bound the *name count* independently of decoded-byte size (Codex
+        # review, fresh evidence): DEFAULT_MAX_BUNDLE_DECODED_BYTES only
+        # charges a shared blob's bytes once (blob_cache below), but each
+        # *name* referencing it still gets its own materialized AbiSnapshot
+        # object graph (snapshot_cache's own deep copy, to preserve
+        # per-entry isolation -- see that block's comment). A manifest
+        # naming far more libraries than any real bundle would need -- up
+        # to ~700k entries fit under DEFAULT_MAX_MANIFEST_BYTES's 64 MiB
+        # even at ~90 bytes/entry -- could otherwise turn one small,
+        # size-capped blob into an unbounded number of live Python objects
+        # regardless of the byte-level caps, since none of them measure
+        # object count. Checked before any blob is even read.
+        if len(library_blobs) > DEFAULT_MAX_LIBRARY_COUNT:
+            raise SnapshotError(
+                f"{path}: this bundle archive's manifest names "
+                f"{len(library_blobs)} libraries, exceeding the "
+                f"{DEFAULT_MAX_LIBRARY_COUNT} safety limit -- refusing to "
+                "continue loading (possible object-count amplification "
+                "attack, or a genuinely oversized bundle)."
             )
         # Aggregate cap across the whole load, plus a cache keyed by hash
         # so a manifest with many library names sharing one blob (the

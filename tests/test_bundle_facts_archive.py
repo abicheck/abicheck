@@ -249,6 +249,41 @@ class TestBundleFactsArchiveFormat:
         with pytest.raises(SnapshotError, match="safety limit"):
             load_bundle_facts(out, format="archive")
 
+    def test_load_rejects_a_manifest_naming_too_many_libraries(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Codex review, fresh evidence: DEFAULT_MAX_BUNDLE_DECODED_BYTES
+        only charges a shared blob's bytes once, but each library name
+        sharing it still materializes its own AbiSnapshot object graph on
+        load -- a manifest naming far more libraries than any real bundle
+        needs could otherwise amplify one small, size-capped blob into an
+        unbounded number of live Python objects. Rejected on name count
+        alone, before any blob is even read."""
+        import abicheck.bundle_facts as bundle_facts_module
+        from abicheck.storage.bundle_archive import BundleArchiveReader
+
+        monkeypatch.setattr(bundle_facts_module, "DEFAULT_MAX_LIBRARY_COUNT", 3)
+        # All five names deliberately share one snapshot/blob -- proving
+        # the cap fires on name *count*, not decoded size (a shared,
+        # trivially small blob would otherwise sail under any byte cap).
+        metadata = {f"lib{i}.so": _meta(soname="shared.so") for i in range(5)}
+        facts = capture_bundle_facts(_per_library_snapshots(metadata))
+        out = tmp_path / "many-names.bundlefacts.archive.zip"
+        save_bundle_facts(facts, out, format="archive")
+
+        real_read_blob = BundleArchiveReader.read_blob
+        blob_reads: list[object] = []
+
+        def _tracking_read_blob(self, h, **kw):  # type: ignore[no-untyped-def]
+            blob_reads.append(h)
+            return real_read_blob(self, h, **kw)
+
+        monkeypatch.setattr(BundleArchiveReader, "read_blob", _tracking_read_blob)
+
+        with pytest.raises(SnapshotError, match="exceeding the 3 safety limit"):
+            load_bundle_facts(out, format="archive")
+        assert blob_reads == []
+
     def test_load_caps_each_blob_read_by_the_remaining_aggregate_allowance(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:

@@ -21,12 +21,12 @@ A pure, format-only primitive: a zip file with one uncompressed
 ``AbiSnapshot`` is -- callers hand this module raw bytes and a manifest
 ``dict``, and get raw bytes back. That split is deliberate: keeping this
 module free of any ``model``/``compare``-layer import lets it join
-`storage/` (ADR-061) cleanly today, without resolving the pre-existing
+`storage/` (ADR-061) cleanly, without resolving the pre-existing
 ``bundle_facts.py`` <-> ``checker_types.py`` (``model`` <-> ``compare``)
 coupling a naive "construct a ``BundleFacts`` directly here" design would
-hit (confirmed via ``scripts/check_architecture.py``: ``bundle_facts.py``'s
-own ``TYPE_CHECKING``-only import of ``checker_types.DiffResult`` creates a
-real ``model -> compare -> model`` cycle once it joins the ``model`` layer).
+hit (``bundle_facts.py``'s own ``TYPE_CHECKING``-only import of
+``checker_types.DiffResult`` creates a real ``model -> compare -> model``
+cycle once it joins the ``model`` layer).
 
 The ``BundleFacts``-aware glue lives in ``serialization.py``'s
 ``save_bundle_facts``/``load_bundle_facts``, same as the plain-JSON format.
@@ -40,11 +40,9 @@ carries a real end-of-file central directory naming every member's offset
 and independently-compressed length, so `zipfile.ZipFile.open(name)` reads
 and decompresses exactly one member without touching any other -- the
 random-access property this format exists to provide. Each member's own
-*payload* is zstd-compressed independently (``ZIP_STORED``, matching how
-``snapshot_io.py`` already treats zstd as a payload transform independent
-of its outer container) rather than zip's own ``ZIP_DEFLATED``, since zstd
-is this project's compression codec of record (ADR-059) with materially
-better ratios than deflate at comparable speed.
+*payload* is zstd-compressed independently (``ZIP_STORED``) rather than
+zip's own ``ZIP_DEFLATED``, since zstd is this project's compression codec
+of record (ADR-059) with materially better ratios at comparable speed.
 """
 
 from __future__ import annotations
@@ -54,17 +52,16 @@ import hashlib
 import io
 import json
 import os
+import secrets
 import stat
-import tempfile
 import zipfile
 from pathlib import Path
 from typing import Any
 
 from ..errors import SnapshotError
 
-#: The manifest member's own name inside the archive -- always the first
-#: thing a reader touches, and (per the zip format) readable without
-#: scanning or decompressing any blob member.
+#: The manifest member's own name -- always the first thing a reader
+#: touches, readable without scanning or decompressing any blob member.
 MANIFEST_MEMBER = "manifest.json"
 
 #: Blob member naming: content-hash-addressed, one per unique payload.
@@ -72,46 +69,37 @@ _BLOB_PREFIX = "blobs/"
 _BLOB_SUFFIX = ".json.zst"
 
 #: zstd compression level for archive blobs. Matches ADR-059's own
-#: ``ZSTD_LEVEL_BASELINE`` reasoning (`abicheck/snapshot_io.py`): a bundle
-#: archive is written rarely (an explicit capture/convert step) and read
-#: often, so it takes the slow/best-ratio end rather than the fast,
-#: internal-cache end.
+#: ``ZSTD_LEVEL_BASELINE`` reasoning: a bundle archive is written rarely
+#: (an explicit capture/convert step) and read often, so it takes the
+#: slow/best-ratio end rather than the fast, internal-cache end.
 ZSTD_LEVEL = 19
 
 #: Same reasoning as `snapshot_io.py`'s own `_ZSTD_MAX_WINDOW_LOG`: bound
 #: decompression memory to a window a legitimate blob will never need,
-#: rather than trusting an archive's own embedded frame parameters -- a
-#: decompression-bomb guard applied per-blob here (unlike the single
-#: whole-document read `snapshot_io.py` guards), so one oversized blob
-#: cannot exhaust memory on a request for an unrelated, small blob
-#: elsewhere in the same archive.
+#: rather than trusting an archive's own embedded frame parameters --
+#: applied per-blob here, so one oversized blob cannot exhaust memory on
+#: a request for an unrelated, small blob elsewhere in the archive.
 _ZSTD_MAX_WINDOW_LOG = 27  # 128 MiB
 
 #: Per-blob decompressed-size cap, mirroring `snapshot_io.py`'s own
 #: `DEFAULT_MAX_DECODED_BYTES` (same 1 GiB value, independently applied --
-#: this module does not import that constant, since `snapshot_io.py` is not
-#: itself part of `storage/` yet; see the module docstring for why this
-#: module avoids depending on it).
+#: this module doesn't import that constant; see the module docstring for
+#: why it avoids depending on `snapshot_io.py`).
 DEFAULT_MAX_BLOB_BYTES = 1024 * 1024 * 1024
 
-#: `manifest.json`'s own size cap -- deliberately far smaller than
+#: `manifest.json`'s own size cap -- far smaller than
 #: `DEFAULT_MAX_BLOB_BYTES`: the manifest holds only name/hash pairs, not
-#: payload content, so even a bundle referencing tens of thousands of
-#: libraries stays well under this (Codex review: rejecting deflate for a
-#: member is not itself a size bound -- a still-`ZIP_STORED` member's own
-#: claimed size is read via `ZipInfo.file_size` and checked *before* the
-#: read, so a crafted archive can't exhaust memory merely by claiming (and
-#: actually storing) an enormous manifest member).
+#: payload content. Rejecting deflate for a member isn't itself a size
+#: bound -- a still-`ZIP_STORED` member's own claimed size is read via
+#: `ZipInfo.file_size` and checked before the read.
 DEFAULT_MAX_MANIFEST_BYTES = 64 * 1024 * 1024
 
 #: Slack added to a decoded-size cap when bounding the *outer*,
 #: still-compressed blob member read -- zstd frame/block overhead can make
 #: an incompressible payload's compressed form slightly larger than its
-#: decoded size, and this margin is deliberately far more generous than
-#: any real zstd frame needs, so it costs nothing against a genuine
-#: decompression-bomb attempt (which the tighter decoded running-total
-#: check below still catches) while never spuriously rejecting a
-#: legitimate payload at the cap (Codex review).
+#: decoded size; generous enough to never spuriously reject a legitimate
+#: payload at the cap, while the tighter decoded running-total check below
+#: still catches a genuine decompression-bomb attempt.
 _ZSTD_FRAME_OVERHEAD_SLACK_BYTES = 1024 * 1024
 
 
@@ -131,15 +119,13 @@ def _blob_member_name(content_hash: str) -> str:
     return f"{_BLOB_PREFIX}{content_hash}{_BLOB_SUFFIX}"
 
 
-#: A fixed zip timestamp (the zip format's own epoch floor -- 1980-01-01,
-#: since DOS-style zip timestamps cannot represent anything earlier) used
+#: A fixed zip timestamp (the format's own epoch floor -- 1980-01-01,
+#: since DOS-style zip timestamps can't represent anything earlier) used
 #: for every member this module writes. `ZipFile.writestr(name, data)`
-#: with a bare string `name` builds its own `ZipInfo` stamped with
+#: with a bare string `name` stamps its own `ZipInfo` with
 #: `time.localtime()` at write time -- so saving byte-identical facts on
-#: two different days would otherwise produce two different archives (and
-#: two different `SnapshotWriteResult.stored_sha256` values) for content
-#: that a caller has every reason to expect is reproducible (Codex
-#: review).
+#: two different days would otherwise produce two different archives
+#: (and two different `stored_sha256` values) for reproducible content.
 _ZIP_EPOCH = (1980, 1, 1, 0, 0, 0)
 
 
@@ -199,11 +185,10 @@ def sniff_bundle_archive_format(path: str | Path) -> str:
 
 #: A real bundle archive (one manifest member + one per *distinct* content
 #: hash) never needs anywhere near this many members -- a crafted archive
-#: claiming more is rejected before `zipfile.ZipFile` is constructed:
+#: claiming more is rejected before `zipfile.ZipFile` is constructed, since
 #: `ZipFile.__init__` eagerly parses the whole central directory and
-#: builds one `ZipInfo` per entry, so an enormous count can exhaust memory
-#: merely by being opened. Below 0xFFFF (the non-ZIP64 EOCD sentinel
-#: meaning "read the real count from ZIP64 instead", handled below).
+#: builds one `ZipInfo` per entry. Below 0xFFFF (the non-ZIP64 EOCD
+#: sentinel, "read the real count from ZIP64 instead", handled below).
 _MAX_ARCHIVE_MEMBERS = 20_000
 
 #: Bytes to search from the end of the file for the End-Of-Central-
@@ -214,16 +199,14 @@ _EOCD_SEARCH_WINDOW_BYTES = 65536 + 22
 
 #: Cap on the central directory's own declared byte size: the entry-
 #: *count* cap above isn't itself a byte-size bound -- a low
-#: `total_entries` can still pair with an enormous `cd_size`, which
-#: `zipfile.ZipFile` reads and parses until fully consumed regardless of
-#: the entry count. A real archive's directory is small (~120 bytes per
-#: `blobs/<64-hex-sha256>.json.zst` record); generous but bounded.
+#: `total_entries` can still pair with an enormous `cd_size`, parsed in
+#: full regardless of entry count. A real archive's directory is small
+#: (~120 bytes/record); generous but bounded.
 _MAX_CENTRAL_DIRECTORY_BYTES = 8 * 1024 * 1024
 
-#: ZIP64 End-Of-Central-Directory Locator (20 bytes, always immediately
-#: preceding the standard EOCD when ZIP64 is in play) and Record
-#: signatures -- recover the real count/size when the standard EOCD's
-#: 2-/4-byte fields overflow to their ZIP64 sentinels.
+#: ZIP64 EOCD Locator (20 bytes, always immediately preceding the
+#: standard EOCD when ZIP64 is in play) and Record signatures -- recover
+#: the real count/size when the standard EOCD's fields overflow.
 _ZIP64_EOCD_LOCATOR_SIG = b"PK\x06\x07"
 _ZIP64_EOCD_RECORD_SIG = b"PK\x06\x06"
 _ZIP64_EOCD_LOCATOR_SIZE = 20
@@ -309,6 +292,26 @@ def content_hash(payload: bytes) -> str:
     the archive at all.
     """
     return hashlib.sha256(payload).hexdigest()
+
+
+def _open_unique_temp(parent: Path, prefix: str, suffix: str) -> tuple[int, Path]:
+    """Atomically create a unique, exclusively-owned temp file in *parent*,
+    mode ``0o666`` filtered through the umask at creation (``os.O_CREAT``
+    respects umask like a plain ``open(path, "w")``) -- unlike
+    :func:`tempfile.mkstemp`, which hard-codes ``0o600``. Mirrors
+    ``snapshot_io._open_unique_temp`` (not imported, to keep this module
+    dependency-free beyond ``..errors``). Retries on a name collision
+    (vanishingly unlikely, 16-byte random suffix) rather than the
+    process-wide, non-thread-safe ``os.umask()`` read-zero-restore dance a
+    prior revision here used."""
+    for _ in range(100):
+        candidate = parent / f"{prefix}{secrets.token_hex(8)}{suffix}"
+        try:
+            fd = os.open(candidate, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o666)
+            return fd, candidate
+        except FileExistsError:
+            continue
+    raise SnapshotError(f"Could not create a unique temp file in {parent}")
 
 
 class BundleArchiveWriter:
@@ -414,16 +417,18 @@ class BundleArchiveWriter:
             self._existing_uid = existing_stat.st_uid
             self._existing_gid = existing_stat.st_gid
         self._target.parent.mkdir(parents=True, exist_ok=True)
-        # tempfile.mkstemp (not a predictable "<name>.tmp-<pid>-<id>" path
-        # opened separately by zipfile.ZipFile) -- a predictable temp name
-        # in a directory writable by another account could be pre-created
-        # as a symlink, and `ZipFile(path, mode="w")` follows symlinks.
-        # mkstemp randomizes the name and opens it with O_CREAT|O_EXCL, so
-        # the fd this class holds always names a file we just created.
-        tmp_fd, tmp_name = tempfile.mkstemp(
-            dir=self._target.parent, prefix=f".{self._target.name}.", suffix=".tmp"
+        # _open_unique_temp, not a predictable "<name>.tmp-<pid>-<id>" path
+        # opened separately by zipfile.ZipFile -- such a name in a
+        # directory writable by another account could be pre-created as a
+        # symlink, and `ZipFile(path, mode="w")` follows symlinks. This
+        # randomizes the name and opens it O_CREAT|O_EXCL, so the fd this
+        # class holds always names a file we just created, at a
+        # umask-filtered 0o666 rather than tempfile.mkstemp's hardcoded
+        # 0600 (a brand-new archive under a typical umask must not be more
+        # restrictive than the plain-JSON path's ordinary `open()` mode).
+        tmp_fd, self._tmp_path = _open_unique_temp(
+            self._target.parent, f".{self._target.name}.", ".tmp"
         )
-        self._tmp_path = Path(tmp_name)
         self._tmp_file = os.fdopen(tmp_fd, "wb")
         # A file object, not a path, is passed here deliberately -- see
         # above; ZipFile doesn't close a fileobj it didn't open itself, so
@@ -481,7 +486,7 @@ class BundleArchiveWriter:
             # between here and os.replace() could leave the temp file's
             # data unflushed to actual storage even though close() reported
             # success. fsync's the *same* fd this class already holds open
-            # (self._tmp_file, from tempfile.mkstemp) rather than reopening
+            # (self._tmp_file, from _open_unique_temp) rather than reopening
             # the path -- no reason to pay a second open when the fd is
             # already ours. Best-effort only in the narrow sense of "this
             # filesystem/platform doesn't support fsync" (EINVAL/ENOTSUP/
@@ -509,18 +514,13 @@ class BundleArchiveWriter:
                     self._existing_uid if self._existing_uid is not None else -1,
                     self._existing_gid if self._existing_gid is not None else -1,
                 )
+            # A brand-new archive needs no mode fixup here at all --
+            # `_open_unique_temp` already applied the umask-filtered
+            # 0o666 default at creation, atomically and without touching
+            # the process-wide umask (the earlier read-zero-restore
+            # dance was not thread-safe).
             if self._existing_mode is not None:
                 os.chmod(self._tmp_path, self._existing_mode)
-            else:
-                # mkstemp() always creates its file at mode 0600 regardless
-                # of umask (Codex review): for a brand-new archive, leaving
-                # that in place publishes more restrictively than a normal
-                # `open(..., "wb")` would, silently breaking shared-baseline
-                # read access on a format switch. os.umask() has no "peek"
-                # mode, so read-then-immediately-restore is the only way.
-                current_umask = os.umask(0)
-                os.umask(current_umask)
-                os.chmod(self._tmp_path, 0o666 & ~current_umask)
             # Re-sync after chown/chmod, before replace (Codex review,
             # fresh evidence): the earlier fsync only guarantees the
             # *file content* reached storage -- chown/chmod mutate the
