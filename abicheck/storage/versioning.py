@@ -555,7 +555,17 @@ def check_reader_compatibility(
     semantics is not necessarily the answer its original producer would have
     given, and a consumer that cares must be able to see that rather than
     have the package silently refused or silently reinterpreted.
+
+    The record is checked before it is read. This is the package's one
+    public decision point, so an untyped loader or migration adapter handing
+    it a parsed mapping used to leak `AttributeError` from the first
+    attribute access — which is neither arm of the `TypeError`/`ValueError`
+    pair this package documents as "the package is malformed", so a caller
+    separating a corrupt package from a broken reader read it as the second
+    (Codex review). The malformed *contents* of a real record still degrade
+    rather than raise; it is the record itself that must be one.
     """
+    _instance_of(versions, StorageVersions, "versions")
     package_format = _stated_version(versions.package_format_version)
     comparison_contract = _stated_version(versions.comparison_contract_version)
     if package_format > supported_package_format:

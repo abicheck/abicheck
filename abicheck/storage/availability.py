@@ -70,6 +70,7 @@ from .guards import (
     key_collection as _key_collection,
     mapping as _mapping,
     provenance_text as _provenance_text,
+    required_field as _required_field,
 )
 
 __all__ = [
@@ -746,8 +747,14 @@ class AvailabilityLedger:
         overrides: dict[tuple[str, str], FactAvailability] = {}
         for raw in data.get("overrides", []):
             key = (
-                _decision_key(raw["family"], "override family"),
-                _decision_key(raw["entity"], "override entity"),
+                _decision_key(
+                    _required_field(raw, "family", "an override document"),
+                    "override family",
+                ),
+                _decision_key(
+                    _required_field(raw, "entity", "an override document"),
+                    "override entity",
+                ),
             )
             if key in overrides:
                 # Rejected rather than resolved. Assignment silently kept the
@@ -773,7 +780,9 @@ class AvailabilityLedger:
                     f"and entity {key[1]!r}; availability must not depend on "
                     "the order rows were serialized in"
                 )
-            overrides[key] = FactAvailability.from_dict(raw["availability"])
+            overrides[key] = FactAvailability.from_dict(
+                _required_field(raw, "availability", "an override document")
+            )
         raw_default = data.get("unknown_family_default")
         default = (
             FactAvailability.from_dict(raw_default)

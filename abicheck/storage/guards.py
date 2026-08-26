@@ -42,6 +42,7 @@ from typing import Any
 #: and a new guard cannot appear here unadvertised.
 __all__ = [
     "decision_key",
+    "required_field",
     "key_collection",
     "enum_member",
     "instance_of",
@@ -237,6 +238,34 @@ def key_collection(raw: Any, field_name: str) -> None:
             "each of which is a valid key, so the result would look answered "
             "rather than wrong"
         )
+
+
+def required_field(document: Any, key: str, record: str) -> Any:
+    """A field a stored document must carry, missing cleanly rather than raw.
+
+    ``document[key]`` raises ``KeyError``, which is a ``LookupError`` and so
+    matches neither arm of the ``TypeError``/``ValueError`` pair this package
+    documents as "the package is malformed" (see this module's own
+    ``mapping`` and the storage ``AGENTS.md``). A caller separating a corrupt
+    package from a broken reader therefore reported a truncated document as
+    an internal crash (Codex review).
+
+    ``ValueError`` rather than ``TypeError``: the document is the right
+    *kind* of thing and is simply incomplete, which is the distinction the
+    two already carry elsewhere here — ``mapping`` raises ``TypeError``
+    because a list is the wrong kind of thing entirely.
+
+    The message names the record as well as the field, since a nested
+    document surfaces through its parent's ``from_dict`` and "missing
+    ``kind``" alone does not say which entity was short of one.
+    """
+    try:
+        return document[key]
+    except KeyError:
+        raise ValueError(
+            f"{record} is missing required field {key!r}; a stored document "
+            "short of a required field is malformed, not absent"
+        ) from None
 
 
 def enum_member(raw: Any, enum_class: type, field_name: str) -> Any:
