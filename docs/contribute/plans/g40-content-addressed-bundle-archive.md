@@ -314,6 +314,19 @@ wants the whole-bundle load path unchanged, with `BundleArchive` as the new,
 separate lazy-access API for a caller that specifically wants per-library
 loading.
 
+**Docs-ownership registration (`docs/AGENTS.md`'s topic-ownership
+contract):** the `format="archive"` option on `save_bundle_facts`/
+`load_bundle_facts` and the new lazy `BundleArchive` API are new
+public-facing surface, so this phase must register them in
+`docs/_meta/topics.yaml` in the same PR. `bundle-analysis`
+(`canonical_page: use/multi-binary.md`) is the existing topic that already
+documents `load_bundle_facts()` (see that page's own "Comparing two release
+bundles from saved facts" example) — extend its `fact_sources` with the new
+`abicheck/storage/bundle_archive.py` module (see Phase 1's ADR-061 routing
+note above for why that's the implementation location) rather than
+registering a separate topic, and add the archive format/`BundleArchive`
+usage to `use/multi-binary.md` itself as part of this phase's PR.
+
 ### Phase 4 — migration (S)
 
 No breaking change to any existing file: `BundleFacts.schema_version`

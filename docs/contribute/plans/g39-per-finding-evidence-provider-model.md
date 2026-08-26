@@ -227,7 +227,21 @@ structure already in place:
    ordered after this one and before slice 2, deriving provenance per
    finding from the participating `Function`/`Variable` record's own
    evidence (which source populated it) rather than assuming a module-level
-   constant.
+   constant. **On a `--ast-frontend hybrid` snapshot, "the participating
+   record" is not a single producer either (Codex review, verified against
+   the code): `fact_provenance.py` (G28 Phase 3) exists precisely because a
+   hybrid snapshot's merge (`dumper_hybrid.merge_snapshots`) can backfill
+   individual facts on one `Function`/`Variable` from clang while the rest
+   of that same record came from castxml — `AbiSnapshot.fact_provenance` is
+   keyed per-fact (`func_fact_key`/`var_fact_key`/`field_fact_key`, e.g.
+   `"func:<mangled>:<fact>"`), not per-declaration.** So for a hybrid
+   snapshot this slice must query `fact_provenance` for the *specific* fact
+   a given detector call compares (e.g. a parameter-default or deprecation
+   change), via `is_castxml_backed_fact`/`both_castxml_backed_fact` or a
+   sibling per-fact lookup, rather than reading one provenance value off the
+   record as a whole — the same "specific fields, not aggregate backend"
+   principle slice 2 below already states for `diff_types.py`, extended to
+   `diff_symbols.py`'s own record-level facts.
 2. **L2 header-derived detectors** (`diff_types.py`'s struct/enum/typedef
    findings, `diff_type_spellings.py`) — provenance here genuinely varies
    per finding (which backend produced *this specific* `RecordType`, and
@@ -327,14 +341,21 @@ literally named `report/`."
 schema change, not a cosmetic addition (Codex review — a prior revision of
 this phase named all three builders but never said this)**:
 `_change_to_dict`/`_leaf_entry` feed `abicheck/schemas/__init__.py`'s
-`REPORT_SCHEMA_VERSION` (currently `"2.46"`), which must gain at least a
-MINOR bump, and `abicheck/schemas/compare_report.schema.json` must add
-`evidence_provenance` to its `Change`-object definition — mirrored, per the
-repo's existing convention for that file, into
-`docs/reference/schemas/v1/compare_report.schema.json` and
-`site/reference/schemas/v1/compare_report.schema.json` in the same PR.
-`_baseline_finding_dicts` feeds `SCAN_SCHEMA_VERSION` (currently `"1.20"`,
-also in `abicheck/schemas/__init__.py`) the identical way — that format has
+`REPORT_SCHEMA_VERSION` (do not hand-copy its current value here — see
+`docs/AGENTS.md`'s rule against hand-copying a volatile count), which must
+gain at least a MINOR bump, and
+`abicheck/schemas/compare_report.schema.json` must add `evidence_provenance`
+to its `Change`-object definition — mirrored, per the repo's existing
+convention for that file, into `docs/reference/schemas/v1/
+compare_report.schema.json` (`scripts/publish_schemas.py`) in the same PR.
+`site/` is build output (mkdocs-generated, gitignored — confirmed no
+`site/` path is tracked in this repo and `publish_schemas.py` only writes
+`docs/reference/schemas/v1/`), so there is no `site/reference/schemas/v1/`
+tracked file to update; it regenerates from the `docs/` mirror on the next
+`mkdocs build`.
+`_baseline_finding_dicts` feeds `SCAN_SCHEMA_VERSION` (also in
+`abicheck/schemas/__init__.py`, same "don't hand-copy the current value"
+rule) the identical way — that format has
 no separate published `.schema.json` mirror today (confirmed: no
 `scan_report.schema.json` exists under `abicheck/schemas/` or
 `docs/reference/schemas/v1/`), so only the version constant itself needs
@@ -342,6 +363,20 @@ bumping for that builder, not a schema file that doesn't exist. Landing
 `evidence_provenance` in any of these three dict builders under an
 *unchanged* schema version would let a new field appear to consumers doing
 schema-version-gated feature detection as if it had always been there.
+
+**Docs-ownership registration (`docs/AGENTS.md`'s topic-ownership
+contract):** `evidence_provenance` is a new public-facing report field, so
+this phase must register it in `docs/_meta/topics.yaml` in the same PR, not
+defer it. The natural home is the existing `evidence-model` topic
+(`canonical_page: learn/evidence-and-detectability.md`) — the field is
+squarely evidence-tier vocabulary, not a new topic, and `docs/AGENTS.md`
+already says not to add a fourth page to that deliberately three-page trio.
+Extend its `fact_sources` list with the modules that actually produce and
+render the field (the detector modules Phase 1 wires, and whichever of
+`_change_to_dict`/`_leaf_entry`/`_baseline_finding_dicts` or their `report/`
+successors carry it per Phase 3) rather than creating a separate topic; add
+a short description of the field to `learn/evidence-and-detectability.md`
+itself as part of this phase's PR.
 
 SARIF and JUnit rendering had not migrated into `report/` at the time this
 plan was written (only JSON and text renderers had) — reaches `sarif.py`'s
