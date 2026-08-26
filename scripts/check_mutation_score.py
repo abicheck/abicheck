@@ -135,6 +135,34 @@ _BINARY_MARKER = re.compile(r"^Binary files (.+) and (.+) differ$")
 #: ``diff --git`` header at all.
 _ONLY_IN_MARKER = re.compile(r"^Only in (.+): (.+)$")
 
+#: Line-start prefixes for git's own per-entry metadata — present only
+#: between a ``diff --git`` line and that entry's ``--- ``/``+++ ``/hunk
+#: content, never meaningful on their own and never carrying a path this
+#: module needs to resolve (the owning ``diff --git`` header already named
+#: it). Recognized by `diff_has_unrecognized_content` purely so a real git
+#: diff entry carrying one of these doesn't itself read as "unrecognized".
+_GIT_ENTRY_METADATA_PREFIXES = (
+    "index ",
+    "old mode ",
+    "new mode ",
+    "deleted file mode ",
+    "new file mode ",
+    "similarity index ",
+    "dissimilarity index ",
+    "rename from ",
+    "rename to ",
+    "copy from ",
+    "copy to ",
+)
+
+#: A hunk *body* line's leading character — context, addition, removal, or
+#: the "\\ No newline at end of file" marker. Only trusted while a hunk is
+#: actually open (`diff_has_unrecognized_content` tracks that itself); an
+#: empty line is never one of these, since a real diff always carries at
+#: least the one prefix character even for a blank context/added/removed
+#: source line.
+_HUNK_BODY_PREFIXES = (" ", "+", "-", "\\")
+
 #: ``diff --git a/<path> b/<path>`` — present on *every* diff entry regardless
 #: of what follows (a hunk, a binary-file marker, a rename with no content
 #: change, a mode-only change). Deliberately not anchored past the two
@@ -377,6 +405,74 @@ def _hunk_file_targets(diff_text: str) -> set[str]:
     return targets
 
 
+def diff_has_unrecognized_content(diff_text: str) -> bool:
+    """True when the diff has a non-blank line that isn't one of the content
+    shapes this module already understands.
+
+    Ten rounds of review each found one more real diff-tool output shape
+    this predicate's path-comparison approach didn't have a dedicated
+    reader for — a git-quoted header, a headerless hunk, a headerless
+    binary marker, a bare-path header, a recursive-diff ``Only in`` marker,
+    and (the finding that prompted this function) GNU diffutils' ``-q``/
+    ``--brief`` ``Files X and Y differ`` form. Each fix so far added one
+    more marker-specific path extractor to the union
+    `diff_lacks_git_headers_for_its_hunks` compares against
+    `diff_touched_paths()` — sound for the shape it targets, but leaves an
+    *eleventh*, still-undiscovered shape exactly as invisible as the tenth
+    was before this round.
+
+    This function closes that class generically instead of naming a
+    twelfth marker: rather than asking "does this line carry a path we can
+    extract", it asks "is this line one of the small, closed set of shapes
+    a real ``diff``/``git diff`` invocation can ever emit at all" — a
+    ``diff --git`` header, one of git's own per-entry metadata lines
+    (`_GIT_ENTRY_METADATA_PREFIXES`), a ``--- ``/``+++ `` header, a hunk
+    header or body line, or one of the two marker shapes this module
+    already extracts a path from (binary, ``Only in``). Deliberately
+    *not* recognizing GNU diffutils' ``-q``/``--brief`` ``Files X and Y
+    differ`` form (the finding that prompted writing this function) —
+    unlike the binary/``Only in`` markers, nothing extracts a path from it
+    into `diff_lacks_git_headers_for_its_hunks`'s own comparison, so
+    treating it as "recognized" here would make the line invisible to
+    *both* checks at once rather than caught by this one. A line that
+    fits none of the recognized shapes — including a marker format no
+    round of review has reported yet — is flagged directly, with no path
+    extraction needed to prove the diff unsafe to scope. This still isn't
+    a full grammar validator (it doesn't check that a ``--- ``/``+++ ``/
+    marker's own path matches its governing ``diff --git`` header —
+    `diff_lacks_git_headers_for_its_hunks`'s existing path-set comparison,
+    kept unchanged alongside this function, is what catches that), but it
+    does mean a wholly new content shape disables scoping on sight rather
+    than needing its own review round and its own extractor before it's
+    caught — provided nobody ever adds it to this function's own
+    recognized set without also giving it a path extractor, exactly the
+    mistake this docstring exists to warn the next round away from.
+    """
+    in_hunk = False
+    for line in diff_text.splitlines():
+        if not line:
+            return True
+        if line.startswith("diff --git "):
+            in_hunk = False
+            continue
+        if line.startswith(_GIT_ENTRY_METADATA_PREFIXES):
+            in_hunk = False
+            continue
+        if line.startswith(("--- ", "+++ ")):
+            in_hunk = False
+            continue
+        if _HUNK.match(line):
+            in_hunk = True
+            continue
+        if _BINARY_MARKER.match(line) or _ONLY_IN_MARKER.match(line):
+            in_hunk = False
+            continue
+        if in_hunk and line.startswith(_HUNK_BODY_PREFIXES):
+            continue
+        return True
+    return False
+
+
 def diff_lacks_git_headers_for_its_hunks(diff_text: str) -> bool:
     """True when some hunk's (or binary marker's) file isn't named by any
     ``diff --git`` header.
@@ -414,29 +510,26 @@ def diff_lacks_git_headers_for_its_hunks(diff_text: str) -> bool:
     ``Only in <dir>: <name>`` line, folded in via `_only_in_marker_paths`
     (tenth round).
 
-    Ten rounds in, this predicate is an *additive* enumeration of every
-    content shape a real diff tool has been shown to emit that can carry
-    file identity without a ``diff --git`` header — not a closed-form
-    grammar validator that would catch an as-yet-unreported eleventh
-    shape by construction. A genuinely closed fix would parse the diff
-    against git's own output grammar in full (every recognized per-entry
-    metadata line — mode/rename/copy/similarity/index — and flag anything
-    that doesn't fit it, rather than naming known-unsafe shapes one at a
-    time) and is a real, separate, higher-risk rewrite of this whole
-    predicate, not attempted here — seven consecutive rounds finding a new
-    gap in the same incremental style argue for it, but this file's own
-    "known gaps over risky reactive patches" convention (AGENTS.md) argues
-    against attempting a materially larger redesign under continued review
-    pressure in the same session. Each shape closed here is still real,
-    independently verified, and strictly narrows what an attacker (or an
-    honestly hand-assembled `--diff-file`) can exploit.
+    Ten rounds of enumerating one more content shape at a time (an
+    eleventh — GNU diffutils' ``-q``/``--brief`` ``Files X and Y differ``
+    form — arrived the same session this docstring was last revised) is
+    what motivated `diff_has_unrecognized_content`: rather than a
+    thirteenth marker-specific path extractor, that function closes the
+    *class* by flagging any line that isn't one of the small, closed set
+    of shapes a real diff tool can emit at all, catching a still-
+    undiscovered twelfth shape by construction instead of needing its own
+    review round first. It's checked here alongside the path-set
+    comparison — not in place of it, since recognizing a shape and
+    verifying its path against the diff's own headers are different
+    questions (see that function's own docstring for why neither
+    subsumes the other).
     """
     hunk_paths = _hunk_file_targets(diff_text)
     hunk_paths |= _binary_marker_paths(diff_text)
     hunk_paths |= _only_in_marker_paths(diff_text)
-    if not hunk_paths:
-        return False
-    return not hunk_paths <= diff_touched_paths(diff_text)
+    if hunk_paths and not hunk_paths <= diff_touched_paths(diff_text):
+        return True
+    return diff_has_unrecognized_content(diff_text)
 
 
 def diff_touches_outside_only_mutate(diff_text: str, only_mutate: list[str]) -> bool:
@@ -1516,8 +1609,20 @@ def main(argv: list[str] | None = None) -> int:
                     ),
                     "mutants_measured": mutants_measured,
                     "mutants_per_second": mutants_per_second,
+                    #: "unknown" rather than "full" whenever the measurement
+                    #: came from a saved --results-file: that file's own
+                    #: content carries no record of whether the run that
+                    #: produced it was itself scoped, so labeling it "full"
+                    #: would assert a fact this invocation cannot see —
+                    #: misleading trend/budget tooling that trusts this
+                    #: field the same way "full" is otherwise never a guess
+                    #: (Codex review).
                     "run_scope": {
-                        "mode": "diff" if scope_modules else "full",
+                        "mode": (
+                            "unknown"
+                            if args.results_file
+                            else ("diff" if scope_modules else "full")
+                        ),
                         "modules": sorted(scope_modules),
                         "requested": bool(args.scope_run_to_diff),
                     },

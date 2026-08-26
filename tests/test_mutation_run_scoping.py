@@ -591,6 +591,86 @@ def test_diff_touches_outside_only_mutate_falls_back_on_an_only_in_marker() -> N
     assert gate.diff_touches_outside_only_mutate(diff, _ONLY_MUTATE_TWO) is True
 
 
+def test_diff_has_unrecognized_content_is_false_for_ordinary_diffs() -> None:
+    diff = (
+        "diff --git a/abicheck/diff_types.py b/abicheck/diff_types.py\n"
+        "--- a/abicheck/diff_types.py\n+++ b/abicheck/diff_types.py\n"
+        "@@ -1,0 +2,1 @@\n+    pass\n"
+    )
+    assert gate.diff_has_unrecognized_content(diff) is False
+
+
+def test_diff_has_unrecognized_content_is_false_for_rename_and_mode_changes() -> None:
+    """A rename/mode-only entry has no hunk at all — every line must still
+    be recognized as git's own per-entry metadata, not flagged as unknown."""
+    rename = (
+        "diff --git a/tests/old_name.py b/tests/new_name.py\n"
+        "similarity index 100%\n"
+        "rename from tests/old_name.py\n"
+        "rename to tests/new_name.py\n"
+    )
+    mode = (
+        "diff --git a/scripts/some_script.sh b/scripts/some_script.sh\n"
+        "old mode 100644\nnew mode 100755\n"
+    )
+    assert gate.diff_has_unrecognized_content(rename) is False
+    assert gate.diff_has_unrecognized_content(mode) is False
+
+
+def test_diff_has_unrecognized_content_is_false_for_a_headed_binary_diff() -> None:
+    diff = (
+        "diff --git a/tests/fixtures/blob.bin b/tests/fixtures/blob.bin\n"
+        "index abc123..def456 100644\n"
+        "Binary files a/tests/fixtures/blob.bin and b/tests/fixtures/blob.bin differ\n"
+    )
+    assert gate.diff_has_unrecognized_content(diff) is False
+
+
+def test_diff_has_unrecognized_content_detects_a_brief_diff_marker() -> None:
+    """GNU diffutils' `-q`/`--brief` mode reports a differing file as `Files
+    X and Y differ` — no hunk, no `Binary files` marker, no `diff --git`
+    header, and (unlike the binary/`Only in` markers) no dedicated path
+    extractor anywhere in this module, so it must be caught by this
+    function's general fallback rather than recognized as safe (Codex
+    review, PR #877, eleventh round on this same predicate)."""
+    diff = "Files a/examples/oracle.json and b/examples/oracle.json differ\n"
+    assert gate.diff_has_unrecognized_content(diff) is True
+
+
+def test_diff_lacks_git_headers_for_its_hunks_detects_a_brief_diff_marker() -> None:
+    diff = (
+        "diff --git a/abicheck/diff_types.py b/abicheck/diff_types.py\n"
+        "--- a/abicheck/diff_types.py\n+++ b/abicheck/diff_types.py\n"
+        "@@ -1,0 +2,1 @@\n+    pass\n"
+        "Files a/examples/oracle.json and b/examples/oracle.json differ\n"
+    )
+    assert gate.diff_lacks_git_headers_for_its_hunks(diff) is True
+
+
+def test_diff_touches_outside_only_mutate_falls_back_on_a_brief_diff_marker() -> None:
+    diff = (
+        "diff --git a/abicheck/diff_types.py b/abicheck/diff_types.py\n"
+        "--- a/abicheck/diff_types.py\n+++ b/abicheck/diff_types.py\n"
+        "@@ -1,0 +2,1 @@\n+    pass\n"
+        "Files a/examples/oracle.json and b/examples/oracle.json differ\n"
+    )
+    assert gate.diff_touches_outside_only_mutate(diff, _ONLY_MUTATE_TWO) is True
+
+
+def test_diff_has_unrecognized_content_catches_a_hypothetical_future_marker() -> None:
+    """The whole point of the general fallback: a diff-tool output shape no
+    round of review has reported yet still disables scoping, with no new
+    code needed to recognize it specifically."""
+    diff = (
+        "diff --git a/abicheck/diff_types.py b/abicheck/diff_types.py\n"
+        "--- a/abicheck/diff_types.py\n+++ b/abicheck/diff_types.py\n"
+        "@@ -1,0 +2,1 @@\n+    pass\n"
+        "Some entirely made-up marker nobody has reported yet: examples/x.json\n"
+    )
+    assert gate.diff_has_unrecognized_content(diff) is True
+    assert gate.diff_touches_outside_only_mutate(diff, _ONLY_MUTATE_TWO) is True
+
+
 def test_mutant_run_scope_is_none_when_a_shared_test_fixture_is_touched() -> None:
     """The scenario `--require-baseline` alone cannot rule out: a production
     module and a *shared* test fixture both change, but the fixture doesn't
@@ -909,3 +989,40 @@ def test_run_seconds_is_none_for_a_saved_results_file(
     doc = json.loads(receipt.read_text())
     assert doc["run_seconds"] is None
     assert doc["mutants_per_second"] is None
+
+
+def test_run_scope_mode_is_unknown_for_a_saved_results_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`--run --results-file ...` never scopes (see the sixth-round test
+    above), so `scope_modules` stays empty and the pre-fix code labeled the
+    receipt's `run_scope.mode` "full" — asserting the saved measurement was
+    a live full-population run, which this invocation has no way to know:
+    the results file itself carries no record of whether *it* was produced
+    by a scoped run. Must read "unknown" instead (Codex review, PR #877,
+    eleventh round)."""
+    (tmp_path / "abicheck").mkdir()
+    (tmp_path / "abicheck" / "diff_types.py").write_text(_SOURCE, encoding="utf-8")
+    _pyproject_with_only_mutate(tmp_path, ["abicheck/diff_types.py"])
+    monkeypatch.setattr(gate, "REPO_ROOT", tmp_path)
+    results = _write(
+        tmp_path,
+        "r.txt",
+        "    abicheck.diff_types.x_alpha__mutmut_1: killed\n",
+    )
+    monkeypatch.setattr(
+        gate, "load_cicd_stats", lambda _dir: {"total": 1, "survived": 0, "killed": 1}
+    )
+    receipt = tmp_path / "receipt.json"
+    rc = gate.main(
+        [
+            "--run",
+            "--results-file",
+            results,
+            "--json",
+            str(receipt),
+        ]
+    )
+    assert rc == 0
+    doc = json.loads(receipt.read_text())
+    assert doc["run_scope"]["mode"] == "unknown"
