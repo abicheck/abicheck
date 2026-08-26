@@ -634,3 +634,76 @@ class TestAnInformationalTextFieldDegradesRatherThanFabricates:
         emitted = ProducerIdentity.from_dict({"name": None}).to_dict()
 
         assert "name" not in emitted
+
+
+class TestTheSectionVersionMappingIsNormalizedAtBothDoors:
+    """The one mapping-valued informational axis, and both doors had a half.
+
+    `to_dict` dereferenced whatever it held, so a directly constructed
+    non-mapping raised `AttributeError` on serialization while the reader
+    degraded the identical shape to `{}`. And `from_dict` inserted normalized
+    keys in *source iteration order*, so a colliding pair kept a different
+    survivor depending on how the caller's mapping was traversed — while
+    `to_dict` sorted, for exactly that reason. One normalizer now serves both.
+    """
+
+    @pytest.mark.parametrize("raw", NOT_MAPPINGS + [{}])
+    def test_a_non_mapping_serializes_as_absent(self, raw: Any) -> None:
+        """Degraded, not raised: the reader degrades the same shape."""
+        assert (
+            "section_schema_versions"
+            not in StorageVersions(section_schema_versions=raw).to_dict()
+        )
+
+    @pytest.mark.parametrize("raw", NOT_MAPPINGS)
+    def test_a_non_mapping_reads_as_empty(self, raw: Any) -> None:
+        assert (
+            StorageVersions.from_dict(
+                {"section_schema_versions": raw}
+            ).section_schema_versions
+            == {}
+        )
+
+    def test_a_colliding_key_pair_resolves_the_same_way_in_either_order(self) -> None:
+        """The order dependence that reached a content address.
+
+        `{1: 1, "1": 2}` collapses to one key under `str()`. Which value
+        survived was decided by traversal order, so two spellings of one
+        document reserialized differently and addressed differently.
+        """
+        left = StorageVersions.from_dict({"section_schema_versions": {1: 1, "1": 2}})
+        right = StorageVersions.from_dict({"section_schema_versions": {"1": 2, 1: 1}})
+
+        assert left == right
+        assert semantic_digest(left.to_dict()) == semantic_digest(right.to_dict())
+
+    @pytest.mark.parametrize(
+        "colliding", [{1: 1, "1": 2}, {"1": 2, 1: 1}, {1: 5, "1": 2}, {"1": 2, 1: 5}]
+    )
+    def test_the_two_doors_agree_on_the_survivor(self, colliding: Any) -> None:
+        """Not just deterministic — the same answer at both doors.
+
+        Both traversal orders *and* both value orderings, because a single
+        example passes against the bug: for `{1: 1, "1": 2}` the sorted
+        writer and the insertion-order reader coincidentally agreed on `2`,
+        so the first version of this test proved nothing. `{1: 5, "1": 2}`
+        is the pair where sorting and last-wins disagree.
+        """
+        assert (
+            StorageVersions(section_schema_versions=colliding).to_dict()[
+                "section_schema_versions"
+            ]
+            == StorageVersions.from_dict(
+                {"section_schema_versions": colliding}
+            ).section_schema_versions
+        )
+
+    def test_a_real_mapping_survives_intact(self) -> None:
+        """Normalizing the malformed case must not disturb the valid one."""
+        versions = StorageVersions(section_schema_versions={"entities": 3, "attrs": 1})
+
+        assert versions.to_dict()["section_schema_versions"] == {
+            "attrs": 1,
+            "entities": 3,
+        }
+        assert StorageVersions.from_dict(versions.to_dict()) == versions

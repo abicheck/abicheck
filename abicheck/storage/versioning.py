@@ -148,6 +148,36 @@ def _stated_text(raw: object) -> str:
     return raw if isinstance(raw, str) else ""
 
 
+def _stated_sections(raw: object) -> dict[str, int]:
+    """The section-version mapping, normalized identically at both doors.
+
+    Two findings, one function (Codex review). Each door had half of it:
+
+    * ``to_dict`` called ``.items()`` on whatever it held, so a directly
+      constructed ``section_schema_versions=["layout"]`` constructed fine and
+      then raised ``AttributeError`` on serialization — while the reader
+      degraded that exact shape to ``{}``. The container is checked before it
+      is dereferenced, the same rule the ledger's mappings follow.
+    * ``from_dict`` inserted normalized keys in *source iteration order*, so
+      ``{1: 1, "1": 2}`` and ``{"1": 2, 1: 1}`` — which collapse to one key —
+      kept different values, reserialized to different documents, and
+      **addressed differently**. ``to_dict`` already sorted for exactly this
+      reason; the reader did not, so the two doors disagreed about which of a
+      colliding pair survives.
+
+    Sorting is what makes the collapse deterministic: the surviving value is
+    decided by the ``(key, count)`` pair's own order, not by how the caller's
+    mapping happened to be traversed. Keys keep their ``str()`` rather than
+    being rejected — a key *names* its entry, so degrading one to empty would
+    collide with every other degraded key, and only a hashable can reach a
+    key position at all, which rules out the mapping and list shapes that
+    made :func:`_stated_text` necessary for values.
+    """
+    if not isinstance(raw, Mapping):
+        return {}
+    return dict(sorted((str(k), _stated_count(v)) for k, v in raw.items()))
+
+
 @dataclass(frozen=True)
 class ProducerIdentity:
     """What emitted a set of facts.
@@ -258,7 +288,12 @@ class StorageVersions:
                 self.comparison_contract_version
             ),
         }
-        if self.section_schema_versions:
+        # Truthiness on the *normalized* value, same as the scalar axes
+        # below: a non-mapping is truthy but normalizes to `{}`, and writing
+        # an empty entry where the reader would report the field absent is
+        # the same disagreement in miniature.
+        sections = _stated_sections(self.section_schema_versions)
+        if sections:
             # Normalized the way this field's own reader normalizes it, so a
             # document emits what it reads back. Writing the mapping verbatim
             # meant `{1: 1}` reloaded as `{"1": 1}` and `{"x": "bad"}` as
@@ -276,13 +311,7 @@ class StorageVersions:
             # still collapse — but through `sorted`, so which survives is
             # decided by the pair's own order rather than by how the mapping
             # was traversed.
-            out["section_schema_versions"] = {
-                key: value
-                for key, value in sorted(
-                    (str(k), _stated_count(v))
-                    for k, v in self.section_schema_versions.items()
-                )
-            }
+            out["section_schema_versions"] = sections
         # Every remaining informational axis is normalized the same way, for
         # the same reason: `normalization_recipe=1` wrote `1` and reloaded as
         # `"1"`, and a fractional or non-numeric generation wrote itself
@@ -347,13 +376,8 @@ class StorageVersions:
             package_format_version=_stated_version(
                 data.get("package_format_version", UNSTATED_VERSION)
             ),
-            section_schema_versions=(
-                {
-                    str(k): _stated_count(v)
-                    for k, v in data["section_schema_versions"].items()
-                }
-                if isinstance(data.get("section_schema_versions"), Mapping)
-                else {}
+            section_schema_versions=_stated_sections(
+                data.get("section_schema_versions")
             ),
             normalization_recipe=_stated_text(data.get("normalization_recipe")),
             producer=ProducerIdentity.from_dict(data.get("producer", {})),
