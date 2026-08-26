@@ -62,3 +62,38 @@
   itself, only ever follows one hop. It now also resolves through
   `resolve_linker_script_chain()` immediately before hashing, matching
   the scan and typed-API paths.
+- **Sixth follow-up (Codex review, two findings): a `frontends`-layer
+  module reaching this fix's own new functions violated ADR-061's
+  documented dependency direction.** `abicheck/frontends/AGENTS.md`
+  states a migrated `frontends` module may import `workflows` but must
+  never import back through the `service`/`cli` compatibility facades --
+  `frontends/cli/runtime.py`'s `_finalize_compare_result` (the CLI's
+  counterpart to `cli_scan_baseline`'s) had been routing both
+  `resolve_linker_script_chain`/`note_if_same_binary_compared` through
+  `service.py` to sidestep an unrelated `frontends -> extract` layering
+  error, which solved that error but created exactly the facade-import
+  violation this convention exists to prevent. Fixed by re-exporting both
+  functions from `abicheck.workflows.extraction` (an existing, real
+  `workflows`-package module, not a facade) instead -- `binary_utils.py`
+  was already `extract`-layer classified; `confidence.py` (home of
+  `note_if_same_binary_compared`) was not classified into any ADR-061
+  layer at all, so `architecture/modules.yaml` now classifies it under
+  `compare` (its own docstring already states it "depends only on the
+  snapshot model and the policy enums", matching that layer's shape).
+  Both `frontends/cli/runtime.py` and `cli_scan_baseline.py` now import
+  both functions from `workflows.extraction`; `service.py`'s own
+  now-unnecessary re-exports were removed.
+- **Seventh follow-up (Codex review): `scan --against`'s new
+  `coverage_warnings` key shipped without the required
+  `SCAN_SCHEMA_VERSION` bump.** Every additive key in the baseline
+  summary this codebase has previously shipped bumped
+  `abicheck.schemas.SCAN_SCHEMA_VERSION` with a documented history entry
+  (`tests/test_cli_scan_baseline.py::TestBaselineSummaryKeysArePinned`
+  exists specifically to force this after a prior PR shipped two keys
+  without it) -- this PR's own new `coverage_warnings` key missed the
+  same checklist. Bumped to `1.21`, documented in `schemas/__init__.py`'s
+  own version-history comment and in `docs/use/output-formats.md`, and
+  added to `TestBaselineSummaryKeysArePinned`'s `_KNOWN_KEYS`/fixture
+  (confirmed the pinning test fails without the fixture change, since the
+  pre-existing fixture never populated `coverage_warnings` and so never
+  actually exercised the new key).

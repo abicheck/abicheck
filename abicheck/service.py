@@ -40,15 +40,9 @@ from .api_types import (
     InputSpec,
     OutputSpec,
 )
-from .binary_utils import (
-    resolve_linker_script_chain as resolve_linker_script_chain,  # noqa: F401 — re-export: frontends layer may not import `extract` directly
-)
 from .checker import compare
 from .checker_types import DiffResult, LibraryMetadata
 from .clang_layout_tool import attach_clang_layout
-from .confidence import (
-    note_if_same_binary_compared as note_if_same_binary_compared,  # noqa: F401 — re-export: `confidence` is unclassified, so frontends must reach it here
-)
 from .dumper_scoping import wrap_run_dump_with_dependency_scope
 from .errors import AbicheckError, SnapshotError, ValidationError
 from .header_utils import (
@@ -1745,11 +1739,9 @@ __all__ = [
     "estimate_scan",
     "expand_header_inputs",
     "load_suppression_and_policy",
-    "note_if_same_binary_compared",
     "render_output",
     "resolve_compare_request",
     "resolve_input",
-    "resolve_linker_script_chain",
     "run_audit",
     "run_compare",
     "run_compare_request",

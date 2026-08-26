@@ -1067,12 +1067,8 @@ def _run_baseline_compare(
     """
     from .cli_buildsource import prepare_embedded_build_source
     from .errors import AbicheckError
-    from .service import (
-        collect_metadata,
-        compare_snapshots,
-        note_if_same_binary_compared,
-        resolve_input,
-    )
+    from .service import collect_metadata, compare_snapshots, resolve_input
+    from .workflows.extraction import note_if_same_binary_compared
 
     bl_headers, bl_includes, bl_public_headers, bl_public_dirs = (
         _resolve_baseline_header_scope(
@@ -1169,11 +1165,10 @@ def _run_baseline_compare(
     # through the full GNU ld linker-script chain to its final resolved
     # target -- the same binary resolve_input() already followed above --
     # so a (possibly multi-hop) script vs. its target DSO still reads as
-    # byte-identical (Codex review). Routed through `service` (workflows
-    # layer), not `binary_utils` directly -- this module is `frontends`
-    # layer under ADR-061, which may not import `extract` (where
-    # `binary_utils` lives).
-    from .service import resolve_linker_script_chain
+    # byte-identical (Codex review). Routed through `workflows.extraction`,
+    # not `binary_utils` directly -- this module is `frontends` layer under
+    # ADR-061, which may not import `extract` (where `binary_utils` lives).
+    from .workflows.extraction import resolve_linker_script_chain
 
     try:
         old_meta = collect_metadata(resolve_linker_script_chain(baseline))

@@ -496,10 +496,15 @@ def _finalize_compare_result(
     contract_evaluation: bool = False,
 ) -> None:
     """Attach metadata and emit redundancy/filter/suppression output."""
-    # Routed through `service` (workflows layer), not `binary_utils`
-    # directly -- this module is `frontends` layer under ADR-061, which
-    # may not import `extract` (where `binary_utils` lives).
-    from ...service import note_if_same_binary_compared, resolve_linker_script_chain
+    # Routed through `workflows.extraction`, not `binary_utils`/`confidence`
+    # directly, and not through `service` -- this module is `frontends`
+    # layer under ADR-061, which may import `workflows` but must never
+    # import back through the `service`/`cli` compatibility facades
+    # (abicheck/frontends/AGENTS.md).
+    from ...workflows.extraction import (
+        note_if_same_binary_compared,
+        resolve_linker_script_chain,
+    )
 
     result.old_metadata = _collect_metadata(resolve_linker_script_chain(old_input))
     result.new_metadata = _collect_metadata(resolve_linker_script_chain(new_input))

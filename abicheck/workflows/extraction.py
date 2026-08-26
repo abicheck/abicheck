@@ -45,6 +45,7 @@ from ..binary_utils import (
     detect_binary_format,
     normalize_binary_input,
     resolve_linker_script,
+    resolve_linker_script_chain,
     strip_vendor_hash,
 )
 from ..buildsource.embed import embed_build_source
@@ -66,6 +67,7 @@ from ..buildsource.inputs_pack import (
     load_inputs_manifest,
 )
 from ..buildsource.l2_seed import seed_includes_and_fold_compile_context
+from ..confidence import note_if_same_binary_compared
 from ..debug_resolver import DebugArtifact, resolve_debug_info
 from ..dump_manifest import DumpManifest, load_manifest
 from ..dumper_clang import resolve_source_frontend_clang_bin
@@ -107,10 +109,12 @@ __all__ = [
     "load_inputs_manifest",
     "load_manifest",
     "normalize_binary_input",
+    "note_if_same_binary_compared",
     "resolve_debug_info",
     "resolve_dependency_scope",
     "resolve_inferred_header_roots",
     "resolve_linker_script",
+    "resolve_linker_script_chain",
     "resolve_source_frontend_clang_bin",
     "seed_includes_and_fold_compile_context",
     "sniff_build_info_format",

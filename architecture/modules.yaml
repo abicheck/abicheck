@@ -52,6 +52,7 @@
         "model"
       ],
       "legacy_paths": [
+        "abicheck/confidence.py",
         "abicheck/diff_build_config.py",
         "abicheck/diff_cxx_rules.py",
         "abicheck/finding_identity.py",
