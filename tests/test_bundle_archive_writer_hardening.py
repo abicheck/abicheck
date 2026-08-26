@@ -531,3 +531,91 @@ class TestReadManifestTranslatesInvalidEncoding:
         with BundleArchiveReader.open(path) as reader:
             with pytest.raises(SnapshotError, match="not valid JSON"):
                 reader.read_manifest()
+
+
+class TestWriteManifestBoundsEncodingBeforeMaterializing:
+    """`write_manifest()` must reject an oversized manifest without first
+    materializing the whole encoded string in memory via `json.dumps()` --
+    it now encodes via `iterencode()` and checks the running byte count
+    chunk by chunk instead (Codex review, fresh evidence)."""
+
+    def test_an_oversized_manifest_is_rejected(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(bundle_archive_module, "DEFAULT_MAX_MANIFEST_BYTES", 100)
+        path = tmp_path / "bundle.archive.zip"
+        with BundleArchiveWriter(path) as writer:
+            with pytest.raises(SnapshotError, match="exceeding the 100 byte"):
+                writer.write_manifest(
+                    {"library_blobs": {f"lib{i}.so": "x" * 20 for i in range(20)}}
+                )
+            # A caller recovering from the rejection can still finish the
+            # archive with a manifest that does fit.
+            writer.write_manifest({"library_blobs": {}})
+
+    def test_a_manifest_under_the_cap_still_round_trips(self, tmp_path: Path) -> None:
+        path = tmp_path / "bundle.archive.zip"
+        manifest = {"library_blobs": {"a.so": "deadbeef"}, "note": "hello"}
+        with BundleArchiveWriter(path) as writer:
+            writer.write_manifest(manifest)
+        with BundleArchiveReader(path) as reader:
+            assert reader.read_manifest() == manifest
+
+    def test_iterencode_never_materializes_the_full_oversized_string(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A regression-proof pin, not just a byte-count check: patches
+        `json.dumps` itself to fail the test if `write_manifest()` ever
+        calls it -- the old, reverted implementation's own mechanism."""
+        monkeypatch.setattr(bundle_archive_module, "DEFAULT_MAX_MANIFEST_BYTES", 100)
+        import json as json_module
+
+        def _fail_if_called(*a: object, **kw: object) -> str:
+            raise AssertionError(
+                "write_manifest() must not call json.dumps() -- it should "
+                "encode incrementally via json.JSONEncoder.iterencode()"
+            )
+
+        monkeypatch.setattr(json_module, "dumps", _fail_if_called)
+        path = tmp_path / "bundle.archive.zip"
+        with BundleArchiveWriter(path) as writer:
+            with pytest.raises(SnapshotError, match="exceeding the 100 byte"):
+                writer.write_manifest(
+                    {"library_blobs": {f"lib{i}.so": "x" * 20 for i in range(20)}}
+                )
+            writer.write_manifest({"library_blobs": {}})
+
+
+class TestReaderClosesTheOwnedFdWhenRewindFails:
+    """`from_open_file()` hands the reader ownership of the caller's fd --
+    a `seek()` failure while rewinding it must be caught by the same
+    guarded block that closes it on every other failure, not escape as a
+    raw, unhandled exception with the fd leaked (Codex review, fresh
+    evidence)."""
+
+    def test_a_seek_failure_on_the_shared_fd_raises_snapshot_error_and_closes_it(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        path = tmp_path / "bundle.archive.zip"
+        with BundleArchiveWriter(path) as writer:
+            h = writer.put_blob(b'{"a": 1}')
+            writer.write_manifest({"library_blobs": {"a.so": h}})
+
+        fp = open(path, "rb")
+        closed = {"value": False}
+        real_close = fp.close
+
+        def _tracking_close() -> None:
+            closed["value"] = True
+            real_close()
+
+        monkeypatch.setattr(fp, "close", _tracking_close)
+
+        def _failing_seek(*a: object, **kw: object) -> None:
+            raise OSError("simulated EIO on rewind")
+
+        monkeypatch.setattr(fp, "seek", _failing_seek)
+
+        with pytest.raises(SnapshotError, match="not a valid bundle archive"):
+            BundleArchiveReader.from_open_file(fp, path)
+        assert closed["value"], "the caller-owned fd must be closed on a seek() failure"

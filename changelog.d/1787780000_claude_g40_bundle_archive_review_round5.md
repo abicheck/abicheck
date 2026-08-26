@@ -200,3 +200,20 @@
   a raw `UnicodeDecodeError`/`json.JSONDecodeError`, bypassing this
   module's `SnapshotError` vocabulary the same way corrupt ZIP members and
   zstd payloads are already translated. Now caught and translated too.
+
+- **G40 bundle archive: two more Codex review findings, both real, both
+  fixed.** (1) `write_manifest()` called `json.dumps(manifest, indent=2)`
+  to get an encoded string before checking it against
+  `DEFAULT_MAX_MANIFEST_BYTES` -- an oversized manifest was therefore
+  fully materialized as one string in memory before this check ever got a
+  chance to reject it. Now encoded via `json.JSONEncoder(indent=2).
+  iterencode()`, with the running UTF-8 byte count checked chunk by
+  chunk, so an oversized manifest is rejected without ever holding the
+  whole encoded string. (2) `BundleArchiveReader.__init__`'s
+  `from_open_file()` branch rewound the caller-owned fd (`fp.seek(0)`)
+  *before* entering the guarded `try`/`except` block that owns closing it
+  on failure -- a `seek()` error (e.g. EIO) at that point escaped as a
+  raw `OSError` with the fd leaked, instead of this module's
+  `SnapshotError` contract. Now the rewind happens inside that same
+  guarded block, so a failure there is translated and the fd is closed
+  like every other failure path in this constructor.
