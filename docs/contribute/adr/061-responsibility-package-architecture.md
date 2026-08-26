@@ -1,7 +1,7 @@
 # ADR-061: Responsibility-Package Architecture and Flat-Namespace Migration
 
 **Date:** 2026-08-24
-**Status:** Accepted — partially implemented (Phases 0-1 implemented; Phases 2-4 in progress; Phase 5 begun — the `model` package and the `*_metadata.py` dataclass/parser split have landed, and the change catalog's registry-validation is already satisfied but its D9 taxonomy repartition is not — and otherwise incremental).
+**Status:** Accepted — partially implemented (Phases 0-1 implemented; Phases 2-4 in progress; Phase 5 begun — the `model` package and the `*_metadata.py` dataclass/parser split have landed; the change catalog has unique identifiers and enum-membership completeness today, but its D9 taxonomy repartition and the rest of D9's registry validation are not done — and otherwise incremental).
 **Decision maker:** abicheck maintainers
 
 ## Context
@@ -1105,52 +1105,70 @@ owed. Splitting it means separating a dataclass from its own load/write
 methods without changing what `BuildSourcePack(...)` constructs for callers
 this repository cannot see, which is its own slice.
 
-**Item 3's *validation* half (global uniqueness and complete metadata) is
-already satisfied; its *taxonomy-partition* half is not, and stays open.**
-D9 specifies the target shape as declarative modules named by taxonomy
-(`symbols.py`, `types.py`, `platform.py`, `build.py`, `source.py`) under
-`model/change_catalog/`, feeding one `registry.py`. What exists today —
-`change_registry.py` plus `change_registry_{buildsource,castxml,composition,
-coverage,numpy,suppression,wheel,types}.py` — is not that: per this
-repository's own `AGENTS.md` ("Adding a new ChangeKind"), those siblings were
-"split out only to stay under the file-size cap," so `change_registry.py`
-still holds most entries across many taxonomies and
-`change_registry_buildsource.py` places unrelated bundle entries there purely
-for space, not because either is that entry's taxonomy home. Repartitioning
-into D9's target layout is real work still owed and stays in the list below
-(a first Codex review round on this PR correctly caught an earlier draft
-marking the whole item done on the strength of the validation half alone).
+**Item 3 stays open — both its *taxonomy-partition* half and, contrary to
+two earlier drafts of this section, most of its *validation* half.** D9
+specifies two separable things: the target file shape (declarative modules
+named by taxonomy — `symbols.py`, `types.py`, `platform.py`, `build.py`,
+`source.py` — under `model/change_catalog/`, feeding one `registry.py`) and
+what that `registry.py` validates — "globally unique identifiers, complete
+metadata, valid references, and non-contradictory defaults." Neither is done.
 
-What *is* already true, and worth recording so it isn't re-verified from
-scratch when the repartition happens: global uniqueness and completeness are
-enforced independent of file layout, since `ChangeKindRegistry` validates the
-assembled `REGISTRY` regardless of which module each `ChangeKindMeta` entry
-came from. `ChangeKindRegistry.__init__` raises `ValueError` on a duplicate
-`kind` at import time (so `REGISTRY` existing at all is proof of uniqueness),
-pinned by `tests/test_architecture_refactor.py::TestChangeKindRegistry::
-test_duplicate_entry_raises`; and completeness in both directions — every
-`ChangeKind` member has a registry entry, and the registry has no entry
-beyond the enum — is pinned by that same class's
+The taxonomy shape isn't: what exists today — `change_registry.py` plus
+`change_registry_{buildsource,castxml,composition,coverage,numpy,
+suppression,wheel,types}.py` — per this repository's own `AGENTS.md`
+("Adding a new ChangeKind"), was "split out only to stay under the
+file-size cap," so `change_registry.py` still holds most entries across many
+taxonomies and `change_registry_buildsource.py` places unrelated bundle
+entries there purely for space, not because either is that entry's taxonomy
+home (a first Codex review round on this PR caught an earlier draft marking
+this done on the strength of the validation claim alone).
+
+The validation is only partly done, and a second Codex review round caught
+this section overclaiming that too: `ChangeKindRegistry` genuinely enforces
+two of D9's four properties, independent of file layout — global uniqueness
+of kind identifiers (`ChangeKindRegistry.__init__` raises `ValueError` on a
+duplicate `kind` at import time, pinned by `tests/
+test_architecture_refactor.py::TestChangeKindRegistry::
+test_duplicate_entry_raises`) and enum-membership completeness in both
+directions — every `ChangeKind` member has exactly one registry entry, and
+no entry names a value outside the enum — pinned by that same class's
 `test_registry_has_all_changekind_members`/`test_registry_no_extra_entries`.
-`scripts/check_ai_readiness.py`'s `changekind-partition` check additionally
-gates (as an ERROR) that every kind is categorized. Its `changekind-detector`/
-`changekind-docs` siblings are WARN-only, not gates, and check for a bare
-textual reference (`ChangeKind.NAME` appearing anywhere outside
-`checker_policy.py`, or the kind's name/value appearing anywhere under
-`docs/`) rather than proving a detector actually produces the kind or that a
-page substantively documents it — real, current-state evidence toward
-"produced by some detector" and "documented", but advisory, not enforced (a
-second Codex review round on this PR caught an earlier draft overstating
-this as gated). None of that changes when the files move to their D9-shaped
-homes — it's evidence the repartition can lean on, not a substitute for it.
+But "enum-membership completeness" is not D9's "complete metadata":
+`ChangeKindMeta.impact` and `.description_template` are both declared
+optional (`impact: str = ""`, `description_template: str | None = None` in
+`change_registry_types.py`), so an entry with empty/absent metadata is
+accepted, not rejected — nothing requires those fields populated. Nor is
+either "valid references" or "non-contradictory defaults" validated
+anywhere: no check confirms a `policy_overrides` key names a real policy, or
+that an override doesn't trivially equal its own `default_verdict`, or any
+other cross-field consistency. `scripts/check_ai_readiness.py`'s
+`changekind-partition` check gates (as an ERROR) the same enum-membership
+completeness `ChangeKindRegistry` already enforces at import time — not new
+coverage. Its `changekind-detector`/`changekind-docs` siblings are WARN-only,
+not gates, and check for a bare textual reference (`ChangeKind.NAME`
+appearing anywhere outside `checker_policy.py`, or the kind's name/value
+appearing anywhere under `docs/`) rather than proving a detector actually
+produces the kind or that a page substantively documents it — real,
+current-state evidence toward "produced by some detector" and "documented",
+but advisory, not enforced, and not part of D9's four validation properties
+either way.
+
+So the only pieces of item 3 actually done are unique identifiers and
+enum-membership completeness — real, and worth not re-verifying when the
+repartition happens, but a small fraction of what D9 asks the assembled
+`registry.py` to validate. Complete-metadata enforcement, reference
+validation, and default-contradiction checking are all still open, alongside
+the taxonomy move itself.
 
 The remaining Phase 5 work:
 
 1. split CastXML and Clang parsing by entity and shared parser context;
 2. separate source-graph values, construction, and comparison;
 3. repartition the change catalog into D9's `model/change_catalog/
-   {symbols,types,platform,build,source}.py` taxonomy (the validation half is
-   already done — see above); and
+   {symbols,types,platform,build,source}.py` taxonomy and implement its full
+   validation (complete metadata, valid references, non-contradictory
+   defaults — only unique identifiers and enum-membership completeness are
+   done today, see above); and
 4. remove superseded private re-exports, migration edges, and cycle
    exceptions.
 
