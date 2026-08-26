@@ -113,6 +113,21 @@ class TestCanonicalizeRecordSymbol:
         names = record_canonical_names(_snap("1", 8))
         assert canonicalize_record_symbol("Unrelated", names) == "Unrelated"
 
+    def test_qualified_hint_wins_over_an_ambiguous_bare_table(self) -> None:
+        """Codex review: an ambiguous bare name has no table entry at all,
+        but a caller that already knows exactly which type it matched
+        (``qualified_hint``) must still resolve correctly."""
+        names: dict[str, str] = {}  # simulates the ambiguous, no-entry case
+        assert canonicalize_record_symbol("Widget", names, "a::Widget") == "a::Widget"
+        assert (
+            canonicalize_record_symbol("Widget::x", names, "a::Widget")
+            == "a::Widget::x"
+        )
+
+    def test_qualified_hint_of_none_falls_back_to_the_table(self) -> None:
+        names = record_canonical_names(_snap("1", 8))
+        assert canonicalize_record_symbol("Widget", names, None) == "ns::Widget"
+
 
 # ── _dedup_cross_kind / _deduplicate_ast_dwarf must actually bridge it ────
 
@@ -230,3 +245,49 @@ class TestEndToEndOnlyOneFindingSurvivesForANamespacedStruct:
         ]
         assert len(size_changes) == 1
         assert size_changes[0].symbol in ("Widget", "ns::Widget")
+
+    def test_bare_name_collision_across_namespaces_still_dedups(self) -> None:
+        """Codex review on PR #873: ``a::Widget`` and ``b::Widget`` share
+        the bare name ``Widget``, which makes ``record_canonical_names``
+        correctly decline to bridge that bare name at all (genuinely
+        ambiguous). Without a per-finding qualified-identity hint, the AST-
+        tier ``TYPE_SIZE_CHANGED`` for ``a::Widget`` (bare symbol
+        ``Widget``) could never be bridged to the DWARF-tier
+        ``STRUCT_SIZE_CHANGED`` for the same struct (qualified symbol
+        ``a::Widget``), so both survived as two separate findings for one
+        real change. ``diff_types._append_type_size_and_alignment_changes``
+        now stamps ``Change.qualified_name`` directly from the matched
+        ``RecordType`` pair, which ``canonicalize_record_symbol`` prefers
+        over the (necessarily ambiguous) table lookup."""
+        old = AbiSnapshot(
+            library="lib.so",
+            version="1",
+            types=[_rec("Widget", "a::Widget", 64), _rec("Widget", "b::Widget", 32)],
+            dwarf=DwarfMetadata(
+                has_dwarf=True,
+                structs={
+                    "a::Widget": StructLayout(name="a::Widget", byte_size=8),
+                    "b::Widget": StructLayout(name="b::Widget", byte_size=4),
+                },
+            ),
+        )
+        new = AbiSnapshot(
+            library="lib.so",
+            version="2",
+            types=[_rec("Widget", "a::Widget", 128), _rec("Widget", "b::Widget", 32)],
+            dwarf=DwarfMetadata(
+                has_dwarf=True,
+                structs={
+                    "a::Widget": StructLayout(name="a::Widget", byte_size=16),
+                    "b::Widget": StructLayout(name="b::Widget", byte_size=4),
+                },
+            ),
+        )
+        result = compare(old, new)
+        size_changes = [
+            c
+            for c in result.changes
+            if c.kind in (ChangeKind.TYPE_SIZE_CHANGED, ChangeKind.STRUCT_SIZE_CHANGED)
+        ]
+        assert len(size_changes) == 1, size_changes
+        assert size_changes[0].symbol in ("Widget", "a::Widget")

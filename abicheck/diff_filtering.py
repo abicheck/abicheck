@@ -1398,7 +1398,8 @@ def _dedup_cross_kind(
     names = record_names or {}
     ast_findings: set[tuple[str, str]] = set()
     for c in changes:
-        ast_findings.add((c.kind.value, canonicalize_record_symbol(c.symbol, names)))
+        canon = canonicalize_record_symbol(c.symbol, names, c.qualified_name)
+        ast_findings.add((c.kind.value, canon))
 
     _DWARF_FIELD_LEVEL_KINDS = {
         ChangeKind.STRUCT_FIELD_OFFSET_CHANGED,

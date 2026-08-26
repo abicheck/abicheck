@@ -19,3 +19,14 @@
   namespaced type's struct/type-level and field-level findings collapse
   to one, the same way an unqualified (global-namespace) type's already
   did.
+- **Follow-up (Codex review): two distinct types sharing a bare name
+  (`a::Widget`/`b::Widget`, both bare `Widget`) still failed to dedup.**
+  The bridge above correctly declines to register a genuinely ambiguous
+  bare name in its lookup table, but that also meant a perfectly
+  well-identified AST-tier finding for `a::Widget` had no way to resolve
+  its own bare `Widget` symbol back to `a::Widget` for comparison against
+  the DWARF-tier finding's already-qualified symbol.
+  `diff_types._append_type_size_and_alignment_changes` now stamps
+  `Change.qualified_name` directly from the matched `RecordType` pair it
+  already has in hand, and `canonicalize_record_symbol` prefers that
+  per-finding hint over the (necessarily ambiguous) table lookup.

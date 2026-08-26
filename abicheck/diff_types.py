@@ -186,16 +186,13 @@ def _removals_are_unconfirmed(old: AbiSnapshot, new: AbiSnapshot) -> bool:
     )
     if not new_stripped_of_types:
         return False
-    # Corroborate with exported-symbol retention: a stripped-but-intact binary
-    # keeps (almost) all of the old side's exports; if most are gone, the library
-    # genuinely changed and removals are real.
-    #
-    # Only count *exported* symbols (PUBLIC/ELF_ONLY). A DWARF-primary old
-    # snapshot also records internal/static subprograms, but the stripped new
-    # side carries dynamic exports only — counting internals would deflate
-    # retention and defeat the suppression for a genuinely intact comparison.
-    # Prefer functions; fall back to variables for data-only DSOs so a changed
-    # variable surface still surfaces removals (CodeRabbit review on PR #275).
+    # Corroborate with exported-symbol retention: a stripped-but-intact
+    # binary keeps (almost) all of the old side's exports; if most are
+    # gone, the library genuinely changed and removals are real. Only
+    # count *exported* symbols (PUBLIC/ELF_ONLY) — a DWARF-primary old
+    # snapshot also records internal/static subprograms the stripped new
+    # side's dynamic exports never carry. Prefer functions; fall back to
+    # variables for data-only DSOs (CodeRabbit review on PR #275).
     old_funcs = _exported_elf_symbol_names(old, symbol_types=FUNCTION_SYMBOL_TYPES)
     new_funcs = _exported_elf_symbol_names(new, symbol_types=FUNCTION_SYMBOL_TYPES)
     if not old_funcs or not new_funcs:
@@ -552,6 +549,11 @@ def _append_type_size_and_alignment_changes(
     t_old: RecordType,
     t_new: RecordType,
 ) -> None:
+    # This caller knows the matched RecordType pair directly, so it can
+    # stamp real identity even when record_canonical_names' bare-name
+    # bridge can't (an unrelated `a::Widget`/`b::Widget` collision
+    # elsewhere in the snapshot -- Codex review).
+    qualified = t_new.qualified_name or t_old.qualified_name
     if (
         t_old.size_bits is not None
         and t_new.size_bits is not None
@@ -564,6 +566,7 @@ def _append_type_size_and_alignment_changes(
                 name=name,
                 old=str(t_old.size_bits),
                 new=str(t_new.size_bits),
+                qualified_name=qualified,
             )
         )
 
@@ -578,6 +581,7 @@ def _append_type_size_and_alignment_changes(
                 symbol=name,
                 name=name,
                 old=str(t_old.alignment_bits),
+                qualified_name=qualified,
                 new=str(t_new.alignment_bits),
             )
         )
@@ -602,10 +606,9 @@ def _try_match_reserved_field(
     candidate: TypeField | None = None
     # Primary: match by offset + type (when available). Excludes candidates
     # already consumed by an earlier reserved-field or rename match at this
-    # offset (multiple distinct added fields can share an offset_bits, e.g.
-    # overlapping anonymous-union members) — otherwise two removed fields
-    # could both claim the same added field, hiding that one was genuinely
-    # dropped (caught in review).
+    # offset (distinct added fields can share an offset_bits, e.g.
+    # overlapping anonymous-union members) — else two removed fields could
+    # claim the same added field, hiding a genuine drop (caught in review).
     if f_old.offset_bits is not None:
         candidate = next(
             (
@@ -890,13 +893,12 @@ def _diff_type_field_pair(
 ) -> list[Change]:
     changes: list[Change] = []
     # Use canonical form for type comparison to avoid false positives from
-    # "struct Foo" vs "Foo" or "const int" vs "int const" differences.
-    # A pointee/by-value cv-qualifier change (``char *`` -> ``const char *``)
-    # leaves the field's size and offset unchanged — it is source-level churn,
-    # not a binary layout break (ISSUE-30/35/65). Top-level field const/volatile
-    # is reported separately by the ``field_qualifiers`` detector. See
-    # _field_type_genuinely_changed for the additional legacy-snapshot
-    # cv_facts_reliable handling.
+    # "struct Foo" vs "Foo" or "const int" vs "int const" differences. A
+    # pointee/by-value cv-qualifier change (``char *`` -> ``const char *``)
+    # leaves the field's size/offset unchanged -- source-level churn, not a
+    # binary layout break (ISSUE-30/35/65); top-level const/volatile is
+    # reported separately by ``field_qualifiers``. See
+    # _field_type_genuinely_changed for cv_facts_reliable handling.
     if _field_type_genuinely_changed(
         f_old.type, f_new.type, cv_facts_reliable=cv_facts_reliable
     ):
@@ -1206,26 +1208,25 @@ def _vtable_transition_is_evidenced(
     # NOT consulted here: ``vptr_offset_bits``. It reads like the one
     # independent layout witness available, and a previous revision of this
     # function used it as exactly that -- wrongly. At the time, both
-    # producers assigned it as ``0 if vtable else None``
-    # (``dwarf_snapshot.py``, ``dumper_castxml.py``), so on those two
-    # backends ``(old.vptr_offset_bits is None) != (new.vptr_offset_bits is
-    # None)`` was *identical*
-    # to the empty-vs-non-empty vtable transition being guarded: it was true
-    # by construction for every input reaching this point, which silently
-    # made the whole guard a no-op and let the original capture-gap false
-    # positive straight back through (Codex review). ``dumper_castxml.py``
-    # still assigns it exactly that way. ``dwarf_snapshot.py`` no longer
-    # does (G31 Phase C): it now reads a real ``_vptr.<Class>``/base-chain
-    # offset from DWARF in the common case, falling back to the same
-    # ``0 if vtable`` heuristic only for the residual unresolved set -- so
-    # for DWARF specifically the field is no longer purely circular. This
-    # function still doesn't consult it, on purpose: declining to use an
-    # available signal is always safe (the failure mode this guard exists to
-    # avoid only ever ran the other way -- trusting a circular signal AS IF
-    # independent), and using it as a genuine witness for the now-partially-
-    # real DWARF case while still excluding it for castxml's own
-    # still-fully-circular case is its own careful design + FP-verification
-    # effort, not a drive-by extension here — see
+    # producers assigned it as ``0 if vtable else None`` (``dwarf_snapshot.
+    # py``, ``dumper_castxml.py``), so on those two backends
+    # ``(old.vptr_offset_bits is None) != (new.vptr_offset_bits is None)``
+    # was *identical* to the empty-vs-non-empty vtable transition being
+    # guarded: true by construction for every input reaching this point,
+    # which silently made the whole guard a no-op and let the original
+    # capture-gap false positive straight back through (Codex review).
+    # ``dumper_castxml.py`` still assigns it exactly that way. ``dwarf_
+    # snapshot.py`` no longer does (G31 Phase C): it now reads a real
+    # ``_vptr.<Class>``/base-chain offset from DWARF in the common case,
+    # falling back to the same ``0 if vtable`` heuristic only for the
+    # residual unresolved set -- so for DWARF the field is no longer purely
+    # circular. This function still doesn't consult it, on purpose:
+    # declining to use an available signal is always safe (the failure mode
+    # this guard exists to avoid only ever ran the other way -- trusting a
+    # circular signal AS IF independent), and using it as a genuine witness
+    # for the now-partially-real DWARF case while still excluding it for
+    # castxml's own still-fully-circular case is its own careful design +
+    # FP-verification effort, not a drive-by extension here — see
     # ``tests/test_vtable_evidence_guard.py``'s own note on why
     # ``abicheck.dwarf_snapshot`` was dropped from its premise-pin test.
     # Only the optional ``ABICHECK_CLANG_LAYOUT_TOOL`` path computes it from
@@ -1470,10 +1471,9 @@ def _diff_type_vtable(
     # a slot's mangled owner renaming from base to derived; func_added (from
     # diff_symbols._diff_functions) already covers the newly-materialized
     # symbol. See vtable_slot_is_override_reuse() for why this must mirror
-    # virtual_method_addition()'s exemption (including its own-owner-descends-
-    # from-old-owner guard, so an unrelated same-signature virtual -- e.g. a
-    # sibling base, or a base-class swap -- can't false-suppress a genuine
-    # slot replacement).
+    # virtual_method_addition()'s exemption (own-owner-descends-from-old-owner
+    # guard included, so an unrelated same-signature virtual can't
+    # false-suppress a genuine slot replacement).
     if len(t_old.vtable) == len(t_new.vtable) and all(
         vtable_slot_is_override_reuse(
             old_entry, new_entry, old_funcs, new_funcs, old_types, new_types

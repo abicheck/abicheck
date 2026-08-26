@@ -579,7 +579,11 @@ def record_canonical_names(snap: AbiSnapshot | None) -> dict[str, str]:
     return out
 
 
-def canonicalize_record_symbol(symbol: str, record_names: Mapping[str, str]) -> str:
+def canonicalize_record_symbol(
+    symbol: str,
+    record_names: Mapping[str, str],
+    qualified_hint: str | None = None,
+) -> str:
     """Canonicalize a struct/type-kind ``Change.symbol`` via *record_names*
     (see :func:`record_canonical_names`), so a DWARF-tier qualified
     spelling and an AST-tier bare spelling for the same type resolve to
@@ -588,11 +592,26 @@ def canonicalize_record_symbol(symbol: str, record_names: Mapping[str, str]) -> 
     Handles both a whole-type symbol (``"Widget"``) and a field-qualified
     one (``"Widget::x"``, for the three field-level kinds in
     ``diff_filtering._DWARF_TO_AST_EQUIV``) — only the type-name portion
-    is ever rewritten, never the field name itself. A symbol with no
-    bridging information (an unrecognized or ambiguous bare name) is
-    returned unchanged, the same conservative default
-    :func:`record_canonical_names` uses.
+    is ever rewritten, never the field name itself.
+
+    *qualified_hint* (``Change.qualified_name``, when the emitting detector
+    already knows exactly which type it matched) takes priority over the
+    *record_names* table and is tried first: two distinct types sharing an
+    ambiguous bare name (``a::Widget``/``b::Widget`` both bare ``Widget``)
+    make *record_names* correctly decline to bridge that bare name at all
+    (see :func:`record_canonical_names`), which would otherwise leave a
+    perfectly well-identified AST-tier finding un-bridgeable to its
+    DWARF-tier counterpart purely because of an unrelated type elsewhere in
+    the snapshot (Codex review). A symbol with no bridging information at
+    all (no hint, and an unrecognized or ambiguous bare name) is returned
+    unchanged, the same conservative default :func:`record_canonical_names`
+    uses.
     """
+    if qualified_hint is not None:
+        if "::" in symbol:
+            _parent, sep, field = symbol.rpartition("::")
+            return f"{qualified_hint}{sep}{field}"
+        return qualified_hint
     canonical = record_names.get(symbol)
     if canonical is not None:
         return canonical
