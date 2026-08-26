@@ -180,28 +180,54 @@ the hash input is the same non-`sort_keys` encoding the plain-JSON path
 already writes, not a re-derived canonical form).
 
 **Deduplication granularity is the whole per-library `AbiSnapshot`, not
-individual declarations — and the within-one-bundle motivating case named
-in an earlier revision of this section does not actually reproduce (Codex
-review, verified against the code).** `AbiSnapshot.library: str` is a
-required, always-distinct-per-library field (`model.py`), and
-`snapshot_to_dict()` also serializes `source_path`, mtimes/sizes, and each
-DSO's own ELF/PE/Mach-O metadata block — none of which two genuinely
-different libraries share, even when re-linking the identical static
-utility into both. So "a static archive re-linked into two DSOs" does
-**not** produce two byte-identical serialized snapshots in practice; the
-only way to observe this dedup path firing is the degenerate case of
+individual declarations — and this plan's own dedup motivation has now been
+corrected twice, each round narrower than the last (Codex review, two
+rounds; recorded in full so a third round doesn't re-litigate the same
+ground).**
+
+*Round 1's finding, still valid:* `AbiSnapshot.library: str` is a required,
+always-distinct-per-library field (`model.py`), and `snapshot_to_dict()`
+also serializes `source_path`, mtimes/sizes, and each DSO's own ELF/PE/
+Mach-O metadata block — none of which two genuinely different libraries
+share, even when re-linking the identical static utility into both. So "a
+static archive re-linked into two DSOs" does **not** produce two
+byte-identical serialized snapshots in practice; the only way to observe
+this dedup path firing *within one bundle* is the degenerate case of
 capturing (or testing with) the literal same `AbiSnapshot` object under two
-map keys. The real, still-genuine benefit this granularity delivers is
-**cross-capture**, not cross-library, dedup: re-saving one library's own
-unchanged `AbiSnapshot` in a later `BundleFacts` capture (the common CI
-shape — most libraries in a release are unchanged run to run) reuses its
-existing blob, since that *is* the same object's own content reproduced.
-Corrected acceptance criterion: Phase 1's own tests exercise cross-capture
-reuse (two `save_bundle_facts` calls a fixed number of days apart for one
-unchanged library, sharing a blob) as the primary case, with the
-within-one-bundle shared-content case named only as a real but rare
-possibility (identical build output for two genuinely distinct libraries),
-not the motivating scenario.
+map keys.
+
+*Round 2's finding: the "fix" for round 1 — reframing the benefit as
+cross-capture dedup — does not hold up either, because each archive is its
+own independent, self-contained zip with no storage shared across files.*
+`BundleArchiveWriter(path)` opens one zip at `path` and writes every blob
+it needs *into that zip alone*; there is no blob directory, external
+object store, or archive-update protocol spanning multiple `save_bundle_
+facts` calls. Concretely: saving two captures to *different* paths (the
+realistic CI shape — a new archive per run) writes the identical blob into
+each archive independently, with zero bytes actually shared between them;
+saving twice to the *same* path doesn't accumulate reuse either — the
+second `BundleArchiveWriter` truncates the same target via a fresh temp
+file (Phase 1's own atomicity design), so it never even sees the first
+capture's blobs to reuse. A test proving two saved manifests reference
+equal *hashes* proves the hash function is stable, not that any storage was
+actually shared or reduced — exactly the round 2 finding's own point.
+
+**Honest, corrected scope: as designed, Phase 1's whole-snapshot
+content-addressed dedup delivers real space savings only in the narrow,
+single-write, same-object-content case round 1 already named as rare — not
+as a general cross-library *or* cross-capture storage-reduction claim.**
+The format's other benefits (Phase 2's lazy per-library reader; a stable,
+content-addressed reference for a manifest/blob pair) stand on their own
+and are unaffected by this correction. **Genuine cross-capture space
+reduction is real future work, out of scope for this plan** (see "Out of
+scope" below) — it needs either an append-only write mode that reuses an
+existing archive's own already-written blobs on a subsequent save to the
+same path, or a shared blob store spanning multiple archive files (a real
+CAS layer, not a per-archive one) — both materially larger designs of
+their own, not a one-line extension of Phase 1's current per-archive
+`BundleArchiveWriter`. The Tests section below is corrected to test
+exactly what Phase 1 actually provides (intra-archive dedup for identical
+content within one write), not a cross-capture claim the design can't back.
 
 Individual-declaration-level dedup (sharing one blob per struct/function
 across libraries, not per whole snapshot) is out of scope for the identical
@@ -360,14 +386,17 @@ instantiation-order-sensitive fields (Phase 1's hash input).
   via a patched/instrumented `zipfile.ZipExtFile` or a member-read counter,
   to open and decompress **exactly one** member — proving lazy access is
   real, not merely API-shaped.
-- Dedup: primarily a **cross-capture** test (matching the corrected
-  motivating case above) — two `save_bundle_facts` calls for the same
-  unchanged library's `AbiSnapshot` share a blob; a same-bundle,
-  two-different-library-names test is included too but is a synthetic,
-  same-object-under-two-keys construction, documented as such rather than
-  presented as evidence the design reduces real production duplication.
-  Either way the underlying archive contains exactly one
-  `blobs/<hash>.json.zst` member for the shared content, not two.
+- Dedup: an **intra-archive** test only (matching the corrected, honest
+  scope above, round 2) — two library names in *one* `BundleFacts` map to
+  byte-identical `AbiSnapshot` content (the same object under two keys,
+  documented in the test itself as a synthetic construction, not evidence
+  of real production duplication) produce exactly one
+  `blobs/<hash>.json.zst` member for the shared content in the resulting
+  archive, not two. **No cross-capture test** — two independent
+  `save_bundle_facts` calls (even for a genuinely unchanged library) are
+  not expected to share any bytes, since each writes its own
+  self-contained archive; asserting otherwise would test a claim this
+  design doesn't make.
 - **Corruption: a tampered blob is rejected, not silently mis-loaded**
   (Codex review) — a valid archive with one blob member's content replaced
   in place (still valid zstd/JSON, but no longer matching its own member
@@ -399,6 +428,17 @@ the partial-load test above, not asserted from documentation alone.
 
 ## Out of scope
 
+- **Cross-capture deduplication** (sharing blob bytes across two separate
+  `save_bundle_facts` calls / archive files, e.g. an unchanged library
+  reused across consecutive CI runs) — not delivered by Phase 1's
+  per-archive `BundleArchiveWriter` as designed (see the corrected
+  "Deduplication granularity" note above; each archive is independently
+  self-contained, so this is a real gap, not an oversight left unstated).
+  Needs either an append-only write mode that reuses an existing archive's
+  own blobs on a later save to the same path, or a genuine shared CAS layer
+  spanning multiple archive files — both a materially larger design than
+  this plan's per-archive format, deferred the same "informed by
+  production usage" way declaration-level dedup below already is.
 - **Declaration-level content addressing** (a genuinely shared header's
   individual struct/function declarations deduplicated across libraries,
   not just whole identical snapshots) — needs `AbiSnapshot` itself to expose

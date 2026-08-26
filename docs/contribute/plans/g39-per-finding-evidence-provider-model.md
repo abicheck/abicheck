@@ -127,31 +127,72 @@ claims this finding" (should not occur in practice once Phase 1 completes,
 but the distinction matters for the completeness gate in Phase 3 the same
 way it already matters for `contract_evidence_refs`).
 
+**A flat, unqualified tuple cannot distinguish which *side* a provider
+applies to, and that distinction is load-bearing (Codex review, fresh
+evidence).** A changed fact's `Change` spans two `AbiSnapshot`s (old and
+new), and their evidence can genuinely differ — an old-side `RecordType`
+DWARF-corroborated per this plan's own layout-finding investigation, paired
+with a new-side one that is not (a real, not hypothetical, shape: a header
+changed in a way DWARF debug info for the *new* build doesn't yet cover,
+or vice versa). An unordered union like `("l2:clang", "corroborated:dwarf")`
+cannot say *which* side the corroboration belongs to — a consumer reading
+it would have no way to avoid treating the whole finding as corroborated
+when only one side actually is, silently defeating the confidence
+distinction this field exists to provide. **Resolution: every entry in the
+vocabulary above is side-scoped by a mandatory `old:`/`new:`/`both:` prefix
+layer** ahead of the tier prefix — e.g. `old:l2:clang`, `new:corroborated:dwarf`,
+or `both:l0:elf_symtab` for a provider whose evidence is genuinely identical
+on both sides (the common case for e.g. a symbol-table-only detector, where
+"old" and "new" mean the same extraction mechanism ran on each side, not
+that the *content* matched). This is additive to the table's existing
+prefixes, not a redesign of them — `evidence_provenance = ("both:l0:elf_symtab",)`
+is the typical L0/L1 slice-1 value, and only the harder L2+ slices need the
+`old:`/`new:` split in practice. Phase 1's own wiring for each slice states,
+per detector, whether `both:` suffices or the per-side split is required —
+recorded there rather than guessed here, since (mirroring this plan's own
+"XL, phased" discipline) the answer genuinely varies by detector and
+shouldn't be frozen before real call sites are examined.
+
 ### Phase 1 — wire the finding-construction call sites (XL, phased itself)
 
-**Corrected inventory** (an earlier draft of this plan cited "~45
-`Change(...)` construction sites" — verified by grep before this revision
-and found materially wrong; recorded here so it isn't re-derived
-incorrectly a second time): direct `Change(...)` construction is rare —
-about 14 sites total. The dominant path is `diff_helpers.make_change()`,
-a shared factory called roughly 350 times across the detector modules,
-which already forwards arbitrary keyword arguments straight to `Change(...)`
-unchanged (`**change_kwargs: Any` in its signature). This has a real,
-favorable consequence: **`make_change()` itself needs no signature
-change** — any call site can already pass `evidence_provenance=(...)`
-through today's `**change_kwargs`. The actual Phase 1 work is therefore
-not "extend one factory, then wire ~45 sites downstream of it" — it's
-"decide and pass the *right value* at every one of the ~350+14 real call
-sites," which is a larger, not smaller, inventory than the original
-estimate, spread across every detector module that emits findings, not
-only `diff_symbols.py`/`diff_types.py`. Confirmed direct-construction call
-sites (bypassing `make_change()`) span `bundle_models.py`, `checker.py`,
-`internal_leak.py`, `pattern_verdicts.py`, `post_manifest.py`,
-`post_processing.py`, `post_processing_reachability.py`, `stack_checker.py`,
-`versioned_symbol_scheme.py`, `cli_buildsource_helpers.py`, and
-`diff_type_spellings.py`, in addition to `diff_helpers.py`'s own factory
-body — each needs individual attention, not just the `make_change()`
-callers.
+**No hand-copied count — this plan has already gotten one wrong twice
+(Codex review, three rounds; per `AGENTS.md`'s own "don't hand-copy a
+table, count, or version number that already has a fact owner elsewhere"
+rule, which this section now follows instead of fighting).** An earlier
+draft cited "~45 `Change(...)` construction sites"; a later revision
+"corrected" that to "about 14 sites" plus "~350" `make_change()` calls —
+also wrong, confirmed by a fresh `git grep -n "Change(" -- 'abicheck/*.py'
+'abicheck/buildsource/*.py'` at implementation time finding several dozen
+direct-construction sites in `buildsource/` alone (`build_diff.py`,
+`crosscheck_base.py`, `evidence_policy.py`, `graph_reconcile.py`,
+`source_diff.py`, `source_graph_findings.py`, ...), none of which the
+prior revision's file list named. A hand-copied count in a plan document
+goes stale the moment any PR adds, removes, or refactors a detector, and
+this plan's own history is now direct proof of that. **Derive the real
+inventory at implementation time instead of trusting any number written
+here**: `git grep -n "Change(" -- 'abicheck/*.py' 'abicheck/buildsource/*.py'`
+for direct constructions (filter out the `class Change` definition itself,
+type annotations, and `diff_helpers.py`'s own factory body), and
+`git grep -n "make_change(" -- 'abicheck/*.py' 'abicheck/buildsource/*.py'`
+for factory calls. The dominant path is still `diff_helpers.make_change()`,
+which already forwards arbitrary keyword arguments straight to
+`Change(...)` unchanged (`**change_kwargs: Any` in its signature) — a real,
+favorable, count-independent consequence: **`make_change()` itself needs
+no signature change**, any call site can already pass
+`evidence_provenance=(...)` through today's `**change_kwargs`. The actual
+Phase 1 work is therefore not "extend one factory, then wire N sites
+downstream of it" — it's "decide and pass the *right value* at every real
+call site, both `make_change()`-routed and direct," spread across every
+detector module that emits findings (`diff_*.py` **and** `buildsource/*.py`
+in full, not a partial file list) — a large, XL-effort inventory whichever
+way it's counted, which is this section's actual, count-independent point.
+**A completeness gate over construction paths themselves** (the P2 finding
+this round of review also raised) is a real alternative to a static count
+and is worth a follow-up investigation — e.g. an AST-based
+`check_ai_readiness.py`-style check that every `Change(...)`/`make_change(...)`
+call site is covered by *some* test asserting on `evidence_provenance` once
+Phase 1 completes — but designing that gate is its own scoped piece of
+work, not attempted in this already-corrected-twice section.
 
 **Implementation location (ADR-061):** detector wiring is `compare/`
 territory ("Match old/new entities or identify a raw change"). As with
