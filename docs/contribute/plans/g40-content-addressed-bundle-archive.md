@@ -1,6 +1,23 @@
+---
+doc_type: contributor
+level: expert
+lifecycle: active
+generated: false
+---
+
 # G40 — Content-addressed bundle archive format
 
 **Status:** Proposed; not started.
+
+**Routing note (ADR-061):** this plan's implementation targets are qualified
+against the root `AGENTS.md`'s "Task routing and dependency direction"
+table (sourced from
+[ADR-061](../adr/061-responsibility-package-architecture.md)). Storage
+format/schema/migration ownership belongs to `storage/`; see "Design" and
+"Files & surfaces" below. `storage/` did not yet exist as a physical package
+when this plan was written — creating it is explicitly sanctioned by ADR-061
+D2 ("a directory is created only when at least one implementation and its
+tests move into it"), not a deviation from the migration.
 
 Split out of [G38](g38-bundle-facts-model-and-multibuild-comparability.md)
 Phase 2's own "deliberately NOT attempted" note (the external review's §9
@@ -88,7 +105,26 @@ compression both hold, unlike a single whole-archive zstd frame.
 
 ### Phase 1 — content-addressed store, whole-snapshot granularity (M)
 
-New module, `abicheck/bundle_archive.py`:
+**Implementation location (ADR-061):** the root `AGENTS.md`'s routing table
+names `storage/` for "Serialize snapshots/baselines, own their schemas/
+migrations, or manage caches" — this plan's entire subject. `storage/` did
+not exist as a physical package at the time this plan was written (only
+`report/`, `frontends/`, `workflows/`, plus the pre-existing `buildsource/`,
+`impact/`, `policies/`, `schemas/`, `compat/` had migrated); creating it here
+is the explicitly-sanctioned first-mover case ADR-061 D2 describes. New code
+under this plan therefore targets `abicheck/storage/bundle_archive.py`, not
+a new flat root module — `bundle_archive.py` would otherwise be rejected by
+`scripts/check_architecture.py`'s `frozen-root-family` rule the moment it's
+added: `bundle_` is already a frozen root family
+(`architecture/modules.yaml`) with an explicit, closed member list (`bundle.py`,
+`bundle_facts.py`, `bundle_manifest.py`, ... — every file G38 already
+shipped), and that check rejects a *new* sibling in a frozen family outright
+("new root sibling is forbidden; create the responsibility package owner").
+`abicheck/bundle_facts.py`/`bundle_manifest.py` (the existing G38 modules
+this plan's `BundleArchive` reads from) stay where they are — this plan adds
+a new storage-format module, not a migration of those.
+
+New module, `abicheck/storage/bundle_archive.py`:
 
 ```python
 @dataclass(frozen=True)
@@ -102,16 +138,28 @@ class BundleArchiveManifest:
     library_filenames: dict[str, str]
 ```
 
-Layout inside the zip: `manifest.json` (the above, uncompressed member —
-always readable without touching the blob store, mirroring
-`bundle_facts.py`'s existing top-level fields) plus one member per *unique*
-content hash under `blobs/<sha256-hex>.json.zst` — the serialized
-`AbiSnapshot` dict, hashed over its own canonical JSON encoding (the
-existing `snapshot_to_json`-style deterministic serialization G38 Phase 13's
-own `save_bundle_facts` docstring already documents caring about — instantiation-
-order-sensitive fields must never be key-sorted, so the hash input is the
-same non-`sort_keys` encoding the plain-JSON path already writes, not a
-re-derived canonical form).
+Layout inside the zip: `manifest.json` (the `BundleArchiveManifest` above,
+uncompressed member — always readable without touching the blob store,
+mirroring `bundle_facts.py`'s existing top-level fields) plus one member per
+*unique* content hash under `blobs/<sha256-hex>.json.zst`. The blob store is
+not `AbiSnapshot`-only: it holds any hashed, serialized payload this format
+needs — the per-library `AbiSnapshot` dicts (referenced by
+`library_blobs`), **and**, when `BundleFacts.manifest` is non-`None`, the
+serialized `InstantiationManifest` itself (referenced by `manifest_blob`,
+using `bundle_manifest.py`'s own existing `to_dict`-shaped serialization —
+the same one a plain-JSON `BundleFacts` already uses for this field). An
+earlier draft of this plan named `manifest_blob: str | None` in the
+manifest dataclass but never specified where the referenced content
+actually lives — corrected here: it's a blob like any other, addressed the
+same way, not a second, undocumented storage mechanism. `manifest_blob` is
+`None` exactly when `BundleFacts.manifest is None` (no instantiation
+manifest was captured), matching that field's own existing optionality.
+Every hash — library or manifest — is computed over its own canonical JSON
+encoding (the existing `snapshot_to_json`-style deterministic serialization
+G38 Phase 13's own `save_bundle_facts` docstring already documents caring
+about — instantiation-order-sensitive fields must never be key-sorted, so
+the hash input is the same non-`sort_keys` encoding the plain-JSON path
+already writes, not a re-derived canonical form).
 
 **Deduplication granularity is the whole per-library `AbiSnapshot`, not
 individual declarations.** Two libraries whose entire parsed snapshot is
@@ -134,8 +182,11 @@ attempted here (see "Out of scope").
 class BundleArchive:
     @classmethod
     def open(cls, path: Path) -> "BundleArchive": ...
-    def manifest(self) -> BundleArchiveManifest: ...       # reads only manifest.json
-    def load_library(self, name: str) -> AbiSnapshot: ...  # reads only that library's blob
+    def manifest(self) -> BundleArchiveManifest: ...              # reads only manifest.json
+    def load_library(self, name: str) -> AbiSnapshot: ...         # reads only that library's blob
+    def load_instantiation_manifest(self) -> InstantiationManifest | None: ...
+        # reads only the manifest_blob member, or returns None without
+        # touching the blob store when BundleArchiveManifest.manifest_blob is None
     def close(self) -> None: ...
 ```
 
@@ -155,13 +206,28 @@ archive.
 
 ### Phase 3 — CLI/API wiring (S)
 
-`save_bundle_facts()`/`load_bundle_facts()` gain an opt-in
-`format: str = "auto"` parameter (`"json"` — today's shape, unchanged
-default; `"archive"` — this plan's zip format; `"auto"` sniffs from the
-path's own bytes, mirroring `snapshot_io.py`'s magic-byte detection, so a
-caller reading an unknown-format path doesn't need to know which one it is
-up front). `BundleFacts` itself is unchanged — this plan is a storage-layer
-addition underneath the existing dataclass, not a new in-memory shape;
+**`load`/`save` get separate, unambiguous contracts — deliberately not one
+shared `"auto"` default.** An earlier draft of this plan gave both
+`save_bundle_facts()` and `load_bundle_facts()` the same
+`format: str = "auto"` parameter and defined `"auto"` as "sniff from the
+path's own bytes" — a real definition for *loading* an existing file, but
+meaningless for *saving* a new one: there are no bytes at the destination
+path to sniff yet, so a save call with no explicit `format=` would have no
+defined behavior. Fixed by giving each function its own contract:
+
+- `save_bundle_facts(facts, path, *, format: str = "json")` — `"json"` is
+  the explicit, unchanged default (today's only behavior, so no existing
+  caller's output format changes), `"archive"` opts into this plan's zip
+  format. No `"auto"` on the save side — there is nothing to sniff.
+- `load_bundle_facts(path, *, format: str = "auto")` — `"auto"` (the
+  default) sniffs the *existing* file's own bytes, mirroring
+  `snapshot_io.py`'s magic-byte detection, so a caller reading a path
+  without knowing which format produced it just works; `"json"`/`"archive"`
+  remain available to force one path explicitly (e.g. for a test asserting
+  which branch ran).
+
+`BundleFacts` itself is unchanged — this plan is a storage-layer addition
+underneath the existing dataclass, not a new in-memory shape;
 `load_bundle_facts()` still returns a plain `BundleFacts` when a caller
 wants the whole-bundle load path unchanged, with `BundleArchive` as the new,
 separate lazy-access API for a caller that specifically wants per-library
@@ -174,9 +240,9 @@ No breaking change to any existing file: `BundleFacts.schema_version`
 is not "archive format at version 1", it's simply not an archive at all, and
 `load_bundle_facts()`'s `"auto"` sniff routes it through the unchanged
 plain-JSON path forever. A converter,
-`abicheck/bundle_archive.py`'s `convert_to_archive(src: Path, dst: Path)`,
-is provided for a caller who wants to opportunistically re-save an existing
-plain-JSON `BundleFacts` file in the new format; never required.
+`abicheck/storage/bundle_archive.py`'s `convert_to_archive(src: Path, dst:
+Path)`, is provided for a caller who wants to opportunistically re-save an
+existing plain-JSON `BundleFacts` file in the new format; never required.
 
 ## Design
 
@@ -186,36 +252,51 @@ were captured from; duplicating them inside the facts archive doubles
 storage for data the archive format itself has no way to keep in sync with
 the source binary's own lifecycle (a rebuild, a rename). If a future
 concrete need for exactly-reproducible raw-binary retrieval materializes,
-that's its own follow-up, informed by a real use case rather than spéculative
+that's its own follow-up, informed by a real use case rather than speculative
 inclusion now — the identical "no general-purpose reanalysis substrate for
 extractors that don't exist yet" reasoning G38 Phase 2 already used to defer
 this whole plan.
 
 Deliberately reuses, rather than reinvents: `snapshot_io.py`'s magic-byte
-container detection precedent (Phase 0's `"auto"` sniff mirrors it exactly),
-ADR-059's decompression-bomb-limit discipline (Phase 2), and G38 Phase 2's
-own deterministic-serialization requirement for the manifest's
+container detection precedent (the loader's `"auto"` sniff mirrors it
+exactly), ADR-059's decompression-bomb-limit discipline (Phase 2), and G38
+Phase 2's own deterministic-serialization requirement for the manifest's
 instantiation-order-sensitive fields (Phase 1's hash input).
 
 ## Files & surfaces
 
-- `abicheck/bundle_archive.py` — new: `BundleArchiveManifest`,
-  `BundleArchive`, `convert_to_archive`.
+- `abicheck/storage/bundle_archive.py` — new: `BundleArchiveManifest`,
+  `BundleArchive`, `convert_to_archive` (see Phase 1's routing note above
+  for why this is `storage/`, not a new flat root module).
 - `abicheck/serialization.py` — `save_bundle_facts`/`load_bundle_facts`
-  gain `format`/`"auto"` sniffing; delegate to `bundle_archive.py` for the
-  archive branch.
-- `abicheck/snapshot_io.py` — no changes; `bundle_archive.py` follows its
-  precedent rather than extending it (the archive's own zip-member framing
-  is a different mechanism from the single-stream plain/gzip/zstd detection
-  `snapshot_io.py` owns, so this stays a sibling module, not a modification
-  to a leaf module several other formats already depend on).
+  gain the `format` parameter described in Phase 3; delegate to
+  `storage/bundle_archive.py` for the archive branch. This module is
+  itself pre-ADR-061 flat-root — whether it stays the public entry point or
+  becomes a thin delegation facade over a `storage/`-owned equivalent by
+  implementation time is a call for whoever lands this plan, informed by
+  how far the `storage/` migration has progressed by then; either way, the
+  archive *logic* lives in `storage/bundle_archive.py`, not duplicated here.
+- `abicheck/snapshot_io.py` — no changes; `storage/bundle_archive.py`
+  follows its precedent rather than extending it (the archive's own
+  zip-member framing is a different mechanism from the single-stream
+  plain/gzip/zstd detection `snapshot_io.py` owns, so this stays a sibling
+  module, not a modification to a leaf module several other formats already
+  depend on).
 - `tests/test_bundle_archive.py` — new.
 
 ## Tests
 
 - Round-trip: a multi-library `BundleFacts` saved as an archive and reloaded
-  (both via `load_bundle_facts("auto")` and via `BundleArchive.open`
+  (both via `load_bundle_facts()`'s `"auto"` sniff and via `BundleArchive.open`
   directly) reproduces the identical per-library `AbiSnapshot`s.
+- **Round-trip with a non-null `InstantiationManifest`** — the manifest-blob
+  gap an earlier draft of this plan left unspecified (see Phase 1's own
+  correction note): a `BundleFacts` whose `manifest` is populated, saved as
+  an archive, reloaded via both `load_bundle_facts()` (which must populate
+  `BundleFacts.manifest` from the archive, not silently drop it) and
+  `BundleArchive.load_instantiation_manifest()` directly, reproduces the
+  identical manifest; a `BundleFacts` with `manifest=None` round-trips to
+  `manifest_blob=None` with no `blobs/` member allocated for it.
 - **Partial-load, verified at production scale, not a toy fixture** — per
   `AGENTS.md`'s own "Third-party-boundary tests must exercise the real
   public API at realistic scale" convention (the zstd-`max_window_size`

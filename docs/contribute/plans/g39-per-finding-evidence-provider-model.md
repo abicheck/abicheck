@@ -1,6 +1,21 @@
+---
+doc_type: contributor
+level: expert
+lifecycle: active
+generated: false
+---
+
 # G39 — Per-finding evidence-provider model
 
 **Status:** Proposed; not started.
+
+**Routing note (ADR-061):** every implementation location this plan names is
+qualified against the root `AGENTS.md`'s "Task routing and dependency
+direction" table (`AGENTS.md`, sourced from
+[ADR-061](../adr/061-responsibility-package-architecture.md)) — route new
+code to the responsibility-package owner current at implementation time, not
+to the flat legacy module this plan cites for orientation. See "Design" and
+"Files & surfaces" below for the specific mapping.
 
 Split out of [G38](g38-bundle-facts-model-and-multibuild-comparability.md)'s
 "Out of scope" section and the root `AGENTS.md`'s "Evidence-provider model"
@@ -67,6 +82,18 @@ need a bespoke field per `ChangeKind` the way the vtable guard's
 
 ### Phase 0 — data model (S)
 
+**Implementation location (ADR-061):** `Change` is a shared domain value
+used across every later stage (comparison, policy, reporting) — the root
+`AGENTS.md`'s routing table places exactly this class of change under
+`model/` ("Add an ABI entity/value shared across stages"). At the time this
+plan was written, `Change` still lives in `checker_types.py` and `model/`
+has not yet absorbed it (ADR-061 Phases 2-4, which include this migration,
+are "in progress," per the ADR's own status line). This plan does **not**
+perform that migration as a side effect: add the field wherever `Change` is
+canonically defined *at implementation time* — `model/findings.py` if that
+migration has already landed by then, `checker_types.py` otherwise. Landing
+this field is not itself a reason to force the `model/` migration forward.
+
 Add one new, additive field to `Change`, following the existing
 `contract_evidence_refs` precedent exactly (flat `tuple[str, ...] | None`,
 `field(default=None, kw_only=True)`, lazy-imported enum for its value
@@ -100,44 +127,86 @@ claims this finding" (should not occur in practice once Phase 1 completes,
 but the distinction matters for the completeness gate in Phase 3 the same
 way it already matters for `contract_evidence_refs`).
 
-### Phase 1 — wire the ~45 `Change(...)` construction sites (XL, phased itself)
+### Phase 1 — wire the finding-construction call sites (XL, phased itself)
 
-Confirmed by grep before this plan was written: `Change(` construction sites
-number in the low-to-mid 40s across `diff_symbols.py`, `diff_types.py`,
-`diff_platform.py`, `diff_versioning.py`, `diff_vtable_layout.py`,
-`diff_sycl.py`, `diff_stdlib_impl.py`, and `buildsource/*.py`'s L3-L5
-detectors. **Not one flag day.** Ordered by risk, matching this file's own
-"known gaps over risky reactive patches" discipline and the FP-rate/
-mutation-score gate structure already in place:
+**Corrected inventory** (an earlier draft of this plan cited "~45
+`Change(...)` construction sites" — verified by grep before this revision
+and found materially wrong; recorded here so it isn't re-derived
+incorrectly a second time): direct `Change(...)` construction is rare —
+about 14 sites total. The dominant path is `diff_helpers.make_change()`,
+a shared factory called roughly 350 times across the detector modules,
+which already forwards arbitrary keyword arguments straight to `Change(...)`
+unchanged (`**change_kwargs: Any` in its signature). This has a real,
+favorable consequence: **`make_change()` itself needs no signature
+change** — any call site can already pass `evidence_provenance=(...)`
+through today's `**change_kwargs`. The actual Phase 1 work is therefore
+not "extend one factory, then wire ~45 sites downstream of it" — it's
+"decide and pass the *right value* at every one of the ~350+14 real call
+sites," which is a larger, not smaller, inventory than the original
+estimate, spread across every detector module that emits findings, not
+only `diff_symbols.py`/`diff_types.py`. Confirmed direct-construction call
+sites (bypassing `make_change()`) span `bundle_models.py`, `checker.py`,
+`internal_leak.py`, `pattern_verdicts.py`, `post_manifest.py`,
+`post_processing.py`, `post_processing_reachability.py`, `stack_checker.py`,
+`versioned_symbol_scheme.py`, `cli_buildsource_helpers.py`, and
+`diff_type_spellings.py`, in addition to `diff_helpers.py`'s own factory
+body — each needs individual attention, not just the `make_change()`
+callers.
+
+**Implementation location (ADR-061):** detector wiring is `compare/`
+territory ("Match old/new entities or identify a raw change"). As with
+Phase 0, this plan targets whichever module is canonical for a given
+detector *at implementation time* — the flat `diff_*.py`/`buildsource/*.py`
+modules named below if `compare/`'s detector migration (ADR-061 D2's
+`compare/detectors/{symbols,types,cpp,platform,build,source}.py`) has not
+yet reached that detector, the `compare/` package otherwise. `buildsource/*`
+is a distinct, already-`AGENTS.md`-scoped package (L3-L5 build/source
+evidence) and stays where it is regardless of the `compare/` migration —
+see `abicheck/buildsource/CLAUDE.md`.
+
+**Not one flag day.** Ordered by risk, matching this file's own "known gaps
+over risky reactive patches" discipline and the FP-rate/mutation-score gate
+structure already in place:
 
 1. **L0/L1-only detectors first** (`diff_symbols.py`'s symbol-table-driven
-   findings, `diff_platform.py`'s ELF/PE/Mach-O-specific findings) — the
-   provenance is a static fact of which module produced the `Change`, not a
-   per-call derivation, so this slice is close to mechanical: one constant
-   tuple per detector function, threaded through the existing `Change(...)`
-   call.
+   findings, `diff_platform.py`'s ELF/PE/Mach-O-specific findings, and the
+   direct-construction sites in `checker.py`/`versioned_symbol_scheme.py`
+   that are similarly static) — the provenance is a static fact of which
+   module produced the `Change`, not a per-call derivation, so this slice is
+   close to mechanical: one constant tuple per detector function, passed
+   through the existing `make_change(...)`/`Change(...)` call.
 2. **L2 header-derived detectors** (`diff_types.py`'s struct/enum/typedef
-   findings) — provenance here genuinely varies per finding (which backend
-   produced *this specific* `RecordType`, and was it DWARF-corroborated) —
-   this is the harder, `AbiSnapshot`-inspecting slice the investigation
-   above already partially scoped for one `ChangeKind` family (layout).
-   Generalize that same reasoning (check the *specific* fields the finding
-   rests on, not the snapshot's aggregate backend) across every `diff_types`
-   detector, not just vtable/size/alignment.
+   findings, `diff_type_spellings.py`) — provenance here genuinely varies
+   per finding (which backend produced *this specific* `RecordType`, and
+   was it DWARF-corroborated) — this is the harder, `AbiSnapshot`-inspecting
+   slice the investigation above already partially scoped for one
+   `ChangeKind` family (layout). Generalize that same reasoning (check the
+   *specific* fields the finding rests on, not the snapshot's aggregate
+   backend) across every `diff_types` detector, not just vtable/size/
+   alignment.
 3. **L3-L5 build/source detectors** (`buildsource/*.py`) — already carry
    `evidence_category`; extend rather than duplicate — a detector that
    already knows its own `evidence_category` value knows enough to also
    state a `l3:`/`l4:`/`l5:` `evidence_provenance` entry with no new
    information gathering, only a second field set from data already in
    scope at the call site.
+4. **Cross-cutting post-processing and roll-up emitters**
+   (`post_processing.py`, `post_processing_reachability.py`,
+   `pattern_verdicts.py`, `internal_leak.py`, `bundle_models.py`,
+   `post_manifest.py`, `cli_buildsource_helpers.py`) — these often
+   construct a `Change` by *transforming* an existing one (a roll-up, a
+   suppression-adjacent rewrite) rather than deriving fresh evidence; the
+   right default here is usually "carry the source finding's own
+   `evidence_provenance` forward," verified per emitter rather than assumed
+   uniformly.
 
 Each slice, once wired, gets its own FP-rate/mutation-score gate re-run
-before merging — never all ~45 sites behind one PR. The FP-rate/mutation-
-score gates exist precisely because a previous incident in this exact area
-(the reverted "linkage-blind removal" and "vptr-offset-bits" attempts,
-`AGENTS.md`'s own record) showed field-level changes to shared detector
-plumbing can silently reintroduce a false positive or false negative that
-passes every hand-written example test.
+before merging — never the whole inventory behind one PR. The FP-rate/
+mutation-score gates exist precisely because a previous incident in this
+exact area (the reverted "linkage-blind removal" and "vptr-offset-bits"
+attempts, `AGENTS.md`'s own record) showed field-level changes to shared
+detector plumbing can silently reintroduce a false positive or false
+negative that passes every hand-written example test.
 
 ### Phase 2 — completeness gate (M)
 
@@ -161,9 +230,19 @@ was never revisited).
 
 ### Phase 3 — report/schema surface (S)
 
-`evidence_provenance` reaches JSON reports (report schema version bump,
-`reporter.py`), SARIF (`sarif.py` — one `properties` bag entry, not a new
-top-level SARIF concept), and the generated docs
+**Implementation location (ADR-061):** `report/` already exists as a real
+package (`abicheck/report/document.py`'s `ReportDocument`,
+`render_json.py`, `render_text.py` — created by the same ADR-061 migration
+that produced this routing table) and is the named owner for "a report
+field, report schema, or output format." `evidence_provenance` reaches the
+canonical JSON path through `report/render_json.py`/`document.py` directly,
+not through the legacy `reporter.py`, which remains a delegation facade
+where it still fronts a documented public path. SARIF and JUnit rendering
+had not migrated into `report/` at the time this plan was written (only
+JSON and text renderers had) — reaches `sarif.py`'s existing `properties`
+bag (one entry, not a new top-level SARIF concept) if that's still the live
+SARIF renderer at implementation time, or `report/render_sarif.py` if that
+migration has landed by then. Also reaches the generated docs
 (`scripts/gen_detector_spec.py`'s matrix gains a column once every kind has
 a real, non-`UNVERIFIED` classification — gated on Phase 2's completeness
 test, so the docs generator cannot claim more coverage than actually
@@ -194,18 +273,36 @@ Deliberately reuses `contract_evidence_refs`' shape (flat string-tuple, not
 a nested dataclass) rather than introducing a second typed provenance model
 alongside `contract_relevance_types.py` — a `Change` gains one more optional
 tuple field, not a new sub-object graph to keep in sync with serialization
-(`checker_types.py`'s own `to_dict`/`from_dict`), SARIF, and every existing
-consumer.
+(wherever `Change.to_dict`/`from_dict` canonically live at implementation
+time), SARIF/JSON rendering, and every existing consumer.
 
 ## Files & surfaces
 
-- `abicheck/checker_types.py` — the new field.
+Named per their flat, pre-migration location, since that is what exists
+today; each bullet's own ADR-061 target package is the actual implementation
+owner once that migration reaches it — see the phase-by-phase routing notes
+above, which this list intentionally does not re-duplicate.
+
+- `abicheck/checker_types.py` (→ `model/findings.py`) — the new field.
+- `abicheck/diff_helpers.py`'s `make_change()` (→ `compare/`) — no signature
+  change needed; named here because its `**change_kwargs` forwarding is
+  exactly why most call sites need no factory-level change, only a passed
+  value.
 - `abicheck/diff_symbols.py`, `diff_types.py`, `diff_platform.py`,
   `diff_versioning.py`, `diff_vtable_layout.py`, `diff_sycl.py`,
-  `diff_stdlib_impl.py` — Phase 1's ~45 call sites.
-- `abicheck/buildsource/*.py` — the L3-L5 detectors already carrying
-  `evidence_category`.
-- `abicheck/reporter.py`, `abicheck/sarif.py` — Phase 3.
+  `diff_stdlib_impl.py`, `diff_type_spellings.py` (→ `compare/detectors/*`)
+  — Phase 1's `make_change()`-routed call sites.
+- `abicheck/checker.py`, `internal_leak.py`, `pattern_verdicts.py`,
+  `post_manifest.py`, `post_processing.py`, `post_processing_reachability.py`,
+  `stack_checker.py`, `versioned_symbol_scheme.py`,
+  `cli_buildsource_helpers.py`, `bundle_models.py` (→ `compare/`/
+  `workflows/`, module-dependent) — Phase 1's direct-construction sites.
+- `abicheck/buildsource/*.py` (stays `buildsource/`, per its own scoped
+  `AGENTS.md` — not part of the `compare/` migration) — the L3-L5 detectors
+  already carrying `evidence_category`.
+- `abicheck/report/render_json.py`/`document.py` (already `report/`),
+  `abicheck/reporter.py`/`sarif.py` as long as either remains the live
+  legacy renderer for its format — Phase 3.
 - `tests/test_evidence_provenance_completeness.py` — Phase 2 (new).
 - `scripts/gen_detector_spec.py`, `docs/reference/detector-spec.md` — Phase 3.
 
