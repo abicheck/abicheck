@@ -223,10 +223,9 @@ def resolve_baseline_compile_context(
 
 def is_raw_source_tree(path: Path | None) -> bool:
     """True for a source tree needing real extraction — not a prebuilt pack."""
-    from .buildsource.inline import is_pack_dir
-    from .cli_buildsource_helpers import _is_inputs_pack_dir
+    from .buildsource.inputs_pack import is_any_pack_dir
 
-    return path is not None and not (is_pack_dir(path) or _is_inputs_pack_dir(path))
+    return path is not None and not is_any_pack_dir(path)
 
 
 def reject_hybrid_source_frontend(

@@ -2589,11 +2589,10 @@ class TestCompareRequestAdr055Evidence:
         new_p = self._make_snap_file(tmp_path, "libtest", "2.0")
         pack_dir = tmp_path / "pack"
         pack_dir.mkdir()
+        # Real manifest, not a patched predicate: is_pack_dir only reads this
+        # file, so this stays independent of which module owns it.
+        (pack_dir / "manifest.json").write_text('{"build_source_pack_version": 1}')
 
-        monkeypatch.setattr(
-            "abicheck.buildsource.inline.is_pack_dir",
-            lambda p: p == pack_dir,
-        )
         monkeypatch.setattr(
             "abicheck.cli_buildsource.embed_build_source", lambda snap, **kwargs: None
         )

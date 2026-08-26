@@ -263,29 +263,14 @@ _SECTION = "Build query (trust)"
 
 
 def _is_inputs_pack_dir(path: Path | None) -> bool:
-    """True when *path* is a Flow-2 ``abicheck_inputs/`` directory (ADR-035 D5).
+    """Compatibility alias for ``buildsource.inputs_pack.is_inputs_pack_dir``.
 
-    A local copy of ``cli_buildsource_helpers._is_inputs_pack_dir``'s own
-    None/is_dir guard around ``buildsource.inputs_pack.is_inputs_pack``, not
-    an import of it: ``cli_buildsource_helpers`` sits several layers above
-    this module in the real import graph (``cli.py``'s ``dump_cmd`` reaches
-    this module directly, and ``cli_buildsource_helpers`` itself reaches back
-    to ``cli.py`` via ``service -> service_scan -> scan_engine ->
-    cli_buildsource -> cli_dump_helpers``), so importing it here -- even
-    function-locally -- closes a real cycle the AI-readiness
-    ``import-cycle-growth`` gate correctly rejects (confirmed by CI:
-    ``cli -> cli_dump_dry_run_build_query -> cli_buildsource_helpers ->
-    service -> service_scan -> scan_engine -> cli_buildsource ->
-    cli_dump_helpers -> cli``). ``buildsource.inputs_pack.py`` itself has no
-    such path back to ``cli.py``, so importing straight from it is safe --
-    the identical fix already applied to
-    ``buildsource.l2_seed._is_inputs_pack_dir`` for the identical reason.
+    Owned there since ADR-061 Phase 3; this was the third of three copies of
+    the same guard, each local because the original lived in the CLI layer.
     """
-    if path is None or not path.is_dir():
-        return False
-    from .buildsource.inputs_pack import is_inputs_pack
+    from .buildsource.inputs_pack import is_inputs_pack_dir
 
-    return is_inputs_pack(path)
+    return is_inputs_pack_dir(path)
 
 
 def _is_pack_dir_any(path: Path | None) -> bool:
