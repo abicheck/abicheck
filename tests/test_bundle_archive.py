@@ -727,6 +727,54 @@ class TestBundleArchiveCentralDirectoryGuard:
         with BundleArchiveReader.open(path) as reader:
             assert reader.read_manifest()["library_blobs"] == {"a.so": h}
 
+    def test_rejects_a_central_directory_with_more_real_records_than_it_claims(
+        self, tmp_path: Path
+    ) -> None:
+        """Codex review, fresh evidence: `total_entries` can be understated
+        while `cd_size` (bounded, but still generously sized) holds far
+        more real central-directory-file-header records -- CPython's
+        `zipfile.ZipFile` parses every record it finds within `cd_size`
+        regardless of `total_entries`, so trusting the declared count
+        alone lets this straight through. Calls the guard directly with a
+        small `max_entries` (not through `BundleArchiveReader.open`'s real
+        20,000-entry cap, which would need an unwieldy number of records
+        to reproduce): 5 real minimal records must be rejected against a
+        cap of 3, even though the EOCD's own `total_entries` claims 1."""
+        import struct
+
+        from abicheck.storage.bundle_archive_cd_guard import (
+            reject_absurd_central_directory,
+        )
+
+        # A minimal central-directory-file-header record: signature(4) +
+        # 42 remaining fixed bytes, all zero -- which already makes the
+        # filename/extra/comment length fields inside those 42 bytes zero.
+        one_record = b"PK\x01\x02" + b"\x00" * 42
+        assert len(one_record) == 46
+        central_directory = one_record * 5
+        cd_offset = 4  # arbitrary; only this test's own bytes matter
+        eocd = struct.pack(
+            "<IHHHHIIH",
+            0x06054B50,
+            0,
+            0,
+            0,
+            1,  # total_entries: understated -- the real count is 5
+            len(central_directory),
+            cd_offset,
+            0,
+        )
+
+        data = bytearray(b"\x00" * cd_offset)
+        data += central_directory
+        data += eocd
+        path = tmp_path / "understated_entry_count.zip"
+        path.write_bytes(bytes(data))
+
+        with path.open("rb") as f:
+            with pytest.raises(SnapshotError, match="actually contains more than"):
+                reject_absurd_central_directory(f, path, max_entries=3)
+
     def test_rejects_a_central_directory_claiming_an_absurd_byte_size(
         self, tmp_path: Path
     ) -> None:
@@ -980,6 +1028,36 @@ class TestSniffBundleArchiveFormatNonRegularSource:
             t.join()
         assert facts.per_library_snapshots == {}
 
+    @pytest.mark.skipif(sys.platform == "win32", reason="no os.mkfifo on Windows")
+    def test_open_regular_file_for_format_sniff_does_not_block_on_a_fifo(
+        self, tmp_path: Path
+    ) -> None:
+        """The TOCTOU fix (Codex review, fresh evidence): a plain path
+        `stat()` followed by a separate `open()` left a window where a
+        concurrent replacement could swap a regular file for a FIFO,
+        whose `open()` then blocks until a writer connects. Now opened
+        `O_NONBLOCK` and classified via `fstat()` on that same fd, so
+        even a bare FIFO with *no* writer at all must never hang -- run
+        in a thread with a bounded join() since a hang here can't
+        otherwise be distinguished from "still running"."""
+        import threading
+
+        from abicheck.storage.bundle_archive import open_regular_file_for_format_sniff
+
+        fifo = tmp_path / "no_writer.fifo"
+        os.mkfifo(fifo)
+
+        result: list[tuple[object, str]] = []
+
+        def _call() -> None:
+            result.append(open_regular_file_for_format_sniff(fifo))
+
+        t = threading.Thread(target=_call, daemon=True)
+        t.start()
+        t.join(timeout=5)
+        assert not t.is_alive(), "open_regular_file_for_format_sniff blocked on a FIFO"
+        assert result == [(None, "json")]
+
 
 class TestOpenRegularFileForFormatSniffClosesOnReadFailure:
     """A failure reading the 4-byte peek itself (e.g. EIO on a network
@@ -990,13 +1068,17 @@ class TestOpenRegularFileForFormatSniffClosesOnReadFailure:
     def test_prefix_read_failure_closes_fp_and_raises_snapshot_error(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        """The real call site is `os.fdopen(fd, "rb")` -- not the builtin
+        `open()` -- since the fix for the FIFO TOCTOU below opens via
+        `os.open()`/`fstat()` on the same fd (Codex review, fresh
+        evidence)."""
         from abicheck.storage.bundle_archive import open_regular_file_for_format_sniff
 
         path = tmp_path / "bundle.archive.zip"
         path.write_bytes(b"PK\x03\x04junk")
 
         closed: list[bool] = []
-        real_open = open
+        real_fdopen = os.fdopen
 
         class _FailingRead:
             def __init__(self, fp: object) -> None:
@@ -1012,12 +1094,10 @@ class TestOpenRegularFileForFormatSniffClosesOnReadFailure:
             def fileno(self) -> int:
                 return self._fp.fileno()  # type: ignore[no-any-return, attr-defined]
 
-        def _tracking_open(file: object, *a: object, **kw: object) -> object:
-            if file == path or file == str(path):
-                return _FailingRead(real_open(file, *a, **kw))
-            return real_open(file, *a, **kw)
+        def _tracking_fdopen(fd: int, *a: object, **kw: object) -> object:
+            return _FailingRead(real_fdopen(fd, *a, **kw))
 
-        monkeypatch.setattr("builtins.open", _tracking_open)
+        monkeypatch.setattr(os, "fdopen", _tracking_fdopen)
         with pytest.raises(SnapshotError, match="simulated read failure"):
             open_regular_file_for_format_sniff(path)
         assert closed == [True]

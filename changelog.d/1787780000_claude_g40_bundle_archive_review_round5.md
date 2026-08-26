@@ -75,3 +75,31 @@
   raised (ENOSPC/EIO), leaving a potentially large temp archive behind.
   Now both closes are nested in their own `finally` so the unlink always
   runs regardless of which one fails.
+
+- **G40 bundle archive: a real central-directory-cap bypass (P1), plus a
+  TOCTOU fix, both from Codex review.** (1) `reject_absurd_central_
+  directory()` only checked the EOCD/ZIP64 record's own *declared*
+  `total_entries` -- but `zipfile.ZipFile` parses every record it can
+  actually find within `cd_size` bytes regardless of what `total_entries`
+  claims, so an archive understating that field (e.g. claiming `1` while
+  `cd_size`, independently capped but still generously sized, holds
+  thousands of real minimal-sized records) bypassed the entry-count cap
+  entirely. Now the actual records are counted directly from the bounded
+  central-directory bytes, bailing as soon as the real count exceeds the
+  limit. (2) `open_regular_file_for_format_sniff()`'s separate `stat()`
+  then `open()` left a window where a concurrent replacement could swap a
+  regular file for a FIFO in between -- `open()`ing a FIFO for reading
+  then blocks until a writer connects, violating this function's own
+  contract to return JSON for a non-regular source without reading (or
+  blocking on) it. Now opens `O_NONBLOCK` first and `fstat()`s that same
+  fd, so the type check and the read refer to one inode with no gap.
+
+  A third finding ("verify zstd frame completion before accepting a
+  blob") was investigated and found not to be exploitable in this
+  codebase: `read_blob()` already re-hashes the fully decoded payload
+  against the content-addressed hash named in the manifest (SHA-256), so
+  any truncated/corrupted decode -- confirmed empirically against real
+  `zstandard` truncation, which does return partial output without
+  raising `ZstdError` -- can never match the recorded hash without
+  breaking SHA-256 collision resistance. No code change made for that
+  finding; the reasoning is recorded on its own PR review thread.

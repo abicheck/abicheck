@@ -49,6 +49,41 @@ _ZIP64_EOCD_RECORD_SIG = b"PK\x06\x06"
 _ZIP64_EOCD_LOCATOR_SIZE = 20
 
 
+def _actual_central_directory_entry_count(
+    f: Any, *, cd_offset: int, cd_size: int, max_entries: int
+) -> int:
+    """Walk the central directory's own file-header records directly,
+    counting them ourselves rather than trusting the EOCD/ZIP64 record's
+    declared total_entries -- CPython's `zipfile._RealGetContents()`
+    parses every record it can find within `cd_size` bytes regardless of
+    what total_entries claims, so an archive understating total_entries
+    while `cd_size` (independently capped, but still generously sized)
+    holds far more minimal-sized real records bypasses a total_entries-
+    only cap entirely (Codex review, fresh evidence). Bails as soon as
+    the count exceeds max_entries, so this never walks more than
+    max_entries + 1 records even for a maximally record-dense directory.
+    A record it can't fully parse (truncated/malformed) stops the walk
+    early rather than raising -- `zipfile.ZipFile`'s own parse is
+    authoritative for that failure mode, same as this module's other
+    best-effort fallbacks."""
+    f.seek(cd_offset)
+    buf = f.read(cd_size)
+    count = 0
+    pos = 0
+    while pos + 46 <= len(buf) and buf[pos : pos + 4] == b"PK\x01\x02":
+        filename_len = int.from_bytes(buf[pos + 28 : pos + 30], "little")
+        extra_len = int.from_bytes(buf[pos + 30 : pos + 32], "little")
+        comment_len = int.from_bytes(buf[pos + 32 : pos + 34], "little")
+        record_len = 46 + filename_len + extra_len + comment_len
+        if pos + record_len > len(buf):
+            break
+        count += 1
+        if count > max_entries:
+            return count
+        pos += record_len
+    return count
+
+
 def reject_absurd_central_directory(f: Any, path: Path, *, max_entries: int) -> None:
     """Reject *path* if its central directory claims more than *max_entries*
     entries or `_MAX_CENTRAL_DIRECTORY_BYTES` -- read directly from the EOCD
@@ -95,6 +130,7 @@ def reject_absurd_central_directory(f: Any, path: Path, *, max_entries: int) -> 
         # comment_len(2) [comment...]
         total_entries = int.from_bytes(tail[idx + 10 : idx + 12], "little")
         cd_size = int.from_bytes(tail[idx + 12 : idx + 16], "little")
+        cd_offset = int.from_bytes(tail[idx + 16 : idx + 20], "little")
         is_zip64_sentinel = total_entries == 0xFFFF or cd_size == 0xFFFFFFFF
 
         # The locator is always the fixed 20 bytes immediately preceding
@@ -152,6 +188,7 @@ def reject_absurd_central_directory(f: Any, path: Path, *, max_entries: int) -> 
                 )
             total_entries = int.from_bytes(record[32:40], "little")
             cd_size = int.from_bytes(record[40:48], "little")
+            cd_offset = int.from_bytes(record[48:56], "little")
     except OSError:
         return
     if total_entries > max_entries:
@@ -168,3 +205,26 @@ def reject_absurd_central_directory(f: Any, path: Path, *, max_entries: int) -> 
             "refusing to open (possible memory-exhaustion attack, or a "
             "genuinely malformed archive)."
         )
+    # The checks above only bound what the EOCD/ZIP64 record *claims* --
+    # `zipfile.ZipFile` parses every record it can actually find within
+    # `cd_size` bytes, regardless of `total_entries`, so an archive
+    # understating that field while `cd_size` still holds far more real
+    # (possibly minimal-sized) records would sail through the check above
+    # unnoticed. Counted for real here, bounded to at most `cd_size`
+    # bytes (already capped) and stopped as soon as the count itself
+    # exceeds the limit.
+    if 0 <= cd_offset < size:
+        try:
+            actual_entries = _actual_central_directory_entry_count(
+                f, cd_offset=cd_offset, cd_size=cd_size, max_entries=max_entries
+            )
+        except OSError:
+            return
+        if actual_entries > max_entries:
+            raise SnapshotError(
+                f"{path}: central directory actually contains more than "
+                f"{max_entries} records (its own declared total_entries "
+                f"understated this), exceeding the safety limit -- "
+                "refusing to open (possible memory-exhaustion attack, or "
+                "a genuinely malformed archive)."
+            )

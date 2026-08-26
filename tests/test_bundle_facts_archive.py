@@ -129,15 +129,20 @@ class TestBundleFactsArchiveFormat:
         out = tmp_path / "old.bundlefacts.archive.zip"
         save_bundle_facts(facts, out, format="archive")
 
+        # The sniff opens via os.open() (not the builtin open()) as of the
+        # FIFO-TOCTOU fix -- see bundle_archive.open_regular_file_for_
+        # format_sniff's own comment -- so tracked there instead.
+        import os as os_module
+
         opened_paths: list[object] = []
-        real_open = open
+        real_os_open = os_module.open
 
         def _tracking_open(file, *a, **kw):  # type: ignore[no-untyped-def]
             if file == out or file == str(out):
                 opened_paths.append(file)
-            return real_open(file, *a, **kw)
+            return real_os_open(file, *a, **kw)
 
-        monkeypatch.setattr("builtins.open", _tracking_open)
+        monkeypatch.setattr(os_module, "open", _tracking_open)
         loaded = load_bundle_facts(out)  # "auto"
 
         assert set(loaded.per_library_snapshots) == set(facts.per_library_snapshots)

@@ -113,10 +113,9 @@ def _blob_member_name(content_hash: str) -> str:
     return f"{_BLOB_PREFIX}{content_hash}{_BLOB_SUFFIX}"
 
 
-#: A fixed zip timestamp (the format's own epoch floor -- 1980-01-01,
-#: since DOS-style zip timestamps can't represent anything earlier) used
-#: for every member this module writes. `ZipFile.writestr(name, data)`
-#: with a bare string `name` stamps its own `ZipInfo` with
+#: A fixed zip timestamp (the format's own epoch floor -- 1980-01-01)
+#: used for every member this module writes. `ZipFile.writestr(name,
+#: data)` with a bare string `name` stamps its own `ZipInfo` with
 #: `time.localtime()` at write time -- so saving byte-identical facts on
 #: two different days would otherwise produce two different archives
 #: (and two different `stored_sha256` values) for reproducible content.
@@ -133,10 +132,9 @@ def _deterministic_zipinfo(name: str) -> zipfile.ZipInfo:
     # A fixed, portable permission bit (rw-r--r--) rather than whatever
     # `ZipInfo`'s own platform-dependent default would otherwise stamp.
     info.external_attr = 0o644 << 16
-    # `ZipInfo.__init__` defaults `create_system` to the *host* platform (0
-    # Windows, 3 Unix) -- identical facts on Windows vs. Linux/macOS CI
-    # would otherwise differ in bytes and `stored_sha256`. Pinned to 3
-    # (Unix) unconditionally, matching this project's CI/release platforms.
+    # `ZipInfo.__init__` defaults `create_system` to the host platform (0
+    # Windows, 3 Unix); pinned to 3 unconditionally so identical facts on
+    # Windows vs. Linux/macOS CI don't differ in bytes/`stored_sha256`.
     info.create_system = 3
     return info
 
@@ -152,11 +150,9 @@ def sniff_bundle_archive_format(path: str | Path) -> str:
     Used by ``serialization.load_bundle_facts``'s ``format="auto"``.
 
     Always ``"json"`` for a non-regular-file source (a FIFO, `/dev/stdin`,
-    a socket) without reading anything from it (Codex review): a real
-    bundle archive can never be delivered that way regardless --
-    `zipfile.ZipFile` seeks to the *end* of its input, which a
-    non-seekable stream can't support -- so consuming this sniff's own
-    4-byte peek could hang or misparse a pipe that isn't rewindable.
+    a socket) without reading anything from it: a real bundle archive can
+    never be delivered that way regardless -- `zipfile.ZipFile` seeks to
+    the *end* of its input, which a non-seekable stream can't support.
     """
     p = Path(path)
     try:
@@ -189,22 +185,33 @@ def open_regular_file_for_format_sniff(
     different generation (Codex review). ``(None, "json")`` for a
     non-regular-file source -- the caller must not close *fp* then."""
     p = Path(path)
+    # Open first, nonblocking, then fstat() *that* fd -- a plain path
+    # stat() followed by a separate open() leaves a window where a
+    # concurrent replacement swaps a regular file for e.g. a FIFO, whose
+    # open() then blocks until a writer connects, violating this
+    # function's "non-regular source returned without being read"
+    # contract. O_NONBLOCK keeps open() from blocking either way, and
+    # fstat() on the resulting fd names the exact inode read below.
+    nonblock = getattr(os, "O_NONBLOCK", 0)
     try:
-        st = p.stat()
+        fd = os.open(p, os.O_RDONLY | nonblock)
     except OSError as exc:
+        raise SnapshotError(f"Cannot read {p}: {exc}") from exc
+    try:
+        st = os.fstat(fd)
+    except OSError as exc:
+        os.close(fd)
         raise SnapshotError(f"Cannot read {p}: {exc}") from exc
     if not stat.S_ISREG(st.st_mode):
+        os.close(fd)
         return None, "json"
-    try:
-        fp = open(p, "rb")
-    except OSError as exc:
-        raise SnapshotError(f"Cannot read {p}: {exc}") from exc
+    fp = os.fdopen(fd, "rb")
     try:
         prefix = fp.read(4)
     except OSError as exc:
-        # A failure reading the peek itself (e.g. EIO on a network
-        # filesystem) must not leak the fd or propagate a raw OSError --
-        # this module's whole error contract is SnapshotError.
+        # A failure reading the peek itself must not leak the fd or
+        # propagate a raw OSError -- this module's error contract is
+        # SnapshotError throughout.
         fp.close()
         raise SnapshotError(f"Cannot read {p}: {exc}") from exc
     return fp, _classify_prefix(prefix)
@@ -302,9 +309,8 @@ class BundleArchiveWriter:
         except (FileNotFoundError, NotADirectoryError):
             # Only genuine absence is treated as "no pre-existing
             # destination" -- any other OSError (e.g. a cyclic symlink
-            # raising ELOOP) must propagate rather than be silently
-            # treated as absence, which would bypass the regular-file/
-            # hard-link/metadata-preservation checks below. Mirrors
+            # raising ELOOP) must propagate, not be silently treated as
+            # absence, bypassing the checks below. Mirrors
             # `snapshot_io._atomic_write_bytes`'s own identical rule.
             existing_stat = None
         self._existing_mode: int | None = None
@@ -315,12 +321,11 @@ class BundleArchiveWriter:
                 # os.replace() would silently destroy a pre-existing FIFO/
                 # socket/device by installing a regular zip in its place --
                 # unlike snapshot_io._atomic_write_bytes (which can write
-                # straight through a non-regular destination, since it
-                # already holds the complete payload as one bytes object),
-                # this writer builds a zip incrementally into a temp file
-                # and only ever publishes via an atomic rename, so there is
-                # no way to "write through" such a destination at all
-                # (Codex review).
+                # straight through a non-regular destination, holding the
+                # complete payload as one bytes object), this writer builds
+                # a zip incrementally into a temp file and only ever
+                # publishes via an atomic rename, so there is no way to
+                # "write through" such a destination at all.
                 raise SnapshotError(
                     f"{self._target}: already exists and is not a regular "
                     "file (a FIFO, socket, or device) -- refusing to "
@@ -351,9 +356,8 @@ class BundleArchiveWriter:
             self._target.parent, f".{self._target.name}.", ".tmp"
         )
         self._tmp_file = os.fdopen(tmp_fd, "wb")
-        # A file object, not a path, is passed here deliberately -- see
-        # above; ZipFile doesn't close a fileobj it didn't open itself, so
-        # close()/_abort() below own closing self._tmp_file.
+        # A file object, not a path: ZipFile doesn't close a fileobj it
+        # didn't open itself, so close()/_abort() own closing it.
         self._zf = zipfile.ZipFile(self._tmp_file, mode="w", compression=zipfile.ZIP_STORED)
         self._written_hashes: set[str] = set()
         self._manifest_written = False
@@ -435,16 +439,16 @@ class BundleArchiveWriter:
             # Ownership restored *before* mode: chown() silently clears
             # setuid/setgid on POSIX, so restoring mode first would let a
             # real 06755 destination's bits survive the chmod only to be
-            # stripped by chown right after (Codex review). Not
-            # best-effort, mirroring `snapshot_io.py`'s own fix: publishing
-            # under the wrong owner/group can revoke real access.
+            # stripped by chown right after. Not best-effort, mirroring
+            # `snapshot_io.py`'s own fix: publishing under the wrong
+            # owner/group can revoke real access.
             #
             # fchown/fchmod on `self._tmp_file`'s own fd, not chown/chmod on
             # `self._tmp_path` -- a shared, non-sticky directory writable by
             # another account could substitute a file/symlink at that path
             # between this exclusively-created fd and a later path-based
-            # reopen (Codex review, fresh evidence). The fd held open since
-            # creation cannot be redirected that way.
+            # reopen. The fd held open since creation cannot be redirected
+            # that way.
             if (
                 self._existing_uid is not None or self._existing_gid is not None
             ) and hasattr(os, "fchown"):
@@ -478,28 +482,25 @@ class BundleArchiveWriter:
             self.stored_sha256 = hasher.hexdigest()
             self._tmp_file.close()
             # Known residual gap: `os.replace()` is inherently path-based
-            # (no portable fd-scoped rename in stdlib `os`), so a
-            # substitution right before this call still publishes attacker
-            # content -- but stored_sha256/stored_size_bytes above were
-            # already computed from the real fd, so this is no longer a
-            # silent MITM: a caller verifying the published file against
-            # stored_sha256 detects the mismatch. Full closure needs an
-            # OS-specific fd-scoped publish primitive or rejecting unsafe
-            # parent directories -- a separate design question.
+            # (no fd-scoped rename in stdlib `os`), so a substitution right
+            # before this call still publishes attacker content -- but
+            # stored_sha256/stored_size_bytes above were already computed
+            # from the real fd, so this is no longer a silent MITM: a
+            # caller verifying the published file against stored_sha256
+            # detects the mismatch.
             os.replace(self._tmp_path, self._target)
         except BaseException:
             # A failure anywhere above must not leave the -- potentially
             # large -- temp file behind next to the untouched destination;
             # a repeated failure (ENOSPC, EIO) would otherwise starve later
-            # retries of the space they're trying to free (Codex review).
-            # No-op once os.replace() has already succeeded.
+            # retries of the space they're trying to free. No-op once
+            # os.replace() has already succeeded.
             #
             # The unlink is in a nested `finally` -- not a plain sibling
             # statement -- so it still runs even when close() *itself*
             # raises (e.g. ENOSPC/EIO flushing buffered bytes during an
-            # exception-driven abort); a plain sibling statement would
-            # never reach the unlink in that case (Codex review, fresh
-            # evidence).
+            # exception-driven abort), which a plain sibling statement
+            # would never reach in that case.
             try:
                 if not self._tmp_file.closed:
                     self._tmp_file.close()
