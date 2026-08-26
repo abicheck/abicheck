@@ -150,6 +150,36 @@ class TestDemangle:
                 _mod.demangle("_ZN3foo3bazEv")
         assert _mod._warned_no_demangler is True
 
+    def test_macho_double_underscore_prefix_via_cxxfilt(self):
+        """Codex review, fresh evidence: clang's own `mangledName` carries the
+        Mach-O global-symbol prefix on macOS (`__ZN3foo3barEv`, not the plain
+        ELF `_ZN3foo3barEv`) -- demangle() must recognize it and strip the
+        extra leading underscore before handing it to cxxfilt, which only
+        speaks the canonical `_Z...` spelling."""
+        mock_cxxfilt = MagicMock()
+        mock_cxxfilt.demangle.side_effect = lambda s: f"demangled:{s}"
+        with patch.dict("sys.modules", {"cxxfilt": mock_cxxfilt}):
+            result = _mod.demangle("__ZN3foo3barEv")
+        assert result == "demangled:_ZN3foo3barEv"
+        mock_cxxfilt.demangle.assert_called_once_with("_ZN3foo3barEv")
+
+    def test_macho_double_underscore_prefix_via_cppfilt(self):
+        mock_cxxfilt = MagicMock()
+        mock_cxxfilt.demangle.side_effect = RuntimeError("no")
+        with patch.dict("sys.modules", {"cxxfilt": mock_cxxfilt}):
+            with patch("subprocess.run") as mock_run:
+                mock_run.return_value = subprocess.CompletedProcess(
+                    args=["c++filt"], returncode=0,
+                    stdout="foo::bar()\n", stderr="",
+                )
+                result = _mod.demangle("__ZN3foo3barEv")
+        assert result == "foo::bar()"
+        # The canonical (single-underscore) form must reach the subprocess,
+        # not the raw Mach-O `__Z...` spelling.
+        called_args = mock_run.call_args[0][0]
+        assert "_ZN3foo3barEv" in called_args
+        assert "__ZN3foo3barEv" not in called_args
+
 
 # ── demangle_batch() ────────────────────────────────────────────────────────
 
@@ -281,6 +311,30 @@ class TestDemangleBatch:
         with patch.dict("sys.modules", {"cxxfilt": mock_cxxfilt}):
             result = _mod.demangle_batch(["printf", "_ZN3foo3barEv", "", "strlen"])
         assert list(result.keys()) == ["_ZN3foo3barEv"]
+
+    def test_macho_double_underscore_prefix_via_cxxfilt(self):
+        """Codex review, fresh evidence: a batch containing a Mach-O
+        `__Z...`-prefixed symbol must be recognized, canonicalized before
+        being handed to cxxfilt, and the result keyed by the *original*
+        (double-underscore) symbol so callers can look it up unchanged."""
+        mock_cxxfilt = MagicMock()
+        mock_cxxfilt.demangle.side_effect = lambda s: f"demangled:{s}"
+        with patch.dict("sys.modules", {"cxxfilt": mock_cxxfilt}):
+            result = _mod.demangle_batch(["__ZN3foo3barEv"])
+        assert result == {"__ZN3foo3barEv": "demangled:_ZN3foo3barEv"}
+        mock_cxxfilt.demangle.assert_called_once_with("_ZN3foo3barEv")
+
+    def test_macho_double_underscore_prefix_via_cppfilt(self):
+        with patch.dict("sys.modules", {"cxxfilt": None}):
+            with patch("subprocess.run") as mock_run:
+                mock_run.return_value = subprocess.CompletedProcess(
+                    args=["c++filt"], returncode=0,
+                    stdout="foo::bar()\n", stderr="",
+                )
+                result = _mod.demangle_batch(["__ZN3foo3barEv"])
+        assert result == {"__ZN3foo3barEv": "foo::bar()"}
+        sent_input = mock_run.call_args[1]["input"]
+        assert sent_input == "_ZN3foo3barEv"
 
 
 # ── base_name() ─────────────────────────────────────────────────────────────
@@ -491,6 +545,18 @@ class TestDemangleText:
         if _mod.demangle("_Z3foov") is None:
             pytest.skip("no c++filt/cxxfilt demangler available")
         assert "foo()" in _mod.demangle_text("call _Z3foov now")
+
+    def test_macho_double_underscore_token_replaced_whole(self, monkeypatch):
+        """Codex review, fresh evidence: matching only the `_Z...` suffix of
+        a Mach-O `__Z...` token left the extra leading underscore glued onto
+        the demangled text (`_Foo::bar()` instead of `Foo::bar()`). The whole
+        `__Z...` span must be captured and replaced as one unit."""
+        monkeypatch.setattr(
+            _mod, "demangle_batch", lambda syms: {"__ZN3Foo3barEv": "Foo::bar()"}
+        )
+        out = _mod.demangle_text("removed: __ZN3Foo3barEv")
+        assert out == "removed: Foo::bar()"
+        assert "_Foo::bar()" not in out
 
 
 def test_demangle_reads_warmed_batch_cache(monkeypatch):

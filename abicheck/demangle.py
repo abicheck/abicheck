@@ -17,7 +17,9 @@
 Used by dwarf_snapshot.py (FIX-B) and appcompat.py (FIX-A Part 3) for
 cross-format symbol matching.
 
-Itanium-mangled (``_Z...``) names only -- MSVC-decorated names (``?run@Foo@@
+Itanium-mangled names only, in either the plain ELF ``_Z...`` spelling or
+the Mach-O ``__Z...`` spelling clang's own ``mangledName`` carries on macOS
+(see ``_canonical_mangled`` below) -- MSVC-decorated names (``?run@Foo@@
 QEAAXXZ``) are never demangled anywhere in this module (Codex review on
 PR #874, fresh evidence): both ``cxxfilt`` (a binding to libstdc++'s
 ``__cxa_demangle``) and the GNU ``c++filt`` fallback support only the
@@ -53,14 +55,38 @@ _log = logging.getLogger(__name__)
 _warned_no_demangler = False
 
 
+def _is_itanium_mangled(symbol: str) -> bool:
+    """True for a plain ELF ``_Z...`` name or its Mach-O ``__Z...`` spelling.
+
+    clang's own ``mangledName`` carries the platform global-symbol prefix on
+    macOS (``__ZN3lib3addEii``, see ``dumper_clang.py``'s ``_visibility``
+    docstring for the same quirk handled on the symbol-matching side), so a
+    Mach-O ``Function.mangled``/``Change.symbol`` can carry either spelling.
+    """
+    return symbol.startswith("_Z") or symbol.startswith("__Z")
+
+
+def _canonical_mangled(symbol: str) -> str:
+    """Strip the Mach-O global-symbol prefix, if present, to the plain
+    Itanium ``_Z...`` spelling cxxfilt/c++filt actually expect -- neither
+    backend recognizes the doubled-underscore form (Codex review, fresh
+    evidence: matching a ``__Z...`` token whole and demangling it unstripped
+    fails silently, and matching only its ``_Z...`` suffix instead leaves
+    the extra leading underscore glued onto the demangled result, e.g.
+    ``_Foo::bar()`` instead of ``Foo::bar()``)."""
+    return symbol[1:] if symbol.startswith("__Z") else symbol
+
+
 @functools.lru_cache(maxsize=16384)
 def demangle(symbol: str) -> str | None:
     """Demangle a single Itanium C++ symbol. Returns *None* if not C++.
 
     Tries ``cxxfilt`` (Python binding to ``__cxa_demangle``) first, then
-    falls back to the ``c++filt`` command-line tool.
+    falls back to the ``c++filt`` command-line tool. Accepts either the
+    plain ELF ``_Z...`` spelling or the Mach-O ``__Z...`` spelling (see
+    :func:`_canonical_mangled`).
     """
-    if not symbol or not symbol.startswith("_Z"):
+    if not symbol or not _is_itanium_mangled(symbol):
         return None
     # Reuse a warmed batch cache so a single demangle never re-forks `c++filt`
     # for a name a prior demangle_batch() already resolved (or proved
@@ -70,13 +96,14 @@ def demangle(symbol: str) -> str | None:
         return _BATCH_CACHE_OK[symbol]
     if symbol in _BATCH_CACHE_FAIL:
         return None
+    canonical = _canonical_mangled(symbol)
     try:
         import cxxfilt
 
-        return str(cxxfilt.demangle(symbol))
+        return str(cxxfilt.demangle(canonical))
     except Exception:  # noqa: BLE001
         _log.debug("cxxfilt demangling failed for %s", symbol)
-    for cmd in _cppfilt_single_commands(symbol):
+    for cmd in _cppfilt_single_commands(canonical):
         try:
             result = subprocess.run(
                 cmd,
@@ -145,7 +172,7 @@ def _batch_phase2_cxxfilt(uncached: list[str], result: dict[str, str]) -> list[s
 
         for s in uncached:
             try:
-                d = cxxfilt.demangle(s)
+                d = cxxfilt.demangle(_canonical_mangled(s))
                 if d and d != s:
                     result[s] = d
                     _batch_cache_record_ok(s, d)
@@ -175,10 +202,11 @@ def _batch_phase3_cppfilt(remaining: list[str], result: dict[str, str]) -> None:
         if not unresolved:
             break
         success_set: set[str] = set()
+        canonical_inputs = [_canonical_mangled(s) for s in unresolved]
         try:
             proc = subprocess.run(
                 cmd,
-                input="\n".join(unresolved),
+                input="\n".join(canonical_inputs),
                 capture_output=True,
                 text=True,
                 timeout=30,
@@ -217,7 +245,7 @@ def demangle_batch(symbols: list[str]) -> dict[str, str]:
     slice of a snapshot — do not pay the subprocess cost more than once
     per unique symbol.
     """
-    cpp_syms = [s for s in symbols if s and s.startswith("_Z")]
+    cpp_syms = [s for s in symbols if s and _is_itanium_mangled(s)]
     if not cpp_syms:
         return {}
 
@@ -279,7 +307,11 @@ def base_name(symbol: str) -> str:
 # messages) without disturbing surrounding prose. ``.``-separated suffixes
 # (GCC clone markers like ``.cold`` / ``.part.0``) are matched only when
 # followed by more name characters, so a trailing sentence period is not eaten.
-_MANGLED_TOKEN_RE = re.compile(r"_Z[A-Za-z0-9_$]+(?:\.[A-Za-z0-9_$]+)*")
+# ``_{1,2}Z`` (not just ``_Z``) so the whole Mach-O ``__Z...`` token is
+# captured and replaced as one span -- matching only its ``_Z...`` suffix
+# left the extra leading underscore glued onto the demangled text (Codex
+# review, fresh evidence: ``__ZN3Foo3barEv`` rendered as ``_Foo::bar()``).
+_MANGLED_TOKEN_RE = re.compile(r"_{1,2}Z[A-Za-z0-9_$]+(?:\.[A-Za-z0-9_$]+)*")
 
 
 def extract_mangled_tokens(text: str) -> set[str]:

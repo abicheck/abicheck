@@ -120,3 +120,19 @@
   so the same root read as `Foo::Foo()` in one table and the raw
   `_ZN3FooC1Ev` in the other on the same page. Now rendered through the
   same `_abbr_symbol_text` helper, with `demangle` threaded through.
+- **Eleventh follow-up (Codex review): a Mach-O clang-derived symbol
+  demangled with a stray leading underscore.** clang's own `mangledName`
+  carries the platform global-symbol prefix on macOS (`__ZN3Foo3barEv`,
+  not the plain ELF `_ZN3Foo3barEv`) -- `demangle()`/`demangle_batch()`
+  required a bare `_Z` prefix and never recognized this doubled-underscore
+  spelling, and the free-form-text token regex matched only its `_Z...`
+  suffix, so a demangled occurrence in report text kept the extra leading
+  underscore glued on (`_Foo::bar()` instead of `Foo::bar()`). Both
+  functions, and the shared `_MANGLED_TOKEN_RE`, now recognize either
+  spelling, canonicalizing to the plain `_Z...` form before invoking
+  cxxfilt/c++filt (neither backend recognizes the doubled-underscore form)
+  while keying results by the original symbol so callers see no change in
+  lookup behavior. Fixed in the shared `demangle.py` module rather than in
+  the HTML report specifically, since every consumer of `demangle()`/
+  `demangle_text()` across the codebase (DWARF export matching, appcompat
+  symbol matching, detector logic) shared the identical gap.
