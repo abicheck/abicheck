@@ -1107,3 +1107,33 @@ class TestExtendableOutputAlgorithmsAreRefused:
 
     def test_the_digest_names_the_algorithm_that_produced_it(self) -> None:
         assert semantic_digest({"a": 1}, algorithm="sha512").split(":")[0] == "sha512"
+
+
+class TestTheDigestPrefixIsTheCanonicalAlgorithmName:
+    """Codex review: an alias gave one object several content addresses.
+
+    `hashlib` accepts `SHA256`, `sha-256` and friends, and preserving the
+    caller's spelling produced addresses whose hex halves were identical but
+    whose prefixes differed — defeating deduplication, and emitting prefixes a
+    reader has no reason to recognize. The address is a property of the
+    content, so nothing incidental to the caller may reach it.
+    """
+
+    @pytest.mark.parametrize("alias", ["SHA256", "sha-256", "SHA-256"])
+    def test_aliases_produce_one_address(self, alias: str) -> None:
+        assert semantic_digest({"x": 1}, algorithm=alias) == semantic_digest(
+            {"x": 1}, algorithm="sha256"
+        )
+
+    @pytest.mark.parametrize(
+        ("alias", "canonical"),
+        [("SHA256", "sha256"), ("SHA-512", "sha512"), ("sha-256", "sha256")],
+    )
+    def test_the_prefix_is_normalized(self, alias: str, canonical: str) -> None:
+        assert semantic_digest({"x": 1}, algorithm=alias).split(":")[0] == canonical
+
+    def test_distinct_algorithms_still_produce_distinct_addresses(self) -> None:
+        """Normalizing aliases must not merge genuinely different algorithms."""
+        assert semantic_digest({"x": 1}, algorithm="sha256") != semantic_digest(
+            {"x": 1}, algorithm="sha512"
+        )

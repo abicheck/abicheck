@@ -322,4 +322,11 @@ def semantic_digest(value: Any, *, algorithm: str = "sha256") -> str:
             "digest size; a content address needs a fixed-length digest, so "
             "choose a fixed-length algorithm such as sha256"
         )
-    return f"{algorithm}:{digester.hexdigest()}"
+    # `digester.name`, not the caller's spelling. `hashlib` accepts aliases
+    # (`SHA256`, `sha-256`, `SHA-512`), and preserving one gave the same
+    # logical object several content addresses whose hex halves were
+    # identical — defeating deduplication, and emitting prefixes a reader has
+    # no reason to recognize (Codex review). The address is supposed to be a
+    # property of the content, so nothing incidental to the caller may reach
+    # it.
+    return f"{digester.name}:{digester.hexdigest()}"

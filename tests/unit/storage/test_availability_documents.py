@@ -476,3 +476,44 @@ class TestProvenanceIsRejectedNotCoerced:
         )
 
         assert FactAvailability.from_dict(original.to_dict()) == original
+
+
+class TestASequenceShapedFamilyTableIsRefused:
+    """Codex review: the previous round's finding, through a different door.
+
+    `dict()` accepts a sequence of pairs and collapses duplicate names
+    *before* any key validation runs, so rows declaring one family `failed`
+    then `present` resolved as comparable while the reverse order resolved as
+    non-comparable. Rejecting non-string keys does nothing when the container
+    itself dedupes first — the shape has to be checked before the keys are.
+    """
+
+    ROWS = [("layout", {"status": "failed"}), ("layout", {"status": "present"})]
+
+    def test_the_reported_sequence_is_refused(self) -> None:
+        with pytest.raises(TypeError, match="families must be a mapping"):
+            AvailabilityLedger.from_dict({"families": self.ROWS})
+
+    def test_row_order_can_no_longer_decide_a_verdict(self) -> None:
+        """Both orders must fail the same way, not disagree."""
+        with pytest.raises(TypeError):
+            AvailabilityLedger.from_dict({"families": self.ROWS})
+        with pytest.raises(TypeError):
+            AvailabilityLedger.from_dict({"families": list(reversed(self.ROWS))})
+
+    @pytest.mark.parametrize(
+        "value", ["layout", [1, 2], (("a", {}),), 5, None, {("a",)}]
+    )
+    def test_a_non_mapping_families_value_is_refused(self, value: object) -> None:
+        with pytest.raises(TypeError, match="families"):
+            AvailabilityLedger.from_dict({"families": value})
+
+    def test_a_real_mapping_still_loads(self) -> None:
+        ledger = AvailabilityLedger.from_dict(
+            {"families": {"layout": {"status": "present"}}}
+        )
+
+        assert ledger.for_family("layout").status is FactStatus.PRESENT
+
+    def test_an_absent_families_key_is_empty(self) -> None:
+        assert AvailabilityLedger.from_dict({}).families == {}

@@ -657,9 +657,28 @@ class AvailabilityLedger:
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> AvailabilityLedger:
+        raw_families = data.get("families", {})
+        if not isinstance(raw_families, Mapping):
+            # `dict()` accepts a sequence of pairs and collapses duplicate
+            # names *before* any key validation runs, so rows declaring one
+            # family `failed` then `present` resolved as comparable while the
+            # reverse order resolved as non-comparable — serialized order
+            # discarding failed evidence and deciding whether a conclusion is
+            # licensed (Codex review).
+            #
+            # This is the previous round's finding entering through a
+            # different door: rejecting non-string *keys* does nothing when
+            # the container itself dedupes first. The shape has to be checked
+            # before the keys are.
+            raise TypeError(
+                f"families must be a mapping, not {type(raw_families).__name__} "
+                f"({raw_families!r}); a sequence of pairs would let duplicate "
+                "family names collapse before validation, with row order "
+                "deciding which record survives"
+            )
         families = {
             _decision_key(name, "family name"): FactAvailability.from_dict(raw)
-            for name, raw in dict(data.get("families", {})).items()
+            for name, raw in raw_families.items()
         }
         overrides: dict[tuple[str, str], FactAvailability] = {}
         for raw in data.get("overrides", []):
