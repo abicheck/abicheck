@@ -85,7 +85,6 @@ from .checker_policy import (  # noqa: F401 - re-export for tests
 )
 from .cli import _safe_write_output, _setup_verbosity, main
 from .cli_compare_options import _cli_flag, _warn_force_public_ignored
-from .cli_help import scan_help_options
 from .cli_options import (
     artifact_set_options,
     compile_context_options,
@@ -131,6 +130,7 @@ from .cli_scan_helpers import (  # noqa: F401 - coverage/depth helpers re-export
     resolve_effective_allow_query,
     scan_pattern_roots,
 )
+from .frontends.cli.help import scan_help_options
 
 # The scan *engine* (classify → always-on tier → level → compare) lives in
 # scan_engine.py, not here — this module is a thin Click front-end over it

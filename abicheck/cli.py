@@ -50,7 +50,6 @@ from .cli_dump_helpers import (
     resolve_dump_debug_format,
 )
 from .cli_dump_non_elf import handle_non_elf_dump
-from .cli_help import compare_help_options, configure_rich_help, dump_help_options
 from .cli_helpers_compare import (  # noqa: F401  — re-exported to keep cli import sites stable
     _build_match_map as _build_match_map,
     _canonical_library_key as _canonical_library_key,
@@ -115,6 +114,7 @@ from .cli_resolve import (
     classify_compare_operand,
 )
 from .compat.cli import compat_group
+from .frontends.cli import help as cli_help
 
 if TYPE_CHECKING:
     from .checker_types import Change
@@ -279,7 +279,7 @@ class _AbicheckGroup(_RootGroupBase):
             sys.exit(0)
 
 
-configure_rich_help()  # register --help option-group panels (G21.8 / M1)
+cli_help.configure_rich_help()  # register --help option-group panels (G21.8 / M1)
 
 
 @click.group(cls=_AbicheckGroup)
@@ -355,7 +355,7 @@ def _resolve_and_check_dump_debug_format(
 
 
 @main.command("dump")
-@dump_help_options  # curated --help + full --help-all (G21.8 collapse M2)
+@cli_help.dump_help_options  # curated --help + full --help-all (G21.8 collapse M2)
 @click.argument("so_path", type=click.Path(exists=True, path_type=Path), required=False)
 @click.option("-H", "--header", "headers", multiple=True, type=click.Path(exists=True, path_type=Path),
               help="Public header file or directory (repeat for multiple).")
@@ -1594,7 +1594,7 @@ def _embed_inline_source_side(
 
 
 @main.command("compare")
-@compare_help_options  # curated --help + full --help-all (G21.8 collapse M2)
+@cli_help.compare_help_options  # curated --help + full --help-all (G21.8 collapse M2)
 @click.argument("old_input", type=click.Path(exists=True, path_type=Path))
 @click.argument("new_input", type=click.Path(exists=True, path_type=Path))
 # Set-input fan-out (ADR-037 D7): -j/--jobs, --dso-only, --output-dir only bite

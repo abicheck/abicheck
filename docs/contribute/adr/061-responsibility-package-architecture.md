@@ -896,27 +896,50 @@ dependency-direction fact elsewhere. Its four call sites
 (`cli_options.py`, `cli_scan_helpers.py`, `cli_compare_helpers.py`,
 `cli_compare_release.py`) now import it from the new package.
 
-Known blocker for the rest of this phase, investigated directly rather than
-assumed: `cli.py` (1959 lines) and `service.py` (1763 lines) are nowhere
-near the "under 150 lines" acceptance target, and cannot move toward it yet
-for two independent, structural reasons. First, the option-declaration
-cluster item 1 also names (`cli_options.py` itself, near its own 2000-line
-hard cap, plus `cli_params.py`/`cli_profiles.py`/`cli_options_contract.py`/
-`cli_contract_options.py`/`cli_help.py`) is not leaf-shaped the way
-`secondary_output.py` was — these ~3,800 combined lines import each other
-and are imported by essentially every `cli_*.py` command module, so moving
-the cluster is a high-blast-radius change to Click decorator stacking
-across the whole CLI surface, not an independently-verifiable vertical
-slice; it needs its own pass that first splits the cluster's internal
-dependency graph. Second, and more fundamentally: `service.py`'s
+**The option-cluster half of the blocker below did not survive
+re-measurement** — the third time in this ADR a recorded blocker has turned
+out to describe a tree that had since moved. The note said the cluster's
+"~3,800 combined lines import each other". They do not: an AST scan of the
+six modules found a **star, not a tangle**. Five of them (`cli_params`,
+`cli_profiles`, `cli_options_contract`, `cli_contract_options`, `cli_help`)
+have **zero** intra-cluster imports; only the `cli_options.py` hub imports
+them. Four of the five have zero first-party imports of any kind, which is
+exactly the criterion `secondary_output.py` was moved on.
+
+Those four moved — 1,249 lines, six call sites:
+
+| was | now |
+|---|---|
+| `cli_profiles.py` | `frontends/cli/options/profiles.py` |
+| `cli_contract_options.py` | `frontends/cli/options/contract.py` |
+| `cli_options_contract.py` | `frontends/cli/options/inventory.py` |
+| `cli_help.py` | `frontends/cli/help.py` |
+
+The two renames are deliberate. `cli_options_contract` (the `cli-contract`
+gate's flag inventory and budget ledger) and `cli_contract_options`
+(ADR-049's contract-evaluation options) are unrelated things whose names
+differed only by word order — precisely the "physical ownership is
+ambiguous" problem in this ADR's own Context. `inventory.py` and
+`contract.py` say which is which.
+
+`cli_params.py` (452 lines) stays flat: it imports four unclassified flat
+modules (`policies`, `policy_file`, `suppression`,
+`buildsource.scan_levels`), and `frontends/` is a *migrated* package, so a
+module physically inside it is subject to `unclassified-import`. It moves
+once those owners exist.
+
+Known blocker for the rest of this phase: `cli.py` (1959 lines) and
+`service.py` (1763 lines) are nowhere near the "under 150 lines" acceptance
+target. `service.py`'s
 `resolve_input`/`_run_dump_uncached`/`compare_snapshots` (hundreds of lines
 each) *are* the current dump/compare implementation, not adapters over an
 already-existing workflow object that `cli.py`/`service.py` could be
 rewritten to call instead — moving that logic into `workflows/` is Phase
-3's own job (item 2 above, "make workflows the sole operation owners"), and
-Phase 3 has so far relocated only one dependency-free contract type
-(`ResolvedArtifactPlan`); the real per-artifact resolve/execute pipeline
-does not exist yet (see Phase 3's own status note above and
+3's own job (item 2 above, "make workflows the sole operation owners").
+Phase 3 has since given `service_dump_pipeline.py` and
+`service_input_resolution.py` `workflows` owners, but `service.py` itself
+still holds the implementation, and the real per-artifact resolve/execute
+pipeline does not exist yet (see Phase 3's own status note above and
 `workflows/AGENTS.md`). Thinning `cli.py`/`service.py` ahead of that
 pipeline would mean either a wrapper around the same inline logic
 (achieving nothing toward the acceptance criteria) or a second, duplicate

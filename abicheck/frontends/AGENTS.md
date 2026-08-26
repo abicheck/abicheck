@@ -20,8 +20,8 @@ responsibility package, reached only through a workflow's typed result.
 
 ## Canonical entry points
 
-Implementation status: this package holds exactly one module so far —
-`cli.cli.options.secondary_output` (moved from the flat
+Implementation status: the first tenant was
+`cli/options/secondary_output.py` (moved from the flat
 `abicheck/cli_secondary_output.py`), the shared `--write FORMAT=PATH` Click
 option factory and its coherence validator. It qualified for an
 immediate, same-session move because it has zero first-party imports, the
@@ -29,35 +29,40 @@ same property that made `artifact_plan.py` a safe Phase 3 vertical slice: a
 physical relocation with no first-party imports cannot change any
 import-cycle or dependency-direction fact about the rest of the codebase.
 
-Everything else Phase 4 names — the bulk of `cli_options.py` and its
-mutually-interdependent sibling option modules (`cli_params.py`,
-`cli_profiles.py`, `cli_options_contract.py`, `cli_contract_options.py`,
-`cli_help.py`), command input translation for `dump`/`compare`/`scan`, and
-reducing `cli.py`/`service.py` themselves — is **not** attempted yet. Two
-reasons, both structural rather than a scope choice:
+Four more modules have since joined it — `options/profiles.py`,
+`options/contract.py`, `options/inventory.py` and `help.py` — on the same
+criterion. The blocker note this section used to carry, that the option
+cluster's modules "import each other", did not survive an AST scan: the
+cluster is a **star**, with `cli_options.py` as the hub and its five
+siblings holding zero intra-cluster imports. Four of the five had no
+first-party imports at all and moved directly.
 
-1. **The option-declaration cluster is not leaf-shaped.** Unlike
-   `secondary_output.py`, `cli_options.py` (near its own 2000-line hard cap)
-   and its siblings import each other and are imported by essentially every
-   `cli_*.py` command module — moving that whole ~3,800-line cluster in one
-   pass is a high-blast-radius change to Click decorator stacking order
-   across the entire CLI surface, not a small, independently-verifiable
-   vertical slice. It needs its own dedicated pass, splitting the cluster's
-   internal dependency graph first.
-2. **`cli.py`/`service.py` cannot shrink until `workflows/` actually owns
-   the operations they currently implement inline.** `service.py`'s
-   `resolve_input`/`_run_dump_uncached`/`compare_snapshots` (hundreds of
-   lines each) *are* the current dump/compare implementation, not adapters
-   over an already-existing workflow object Phase 4 could point them at
-   instead — moving that logic into `workflows/` is Phase 3's job. Phase 3
-   itself has only relocated one dependency-free contract type
-   (`ResolvedArtifactPlan`) so far; the real per-artifact resolve/execute
-   pipeline does not exist yet (see `workflows/AGENTS.md`'s own status
-   note and ADR-061's Phase 3 section). Thinning `cli.py`/`service.py`
-   before that pipeline exists would mean either leaving the real logic in
-   place under a thin wrapper (achieving nothing) or duplicating it into a
-   new home with no shared implementation to delegate to (a second copy
-   that can drift, exactly what this migration exists to prevent).
+`cli_params.py` did not, and the reason is the rule to remember when adding
+anything here: **this is a migrated package, so `unclassified-import`
+applies to every module physically inside it.** `cli_params.py` imports four
+unclassified flat modules (`policies`, `policy_file`, `suppression`,
+`buildsource.scan_levels`); it can only move once those have owners. Check a
+candidate's full first-party import set before moving it, not just whether
+it looks leaf-shaped.
+
+Everything else Phase 4 names — the bulk of `cli_options.py`, command input
+translation for `dump`/`compare`/`scan`, and reducing `cli.py`/`service.py`
+themselves — is **not** attempted yet:
+**`cli.py`/`service.py` cannot shrink until `workflows/` actually owns the
+operations they currently implement inline.** `service.py`'s
+`resolve_input`/`_run_dump_uncached`/`compare_snapshots` (hundreds of lines
+each) *are* the current dump/compare implementation, not adapters over an
+already-existing workflow object Phase 4 could point them at instead —
+moving that logic into `workflows/` is Phase 3's job. Phase 3 has since
+given `service_dump_pipeline.py` and `service_input_resolution.py`
+`workflows` owners, but `service.py` itself still holds the implementation
+and the real per-artifact resolve/execute pipeline does not exist yet (see
+`workflows/AGENTS.md` and ADR-061's Phase 3 section). Thinning
+`cli.py`/`service.py` before that pipeline exists would mean either leaving
+the real logic in place under a thin wrapper (achieving nothing) or
+duplicating it into a new home with no shared implementation to delegate to
+(a second copy that can drift, exactly what this migration exists to
+prevent).
 
 Documented in ADR-061's Phase 4 status note.
 

@@ -7,7 +7,7 @@ level: intermediate
 summarizes:
   - contract-relevance-and-coverage
 depends_on:
-  - abicheck/cli_contract_options.py
+  - abicheck/frontends/cli/options/contract.py
   - abicheck/contract_pipeline.py
   - abicheck/pack_application.py
 lifecycle: active
