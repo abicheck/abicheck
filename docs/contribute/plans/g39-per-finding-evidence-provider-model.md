@@ -168,13 +168,25 @@ see `abicheck/buildsource/CLAUDE.md`.
 over risky reactive patches" discipline and the FP-rate/mutation-score gate
 structure already in place:
 
-1. **L0/L1-only detectors first** (`diff_symbols.py`'s symbol-table-driven
-   findings, `diff_platform.py`'s ELF/PE/Mach-O-specific findings, and the
-   direct-construction sites in `checker.py`/`versioned_symbol_scheme.py`
-   that are similarly static) — the provenance is a static fact of which
-   module produced the `Change`, not a per-call derivation, so this slice is
-   close to mechanical: one constant tuple per detector function, passed
-   through the existing `make_change(...)`/`Change(...)` call.
+1. **L0/L1-only detectors first** (`diff_platform.py`'s ELF/PE/Mach-O-specific
+   findings, and the direct-construction sites in `checker.py`/
+   `versioned_symbol_scheme.py` that are similarly static) — the provenance
+   is a static fact of which module produced the `Change`, not a per-call
+   derivation, so this slice is close to mechanical: one constant tuple per
+   detector function, passed through the existing `make_change(...)`/
+   `Change(...)` call. **`diff_symbols.py` does NOT belong in this
+   mechanical sub-slice** despite being symbol-table-driven on its face
+   (Codex review, verified against the code): `_public_functions()` falls
+   back to the complete header/DWARF function set when live ELF evidence is
+   absent, and separately still returns synthetic CastXML-only
+   constructors/destructors that never match any exported symbol — so the
+   same removal/addition call site can be driven by L0, L1, or L2 evidence
+   depending on which producer's facts a given `Function` actually rests on,
+   not by which module ran. Treat `diff_symbols.py` as its own slice,
+   ordered after this one and before slice 2, deriving provenance per
+   finding from the participating `Function`/`Variable` record's own
+   evidence (which source populated it) rather than assuming a module-level
+   constant.
 2. **L2 header-derived detectors** (`diff_types.py`'s struct/enum/typedef
    findings, `diff_type_spellings.py`) — provenance here genuinely varies
    per finding (which backend produced *this specific* `RecordType`, and

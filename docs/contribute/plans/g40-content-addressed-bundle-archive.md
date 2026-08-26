@@ -226,6 +226,25 @@ defined behavior. Fixed by giving each function its own contract:
   remain available to force one path explicitly (e.g. for a test asserting
   which branch ran).
 
+**`save_bundle_facts`'s existing `compression: str = "auto"` keyword-only
+parameter is unchanged and stays in the signature** (Codex review: an
+earlier revision of this section only listed `format` and implicitly
+dropped it, which would have broken every existing caller passing
+`compression="gzip"`/`"zstd"` and removed the suffix-selected compressed-
+JSON behavior `snapshot_io.py`'s writer already provides). It applies
+*only* to the `format="json"` branch — the outer, whole-document ADR-059
+compression envelope this plan's own "Why zip, not `.tar.zst`" section
+above already distinguishes from an archive member's own per-blob zstd
+compression, which is unconditional and not user-configurable (every blob
+is stored zstd-compressed regardless of `compression=`, the same way the
+archive's own zip container is always `ZIP_STORED`, never `ZIP_DEFLATED`).
+`save_bundle_facts(facts, path, format="archive", compression="gzip")` is
+therefore not a contradiction to reject: `compression` is silently
+inapplicable to that branch (ignored, not an error) since the archive
+format has no whole-document compression envelope of its own for it to
+select — stated explicitly here so the implementation doesn't have to
+invent a rejection rule this plan never asked for.
+
 `BundleFacts` itself is unchanged — this plan is a storage-layer addition
 underneath the existing dataclass, not a new in-memory shape;
 `load_bundle_facts()` still returns a plain `BundleFacts` when a caller
