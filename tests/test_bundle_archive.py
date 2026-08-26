@@ -906,6 +906,37 @@ class TestBundleArchiveWriterCloseFailureCleanup:
         assert list(tmp_path.glob("*.tmp")) == []
         assert not path.exists()
 
+    def test_a_failure_while_aborting_still_removes_the_temp_file(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """CodeRabbit review: _abort() (reached via __exit__ on an
+        exception, or close() with no manifest written) must still unlink
+        the temp file when self._zf.close() itself raises -- not just
+        close()'s own guarded path."""
+        path = tmp_path / "bundle.archive.zip"
+        writer = BundleArchiveWriter(path)
+        h = writer.put_blob(b'{"a": 1}')
+
+        calls = 0
+
+        def _failing_close(self: zipfile.ZipFile) -> None:
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                raise OSError(errno.ENOSPC, "simulated disk full during abort")
+
+        monkeypatch.setattr(zipfile.ZipFile, "close", _failing_close)
+        # No write_manifest() -- close() takes the _abort() branch, and
+        # the abort's own zip-close failure propagates ahead of the
+        # "no manifest written" SnapshotError close() would otherwise
+        # raise -- the fix under test is that the temp file is still
+        # removed either way, not which exception wins.
+        with pytest.raises(OSError, match="simulated disk full during abort"):
+            writer.close()
+        assert list(tmp_path.glob("*.tmp")) == []
+        assert not path.exists()
+        del h  # unused beyond establishing a non-empty archive
+
 
 class TestBundleArchiveWriterMetadataDurability:
     """Codex review, fresh evidence: chown/chmod mutate the temp file's

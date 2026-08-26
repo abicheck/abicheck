@@ -26,8 +26,7 @@ module free of any ``model``/``compare``-layer import lets it join
 coupling a naive "construct a ``BundleFacts`` directly here" design would
 hit (confirmed via ``scripts/check_architecture.py``: ``bundle_facts.py``'s
 own ``TYPE_CHECKING``-only import of ``checker_types.DiffResult`` creates a
-real ``model -> compare -> model`` cycle the moment it joins the ``model``
-layer).
+real ``model -> compare -> model`` cycle once it joins the ``model`` layer).
 
 The ``BundleFacts``-aware glue lives in ``serialization.py``'s
 ``save_bundle_facts``/``load_bundle_facts``, same as the plain-JSON format.
@@ -44,8 +43,8 @@ random-access property this format exists to provide. Each member's own
 *payload* is zstd-compressed independently (``ZIP_STORED``, matching how
 ``snapshot_io.py`` already treats zstd as a payload transform independent
 of its outer container) rather than zip's own ``ZIP_DEFLATED``, since zstd
-is this project's compression codec of record (ADR-059) and gives
-materially better ratios than deflate at comparable speed.
+is this project's compression codec of record (ADR-059) with materially
+better ratios than deflate at comparable speed.
 """
 
 from __future__ import annotations
@@ -200,12 +199,11 @@ def sniff_bundle_archive_format(path: str | Path) -> str:
 
 #: A real bundle archive (one manifest member + one per *distinct* content
 #: hash) never needs anywhere near this many members -- a crafted archive
-#: claiming more is rejected before `zipfile.ZipFile` is constructed
-#: (Codex review): `ZipFile.__init__` eagerly parses the whole central
-#: directory and builds one `ZipInfo` per entry, so an enormous entry
-#: count can exhaust memory merely by being opened. Below 0xFFFF (65535,
-#: the non-ZIP64 EOCD sentinel meaning "read the real count from ZIP64
-#: instead", handled separately below).
+#: claiming more is rejected before `zipfile.ZipFile` is constructed:
+#: `ZipFile.__init__` eagerly parses the whole central directory and
+#: builds one `ZipInfo` per entry, so an enormous count can exhaust memory
+#: merely by being opened. Below 0xFFFF (the non-ZIP64 EOCD sentinel
+#: meaning "read the real count from ZIP64 instead", handled below).
 _MAX_ARCHIVE_MEMBERS = 20_000
 
 #: Bytes to search from the end of the file for the End-Of-Central-
@@ -214,8 +212,8 @@ _MAX_ARCHIVE_MEMBERS = 20_000
 #: is 2 bytes), so this comfortably covers the worst case.
 _EOCD_SEARCH_WINDOW_BYTES = 65536 + 22
 
-#: Cap on the central directory's own declared byte size (Codex review):
-#: the entry-*count* cap above isn't itself a byte-size bound -- a low
+#: Cap on the central directory's own declared byte size: the entry-
+#: *count* cap above isn't itself a byte-size bound -- a low
 #: `total_entries` can still pair with an enormous `cd_size`, which
 #: `zipfile.ZipFile` reads and parses until fully consumed regardless of
 #: the entry count. A real archive's directory is small (~120 bytes per
@@ -233,18 +231,16 @@ _ZIP64_EOCD_LOCATOR_SIZE = 20
 
 def _reject_absurd_central_directory(path: Path) -> None:
     """Reject *path* if its central directory claims more than
-    `_MAX_ARCHIVE_MEMBERS` entries or more than `_MAX_CENTRAL_DIRECTORY_
-    BYTES` -- read directly from the EOCD (and, when present, the ZIP64
-    EOCD locator/record), without invoking `zipfile.ZipFile`'s own
-    central-directory parse (which is exactly the unbounded work this
-    check exists to preflight against).
+    `_MAX_ARCHIVE_MEMBERS` entries or `_MAX_CENTRAL_DIRECTORY_BYTES` --
+    read directly from the EOCD (and, when present, the ZIP64 EOCD
+    locator/record), without invoking `zipfile.ZipFile`'s own
+    central-directory parse (the unbounded work this preflights against).
 
-    Best-effort: if the EOCD record can't be found in the search window,
-    or a present ZIP64 locator/record can't be read, this silently
-    returns rather than raising -- `zipfile.ZipFile`'s own error, or its
-    own central-directory read, is authoritative for those cases; this
-    function only ever *adds* an earlier rejection for the common,
-    easily-recognized attack shapes, never a false one.
+    Best-effort: if the EOCD (or a present ZIP64 locator/record) can't be
+    found/read, this silently returns rather than raising --
+    `zipfile.ZipFile`'s own error/read is authoritative for those cases;
+    this only ever *adds* an earlier rejection for common attack shapes,
+    never a false one.
     """
     try:
         size = path.stat().st_size
@@ -279,10 +275,9 @@ def _reject_absurd_central_directory(path: Path) -> None:
                     return
                 zip64_eocd_offset = int.from_bytes(locator[8:16], "little")
                 f.seek(zip64_eocd_offset)
-                # Fixed portion only (56 bytes) -- everything this function
-                # needs (signature, total_entries, cd_size) lives within it;
-                # no need to read the record's own variable "extensible
-                # data sector" tail.
+                # Fixed portion only (56 bytes) -- signature/total_entries/
+                # cd_size all live within it; no need for the record's own
+                # variable "extensible data sector" tail.
                 record = f.read(56)
                 if len(record) != 56 or not record.startswith(_ZIP64_EOCD_RECORD_SIG):
                     return
@@ -420,12 +415,11 @@ class BundleArchiveWriter:
             self._existing_gid = existing_stat.st_gid
         self._target.parent.mkdir(parents=True, exist_ok=True)
         # tempfile.mkstemp (not a predictable "<name>.tmp-<pid>-<id>" path
-        # opened separately by zipfile.ZipFile itself) -- a predictable temp
-        # name in a directory writable by another account could be
-        # pre-created as a symlink, and `ZipFile(path, mode="w")` follows
-        # symlinks. mkstemp randomizes the name and opens it with
-        # O_CREAT|O_EXCL, so the fd this class holds always names a file we
-        # just created.
+        # opened separately by zipfile.ZipFile) -- a predictable temp name
+        # in a directory writable by another account could be pre-created
+        # as a symlink, and `ZipFile(path, mode="w")` follows symlinks.
+        # mkstemp randomizes the name and opens it with O_CREAT|O_EXCL, so
+        # the fd this class holds always names a file we just created.
         tmp_fd, tmp_name = tempfile.mkstemp(
             dir=self._target.parent, prefix=f".{self._target.name}.", suffix=".tmp"
         )
@@ -581,11 +575,18 @@ class BundleArchiveWriter:
 
     def _abort(self) -> None:
         """Close the in-progress zip handle and discard its temp file --
-        *path* (if it already held a prior archive) is never touched."""
-        self._zf.close()
-        if not self._tmp_file.closed:
-            self._tmp_file.close()
-        self._tmp_path.unlink(missing_ok=True)
+        *path* (if it already held a prior archive) is never touched.
+
+        `self._zf.close()` itself can raise (CodeRabbit review: ENOSPC/EIO
+        while writing the central directory) -- guarded so the temp file
+        is still unlinked either way rather than left behind next to an
+        untouched destination."""
+        try:
+            self._zf.close()
+        finally:
+            if not self._tmp_file.closed:
+                self._tmp_file.close()
+            self._tmp_path.unlink(missing_ok=True)
 
     def __enter__(self) -> BundleArchiveWriter:
         return self
