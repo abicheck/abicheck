@@ -12,7 +12,9 @@
       "may_import": [],
       "legacy_paths": [
         "abicheck/change_registry_types.py",
-        "abicheck/evidence_depth.py"
+        "abicheck/compile_context.py",
+        "abicheck/evidence_depth.py",
+        "abicheck/model.py"
       ]
     },
     "storage": {
@@ -26,6 +28,16 @@
       "may_import": [
         "model",
         "storage"
+      ],
+      "legacy_paths": [
+        "abicheck/_compiler_options.py",
+        "abicheck/buildsource/embed.py",
+        "abicheck/buildsource/inputs_pack.py",
+        "abicheck/buildsource/l2_seed.py",
+        "abicheck/dumper_clang.py",
+        "abicheck/dumper_scoping.py",
+        "abicheck/header_conditionals.py",
+        "abicheck/header_utils.py"
       ]
     },
     "compare": {
@@ -60,8 +72,12 @@
         "policy"
       ],
       "legacy_paths": [
+        "abicheck/service.py",
+        "abicheck/service_compare_evidence.py",
+        "abicheck/service_compare_pipeline.py",
         "abicheck/service_dump_pipeline.py",
-        "abicheck/service_input_resolution.py"
+        "abicheck/service_input_resolution.py",
+        "abicheck/service_scan.py"
       ]
     },
     "report": {

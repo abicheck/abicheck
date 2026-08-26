@@ -2218,7 +2218,7 @@ class TestCompareRequestAdr055Evidence:
         # that run_compare_request wires sources/collect_mode into
         # embed_build_source, so stub the diff step to a no-op.
         monkeypatch.setattr(
-            "abicheck.cli_buildsource.prepare_embedded_build_source",
+            "abicheck.buildsource.evidence_report.prepare_embedded_build_source",
             lambda *a, **k: (None, [], {}, []),
         )
 
@@ -2271,7 +2271,7 @@ class TestCompareRequestAdr055Evidence:
             description="source-only ABI break injected by test",
         )
         monkeypatch.setattr(
-            "abicheck.cli_buildsource.prepare_embedded_build_source",
+            "abicheck.buildsource.evidence_report.prepare_embedded_build_source",
             lambda *a, **k: ([sentinel_change], [], {}, [sentinel_change]),
         )
 
@@ -2316,7 +2316,7 @@ class TestCompareRequestAdr055Evidence:
             return extra_changes, [], {}, []
 
         monkeypatch.setattr(
-            "abicheck.cli_buildsource.prepare_embedded_build_source", _fake_prepare
+            "abicheck.buildsource.evidence_report.prepare_embedded_build_source", _fake_prepare
         )
 
         request = CompareRequest(
@@ -2343,7 +2343,7 @@ class TestCompareRequestAdr055Evidence:
             lambda snap, **kwargs: embed_calls.append(kwargs),
         )
         monkeypatch.setattr(
-            "abicheck.cli_buildsource.prepare_embedded_build_source",
+            "abicheck.buildsource.evidence_report.prepare_embedded_build_source",
             lambda *a, **k: (None, [], {}, []),
         )
 
@@ -2377,7 +2377,7 @@ class TestCompareRequestAdr055Evidence:
             lambda snap, **kwargs: embed_calls.append(kwargs),
         )
         monkeypatch.setattr(
-            "abicheck.cli_buildsource.prepare_embedded_build_source",
+            "abicheck.buildsource.evidence_report.prepare_embedded_build_source",
             lambda *a, **k: (None, [], {}, []),
         )
 
@@ -2438,7 +2438,7 @@ class TestCompareRequestAdr055Evidence:
             lambda snap, **kwargs: embed_calls.append(kwargs),
         )
         monkeypatch.setattr(
-            "abicheck.cli_buildsource.prepare_embedded_build_source",
+            "abicheck.buildsource.evidence_report.prepare_embedded_build_source",
             lambda *a, **k: (None, [], {}, []),
         )
 
@@ -2483,7 +2483,7 @@ class TestCompareRequestAdr055Evidence:
             lambda snap, **kwargs: embed_calls.append(kwargs),
         )
         monkeypatch.setattr(
-            "abicheck.cli_buildsource.prepare_embedded_build_source",
+            "abicheck.buildsource.evidence_report.prepare_embedded_build_source",
             lambda *a, **k: (None, [], {}, []),
         )
 
@@ -2526,7 +2526,7 @@ class TestCompareRequestAdr055Evidence:
             lambda snap, **kwargs: embed_calls.append(kwargs),
         )
         monkeypatch.setattr(
-            "abicheck.cli_buildsource.prepare_embedded_build_source",
+            "abicheck.buildsource.evidence_report.prepare_embedded_build_source",
             lambda *a, **k: (None, [], {}, []),
         )
 
@@ -2597,7 +2597,7 @@ class TestCompareRequestAdr055Evidence:
             "abicheck.buildsource.embed.embed_build_source", lambda snap, **kwargs: None
         )
         monkeypatch.setattr(
-            "abicheck.cli_buildsource.prepare_embedded_build_source",
+            "abicheck.buildsource.evidence_report.prepare_embedded_build_source",
             lambda *a, **k: (None, [], {}, []),
         )
 
@@ -2623,7 +2623,7 @@ class TestCompareRequestAdr055Evidence:
             "abicheck.buildsource.embed.embed_build_source", lambda snap, **kwargs: None
         )
         monkeypatch.setattr(
-            "abicheck.cli_buildsource.prepare_embedded_build_source",
+            "abicheck.buildsource.evidence_report.prepare_embedded_build_source",
             lambda *a, **k: (None, [], {}, []),
         )
 
@@ -2652,7 +2652,7 @@ class TestCompareRequestAdr055Evidence:
             "abicheck.buildsource.embed.embed_build_source", lambda snap, **kwargs: None
         )
         monkeypatch.setattr(
-            "abicheck.cli_buildsource.prepare_embedded_build_source",
+            "abicheck.buildsource.evidence_report.prepare_embedded_build_source",
             lambda *a, **k: (None, [], {}, []),
         )
 
@@ -2744,7 +2744,7 @@ class TestCompareRequestAdr055Evidence:
             lambda snap, **kwargs: embed_calls.append(kwargs),
         )
         monkeypatch.setattr(
-            "abicheck.cli_buildsource.prepare_embedded_build_source",
+            "abicheck.buildsource.evidence_report.prepare_embedded_build_source",
             lambda *a, **k: (None, [], {}, []),
         )
 
@@ -5523,7 +5523,7 @@ class TestComparePipelinePhases:
         checks the wiring itself: rows it produces are attached to the
         ``DiffResult``, and the metrics call still receives the extra changes.
         """
-        from abicheck import cli_buildsource
+        from abicheck.buildsource import evidence_report
         from abicheck.service import classify_compare_pair, resolve_compare_request
 
         rows = [{"layer": "L3", "covered": 1}]
@@ -5535,10 +5535,14 @@ class TestComparePipelinePhases:
         def _fake_attach(result, metrics, extra, **_kwargs):
             attached.append((result, metrics, extra))
 
+        # ADR-061 Phase 3: patch the *implementation owner*. These moved out of
+        # `cli_buildsource` into the engine, and `classify_compare_pair` now
+        # imports them from there -- patching the old facade would leave this
+        # test asserting against the real functions.
         monkeypatch.setattr(
-            cli_buildsource, "prepare_embedded_build_source", _fake_prepare
+            evidence_report, "prepare_embedded_build_source", _fake_prepare
         )
-        monkeypatch.setattr(cli_buildsource, "attach_evidence_metrics", _fake_attach)
+        monkeypatch.setattr(evidence_report, "attach_evidence_metrics", _fake_attach)
 
         old_p = self._snap_file(tmp_path, "libtest", "1.0")
         new_p = self._snap_file(tmp_path, "libtest", "2.0")

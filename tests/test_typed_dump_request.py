@@ -1301,12 +1301,13 @@ def test_resolve_side_snapshot_impl_forwards_gated_build_inputs_to_embed(
     snapshot's own evidence layers could silently describe two different
     builds. _resolve_side_snapshot_impl computes the allow_build_query gate
     once and forwards the identical (gated) values to both."""
-    from abicheck import (
-        service,
-        service_input_resolution as sir,
-    )
+    # ADR-061 Phase 3: patch the implementation owner
+    # (`workflows.artifact.execute`), not the `service_input_resolution`
+    # facade -- the caller reads the owner's reference, never the facade's.
+    from abicheck import service
     from abicheck.model import AbiSnapshot
     from abicheck.service_compare_evidence import SideEvidence
+    from abicheck.workflows.artifact import execute as sir
 
     header = tmp_path / "h.h"
     header.write_text("void f();\n", encoding="utf-8")
@@ -1861,8 +1862,9 @@ class TestSeedCleanupsDrainBeforeTheEmbedStep:
     def test_cleanups_run_after_the_parse_and_before_the_embed(
         self, monkeypatch, tmp_path: Path
     ) -> None:
-        from abicheck import service, service_input_resolution as sir
+        from abicheck import service
         from abicheck.service_compare_evidence import SideEvidence
+        from abicheck.workflows.artifact import execute as sir
 
         hdr = tmp_path / "widget.h"
         hdr.write_text("struct Widget { int x; };\n", encoding="utf-8")
@@ -1915,8 +1917,9 @@ class TestSeedCleanupsDrainBeforeTheEmbedStep:
         backstop. Neither may run the same already-handed-off thunk twice."""
         import pytest
 
-        from abicheck import service, service_input_resolution as sir
+        from abicheck import service
         from abicheck.service_compare_evidence import SideEvidence
+        from abicheck.workflows.artifact import execute as sir
 
         hdr = tmp_path / "widget.h"
         hdr.write_text("struct Widget { int x; };\n", encoding="utf-8")

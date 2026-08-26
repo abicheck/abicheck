@@ -48,13 +48,15 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from .errors import AstContextMissingError, ValidationError
-from .service_input_resolution import (
+from .workflows.artifact import ResolvedArtifactPlan
+from .workflows.artifact.execute import (
     _resolve_side_snapshot_impl,
     enforce_requested_depth,
+)
+from .workflows.artifact.resolve import (
     is_raw_source_tree,
     reject_hybrid_source_frontend,
 )
-from .workflows.artifact import ResolvedArtifactPlan
 
 if TYPE_CHECKING:
     from collections.abc import Callable

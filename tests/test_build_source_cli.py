@@ -1239,13 +1239,14 @@ def test_compare_json_without_evidence_omits_metrics(tmp_path):
 def test_evidence_metrics_helpers_edge_branches(capsys):
     """ADR-033 D6/D9 helper edge cases: empty-metrics no-ops, the
     missing-duration echo path, and the _layer_status fallback."""
-    from abicheck.buildsource.evidence_policy import (
-        _layer_status,
-        echo_evidence_metrics,
-    )
+    # ADR-061 Phase 3: the engine renders these lines
+    # (`evidence_policy.evidence_metrics_lines`); the CLI owns the stream, so
+    # the stderr-writing spelling this test exercises lives with the adapter.
+    from abicheck.buildsource.evidence_policy import _layer_status
     from abicheck.buildsource.model import CoverageStatus, DataLayer, LayerCoverage
     from abicheck.checker_types import DiffResult, Verdict
     from abicheck.cli_buildsource import attach_evidence_metrics
+    from abicheck.cli_buildsource_helpers import echo_evidence_metrics
 
     # Unknown layer → not_collected fallback (no rows for L5).
     rows = [
