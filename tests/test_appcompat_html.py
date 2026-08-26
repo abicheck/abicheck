@@ -253,6 +253,33 @@ def test_prewarms_the_demangle_cache_before_rendering_rows(monkeypatch) -> None:
     assert {"_ZN3FooC1Ev", "_ZN3Bar3runEv"} <= set(calls[0]), calls
 
 
+def test_missing_symbols_prewarm_accepts_macho_prefix(monkeypatch) -> None:
+    """CodeRabbit review, fresh evidence: the missing_symbols prewarm called
+    demangle_batch() without accept_macho_prefix=True, unlike
+    _missing_symbol_cell() (which resolves a Mach-O `__Z...` symbol via
+    _abbr_symbol_text()). A report with many distinct missing Mach-O
+    symbols would batch-warm none of them, falling back to one demangle()
+    call per row instead of the single batched call this prewarm exists
+    for."""
+    import abicheck.appcompat_html as appcompat_html_mod
+    import abicheck.demangle as demangle_mod
+
+    calls: list[dict] = []
+    orig = demangle_mod.demangle_batch
+
+    def spy(batch: list[str], **kw) -> dict[str, str]:
+        calls.append(kw)
+        return orig(batch, **kw)
+
+    # appcompat_html.py does `from .demangle import demangle_batch`, binding
+    # its own module-local name -- patching abicheck.demangle.demangle_batch
+    # alone would miss appcompat_html's own direct call.
+    monkeypatch.setattr(appcompat_html_mod, "demangle_batch", spy)
+    appcompat_to_html(_appcompat_result(missing=["__ZN3FooC1Ev"]))
+    assert calls, "demangle_batch was never called"
+    assert calls[-1].get("accept_macho_prefix") is True, calls
+
+
 def test_demangle_false_keeps_missing_symbols_raw() -> None:
     """Codex review, fresh evidence: appcompat_to_html() had no equivalent
     to the CLI's --no-demangle -- it always demangled unconditionally."""

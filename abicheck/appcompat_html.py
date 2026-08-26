@@ -79,7 +79,7 @@ def appcompat_to_html(result: object, *, demangle: bool = True) -> str:
         # warm the same process-wide cache directly so the Missing Symbols
         # table below (Codex review) also renders from a single batched call.
         if missing:
-            demangle_batch(list(missing))
+            demangle_batch(list(missing), accept_macho_prefix=True)
 
     verdict_icon = {
         "BREAKING": "\U0001f534",

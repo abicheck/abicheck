@@ -200,3 +200,12 @@
   duplicated logic) is now a thin alias for it. The description field
   deliberately keeps `demangle_text()`'s embedded-token scan, since it is
   genuine prose that can legitimately name a mangled symbol inline.
+- **Seventeenth follow-up (CodeRabbit review): the Missing Symbols prewarm
+  didn't accept the Mach-O prefix.** `appcompat_to_html()`'s own
+  `demangle_batch(list(missing))` call (used to batch-warm the cache before
+  `_missing_symbol_cell()` -- now `_abbr_symbol_text()` -- renders each
+  row) omitted `accept_macho_prefix=True`, unlike `_missing_symbol_cell()`
+  itself, so a report with many distinct missing Mach-O `__Z...` symbols
+  warmed none of them, falling back to one `demangle()` call per row
+  instead of the single batched call this prewarm exists for. Now passes
+  `accept_macho_prefix=True`, matching the cell it warms for.
