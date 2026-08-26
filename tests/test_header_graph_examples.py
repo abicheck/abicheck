@@ -54,29 +54,30 @@ REPO_DIR = Path(__file__).parent.parent
 EXAMPLES_DIR = REPO_DIR / "examples"
 
 #: (case dir, expected verdict, expected changed kinds beyond the L5 risk
-#: finding all four share).
+#: finding all four share). An entry may itself be a ``frozenset`` of
+#: alternative kinds, meaning "at least one of these", rather than a bare
+#: string meaning "exactly this one".
 #:
 #: case187/191 name a DWARF-sourced kind (``struct_field_type_changed``/
 #: ``struct_size_changed``) that is genuinely unreachable on macOS: abicheck
 #: has no Mach-O debug-map/N_OSO resolution, so ``_dump_macho`` never attempts
 #: DWARF at all (headers + export table only, unlike ``_dump_elf``). On Linux
-#: the same ``.so`` embeds DWARF directly (no such indirection needed), so the
-#: DWARF-sourced kind fires there in addition to the header-sourced one every
-#: platform gets. Both kinds are independently sufficient for BREAKING per
-#: each case's README; this only picks the one the current platform can prove.
-_STRUCT_FIELD_KIND = (
-    "type_field_type_changed"
-    if sys.platform == "darwin"
-    else "struct_field_type_changed"
-)
-_STRUCT_SIZE_KIND = (
-    "type_size_changed" if sys.platform == "darwin" else "struct_size_changed"
-)
+#: the same ``.so`` used to additionally fire the DWARF-sourced kind alongside
+#: the header-sourced one -- but the abicheck code-review report's item 5 fix
+#: (cross-tier struct/type dedup bridging bare-vs-qualified spellings) now
+#: correctly collapses the two into whichever one the pipeline resolves first
+#: for this case's exact field/type shape, so which single kind survives is
+#: no longer reliably platform-determined (Codex review, fresh CI evidence:
+#: `struct_field_type_changed` went missing on Linux once that fix landed).
+#: Both kinds are independently sufficient for BREAKING per each case's
+#: README, so accept either rather than pinning one.
+_STRUCT_FIELD_KINDS = frozenset({"type_field_type_changed", "struct_field_type_changed"})
+_STRUCT_SIZE_KINDS = frozenset({"type_size_changed", "struct_size_changed"})
 CASES = [
     (
         "case187_public_struct_private_field_type",
         "BREAKING",
-        {_STRUCT_FIELD_KIND},
+        {_STRUCT_FIELD_KINDS},
     ),
     (
         "case188_public_class_private_base_class",
@@ -91,7 +92,7 @@ CASES = [
     (
         "case191_header_only_graph_field_type",
         "BREAKING",
-        {_STRUCT_SIZE_KIND},
+        {_STRUCT_SIZE_KINDS},
     ),
 ]
 
@@ -226,5 +227,11 @@ def test_header_graph_reproduces_documented_finding(
     assert payload["verdict"] == expected_verdict, payload["verdict"]
     got_kinds = {c["kind"] for c in payload.get("changes", [])}
     expected_kinds = expected_extra_kinds | {"public_api_internal_dependency_added"}
-    missing = expected_kinds - got_kinds
+    # A requirement is either a bare kind (must be present) or a frozenset of
+    # alternatives (at least one must be present) -- see CASES's own comment.
+    missing = {
+        req
+        for req in expected_kinds
+        if not (got_kinds & req if isinstance(req, frozenset) else req in got_kinds)
+    }
     assert not missing, f"{case_name}: missing kinds {missing}; got {got_kinds}"
