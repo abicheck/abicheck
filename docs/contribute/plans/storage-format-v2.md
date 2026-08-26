@@ -86,13 +86,17 @@ and `BundleFacts` document is bit-for-bit unchanged.
   default-ness, binding, type, visibility, definition status), so two
   versioned definitions of one bare name are two occurrences.
 - **A0.4** Canonical encoding: unordered collections carry an explicit
-  stable sort key, ordered collections are arrays, volatile capture
-  metadata is excluded from the semantic-hash domain, and the digest is
-  invariant under key order, insertion order, and pretty-printing.
-- **A0.5** The version axes of ADR-062 D2 are separate fields, with only
-  `comparison_contract_version` failing closed on a newer value, and
-  imported legacy snapshots preserving their source schema/producer
-  generation.
+  stable sort key, ordered collections are arrays, capture metadata is
+  excluded from the semantic-hash domain via one reserved slot at the
+  document root (never by key name at arbitrary depth, which cannot tell a
+  hostname from a platform or a `pid` field from a process id), and the
+  digest is invariant under key order, insertion order, and pretty-printing.
+- **A0.5** The version axes of ADR-062 D2 are separate fields. Two fail
+  closed — `package_format_version` (the reader may not locate the
+  structures) and `comparison_contract_version` (the verdict could be
+  wrong), the latter also when the package does not state it — and the
+  remaining five are informational. Imported legacy snapshots preserve their
+  source schema/producer generation.
 - **A0.6** Property-style tests state each primitive's contract as
   invariants (not only example cases), per the root `AGENTS.md`
   "Primitive-level property tests" guidance.

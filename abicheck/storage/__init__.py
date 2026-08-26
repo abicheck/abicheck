@@ -35,11 +35,11 @@ from .availability import (
     FactStatus,
 )
 from .canonical import (
-    VOLATILE_KEYS,
+    CAPTURE_METADATA_KEY,
     canonical_form,
     canonical_json,
     semantic_digest,
-    strip_volatile,
+    strip_capture_metadata,
 )
 from .identity import (
     EntityId,
@@ -62,7 +62,7 @@ from .versioning import (
 __all__ = [
     "COMPARISON_CONTRACT_VERSION",
     "PACKAGE_FORMAT_VERSION",
-    "VOLATILE_KEYS",
+    "CAPTURE_METADATA_KEY",
     "AvailabilityLedger",
     "Confidence",
     "EntityId",
@@ -81,5 +81,5 @@ __all__ = [
     "check_reader_compatibility",
     "elf_symbol_occurrence",
     "semantic_digest",
-    "strip_volatile",
+    "strip_capture_metadata",
 ]

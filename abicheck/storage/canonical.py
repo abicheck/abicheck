@@ -51,50 +51,40 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 __all__ = [
-    "VOLATILE_KEYS",
+    "CAPTURE_METADATA_KEY",
     "canonical_form",
     "canonical_json",
     "semantic_digest",
-    "strip_volatile",
+    "strip_capture_metadata",
 ]
 
-#: Keys excluded from the semantic-hash domain wherever they appear. These
-#: record *when and where* a capture ran, never *what it found*, so two
-#: captures of byte-identical inputs must agree despite differing here.
-#: Kept as a frozenset of exact key names rather than a prefix/suffix rule:
-#: a heuristic like "anything ending in ``_at``" would silently swallow a
-#: real fact (a field genuinely named ``deprecated_at`` is content), and a
-#: digest that quietly ignores content is far worse than one that includes
-#: an extra timestamp.
+#: The one reserved key at a document's **root**, whose entire subtree is
+#: excluded from the semantic-hash domain. Everything a capture records about
+#: *when and where* it ran — timestamps, hostname, pid, scratch paths, wall
+#: clock — lives under here, so two captures of byte-identical inputs agree
+#: without any key elsewhere in the document being treated as volatile.
 #:
-#: Every name here must be **unambiguous**, which is a stricter bar than
-#: "exact". ``host`` was listed and has been removed (Codex review): in this
-#: codebase it is just as likely to name real platform or frontend-context
-#: content as a hostname, so excluding it made
-#: ``semantic_digest({"host": "linux"})``,
+#: This replaced a ``VOLATILE_KEYS`` frozenset of names stripped recursively
+#: at any depth, and the replacement is the point rather than an
+#: implementation detail. That design asked an unanswerable question of every
+#: key in the document — "does this name mean capture metadata *here*?" — and
+#: got it wrong twice in review. First ``host``, which is as likely to name a
+#: platform as a hostname, made ``semantic_digest({"host": "linux"})``,
 #: ``semantic_digest({"host": "windows"})`` and ``semantic_digest({})``
-#: identical — a content-address collision, and precisely the "quietly
-#: ignores content" failure this comment already warns about, committed one
-#: entry below the warning. ``hostname`` cannot mean anything else and
-#: stays. The stricter long-term shape is D6's designated capture-metadata
-#: object, where volatility is structural rather than name-based; until a
-#: package has one, a name earns a place here only if no reading of it is
-#: content.
-VOLATILE_KEYS: frozenset[str] = frozenset(
-    {
-        "created_at",
-        "captured_at",
-        "generated_at",
-        "duration_seconds",
-        "elapsed_seconds",
-        "hostname",
-        "pid",
-        "tmpdir",
-        "scratch_dir",
-        "working_directory",
-        "wall_clock_seconds",
-    }
-)
+#: identical. Removing that one name did not fix the class: ``pid`` is an
+#: entirely ordinary C struct field, so ``{"entities": {"pid": {"type":
+#: "int"}}}`` still hashed equal to ``{"entities": {}}``, and
+#: ``working_directory`` is a real build input. Each fix drew the next
+#: instance of the same defect, which is the signal to stop patching the list
+#: and change the mechanism.
+#:
+#: Position, not spelling, is what makes this sound: only the document root
+#: is inspected, so a nested ``{"entities": {"capture": …}}`` is ordinary
+#: content and is hashed. A payload may therefore use any name it likes for
+#: content at any depth; the format reserves exactly one slot, at exactly one
+#: place, and a producer that puts content there is misusing a declared part
+#: of the format rather than being silently second-guessed.
+CAPTURE_METADATA_KEY = "capture"
 
 
 def _canonical_number(value: float) -> Any:
@@ -125,7 +115,7 @@ def _set_member(value: Any) -> Any:
     return int(value) if isinstance(value, bool) else value
 
 
-def canonical_form(value: Any, *, drop_volatile: bool = True) -> Any:
+def canonical_form(value: Any) -> Any:
     """Recursively normalize a value into its canonical logical form.
 
     Accepts the shapes a storage payload is built from: mappings, sequences,
@@ -134,6 +124,10 @@ def canonical_form(value: Any, *, drop_volatile: bool = True) -> Any:
     ``str()`` fallback would let an object whose ``repr`` contains a memory
     address into the hash domain, making the digest differ run to run for
     identical content.
+
+    This function normalizes only; it never removes anything. Excluding the
+    reserved capture-metadata subtree is :func:`strip_capture_metadata`'s job,
+    and it happens once at the document root rather than at every level.
     """
     if value is None or isinstance(value, (str, bool)):
         return value
@@ -166,47 +160,72 @@ def canonical_form(value: Any, *, drop_volatile: bool = True) -> Any:
         # unrecoverable at this point by construction, so preserving it is not
         # among the options; agreeing is.
         return sorted(
-            (
-                canonical_form(_set_member(v), drop_volatile=drop_volatile)
-                for v in value
-            ),
+            (canonical_form(_set_member(v)) for v in value),
             key=lambda item: json.dumps(item, sort_keys=True, ensure_ascii=False),
         )
     if isinstance(value, Mapping):
-        items = sorted((str(k), v) for k, v in value.items())
+        # Keys must already be strings. Coercing with `str()` was lossy in two
+        # ways at once (Codex review): `{1: "a", "1": "b"}` collapsed to a
+        # single entry, so the digest matched a document that never held the
+        # discarded one; and sorting `(str(k), v)` pairs fell through to
+        # comparing *values* whenever two keys tied, so `{1: {}, "1": []}`
+        # raised `TypeError: '<' not supported between instances of 'list' and
+        # 'dict'` from inside a digest call. A JSON object's keys are strings
+        # anyway, so a non-string key is a producer bug that a round-trip
+        # would silently rewrite — rejecting it is the same no-silent-coercion
+        # rule the `bytes` and unsupported-type branches already apply.
+        for raw_key in value:
+            if not isinstance(raw_key, str):
+                raise TypeError(
+                    f"mapping key {raw_key!r} is {type(raw_key).__name__}, not str; "
+                    "canonical storage form does not coerce keys"
+                )
+        # Sorted by key alone — never by the pair — so no value comparison can
+        # occur and mutually unorderable values are simply irrelevant here.
         return {
-            k: canonical_form(v, drop_volatile=drop_volatile)
-            for k, v in items
-            if not (drop_volatile and k in VOLATILE_KEYS)
+            k: canonical_form(v) for k, v in sorted(value.items(), key=lambda kv: kv[0])
         }
     if isinstance(value, Sequence):
         # Order preserved: a sequence is the shape that *means* something is
         # ordered. A caller whose collection is conceptually unordered must
         # pass a set, or sort it with its own explicit key, rather than
         # relying on this function to guess.
-        return [canonical_form(v, drop_volatile=drop_volatile) for v in value]
+        return [canonical_form(v) for v in value]
     raise TypeError(
         f"{type(value).__name__} has no canonical storage form; "
         "convert it to a mapping, sequence, set, string, number, bool, or None"
     )
 
 
-def strip_volatile(value: Any) -> Any:
-    """Canonical form with volatile capture metadata removed."""
-    return canonical_form(value, drop_volatile=True)
+def strip_capture_metadata(value: Any) -> Any:
+    """Canonical form with the reserved root capture-metadata slot removed.
+
+    Only the document **root** is inspected. A ``capture`` key nested anywhere
+    below it is ordinary content and survives — see
+    :data:`CAPTURE_METADATA_KEY` for why position rather than spelling is what
+    makes this sound.
+    """
+    canonical = canonical_form(value)
+    if isinstance(canonical, dict):
+        return {k: v for k, v in canonical.items() if k != CAPTURE_METADATA_KEY}
+    return canonical
 
 
 def canonical_json(
-    value: Any, *, drop_volatile: bool = True, indent: int | None = None
+    value: Any, *, drop_capture_metadata: bool = False, indent: int | None = None
 ) -> str:
     """Serialize a value through :func:`canonical_form`.
 
-    ``indent`` affects only presentation. :func:`semantic_digest` never reads
-    this function's output, so a pretty-printed object and a compact one are
-    the same content by construction rather than by convention.
+    ``drop_capture_metadata`` defaults to ``False``: the stored document keeps
+    its capture metadata, which is excluded from *hashing* only. ``indent``
+    affects only presentation — :func:`semantic_digest` never reads this
+    function's output, so a pretty-printed object and a compact one are the
+    same content by construction rather than by convention.
     """
     return json.dumps(
-        canonical_form(value, drop_volatile=drop_volatile),
+        strip_capture_metadata(value)
+        if drop_capture_metadata
+        else canonical_form(value),
         indent=indent,
         ensure_ascii=False,
         sort_keys=True,
@@ -223,7 +242,7 @@ def semantic_digest(value: Any, *, algorithm: str = "sha256") -> str:
     is sha256" instead of leaving a reader to assume.
     """
     payload = json.dumps(
-        canonical_form(value, drop_volatile=True),
+        strip_capture_metadata(value),
         ensure_ascii=False,
         sort_keys=True,
         separators=(",", ":"),

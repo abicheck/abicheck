@@ -11,7 +11,9 @@
   replacement for `AbiSnapshot.index()`'s first-wins behaviour),
   `canonical_form`/`semantic_digest` (a digest invariant under mapping key
   order, set iteration order, and pretty-printing, and deliberately *not*
-  invariant under sequence order), and `StorageVersions`/
+  invariant under sequence order; capture metadata is excluded via one
+  reserved slot at the document root rather than by key name at arbitrary
+  depth), and `StorageVersions`/
   `check_reader_compatibility` (the seven version axes today's single
   `SCHEMA_VERSION` integer conflates, with only the comparison-contract axis
   failing closed). These are leaf primitives: nothing produces, consumes, or

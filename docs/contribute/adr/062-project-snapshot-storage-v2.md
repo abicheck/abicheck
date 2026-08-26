@@ -141,10 +141,23 @@ independent fields:
 | `resolver_generation` | derived-graph/resolution semantics epoch |
 | `comparison_contract_version` | what a reader must understand to compare safely |
 
-Only `comparison_contract_version` fails closed on a newer value; the
-others are informational to a reader that does not recognize them, which is
-what lets an optional display field ship without implying a new evidence
-recipe. Capability is stated explicitly rather than derived from schema
+Exactly two axes fail closed, for two different reasons: a newer
+`package_format_version` means the reader may not be able to *locate* the
+package's structures at all, and a newer `comparison_contract_version` means
+comparing without understanding the change could produce a *wrong verdict*.
+`comparison_contract_version` also fails closed when the package does not
+state it, since unknown comparison semantics are exactly what that axis
+guards. The remaining five are informational to a reader that does not
+recognize them, which is what lets an optional display field ship without
+implying a new evidence recipe.
+
+(An earlier draft of this paragraph said only `comparison_contract_version`
+fails closed, which contradicted the implementation — Codex review caught the
+disagreement. The prose was the wrong half: weakening the container-layout
+axis to match it would let a reader silently misparse a package whose layout
+it does not understand, which is a worse failure than refusing to read it.)
+
+Capability is stated explicitly rather than derived from schema
 history, and an imported legacy snapshot preserves its
 `source_schema_version` and `source_producer_generation` so migrations and
 audits stay honest instead of accumulating one special case per newly

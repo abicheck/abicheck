@@ -44,6 +44,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 __all__ = [
+    "UNSTATED_VERSION",
     "PACKAGE_FORMAT_VERSION",
     "COMPARISON_CONTRACT_VERSION",
     "ProducerIdentity",
@@ -55,11 +56,14 @@ __all__ = [
 #: Container/manifest layout. Bumped when the package *shape* changes.
 PACKAGE_FORMAT_VERSION = 1
 
-#: What a reader must understand to compare safely. This is the only axis a
-#: reader refuses on, so it is bumped only when reading a package without
-#: understanding the change could produce a *wrong verdict* — never for a
-#: field a reader can ignore.
+#: What a reader must understand to compare safely. Bumped only when reading a
+#: package without understanding the change could produce a *wrong verdict* —
+#: never for a field a reader can ignore.
 COMPARISON_CONTRACT_VERSION = 1
+
+#: A version axis the package did not state. Distinct from any real version so
+#: that "unknown" can never be mistaken for "the same as mine".
+UNSTATED_VERSION = 0
 
 
 @dataclass(frozen=True)
@@ -161,8 +165,17 @@ class StorageVersions:
             producer=ProducerIdentity.from_dict(data.get("producer", {})),
             extractor_generation=int(data.get("extractor_generation", 0)),
             resolver_generation=int(data.get("resolver_generation", 0)),
+            # Absence is recorded as UNSTATED, never synthesized as this
+            # reader's own version. Defaulting to `COMPARISON_CONTRACT_VERSION`
+            # made a malformed or pre-versioned package claim to share this
+            # build's comparison semantics, so `check_reader_compatibility`
+            # then reported it readable — bypassing the one axis that exists
+            # to fail closed exactly when those semantics are unknown (Codex
+            # review). Parsing stays defensive, per this repo's convention
+            # that a hand-edited package must not abort a load; the refusal
+            # belongs at the decision point, not here.
             comparison_contract_version=int(
-                data.get("comparison_contract_version", COMPARISON_CONTRACT_VERSION)
+                data.get("comparison_contract_version", UNSTATED_VERSION)
             ),
             source_schema_version=int(data.get("source_schema_version", 0)),
             source_producer_generation=str(data.get("source_producer_generation", "")),
@@ -221,6 +234,15 @@ def check_reader_compatibility(
             reason=(
                 f"package format v{versions.package_format_version} is newer than "
                 f"this build's v{supported_package_format}; upgrade abicheck to read it"
+            ),
+        )
+    if versions.comparison_contract_version == UNSTATED_VERSION:
+        return ReaderCompatibility(
+            readable=False,
+            reason=(
+                "package does not state a comparison contract version, so its "
+                "comparison semantics are unknown; comparing against it could "
+                "produce a wrong verdict"
             ),
         )
     if versions.comparison_contract_version > supported_comparison_contract:

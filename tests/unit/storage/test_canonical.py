@@ -16,15 +16,16 @@ import pytest
 from hypothesis import given, strategies as st
 
 from abicheck.storage.canonical import (
-    VOLATILE_KEYS,
+    CAPTURE_METADATA_KEY,
     canonical_form,
     canonical_json,
     semantic_digest,
-    strip_volatile,
+    strip_capture_metadata,
 )
 from abicheck.storage.versioning import (
     COMPARISON_CONTRACT_VERSION,
     PACKAGE_FORMAT_VERSION,
+    UNSTATED_VERSION,
     ProducerIdentity,
     StorageVersions,
     check_reader_compatibility,
@@ -134,35 +135,88 @@ class TestDigestRespectsRealOrder:
         assert semantic_digest(as_map) == semantic_digest(reordered_map)
 
 
-class TestVolatileMetadata:
-    @given(st.sampled_from(sorted(VOLATILE_KEYS)))
-    def test_a_volatile_key_never_reaches_the_digest(self, key: str) -> None:
-        assert semantic_digest({"facts": [1], key: "a"}) == semantic_digest(
-            {"facts": [1], key: "b"}
+class TestCaptureMetadata:
+    """One reserved slot at the root, not a set of names at any depth."""
+
+    def test_the_reserved_root_slot_is_excluded_from_the_digest(self) -> None:
+        assert semantic_digest(
+            {"facts": [1], CAPTURE_METADATA_KEY: {"hostname": "runner-1"}}
+        ) == semantic_digest(
+            {"facts": [1], CAPTURE_METADATA_KEY: {"hostname": "runner-2"}}
         )
 
-    def test_volatile_keys_are_stripped_at_any_depth(self) -> None:
-        nested = {"outer": {"inner": {"created_at": "now", "real": 1}}}
+    def test_it_is_excluded_only_at_the_root(self) -> None:
+        """Position, not spelling, is what makes the exclusion sound."""
+        nested_a = {"entities": {CAPTURE_METADATA_KEY: {"type": "int"}}}
+        nested_b = {"entities": {}}
 
-        assert strip_volatile(nested) == {"outer": {"inner": {"real": 1}}}
+        assert semantic_digest(nested_a) != semantic_digest(nested_b)
 
-    def test_a_content_field_that_merely_looks_temporal_is_kept(self) -> None:
-        """Exact key names, not a suffix heuristic.
+    def test_strip_removes_only_the_root_slot(self) -> None:
+        payload = {
+            CAPTURE_METADATA_KEY: {"pid": 1},
+            "entities": {CAPTURE_METADATA_KEY: {"real": 1}},
+        }
 
-        "Anything ending in `_at`" would swallow a real fact such as
-        `deprecated_at`, and a digest that quietly ignores content is far
-        worse than one that includes an extra timestamp.
-        """
-        assert "deprecated_at" in strip_volatile({"deprecated_at": "1.2"})
-        assert semantic_digest({"deprecated_at": "1.2"}) != semantic_digest(
-            {"deprecated_at": "1.3"}
+        assert strip_capture_metadata(payload) == {
+            "entities": {CAPTURE_METADATA_KEY: {"real": 1}}
+        }
+
+    def test_a_non_mapping_root_is_returned_unchanged(self) -> None:
+        assert strip_capture_metadata([1, 2]) == [1, 2]
+
+    def test_the_stored_document_keeps_its_capture_metadata(self) -> None:
+        """Excluded from *hashing*, not from what is written."""
+        payload = {CAPTURE_METADATA_KEY: {"hostname": "h"}, "x": 1}
+
+        assert CAPTURE_METADATA_KEY in canonical_json(payload)
+        assert CAPTURE_METADATA_KEY not in canonical_json(
+            payload, drop_capture_metadata=True
         )
 
-    def test_canonical_json_can_keep_volatile_keys_for_storage(self) -> None:
-        """Excluded from *hashing*, not from the stored document."""
-        payload = canonical_json({"created_at": "now", "x": 1}, drop_volatile=False)
 
-        assert "created_at" in payload
+class TestNoContentKeyIsStrippedByName:
+    """Codex review, twice. The name-based strip was the wrong mechanism.
+
+    `host` was removed after it collapsed `{"host": "linux"}`,
+    `{"host": "windows"}` and `{}` to one digest. Removing that one name did
+    not fix the class — the next round found `pid` (an entirely ordinary C
+    struct field) and `working_directory` (a real build input) doing the same
+    thing. Each fix drew the next instance, which is the signal to change the
+    mechanism rather than keep editing the list.
+    """
+
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "host",
+            "hostname",
+            "pid",
+            "created_at",
+            "captured_at",
+            "generated_at",
+            "duration_seconds",
+            "elapsed_seconds",
+            "tmpdir",
+            "scratch_dir",
+            "working_directory",
+            "wall_clock_seconds",
+        ],
+    )
+    def test_every_previously_stripped_name_is_now_content(self, name: str) -> None:
+        assert semantic_digest({name: "a"}) != semantic_digest({name: "b"})
+        assert semantic_digest({name: "a"}) != semantic_digest({})
+
+    def test_the_reported_pid_entity_survives(self) -> None:
+        """The literal counterexample from review."""
+        assert semantic_digest(
+            {"entities": {"pid": {"type": "int"}}}
+        ) != semantic_digest({"entities": {}})
+
+    def test_a_working_directory_build_input_survives(self) -> None:
+        assert semantic_digest(
+            {"build": {"working_directory": "/a"}}
+        ) != semantic_digest({"build": {"working_directory": "/b"}})
 
 
 class TestNumberNormalization:
@@ -235,11 +289,38 @@ class TestCanonicalFormBasics:
         assert semantic_digest({"a": 1}).startswith("sha256:")
         assert semantic_digest({"a": 1}, algorithm="sha512").startswith("sha512:")
 
-    def test_non_string_mapping_keys_are_normalized(self) -> None:
-        assert canonical_form({1: "a", "1": "b"}) in (
-            {"1": "a"},
-            {"1": "b"},
-        )
+    def test_non_string_mapping_keys_are_refused(self) -> None:
+        """Codex review. The previous version of this test pinned the bug.
+
+        It asserted the result was *one of* `{"1": "a"}` / `{"1": "b"}` —
+        which reads as a deliberate normalization choice but was really a
+        silent loss: `{1: "a", "1": "b"}` has two entries and the digest
+        matched a document that only ever had one. A test written to accept
+        whichever value survived made a real gap look settled, which is the
+        same trap the root `AGENTS.md` records for the forced-include work.
+        """
+        with pytest.raises(TypeError, match="not str"):
+            canonical_form({1: "a", "1": "b"})
+
+    def test_a_key_collision_cannot_silently_drop_an_entry(self) -> None:
+        with pytest.raises(TypeError):
+            canonical_form({1: "a"})
+
+    def test_unorderable_values_under_colliding_keys_do_not_crash_sorting(
+        self,
+    ) -> None:
+        """Sorting pairs fell through to comparing values when keys tied.
+
+        `{1: {}, "1": []}` raised `TypeError: '<' not supported between
+        instances of 'list' and 'dict'` from inside a digest call. Sorting by
+        key alone makes value orderability irrelevant; the non-string keys are
+        refused first, and the error names the key rather than the comparison.
+        """
+        with pytest.raises(TypeError, match="not str"):
+            canonical_form({1: {}, "1": []})
+
+    def test_string_keyed_mappings_with_unorderable_values_are_fine(self) -> None:
+        assert canonical_form({"b": [], "a": {}}) == {"a": {}, "b": []}
 
 
 class TestVersionAxes:
@@ -385,39 +466,88 @@ class TestReaderCompatibility:
         assert not result.readable
 
 
-class TestVolatileKeysAreUnambiguous:
-    """Codex review: `host` was excluded and is not unambiguously volatile.
+class TestUnstatedComparisonContractFailsClosed:
+    """Codex review: absence was synthesized as the reader's own version.
 
-    In this codebase `host` is as likely to name real platform or
-    frontend-context content as a hostname, so excluding it collapsed
-    genuinely different content to one digest — the exact failure
-    `VOLATILE_KEYS`' own comment warns about.
+    `from_dict` defaulted the missing key to `COMPARISON_CONTRACT_VERSION`, so
+    a malformed or pre-versioned package claimed to share this build's
+    comparison semantics and `check_reader_compatibility` reported it
+    readable — bypassing the one axis that exists to fail closed exactly when
+    those semantics are unknown.
     """
 
-    def test_host_is_content_and_reaches_the_digest(self) -> None:
-        assert "host" not in VOLATILE_KEYS
-        assert semantic_digest({"host": "linux"}) != semantic_digest(
-            {"host": "windows"}
-        )
-        assert semantic_digest({"host": "linux"}) != semantic_digest({})
+    def test_a_package_omitting_the_axis_is_not_readable(self) -> None:
+        versions = StorageVersions.from_dict({})
 
-    def test_hostname_remains_volatile(self) -> None:
-        """The unambiguous spelling keeps its exclusion."""
-        assert "hostname" in VOLATILE_KEYS
-        assert semantic_digest({"hostname": "runner-1"}) == semantic_digest(
-            {"hostname": "runner-2"}
-        )
+        assert versions.comparison_contract_version == UNSTATED_VERSION
 
-    @pytest.mark.parametrize("key", sorted(VOLATILE_KEYS))
-    def test_no_excluded_key_has_a_plausible_content_reading(self, key: str) -> None:
-        """A guard on the bar itself, not just on today's list.
+        result = check_reader_compatibility(versions)
 
-        Every excluded name must be one no reasonable payload would use for
-        content. These stems are the ones that carry a real ABI meaning
-        elsewhere in this codebase, so a future addition containing one
-        should be argued for explicitly rather than added to the set.
+        assert not result.readable
+        assert "does not state a comparison contract version" in result.reason
+
+    def test_parsing_stays_defensive(self) -> None:
+        """The refusal belongs at the decision point, not at the parse.
+
+        This repo's convention is that a hand-edited or newer package never
+        aborts a load; it is refused when a decision is actually made from it.
         """
-        ambiguous_stems = ("host", "target", "arch", "platform", "version", "path")
-        assert not any(
-            key == stem or key.startswith(stem + "_") for stem in ambiguous_stems
+        assert StorageVersions.from_dict({}) is not None
+        assert StorageVersions.from_dict({"producer": {}}) is not None
+
+    def test_a_stated_current_version_is_readable(self) -> None:
+        versions = StorageVersions.from_dict(
+            {"comparison_contract_version": COMPARISON_CONTRACT_VERSION}
         )
+
+        assert check_reader_compatibility(versions).readable
+
+    def test_a_round_tripped_package_always_states_the_axis(self) -> None:
+        """A package this build writes can always be read back."""
+        payload = StorageVersions().to_dict()
+
+        assert "comparison_contract_version" in payload
+        assert check_reader_compatibility(StorageVersions.from_dict(payload)).readable
+
+
+class TestExactlyTwoAxesFailClosed:
+    """Codex review flagged the docs and the code disagreeing here.
+
+    ADR-062 D2 and plan A0.5 said only `comparison_contract_version` fails
+    closed, while the implementation also refused a newer
+    `package_format_version`. The prose was the wrong half — a reader that
+    cannot locate a newer container's structures must refuse rather than
+    misparse — so the documents were corrected to match. This test pins the
+    resulting contract so the two cannot drift apart silently again.
+    """
+
+    def test_the_two_closing_axes_refuse(self) -> None:
+        for versions in (
+            StorageVersions(package_format_version=PACKAGE_FORMAT_VERSION + 1),
+            StorageVersions(
+                comparison_contract_version=COMPARISON_CONTRACT_VERSION + 1
+            ),
+        ):
+            assert not check_reader_compatibility(versions).readable
+
+    @pytest.mark.parametrize(
+        "versions",
+        [
+            StorageVersions(section_schema_versions={"graph": 99}),
+            StorageVersions(normalization_recipe="norm-v99"),
+            StorageVersions(producer=ProducerIdentity("unknown-tool", "99")),
+            StorageVersions(extractor_generation=99),
+            StorageVersions(resolver_generation=99),
+            StorageVersions(source_schema_version=99),
+            StorageVersions(source_producer_generation="gen-99"),
+        ],
+    )
+    def test_the_other_five_axes_stay_informational(
+        self, versions: StorageVersions
+    ) -> None:
+        """A reader that does not recognize these must still read the package.
+
+        This is what lets an optional display field ship without implying a
+        new evidence recipe.
+        """
+        assert check_reader_compatibility(versions).readable
