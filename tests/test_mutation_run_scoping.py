@@ -636,3 +636,40 @@ def test_scoping_never_applies_over_a_saved_results_file(
         ]
     )
     assert rc == 1
+
+
+def test_run_seconds_is_none_for_a_saved_results_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`--run --results-file ...`: `_gather()` returns the saved file without
+    ever invoking mutmut, so `run_seconds`/`mutants_per_second` must read
+    `None` rather than the near-zero file-read duration and the implausible
+    rate derived from it — a receipt consumer (a future budget/trend tool)
+    would otherwise mistake an offline replay for a fast live run (Codex
+    review, PR #877, sixth round)."""
+    (tmp_path / "abicheck").mkdir()
+    (tmp_path / "abicheck" / "diff_types.py").write_text(_SOURCE, encoding="utf-8")
+    _pyproject_with_only_mutate(tmp_path, ["abicheck/diff_types.py"])
+    monkeypatch.setattr(gate, "REPO_ROOT", tmp_path)
+    results = _write(
+        tmp_path,
+        "r.txt",
+        "    abicheck.diff_types.x_alpha__mutmut_1: killed\n",
+    )
+    monkeypatch.setattr(
+        gate, "load_cicd_stats", lambda _dir: {"total": 1, "survived": 0, "killed": 1}
+    )
+    receipt = tmp_path / "receipt.json"
+    rc = gate.main(
+        [
+            "--run",
+            "--results-file",
+            results,
+            "--json",
+            str(receipt),
+        ]
+    )
+    assert rc == 0
+    doc = json.loads(receipt.read_text())
+    assert doc["run_seconds"] is None
+    assert doc["mutants_per_second"] is None

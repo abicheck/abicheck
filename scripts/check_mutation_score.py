@@ -1299,7 +1299,7 @@ def main(argv: list[str] | None = None) -> int:
         if stats is not None:
             not_checked = stats.get("not_checked", 0)
             mutants_measured = max(stats.get("total", 0) - not_checked, 0)
-            if args.run and gather_seconds > 0:
+            if args.run and not args.results_file and gather_seconds > 0:
                 mutants_per_second = round(mutants_measured / gather_seconds, 3)
         Path(args.json).write_text(
             json.dumps(
@@ -1311,12 +1311,25 @@ def main(argv: list[str] | None = None) -> int:
                     "by_module": by_module,
                     "gated": gated,
                     "exit_code": exit_code,
-                    #: Budget/efficiency metrics (only meaningful under
-                    #: --run): how long `_gather` took, how many mutants were
-                    #: actually test-executed and at what rate, and whether
-                    #: this run scoped the expensive phase to a subset of
+                    #: Budget/efficiency metrics (only meaningful for a real
+                    #: --run that actually invoked mutmut): how long
+                    #: `_gather` took, how many mutants were actually
+                    #: test-executed and at what rate, and whether this run
+                    #: scoped the expensive phase to a subset of
                     #: `only_mutate` or fell back to the full population.
-                    "run_seconds": round(gather_seconds, 3) if args.run else None,
+                    #: `_gather()` checks --results-file *before* --run and
+                    #: returns those saved results unconditionally when both
+                    #: are given, without ever invoking mutmut — so
+                    #: `run_seconds` under that combination would otherwise
+                    #: be a near-zero file-read duration, not a real run
+                    #: time, and `mutants_per_second` derived from it would
+                    #: read as an implausibly fast "live" rate to anything
+                    #: consuming this receipt (Codex review).
+                    "run_seconds": (
+                        round(gather_seconds, 3)
+                        if args.run and not args.results_file
+                        else None
+                    ),
                     "mutants_measured": mutants_measured,
                     "mutants_per_second": mutants_per_second,
                     "run_scope": {
