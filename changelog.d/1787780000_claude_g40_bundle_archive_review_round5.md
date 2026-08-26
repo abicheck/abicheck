@@ -130,3 +130,30 @@
   blocked on `open()` instead of failing cleanly. Now uses the same
   O_NONBLOCK-open + `fstat()`-classify shape as that sniff, raising
   `SnapshotError` for a non-regular source.
+
+- **G40 bundle archive: a real central-directory-cap bypass (P1) in the
+  entry-counting fix from the previous round.** `_actual_central_
+  directory_entry_count()` seeked to the raw, EOCD/ZIP64-record-declared
+  `cd_offset` -- but that field is written relative to the *zip data's
+  own start*, not the whole file, so a concatenated/self-extracting
+  archive with bytes prepended before the zip structure makes it wrong
+  by exactly the prefix length. `zipfile.ZipFile` itself never trusts
+  this field directly either: CPython's own `_RealGetContents` derives
+  `start_dir = eocd_location - size_cd`, where the claimed offset field
+  cancels out of the formula entirely. Reproduced: a prefixed archive
+  whose EOCD `total_entries` was patched to 1 counted zero records with
+  the old, offset-trusting seek (silently passing) while `ZipFile` itself
+  correctly rebased and materialized all 20,001 real `ZipInfo` objects.
+  Fixed by deriving the same offset-independent position CPython uses
+  (`record_position - cd_size`, where `record_position` is the verified
+  location of whichever EOCD/ZIP64 record supplied `cd_size` -- never the
+  claimed offset field, which is now not even read). Regression test:
+  `test_rejects_understated_entries_even_with_a_prepended_prefix` (a real
+  5-record central directory behind a 100-byte prefix, confirmed to pass
+  silently against the pre-fix seek and to be correctly rejected against
+  the fix).
+
+  `tests/test_bundle_archive_cd_guard.py` (new): the central-directory
+  guard and preflight-safety test classes, split out of
+  `tests/test_bundle_archive.py` purely to keep both under the ADR-061
+  1200-line test cap after these additions.

@@ -1,0 +1,406 @@
+# Copyright 2026 Nikolay Petrov
+# SPDX-License-Identifier: Apache-2.0
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""Central-directory bomb guard and preflight tests for
+``bundle_archive_cd_guard.py``/``bundle_archive.py`` (G40) -- split out of
+``tests/test_bundle_archive.py`` (an ADR-061 test-size-capped module) to
+keep both under the 1200-line test cap.
+
+Covers ``reject_absurd_central_directory()`` itself (declared vs. actual
+entry counts, byte-size caps, ZIP64 locator/record handling, prefixed/
+self-extracting archives) and the preflight's own publication-safety
+properties (sharing one fd with ``zipfile.ZipFile``, rejecting non-regular
+sources, rejecting in-place growth between the preflight and construction).
+"""
+
+from __future__ import annotations
+
+import os
+import sys
+from pathlib import Path
+
+import pytest
+
+from abicheck.errors import SnapshotError
+from abicheck.storage.bundle_archive import BundleArchiveReader, BundleArchiveWriter
+
+
+class TestBundleArchiveCentralDirectoryGuard:
+    """ZipFile(...) eagerly parses the whole central directory before any
+    per-member size guard runs -- an absurd entry count must be rejected
+    before that parse (Codex review)."""
+
+    def test_rejects_an_absurd_central_directory_entry_count(
+        self, tmp_path: Path
+    ) -> None:
+        import struct
+
+        path = tmp_path / "fake.zip"
+        # A hand-crafted EOCD record claiming far more entries than this
+        # format ever legitimately needs -- no real central directory
+        # backs it, since the guard must fire before zipfile.ZipFile ever
+        # tries to parse one.
+        eocd = struct.pack("<IHHHHIIH", 0x06054B50, 0, 0, 0, 65000, 0, 0, 0)
+        path.write_bytes(b"PK\x03\x04" + b"junk" + eocd)
+
+        with pytest.raises(SnapshotError, match="central directory claims"):
+            BundleArchiveReader.open(path)
+
+    def test_a_real_archive_with_ordinary_member_count_opens_fine(
+        self, tmp_path: Path
+    ) -> None:
+        path = tmp_path / "bundle.archive.zip"
+        with BundleArchiveWriter(path) as writer:
+            h = writer.put_blob(b'{"a": 1}')
+            writer.write_manifest({"library_blobs": {"a.so": h}})
+
+        with BundleArchiveReader.open(path) as reader:
+            assert reader.read_manifest()["library_blobs"] == {"a.so": h}
+
+    def test_rejects_a_central_directory_with_more_real_records_than_it_claims(
+        self, tmp_path: Path
+    ) -> None:
+        """Codex review, fresh evidence: `total_entries` can be understated
+        while `cd_size` (bounded, but still generously sized) holds far
+        more real central-directory-file-header records -- CPython's
+        `zipfile.ZipFile` parses every record it finds within `cd_size`
+        regardless of `total_entries`, so trusting the declared count
+        alone lets this straight through. Calls the guard directly with a
+        small `max_entries` (not through `BundleArchiveReader.open`'s real
+        20,000-entry cap, which would need an unwieldy number of records
+        to reproduce): 5 real minimal records must be rejected against a
+        cap of 3, even though the EOCD's own `total_entries` claims 1."""
+        import struct
+
+        from abicheck.storage.bundle_archive_cd_guard import (
+            reject_absurd_central_directory,
+        )
+
+        # A minimal central-directory-file-header record: signature(4) +
+        # 42 remaining fixed bytes, all zero -- which already makes the
+        # filename/extra/comment length fields inside those 42 bytes zero.
+        one_record = b"PK\x01\x02" + b"\x00" * 42
+        assert len(one_record) == 46
+        central_directory = one_record * 5
+        cd_offset = 4  # arbitrary; only this test's own bytes matter
+        eocd = struct.pack(
+            "<IHHHHIIH",
+            0x06054B50,
+            0,
+            0,
+            0,
+            1,  # total_entries: understated -- the real count is 5
+            len(central_directory),
+            cd_offset,
+            0,
+        )
+
+        data = bytearray(b"\x00" * cd_offset)
+        data += central_directory
+        data += eocd
+        path = tmp_path / "understated_entry_count.zip"
+        path.write_bytes(bytes(data))
+
+        with path.open("rb") as f:
+            with pytest.raises(SnapshotError, match="actually contains more than"):
+                reject_absurd_central_directory(f, path, max_entries=3)
+
+    def test_rejects_understated_entries_even_with_a_prepended_prefix(
+        self, tmp_path: Path
+    ) -> None:
+        """Codex review, fresh evidence: `zipfile.ZipFile` rebases the
+        central directory's real position via `eocd_location - size_cd`
+        (the claimed `cd_offset` field cancels out of that formula
+        entirely), so a self-extracting archive with N prefix bytes still
+        opens correctly even though its EOCD's `cd_offset` is relative to
+        the zip data alone, not the whole file. A guard seeking to the
+        raw, prefix-unaware `cd_offset` instead finds nothing there and
+        silently counts zero. Reproduced: 5 real records behind a
+        100-byte prefix, `cd_offset` still claiming its pre-prefix
+        (now-wrong) value, `total_entries` understated to 1."""
+        import struct
+
+        from abicheck.storage.bundle_archive_cd_guard import (
+            reject_absurd_central_directory,
+        )
+
+        prefix = b"\x00" * 100  # simulates a self-extracting stub
+        one_record = b"PK\x01\x02" + b"\x00" * 42
+        central_directory = one_record * 5
+        cd_offset_claimed = 4  # correct with no prefix; wrong with one
+        eocd = struct.pack(
+            "<IHHHHIIH",
+            0x06054B50,
+            0,
+            0,
+            0,
+            1,  # total_entries: understated -- the real count is 5
+            len(central_directory),
+            cd_offset_claimed,
+            0,
+        )
+
+        data = bytearray(prefix)
+        data += b"\x00" * cd_offset_claimed
+        data += central_directory
+        data += eocd
+        path = tmp_path / "prefixed_understated_entry_count.zip"
+        path.write_bytes(bytes(data))
+
+        with path.open("rb") as f:
+            with pytest.raises(SnapshotError, match="actually contains more than"):
+                reject_absurd_central_directory(f, path, max_entries=3)
+
+    def test_rejects_a_central_directory_claiming_an_absurd_byte_size(
+        self, tmp_path: Path
+    ) -> None:
+        """Codex review, fresh evidence: the entry-count cap alone isn't a
+        byte-size bound -- a crafted archive can pair a low total_entries
+        with an enormous cd_size, which zipfile.ZipFile reads and parses
+        until fully consumed regardless of the entry count."""
+        import struct
+
+        path = tmp_path / "fake.zip"
+        # Low entry count (10, well under the cap), huge cd_size (200 MiB).
+        eocd = struct.pack("<IHHHHIIH", 0x06054B50, 0, 0, 0, 10, 200 * 1024 * 1024, 0, 0)
+        path.write_bytes(b"PK\x03\x04" + b"junk" + eocd)
+
+        with pytest.raises(SnapshotError, match="central directory claims"):
+            BundleArchiveReader.open(path)
+
+    def test_rejects_a_zip64_archive_claiming_an_absurd_entry_count(
+        self, tmp_path: Path
+    ) -> None:
+        """A ZIP64 entry-count sentinel (0xFFFF) must not skip the cap --
+        the real count is recovered from the locator/record (Codex)."""
+        import struct
+
+        path = tmp_path / "fake_zip64.zip"
+        zip64_eocd_offset = 4  # arbitrary; only this test's own bytes matter
+        # ZIP64 EOCD record: sig(4) size_of_record(8) ver_made_by(2)
+        # ver_needed(2) disk(4) disk_start_cd(4) entries_this_disk(8)
+        # total_entries(8) cd_size(8) cd_offset(8) = 56 bytes fixed portion.
+        zip64_record = struct.pack(
+            "<IQHHIIQQQQ", 0x06064B50, 44, 0, 0, 0, 0, 0, 70_000, 1024, 0
+        )
+        # ZIP64 EOCD locator: sig(4) disk_with_zip64_eocd(4) offset(8) total_disks(4)
+        zip64_locator = struct.pack("<IIQI", 0x07064B50, 0, zip64_eocd_offset, 1)
+        # Standard EOCD with the 0xFFFF sentinel for total_entries.
+        eocd = struct.pack("<IHHHHIIH", 0x06054B50, 0, 0, 0, 0xFFFF, 0, 0, 0)
+
+        data = bytearray(b"\x00" * zip64_eocd_offset)
+        data += zip64_record
+        data += zip64_locator
+        data += eocd
+        path.write_bytes(bytes(data))
+
+        with pytest.raises(SnapshotError, match="central directory claims 70000"):
+            BundleArchiveReader.open(path)
+
+    def test_rejects_a_zip64_locator_even_without_a_standard_eocd_sentinel(
+        self, tmp_path: Path
+    ) -> None:
+        """CPython's ZipFile inspects a preceding ZIP64 locator
+        unconditionally, not only on a sentinel overflow -- a hostile
+        archive can pair small standard-EOCD values with a real oversized
+        ZIP64 record (Codex review, fresh evidence)."""
+        import struct
+
+        path = tmp_path / "fake_zip64_no_sentinel.zip"
+        zip64_eocd_offset = 4
+        zip64_record = struct.pack(
+            "<IQHHIIQQQQ", 0x06064B50, 44, 0, 0, 0, 0, 0, 70_000, 1024, 0
+        )
+        zip64_locator = struct.pack("<IIQI", 0x07064B50, 0, zip64_eocd_offset, 1)
+        # Standard EOCD with small, non-sentinel total_entries/cd_size.
+        eocd = struct.pack("<IHHHHIIH", 0x06054B50, 0, 0, 0, 1, 100, 0, 0)
+
+        data = bytearray(b"\x00" * zip64_eocd_offset)
+        data += zip64_record
+        data += zip64_locator
+        data += eocd
+        path.write_bytes(bytes(data))
+
+        with pytest.raises(SnapshotError, match="central directory claims 70000"):
+            BundleArchiveReader.open(path)
+
+    @pytest.mark.parametrize(
+        ("build_prefix", "match"),
+        [
+            # No room before the EOCD for a 20-byte locator at all.
+            (lambda offset: b"", "too short to hold a ZIP64 EOCD locator"),
+            # Bytes precede the EOCD, but aren't a real ZIP64 locator.
+            (lambda offset: b"\x00" * 20, "no valid ZIP64 EOCD locator"),
+        ],
+    )
+    def test_rejects_a_zip64_sentinel_with_no_usable_locator(
+        self, tmp_path: Path, build_prefix, match
+    ) -> None:
+        """Codex review, fresh evidence: a ZIP64 sentinel whose locator
+        can't be found/validated must be rejected outright, not silently
+        passed through to zipfile.ZipFile's own fallback onto the
+        (sentinel, unverified) standard EOCD fields."""
+        import struct
+
+        path = tmp_path / "fake_zip64.zip"
+        eocd = struct.pack("<IHHHHIIH", 0x06054B50, 0, 0, 0, 0xFFFF, 0, 0, 0)
+        path.write_bytes(build_prefix(None) + bytes(eocd))
+
+        with pytest.raises(SnapshotError, match=match):
+            BundleArchiveReader.open(path)
+
+    def test_rejects_a_zip64_locator_pointing_at_a_malformed_record(
+        self, tmp_path: Path
+    ) -> None:
+        """Codex review, fresh evidence: the locator itself is well-formed
+        and points somewhere, but what's there isn't a real ZIP64 EOCD
+        record (wrong signature/too short) -- also rejected outright."""
+        import struct
+
+        path = tmp_path / "fake_zip64_bad_record.zip"
+        zip64_eocd_offset = 4
+        junk_record = b"\x00" * 56  # 56 bytes, but not the ZIP64 record signature
+        zip64_locator = struct.pack("<IIQI", 0x07064B50, 0, zip64_eocd_offset, 1)
+        eocd = struct.pack("<IHHHHIIH", 0x06054B50, 0, 0, 0, 0xFFFF, 0, 0, 0)
+
+        data = bytearray(b"\x00" * zip64_eocd_offset)
+        data += junk_record
+        data += zip64_locator
+        data += eocd
+        path.write_bytes(bytes(data))
+
+        with pytest.raises(SnapshotError, match="no valid ZIP64 EOCD record"):
+            BundleArchiveReader.open(path)
+
+    def test_rejects_a_zip64_locator_offset_beyond_the_file_size(
+        self, tmp_path: Path
+    ) -> None:
+        """Codex review, fresh evidence: a crafted locator can name an
+        offset the platform's f.seek() would raise ValueError for (e.g.
+        2**64-1), which the surrounding `except OSError:` does not catch --
+        this must surface as SnapshotError, not a raw exception, matching
+        this module's own documented error vocabulary. Bounding against
+        the file's own size rejects both the huge-offset case and any
+        offset merely past EOF, without depending on seek() to fail."""
+        import struct
+
+        path = tmp_path / "fake_zip64_huge_offset.zip"
+        absurd_offset = 2**64 - 1
+        zip64_locator = struct.pack("<IIQI", 0x07064B50, 0, absurd_offset, 1)
+        eocd = struct.pack("<IHHHHIIH", 0x06054B50, 0, 0, 0, 0xFFFF, 0, 0, 0)
+
+        data = bytearray(zip64_locator)
+        data += eocd
+        path.write_bytes(bytes(data))
+
+        with pytest.raises(SnapshotError, match="beyond the file's own size"):
+            BundleArchiveReader.open(path)
+
+
+class TestBundleArchivePreflightUsesTheSameFdAsZipFile:
+    """Codex review, fresh evidence: the earlier preflight reopened *path*
+    a second time for `zipfile.ZipFile` -- a concurrent atomic replacement
+    between the two opens could swap in a different generation, bypassing
+    the preflight entirely. Both now read through one shared fd."""
+
+    def test_preflight_and_zipfile_share_one_open(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        path = tmp_path / "bundle.archive.zip"
+        with BundleArchiveWriter(path) as writer:
+            h = writer.put_blob(b'{"a": 1}')
+            writer.write_manifest({"library_blobs": {"a.so": h}})
+
+        # BundleArchiveReader.__init__ opens via os.open() (not the
+        # builtin open()) as of the FIFO-TOCTOU fix -- tracked there.
+        opened_paths: list[object] = []
+        real_os_open = os.open
+
+        def _tracking_open(file, *a, **kw):  # type: ignore[no-untyped-def]
+            if file == path or file == str(path):
+                opened_paths.append(file)
+            return real_os_open(file, *a, **kw)
+
+        monkeypatch.setattr(os, "open", _tracking_open)
+        with BundleArchiveReader.open(path) as reader:
+            assert reader.read_blob(h) == b'{"a": 1}'
+        # Exactly one open() of *path* -- zipfile.ZipFile receives the
+        # already-open fd, not the path again.
+        assert len(opened_paths) == 1
+
+
+class TestBundleArchiveReaderRejectsNonRegularSourcesDirectly:
+    """Codex review, fresh evidence: an explicit `format="archive"`
+    caller reaches `BundleArchiveReader.open()`/`__init__` directly,
+    bypassing `open_regular_file_for_format_sniff`'s own non-regular-
+    source guard entirely -- a FIFO with no writer must still be
+    rejected cleanly rather than hanging on a blocking `open()`."""
+
+    @pytest.mark.skipif(sys.platform == "win32", reason="no os.mkfifo on Windows")
+    def test_open_does_not_block_on_a_fifo_with_no_writer(self, tmp_path: Path) -> None:
+        import threading
+
+        fifo = tmp_path / "no_writer.fifo"
+        os.mkfifo(fifo)
+
+        outcomes: list[object] = []
+
+        def _call() -> None:
+            try:
+                BundleArchiveReader.open(fifo)
+            except SnapshotError as exc:
+                outcomes.append(exc)
+
+        t = threading.Thread(target=_call, daemon=True)
+        t.start()
+        t.join(timeout=5)
+        assert not t.is_alive(), "BundleArchiveReader.open() blocked on a FIFO"
+        assert len(outcomes) == 1
+        assert "not a regular file" in str(outcomes[0])
+
+
+class TestBundleArchivePreflightRejectsInPlaceGrowth:
+    """Codex review, fresh evidence, reproduced: sharing one fd between
+    the preflight and `zipfile.ZipFile` closes a *path-substitution*
+    race but not an *in-place content* one -- another writer with this
+    inode's access could still grow the file between the preflight
+    returning and `ZipFile`'s own scan. Re-checked immediately before
+    construction."""
+
+    def test_growth_between_preflight_and_zipfile_is_rejected(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import abicheck.storage.bundle_archive_cd_guard as cd_guard_module
+
+        path = tmp_path / "bundle.archive.zip"
+        with BundleArchiveWriter(path) as writer:
+            h = writer.put_blob(b'{"a": 1}')
+            writer.write_manifest({"library_blobs": {"a.so": h}})
+
+        real_guard = cd_guard_module.reject_absurd_central_directory
+
+        def _guard_then_grow(f, archive_path, *, max_entries):  # type: ignore[no-untyped-def]
+            validated_size = real_guard(f, archive_path, max_entries=max_entries)
+            # Simulates another writer appending to the same inode right
+            # after this check returns but before ZipFile is constructed.
+            with open(path, "ab") as grower:
+                grower.write(b"\x00" * 64)
+            return validated_size
+
+        monkeypatch.setattr(
+            cd_guard_module, "reject_absurd_central_directory", _guard_then_grow
+        )
+        with pytest.raises(SnapshotError, match="changed size while being opened"):
+            BundleArchiveReader.open(path)

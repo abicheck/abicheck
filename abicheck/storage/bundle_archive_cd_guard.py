@@ -142,10 +142,10 @@ def reject_absurd_central_directory(f: Any, path: Path, *, max_entries: int) -> 
             return size
         # EOCD layout: signature(4) this_disk(2) cd_start_disk(2)
         # entries_this_disk(2) total_entries(2) cd_size(4) cd_offset(4)
-        # comment_len(2) [comment...]
+        # comment_len(2) [comment...]. cd_offset itself is deliberately
+        # never read -- see cd_start's own comment below for why.
         total_entries = int.from_bytes(tail[idx + 10 : idx + 12], "little")
         cd_size = int.from_bytes(tail[idx + 12 : idx + 16], "little")
-        cd_offset = int.from_bytes(tail[idx + 16 : idx + 20], "little")
         is_zip64_sentinel = total_entries == 0xFFFF or cd_size == 0xFFFFFFFF
 
         # The locator is always the fixed 20 bytes immediately preceding
@@ -203,9 +203,26 @@ def reject_absurd_central_directory(f: Any, path: Path, *, max_entries: int) -> 
                 )
             total_entries = int.from_bytes(record[32:40], "little")
             cd_size = int.from_bytes(record[40:48], "little")
-            cd_offset = int.from_bytes(record[48:56], "little")
     except OSError:
         return size
+    # Where CPython's own zipfile._RealGetContents() actually seeks for
+    # the central directory: `start_dir = offset_cd + concat`, where
+    # `concat = eocd_location - size_cd - offset_cd` -- the claimed
+    # cd_offset/diroffset field cancels out of that sum entirely, leaving
+    # `start_dir = eocd_location - size_cd` (non-ZIP64) or, for ZIP64,
+    # the identical shape anchored on the ZIP64 record's own verified
+    # position instead of the standard EOCD's. This is deliberately not
+    # the field this preflight itself decoded from either record: a
+    # concatenated/self-extracting archive's *claimed* offset is written
+    # relative to the start of the zip data, not the whole file, so
+    # trusting it directly here (as an earlier revision of this function
+    # did) let a crafted archive's directory sit somewhere this guard
+    # never actually walked while `ZipFile` correctly rebased and parsed
+    # the real one (Codex review, fresh evidence, reproduced: a prefixed
+    # 20,001-entry archive whose EOCD count was patched to 1 counted zero
+    # records here while `ZipFile` materialized all 20,001).
+    record_position = zip64_eocd_offset if has_locator else eocd_abs
+    cd_start = record_position - cd_size
     if total_entries > max_entries:
         raise SnapshotError(
             f"{path}: central directory claims {total_entries} entries, "
@@ -228,10 +245,10 @@ def reject_absurd_central_directory(f: Any, path: Path, *, max_entries: int) -> 
     # unnoticed. Counted for real here, bounded to at most `cd_size`
     # bytes (already capped) and stopped as soon as the count itself
     # exceeds the limit.
-    if 0 <= cd_offset < size:
+    if 0 <= cd_start < size:
         try:
             actual_entries = _actual_central_directory_entry_count(
-                f, cd_offset=cd_offset, cd_size=cd_size, max_entries=max_entries
+                f, cd_offset=cd_start, cd_size=cd_size, max_entries=max_entries
             )
         except OSError:
             return size
