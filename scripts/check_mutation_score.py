@@ -269,8 +269,7 @@ def diff_has_unparseable_git_header(diff_text: str) -> bool:
 
 
 def diff_lacks_git_headers_for_its_hunks(diff_text: str) -> bool:
-    """True when the diff has at least one real ``@@`` hunk but *no*
-    ``diff --git`` header line anywhere in it.
+    """True when some hunk's file isn't named by any ``diff --git`` header.
 
     A "headerless" unified diff — e.g. produced by plain ``diff -u`` rather
     than ``git diff``, or a hand-assembled/stripped patch file passed via
@@ -279,25 +278,30 @@ def diff_lacks_git_headers_for_its_hunks(diff_text: str) -> bool:
     `diff_touched_only_mutate_modules` can still name a touched
     ``only_mutate`` module from it. But `diff_touched_paths` (and
     `diff_has_unparseable_git_header`) can only ever see a path named by a
-    ``diff --git`` header — with zero such headers in the whole diff, both
-    read as "nothing touched" regardless of what the hunks actually show,
-    silently permitting a scoped run even when the diff also touches a real
-    path outside ``only_mutate`` the hunk-based reader would have caught
-    just as easily as the in-scope one (Codex review, PR #877, sixth round
-    on this same predicate — the fifth round's fix closed a header this
-    reader *couldn't parse*; this is a diff with *no* headers to parse at
-    all). Scoped by "has a hunk" rather than firing on any header-free diff
-    outright: an empty diff, or one with no hunks at all, is already handled
-    by `mutant_run_scope`'s own no-diff/nothing-touched fallbacks.
+    ``diff --git`` header. Checking merely "does *any* `diff --git` line
+    exist anywhere in the text" (the first version of this check) is not
+    enough: a diff that concatenates one ordinary `diff --git`-headed entry
+    with a second, headerless unified-diff section (e.g. two files pasted
+    together, or a hand-assembled `--diff-file`) has a header *somewhere*,
+    so that version read the whole diff as headered and never looked at
+    whether the headerless section's own file was actually covered by one
+    (Codex review, PR #877, seventh round on this same predicate — the
+    sixth round's fix closed a diff with *zero* headers; this is a diff
+    with *some*, just not covering every hunk). Fixed by comparing the
+    file set each reader actually sees: every path `_hunks()` names must
+    also appear in `diff_touched_paths()`'s header-derived set, or a real
+    hunk exists that the header-based reader — and therefore
+    `diff_touches_outside_only_mutate` — cannot see at all.
     """
-    has_git_header = any(
-        line.startswith("diff --git ") for line in diff_text.splitlines()
-    )
-    if has_git_header:
+    hunk_paths: set[str] = set()
+    for old, new, _, _ in _hunks(diff_text):
+        if old is not None:
+            hunk_paths.add(old)
+        if new is not None:
+            hunk_paths.add(new)
+    if not hunk_paths:
         return False
-    return any(
-        old is not None or new is not None for old, new, _, _ in _hunks(diff_text)
-    )
+    return not hunk_paths <= diff_touched_paths(diff_text)
 
 
 def diff_touches_outside_only_mutate(diff_text: str, only_mutate: list[str]) -> bool:
@@ -321,18 +325,22 @@ def diff_touches_outside_only_mutate(diff_text: str, only_mutate: list[str]) -> 
     diff with *no* `diff --git` headers at all (a headerless unified diff
     from plain `diff -u` or a hand-assembled `--diff-file`), which is
     invisible to the header-based reader regardless of content even
-    though the hunk-based reader still sees it fine
-    (`diff_lacks_git_headers_for_its_hunks`). The first three rounds each
-    narrowed what counted as "outside `only_mutate`"; the last three each
-    showed that no such narrowing could have helped, since the affected
-    path was never in the detected set at all — fixed at the detection
-    layer each time: first by moving off `_hunks()` onto `diff --git`
-    headers (`diff_touched_paths`), then by treating any header that
-    reader still can't parse as itself a signal to disable scoping
-    (`diff_has_unparseable_git_header`) rather than writing a
-    git-quote/octal-escape decoder, then by falling back whenever the
-    header-based reader has nothing to parse in the first place while the
-    hunk-based reader still finds real content.
+    though the hunk-based reader still sees it fine, and — a diff mixing
+    an ordinary `diff --git`-headed entry with a *second*, headerless
+    section, whose own file a naive "does any header exist at all" check
+    still misses (`diff_lacks_git_headers_for_its_hunks`, which instead
+    compares the two readers' own file sets directly). The first three
+    rounds each narrowed what counted as "outside `only_mutate`"; the
+    last four each showed that no such narrowing could have helped, since
+    the affected path was never in the detected set at all — fixed at the
+    detection layer each time: first by moving off `_hunks()` onto
+    `diff --git` headers (`diff_touched_paths`), then by treating any
+    header that reader still can't parse as itself a signal to disable
+    scoping (`diff_has_unparseable_git_header`) rather than writing a
+    git-quote/octal-escape decoder, then by comparing what the hunk-based
+    and header-based readers each see and falling back whenever a hunk's
+    file isn't covered by any header at all — whether because the diff
+    has none, or because one section of it does and another doesn't.
 
     Every mutant, however scoped, is tested against the diff's *entire*
     current tree — mutmut's own `copy_src_dir`/`copy_also_copy_files` copy

@@ -407,6 +407,38 @@ def test_diff_touches_outside_only_mutate_falls_back_on_a_headerless_diff() -> N
     }
 
 
+def test_diff_lacks_git_headers_for_its_hunks_detects_a_mixed_diff() -> None:
+    """A diff concatenating one ordinary `diff --git`-headed entry with a
+    second, headerless unified-diff section (two files pasted together, or
+    a hand-assembled `--diff-file`) has a `diff --git` line *somewhere* —
+    checking mere presence isn't enough, since the headerless section's own
+    file is still invisible to `diff_touched_paths` (Codex review, PR #877,
+    seventh round on this same check)."""
+    diff = (
+        "diff --git a/abicheck/diff_types.py b/abicheck/diff_types.py\n"
+        "--- a/abicheck/diff_types.py\n+++ b/abicheck/diff_types.py\n"
+        "@@ -1,0 +2,1 @@\n+    pass\n"
+        "--- a/tests/conftest.py\n+++ b/tests/conftest.py\n"
+        "@@ -1,0 +2,1 @@\n+    pass\n"
+    )
+    assert gate.diff_lacks_git_headers_for_its_hunks(diff) is True
+    # Pin why: a `diff --git` line exists, but doesn't cover the second hunk.
+    assert gate.diff_touched_paths(diff) == {"abicheck/diff_types.py"}
+
+
+def test_diff_touches_outside_only_mutate_falls_back_on_a_mixed_diff() -> None:
+    """End-to-end: the mixed-format diff above must not be scoped, even
+    though its lone `diff --git` header names only the in-scope module."""
+    diff = (
+        "diff --git a/abicheck/diff_types.py b/abicheck/diff_types.py\n"
+        "--- a/abicheck/diff_types.py\n+++ b/abicheck/diff_types.py\n"
+        "@@ -1,0 +2,1 @@\n+    pass\n"
+        "--- a/tests/conftest.py\n+++ b/tests/conftest.py\n"
+        "@@ -1,0 +2,1 @@\n+    pass\n"
+    )
+    assert gate.diff_touches_outside_only_mutate(diff, _ONLY_MUTATE_TWO) is True
+
+
 def test_mutant_run_scope_is_none_when_a_shared_test_fixture_is_touched() -> None:
     """The scenario `--require-baseline` alone cannot rule out: a production
     module and a *shared* test fixture both change, but the fixture doesn't
