@@ -54,6 +54,7 @@ from .cli_compare_options import (
     _resolve_debug_roots,
     _resolve_demangle,
     _warn_force_public_ignored,
+    echo_coverage_warnings,
 )
 from .cli_dump_helpers import resolve_dump_depth
 from .cli_helpers_compare import (
@@ -1235,7 +1236,8 @@ def _report_compare_result(
         from .reporter import _finding_id
 
         stamp_scoped_result_findings(result, finding_id=_finding_id)
-
+    if fmt == ONELINE_FORMAT:
+        echo_coverage_warnings(result.coverage_warnings)
     _write_or_echo(
         output,
         _render_compare_report(

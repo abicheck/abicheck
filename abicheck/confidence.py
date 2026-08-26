@@ -287,9 +287,29 @@ def note_if_same_binary_compared(result: DiffResult) -> None:
         return
     if old_meta.sha256 != new_meta.sha256:
         return
+    # The two *binaries* being byte-identical says nothing about whether a
+    # real change could still be caught: a comparison that also analyzed
+    # header/AST evidence (e.g. --old-header/--new-header, --build-info,
+    # or --sources pointing at genuinely different content than what
+    # produced this identical .so/.dll/.dylib) can still detect a real
+    # API/source-level difference even though the binary content is the
+    # same -- so the stronger "this comparison cannot detect a change"
+    # claim is only true when no such evidence was in play (Codex review,
+    # fresh evidence: the original wording overclaimed for exactly this
+    # case).
+    header_evidence_used = "header" in result.evidence_tiers
+    if header_evidence_used:
+        detection_note = (
+            "any ABI/API difference this run could still catch would have "
+            "to come from the header/build evidence supplied alongside "
+            "these binaries, not from the binaries themselves"
+        )
+    else:
+        detection_note = (
+            "this comparison cannot detect a change even if one was "
+            "intended -- verify the correct build artifacts were provided"
+        )
     result.coverage_warnings.append(
         "old and new binaries are byte-identical (sha256 "
-        f"{old_meta.sha256[:12]}...); this comparison cannot detect a "
-        "change even if one was intended -- verify the correct build "
-        "artifacts were provided"
+        f"{old_meta.sha256[:12]}...); {detection_note}"
     )

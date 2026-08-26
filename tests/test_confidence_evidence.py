@@ -445,7 +445,7 @@ class TestNoteIfSameBinaryCompared:
     way -- the correct verdict and "nothing was actually compared" read
     identically without this warning."""
 
-    def _result(self, old_sha=None, new_sha=None):
+    def _result(self, old_sha=None, new_sha=None, evidence_tiers=None):
         from abicheck.checker import DiffResult
         from abicheck.checker_types import LibraryMetadata
 
@@ -458,6 +458,8 @@ class TestNoteIfSameBinaryCompared:
             result.new_metadata = LibraryMetadata(
                 path="/b/new.so", sha256=new_sha, size_bytes=100
             )
+        if evidence_tiers is not None:
+            result.evidence_tiers = evidence_tiers
         return result
 
     def test_identical_sha256_appends_warning(self):
@@ -468,6 +470,41 @@ class TestNoteIfSameBinaryCompared:
         assert any("byte-identical" in w for w in result.coverage_warnings), (
             result.coverage_warnings
         )
+
+    def test_no_header_evidence_keeps_the_cannot_detect_claim(self):
+        """No header/AST evidence was analyzed alongside the identical
+        binaries -- the strong "this comparison cannot detect a change"
+        claim is accurate for this case."""
+        from abicheck.confidence import note_if_same_binary_compared
+
+        result = self._result(
+            old_sha="a" * 64, new_sha="a" * 64, evidence_tiers=["elf", "dwarf"]
+        )
+        note_if_same_binary_compared(result)
+        assert any(
+            "cannot detect a change" in w for w in result.coverage_warnings
+        ), result.coverage_warnings
+
+    def test_header_evidence_present_qualifies_the_claim(self):
+        """Codex review: the binaries being byte-identical says nothing
+        about whether a real API/source-level change could still be
+        caught when header/AST evidence was also analyzed (e.g. distinct
+        --old-header/--new-header or --build-info content) -- the warning
+        must not claim this comparison "cannot detect a change" when
+        header evidence genuinely could."""
+        from abicheck.confidence import note_if_same_binary_compared
+
+        result = self._result(
+            old_sha="a" * 64, new_sha="a" * 64, evidence_tiers=["elf", "header"]
+        )
+        note_if_same_binary_compared(result)
+        assert any(
+            "cannot detect a change" not in w and "byte-identical" in w
+            for w in result.coverage_warnings
+        ), result.coverage_warnings
+        assert any(
+            "header/build evidence" in w for w in result.coverage_warnings
+        ), result.coverage_warnings
 
     def test_different_sha256_appends_nothing(self):
         from abicheck.confidence import note_if_same_binary_compared
@@ -519,6 +556,33 @@ class TestNoteIfSameBinaryCompared:
         runner = CliRunner()
         result = runner.invoke(main, ["compare", str(so_path), str(so_path)])
         assert "byte-identical" in result.stdout, result.stdout
+
+    def test_oneline_profile_still_surfaces_the_warning_on_stderr(
+        self, tmp_path, monkeypatch
+    ):
+        """Codex review: `--profile quick` renders through
+        `service_render.to_stat`, a fixed one-line summary with no room for
+        a `coverage_warnings` entry -- every other format already surfaces
+        it inline (JSON/SARIF/markdown/HTML), so this format silently
+        dropped a same-binary warning entirely, mirroring the identical gap
+        already fixed for `scan --against`'s own text renderer."""
+        from unittest.mock import MagicMock
+
+        from click.testing import CliRunner
+
+        from abicheck import dumper as dumper_mod
+        from abicheck.cli import main
+
+        so_path = tmp_path / "lib.so"
+        so_path.write_bytes(b"\x7fELF" + b"\x00" * 200)
+        snap = AbiSnapshot(library="libfoo.so", version="1.0", functions=[])
+        monkeypatch.setattr(dumper_mod, "dump", MagicMock(side_effect=[snap, snap]))
+
+        runner = CliRunner()
+        result = runner.invoke(
+            main, ["compare", "--profile", "quick", str(so_path), str(so_path)]
+        )
+        assert "byte-identical" in result.output, result.output
 
     def test_native_compare_cli_hashes_through_a_multi_hop_linker_script_chain(
         self, tmp_path, monkeypatch
