@@ -712,21 +712,19 @@ def _resolve_baseline_header_scope(
 
     bl_headers = list(baseline_headers)
     bl_includes = list(baseline_includes) if baseline_includes else includes
-    # The old-side public boundary comes ONLY from `-H old=`: dirs in
-    # it are public-header dirs, files opt in just themselves. Do NOT fall back
-    # to the new side's public dirs — a relative dir like `include/` would
-    # (segment-based provenance) re-mark old private headers as PUBLIC and skew
-    # the public-surface scoping (Codex review).
-    #
-    # Split by file-vs-dir the same way the candidate side's
-    # `_public_provenance_set` already does (Codex review, PR #624
-    # follow-up): a lone `-H old=<dir>` umbrella must feed its directory
-    # into `bl_public_dirs` ONLY, not also into `bl_public_headers` as a
-    # raw directory "path" -- doing both fed the ADR-050 comparability
-    # gate an old side whose declared scope was represented differently
-    # from the new side's (a directory counted twice vs. once), a false
-    # scope_fingerprint mismatch on an ordinary --against comparison
-    # that never touched the actual public surface.
+    # The old-side public boundary comes ONLY from `-H old=`: dirs in it
+    # are public-header dirs, files opt in just themselves. Do NOT fall
+    # back to the new side's public dirs -- a relative dir like `include/`
+    # would (segment-based provenance) re-mark old private headers as
+    # PUBLIC and skew the public-surface scoping (Codex review). Split by
+    # file-vs-dir the same way the candidate side's `_public_provenance_
+    # set` already does (Codex review, PR #624 follow-up): a lone
+    # `-H old=<dir>` umbrella must feed its directory into `bl_public_dirs`
+    # ONLY, not also into `bl_public_headers` as a raw directory "path" --
+    # doing both fed the ADR-050 comparability gate an old side whose
+    # declared scope was represented differently from the new side's (a
+    # directory counted twice vs. once), a false `scope_fingerprint`
+    # mismatch on an ordinary --against comparison.
     bl_public_headers = [p for p in bl_headers if not p.is_dir()]
     bl_public_dirs = [p for p in bl_headers if p.is_dir()]
     return bl_headers, bl_includes, bl_public_headers, bl_public_dirs
@@ -825,6 +823,10 @@ def _baseline_summary(
     not_evaluated = list(getattr(diff, "not_evaluated", ()) or ())
     if not_evaluated:
         summary["not_evaluated"] = len(not_evaluated)
+    # Codex review: surface `coverage_warnings` the way `compare` does.
+    coverage_warnings = list(getattr(diff, "coverage_warnings", ()) or ())
+    if coverage_warnings:
+        summary["coverage_warnings"] = coverage_warnings
     # ADR-049 Phase 5 §6.4 names *detector provenance* among the fields the
     # two commands must agree on, and `compare`'s JSON report has carried it
     # since long before this Gate (`reporter._add_detectors`) while `scan
@@ -1076,36 +1078,30 @@ def _run_baseline_compare(
     ``build_source``).
 
     *require_complete_analysis* mirrors ``compare``'s own P0.4
-    ``--require-complete-analysis``: ``checker.compare`` (reached through
-    :func:`~abicheck.service.compare_snapshots` above) always attaches an
-    ``analysis_assurance`` result to *diff* regardless of this flag, and
-    :func:`_baseline_summary` always reports it in ``--format json`` --
-    this parameter only controls whether an incomplete status additionally
+    ``--require-complete-analysis``: ``checker.compare`` always attaches an
+    ``analysis_assurance`` result to *diff* regardless of this flag; this
+    parameter only controls whether an incomplete status additionally
     floors the returned exit code (folded with the same ``max`` discipline
-    :func:`~abicheck.contract_coverage_exit.fold_coverage_exit` already
-    uses for its own orthogonal axis, immediately below).
+    :func:`~abicheck.contract_coverage_exit.fold_coverage_exit` uses for
+    its own orthogonal axis, immediately below).
 
     *requested_depth* (Codex review, fresh evidence): the caller's own
     explicitly-pinned ``--depth``/non-``auto`` ``--source-method`` (``None``
-    when the depth was only inferred, mirroring the exact "explicit
-    override, never inferred" discipline ``cli_compare_helpers.
-    _report_compare_result`` already applies for ``compare --depth``).
-    ``checker.compare()``'s own internal ``compute_analysis_assurance`` call
-    runs *before* this function ever sees *diff*, so it always reads
+    when only inferred, mirroring ``cli_compare_helpers.
+    _report_compare_result``'s "explicit override, never inferred"
+    discipline for ``compare --depth``). ``checker.compare()``'s own
+    internal ``compute_analysis_assurance`` call runs *before* this
+    function ever sees *diff*, so it always reads
     ``DiffResult.requested_depth`` as ``None`` regardless of what the scan
-    was actually pinned to -- without this, an explicit ``scan --against
-    --depth source --sources <tree>`` that never reached source evidence
-    (no compile database found, so the effective depth silently stayed
-    ``headers``) reported ``analysis_assurance.status="complete"`` (nothing
-    to compare the unset ``requested_depth`` against) even though the
-    evidence contract was demonstrably not satisfied, silently defeating
-    ``--require-complete-analysis``. When given, *diff* is stamped and
-    ``analysis_assurance`` is recomputed before the summary/exit-code fold
-    below so the requested-vs-effective gate has something real to check.
+    was actually pinned to -- without this, an unreached ``--depth
+    source`` silently defeats ``--require-complete-analysis``. When given,
+    *diff* is stamped and ``analysis_assurance`` recomputed below so the
+    requested-vs-effective gate has something real to check.
     """
     from .cli_buildsource import prepare_embedded_build_source
+    from .confidence import note_if_same_binary_compared
     from .errors import AbicheckError
-    from .service import compare_snapshots, resolve_input
+    from .service import collect_metadata, compare_snapshots, resolve_input
 
     bl_headers, bl_includes, bl_public_headers, bl_public_dirs = (
         _resolve_baseline_header_scope(
@@ -1196,6 +1192,11 @@ def _run_baseline_compare(
         contract_evaluation=contract_evaluation,
         contract_mode=contract_mode,
     )
+    # Codex review: stamp metadata so the same-binary warning below fires
+    # here too (a no-op for a JSON/Perl snapshot baseline).
+    diff.old_metadata = collect_metadata(baseline)
+    diff.new_metadata = collect_metadata(binary)
+    note_if_same_binary_compared(diff)
     # P0.4 (Codex review, fresh evidence): checker.compare()'s own internal
     # compute_analysis_assurance call (inside compare_snapshots above) runs
     # before this function ever sees *diff*, so it always reads
@@ -1239,16 +1240,15 @@ def _run_baseline_compare(
     # reader doesn't have to re-derive "why is this exit N" from the
     # separately-emitted `severity`/`analysis_assurance_exit_contribution`/
     # `contract_coverage_exit_contribution` fields. Nested under this
-    # baseline-compare summary (`diff.exit`), matching where those same
-    # constituent fields already live -- not at `ScanOutcome`'s own
-    # top-level `verdict`/`exit_code`, which additionally folds the
-    # scan-only budget/not-comparable/crosscheck-promotion axes
-    # `exit_decision.py`'s own module docstring explicitly defers to PR
-    # G2. `exit_scheme` mirrors the exact condition `base_exit` below is
-    # already computed under (not bare `exit_code_scheme`), so a caller
-    # that configured `exit_code_scheme="severity"` without ever resolving
-    # a `sev_config` gets the identical legacy-scheme answer both places
-    # agree on, rather than the resolver's severity branch's own assertion.
+    # baseline-compare summary (`diff.exit`), matching where those fields
+    # already live -- not `ScanOutcome`'s own top-level `verdict`/
+    # `exit_code`, which additionally folds the scan-only budget/
+    # not-comparable/crosscheck-promotion axes `exit_decision.py`'s own
+    # module docstring explicitly defers to PR G2. `exit_scheme` mirrors
+    # the exact condition `base_exit` below is already computed under, so
+    # a caller with `exit_code_scheme="severity"` and no resolved
+    # `sev_config` gets the identical legacy-scheme answer both places
+    # agree on.
     from .exit_decision import resolve_compare_exit_decision
 
     exit_scheme = (

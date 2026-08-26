@@ -17,3 +17,12 @@
   surfaced in every existing report format (JSON/SARIF/text/HTML/
   Markdown) that already renders `coverage_warnings`, with no new field
   or schema change needed.
+- **Follow-up (Codex review): `scan --against` didn't actually surface
+  this warning yet.** `cli_scan_baseline._run_baseline_compare` builds
+  its own summary via `compare_snapshots` directly, bypassing both the
+  metadata stamping `compare`'s own result-finalization does and the
+  summary field that would carry the warning. It now stamps
+  `old_metadata`/`new_metadata` from the baseline/candidate paths, calls
+  `note_if_same_binary_compared`, and `_baseline_summary` copies
+  `coverage_warnings` into the JSON summary the same way it already
+  copies `not_evaluated`.
