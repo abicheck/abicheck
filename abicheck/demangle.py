@@ -25,11 +25,6 @@ import logging
 import re
 import subprocess
 
-from .name_classification import (
-    STDLIB_TYPE_NAMESPACE_PREFIXES,
-    contains_anonymous_type_marker,
-)
-
 _log = logging.getLogger(__name__)
 
 # Whether we have already warned about demangling being unavailable.
@@ -282,42 +277,3 @@ def demangle_text(text: str) -> str:
         return demangled if demangled and demangled != tok else tok
 
     return _MANGLED_TOKEN_RE.sub(_repl, text)
-
-
-def is_stdlib_internal_closure_instantiation(symbol: str) -> bool:
-    """True if *symbol* is a C++ runtime/stdlib symbol instantiated over a
-    caller-supplied closure type (a lambda) -- e.g. ``std::once_flag::
-    _Prepare_execution<...Widget::run()::{lambda()#1}...>`` (a
-    ``std::call_once`` guard, the concrete reported case).
-
-    Such a symbol can never be part of any external consumer's ABI
-    contract, independent of whether the library under test was dumped
-    with header data at all: a lambda closure's mangled encoding is
-    per-translation-unit and compiler-ordering dependent (see
-    ``change_registry``'s own ``unnamed_type_in_public_abi`` entry), so no
-    consumer could have written source code naming this exact template
-    argument themselves -- there is no possible external caller to break.
-    This lets :func:`abicheck.surface.classify_change_surface` demote it
-    with full confidence even when neither side's public-header surface is
-    resolvable at all (the ELF-only-mode case this function exists for),
-    where every other classification rule conservatively keeps everything
-    rather than risk hiding a real change from the unresolved side.
-
-    Deliberately narrower than "stdlib-rooted and touches an internal
-    namespace" (the library's own ``detail::``/``impl::`` types): unlike a
-    closure, a library's own internal-namespace type COULD in principle be
-    named by a consumer that reaches into implementation details, so that
-    broader check would risk a false demotion. A closure's total
-    unnameability is what makes this narrower check unconditionally safe.
-
-    Conservative on demangling failure (returns ``False``, never guesses):
-    a symbol that isn't a real Itanium C++ mangled name at all, or one
-    ``c++filt``/``cxxfilt`` cannot resolve, is left to the ordinary
-    classification path.
-    """
-    demangled = demangle(symbol)
-    if demangled is None:
-        return False
-    return demangled.startswith(STDLIB_TYPE_NAMESPACE_PREFIXES) and (
-        contains_anonymous_type_marker(demangled)
-    )

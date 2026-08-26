@@ -16,40 +16,45 @@ The surface is computed from two facts that the dumper already records:
 
 1. **Linkage + header scope** — :class:`~abicheck.model.Visibility`. A
    function/variable is :data:`Visibility.PUBLIC` only when it is *both*
-   exported *and* declared in a user-provided public header (ADR-016).
-   ``ELF_ONLY``/``HIDDEN`` symbols are not part of the public surface.
+   exported *and* declared in one of the user-provided public headers
+   (see ADR-016). ``ELF_ONLY`` / ``HIDDEN`` symbols are therefore not part
+   of the public surface.
 2. **Type reachability** — a record/enum/typedef is public iff it is
    reachable from a public function/variable through return types,
    parameter types, data members, base classes, or typedef targets. The
    closure deliberately follows *all* data members (including private and
    pointer-typed ones): this over-keeps rather than risks hiding a layout
-   dependency. It follows enum references the same way, including a
-   namespaced enum referenced by its unqualified short name (``Mode`` for
-   ``ns::Mode``) via the same trailing-``::`` alias index records use —
-   locked in by ``scripts/check_fp_rate.py``'s ``enum-reachability`` axis.
+   dependency. The closure follows enum references (as struct-field types,
+   typedef targets, or signature types) exactly as it follows record
+   references — including resolving a namespaced enum referenced by its
+   unqualified short name (``Mode`` for ``ns::Mode``) via the same trailing-``::``
+   alias index records use — so an unreferenced internal enum is scoped out
+   while a public-reachable one is kept (locked in by the ``enum-reachability``
+   axis of the ``scripts/check_fp_rate.py`` corpus).
 
    Precise by-value-vs-pointer reachability (ADR-024 §D3) is intentionally
    *not* done here: a pointer-reached type whose full definition is public
-   is still layout-observable, so demoting it here would hide a real break.
-   The safe half — a pointer-only-reached *opaque* handle whose layout
-   consumers cannot see — is delivered downstream by the opaque filter
-   (``diff_filtering._filter_opaque_size_changes``/
-   ``_downgrade_opaque_type_changes``), on the layout-observability axis
-   rather than the public/private one. Both polarities are locked in by
+   is still layout-observable (a consumer can dereference/allocate it by
+   value), so demoting it at this stage would hide a real break. The safe
+   half of that precision — a pointer-only-reached *opaque* handle whose
+   layout consumers cannot see — is delivered downstream by the opaque
+   filter (``diff_filtering._filter_opaque_size_changes`` /
+   ``_downgrade_opaque_type_changes``), which acts on the layout-observability
+   axis rather than the public/private axis. Both polarities are locked in by
    the ``pointer-opaque`` axis of the FP-rate corpus.
 
 This module performs *no* deletion on its own; it only answers "is this
-finding about the public surface?". The consuming pipeline step
+finding about the public surface?".  The pipeline step that consumes it
 (``FilterNonPublicSurface``) moves out-of-surface findings to an audit
-ledger, never dropping them silently — see ADR-024 §D4/D5.
+ledger rather than dropping them silently — see ADR-024 §D4/D5.
 
 Design constraints (ADR-024 §D5, anti-hiding):
 
 * Internal-leak findings are **never** treated as out-of-surface — a
   private type reachable from a public API is exactly the signal scoping
   must not hide.
-* When unresolved (no headers, every symbol ``ELF_ONLY``), scoping is a
-  no-op — except a stdlib closure (``demangle.is_stdlib_internal_closure_instantiation``).
+* When the surface cannot be resolved (no headers were provided, so every
+  symbol is ``ELF_ONLY``), scoping is a no-op: we keep every finding.
 * Type names we cannot place are kept (conservative — never hide an
   unknown).
 """
@@ -60,7 +65,6 @@ import re
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from .demangle import is_stdlib_internal_closure_instantiation
 from .diff_cxx_rules import owner_class_of
 from .model import ScopeOrigin, Visibility
 
@@ -1082,7 +1086,6 @@ REASON_PRIVATE_INTERNAL_UNREACHABLE = "private-internal-unreachable"
 # other exported symbols and internal type layout cannot be observed by any
 # `import` consumer — it is off the real public surface (G23 oracle scoping).
 REASON_OFF_PYTHON_SURFACE = "off-python-surface"
-REASON_STDLIB_INTERNAL_CLOSURE = "stdlib-internal-closure"  # see demangle.py
 
 # Map a demotable origin to its ledger reason code.
 _ORIGIN_REASON: dict[ScopeOrigin, str] = {
@@ -1168,9 +1171,6 @@ def classify_change_surface(
     # survival via the conservative-unknown fallback).
     if change.kind.value.startswith("python_"):
         return True, None
-    # Resolvability-independent; must precede the guard below.
-    if change.symbol and is_stdlib_internal_closure_instantiation(change.symbol):
-        return False, REASON_STDLIB_INTERNAL_CLOSURE
     if not (surf_old.resolvable and surf_new.resolvable):
         # If either side lacks a resolvable surface we cannot confidently
         # place a finding as private on *both* versions — keep everything
