@@ -177,3 +177,83 @@ class TestBundleArchiveWriterReader:
 
     def test_default_max_blob_bytes_is_one_gib(self) -> None:
         assert DEFAULT_MAX_BLOB_BYTES == 1024 * 1024 * 1024
+
+    def test_read_blob_rejects_content_that_does_not_match_its_hash(
+        self, tmp_path: Path
+    ) -> None:
+        """A blob member's name is not itself verified content -- a
+        corrupted or hand-assembled archive storing the wrong bytes under a
+        given hash's member name must be rejected, not handed back silently
+        (Codex review)."""
+        import zstandard
+
+        path = tmp_path / "bundle.archive.zip"
+        with BundleArchiveWriter(path) as writer:
+            h = writer.put_blob(b'{"real": true}')
+            writer.write_manifest({"library_blobs": {"a.so": h}})
+
+        # Replace the blob member's content in place -- same member name
+        # (still keyed by the *original* content's hash), different bytes.
+        member = f"blobs/{h}.json.zst"
+        with zipfile.ZipFile(path) as zf:
+            names = zf.namelist()
+            other = {n: zf.read(n) for n in names if n != member}
+        wrong_payload = zstandard.ZstdCompressor().compress(b'{"corrupted": true}')
+        with zipfile.ZipFile(path, mode="w") as zf:
+            for n, data in other.items():
+                zf.writestr(n, data)
+            zf.writestr(member, wrong_payload)
+
+        with BundleArchiveReader.open(path) as reader:
+            with pytest.raises(SnapshotError, match="not the .* its own member name"):
+                reader.read_blob(h)
+
+
+class TestBundleArchiveWriterAtomicity:
+    """Codex review: the original revision opened *path* directly with
+    ``mode="w"``, which truncates any pre-existing archive immediately --
+    a later error would then leave a partial file where a valid prior
+    archive used to be. Writes now go to a temp file, promoted only on a
+    fully successful close()."""
+
+    def test_close_without_manifest_leaves_existing_destination_untouched(
+        self, tmp_path: Path
+    ) -> None:
+        path = tmp_path / "bundle.archive.zip"
+        with BundleArchiveWriter(path) as writer:
+            h = writer.put_blob(b'{"a": 1}')
+            writer.write_manifest({"library_blobs": {"a.so": h}})
+        original_bytes = path.read_bytes()
+
+        writer = BundleArchiveWriter(path)
+        writer.put_blob(b"x")
+        with pytest.raises(SnapshotError, match="no manifest.json"):
+            writer.close()
+
+        assert path.read_bytes() == original_bytes
+        assert list(tmp_path.glob("*.tmp-*")) == []
+
+    def test_exception_mid_write_leaves_existing_destination_untouched(
+        self, tmp_path: Path
+    ) -> None:
+        path = tmp_path / "bundle.archive.zip"
+        with BundleArchiveWriter(path) as writer:
+            h = writer.put_blob(b'{"a": 1}')
+            writer.write_manifest({"library_blobs": {"a.so": h}})
+        original_bytes = path.read_bytes()
+
+        with pytest.raises(ValueError, match="boom"):
+            with BundleArchiveWriter(path) as writer:
+                writer.put_blob(b"y")
+                raise ValueError("boom")
+
+        assert path.read_bytes() == original_bytes
+        assert list(tmp_path.glob("*.tmp-*")) == []
+
+    def test_successful_write_leaves_no_temp_file_behind(self, tmp_path: Path) -> None:
+        path = tmp_path / "bundle.archive.zip"
+        with BundleArchiveWriter(path) as writer:
+            h = writer.put_blob(b'{"a": 1}')
+            writer.write_manifest({"library_blobs": {"a.so": h}})
+        assert list(tmp_path.glob("*.tmp-*")) == []
+        assert path.exists()

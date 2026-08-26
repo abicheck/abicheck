@@ -57,6 +57,7 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import os
 import zipfile
 from pathlib import Path
 from typing import Any
@@ -156,11 +157,22 @@ class BundleArchiveWriter:
     manifest references has already been written (so a reader opening a
     completed archive never observes a manifest naming a hash with no
     corresponding member).
+
+    Writes go to a temporary file in *path*'s own directory; *close()* (a
+    clean context-manager exit) only ``os.replace()``s it over *path* once
+    the archive is fully written, so an in-progress write -- interrupted by
+    any error, including one from *put_blob*/*write_manifest* themselves --
+    can never leave a truncated archive in *path*'s place when *path*
+    already held a prior, valid one (Codex review: the original revision
+    opened *path* directly with ``mode="w"``, which truncates immediately).
     """
 
     def __init__(self, path: str | Path) -> None:
         self._path = Path(path)
-        self._zf = zipfile.ZipFile(self._path, mode="w", compression=zipfile.ZIP_STORED)
+        self._tmp_path = self._path.with_name(
+            f"{self._path.name}.tmp-{os.getpid()}-{id(self):x}"
+        )
+        self._zf = zipfile.ZipFile(self._tmp_path, mode="w", compression=zipfile.ZIP_STORED)
         self._written_hashes: set[str] = set()
         self._manifest_written = False
 
@@ -193,25 +205,33 @@ class BundleArchiveWriter:
 
     def close(self) -> None:
         if not self._manifest_written:
+            self._abort()
             raise SnapshotError(
                 "BundleArchiveWriter closed without write_manifest() -- the "
                 "resulting archive would have no manifest.json member"
             )
         self._zf.close()
+        os.replace(self._tmp_path, self._path)
+
+    def _abort(self) -> None:
+        """Close the in-progress zip handle and discard its temp file --
+        *path* (if it already held a prior archive) is never touched."""
+        self._zf.close()
+        self._tmp_path.unlink(missing_ok=True)
 
     def __enter__(self) -> BundleArchiveWriter:
         return self
 
     def __exit__(self, *exc_info: object) -> None:
-        # Only close (which validates a manifest was written) on a clean
-        # exit -- an exception mid-write should propagate as-is, not be
-        # masked by "no manifest written yet" when the real cause is
-        # upstream. A raw ZipFile.close() on the failure path is enough to
-        # avoid leaking the file handle.
+        # Only close (which validates a manifest was written, then does the
+        # real os.replace()) on a clean exit -- an exception mid-write
+        # should propagate as-is, not be masked by "no manifest written
+        # yet" when the real cause is upstream. Either way the temp file is
+        # discarded rather than left behind or promoted over *path*.
         if exc_info[0] is None:
             self.close()
         else:
-            self._zf.close()
+            self._abort()
 
 
 class BundleArchiveReader:
@@ -255,6 +275,14 @@ class BundleArchiveReader:
         ``ZstdDecompressor.decompress(data)`` call would allocate the full
         decoded output regardless of *this* function's own window-size
         bound, which defeats the point of a per-blob memory guard.
+
+        Also re-hashes the decoded payload and checks it against
+        *content_hash_hex* before returning -- the member name alone is
+        just a zip entry name, not a verified property of its content, so a
+        corrupted or hand-assembled archive storing arbitrary bytes under a
+        given hash's member name would otherwise be handed back to the
+        caller unchecked, defeating the whole point of content-addressing
+        (Codex review).
         """
         member = _blob_member_name(content_hash_hex)
         try:
@@ -283,7 +311,16 @@ class BundleArchiveReader:
                         "-- refusing to continue decompressing (possible "
                         "decompression bomb, or a genuinely oversized blob)."
                     )
-        return out.getvalue()
+        decoded = out.getvalue()
+        actual_hash = content_hash(decoded)
+        if actual_hash != content_hash_hex:
+            raise SnapshotError(
+                f"{self._path}: blob member {member!r} decoded to content "
+                f"hashing {actual_hash!r}, not the {content_hash_hex!r} its "
+                "own member name claims -- archive is corrupted or was not "
+                "produced by BundleArchiveWriter."
+            )
+        return decoded
 
     def close(self) -> None:
         self._zf.close()

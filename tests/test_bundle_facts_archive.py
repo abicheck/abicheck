@@ -187,3 +187,30 @@ class TestBundleFactsArchiveFormat:
         save_bundle_facts(facts, out)
         with pytest.raises(ValueError, match="unknown format"):
             load_bundle_facts(out, format="yaml")
+
+    def test_load_rejects_a_newer_container_schema_version(self, tmp_path: Path) -> None:
+        """The container's own schema_version (manifest/blob shape) is a
+        separate axis from bundle_facts_schema_version -- a newer one must
+        fail closed, not be silently misread as version 1 (Codex review)."""
+        from abicheck.errors import IncompatibleSnapshotSchemaError
+        from abicheck.storage.bundle_archive import BundleArchiveWriter
+
+        out = tmp_path / "future.bundlefacts.archive.zip"
+        with BundleArchiveWriter(out) as writer:
+            writer.write_manifest({"schema_version": 999, "library_blobs": {}})
+
+        with pytest.raises(IncompatibleSnapshotSchemaError, match="999"):
+            load_bundle_facts(out, format="archive")
+
+    def test_load_rejects_a_manifest_missing_library_blobs(self, tmp_path: Path) -> None:
+        """A manifest.json with no 'library_blobs' key at all (a malformed
+        or unrelated zip) must be rejected outright rather than silently
+        loading as an empty, valid-looking BundleFacts (Codex review)."""
+        from abicheck.storage.bundle_archive import BundleArchiveWriter
+
+        out = tmp_path / "malformed.bundlefacts.archive.zip"
+        with BundleArchiveWriter(out) as writer:
+            writer.write_manifest({"schema_version": 1})
+
+        with pytest.raises(ValueError, match="library_blobs"):
+            load_bundle_facts(out, format="archive")

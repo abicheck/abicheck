@@ -395,10 +395,11 @@ def write_bundle_facts_archive(
     in this function decides that; it simply calls ``put_blob`` once per
     library and lets identical payloads collapse on their own.
     """
+    import hashlib as _hashlib
     import json as _json
 
     from .snapshot_io import SnapshotCompression, SnapshotWriteResult
-    from .storage.bundle_archive import BundleArchiveWriter, content_hash
+    from .storage.bundle_archive import BundleArchiveWriter
 
     p = Path(path)
     library_blobs: dict[str, str] = {}
@@ -431,13 +432,20 @@ def write_bundle_facts_archive(
                 "library_filenames": dict(facts.library_filenames),
             }
         )
-    stored_bytes = p.read_bytes()
+    # Stream the completed archive through sha256 rather than
+    # `p.read_bytes()` -- a large multi-library bundle's archive can itself
+    # be large, and this bookkeeping step has no reason to hold a second
+    # full in-memory copy of it just to size/hash it (Codex review).
+    hasher = _hashlib.sha256()
+    with open(p, "rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            hasher.update(chunk)
     return SnapshotWriteResult(
         path=p,
         compression=SnapshotCompression.ZSTD,
         decoded_size_bytes=decoded_size_bytes,
-        stored_size_bytes=len(stored_bytes),
-        stored_sha256=content_hash(stored_bytes),
+        stored_size_bytes=p.stat().st_size,
+        stored_sha256=hasher.hexdigest(),
     )
 
 
@@ -462,6 +470,22 @@ def read_bundle_facts_archive(
 
     with BundleArchiveReader.open(path) as reader:
         manifest = reader.read_manifest()
+        # The *container's* own schema_version (BUNDLE_ARCHIVE_SCHEMA_VERSION
+        # -- the manifest/blob shape itself) is a separate axis from
+        # bundle_facts_schema_version (the BundleFacts shape it encodes) --
+        # see the two constants' own module-level comments. A newer
+        # container version can change manifest field names/blob
+        # conventions this reader doesn't know about, so it must fail
+        # closed rather than silently misreading it as version 1 (Codex
+        # review).
+        archive_schema_version = int(manifest.get("schema_version", 1))
+        if archive_schema_version > BUNDLE_ARCHIVE_SCHEMA_VERSION:
+            raise IncompatibleSnapshotSchemaError(
+                f"Bundle archive container schema_version {archive_schema_version} "
+                "is newer than this abicheck (supports up to schema_version "
+                f"{BUNDLE_ARCHIVE_SCHEMA_VERSION}). Upgrade abicheck to read "
+                "this bundle archive."
+            )
         bundle_facts_schema_version = int(
             manifest.get("bundle_facts_schema_version", BUNDLE_FACTS_SCHEMA_VERSION)
         )
@@ -472,7 +496,12 @@ def read_bundle_facts_archive(
                 f"{BUNDLE_FACTS_SCHEMA_VERSION}). Upgrade abicheck to read "
                 "this bundle archive."
             )
-        library_blobs = manifest.get("library_blobs", {})
+        if "library_blobs" not in manifest:
+            raise ValueError(
+                "bundle archive: manifest.json is missing required key "
+                "'library_blobs' -- not a BundleArchiveWriter-produced archive"
+            )
+        library_blobs = manifest["library_blobs"]
         if not isinstance(library_blobs, dict):
             raise ValueError(
                 "bundle archive: 'library_blobs' must be a mapping, got "
