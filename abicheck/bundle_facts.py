@@ -161,9 +161,8 @@ def capture_bundle_facts(
             if name not in per_library_snapshots:
                 continue
             # The resolved target's basename, not path.name -- library_paths
-            # commonly names a dev symlink (libfoo.so -> libfoo.so.1.2), and
-            # a bare path.name would capture the unversioned symlink name
-            # instead of the real one the SONAME-skew fallback needs (Codex).
+            # commonly names a dev symlink, and path.name would capture the
+            # unversioned name, not the real one SONAME-skew needs (Codex).
             library_filenames[name] = resolved_basename(path)
             aliases = filesystem_alias_basenames(path)
             if aliases:
@@ -467,8 +466,7 @@ def write_bundle_facts_archive(
         unique_payloads.setdefault(manifest_blob, manifest_payload)
 
     # (a) Member-count cap: one member per *distinct* blob hash, plus one
-    # for `manifest.json` -- `manifest_blob`'s own hash is already inside
-    # `unique_payloads` above, so nothing further to reserve for it.
+    # for `manifest.json` -- already inside `unique_payloads` above.
     if len(unique_payloads) + 1 > MAX_ARCHIVE_MEMBERS:
         raise SnapshotError(
             f"{p}: writing this bundle's {len(unique_payloads)} distinct "
@@ -476,9 +474,8 @@ def write_bundle_facts_archive(
             "members (the reader's own safety limit) -- refusing to write "
             "an archive that could not be reopened."
         )
-    # (b) Aggregate decoded-byte cap, mirroring read_bundle_facts_archive()
-    # exactly -- every *duplicate* name's own deep-copied AbiSnapshot too,
-    # not each unique blob's bytes once.
+    # (b) Aggregate decoded-byte cap, mirroring read_bundle_facts_archive():
+    # every *duplicate* name's own copy, not each unique blob's bytes once.
     hash_counts = Counter(library_blobs.values())
     reader_charged_bytes = sum(len(unique_payloads[h]) * n for h, n in hash_counts.items())
     # manifest_blob's bytes are charged once more, whenever present --
@@ -625,23 +622,22 @@ def read_bundle_facts_archive(
         archive_schema_version = _require_int_schema_version(
             manifest.get("schema_version", 1), field="schema_version"
         )
-        if archive_schema_version > BUNDLE_ARCHIVE_SCHEMA_VERSION:
+        # Below 1 (never existed) or above MAX (too new) alike -- 0/negative
+        # must not silently masquerade as the current, well-understood
+        # format any more than a future version may (Codex).
+        if not 1 <= archive_schema_version <= BUNDLE_ARCHIVE_SCHEMA_VERSION:
             raise IncompatibleSnapshotSchemaError(
                 f"Bundle archive container schema_version {archive_schema_version} "
-                "is newer than this abicheck (supports up to schema_version "
-                f"{BUNDLE_ARCHIVE_SCHEMA_VERSION}). Upgrade abicheck to read "
-                "this bundle archive."
+                f"is not a version this abicheck supports (1..{BUNDLE_ARCHIVE_SCHEMA_VERSION})."
             )
         bundle_facts_schema_version = _require_int_schema_version(
             manifest.get("bundle_facts_schema_version", BUNDLE_FACTS_SCHEMA_VERSION),
             field="bundle_facts_schema_version",
         )
-        if bundle_facts_schema_version > BUNDLE_FACTS_SCHEMA_VERSION:
+        if not 1 <= bundle_facts_schema_version <= BUNDLE_FACTS_SCHEMA_VERSION:
             raise IncompatibleSnapshotSchemaError(
                 f"Bundle facts schema_version {bundle_facts_schema_version} is "
-                "newer than this abicheck (supports up to schema_version "
-                f"{BUNDLE_FACTS_SCHEMA_VERSION}). Upgrade abicheck to read "
-                "this bundle archive."
+                f"not a version this abicheck supports (1..{BUNDLE_FACTS_SCHEMA_VERSION})."
             )
         if "library_blobs" not in manifest:
             raise ValueError(
@@ -665,8 +661,7 @@ def read_bundle_facts_archive(
                 )
         # Bound the *name count* independently of decoded-byte size: each
         # name referencing a shared blob still materializes its own
-        # AbiSnapshot object graph, so a manifest could amplify one small
-        # blob into an unbounded object count -- checked before any read.
+        # AbiSnapshot graph -- checked before any read.
         if len(library_blobs) > DEFAULT_MAX_LIBRARY_COUNT:
             raise SnapshotError(
                 f"{path}: this bundle archive's manifest names "
@@ -738,7 +733,12 @@ def read_bundle_facts_archive(
                         "genuinely oversized bundle)."
                     )
                 total_decoded += copy_bytes
-                per_library_snapshots[name] = copy.deepcopy(cached_snapshot)
+                # A deep enough value can still blow deepcopy's own
+                # recursion budget even after snapshot_from_dict() succeeds.
+                try:
+                    per_library_snapshots[name] = copy.deepcopy(cached_snapshot)
+                except RecursionError as exc:
+                    raise SnapshotError(f"{path}: blob for library {name!r} is too deeply nested to duplicate") from exc
                 continue
             raw = _cached_blob(h)
             blob = _load_blob_json(raw, f"blob for library {name!r}")

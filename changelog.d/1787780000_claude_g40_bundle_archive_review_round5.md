@@ -760,3 +760,28 @@
   (`test_load_translates_a_malformed_nested_snapshot_shape`, confirmed
   to fail against the pre-fix code with a raw `TypeError`) exercises
   this through the public `load_bundle_facts()` entry point.
+
+- **G40 bundle archive: two more Codex review findings, both real, both
+  fixed.** (1) `read_bundle_facts_archive()`'s `copy.deepcopy(cached_
+  snapshot)` call (the fast path for a second library name sharing an
+  already-parsed blob's hash) had no exception translation: a
+  sufficiently deep value (e.g. ~900 nested lists under `constants`)
+  can blow `deepcopy`'s own pure-Python recursion budget even though
+  `snapshot_from_dict()` -- backed by a C-accelerated JSON decoder that
+  tolerates much deeper nesting -- already succeeded for the *first*
+  name referencing that hash, leaking a raw `RecursionError` for the
+  *second*. Fixed by wrapping the `deepcopy()` call the same way the
+  earlier `_load_snapshot_dict()` fix wraps `snapshot_from_dict()`
+  itself. (2) `schema_version`/`bundle_facts_schema_version` only
+  checked their *upper* bound (rejecting a version newer than this
+  abicheck supports) -- `0` or a negative integer, which never existed
+  as a real schema version, silently passed through and was parsed as
+  if it were v1's layout. Fixed by requiring both fields to fall within
+  `1..MAX` (collapsing the previous upper-bound-only check and a
+  planned separate lower-bound check into one combined range check, to
+  stay within the ADR-061 line cap). New regression tests for both
+  (`test_load_translates_a_recursion_error_when_cloning_a_shared_
+  snapshot`, `test_load_rejects_a_schema_version_that_never_existed`),
+  all confirmed to fail against the pre-fix code (a raw `RecursionError`
+  for the first, a silent pass-through for the second) before applying
+  the fix.

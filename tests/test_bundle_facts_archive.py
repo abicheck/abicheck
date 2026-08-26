@@ -414,6 +414,34 @@ class TestBundleFactsArchiveFormat:
     @pytest.mark.parametrize(
         ("field", "value"),
         [
+            ("schema_version", 0),
+            ("schema_version", -1),
+            ("bundle_facts_schema_version", 0),
+            ("bundle_facts_schema_version", -1),
+        ],
+    )
+    def test_load_rejects_a_schema_version_that_never_existed(
+        self, tmp_path: Path, field: str, value: int
+    ) -> None:
+        """0 or a negative integer never existed as a real schema version
+        -- only checking the *upper* bound let it silently masquerade as
+        v1's layout instead of failing closed the same way a too-new
+        version already does (Codex review, fresh evidence)."""
+        from abicheck.errors import IncompatibleSnapshotSchemaError
+        from abicheck.storage.bundle_archive import BundleArchiveWriter
+
+        out = tmp_path / "never_existed_schema_version.bundlefacts.archive.zip"
+        manifest: dict[str, object] = {"schema_version": 1, "library_blobs": {}}
+        manifest[field] = value
+        with BundleArchiveWriter(out) as writer:
+            writer.write_manifest(manifest)
+
+        with pytest.raises(IncompatibleSnapshotSchemaError, match=str(value)):
+            load_bundle_facts(out, format="archive")
+
+    @pytest.mark.parametrize(
+        ("field", "value"),
+        [
             ("schema_version", 1.9),
             ("schema_version", True),
             ("schema_version", "1"),
@@ -554,6 +582,34 @@ class TestBundleFactsArchiveFormat:
         with BundleArchiveWriter(out) as writer:
             h = writer.put_blob(deeply_nested.encode("utf-8"))
             writer.write_manifest({"library_blobs": {}, "manifest_blob": h})
+
+        with pytest.raises(SnapshotError, match="too deeply nested"):
+            load_bundle_facts(out, format="archive")
+
+    def test_load_translates_a_recursion_error_when_cloning_a_shared_snapshot(
+        self, tmp_path: Path
+    ) -> None:
+        """Two library names sharing one blob hash take a different code
+        path for the second name -- copy.deepcopy() on the already-
+        deserialized snapshot, not snapshot_from_dict() again. A
+        sufficiently deep value (Python's json C decoder handles far
+        deeper nesting than deepcopy's own pure-Python recursion) can
+        blow deepcopy's own recursion budget even though the first name's
+        own snapshot_from_dict() already succeeded (Codex review, fresh
+        evidence)."""
+        import json as json_module
+
+        from abicheck.storage.bundle_archive import BundleArchiveWriter
+
+        out = tmp_path / "recursion_on_clone.bundlefacts.archive.zip"
+        depth = 900  # json.loads succeeds here; copy.deepcopy does not
+        nested = json_module.loads(("[" * depth) + ("]" * depth))
+        payload = json_module.dumps(
+            {"library": "a.so", "version": "1", "constants": {"DEEP": nested}}
+        )
+        with BundleArchiveWriter(out) as writer:
+            h = writer.put_blob(payload.encode("utf-8"))
+            writer.write_manifest({"library_blobs": {"a.so": h, "b.so": h}})
 
         with pytest.raises(SnapshotError, match="too deeply nested"):
             load_bundle_facts(out, format="archive")
