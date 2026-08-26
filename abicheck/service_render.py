@@ -67,9 +67,12 @@ def render_output(
     ``'junit'``, ``'review'``. Plus :data:`ONELINE_FORMAT`, an internal-only
     value not exposed on the public ``--format`` CLI choice.
 
-    ``demangle`` only affects human-facing formats (markdown, review); machine
-    formats (json/sarif/junit) always keep raw mangled symbols so downstream
-    tooling can match on them.
+    ``demangle`` only affects human-facing formats (markdown, review, html);
+    machine formats (json/sarif/junit) always keep raw mangled symbols so
+    downstream tooling can match on them. This function's own default
+    (``False``) is for a direct Tier-2 caller with no CLI in front of it;
+    the CLI itself resolves the per-format default via
+    ``cli_compare_options._resolve_demangle`` before calling here.
 
     The release recommendation is unconditionally included in every
     human-facing format (markdown/review) and in JSON's own ``summary``
@@ -164,6 +167,7 @@ def render_output(
             show_only=show_only,
             show_impact=show_impact,
             severity_config=severity_config,
+            demangle=demangle,
         )
 
     if fmt == "junit":
