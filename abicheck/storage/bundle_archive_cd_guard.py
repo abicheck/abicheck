@@ -112,7 +112,25 @@ def reject_absurd_central_directory(f: Any, path: Path, *, max_entries: int) -> 
     the two adjacent statements at the call site rather than closing it
     outright -- true immutability would need a stable, separately-
     materialized copy of the archive bytes, a much larger change than
-    this preflight's own scope.
+    this preflight's own scope. **Known residual, confirmed by a
+    same-length reproduction (Codex review, fresh evidence): the size
+    re-check the caller performs catches growth, not an equal-length
+    in-place overwrite** -- another writer with this inode's access can
+    still swap validated content for a differently-shaped one (e.g. a
+    padded one-entry archive replaced, byte-for-byte length-equal, by a
+    genuine two-entry one) between this check returning and `ZipFile`'s
+    own scan, undetected by the size comparison. Not closed here: the
+    only correct fix is binding validation and parsing to the *same*
+    immutable bytes -- e.g. `ZipFile(io.BytesIO(f.read()))` -- which
+    means reading the *entire* archive (not just its central directory)
+    into memory up front, defeating this format's whole design goal of
+    letting `read_manifest()`/`read_blob()` touch only the one member
+    each actually needs. That is a real, cross-cutting architecture
+    change to this module's I/O model, not a follow-up to this
+    preflight's own scope; accepted as a residual gap in the same class
+    the paragraph above already names, given a co-resident writer with
+    live access to this exact inode is already a highly privileged
+    threat position this preflight was never the sole defense against.
 
     Best-effort *only* for "the EOCD signature itself can't be found in
     the tail" (a genuinely truncated/non-zip file, checked below without

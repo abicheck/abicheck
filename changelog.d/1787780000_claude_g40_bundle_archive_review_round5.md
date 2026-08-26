@@ -251,3 +251,21 @@
   (fixed two rounds ago) no longer has this problem. Now checked
   incrementally via `json.JSONEncoder(indent=2).iterencode()`, the same
   fix already applied to the primitive layer.
+
+- **G40 bundle archive: a residual TOCTOU gap investigated, confirmed
+  real, and documented rather than fixed (Codex review, fresh evidence,
+  same-length reproduction).** The size re-check `BundleArchiveReader.
+  __init__` performs immediately before constructing `zipfile.ZipFile`
+  catches an in-place *growth* between the preflight and `ZipFile`'s own
+  scan (fixed several rounds ago), but not an equal-length in-place
+  *overwrite* -- another writer with this inode's access can still swap
+  validated content for a differently-shaped one, byte-for-byte
+  length-equal, undetected by a size comparison. The only correct fix is
+  binding validation and parsing to the same immutable bytes (e.g.
+  reading the entire archive into a private buffer up front), which
+  defeats this format's whole design goal of letting `read_manifest()`/
+  `read_blob()` touch only the one member each actually needs -- a real,
+  cross-cutting architecture change to this module's I/O model, not a
+  follow-up to this preflight's own scope. Documented as a known residual
+  in `reject_absurd_central_directory()`'s own docstring, alongside the
+  growth case it already named; not fixed here.
