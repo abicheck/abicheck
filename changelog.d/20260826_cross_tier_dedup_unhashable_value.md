@@ -11,3 +11,6 @@
 - Added the `abicheck.compare` responsibility package (ADR-061), which owns
   matching old/new entities and identifying a raw change. The flat `diff_*`
   modules remain its declared legacy paths.
+
+  Converted values carry a private tag, so a list and a tuple of the same
+  items stay distinct keys and no detector value can forge a converted one.

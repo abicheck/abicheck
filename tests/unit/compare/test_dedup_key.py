@@ -7,41 +7,51 @@ reusable dedup/grouping primitive is tested directly rather than only
 through its highest-level caller: an example test written to confirm the
 fix just made encodes only the input its author already thought of.
 
-The three invariants are the ones a dedup key must satisfy:
-
-- **hashable** — a `set` can hold it, which is the whole reason it exists;
-- **equal in, equal out** — otherwise a dedup stops deduplicating;
-- **unequal in, unequal out** — otherwise a dedup silently *over*-merges
-  two genuinely different findings, which is the worse failure of the two.
+That guidance earned its keep here. The first version of this file drew
+lists and frozensets but never tuples, so its no-overmerge property never
+saw the pair `["a"]` / `("a",)` -- which the implementation collapsed onto
+the same key, the precise failure the property exists to forbid. The
+strategy below therefore generates *heterogeneous* containers, and
+`TestConvertedFormsCannotCollide` pins the specific pairs by hand as well.
 """
 
 from __future__ import annotations
+
+import copy
 
 import pytest
 from hypothesis import given, strategies as st
 
 from abicheck.compare.dedup_key import hashable_value
 
-# Values a finding's value slot can actually receive. `Change.old_value` is
+# Leaves a finding's value slot can actually hold. `Change.old_value` is
 # annotated `str | None`, but the annotation is not enforced and
 # `diff_python.py` stores lists there at seven sites.
-_VALUES = st.recursive(
-    st.none() | st.booleans() | st.integers() | st.text(),
-    lambda children: st.lists(children) | st.frozensets(st.integers()),
-    max_leaves=12,
+_LEAVES = st.none() | st.booleans() | st.integers() | st.text(max_size=3)
+
+# Containers whose *own* equality is exact, so both directions of the
+# equal/unequal invariants hold. Deliberately mixes list and tuple at every
+# level: a strategy drawing only one of them cannot express the collision
+# that the tagging in `hashable_value` exists to prevent.
+_EXACT = st.recursive(
+    _LEAVES,
+    lambda children: st.lists(children, max_size=3)
+    | st.lists(children, max_size=3).map(tuple),
+    max_leaves=8,
 )
 
 _UNHASHABLE = [
     pytest.param(["a", "b"], id="list"),
     pytest.param([], id="empty-list"),
     pytest.param([["nested"]], id="nested-list"),
+    pytest.param((["in-a-tuple"],), id="list-inside-tuple"),
     pytest.param({"a": 1}, id="dict"),
     pytest.param({"a", "b"}, id="set"),
 ]
 
 
 class TestTheResultIsAlwaysHashable:
-    @given(_VALUES)
+    @given(_EXACT)
     def test_any_value_yields_a_hashable_result(self, value: object) -> None:
         hash(hashable_value(value))
 
@@ -62,10 +72,8 @@ class TestTheResultIsAlwaysHashable:
 
 
 class TestEqualValuesKeyEqually:
-    @given(_VALUES)
+    @given(_EXACT)
     def test_a_value_keys_the_same_as_an_equal_copy(self, value: object) -> None:
-        import copy
-
         assert hashable_value(value) == hashable_value(copy.deepcopy(value))
 
     def test_repeated_calls_agree(self) -> None:
@@ -74,29 +82,59 @@ class TestEqualValuesKeyEqually:
 
 
 class TestUnequalValuesKeyDifferently:
-    @given(_VALUES, _VALUES)
+    """The invariant that matters more: an over-merge drops a real finding."""
+
+    @given(_EXACT, _EXACT)
     def test_unequal_values_never_merge(self, left: object, right: object) -> None:
         if left == right:
             return
         assert hashable_value(left) != hashable_value(right)
 
     def test_a_list_does_not_collide_with_its_own_string_spelling(self) -> None:
-        """A conversion that flattened to text would merge unequal values."""
         assert hashable_value(["a"]) != hashable_value("['a']")
 
+
+class TestConvertedFormsCannotCollide:
+    """Each case below was a real collision before the conversions were tagged."""
+
+    def test_a_list_does_not_collide_with_the_equivalent_tuple(self) -> None:
+        assert hashable_value(["a"]) != hashable_value(("a",))
+
+    def test_nesting_preserves_the_container_distinction(self) -> None:
+        assert hashable_value([["a"]]) != hashable_value([("a",)])
+
+    def test_a_genuine_tuple_cannot_forge_the_fallback(self) -> None:
+        """The fallback's shape is `(tag, type_name, repr)`; only the tag is
+        unforgeable, which is why it is there."""
+        value = {"a": 1}
+        assert hashable_value(value) != hashable_value(
+            (type(value).__name__, repr(value))
+        )
+
     def test_an_unhashable_object_does_not_collide_with_its_repr(self) -> None:
-        """The fallback is type-tagged precisely so this cannot collide."""
         value = {"a": 1}
         assert hashable_value(value) != hashable_value(repr(value))
 
+    def test_two_unhashable_types_sharing_a_repr_stay_distinct(self) -> None:
+        """The type name is carried for exactly this case."""
 
-class TestHashableValuesArePassedThroughUnchanged:
-    @pytest.mark.parametrize("value", [None, "", "text", 0, False, ("a", "b")])
-    def test_already_hashable_values_are_identical(self, value: object) -> None:
+        class Odd:
+            def __hash__(self) -> int:
+                raise TypeError
+
+            def __repr__(self) -> str:
+                return "{'a': 1}"
+
+        assert hashable_value(Odd()) != hashable_value({"a": 1})
+
+
+class TestHashableScalarsArePassedThroughUnchanged:
+    @pytest.mark.parametrize("value", [None, "", "text", 0, False, frozenset({"a"})])
+    def test_already_hashable_scalars_are_identical(self, value: object) -> None:
         assert hashable_value(value) is value
 
-    def test_a_list_becomes_a_tuple_rather_than_text(self) -> None:
-        assert hashable_value(["a", "b"]) == ("a", "b")
-
-    def test_nesting_is_converted_recursively(self) -> None:
-        assert hashable_value([["a"], ["b"]]) == (("a",), ("b",))
+    def test_a_tuple_is_tagged_rather_than_passed_through(self) -> None:
+        """A bare pass-through is what let a tuple collide with a list."""
+        value = ("a", "b")
+        assert hashable_value(value) is not value
+        assert hash(hashable_value(value))
