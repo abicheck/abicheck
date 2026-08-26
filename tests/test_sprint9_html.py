@@ -849,3 +849,75 @@ def test_correlation_note_hidden_when_show_only_filters_out_the_target() -> None
     # The original Change objects are never mutated by the filtered render.
     assert layout_change.correlated_change_kind == ChangeKind.TYPE_VTABLE_CHANGED.value
     assert "See also" in generate_html_report(r)
+
+
+# ---------------------------------------------------------------------------
+# Real demangling through the actual Change dataclass (item 8 of the abicheck
+# code-review report: the HTML report never actually demangled anything --
+# `_symbol_cell` read a `demangled_symbol` attribute that `Change` (the real
+# production dataclass) never sets, so it always silently fell back to the
+# raw mangled symbol; `description` was never touched at all. The tests
+# above (`test_demangled_symbol_shown_as_text`/`test_mangled_symbol_in_
+# tooltip`) never caught this because their `SimpleNamespace` fake
+# hand-sets `demangled_symbol` itself, masking the gap.
+# ---------------------------------------------------------------------------
+
+
+class TestRealDemanglingThroughTheProductionChangeDataclass:
+    def _elf_only_removal(self):
+        from abicheck.checker import Change, DiffResult, Verdict
+        from abicheck.checker_policy import ChangeKind
+
+        mangled = "_ZN3FooC1Ev"
+        change = Change(
+            kind=ChangeKind.FUNC_REMOVED_ELF_ONLY,
+            symbol=mangled,
+            description=f"Elf_only function removed: {mangled}",
+        )
+        return DiffResult(
+            old_version="1.0",
+            new_version="2.0",
+            library="libtest.so.1",
+            changes=[change],
+            verdict=Verdict.BREAKING,
+        )
+
+    def test_default_demangles_symbol_cell_for_a_real_change(self) -> None:
+        out = generate_html_report(self._elf_only_removal())
+        assert "Foo::Foo()" in out
+        assert "_ZN3FooC1Ev" in out  # mangled kept as the <abbr> tooltip
+
+    def test_default_demangles_the_description_too(self) -> None:
+        """The gap `demangled_symbol` never covered at all: the
+        Description column embeds the same mangled name inline."""
+        out = generate_html_report(self._elf_only_removal())
+        assert "Elf_only function removed: Foo::Foo()" in out
+
+    def test_demangle_false_keeps_both_raw(self) -> None:
+        out = generate_html_report(self._elf_only_removal(), demangle=False)
+        assert "Foo::Foo()" not in out
+        assert out.count("_ZN3FooC1Ev") >= 2  # symbol cell AND description
+
+    def test_template_argument_angle_brackets_are_escaped_not_injected(self) -> None:
+        """Demangling runs BEFORE html.escape, so a demangled template
+        argument's own `<`/`>` must never appear unescaped in the output."""
+        from abicheck.checker import Change, DiffResult, Verdict
+        from abicheck.checker_policy import ChangeKind
+
+        mangled = "_Z3fooI3BarEvT_"  # void foo<Bar>(Bar)
+        change = Change(
+            kind=ChangeKind.FUNC_REMOVED,
+            symbol=mangled,
+            description=f"Function removed: {mangled}",
+        )
+        result = DiffResult(
+            old_version="1.0",
+            new_version="2.0",
+            library="libtest.so.1",
+            changes=[change],
+            verdict=Verdict.BREAKING,
+        )
+        out = generate_html_report(result)
+        assert "foo&lt;Bar&gt;" in out
+        assert "<Bar>" not in out
+        assert "foo<Bar>" not in out

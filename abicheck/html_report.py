@@ -35,6 +35,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 from .checker_policy import HasKind
+from .demangle import demangle_text
 
 # Page chrome (DOCTYPE/head/stylesheet/body frame, verdict palette, footer) now
 # lives in one shared seam (``html_template``). ``_VERDICT_STYLE`` /
@@ -139,17 +140,17 @@ def _file_metadata_html(result: object) -> str:
 </div>"""
 
 
-def _symbol_cell(change: object) -> str:
-    """Render symbol name: demangled text with mangled name as tooltip."""
-    h = html.escape
-    mangled = h(getattr(change, "symbol", "") or "")
-    demangled = h(getattr(change, "demangled_symbol", "") or mangled)
+def _symbol_cell(change: object, demangle: bool = True) -> str:
+    """Symbol: demangled text with mangled name as tooltip. Demangles
+    BEFORE ``html.escape`` (never the reverse) -- safe by construction."""
+    raw = getattr(change, "symbol", "") or ""
+    mangled, demangled = html.escape(raw), html.escape(demangle_text(raw) if demangle else raw)
     if demangled and demangled != mangled and mangled:
         return f'<abbr title="{html.escape(mangled, quote=True)}">{demangled}</abbr>'
     return demangled or mangled
 
 
-def _changes_table(changes: list[object]) -> str:
+def _changes_table(changes: list[object], demangle: bool = True) -> str:
     if not changes:
         return "<p class='empty'>No changes in this category.</p>"
 
@@ -159,10 +160,11 @@ def _changes_table(changes: list[object]) -> str:
     for ch in changes:
         ks = kind_str(ch)
         cat = category(ks)
-        desc = html.escape(getattr(ch, "description", "") or "")
+        raw_desc = getattr(ch, "description", "") or ""
+        desc = html.escape(demangle_text(raw_desc) if demangle else raw_desc)
         old_val = html.escape(str(getattr(ch, "old_value", "") or ""))
         new_val = html.escape(str(getattr(ch, "new_value", "") or ""))
-        sym_cell = _symbol_cell(ch)
+        sym_cell = _symbol_cell(ch, demangle)
         loc = getattr(ch, "source_location", None)
         affected = getattr(ch, "affected_symbols", None)
 
@@ -820,6 +822,7 @@ def generate_html_report(
     show_only: str | None = None,
     show_impact: bool = False,
     severity_config: SeverityConfig | None = None,
+    demangle: bool = True,
 ) -> str:
     """Generate a standalone ABICC-compatible HTML ABI report.
 
@@ -833,6 +836,7 @@ def generate_html_report(
             changes (legacy behaviour).
         show_only: Optional --show-only filter string (display-only).
         show_impact: If True, append an impact summary table.
+        demangle: Demangle C++ symbols in the native table (see ``_symbol_cell``).
         severity_config: Optional severity configuration. When given (native
             report only — the ABICC-compatible ``compat_html`` layout is left
             unchanged), a separate "CI Gate" headline card is rendered
@@ -843,11 +847,7 @@ def generate_html_report(
     Returns:
         Complete self-contained HTML document as a string.
     """
-    verdict = (
-        result.verdict.value
-        if hasattr(result.verdict, "value")
-        else str(result.verdict)
-    )
+    verdict = result.verdict.value if hasattr(result.verdict, "value") else str(result.verdict)
     fg, bg = _VERDICT_STYLE.get(verdict, ("#212121", "#f5f5f5"))
 
     all_changes: list[object] = list(getattr(result, "changes", None) or [])
@@ -1020,7 +1020,7 @@ def generate_html_report(
 
     def _section(title: str, anchor: str, css_class: str, items: list[object]) -> str:
         count = len(items)
-        tbl = _changes_table(items)
+        tbl = _changes_table(items, demangle)
         return (
             f"<div class='section {css_class}' id='{anchor}'>"
             f"<h3>{title} ({count})</h3>"
