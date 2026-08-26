@@ -11,7 +11,11 @@
       "path": "abicheck/model",
       "may_import": [],
       "legacy_paths": [
-        "abicheck/change_registry_types.py"
+        "abicheck/change_registry_types.py",
+        "abicheck/checker_types.py",
+        "abicheck/compile_context.py",
+        "abicheck/evidence_depth.py",
+        "abicheck/model.py"
       ]
     },
     "storage": {
@@ -25,6 +29,21 @@
       "may_import": [
         "model",
         "storage"
+      ],
+      "legacy_paths": [
+        "abicheck/_compiler_options.py",
+        "abicheck/binary_utils.py",
+        "abicheck/buildsource/embed.py",
+        "abicheck/buildsource/inline.py",
+        "abicheck/buildsource/inputs_pack.py",
+        "abicheck/buildsource/l2_seed.py",
+        "abicheck/buildsource/risk.py",
+        "abicheck/debug_resolver.py",
+        "abicheck/dump_manifest.py",
+        "abicheck/dumper_clang.py",
+        "abicheck/dumper_scoping.py",
+        "abicheck/header_conditionals.py",
+        "abicheck/header_utils.py"
       ]
     },
     "compare": {
@@ -33,9 +52,10 @@
         "model"
       ],
       "legacy_paths": [
-        "abicheck/checker_types.py",
+        "abicheck/diff_build_config.py",
         "abicheck/diff_cxx_rules.py",
-        "abicheck/finding_identity.py"
+        "abicheck/finding_identity.py",
+        "abicheck/probe_harness.py"
       ]
     },
     "policy": {
@@ -45,8 +65,10 @@
         "compare"
       ],
       "legacy_paths": [
-        "abicheck/severity.py",
-        "abicheck/analysis_assurance.py"
+        "abicheck/analysis_assurance.py",
+        "abicheck/contract_coverage_exit.py",
+        "abicheck/exit_decision.py",
+        "abicheck/severity.py"
       ]
     },
     "workflows": {
@@ -57,6 +79,15 @@
         "extract",
         "compare",
         "policy"
+      ],
+      "legacy_paths": [
+        "abicheck/compatibility_evaluation_frontend.py",
+        "abicheck/service.py",
+        "abicheck/service_compare_evidence.py",
+        "abicheck/service_compare_pipeline.py",
+        "abicheck/service_dump_pipeline.py",
+        "abicheck/service_input_resolution.py",
+        "abicheck/service_scan.py"
       ]
     },
     "report": {
@@ -66,6 +97,9 @@
         "compare",
         "policy",
         "workflows"
+      ],
+      "legacy_paths": [
+        "abicheck/reporter.py"
       ]
     },
     "frontends": {
@@ -74,6 +108,41 @@
         "model",
         "workflows",
         "report"
+      ],
+      "legacy_paths": [
+        "abicheck/cli.py",
+        "abicheck/cli_aggregate.py",
+        "abicheck/cli_audit.py",
+        "abicheck/cli_buildsource.py",
+        "abicheck/cli_buildsource_helpers.py",
+        "abicheck/cli_buildsource_merge.py",
+        "abicheck/cli_compare_fold.py",
+        "abicheck/cli_compare_helpers.py",
+        "abicheck/cli_compare_options.py",
+        "abicheck/cli_compare_receipt.py",
+        "abicheck/cli_compare_release.py",
+        "abicheck/cli_compare_release_helpers.py",
+        "abicheck/cli_datasources.py",
+        "abicheck/cli_dump_depth.py",
+        "abicheck/cli_dump_dry_run_build_query.py",
+        "abicheck/cli_dump_helpers.py",
+        "abicheck/cli_dump_non_elf.py",
+        "abicheck/cli_dump_protocols.py",
+        "abicheck/cli_dump_request.py",
+        "abicheck/cli_graph.py",
+        "abicheck/cli_helpers_compare.py",
+        "abicheck/cli_options.py",
+        "abicheck/cli_params.py",
+        "abicheck/cli_pr_comment.py",
+        "abicheck/cli_project.py",
+        "abicheck/cli_resolve.py",
+        "abicheck/cli_scan.py",
+        "abicheck/cli_scan_baseline.py",
+        "abicheck/cli_scan_helpers.py",
+        "abicheck/cli_scan_receipt.py",
+        "abicheck/cli_stack.py",
+        "abicheck/compat/cli.py",
+        "abicheck/dry_run.py"
       ]
     }
   },

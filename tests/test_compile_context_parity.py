@@ -21,7 +21,7 @@ The cross-toolchain + frontend family is defined once in
 (``cli_options.merge_compile_config`` / ``resolve_compile_context``). This guards
 that the three commands never drift, that ``scan`` threads the context down to the
 header dump, and that ``compare`` now threads its both-sides context to *both*
-sides while the per-side ``--old/new-ast-frontend`` override still wins.
+sides while the per-side ``--old/new-ast-frontend`` override still wins.ADR-061 Phase 4, throughout: patch the owner, not ``abicheck.cli`` -- its lazy ``__getattr__`` means a ``setattr`` there rebinds nothing the caller reads.
 """
 
 from __future__ import annotations
@@ -1223,7 +1223,7 @@ def test_dump_reads_compile_block_from_config(
     Patches ``perform_elf_dump`` (so the fake-ELF bytes are never parsed for real)
     and asserts the synthesized ``-std`` reaches its literal gcc option tokens.
     """
-    import abicheck.cli as cli_mod
+    import abicheck.frontends.cli.commands.dump as cli_mod
 
     so = tmp_path / "libfoo.so"
     so.write_bytes(b"\x7fELF" + b"\x00" * 100)
@@ -1253,7 +1253,7 @@ def test_compare_threads_compile_context_for_set_inputs(
     resolved CompileContext to the release fan-out, not reject it -- the
     per-library fan-out now threads the L2 context to each pair's header
     dump (fix: whole-product-bundle known-gap entry, AGENTS.md)."""
-    import abicheck.cli as cli_mod
+    import abicheck.frontends.cli.commands.compare as cli_mod
 
     old_dir = tmp_path / "old"
     new_dir = tmp_path / "new"
@@ -1294,7 +1294,7 @@ def test_compare_threads_compiler_aliases_for_set_inputs(
     release fan-out's resolved CompileContext exactly like they reach a
     single-pair compare's (test_compare_threads_compile_context_for_set_inputs
     above)."""
-    import abicheck.cli as cli_mod
+    import abicheck.frontends.cli.commands.compare as cli_mod
 
     old_dir = tmp_path / "old"
     new_dir = tmp_path / "new"
@@ -1375,7 +1375,7 @@ def test_compare_set_inputs_without_compile_flags_not_rejected(
     """The guard fires only on explicitly-passed compile-context flags — a plain
     directory compare still dispatches (no false rejection from the 'auto'
     --ast-frontend default)."""
-    import abicheck.cli as cli_mod
+    import abicheck.frontends.cli.commands.compare as cli_mod
 
     old_dir = tmp_path / "old"
     new_dir = tmp_path / "new"
@@ -1400,7 +1400,7 @@ def test_compare_set_inputs_applies_config_compile_block(
     block must apply it (not silently drop it, and no longer just warn) --
     the fan-out now threads the L2 context (fix: whole-product-bundle
     known-gap entry, AGENTS.md)."""
-    import abicheck.cli as cli_mod
+    import abicheck.frontends.cli.commands.compare as cli_mod
 
     old_dir = tmp_path / "old"
     new_dir = tmp_path / "new"
@@ -1437,7 +1437,7 @@ def test_compare_set_inputs_forwards_config_include_dirs(
     configured include root could fail or parse incompletely despite the
     compile: block otherwise being applied.
     """
-    import abicheck.cli as cli_mod
+    import abicheck.frontends.cli.commands.compare as cli_mod
 
     old_dir = tmp_path / "old"
     new_dir = tmp_path / "new"
@@ -1522,7 +1522,7 @@ def test_dump_pe_threads_compile_context(
     """A PE/Mach-O dump now folds the compile: block into header scoping too — the
     context is resolved before the format dispatch and threaded into the non-ELF
     path (Codex review). Previously --gcc-options were warned-and-ignored there."""
-    import abicheck.cli as cli_mod
+    import abicheck.frontends.cli.commands.dump as cli_mod
 
     pe = tmp_path / "foo.dll"
     pe.write_bytes(b"MZ" + b"\x00" * 128)
@@ -1555,7 +1555,7 @@ def test_dump_pe_threads_compile_context(
 def test_dump_pe_explicit_gcc_options_no_longer_warns(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    import abicheck.cli as cli_mod
+    import abicheck.frontends.cli.commands.dump as cli_mod
 
     pe = tmp_path / "foo.dll"
     pe.write_bytes(b"MZ" + b"\x00" * 128)
@@ -1714,7 +1714,7 @@ def test_a_one_sided_frontend_keeps_the_source_trees_configured_frontend(
     explicitness -- rather than through a full inline dump, so the test states
     the contract rather than one downstream consequence of it.
     """
-    import abicheck.cli_compare_helpers as helpers
+    import abicheck.frontends.cli.commands.compare as helpers
 
     old_so, new_so, header = _two_elf(tmp_path)
     src = tmp_path / "srctree"
@@ -1754,7 +1754,7 @@ def test_a_shared_frontend_is_explicit_for_both_inline_source_sides(
 ) -> None:
     # The other direction, so the fix above cannot be satisfied by simply
     # never reporting the inline path's shared frontend as explicit.
-    import abicheck.cli_compare_helpers as helpers
+    import abicheck.frontends.cli.commands.compare as helpers
 
     old_so, new_so, header = _two_elf(tmp_path)
     src = tmp_path / "srctree2"

@@ -120,22 +120,10 @@ def _is_engine_module(rel: str) -> bool:
 # below — a real case this format has to disambiguate).
 ENGINE_CLI_BOUNDARY_ALLOWLIST: frozenset[str] = frozenset(
     {
-        "abicheck/buildsource/evidence_policy.py::import click::1",
         "abicheck/scan_engine.py::import click::1",
         "abicheck/scan_engine.py::from .cli_scan_baseline import ...::1",
         "abicheck/scan_engine.py::from .cli_scan_helpers import ...::1",
-        "abicheck/service_compare_pipeline.py::from .cli_buildsource import ...::1",
-        "abicheck/service_dump_pipeline.py::from .cli_dump_helpers import ...::1",
-        "abicheck/service_input_resolution.py::"
-        "from .cli_buildsource_helpers import ...::1",
-        "abicheck/service_input_resolution.py::import click::1",
-        "abicheck/service_input_resolution.py::from .cli_buildsource import ...::1",
-        "abicheck/service_input_resolution.py::from .cli_dump_helpers import ...::1",
         "abicheck/service_scan.py::import click::1",
-        "abicheck/service_scan.py::from .cli_scan_baseline import ...::1",
-        "abicheck/service_scan.py::from .cli_scan_receipt import ...::1",
-        "abicheck/service_scan.py::from .cli_scan_baseline import ...::2",
-        "abicheck/service_scan.py::from .cli_scan_baseline import ...::3",
     }
 )
 

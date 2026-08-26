@@ -1279,7 +1279,7 @@ def test_perform_elf_dump_header_graph_receives_seeded_includes(
     plain_snap = AbiSnapshot(library="lib.so", version="1.0")
     monkeypatch.setattr("abicheck.cli_dump_helpers.dump", lambda **_kw: plain_snap)
     monkeypatch.setattr(
-        "abicheck.buildsource.l2_seed.seed_includes_and_fold_compile_context",
+        "abicheck.workflows.extraction.seed_includes_and_fold_compile_context",
         _fake_seed_and_fold([seeded]),
     )
 
@@ -1471,7 +1471,7 @@ def test_perform_elf_dump_seeds_l2_includes_and_runs_cleanup(
         return AbiSnapshot(library="lib.so", version="1.0")
 
     monkeypatch.setattr(
-        "abicheck.buildsource.l2_seed.seed_includes_and_fold_compile_context",
+        "abicheck.workflows.extraction.seed_includes_and_fold_compile_context",
         fake_seed_and_fold,
     )
     monkeypatch.setattr("abicheck.cli_dump_helpers.dump", fake_dump)
@@ -1524,7 +1524,7 @@ def test_perform_elf_dump_defers_l2_cleanup_until_after_header_graph(
         return plain_snap
 
     monkeypatch.setattr(
-        "abicheck.buildsource.l2_seed.seed_includes_and_fold_compile_context",
+        "abicheck.workflows.extraction.seed_includes_and_fold_compile_context",
         fake_seed_and_fold,
     )
     monkeypatch.setattr("abicheck.cli_dump_helpers.dump", fake_dump)
@@ -1574,7 +1574,7 @@ def test_perform_elf_dump_cleans_up_when_enrichment_raises_before_header_graph(
         raise AssertionError("_attach_header_graph must not be reached")
 
     monkeypatch.setattr(
-        "abicheck.buildsource.l2_seed.seed_includes_and_fold_compile_context",
+        "abicheck.workflows.extraction.seed_includes_and_fold_compile_context",
         fake_seed_and_fold,
     )
     monkeypatch.setattr("abicheck.cli_dump_helpers.dump", fake_dump)
@@ -1623,7 +1623,7 @@ def test_perform_elf_dump_cleanup_still_runs_after_header_graph_with_no_flags(
         return plain_snap
 
     monkeypatch.setattr(
-        "abicheck.buildsource.l2_seed.seed_includes_and_fold_compile_context",
+        "abicheck.workflows.extraction.seed_includes_and_fold_compile_context",
         fake_seed_and_fold,
     )
     monkeypatch.setattr("abicheck.cli_dump_helpers.dump", fake_dump)
@@ -1854,7 +1854,7 @@ def test_perform_elf_dump_wraps_dump_errors_still_cleans_up_seeded_dirs(
         raise AbicheckError("castxml exploded")
 
     monkeypatch.setattr(
-        "abicheck.buildsource.l2_seed.seed_includes_and_fold_compile_context",
+        "abicheck.workflows.extraction.seed_includes_and_fold_compile_context",
         fake_seed_and_fold,
     )
     monkeypatch.setattr("abicheck.cli_dump_helpers.dump", _raise)

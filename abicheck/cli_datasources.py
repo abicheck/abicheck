@@ -21,8 +21,8 @@ def print_data_sources(
     sources_path: Path | None = None,
 ) -> None:
     """Print data source diagnostic information for a binary."""
-    from .binary_utils import detect_binary_format, normalize_binary_input
     from .dwarf_snapshot import show_data_sources
+    from .workflows.extraction import detect_binary_format, normalize_binary_input
 
     normalized_path, binary_fmt = normalize_binary_input(so_path)
     if binary_fmt is None:
@@ -39,8 +39,8 @@ def print_data_sources(
         dwarf_meta, _ = parse_dwarf(normalized_path)
 
     if build_source_path is not None or sources_path is not None:
-        from .buildsource.inline import is_pack_dir
         from .buildsource.pack import BuildSourcePack
+        from .workflows.extraction import is_pack_dir
 
         def load_pack(path: Path, label: str) -> BuildSourcePack | None:
             """Load a build-source pack when the input is already collected."""

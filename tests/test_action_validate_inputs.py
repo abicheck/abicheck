@@ -612,7 +612,7 @@ class TestCompareFormatAllowlistMatchesCli:
     own Choice.choices for the single-pair set (introspected directly rather
     than scraped from --help-all's output, which rich-click hard-wraps
     mid-word inside its option table at this terminal width) and
-    abicheck/cli.py's _RELEASE_FORMATS constant for the release-style set --
+    the compare command module's _RELEASE_FORMATS constant for the release-style set --
     so a future CLI format addition/removal doesn't silently desync the
     Action's fail-fast validator from what the CLI really accepts."""
 
@@ -648,15 +648,15 @@ class TestCompareFormatAllowlistMatchesCli:
         validator_formats = self._extract_allowlist(
             "only 'json', 'markdown', and 'junit' are available"
         )
-        cli_source = (
-            Path(__file__).resolve().parents[1] / "abicheck" / "cli.py"
-        ).read_text(encoding="utf-8")
+        # ADR-061 Phase 4 moved `compare`'s body out of the `cli.py` facade.
+        cmd = "abicheck/frontends/cli/commands/compare.py"
+        cli_source = (Path(__file__).resolve().parents[1] / cmd).read_text("utf-8")
         m = re.search(r"_RELEASE_FORMATS = frozenset\(\{([^}]+)\}\)", cli_source)
-        assert m, "could not find _RELEASE_FORMATS in abicheck/cli.py"
+        assert m, "could not find _RELEASE_FORMATS in the compare command module"
         cli_formats = {f.strip().strip('"') for f in m.group(1).split(",")}
         assert validator_formats == cli_formats, (
             f"validate-inputs.sh's release-style compare allowlist {sorted(validator_formats)} "
-            f"has drifted from abicheck/cli.py's _RELEASE_FORMATS {sorted(cli_formats)}"
+            f"has drifted from the compare command module's _RELEASE_FORMATS {sorted(cli_formats)}"
         )
 
 

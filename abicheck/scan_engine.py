@@ -83,10 +83,8 @@ from .cli_scan_helpers import (
 )
 from .errors import ProfileMismatchError, ScopeMismatchError
 from .schemas import SCAN_SCHEMA_VERSION
-from .service_input_resolution import (
-    BaselineReuseContext,
-    SideResolution,
-)
+from .workflows.artifact.execute import SideResolution
+from .workflows.artifact.resolve import BaselineReuseContext
 
 if TYPE_CHECKING:
     from .environment_matrix import EnvironmentMatrix
@@ -282,7 +280,7 @@ def _build_new_snapshot(
     from .errors import AbicheckError
     from .header_utils import split_public_header_inputs
     from .service_compare_evidence import SideEvidence
-    from .service_input_resolution import _resolve_side_snapshot_impl
+    from .workflows.artifact.execute import _resolve_side_snapshot_impl
 
     # L4 replay's own public-header roots, kept deliberately WIDER than the
     # L2/crosscheck-origin provenance set (`public_headers`/`public_header_dirs`

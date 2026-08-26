@@ -63,7 +63,7 @@ SURFACE_ROOTS: tuple[Path, ...] = (
     *SURFACE_SOURCES,
     Path("abicheck/cli.py"),
     Path("abicheck/cli_options.py"),
-    Path("abicheck/cli_options_contract.py"),
+    Path("abicheck/frontends/cli/options/inventory.py"),
     Path("abicheck/schemas"),
     Path("abicheck/change_registry.py"),
     Path("abicheck/checker_policy.py"),

@@ -77,7 +77,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from mutation_results import (  # noqa: E402
-    MODULE_SCOPE,
+    # Re-exported for tests/test_mutation_score_gate.py, which reads it as
+    # `gate.MODULE_SCOPE`; `as` keeps `ruff --fix` from stripping it as unused.
+    MODULE_SCOPE as MODULE_SCOPE,
     MutantRecord,
     count_unresolved,
     functions_covering_lines,
