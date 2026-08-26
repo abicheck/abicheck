@@ -23,6 +23,7 @@ classification stays manual while the exhaustiveness is enforced here.
 from __future__ import annotations
 
 import pytest
+from _detector_mutations import CTX_PREFIX, MUTATIONS, build_snapshot
 from evidence_provenance_contract import (
     ALL_BUCKETS,
     PROVENANCE_PER_FINDING,
@@ -30,10 +31,25 @@ from evidence_provenance_contract import (
     PROVENANCE_UNVERIFIED,
 )
 
+from abicheck.checker import compare
 from abicheck.checker_policy import ChangeKind
 from abicheck.checker_types import Change
+from abicheck.model import Function, RecordType, Visibility
 
 ALL_KIND_VALUES = frozenset(k.value for k in ChangeKind)
+
+# Mirrors test_detector_oracle.py's own fixed, unrelated context.
+_CONTEXT = {
+    "functions": [
+        Function(
+            name=f"{CTX_PREFIX}keep",
+            mangled=f"_Z{CTX_PREFIX}keepv",
+            return_type="int",
+            visibility=Visibility.PUBLIC,
+        ),
+    ],
+    "types": [RecordType(name=f"{CTX_PREFIX}Keep", kind="struct", size_bits=64)],
+}
 
 
 class TestClassificationIsExhaustive:
@@ -118,4 +134,59 @@ class TestFieldDefaultsToNone:
         all_names = [field.name for field in dataclasses.fields(Change)]
         assert all_names[-1] == "evidence_provenance", (
             "evidence_provenance must be the last-declared field on Change"
+        )
+
+
+class TestClassificationTracksRealProducerBehavior:
+    """Codex review: the exhaustiveness tests above only prove every enum
+    value is in *some* bucket -- they say nothing about whether a kind's
+    real producer actually behaves the way its bucket claims. A Phase 1
+    change that starts setting `evidence_provenance` for a kind but forgets
+    to move it out of `PROVENANCE_UNVERIFIED` (the exact class of bug
+    #753 -> #759 already taught this codebase to guard against) would pass
+    every test above silently.
+
+    Ties each mutation in `_detector_mutations.MUTATIONS` (the same
+    known-edit catalogue `test_detector_oracle.py` uses) to its
+    `expected_kind`'s bucket: a `PROVENANCE_UNVERIFIED` kind's real,
+    end-to-end emitted `Change` must still carry `evidence_provenance is
+    None` (nothing has wired it yet); a `PROVENANCE_STATIC`/
+    `PROVENANCE_PER_FINDING` kind's must not (something has). Only 16 of
+    397 kinds have a mutation-catalogue entry today, so this is partial
+    coverage, not the completeness tests' full-enum guarantee -- but for
+    every kind it does cover, a producer silently drifting from its
+    declared bucket fails here instead of nowhere.
+    """
+
+    @pytest.mark.parametrize("mutation", MUTATIONS, ids=lambda m: m.__name__)
+    def test_unverified_kinds_are_not_yet_actually_stamped(self, mutation) -> None:
+        old_extra, new_extra, expected_kind, _ = mutation(tag=1)
+        if expected_kind.value not in PROVENANCE_UNVERIFIED:
+            pytest.skip(f"{expected_kind.value} is not classified UNVERIFIED")
+        old = build_snapshot("1.0", _CONTEXT, old_extra)
+        new = build_snapshot("2.0", _CONTEXT, new_extra)
+        emitted = [c for c in compare(old, new).changes if c.kind == expected_kind]
+        assert emitted, f"{mutation.__name__}: expected_kind {expected_kind.name} not emitted"
+        stamped = [c for c in emitted if c.evidence_provenance is not None]
+        assert not stamped, (
+            f"{expected_kind.value} is classified PROVENANCE_UNVERIFIED in "
+            "tests/evidence_provenance_contract.py, but its real producer "
+            f"now sets evidence_provenance ({stamped[0].evidence_provenance!r}) "
+            "-- move it to PROVENANCE_STATIC or PROVENANCE_PER_FINDING."
+        )
+
+    @pytest.mark.parametrize("mutation", MUTATIONS, ids=lambda m: m.__name__)
+    def test_classified_kinds_are_actually_stamped(self, mutation) -> None:
+        old_extra, new_extra, expected_kind, _ = mutation(tag=1)
+        if expected_kind.value not in (PROVENANCE_STATIC | PROVENANCE_PER_FINDING):
+            pytest.skip(f"{expected_kind.value} is not classified STATIC/PER_FINDING")
+        old = build_snapshot("1.0", _CONTEXT, old_extra)
+        new = build_snapshot("2.0", _CONTEXT, new_extra)
+        emitted = [c for c in compare(old, new).changes if c.kind == expected_kind]
+        assert emitted, f"{mutation.__name__}: expected_kind {expected_kind.name} not emitted"
+        assert any(c.evidence_provenance is not None for c in emitted), (
+            f"{expected_kind.value} is classified PROVENANCE_STATIC/"
+            "PROVENANCE_PER_FINDING, but its real producer still leaves "
+            "evidence_provenance unset -- either the classification is "
+            "premature, or the producer's own wiring is incomplete."
         )
