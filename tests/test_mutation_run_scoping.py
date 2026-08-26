@@ -314,6 +314,47 @@ def test_diff_touched_paths_reads_both_sides_of_a_diff_git_header() -> None:
     assert gate.diff_touched_paths(diff) == {"old_name.py", "new_name.py"}
 
 
+def test_diff_has_unparseable_git_header_is_false_for_ordinary_diffs() -> None:
+    diff = (
+        "diff --git a/abicheck/diff_types.py b/abicheck/diff_types.py\n"
+        "--- a/abicheck/diff_types.py\n+++ b/abicheck/diff_types.py\n"
+        "@@ -1,0 +2,1 @@\n+    pass\n"
+        "diff --git a/tests/old_name.py b/tests/new_name.py\n"
+        "similarity index 100%\n"
+        "rename from tests/old_name.py\n"
+        "rename to tests/new_name.py\n"
+    )
+    assert gate.diff_has_unparseable_git_header(diff) is False
+
+
+def test_diff_has_unparseable_git_header_detects_a_quoted_path() -> None:
+    """Git quotes a non-ASCII/space/special-char path by default
+    (`core.quotepath`), emitting ``diff --git "a/..." "b/..."`` — a header
+    `_DIFF_GIT_HEADER`'s plain ``a/... b/...`` pattern doesn't match, so the
+    quoted path would otherwise silently vanish from `diff_touched_paths`
+    (Codex review, PR #877, fifth round on this same check)."""
+    diff = 'diff --git "a/tests/fixtures/caf\\303\\251.json" "b/tests/fixtures/caf\\303\\251.json"\n'
+    assert gate.diff_has_unparseable_git_header(diff) is True
+
+
+def test_diff_touches_outside_only_mutate_falls_back_on_a_quoted_path() -> None:
+    """End-to-end: a diff editing an in-scope module plus a quoted-path file
+    outside it must not be scoped, even though `diff_touched_paths` alone
+    can't see the quoted path at all — the header-unparseable guard is what
+    catches it, not the touched-paths set."""
+    diff = (
+        "diff --git a/abicheck/diff_types.py b/abicheck/diff_types.py\n"
+        "--- a/abicheck/diff_types.py\n+++ b/abicheck/diff_types.py\n"
+        "@@ -1,0 +2,1 @@\n+    pass\n"
+        'diff --git "a/tests/fixtures/caf\\303\\251.json" "b/tests/fixtures/caf\\303\\251.json"\n'
+        "index abc123..def456 100644\n"
+        "Binary files differ\n"
+    )
+    assert gate.diff_touches_outside_only_mutate(diff, _ONLY_MUTATE_TWO) is True
+    # Pin why: the touched-paths reader alone misses the quoted file entirely.
+    assert gate.diff_touched_paths(diff) == {"abicheck/diff_types.py"}
+
+
 def test_mutant_run_scope_is_none_when_a_shared_test_fixture_is_touched() -> None:
     """The scenario `--require-baseline` alone cannot rule out: a production
     module and a *shared* test fixture both change, but the fixture doesn't

@@ -245,24 +245,55 @@ def diff_touched_paths(diff_text: str) -> set[str]:
     return touched
 
 
+def diff_has_unparseable_git_header(diff_text: str) -> bool:
+    """Any ``diff --git`` line `_DIFF_GIT_HEADER`'s plain ``a/... b/...``
+    form can't parse.
+
+    Most commonly a git-quoted path: `core.quotepath` (on by default) makes
+    git wrap the *whole* header in double quotes and C-style-escape it the
+    moment a path needs it — a space, a non-ASCII byte, an embedded quote,
+    backslash, tab, or control character — e.g. ``diff --git "a/caf\\303\\251"
+    "b/caf\\303\\251"``. `diff_touched_paths` silently drops such an entry
+    (Codex review, PR #877, fifth round on this same predicate — the fourth
+    round's fix moved detection off `_hunks()` and onto `diff --git`
+    headers, and this is a gap in *that* parser rather than a case it
+    already covered). Decoding git's own quoting/escaping correctly is a
+    real, if narrow, parser in its own right; conservatively treating any
+    unparseable header as "touches something outside `only_mutate`" is
+    simpler and can only ever make scoping more cautious, never less.
+    """
+    return any(
+        line.startswith("diff --git ") and not _DIFF_GIT_HEADER.match(line)
+        for line in diff_text.splitlines()
+    )
+
+
 def diff_touches_outside_only_mutate(diff_text: str, only_mutate: list[str]) -> bool:
     """Any path this diff touches — of *any* kind — that isn't itself in ``only_mutate``.
 
-    Four widening review rounds on this same predicate (Codex + CodeRabbit,
+    Five widening review rounds on this same predicate (Codex + CodeRabbit,
     PR #877) each found the previous version still let something through
     that could change an *untouched* module's behavior under mutation
     without touching that module's own file: "any `tests/` path" (a shared
     fixture), then "any `.py` file, of any kind" (a shared production
     helper an untouched module imports), then a non-Python `also_copy`
     input (`examples/**/*.json` and the like — read as fixture/oracle data
-    by tests that exercise mutated modules), and finally a class of change
-    invisible to the *diff-line* readers entirely: a binary-file diff, a
+    by tests that exercise mutated modules), then a class of change
+    invisible to the *diff-line* readers entirely (a binary-file diff, a
     pure rename, or a mode-only change, none of which contain a ``@@``
-    hunk. The first three rounds each narrowed what counted as "outside
-    `only_mutate`"; the fourth exposed that no such narrowing could have
-    helped, since the affected path was never in the touched set at all.
-    Fixed at that root instead: `diff_touched_paths` reads the one thing
-    every diff entry has in common (its `diff --git` header), hunk or not.
+    hunk — fixed by reading `diff --git` headers directly instead), and
+    finally a header this new reader still couldn't parse: a git-quoted
+    path (`diff --git "a/..." "b/..."`, the form `core.quotepath`
+    produces for a non-ASCII/space/special-character path), silently
+    dropped by `diff_touched_paths` rather than raising. The first three
+    rounds each narrowed what counted as "outside `only_mutate`"; the
+    fourth and fifth each showed that no such narrowing could have
+    helped, since the affected path was never in the detected set at all
+    — fixed at the detection layer both times: first by moving off
+    `_hunks()` onto `diff --git` headers (`diff_touched_paths`), then by
+    treating any header that reader still can't parse as itself a signal
+    to disable scoping (`diff_has_unparseable_git_header`), rather than
+    writing a git-quote/octal-escape decoder.
 
     Every mutant, however scoped, is tested against the diff's *entire*
     current tree — mutmut's own `copy_src_dir`/`copy_also_copy_files` copy
@@ -290,6 +321,8 @@ def diff_touches_outside_only_mutate(diff_text: str, only_mutate: list[str]) -> 
     (`changelog.d/`, say) is a real, separate improvement, not attempted
     here after four consecutive rounds on the same check.
     """
+    if diff_has_unparseable_git_header(diff_text):
+        return True
     touched = diff_touched_paths(diff_text)
     only_mutate_set = set(only_mutate)
     return any(p not in only_mutate_set for p in touched)
