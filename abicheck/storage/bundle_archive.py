@@ -24,17 +24,16 @@ module free of any ``model``/``compare``-layer import lets it join
 `storage/` (ADR-061) cleanly, without resolving the pre-existing
 ``bundle_facts.py`` <-> ``checker_types.py`` (``model`` <-> ``compare``)
 coupling a naive "construct a ``BundleFacts`` directly here" design hits.
-
 The ``BundleFacts``-aware glue lives in ``serialization.py``'s
 ``save_bundle_facts``/``load_bundle_facts``. See the G40 design plan
 (``docs/contribute/plans/g40-content-addressed-bundle-archive.md``).
 
-Zip, not tar (`.tar.zst`, the original review sketch's own naming): zip
-carries a real end-of-file central directory naming every member's offset
-and independently-compressed length, so `zipfile.ZipFile.open(name)` reads
-and decompresses exactly one member without touching any other. Each
-member's own *payload* is zstd-compressed independently (``ZIP_STORED``),
-not zip's own ``ZIP_DEFLATED``, this project's codec of record (ADR-059).
+Zip, not tar (`.tar.zst`): zip carries a real end-of-file central
+directory naming every member's offset and independently-compressed
+length, so `zipfile.ZipFile.open(name)` reads and decompresses exactly
+one member without touching any other. Each member's own *payload* is
+zstd-compressed independently (``ZIP_STORED``), not zip's own
+``ZIP_DEFLATED``, this project's codec of record (ADR-059).
 """
 
 from __future__ import annotations
@@ -51,6 +50,7 @@ from pathlib import Path
 from typing import Any
 
 from ..errors import SnapshotError
+from .zstd_frame_guard import validate_zstd_frame_completeness
 
 #: The manifest member's own name -- always the first thing a reader
 #: touches, readable without scanning or decompressing any blob member.
@@ -60,18 +60,16 @@ MANIFEST_MEMBER = "manifest.json"
 _BLOB_PREFIX = "blobs/"
 _BLOB_SUFFIX = ".json.zst"
 
-#: zstd compression level for archive blobs. Matches ADR-059's own
-#: ``ZSTD_LEVEL_BASELINE`` reasoning: written rarely, read often, so it
-#: takes the slow/best-ratio end rather than the fast, internal-cache end.
+#: zstd compression level for archive blobs (ADR-059's ``ZSTD_LEVEL_
+#: BASELINE`` reasoning: written rarely, read often).
 ZSTD_LEVEL = 19
 
 #: Same reasoning as `snapshot_io.py`'s own `_ZSTD_MAX_WINDOW_LOG`: bound
-#: decompression memory to a window a legitimate blob will never need,
-#: rather than trusting an archive's own embedded frame parameters.
+#: decompression memory to a window a legitimate blob will never need.
 _ZSTD_MAX_WINDOW_LOG = 27  # 128 MiB
 
-#: Per-blob decompressed-size cap, mirroring `snapshot_io.py`'s own
-#: `DEFAULT_MAX_DECODED_BYTES` (same 1 GiB value, independently applied).
+#: Per-blob decompressed-size cap (mirrors `snapshot_io.py`'s own
+#: `DEFAULT_MAX_DECODED_BYTES`, same 1 GiB value, applied independently).
 DEFAULT_MAX_BLOB_BYTES = 1024 * 1024 * 1024
 
 #: `manifest.json`'s own size cap -- far smaller than
@@ -79,11 +77,9 @@ DEFAULT_MAX_BLOB_BYTES = 1024 * 1024 * 1024
 #: payload content.
 DEFAULT_MAX_MANIFEST_BYTES = 64 * 1024 * 1024
 
-#: Slack added to a decoded-size cap when bounding the *outer*,
-#: still-compressed blob member read -- zstd overhead can make an
-#: incompressible payload's compressed form slightly larger than its
-#: decoded size; the tighter decoded running-total check below still
-#: catches a genuine decompression-bomb attempt.
+#: Slack for the *outer*, still-compressed blob member read -- zstd
+#: overhead can slightly inflate an incompressible payload; the tighter
+#: decoded running-total check below still catches a real bomb.
 _ZSTD_FRAME_OVERHEAD_SLACK_BYTES = 1024 * 1024
 
 
@@ -139,16 +135,13 @@ def sniff_bundle_archive_format(path: str | Path) -> str:
     """``"archive"`` if *path*'s own bytes start with a zip local-file-header
     or empty-archive magic, or (for a prefix matching neither that nor a
     recognized gzip/zstd envelope) its tail contains a structurally
-    plausible EOCD, per `looks_like_zip_from_tail()`; ``"json"`` otherwise
-    (gzip/zstd is never tail-scanned -- their own magic already resolves the
-    format). Used by ``serialization.load_bundle_facts``'s ``format="auto"``.
-    Always ``"json"`` for a non-regular-file source (a FIFO, `/dev/stdin`, a
-    socket): a real bundle archive can never be delivered that way regardless.
+    plausible EOCD, per `looks_like_zip_from_tail()`; ``"json"`` otherwise.
+    Used by ``serialization.load_bundle_facts``'s ``format="auto"``. Always
+    ``"json"`` for a non-regular-file source (a FIFO, socket): a real
+    bundle archive can never be delivered that way regardless.
 
-    Delegates to `open_regular_file_for_format_sniff()`'s own single-open,
-    nonblocking-then-fstat classification (closing the fd itself) rather
-    than a separate `stat()` + `open()` -- closing the same two-inode
-    TOCTOU window that helper was fixed for (Codex review)."""
+    Delegates to `open_regular_file_for_format_sniff()`'s own
+    stat-then-open classification (closing the fd itself)."""
     fp, fmt = open_regular_file_for_format_sniff(path)
     if fp is not None:
         fp.close()
@@ -171,6 +164,20 @@ def open_regular_file_for_format_sniff(
     different generation (Codex review). ``(None, "json")`` for a
     non-regular-file source -- the caller must not close *fp* then."""
     p = Path(path)
+    # A path-level stat() first, BEFORE any open() -- opening a FIFO at
+    # all, even briefly/nonblocking, can complete a one-shot producer's
+    # own blocking open()-for-write; closing right after (the non-regular
+    # branch below) then leaves the caller's later, separate open() to
+    # block forever for a writer that already came and went (Codex
+    # review, reproduced with a real FIFO). stat() never blocks/connects
+    # a reader, so this is free; the fd-level fstat() below, on what's
+    # actually opened, stays the source of truth against a swap in between.
+    try:
+        path_st = os.stat(p)
+    except OSError as exc:
+        raise SnapshotError(f"Cannot read {p}: {exc}") from exc
+    if not stat.S_ISREG(path_st.st_mode):
+        return None, "json"
     # Open first, nonblocking, then fstat() *that* fd -- a separate
     # stat()/open() risks a concurrent swap to a blocking FIFO.
     nonblock = getattr(os, "O_NONBLOCK", 0)
@@ -205,15 +212,11 @@ def open_regular_file_for_format_sniff(
     return fp, fmt
 
 
-#: A real bundle archive (one manifest member + one per *distinct* content
-#: hash) never needs anywhere near this many members -- a crafted archive
-#: claiming more is rejected before `zipfile.ZipFile` is constructed, since
-#: `ZipFile.__init__` eagerly parses the whole central directory and builds
-#: one `ZipInfo` per entry. Below 0xFFFF (the non-ZIP64 EOCD sentinel;
-#: "read the real count from ZIP64 instead" is handled below). Public:
-#: `bundle_facts.py` aligns its own writer-side member-count budget to
-#: this reader-side cap so it can never write an archive it wouldn't
-#: itself agree to reopen.
+#: A real bundle archive never needs anywhere near this many members -- a
+#: crafted archive claiming more is rejected before `zipfile.ZipFile` is
+#: constructed, since `ZipFile.__init__` eagerly parses the whole central
+#: directory. Below 0xFFFF (the non-ZIP64 EOCD sentinel). Public:
+#: `bundle_facts.py` aligns its own writer-side budget to this cap.
 MAX_ARCHIVE_MEMBERS = 20_000
 
 #: Central-directory bomb guard (EOCD/ZIP64 preflight) and the manifest
@@ -223,10 +226,8 @@ MAX_ARCHIVE_MEMBERS = 20_000
 
 
 def content_hash(payload: bytes) -> str:
-    """The content-address of *payload* -- sha256 hex digest. A public
-    function (not folded into the writer) so a caller can compute a hash to
-    check against an already-known manifest entry without opening the
-    archive at all."""
+    """The content-address of *payload* -- sha256 hex digest. Public so a
+    caller can check against a known manifest entry without opening it."""
     return hashlib.sha256(payload).hexdigest()
 
 
@@ -235,10 +236,8 @@ def _open_unique_temp(parent: Path, prefix: str, suffix: str) -> tuple[int, Path
     mode ``0o666`` filtered through the umask. Mirrors ``snapshot_io.
     _open_unique_temp`` (not imported, to stay dependency-free), except
     ``O_RDWR`` not ``O_WRONLY``: `BundleArchiveWriter.close()` reads this
-    same fd back (via `os.dup`) to hash what it actually wrote, without a
-    path-based reopen a hostile actor sharing the directory could redirect.
-    Retries on a name collision rather than a process-wide ``os.umask()``
-    dance."""
+    same fd back (via `os.dup`) to hash what it wrote, without a path-based
+    reopen a hostile actor sharing the directory could redirect."""
     for _ in range(100):
         candidate = parent / f"{prefix}{secrets.token_hex(8)}{suffix}"
         try:
@@ -351,8 +350,7 @@ class BundleArchiveWriter:
         h = content_hash(payload)
         if h in self._written_hashes:
             return h
-        # Enforced here too, not only by write_bundle_facts_archive()'s own
-        # preflight. +1 for this blob, +1 reserved for the manifest member.
+        # +1 for this blob, +1 reserved for the manifest member.
         if len(self._written_hashes) + 1 + 1 > MAX_ARCHIVE_MEMBERS:
             raise SnapshotError(
                 f"BundleArchiveWriter: writing this blob would produce "
@@ -360,8 +358,7 @@ class BundleArchiveWriter:
                 "reader's own safety limit) -- refusing to write an "
                 "archive that could not be reopened."
             )
-        # Same symmetry as the member-count cap: read_blob()'s own
-        # default cap is exactly this value.
+        # Symmetry: read_blob()'s own default cap is exactly this value.
         if len(payload) > DEFAULT_MAX_BLOB_BYTES:
             raise SnapshotError(
                 f"BundleArchiveWriter: this payload is {len(payload)} "
@@ -722,24 +719,19 @@ class BundleArchiveReader:
         self, content_hash_hex: str, *, max_decoded_bytes: int = DEFAULT_MAX_BLOB_BYTES
     ) -> bytes:
         """Decompress and return exactly the one blob named by
-        *content_hash_hex* -- no other archive member is read or
-        decompressed.
+        *content_hash_hex* -- no other archive member is read.
 
-        Streams the decompression in bounded chunks and enforces
-        *max_decoded_bytes* against the running decoded size (mirroring
-        `snapshot_io.py`'s own `_decompress_zstd` pattern) -- a bare
-        ``ZstdDecompressor.decompress(data)`` call would allocate the full
-        decoded output regardless of this function's own window-size bound.
-
-        Also re-hashes the decoded payload and checks it against
-        *content_hash_hex* -- the member name alone is just a zip entry
-        name, not a verified property of its content.
+        Streams the decompression in bounded chunks, enforcing
+        *max_decoded_bytes* against the running decoded size (a bare
+        ``ZstdDecompressor.decompress(data)`` call would allocate the
+        full output regardless of this bound). Re-hashes the decoded
+        payload against *content_hash_hex* -- the member name alone is
+        just a zip entry name, not a verified property of its content.
 
         The *outer*, still-compressed member read is bounded by
-        *max_decoded_bytes* plus a fixed slack margin, not the bare
-        decoded cap -- zstd's own overhead can make an incompressible
-        payload's compressed form larger than its decoded size. The
-        decoded running-total check below is the tight bound."""
+        *max_decoded_bytes* plus a fixed slack margin -- zstd overhead
+        can inflate an incompressible payload; the decoded running
+        total is the tight bound."""
         member = _blob_member_name(content_hash_hex)
         try:
             compressed = self._read_stored_member(
@@ -776,6 +768,14 @@ class BundleArchiveReader:
                 f"{self._path}: blob {content_hash_hex!r} failed to "
                 f"decompress: {exc}"
             ) from exc
+        # A frame truncated at just the right point can decompress above
+        # with no error, silently yielding fewer bytes than intended --
+        # this shared cross-check catches it (a hostile archive can name
+        # a member after a truncated payload's own hash, defeating the
+        # content-hash check below alone).
+        validate_zstd_frame_completeness(
+            zstandard, decompressor, compressed, source=f"{self._path}: blob {content_hash_hex!r}"
+        )
         decoded = out.getvalue()
         actual_hash = content_hash(decoded)
         if actual_hash != content_hash_hex:

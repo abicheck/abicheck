@@ -525,3 +525,49 @@
   lazily inside `_read_stored_member()`'s `self._zf.open(name)` call, not
   at construction. Now caught and translated to `SnapshotError` alongside
   the pre-existing `BadZipFile`/`OSError` handling there.
+
+- **G40 bundle archive: two more real Codex review findings, both fixed
+  -- one a silent-truncation guard, one a genuine FIFO-hang regression.**
+  (1) `read_blob()`'s zstd `stream_reader()` pass can decompress a
+  truncated frame with no error at all, silently yielding fewer bytes
+  than intended instead of raising -- confirmed empirically: for a
+  multi-block payload, truncating the compressed bytes by as little as
+  one byte can decompress cleanly to a partial-but-plausible prefix, no
+  exception. The post-decode content-hash check is not sufficient on its
+  own: a hostile archive can name the member after the truncated
+  payload's own (still-correct) hash, defeating it. Fixed by extracting
+  `snapshot_io._decompress_zstd`'s own three-Codex-round-corrected
+  frame-completeness cross-check (`.eof`/declared-content-size, walking
+  every concatenated frame) into a new shared leaf,
+  `storage/zstd_frame_guard.validate_zstd_frame_completeness`, now called
+  from both `_decompress_zstd` and `read_blob()` -- sharing the
+  already-hard-won logic rather than reimplementing (and re-risking) it,
+  while keeping each call site's own window-size/decompression policy
+  independent. (2) `open_regular_file_for_format_sniff()`'s non-regular-
+  file branch opened the path (nonblocking), fstat'd it, then immediately
+  closed it before returning `(None, "json")` -- for a FIFO with a
+  one-shot external producer (opens for write, writes once, closes), this
+  preliminary open()+close() can itself complete the producer's own
+  blocking open()-for-write, letting it write and exit *before* the
+  caller's real, separate read ever opens the FIFO -- which then blocks
+  forever, since a FIFO read-open blocks until a writer connects, and the
+  one-shot producer already came and went. Reproduced with a real FIFO +
+  subprocess producer: pre-fix, the producer got `BrokenPipeError` and
+  the follow-up real read hung indefinitely. Fixed by checking
+  regularity via a path-level `stat()` *before* ever opening the path --
+  `stat()` never blocks and never "connects" a reader the way `open()`
+  does, so a FIFO is never touched at all until the one real read that
+  will actually consume it; the existing fd-level `fstat()` (on what's
+  actually opened) stays the source of truth against a concurrent swap
+  in between, unaffected. Regression tests (both in
+  `tests/test_bundle_archive_cd_guard.py`, moved there for line-budget
+  headroom): `TestReadBlobRejectsTruncatedZstdFrames` (a real
+  multi-block zstd frame truncated by 3 bytes, with a premise check
+  confirming real `zstandard` really does silently short-decode it) and
+  `TestSniffDoesNotConsumeAOneShotFifoProducer` (a real subprocess
+  producer + explicit synchronization sleeps, run through a bounded
+  `Thread.join()` so a regression reads as a clean assertion failure
+  rather than hanging the test run itself). Both confirmed to fail
+  against the pre-fix code -- the truncated-frame test with no exception
+  raised, the FIFO test with the real read blocking past its 5s join
+  timeout, reliably across repeated runs.

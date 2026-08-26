@@ -44,6 +44,7 @@ from pathlib import Path
 from typing import Any
 
 from .errors import SnapshotError
+from .storage.zstd_frame_guard import validate_zstd_frame_completeness
 
 # ── Compression selector ────────────────────────────────────────────────────
 
@@ -393,85 +394,11 @@ def _decompress_zstd(data: bytes, *, max_decoded_bytes: int, source: str) -> byt
     # A frame truncated early enough (e.g. mid-header) can decompress with no
     # error at all, silently yielding fewer bytes than the frame's own
     # declared content size instead of raising -- confirmed against a real
-    # truncated frame. Cross-check against declared frame sizes (present on
-    # every frame this module writes, via write_content_size=True) rather
-    # than trusting the clean decompression loop above alone.
-    #
-    # Codex review, two rounds: ``get_frame_parameters(data)`` only ever
-    # inspects the *first* frame of a stream. A valid zstd stream may
-    # legitimately be multiple concatenated frames (this module's own
-    # writer never produces one, but a foreign/external snapshot may), and
-    # ``stream_reader`` above correctly decompresses all of them -- the
-    # first round's fix (comparing only against the first frame's declared
-    # size, flagging only under-decoding) stopped false-flagging a
-    # legitimate multi-frame stream, but a second round found it still
-    # couldn't catch a truncated *later* frame: if frame 1 (declares 100,
-    # yields 100) is intact and frame 2 (declares 100) is truncated to
-    # yield only 50, the aggregate 150 still exceeds frame 1's own 100,
-    # passing the "< declared" check with no visibility into frame 2 at
-    # all. Walk every frame's own declared size against its own actual
-    # output instead, using ``decompressobj()``'s per-frame boundary
-    # tracking (``.eof``/``.unused_data`` -- confirmed empirically: `.eof`
-    # is `False` exactly when a frame's decompression didn't reach its own
-    # end, `.unused_data` holds the remaining, not-yet-processed bytes).
-    #
-    # A third round found the second round's fix still stopped short: a
-    # frame with no declared size (CONTENTSIZE_UNKNOWN) used to abandon
-    # validation for *that* frame and every subsequent one, so a truncated
-    # frame anywhere after an unknown-size frame could hit the exact silent
-    # short-read this whole pass exists to catch, unchecked. `.eof` is
-    # checked unconditionally now (see the loop body below); only the
-    # declared-length comparison is skipped when there's genuinely nothing
-    # to compare against.
-    #
-    # Memory safety of this second pass (Codex review would flag this too,
-    # unprompted, if left unexplained): ``decompressobj().decompress()`` has
-    # no output-size cap the way ``stream_reader``'s bounded chunked reads
-    # above do -- feeding it even a tiny sliver of a highly-compressible
-    # frame's compressed bytes can still fully materialize that frame's
-    # entire decoded output in one call (confirmed empirically), which
-    # would reintroduce a real decompression-bomb risk if this ran
-    # *instead of* the bounded primary loop above. It doesn't: this pass
-    # only ever runs after that bounded loop already completed
-    # successfully, so the *total* decoded content across every frame is
-    # already known to fit within max_decoded_bytes (that's exactly what
-    # "completed without raising" means) -- redecompressing the same,
-    # already-proven-bounded data a second time for validation cannot
-    # exceed that same total, whatever this loop's own call granularity is.
-    remaining = data
-    try:
-        while remaining:
-            frame_declared = zstandard.get_frame_parameters(remaining).content_size
-            dobj = dctx.decompressobj()
-            frame_out = dobj.decompress(remaining)
-            # Codex review, third round: a frame with no declared size
-            # (CONTENTSIZE_UNKNOWN -- only possible for a foreign encoder
-            # that didn't set zstd's content-size flag; this module's own
-            # writer always does) used to abandon validation for that frame
-            # *and every subsequent frame* entirely -- a truncated *later*
-            # frame could then hit the exact same silent-short-read
-            # behavior this whole pass exists to catch, with nothing left
-            # checking it. `.eof` (frame completeness) is independent of
-            # whether a declared size exists at all, so it's still checked
-            # unconditionally; only the length-equality cross-check is
-            # skipped when there's no declared length to compare against.
-            if not dobj.eof or (
-                frame_declared != zstandard.CONTENTSIZE_UNKNOWN
-                and len(frame_out) != frame_declared
-            ):
-                raise SnapshotError(
-                    f"{source}: corrupt or truncated zstd stream (a frame "
-                    f"declares {frame_declared} bytes but only "
-                    f"{len(frame_out)} decoded)"
-                )
-            remaining = dobj.unused_data
-    except SnapshotError:
-        raise
-    except Exception:
-        pass  # frame-header parsing itself failing adds no new information
-        # -- the primary bounded loop above already proved the stream
-        # decodes cleanly end to end; this pass is an additional, stricter
-        # cross-check on top of that, not the only line of defense.
+    # truncated frame. `validate_zstd_frame_completeness` is a shared,
+    # three-Codex-round-corrected cross-check now also used by
+    # `storage/bundle_archive.py`'s `read_blob()` -- see its own docstring
+    # for the full multi-frame/CONTENTSIZE_UNKNOWN/memory-safety reasoning.
+    validate_zstd_frame_completeness(zstandard, dctx, data, source=source)
     return out.getvalue()
 
 

@@ -39,7 +39,12 @@ from pathlib import Path
 import pytest
 
 from abicheck.errors import SnapshotError
-from abicheck.storage.bundle_archive import BundleArchiveReader, BundleArchiveWriter
+from abicheck.storage.bundle_archive import (
+    MANIFEST_MEMBER,
+    BundleArchiveReader,
+    BundleArchiveWriter,
+    content_hash,
+)
 
 
 class TestBundleArchiveCentralDirectoryGuard:
@@ -859,3 +864,111 @@ class TestBundleArchiveReaderRejectsInvalidUtf8LocalHeaderFilenames:
         with pytest.raises(SnapshotError, match="invalid local file header filename"):
             with BundleArchiveReader.open(path) as reader:
                 reader.read_manifest()
+
+
+class TestReadBlobRejectsTruncatedZstdFrames:
+    """A zstd frame truncated at just the right point can decompress with
+    no error at all, silently yielding fewer bytes than intended instead
+    of raising -- confirmed against a real truncated frame (Codex
+    review). A hostile archive can then name the member after the
+    truncated payload's own (still-correct) content hash, so the
+    post-decode hash check alone would not catch it either."""
+
+    def _truncated_blob_archive(self, tmp_path: Path) -> tuple[Path, bytes]:
+        import zstandard
+
+        json_bytes = b'{"k": "v"}'
+        full_payload = json_bytes + b" " * 300_000  # spans multiple zstd blocks
+        compressor = zstandard.ZstdCompressor(level=19)
+        compressed = compressor.compress(full_payload)
+        truncated = compressed[:-3]
+
+        # Premise: confirm real zstandard really does silently short-decode
+        # this, not raise -- otherwise this fixture proves nothing.
+        dctx = zstandard.ZstdDecompressor()
+        out = io.BytesIO()
+        with dctx.stream_reader(io.BytesIO(truncated)) as reader:
+            while True:
+                chunk = reader.read(1024 * 1024)
+                if not chunk:
+                    break
+                out.write(chunk)
+        partial = out.getvalue()
+        assert partial and partial != full_payload and partial.startswith(json_bytes)
+        partial_hash = content_hash(partial)
+
+        path = tmp_path / "bundle.archive.zip"
+        with zipfile.ZipFile(path, mode="w") as zf:
+            zf.writestr(MANIFEST_MEMBER, json.dumps({"library_blobs": {"a.so": partial_hash}}))
+            zf.writestr(f"blobs/{partial_hash}.json.zst", truncated, compress_type=zipfile.ZIP_STORED)
+        return path, partial
+
+    def test_read_blob_raises_instead_of_silently_returning_truncated_content(
+        self, tmp_path: Path
+    ) -> None:
+        path, partial = self._truncated_blob_archive(tmp_path)
+        with BundleArchiveReader.open(path) as reader:
+            manifest = reader.read_manifest()
+            h = manifest["library_blobs"]["a.so"]
+            with pytest.raises(SnapshotError, match="corrupt or truncated zstd stream"):
+                reader.read_blob(h)
+
+
+class TestSniffDoesNotConsumeAOneShotFifoProducer:
+    """A *thread*-based writer doesn't reliably reproduce this: Python
+    thread scheduling can let the writer's open()+write()+close() finish
+    entirely before the sniff's own open() ever runs, masking the bug.
+    Uses a real *subprocess* with an explicit delay instead, so the
+    writer is deterministically still blocked in its own open()-for-write
+    (a FIFO write-end open() blocks until >=1 reader connects) when the
+    sniff runs -- exactly the scenario this fix targets: opening (even
+    briefly, even nonblocking) a FIFO with no *intended* reader can
+    complete that blocking open(), letting the writer proceed and close
+    before the caller's real, separate read ever gets a chance to
+    connect (Codex review, fresh evidence)."""
+
+    @pytest.mark.skipif(sys.platform == "win32", reason="no os.mkfifo on Windows")
+    def test_sniff_leaves_the_one_shot_writer_for_the_real_read(
+        self, tmp_path: Path
+    ) -> None:
+        import subprocess
+        import threading
+        import time
+
+        from abicheck.storage.bundle_archive import open_regular_file_for_format_sniff
+
+        fifo = tmp_path / "producer.fifo"
+        os.mkfifo(fifo)
+        payload = b'{"schema_version": 1, "per_library_snapshots": {}}'
+        proc = subprocess.Popen(
+            [sys.executable, "-c", f"open({str(fifo)!r}, 'wb').write({payload!r})"]
+        )
+        try:
+            time.sleep(0.3)  # let the child block in its own open()-for-write
+            fp, fmt = open_regular_file_for_format_sniff(fifo)
+            assert fp is None and fmt == "json"
+            # Give the child a chance to run its write()+exit *now*, if the
+            # sniff's own open()+close() already connected-then-dropped a
+            # reader from under it (the pre-fix bug) -- without this, the
+            # real read below can race ahead and connect before the child
+            # is scheduled, masking the bug non-deterministically.
+            time.sleep(0.3)
+            # The real, single read: run with a bounded join(), since a
+            # regression here is a hang, indistinguishable from "still
+            # running" without one.
+            result: list[bytes] = []
+
+            def _read() -> None:
+                with open(fifo, "rb") as f:
+                    result.append(f.read())
+
+            t = threading.Thread(target=_read, daemon=True)
+            t.start()
+            t.join(timeout=5)
+            assert not t.is_alive(), "the real read blocked on the FIFO"
+            assert result == [payload]
+            assert proc.wait(timeout=5) == 0
+        finally:
+            if proc.poll() is None:
+                proc.kill()
+                proc.wait()
