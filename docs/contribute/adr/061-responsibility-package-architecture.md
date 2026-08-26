@@ -1173,9 +1173,11 @@ The remaining Phase 5 work:
    exceptions.
 
 **Acceptance:** parser fixtures demonstrate byte/fact parity where applicable;
-catalog validation proves global uniqueness and complete metadata; no parser
-imports policy/report/workflows/frontends; corresponding debt entries are
-removed.
+catalog validation proves all four of D9's properties — global uniqueness,
+complete metadata, valid references, and non-contradictory defaults (only
+the first is fully done today; the rest, complete metadata included, remain
+open per the item-3 write-up above); no parser imports
+policy/report/workflows/frontends; corresponding debt entries are removed.
 
 ## Migration rules for every phase
 
