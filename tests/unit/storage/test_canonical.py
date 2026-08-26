@@ -729,3 +729,56 @@ class TestInformationalAxesParseDefensively:
         )
 
         assert StorageVersions.from_dict(versions.to_dict()) == versions
+
+
+class TestTheDecisionPointIsSafeOnItsOwn:
+    """Codex review: `from_dict` sanitized, the guard itself did not.
+
+    `StorageVersions` is public and constructible directly, so a loader or
+    migration adapter that builds one without `from_dict` could hand
+    `check_reader_compatibility` a negative version — neither equal to the
+    sentinel nor newer than supported, so it passed both guards as readable.
+    A guard that relies on its callers having cleaned the input is not a
+    fail-closed guard.
+    """
+
+    @pytest.mark.parametrize("value", [-1, -99, UNSTATED_VERSION])
+    def test_a_non_positive_package_format_is_refused(self, value: int) -> None:
+        versions = StorageVersions(
+            package_format_version=value,
+            comparison_contract_version=COMPARISON_CONTRACT_VERSION,
+        )
+
+        assert not check_reader_compatibility(versions).readable
+
+    @pytest.mark.parametrize("value", [-1, -99, UNSTATED_VERSION])
+    def test_a_non_positive_comparison_contract_is_refused(self, value: int) -> None:
+        versions = StorageVersions(
+            package_format_version=PACKAGE_FORMAT_VERSION,
+            comparison_contract_version=value,
+        )
+
+        assert not check_reader_compatibility(versions).readable
+
+    def test_the_reported_direct_construction_is_refused(self) -> None:
+        """The literal case from review: both axes negative."""
+        result = check_reader_compatibility(
+            StorageVersions(package_format_version=-1, comparison_contract_version=-1)
+        )
+
+        assert not result.readable
+        assert result.reason
+
+    def test_a_refusal_always_carries_a_reason(self) -> None:
+        """An empty reason was the tell — it meant no branch had fired."""
+        for versions in (
+            StorageVersions(package_format_version=-1),
+            StorageVersions(comparison_contract_version=-1),
+            StorageVersions(package_format_version=PACKAGE_FORMAT_VERSION + 1),
+        ):
+            result = check_reader_compatibility(versions)
+            assert not result.readable
+            assert result.reason
+
+    def test_valid_versions_are_unaffected(self) -> None:
+        assert check_reader_compatibility(StorageVersions()).readable

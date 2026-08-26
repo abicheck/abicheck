@@ -283,6 +283,16 @@ def check_reader_compatibility(
 ) -> ReaderCompatibility:
     """Decide whether this build may read a package, per ADR-062 D2.
 
+    Both fail-closed axes are checked for being *usable* (``> UNSTATED_VERSION``)
+    rather than merely for equality with the sentinel. ``from_dict`` already
+    sanitizes, but ``StorageVersions`` is public and constructible directly, so
+    a loader or migration adapter that builds one without going through
+    ``from_dict`` could hand this function a negative version — which is
+    neither equal to the sentinel nor newer than supported, and so passed both
+    guards as readable (Codex review). The sanitizer and the decision point
+    must each be safe on their own; a guard that relies on its callers having
+    already cleaned the input is not a fail-closed guard.
+
     Two axes fail closed and the rest do not, which is the whole point of
     splitting them:
 
@@ -308,7 +318,7 @@ def check_reader_compatibility(
                 f"this build's v{supported_package_format}; upgrade abicheck to read it"
             ),
         )
-    if versions.package_format_version == UNSTATED_VERSION:
+    if versions.package_format_version <= UNSTATED_VERSION:
         return ReaderCompatibility(
             readable=False,
             reason=(
@@ -316,7 +326,7 @@ def check_reader_compatibility(
                 "layout is unknown; this reader may not locate its structures"
             ),
         )
-    if versions.comparison_contract_version == UNSTATED_VERSION:
+    if versions.comparison_contract_version <= UNSTATED_VERSION:
         return ReaderCompatibility(
             readable=False,
             reason=(
