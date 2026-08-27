@@ -690,3 +690,52 @@ def record_resolved_config(
             for category in _SEVERITY_CATEGORIES
         },
     )
+
+
+def record_release_resolved_config(result: Any, config: Any) -> None:
+    """``record_resolved_config``'s release-fan-out sibling: the config-merge
+    half only, called from ``cli_compare_release._run_compare_pair`` once
+    per library (CLI cleanup phase two, "PR B" effective-config parity).
+
+    Deliberately narrower than ``record_resolved_config``: this stamps
+    *config* onto *result.evaluation_config* unconditionally (so
+    ``effective_config_digest``'s rich tier is reachable for a ``--pack``-
+    only release run, which never builds a ``PersistedContractContext`` at
+    all -- same reasoning as that function's own leading comment) and, when
+    *result* does carry one (a release run given ``--contract``), merges
+    *config* into it via :func:`~abicheck.contract_context.
+    with_resolved_config` -- closing the same "rich tier silently
+    unreachable" gap for the ``--pack`` + ``--contract`` combination, which
+    ``effective_config_fields`` prefers reading off the context over the
+    bare attribute whenever one exists (Codex review, fresh evidence).
+
+    Never calls :func:`~abicheck.contract_context.with_resolved_gate`, unlike
+    ``record_resolved_config``: that call needs a resolved gate config
+    (exit-code scheme/severity) the release fan-out has no per-library
+    equivalent of yet -- ``cli_compare_release_helpers.apply_release_gate_
+    pack``'s own docstring already documents that as a separate, deferred
+    "GateOptions unification" slice, not something this function should
+    reach for on its own.
+
+    Lives beside ``record_resolved_config`` rather than in ``abicheck.
+    workflows`` (where the rest of the release fan-out's own per-library
+    stamping lives, ``cli_compare_release._run_compare_pair``'s own call
+    site) because the merge needs real ``contract_context``/
+    ``contract_evidence`` objects, and neither module is ADR-061-classified
+    yet -- ``scripts/check_architecture.py``'s ``unclassified-import`` check
+    (correctly) refuses a ``workflows/`` module importing either. This
+    mirrors ``record_resolved_config``'s own home: the single-pair
+    equivalent of this exact operation already lives in this same flat,
+    not-yet-migrated module, for the identical reason.
+    """
+    if config is None:
+        return
+    result.evaluation_config = config
+
+    from .contract_evidence import PersistedContractContext
+
+    ctx = getattr(result, "contract_context", None)
+    if isinstance(ctx, PersistedContractContext):
+        from .contract_context import with_resolved_config
+
+        result.contract_context = with_resolved_config(ctx, config)

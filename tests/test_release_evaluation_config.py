@@ -19,9 +19,14 @@ Split out of ``test_effective_config_digest.py`` rather than appended to it
 (ADR-061 no-growth debt ledger: that file, like ``cli_compare_release.py``/
 ``cli_compare_release_helpers.py``, is a ``debt.yaml``-tracked legacy module
 already sitting at its adoption baseline, so a new behavior axis gets its own
-focused module instead of growing it) -- see ``abicheck.workflows.
-release_evaluation.stamp_release_evaluation_config``'s own docstring for what
-this covers and why.
+focused module instead of growing it) -- see ``abicheck.cli_compare_receipt.
+record_release_resolved_config``'s own docstring for what this covers and
+why (an attempt to home this in ``abicheck.workflows.release_evaluation``
+instead was reverted: the contract-context merge half needs real
+``contract_context``/``contract_evidence`` objects, and
+``scripts/check_architecture.py``'s ``unclassified-import`` check correctly
+refuses a ``workflows/`` module importing either until they're ADR-061-
+classified).
 
 Duplicates the three small fixture helpers (`_identity`/
 `_minimal_evaluation_config`/`_result`) from ``test_effective_config_digest.
@@ -96,8 +101,11 @@ class TestReleaseFanOutStampsResolvedConfig:
     ``pack_application.PackApplication.resolved_config`` (set once, for the
     whole release, by the ``pack_application()`` factory both paths share)
     and stamping it in ``_run_compare_pair`` via
-    ``abicheck.workflows.release_evaluation.stamp_release_evaluation_config``,
-    right after ``service.run_compare`` returns.
+    ``abicheck.cli_compare_receipt.record_release_resolved_config``, right
+    after ``service.run_compare`` returns. That function also merges into
+    an existing ``contract_context`` (a release run given ``--contract``),
+    which ``TestReleaseFanOutMergesContractContext`` below covers
+    separately.
     """
 
     @staticmethod
@@ -235,3 +243,81 @@ class TestReleaseFanOutStampsResolvedConfig:
         config = _minimal_evaluation_config()
         application = pack_application(config, policy_file=None)
         assert application.resolved_config is config
+
+
+class TestReleaseFanOutMergesContractContext:
+    """Codex review, fresh evidence: the first cut of this fix only stamped
+    the bare ``DiffResult.evaluation_config`` attribute. ``effective_config_
+    digest.effective_config_fields`` prefers ``contract_context.
+    evaluation_context.resolved_config`` over that bare attribute whenever a
+    ``PersistedContractContext`` exists -- which a release comparison run
+    with ``--contract`` builds per library, same as single-pair `compare` --
+    so the rich tier stayed silently unreachable for exactly the `--pack`
+    *and* `--contract` combination. ``cli_compare_receipt.
+    record_release_resolved_config`` now also merges into an existing
+    context via ``contract_context.with_resolved_config``, mirroring what
+    ``record_resolved_config`` already does for single-pair `compare`."""
+
+    @staticmethod
+    def _persisted_context(resolved_config):
+        from abicheck.contract_evidence import (
+            ContractEvidenceBlock,
+            EvaluationContextBlock,
+            PersistedContractContext,
+        )
+
+        return PersistedContractContext(
+            contract_evidence=ContractEvidenceBlock(),
+            evaluation_context=EvaluationContextBlock(resolved_config=resolved_config),
+        )
+
+    def test_no_contract_context_only_stamps_the_bare_attribute(self) -> None:
+        from abicheck.cli_compare_receipt import record_release_resolved_config
+
+        config = _minimal_evaluation_config()
+        diff = _result()
+        record_release_resolved_config(diff, config)
+        assert diff.evaluation_config is config
+        assert getattr(diff, "contract_context", None) is None
+
+    def test_existing_contract_context_is_merged_not_ignored(self) -> None:
+        """The actual regression: without the merge, `effective_config_
+        fields` reads the *old*, unmerged context's config and never sees
+        the pack's identity at all."""
+        from abicheck.cli_compare_receipt import record_release_resolved_config
+
+        unmerged = _minimal_evaluation_config()
+        pack_config = _minimal_evaluation_config(
+            contract=ContractConfig(
+                mode=ContractMode.PUBLIC,
+                packs=(_identity("ignore_removals", version=1),),
+            )
+        )
+        diff = _result()
+        diff.contract_context = self._persisted_context(unmerged)
+
+        record_release_resolved_config(diff, pack_config)
+
+        fields = effective_config_fields(
+            diff, severity_config=None, exit_code_scheme="legacy"
+        )
+        assert fields["_tier"] == "contract"
+        # Reflects the merged (pack-carrying) config, not the stale one the
+        # context was built with.
+        assert "ignore_removals@1:digest" in fields["packs"]
+
+    def test_no_config_is_a_complete_no_op(self) -> None:
+        """No --pack at all (config=None): neither field may change, even
+        when a contract_context already exists -- `record_release_resolved_
+        config` must not fabricate a merge from nothing."""
+        from abicheck.cli_compare_receipt import record_release_resolved_config
+
+        original_config = _minimal_evaluation_config()
+        diff = _result()
+        original_ctx = self._persisted_context(original_config)
+        diff.contract_context = original_ctx
+
+        record_release_resolved_config(diff, None)
+
+        assert diff.evaluation_config is None
+        assert diff.contract_context is original_ctx

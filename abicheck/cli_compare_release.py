@@ -43,6 +43,7 @@ from .cli import (
     _setup_verbosity,
     _write_or_echo,
 )
+from .cli_compare_receipt import record_release_resolved_config
 from .cli_compare_release_helpers import (  # noqa: F401
     _RELEASE_VERDICT_ORDER,
     _cleanup_temp_dirs,
@@ -90,7 +91,6 @@ from .frontends.cli.options import (
 )
 from .model import AbiSnapshot
 from .reporter import to_json
-from .workflows.release_evaluation import stamp_release_evaluation_config
 
 if TYPE_CHECKING:
     from .compile_context import CompileContext
@@ -200,7 +200,7 @@ def _run_compare_pair(
         ),
         compile_context=compile_context,
     )
-    stamp_release_evaluation_config(result.diff, pack_application)  # PR B parity
+    record_release_resolved_config(result.diff, getattr(pack_application, "resolved_config", None))
     return result
 
 
