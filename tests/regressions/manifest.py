@@ -344,32 +344,67 @@ BUG_CLASSES: tuple[BugClass, ...] = (
         seed_tests=(
             "tests/test_cross_tier_dedup_unhashable_value.py",
             "tests/test_finding_identity_properties.py",
+            "tests/unit/compare/test_dedup_key.py",
+            "tests/test_diff_namespaces.py",
         ),
         known_gaps=(
             KnownGap(
                 description=(
-                    "Both seed tests call internal matching/dedup "
-                    "primitives directly (`diff_filtering`/"
-                    "`finding_identity`) — no CLI, no python-api call — so "
-                    "there is no public-surface-level test that a real "
-                    "dedup-key collision actually reaches `compare()`'s "
-                    "output."
+                    "Phase 5 closed both of this entry's original gaps. "
+                    "(1) `tests/test_cross_tier_dedup_unhashable_value.py`'s "
+                    "`TestRealCollisionReachesCompareOutput` now runs a "
+                    "real `checker.compare()` call (a real abi3/Limited-API "
+                    "snapshot pair producing two genuinely distinct, "
+                    "list-valued `PYTHON_STABLE_ABI_VIOLATION` findings "
+                    "sharing one ChangeKind) and confirms both survive the "
+                    "full post-processing pipeline `DeduplicateAstDwarf` "
+                    "runs inside — not just the isolated "
+                    "`_deduplicate_ast_dwarf`/`cross_tier_transition` calls "
+                    "the rest of that file already covered. (2) "
+                    "`tests/unit/compare/test_dedup_key.py` (now a "
+                    "registered seed test, not just an unregistered file) "
+                    "already carries the exact adversarial generator this "
+                    "entry's own text asked for — mixed list/tuple/dict/"
+                    "set nesting at every level, `nan` (and, via "
+                    "Hypothesis's default `st.floats()` range, signed zero "
+                    "and +/-infinity), structurally-equal copies via "
+                    "`copy.deepcopy`, and an opaque-object class sharing a "
+                    "`repr()` between two unequal instances — plus the "
+                    "named mutant-killing cases (a list vs. its own string "
+                    "spelling, a list vs. the equivalent tuple, an "
+                    "unhashable value vs. its `repr()`, order-independent "
+                    "dict/set keying). `tests/test_diff_namespaces.py`'s "
+                    "own `TestPairedStableIndicesProperties` (already "
+                    "written per this repo's 'Primitive-level property "
+                    "tests' AGENTS.md section) is now registered here too, "
+                    "closing this entry's 'explicit must-merge/must-not-"
+                    "merge pairs... promoted into this suite's fixed "
+                    "corpus' ask for `_paired_stable_indices` specifically."
                 ),
                 reference="docs/contribute/plans/bug-class-regression-testing.md#phase-5",
             ),
             KnownGap(
                 description=(
-                    "Neither seed test's generator covers the specific "
-                    "shapes Phase 5's own '#879's own history' section "
-                    "names as previously missing (sets, varied mapping "
-                    "insertion order, NaN/signed-zero/infinities, "
-                    "structurally-equal copies, objects sharing a `repr()` "
-                    "but not an identity) — the seeds exercise fixed list/"
-                    "dict values and function/variable identities, not a "
-                    "generated adversarial corpus over those shapes, so "
-                    "the invariant's totality/injectivity/order-invariance "
-                    "claims are untested for exactly the inputs that "
-                    "caused #879 in the first place."
+                    "Phase 5's own text also asks for the 'constant/type "
+                    "identity fallbacks' AGENTS.md's 'Primitive-level "
+                    "property tests' section names — constants' value-"
+                    "equality identity and types' structural-fingerprint-"
+                    "then-source_location identity — to have their pairs "
+                    "promoted into a fixed corpus the same way "
+                    "`_paired_stable_indices`'s were. Deliberately NOT "
+                    "attempted: both are already-documented, twice-"
+                    "falsified-and-accepted heuristics (see "
+                    "`_type_index_items`'s and `_diff_constants`'s own "
+                    "docstrings, and this repo's own "
+                    "'attempted twice, reverted twice' rule) with no "
+                    "single correct behavior to state as an invariant — a "
+                    "property test for either would have to pin the "
+                    "CURRENT accepted collision shape as its own bound "
+                    "(the same design `TestL5SourceGraphIdentitiesAreNot"
+                    "Renumbered` in `tests/test_lambda_identity_ordinal.py` "
+                    "uses for a different residual), which is a real, "
+                    "separate design task rather than a follow-up to this "
+                    "PR's registry/generator-registration work."
                 ),
                 reference="docs/contribute/plans/bug-class-regression-testing.md#phase-5",
             ),
