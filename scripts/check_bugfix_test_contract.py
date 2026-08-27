@@ -610,6 +610,28 @@ def touches_tests(paths: list[str]) -> bool:
     return any(is_test_path(p) for p in paths)
 
 
+def _is_collected_python_test_module(path: str) -> bool:
+    """Does this `.py` path look like a file pytest actually *collects* as
+    a test — `test_*.py` / `*_test.py` — rather than a shared support/data
+    module a real test merely imports?
+
+    `is_test_path()` credits any non-prose file under a `tests/` directory
+    as evidence, including a shared support module like
+    `canonical_identity_contract.py`, `_workflow_exec.py`, or this
+    repository's own `tests/regressions/manifest.py` — none of which
+    pytest's `testpaths = ["tests"]` collection ever runs on its own. A fix
+    that only edits such a module (e.g. registering a new `BugClass` entry
+    with no `seed_tests` path actually changed) satisfied the structural
+    "you changed a test" gate with zero executable test evidence (Codex
+    review). Scoped to `.py` files only — a non-`.py` file under `tests/`
+    is still recognised as test *data* (fixtures, golden snapshots) by
+    `is_test_path()`'s own docstring, unaffected by this narrower check.
+    """
+    return path.endswith(".py") and (
+        PurePosixPath(path).name.startswith("test_") or path.endswith("_test.py")
+    )
+
+
 def added_lines_by_path(diff_text: str) -> dict[str, list[tuple[int, str]]]:
     """`path -> [(new-side line number, text), ...]` for every added line.
 
@@ -813,7 +835,9 @@ def adds_or_modifies_a_test(
     the *status* rules out a deletion (the opposite of evidence) and a type
     change (retyping a test file is not writing one), while the *content* rules
     out a rename or a whitespace/comment-only edit, which carry an `A`/`M`
-    status while asserting nothing new.
+    status while asserting nothing new. A third check, `.py`-only, rules out a
+    shared support/data module under `tests/` that is not itself collected —
+    see `_is_collected_python_test_module()`'s own docstring (Codex review).
     """
     with_content = added_content_paths(diff_text, read_new)
     # A removal counts only in a *fixture*: dropping an expected line from a
@@ -826,6 +850,7 @@ def adds_or_modifies_a_test(
     return any(
         status in ("A", "M")
         and is_test_path(path)
+        and (not path.endswith(".py") or _is_collected_python_test_module(path))
         and (path in with_content or (status == "M" and path in with_removals))
         for status, path in changed
     )

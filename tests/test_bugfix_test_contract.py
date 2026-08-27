@@ -112,6 +112,46 @@ class TestStructuralRequirement:
             [("M", "abicheck/diff_types.py")], _content_diff("abicheck/diff_types.py")
         )
 
+    @pytest.mark.parametrize(
+        "path",
+        [
+            # A registry/support module a real test imports, not one pytest
+            # collects on its own — real files, not hypotheticals (Codex
+            # review, PR #885): editing only tests/regressions/manifest.py
+            # (e.g. adding a BugClass with no seed_tests path touched)
+            # satisfied this gate with zero executable test evidence.
+            "tests/regressions/manifest.py",
+            "tests/canonical_identity_contract.py",
+            "tests/conftest.py",
+            "tests/_workflow_exec.py",
+        ],
+    )
+    def test_a_modified_support_module_under_tests_is_not_evidence(
+        self, path: str
+    ) -> None:
+        """`is_test_path()` alone credits any non-prose file under `tests/`
+        — this is the narrower check that requires the file to actually be
+        one pytest collects."""
+        assert gate.is_test_path(path), f"{path} should still read as a test path"
+        assert not gate.adds_or_modifies_a_test([("M", path)], _content_diff(path))
+
+    def test_a_modified_support_module_alongside_a_real_test_is_still_evidence(
+        self,
+    ) -> None:
+        """Negative control for the pair above: the new check must reject the
+        support module specifically, not the presence of any `.py` file in
+        the same diff."""
+        diff = _content_diff("tests/regressions/manifest.py") + _content_diff(
+            "tests/test_regressions_manifest.py"
+        )
+        assert gate.adds_or_modifies_a_test(
+            [
+                ("M", "tests/regressions/manifest.py"),
+                ("M", "tests/test_regressions_manifest.py"),
+            ],
+            diff,
+        )
+
     def test_a_type_change_is_not_test_evidence(self) -> None:
         """Retyping a test file is not writing one."""
         assert not gate.adds_or_modifies_a_test(
