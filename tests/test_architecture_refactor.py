@@ -441,13 +441,15 @@ class TestChangeKindRegistry:
     def test_setstate_normalizes_a_legacy_plain_dict_policy_overrides(self):
         """Loading a pre-``_ImmutableDict`` pickle must still be immutable.
 
-        Pickle's default protocol restores an object's state by setting
-        ``__dict__`` directly (via ``__setstate__``, when defined) — it
-        never calls ``__init__``/``__post_init__``. A pickle produced
-        before ``policy_overrides`` became an ``_ImmutableDict`` (or any
-        hand-built state carrying a plain dict there) would therefore
-        silently install a plain, mutable dict on the restored instance,
-        bypassing every validation/immutability guarantee
+        Pickle's default protocol restores a slotted dataclass by calling
+        ``__setstate__`` (when defined) with the value
+        ``object.__getstate__()`` produces for a ``__dict__``-less
+        instance — a plain list of field values in declaration order, not
+        a dict — and never calls ``__init__``/``__post_init__``. A pickle
+        produced before ``policy_overrides`` became an ``_ImmutableDict``
+        (or any hand-built state carrying a plain dict there) would
+        therefore silently install a plain, mutable dict on the restored
+        instance, bypassing every validation/immutability guarantee
         ``__post_init__`` establishes (Codex review, PR #882, fresh
         evidence — confirmed against a real pre-fix pickle). Fixed with
         ``ChangeKindMeta.__setstate__``, which normalizes on load
@@ -455,20 +457,20 @@ class TestChangeKindRegistry:
         """
         import pytest
 
-        entry = ChangeKindMeta(
-            "test_kind", Verdict.BREAKING, impact="x",
-            policy_overrides={"plugin_abi": Verdict.COMPATIBLE},
-        )
+        from abicheck.model.change_catalog.registry import _ImmutableDict
+
         # Simulate a legacy pickle's restored state: a plain dict, not the
-        # _ImmutableDict __post_init__ would have wrapped it into.
-        legacy_state = dict(entry.__dict__)
-        legacy_state["policy_overrides"] = {"plugin_abi": Verdict.COMPATIBLE}
-        assert type(legacy_state["policy_overrides"]) is dict
+        # _ImmutableDict __post_init__ would have wrapped it into, in the
+        # field-declaration-order list shape a slotted dataclass restores
+        # from.
+        legacy_state = [
+            "test_kind", Verdict.BREAKING, "x", False,
+            {"plugin_abi": Verdict.COMPATIBLE}, None,
+        ]
+        assert type(legacy_state[4]) is dict
 
         restored = object.__new__(ChangeKindMeta)
         restored.__setstate__(legacy_state)
-
-        from abicheck.model.change_catalog.registry import _ImmutableDict
 
         assert isinstance(restored.policy_overrides, _ImmutableDict)
         assert dict(restored.policy_overrides) == {"plugin_abi": Verdict.COMPATIBLE}
@@ -480,15 +482,12 @@ class TestChangeKindRegistry:
 
         Nothing stops a caller from invoking ``entry.__setstate__(...)``
         directly on an already-initialized, LIVE catalog entry (e.g. one
-        obtained via ``REGISTRY.entries``) — that call would silently
-        overwrite its ``__dict__`` in place, since it never goes through
-        ``frozen=True``'s ``__setattr__`` override. A crafted state could
-        install an unvalidated ``policy_overrides`` entry or blank the
-        required ``impact`` text directly onto a shared, already-trusted
-        catalog entry (Codex review, PR #882, fresh evidence). Fixed by
-        refusing outright unless ``self`` is still a genuinely blank
-        instance — the shape pickle's own restore protocol actually
-        produces.
+        obtained via ``REGISTRY.entries``) — a crafted state could install
+        an unvalidated ``policy_overrides`` entry or blank the required
+        ``impact`` text directly onto a shared, already-trusted catalog
+        entry (Codex review, PR #882, fresh evidence). Fixed by refusing
+        outright unless ``self`` is still a genuinely blank instance — the
+        shape pickle's own restore protocol actually produces.
         """
         import pytest
 
@@ -497,9 +496,41 @@ class TestChangeKindRegistry:
             policy_overrides={"plugin_abi": Verdict.COMPATIBLE},
         )
         with pytest.raises(TypeError, match="already-initialized"):
-            entry.__setstate__({"policy_overrides": {"unknown": Verdict.API_BREAK}})
+            entry.__setstate__([
+                "test_kind", Verdict.BREAKING, "x", False,
+                {"unknown": Verdict.API_BREAK}, None,
+            ])
         # The live entry is completely unaffected by the rejected call.
         assert dict(entry.policy_overrides) == {"plugin_abi": Verdict.COMPATIBLE}
+
+    def test_change_kind_meta_has_no_instance_dict(self):
+        """A ``ChangeKindMeta`` has no ``__dict__`` to reach past ``frozen=True`` through.
+
+        Without ``slots=True``, ``frozen=True`` only blocks reassigning an
+        attribute (``entry.policy_overrides = {...}``) — a caller can still
+        reach straight past that guard via the instance's own ``__dict__``
+        (``REGISTRY.entries["func_removed"].__dict__["policy_overrides"] =
+        {"unknown": Verdict.API_BREAK}``), which installs an unvalidated
+        override directly onto the *live*, shared catalog entry every other
+        caller trusts — with no ``__setattr__``/``_ImmutableDict`` guard
+        anywhere in the way (Codex review, PR #882, fresh evidence). Fixed
+        by making the dataclass ``slots=True``: a slotted instance has no
+        ``__dict__`` attribute at all, so this path doesn't exist to reach
+        through.
+        """
+        import pytest
+
+        entry = ChangeKindMeta(
+            "test_kind", Verdict.BREAKING, impact="x",
+            policy_overrides={"plugin_abi": Verdict.COMPATIBLE},
+        )
+        with pytest.raises(AttributeError):
+            entry.__dict__  # noqa: B018 - deliberately probing for absence
+        # Confirmed on the actual production registry too, matching the
+        # exact exploit shape from review.
+        live = REGISTRY.entries["func_removed"]
+        with pytest.raises(AttributeError):
+            live.__dict__  # noqa: B018
 
     def test_setstate_does_not_validate_matching_the_constructor(self):
         """Restoring (unpickling) a standalone entry must not be stricter than building one.

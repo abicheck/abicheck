@@ -41,7 +41,7 @@ from __future__ import annotations
 
 import string
 from collections.abc import Iterable, Iterator, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from enum import Enum
 from types import MappingProxyType
 from typing import Any
@@ -240,9 +240,24 @@ class _ImmutableDict(Mapping[str, Verdict]):
         return (self.__class__, (dict(self._data),))
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class ChangeKindMeta:
-    """All metadata for a single ChangeKind, declared in one place."""
+    """All metadata for a single ChangeKind, declared in one place.
+
+    ``slots=True`` (Codex review, PR #882, fresh evidence): without it,
+    ``frozen=True`` only blocks reassigning an attribute
+    (``entry.policy_overrides = {...}``) — it does nothing to stop a caller
+    reaching straight past that guard via the instance's own ``__dict__``
+    (``REGISTRY.entries["func_removed"].__dict__["policy_overrides"] =
+    {"unknown": Verdict.API_BREAK}``), which installs an unvalidated
+    override directly onto the *live*, shared catalog entry every other
+    caller trusts, with no ``__setattr__``/``_ImmutableDict`` guard anywhere
+    in the way. A slotted dataclass has no ``__dict__`` at all, so that
+    attribute path doesn't exist to reach through — the same fix already
+    applied to ``_ImmutableDict`` itself (a ``MappingProxyType``-backed
+    ``_data`` plus its own ``__setattr__`` guard) applied one layer up, to
+    the object that holds it.
+    """
 
     kind: str  # ChangeKind enum value (e.g. "func_removed")
     default_verdict: Verdict
@@ -313,35 +328,41 @@ class ChangeKindMeta:
         memo[id(self)] = new
         return new
 
-    def __setstate__(self, state: dict[str, Any]) -> None:
-        # Pickle's default protocol restores a frozen dataclass by setting
-        # __dict__ directly from the pickled state (via this method, when
-        # defined) — it never calls __init__/__post_init__. A pickle
-        # written before policy_overrides became an _ImmutableDict (or one
-        # produced by any code that had a plain dict at this field) would
-        # therefore silently install a plain, mutable dict on the restored
-        # instance, bypassing every validation/immutability guarantee
-        # __post_init__ establishes — confirmed with a real pickle from
-        # before the _ImmutableDict change: type(loaded.policy_overrides)
-        # is dict, and loaded.policy_overrides["x"] = y succeeds (Codex
-        # review, PR #882, fresh evidence). Normalize on load instead, so
-        # every restored instance's policy_overrides is provably an
-        # _ImmutableDict regardless of which version produced the pickle.
+    def __setstate__(self, state: list[Any]) -> None:
+        # Pickle's default protocol restores a slotted dataclass by calling
+        # this method (when defined) with the value ``object.__getstate__()``
+        # produces for a __dict__-less instance: a plain LIST of field
+        # values in declaration order, not a dict keyed by field name (a
+        # slots dataclass has no per-field key/value mapping to hand back —
+        # confirmed empirically, and different in shape from the pre-slots
+        # revision of this method, which received a dict). It never calls
+        # __init__/__post_init__. A pickle written before policy_overrides
+        # became an _ImmutableDict (or one produced by any code that had a
+        # plain dict at this field) would therefore silently install a
+        # plain, mutable dict on the restored instance, bypassing every
+        # validation/immutability guarantee __post_init__ establishes —
+        # confirmed with a real pickle from before the _ImmutableDict
+        # change: type(loaded.policy_overrides) is dict, and
+        # loaded.policy_overrides["x"] = y succeeds (Codex review, PR #882,
+        # fresh evidence). Normalize on load instead, so every restored
+        # instance's policy_overrides is provably an _ImmutableDict
+        # regardless of which version produced the pickle.
         #
         # __setstate__ is an ordinary method, not exclusive to pickle's own
         # restore path — nothing stops a caller from invoking it directly
         # on an already-initialized, LIVE catalog entry (e.g. one obtained
-        # via ``REGISTRY.entries``), which would silently overwrite its
-        # __dict__ in place: this never goes through frozen=True's
-        # __setattr__ override, so a crafted state like
-        # ``{"policy_overrides": {"unknown": Verdict.API_BREAK}}`` would
-        # install an unvalidated override directly onto a shared catalog
-        # entry other code already trusts, or blank the required ``impact``
-        # text (Codex review, PR #882, fresh evidence). Refuse outright
-        # unless ``self`` is still a genuinely blank instance — the shape
-        # pickle's own restore protocol actually produces
+        # via ``REGISTRY.entries``), which would (pre-``slots=True``) have
+        # silently overwritten its __dict__ in place: that never went
+        # through frozen=True's __setattr__ override, so a crafted state
+        # could install an unvalidated override directly onto a shared
+        # catalog entry other code already trusts, or blank the required
+        # ``impact`` text (Codex review, PR #882, fresh evidence). Refuse
+        # outright unless ``self`` is still a genuinely blank instance — the
+        # shape pickle's own restore protocol actually produces
         # (``object.__new__(cls)`` with no ``__init__``/``__post_init__``
-        # call).
+        # call, so every slot is still unset) — checked via a slot that's
+        # always populated rather than ``self.__dict__`` (which no longer
+        # exists to check once slotted).
         #
         # Deliberately does NOT also call _validate_entry() here (an
         # earlier revision of this fix did, and was reverted — Codex
@@ -360,16 +381,18 @@ class ChangeKindMeta:
         # blank-instance guard above is what actually closes the live-
         # mutation attack this method exists to prevent; it doesn't
         # depend on also validating restored content.
-        if self.__dict__:
+        if hasattr(self, "kind"):
             raise TypeError(
                 "ChangeKindMeta.__setstate__ refuses to overwrite an "
                 "already-initialized instance"
             )
-        overrides = state.get("policy_overrides")
+        field_names = [f.name for f in fields(self)]
+        values = dict(zip(field_names, state, strict=True))
+        overrides = values.get("policy_overrides")
         if not isinstance(overrides, _ImmutableDict):
-            state = dict(state)
-            state["policy_overrides"] = _ImmutableDict(overrides or {})
-        self.__dict__.update(state)
+            values["policy_overrides"] = _ImmutableDict(overrides or {})
+        for name, value in values.items():
+            object.__setattr__(self, name, value)
 
 
 #: Representative ``str.format(**...)`` kwarg sets used to *actually execute*
