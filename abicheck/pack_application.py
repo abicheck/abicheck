@@ -246,6 +246,22 @@ class PackApplication:
     #: pack severity level would otherwise make it re-derive one. See that
     #: function for why re-deriving was wrong.
     resolved_exit_code_scheme: str | None = None
+    #: The full, already-resolved ``CompatibilityEvaluationConfig`` this
+    #: application was built from (CLI cleanup phase two, "PR B" effective-
+    #: config parity). Not a pack *contribution* -- ``is_empty()`` below
+    #: deliberately ignores it -- but real pack identity/provenance a caller
+    #: without its own resolved-config object (the directory/package release
+    #: fan-out, which reloads a fresh ``PolicyFile`` per library rather than
+    #: sharing one ``CompatibilityEvaluationConfig``) can stamp onto each
+    #: library's own ``DiffResult.evaluation_config`` the same way single-pair
+    #: ``compare``'s ``cli_compare_receipt.record_resolved_config`` does --
+    #: closing the "release per-library digest loses pack identity" gap
+    #: documented in ``effective_config_digest``'s own module docstring.
+    #: Since a release resolves its ``PackApplication`` once for the whole
+    #: run (not per library), every library shares this identical object,
+    #: which is exactly what makes the digest sensitive to *which pack
+    #: revision* ran rather than only to its current field assignments.
+    resolved_config: Any = None
 
     def is_empty(self) -> bool:
         """True when no pack contributed anything this run applies."""
@@ -310,6 +326,7 @@ def pack_application(config: Any, *, policy_file: PolicyFile | None) -> PackAppl
         resolved_exit_code_scheme=getattr(
             getattr(config, "gate", None), "exit_code_scheme", None
         ),
+        resolved_config=config,
     )
 
 

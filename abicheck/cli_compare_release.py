@@ -70,6 +70,7 @@ from .cli_compare_release_helpers import (  # noqa: F401
     apply_release_gate_pack,
     reject_bundle_facts_out_collision,
     reject_bundle_facts_out_dir_collision,
+    stamp_release_evaluation_config,
     write_bundle_facts_out,
 )
 from .cli_options import (
@@ -171,7 +172,7 @@ def _run_compare_pair(
     old_input, _ = _normalize_binary_input(old_input)
     new_input, _ = _normalize_binary_input(new_input)
 
-    return service.run_compare(
+    result = service.run_compare(
         old_input,
         new_input,
         old_headers=old_headers,
@@ -199,6 +200,10 @@ def _run_compare_pair(
         ),
         compile_context=compile_context,
     )
+    # PR B effective-config parity -- see stamp_release_evaluation_config's
+    # own docstring for why.
+    stamp_release_evaluation_config(result.diff, pack_application)
+    return result
 
 
 _CompareReleaseCommonArgs = tuple[

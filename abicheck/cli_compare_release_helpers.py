@@ -608,6 +608,42 @@ def _cleanup_temp_dirs(temp_dir_paths: list[str], keep_extracted: bool) -> None:
         click.echo(f"Extracted files kept in: {kept_paths}", err=True)
 
 
+def stamp_release_evaluation_config(
+    diff: DiffResult, pack_application: PackApplication | None
+) -> None:
+    """Stamp *diff* with the release's already-resolved
+    ``CompatibilityEvaluationConfig``, the way ``cli_compare_receipt.
+    record_resolved_config`` does for single-pair ``compare`` (CLI cleanup
+    phase two, "PR B" effective-config parity).
+
+    Closes the "release per-library digest loses pack identity" gap
+    documented in ``effective_config_digest``'s own module docstring: without
+    this, ``cli_compare_release._run_compare_pair`` never installed a rich-
+    tier config onto each library's own ``DiffResult``, so a release run
+    under two different pack *revisions* that happen to project the same
+    current policy/severity assignments produced the identical per-library
+    digest -- even though the rich tier's whole point is real, versioned pack
+    identities.
+
+    *pack_application* is resolved once for the whole release (not per
+    library, unlike a single-pair ``compare``'s own ``PackApplication`` --
+    see ``cli_compare_receipt.resolve_release_pack_application``'s own
+    docstring for why), so every library in the release ends up sharing the
+    identical ``resolved_config`` object, which is exactly what makes
+    ``effective_config_digest``'s rich tier sensitive to *which pack
+    revision* ran rather than only to its current field assignments.
+
+    A no-op — *diff*'s ``evaluation_config`` stays ``None``, the pre-existing
+    baseline-tier behavior — whenever no ``--pack`` was given at all
+    (*pack_application* is ``None``) or *pack_application* was hand-built
+    without going through the ``pack_application()`` factory (its
+    ``resolved_config`` stays ``None`` too), matching ``record_resolved_
+    config``'s own contract.
+    """
+    if pack_application is not None and pack_application.resolved_config is not None:
+        diff.evaluation_config = pack_application.resolved_config
+
+
 def apply_release_gate_pack(
     pack_application: PackApplication | None,
     *,
