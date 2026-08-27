@@ -54,7 +54,7 @@ assume:
 | ADR-055 (typed request/result) | D1 implemented for `compare` only | Phase 1 extends the existing `CompareRequest`/`service_compare_pipeline.py` shape to `dump`/`scan`, it does not invent a new shape |
 | ADR-061 (responsibility packages) | Phases 0-1 implemented; Phase 5 (`model` package) begun | Phase 0/2/4/7 of this plan land inside the `model`/`compare`/`policy` packages ADR-061 already created; this plan does not create new top-level packages beyond what ADR-061 names |
 | ADR-062 (storage v2) | Phase 0 primitives (`abicheck/storage/`: `FactStatus`/`FactAvailability`, occurrence-preserving identity, canonical encoding, version axes) implemented and **inert** — nothing wired to a producer/reader | Phase 0/5 of this plan is the *generalization* of these primitives into the domain layer; Phase 8 of this plan is the *wiring* ADR-062 Phase 1 still needs, done jointly rather than twice |
-| ADR-042 (compatibility/gate separation) | Implemented for JSON/SARIF/`compare-release`; `junit_report.py` still computes inline | Phase 7 of this plan closes exactly this one remaining gap, not a redesign |
+| ADR-042 (compatibility/gate separation) | Implemented for JSON/SARIF/`compare-release`; `junit_report.py` and `workflows/aggregate/gate.py`/`fold.py` still compute/decode exit codes inline | Phase 7 of this plan closes both remaining gaps (not only the `junit_report.py` one a first draft of this plan named) — neither is a redesign of ADR-042 itself |
 | AGENTS.md "PR C" (dump/scan typed convergence) | `resolve_dump_request`/`execute_dump_request` split landed; real `dump`/`scan` execution still on the legacy path, blocked on two named items (castxml availability for parity testing, `--compile-db-filter` typed surface — now closed) | Phase 1 of this plan is exactly "finish PR C," not a new design |
 
 ## Phases
@@ -361,11 +361,25 @@ replaced by one `ScopePath`-based identity computation instead of being
 kept as a parallel, narrower fix.
 
 **Files.** `abicheck/model/identity.py` (new, leaf — no dependency on
-`checker_types`/`diff_*`, per ADR-063 D10; its function-identity
-constructor calls into the existing `finding_identity.
-resolve_function_identity` logic rather than re-deriving it, so the two
-cannot drift independently of each other — this phase generalizes that
-function's caller, not its algorithm); `diff_filtering.py`'s
+`checker_types`/`diff_*`, per ADR-063 D10). **The direction of reuse with
+`finding_identity.resolve_function_identity` matters and a first draft of
+this phase had it backwards**: `finding_identity.py` is comparison logic
+that itself imports model entities and `checker_types`, so `model/
+identity.py` calling *into* it would make the leaf module depend upward
+on `compare/`-level code — reversing ADR-061's required `compare -> model`
+direction and either failing the architecture gate outright or creating a
+cycle the moment comparison code also starts consuming `EntityId`. The
+corrected direction: the canonical signature-resolution *algorithm* itself
+(mangled-name-primary, the normalized parameter-type/cv-qualifier fallback
+tuple, the `extern "C"` exclusion) moves into `model/identity.py` as part
+of `EntityId`'s own function-identity constructor, and
+`finding_identity.resolve_function_identity` becomes a thin wrapper
+delegating to it — `compare -> model` is the allowed edge, so `compare/`
+(where `finding_identity.py` lives) depends on the leaf, never the
+reverse. This is the same generalization direction every other phase in
+this plan already takes (the algorithm moves to the primitive; the
+original call site becomes the wrapper), corrected here to actually match
+it rather than stating it backwards. `diff_filtering.py`'s
 `_find_opaque_types`/`_find_by_value_types`/`_root_type_name` (consume
 `EntityId` instead of bare `t.name`); `dumper_clang.py`/
 `dumper_castxml.py`'s `parse_types()` (produce `ScopePath`-derived
@@ -461,22 +475,49 @@ sibling:
   collected. Nodes are keyed by the `EntityId` Phase 2 already
   established — this phase is ordered after Phase 2 for exactly that
   reason, the same dependency Phase 5 (`SemanticIR`) has on Phase 2.
-- **This is what actually closes the "two graphs disagreeing" problem,
-  not a deferred aspiration.** When L3-L5 evidence *is* also collected,
-  `source_graph.py`'s builder and `compare/surface_graph.py`'s builder
-  register nodes for the *same* declaration under the *same* `EntityId`-
-  derived id — and `merge_graph_facts` (already designed, today, for
-  exactly this: "a node accumulates one `GraphFact` per producer that ever
-  registered it... genuine cross-producer disagreements recorded... instead
-  of silently dropped") merges them into one graph automatically, rather
-  than requiring ADR-057/053's consumers to be migrated in this same phase
-  before the disagreement is closed. Migrating those consumers onto
-  querying the merged graph directly is still explicitly **not** part of
-  this phase (each is its own later, separately-justified phase, per this
-  plan's "don't attempt a change with no real caller" discipline) — what
-  changes this time is that deferring the migration no longer leaves two
-  graphs free to silently disagree about the same declaration, since they
-  already share one node identity and one merge primitive underneath.
+- **Sharing node ids alone does not merge two graphs — this phase adds the
+  actual assembly step, not only a shared identity.** `merge_graph_facts`
+  only folds the `GraphFact` list already attached to *one* node; it is
+  not itself what combines two independently-built graph objects, and an
+  earlier draft of this phase described the disagreement as closed on the
+  strength of shared node ids alone, which a reviewer correctly rejected —
+  two builders each producing their own, separate graph *object* can share
+  every node id and still never actually merge, because nothing calls the
+  merge. What actually merges two registrations today is
+  `SourceGraphSummary.add_node()`/`add_edge()`: *within one
+  `SourceGraphSummary` instance*, registering a second `GraphNode` under
+  an id already present calls `merge_entity_facts`, which is what invokes
+  `merge_graph_facts` underneath. So the real fix is an assembly step, not
+  an identity claim: **both builders write into the same
+  `SourceGraphSummary` instance for a given snapshot side.**
+  `compare/surface_graph.py`'s public-surface builder and `source_graph.py`'s
+  L5 builder (when L3-L5 evidence is present) are both given the *same*
+  `SourceGraphSummary` object and both call its real `add_node`/`add_edge`
+  — exactly the pattern `buildsource/header_graph.py`'s existing
+  `build_header_only_graph()` already uses internally (`graph =
+  SourceGraphSummary(); ...; graph.add_node(...)`), generalized here to
+  two independent builders sharing one instance instead of one builder
+  filling it alone. **Who constructs and threads that one instance matters
+  for the same import-direction reason D5 already corrected once in this
+  phase**: `compare/surface_graph.py` may not import `SourceGraphSummary`
+  from `buildsource/` directly (`compare -> model` is the allowed edge;
+  `buildsource/` is `extract`-layer, and `compare -> extract` is not), so
+  the instance is constructed and handed to *both* builders by the
+  orchestrating workflow code (`workflows/`, which is allowed to import
+  `model`, `extract`, and `compare` alike) — each builder function receives
+  the shared `SourceGraphSummary` as a parameter and only ever calls
+  `.add_node`/`.add_edge` on it, never constructs or imports it itself.
+  `AbiSnapshot.build_source.source_graph` — the one field either builder's
+  output is ultimately attached to — is populated from this one shared
+  instance, never from two independently-constructed ones merged after the
+  fact by inspection. ADR-057/053's consumers still
+  read the L3-L5-gated graph only when it exists, and migrating them onto
+  querying through `PublicSurfaceQuery`'s shared instance directly is
+  still explicitly **not** part of this phase (each stays its own later,
+  separately-justified phase, per this plan's "don't attempt a change with
+  no real caller" discipline) — but what changes this time is structural,
+  not aspirational: there is one graph object per snapshot side after this
+  phase, not two that merely happen to agree on node spelling.
 - **The relevance query** — `abicheck/policy/public_surface.py` (new):
   `PublicSurfaceQuery.resolve(graph, explicit_roots) -> frozenset[EntityId]`,
   a traversal from explicit public roots through `includes`/`declares`
@@ -509,14 +550,22 @@ traversal logic); `surface.py` (`compute_public_surface()` becomes a thin
 wrapper calling `PublicSurfaceQuery.resolve`); `dumper_scoping.py`/
 `export_surface.py`/`type_reachability.py` (each becomes a graph *builder*
 contributing nodes/edges in `compare/`, or a relevance *query* in
-`policy/`, not an independent reachability algorithm). `abicheck/
+`policy/`, not an independent reachability algorithm); the
+`workflows/`-layer dump/compare orchestration code that already calls
+`buildsource.header_graph.build_header_only_graph()`/attaches
+`build_source.source_graph` (`service_header_graph_attach.py` and
+siblings) gains the one line constructing a single `SourceGraphSummary`
+and threading it into both the public-surface builder and the L5 builder,
+per the assembly-step design above. `abicheck/
 workflows/consumer_graph.py` (ADR-057's consumer graph) and ADR-053's
 TU→link-unit→DSO attribution are explicitly **not** migrated to query the
 graph in this phase — each stays a candidate for a later, separate phase,
 per this plan's "don't attempt a change with no real caller" discipline
 (see AGENTS.md's "shape first, wiring later" gap and ADR-063 D7's
-capability-lifecycle states) — but they already share the merged graph's
-node identity the moment this phase ships, per the point above.
+capability-lifecycle states) — but the moment this phase ships, the graph
+they would eventually query is already the single, merged
+`SourceGraphSummary` instance per the assembly step above, not a second
+object they'd need their own migration to reconcile with.
 
 **Tests.** Every existing `surface.py`/`type_reachability.py` regression
 test (including the namespace-collision property suite Phase 2 already
@@ -529,13 +578,17 @@ test suite (`tests/test_source_graph*.py`/`tests/test_graph_facts.py` or
 their current equivalents) is re-run unchanged against the relocated
 `model/graph.py` primitive via `buildsource/graph_facts.py`'s re-export
 shim, proving the relocation is behavior-preserving rather than asserted.
-One new end-to-end regression is added specifically for the merge claim
-above: a project with both a public header (no L3-L5 evidence needed) and
-real `--sources`/`--build-info` evidence produces exactly one graph node
-for a declaration both builders see, not two — i.e. the same `EntityId`-
-derived node id is present in both builders' output and `merge_graph_facts`
-folds them, rather than the public-surface query and the L5 source graph
-silently describing the same declaration under two different node objects.
+One new end-to-end regression is added specifically for the shared-assembly
+claim above: a project with both a public header (no L3-L5 evidence
+needed) and real `--sources`/`--build-info` evidence produces exactly one
+`SourceGraphSummary` instance containing exactly one graph node for a
+declaration both builders see, not two separate summary objects that
+happen to agree on a node id — asserted by identity (`is`) on the summary
+object each builder was handed, not only by comparing their outputs after
+the fact, so a future regression that quietly goes back to constructing
+two independent `SourceGraphSummary()` instances fails this test
+immediately rather than only failing once two disagreeing facts happen to
+surface.
 
 **Acceptance criteria.** `surface.py`'s own traversal implementation and
 `export_surface.py`'s independent closure walk are deleted, not kept
@@ -751,24 +804,78 @@ summary still renders from, unchanged. "Stops computing inline" means
 starts asking the aggregate report outcome a per-test-case question it
 cannot answer.
 
-**Files.** `abicheck/policy/outcome.py` (new); `junit_report.py` (the one
-remaining inline exit-code computation ADR-042 already named as
+**`junit_report.py` is not the only remaining inline exit-code consumer —
+a first draft of this phase missed the multi-target aggregate path
+entirely.** `abicheck/workflows/aggregate/gate.py`'s `TargetGate.
+from_report` decodes a persisted report's raw `exit_code` integer back
+into `blocking`/severity semantics, and `abicheck/workflows/aggregate/
+fold.py`'s own `exit_code()` aggregates every target's gate by `max()`-ing
+their integer codes and branches `blocking`/filtering directly on
+`t.gate.exit_code`. This is exactly the PR #700 failure mode D6 targets —
+an integer read and branched on as semantic data inside the system, not
+only encoded once at a boundary — and it is **not** an instance this
+phase can treat as "just another front-end encoder," because unlike the
+CLI's own `_exit_with_severity_or_verdict`, `gate.py` is parsing a
+persisted report **produced by a separate, possibly older, process** —
+the raw `exit_code` integer is a genuine external wire contract at that
+boundary, not internal domain data this phase controls end to end.
+
+The fix is additive to the report schema, not a behavior change to what
+already-published reports mean: the report JSON gains `RunOutcome`'s
+structured axes (`compatibility`/`assurance`/`gate`/`operational`/
+`lifecycle`) alongside the existing `exit_code` field — never replacing
+it, since `exit_code` is the documented external contract
+(`docs/reference/exit-codes.md`) and stays exactly as it is for every
+external consumer. `TargetGate.from_report` reads the structured fields
+when a report carries them, and falls back to decoding the legacy
+`exit_code` only for a report that predates this change (the same
+"read once, decode for legacy, never for fresh" backfill shape Phase 0
+already established for `Fact[...]` against the old reliability flags —
+this phase is the second place that exact shape applies, not a new
+pattern). `fold.py`'s own aggregation then operates on `RunOutcome.gate`
+values (an explicit ordering over `PolicyGateDecision`, not `max()` over
+raw integers) for every report new enough to carry them, and its
+`exit_code()` method becomes the *one* place — the aggregate's own
+external encoder, mirroring the CLI's `_exit_with_severity_or_verdict` —
+that turns the aggregated `RunOutcome` back into the integer `aggregate`'s
+own JSON output and process exit code still need.
+
+**Files.** `abicheck/policy/outcome.py` (new); `junit_report.py` (the
+first remaining inline exit-code computation ADR-042 already named as
 unfinished); `html_report.py`'s CI Gate card (already `RunOutcome`-shaped
 per ADR-042 — confirm it reads the new object directly rather than a
 precursor shape, closing ADR-036 Increment 3 as a side effect if it
-hasn't landed separately by then).
+hasn't landed separately by then); `abicheck/workflows/aggregate/gate.py`
+(`TargetGate.from_report` reads structured `RunOutcome` fields first,
+legacy `exit_code` decoding becomes the named fallback path, not the only
+path); `abicheck/workflows/aggregate/fold.py` (`exit_code()`'s aggregation
+reads `RunOutcome.gate` per target, `max()`-over-raw-integers deleted);
+the report-writing side of `reporter.py`/`aggregate.py` (emit the new
+structured fields alongside the unchanged `exit_code`).
 
 **Tests.** A parity test asserting `junit_report.py`'s exit-relevant
 output (failure count, failure classification) is unchanged for the
 existing `tests/test_junit_report.py` fixtures before and after the
 rewrite — this is a refactor, not a behavior change, and needs to prove
-that explicitly given JUnit output is consumed by external CI systems.
+that explicitly given JUnit output is consumed by external CI systems. A
+second parity test for the aggregate path: `fold.py`'s `exit_code()`/
+`blocking` output is unchanged for every existing `tests/test_aggregate.py`
+fixture, run twice — once against a report carrying only the legacy
+`exit_code` field (proving the fallback decode path reproduces today's
+behavior exactly) and once against a report regenerated with the new
+structured fields (proving the new path agrees with the old one on every
+existing fixture, not only on fixtures written after this phase).
 
 **Acceptance criteria.** Zero remaining inline exit-code/severity
 computation outside the one designated encoder per front end — enforced
 by a new `check_ai_readiness.py` check (`no-inline-gate-computation`,
 WARN) flagging a severity/exit-code literal compared against `Change`
-data outside `policy/outcome.py` and the per-front-end encoders.
+data, or a `max()`/comparison over a `.exit_code` attribute, outside
+`policy/outcome.py` and the per-front-end encoders (the widened check is
+what actually closes the gap the first draft's narrower, `Change`-only
+check left open: `fold.py`'s `max()` over `TargetGate.exit_code` never
+touches `Change` at all, so a check scoped to `Change` comparisons alone
+would never have flagged it).
 
 ---
 
@@ -902,7 +1009,15 @@ not new design.
 - Phase 6: each backend parser's own copy of anonymous-marker/closure-
   identity/namespace-join logic.
 - Phase 7: `junit_report.py`'s pre-rewrite inline computation (deleted,
-  not `# deprecated` and kept).
+  not `# deprecated` and kept); `fold.py`'s `max()`-over-raw-`exit_code`
+  aggregation (replaced outright by `RunOutcome.gate`-ordering aggregation
+  in the same phase, not left running alongside it). `gate.py`'s
+  legacy-`exit_code`-only decode fallback is the one exception to "delete
+  in the same PR": it stays, the same way Phase 0's reliability-flag
+  backfill stays, only so a report predating this phase's schema addition
+  still reads correctly — removed once no such report needs to be read
+  anymore (every front end emits the structured fields from this phase
+  onward), not before, and not kept as a second *current* representation.
 - Phase 8: any remaining legacy baseline-set/`BundleFacts`-only code path
   once the `ProjectSnapshot` import adapter covers it — per ADR-062's own
   phasing, not accelerated here.
@@ -948,7 +1063,7 @@ history. This checklist is re-run, and re-verified, at the end of the
 | 4 | M | Planner rejecting a request current behavior silently accepted — must ship with a migration note in `CHANGELOG.md`/docs, not only a changelog fragment, since it is a user-visible behavior change (a previously-silent no-op becomes an error) |
 | 5 | L (mechanical, field-by-field) | Scope creep — cap each commit to one field |
 | 6 | XL | Largest blast radius in this plan (every backend parser); sequence last among the "hard" phases, after 0/2/3 give it primitives to build on |
-| 7 | S | JUnit output is consumed by external CI systems, and `_is_failure` stays per-finding rather than becoming an aggregate-outcome lookup — parity testing, not redesign |
+| 7 | M | Two independent exit-code consumers, not one: JUnit output is consumed by external CI systems (`_is_failure` stays per-finding, parity testing not redesign), and the multi-target aggregate path (`workflows/aggregate/gate.py`/`fold.py`) was missed entirely in this phase's first draft — its report-schema addition needs the legacy-decode fallback proven bit-for-bit equivalent on every existing fixture, not just new ones |
 | 8 | XL | Shared with ADR-062's own Phase 1 risk profile; do not duplicate that ADR's own risk analysis here, defer to it |
 | 9 | S | Low technical risk (extracting already-shared logic into a leaf module), but skippable-looking — it has no dependency on any other phase, which makes it easy to defer indefinitely rather than land; don't let "independent" read as "optional" |
 | 10 | S per row, continuous | The easiest phase to skip under time pressure — explicitly called out as required, not optional, per ADR-063's decision drivers |

@@ -361,9 +361,13 @@ verdict`, the Action's own encoder) maps `RunOutcome` to that front end's
 exit-code scheme. This directly targets the PR #700 failure mode (a
 downstream consumer decoding semantic meaning from an exit-code integer)
 and finishes what ADR-042 started: `mcp_server.py`'s removal already
-deleted one of the two remaining inline exit-code computations AGENTS.md
-flagged; `junit_report.py` is the other and is folded into this decision's
-scope.
+deleted one of the remaining inline exit-code computations AGENTS.md
+flagged; `junit_report.py` and `workflows/aggregate/gate.py`/`fold.py`'s
+own `max()`-over-raw-integer aggregation are folded into this decision's
+scope too — the latter pair was missed by an earlier draft of this ADR's
+own implementation plan, caught in review, and is exactly the shape of
+gap D6 exists to close: decoding and aggregating exit-code semantics
+*inside* `aggregate`'s own workflow code, not only at its final encoder.
 
 `RunOutcome` is a **report-level** aggregate; it is not a substitute for
 the per-finding `compatibility_decision` ADR-049 D1 already persists on
