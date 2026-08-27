@@ -210,14 +210,28 @@ def test_adding_an_unrelated_public_directory_does_not_change_classification(
     `any(...)` over the public-dir list, so an irrelevant addition can only
     ever add a spurious match, never remove one; the unrelated directory
     here is built from UUID segments that cannot appear anywhere in the
-    generated header path, so no spurious match is possible either."""
+    generated header path, so no spurious match is possible either.
+
+    Both a public and a PRIVATE header are checked, each against its own
+    expected ``ScopeOrigin`` before and after the addition -- the public
+    header alone can't distinguish this property from an implementation
+    that spuriously matches unrelated directories, since it already
+    classifies PUBLIC_HEADER either way and `_matches_public` is additive
+    (a regression could only ever flip a PRIVATE_HEADER classification to a
+    spurious PUBLIC_HEADER one, never the reverse)."""
     public_dir = _abspath((*root, *pub_rel))
-    header = _abspath((*root, *pub_rel, *header_rel, f"{filename}.h"))
+    public_header = _abspath((*root, *pub_rel, *header_rel, f"{filename}.h"))
+    private_sibling = (str(uuid.uuid4()), str(uuid.uuid4()))
+    private_header = _abspath((*root, *private_sibling, f"{filename}.h"))
     unrelated_dir = _abspath((str(uuid.uuid4()), str(uuid.uuid4())))
 
-    before = _classify(header, [public_dir])
-    after = _classify(header, [public_dir, unrelated_dir])
-    assert before == after
+    assert _classify(public_header, [public_dir]) is ScopeOrigin.PUBLIC_HEADER
+    assert _classify(private_header, [public_dir]) is ScopeOrigin.PRIVATE_HEADER
+
+    after_public = _classify(public_header, [public_dir, unrelated_dir])
+    after_private = _classify(private_header, [public_dir, unrelated_dir])
+    assert after_public is ScopeOrigin.PUBLIC_HEADER
+    assert after_private is ScopeOrigin.PRIVATE_HEADER
 
 
 # --------------------------------------------------------------------------
