@@ -94,15 +94,49 @@ def _is_collected_test_path(rel_path: str) -> bool:
     predicate, `path.name.startswith("test_") or path.parent.name !=
     "tests"`, was true for almost any path and accepted exactly the support
     modules this check exists to reject).
+
+    Resolves both sides before checking containment (Codex review,
+    fresh evidence, same PR): `Path.relative_to()` is a purely lexical
+    check that never collapses `..` or follows a symlink, so an
+    unresolved `rel_path` like `tests/../agent-evals/tasks/.../
+    hidden_tests/test_foo.py` satisfied the old `relative_to(tests/)`
+    check while naming a file the root `testpaths = ["tests"]` suite
+    never collects.
     """
     path = REPO_ROOT / rel_path
     if not path.is_file() or path.suffix != ".py" or not path.name.startswith("test_"):
         return False
     try:
-        path.relative_to(REPO_ROOT / "tests")
+        path.resolve().relative_to((REPO_ROOT / "tests").resolve())
     except ValueError:
         return False
     return True
+
+
+class TestIsCollectedTestPathBoundary:
+    """Direct tests of `_is_collected_test_path`'s own containment check —
+    per this repo's own bug-class discipline (the point of this whole PR),
+    the regression here is the *class* (a `tests/../...` traversal escaping
+    the `tests/` boundary via a purely lexical `relative_to()`), not only
+    the one reported example (Codex review, PR #885)."""
+
+    def test_a_real_hidden_eval_fixture_outside_tests_is_rejected(self) -> None:
+        # A real file (not a hypothetical): a test_*.py hidden eval fixture
+        # that lexically satisfies `tests/../...`.relative_to("tests") but
+        # resolves outside the tests/ tree the root suite actually collects.
+        traversal = (
+            "tests/../agent-evals/tasks/add-change-kind-small/"
+            "hidden_tests/test_type_nodiscard_detection.py"
+        )
+        assert (REPO_ROOT / traversal).is_file(), "fixture for this test moved/renamed"
+        assert not _is_collected_test_path(traversal)
+
+    def test_an_ordinary_tests_path_is_accepted(self) -> None:
+        assert _is_collected_test_path("tests/test_bugfix_test_contract.py")
+
+    def test_a_nested_tests_path_is_accepted(self) -> None:
+        # tests/regressions/manifest.py's own sibling — real, nested.
+        assert _is_collected_test_path("tests/test_regressions_manifest.py")
 
 
 class TestRegisteredTestPathsExist:
