@@ -351,11 +351,42 @@ permanently `BREAKING` once a newer floor is checked next, even if the
 newer floor would correctly reclassify it `COMPATIBLE`. The extract/diff-
 once requirement stands, but "evaluate against N environments" needs a
 pristine `Change` list (or an unmodified raw-result stage) per
-environment — e.g. deep-copying the kept `Change` list (or resetting
-`effective_verdict`/`modulation_reason`/`modulation_rule` to `None`)
-immediately before each environment's own
-`apply_runtime_floor_contract()`/provider-resolution pass, never sharing
-mutated objects across environments.
+environment — restored from a snapshot taken immediately before the
+*first* environment's `_env_matrix_contract_changes()` pass, never
+sharing mutated objects across environments.
+
+**Blanket-resetting `effective_verdict`/`modulation_reason`/
+`modulation_rule` to `None` — the alternative this section originally
+offered alongside deep-copying — is wrong, not merely a less-clean
+equivalent, and a review round caught it by reading two of this
+function's own callers rather than only its own skip check.** Some
+detectors assign an *authoritative* modulation before
+`_env_matrix_contract_changes()` ever runs, and that function's own skip
+condition is what deliberately protects it: `diff_stdlib_impl.py`
+constructs certain findings with `effective_verdict=Verdict.BREAKING`
+already set at creation time (never `None` to begin with for those), and
+`diff_templates.py`'s own lambda-closure-demotion pass
+(`demote_lambda_closure_unexported_findings`) explicitly checks `if
+change.effective_verdict is not None: continue` before ever touching a
+finding, then sets `effective_verdict=Verdict.COMPATIBLE_WITH_RISK` on
+the ones it does demote — precisely so a later stage's skip check (the
+identical `if change.effective_verdict is not None: continue` in
+`apply_runtime_floor_contract()`) leaves that earlier decision alone.
+Resetting the field to `None` before each environment's pass erases
+exactly this signal: `apply_runtime_floor_contract()`'s own skip check
+would then see a blank slate for a finding that was never meant to be
+eligible for floor-based reclassification at all, letting that
+environment's runtime floor silently overwrite an authoritative
+pre-environment modulation with its own verdict. The fix is not "reset
+to a blank value" but "restore to the exact pre-environment state" —
+clone the `Change` list (or snapshot each finding's
+`effective_verdict`/`modulation_reason`/`modulation_rule` triple) once,
+immediately after every upstream detector (including `diff_stdlib_impl`/
+`diff_templates`) has run and *before* `_env_matrix_contract_changes()`
+is invoked for the first environment, and restore from that one
+snapshot before each subsequent environment's pass — never a blanket
+`None` reset, which cannot distinguish "not yet modulated" from
+"deliberately modulated by an earlier, authoritative stage."
 
 **Resetting/copying the `Change` list is still not sufficient by itself —
 it only covers half of `_env_matrix_contract_changes()`, and the other
@@ -418,9 +449,35 @@ own. The per-environment fan-out must therefore rerun the **complete
 downstream policy chain** per environment, not only
 `_env_matrix_contract_changes()` in isolation: `_apply_soname_policy()`,
 `_compute_verdict_for()`, and — when contract evaluation is active —
-`stage.record_compatibility_decisions()`, each fed that environment's own
+`record_compatibility_decisions()`, each fed that environment's own
 `_env_matrix_contract_changes()` output, producing that environment's own
-verdict and advisory set. Only the stages genuinely upstream of, and
+verdict and advisory set.
+
+**"Fed that environment's own output" is not automatically true for the
+contract stage specifically, and reusing one shared `ContractEvaluationStage`
+instance across environment branches would silently contaminate every
+branch after the first — confirmed by reading `contract_pipeline.py`
+directly, not assumed.** `ContractEvaluationStage.classify()` *appends*
+every finding it records to `self.changes` rather than replacing it, and
+`build_context()` persists that same accumulated `self.changes` list
+verbatim as the stage's context. Calling `classify()` a second time on
+one shared stage instance for a second environment does not give that
+environment a fresh, empty classification pass — it adds to whatever the
+first environment's branch already appended, so the second (and every
+subsequent) environment's `record_compatibility_decisions()`/
+`build_context()` call persists a context containing every earlier
+branch's classified findings too, potentially under duplicate finding
+identities once the same underlying `Change` list is evaluated more than
+once. `build_contract_stage()` — the expensive half that resolves mode,
+both sides' public/export surfaces, and the provider-evidence ledger —
+is genuinely reusable across environments (that evidence does not vary
+per environment, only the floor/verdict does), but the *classification*
+half must not be: each environment branch needs its own fresh
+`ContractEvaluationStage` instance (or an equivalent reset of
+`self.changes` to empty) before its own `classify()`/
+`record_compatibility_decisions()`/`build_context()` calls, sharing only
+the immutable evidence-collection result the expensive `build_
+contract_stage()` call already produced once. Only the stages genuinely upstream of, and
 independent from, `_env_matrix_contract_changes()` — symbol/type diffing,
 suppression, build-context reconciliation, the NumPy C-API delta — run
 exactly once and are shared/copied across environments as already
