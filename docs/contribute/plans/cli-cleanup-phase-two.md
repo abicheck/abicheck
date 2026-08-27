@@ -2169,13 +2169,22 @@ pipelines a fourth time.
   > around a resolve-time embed, and the still-unstarted third step —
   > actually migrating `dump_cmd`'s real ELF/PE/Mach-O execution onto
   > `execute_dump_request`. Of those two, only the migration step is blocked
-  > on an external dependency: castxml, still unavailable in every
-  > environment this work has been done in (item 2 of the 3A sub-section's
-  > own "What still blocks routing `dump_cmd`'s real run" note) — an
-  > implementer resuming this item should not read that as license to skip
-  > the reordering, which has no such external blocker and could be done
-  > independently. Items 2 (the L4 extractor default divergence) and 3 (the
-  > `-H` directory gap, below) are unchanged.
+  > on an external dependency: castxml, unavailable in every environment
+  > this work had been done in as of this note (item 2 of the 3A
+  > sub-section's own "What still blocks routing `dump_cmd`'s real run"
+  > note) — an implementer resuming this item should not read that as
+  > license to skip the reordering, which has no such external blocker and
+  > could be done independently. **Update (2026-08-27): the tooling half of
+  > this specific blocker is closed — see the 2026-08-27 item-2 note below,
+  > which obtained and verified a local, policy-compliant castxml. That
+  > note's own castxml install was used only to reproduce the already-known
+  > L4 extractor divergence (a narrower, already-scoped test run); "the
+  > migration itself" — this bullet's own byte-identical-output
+  > verification — was not attempted in that same session and remains open
+  > for exactly that reason: not for lack of castxml any more, but for lack
+  > of the work itself.** Items 2 (the L4 extractor default divergence) and
+  > 3 (the `-H` directory gap, below) are unchanged in substance, item 2's
+  > "unverifiable" framing corrected per its own note.
   >
   > **Investigated further (2026-08-27): the reordering is real work to
   > *verify*, and its depth-gate/provenance/dependency-scope half is now
@@ -2268,8 +2277,13 @@ pipelines a fourth time.
   > migrated pipeline (a real `perform_elf_dump` calling
   > `execute_dump_request` end to end, ADR-039 collector included) produces
   > output byte-identical to today's write-time-embed path under the
-  > *default* castxml backend — "the migration itself," and it remains
-  > exactly as blocked on castxml as this note already said.
+  > *default* castxml backend — "the migration itself." **No longer blocked
+  > on castxml being unavailable** (see the 2026-08-27 item-2 note below,
+  > which obtained one), but this exact byte-identical-output verification
+  > was not attempted with it — the castxml install that session was used
+  > only to reproduce the L4 extractor divergence, a different, narrower,
+  > already-scoped test run. This step stays open until someone actually
+  > runs it.
   >
   > **Item 2 (the L4 extractor default divergence) is now locally
   > reconfirmed under real castxml — but this is a reproduction of an
@@ -2332,13 +2346,17 @@ pipelines a fourth time.
   > production usage* half — the two xfail tests exercise one project shape
   > each, not the breadth "production usage" implies, and a default-changing
   > fix here is exactly the class of decision this file's own established
-  > pattern (see `AGENTS.md`'s "Known gaps" entries throughout this same
-  > code area) treats as needing explicit maintainer sign-off before
-  > landing, not something to flip as a side effect of narrating a plan
-  > document. Left as item 2, unchanged in substance, with its
-  > "unverifiable" framing corrected to "verified and reproduced, fix not
-  > yet attempted" so a future session does not have to redo the castxml
-  > acquisition to pick this up.
+  > "known gaps over risky reactive patches" convention (see this plan's own
+  > 2026-08-19 note above, and `AGENTS.md`'s "Known gaps" entries throughout
+  > this same code area) says belongs in its own dedicated, deliberately
+  > verified pass rather than a rushed follow-on to an investigation whose
+  > actual subject was the plan doc, not this call site — not a claim that
+  > any repository rule requires a maintainer's explicit sign-off before it
+  > can land (Codex review — an earlier revision of this note overstated
+  > that). Left as item 2, unchanged in substance, with its "unverifiable"
+  > framing corrected to "verified and reproduced, fix not yet attempted"
+  > so a future session does not have to redo the castxml acquisition to
+  > pick this up.
 
 `dump --build-query` and `dump --build-compile-db` describe how the *project*
 is built, not what this snapshot is. They are already documented as CLI
