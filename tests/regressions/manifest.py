@@ -468,6 +468,37 @@ BUG_CLASSES: tuple[BugClass, ...] = (
             ),
         ),
     ),
+    BugClass(
+        id="scoping.aggregate_view_starvation",
+        invariant=(
+            "A detector that reasons across multiple already-scoped "
+            "evidence views (e.g. a cross-library bundle check reading "
+            "each library's own public-surface-scoped `DiffResult`) must "
+            "not silently starve on a real change merely because an "
+            "earlier, independent scoping decision (public-surface "
+            "filtering, suppression) demoted it out of the one view the "
+            "detector happened to read — either the detector consults the "
+            "unscoped/recorded-but-demoted evidence its own contract "
+            "actually needs, or the scoping gap is documented as a known, "
+            "accepted limitation, never left silent."
+        ),
+        fixed_by=(894,),
+        seed_tests=("tests/test_bundle_diff_derived_scoping.py",),
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "The fix reads `DiffResult.out_of_surface_changes` "
+                    "(demoted-by-scoping evidence), which itself never "
+                    "passes through `ApplySuppression` — a change a user's "
+                    "own suppression rule targets can still starve the "
+                    "bundle detectors reading it, since suppression only "
+                    "ever runs on the in-surface `changes` list "
+                    "(`docs/use/multi-binary.md`, G38 Phase 14 notes)."
+                ),
+                reference="docs/contribute/plans/g38-bundle-facts-model-and-multibuild-comparability.md#phase-14",
+            ),
+        ),
+    ),
 )
 
 
