@@ -939,13 +939,13 @@ names the two blockers precisely and one is closed:
    left implicit in this Design section alone.
 
 Once unblocked: route `perform_elf_dump`/`handle_non_elf_dump` through
-`execute_dump_request`, and `scan_engine._build_new_snapshot` through the
-already-landed `_resolve_side_snapshot_impl` call (this step is smaller
-than it looks — the candidate-resolver convergence already landed per
-AGENTS.md's own record; what remains is the `dump` CLI's real execution
-path). Fold the legacy `-p`/`--compile-db` auto-match into the L3→L2 fold
-as the *sole* source of compile-database-derived context when the fold
-applies (already decided and landed per AGENTS.md's "legacy-match
+`execute_dump_request` — the one remaining routing step (this phase's
+worklist is smaller than the Goal above might suggest: `scan_engine.
+_build_new_snapshot` needs no further work here, since its own routing
+onto `_resolve_side_snapshot_impl` already landed per AGENTS.md's own
+record). Fold the legacy `-p`/`--compile-db` auto-match into the L3→L2
+fold as the *sole* source of compile-database-derived context when the
+fold applies (already decided and landed per AGENTS.md's "legacy-match
 overlap" entry) rather than re-deciding it here.
 
 **A third dump execution path exists, untouched by either of the two
