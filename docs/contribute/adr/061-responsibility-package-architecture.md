@@ -1113,10 +1113,17 @@ scan is a full AST walk — it also counts a `TYPE_CHECKING` block and a
 function-local import, which is exactly where the module-level check missed
 two more edges: `DepthParam.convert()`/`get_metavar()` both import
 `buildsource.scan_levels` (also unclassified) function-locally, independent
-of the `policy_file`/`suppression`/`policies` edges below. A full re-scan
-found five import sites across those four targets, all unclassified, all
-reaching the same `frontends -> policy`-shaped edge `checker_types.py` hits
-one layer over (`model -> policy`).
+of the `policy_file`/`suppression`/`policies` edges below. **The four targets
+are not one shape of problem, and a Codex review round caught this note
+lumping them together as if they were.** `buildsource.scan_levels`'s only
+imports are stdlib (`__future__`, `enum` — checked directly), so it is a
+clean, trivially classifiable leaf; if it lands `model` (the plausible
+outcome named a few paragraphs below), `frontends -> model` is an *allowed*
+edge, not a forbidden one — its two import sites are not evidence of the
+same `frontends -> policy` problem the other three targets are. Only
+`policy_file`/`suppression`/`policies` (three import sites) actually reach
+that shape, mirroring `checker_types.py`'s `model -> policy` edge one layer
+over.
 Reading `PolicyFile` itself before proposing a fix mattered: it is not a
 `*_metadata.py`-shaped dataclass-plus-parser. `load()`, `evidence_verdict()`,
 `compute_verdict()`, `describe()`, and `validate_overrides()` are instance
@@ -1155,7 +1162,28 @@ threading it into a `model`-owned facade still needs `checker_policy.py`'s own
 model-vs-policy split, narrower than this paragraph first claimed but not
 resolved by it. `PolicyFile` overall is not made safe to facade-split by this
 correction alone — `ChangeKind` and `ReclassifyRule` both still block it.
-Reclassifying
+
+**A fourth Codex review round found the facade proposal has a sharper problem
+than either of those: `checker_types.py` narrowing `DiffResult.policy_file`
+to the data-only base is not merely unresolved, it is unworkable as
+described, checked against real call sites rather than assumed.**
+`bundle_models.py:500` calls `diff.policy_file.compute_verdict([change])`
+straight through the `DiffResult` field; `bundle_models.py:661` does the
+identical thing through its own `BundleFinding.policy_file`; dozens of other
+signatures across `service.py`, `scan_engine.py`, `contract_pipeline.py`,
+`buildsource/evidence_policy.py`, `buildsource/evidence_report.py`, and more
+type a `policy_file` parameter as the full, method-bearing `PolicyFile | None`
+and call methods on it too. Narrowing `checker_types.py`'s declared field
+type to a data-only `PolicyFileFacts` breaks every one of those call sites
+under the enforced mypy gate (the method doesn't exist on the declared type),
+even though the runtime object is unchanged. Keeping the field's declared
+type as the full `PolicyFile` avoids that break but means `checker_types.py`
+still imports the policy-owned class for the annotation — reproducing the
+exact `model -> policy` edge the facade exists to remove. So the facade's
+"nothing public breaks" claim holds for `PolicyFile`'s own API, but not for
+this specific field-narrowing plan: there is no version of it that both
+keeps every existing consumer typed correctly and gets `checker_types.py`
+out of `policy`. Reclassifying
 `policy_file.py`/`suppression.py` as `compare` instead was rejected too:
 `compute_verdict` is policy logic by any reading, and mislabeling it only
 relocates the ambiguity this ADR exists to remove.
