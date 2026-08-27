@@ -126,13 +126,30 @@ checks:
 
 `matrix:` points at the existing runtime-floor/env-matrix format G10 already
 established (`--env-matrix`'s `runtime_floors`, `platform_baseline_floor_raised`)
-— this is a *naming and referencing* layer over that existing mechanism, not
-a new runtime-floor model. The environment id and a digest of its resolved
-matrix content must show up in: the run plan (`RunPlanCheck`), the effective
-configuration receipt, the report envelope, and the aggregate's
-profile/evaluation matrix — the same "resolved value plus its digest, both
-persisted" shape `comparability.py`'s fingerprints and G34's
-`consumer_compile` projection already use, applied to a new axis.
+— this is a *naming and referencing* layer over that existing mechanism for
+the runtime-floor axis specifically, **but that format cannot, by itself,
+carry what the provider-resolution phase below needs.** Confirmed by
+reading `abicheck/environment_matrix.py` directly:
+`EnvironmentMatrix`/`_KNOWN_TOP_LEVEL_KEYS` recognizes exactly
+`compilers`/`abi_version`/`libstdcxx_dual_abi`/`sycl`/`cuda`/`target_os`/
+`target_arch`/`runtime_floors` — no sysroot path, no provider/package
+inventory, and an unrecognized key is only warned about
+(`_warn_unknown_keys`), never rejected, so a hand-added `providers:`/
+`sysroot:` section today would silently do nothing. This plan must
+therefore extend `EnvironmentMatrix`'s own schema (a new top-level section,
+e.g. `providers:` naming a sysroot path plus, per provider, expected
+SONAME/export/symbol-version facts) alongside the naming/referencing layer
+`environments:` adds — without this schema extension, every
+environment-aware provider lookup in the next section degrades to
+incomplete coverage for lack of any real presence/SONAME/export/version
+input to resolve against, which is a correctness gap, not a missing nice-
+to-have. The environment id and a digest of its resolved matrix content
+(runtime floors *and* the new provider section together) must show up in:
+the run plan (`RunPlanCheck`), the effective configuration receipt, the
+report envelope, and the aggregate's profile/evaluation matrix — the same
+"resolved value plus its digest, both persisted" shape `comparability.py`'s
+fingerprints and G34's `consumer_compile` projection already use, applied
+to a new axis.
 
 **Efficiency constraint, load-bearing**: environment evaluation must not
 trigger a new binary/header/source extraction per environment. The
@@ -184,6 +201,12 @@ from the report.
   validated — near `abicheck/buildsource/project_targets.py`) — new
   `environments:` top-level block, new `id`/`analysis:`/`environment:` check
   fields.
+- `abicheck/environment_matrix.py` — extend `EnvironmentMatrix`'s schema
+  with the new provider/sysroot section described above (a new
+  `_KNOWN_TOP_LEVEL_KEYS` entry, its own parser mirroring
+  `_parse_sycl_constraints`/`_parse_cuda_constraints`'s existing shape) —
+  without this, `matrix:` cannot carry what the provider resolver needs and
+  the whole feature degrades to incomplete coverage by construction.
 - **Environment-aware provider resolution — routed through ADR-061's
   canonical package owners, not `abicheck/bundle.py`** (a
   `legacy_root_modules` no-growth entry per `architecture/modules.yaml`):
@@ -225,12 +248,14 @@ L, phased:
 - Named environments (M): schema + digest plumbing + the "evaluate once
   against N environments" reconciliation; medium risk in ensuring the
   extract-once invariant is actually enforced rather than merely intended.
-- Provider resolution (L): the resolver itself is new logic against
-  real sysroot/environment data, and needs real multi-environment fixtures
-  (RHEL 8 vs. Ubuntu 24 class of difference) to validate against, which may
-  not all be available in every development/CI environment — treat missing
-  fixture environments as a documented gap rather than skipping the
-  acceptance test silently.
+- Provider resolution (L): includes the confirmed `environment_matrix.py`
+  schema extension (a real prerequisite, not a formality — see "Named
+  environments" above) alongside the resolver itself, which is new logic
+  against real sysroot/environment data. Needs real multi-environment
+  fixtures (RHEL 8 vs. Ubuntu 24 class of difference) to validate against,
+  which may not all be available in every development/CI environment —
+  treat missing fixture environments as a documented gap rather than
+  skipping the acceptance test silently.
 
 ## Out of scope
 

@@ -124,6 +124,19 @@ attribution actually usable.
 The design is almost entirely "thread an existing value through," not new
 logic:
 
+A real `check-project.yml` run does not shell out to `dump`/`compare`
+directly — it is a three-layer composite chain, confirmed by reading the
+actual `uses:` steps: `check-project.yml` invokes
+`./.check-project-src/actions/check-target` (the `actions/check-target/
+action.yml`/`run.sh` composite), which in turn invokes the repository-root
+`action.yml`/`run.sh` (the one that actually constructs the `dump`/
+`compare` CLI command). Threading `attribution_path`/target id through
+means adding a new input at **every** layer of that chain, not just the
+outermost workflow — an earlier draft of this plan only described the
+workflow-level output and a bare CLI flag, which would leave inferred
+projection unusable end to end (the two intermediate composite Actions
+would have no way to pass the value through). The design, corrected:
+
 1. **`check-project.yml`**: replace the unconditional
    `projection == 'inferred'` rejection (see its own comment, quoted
    above) with: if `projection == 'inferred'`, require `attribution_path`
@@ -131,16 +144,25 @@ logic:
    defensively at consumption time — a validated `build-output.json` at
    publish time doesn't guarantee the exact file used at check time is the
    same one), load it, and forward `(attribution_path resolved, target_id)`
-   to the check invocation as new outputs (mirroring how `evidence-pack`/
-   `evidence-producer` are already forwarded as step outputs today).
-2. **CLI/typed-API surface**: whatever `dump`/`compare` invocation
-   `check-project.yml`'s check step ultimately shells out to needs a new
+   as new outputs into its `actions/check-target` step (mirroring how
+   `evidence-pack`/`evidence-producer` are already forwarded as step
+   outputs today).
+2. **`actions/check-target/action.yml`/`run.sh`**: gain new inputs
+   (e.g. `attribution-path`/`attribution-target-id`) accepting the values
+   `check-project.yml` forwards, and pass them onward to the repository-root
+   Action it invokes internally — the same forwarding shape its existing
+   `candidate-build-output`/`evidence-pack-path` inputs already use (see
+   `check-project.yml`'s own comment on those, quoted in this plan's
+   Problem section).
+3. **Repository-root `action.yml`/`run.sh`**: gain the matching inputs and
+   have `run.sh`'s dispatch translate them into the new `dump`/`compare` CLI
+   flag from step 4 below.
+4. **CLI/typed-API surface**: the actual `dump`/`compare` CLI gains a new
    flag (or config field) accepting an attribution-manifest path and a
    target id, which it loads and passes to `ingest_inputs_pack(attribution=,
-   expected_target_id=)` — this is the one genuinely new piece of code
-   this plan adds, and it is a thin CLI/config-to-Python-API translation,
-   not new attribution logic.
-3. **Reject, don't silently widen, everything else**: a target declaring
+   expected_target_id=)` — this is the one genuinely new piece of *logic*
+   this plan adds; everything above it is forwarding.
+5. **Reject, don't silently widen, everything else**: a target declaring
    `projection: inferred` with no `attribution_path`, or one whose
    attribution file fails `_inferred_evidence_projection_issues()`'s
    existing checks, keeps failing exactly as it does today — this plan
@@ -152,7 +174,14 @@ logic:
 - `.github/workflows/check-project.yml` — replace the unconditional
   `projection: inferred` rejection with the attribution-aware path above;
   update the inline comment and error message once wired.
-- Whichever CLI entry point(s) `check-project.yml` invokes for a
+- `actions/check-target/action.yml`/`run.sh` — new inputs forwarding
+  `attribution_path`/target id to the repository-root Action it invokes.
+- Repository-root `action.yml`/`run.sh` — new inputs, dispatched into the
+  new CLI flag below (the same three-layer chain G45 documents needing to
+  relax `new-library` through for its own, unrelated header-only-target
+  gap — these are two separate wiring tasks through the identical Action
+  chain, not the same fix).
+- Whichever CLI entry point(s) this chain ultimately shells out to for a
   build/source-depth check (see G41 Phase 2's per-target header/
   compile-context projection work, which touches the same call sites) —
   new flag/config field for an attribution-manifest path + target id.
@@ -179,8 +208,11 @@ logic:
 ## Effort & risk
 
 M (revised down from the original L estimate, since the attribution model
-and its validation are both already implemented) — the remaining work is
-CLI/workflow plumbing connecting two already-tested pieces
+and its validation are both already implemented, then confirmed to still
+hold once the full three-layer Action chain — `check-project.yml` →
+`actions/check-target` → repository-root Action — was accounted for: every
+added layer is forwarding, not new logic) — the remaining work is
+CLI/workflow/Action plumbing connecting two already-tested pieces
 (`attribute_sources_to_targets()`'s output, already validated by
 `_inferred_evidence_projection_issues()`) to a third
 (`ingest_inputs_pack()`'s existing `attribution`/`expected_target_id`

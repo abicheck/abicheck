@@ -107,24 +107,75 @@ silently trusting one — this is the same principle G39's producer-receipt
 work applies to compiler-identity evidence, applied here to binding-runtime
 identity.
 
-### Comparison semantics
+### Comparison semantics — implement the SciPy roadmap's `SurfaceProvider` interface, not a bespoke one
 
 This is fundamentally a **new kind of cross-module compatibility check**,
 not a per-library `ChangeKind` — closer in shape to the bundle layer's
-sibling-DSO analysis (G38) than to a single-binary diff. The natural home
-is a new `compare/`-owned matcher, invoked from `workflows/`-level
-bundle/multi-artifact scan coordination (existing recognition in
-`abicheck/scan_engine.py` is the entry point to extend from, not the
-implementation's home — see "Files & surfaces" above) that:
+sibling-DSO analysis (G38) than to a single-binary diff. **This plan's
+provider must not invent its own shape**: two existing documents already
+specify a canonical, shared plugin interface for exactly this class of
+evidence provider, and `BindingAbiProvider` is explicitly named as one of
+its intended implementations —
+[`docs/contribute/scipy-scientific-python-roadmap.md`](../scipy-scientific-python-roadmap.md)'s
+"Recommended architecture" section defines:
 
-1. Extracts each module's binding surface.
-2. Finds declared shared native types between module pairs (via whatever
-   registration-scope evidence is available — global-scope types are
-   candidates for every other global-scope module in the same process;
-   module-local types are never candidates).
-3. Flags an incompatibility when two modules sharing a candidate type
-   disagree on binding ABI/internals version, C++ stdlib ABI, debug/release
-   identity, or free-threaded mode.
+```
+SurfaceProvider
+  identify(artifact)
+  collect(artifact, context) -> SurfaceFacts
+  compare(old, new, policy) -> Changes
+  coverage() -> CoverageRecord
+```
+
+and
+[`docs/contribute/python-build-ecosystem-positioning.md`](../python-build-ecosystem-positioning.md)
+(the "Proposed provider shape" section) says explicitly: "`BindingAbiProvider`
+should be one more implementation of the `SurfaceProvider` interface... not a
+separately-invented interface — the two docs should not end up specifying
+two incompatible plugin shapes for the same evidence-provider concept."
+Adopt that contract here rather than the ad hoc matcher an earlier draft of
+this plan sketched:
+
+- **`identify(artifact)`** — recognize a pybind11/nanobind-built extension
+  module (reusing `python_ext.py`'s existing builder recognition).
+- **`collect(artifact, context) -> SurfaceFacts`** — the normalized binding
+  surface described in "Goal & acceptance criteria" above (framework,
+  version, internals identity, registration scope, declared shared native
+  types), from binary evidence first, an optional build-emitted manifest
+  second.
+- **`compare(old, new, policy) -> Changes`** — the module-pair matching
+  logic: find declared shared native types between two modules (via
+  whatever registration-scope evidence is available — global-scope types
+  are candidates for every other global-scope module in the same process;
+  module-local types are never candidates) and flag an incompatibility when
+  two modules sharing a candidate type disagree on binding ABI/internals
+  version, C++ stdlib ABI, debug/release identity, or free-threaded mode.
+- **`coverage() -> CoverageRecord`** — this provider's own evidence-
+  completeness signal (did extraction fully resolve both modules' internals
+  identity, or degrade), following the same "explicit incomplete-coverage
+  result, never silent" discipline this plan's other sections already
+  establish (see the C++-stdlib-ABI/registration-scope section above).
+
+**Before designing this provider in detail, evaluate `SurfaceProvider`
+adoption itself against [ADR-032](../adr/032-evidence-extractor-plugin-interface.md)
+(the existing extractor-plugin interface) and
+[ADR-034](../adr/034-managed-runtime-and-non-c-abi-frontends.md) (non-C-ABI
+frontend scope)** — the positioning doc's own words: "Adopting
+`SurfaceProvider` is a materially larger step than the current
+evidence-tier model," and this evaluation is a real prerequisite, not a
+formality, since `SurfaceProvider` may end up subsuming or reshaping how
+ADR-032's plugin interface is expressed. If that evaluation concludes
+`SurfaceProvider` itself is not yet ready to adopt, implement
+`BindingAbiProvider` against the interface it specifies anyway (the shape
+above), so the eventual `SurfaceProvider` migration is a registration
+change, not a rewrite — never invent a third, `BindingAbiProvider`-only
+shape in the meantime. This is also the deciding structural constraint for
+package placement: `identify()`/`collect()` are `extract/`-owned, the
+normalized `SurfaceFacts` type is `model/`-owned, `compare()` is
+`compare/`-owned, and whatever invokes this provider from bundle/
+multi-artifact scanning (existing recognition in `abicheck/scan_engine.py`
+is the entry point to extend from, not the implementation's home) is
+`workflows/`-owned — see "Files & surfaces" below.
 
 ## Files & surfaces
 

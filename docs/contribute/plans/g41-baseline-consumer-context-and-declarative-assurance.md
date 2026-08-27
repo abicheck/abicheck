@@ -318,20 +318,44 @@ mistake (see `AGENTS.md`'s numbered findings on the L3→L2-fold entry).
   orchestration only (resolving the run plan, invoking the dump, calling
   the new `storage/` module to read/write the manifest) — no schema logic
   grown here directly.
-- `abicheck/buildsource/run_plan.py` — Phase 2: new `RunPlanCheck` fields
-  (`public_header_roots`, `generated_header_roots`, `include_dirs`,
-  `compile_context`), projected in `_generate_target_checks`/
-  `_generate_bundle_checks`.
+- **Phase 2 per-target header/compile-context projection — the
+  *generation* logic is `workflows/`-owned coordination, per ADR-061's own
+  routing table ("Coordinate dump, compare, scan, release, aggregate,
+  project, or dependency behavior" names `project` explicitly, and
+  per-target run-plan generation from `build-output.json` is exactly
+  that).** `abicheck/buildsource/run_plan.py` is not yet in `architecture/
+  modules.yaml`'s classified inventory, so growing it wouldn't trip the
+  gate today — but new generation logic (the function reading a profile's
+  validated `build-output.json` and populating `public_header_roots`/
+  `generated_header_roots`/`include_dirs`/`compile_context`) should still
+  be added as `workflows/`-owned coordination rather than grown inline in
+  `_generate_target_checks`/`_generate_bundle_checks`, consistent with
+  every other package-routing fix in this plan set. The `RunPlanCheck`
+  dataclass's own new fields are a data-model question (`model/` is the
+  more defensible long-term home for a shared value every stage reads),
+  but relocating `RunPlanCheck` itself is out of scope for this plan —
+  decide that as part of whichever pass eventually migrates `run_plan.py`
+  into the classified inventory, not as a side effect of adding four
+  fields to it.
 - `.github/workflows/check-project.yml` — Phase 2: per-cell header/compile
   forwarding instead of `inputs.header`/`old-header`/`new-header`.
 - `abicheck/cli_project.py` (`project validate-build`) — Phase 2:
   reconciliation/failure when `.abicheck.yml` and `build-output.json` both
-  declare headers and disagree.
+  declare headers and disagree. `cli_project.py` is a
+  `frozen_root_families["cli_"]` entry, so keep this to the thin CLI
+  adapter call; any real reconciliation logic belongs in `workflows/`.
 - Project schema / `abicheck/buildsource/project_targets.py` — Phase 3:
   `require_complete_analysis` (minimal) and, later, the structured
   `assurance:` block.
-- `abicheck/cli_aggregate.py` — Phase 3: distinguishing the four failure
-  classes in the aggregate.
+- **Phase 3 aggregate failure-class distinction — `workflows/`, not
+  `abicheck/cli_aggregate.py` directly.** `cli_aggregate.py` is a
+  `frozen_root_families["cli_"]` no-growth entry, and ADR-061's routing
+  table names `aggregate` explicitly as `workflows/`'s responsibility
+  ("Coordinate dump, compare, scan, release, aggregate, project, or
+  dependency behavior"). The compatibility/assurance/operational/
+  missing-report-coverage distinction belongs in a `workflows/`-owned
+  aggregation module; `cli_aggregate.py` gains only the thin CLI
+  presentation/exit-code adapter over it.
 - `abicheck/service_dump_pipeline.py`, `abicheck/cli_dump_helpers.py`,
   `abicheck/service.py` — Phase 4: already-tracked, see `AGENTS.md`'s "PR C"
   entry for the current file-level state.

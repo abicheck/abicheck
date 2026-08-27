@@ -199,12 +199,32 @@ file can never itself fail the validator it's meant to satisfy.
   "no binary, headers/source-only" branch to `run.sh`'s dispatch — without
   this, the `build-output.json` exemption above is necessary but not
   sufficient: the target still can't run a candidate check end to end.
-- `abicheck/cli_dump_helpers.py`/`abicheck/cli_compare_helpers.py` (or
-  their `frontends/`-routed successors) — confirm the underlying `dump`/
-  `compare` CLI already accepts a headers/source-only operand with no
-  binary path (it does, for `depth: headers`/`depth: source`, per this
-  tool's existing design) and that `check-target`'s own dispatch forwards
-  that shape correctly instead of assuming a binary path is always present.
+- **`abicheck/frontends/cli/commands/dump.py`/`compare.py`** — this is a
+  real implementation gap, not a confirmation task (an earlier draft of
+  this plan wrongly assumed the underlying CLI already supported this).
+  Confirmed by reading both directly:
+  - `dump.py`'s `so_path` argument is already `required=False`, so a
+    binary-less `dump --sources tree -H api.h` *runs* — but its
+    `dump_source_only()` path embeds only L3/L4/L5 build/source facts and
+    never runs an L2 header-AST pass at all, so **the given headers are
+    silently ignored in the written snapshot** (the function's own
+    docstring/comment: "`-H`/`--header` has no effect on the WRITTEN
+    snapshot here... exits 0 with an empty (0 functions/enums) snapshot and
+    no visible sign `-H` was ignored," beyond a stderr warning). A
+    header-only library's *entire* contract is exactly the L2 facts this
+    path discards — a real header-AST-only dump mode (no binary, no
+    `--sources`/`--build-info` requirement, just `-H`/`--header` parsed
+    through the existing L2 backend) needs to be added, not merely wired
+    to an existing capability.
+  - `compare.py`'s two positional operands (`old_input`/`new_input`) are
+    both plain, non-optional `click.argument`s with no header-only/
+    source-only variant evident — closing this needs either making both
+    positionals optional when paired with header/source flags (mirroring
+    `dump`'s own `so_path: required=False` precedent) or an equivalent
+    dedicated code path, verified against this module directly before
+    committing to either shape.
+  - This is the load-bearing half of "a real check can run," alongside the
+    Action-layer relaxation above — neither alone is sufficient.
 
 ## Tests
 
@@ -221,17 +241,25 @@ file can never itself fail the validator it's meant to satisfy.
 
 ## Effort & risk
 
-M combined (revised up from S–M for the header-only slice, since the
-`actions/check-target` gap below turned out to be load-bearing, not
-cosmetic):
+L combined (revised up twice from the original S–M estimate: first for the
+Action-layer gap, then again once reading `dump.py`/`compare.py` directly
+showed the binary-less *CLI* path doesn't exist yet either — see below):
 
-- Header-only targets: M — `project_targets.py`/`build_output.py` relaxation
-  is S–M on its own, but reaching a real, runnable check also needs
-  `actions/check-target/action.yml`'s `new-library: required: true` relaxed
-  and `run.sh`'s compare-mode dispatch given a no-binary branch (confirmed
-  by reading both — `run.sh`'s `CMD+=("${INPUT_NEW_LIBRARY:?new-library is
-  required}")` fails hard with no operand today). Without this second half,
-  the `build-output.json`/`project_targets.py` relaxation alone leaves the
+- Header-only targets: L — `project_targets.py`/`build_output.py`
+  relaxation is S–M on its own, but reaching a real, runnable check needs
+  three layers, not one: (1) `actions/check-target/action.yml`'s
+  `new-library: required: true` relaxed and `run.sh`'s compare-mode
+  dispatch given a no-binary branch (confirmed by reading both — `run.sh`'s
+  `CMD+=("${INPUT_NEW_LIBRARY:?new-library is required}")` fails hard with
+  no operand today); (2) a genuine new `dump`/`compare` CLI capability —
+  confirmed by reading `dump.py`/`compare.py` directly, not assumed: today's
+  binary-less `dump` path (`dump_source_only()`) discards `-H`/`--header`
+  entirely rather than running an L2 header-AST pass, and `compare.py`'s
+  two positional operands have no header-only variant at all. This is the
+  largest, least-scoped piece of this plan and should be estimated
+  independently once a design for it exists — a real L2-only dump/compare
+  mode is not a small addition. Without both (1) and (2), the
+  `build-output.json`/`project_targets.py` relaxation alone leaves the
   target validated but still unable to run the check the feature exists
   for — verify this end-to-end via the acceptance test, not just via
   `project validate-build` passing.
