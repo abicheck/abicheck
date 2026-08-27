@@ -396,9 +396,36 @@ satisfies "extract/diff exactly once": no new binary/header/source
 already-extracted facts from the one `dump`/`compare` pass — what reruns
 per environment is this one environment-*dependent policy* stage
 specifically, not the extraction stage the constraint actually protects.
-Every other environment-independent stage of `compare()` (symbol/type
-diffing, suppression, the rest of policy) still runs exactly once and its
-results are shared/copied across environments as already established.
+
+**"Every other stage runs exactly once" (an earlier draft's own closing
+claim, immediately above) is wrong for the stages downstream of this one
+— confirmed by reading `checker.compare()`'s actual call order, not
+assumed.** `_env_matrix_contract_changes()` deliberately runs *before*
+`_apply_soname_policy()` and `_compute_verdict_for()`, and `compare()`'s
+own comment states exactly why: "so a floor-decided BREAKING finding also
+drives the `soname_bump_recommended` advisory... and so the internal-node
+demotion inside `_apply_soname_policy` ... cannot race it." Both
+downstream stages read directly from what this stage just produced/
+modulated. Rerunning only `_env_matrix_contract_changes()` per environment
+while sharing one, already-computed `_apply_soname_policy()`/
+`_compute_verdict_for()` result across all environments would mean: only
+whichever single environment happened to back that one shared pass gets
+a correctly-attributed SONAME advisory and a correctly-computed overall
+verdict — every other environment's genuinely different floor-driven
+outcome (e.g. one environment's floor makes a delta `BREAKING`, another's
+doesn't) would silently share the wrong verdict/advisory instead of its
+own. The per-environment fan-out must therefore rerun the **complete
+downstream policy chain** per environment, not only
+`_env_matrix_contract_changes()` in isolation: `_apply_soname_policy()`,
+`_compute_verdict_for()`, and — when contract evaluation is active —
+`stage.record_compatibility_decisions()`, each fed that environment's own
+`_env_matrix_contract_changes()` output, producing that environment's own
+verdict and advisory set. Only the stages genuinely upstream of, and
+independent from, `_env_matrix_contract_changes()` — symbol/type diffing,
+suppression, build-context reconciliation, the NumPy C-API delta — run
+exactly once and are shared/copied across environments as already
+established; everything from `_env_matrix_contract_changes()` onward in
+`compare()`'s own call order reruns per environment.
 
 **That in-process mutation fix is necessary but not sufficient — the real
 extract-once boundary in this codebase is a GitHub Actions *job*, not a
@@ -524,13 +551,20 @@ merely a safer mutator once inside one job:
 2. **Fan-out inside the one job**: `actions/check-target` (or the CLI
    command it shells out to) gains a mode that performs the dump/compare
    exactly once, then evaluates the resulting `DiffResult` against each
-   environment in the group's list in-process, once per environment — both
-   resetting/copying the pristine `Change` list (established above) **and**
-   fully rerunning `_env_matrix_contract_changes()`'s standalone,
-   finding-producing checks against the raw extracted snapshot for that
-   environment's own floors (established above — a reset alone does not
-   reproduce these) — and emits one report artifact **per environment**
-   from that single job.
+   environment in the group's list in-process, once per environment,
+   rerunning the **complete downstream policy chain** from
+   `_env_matrix_contract_changes()` onward for that environment — both
+   resetting/copying the pristine `Change` list and fully rerunning
+   `_env_matrix_contract_changes()`'s standalone, finding-producing checks
+   against the raw extracted snapshot for that environment's own floors
+   (established above — a reset alone does not reproduce these), **and**
+   rerunning `_apply_soname_policy()`/`_compute_verdict_for()`/contract
+   decision recording against that environment's own
+   `_env_matrix_contract_changes()` output (established immediately above
+   — these two stages read directly from what that stage produces, so a
+   shared, single downstream pass would misattribute one environment's
+   SONAME advisory/verdict to every other environment) — and emits one
+   report artifact **per environment** from that single job.
 3. **Each environment's report needs its own `target_id`, not merely its
    own artifact filename — confirmed by reading the aggregate's actual
    loader, not assumed, correcting a wrong claim in an earlier draft of
