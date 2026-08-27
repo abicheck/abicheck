@@ -43,6 +43,7 @@ from .cli import (
     _setup_verbosity,
     _write_or_echo,
 )
+from .cli_compare_receipt import record_release_resolved_config
 from .cli_compare_release_helpers import (  # noqa: F401
     _RELEASE_VERDICT_ORDER,
     _cleanup_temp_dirs,
@@ -172,7 +173,7 @@ def _run_compare_pair(
     old_input, _ = _normalize_binary_input(old_input)
     new_input, _ = _normalize_binary_input(new_input)
 
-    return service.run_compare(
+    result = service.run_compare(
         old_input,
         new_input,
         old_headers=old_headers,
@@ -200,6 +201,8 @@ def _run_compare_pair(
         ),
         compile_context=compile_context,
     )
+    record_release_resolved_config(result.diff, getattr(pack_application, "resolved_config", None))
+    return result
 
 
 _CompareReleaseCommonArgs = tuple[
