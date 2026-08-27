@@ -101,6 +101,17 @@ equivalent tooling that holds that access, and re-derive it from this
 section's rule (not by re-copying this list verbatim) if the table above has
 since changed.
 
+**`branch-protection-ruleset.json`/`branch-protection-ruleset.md`** in this
+same directory are the ready-to-apply artifact for that step: an exact
+Rulesets API payload for the 14-name list above, one `gh api` command to
+apply it, and a negative-test procedure to confirm enforcement is real (not
+just configured). `tests/test_required_checks_governance.py`'s
+`TestBranchRulesetArtifact` keeps the JSON's context list in lockstep with
+this section's prose and `verify-merge-checks.yml`'s own `REQUIRED_CHECKS`
+array, so this is a third mechanically-checked copy of the list, not a
+fourth hand-copied one. The admin action itself is still outstanding — see
+`docs/contribute/plans/cli-cleanup-phase-two.md`'s PR 0B status note.
+
 **Prefer one stable aggregate required check per always-required workflow**
 over requiring every matrix leg individually — a matrix-leg-level required
 list goes stale on every matrix edit and is the usual reason required checks

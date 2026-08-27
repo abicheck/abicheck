@@ -1,0 +1,86 @@
+# `main` required-status-checks Ruleset — admin runbook
+
+This is the one remaining manual step for CLI cleanup phase two's **PR 0B /
+P0** (see `docs/contribute/plans/cli-cleanup-phase-two.md`'s "PR 0 — restore
+a green CI baseline first" section and this directory's `AGENTS.md`
+"Required-status-check configuration" section). Every code-side
+prerequisite is implemented and tested
+(`tests/test_required_checks_governance.py`); what is missing is that the
+branch API still reports `main` as `protected: true` with
+`required_status_checks.enforcement_level: off` and an empty required-checks
+list — so today a red required check does **not** block a merge.
+
+No tool available to an automated PR reaches repository-admin Ruleset
+configuration (confirmed: neither the GitHub MCP server's tool set nor any
+CLI available in this environment exposes branch-protection/Ruleset
+administration). This has to be run by a human with admin access on the
+`abicheck/abicheck` repository.
+
+## Apply
+
+`branch-protection-ruleset.json` in this directory is the exact API payload,
+derived from — and kept in lockstep by
+`tests/test_required_checks_governance.py::TestBranchRulesetArtifact` with —
+the required-check list in this directory's `AGENTS.md` and the identical
+`REQUIRED_CHECKS` array in `workflows/verify-merge-checks.yml`. Create it
+with the GitHub CLI (needs an admin-scoped token / `gh auth login` as an
+account with admin on this repo):
+
+```bash
+gh api --method POST -H "Accept: application/vnd.github+json" \
+  /repos/abicheck/abicheck/rulesets \
+  --input .github/branch-protection-ruleset.json
+```
+
+Equivalently, in the web UI: **Settings → Rules → Rulesets → New branch
+ruleset**, target branch `main`, enforcement **Active**, add a
+"Require status checks to pass" rule and add each of the 14 contexts listed
+in the JSON file (exact spelling matters — GitHub matches a required status
+check by its reported check-run *name*, not the workflow job id; see
+`AGENTS.md`'s rule for why `docs-pr (required)`/`test-action (required)` are
+the two neutral-aggregate gate jobs' names, not `build-docs`/`test-action
+summary`).
+
+## Update instead of duplicate
+
+If a ruleset with this name (or an equivalent classic branch-protection
+config) already exists, don't create a second one — find its id and `PUT` the
+same body instead:
+
+```bash
+gh api /repos/abicheck/abicheck/rulesets | jq '.[] | {id, name}'
+gh api --method PUT -H "Accept: application/vnd.github+json" \
+  /repos/abicheck/abicheck/rulesets/<id> \
+  --input .github/branch-protection-ruleset.json
+```
+
+## Verify enforcement is real, not just configured
+
+Configuring the rule is not the same as confirming it blocks a merge —
+`branch-protection-ruleset.json` being applied only proves the rule exists,
+not that GitHub is acting on it. Do a negative test:
+
+1. Open a throwaway PR against `main` that fails one required check (e.g. a
+   deliberate `ruff` violation to fail `lint-and-types`).
+2. Confirm the PR's merge button is disabled/blocked while that check is red
+   — not just "shows a warning."
+3. Fix the violation, confirm the check goes green, confirm the merge button
+   becomes available.
+4. Close/delete the throwaway PR and branch; do not merge it.
+
+Only after that negative test passes is PR 0B/P0 actually done — see
+`workflows/verify-merge-checks.yml` for the complementary *post-merge*
+detector, which catches a merge that slipped through a misconfigured or
+momentarily-disabled ruleset after the fact, but cannot substitute for this
+pre-merge check.
+
+## If the required-check list changes
+
+Don't hand-edit `branch-protection-ruleset.json`'s `required_status_checks`
+list without re-deriving it from `AGENTS.md`'s rule first (see that file's
+"Required-status-check configuration" section) — apply the rule fresh
+against the current "Required vs. informational workflows" table, update
+`AGENTS.md`'s list, `workflows/verify-merge-checks.yml`'s `REQUIRED_CHECKS`
+array, and this JSON file together, then re-apply the ruleset with the `PUT`
+form above. `tests/test_required_checks_governance.py` fails if any of the
+three drift apart.

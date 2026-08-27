@@ -33,6 +33,7 @@ to `test-action.yml` escaping its own aggregate's `needs:` list.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
@@ -41,6 +42,30 @@ import yaml
 
 ROOT = Path(__file__).resolve().parent.parent
 WORKFLOWS = ROOT / ".github" / "workflows"
+
+# The 14 unconditional required-check names, kept in one place here so
+# TestBranchRulesetArtifact and TestVerifyMergeChecksWorkflow (below) check
+# both of the other two sources of truth against the *same* list rather than
+# each hand-copying it independently -- which is exactly how this list has
+# drifted wrong three times before (see .github/AGENTS.md's own "Required-
+# status-check configuration" section and its "hand-copying a fourth one is
+# the wrong fix" note).
+REQUIRED_CHECK_NAMES = (
+    "ai-readiness",
+    "FAIR metadata and packaging",
+    "lint-and-types",
+    "unit-tests (ubuntu-latest, 3.13, false)",
+    "packaging (ubuntu-latest)",
+    "packaging (windows-latest)",
+    "changelog-fragment",
+    "cli-interface-diff",
+    "test-contract",
+    "Dependency Review",
+    "Security Scan",
+    "CodeQL Analysis (python)",
+    "docs-pr (required)",
+    "test-action (required)",
+)
 
 
 def _load_workflow(name: str) -> dict[str, Any]:
@@ -237,29 +262,11 @@ class TestVerifyMergeChecksWorkflow:
     def test_required_checks_list_present_in_script(self) -> None:
         raw = (WORKFLOWS / "verify-merge-checks.yml").read_text(encoding="utf-8")
         assert "REQUIRED_CHECKS" in raw
-        # Every unconditional required check named in .github/AGENTS.md's
-        # own derived list should appear in the script's own list literal --
-        # a loose substring check (not a full JS parse), but enough to catch
-        # a check silently dropped from one place and not the other.
-        for name in (
-            "ai-readiness",
-            "FAIR metadata and packaging",
-            "lint-and-types",
-            "unit-tests (ubuntu-latest, 3.13, false)",
-            "packaging (ubuntu-latest)",
-            "packaging (windows-latest)",
-            "changelog-fragment",
-            "cli-interface-diff",
-            "test-contract",
-            "Dependency Review",
-            "Security Scan",
-            "CodeQL Analysis (python)",
-            # The two neutral-aggregate gate jobs' own emitted check names
-            # (not their job ids) -- both are unconditioned like every other
-            # ci.yml job, so they exist on every PR head SHA and belong here.
-            "docs-pr (required)",
-            "test-action (required)",
-        ):
+        # Every unconditional required check in the shared REQUIRED_CHECK_NAMES
+        # list should appear in the script's own list literal -- a loose
+        # substring check (not a full JS parse), but enough to catch a check
+        # silently dropped from one place and not the other.
+        for name in REQUIRED_CHECK_NAMES:
             assert name in raw, f"{name!r} missing from verify-merge-checks.yml"
 
     def test_does_not_require_the_path_filtered_aggregate_checks(self) -> None:
@@ -301,3 +308,63 @@ class TestVerifyMergeChecksWorkflow:
         raw = (WORKFLOWS / "verify-merge-checks.yml").read_text(encoding="utf-8")
         assert "candidates.length === 0" in raw
         assert "|| prs[0]" not in raw
+
+
+class TestBranchRulesetArtifact:
+    """`.github/branch-protection-ruleset.json` is the API payload an admin
+    applies by hand to actually enforce the required-check list (see
+    `.github/branch-protection-ruleset.md`'s runbook) -- the one manual step
+    PR 0B/P0 cannot automate. It is a *third* place this same 14-name list is
+    spelled out, alongside `AGENTS.md`'s prose and `verify-merge-checks.yml`'s
+    `REQUIRED_CHECKS` array; these tests keep it from becoming a fourth
+    hand-copied list that drifts out of sync unnoticed."""
+
+    @staticmethod
+    def _ruleset() -> dict[str, Any]:
+        raw = (ROOT / ".github" / "branch-protection-ruleset.json").read_text(
+            encoding="utf-8"
+        )
+        data = json.loads(raw)
+        assert isinstance(data, dict)
+        return data
+
+    @staticmethod
+    def _status_checks_rule(ruleset: dict[str, Any]) -> dict[str, Any]:
+        rules = ruleset.get("rules")
+        assert isinstance(rules, list) and rules
+        (status_rule,) = [r for r in rules if r.get("type") == "required_status_checks"]
+        return status_rule
+
+    def test_targets_main_and_is_active(self) -> None:
+        ruleset = self._ruleset()
+        assert ruleset.get("target") == "branch"
+        assert ruleset.get("enforcement") == "active"
+        include = ruleset.get("conditions", {}).get("ref_name", {}).get("include", [])
+        assert "refs/heads/main" in include
+
+    def test_required_status_checks_matches_the_shared_list_exactly(self) -> None:
+        rule = self._status_checks_rule(self._ruleset())
+        contexts = tuple(
+            c["context"] for c in rule["parameters"]["required_status_checks"]
+        )
+        # Order-insensitive: what matters for enforcement is the set, and
+        # accidental reordering during a hand-edit shouldn't fail this test.
+        assert set(contexts) == set(REQUIRED_CHECK_NAMES)
+        assert len(contexts) == len(REQUIRED_CHECK_NAMES), (
+            "duplicate context entry in branch-protection-ruleset.json"
+        )
+
+    def test_strict_status_checks_policy_is_enabled(self) -> None:
+        """Without `strict_required_status_checks_policy`, a required check
+        that passed against a stale base branch can still count -- matching
+        the same up-to-date-branch expectation `non_fast_forward` implies."""
+        rule = self._status_checks_rule(self._ruleset())
+        assert rule["parameters"]["strict_required_status_checks_policy"] is True
+
+    def test_runbook_references_the_json_file_and_gh_command(self) -> None:
+        runbook = (ROOT / ".github" / "branch-protection-ruleset.md").read_text(
+            encoding="utf-8"
+        )
+        assert "branch-protection-ruleset.json" in runbook
+        assert "gh api" in runbook
+        assert "/repos/abicheck/abicheck/rulesets" in runbook
