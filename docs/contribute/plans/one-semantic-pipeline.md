@@ -667,12 +667,43 @@ sibling:
   `Visibility.PUBLIC` but unreachable through real header inclusion, or
   vice versa, is exactly the disagreement this phase exists to close for
   `compute_public_surface()`, and `SurfaceGraph` has had its own,
-  independent version of that same risk the whole time. This phase closes
-  it: `SurfaceGraph.public_roots()`'s body is replaced with a call into
-  `PublicSurfaceQuery.resolve()` (the graph query this phase builds,
-  below) instead of its own `Visibility.PUBLIC` filter, so `idioms.py`/
-  `pattern_verdicts.py`/`diff_surface_metrics.py` inherit the corrected
-  answer without each needing their own migration. `SurfaceGraph` itself
+  independent version of that same risk the whole time.
+
+  **Two things were wrong with the first fix for this, both caught by
+  review, and both point at the same corrected shape.** First,
+  `SurfaceGraph.public_roots()` calling `PublicSurfaceQuery.resolve()`
+  directly would make `surface_graph.py` — a comparison/index-layer
+  module (ADR-025's A1-A4 surface-intelligence substrate, the same role
+  `idiom.py`/`pattern_verdicts.py`/`diff_surface_metrics.py` already play)
+  — import `policy/public_surface.py`, reversing ADR-061's required
+  `policy -> compare` direction (`policy/` is allowed to depend on
+  `compare/`, never the reverse). Second, `PublicSurfaceQuery.resolve()`
+  returns `frozenset[EntityId]` (per this phase's own primitive below),
+  while `SurfaceGraph.public_roots()` is documented and consumed today as
+  a `frozenset[str]` of symbol/mangled names — `pattern_verdicts.py`'s
+  `_recognise_create_destroy()` passes each root straight into
+  `re.Pattern[str].match()`, which a bare delegation would hand an
+  `EntityId` object instead of a string and fail outright, not just
+  disagree in content.
+
+  The corrected shape fixes both at once by moving the decision, not the
+  call: the workflow/compare orchestration code that already calls
+  `PublicSurfaceQuery.resolve()` for `compute_public_surface()` (the same
+  assembly step this phase's earlier bullets already describe) resolves
+  the public `EntityId` set *once* and passes it into `build_surface_graph
+  (snapshot, public_entity_ids: frozenset[EntityId])` as a new parameter
+  — `surface_graph.py` itself never imports `policy/public_surface.py`,
+  it only receives an already-resolved answer, same direction as every
+  other `policy -> compare` edge in this plan. `SurfaceGraph.public_roots()`
+  then maps each received `EntityId` back to the snapshot's own
+  symbol/mangled-name spelling (via the `Function`/`Variable` the identity
+  already resolves to — `EntityId`'s function variant carries the mangled
+  name directly in `extra` when one exists, the same primitive Phase 2
+  already built), preserving its existing `frozenset[str]` return type
+  and its existing consumers' string-based contract exactly — `idioms.py`/
+  `pattern_verdicts.py`/`diff_surface_metrics.py` need no change at all,
+  inheriting the corrected answer through the same string keys they
+  already read. `SurfaceGraph` itself
   is not deleted or folded into `model/graph.py` — it answers a genuinely
   different question from the evidence graph (a snapshot-local
   declaration-reference index for surface-intelligence metrics, not a
@@ -680,7 +711,7 @@ sibling:
   module would be the opposite error: forcing a real distinction into one
   representation. What must be one representation is *what counts as
   public*, not the index structure built for a different purpose on top
-  of it.
+  of it, and not the direction that decision travels in.
 - **Build the public-surface graph as instances of that same primitive**,
   not a new dataclass hierarchy — `abicheck/compare/surface_graph.py`
   (new) registers its own node/edge *kind vocabulary* (`header`,
@@ -862,11 +893,15 @@ the new location, `NODE_KINDS`/`EDGE_KINDS` and L5-specific construction
 logic unchanged in place); `abicheck/compare/surface_graph.py` (new —
 public-surface node/edge *kind vocabulary* and builder, using `model/
 graph.py`'s primitive, not a new one); `abicheck/surface_graph.py`
-(`SurfaceGraph.public_roots()` delegates to `PublicSurfaceQuery.resolve()`
-instead of its own `Visibility.PUBLIC` filter, per the note above — its
+(`build_surface_graph()` gains a `public_entity_ids: frozenset[EntityId]`
+parameter, resolved by the calling workflow/compare orchestration via
+`PublicSurfaceQuery.resolve()` — never imported by `surface_graph.py`
+itself — and `SurfaceGraph.public_roots()` maps those ids back to their
+mangled/symbol-name spelling, preserving its existing `frozenset[str]`
+return type exactly, per the note above — its
 three real consumers, `idioms.py`/`pattern_verdicts.py`/
 `diff_surface_metrics.py`, are unaffected beyond inheriting the corrected
-answer); `abicheck/policy/public_surface.py`
+answer through the same string keys); `abicheck/policy/public_surface.py`
 (new — `PublicSurfaceQuery`, migrated from `surface.py`'s existing
 traversal logic); `surface.py` (`compute_public_surface()` becomes a thin
 wrapper calling `PublicSurfaceQuery.resolve`); `dumper_scoping.py`/
@@ -940,12 +975,18 @@ proving the backfill is genuinely not persisted back onto it. A fourth
 regression covers `abicheck/surface_graph.py`'s own migration: every
 existing `idioms.py`/`pattern_verdicts.py`/`diff_surface_metrics.py` test
 is re-run unchanged (behavior-preserving, same as the `surface.py`
-migration bar above), plus one new case constructing a snapshot where
+migration bar above, now passing a resolved `public_entity_ids` set into
+`build_surface_graph()`), plus one new case constructing a snapshot where
 `Visibility.PUBLIC` and real reachability disagree (a declaration tagged
-public but unreachable through header inclusion), asserting
-`SurfaceGraph.public_roots()` now agrees with `PublicSurfaceQuery.resolve()`
-rather than the old `Visibility.PUBLIC`-only answer — confirmed to fail
-against the pre-migration `SurfaceGraph` for this exact input.
+public but unreachable through header inclusion): asserting
+`SurfaceGraph.public_roots()` — still returning `frozenset[str]`, still
+consumable by `re.Pattern.match()` with no caller change — agrees with
+`PublicSurfaceQuery.resolve()`'s answer rather than the old
+`Visibility.PUBLIC`-only one, confirmed to fail against the
+pre-migration `SurfaceGraph` for this exact input; and a second case
+asserting `surface_graph.py` imports nothing from `policy/`, enforced by
+the same architecture-gate mechanism this plan already uses elsewhere for
+a leaf module's import direction.
 
 **Acceptance criteria.** `surface.py`'s own traversal implementation and
 `export_surface.py`'s independent closure walk are deleted, not kept
@@ -1199,9 +1240,31 @@ site has anywhere to route the normalizer through — `dumper.py`/
 `dumper_manifest.py` (both named explicitly in the Files list below, not
 only in this prose) are updated in this same phase to call
 `semantic_normalizer.normalize()` on each backend's raw facts and project
-the result back into the existing `AbiSnapshot` field shapes (via
-`SemanticIR.canonical_entities()`, so nothing downstream of `AbiSnapshot`
-changes shape in this phase). The adapter making `SemanticIR` itself
+the result back into the existing `AbiSnapshot` field shapes. **This
+projection must not go through `SemanticIR.canonical_entities()` — a first
+draft of this phase specified exactly that, and it silently reintroduces
+the evidence loss `OccurrenceId`-keying exists to prevent, one step later
+than the earlier fix closed it.** `canonical_entities()` is defined above
+as "resolve which occurrence wins" — a genuine reduction, by design, for
+a consumer that explicitly wants one canonical view. `AbiSnapshot.
+functions`/`types`/... are **not** that consumer: they are the existing
+list-shaped fields the unchanged checker reads today, and today's
+assembly already puts a complete definition and an incomplete/ODR-
+duplicate declaration sharing one `EntityId` into that list as two
+separate entries — routing through `canonical_entities()` here would
+collapse them to one, an order-dependent, unspecified-winner loss of
+exactly the evidence `SemanticIR.occurrences` (plural, keyed by
+`OccurrenceId`) was built to keep. The correct projection iterates
+`SemanticIR.occurrences` directly — one `AbiSnapshot` list entry per
+occurrence, the same cardinality today's assembly already produces — and
+is pinned by this phase's own parity test (below) proving the legacy
+fields' shape and count are unchanged for a fixture containing a real
+ODR-duplicate pair, not only for the common one-occurrence-per-entity
+case a less pointed test could pass by accident. `SemanticIR.
+canonical_entities()` remains exactly what it already was: the reduction
+method for a future `SemanticIR`-aware consumer that genuinely wants one
+canonical view, reachable through `AbiSnapshot.semantic_ir` below, never
+through the legacy fields. The adapter making `SemanticIR` itself
 available to `compare()`/future `SemanticIR`-aware detectors, not only the
 projected fields, is this same assembly step: `AbiSnapshot` gains a new,
 optional `semantic_ir: SemanticIR | None` field, populated by `dumper.py`/
@@ -1223,7 +1286,13 @@ in. An end-to-end parity test (`dump`/`compare` over a real fixture,
 before and after this phase, asserting identical `AbiSnapshot` output) is
 required alongside the per-backend unit tests below, to prove the
 normalizer-mediated assembly path is behavior-preserving for the existing
-pipeline rather than asserted.
+pipeline rather than asserted — **and that fixture must include a real
+ODR-duplicate or incomplete/complete declaration pair sharing one
+`EntityId`, not only the common one-occurrence-per-entity case**, per the
+`canonical_entities()` finding above: a fixture without that shape could
+pass this parity test even with the wrong (collapsing) projection, since
+the collapse is only observable when more than one occurrence exists for
+some identity.
 
 **Tests.** Every existing per-backend regression test that currently
 proves "backend X handles construct Y" is kept and re-targeted at the
