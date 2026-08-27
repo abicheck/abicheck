@@ -8,6 +8,8 @@ Covers:
 
 from __future__ import annotations
 
+import pytest
+
 from abicheck.change_registry import (
     REGISTRY,
     ChangeKindMeta,
@@ -179,7 +181,8 @@ class TestChangeKindRegistry:
         with pytest.raises(ValueError, match="is_addition=True"):
             ChangeKindRegistry(entries)
 
-    def test_verdict_blind_policy_override_must_be_compatible(self):
+    @pytest.mark.parametrize("policy", ["sdk_vendor", "plugin_abi"])
+    def test_verdict_blind_policy_override_must_be_compatible(self, policy):
         """A non-COMPATIBLE override for sdk_vendor/plugin_abi is rejected.
 
         checker_policy.policy_kind_sets() classifies every kind carrying a
@@ -189,18 +192,18 @@ class TestChangeKindRegistry:
         Verdict.COMPATIBLE would pass the redundant-override check (it
         differs from default_verdict) while silently disagreeing with
         actual runtime behavior, so it must be rejected on its own.
-        """
-        import pytest
 
-        for policy in ("sdk_vendor", "plugin_abi"):
-            entries = [
-                ChangeKindMeta(
-                    "test_kind", Verdict.BREAKING, impact="x",
-                    policy_overrides={policy: Verdict.API_BREAK},
-                ),
-            ]
-            with pytest.raises(ValueError, match="unconditionally"):
-                ChangeKindRegistry(entries)
+        Parametrized (CodeRabbit review, PR #882) rather than a manual
+        loop, so each policy gets its own independent test result.
+        """
+        entries = [
+            ChangeKindMeta(
+                "test_kind", Verdict.BREAKING, impact="x",
+                policy_overrides={policy: Verdict.API_BREAK},
+            ),
+        ]
+        with pytest.raises(ValueError, match="unconditionally"):
+            ChangeKindRegistry(entries)
 
     def test_verdict_blind_policy_matches_runtime_behavior(self):
         """Regression guard: _VERDICT_BLIND_POLICIES must track policy_kind_sets().
