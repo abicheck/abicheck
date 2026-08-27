@@ -711,6 +711,69 @@ namespace lib { int touch() { return run_one() + run_two(); } }
         assert result.verdict is not Verdict.NO_CHANGE
         assert result.changes != []
 
+    def test_two_lambdas_stay_distinct_when_an_unrelated_declaration_moves(
+        self, tmp_path: Path
+    ) -> None:
+        """The genuinely untested transformation the test above cannot
+        cover: reordering an UNRELATED declaration around the two lambdas
+        while their own relative order to EACH OTHER stays fixed -- unlike
+        swapping run_one/run_two themselves, this does not touch the
+        documented same-kind-reorder limitation at all, so it must both
+        keep the two closures distinct AND compare as NO_CHANGE (Codex
+        review, PR #898 -- the previous test's swap of run_one/run_two
+        was a different, already-covered case)."""
+        _require_toolchain()
+        header_text = """
+#pragma once
+namespace lib {
+int unrelated_fn(int x);
+template <class F> int call_with(F f) { return f(); }
+inline int run_one() { return call_with([]() { return 1; }); }
+inline int run_two() { return call_with([]() { return 2; }); }
+}
+"""
+        reordered_header = """
+#pragma once
+namespace lib {
+template <class F> int call_with(F f) { return f(); }
+inline int run_one() { return call_with([]() { return 1; }); }
+inline int run_two() { return call_with([]() { return 2; }); }
+int unrelated_fn(int x);
+}
+"""
+        source_text = """
+#include "api.h"
+namespace lib {
+int unrelated_fn(int x) { return x; }
+int touch() { return run_one() + run_two(); }
+}
+"""
+
+        def _lambda_param_spellings(functions: object) -> set[str]:
+            return {
+                p.type
+                for f in functions  # type: ignore[attr-defined]
+                if "call_with" in f.mangled
+                for p in f.params
+                if p.type and "(lambda" in p.type
+            }
+
+        root_a = tmp_path / "original_order"
+        root_b = tmp_path / "reordered"
+        root_a.mkdir()
+        root_b.mkdir()
+        so_a, header_a = _build(root_a, header_text, source_text)
+        so_b, header_b = _build(root_b, reordered_header, source_text)
+        snap_a = _dump(so_a, header_a)
+        snap_b = _dump(so_b, header_b)
+
+        assert len(_lambda_param_spellings(snap_a.functions)) >= 2
+        assert len(_lambda_param_spellings(snap_b.functions)) >= 2
+
+        result = compare(snap_a, snap_b)
+        assert result.verdict is Verdict.NO_CHANGE
+        assert result.changes == []
+
     def test_nested_records_stay_distinct_across_unrelated_line_drift(
         self, tmp_path: Path
     ) -> None:
