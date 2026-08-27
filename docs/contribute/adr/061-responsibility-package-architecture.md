@@ -1119,8 +1119,18 @@ destination package exists and has real tenants
 (`service_dump_pipeline.py`, `service_compare_pipeline.py`,
 `service_scan.py`), so the original "the destination does not exist" framing
 is stale. What remains is two ordinary kinds of work, not one already done —
-classifying (or, per the `policy_file.py` precedent below, deliberately
-leaving unclassified) the two dozen modules above, *and* thinning
+classifying the two dozen modules above (a Codex review round on this
+document caught an earlier revision offering "or deliberately leave
+unclassified, per the `policy_file.py` precedent" as an alternative here —
+that precedent doesn't transfer: `policy_file.py` can stay unclassified only
+because it isn't itself `migrated_source`, i.e. it never physically moves;
+once `service.py` is physically relocated into `workflows/`, it becomes
+`migrated_source`, and any surviving unclassified import — including a
+type-only one — trips `unclassified-import` regardless of intent, the same
+result the `ReclassifyRule` probe below already confirmed for a different
+module. Every one of the two dozen has to be classified, exposed through an
+allowed canonical surface, or removed from the migrated code; there is no
+"leave it unclassified" option once the move itself happens), *and* thinning
 `service.py`'s own ~1763 lines of `resolve_input`/`_dump_elf`/`_dump_pe`/
 `_dump_macho`/`compare_snapshots` into the owners that destination already
 has, verified against the same test suite, the way `cli.py` moved into
@@ -1340,16 +1350,25 @@ a physical move is safe, and the ~1763 lines of implementation still need
 thinning into the destination that work would unblock. Neither is closed by
 this investigation. The `cli.py` half is complete.
 
-Nor is the `PolicyFile` design question itself closed, and a Codex review
-round on this same document caught an earlier revision of this paragraph
-implying it was — worth being precise about what "decided" actually covers
-here. **Decided**: which of the investigated options this ADR adopts —
-`policy_file.py` is not reclassified as `compare`, not split into a
-data-only base plus a facade subclass, and not given a `Protocol`-based
-facade (blocked on `ChangeKind`/`ReclassifyRule`, as above) — the choice
-among those four is settled, and won't be relitigated by a future reader
-re-proposing one of the three rejected options. **Not decided**: `policy_file.py`'s
-final layer ownership. "Deliberately unclassified" is this ADR's recorded
+Nor is the `PolicyFile` design question itself closed, and two Codex review
+rounds on this same document each caught a different overstatement in this
+paragraph — worth being precise about what "decided" actually covers here,
+and, per the second round, precise about the `Protocol` option specifically
+so it doesn't read as rejected when it isn't. **Decided and closed, not to
+be relitigated**: two of the investigated options are rejected outright —
+`policy_file.py` is not reclassified as `compare` (mislabels real policy
+logic), and it is not split into a data-only base plus a facade subclass
+(no version of that field-narrowing avoids breaking either `checker_types.py`
+or its own consumers, per the fourth Codex round above). **Decided, but not
+yet actionable**: the `Protocol`-based facade is the *selected* mechanism for
+whenever `policy_file.py`'s ownership is finally resolved — see the
+paragraph above ("the protocol is the better mechanism to use *once*..."),
+not a third rejected option; it is blocked today only by its two
+co-prerequisites (`ChangeKind` and `ReclassifyRule` each independently
+classified), not by any objection to the mechanism itself. **Not decided**:
+`policy_file.py`'s final layer ownership, and therefore *when* those two
+prerequisites get satisfied and the Protocol actually lands. "Deliberately
+unclassified" is this ADR's recorded
 *treatment* of the module for now, not its destination — the module stays
 outside `architecture/modules.yaml`'s classified set, `check_architecture.py`
 enforces nothing about which layer may import it, and the actual owner is
