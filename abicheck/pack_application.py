@@ -377,6 +377,30 @@ def policy_file_with_packs(
     return updated
 
 
+def resolve_bundle_policy_file(
+    suppress: Path | None,
+    policy: str,
+    policy_file_path: Path | None,
+    application: PackApplication | None,
+) -> PolicyFile | None:
+    """Resolve the ``PolicyFile`` a ``compare-release`` bundle analysis
+    should score against (G38 Phase 16), mirroring the per-library/matrix
+    resolve-then-fold-packs pattern (``_load_suppression_and_policy`` then,
+    when a ``--pack`` was resolved, :func:`policy_file_with_packs`) so
+    ``bundle_*`` findings honor the same ``--policy``/``--pack`` overrides
+    every other finding kind already does. Lives here rather than in
+    ``cli_compare_release_helpers.py`` because that module -- and its
+    sibling ``cli_compare_release.py`` -- are pinned at a no-growth line-
+    count baseline (``architecture/debt.yaml``, ADR-061); this module isn't.
+    """
+    from .cli_params import _load_suppression_and_policy
+
+    _, pf = _load_suppression_and_policy(suppress, policy, policy_file_path)
+    if application is not None:
+        pf = policy_file_with_packs(pf, application, base_policy=policy)
+    return pf
+
+
 def apply_to_compare_config(resolved_cfg: Any, application: PackApplication) -> Any:
     """*resolved_cfg* with the gate packs' contributions folded in.
 

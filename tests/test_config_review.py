@@ -768,7 +768,9 @@ class TestReleaseSeverityPolicyAndGlobal:
 
         change = _breaking_diff().changes[0]
         finding = types.SimpleNamespace(to_change=lambda: change)
-        bundle = types.SimpleNamespace(bundle_findings=[finding], policy="strict_abi")
+        bundle = types.SimpleNamespace(
+            bundle_findings=[finding], policy="strict_abi", policy_file=None
+        )
         assert (
             _fold_release_global_severity(
                 0, bundle, None, "default", None, None, None, None
@@ -801,7 +803,7 @@ class TestReleaseSeverityPolicyAndGlobal:
         finding = types.SimpleNamespace(to_change=lambda: change)
 
         strict_bundle = types.SimpleNamespace(
-            bundle_findings=[finding], policy="strict_abi"
+            bundle_findings=[finding], policy="strict_abi", policy_file=None
         )
         assert (
             _fold_release_global_severity(
@@ -811,11 +813,61 @@ class TestReleaseSeverityPolicyAndGlobal:
         )
 
         plugin_bundle = types.SimpleNamespace(
-            bundle_findings=[finding], policy="plugin_abi"
+            bundle_findings=[finding], policy="plugin_abi", policy_file=None
         )
         assert (
             _fold_release_global_severity(
                 0, plugin_bundle, None, "default", None, None, None, None
+            )
+            == 0
+        )
+
+    def test_fold_bundle_honors_the_bundle_result_own_policy_file(self):
+        # G38 Phase 16 (Codex review, fresh evidence): the fold above
+        # started forwarding `bundle_result.policy` -- but not
+        # `bundle_result.policy_file` -- so a `--policy custom.yaml`
+        # override demoting a bundle_* kind to `ignore` already changed
+        # the *displayed* `BundleDiffResult.bundle_verdict` (its own
+        # `.policy_file`-aware property) while the severity-aware process
+        # exit still scored the unmodified bare-policy classification,
+        # letting the two disagree in the identical way Phase 10 already
+        # fixed for `.policy` alone.
+        import types
+
+        from abicheck.checker_policy import ChangeKind, Verdict
+        from abicheck.checker_types import Change
+        from abicheck.cli_compare_release import _fold_release_global_severity
+        from abicheck.policy_file import PolicyFile
+
+        change = Change(
+            kind=ChangeKind.BUNDLE_INTRA_DEP_REMOVED,
+            symbol="core_fn",
+            description="removed",
+            old_value="present",
+            new_value="absent",
+        )
+        finding = types.SimpleNamespace(to_change=lambda: change)
+
+        unmodified = types.SimpleNamespace(
+            bundle_findings=[finding], policy="strict_abi", policy_file=None
+        )
+        assert (
+            _fold_release_global_severity(
+                0, unmodified, None, "default", None, None, None, None
+            )
+            == 4
+        )
+
+        overridden = types.SimpleNamespace(
+            bundle_findings=[finding],
+            policy="strict_abi",
+            policy_file=PolicyFile(
+                overrides={ChangeKind.BUNDLE_INTRA_DEP_REMOVED: Verdict.COMPATIBLE}
+            ),
+        )
+        assert (
+            _fold_release_global_severity(
+                0, overridden, None, "default", None, None, None, None
             )
             == 0
         )

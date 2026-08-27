@@ -42,6 +42,7 @@ from .model import AbiSnapshot
 if TYPE_CHECKING:
     from .pack_application import PackApplication
     from .package import PackageExtractor
+    from .policy_file import PolicyFile
     from .workflows.gate import SeverityConfig
 
 
@@ -541,8 +542,7 @@ def _collect_bundle_result(
     worst_verdict: str,
     manifest_path: Path | None,
     bundle_system_providers: str,
-    bundle_cohorts: tuple[str, ...] = (),
-    policy: str = "strict_abi",
+    bundle_cohorts: tuple[str, ...] = (), policy: str = "strict_abi", policy_file: PolicyFile | None = None,
 ) -> tuple[BundleDiffResult | None, str]:
     """Extract stashed DiffResults, run bundle analysis, update worst verdict.
 
@@ -555,7 +555,7 @@ def _collect_bundle_result(
     is duck-type compatible with what
     :func:`~abicheck.bundle_signature_evidence.find_unverified_signature_
     findings` reads, so both are folded into the same ``old_snapshots``/
-    ``new_snapshots`` mapping this function has always built.
+    ``new_snapshots`` mapping this function has always built. *policy_file* (G38 Phase 16) is set on the result before ``bundle_verdict`` is read.
     """
     stashed_diffs: list[DiffResult] = []
     old_snapshots: dict[str, AbiSnapshot | BundleSignatureEvidence] = {}
@@ -588,10 +588,9 @@ def _collect_bundle_result(
         new_snapshots=new_snapshots,
     )
     if bundle_result is not None:
+        bundle_result.policy_file = policy_file  # G38 Phase 16
         bv = bundle_result.bundle_verdict.value
-        if _RELEASE_VERDICT_ORDER.get(bv, 0) > _RELEASE_VERDICT_ORDER.get(
-            worst_verdict, 0
-        ):
+        if _RELEASE_VERDICT_ORDER.get(bv, 0) > _RELEASE_VERDICT_ORDER.get(worst_verdict, 0):
             worst_verdict = bv
     return bundle_result, worst_verdict
 
@@ -816,10 +815,11 @@ def _fold_release_global_severity(
         # `BundleDiffResult.bundle_verdict` already honors via its own
         # `.policy` field) never reached the severity-aware exit code,
         # letting the displayed verdict and the process exit disagree.
+        # G38 Phase 16 (Codex review): `policy_file` had the identical gap.
         bundle_changes = [f.to_change() for f in bundle_result.bundle_findings]
         worst = max(
             worst,
-            compute_exit_code(bundle_changes, config, policy=bundle_result.policy),
+            compute_exit_code(bundle_changes, config, policy=bundle_result.policy, policy_file=bundle_result.policy_file),
         )
     if matrix_result is not None and matrix_result.changes:
         worst = max(

@@ -483,3 +483,174 @@ class TestBundleAnalysisErrorsAreStructural:
         text = "\n".join(lines)
         assert "Bundle Analysis Warnings" in text
         assert "synthetic failure" in text
+
+
+class TestBundleAnalysisForwardsPolicyFile:
+    """G38 Phase 16: the release fan-out's own resolved ``PolicyFile`` must
+    reach ``analyze_bundle()``/``compare_bundle()`` -- not just the bare
+    *policy* preset name -- so a ``--policy custom.yaml`` override for a
+    ``bundle_*`` ``ChangeKind`` actually changes the release's aggregate
+    ``bundle_verdict``. Before this wiring, ``_run_bundle_analysis`` never
+    accepted a ``policy_file`` parameter at all, so such an override was
+    silently ignored on this one call site even though the stored-
+    ``BundleFacts`` driver (``bundle_facts.compare_bundle_from_facts``)
+    already honored one."""
+
+    def _fake_snapshot(self, libs: dict[str, Path]) -> BundleSnapshot:
+        return _snapshot(
+            {
+                "libcore.so": _meta(exports=["core_fn"]),
+                "libconsumer.so": _meta(imports=["core_fn"], needed=["libcore.so"]),
+            }
+        )
+
+    def _entries(
+        self, old_snap: AbiSnapshot, new_snap: AbiSnapshot
+    ) -> list[dict[str, object]]:
+        return [
+            {
+                "library": "libcore.so",
+                "verdict": "NO_CHANGE",
+                "_diff_result": _diff("libcore.so"),
+                "_old_snapshot": old_snap,
+                "_new_snapshot": new_snap,
+                "_bundle_key": "libcore.so",
+            },
+            {
+                "library": "libconsumer.so",
+                "verdict": "NO_CHANGE",
+                "_diff_result": _diff("libconsumer.so"),
+            },
+        ]
+
+    def test_policy_file_override_demotes_the_bundle_verdict(
+        self, monkeypatch
+    ) -> None:
+        from abicheck.policy_file import PolicyFile
+
+        monkeypatch.setattr(bundle_mod, "build_bundle_snapshot", self._fake_snapshot)
+
+        old_map = {
+            "libcore.so": Path("libcore.so"),
+            "libconsumer.so": Path("libconsumer.so"),
+        }
+        new_map = dict(old_map)
+        old_snap = _snap(
+            "libcore.so", functions=[_elf_only_fn("core_fn")], elf_only_mode=True
+        )
+        new_snap = _snap(
+            "libcore.so", functions=[_elf_only_fn("core_fn")], elf_only_mode=True
+        )
+
+        # Without a policy_file override, the signature-evidence gate's
+        # BUNDLE_INTRA_DEP_SIGNATURE_UNVERIFIED finding scores under the
+        # bare "strict_abi" default.
+        unmodified, unmodified_verdict = _collect_bundle_result(
+            self._entries(old_snap, new_snap),
+            old_map,
+            new_map,
+            "NO_CHANGE",
+            manifest_path=None,
+            bundle_system_providers="",
+        )
+        assert unmodified is not None
+        assert any(
+            f.kind == ChangeKind.BUNDLE_INTRA_DEP_SIGNATURE_UNVERIFIED
+            for f in unmodified.bundle_findings
+        )
+        assert unmodified.bundle_verdict != Verdict.COMPATIBLE
+
+        # A policy_file overriding that kind to COMPATIBLE must reach
+        # analyze_bundle() -- through _run_bundle_analysis -- and change the
+        # aggregate bundle_verdict, exactly the way the same override
+        # already changes a single --policy compare's own verdict.
+        pf = PolicyFile(
+            overrides={
+                ChangeKind.BUNDLE_INTRA_DEP_SIGNATURE_UNVERIFIED: Verdict.COMPATIBLE
+            }
+        )
+        overridden, overridden_verdict = _collect_bundle_result(
+            self._entries(old_snap, new_snap),
+            old_map,
+            new_map,
+            "NO_CHANGE",
+            manifest_path=None,
+            bundle_system_providers="",
+            policy_file=pf,
+        )
+        assert overridden is not None
+        assert overridden.bundle_verdict == Verdict.COMPATIBLE
+        assert overridden_verdict != unmodified_verdict
+
+    def test_collect_bundle_result_sets_policy_file_before_verdict_is_read(
+        self, monkeypatch
+    ) -> None:
+        """Direct plumbing check: ``_collect_bundle_result`` must set its
+        *policy_file* argument on the ``BundleDiffResult`` it gets back from
+        ``_run_bundle_analysis`` -- and do so *before* it reads
+        ``bundle_verdict`` to fold into ``worst_verdict`` -- independent of
+        what any particular ChangeKind override happens to do to a verdict.
+        ``_run_bundle_analysis`` itself takes no ``policy_file`` parameter;
+        ``BundleDiffResult.policy_file`` is a plain mutable field, set by the
+        caller after construction (G38 Phase 16)."""
+        from abicheck.policy_file import PolicyFile
+
+        monkeypatch.setattr(bundle_mod, "build_bundle_snapshot", self._fake_snapshot)
+
+        old_map = {"libcore.so": Path("libcore.so")}
+        new_map = dict(old_map)
+        sentinel_pf = PolicyFile()
+
+        bundle_result, _ = _collect_bundle_result(
+            self._entries(
+                _snap("libcore.so", functions=[], elf_only_mode=True),
+                _snap("libcore.so", functions=[], elf_only_mode=True),
+            ),
+            old_map,
+            new_map,
+            "NO_CHANGE",
+            manifest_path=None,
+            bundle_system_providers="",
+            policy_file=sentinel_pf,
+        )
+
+        assert bundle_result is not None
+        assert bundle_result.policy_file is sentinel_pf
+
+
+class TestResolveBundlePolicyFile:
+    """``pack_application.resolve_bundle_policy_file`` (G38 Phase 16) --
+    the primitive the ``compare-release`` fan-out uses to resolve the
+    ``PolicyFile`` bundle analysis should score against. Lives in
+    ``pack_application.py``, not ``cli_compare_release_helpers.py``,
+    because the latter (and its sibling ``cli_compare_release.py``) are
+    pinned at a no-growth line-count baseline (``architecture/debt.yaml``,
+    ADR-061); tested here rather than in ``test_pack_application.py``
+    because that file is pinned at one too (Codex review, fresh evidence)."""
+
+    def test_no_policy_file_and_no_pack_resolves_none(self) -> None:
+        from abicheck.pack_application import resolve_bundle_policy_file
+
+        assert resolve_bundle_policy_file(None, "strict_abi", None, None) is None
+
+    def test_resolves_a_real_policy_document(self, tmp_path: Path) -> None:
+        from abicheck.pack_application import resolve_bundle_policy_file
+
+        pol = tmp_path / "policy.yaml"
+        pol.write_text("base_policy: strict_abi\noverrides:\n  func_removed: ignore\n")
+        pf = resolve_bundle_policy_file(None, "strict_abi", pol, None)
+        assert pf is not None
+        assert pf.overrides[ChangeKind.FUNC_REMOVED] == Verdict.COMPATIBLE
+
+    def test_folds_a_resolved_pack_application(self, tmp_path: Path) -> None:
+        from abicheck.pack_application import (
+            PackApplication,
+            resolve_bundle_policy_file,
+        )
+
+        application = PackApplication(
+            policy_overrides={ChangeKind.BUNDLE_INTRA_DEP_REMOVED: Verdict.COMPATIBLE}
+        )
+        pf = resolve_bundle_policy_file(None, "strict_abi", None, application)
+        assert pf is not None
+        assert pf.overrides[ChangeKind.BUNDLE_INTRA_DEP_REMOVED] == Verdict.COMPATIBLE
