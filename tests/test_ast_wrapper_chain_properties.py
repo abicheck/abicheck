@@ -183,6 +183,31 @@ def test_unwrap_expr_stops_on_a_non_dict_child(kinds: list[str], data: Any) -> N
     assert clang_nodes._unwrap_expr(root) is stopping_node
 
 
+@given(kinds=_nonempty_kinds_strategy, data=st.data())
+@settings(max_examples=150)
+def test_evaluated_int_value_survives_the_same_malformed_shapes(
+    kinds: list[str], data: Any
+) -> None:
+    """`_evaluated_int_value` has its OWN, independently-maintained
+    traversal loop (not built on top of either `_unwrap_expr` copy) --
+    the three ambiguous/malformed shapes above must degrade the same way
+    on it too (Codex review, PR #888): none of these malformed builders
+    previously reached this primitive at all, so a regression indexing a
+    missing child or calling ``.get()`` on a non-dict child here could
+    have escaped this suite entirely."""
+    at = data.draw(st.integers(min_value=0, max_value=len(kinds) - 1))
+    for build in (
+        chain_with_ambiguous_branch,
+        chain_with_missing_inner,
+        chain_with_non_dict_child,
+    ):
+        root, _stopping_node = build(kinds, at)
+        # No value was ever folded onto any node in these chains, so a
+        # correct traversal that degrades cleanly at the malformed point
+        # must report None -- never raise, never fabricate a value.
+        assert dumper_clang._evaluated_int_value(root) is None
+
+
 # --------------------------------------------------------------------------
 # `_evaluated_int_value`: the actual #839 mechanism -- a value folded at ANY
 # position along the chain must be found, not just the endpoints.
@@ -231,6 +256,37 @@ def test_evaluated_int_value_skips_unparseable_values_instead_of_raising(
     value_at = data.draw(st.integers(min_value=0, max_value=len(kinds)))
     root, _leaf = build_wrapper_chain(kinds, value_at=value_at, value=bad_value)
     assert dumper_clang._evaluated_int_value(root) is None
+
+
+@given(
+    kinds=st.lists(st.sampled_from(_WRAPPER_KINDS), min_size=2, max_size=6),
+    bad_value=st.text(
+        alphabet="abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ",
+        min_size=1,
+        max_size=8,
+    ).filter(lambda s: not _looks_intlike(s)),
+    good_value=st.integers(min_value=-1000, max_value=1000),
+    data=st.data(),
+)
+@settings(max_examples=150)
+def test_evaluated_int_value_recovers_a_valid_value_past_an_unparseable_one(
+    kinds: list[str], bad_value: str, good_value: int, data: Any
+) -> None:
+    """The 'skip, don't raise' contract above only proves the walk doesn't
+    crash when NOTHING further down is parseable either -- it doesn't by
+    itself prove the walk actually CONTINUES rather than stopping outright
+    (Codex review, PR #888): a regression that returns ``None`` immediately
+    on the first unparseable value, instead of continuing to descend,
+    would still pass that test. Fold a real value onto a DEEPER node than
+    the malformed one and assert it's still found."""
+    bad_at = data.draw(st.integers(min_value=0, max_value=len(kinds) - 1))
+    good_at = data.draw(st.integers(min_value=bad_at + 1, max_value=len(kinds)))
+    root, _leaf = build_wrapper_chain(kinds, value_at=good_at, value=str(good_value))
+    ancestor = root
+    for _ in range(bad_at):
+        ancestor = ancestor["inner"][0]
+    ancestor["value"] = bad_value
+    assert dumper_clang._evaluated_int_value(root) == good_value
 
 
 def _looks_intlike(s: str) -> bool:
