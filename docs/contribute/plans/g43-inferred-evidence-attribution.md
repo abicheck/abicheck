@@ -291,6 +291,34 @@ would have no way to pass the value through). The design, corrected:
   pack into a `BuildSourcePack`/`AbiSnapshot.build_source` carries it
   forward on the pack itself.
 
+  **The count must also survive a stored baseline's own serialize/reload
+  round trip — confirmed to be a real, separate gap by reading
+  `abicheck/buildsource/pack.py` directly, not assumed.**
+  `BuildSourcePack.to_embedded_dict()`/`from_embedded_dict()` (the path a
+  baseline snapshot's `.abi.json` actually goes through) enumerate exactly
+  four persisted keys — `manifest`, `build_evidence`, `source_abi`,
+  `source_graph` — and reconstruct the in-memory pack from only those; a
+  plain in-memory `BuildSourcePack`/`IngestedInputs` attribute with no
+  corresponding key in this list is silently dropped the moment a pack is
+  embedded into a snapshot and later reloaded. Concretely: if only the
+  *old* (previously-published baseline) side ever had an unmapped TU, a
+  fresh `scan --against`/`compare` against that stored baseline would
+  reload a pack whose unresolved-attribution count reads `0` regardless of
+  what was true when the baseline was originally published —
+  `compute_analysis_assurance()` then sees zero on that side and can
+  report complete assurance for exactly the case this signal exists to
+  catch. The field's real, persisted home is therefore
+  `BuildSourceManifest` (`abicheck/buildsource/model.py`) — already
+  serialized unconditionally via `manifest.to_dict()`/`from_dict()` inside
+  both `to_embedded_dict()`/`from_embedded_dict()`, and already carrying
+  its own `build_source_pack_version` to bump for this new field — not a
+  bare dataclass attribute that happens to ride on the in-memory
+  `BuildSourcePack`/`IngestedInputs` object only for the lifetime of one
+  process. This is routed through `abicheck/model/`(shared value)/
+  `abicheck/storage/`(the manifest schema/round-trip itself, per ADR-061's
+  routing already established for G41/G39's own manifest work above), not
+  grown as an ad hoc field on `pack.py` directly.
+
   **The consumer is `analysis_assurance.compute_analysis_assurance()`, not
   `contract_coverage_ledger.py` — corrected after a fresh review round
   confirmed the ledger is the wrong mechanism for G41 Phase 3's actual
@@ -349,6 +377,12 @@ would have no way to pass the value through). The design, corrected:
   with no `attribution_path`, or a corrupted one, still fails exactly as
   it does today — this plan must not be the PR that accidentally weakens
   `_inferred_evidence_projection_issues()`'s existing guard.
+- A stored-baseline round-trip regression test: publish a baseline from a
+  pack carrying a genuinely unresolved-attribution TU, write it to an
+  embedded `.abi.json` via `to_embedded_dict()`, reload it via
+  `from_embedded_dict()`, and assert the unresolved-attribution count
+  survives — confirming the persistence gap above is actually closed, not
+  merely that the in-memory field exists for the lifetime of one process.
 
 ## Effort & risk
 

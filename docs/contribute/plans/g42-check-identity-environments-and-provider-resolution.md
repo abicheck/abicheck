@@ -118,8 +118,36 @@ _CHECK_ID_RE = re.compile(
 )
 ```
 
-— an optional, non-capturing-when-absent `~<id>` tail (the `~` is not
-already produced by `build_check_id`/`_IDENTIFIER_RE`, so it can't collide
+**This is the pattern's shape before the "Efficiency constraint" section
+below adds a second, composed segment — the two must not be designed or
+implemented independently.** The full, final pattern this plan requires
+— after the environment-grouping work later in this document adds its own
+`!<environment_id>` segment — is:
+
+```
+_CHECK_ID_RE = re.compile(
+    r"^(?P<target>.+)@(?P<profile>[A-Za-z0-9][A-Za-z0-9._-]*)"
+    r"#(?P<channel>[A-Za-z0-9][A-Za-z0-9._-]*)"
+    r"@(?P<depth>binary|headers|build|source)"
+    r"(?:!(?P<environment_id>[A-Za-z0-9._-]+))?"
+    r"(?:~(?P<explicit_id>[A-Za-z0-9][A-Za-z0-9._-]*))?$"
+)
+```
+
+— i.e. `!<environment_id>` before `~<explicit_id>`, both optional and
+independently omittable, matching the exact shape "Efficiency constraint"
+below specifies. This is the **one** canonical pattern definition this
+plan's "Files & surfaces" section requires extended, in lockstep, across
+`_CHECK_ID_RE`/`CheckIdParts` (`contracts.py`), `CHECK_ID_PATTERN`/
+`validate_check_id()` (`checker_types.py`), `build_check_id()`
+(`check_report.py`), and the JSON report schema — an earlier draft of
+this plan described the `~<explicit_id>` extension and the
+`!<environment_id>` extension in two separate places without ever writing
+down the composed result, which is exactly the gap that let a later
+review round find the non-`contracts.py` copies still missing the
+environment segment. An optional, non-capturing-when-absent `~<id>` tail
+(the `~` is not already produced by `build_check_id`/`_IDENTIFIER_RE`, so
+it can't collide
 with an existing target/profile/channel value), with `CheckIdParts` gaining
 a matching `explicit_id: str | None` field. Absent `id`, the generated
 string and its parse are bit-for-bit unchanged (`explicit_id=None`) — this
@@ -478,23 +506,38 @@ from the report.
   silently stops guaranteeing coverage for every environment but one in a
   group.
 - **`abicheck/workflows/aggregate/contracts.py`** — required, not optional:
-  `_CHECK_ID_RE`'s extended `~<explicit_id>` suffix and `CheckIdParts`'
-  matching `explicit_id` field (see "Explicit check identifiers" above) —
-  without this, the whole `id:` feature silently breaks profile/
-  finding-matrix grouping the moment it's used.
+  `_CHECK_ID_RE`'s extended `~<explicit_id>` suffix **and** the separate
+  `!<environment_id>` segment (see "Explicit check identifiers" and
+  "Efficiency constraint" above — both segments, composed, per the full
+  shape `target@profile#channel@depth(?:!environment_id)?(?:~explicit_id)?`
+  already given there) and `CheckIdParts`' matching `explicit_id`/
+  `environment_id` fields — without this, the whole `id:`/multi-
+  environment feature silently breaks profile/finding-matrix grouping the
+  moment either is used.
 - **`abicheck/checker_types.py` (`CHECK_ID_PATTERN`/`validate_check_id()`)
   and `abicheck/buildsource/check_report.py` (`build_check_id()`) —
-  equally required, not optional.** These run *before* `contracts.py`
-  ever sees the string: `build_check_id()` calls `validate_check_id()`
-  unconditionally, so a `check_id` builder that appended `~<explicit_id>`
-  without extending this pattern first would raise at construction time.
-  Both need the identical `(?:~[A-Za-z0-9][A-Za-z0-9._-]*)?` extension.
+  equally required, not optional, and must cover *both* new segments, not
+  only `~<explicit_id>` — a real gap confirmed by a fresh review round:
+  an earlier draft of this bullet extended these two with only the
+  `~<explicit_id>` tail, which would leave `build_check_id()`/
+  `validate_check_id()` rejecting the environment-qualified shape
+  (`target@profile#channel@depth!environment~id`) this same plan's own
+  "Efficiency constraint" section requires for a grouped multi-environment
+  check, before `contracts.py` ever sees the string.** These run *before*
+  `contracts.py` ever sees the string: `build_check_id()` calls
+  `validate_check_id()` unconditionally, so a `check_id` builder producing
+  either new segment without extending this pattern first would raise at
+  construction time. Both need the complete, composed extension —
+  `(?:!<environment_id>)?(?:~<explicit_id>)?` in that order, matching
+  `_CHECK_ID_RE`'s own shape exactly, not the `~<explicit_id>`-only
+  extension from an earlier draft.
 - **`abicheck/schemas/compare_report.schema.json`'s `check_id` `pattern`**
   (plus a schema version bump and the `docs/reference/schemas/v1/`
   re-sync via `scripts/publish_schemas.py`) — an independent copy of the
-  same anchored regex per `CHECK_ID_PATTERN`'s own comment; must extend
-  in lockstep with the two Python-side validators above or JSON Schema
-  validation of a real report becomes the new failure point.
+  same anchored regex per `CHECK_ID_PATTERN`'s own comment; must carry the
+  identical complete, composed extension (both segments) in lockstep with
+  the two Python-side validators above, or JSON Schema validation of a
+  real multi-environment report becomes the new failure point.
 - Project schema (wherever `.abicheck.yml`'s `checks:`/`environments:` are
   validated — near `abicheck/buildsource/project_targets.py`) — new
   `environments:` top-level block, new `id`/`analysis:`/`environment:` check
