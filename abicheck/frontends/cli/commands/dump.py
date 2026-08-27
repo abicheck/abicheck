@@ -350,6 +350,24 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
     collect_mode, headers = resolve_dump_collect_context(
         depth, _resolved_collect_mode, sources, build_info, headers,
     )
+    # PR 3C prerequisite 3's own residual gap (CLI cleanup phase two plan,
+    # "The `-H` directory gap"): `--dry-run` never validated a `-H`
+    # directory, so it could report success for an invocation the real run
+    # (`_expand_header_inputs`, called downstream at the real-execution
+    # call sites below) would reject outright -- a missing path, an empty
+    # header directory, or a path that is neither a file nor a directory.
+    # Checked here, unconditionally and before the `--dry-run` branch,
+    # exactly like the hybrid+depth and binary+no-SO_PATH `UsageError`
+    # checks above and below: both paths must reject the same input the
+    # same way. The result is discarded -- this call exists purely for its
+    # validation side effect, matching `--dry-run`'s own documented
+    # contract (`render_dump_dry_run`'s docstring: "no I/O beyond
+    # stat()/PATH lookups"), which a directory walk satisfies (real
+    # execution still calls `_expand_header_inputs` again downstream for
+    # its own actual expanded list -- cheap, idempotent, and not worth
+    # threading a resolved value through every intermediate call site for).
+    if headers:
+        _expand_header_inputs(list(headers))
     # The public-header/-dir split this command used to compute here is now
     # read off the resolved plan (`_resolved.public_headers` /
     # `.public_header_dirs`, ADR-061 Phase 3), so there is one derivation
