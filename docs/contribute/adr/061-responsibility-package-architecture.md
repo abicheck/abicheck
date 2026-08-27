@@ -1186,22 +1186,32 @@ it that both keeps every existing consumer typed correctly and gets
 `checker_types.py` out of `policy`.
 
 **A fifth Codex review round proposed a different mechanism that genuinely
-closes half of that — a `Protocol`, not a subclass, and it is credited
+closes part of that — a `Protocol`, not a subclass, and it is credited
 here rather than argued away.** Python's structural typing (PEP 544) means a
-`model`-owned `PolicyFileProtocol` declaring `overrides`, `reclassify`, and
-`compute_verdict()`'s signature is satisfied by the existing `PolicyFile`
+`model`-owned `PolicyFileProtocol` is satisfied by the existing `PolicyFile`
 without `PolicyFile` importing or inheriting from it at all — so
 `checker_types.py`'s field, typed against the protocol instead of the
 concrete class, resolves `bundle_models.py:500`'s
 `diff.policy_file.compute_verdict(...)` correctly under mypy. The "no
 version... keeps every consumer typed correctly" framing just above was
 about a subclass/narrowing split specifically; a protocol really does
-dissolve that half.
+dissolve that half — *provided it declares the whole surface real callers
+use, not a sketch of it.* **A sixth Codex review round caught that this
+paragraph's own first draft didn't**: it named only `overrides`, `reclassify`,
+and `compute_verdict()`, but a full re-scan of every `.policy_file.<member>`
+access across the codebase (the same AST-adjacent method already used
+elsewhere in this note, not a repeat of the original three-member guess)
+found two more real, direct accesses a protocol would also have to declare —
+`reporter.py:1056-1065`'s `result.policy_file.source_path` and
+`compatibility_evaluation_frontend.py:1253,1256`'s
+`explicit.policy_file.base_policy` — for five total:
+`base_policy`, `overrides`, `reclassify`, `source_path`, `compute_verdict()`.
 
-It does not dissolve the other half, for the same reason the subclass
-attempt didn't: the protocol still has to *type* `overrides`/`reclassify`
-accurately to be worth using — `Mapping[ChangeKind, Verdict]` and
-`Sequence[ReclassifyRule]`, the identical two references. A protocol module
+Declaring the full five doesn't change the conclusion, only completes the
+premise it rests on: the protocol still has to *type* `overrides`/
+`reclassify` accurately to be worth using — `Mapping[ChangeKind, Verdict]`
+and `Sequence[ReclassifyRule]`, the identical two references named before
+this correction. A protocol module
 placed where it would belong, physically under `abicheck/model/` (a real,
 already-migrated package, not a `legacy_paths` entry — unlike
 `checker_types.py`, which currently escapes this check only because it
