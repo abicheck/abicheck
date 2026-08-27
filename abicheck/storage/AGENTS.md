@@ -62,7 +62,7 @@ own module — no service locator; `__init__.py` is a re-export surface only.
 | `identity.py` | `EntityId`/`OccurrenceId`/`OccurrenceSet`/`IdentityConflict` — logical vs. observed identity, multiplicity preserved (D4) |
 | `canonical.py` | `canonical_form`/`canonical_json`/`semantic_digest` — the one canonical logical encoding (D5) |
 | `versioning.py` | `StorageVersions`/`ProducerIdentity`/`check_reader_compatibility` — the separated version axes (D2) |
-| `package.py` | `PackageManifest`/`VariantRef`/`ArtifactRef`/`ObjectRef`/`ObjectStore` — D6/D7's package object model and path layout (plan A1.1; no store yet) |
+| `package.py` | `PackageManifest`/`VariantRef`/`ArtifactRef`/`ObjectRef`/`ObjectStore`/`InMemoryObjectStore` — D6/D7's package object model and path layout (plan A1.1; no directory-backed store yet) |
 | `guards.py` | the value guards all five apply at their doors — internal, not re-exported (invariant 6) |
 
 ## Invariants this package must not break
