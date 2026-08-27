@@ -235,3 +235,19 @@ class EnumType:
     # type-map-key reasons documented on ``RecordType.qualified_name``. None
     # when the enum is at global scope or the dumper couldn't determine it.
     qualified_name: str | None = None
+
+
+def resolve_vptr_offset_bits(rec: RecordType, value: int) -> None:
+    """Set ``vptr_offset_bits`` AND its ``Fact[T]`` sibling together.
+
+    ADR-063 Phase 0: a caller resolving a class's vptr offset *after* the
+    ``RecordType`` was already constructed (a post-construction fixed-point
+    pass, a DWARF-corroboration backfill) must update both representations
+    together — ``__post_init__`` already backfilled ``vptr_offset_bits_fact``
+    from the pre-resolution state (typically ``Fact.not_collected()``, since
+    ``None`` is what put the record on such a pass's worklist in the first
+    place), and leaving it stale while only the legacy scalar moves silently
+    loses exactly the fact this bridge exists to make visible.
+    """
+    rec.vptr_offset_bits = value
+    rec.vptr_offset_bits_fact = Fact.present(value)

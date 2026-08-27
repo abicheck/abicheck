@@ -1112,6 +1112,26 @@ class TestTypeAndFieldFactBackfill:
         assert merged_t.is_trivially_copyable is False
         assert merged_t.vptr_offset_bits == 0
 
+    def test_layout_scalar_fields_backfilled_vptr_fact_matches_scalar(self):
+        """ADR-063 Phase 0 (Codex review): dataclasses.replace() re-invokes
+        RecordType.__post_init__ with EVERY field of the castxml-side record,
+        including its own (pre-backfill) vptr_offset_bits_fact — which,
+        without this fix, silently reverted the just-backfilled scalar back
+        to None (the "explicit Fact wins" bridge rule fighting the merge).
+        The Fact sibling must move together with the scalar it derives from."""
+        from abicheck.model.fact import FactStatus
+
+        t_old = RecordType(name="Widget", kind="class", size_bits=64, vptr_offset_bits=None)
+        t_clang = RecordType(name="Widget", kind="class", size_bits=64, vptr_offset_bits=0)
+        castxml = _snap(types=[t_old], ast_producer="castxml")
+        clang = _snap(types=[t_clang], ast_producer="clang")
+        merged = merge_snapshots(castxml, clang)
+        merged_t = merged.type_by_name("Widget")
+        assert merged_t.vptr_offset_bits == 0
+        assert merged_t.vptr_offset_bits_fact is not None
+        assert merged_t.vptr_offset_bits_fact.status is FactStatus.PRESENT
+        assert merged_t.vptr_offset_bits_fact.value == 0
+
     def test_layout_scalar_fields_never_override_castxml(self):
         # castxml's own real layout, when present, always wins.
         t_old = RecordType(

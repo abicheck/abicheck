@@ -59,6 +59,7 @@ from .entities import (
     EnumType as EnumType,
     RecordType as RecordType,
     TypeField as TypeField,
+    resolve_vptr_offset_bits as resolve_vptr_offset_bits,
 )
 from .extraction_contract import (
     DependencyInfo as DependencyInfo,

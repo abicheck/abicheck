@@ -411,7 +411,25 @@ FACT_ROWS: tuple[FactRow, ...] = (
     ),
     FactRow("RecordType", "fields", _FULL, _FULL),
     FactRow("RecordType", "bases", _FULL, _FULL),
+    FactRow(
+        "RecordType",
+        "bases_fact",
+        _NONE,
+        _NONE,
+        note=(
+            "ADR-063 Phase 0: `Fact[list[str]]` sibling of `bases`. Same "
+            "coverage as `bases` — no producer constructs this directly yet, "
+            "so it is `Fact.present(raw)` on a fresh dump."
+        ),
+    ),
     FactRow("RecordType", "virtual_bases", _FULL, _FULL),
+    FactRow(
+        "RecordType",
+        "virtual_bases_fact",
+        _NONE,
+        _NONE,
+        note="ADR-063 Phase 0: `Fact[list[str]]` sibling of `virtual_bases` — see `bases_fact`.",
+    ),
     FactRow(
         "RecordType",
         "vtable",
@@ -423,6 +441,13 @@ FACT_ROWS: tuple[FactRow, ...] = (
             "compiler-emitted table; castxml's comes from its own bundled "
             "compiler. Both are transitively inherited across bases."
         ),
+    ),
+    FactRow(
+        "RecordType",
+        "vtable_fact",
+        _NONE,
+        _NONE,
+        note="ADR-063 Phase 0: `Fact[list[str]]` sibling of `vtable` — see `bases_fact`.",
     ),
     FactRow("RecordType", "source_location", _FULL, _FULL),
     FactRow("RecordType", "is_union", _FULL, _FULL),
@@ -531,6 +556,13 @@ FACT_ROWS: tuple[FactRow, ...] = (
             "vtable's placement under multiple inheritance. Only DWARF reads "
             "the compiler's own artificial vptr member for a real offset."
         ),
+    ),
+    FactRow(
+        "RecordType",
+        "vptr_offset_bits_fact",
+        _NONE,
+        _NONE,
+        note="ADR-063 Phase 0: `Fact[int | None]` sibling of `vptr_offset_bits` — see `bases_fact`.",
     ),
     FactRow(
         "RecordType",
@@ -665,6 +697,18 @@ FACT_ROWS: tuple[FactRow, ...] = (
             "castxml's own params verbatim for every matched function and "
             "castxml never populates this fact at all (see its own "
             "docstring)."
+        ),
+    ),
+    FactRow(
+        "Param",
+        "is_va_list_fact",
+        _NONE,
+        _NONE,
+        note=(
+            "ADR-063 Phase 0: `Fact[bool]` sibling of `is_va_list` — unlike "
+            "the scalar it derives from, no producer constructs this field "
+            "directly yet (the __post_init__ bridge backfills it from "
+            "whichever side actually populates `is_va_list`)."
         ),
     ),
 )

@@ -128,7 +128,15 @@ from .fact_provenance import (
     type_fact_key,
     var_fact_key,
 )
-from .model import AbiSnapshot, EnumType, Function, RecordType, TypeField, Variable
+from .model import (
+    AbiSnapshot,
+    EnumType,
+    Fact,
+    Function,
+    RecordType,
+    TypeField,
+    Variable,
+)
 from .name_classification import canonicalize_type_name
 
 _CTOR_MARKER = "{ctor}"
@@ -644,6 +652,17 @@ def _merge_record_type(
         for attr in _LAYOUT_SCALAR_ATTRS:
             if getattr(t, attr) is None and getattr(clang_t, attr) is not None:
                 updates[attr] = getattr(clang_t, attr)
+        # ADR-063 Phase 0: dataclasses.replace(t, **updates) below re-invokes
+        # RecordType.__post_init__ with EVERY field of `t`, not just the ones
+        # named in `updates` -- including t's own (stale, pre-merge)
+        # vptr_offset_bits_fact when vptr_offset_bits itself IS being
+        # updated here. __post_init__'s "explicit Fact wins" rule would then
+        # silently revert the just-backfilled scalar back to t's old value
+        # (Codex review, confirmed against a real repro). Passing the
+        # matching Fact explicitly alongside the scalar in the same
+        # `updates` dict keeps both representations in agreement.
+        if "vptr_offset_bits" in updates:
+            updates["vptr_offset_bits_fact"] = Fact.present(updates["vptr_offset_bits"])
         if not t.base_offsets and clang_t.base_offsets:
             updates["base_offsets"] = clang_t.base_offsets
         # G31 Phase C fact-completeness (verified against real castxml 0.6.3 +
@@ -976,4 +995,6 @@ def run_hybrid_dump(
     with qualified_name_segments.defer_closure_identity_renumbering():
         castxml_snap = dump_fn(so_path, headers, header_backend="castxml", **kwargs)
         clang_snap = dump_fn(so_path, headers, header_backend="clang", **kwargs)
-    return qualified_name_segments.renumber_anonymous_closure_identities(merge_snapshots(castxml_snap, clang_snap))
+    return qualified_name_segments.renumber_anonymous_closure_identities(
+        merge_snapshots(castxml_snap, clang_snap)
+    )

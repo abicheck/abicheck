@@ -63,6 +63,7 @@ from .model import (
     Visibility,
     is_compiler_internal_type as _is_compiler_internal,
     is_cxx_runtime_library,
+    resolve_vptr_offset_bits,
 )
 
 if TYPE_CHECKING:
@@ -1273,7 +1274,7 @@ class _DwarfSnapshotBuilder:
                         resolved = base_rec.vptr_offset_bits
                         break
                 if resolved is not None:
-                    rec.vptr_offset_bits = resolved
+                    resolve_vptr_offset_bits(rec, resolved)
                     progressed = True
                 else:
                     still_unresolved.append(rec)
@@ -1306,7 +1307,7 @@ class _DwarfSnapshotBuilder:
         # `vptr_offset_bits` is already set).
         for rec in self.types:
             if rec.vptr_offset_bits is None and rec.vtable:
-                rec.vptr_offset_bits = 0
+                resolve_vptr_offset_bits(rec, 0)
 
         # Second final-fallback tier: a class that is polymorphic ONLY
         # through a "nearly empty" virtual base, adding or overriding no
@@ -1365,7 +1366,7 @@ class _DwarfSnapshotBuilder:
                     and vbase.vptr_offset_bits is not None
                     for vbase_name, vbase_key in virtual_edges
                 ):
-                    rec.vptr_offset_bits = 0
+                    resolve_vptr_offset_bits(rec, 0)
                     progressed = True
                 else:
                     still_unresolved.append(rec)
