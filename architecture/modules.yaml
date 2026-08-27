@@ -27,7 +27,6 @@
         "model"
       ],
       "legacy_paths": [
-        "abicheck/buildsource/baseline_set.py",
         "abicheck/buildsource/build_cache.py"
       ]
     },

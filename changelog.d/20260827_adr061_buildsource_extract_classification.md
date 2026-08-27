@@ -3,8 +3,8 @@
 - **ADR-061 continuation**: 19 more of `buildsource/`'s 73 flat modules (24
   total, plus its pre-existing 5) are now classified into the `extract`
   responsibility layer in `architecture/modules.yaml`, alongside 7 into
-  `compare`, 2 into `storage`, 1 into `model` (plus its pre-existing 2), and
-  1 into `workflows` -- 37 of 73 `buildsource/` files classified overall.
+  `compare`, 1 into `storage`, 1 into `model` (plus its pre-existing 2), and
+  1 into `workflows` -- 36 of 73 `buildsource/` files classified overall.
   Verified via `scripts/check_architecture.py` (0 errors).
 
   - `extract`: raw fact-extraction/graph-building modules
@@ -21,10 +21,8 @@
     rename/move/identity-reconciliation `Change` findings). Two review
     rounds of Codex findings on this PR, all correct on reading the
     flagged files directly.
-  - `storage`: `build_cache.py` (content-addressed cache, on-disk
-    reads/writes) and `baseline_set.py` (baseline manifest schema/version
-    parsing, snapshot-artifact loading, content-digest verification) --
-    both `storage`'s explicit "manage caches"/"own schemas" ownership, not
+  - `storage`: `build_cache.py` -- content-addressed cache, on-disk
+    reads/writes, `storage`'s explicit "manage caches" ownership, not
     extraction.
   - `model`: `graph_facts.py` -- defines the shared `GraphFact`/
     `FactConflict`/`GraphNode`/`GraphEdge` schema multiple layers consume,
@@ -73,7 +71,36 @@
   design (move the shared decoders to an inward layer, or accept the
   duplication), not a same-PR reactive patch.
 
-  The remaining 35 `buildsource/` files stay unclassified: 30 of them are
+  **`baseline_set.py` reverted back out of `storage`, a fourth review
+  round.** Codex's storage classification itself was correct (confirmed
+  again above), but flagged fresh evidence this PR's own earlier "0
+  errors" check couldn't see: `baseline_set.py` imports and calls
+  `elf_metadata.parse_elf_metadata` -- `extract`'s documented owner per
+  `AGENTS.md`'s task-routing table -- and `elf_metadata.py` isn't
+  classified on this branch only because PR #899 (the parser-module
+  `extract` classification) hasn't merged yet, not because the dependency
+  doesn't exist. Verified by simulation rather than taking the claim on
+  faith: temporarily adding `elf_metadata.py` to `extract` (as #899 will)
+  and re-running the checker reproduces exactly the predicted
+  `storage -> extract` violation, plus a `extract -> storage -> extract`
+  dependency cycle. Reverting `baseline_set.py` to unclassified now avoids
+  landing a classification this repository's own in-flight, independently
+  reviewed sibling PR would immediately break.
+
+  **`export_accounting.py`'s compare-shaped claim investigated and found
+  incorrect** -- the one Codex finding across four review rounds on this
+  PR that didn't hold up, so left as `extract`, unchanged. The finding
+  attributes `_check_exported_not_public`'s `Change`-emission to this
+  module, but that function is defined in the separate, still-unclassified
+  `crosscheck.py`, not here -- `export_accounting.py`'s own docstring
+  states the opposite explicitly ("These helpers are free of any
+  `Change`/`ChangeKind` concern; `crosscheck` turns the undocumented
+  buckets into findings"), and a direct grep confirms no `Change`/
+  `ChangeKind` construction anywhere in the file. It genuinely is what its
+  docstring says: pure mangled-name classification over already-extracted
+  snapshot/export data, `extract`'s job.
+
+  The remaining 36 `buildsource/` files stay unclassified: 30 of them are
   directly imported by `frontends`-layer `cli_*.py` modules (a pre-existing
   `frontends -> buildsource` direct-import pattern that bypasses the target
   `frontends -> workflows -> extract` routing -- ADR-061 D9's own worked
