@@ -658,13 +658,32 @@ becoming the check's own initial known-failures baseline (mirroring
 `check_ai_readiness.py`'s existing `MYPY_ERROR_BASELINE`/
 `LARGE_FILE_ALLOWLIST` pattern: a reviewed, shrinking allowlist of
 *known* violations, not a permanent exemption list a new violation can
-quietly join). **`RecordType.virtual_bases` is explicitly out of this
-phase's Scope, and a later pass should not assume naming it here converts
-it**: the Design section above converts `bases`/`vtable`/
-`vptr_offset_bits`/`Param.is_va_list` only; `virtual_bases` sharing the
-identical unavailable-vs-empty ambiguity is a real, separate finding
-worth its own follow-up phase, not silently folded into this one's
-already-large surface by virtue of cooccurring in the same loop bodies.
+quietly join). **`RecordType.virtual_bases` was left out of this phase's
+Design section with no concrete phase scheduled to pick it up, and a
+review round correctly rejected that as a dead end: Phase 5's own
+eligibility mechanism is keyed to an existing backend-reliability flag,
+and this field has none, so leaving it for Phase 5 would mean it never
+gets picked up by anything.** Checking the real producers settles where
+it actually belongs: `dumper_clang.py`'s `_parse_bases()` and
+`dwarf_snapshot.py`'s base-classification walk both populate `bases`/
+`virtual_bases` from the *same* call, in the same pass, under the same
+availability conditions — there is no separate collection step and no
+separate reliability signal for one versus the other, so treating them as
+two different phases' work would be artificial. `virtual_bases` is
+therefore converted in this same Phase 0 PR, using the identical
+sentinel-based `Fact[list[str]]` mechanism already fully specified for
+`bases` above (same list-typed omission-sentinel construction, same
+`__post_init__` bridge, same legacy-schema backfill reading whatever
+signal `bases_fact` itself backfills from, since the two are produced
+together) — not a new mechanism, the same one with a second field name.
+Every one of the five readers named above that reads `bases`/
+`virtual_bases` together in one loop body (`contract_evidence_collect.py`,
+`diff_time64.py`, `diff_stdlib_impl.py`, `diff_cxx_rules`'s base-walk
+helpers, `internal_leak.py`) migrates both fields in the same pass, not
+`bases` now and `virtual_bases` in a still-later phase — the provenance
+propagation this finding asked for is exactly "every semantic reader of
+`virtual_bases` is already on this phase's own migration list for
+`bases`," not a second, separate reader audit.
 
 **Tests.** A direct test on `Fact[T]`'s actual comparison contract, added
 before any detector migration depends on it: `if fact:` raises
@@ -1466,24 +1485,41 @@ sibling:
   both are themselves reached from `checker.py`'s own explicit call sites
   (`_apply_pattern_verdicts_step`/`_apply_surface_metrics`, not the generic
   detector registry, so widening their signatures doesn't touch dispatch
-  machinery). `build_surface_graph`/`compute_surface_metrics` both gain an
-  **optional** `public_entity_ids: frozenset[EntityId] | None = None`
-  parameter — optional so a test or script calling either function
-  directly, with no policy-layer caller in the chain at all, does not
-  break — and `checker.py`'s `_apply_pattern_verdicts_step`/
-  `_apply_surface_metrics` both gain the identical parameter, threaded in
-  from `compare()`'s own `PublicSurfaceQuery.resolve()` call (the same
-  resolved set `compute_public_surface()` already uses) and passed straight
-  through to `apply_pattern_verdicts()`/`diff_surface_metrics()`, which
-  pass it straight through to `build_surface_graph()`/
-  `compute_surface_metrics()` in turn. When `None` (the only case possible
-  outside `compare()`'s own pipeline), `SurfaceGraph.public_roots()` falls
+  machinery).
+
+  **A single `public_entity_ids` parameter is the wrong shape for a
+  two-snapshot function, and a first draft of this fix threaded exactly
+  one — a review round correctly traced the real call sites and found
+  `apply_pattern_verdicts()`/`compute_surface_metrics()` each build *two*
+  separate graphs, one per side (`build_surface_graph(old)` and
+  `build_surface_graph(new)`), not one.** Old and new can genuinely have
+  different public reachability — a declaration added to, or removed from,
+  the public-header set between versions is exactly the kind of change
+  `compare()` exists to detect — so resolving one shared id set and handing
+  it to both sides' graph builds classifies one side using the *other*
+  side's surface, corrupting pattern modulation and surface-metric findings
+  for precisely the changes that matter most (a declaration crossing the
+  public/private line). `build_surface_graph`/`compute_surface_metrics` both
+  gain **two** optional parameters instead of one —
+  `old_public_entity_ids: frozenset[EntityId] | None = None`/
+  `new_public_entity_ids: frozenset[EntityId] | None = None` — each threaded
+  to the matching `build_surface_graph(old)`/`build_surface_graph(new)` call
+  specifically, never the same set to both. `checker.py`'s
+  `_apply_pattern_verdicts_step`/`_apply_surface_metrics` both gain the
+  identical pair, resolved from `compare()`'s own two separate
+  `PublicSurfaceQuery.resolve()` calls (one per side — `compute_public_
+  surface()` already resolves old and new independently for the identical
+  reason) and passed straight through to `apply_pattern_verdicts()`/
+  `diff_surface_metrics()`, which pass the matching half of the pair
+  straight through to `build_surface_graph()`/`compute_surface_metrics()`
+  in turn. When both are `None` (the only case possible outside
+  `compare()`'s own pipeline), `SurfaceGraph.public_roots()` falls
   back to its pre-existing `Visibility.PUBLIC` filter — an explicit,
   narrow, named residual for a caller this phase cannot reach, not a
   second silent implementation competing with the real one; every call
   reachable from `checker.compare()` itself — which is what `idioms.py`/
   `pattern_verdicts.py`/`diff_surface_metrics.py` actually run under in
-  production — receives the real, resolved ids. **`PublicSurfaceQuery.
+  production — receives the real, resolved, side-specific ids. **`PublicSurfaceQuery.
   resolve()`'s result is not already a function/variable-only set, and a
   first draft of this phase's mapping step assumed it was — `resolve()`
   traverses `declares` and type-reference edges, so it genuinely returns
@@ -2017,18 +2053,23 @@ the new location, `NODE_KINDS`/`EDGE_KINDS` and L5-specific construction
 logic unchanged in place); `abicheck/compare/surface_graph.py` (new —
 public-surface node/edge *kind vocabulary* and builder, using `model/
 graph.py`'s primitive, not a new one); `abicheck/surface_graph.py`
-(`build_surface_graph()`/`compute_surface_metrics()` each gain an optional
-`public_entity_ids: frozenset[EntityId] | None = None` parameter, and
-`SurfaceGraph.public_roots()` maps a given set of ids back to their
+(`build_surface_graph()`/`compute_surface_metrics()` each gain **two**
+optional parameters, not one — `old_public_entity_ids`/
+`new_public_entity_ids: frozenset[EntityId] | None = None`, each reaching
+only the matching side's own `build_surface_graph(old)`/
+`build_surface_graph(new)` call, per the two-snapshot correction above —
+and `SurfaceGraph.public_roots()` maps a given set of ids back to their
 mangled/symbol-name spelling, preserving its existing `frozenset[str]`
 return type exactly — `surface_graph.py` itself still never imports
 `policy/public_surface.py`, per the note above); `pattern_verdicts.py`
-(`apply_pattern_verdicts()` gains the identical optional parameter,
-threaded straight through to `build_surface_graph()`); `diff_surface_
-metrics.py` (`diff_surface_metrics()` gains the identical optional
-parameter, threaded straight through to `compute_surface_metrics()`);
-`checker.py` (`_apply_pattern_verdicts_step`/`_apply_surface_metrics` both
-gain the identical parameter). **Neither `checker.py` nor `compare()`
+(`apply_pattern_verdicts()` gains the identical pair, each threaded
+straight through to its matching `build_surface_graph()` call); `diff_surface_
+metrics.py` (`diff_surface_metrics()` gains the identical pair, each
+threaded straight through to its matching `compute_surface_metrics()`
+call); `checker.py` (`_apply_pattern_verdicts_step`/`_apply_surface_metrics`
+both gain the identical pair, resolved from `compare()`'s own two
+independent, per-side `PublicSurfaceQuery.resolve()` calls). **Neither
+`checker.py` nor `compare()`
 itself may call `PublicSurfaceQuery.resolve()` directly to populate it —
 a first draft of this phase's text said exactly that ("the same
 `PublicSurfaceQuery.resolve()` result `compare()` already computes"),
@@ -2178,10 +2219,18 @@ real reachability disagree, asserting the pattern-verdict/surface-metrics
 findings `compare()` actually produces reflect the resolved `EntityId`
 answer, not the legacy `Visibility.PUBLIC`-only one — confirmed by
 patching `build_surface_graph`/`compute_surface_metrics` to assert they
-were called with a non-`None` `public_entity_ids` when reached through
-`compare()`, not only by comparing output, so a future regression that
-silently stops threading the parameter through `checker.py` fails this
-test even if it happens not to change the specific fixture's output.
+were called with non-`None` `old_public_entity_ids`/`new_public_entity_ids`
+when reached through `compare()`, not only by comparing output, so a
+future regression that silently stops threading either parameter through
+`checker.py` fails this test even if it happens not to change the specific
+fixture's output. A sixth regression pins the two-sided correction
+itself, directly: a fixture where a declaration is public in `old` but
+removed from the public-header set in `new` (or the reverse) — the one
+shape a single shared id set would misclassify — asserting
+`build_surface_graph(old)`/`build_surface_graph(new)` each receive their
+own side's resolved ids, not the other side's, confirmed to fail against
+a version of the threading that resolves one shared set and passes it to
+both calls.
 Separately, asserting
 `SurfaceGraph.public_roots()` — still returning `frozenset[str]`, still
 consumable by `re.Pattern.match()` with no caller change — agrees with
@@ -3357,6 +3406,40 @@ must never be degraded, and confirming the reviewer's point that `.gate`
 and `.operational` are not one axis that happens to share a dataclass:
 `.gate` is the thing `advisory` is for deferring, `.operational` is the
 thing no gate-mode may ever defer.
+
+**A fifth mutator needs the identical structured-field treatment, found
+alongside `_neutralize_gate()` but pulling in the opposite direction — it
+*escalates* rather than neutralizes, and the same
+structured-field-preferred reading can silently erase an escalation the
+same way it could silently keep a neutralized gate blocking.**
+`buildsource/check_report.py`'s `_escalate_removed_library_severity()` is
+`augment_report()`'s own fold for `--fail-on-removed-library`'s exit 8 —
+the one case, per that function's own docstring, where the composite
+Action's real process exit code can diverge from what the report body
+itself persisted, since `compare_release_cmd`'s `_exit_compare_release`
+applies exit 8 "in preference to the severity code." It writes only the
+legacy `severity` dict (`exit_code`/`blocking`/`blocking_categories`) —
+`augment_report()` has no `RunOutcome.gate` field to write yet at all, so
+once `GateInfo.from_report_data` is reading the structured fields first,
+a report this exact function escalated reads `RunOutcome.gate = NONE`
+(never populated, defaulting to non-blocking) while its legacy `severity`
+block correctly reads `blocking: true` — a deferred aggregate job reading
+the preferred, structured field sees no escalation at all and passes a
+release whose removed-library gate the caller explicitly asked for,
+silently, with no warning and no test currently covering this exact path.
+`_escalate_removed_library_severity()` gains the matching structured
+write — `RunOutcome.gate = ABI_BREAKING` (the same tier its existing
+legacy write already encodes: "a whole library disappearing is
+unambiguously an ABI break," per that function's own docstring) — folded
+in at the identical call site `augment_report()` already has
+(`analysis_exit_code == _REMOVED_LIBRARY_EXIT_CODE`), alongside the
+existing severity write, never replacing it. A dedicated regression
+reproduces the exit-8 path end to end through `augment_report()` itself
+(not a hand-built report dict) and asserts `GateInfo.from_report_data`
+reads a blocking result from the escalated report under every gate mode
+except `advisory` — confirmed to fail against a version of
+`_escalate_removed_library_severity()` that writes only the legacy block,
+which is exactly today's code.
 
 **Tests.** `tests/test_junit_report.py`'s existing suite needs no changes
 at all — `_is_failure` is untouched, so this is the test that proves the
