@@ -1578,7 +1578,7 @@ def test_perform_elf_dump_cleans_up_when_enrichment_raises_before_header_graph(
         fake_seed_and_fold,
     )
     monkeypatch.setattr("abicheck.cli_dump_helpers.dump", fake_dump)
-    monkeypatch.setattr("abicheck.python_ext.detect_python_extension", _raise_ext)
+    monkeypatch.setattr("abicheck.workflows.extraction.detect_python_extension", _raise_ext)
     monkeypatch.setattr("abicheck.service._attach_header_graph", fake_attach)
 
     _events, _stamp, _write, _expand, _populate = _elf_dump_callables()
@@ -1660,13 +1660,13 @@ def test_perform_elf_dump_detects_python_surfaces_and_follow_deps(
     api_sentinel = object()
     numpy_sentinel = object()
     monkeypatch.setattr(
-        "abicheck.python_ext.detect_python_extension", lambda _s: ext_sentinel
+        "abicheck.workflows.extraction.detect_python_extension", lambda _s: ext_sentinel
     )
     monkeypatch.setattr(
-        "abicheck.python_api.detect_python_api", lambda _s: api_sentinel
+        "abicheck.workflows.extraction.detect_python_api", lambda _s: api_sentinel
     )
     monkeypatch.setattr(
-        "abicheck.numpy_capi.extract_numpy_capi_surface", lambda _p: numpy_sentinel
+        "abicheck.workflows.extraction.extract_numpy_capi_surface", lambda _p: numpy_sentinel
     )
 
     events, _stamp, _write, _expand, _populate = _elf_dump_callables()
@@ -1736,9 +1736,9 @@ def test_perform_elf_dump_preserves_existing_python_metadata(
     def _boom(_s):  # noqa: ANN001, ANN202
         raise AssertionError("detection must not run when metadata is present")
 
-    monkeypatch.setattr("abicheck.python_ext.detect_python_extension", _boom)
-    monkeypatch.setattr("abicheck.python_api.detect_python_api", _boom)
-    monkeypatch.setattr("abicheck.numpy_capi.extract_numpy_capi_surface", _boom)
+    monkeypatch.setattr("abicheck.workflows.extraction.detect_python_extension", _boom)
+    monkeypatch.setattr("abicheck.workflows.extraction.detect_python_api", _boom)
+    monkeypatch.setattr("abicheck.workflows.extraction.extract_numpy_capi_surface", _boom)
 
     events, _stamp, _write, _expand, _populate = _elf_dump_callables()
 
