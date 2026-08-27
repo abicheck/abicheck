@@ -1053,11 +1053,19 @@ handful this note originally sampled before concluding classification was
 "closed" — found roughly two dozen still unclassified: `checker`,
 `policy_file`, `suppression`, `clang_layout_tool`, `service_dump_cache`,
 `service_header_graph_attach`, `service_metadata_attach`, `service_render`,
-`api_types`, `dumper`, `dumper_hybrid`, `dwarf_advanced`, `dwarf_metadata`,
+`dumper`, `dumper_hybrid`, `dwarf_advanced`, `dwarf_metadata`,
 `environment_matrix`, `compat.abicc_dump_import`, `snapshot_io`,
 `symvers_metadata`, `btf_metadata`, `ctf_metadata`, `provenance`,
 `pe_metadata`, `macho_metadata`, `contract_relevance_types`, `pdb_metadata`,
-`pdb_utils`, `pdb_model`, `post_manifest`. Phase 5's dataclass/parser split
+`pdb_utils`, `pdb_model`, `post_manifest`, and — missing from an earlier
+revision of this list, a ninth Codex review round caught it — `serialization`
+(line 54). `api_types` (also imported, line 36) is deliberately *not* on this
+list any more, for the opposite reason `serialization` was added to it:
+`api_types` is one of `modules.yaml`'s two `public_root_surfaces`, the
+explicit exemption `check_architecture.py`'s `unclassified-import` check
+carves out — so importing it is not actually a blocker the way every other
+name here is, and listing it alongside them (as an earlier revision did)
+overstated the count in the other direction. Phase 5's dataclass/parser split
 moved each format's *dataclass* half into `model/*_facts.py`; it did not
 classify the surviving flat *parser* module (`pe_metadata.py`,
 `macho_metadata.py`, `dwarf_metadata.py`, `symvers_metadata.py`, and
@@ -1121,9 +1129,16 @@ clean, trivially classifiable leaf; if it lands `model` (the plausible
 outcome named a few paragraphs below), `frontends -> model` is an *allowed*
 edge, not a forbidden one — its two import sites are not evidence of the
 same `frontends -> policy` problem the other three targets are. Only
-`policy_file`/`suppression`/`policies` (three import sites) actually reach
-that shape, mirroring `checker_types.py`'s `model -> policy` edge one layer
-over.
+`policy_file`/`suppression`/`policies` actually reach that shape, mirroring
+`checker_types.py`'s `model -> policy` edge one layer over — **at six import
+sites, not three, an eighth Codex review round caught after directly
+re-running the AST walk rather than trusting the earlier hand count**:
+`policy_file` at lines 26 (`TYPE_CHECKING`), 55, and 382; `suppression` at
+27 (`TYPE_CHECKING`) and 383; `policies` at 54. Eight total across the four
+targets once `buildsource.scan_levels`'s two are added back in, not five —
+the same undercount this note's own earlier "zero first-party imports"
+mistake already illustrates once, now repeated in the correction meant to
+fix it.
 Reading `PolicyFile` itself before proposing a fix mattered: it is not a
 `*_metadata.py`-shaped dataclass-plus-parser. `load()`, `evidence_verdict()`,
 `compute_verdict()`, `describe()`, and `validate_overrides()` are instance
