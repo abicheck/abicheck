@@ -487,6 +487,30 @@ class PackageManifest:
             tuple(sorted(artifacts, key=lambda artifact: artifact.artifact_id)),
         )
 
+        # Membership is stated twice -- an `ArtifactRef.variant_id` pointing
+        # up, and a `VariantRef.artifact_ids` listing down -- and nothing
+        # above cross-checks the second against the first. A variant naming
+        # an artifact that doesn't exist, or one whose own `variant_id`
+        # names a *different* declared variant, would otherwise serialize
+        # as a self-contradictory graph: a reader trusting `artifact_ids` as
+        # documented membership could resolve a nonexistent ref or attribute
+        # an artifact to the wrong variant.
+        artifacts_by_id = {artifact.artifact_id: artifact for artifact in artifacts}
+        for variant in variants:
+            for artifact_id in variant.artifact_ids:
+                member = artifacts_by_id.get(artifact_id)
+                if member is None:
+                    raise ValueError(
+                        f"VariantRef {variant.variant_id!r} names artifact_id "
+                        f"{artifact_id!r}, which is not in artifact_refs"
+                    )
+                if member.variant_id != variant.variant_id:
+                    raise ValueError(
+                        f"VariantRef {variant.variant_id!r} names artifact_id "
+                        f"{artifact_id!r}, but that artifact's own variant_id "
+                        f"is {member.variant_id!r}"
+                    )
+
     def to_dict(self) -> dict[str, Any]:
         out: dict[str, Any] = {"versions": self.versions.to_dict()}
         if self.variant_refs:
@@ -574,9 +598,18 @@ class InMemoryObjectStore:
     def get(self, digest: str) -> Any:
         digest = _identity_text(digest, "digest")
         try:
-            return self._objects[digest]
+            stored = self._objects[digest]
         except KeyError:
             raise KeyError(f"no object stored under digest {digest!r}") from None
+        # An isolated copy, not the store's own internal object: returning
+        # `stored` directly would let a caller mutate a list/dict in place,
+        # silently corrupting content that no longer matches the digest it
+        # is stored under -- and a later `put` of the original value
+        # couldn't repair it, since that digest already exists (Codex
+        # review). `canonical_form` is idempotent and always builds fresh
+        # containers, so re-deriving it here is a real copy, not another
+        # reference to the same one.
+        return canonical_form(stored)
 
     def has(self, digest: str) -> bool:
         return _identity_text(digest, "digest") in self._objects

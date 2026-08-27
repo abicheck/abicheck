@@ -303,6 +303,33 @@ class TestPackageManifest:
         with pytest.raises(ValueError, match="undeclared"):
             PackageManifest(artifact_refs=(self._A,))
 
+    def test_a_variant_naming_a_nonexistent_artifact_is_refused(self) -> None:
+        with pytest.raises(ValueError, match="not in artifact_refs"):
+            PackageManifest(
+                variant_refs=(
+                    VariantRef(variant_id="cpu-gcc", artifact_ids=("libfoo",)),
+                ),
+                artifact_refs=(),
+            )
+
+    def test_a_variant_naming_an_artifact_owned_by_another_variant_is_refused(
+        self,
+    ) -> None:
+        other = ArtifactRef(artifact_id="libbar", variant_id="cpu-clang", kind="elf")
+        with pytest.raises(ValueError, match="own variant_id"):
+            PackageManifest(
+                variant_refs=(
+                    VariantRef(variant_id="cpu-gcc", artifact_ids=("libbar",)),
+                    VariantRef(variant_id="cpu-clang"),
+                ),
+                artifact_refs=(other,),
+            )
+
+    def test_consistent_membership_on_both_sides_round_trips(self) -> None:
+        variant = VariantRef(variant_id="cpu-gcc", artifact_ids=("libfoo",))
+        manifest = PackageManifest(variant_refs=(variant,), artifact_refs=(self._A,))
+        assert PackageManifest.from_dict(manifest.to_dict()) == manifest
+
     def test_refs_are_sorted_regardless_of_construction_order(self) -> None:
         v_a = VariantRef(variant_id="a")
         v_b = VariantRef(variant_id="b")
@@ -386,6 +413,18 @@ class TestObjectStoreContract:
         store = InMemoryObjectStore()
         digest = store.put({"b": 2, "a": 1})
         assert store.get(digest) == {"a": 1, "b": 2}
+
+    def test_mutating_a_returned_value_does_not_corrupt_the_store(self) -> None:
+        store = InMemoryObjectStore()
+        digest = store.put({"declarations": [1, 2, 3]})
+        fetched = store.get(digest)
+        fetched["declarations"].append(4)  # type: ignore[union-attr]
+        fetched["poisoned"] = True
+        # The store's own copy is untouched, and a second `get` -- the one a
+        # different caller would make -- still sees the original content
+        # under the digest it was actually stored with.
+        assert store.get(digest) == {"declarations": [1, 2, 3]}
+        assert store.has(digest)
 
     def test_get_raises_key_error_for_an_unknown_digest(self) -> None:
         store = InMemoryObjectStore()
