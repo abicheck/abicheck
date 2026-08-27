@@ -2048,16 +2048,43 @@ documented as backend-dependent" — but neither is a bare `bool`/`list`/
 report Phase 5 complete while these (and any future field shaped like
 them) stay raw, overloaded values with no availability distinction. The
 check's actual scan key is not a field's annotation shape at all — it is
-"does this field have a sibling snapshot-level reliability flag" (the same
-`*_facts_reliable`-suffixed boolean pattern Phase 0's own bridge reads
-from, for every field already converted), since that flag's mere
-existence is this codebase's own, already-written admission that the
-field is availability-ambiguous, independent of whether the field itself
-happens to be a `bool`, a `list`, an `int | None`, a `str | None`, or an
-enum. A field with no such flag and no other documented backend-dependence
-is out of scope, the same way it was before this correction; the fix
-widens which fields the scan considers eligible, not how many fields
-outside that category it flags.
+"does this field have a snapshot-level reliability flag," independent of
+whether the field itself happens to be a `bool`, a `list`, an `int |
+None`, a `str | None`, or an enum.
+
+**"Sibling" overstates what this relationship actually is, and a first
+draft of this correction implied a name-based lookup a reviewer correctly
+found doesn't exist.** A `*_facts_reliable` flag is not a 1:1,
+name-derivable sibling of the one field it guards — `fact_provenance.py`'s
+own real logic shows the relationship is many-to-one and non-mechanical:
+`clang_deprecation_facts_reliable` alone gates *two* fields
+(`Function.deprecated` and `is_scoped`), and `clang_field_initializer_
+facts_reliable` gates `TypeField.default`, a field whose own name shares
+no substring with the flag's. No scan that tries to derive "which field(s)
+does this flag cover" by matching names or scanning annotations can
+reconstruct either relationship — and the registry lookup this check
+otherwise leans on cannot find a field that was never converted or
+registered in the first place, so the gap this finding closes (a field
+nobody has touched yet) would survive a check keyed on an undefined
+"sibling" relation exactly as it would have survived the original
+three-shape enumeration. The fix is an explicit, hand-maintained inventory
+— a `REFERENCE_FLAG_COVERAGE: dict[str, tuple[str, ...]]` (flag name →
+every model field it guards, covering the already-known many-to-one cases
+above) living alongside `fact_registry.py`, not derived at scan time — with
+the completeness check validated in *both* directions: every flag in the
+inventory names at least one field that is either already converted or
+explicitly tracked as this phase's remaining scope (an entry with no real
+field would be exactly the kind of self-congratulatory registration this
+plan's own D7 completeness principle forbids), and every model field
+`model/`'s own eligibility sweep finds with a documented backend-dependence
+comment appears under some flag in the inventory (a field with real
+backend-dependent prose but no inventory entry is the "field nobody has
+touched yet" case this whole correction exists to catch, now caught by a
+table lookup instead of an unreliable name match). Building this inventory
+is this phase's own first concrete task, not an assumption its design gets
+to take for granted — a field with no flag and no other documented
+backend-dependence is out of scope, the same way it was before this
+correction.
 
 **Files.** `abicheck/model/fact_registry.py` (new); every fact-bearing
 `model/` dataclass module with an eligible field — `model/*_facts.py`,
@@ -2097,10 +2124,12 @@ that backend — an unregistered real producer is exactly the kind of
 silent drift a registry meant to be the single source of truth cannot
 tolerate either. A third direction closes the gap this finding raised:
 the check also scans every dataclass field under `model/` for the
-*eligible-but-unconverted* shape — a field with a sibling
-`*_facts_reliable` flag and no matching `Fact[...]` sibling, per the
-Design section's own corrected eligibility rule above, not restricted to
-any particular annotation shape — and fails
+*eligible-but-unconverted* shape — a field named in the
+`REFERENCE_FLAG_COVERAGE` inventory (per the Design section's own
+corrected eligibility rule above) with no matching `Fact[...]` sibling,
+not restricted to any particular annotation shape, and not derived from
+the flag's own name by a match this codebase's real many-to-one flag/field
+relationships don't support — and fails
 if any exists once this phase claims completion — not only auditing the
 fields the registry already knows about, so a field the conversion missed
 entirely (not just one the registry forgot to register) fails this check
@@ -2314,7 +2343,37 @@ model_types_from_dwarf_metadata(dwarf_meta)` to convert PDB-derived DWARF
 metadata into `RecordType`/`EnumType` objects before assembling the
 snapshot — narrowing `pdb_metadata.py` alone, as the first draft's Files
 list already named, leaves this second, PDB-model-specific conversion
-step untouched and still producing the pre-normalization shape. Both are
+step untouched and still producing the pre-normalization shape.
+
+**A fifth site is not a raw-fact assembler at all, and a later review
+round correctly found that this phase's own "attach `semantic_ir`
+identically" treatment does not describe what it actually needs:
+`dumper_hybrid.merge_snapshots()`, the `--ast-frontend hybrid` path.**
+`service.py` recursively produces a CastXML snapshot and a Clang snapshot
+and hands both to `merge_snapshots()`, which reconciles them via
+`dataclasses.replace(castxml_snap, ...)` — a pairwise merge of two
+*already-assembled* `AbiSnapshot`s, not a single backend's raw facts
+going through the normalizer once. Each sub-snapshot, per this phase's own
+per-backend wiring, already carries its own `semantic_ir` by the time
+`merge_snapshots()` receives it — but that function's real logic only
+reconciles the legacy `functions`/`types`/... projections (folding in
+Clang-only entities and Clang-backfilled facts onto the CastXML base), and
+has no step that does the equivalent reconciliation for `semantic_ir`
+itself. Left as stated, the merged snapshot would keep the CastXML-only
+`semantic_ir` unchanged while its own `functions`/`types` fields include
+exactly the Clang-only and Clang-backfilled data that reconciliation adds
+— the two representations disagreeing on a single, freshly-produced
+snapshot, which is the Governing Invariant's one forbidden outcome, not a
+legacy-compatibility accommodation. `merge_snapshots()` therefore needs
+its own, fifth reconciliation step for `semantic_ir` — merging (or
+reconstructing) the two sub-snapshots' `SemanticIR.occurrences` maps the
+same way the legacy fields already merge, so a hybrid-frontend snapshot's
+`semantic_ir` reflects the same merged facts its `functions`/`types`
+do — added to the Files list below and to the parity-test requirement,
+since a `--ast-frontend hybrid` `dump`/`compare` is a real, already-
+documented production path this phase's own "every assembly call site"
+bar already commits to covering, not a fifth site invented for this
+finding. The BTF/CTF dispatch and PDB path are
 updated the same way `dumper.py`/`dumper_manifest.py` are: call
 `semantic_normalizer.normalize()` on the raw facts and project through the
 existing `AbiSnapshot` field shapes, attaching `semantic_ir` identically
@@ -2323,6 +2382,9 @@ existing `AbiSnapshot` field shapes, attaching `semantic_ir` identically
 production the same way `pdb_metadata.py` itself is, per the Design
 section's own parser-narrowing rule, since it's a second conversion layer
 for the identical backend, not a different one);
+`dumper_hybrid.py` (`merge_snapshots()` gains the `semantic_ir`
+reconciliation step named above, alongside its existing legacy-field
+merge);
 `serialization.py` (`SCHEMA_VERSION` bump, and a real encode/decode design
 for `semantic_ir` — **not the bare "field's encode/decode" a first draft
 of this phase left unspecified, which understates a genuine technical
@@ -2448,9 +2510,10 @@ leaves `SemanticIR` fully built and fully inert beside an unchanged
 production pipeline — neither is an acceptable state to merge this phase
 in. An end-to-end parity test (`dump`/`compare` over a real fixture,
 before and after this phase, asserting identical `AbiSnapshot` output) is
-required for **each of the four assembly call sites** — `dumper.py`,
-`dumper_manifest.py`, `service.py`'s BTF/CTF dispatch, and `service.py`'s
-PDB path via `pdb_model.model_types_from_dwarf_metadata` — not only the
+required for **each of the five assembly call sites** — `dumper.py`,
+`dumper_manifest.py`, `service.py`'s BTF/CTF dispatch, `service.py`'s
+PDB path via `pdb_model.model_types_from_dwarf_metadata`, and
+`dumper_hybrid.merge_snapshots()` — not only the
 first two, alongside the per-backend unit tests below, to prove the
 normalizer-mediated assembly path is behavior-preserving for the existing
 pipeline rather than asserted — **and that fixture must include a real
@@ -2469,7 +2532,15 @@ a version of `snapshot_to_dict()` that still relies on plain `asdict()`
 for this field (it raises before the assertion is even reached, per the
 unhashable-key defect above) and against a version using a string-keyed
 encoding (it loses the shared-`EntityId`, multiple-occurrence shape the
-test specifically constructs).
+test specifically constructs). A dedicated test covers `dumper_hybrid.
+merge_snapshots()`'s own `semantic_ir` reconciliation directly: a CastXML
+sub-snapshot and a Clang sub-snapshot each carrying a real, distinct
+`SemanticIR` (one entity backfilled from Clang-only facts, matching the
+legacy-field reconciliation this function already performs), asserting
+the merged snapshot's `semantic_ir` reflects that same Clang-only entity
+— confirmed to fail against a version of `merge_snapshots()` that carries
+the CastXML sub-snapshot's `semantic_ir` through unchanged, the exact
+drift this finding caught.
 
 **Tests.** Every existing per-backend regression test that currently
 proves "backend X handles construct Y" is kept and re-targeted at the
