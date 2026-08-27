@@ -98,6 +98,25 @@
   design (move the shared decoders to an inward layer, or accept the
   duplication), not a same-PR reactive patch.
 
+  **A seventh review round found the bare-dot fix above was itself
+  incomplete**: it only handled a relative import with an empty
+  `node.module` (`from . import x`/`from .. import x`), not the equally
+  valid absolute form (`from abicheck import legacy_compare`, `node.module`
+  set to `"abicheck"`) -- so a `legacy_paths`-classified importer using the
+  absolute spelling stayed exactly as invisible to `dependency-direction`
+  as the relative form was before the third-round fix, with no
+  `unclassified-import` fallback to catch it either. Fixed by generalizing
+  rather than adding a second special case: the `<package>.<name>`
+  recording now runs unconditionally for every `ImportFrom` node, relative
+  or absolute alike, since both spellings are equally ambiguous from the
+  AST alone (`<name>` may be a plain symbol or a submodule of `<package>`).
+  Verified the same way as the third-round fix -- a real repo-wide check
+  still surfaces exactly the known violations and zero new false positives
+  -- with a new regression test,
+  `test_absolute_import_of_forbidden_submodule_is_enforced`, confirmed to
+  fail against the narrower (bare-dot-only) checker and pass against the
+  generalized one.
+
   **`baseline_set.py` reverted back out of `storage`, a fourth review
   round.** Codex's storage classification itself was correct (confirmed
   again above), but flagged fresh evidence this PR's own earlier "0
