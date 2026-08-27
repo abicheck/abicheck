@@ -514,7 +514,16 @@ class TestRequiredFamiliesMustBeACollection:
             pytest.param(["layout"], id="list"),
             pytest.param(("layout",), id="tuple"),
             pytest.param({"layout"}, id="set"),
-            pytest.param(iter(["layout"]), id="iterator"),
+            # A factory, not a live iterator: pytest.mark.parametrize
+            # evaluates its argvalues once at *collection* time, so a bare
+            # `iter(["layout"])` here is a single shared, stateful object —
+            # any double collection or double run of this test in the same
+            # process (mutmut's own harness does this) exhausts it before
+            # the assertion below ever sees it, making the test fail for a
+            # reason that has nothing to do with the guard under test.
+            # Deferring construction to run time gives every actual test
+            # run its own fresh iterator, matching every other param here.
+            pytest.param(lambda: iter(["layout"]), id="iterator"),
         ],
     )
     def test_real_collections_still_work(self, required: object) -> None:
@@ -522,6 +531,8 @@ class TestRequiredFamiliesMustBeACollection:
         the container, not consume it — a check that iterated to decide
         would leave a caller's iterator empty.
         """
+        if callable(required):
+            required = required()
         assert self._ledger().missing_families(required) == ("layout",)
 
     def test_sibling_doors_refuse_a_bare_string_whether_empty_or_not(self) -> None:
