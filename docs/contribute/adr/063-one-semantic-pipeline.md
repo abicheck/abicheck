@@ -196,20 +196,25 @@ classify → outcome` — instead of each independently orchestrating
 This generalizes ADR-055's D1 (CLI and the typed API already share one
 input-resolution path for `compare`) and ADR-061's `workflows` ring to
 *every* operation, not only `compare`. Concretely: `dump`'s ELF/PE/Mach-O
-execution paths (`perform_elf_dump`/`handle_non_elf_dump`) converge on the
-`resolve_dump_request`/`execute_dump_request` split already added to
-`service_dump_pipeline.py`, and `scan`'s candidate resolution
-(`scan_engine._build_new_snapshot`) converges on the shared
-`_resolve_side_snapshot_impl` primitive those two functions themselves call
-internally — not on `resolve_dump_request`/`execute_dump_request`
-verbatim, since `scan` has no `DumpRequest`-shaped input for that pair's own
-signature to accept (per AGENTS.md's own record, this half is already
-landed; only `dump`'s real execution path remains on the legacy route). See
-AGENTS.md's "PR C" note for the concrete, already-identified blockers to
-finishing the `dump` half, and the Action/`cli_project.py`/bundle fan-out
-stop doing their own policy interpretation or compare setup. The
-`cli-contract`/`engine-cli-boundary` AI-readiness gates are widened to check
-this directly rather than only the currently-allowlisted legacy exceptions.
+execution paths (`perform_elf_dump`/`handle_non_elf_dump`) are meant to
+converge on the `resolve_dump_request`/`execute_dump_request` split already
+added to `service_dump_pipeline.py`, but still run their own legacy route
+today. `scan`'s candidate resolution (`scan_engine._build_new_snapshot`)
+already converges on the shared `service_input_resolution.
+_resolve_side_snapshot_impl` primitive — the same one `execute_dump_request`
+itself calls internally (`resolve_dump_request` does not; it only validates
+evidence and builds a `ResolvedDumpRequest`) — not on
+`resolve_dump_request`/`execute_dump_request` verbatim, since `scan` has no
+`DumpRequest`-shaped input for that pair's own signature to accept (per
+AGENTS.md's own record, this half is already landed; only `dump`'s real
+execution path remains on the legacy route, still needing to be migrated
+onto `execute_dump_request` itself, not merely onto the shared primitive it
+wraps). See AGENTS.md's "PR C" note for the concrete, already-identified
+blockers to finishing the `dump` half, and the Action/`cli_project.py`/
+bundle fan-out stop doing their own policy interpretation or compare setup.
+The `cli-contract`/`engine-cli-boundary` AI-readiness gates are widened to
+check this directly rather than only the currently-allowlisted legacy
+exceptions.
 
 **No new root entry point is introduced.** ADR-043/054's CLI surface is
 unchanged; this decision is about what happens *behind* each existing
