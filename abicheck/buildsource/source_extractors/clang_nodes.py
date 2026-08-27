@@ -60,9 +60,11 @@ _LITERAL_NODE_KINDS = frozenset(
 #: independence of ``SourceEntity.identity()``).
 _FINGERPRINT_SCALAR_KEYS = ("kind", "name", "value", "opcode", "castKind")
 
+
 def _hash(*parts: str) -> str:
     blob = "\x00".join(parts).encode("utf-8")
     return "sha256:" + hashlib.sha256(blob).hexdigest()
+
 
 #: AST node kinds that introduce a *local* binding — a parameter or a
 #: block-scope variable. Their names are alpha-renamed to positional placeholders
@@ -83,6 +85,7 @@ _NON_RENAMEABLE_STORAGE = frozenset({"static", "extern"})
 #: every non-commutative operator (`-`, `/`, `%`, `<`, `<<`, assignments, …).
 _COMMUTATIVE_OPS = frozenset({"+", "*", "==", "!=", "&", "|", "^"})
 
+
 def _is_renameable_local(node: dict[str, Any]) -> bool:
     """Whether a decl node is an automatic local whose name is alpha-renameable.
 
@@ -96,6 +99,7 @@ def _is_renameable_local(node: dict[str, Any]) -> bool:
     if kind == "VarDecl" and node.get("storageClass") in _NON_RENAMEABLE_STORAGE:
         return False
     return True
+
 
 def _alpha_rename_map(
     node: dict[str, Any], param_ids: tuple[str, ...]
@@ -164,6 +168,7 @@ def _alpha_rename_map(
     _order(node)
     return {nid: f"${i}" for i, nid in enumerate(order)}
 
+
 def _canonical(node: Any, amap: dict[str, str]) -> Any:
     """Reduce a clang AST node to a build-root-stable structural form for hashing.
 
@@ -222,6 +227,7 @@ def _canonical(node: Any, amap: dict[str, str]) -> Any:
         out["inner"] = children
     return out
 
+
 def _subtree_hash(node: dict[str, Any], param_ids: tuple[str, ...] = ()) -> str:
     """Alpha-equivalence-normalized structural fingerprint of a clang subtree.
 
@@ -233,6 +239,7 @@ def _subtree_hash(node: dict[str, Any], param_ids: tuple[str, ...] = ()) -> str:
     amap = _alpha_rename_map(node, param_ids)
     return _hash("clang-ast", json.dumps(_canonical(node, amap), sort_keys=True))
 
+
 def _param_ids(node: dict[str, Any]) -> tuple[str, ...]:
     """The clang ids of a function node's parameters, in declared order."""
     out: list[str] = []
@@ -242,6 +249,7 @@ def _param_ids(node: dict[str, Any]) -> tuple[str, ...]:
             if isinstance(cid, str):
                 out.append(cid)
     return tuple(out)
+
 
 def _node_file(node: dict[str, Any], current: str) -> str:
     """The declaring file for a node, honoring clang's sticky-``file`` JSON.
@@ -264,6 +272,7 @@ def _node_file(node: dict[str, Any], current: str) -> str:
                     return sf
     return current
 
+
 def _node_line(node: dict[str, Any]) -> int:
     loc = node.get("loc")
     if isinstance(loc, dict):
@@ -276,6 +285,7 @@ def _node_line(node: dict[str, Any]) -> int:
             if isinstance(exp_line, int):
                 return exp_line
     return 0
+
 
 #: Single-child wrapper expression nodes to descend through before deciding
 #: whether an initializer is a lone literal — so `42` reads as the literal "42"
@@ -293,21 +303,29 @@ _WRAPPER_EXPR_KINDS = frozenset(
     }
 )
 
+
 def _has_body(node: dict[str, Any]) -> bool:
     return any(
         isinstance(c, dict) and c.get("kind") == "CompoundStmt"
         for c in node.get("inner", [])
     )
 
+
 def _unwrap_expr(node: dict[str, Any]) -> dict[str, Any]:
     """Descend through single-child wrapper expressions (casts, ConstantExpr…)."""
     cur = node
     while isinstance(cur, dict) and cur.get("kind") in _WRAPPER_EXPR_KINDS:
-        inner = [c for c in cur.get("inner", []) if isinstance(c, dict)]
+        raw_inner = cur.get("inner")
+        inner = (
+            [c for c in raw_inner if isinstance(c, dict)]
+            if isinstance(raw_inner, list)
+            else []
+        )
         if len(inner) != 1:
             break
         cur = inner[0]
     return cur
+
 
 def _init_expr(node: dict[str, Any]) -> dict[str, Any] | None:
     """The initializer expression child of a Var/Parm decl, or ``None``.
@@ -322,6 +340,7 @@ def _init_expr(node: dict[str, Any]) -> dict[str, Any] | None:
         and not str(c.get("kind", "")).endswith(("Decl", "Attr", "Comment"))
     ]
     return candidates[-1] if candidates else None
+
 
 def _expr_value(node: dict[str, Any]) -> str:
     """A value string that changes iff the whole initializer expression changes.
@@ -340,6 +359,7 @@ def _expr_value(node: dict[str, Any]) -> str:
     ):
         return str(core["value"])
     return _subtree_hash(node)
+
 
 def _default_arg_repr(node: dict[str, Any]) -> str:
     """Normalized default-argument string for a function's parameters.
@@ -365,11 +385,13 @@ def _default_arg_repr(node: dict[str, Any]) -> str:
         parts.append(f"p{position}={rep}")
     return ",".join(parts)
 
+
 def _signature(node: dict[str, Any]) -> str:
     type_obj = node.get("type")
     if isinstance(type_obj, dict):
         return str(type_obj.get("qualType", ""))
     return ""
+
 
 def _signature_desugared(node: dict[str, Any]) -> str:
     """Return the node's ``desugaredQualType`` (the alias-resolved spelling).
@@ -384,21 +406,27 @@ def _signature_desugared(node: dict[str, Any]) -> str:
         return str(type_obj.get("desugaredQualType", ""))
     return ""
 
+
 def _mangled(node: dict[str, Any]) -> str:
     mangled = node.get("mangledName")
     name = node.get("name", "")
     if isinstance(mangled, str) and mangled and mangled != name:
-        return mangled[1:] if mangled.startswith("__Z") else mangled  # macOS ABI underscore (Codex review)
+        return (
+            mangled[1:] if mangled.startswith("__Z") else mangled
+        )  # macOS ABI underscore (Codex review)
     return ""
+
 
 def _qualified(scope: list[str], name: str) -> str:
     return "::".join([*scope, name]) if scope else name
+
 
 def _entity_names(name: str, mangled: str = "") -> dict[str, str]:
     names = {"source_qualified": name}
     if mangled:
         names["mangled"] = mangled
     return names
+
 
 def _entity_ownership(visibility: str, origin: str) -> dict[str, str]:
     role = {
@@ -408,6 +436,7 @@ def _entity_ownership(visibility: str, origin: str) -> dict[str, str]:
         "private_header": "internal_candidate",
     }.get(visibility, "unknown")
     return {"visibility": visibility, "origin": origin, "role": role}
+
 
 def _template_param_name(node: dict[str, Any], position: int) -> str:
     name = str(node.get("name") or "")
@@ -419,6 +448,7 @@ def _template_param_name(node: dict[str, Any], position: int) -> str:
         if kind == "NonTypeTemplateParmDecl"
         else "T" + str(position)
     )
+
 
 def _template_params(node: dict[str, Any]) -> list[str]:
     params: list[str] = []

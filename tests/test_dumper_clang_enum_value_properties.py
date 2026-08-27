@@ -30,49 +30,53 @@ existing "outermost ConstantExpr wrapper" example it was already correct
 for). This module states the actual contract as an invariant instead: for a
 value folded onto ANY position along the wrapper chain, `_evaluated_int_value`
 must find it -- not just the two shapes anyone happened to think to test.
+
+Chain construction is delegated to ``tests/_wrapper_chain_gen.py``, the same
+shared generator ``tests/test_ast_wrapper_chain_properties.py`` (Phase 2 of
+``docs/contribute/plans/bug-class-regression-testing.md``) uses for every
+other "unwrap until X" primitive -- a fix to the generator's own shape
+reaches this module's coverage too, rather than needing a second,
+independently-drifting copy (Codex review, PR #888).
 """
 
 from __future__ import annotations
-
-from typing import Any
 
 import pytest
 from hypothesis import given, settings, strategies as st
 
 from abicheck.dumper_clang import _WRAPPER_EXPR_KINDS, _evaluated_int_value
+from tests._wrapper_chain_gen import build_wrapper_chain
 
 pytestmark = pytest.mark.slow
 
 _WRAPPER_KINDS = sorted(_WRAPPER_EXPR_KINDS)
 
 
-def _build_chain(kinds: list[str], value_at: int, value: int) -> dict[str, Any]:
-    """A single-child wrapper chain of the given *kinds* (outermost first),
-    terminating in a non-wrapper leaf node, with *value* folded onto the
-    node at position *value_at* (0 == the outermost node, ``len(kinds)`` ==
-    the terminal leaf itself)."""
-    # Build innermost-out: start with the terminal leaf (never a wrapper
-    # kind, mirroring a real DeclRefExpr/IntegerLiteral leaf).
-    node: dict[str, Any] = {"kind": "DeclRefExpr"}
-    if value_at == len(kinds):
-        node["value"] = str(value)
-    for i in range(len(kinds) - 1, -1, -1):
-        wrapper: dict[str, Any] = {"kind": kinds[i], "inner": [node]}
-        if value_at == i:
-            wrapper["value"] = str(value)
-        node = wrapper
-    return node
+def _int_value_encodings(value: int) -> list[str]:
+    """Every string encoding ``_evaluated_int_value`` must accept for
+    *value* -- it parses via ``int(str(val), 0)``, base-0, not decimal-only
+    (mirrors ``tests/test_ast_wrapper_chain_properties.py``'s identical
+    helper, Codex review, PR #888)."""
+    return [str(value), hex(value), oct(value), bin(value)]
+
+
+_int_with_encoding_strategy = st.integers(min_value=-1000, max_value=1000).flatmap(
+    lambda v: st.sampled_from(_int_value_encodings(v)).map(lambda s: (v, s))
+)
 
 
 @given(
     kinds=st.lists(st.sampled_from(_WRAPPER_KINDS), min_size=0, max_size=6),
-    value=st.integers(min_value=-1000, max_value=1000),
+    value_and_encoding=_int_with_encoding_strategy,
     data=st.data(),
 )
 @settings(max_examples=300)
-def test_finds_a_value_folded_at_any_position_along_the_chain(kinds, value, data) -> None:
+def test_finds_a_value_folded_at_any_position_along_the_chain(
+    kinds, value_and_encoding, data
+) -> None:
+    value, encoding = value_and_encoding
     value_at = data.draw(st.integers(min_value=0, max_value=len(kinds)))
-    node = _build_chain(kinds, value_at, value)
+    node, _leaf = build_wrapper_chain(kinds, value_at=value_at, value=encoding)
     assert _evaluated_int_value(node) == value
 
 
@@ -83,7 +87,7 @@ def test_no_value_anywhere_returns_none(kinds) -> None:
     e.g. a bare DeclRefExpr leaf with nothing evaluated) -> None, not a
     fabricated positional guess. Auto-increment fallback is the caller's
     job (dumper_clang.parse_enums), not this primitive's."""
-    node = _build_chain(kinds, value_at=-1, value=0)  # -1: never matches
+    node, _leaf = build_wrapper_chain(kinds)  # no value_at -> nothing folded
     assert _evaluated_int_value(node) is None
 
 
@@ -102,7 +106,7 @@ def test_outermost_folded_value_wins_over_a_deeper_one(
     top-down walk order _evaluated_int_value actually implements."""
     if outer_value == inner_value:
         return
-    node = _build_chain(kinds, value_at=0, value=outer_value)
+    node, _leaf = build_wrapper_chain(kinds, value_at=0, value=str(outer_value))
     # Fold a second, different value onto the innermost wrapper too (or the
     # leaf, if there are no wrapper kinds at all).
     cur = node
