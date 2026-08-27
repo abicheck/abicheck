@@ -177,6 +177,16 @@ class TestStructuralRequirement:
         )
         assert gate.adds_or_modifies_a_test([("M", path)], _content_diff(path))
 
+    def test_a_non_gating_standalone_script_is_not_evidence(self) -> None:
+        """Negative control for the pair above: not every `python <path> ...`
+        invocation qualifies. `tests/summarize_validate_results.py`'s own two
+        CI invocations both end in `|| true`, so its exit code can never fail
+        the workflow — a fix confined to editing it proves nothing was
+        actually tested (Codex review, PR #885)."""
+        path = "tests/summarize_validate_results.py"
+        assert path not in gate._STANDALONE_TEST_RUNNERS
+        assert not gate.adds_or_modifies_a_test([("M", path)], _content_diff(path))
+
 
 def _git_repo_with(tmp_path: Path, *, second_commit: dict[str, str]) -> Path:
     """A real repository: one base commit, then *second_commit*'s edits."""

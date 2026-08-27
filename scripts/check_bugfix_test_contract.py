@@ -182,8 +182,14 @@ _TEST_DATA_DIR = "golden"
 #: `.github/workflows/*.yml`, not just the reported pair). Allowlist-and-grow,
 #: mirroring `CLI_CONTRACT_ALLOWLIST`/`ENGINE_CLI_BOUNDARY_ALLOWLIST`'s own
 #: convention in `check_ai_readiness.py`: a new standalone runner belongs here
-#: only once it is genuinely invoked directly by a workflow step, verified the
-#: same way (grep `.github/workflows/*.yml` for `python .../<name>.py`).
+#: only once it is genuinely invoked directly by a workflow step *whose exit
+#: code actually gates that workflow* — verified by grepping
+#: `.github/workflows/*.yml` for `python .../<name>.py` and confirming the
+#: invocation does not end in `|| true` (or an equivalent always-succeed
+#: guard). `tests/summarize_validate_results.py` was in this set once and
+#: was removed: both of its invocations end in `|| true` (a Job Summary
+#: formatting step whose own failure cannot fail the workflow), so editing
+#: only it proved nothing was actually tested (Codex review, PR #885).
 _STANDALONE_TEST_RUNNERS = frozenset(
     {
         # contrib/abicheck-clang-plugin/tests/ — clang-plugin.yml's C.6
@@ -195,12 +201,13 @@ _STANDALONE_TEST_RUNNERS = frozenset(
         # tests/ — examples-validation.yml and examples-validation-nightly.yml
         # run these directly as the real-binary example-catalog validation
         # lane (as opposed to test_abi_examples.py's own pytest-collected
-        # ground-truth checks, which import some of the same helpers).
+        # ground-truth checks, which import some of the same helpers). Each
+        # invocation's exit code is unguarded, so a nonzero exit fails the
+        # job — unlike summarize_validate_results.py, see above.
         "tests/validate_examples.py",
         "tests/check_validate_results.py",
         "tests/check_stripped_fp.py",
         "tests/example_shards.py",
-        "tests/summarize_validate_results.py",
     }
 )
 

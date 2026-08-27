@@ -34,6 +34,72 @@ from tests.regressions.manifest import BUG_CLASSES, BugClass, all_ids, get
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
+def _decorator_call_args(source: str, marker_name: str) -> list[str | None]:
+    """Every `@pytest.mark.<marker_name>(...)` call's raw argument text in
+    *source* — `None` in the list for a bare, unparenthesized occurrence.
+
+    Depth-counted rather than a `.*?` regex, since a non-greedy regex over
+    a call's arguments stops at the *first* `)` and would misread a nested
+    call (e.g. `reason=some_helper(x)`) as the marker's own closing paren.
+    A literal-substring search rather than `\\bmarker\\b`-style regex, with
+    an explicit next-character guard, so searching for `skip` does not
+    match the unrelated `skipif` marker (`skip` is a prefix of `skipif`).
+    """
+    marker = f"pytest.mark.{marker_name}"
+    results: list[str | None] = []
+    idx = 0
+    while True:
+        pos = source.find(marker, idx)
+        if pos == -1:
+            break
+        after = pos + len(marker)
+        if after < len(source) and (source[after].isalnum() or source[after] == "_"):
+            # A longer identifier (e.g. `skipif` while searching for `skip`)
+            # — not a real match of this marker.
+            idx = after
+            continue
+        j = after
+        while j < len(source) and source[j] in " \t":
+            j += 1
+        if j < len(source) and source[j] == "(":
+            depth = 0
+            k = j
+            while k < len(source):
+                if source[k] == "(":
+                    depth += 1
+                elif source[k] == ")":
+                    depth -= 1
+                    if depth == 0:
+                        break
+                k += 1
+            results.append(source[j + 1 : k])
+            idx = k + 1
+        else:
+            results.append(None)
+            idx = after
+    return results
+
+
+def _canary_strictness_violation(source: str) -> str | None:
+    """`None` if *source* honors the "fails loudly" canary contract
+    (`KnownGap.canary_test`'s own docstring); otherwise a one-sentence
+    reason it doesn't (Codex review, PR #885 — this repository has no
+    `xfail_strict` ini option, so a bare `@pytest.mark.xfail` stays green
+    on an unexpected pass, and a `@pytest.mark.skip`'d test never executes
+    at all — neither can detect the tracked residual closing or widening).
+    """
+    if _decorator_call_args(source, "skip"):
+        return "uses @pytest.mark.skip, which never executes and so cannot fail loudly"
+    for args in _decorator_call_args(source, "xfail"):
+        if args is None or "strict=True" not in args.replace(" ", "").replace("\n", ""):
+            return (
+                "uses a non-strict @pytest.mark.xfail — an unexpected pass "
+                "(XPASS) stays green with no `xfail_strict` ini option set; "
+                "use `strict=True` or the runtime `pytest.xfail(...)` call form"
+            )
+    return None
+
+
 class TestRegistryShape:
     def test_registry_is_non_empty(self) -> None:
         assert len(BUG_CLASSES) > 0
@@ -181,6 +247,90 @@ class TestRegisteredTestPathsExist:
                 f"real, pytest-collected test: {gap.canary_test} "
                 f"({gap.description})"
             )
+            source = (REPO_ROOT / gap.canary_test).read_text(encoding="utf-8")
+            violation = _canary_strictness_violation(source)
+            assert violation is None, (
+                f"{bug_class.id}: known_gaps canary {gap.canary_test} {violation} "
+                f"({gap.description}) — see KnownGap.canary_test's own docstring"
+            )
+
+
+class TestCanaryStrictnessViolation:
+    """Direct tests of `_canary_strictness_violation` — per this repo's own
+    bug-class discipline, the property being enforced ("fails loudly on an
+    unexpected pass or on the residual widening") is what's tested, not one
+    hand-picked example (Codex review, PR #885: no `BugClass` entry
+    currently sets a real `canary_test`, so without these direct tests the
+    strictness contract would be enforced by code nothing exercises)."""
+
+    def test_a_strict_xfail_is_accepted(self) -> None:
+        source = (
+            "@pytest.mark.xfail(reason='tracked gap', strict=True)\ndef test_x(): ...\n"
+        )
+        assert _canary_strictness_violation(source) is None
+
+    def test_a_bare_xfail_is_rejected(self) -> None:
+        source = "@pytest.mark.xfail\ndef test_x(): ...\n"
+        assert _canary_strictness_violation(source) is not None
+
+    def test_a_non_strict_xfail_is_rejected(self) -> None:
+        source = "@pytest.mark.xfail(reason='tracked gap')\ndef test_x(): ...\n"
+        assert _canary_strictness_violation(source) is not None
+
+    def test_strict_false_is_rejected(self) -> None:
+        source = "@pytest.mark.xfail(reason='tracked gap', strict=False)\ndef test_x(): ...\n"
+        assert _canary_strictness_violation(source) is not None
+
+    def test_a_skip_is_rejected_even_with_a_reason(self) -> None:
+        source = "@pytest.mark.skip(reason='not implemented yet')\ndef test_x(): ...\n"
+        assert _canary_strictness_violation(source) is not None
+
+    def test_skipif_is_not_confused_with_skip(self) -> None:
+        """`skip` is a literal prefix of `skipif` — a naive substring search
+        would misfire here."""
+        source = (
+            "@pytest.mark.skipif(sys.platform == 'win32', reason='posix only')\n"
+            "def test_x(): ...\n"
+        )
+        assert _canary_strictness_violation(source) is None
+
+    def test_a_plain_assertion_test_is_accepted(self) -> None:
+        """No xfail/skip decorator at all — a canary that currently passes,
+        asserting the residual's *bound* rather than its absence, is a
+        legitimate "equivalent executable assertion" per the docstring."""
+        source = "def test_x():\n    assert some_bound_still_holds()\n"
+        assert _canary_strictness_violation(source) is None
+
+    def test_a_runtime_pytest_xfail_call_is_accepted(self) -> None:
+        """The `pytest.xfail(...)` call form immediately aborts the test as
+        XFAIL when reached — inherently as loud as `strict=True` — and
+        doesn't match the `@pytest.mark.xfail` decorator pattern at all."""
+        source = (
+            "def test_x():\n"
+            "    if not fixed_yet():\n"
+            "        pytest.xfail('tracked gap')\n"
+            "    assert real_behavior()\n"
+        )
+        assert _canary_strictness_violation(source) is None
+
+    def test_nested_call_in_xfail_reason_does_not_confuse_paren_matching(self) -> None:
+        """A `.*?` regex over the call's arguments would stop at the first
+        `)` — the nested `helper(x)` call's own — and misread the marker as
+        already closed, missing the real `strict=True` that follows."""
+        source = (
+            "@pytest.mark.xfail(reason=helper(x), strict=True)\ndef test_x(): ...\n"
+        )
+        assert _canary_strictness_violation(source) is None
+
+    def test_multiple_xfail_markers_all_require_strict(self) -> None:
+        source = (
+            "@pytest.mark.xfail(strict=True)\n"
+            "def test_a(): ...\n"
+            "\n"
+            "@pytest.mark.xfail(reason='no strict here')\n"
+            "def test_b(): ...\n"
+        )
+        assert _canary_strictness_violation(source) is not None
 
 
 class TestLookupHelpers:

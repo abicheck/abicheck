@@ -55,13 +55,23 @@ class KnownGap:
 
     Per AGENTS.md's "Fix the cause, not the instance": a gap is tracked
     here rather than left as prose only. `canary_test`, when set, must be
-    a *dedicated* executable canary (an ``xfail``/skip-with-reason test
-    written specifically for this gap) that fails loudly if the residual
-    silently closes or silently widens — never a pointer to an existing
-    suite that happens to cover the same class but doesn't encode this
-    specific gap. Leave it `None` for a gap that is tracked but not yet
-    monitored by a canary; `None` is honest, a mismatched path is not
-    (Codex review, PR #885).
+    a *dedicated* executable canary written specifically for this gap that
+    fails loudly if the residual silently closes or silently widens — never
+    a pointer to an existing suite that happens to cover the same class but
+    doesn't encode this specific gap. Leave it `None` for a gap that is
+    tracked but not yet monitored by a canary; `None` is honest, a
+    mismatched path is not (Codex review, PR #885).
+
+    "Fails loudly" is a strict requirement, checked by
+    `tests/test_regressions_manifest.py::test_known_gap_canaries_exist`, not
+    just documented here: an ordinary `@pytest.mark.xfail` is non-strict by
+    this repository's own pytest config (no `xfail_strict` ini option), so
+    an unexpected pass (XPASS, i.e. the gap silently closed) still reports
+    green — use `@pytest.mark.xfail(..., strict=True)` or the runtime
+    `pytest.xfail(...)` call form instead. A bare `@pytest.mark.skip` is
+    rejected outright: a skipped test never executes at all, so it cannot
+    detect the residual closing *or* widening — it only proves the file
+    exists (Codex review, PR #885).
     """
 
     #: What's not covered (one sentence — the full account lives in
