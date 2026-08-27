@@ -2679,7 +2679,7 @@ consumable by `re.Pattern.match()` with no caller change — agrees with
 pre-migration `SurfaceGraph` for this exact input; and a second case
 asserting `surface_graph.py` imports nothing from `policy/`, enforced by
 the same architecture-gate mechanism this plan already uses elsewhere for
-a leaf module's import direction. A sixth regression pins the kind-filter
+a leaf module's import direction. A seventh regression pins the kind-filter
 fix directly: a fixture where `PublicSurfaceQuery.resolve()`'s resolved
 set genuinely includes a record/enum/typedef `EntityId` (a public
 function's return type, reachable via a `declares`/type-reference edge)
