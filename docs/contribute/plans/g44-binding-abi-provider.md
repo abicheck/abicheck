@@ -1,3 +1,10 @@
+---
+doc_type: contributor
+level: expert
+lifecycle: active
+generated: false
+---
+
 # G44 — pybind11/nanobind binding-ABI provider
 
 ## Problem
@@ -105,9 +112,10 @@ identity.
 This is fundamentally a **new kind of cross-module compatibility check**,
 not a per-library `ChangeKind` — closer in shape to the bundle layer's
 sibling-DSO analysis (G38) than to a single-binary diff. The natural home
-is a new detector consulted during bundle/multi-artifact analysis
-(`abicheck/scan_engine.py` already recognizes bindings; extend from there)
-that:
+is a new `compare/`-owned matcher, invoked from `workflows/`-level
+bundle/multi-artifact scan coordination (existing recognition in
+`abicheck/scan_engine.py` is the entry point to extend from, not the
+implementation's home — see "Files & surfaces" above) that:
 
 1. Extracts each module's binding surface.
 2. Finds declared shared native types between module pairs (via whatever
@@ -120,22 +128,53 @@ that:
 
 ## Files & surfaces
 
-- A new `abicheck/binding_abi.py` (or similar) owning extraction for both
-  frameworks — keep pybind11 and nanobind as two clearly-separated
-  extractors behind one shared surface type, since their tag schemes are
-  independently versioned and will drift independently.
-- `abicheck/python_ext.py` — extend the existing builder-recognition path
-  to also invoke the new extractor when a pybind11/nanobind signature is
-  present.
-- `abicheck/scan_engine.py` — the cross-module comparison, likely as a new
-  multi-artifact/bundle-adjacent detector rather than a single-binary
-  `ChangeKind` (see G38's bundle-detector taxonomy for the closest existing
-  precedent — a `bundle_*`-shaped finding family may be the right home).
-- New `ChangeKind`s following the standard four-step procedure in the root
-  `AGENTS.md` ("Adding a new ChangeKind") — e.g. something in the shape of
-  `binding_abi_mismatch`, `binding_internals_version_mismatch`.
+This is new code, so it must route to ADR-061's target responsibility
+owners (root `AGENTS.md`'s "Task routing and dependency direction" table)
+rather than growing the flat, legacy root-module families
+(`abicheck/python_ext.py`, `abicheck/scan_engine.py`) that predate that
+migration — new code imports the canonical implementation modules, never
+extends a legacy facade, and `scripts/check_architecture.py` gates exactly
+this:
+
+- **`extract/`** — the binding-surface extractor itself (a new
+  `extract/binding_abi/` submodule, or a sibling module inside whatever
+  `extract/` package already owns Python-extension binary reading) — this
+  is "read a binary/debug fact," ADR-061's `extract/` row. Keep pybind11
+  and nanobind as two clearly-separated extractors behind one shared
+  surface type, since their tag schemes are independently versioned and
+  will drift independently.
+- **`model/`** — the normalized binding-surface value type (framework,
+  version, internals identity, registration scope, declared shared native
+  types) shared between extraction and comparison — ADR-061's `model/` row
+  ("add an ABI entity/value shared across stages").
+- **`compare/`** — the raw old/new binding-surface matching and
+  incompatibility identification (which module pairs share a candidate
+  type, whether their surfaces disagree) — ADR-061's `compare/` row
+  ("match old/new entities or identify a raw change").
+- **`workflows/`** — bundle/multi-artifact scan coordination that invokes
+  the new compare step alongside G38's existing bundle detectors, rather
+  than adding a second, independent extraction/comparison invocation
+  inside legacy `scan_engine.py` directly.
+- **`policy/`**/`report/` — new `ChangeKind`s and their gating/reporting,
+  following the standard four-step procedure in the root `AGENTS.md`
+  ("Adding a new ChangeKind") — e.g. something in the shape of
+  `binding_abi_mismatch`, `binding_internals_version_mismatch`. Registered
+  in `abicheck/change_registry.py` (or a topic-specific sibling
+  `change_registry_<topic>.py`) per that procedure, not hand-added to
+  `BREAKING_KINDS`/etc.
+- `abicheck/python_ext.py`/`abicheck/scan_engine.py` gain only the minimal
+  recognition hook needed to invoke the new `extract/`/`workflows/` code
+  from an existing entry point — implementation logic belongs in the new
+  packages above, not grown inline in either legacy module.
 - `docs/reference/change-kinds.md` / `detector-spec` — documentation for the
   new kinds, per the existing doc-generation pipeline.
+
+Before writing code, check `abicheck/architecture/` (the executable
+ADR-061 contract) and its no-growth inventory for the exact current package
+boundaries and import-direction rules — this section names the target
+owners, not the precise module paths, since the migration is incremental
+and the exact package layout may have moved by the time this plan is
+picked up.
 
 ## Tests
 

@@ -1,3 +1,10 @@
+---
+doc_type: contributor
+level: expert
+lifecycle: active
+generated: false
+---
+
 # G42 — Explicit check identity, named deployment environments, and environment-aware system-provider resolution
 
 ## Problem

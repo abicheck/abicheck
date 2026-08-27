@@ -2633,16 +2633,19 @@ relying on per-finding tags in a fail-closed consumer (a declarative
 project's evidence-routing gate); the report-surface work in Phase 3 above
 does not depend on it and can ship independently.
 
-**Relationship to other plans:** the attribution-source/confidence fields
-G43 ([`g43-inferred-evidence-attribution.md`](g43-inferred-evidence-attribution.md))
-adds to a shared pack are a sibling concern (TU→target ownership) to this
-phase's producer/compatibility receipt (TU→compiler/context fidelity) — the
-two receipts live in the same pack manifest but answer different
-questions, and should be designed to compose (one pack manifest, two
-receipt sections) rather than merged into one undifferentiated blob. G34's
-`consumer_compile`/toolchain-binding work is the source of the
-"compile-context fingerprint"/"compiler path and digest" fields this phase
-reuses rather than re-deriving.
+**Relationship to other plans:** `abicheck/buildsource/build_output.py`'s
+existing `evidence.attribution_path` field (already validated by
+`_inferred_evidence_projection_issues()` — see
+G43 ([`g43-inferred-evidence-attribution.md`](g43-inferred-evidence-attribution.md)),
+which wires the *consumption* of that already-implemented attribution data
+into `check-project.yml`/dump/compare) is a sibling concern (TU→target
+ownership) to this phase's producer/compatibility receipt (TU→compiler/
+context fidelity) — the two receipts live in the same pack manifest but
+answer different questions, and should be designed to compose (one pack
+manifest, two receipt sections) rather than merged into one
+undifferentiated blob. G34's `consumer_compile`/toolchain-binding work is
+the source of the "compile-context fingerprint"/"compiler path and digest"
+fields this phase reuses rather than re-deriving.
 
 **Acceptance test:** a Clang-18 plugin pack consumed by an incompatible
 producer context is rejected with a typed reason. A stale source-tree
@@ -2662,9 +2665,9 @@ sibling consumers of the same pack manifest), `abicheck/comparability.py`
 
 **Effort:** M — mostly additive schema fields plus one new validation
 entry point; the design risk is keeping this receipt's fields cleanly
-separated from G43's attribution fields in the same manifest rather than
-letting the two blur into one field family that answers neither question
-cleanly.
+separated from the existing `attribution_path` fields in the same manifest
+rather than letting the two blur into one field family that answers
+neither question cleanly.
 
 ## Design
 

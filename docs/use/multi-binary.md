@@ -53,33 +53,43 @@ shows up in the report under any `--policy` profile; only
 `--scope-public-headers` (or suppression, a third, separate mechanism —
 see below) decides whether it's there at all.
 
-**A custom `--policy custom.yaml` document now reaches the release
-fan-out's bundle verdict too, not only a built-in profile name.**
-`compare_bundle()` gained a second, optional `policy_file: PolicyFile |
-None` parameter alongside its original bare `policy: str` name — when
-supplied, `BundleDiffResult.bundle_verdict` scores `bundle_*` findings
-through `policy_file.compute_verdict(changes)` directly (the same call the
-per-library path already made), instead of always falling back to the
-coarse three-way `policy_kind_sets()` switch
+**`compare_bundle()`/`analyze_bundle()` can now honor a custom `PolicyFile`
+for bundle findings — but the CLI's directory/package release fan-out
+(`compare-release`) does not yet pass one, so a `--policy custom.yaml`
+document's overrides still don't reach that entry point's aggregate bundle
+verdict.** `compare_bundle()` gained a second, optional `policy_file:
+PolicyFile | None` parameter alongside its original bare `policy: str`
+name — when supplied, `BundleDiffResult.bundle_verdict` scores `bundle_*`
+findings through `policy_file.compute_verdict(changes)` directly (the same
+call the per-library path already makes), instead of always falling back
+to the coarse three-way `policy_kind_sets()` switch
 (`strict_abi`/`sdk_vendor`/`plugin_abi`) `compute_verdict()`'s own
-docstring describes. `cli_compare_release_helpers.py`'s directory/package
-release fan-out (`_run_bundle_analysis`/`_collect_bundle_result`, plus the
-release-global build-config-matrix fan-out) already resolves and forwards
-this `policy_file` — so on that entry point, a `--policy custom.yaml`
-document's `overrides:` entry for e.g. `bundle_intra_dep_removed` **does**
-reach the aggregate bundle verdict today, the same way it reaches a
-per-library one.
+docstring describes. `bundle_analysis.analyze_bundle()` (the shared
+orchestrator both a live comparison and a stored-facts comparison route
+through) accepts and forwards the same parameter, and the **stored
+`BundleFacts` Python-API driver** — `bundle_facts.compare_bundle_from_facts()`,
+`bundle_side_input.compare_bundle_sides()`/
+`compare_release_against_bundle_facts()` — already resolves and threads a
+real `policy_file` through to it, so a custom policy document's overrides
+*do* reach the bundle verdict on that path.
 
-What this does *not* yet cover: `policy_file` is a parameter
-`compare_bundle()`'s caller must resolve and pass — a caller that never
-threads a real `PolicyFile` through (rather than the bare `policy` name)
-still falls back to the coarse three-way switch above, and an unrecognized
-bare `policy` name (e.g. a YAML path passed where a profile name is
-expected) still silently resolves to `strict_abi` for whichever findings
-aren't covered by the passed-in `policy_file`'s own overrides, per
-`compute_verdict()`'s own "Unknown policy names fall back to `strict_abi`"
-contract. Direct, per-finding suppression of a `bundle_*` kind is still
-not supported on any entry point — see the suppression section below,
+The CLI's directory/package `compare-release` fan-out is a **separate**
+code path (`cli_compare_release_helpers.py`'s `_run_bundle_analysis`/
+`_collect_bundle_result`, called from `cli_compare_release.py`) and, as of
+this writing, still calls `analyze_bundle(..., policy=policy, ...)` with
+only the bare policy-profile-name string — it never resolves or forwards
+a `policy_file`. So a `--policy custom.yaml` document's `overrides:` entry
+for e.g. `bundle_intra_dep_removed` still has **no effect on the release
+fan-out's aggregate bundle verdict**, and an unrecognized bare `policy`
+name there still silently falls back to `strict_abi` for bundle-verdict
+purposes, per `compute_verdict()`'s own "Unknown policy names fall back to
+`strict_abi`" contract — unchanged from before `policy_file` existed as a
+parameter. Closing this specific gap (threading a resolved `PolicyFile`
+through `_collect_bundle_result`/`_run_bundle_analysis` the same way the
+stored-facts driver already does) is tracked in
+[G38's plan, Phase 15](../contribute/plans/g38-bundle-facts-model-and-multibuild-comparability.md).
+Direct, per-finding suppression of a `bundle_*` kind is still not
+supported on any entry point — see the suppression section below,
 unchanged by this.
 
 **Graph-native detectors ignore public-surface scoping entirely.**

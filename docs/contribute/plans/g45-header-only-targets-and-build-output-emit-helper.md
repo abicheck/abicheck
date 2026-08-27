@@ -1,3 +1,10 @@
+---
+doc_type: contributor
+level: expert
+lifecycle: active
+generated: false
+---
+
 # G45 — Header-only project targets and a validated `build-output.json` producer helper
 
 ## Problem
@@ -93,6 +100,36 @@ symbol table) and is explicit about that omission rather than leaving
 those fields as an ambiguous absence indistinguishable from "binary
 evidence wasn't collected this run."
 
+**Relaxing `project_targets.py` alone is not sufficient — `build-output.json`'s
+own model and validator must change too, or the target can never pass
+`project validate-build` regardless of what the project schema allows.**
+Confirmed by reading `abicheck/buildsource/build_output.py`:
+`BuildOutputTarget` has no target-kind discriminator at all and
+unconditionally serializes a `binary` field, and `validate_build_output()`
+unconditionally calls `_binary_issues()` for every target
+(`abicheck/buildsource/build_output.py:488-492`: `if not target.binary:
+return [f"target {target.id!r}: no binary declared."]`) — so a header-only
+target's `build-output.json` entry fails validation with "no binary
+declared" the moment it's checked, before baseline publication is ever
+reached. This plan must therefore also cover:
+
+- a target-kind (or equivalent) field on `BuildOutputTarget` distinguishing
+  "intentionally binary-less" from "binary evidence missing" — the same
+  distinction `project_targets.py`'s own relaxation needs, kept consistent
+  between the two rather than each inventing its own signal;
+- `_binary_issues()` (or its header-only-aware successor) skipping the
+  "no binary declared" error specifically for a target the schema marks
+  header-only, while still requiring it for every other target kind —
+  never relaxing the check globally;
+- a schema-version bump for `BuildOutputTarget` if the discriminator is a
+  new required-when-present field, per this repo's existing schema-versioning
+  discipline for `build-output.json`-shaped documents.
+
+Prototype `project_targets.py`'s relaxation and `build_output.py`'s model/
+validator change together — a design that only touches one half will not
+produce a working end-to-end path, which is exactly the gap a first
+implementation attempt found here.
+
 ### `build-output.json` emit helper
 
 A new typed builder (likely `abicheck/buildsource/build_output_emit.py`, a
@@ -127,6 +164,11 @@ file can never itself fail the validator it's meant to satisfy.
 
 - `abicheck/buildsource/project_targets.py` — header-only target
   kind/relaxation and its depth-gating.
+- `abicheck/buildsource/build_output.py` — `BuildOutputTarget`'s target-kind
+  discriminator, `_binary_issues()`'s header-only exemption, and the
+  accompanying schema-version bump — see the Design section above; without
+  this, the target still fails `project validate-build` regardless of what
+  `project_targets.py` allows.
 - `abicheck/buildsource/baseline_publish.py` — header-only baseline
   handling (no fabricated binary fields).
 - `abicheck/buildsource/build_output_emit.py` (new) — the typed builder.

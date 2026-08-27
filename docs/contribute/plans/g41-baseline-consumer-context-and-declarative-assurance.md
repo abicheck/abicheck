@@ -1,3 +1,10 @@
+---
+doc_type: contributor
+level: expert
+lifecycle: active
+generated: false
+---
+
 # G41 — Baseline/candidate context parity and a declarative assurance contract
 
 ## Problem

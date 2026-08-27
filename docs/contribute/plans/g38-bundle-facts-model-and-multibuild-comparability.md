@@ -1995,6 +1995,50 @@ wiring itself, since the underlying logic is already tested); the file
 split itself is its own, separately-scoped refactor (see Phase 13's table)
 and should not be bundled into the same PR as the new surface it enables.
 
+### Phase 16 — Thread a resolved `PolicyFile` into the release fan-out's own bundle analysis
+
+**Origin:** Codex review on the PR that documented Phase 14/15 above,
+verified against current source, not assumed. `compare_bundle()`/
+`analyze_bundle()` both accept an optional `policy_file: PolicyFile |
+None` (see this plan's own docstring excerpt for `compare_bundle`'s
+`policy_file` parameter above), and the stored-`BundleFacts` Python-API
+driver (`bundle_facts.compare_bundle_from_facts()`,
+`bundle_side_input.compare_bundle_sides()`/
+`compare_release_against_bundle_facts()`) already resolves and forwards a
+real one. **The CLI's directory/package `compare-release` fan-out does
+not**: `cli_compare_release_helpers._run_bundle_analysis()` calls
+`analyze_bundle(..., policy=policy, ...)` with only the bare
+policy-profile-name string, and its caller,
+`_collect_bundle_result()`, has no `policy_file` parameter at all —
+confirmed by reading both functions and their one caller in
+`cli_compare_release.py`. So a `--policy custom.yaml` document's
+`overrides:` entry for a `bundle_*` kind still has no effect on the
+release fan-out's own aggregate `bundle_verdict` today, even though the
+capability to honor one now exists two calls away.
+
+**Fix:** thread the release fan-out's already-resolved `PolicyFile` (the
+same one `_load_suppression_and_policy`/`policy_file_with_packs` already
+build for per-library scoring in this same module — see
+`_load_probe_matrix_changes`'s sibling handling a few functions over) into
+`_collect_bundle_result()`'s and `_run_bundle_analysis()`'s signatures and
+onward into `analyze_bundle(..., policy_file=pf, ...)`, mirroring exactly
+what the stored-facts driver already does. This is a narrow, mechanical
+change — the capability, its Python-API plumbing, and its stored-facts
+caller are all already shipped; only this one live-comparison caller is
+missing the thread-through.
+
+**Acceptance test:** `compare-release` two directories with a `--policy
+custom.yaml` document overriding `bundle_intra_dep_removed` to
+`compatible`; the release's aggregate `bundle_verdict` must reflect the
+override (previously: unaffected, always scored under the bare policy
+name's coarse three-way switch).
+
+**Effort:** S — the blocking file-size-cap constraint documented in Phase
+13's table applies to *adding a new CLI surface* (a flag, a config block);
+this phase adds no new flag, only forwards an already-resolved local
+variable one call deeper, so it is not blocked by that constraint the way
+Phase 15 is.
+
 ---
 
 ## Out of scope

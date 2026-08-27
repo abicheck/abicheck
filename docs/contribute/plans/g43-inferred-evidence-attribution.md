@@ -1,140 +1,201 @@
-# G43 — Safe projection: inferred (TU-to-target) evidence attribution
+---
+doc_type: contributor
+level: expert
+lifecycle: active
+generated: false
+---
+
+# G43 — Wire the already-implemented TU-to-target attribution into `check-project.yml`/dump/compare
 
 ## Problem
 
 PR #860 correctly rejects `evidence.projection: inferred`/shared evidence
 packs today — `check-project.yml` explicitly errors when a target's
 declared evidence is anything other than `projection: declared`, because
-nothing yet filters an inferred pack's translation units by target
-attribution before analysis, and forwarding it unfiltered would let one
-target's evidence incorporate every other target's facts too
-(`check-project.yml`'s own inline comment, confirmed present at the review's
-base commit). `build-output.json` documents the identical constraint.
+(per its own inline comment) "no dump/compare entry point yet filters an
+inferred pack's TUs by `attribution_path`/target id before analysis." This
+fail-closed behavior is correct and must not be relaxed without the real
+fix reaching every consumer it needs to reach.
 
-This fail-closed behavior is correct and must not be relaxed without the
-real fix. It is, however, expensive for a large multi-target project:
-today every target must publish its own separately-filtered evidence pack,
-even when a single shared build already produced facts for every target in
-one pass.
+**Correction to an earlier draft of this plan, worth recording so it isn't
+re-proposed**: this plan originally set out to *design and build* a new
+TU→link-unit→DSO attribution chain from scratch. That work already
+exists, confirmed by reading the code rather than assumed (Codex review on
+the PR that first introduced this plan, fresh evidence):
+
+- `abicheck/buildsource/link_attribution.py`'s `attribute_sources_to_targets()`
+  computes exactly the attribution chain this plan describes — two
+  independent, non-exclusive channels (a real target graph's own
+  `source_files`, walked transitively through absorbed
+  `OBJECT_LIBRARY`/`STATIC_LIBRARY` dependencies; a link-unit-graph
+  fallback for build systems with no semantic target concept, e.g. Make) —
+  and returns `{normalized_source_path: frozenset[target_identity]}`.
+- `abicheck/buildsource/build_output.py`'s `_inferred_evidence_projection_issues()`
+  already validates a declared `evidence.attribution_path` file: it must
+  exist, be readable JSON, and actually tie at least one TU to the
+  declaring target, or the target fails `project validate-build`.
+- `abicheck/buildsource/inputs_pack.py`'s `ingest_inputs_pack()` already
+  accepts `attribution`/`expected_target_id` parameters (ADR-053 D3) and
+  filters a pack's translation units to exactly the ones the attribution
+  mapping ties to the requested target — `_filter_tus_by_attribution()`
+  keeps a TU whenever `expected_target_id in identities`, which already
+  handles the multi-target case correctly (see "Multi-target attribution
+  is valid evidence, not ambiguity" below).
+
+**What ADR-053 itself identifies as still deferred — and what this plan is
+now actually scoped to — is narrower: the CLI/workflow plumbing that calls
+this already-built, already-validated mechanism from a real check.**
+`check-project.yml`'s rejection comment says exactly this: the attribution
+model and its validation exist; nothing in `check-project.yml`, nor any
+real `dump`/`compare` CLI invocation, reads a target's `evidence.
+attribution_path`, loads the attribution mapping, and threads
+`(attribution, expected_target_id)` into `ingest_inputs_pack()` (or the
+equivalent entry point a live `dump`/`compare` uses) before running the
+actual analysis. That is a wiring gap, not a missing-model gap.
+
+## Multi-target attribution is valid evidence, not ambiguity
+
+An earlier draft of this plan treated a source attributed to more than one
+target as an "ambiguous ownership" case that should not count toward any
+target's completeness. **That is wrong, and the existing implementation
+already gets it right**: `attribute_sources_to_targets()`'s own docstring
+and the target-graph channel's own transitive-absorption logic mean a
+source legitimately linked into several DSOs (a header-only utility object
+compiled once and linked into multiple targets, or an `OBJECT_LIBRARY`
+whose sources are absorbed into every dependent) is *correctly* attributed
+to every one of those targets — and `_filter_tus_by_attribution()` already
+keeps such a TU for each target's own filtered view, independently. This
+is the whole point of returning a `frozenset` of identities per source
+rather than a single owner: shared-but-real ownership is a normal,
+expected shape, not a defect.
+
+The only case that should ever be treated as incomplete/unresolved is a
+source **absent from the attribution mapping entirely** — unknown to both
+channels — which `_filter_tus_by_attribution()` already drops (fail-safe:
+"a source absent from `attribution` entirely... is dropped, exactly like
+one attributed to a different target only"). This plan's job is to make
+that existing distinction visible in the declarative project's assurance
+contract (see G41 Phase 3), not to invent a new, incorrect distinction
+between "single-target" and "multi-target" attribution.
 
 ## Goal & acceptance criteria
 
-Build a real translation-unit-to-target attribution chain so a single
-shared, build-wide evidence pack can be safely filtered *at consumption
-time* per target, with the same safety guarantee `projection: declared`
-already provides — no target ever sees another target's facts — instead of
-requiring N separately-published packs for N targets.
+Wire the existing attribution mechanism end to end so `check-project.yml`
+can safely accept `evidence.projection: inferred` for a target whose
+attribution is present and validated, instead of unconditionally rejecting
+it:
 
-Attribution chain:
-
-```
-translation unit
-  → compile action
-  → object/archive member
-  → link action
-  → produced DSO
-  → project target
-```
-
-The pack must record, and a consumer must be able to check without
-re-deriving:
-
-- selected translation units (attributed to this target);
-- rejected/unattributed units (evidence present but ownership unresolved);
-- ambiguous ownership (a TU whose attribution genuinely cannot be resolved
-  to exactly one target — e.g. a header-only utility object linked into
-  several DSOs);
-- target coverage (what fraction of the target's own compile units were
-  successfully attributed);
-- attribution source and confidence (compile-DB derived, link-command
-  derived, Bazel/CMake-file-API derived, etc., since different producers
-  give different-quality evidence for this).
+1. `check-project.yml`'s evidence-routing step, for a target declaring
+   `projection: inferred`, reads the validated `evidence.attribution_path`
+   (already checked by `_inferred_evidence_projection_issues()` during
+   `project validate-build`), loads the attribution mapping, and forwards
+   it — plus the target's own id — to whichever `dump`/`compare` entry
+   point ultimately calls `ingest_inputs_pack()` for this check, instead of
+   erroring out unconditionally.
+2. The real `dump`/`compare` CLI paths that consume a Flow-2
+   `abicheck_inputs/` pack gain a way to receive an external
+   `(attribution, expected_target_id)` pair — today `ingest_inputs_pack()`
+   accepts these as a Python-API parameter pair, but no CLI flag or
+   `check-project.yml`-driven invocation actually supplies them.
+3. `check-project.yml`'s own rejection message and inline comment are
+   updated once the wiring lands, so the workflow no longer says "no
+   dump/compare entry point yet filters..." while one now does.
 
 ### Acceptance test
 
-One shared, build-wide pack covers `core`, `math`, and `strings`. A
-source-only change in `strings` must not enter either the `core` or `math`
-source snapshot. Removing target attribution (or degrading it below a
-usable confidence) must produce an assurance/operational failure — never a
-shallow green result that silently fell back to "no filtering."
+One shared, build-wide pack covers `core`, `math`, and `strings`, with a
+real `attribution_path` manifest computed from
+`attribute_sources_to_targets()` over the shared build's own evidence. A
+source-only change in `strings` must not enter either the `core` or
+`math` source snapshot (the existing `_filter_tus_by_attribution()`
+already guarantees this once given the right `expected_target_id` — this
+test is end-to-end through `check-project.yml`, not a new unit test on
+already-tested filtering logic). A source genuinely shared by `core` and
+`math` (an absorbed `OBJECT_LIBRARY`) must appear in *both* filtered
+views, not be excluded from either. Removing/corrupting the
+`attribution_path` file (or a target declaring `projection: inferred`
+with no such path at all) must still produce `_inferred_evidence_
+projection_issues()`'s existing validation failure — this plan must not
+weaken that guard, only add the consumption path that makes a *valid*
+attribution actually usable.
 
 ## Design
 
-This is the generalization of the TU→link-unit→DSO attribution core G30
-already built for a narrower purpose (see
-[ADR-053](../adr/053-tu-link-unit-dso-attribution.md), referenced from
-G30's own plan as "P2's first slice... implemented, with pipeline wiring
-still open"). Read that ADR and G30's P2 section before designing this —
-the attribution *core* (TU → link-unit → DSO) may already answer most of
-what this plan needs; what's additionally required here is the last hop
-(DSO → *project target*, a `.abicheck.yml`-level concept G30's core has no
-reason to know about) and the consumption-time filter that actually gates
-`check-project.yml`'s evidence routing on the result.
+The design is almost entirely "thread an existing value through," not new
+logic:
 
-Consumption-time filtering means: given a shared pack and a target id,
-compute the attributed TU set for that target, and construct (or mark as
-usable) a *view* of the pack scoped to exactly that set — the same
-guarantee a separately-published `projection: declared` pack gives, derived
-instead of pre-published. `check-project.yml`'s existing
-`projection == 'inferred'` rejection (see its own comment, quoted in the
-Problem section) becomes: accept `inferred` only when the pack also carries
-a resolved attribution manifest meeting a minimum confidence/coverage
-threshold for the requested target; otherwise keep rejecting exactly as
-today.
-
-Ambiguous ownership must never silently resolve to "include it" — an
-ambiguous TU is evidence the attribution is incomplete for *every* target
-it might belong to, and should either widen the pack's own reported
-coverage gap (visible in the assurance contract from G41 Phase 3) or, at
-minimum, never silently count toward any one target's completeness.
+1. **`check-project.yml`**: replace the unconditional
+   `projection == 'inferred'` rejection (see its own comment, quoted
+   above) with: if `projection == 'inferred'`, require `attribution_path`
+   to be set (already enforced by `project validate-build`, but re-check
+   defensively at consumption time — a validated `build-output.json` at
+   publish time doesn't guarantee the exact file used at check time is the
+   same one), load it, and forward `(attribution_path resolved, target_id)`
+   to the check invocation as new outputs (mirroring how `evidence-pack`/
+   `evidence-producer` are already forwarded as step outputs today).
+2. **CLI/typed-API surface**: whatever `dump`/`compare` invocation
+   `check-project.yml`'s check step ultimately shells out to needs a new
+   flag (or config field) accepting an attribution-manifest path and a
+   target id, which it loads and passes to `ingest_inputs_pack(attribution=,
+   expected_target_id=)` — this is the one genuinely new piece of code
+   this plan adds, and it is a thin CLI/config-to-Python-API translation,
+   not new attribution logic.
+3. **Reject, don't silently widen, everything else**: a target declaring
+   `projection: inferred` with no `attribution_path`, or one whose
+   attribution file fails `_inferred_evidence_projection_issues()`'s
+   existing checks, keeps failing exactly as it does today — this plan
+   only adds a path for the *validated* case, it does not loosen the
+   validation.
 
 ## Files & surfaces
 
-- ADR-053 and `abicheck/buildsource/`'s existing TU→link-unit→DSO
-  attribution core (per G30's plan — locate the actual module(s) before
-  writing new code; this is very likely an extension, not a new subsystem).
-- A new DSO→target resolver, likely living alongside
-  `abicheck/buildsource/project_targets.py` (the module that already knows
-  what a "project target" is) rather than inside the build-evidence
-  collection layer itself — the attribution core should stay agnostic to
-  `.abicheck.yml`'s vocabulary.
-- `check-project.yml` — the `projection: inferred` rejection gains its
-  attribution-confidence-gated exception.
-- `abicheck/buildsource/build_output.py` — pack manifest fields for
-  attribution source/confidence/coverage, mirroring the shape G41 Phase 1's
-  baseline-manifest fields use for a different axis (reuse the pattern, not
-  the fields).
+- `.github/workflows/check-project.yml` — replace the unconditional
+  `projection: inferred` rejection with the attribution-aware path above;
+  update the inline comment and error message once wired.
+- Whichever CLI entry point(s) `check-project.yml` invokes for a
+  build/source-depth check (see G41 Phase 2's per-target header/
+  compile-context projection work, which touches the same call sites) —
+  new flag/config field for an attribution-manifest path + target id.
+- `abicheck/buildsource/inputs_pack.py` — no new logic expected;
+  `ingest_inputs_pack()`'s existing `attribution`/`expected_target_id`
+  parameters are the consumption point this plan wires a caller onto.
+- `abicheck/buildsource/build_output.py` — no new logic expected;
+  `_inferred_evidence_projection_issues()` already validates the
+  `attribution_path` this plan's CLI wiring reads.
 
 ## Tests
 
-- Unit tests on the DSO→target resolver against a synthetic multi-target
-  build graph (unambiguous, ambiguous, and unattributed TU cases).
-- An `integration` fixture building `core`/`math`/`strings` as one shared
-  build, publishing one evidence pack, and asserting per-target filtering
-  matches the acceptance test above exactly.
-- A regression test asserting a pack with attribution confidence below
-  threshold (or none at all) is still rejected the same way an
-  unconditionally-`inferred` pack is today — this fix must never regress
-  the existing fail-closed behavior for the common case where attribution
-  genuinely isn't available.
+- An `integration` end-to-end fixture matching the acceptance test above,
+  run through the real `check-project.yml` workflow (or its equivalent
+  local invocation), not only through `ingest_inputs_pack()`'s existing
+  unit tests — the gap this plan closes is specifically that no real
+  workflow invocation reaches that already-tested function with real
+  attribution data.
+- A regression test confirming a target declaring `projection: inferred`
+  with no `attribution_path`, or a corrupted one, still fails exactly as
+  it does today — this plan must not be the PR that accidentally weakens
+  `_inferred_evidence_projection_issues()`'s existing guard.
 
 ## Effort & risk
 
-L. The riskiest part is not the filtering logic — it's building a *correct*
-DSO→target resolver across enough build-system shapes (CMake, Bazel, Make,
-a plain compile database with no link-graph information at all) that "no
-attribution available" is the honest, common answer for at least one real
-build system, and the fail-closed default must degrade gracefully to that
-rather than guessing. Do not attempt to infer attribution from naming
-heuristics (a file path convention, a directory prefix) — that reintroduces
-exactly the "accidentally shared" risk this whole feature exists to close,
-just moved from evidence-pack scope to attribution-source scope.
+M (revised down from the original L estimate, since the attribution model
+and its validation are both already implemented) — the remaining work is
+CLI/workflow plumbing connecting two already-tested pieces
+(`attribute_sources_to_targets()`'s output, already validated by
+`_inferred_evidence_projection_issues()`) to a third
+(`ingest_inputs_pack()`'s existing `attribution`/`expected_target_id`
+parameters), plus updating `check-project.yml`'s own rejection logic and
+messaging. Low design risk; the main risk is scope creep back into
+re-deriving attribution logic that already exists — resist that, and keep
+this plan to the wiring task ADR-053 itself identifies as deferred.
 
 ## Out of scope
 
-- Relaxing `projection: inferred`'s rejection for any build system this
-  plan cannot build a real, verified attribution resolver for — a partial
-  fix that "usually works" is worse than today's fail-closed default,
-  which is honest about the gap.
-- Retrofitting historical (already-published) evidence packs that predate
-  attribution manifests — this only applies going forward.
+- Redesigning `attribute_sources_to_targets()`'s two channels or their
+  confidence/fallback rules — both already exist and are tested; this
+  plan consumes them as-is.
+- Any change to `_filter_tus_by_attribution()`'s multi-target semantics —
+  already correct, as established above.
+- Extending attribution to build systems neither existing channel covers
+  (a target-graph-free, link-unit-free build) — out of scope for both the
+  original ADR-053 work and this wiring plan.
