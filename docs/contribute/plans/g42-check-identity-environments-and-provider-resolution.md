@@ -355,7 +355,52 @@ environment — e.g. deep-copying the kept `Change` list (or resetting
 `effective_verdict`/`modulation_reason`/`modulation_rule` to `None`)
 immediately before each environment's own
 `apply_runtime_floor_contract()`/provider-resolution pass, never sharing
-mutated objects across environments. **That in-process mutation fix is necessary but not sufficient — the real
+mutated objects across environments.
+
+**Resetting/copying the `Change` list is still not sufficient by itself —
+it only covers half of `_env_matrix_contract_changes()`, and the other
+half must be *rerun*, not copied, per environment — a further gap
+confirmed by reading that function directly, not assumed.**
+`_env_matrix_contract_changes()` (`checker.py`) does two structurally
+different things under one gate, by its own docstring: (1)
+`apply_runtime_floor_contract()` reclassifies an *existing* delta finding
+already in `kept`/`verdict_redundant` in place — the mutation case the
+correction above already fixes; (2) `check_platform_baseline_floor()`,
+`check_musllinux_glibc_dependency()`, and the wheel-deployment checks
+(`check_macos_deployment_target_floor`/`check_wheel_tag_architecture_
+mismatch`/`check_wheel_rpath_not_portable`/`check_wheel_closure_
+dependency_violation`) are each **standalone**: they read the new
+binary's own raw evidence (`new_elf`/`new_macho`) directly and *produce
+new findings* — independent of whatever is already in `kept`, and
+independent of whether the floor moved between old and new. The
+canonical example this codebase's own comment already names: "a binary
+that has always required a newer glibc than its wheel tag promises" —
+this produces a `Change` only when this function actually runs against
+that environment's own declared floor; there is no pre-existing delta in
+the `DiffResult` for a pristine-Change-list reset to preserve or copy.
+An unchanged binary that has always exceeded its declared manylinux floor
+would therefore have this violation reported for the *first* environment
+evaluated (whichever one happens to trigger it once) and silently
+omitted from every other grouped environment's report, since resetting/
+copying `Change` objects has nothing to reset *to* for a finding these
+functions haven't produced yet.
+
+The fix: the per-environment fan-out must **rerun the complete
+`_env_matrix_contract_changes()` step once per environment** — both
+halves, not only the mutation half — using the raw snapshot facts
+(`new_elf`/`new_macho`) already held in memory from the single extraction
+this section's efficiency constraint already guarantees, with each
+environment's own resolved `EnvironmentMatrix`/floors. This still
+satisfies "extract/diff exactly once": no new binary/header/source
+*extraction* runs per environment, since `new_elf`/`new_macho` are the
+already-extracted facts from the one `dump`/`compare` pass — what reruns
+per environment is this one environment-*dependent policy* stage
+specifically, not the extraction stage the constraint actually protects.
+Every other environment-independent stage of `compare()` (symbol/type
+diffing, suppression, the rest of policy) still runs exactly once and its
+results are shared/copied across environments as already established.
+
+**That in-process mutation fix is necessary but not sufficient — the real
 extract-once boundary in this codebase is a GitHub Actions *job*, not a
 Python function call, and nothing in this plan as drafted groups
 environment-only-differing checks before the workflow decides how many
@@ -479,10 +524,13 @@ merely a safer mutator once inside one job:
 2. **Fan-out inside the one job**: `actions/check-target` (or the CLI
    command it shells out to) gains a mode that performs the dump/compare
    exactly once, then evaluates the resulting `DiffResult` against each
-   environment in the group's list in-process — using the pristine-
-   `Change`-list requirement established above, once per environment —
-   and emits one report artifact **per environment** from that single
-   job.
+   environment in the group's list in-process, once per environment — both
+   resetting/copying the pristine `Change` list (established above) **and**
+   fully rerunning `_env_matrix_contract_changes()`'s standalone,
+   finding-producing checks against the raw extracted snapshot for that
+   environment's own floors (established above — a reset alone does not
+   reproduce these) — and emits one report artifact **per environment**
+   from that single job.
 3. **Each environment's report needs its own `target_id`, not merely its
    own artifact filename — confirmed by reading the aggregate's actual
    loader, not assumed, correcting a wrong claim in an earlier draft of
