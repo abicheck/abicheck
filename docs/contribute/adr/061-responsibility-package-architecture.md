@@ -1305,6 +1305,24 @@ test exercises `asdict()`/`deepcopy()`/`pickle` round-trips together with
 re-checking immutability on both reconstructed copies, confirmed to fail
 against the `MappingProxyType` version.
 
+An eighth Codex review round on that commit found `_ImmutableDict` still
+had one inherited mutating path open: `entry.policy_overrides |= {...}`
+(PEP 584's in-place union) is sugar for `entry.policy_overrides =
+entry.policy_overrides.__ior__({...})` — `dict`'s own `__ior__` mutates in
+place and returns `self` *before* Python attempts the reassignment, so on
+a frozen dataclass the mutation had already silently corrupted the entry
+with an unvalidated override by the time `FrozenInstanceError` aborted the
+(redundant, same-object) assignment. Every one of the seven methods
+already overridden stayed correctly blocked; `__ior__` — the only
+augmented-assignment operator `dict` supports — was the one gap. Fixed by
+overriding it too (`# type: ignore[misc,override]` on the signature: mypy
+wants an in-place-union override to stay compatible with `dict.__or__`'s
+own overloaded signature, which a method that always raises regardless of
+input type cannot satisfy). Verified directly (`m.policy_overrides |=
+{...}` now raises `TypeError` and the entry's own mapping is provably
+unchanged afterward) and pinned by a new test,
+`test_policy_overrides_blocks_augmented_union_assignment`.
+
 **The fourth, "complete metadata", is now also enforced** — closed in a
 later pass, on its own, separate from the taxonomy repartition item 3
 still names below. `ChangeKindMeta.description_template` stays genuinely

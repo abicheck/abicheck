@@ -266,6 +266,27 @@ class TestChangeKindRegistry:
         source["plugin_abi"] = Verdict.BREAKING
         assert entry.policy_overrides["plugin_abi"] == Verdict.COMPATIBLE
 
+    def test_policy_overrides_blocks_augmented_union_assignment(self):
+        """`entry.policy_overrides |= {...}` cannot silently corrupt the entry.
+
+        ``|=`` is sugar for ``entry.policy_overrides =
+        entry.policy_overrides.__ior__({...})`` — dict's own ``__ior__``
+        mutates in place and returns self *before* Python attempts the
+        reassignment, so on a frozen dataclass the mutation had already
+        happened by the time ``FrozenInstanceError`` aborted the (redundant)
+        assignment. Every other mutator was already blocked; this inherited
+        path was not (Codex review, PR #882, fresh evidence).
+        """
+        import pytest
+
+        entry = ChangeKindMeta(
+            "test_kind", Verdict.BREAKING,
+            policy_overrides={"plugin_abi": Verdict.COMPATIBLE},
+        )
+        with pytest.raises(TypeError):
+            entry.policy_overrides |= {"unknown": Verdict.API_BREAK}
+        assert dict(entry.policy_overrides) == {"plugin_abi": Verdict.COMPATIBLE}
+
     def test_policy_overrides_immutability_survives_serialization(self):
         """The immutable policy_overrides still round-trips like an ordinary dict.
 

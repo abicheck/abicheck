@@ -40,7 +40,7 @@ import string
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any
+from typing import Any, NoReturn
 
 
 class Verdict(str, Enum):
@@ -133,6 +133,21 @@ class _ImmutableDict(dict[str, Verdict]):
         raise TypeError("policy_overrides is immutable after construction")
 
     def setdefault(self, *args: Any, **kwargs: Any) -> Any:
+        raise TypeError("policy_overrides is immutable after construction")
+
+    def __ior__(self, other: Any) -> NoReturn:  # type: ignore[misc,override]
+        # ``entry.policy_overrides |= {...}`` (PEP 584 in-place union) is
+        # sugar for ``entry.policy_overrides = entry.policy_overrides.
+        # __ior__({...})`` — dict's own ``__ior__`` mutates in place and
+        # returns self *before* Python attempts the reassignment, so on a
+        # frozen dataclass the mutation had already happened by the time
+        # ``FrozenInstanceError`` aborted the (redundant, same-object)
+        # assignment — every method above stayed blocked while this one
+        # inherited path silently corrupted the entry with an unvalidated
+        # override (Codex review, PR #882, fresh evidence). ``__ior__`` is
+        # the only augmented-assignment operator ``dict`` supports, so this
+        # closes the complete mutating-method surface alongside the seven
+        # methods above it.
         raise TypeError("policy_overrides is immutable after construction")
 
     def __reduce__(self) -> tuple[Any, ...]:
