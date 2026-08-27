@@ -1056,10 +1056,32 @@ moved each format's *dataclass* half into `model/*_facts.py`; it did not
 classify the surviving flat *parser* module (`pe_metadata.py`,
 `macho_metadata.py`, `dwarf_metadata.py`, `symvers_metadata.py`, and
 siblings) as `extract` — that classification step is still outstanding for
-every one of them. So the "67 direction violations" this note originally
-recorded have not been resolved; they are simply not yet exercised, because
-nothing has tried to physically move `service.py` into `abicheck/workflows/`
-to trip them.
+every one of them.
+
+**The "67" figure itself is stale, not merely unresolved — a further Codex
+review round caught this note repeating it without re-measuring, and it is
+worth recording what re-measuring actually shows rather than asserting either
+"still 67" or a new total this pass didn't verify.** The original count came
+from classifying `service.py`'s whole import list at once, before the
+metadata split existed; the split changed the graph the count was taken
+against, so the number cannot simply carry over. Temporarily classifying just
+the eleven now-split parser modules (`elf_metadata.py`, `pe_metadata.py`,
+`macho_metadata.py`, `dwarf_metadata.py`, `dwarf_advanced.py`,
+`sycl_metadata.py`, `symvers_metadata.py`, `python_api.py`, `python_ext.py`,
+`numpy_capi.py`, `build_mode.py`) as `extract` and re-running
+`check_architecture.py` produces **7** findings today, all shaped
+`frontends -> extract` — `cli_compare_release.py`, `cli_datasources.py`,
+`cli_dump_helpers.py` (three sites), and `cli_resolve.py` importing a parser
+module directly rather than through a `workflows` re-export. None of the
+seven is a `service.py`-originated finding, since `service.py` is already
+`workflows`-classified and `workflows -> extract` is allowed — confirming
+this specific edge was never `service.py`'s own problem. That is a real,
+freshly-measured number for one slice of the original blocker, not a
+restatement of the old one, and it is not the full picture: re-running the
+same experiment across every module in the list above (compare/policy/model
+targets included, not just the eleven `extract` candidates) to get a true
+current total is real, not-yet-done work — this note does not claim to have
+done it, only to have stopped asserting a number it hadn't re-checked.
 
 What *is* true, and worth keeping separate from what isn't: `service.py`'s
 destination package exists and has real tenants
@@ -1092,15 +1114,37 @@ Reading `PolicyFile` itself before proposing a fix mattered: it is not a
 `compute_verdict()`, `describe()`, and `validate_overrides()` are instance
 methods on the same class `checker_types.py` needs to reference — `compute_
 verdict()` in particular *is* policy's resolution algorithm, not a fact about
-a policy document. Splitting the type from the algorithm the way the
-metadata split did would mean turning documented public methods
-(`pf.compute_verdict(changes)`) into free functions taking the instance as an
-argument — a breaking Python API change (`CLAUDE.md`: "changing their public
-surface is a breaking change... coordinate it") made reactively inside an
-architecture-classification slice, not something to force through here.
-Reclassifying `policy_file.py`/`suppression.py` as `compare` instead was
-rejected too: `compute_verdict` is policy logic by any reading, and mislabeling
-it only relocates the ambiguity this ADR exists to remove.
+a policy document.
+
+**A Codex review round pushed back on the next step, correctly: "breaking API"
+is not the obstacle it was made out to be.** A facade avoids exactly the break
+described — keep `PolicyFile` in `policy_file.py` with every existing method
+intact (as thin wrappers over policy-owned free functions, or simply
+unmoved), and give `model` a separate, data-only base (`PolicyFileFacts` or
+similar) that `PolicyFile` subclasses and `checker_types.py` types its field
+against. `pf.compute_verdict(changes)` keeps working untouched; nothing
+public breaks. That part of the original reasoning was overstated and is
+corrected here.
+
+**It does not, however, resolve the classification question — it relocates
+it, and checking where it lands is what actually settles this.** A model-owned
+`PolicyFileFacts` still needs `PolicyFile`'s *fields*, not just freedom from
+its methods: `overrides: dict[ChangeKind, Verdict]` and
+`reclassify: list[ReclassifyRule]` are exactly the state a facade split would
+carry into `model`. `ReclassifyRule` lives in `reclassify.py` — already
+**deliberately unclassified** two paragraphs above in this same document, for
+this identical reason. `ChangeKind`/`Verdict` live in `checker_policy.py`
+(1559 lines) — confirmed by reading it, not assumed: it is not a clean enum
+module either, it mixes those two enums with real policy algorithms of its
+own (`compute_verdict`, `policy_kind_sets`, `effective_category`,
+`evidence_status_for_change`). So a facade split on `PolicyFile` alone
+doesn't avoid this ADR's model-vs-policy question; it moves the identical
+question onto `checker_policy.py`'s own, larger entanglement — which is the
+same "`checker_policy.py`'s own model-vs-policy split" this note already
+named as the actual pending decision, not a new one. Reclassifying
+`policy_file.py`/`suppression.py` as `compare` instead was rejected too:
+`compute_verdict` is policy logic by any reading, and mislabeling it only
+relocates the ambiguity this ADR exists to remove.
 
 `policy_file.py` is left **deliberately unclassified**, the same treatment
 `reclassify.py` and `contract_gating.py` already have above for the identical
