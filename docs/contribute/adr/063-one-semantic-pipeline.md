@@ -412,8 +412,15 @@ is what's stated here.
 
 Building the graph and deciding relevance from it are two different
 responsibilities under ADR-061's own task-routing table ("match... a raw
-change" vs. "decide relevance"): the graph substrate lands in `compare/`
-(a reconciliation of raw facts, not a policy decision), and the relevance
+change" vs. "decide relevance"): the public-surface graph *builder* —
+the code that walks a snapshot and populates node/edge instances of the
+shared `model/graph.py` primitive D5 already relocates above — lands in
+`compare/` (a reconciliation of raw facts, not a policy decision; **not
+the shared `GraphNode`/`GraphEdge`/`merge_graph_facts` primitive itself,
+which stays in `model/graph.py` per the relocation two paragraphs above —
+a first draft of this sentence said "the graph substrate lands in
+`compare/`," contradicting that same relocation within this decision's
+own text**), and the relevance
 query itself — what `compute_public_surface()` actually decides — lands in
 `policy/`, which may import from `compare/` under ADR-061's fixed
 dependency direction. D5 does not move a relevance decision into

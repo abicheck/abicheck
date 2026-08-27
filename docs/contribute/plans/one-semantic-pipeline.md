@@ -1624,7 +1624,7 @@ sibling:
   elsewhere in the codebase (it currently *means* "build/source evidence
   was collected," which several existing checks rely on). Fixed by a new,
   always-present field directly on `AbiSnapshot` — `surface_graph:
-  SourceGraphSummary | None = field(default=None, kw_only=True)` (`None`
+  SurfaceGraphLike | None = field(default=None, kw_only=True)` (`None`
   only for a snapshot this phase hasn't touched yet, e.g. an old loaded
   snapshot predating this field; always populated for a freshly-extracted
   one, regardless of whether `build_source` is set). This is the one
@@ -1765,20 +1765,41 @@ sibling:
   not aspirational: there is one graph object per snapshot side after this
   phase, not two that merely happen to agree on node spelling.
 
-  **Two items this relocation still owes a real design, named here rather
-  than asserted as solved — this plan is stopping at naming them, not
-  attempting a fourth consecutive re-design of the same field in the same
-  review cycle.** First: `SourceGraphSummary` itself — the container class
-  with `add_node`/`add_edge`/`resolve_entities`, as opposed to the
-  `GraphNode`/`GraphEdge` primitives Phase 3's own `model/graph.py`
-  relocation already covers — still lives in `buildsource/source_graph.py`
-  today. Typing `AbiSnapshot.surface_graph: SourceGraphSummary | None` from
-  `model/snapshot.py` needs that container available to `model/` too, the
-  same direction question already answered once for the primitives
-  themselves; whether `SourceGraphSummary` relocates alongside them, or
-  `AbiSnapshot` instead holds a narrower model-layer protocol/interface
-  `SourceGraphSummary` satisfies, is a real design choice this document
-  does not resolve. Second: moving the L5 graph's attachment point off
+  **The first of two items this relocation owes a real design is now
+  resolved, not deferred a fourth time — a review round correctly found
+  that `AbiSnapshot.surface_graph`'s own declared type above is not
+  actionable while this stayed open, which is a different problem than
+  "this would benefit from being decided eventually."** `SourceGraphSummary`
+  itself — the container class with `add_node`/`add_edge`/
+  `resolve_entities`, as opposed to the `GraphNode`/`GraphEdge` primitives
+  Phase 3's own `model/graph.py` relocation already covers — still lives in
+  `buildsource/source_graph.py` today, and does **not** relocate alongside
+  them: its own imports (`buildsource.build_evidence.BuildEvidence`,
+  `buildsource.entity_resolver.EntityResolver`) are genuine L3-L5
+  build/source-evidence types, not model-layer primitives, so moving the
+  whole class to `model/` would drag those two modules (and whatever they
+  themselves depend on) into `model/` too — the same kind of inversion the
+  `GraphNode`/`GraphEdge` relocation was careful to avoid by checking its
+  own dependency closure first, just failed here by not checking
+  `SourceGraphSummary`'s. The resolution is the protocol option this
+  paragraph named but didn't choose: `model/graph.py` gains a narrow,
+  structural `typing.Protocol` (e.g. `SurfaceGraphLike`, declaring only
+  `add_node(self, node: GraphNode) -> None`/`add_edge(self, edge:
+  GraphEdge) -> None` — the two methods every builder this phase's Design
+  section describes actually calls on the shared instance, not
+  `resolve_entities` or any other method only an L5-specific consumer
+  reaches). `AbiSnapshot.surface_graph: SurfaceGraphLike | None` in
+  `model/snapshot.py` needs no import from `buildsource` at all —
+  `SourceGraphSummary` already structurally satisfies the protocol (Python
+  `Protocol`s check structurally, not by inheritance, so the existing class
+  needs no base-class change either) — and every caller that actually needs
+  `resolve_entities`/other `SourceGraphSummary`-specific methods narrows
+  back from the protocol to the concrete type at its own call site (an
+  ordinary, localized `isinstance`/`cast`, not a model-layer concern). The
+  second item, below, is the one still left to the implementation PR, for
+  the reason already stated — it depends on auditing and migrating real
+  existing readers, not on a type-contract decision a planning document can
+  make in the abstract. Second: moving the L5 graph's attachment point off
   `BuildSourcePack.source_graph` has real existing readers —
   `internal_leak.py`, `buildsource/crosscheck.py`, `buildsource/
   evidence_report.py`, `evidence_depth.py` among them — each would observe
@@ -1985,7 +2006,7 @@ enforces); `dumper_scoping.py`/
 `export_surface.py`/`type_reachability.py` (each becomes a graph *builder*
 contributing nodes/edges in `compare/`, or a relevance *query* in
 `policy/`, not an independent reachability algorithm); `abicheck/model/
-snapshot.py` (new `AbiSnapshot.surface_graph: SourceGraphSummary | None`
+snapshot.py` (new `AbiSnapshot.surface_graph: SurfaceGraphLike | None`
 field, unconditional — not nested under `build_source`); the
 `workflows/`-layer dump/compare orchestration code that already calls
 `buildsource.header_graph.build_header_only_graph()`/attaches
@@ -2111,13 +2132,26 @@ with a named reason, not discovered as a silent no-op mid-run.
 **Design.** `abicheck/workflows/plan.py`: `AnalysisPlan` as a frozen
 dataclass (operation, per-side `SidePlan`, requested depth, required
 facts, resolved toolchain/compile context) built by a new
-`AnalysisPlanner.resolve(request) -> AnalysisPlan | PlanningError`.
-`PlanningError` carries one entry per failed
+`AnalysisPlanner.resolve(request) -> AnalysisPlan`, **raising
+`PlanningError` on failure, not returning it — a first draft of this
+signature wrote `-> AnalysisPlan | PlanningError`, a union return type
+that directly contradicts the very next sentence's own "raise
+`PlanningError`," and a review round correctly caught a contract this
+plan states two different ways.** Chosen for the raise-not-return
+direction to match this codebase's own existing idiom for exactly this
+shape of failure (a request a resolver cannot satisfy at all, as opposed
+to a resolved value with its own partial-failure fields) —
+`DumpDepthNotSatisfiedError`/`ValidationError` and siblings are raised,
+never returned alongside the success type in a union a caller must
+narrow before using. `PlanningError` carries one entry per failed
 requirement (`requested`, `why_unsupported`), modeled directly on the
 `--build-target` + pre-captured `aquery` gap and the `-H` + unsupported-
 collect-mode gap AGENTS.md already documents as *silent* failures — this
 phase's acceptance test is exactly "these two scenarios now raise
-`PlanningError` instead of silently dropping the request."
+`PlanningError` instead of silently dropping the request," and every
+caller of `AnalysisPlanner.resolve()` can therefore treat a returned value
+as always a usable `AnalysisPlan`, with no `isinstance`/union-narrowing
+step of its own.
 
 **`AnalysisPlan` deliberately does not carry resolved policy or the
 surface contract, and a first draft of this phase's field list included
