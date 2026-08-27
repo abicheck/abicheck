@@ -50,8 +50,9 @@ from abicheck.compatibility_evaluation_config import (
     GateConfig,
     ImmutableIdentity,
     SurfaceConfig,
+    ValueProvenance,
 )
-from abicheck.contract_relevance_types import ContractMode
+from abicheck.contract_relevance_types import ContractMode, SelectorLayer
 from abicheck.effective_config_digest import (
     effective_config_digest,
     effective_config_fields,
@@ -463,3 +464,44 @@ class TestReleaseFanOutPreservesObservedSuppressions:
         merged_config = diff.contract_context.evaluation_context.resolved_config
         assert diff.evaluation_config is merged_config
         assert diff.evaluation_config.suppressions is observed_suppressions
+
+    def test_observed_suppression_provenance_is_copied_when_present(self) -> None:
+        """The restore copies the *observed* config's own provenance entry
+        for the suppressions field, not just its value -- covers the branch
+        where ``observed_config.provenance`` actually carries a
+        ``SUPPRESSIONS_FIELD`` entry (every other test in this class builds
+        an ``observed_config`` with the default empty provenance mapping, so
+        this is the one exercising the copy rather than the pop-when-absent
+        fallback)."""
+        from abicheck.cli_compare_receipt import record_release_resolved_config
+        from abicheck.compatibility_evaluation_config import SuppressionConfig
+
+        observed_suppressions = SuppressionConfig(
+            sha256="sha256:observed", rules=("cxx_standard_floor_raised",)
+        )
+        observed_suppression_provenance = ValueProvenance(
+            layer=SelectorLayer.EXPLICIT_CLI,
+            source_kind="suppression_file",
+            sha256="sha256:observed",
+            path="/tmp/observed-suppress.yml",
+        )
+        observed = _minimal_evaluation_config(
+            suppressions=observed_suppressions,
+            provenance={"suppressions": observed_suppression_provenance},
+        )
+        release_wide_config = _minimal_evaluation_config(
+            contract=ContractConfig(
+                mode=ContractMode.PUBLIC,
+                packs=(_identity("ignore_removals", version=1),),
+            )
+        )
+        assert release_wide_config.suppressions is None
+
+        diff = _result()
+        diff.contract_context = self._persisted_context(observed)
+
+        record_release_resolved_config(diff, release_wide_config)
+
+        merged_config = diff.contract_context.evaluation_context.resolved_config
+        assert merged_config.suppressions is observed_suppressions
+        assert merged_config.provenance["suppressions"] is observed_suppression_provenance
