@@ -27,6 +27,7 @@
         "model"
       ],
       "legacy_paths": [
+        "abicheck/buildsource/baseline_set.py",
         "abicheck/buildsource/build_cache.py"
       ]
     },
@@ -40,21 +41,13 @@
         "abicheck/_compiler_options.py",
         "abicheck/binary_utils.py",
         "abicheck/buildsource/archive_graph.py",
-        "abicheck/buildsource/baseline_publish.py",
-        "abicheck/buildsource/baseline_set.py",
         "abicheck/buildsource/build_config_schema.py",
         "abicheck/buildsource/call_graph.py",
         "abicheck/buildsource/callback_graph.py",
         "abicheck/buildsource/clang_ast_run.py",
         "abicheck/buildsource/comdat_groups.py",
-        "abicheck/buildsource/crosscheck_base.py",
-        "abicheck/buildsource/crosscheck_coherence.py",
         "abicheck/buildsource/embed.py",
-        "abicheck/buildsource/entity_identity.py",
-        "abicheck/buildsource/entity_resolver.py",
         "abicheck/buildsource/export_accounting.py",
-        "abicheck/buildsource/graph_impact.py",
-        "abicheck/buildsource/graph_reconcile.py",
         "abicheck/buildsource/header_compile_context.py",
         "abicheck/buildsource/header_graph.py",
         "abicheck/buildsource/include_graph.py",
@@ -88,6 +81,11 @@
       ],
       "legacy_paths": [
         "abicheck/buildsource/build_diff.py",
+        "abicheck/buildsource/crosscheck_base.py",
+        "abicheck/buildsource/crosscheck_coherence.py",
+        "abicheck/buildsource/entity_identity.py",
+        "abicheck/buildsource/entity_resolver.py",
+        "abicheck/buildsource/graph_reconcile.py",
         "abicheck/buildsource/source_diff.py",
         "abicheck/confidence.py",
         "abicheck/diff_build_config.py",
@@ -119,6 +117,7 @@
         "policy"
       ],
       "legacy_paths": [
+        "abicheck/buildsource/baseline_publish.py",
         "abicheck/compatibility_evaluation_frontend.py",
         "abicheck/service.py",
         "abicheck/service_compare_evidence.py",

@@ -1,41 +1,51 @@
 ### Changed
 
-- **ADR-061 continuation**: 36 of `buildsource/`'s 73 flat modules (plus its
-  pre-existing 5) are now classified into the `extract` responsibility
-  layer, 2 into `compare`, 1 into `storage`, and 1 into `model`, in
-  `architecture/modules.yaml`. Config-only change, verified via
-  `scripts/check_architecture.py` (0 errors) -- no source files touched, so
-  behavior is unchanged.
+- **ADR-061 continuation**: 21 more of `buildsource/`'s 73 flat modules (26
+  total, plus its pre-existing 5) are now classified into the `extract`
+  responsibility layer in `architecture/modules.yaml`, alongside 7 into
+  `compare`, 2 into `storage`, 1 into `model` (plus its pre-existing 2), and
+  1 into `workflows` -- 39 of 73 `buildsource/` files classified overall.
+  Config-only change, verified via `scripts/check_architecture.py`
+  (0 errors) -- no source files touched, so behavior is unchanged.
 
   - `extract`: raw fact-extraction/graph-building modules
     (`header_graph.py`, `template_graph*.py`, `type_graph.py`,
-    `crosscheck_base.py`, `entity_identity.py`, `clang_ast_run.py`,
-    `comdat_groups.py`, and 29 siblings) with no cross-layer import
-    violations.
-  - `compare`: `source_diff.py`/`build_diff.py` -- both compare old/new
-    surfaces and emit `Change` findings via `ChangeKind`, the `compare`
-    layer's job per `AGENTS.md`'s task-routing table, not raw extraction
-    (a Codex review finding on this PR's first pass, which had
-    misclassified both as `extract`).
-  - `storage`: `build_cache.py` -- owns content-addressed cache keys plus
-    on-disk cache reads/writes, matching `storage`'s explicit "manage
-    caches" ownership rather than `extract` (same review round).
+    `clang_ast_run.py`, `comdat_groups.py`, and 21 siblings) with no
+    cross-layer import violations.
+  - `compare`: `source_diff.py`/`build_diff.py` (compare old/new surfaces,
+    emit `Change` findings via `ChangeKind`); `crosscheck_base.py`/
+    `crosscheck_coherence.py` (raw-finding cross-check detectors, not fact
+    readers); `entity_identity.py`/`entity_resolver.py` (canonical
+    identity computation for old/new node matching, the same shape
+    `finding_identity.py` -- already `compare` -- already has for flat
+    findings); `graph_reconcile.py` (old/new node reconciliation --
+    rename/move/identity-reconciliation `Change` findings). Two review
+    rounds of Codex findings on this PR, all correct on reading the
+    flagged files directly.
+  - `storage`: `build_cache.py` (content-addressed cache, on-disk
+    reads/writes) and `baseline_set.py` (baseline manifest schema/version
+    parsing, snapshot-artifact loading, content-digest verification) --
+    both `storage`'s explicit "manage caches"/"own schemas" ownership, not
+    extraction.
   - `model`: `graph_facts.py` -- defines the shared `GraphFact`/
     `FactConflict`/`GraphNode`/`GraphEdge` schema multiple layers consume,
-    not an extraction algorithm (same review round).
+    not an extraction algorithm.
+  - `workflows`: `baseline_publish.py` -- bridges an already-validated
+    `BuildOutput` to a CI Action's payload shape, orchestration rather than
+    fact-reading.
 
-  `source_graph_findings.py` -- also flagged as compare-shaped by the same
-  review, and it is (it emits findings, not raw facts) -- stays
-  unclassified: it imports `header_graph.py`/`graph_impact.py`/
-  `graph_reconcile.py` (still `extract`-classified) at module/lazy scope,
-  which `compare`'s `may_import: [model]` forbids. `graph_reconcile.py` is
-  itself compare-shaped (old/new node reconciliation, per AGENTS.md's
-  "match old/new entities" routing) rather than a raw extractor, so
-  reclassifying `source_graph_findings.py` cleanly needs that cascade
-  addressed too -- left for a dedicated follow-up rather than chased under
-  this same config-only pass.
+  `source_graph_findings.py` and `graph_impact.py` -- also flagged as
+  compare-shaped, and they are (both emit/enrich findings rather than raw
+  facts) -- stay unclassified: both import `header_graph.py`/
+  `call_graph.py` (still `extract`-classified, genuine raw AST/graph
+  extraction) at module/lazy scope, which `compare`'s `may_import: [model]`
+  forbids. Unlike `entity_identity.py`/`entity_resolver.py`/
+  `graph_reconcile.py` above, there is no clean further reclassification
+  that resolves this cascade -- `call_graph.py` is real Clang-AST call-graph
+  extraction and correctly stays `extract`. Left unclassified per Codex's
+  own suggested fallback rather than forcing an incomplete fix.
 
-  The remaining 33 `buildsource/` files stay unclassified: 30 of them are
+  The remaining 34 `buildsource/` files stay unclassified: 30 of them are
   directly imported by `frontends`-layer `cli_*.py` modules (a pre-existing
   `frontends -> buildsource` direct-import pattern that bypasses the target
   `frontends -> workflows -> extract` routing -- ADR-061 D9's own worked
