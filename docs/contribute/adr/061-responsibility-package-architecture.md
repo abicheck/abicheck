@@ -1032,29 +1032,61 @@ imports `policy_file`/`contract_relevance_types` — `compare -> policy` and
 design decision about where a policy-parameterised comparison belongs, not a
 mechanical move.
 
-**Re-measured again, and the `*_metadata.py` half of the blocker is now
-closed** — Phase 5's dataclass/parser split "has landed" (see that phase's own
-status line), and `service.py`, `checker_types.py`, `cli_params.py`, and
-`analysis_assurance.py` are all now classified in `architecture/modules.yaml`
-(`python scripts/check_architecture.py` reports 0 errors against the tree as
-it stands). So `service.py`'s destination now exists in the literal sense —
-it just hasn't been used yet: `service.py` is still 1763 flat lines, and
-Phase 4's acceptance criterion ("root `service.py` [reduced] to documented
-typed functions") is unmet. **What remains for `service.py` is not a
-classification problem, it is thinning it** — moving its actual
-`resolve_input`/`_dump_elf`/`_dump_pe`/`_dump_macho`/`compare_snapshots`
-implementation into the `workflows`/`extract` owners Phase 3 already
-established, verified against the same test suite, the way `cli.py` moved
-into `frontends/cli/commands/*.py`. That is real, engine-level surgery on the
-public dump/compare entry points, not a follow-on to this note.
+**Re-measured again, and the picture is more mixed than "closed" — a Codex
+review round on this PR caught the overclaim before it stood.** `service.py`,
+`checker_types.py`, `cli_params.py`, and `analysis_assurance.py` are indeed
+classified in `architecture/modules.yaml`, and `python
+scripts/check_architecture.py` reports 0 errors against the tree as it
+stands — but that is because none of the four is `migrated_source`
+(physically inside its owner package's directory), and `unclassified-import`
+only fires against a migrated source's own imports. A 0-error result from a
+flat, unmigrated file says nothing about whether moving it is safe.
+
+A direct AST scan of every first-party import `service.py` makes — not the
+handful this note originally sampled before concluding classification was
+"closed" — found roughly two dozen still unclassified: `checker`,
+`policy_file`, `suppression`, `clang_layout_tool`, `service_dump_cache`,
+`service_header_graph_attach`, `service_metadata_attach`, `service_render`,
+`api_types`, `dumper`, `dumper_hybrid`, `dwarf_advanced`, `dwarf_metadata`,
+`environment_matrix`, `compat.abicc_dump_import`, `snapshot_io`,
+`symvers_metadata`, `btf_metadata`, `ctf_metadata`, `provenance`,
+`pe_metadata`, `macho_metadata`, `contract_relevance_types`, `pdb_metadata`,
+`pdb_utils`, `pdb_model`, `post_manifest`. Phase 5's dataclass/parser split
+moved each format's *dataclass* half into `model/*_facts.py`; it did not
+classify the surviving flat *parser* module (`pe_metadata.py`,
+`macho_metadata.py`, `dwarf_metadata.py`, `symvers_metadata.py`, and
+siblings) as `extract` — that classification step is still outstanding for
+every one of them. So the "67 direction violations" this note originally
+recorded have not been resolved; they are simply not yet exercised, because
+nothing has tried to physically move `service.py` into `abicheck/workflows/`
+to trip them.
+
+What *is* true, and worth keeping separate from what isn't: `service.py`'s
+destination package exists and has real tenants
+(`service_dump_pipeline.py`, `service_compare_pipeline.py`,
+`service_scan.py`), so the original "the destination does not exist" framing
+is stale. What remains is two ordinary kinds of work, not one already done —
+classifying (or, per the `policy_file.py` precedent below, deliberately
+leaving unclassified) the two dozen modules above, *and* thinning
+`service.py`'s own ~1763 lines of `resolve_input`/`_dump_elf`/`_dump_pe`/
+`_dump_macho`/`compare_snapshots` into the owners that destination already
+has, verified against the same test suite, the way `cli.py` moved into
+`frontends/cli/commands/*.py`. Neither is done; this note does not claim
+either is.
 
 The second inversion was investigated on its own terms, since it looked like
-the smaller of the two and a plausible next physical move
-(`cli_params.py` now has zero first-party imports of its own, qualifying it
-for the same zero-import relocation four sibling option modules already used
-— except its `TYPE_CHECKING` block and one function-local import reach
-`policy_file`/`suppression`/`policies`, which is the same `model -> policy`
-edge one level removed: `frontends -> policy` is equally forbidden).
+the smaller of the two and a plausible next physical move. **That, too, needed
+a second pass**: an earlier revision of this note said `cli_params.py` "now
+has zero first-party imports of its own," checked only against its
+module-level `import`/`from` statements. `check_architecture.py`'s own import
+scan is a full AST walk — it also counts a `TYPE_CHECKING` block and a
+function-local import, which is exactly where the module-level check missed
+two more edges: `DepthParam.convert()`/`get_metavar()` both import
+`buildsource.scan_levels` (also unclassified) function-locally, independent
+of the `policy_file`/`suppression`/`policies` edges below. A full re-scan
+found five import sites across those four targets, all unclassified, all
+reaching the same `frontends -> policy`-shaped edge `checker_types.py` hits
+one layer over (`model -> policy`).
 Reading `PolicyFile` itself before proposing a fix mattered: it is not a
 `*_metadata.py`-shaped dataclass-plus-parser. `load()`, `evidence_verdict()`,
 `compute_verdict()`, `describe()`, and `validate_overrides()` are instance
@@ -1075,12 +1107,24 @@ it only relocates the ambiguity this ADR exists to remove.
 reason: it is a leaf type `compare`'s model layer and `policy`'s algorithms
 both legitimately depend on, and which layer finally owns it is
 `checker_policy.py`'s own model-vs-policy split to answer, not this
-investigation's. `cli_params.py`'s physical move stays blocked for the same
-reason — correctly, not because a quick fix was overlooked.
+investigation's. `suppression.py`/`policies` (the package) are left
+unclassified alongside it for now, for the narrower reason that nothing has
+yet checked whether either has the same shape of problem — that check is
+still owed, not done by implication. `cli_params.py`'s physical move stays
+blocked on that plus its own `buildsource.scan_levels` edge (also
+unclassified, and not yet checked either); `buildsource.scan_levels` looks
+like a plausible `model` leaf on its face — it is exactly the kind of
+small, dependency-free vocabulary module `evidence_depth.py` was classified
+as in Phase 3 — but that is a claim to verify against the module's actual
+imports, not something this note establishes.
 
-So Phase 4's `service.py` half is **blocked on its own size, not on
-Phase 5 or on this classification question** — both of those are now closed;
-what is left is the thinning itself. The `cli.py` half is complete.
+So Phase 4's `service.py` half is **blocked on real, unfinished work at both
+levels this note originally distinguished**: the two dozen imports named
+above still need classifying (or deliberately deferring, case by case) before
+a physical move is safe, and the ~1763 lines of implementation still need
+thinning into the destination that work would unblock. Neither is closed by
+this investigation; only the `PolicyFile` design question is. The `cli.py`
+half is complete.
 
 1. Move command input translation into `frontends/cli/commands` and reusable
    Click-only option declaration into `frontends/cli/options`.
