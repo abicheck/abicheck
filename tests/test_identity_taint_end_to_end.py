@@ -571,3 +571,82 @@ class TestFindingIdentityIsCheckoutPathInvariant:
             f"finding ids purely from a different checkout root: {ids_a} "
             f"vs {ids_b}"
         )
+
+    def test_type_bearing_finding_gets_the_same_canonical_id_under_different_roots(
+        self, tmp_path: Path
+    ) -> None:
+        """The test above doesn't actually exercise this fix's own
+        renumbering mechanism: FUNC_ADDED/UNNAMED_TYPE_IN_PUBLIC_ABI are
+        both matched by a real, compiler-assigned mangled symbol -- or an
+        Itanium-native ``{lambda()#N}`` demangled discriminator, which is a
+        structural ordinal the compiler itself assigns, unrelated to this
+        repo's own ``renumber_anonymous_closure_identities`` -- both
+        inherently checkout-path-invariant on their own, with or without
+        this fix (Codex review, PR #898). A genuinely TYPE-bearing finding
+        kind instead folds ``old_value``/``new_value`` VERBATIM into its
+        canonical id (``report_canonical_finding_id``'s NORMALIZED tier,
+        per its own docstring, for any kind outside
+        ``_EQUIVALENT_CHANGE_CATEGORIES``) -- so it is THIS fix's
+        renumbered ``Param.type``/``RecordType.qualified_name`` spelling,
+        not a real ELF symbol, whose checkout-path-invariance actually
+        matters for such a kind's identity to be stable.
+
+        The direct-clang backend used elsewhere in this module doesn't
+        emit a closure as its own standalone ``RecordType`` (confirmed
+        empirically -- ``snap.types`` carries no closure entry at all, only
+        ``Function.params[*].type`` embeds the ``(lambda:...)`` spelling),
+        so a genuine end-to-end ``compare()`` can't be coerced into
+        producing a real TYPE-bearing finding for a closure without
+        castxml (a separate backend, unavailable in this sandbox -- see
+        this module's own docstring for the castxml/clang split). This
+        builds the ``Change`` directly instead -- but from a REAL,
+        dump()-produced parameter-type spelling (not a hand-built AST
+        fragment the way the pre-existing seed tests for this class do),
+        obtained from the SAME real toolchain the rest of this module
+        uses, under two different checkout roots. Since
+        ``renumber_anonymous_closure_identities`` already runs
+        automatically inside ``dump()`` (production wiring) before any
+        ``Change`` is ever constructed, this is exactly the value a real
+        finding's ``old_value``/``new_value`` would carry in production --
+        confirming that value is checkout-path-invariant is precisely
+        confirming this fix's own effect on finding-identity stability."""
+        _require_toolchain()
+
+        def _closure_param_spelling(root: Path) -> str:
+            root.mkdir(parents=True)
+            so, header = _build(root, _HEADER, _SOURCE)
+            snap = _dump(so, header)
+            for f in snap.functions:  # type: ignore[attr-defined]
+                for p in f.params:
+                    if p.type and "(lambda" in p.type:
+                        return p.type
+            raise AssertionError(
+                "expected a lambda-parameterized invoke_with<...> "
+                "instantiation in the snapshot"
+            )
+
+        spelling_a = _closure_param_spelling(tmp_path / "checkout_a")
+        spelling_b = _closure_param_spelling(
+            tmp_path / "an/unrelated/deeper/checkout_b"
+        )
+
+        from abicheck.checker_policy import ChangeKind
+        from abicheck.checker_types import Change
+        from abicheck.finding_identity import report_canonical_finding_id
+
+        def _template_param_change(spelling: str) -> Change:
+            return Change(
+                kind=ChangeKind.TEMPLATE_PARAM_TYPE_CHANGED,
+                symbol="lib::invoke_with",
+                description=f"parameter type changed to {spelling}",
+                old_value="F",
+                new_value=spelling,
+            )
+
+        id_a = report_canonical_finding_id(_template_param_change(spelling_a))
+        id_b = report_canonical_finding_id(_template_param_change(spelling_b))
+        assert id_a == id_b, (
+            "a type-bearing finding's canonical id differed purely from "
+            f"checkout root: {spelling_a!r} -> {id_a} vs {spelling_b!r} -> "
+            f"{id_b}"
+        )

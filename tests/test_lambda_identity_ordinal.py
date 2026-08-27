@@ -987,9 +987,22 @@ class TestL5SourceGraphIdentitiesAreNotRenumbered:
         # The L5 side is untouched by THIS pass -- still exactly the
         # pre-renumber spelling, in the node's identity-bearing id, its
         # label, AND the edge endpoint referencing it. This is the
-        # documented gap's own bound, not a desired outcome.
+        # documented gap's own bound, not a desired outcome. Re-fetches
+        # ``source_graph`` from ``snap`` AFTER the call rather than reusing
+        # the ``graph`` reference captured before it (Codex review, PR
+        # #898): a future fix that closes this gap by constructing a
+        # rewritten ``SourceGraphSummary``/``BuildSourcePack`` and
+        # reassigning it onto ``snap.build_source`` -- rather than mutating
+        # the existing objects in place -- would leave the stale ``graph``
+        # reference showing the old, unrenumbered values forever, making
+        # this canary pass for the wrong reason even after the gap closed.
         assert snap.build_source is not None
-        assert graph.nodes[0].id == pre_renumber_id
-        assert graph.nodes[0].label == pre_renumber_label
-        assert "522" in graph.nodes[0].label and "26" in graph.nodes[0].label
-        assert graph.edges[0].src == pre_renumber_edge_src
+        post_renumber_graph = snap.build_source.source_graph
+        assert post_renumber_graph is not None
+        assert post_renumber_graph.nodes[0].id == pre_renumber_id
+        assert post_renumber_graph.nodes[0].label == pre_renumber_label
+        assert (
+            "522" in post_renumber_graph.nodes[0].label
+            and "26" in post_renumber_graph.nodes[0].label
+        )
+        assert post_renumber_graph.edges[0].src == pre_renumber_edge_src
