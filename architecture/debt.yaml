@@ -373,7 +373,7 @@
     },
     {
       "path": "abicheck/checker_types.py",
-      "baseline_lines": 807,
+      "baseline_lines": 803,
       "target": "compare",
       "rule": "no_growth",
       "category": "legacy_compare_monolith",
@@ -403,7 +403,7 @@
     },
     {
       "path": "abicheck/cli_compare_helpers.py",
-      "baseline_lines": 1997,
+      "baseline_lines": 1996,
       "target": "workflows-or-frontends",
       "rule": "no_growth",
       "category": "legacy_workflow_or_frontend_monolith",
@@ -413,7 +413,7 @@
     },
     {
       "path": "abicheck/cli_compare_release.py",
-      "baseline_lines": 1998,
+      "baseline_lines": 1995,
       "target": "workflows-or-frontends",
       "rule": "no_growth",
       "category": "legacy_workflow_or_frontend_monolith",
@@ -473,7 +473,7 @@
     },
     {
       "path": "abicheck/cli_resolve.py",
-      "baseline_lines": 809,
+      "baseline_lines": 806,
       "target": "workflows-or-frontends",
       "rule": "no_growth",
       "category": "legacy_workflow_or_frontend_monolith",
@@ -493,7 +493,7 @@
     },
     {
       "path": "abicheck/cli_scan_baseline.py",
-      "baseline_lines": 1347,
+      "baseline_lines": 1343,
       "target": "workflows-or-frontends",
       "rule": "no_growth",
       "category": "legacy_workflow_or_frontend_monolith",
@@ -623,7 +623,7 @@
     },
     {
       "path": "abicheck/diff_filtering.py",
-      "baseline_lines": 1787,
+      "baseline_lines": 1785,
       "target": "compare",
       "rule": "no_growth",
       "category": "legacy_compare_monolith",
@@ -643,7 +643,7 @@
     },
     {
       "path": "abicheck/diff_platform.py",
-      "baseline_lines": 1935,
+      "baseline_lines": 1876,
       "target": "compare",
       "rule": "no_growth",
       "category": "legacy_compare_monolith",
@@ -703,7 +703,7 @@
     },
     {
       "path": "abicheck/diff_types.py",
-      "baseline_lines": 2000,
+      "baseline_lines": 1999,
       "target": "compare",
       "rule": "no_growth",
       "category": "legacy_compare_monolith",
@@ -873,7 +873,7 @@
     },
     {
       "path": "abicheck/html_report.py",
-      "baseline_lines": 1244,
+      "baseline_lines": 1243,
       "target": "report",
       "rule": "no_growth",
       "category": "legacy_report_monolith",
@@ -903,7 +903,7 @@
     },
     {
       "path": "abicheck/junit_report.py",
-      "baseline_lines": 1162,
+      "baseline_lines": 1160,
       "target": "report",
       "rule": "no_growth",
       "category": "legacy_report_monolith",
@@ -1003,7 +1003,7 @@
     },
     {
       "path": "abicheck/reporter_markdown.py",
-      "baseline_lines": 2000,
+      "baseline_lines": 1997,
       "target": "report",
       "rule": "no_growth",
       "category": "legacy_report_monolith",
@@ -1043,7 +1043,7 @@
     },
     {
       "path": "abicheck/serialization.py",
-      "baseline_lines": 1986,
+      "baseline_lines": 1985,
       "target": "storage",
       "rule": "no_growth",
       "category": "legacy_storage_monolith",
@@ -1303,7 +1303,7 @@
     },
     {
       "path": "tests/test_bugfix_test_contract.py",
-      "baseline_lines": 1267,
+      "baseline_lines": 1206,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "category": "legacy_oversized_test_module",
