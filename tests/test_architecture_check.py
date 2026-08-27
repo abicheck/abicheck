@@ -477,10 +477,21 @@ def test_bare_dot_import_of_own_symbol_is_not_a_false_violation(
     `__init__.py` re-export, or a genuine same-package submodule) stays
     silent, matching what a real repo-wide check found before trusting this
     fix (zero new false positives across the whole codebase).
+
+    Covers both shapes CodeRabbit review flagged as needing separate
+    coverage: a symbol defined directly in `__init__.py` (`SOME_CONSTANT`)
+    and a genuine same-layer submodule (`helper.py`) -- the fix's own
+    `target.<name>` path resolves the latter to a real module in the same
+    layer as the importer, which must stay silent exactly like the former.
     """
     root = _tree(tmp_path)
     _add_package(root, "extract", "SOME_CONSTANT = 1\n")
+    _write(root / "abicheck/extract/helper.py")
     _write(root / "abicheck/extract/reader.py", "from . import SOME_CONSTANT\n")
+    _write(
+        root / "abicheck/extract/submodule_reader.py",
+        "from . import helper\n",
+    )
 
     assert check_repository(root) == []
 

@@ -1,16 +1,17 @@
 ### Changed
 
 - **ADR-061 continuation**: 19 more of `buildsource/`'s 73 flat modules (24
-  total, plus its pre-existing 5) are now classified into the `extract`
+  total, including its pre-existing 5) are now classified into the `extract`
   responsibility layer in `architecture/modules.yaml`, alongside 5 into
-  `compare`, 1 into `storage`, 1 into `model` (plus its pre-existing 2), and
-  1 into `workflows` -- 34 of 73 `buildsource/` files classified overall.
-  Verified via `scripts/check_architecture.py` (0 errors).
+  `compare`, 1 into `storage`, 1 into `model` (including its pre-existing 2),
+  and 1 into `workflows` -- 34 of 73 `buildsource/` files classified
+  overall. Verified via `scripts/check_architecture.py` (0 errors).
 
   - `extract`: raw fact-extraction/graph-building modules
-    (`header_graph.py`, `template_graph.py`, `type_graph.py`,
+    (`header_graph.py`, `template_graph_extractor.py`, `type_graph.py`,
     `clang_ast_run.py`, `comdat_groups.py`, and 19 siblings) with no
-    cross-layer import violations.
+    cross-layer import violations. (`template_graph.py` itself stays
+    unclassified -- see below.)
   - `compare`: `source_diff.py`/`build_diff.py` (compare old/new surfaces,
     emit `Change` findings via `ChangeKind`); `crosscheck_base.py`/
     `crosscheck_coherence.py` (raw-finding cross-check detectors, not fact
