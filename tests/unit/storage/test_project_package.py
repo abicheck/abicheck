@@ -44,7 +44,10 @@ class TestObjectRef:
 
     @pytest.mark.parametrize("field_name", ["kind", "digest"])
     def test_empty_identity_field_is_refused(self, field_name: str) -> None:
-        kwargs: dict[str, Any] = {"kind": "graph", "digest": "sha256:ab"}
+        kwargs: dict[str, Any] = {
+            "kind": "graph",
+            "digest": "sha256:" + "ab" * 32,
+        }
         kwargs[field_name] = ""
         with pytest.raises(ValueError):
             ObjectRef(**kwargs)
@@ -54,7 +57,7 @@ class TestObjectRef:
         self, value: Any
     ) -> None:
         with pytest.raises(TypeError):
-            ObjectRef(kind=value, digest="sha256:ab")
+            ObjectRef(kind=value, digest="sha256:" + "ab" * 32)
         with pytest.raises(TypeError):
             ObjectRef(kind="graph", digest=value)
 
@@ -64,7 +67,7 @@ class TestObjectRef:
 
     def test_from_dict_requires_kind_and_digest(self) -> None:
         with pytest.raises(ValueError, match="kind"):
-            ObjectRef.from_dict({"digest": "sha256:ab"})
+            ObjectRef.from_dict({"digest": "sha256:" + "ab" * 32})
         with pytest.raises(ValueError, match="digest"):
             ObjectRef.from_dict({"kind": "graph"})
 
@@ -75,13 +78,22 @@ class TestObjectRef:
         # `size` is informational -- no decision reads it -- so it degrades,
         # unlike `kind`/`digest`.
         loaded = ObjectRef.from_dict(
-            {"kind": "graph", "digest": "sha256:ab", "size": bad_size}
+            {"kind": "graph", "digest": "sha256:" + "ab" * 32, "size": bad_size}
         )
         assert loaded.size == 0
 
     @pytest.mark.parametrize(
         "digest",
-        ["garbage", "sha256:not-hex-at-all-zz", "sha256:", ":deadbeef", "sha256:a"],
+        [
+            "garbage",
+            "sha256:not-hex-at-all-zz",
+            "sha256:",
+            ":deadbeef",
+            "sha256:a",
+            "sha256:" + "ab" * 32 + "cd",  # right algorithm, wrong length
+            "notreal:" + "ab" * 32,  # unknown algorithm
+            "shake_128:" + "ab" * 16,  # a real algorithm with no fixed size
+        ],
     )
     def test_a_malformed_digest_is_refused_at_construction(self, digest: str) -> None:
         # Not just at write time via `object_relpath` -- a reference that
@@ -91,9 +103,20 @@ class TestObjectRef:
         with pytest.raises(ValueError):
             ObjectRef.from_dict({"kind": "graph", "digest": digest})
 
+    def test_an_algorithm_semantic_digest_can_actually_produce_is_accepted(
+        self,
+    ) -> None:
+        # `sha3_256` contains an underscore, which a bare `isalnum()` check
+        # would have rejected -- a real `semantic_digest(..., algorithm=
+        # "sha3_256")` output must still be usable as a reference.
+        digest = semantic_digest({"x": 1}, algorithm="sha3_256")
+        assert digest.startswith("sha3_256:")
+        ref = ObjectRef(kind="graph", digest=digest)
+        assert ref.digest == digest
+
     def test_size_alone_does_not_change_identity(self) -> None:
-        a = ObjectRef(kind="graph", digest="sha256:ab", size=1)
-        b = ObjectRef(kind="graph", digest="sha256:ab", size=2)
+        a = ObjectRef(kind="graph", digest="sha256:" + "ab" * 32, size=1)
+        b = ObjectRef(kind="graph", digest="sha256:" + "ab" * 32, size=2)
         # Not asserting `a == b` -- the dataclass equality is field-by-field
         # and legitimately differs on `size`. What must never differ is what
         # the reference resolves to.
@@ -119,6 +142,11 @@ class TestPathLayout:
             "sha256:not-hex-at-all-zz",
             "sha256:a",
             "",
+            "sha256:" + "ab" * 32 + "cd",  # right algorithm, wrong length
+            "sha256:" + "ab" * 16,  # right algorithm, half the real length
+            "notreal:" + "ab" * 32,  # not a real hashlib algorithm
+            "shake_128:" + "ab" * 16,  # real algorithm, no fixed digest size
+            "sha256:" + ("AB" * 32),  # uppercase hex is not this format's spelling
         ],
     )
     def test_object_relpath_refuses_a_malformed_digest(self, digest: str) -> None:
@@ -128,6 +156,19 @@ class TestPathLayout:
     def test_object_relpath_refuses_a_non_string(self) -> None:
         with pytest.raises(TypeError):
             object_relpath(1)  # type: ignore[arg-type]
+
+    def test_object_relpath_accepts_every_algorithm_semantic_digest_can_produce(
+        self,
+    ) -> None:
+        # `algorithm.isalnum()` would have rejected `sha3_256` (it contains
+        # an underscore) even though `semantic_digest` can genuinely produce
+        # it -- the two must agree on what a real digest looks like.
+        for algorithm in ("sha256", "sha3_256", "sha512", "md5", "blake2b"):
+            digest = semantic_digest({"x": 1}, algorithm=algorithm)
+            _, _, hexdigest = digest.partition(":")
+            assert object_relpath(digest) == (
+                f"objects/{algorithm}/{hexdigest[:2]}/{hexdigest}.json"
+            )
 
     def test_variant_and_artifact_relpaths(self) -> None:
         assert variant_ref_relpath("cpu-gcc") == "refs/variants/cpu-gcc.json"

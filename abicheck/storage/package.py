@@ -61,6 +61,7 @@ same D6 directory.
 
 from __future__ import annotations
 
+import hashlib
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from types import MappingProxyType
@@ -241,6 +242,15 @@ def object_relpath(digest: str) -> str:
     writer must agree on — never the bytes stored there. A real writer picks
     its own physical suffix (`.json`, `.json.zst`, ...) on top of this path,
     per ADR-059's envelope, which this function has no opinion on.
+
+    Validated against `hashlib`'s own algorithm/digest-size semantics, not a
+    hand-rolled character class: an earlier `str.isalnum()` check rejected
+    `semantic_digest`'s own canonical spelling for some algorithms (`"sha3_
+    256"` contains `_`, which is not alphanumeric) while still accepting an
+    impossible address like `"sha256:ab"` (two hex characters where sha256
+    always produces sixty-four) or an unknown algorithm name outright. The
+    two checks must agree on what `semantic_digest` can actually produce, or
+    a real digest could fail to address the very object it names.
     """
     if not isinstance(digest, str):
         raise TypeError(
@@ -249,10 +259,28 @@ def object_relpath(digest: str) -> str:
     algorithm, separator, hexdigest = digest.partition(":")
     if not separator or not algorithm or not hexdigest:
         raise ValueError(f"digest must be in '<algorithm>:<hex>' form, got {digest!r}")
-    if not algorithm.isalnum() or not all(c in "0123456789abcdef" for c in hexdigest):
-        raise ValueError(f"digest is not a well-formed content address: {digest!r}")
-    if len(hexdigest) < 2:
-        raise ValueError(f"digest hex portion is too short to shard: {digest!r}")
+    try:
+        digest_size = hashlib.new(algorithm).digest_size
+    except (ValueError, TypeError):
+        raise ValueError(
+            f"{algorithm!r} is not a hashlib-known digest algorithm: {digest!r}"
+        ) from None
+    if digest_size == 0:
+        # An extendable-output function (SHAKE and friends) has no fixed
+        # digest size, which `semantic_digest` itself already refuses for
+        # the identical reason -- a content address needs a length every
+        # reader agrees on.
+        raise ValueError(
+            f"{algorithm!r} has no fixed digest size, so it cannot address a "
+            f"stored object: {digest!r}"
+        )
+    if len(hexdigest) != digest_size * 2 or not all(
+        char in "0123456789abcdef" for char in hexdigest
+    ):
+        raise ValueError(
+            f"{algorithm!r} produces a {digest_size * 2}-character lowercase "
+            f"hex digest, not {digest!r}"
+        )
     return f"{_OBJECT_DIR}/{algorithm}/{hexdigest[:2]}/{hexdigest}.json"
 
 
