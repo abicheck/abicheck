@@ -362,6 +362,27 @@ RunOutcome(
 )
 ```
 
+`PolicyGateDecision` is a **new, code-free type this decision defines** —
+not a reuse of `severity.GateDecision`, the existing type that already has
+this name's natural meaning in the codebase today. The existing
+`severity.GateDecision` dataclass carries exactly what D6 exists to keep
+out of domain/workflow data: an `exit_code: int`, a `blocking: bool`
+derived from it, and `blocking_categories`, all scheme-dependent (legacy
+vs. severity-aware) and correct for what that type is — the CLI's and
+aggregate's own *exit-code encoder* output, not something `RunOutcome`
+should hold. `PolicyGateDecision` is instead an ordered, exit-code-free
+enum/dataclass (e.g. `NONE < ADDITION_QUALITY < POTENTIAL_BREAKING <
+ABI_BREAKING`, or the equivalent `IssueCategory`-shaped ordering
+`compute_exit_code`'s own severity scheme already uses) carrying enough to
+*derive* an exit code, never one itself — `fold.py`'s aggregation orders
+and `max()`s `PolicyGateDecision` values directly, with no integer in the
+comparison. Converting a `PolicyGateDecision` to `severity.GateDecision.
+exit_code` is confined to the same boundary encoders D6 already names (the
+CLI's `_exit_with_severity_or_verdict`, the Action's encoder, and
+`aggregate`'s own `exit_code()` method) — every one of them already exists
+today and already owns exactly this conversion for the legacy-scheme case,
+so this is a new input type for an existing function, not a new encoder.
+
 No domain or workflow code computes or branches on an integer exit code.
 Exactly one function per front end (the CLI's `_exit_with_severity_or_
 verdict`, the Action's own encoder) maps `RunOutcome` to that front end's

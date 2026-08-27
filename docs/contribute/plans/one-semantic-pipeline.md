@@ -454,8 +454,40 @@ numbered findings in that one entry). Each of those local patches is
 replaced by one `ScopePath`-based identity computation instead of being
 kept as a parallel, narrower fix.
 
+**This is not the first `EntityId`/`OccurrenceId` in the repository, and a
+first draft of this phase treated it as one.** ADR-062 Phase 0 already
+defined `storage/entity_ids.py`'s own `EntityId` (`kind: EntityKind`,
+`qualified_name: str`, `discriminator: str`) and `OccurrenceId`, complete
+with a packed `key` property and `to_dict()`/`from_dict()` — inert today
+(ADR-062 Phase 1's writer/reader doesn't exist yet, per that ADR's own
+status), but a real, already-reviewed module, not a stub. Landing `model/
+identity.py`'s `(ScopePath, kind, leaf_name, extra)` shape as a second,
+independent type would leave exactly two canonical identities once Phase 8
+wires storage's writer/reader — the Governing Invariant's one forbidden
+outcome. `EntityKind`/`ObservationKind` (genuinely domain vocabulary, not
+a storage wire concern) relocate from `storage/entity_ids.py` into `model/
+identity.py` alongside the new primitive, and `model.identity.EntityId`'s
+`kind` field is typed as the relocated `EntityKind` enum rather than a bare
+string literal, closing that mismatch too. `storage/entity_ids.py`'s
+`EntityId`/`OccurrenceId` keep their existing role as D8's *wire* DTOs
+(the packed `key`, the exact `to_dict()`/`from_dict()` shape ADR-062's
+on-disk format already commits to) but stop being independently
+constructed: `EntityId.qualified_name`/`discriminator` become derived, via
+a new `to_dto()` on the domain type (mirroring D8's `to_dto()`/`from_dto()`
+convention elsewhere in this plan), from the domain `EntityId`'s
+`ScopePath`/`leaf_name`/`extra` — `qualified_name` rendered from
+`ScopePath`+`leaf_name`, `discriminator` from `extra` — rather than a
+second place that independently decides what qualifies as a function's
+discriminator. This is the identical domain/DTO split D8 already
+establishes for Phase 8's storage writer, applied one phase earlier because
+the domain type it wraps already existed before this phase, not invented
+by it. `storage/identity.py`'s own re-export of both names is unaffected —
+it already imports them from `storage/entity_ids.py`, and continues to.
+
 **Files.** `abicheck/model/identity.py` (new, leaf — no dependency on
-`checker_types`/`diff_*`, per ADR-063 D10). **The direction of reuse with
+`checker_types`/`diff_*`, per ADR-063 D10; also receives the relocated
+`EntityKind`/`ObservationKind` enums from `storage/entity_ids.py`, per the
+note above). **The direction of reuse with
 `finding_identity.resolve_function_identity` matters and a first draft of
 this phase had it backwards**: `finding_identity.py` is comparison logic
 that itself imports model entities and `checker_types`, so `model/
@@ -482,7 +514,11 @@ identity, replacing the ad hoc `"::".join([*entry.scope, name])`);
 `_spelling_index`, `_typedef_spelling_targets`, `_namespace_suffix_
 spellings` — collapse into one `ScopePath`-based resolver, deleting the
 bespoke string-suffix machinery once the new resolver's test coverage
-matches or exceeds the existing eleven-plus regression cases).
+matches or exceeds the existing eleven-plus regression cases);
+`storage/entity_ids.py` (trimmed to the wire-DTO `EntityId`/`OccurrenceId`
+pair plus the new `to_dto()`/`from_dto()` bridge to `model.identity.
+EntityId`, per the relocation note above — `EntityKind`/`ObservationKind`
+move out, the packed-key DTO shape stays).
 
 **Tests.** Every existing regression test named in the "Known gaps"
 collision-history entries above is kept (they pin real, previously-found
@@ -499,11 +535,20 @@ f()` vs. `void f() const`) always produce distinct `EntityId`s**, pinned
 directly against the exact counterexample a reviewer raised for this
 design, with an `extern "C"` sibling case confirming the deliberate
 opposite rule (a changed parameter list there stays the same identity).
+A separate test on the relocation covers `storage/entity_ids.py`'s
+existing `tests/test_entity_ids.py`-style suite re-pointed at the new
+`to_dto()`/`from_dto()` bridge — every existing DTO `to_dict()`/
+`from_dict()` round-trip case must still produce byte-identical output,
+proving the relocation changed where the vocabulary lives, not the wire
+shape ADR-062 already committed to.
 
 **Acceptance criteria.** `diff_filtering.py`/`type_reachability.py`'s
 string-based ambiguity-tracking helpers are deleted, not kept alongside
-the new resolver. FP-rate gate shows no regression (a net-new suppressed
-finding from the identity change is a Phase 2 bug, not acceptable drift).
+the new resolver. Exactly one `EntityKind`/`ObservationKind` definition
+exists in the repository after this phase, in `model/identity.py` —
+`storage/entity_ids.py` imports rather than redefines them. FP-rate gate
+shows no regression (a net-new suppressed finding from the identity
+change is a Phase 2 bug, not acceptable drift).
 
 ---
 
@@ -847,12 +892,30 @@ completeness` check mirroring its existing `changekind-partition`/
 **Scope.** This phase converts the *remaining* model fields Phase 0 left
 alone into `Fact[T]` + a registry entry, mechanically, field by field —
 each conversion is its own small commit (not one repository-wide diff),
-so a regression is attributable to one field's conversion.
+so a regression is attributable to one field's conversion. **"Remaining
+model fields" means every availability-ambiguous field on every
+fact-bearing model dataclass, not only the files named `model/*_facts.py`
+— a first draft of this phase scoped itself to that filename pattern and
+missed real candidates living elsewhere**: `RecordType.is_final` (`model/
+entities.py`), `Function.contract_attributes`/`Variable.alignment_bits`
+(`model/declarations.py`) are exactly the same "unavailable vs. genuinely
+absent" ambiguity Phase 0 exists to close, and none of them live in a
+`*_facts.py`-named file. The completeness check below must therefore scan
+every dataclass field under `model/` eligible for this conversion
+(bool/list/int-or-None fields documented as backend-dependent), not only
+fields already typed `Fact[T]` — a check that starts from "fields already
+converted" is structurally blind to a raw field nobody has touched yet,
+which is exactly how this phase could report complete while the ambiguity
+it exists to close still exists.
 
-**Files.** `abicheck/model/fact_registry.py` (new); every `model/
-*_facts.py` module (each field gains a registry entry as it's converted);
-`scripts/check_ai_readiness.py` (new check); `scripts/gen_fact_capability_
-matrix.py` (new, generates what is today a hand-maintained capability doc).
+**Files.** `abicheck/model/fact_registry.py` (new); every fact-bearing
+`model/` dataclass module with an eligible field — `model/*_facts.py`,
+plus `model/entities.py` and `model/declarations.py` specifically (their
+`is_final`/`contract_attributes`/`alignment_bits` fields named above, and
+any sibling field matching the same shape found during the audit this
+phase's first commit performs); `scripts/check_ai_readiness.py` (new
+check); `scripts/gen_fact_capability_matrix.py` (new, generates what is
+today a hand-maintained capability doc).
 
 **Tests.** `tests/test_fact_registry_completeness.py`: every `Fact[T]`-
 typed model field has exactly one registry entry; **every registry
@@ -865,7 +928,14 @@ The check also runs in the other direction: for each backend, every fact
 that backend's own parser actually populates has a registry entry naming
 that backend — an unregistered real producer is exactly the kind of
 silent drift a registry meant to be the single source of truth cannot
-tolerate either. Re-run the
+tolerate either. A third direction closes the gap this finding raised:
+the check also scans every dataclass field under `model/` for the
+*eligible-but-unconverted* shape (raw `bool`/`list`/`int | None` with no
+matching `Fact[...]` sibling, documented as backend-dependent) and fails
+if any exists once this phase claims completion — not only auditing the
+fields the registry already knows about, so a field the conversion missed
+entirely (not just one the registry forgot to register) fails this check
+too. Re-run the
 full FP-rate/mutation-score gates once after this phase's field-by-field
 conversion is complete (not per-field — the mechanical conversions don't
 individually risk detector-logic drift, but the cumulative change to every
@@ -978,7 +1048,13 @@ per ADR-063 D9 on the same architectural grounds as the other
 type-declaration-producing backends, even though neither has a specific
 AGENTS.md incident motivating it yet); `name_classification.py` (its
 `_ANONYMOUS_TYPE_MARKERS` and sibling helpers become the normalizer's,
-used once). `elf_metadata.py`/`pe_metadata.py`/`macho_metadata.py` are
+used once); `dumper.py`/`dumper_manifest.py` (the assembly call sites —
+call `semantic_normalizer.normalize()` on each backend's raw facts,
+project into the existing `AbiSnapshot` field shapes, and attach the
+`SemanticIR` itself on the new `semantic_ir` field, per the Design section
+above); `model/snapshot.py` (the new `AbiSnapshot.semantic_ir` field);
+`serialization.py` (`SCHEMA_VERSION` bump and the field's encode/decode).
+`elf_metadata.py`/`pe_metadata.py`/`macho_metadata.py` are
 explicitly **not** touched by this phase — see ADR-063 D9's own
 "deliberately excluded, not an oversight" note: binary-symbol-table
 extraction has no type spelling/scope/template-argument concern for this
@@ -991,13 +1067,25 @@ return values directly into `AbiSnapshot`'s `functions`/`types`/...
 fields, and `checker.compare()` consumes that `AbiSnapshot` shape
 unchanged. Once a parser method returns only `RawXFacts`, neither call
 site has anywhere to route the normalizer through — `dumper.py`/
-`dumper_manifest.py` must be updated in this same phase to call
+`dumper_manifest.py` (both named explicitly in the Files list below, not
+only in this prose) are updated in this same phase to call
 `semantic_normalizer.normalize()` on each backend's raw facts and project
 the result back into the existing `AbiSnapshot` field shapes (via
 `SemanticIR.canonical_entities()`, so nothing downstream of `AbiSnapshot`
-changes shape in this phase), and a checker/workflow-level adapter making
-that `SemanticIR` itself available where `compare()`/future `SemanticIR`-
-aware detectors need it must be named explicitly. Without this wiring,
+changes shape in this phase). The adapter making `SemanticIR` itself
+available to `compare()`/future `SemanticIR`-aware detectors, not only the
+projected fields, is this same assembly step: `AbiSnapshot` gains a new,
+optional `semantic_ir: SemanticIR | None` field, populated by `dumper.py`/
+`dumper_manifest.py` alongside the projected fields — one assembly call
+produces both the backward-compatible `AbiSnapshot` shape existing
+detectors read and the canonical `SemanticIR` a future detector can read
+instead, rather than two independent channels that could disagree. This is
+additive to `AbiSnapshot` (another `serialization.SCHEMA_VERSION` bump,
+same shape as Phase 0/Phase 3's), not a replacement for the existing
+fields, so `checker.compare()` itself needs no change in this phase —
+every existing detector keeps reading `AbiSnapshot.functions`/`types`/...
+exactly as it does today; only a detector written to consume `SemanticIR`
+directly (none exist yet) would read the new field. Without this wiring,
 landing the Files list above either breaks every `dump`/`compare`
 invocation (the parsers stop returning what `dumper.py` assembles from) or
 leaves `SemanticIR` fully built and fully inert beside an unchanged
@@ -1046,10 +1134,19 @@ front end encodes `RunOutcome`'s independent axes exactly once, at the
 boundary.
 
 **Design.** `abicheck/policy/outcome.py`: `RunOutcome` (compatibility,
-assurance, gate, operational, lifecycle — each already real today as
-`Verdict`/`AnalysisAssurance`/the ADR-042 gate decision/various ad hoc
+assurance, gate, operational, lifecycle — each axis's *underlying concept*
+is already real today as `Verdict`/`AnalysisAssurance`/various ad hoc
 operational-status values/ADR-053's target lifecycle, just not yet one
-object). **`RunOutcome` is report-level, not per-finding — it does not
+object). **The `gate` axis is a new type, `PolicyGateDecision`, not a
+reuse of the existing `severity.GateDecision`** — per ADR-063 D6's own
+note: `severity.GateDecision` carries `exit_code: int`/`blocking: bool`/
+`blocking_categories`, exactly the scheme-encoded data D6 bans from domain
+objects, so `RunOutcome.gate` cannot simply *be* one. `PolicyGateDecision`
+is an ordered, exit-code-free value (mirroring the `IssueCategory`
+ordering `severity.compute_exit_code` already uses internally — `NONE <
+ADDITION_QUALITY < POTENTIAL_BREAKING < ABI_BREAKING`) that the boundary
+encoders convert to `severity.GateDecision`/a raw integer, never the
+reverse. **`RunOutcome` is report-level, not per-finding — it does not
 replace `junit_report.py`'s per-test-case classification, and this phase
 does not attempt to make it.** `junit_report.py`'s `_is_failure` decides,
 per `Change`, whether that individual finding fails its JUnit test case,
@@ -1143,7 +1240,10 @@ external encoder, mirroring the CLI's `_exit_with_severity_or_verdict` —
 that turns the aggregated `RunOutcome` back into the integer `aggregate`'s
 own JSON output and process exit code still need.
 
-**Files.** `abicheck/policy/outcome.py` (new); `checker_types.py` (new
+**Files.** `abicheck/policy/outcome.py` (new — `RunOutcome` and the new,
+exit-code-free `PolicyGateDecision` ordered type, per the Design section
+above; `severity.GateDecision` itself is untouched, since it remains
+exactly what the boundary encoders convert *to*); `checker_types.py` (new
 `Change.gate_classification` field, kw_only, appended last — `Change` is
 public API); the actual stamping call site — `checker.py` if the
 `SeverityConfig`/`relevant_ids` gap above is closed by widening
@@ -1293,7 +1393,30 @@ identity needs no other field to narrow it), so it is still part of the
 shared grammar `suppression.py`'s matcher must keep evaluating even though
 `reclassify.py` never uses it; the shared module's leaf-matcher contract
 covers the union of both classes' fields, not their intersection, and a
-consumer that doesn't use a given field simply never sets it. Dropping
+consumer that doesn't use a given field simply never sets it.
+
+**The `finding_id` matcher itself must not call `finding_identity.
+report_canonical_finding_id` from inside the leaf module — a first draft
+of this phase's Files section did exactly that, and it is the same
+upward-dependency mistake Phase 2 caught and corrected for
+`model/identity.py`, recreated here.** `finding_identity.py` is
+comparison-layer logic that imports `checker_types`/model entities to
+compute its answer, so `policy/selectors.py` calling into it would depend
+upward on `compare/`-level code — precisely the edge this leaf module's
+own "zero dependency on `checker_types`/`suppression.py`/`reclassify.py`/
+`reporter`" contract exists to forbid, and the existing architecture-gate
+check this phase adds (see Files below) would not even catch it, since
+that check's denylist names those four modules specifically, not
+`finding_identity.py`. The fix follows the same shape Phase 2 already
+established for exactly this situation: the leaf matcher never computes
+the canonical finding id itself — it only compares a string. **The
+caller** (`Suppression.selector_matches()`/`suppression.py`, which already
+imports `finding_identity.py` today and is comparison-layer code, not a
+leaf) computes `report_canonical_finding_id(change)` once and passes the
+resulting string into the shared matcher alongside the `Change`, so
+`policy/selectors.py`'s `finding_id` check is a plain string-equality
+comparison against an already-computed value, with no import of
+`finding_identity.py` anywhere in the leaf module. Dropping
 either from the shared grammar would either lose a supported selector
 outright or leave its matching logic as a second, un-consolidated
 implementation sitting next to the new leaf module — exactly what this
@@ -1316,21 +1439,26 @@ an instance of the "one concept, two representations" problem this plan
 otherwise targets.
 
 **Files.** `abicheck/policy/selectors.py` (new — includes the
-`finding_id` matcher, calling `finding_identity.report_canonical_
-finding_id` the same way `_matches_finding_id()` does today, so the
-backend-independent identity semantics move intact rather than being
-reimplemented against the leaf module's narrower dependency set);
-`suppression.py` (`Suppression.selector_matches()` becomes a thin wrapper
-calling the shared matcher, or is removed in favor of direct calls —
-whichever keeps `Suppression`'s own public method surface, including its
-existing `parse_finding_id`-based construction-time validation, intact for
-existing callers);
+`finding_id` matcher as a plain string-equality comparison against an
+already-computed canonical id, per the Design section above; the leaf
+itself never imports `finding_identity.py`); `suppression.py`
+(`Suppression.selector_matches()` becomes a thin wrapper calling the
+shared matcher — computing `finding_identity.report_canonical_finding_id`
+itself, as it already does today via `_matches_finding_id()`, and passing
+the resulting string into the shared matcher — or is removed in favor of
+direct calls, whichever keeps `Suppression`'s own public method surface,
+including its existing `parse_finding_id`-based construction-time
+validation, intact for existing callers);
 `reclassify.py` (drops the `importlib.import_module` workaround and its
 own docstring's cycle justification, replaced by a static import of
 `policy/selectors.py`); `scripts/check_architecture.py`'s import-direction
 gate (ADR-061) gains a check that `policy/selectors.py` itself imports
 nothing from `policy_file.py`/`checker_types.py`/`suppression.py`/
-`reclassify.py`, so a future change cannot silently reintroduce the same
+`reclassify.py`/`finding_identity.py` — `finding_identity.py` is added to
+the denylist explicitly, not assumed covered by the other four, since it
+is exactly the module a first draft of this phase tried to import from
+the leaf and the module name alone gives no hint it belongs on this list
+unless named — so a future change cannot silently reintroduce the same
 cycle through the new leaf module.
 
 **Tests.** Every existing `suppression.py`/`reclassify.py` selector test is
