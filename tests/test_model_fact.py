@@ -137,27 +137,55 @@ class TestRecordTypeFactBridge:
         assert r.bases_fact.status is FactStatus.PRESENT
         assert r.bases_fact.value == ["Base"]
 
-    def test_explicit_fact_wins_and_overwrites_legacy_field(self) -> None:
-        """RecordType(vtable=["old"], vtable_fact=Fact.present(["new"])) ends
-        construction with self.vtable == ["new"] — the explicit Fact[...]
-        value also overwrites the legacy field, not only the reverse."""
+    def test_disagreeing_legacy_wins_over_a_stale_or_conflicting_fact(self) -> None:
+        """ADR-063 Phase 0 (Codex review): dataclasses.replace(rec, vtable=X)
+        carries the OLD, already-resolved vtable_fact forward unchanged —
+        indistinguishable, to __post_init__, from a fresh construction
+        supplying both fields. Trusting the Fact unconditionally (this
+        bridge's original design) silently reverted every such replace()
+        update, breaking the ordinary update path for every migrated public
+        dataclass field. The legacy value winning when the two disagree is
+        what makes replace() safe; a fresh construction genuinely wanting a
+        Fact inconsistent with its own legacy value is the accepted, narrow
+        residual (see bridge_legacy_and_fact's own docstring)."""
         r = RecordType(
-            name="Foo", kind="struct", vtable=["old"], vtable_fact=Fact.present(["new"])
+            name="Foo", kind="struct", vtable=["new"], vtable_fact=Fact.present(["old"])
         )
         assert r.vtable == ["new"]
         assert r.vtable_fact is not None
         assert r.vtable_fact.value == ["new"]
 
-    def test_explicit_not_collected_fact_normalizes_legacy_to_default(self) -> None:
-        r = RecordType(
-            name="Foo",
-            kind="struct",
-            vtable=["stale"],
-            vtable_fact=Fact.not_collected(),
-        )
+    def test_explicit_not_collected_fact_normalizes_legacy_when_legacy_omitted(
+        self,
+    ) -> None:
+        r = RecordType(name="Foo", kind="struct", vtable_fact=Fact.not_collected())
         assert r.vtable == []
         assert r.vtable_fact is not None
         assert r.vtable_fact.status is FactStatus.NOT_COLLECTED
+
+    def test_replace_updating_only_the_legacy_field_is_not_silently_reverted(
+        self,
+    ) -> None:
+        """The real-world shape of the Codex-reported bug: an ordinary
+        dataclasses.replace() call updating `bases` (never touching
+        `bases_fact`) must not have its update discarded in favor of the
+        stale, carried-forward Fact — the failure mode "External Python API
+        callers using dataclasses.replace() silently lose their requested
+        update" for every migrated field, not just vptr_offset_bits."""
+        r = RecordType(name="Foo", kind="struct", bases=["OldBase"])
+        r2 = dataclasses.replace(r, bases=["NewBase"])
+        assert r2.bases == ["NewBase"]
+        assert r2.bases_fact is not None
+        assert r2.bases_fact.status is FactStatus.PRESENT
+        assert r2.bases_fact.value == ["NewBase"]
+
+    def test_replace_touching_an_unrelated_field_leaves_the_pair_untouched(
+        self,
+    ) -> None:
+        r = RecordType(name="Foo", kind="struct", bases=["Base"])
+        r2 = dataclasses.replace(r, kind="union")
+        assert r2.bases == ["Base"]
+        assert r2.bases_fact == r.bases_fact
 
     def test_virtual_bases_uses_the_identical_mechanism(self) -> None:
         r_omitted = RecordType(name="Foo", kind="struct")
@@ -236,14 +264,18 @@ class TestParamFactBridge:
         assert p.is_va_list_fact.status is FactStatus.PRESENT
         assert p.is_va_list_fact.value is True
 
-    def test_explicit_fact_wins_and_overwrites_legacy_field(self) -> None:
+    def test_disagreeing_legacy_wins_over_a_stale_or_conflicting_fact(self) -> None:
+        # See RecordType's sibling test of the same name for the full
+        # replace()-safety rationale (bridge_legacy_and_fact's docstring).
         p = Param(
             name="args",
             type="va_list",
-            is_va_list=False,
-            is_va_list_fact=Fact.present(True),
+            is_va_list=True,
+            is_va_list_fact=Fact.present(False),
         )
         assert p.is_va_list is True
+        assert p.is_va_list_fact is not None
+        assert p.is_va_list_fact.value is True
 
     def test_field_type_never_widens(self) -> None:
         by_name = {f.name: f for f in dataclasses.fields(Param)}

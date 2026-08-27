@@ -74,22 +74,51 @@ def bridge_legacy_and_fact(
     caller never supplied it). ``explicit_fact`` is the sibling ``Fact[T]``
     field's value (``None`` if the caller didn't supply that either).
 
-    Whichever of the two the caller actually supplied is authoritative and
-    is written back to *both* representations, so they cannot disagree
-    afterward: an explicit ``Fact[T]`` (even one asserting no evidence)
-    overwrites the legacy field; a genuinely-omitted legacy field with no
-    explicit ``Fact[T]`` backfills to ``Fact.not_collected()``; an
-    explicitly-supplied legacy value (including the field's own normal
-    resting value, distinguished from omission by sentinel identity)
-    backfills to ``Fact.present(legacy)``.
+    ``dataclasses.replace(obj, legacy=new_value)`` re-invokes ``__init__``
+    with *every* field of ``obj``, not just ``legacy`` — including its own
+    already-resolved, non-``None`` ``explicit_fact`` sibling, carried
+    forward unchanged. A naive "an explicit Fact always wins" rule (this
+    function's own original design) cannot tell that carried-forward sibling
+    apart from a caller genuinely constructing both fields together, so it
+    silently reverted every such ``replace()`` update back to the sibling's
+    stale value (Codex review, confirmed against real ``RecordType``/
+    ``Param`` replace() calls, not just the vptr-specific case two internal
+    call sites were first patched for).
+
+    Fixed by comparing ``legacy`` against what ``explicit_fact`` itself
+    *implies* the legacy value should be (its own value, or
+    ``normalized_default`` for a non-present status): if they agree, nothing
+    was updated relative to what produced this ``explicit_fact`` (a fresh
+    construction supplying both consistently, or a ``replace()`` that left
+    this field pair untouched) and ``explicit_fact`` is trusted as-is. If
+    they disagree, ``legacy`` was the one that changed — a ``replace()``
+    updating only the legacy field, or a fresh construction stating
+    genuinely conflicting values — so ``legacy`` wins and a fresh
+    ``Fact.present(legacy)`` is derived, discarding the stale/conflicting
+    sibling. This subsumes the two vptr-specific call-site fixes: passing
+    both fields together in one ``replace()`` call still has them agree,
+    so nothing about that path changes.
+
+    One narrower case is a known, accepted residual: a ``replace()`` call
+    that intends to *downgrade only the Fact* (e.g. to
+    ``Fact.not_collected()``) while deliberately leaving a non-default
+    legacy value untouched will have that downgrade discarded, since the
+    disagreement is read as "legacy changed" rather than "Fact changed" —
+    no call site does this today (every real downgrade path, e.g.
+    ``apply_legacy_fact_backfill``, plain-mutates both fields together
+    without going through ``replace()`` at all), and the fix favors the
+    overwhelmingly common case (an ordinary field update silently lost) over
+    this narrower, currently-unused one.
     """
     if explicit_fact is not None:
-        value = (
+        implied_legacy = (
             explicit_fact.value
             if explicit_fact.value is not None
             else normalized_default
         )
-        return value, explicit_fact
+        if legacy is omitted or legacy == implied_legacy:
+            return implied_legacy, explicit_fact
+        return legacy, Fact.present(legacy)
     if legacy is omitted:
         return normalized_default, Fact.not_collected()
     return legacy, Fact.present(legacy)
