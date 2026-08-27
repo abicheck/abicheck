@@ -111,6 +111,7 @@ def apply_legacy_fact_backfill(
     schema_version: int,
     clang_vtable_facts_reliable_value: bool,
     clang_va_list_facts_reliable_value: bool,
+    ast_producer_value: str | None,
 ) -> None:
     """Correct the legacy (pre-v26) backfill for vtable/vptr/is_va_list.
 
@@ -129,6 +130,23 @@ def apply_legacy_fact_backfill(
     unrepresentable. Only runs for a legacy (pre-v26) load — a fresh v26+
     snapshot's ``*_fact`` keys were decoded explicitly at construction time
     via :func:`decode_fact` and must not be overridden here.
+
+    ``is_va_list`` needs an extra gate ``vtable``/``vptr_offset_bits`` don't
+    (Codex review, fresh evidence): CastXML never determines va_list-ness at
+    all — its own ``is_va_list`` is always a blanket ``False`` placeholder,
+    not a computed fact the way CastXML's vtable *is* one (see
+    ``clang_vtable_facts_reliable_value``'s own computation in
+    ``serialization.py``: "a castxml... snapshot's own vtable extraction
+    predates this field entirely, so it's always reliable"). But
+    ``clang_va_list_facts_reliable_value`` reads ``True`` for a CastXML
+    snapshot too, since that flag's actual meaning is "safe to trust
+    `False` as not-wrong" (CastXML never reports a real va_list parameter
+    as anything but `False`, so the polarity is never wrong) — a different
+    question from "was this fact actually collected". Reusing that flag
+    alone would silently turn "never observed" into "confirmed not
+    va_list" on every legacy CastXML load. Gated here on
+    ``ast_producer_value == "clang"`` in addition to the reliability flag,
+    so only an actual clang-family load can reach ``Fact.present(...)``.
     """
     if schema_version >= 26:
         return
@@ -140,7 +158,7 @@ def apply_legacy_fact_backfill(
             if "vptr_offset_bits_fact" not in type_dict:
                 record.vptr_offset_bits = None
                 record.vptr_offset_bits_fact = Fact.not_collected()
-    if not clang_va_list_facts_reliable_value:
+    if ast_producer_value != "clang" or not clang_va_list_facts_reliable_value:
         for func_dict, func in zip(d.get("functions", []), funcs, strict=False):
             for param_dict, param in zip(
                 func_dict.get("params", []), func.params, strict=False

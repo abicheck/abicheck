@@ -1303,6 +1303,7 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
         _schema_version,
         clang_vtable_facts_reliable_value,
         clang_va_list_facts_reliable_value,
+        ast_producer_value,
     )
 
     if "castxml_var_access_facts_reliable" in d:
