@@ -6,14 +6,19 @@ are already partially satisfied by work this ADR consolidates rather than
 replaces (see "Relationship to existing ADRs" below); none of its new
 primitives exist yet.
 **Decision maker:** abicheck maintainers
-**Relates to / builds on:** [ADR-036](036-report-view-model.md),
+**Relates to / builds on:** [ADR-024](024-public-abi-surface-resolution.md),
+[ADR-031](031-source-implementation-graph-augmentation.md),
+[ADR-036](036-report-view-model.md),
 [ADR-037](037-cli-interface-contract.md),
 [ADR-042](042-compatibility-and-gate-decision-separation.md),
+[ADR-043](043-cli-pre-1.0-surface-reset.md),
+[ADR-044](044-reachability-aware-suppression.md),
 [ADR-045](045-identity-based-old-new-entity-matching.md),
 [ADR-046](046-source-graph-identity-v2-and-evidence-merge.md),
 [ADR-048](048-canonical-entity-identity-and-graph-reconciliation.md),
 [ADR-049](049-contract-relevance-and-compatibility-configuration.md),
 [ADR-050](050-comparability-contract-and-multi-tu-manifest.md),
+[ADR-053](053-tu-link-unit-dso-attribution.md),
 [ADR-054](054-cli-project-integration-surface-consolidation.md),
 [ADR-055](055-typed-request-result-completeness-and-schema-registry.md),
 [ADR-057](057-consumer-graph-and-impact-join.md),
