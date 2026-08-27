@@ -1481,6 +1481,43 @@ sibling:
   the existing URI-scheme node kinds below. Every other kind keeps the
   existing URI-scheme id (`header://`, `source://`, ...), which was never
   the display spelling and was never at risk of this collision.
+  **`canonical_key(EntityId)` alone still collides for a real, ordinary
+  case `EntityId`'s own precision was never built to resolve, and a
+  reviewer correctly traced why: two internal-linkage (`static`)
+  functions in different translation units sharing the same scope, leaf
+  name, and signature** — e.g. two files each defining a file-local
+  `static void helper()` — mangle to the *identical* Itanium symbol (a
+  mangled name carries no file/TU component), so `EntityId`'s own
+  function-kind `extra` (mangled name, or the normalized-signature
+  fallback) cannot tell them apart either; both collapse to one
+  `canonical_key`, and `SourceGraphSummary.add_node()` merges their facts
+  and edges into a single node. This is not a new ambiguity this phase
+  introduces — it is the identical one ADR-046/048's existing L5 source-
+  graph identity (`buildsource/entity_identity.py`) was already built to
+  resolve, by preferring a compiler-provided USR (which *does* encode
+  enough context to disambiguate two same-named internal-linkage
+  declarations) over a bare mangled name. Losing that resolution the
+  moment declaration/type nodes key on `canonical_key(EntityId)` directly
+  would be a real regression for exactly the nodes the L5 builder
+  populates, not merely an unlikely edge case. **The fix reuses a
+  mechanism this plan already designed for the adjacent "same identity,
+  genuinely different declaration" shape, rather than inventing a fourth
+  one**: `model/graph.py`'s `GraphNode.id` for a `declaration`/`type` node
+  is `canonical_key(occurrence_id)` — `OccurrenceId`, not bare `EntityId`
+  — where the disambiguator Phase 2 already defined for the ODR-duplicate/
+  incomplete-declaration case is populated, for this case, from the same
+  USR/TU-context signal `entity_identity.py` already prefers when the
+  underlying evidence carries one (L5 source evidence, which is exactly
+  when two internal-linkage declarations can coexist as distinct graph
+  nodes in the first place — a pure L0-L2 binary/header-only snapshot has
+  no TU-level view to distinguish them from either, the identical
+  structural limit the flat `EntityId` layer already accepts). A
+  declaration with a globally-unique identity at the `EntityId` level
+  (the overwhelming common case — anything with external linkage, or an
+  internal-linkage entity that merely happens not to collide) gets an
+  empty disambiguator, so `canonical_key(occurrence_id)` reduces to
+  exactly `canonical_key(entity_id)` for every node this finding doesn't
+  apply to, with no behavior change for them.
   This phase is ordered after Phase 2 because the declaration/type half
   needs it — the same dependency Phase 6 (`SemanticIR`) has on Phase 2 —
   not because every node kind does.
@@ -1558,14 +1595,58 @@ sibling:
   reimplementing its own `None` check — `policy.public_surface.
   resolve_public_surface(snapshot, explicit_roots)` (a thin wrapper, not a
   second query implementation): it reads `snapshot.surface_graph`,
-  lazily builds one on the fly, in memory, using the exact same
-  `compare/surface_graph.py` builder a fresh extraction already uses when
-  that field is `None` — it needs only the flat `AbiSnapshot` fields that
-  builder already reads (header origin, declarations, export-table data),
-  none of which are themselves new or missing on an old snapshot; only the
-  *pre-built graph* is missing, not the evidence it would be built from —
-  and then calls `PublicSurfaceQuery.resolve()` with that graph, which
-  stays exactly the graph-only traversal its signature already states.
+  lazily builds one on the fly, in memory, using the flat `AbiSnapshot`
+  fields that are actually available on an old snapshot (header origin,
+  declarations, export-table data) when that field is `None` — and then
+  calls `PublicSurfaceQuery.resolve()` with that graph, which stays exactly
+  the graph-only traversal its signature already states.
+
+  **That graph is a lossy approximation, not the real thing — a first
+  draft of this paragraph claimed the backfill reuses "the exact same
+  `compare/surface_graph.py` builder a fresh extraction already uses," and
+  that claim contradicts Phase 2's own finding directly above.** Phase 2
+  establishes that `EntityId`/`ScopePath` construction needs the *typed*
+  scope-segment list the parsers track internally during the AST walk —
+  which node kind each scope-stack entry actually is (namespace vs. record
+  vs. inline namespace vs. anonymous scope), plus kind-specific data like a
+  record's access specifier — and that `qualified_name`'s flattened
+  `"::".join(...)` string is **structurally**, not merely
+  implementation-incompletely, insufficient to reconstruct that list: the
+  segment-kind tag was never captured in the string in the first place, so
+  no amount of re-parsing `qualified_name` recovers it. An old snapshot
+  predating this phase was written by a parser that only ever produced the
+  flattened string — it has no typed scope list anywhere to read, on disk
+  or in memory, because Phase 2's widening of `entry.scope` from
+  `list[str]` to typed segment records is exactly the parser-side change
+  that old snapshot's own extraction run never had. The "fresh extraction"
+  builder this sentence originally pointed to is building `EntityId`-keyed
+  nodes from that typed list **during parsing**; the backfill has no
+  parsing step to draw it from, only the flat fields the old snapshot
+  actually persisted. So the backfill cannot build a true `EntityId`-keyed
+  graph for an old snapshot, full stop — it is not a gap in this
+  wrapper's implementation to close later, it is the direct consequence of
+  the fact the backfill's only inputs are exactly what Phase 2 already
+  proved is insufficient.
+
+  The honest fix is to build an **approximate** graph instead, keyed on the
+  qualified-name string itself (optionally paired with `kind` to at least
+  separate a record from a function sharing one bare name) rather than on
+  a real `EntityId`, and to carry that distinction in the type system
+  rather than leave it implicit: the backfill returns a graph over
+  `EntityId`-shaped keys synthesized with an empty/best-effort `ScopePath`
+  (every segment collapsed to a single untyped `Namespace`-kind entry, the
+  closest-fitting existing segment type, rather than inventing a sixth
+  segment kind solely to mean "unknown") — which is **exactly the same
+  collision class `compute_public_surface()`'s/`export_surface.py`'s own
+  pre-migration string-keyed traversal already has today** (two
+  same-named declarations in different namespaces, or a record and a
+  function sharing a bare name, collapsing onto one key) — so this backfill
+  is a lateral move to the new query shape with the same known, already-
+  accepted fidelity loss, not a regression and not a new capability. A
+  fresh extraction under this phase never takes this path at all (its
+  `surface_graph` is never `None`), so the approximation is reached only
+  for a snapshot already using today's qualified-name-string semantics —
+  it degrades to what that snapshot already had, nothing worse.
   The backfilled
   graph is not written back onto the loaded `snapshot` object (no silent,
   surprising mutation of a caller's loaded snapshot) -- a query against
@@ -2410,15 +2491,29 @@ carrying a `ScopePath`, so a string rendering can't be reversed any more
 than `ScopePath` alone could. The fix follows the same shape Phase 2's
 v2 DTO already established: `semantic_ir` is excluded from the plain
 `asdict()` walk (the same special-casing `surface_graph` already needs,
-per Phase 3's finding) and encoded by its own `SemanticIR.to_dict()` as a
-**list of entries**, not a dict — `{"occurrences": [{"occurrence":
-occurrence_id.to_dict(), "entity": entity.to_dict()} for occurrence_id,
-entity in self.occurrences.items()]}` — with `SemanticIR.from_dict()`
-rebuilding the `dict[OccurrenceId, CanonicalEntity]` from that list on
-load. `OccurrenceId`/`EntityId`'s own `to_dict()`/`from_dict()` reuse the
-identical structured-segment encoding Phase 2's `storage/entity_ids.py`
-v2 DTO already defines for `ScopePath`, rather than a third, independently
-invented structural encoding for the same type.)
+per Phase 3's finding) and encoded as a **list of entries**, not a dict —
+`{"occurrences": [{"occurrence": <dto>, "entity": <dto>} for each
+occurrence_id, entity in self.occurrences.items()]}`.
+
+**The encode/decode functions themselves do not live on the domain types —
+a first draft of this phase put `to_dict()`/`from_dict()` directly on
+`SemanticIR`/`OccurrenceId`/`EntityId`, and a reviewer correctly caught
+that this reverses the dependency direction D8/ADR-061 already establish.**
+`storage/entity_ids.py`'s v2 DTO conversion is owned by `storage/`
+precisely so `model -> storage` never has to exist as an edge; a `model/
+semantic_ir.py`-resident `to_dict()` that calls into `storage/entity_ids.
+py`'s DTO functions would create exactly that edge, and reimplementing the
+identical structured-segment encoding directly inside `model/` would
+create the duplicate encoding this same paragraph already rejects one
+paragraph up. The actual owner of this conversion is `serialization.py`
+itself — the one module in this codebase already positioned to depend on
+both `model` and `storage` — via new, free (not method) functions,
+`encode_semantic_ir(semantic_ir) -> dict`/`decode_semantic_ir(data) ->
+SemanticIR`, which call `storage.entity_ids.to_dto()`/`from_dto()` for each
+`OccurrenceId`/`EntityId` and assemble/take apart the list-of-entries shape
+above. `snapshot_to_dict()`/`snapshot_from_dict()` call these two
+functions for the `semantic_ir` field instead of either a domain-type
+method or a second, storage-importing branch living in `model/`.
 `elf_metadata.py`/`pe_metadata.py`/`macho_metadata.py` are
 explicitly **not** touched by this phase — see ADR-063 D9's own
 "deliberately excluded, not an oversight" note: binary-symbol-table
