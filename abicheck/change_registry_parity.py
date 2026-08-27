@@ -222,10 +222,15 @@ PARITY_EXTENSION_ENTRIES: list[ChangeKindMeta] = [
 
     # ── ABICC full parity — remaining gaps ─────────────────────────────────
     _E("var_value_changed", _C,
-       impact="A global variable's initial/static value changed; this is "
-              "a behavior change, not an ABI break — the variable's type, "
-              "size, and address are unchanged, but code reading it may "
-              "observe a different value.",
+       impact="A global variable's initial/static value changed; this "
+              "detector only compares the value itself, not the "
+              "variable's type or size, so this fires purely on the "
+              "observed value difference. If a companion finding also "
+              "reports the type or size changed, treat that as the more "
+              "significant signal — otherwise this is a behavior change, "
+              "not an ABI break, and old binaries that inlined the old "
+              "value via constant propagation keep using it until "
+              "recompiled.",
        description_template="Global data value changed: {name} ({old} → {new})"),
     _E("type_kind_changed", _B,
        impact="An aggregate's declared kind changed (e.g. struct/class ↔ "
@@ -235,21 +240,32 @@ PARITY_EXTENSION_ENTRIES: list[ChangeKindMeta] = [
               "wrong effective location.",
        description_template="Aggregate kind changed: {name} ({old} → {new})"),
     _E("source_level_kind_changed", _A,
-       impact="An aggregate's declared kind changed at the source level "
-              "(struct/class/union); the binary layout is typically "
-              "unaffected for struct↔class (which differ only in default "
-              "access/inheritance), but source relying on the old kind's "
-              "default access, or on non-overlapping storage when a union "
-              "is involved, may no longer compile or behave correctly.",
+       impact="An aggregate's declared struct/class kind changed at the "
+              "source level; `_diff_type_kind_changes()` always routes any "
+              "union-involving transition to the separate "
+              "`type_kind_changed` kind instead, so this one is reported "
+              "only for struct↔class — which differ solely in default "
+              "member access and default inheritance access, never in "
+              "storage layout. The binary layout is unaffected; source "
+              "relying on the old kind's default access may no longer "
+              "compile or may behave differently (e.g. a member that was "
+              "implicitly public becoming implicitly private).",
        policy_overrides={"sdk_vendor": _C},
        description_template="Aggregate kind changed: {name} ({old} → {new})"),
     _E("used_reserved_field", _C,
        impact="A previously-reserved/padding field was put into real use; "
-              "since the space was already part of the struct's layout "
-              "(typically zero-initialized in existing code), the "
-              "struct's overall size is usually unaffected — but a "
-              "consumer that read the old field as unused padding may now "
-              "observe meaningful, non-zero data there.",
+              "since the space was already part of the struct's layout, "
+              "the struct's overall size is usually unaffected. This "
+              "detector only checks the rename's type/offset, not "
+              "whether existing callers actually zero-initialize that "
+              "space, so the risk runs both directions: a consumer "
+              "reading a struct the new library populated may see "
+              "meaningful, non-zero data where it expected unused "
+              "padding, and — the direction this detector cannot rule "
+              "out — an old caller that constructs the struct without "
+              "explicitly initializing the (formerly reserved) field and "
+              "passes it to the new library can hand the new callee "
+              "indeterminate bytes that it now interprets as real data.",
        description_template="Reserved field put into use: {name}::{old} → {new}"),
     _E("param_restrict_changed", _C,
        impact="A parameter's restrict qualifier was added or removed "
