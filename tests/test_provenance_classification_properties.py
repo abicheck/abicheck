@@ -184,15 +184,54 @@ def test_classification_is_invariant_to_dot_and_double_dot_spellings(
     `foo/../foo/` detour, must classify identically to the plain form --
     `_segments()`'s own `..`-collapsing (already property-tested against
     `posixpath.normpath` in `test_provenance_toolchain_properties.py`) must
-    actually reach the classification layer, not just its own unit."""
+    actually reach the classification layer, not just its own unit.
+
+    The detour is spliced INSIDE `pub_rel` itself (before its last segment),
+    not merely appended after an already-complete match -- otherwise a
+    broken/no-op `..`-collapse would leave `root + pub_rel` intact as a
+    contiguous prefix regardless, since a bare `.` segment is already
+    dropped by plain path-component splitting, and the noise trailing
+    afterward wouldn't break the containment match either way. Splicing it
+    inside `pub_rel` means an incorrect collapse genuinely breaks the
+    directory-containment match (a different `ScopeOrigin`, not just a
+    coincidentally-equal one), which is what this metamorphic property is
+    actually meant to catch. Both a public and a private header are
+    checked, matching the sibling additive-directory property's fix for
+    the identical reason -- a spliced-detour private header (a UUID-rooted
+    sibling) confirms the noise doesn't itself spuriously introduce a
+    match."""
     public_dir = _abspath((*root, *pub_rel))
-    plain_header = _abspath((*root, *pub_rel, *header_rel, f"{filename}.h"))
-    noisy_header = "/" + "/".join(
-        (*root, ".", *pub_rel, "detour", "..", *header_rel, f"{filename}.h")
+    plain_public_header = _abspath((*root, *pub_rel, *header_rel, f"{filename}.h"))
+    noisy_public_header = "/" + "/".join(
+        (
+            *root,
+            ".",
+            *pub_rel[:-1],
+            "detour",
+            "..",
+            pub_rel[-1],
+            *header_rel,
+            f"{filename}.h",
+        )
     )
-    assert _classify(plain_header, [public_dir]) == _classify(
-        noisy_header, [public_dir]
+    assert _classify(plain_public_header, [public_dir]) is ScopeOrigin.PUBLIC_HEADER
+    assert _classify(noisy_public_header, [public_dir]) is ScopeOrigin.PUBLIC_HEADER
+
+    private_sibling = (str(uuid.uuid4()), str(uuid.uuid4()))
+    plain_private_header = _abspath((*root, *private_sibling, f"{filename}.h"))
+    noisy_private_header = "/" + "/".join(
+        (
+            *root,
+            ".",
+            private_sibling[0],
+            "detour",
+            "..",
+            private_sibling[1],
+            f"{filename}.h",
+        )
     )
+    assert _classify(plain_private_header, [public_dir]) is ScopeOrigin.PRIVATE_HEADER
+    assert _classify(noisy_private_header, [public_dir]) is ScopeOrigin.PRIVATE_HEADER
 
 
 @given(
