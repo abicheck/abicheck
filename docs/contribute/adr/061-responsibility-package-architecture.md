@@ -1260,14 +1260,37 @@ declared, really does dissolve that half — *provided it declares the whole
 surface real callers
 use, not a sketch of it.* **A sixth Codex review round caught that this
 paragraph's own first draft didn't**: it named only `overrides`, `reclassify`,
-and `compute_verdict()`, but a full re-scan of every `.policy_file.<member>`
-access across the codebase (the same AST-adjacent method already used
-elsewhere in this note, not a repeat of the original three-member guess)
-found two more real, direct accesses a protocol would also have to declare —
+and `compute_verdict()`, but a re-scan of every `.policy_file.<member>`
+access — i.e. every place *something else's* `policy_file` field is read,
+the shape `DiffResult`/`BundleDiffResult` consumers actually use (the same
+AST-adjacent method already used elsewhere in this note, not a repeat of the
+original three-member guess) — found two more real, direct accesses a
+protocol would also have to declare —
 `reporter.py:1056-1065`'s `result.policy_file.source_path` and
 `compatibility_evaluation_frontend.py:1253,1256`'s
 `explicit.policy_file.base_policy` — for five total:
 `base_policy`, `overrides`, `reclassify`, `source_path`, `compute_verdict()`.
+**This is the exposed-field surface (what a `DiffResult`/`BundleDiffResult`
+consumer sees), not "every access in the codebase" — a nineteenth Codex
+review round caught that overclaim**: `checker.py`, which itself *builds* a
+`DiffResult` and receives `policy_file: PolicyFile | None` as its own
+plain function parameter (not read back off a `DiffResult`), separately
+accesses `policy_file.frozen_namespaces` (`checker.py:479`) and
+`policy_file.internal_namespaces` (`checker.py:611-613`) — two more real
+members, on a completely different code path this five-member scan doesn't
+cover. Not a gap in the five-member list *for its actual scope*
+(`checker_types.py`'s `DiffResult.policy_file` field and its downstream
+readers, the concrete problem this whole investigation exists to answer):
+`checker.py` imports `PolicyFile` directly today with no violation, because
+`policy_file.py` stays unclassified and `compare -> unclassified` is fine.
+But it is a real limit on the claim's reach — if `policy_file.py` itself is
+ever classified `policy` (a step this document does not decide), `compare
+-> policy` becomes forbidden and `checker.py`'s own parameters would need
+the identical protocol treatment, widened to cover `frozen_namespaces`/
+`internal_namespaces` and whatever else a full audit of `checker.py`'s
+(and every other `compare`-side consumer's) own `policy_file` accesses
+turns up — unaudited here, since it depends on a decision this document
+explicitly leaves open.
 
 Declaring the full five doesn't change the conclusion, only completes the
 premise it rests on: the protocol still has to *type* `overrides`/
