@@ -2114,10 +2114,48 @@ be a policy-neutral facts artifact — or require re-deriving/discarding
 those fields on every new comparison, defeating the point of storing them
 at all. The correct shape: member snapshots publish as `BundleFacts`
 (facts only, exactly as Phase 2 already defines it); per-member reports/
-`DiffResult`/assurance results are transported to the bundle-dispatch job
-as their **own**, separate artifacts (mirroring how ordinary per-target
-check reports already flow to `check-project.yml`'s aggregate step today)
-— never folded into `BundleFacts`'s own schema.
+`DiffResult`/assurance results are never folded into `BundleFacts`'s own
+schema.
+
+**"Transport the ordinary per-target reports" (the previous paragraph's
+own closing parenthetical) is not itself a working mechanism, and a
+fresh review round caught it: there is nowhere for the dispatch job to
+turn a transported report back into the `list[DiffResult]`
+`compare_bundle_sides()`/`compare_bundle_from_facts()` actually require.**
+`DiffResult` (`checker_types.py`) has neither `to_dict()` nor
+`from_dict()` — this codebase has report-to-JSON *writers*
+(`reporter.py`) and the aggregate's own report *readers*, but no loader
+that reconstructs a real `DiffResult` object from either shape.
+`compare_bundle_from_facts()` itself confirms this is a real, unsolved
+gap rather than an oversight to patch trivially: it already takes
+`per_library_results: list[DiffResult]` as a required, caller-supplied
+parameter — it has never needed to reconstruct one from disk, because
+its only caller today computes it live, in-process, in the same
+`compare --release` invocation. Two genuine fixes, not one — pick
+whichever this phase's own implementation finds simpler once attempted:
+- **Recompute rather than transport**: since the bundle-dispatch job
+  already assembles both old and new `BundleFacts`/snapshots for every
+  member (step 2 above), it can call `compare()` itself, once per member,
+  from the assembled old/new snapshot pair — producing a fresh
+  `DiffResult` directly, with no serialization round-trip needed at all.
+  This avoids inventing a new format, at the cost of re-running the
+  (already-extracted, snapshot-level) diff computation at dispatch time
+  rather than reusing whatever diff each member's own matrix cell already
+  computed.
+- **Define a real lossless `DiffResult` serializer/loader**: add
+  `to_dict()`/`from_dict()` (or an equivalent envelope) to `DiffResult`
+  itself, transported as its own artifact per member cell, letting the
+  dispatch job reuse each cell's own already-computed diff instead of
+  recomputing it. This is new, real serialization work on a core model
+  type (`checker_types.py`) that would need its own scoped design and
+  compatibility considerations (schema version, `Change`'s own nested
+  shape) — not a small addition to fold into this phase's plumbing
+  without deciding it deliberately.
+Either way, "the per-member reports already flow to `check-project.yml`'s
+aggregate step" is not, by itself, a solved problem for this use — the
+aggregate consumes the JSON report shape for its own summary/gate
+purposes, which is a different consumer with different requirements than
+`compare_bundle_sides()`'s typed `DiffResult` input.
 
 (3) build/restore `BundleFacts` from an already-assembled input — done
 (Phase 2), *once step (2)'s assembly problem above is solved*.

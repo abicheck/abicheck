@@ -87,7 +87,16 @@ with the identical incompatible internals mismatch against `_core.so`
 preserved unchanged. `compare()` must recognize this as the *same* pair
 via stable module identity (not filename) and report **no** relationship-
 level change — the naive filename-keyed reading (old pair vanishes, a
-new one appears) must not fire as a fresh incompatibility.
+new one appears) must not fire as a fresh incompatibility. **A sixth
+variant, added per the per-type keying correction below**: `_core.so`
+and `_geometry.so` already disagree on shared type A in the old release
+(and continue to, unchanged, in the new release); the new release
+additionally introduces a fresh internals mismatch on a *different*
+shared type B between the same two modules, previously compatible.
+`compare()` must report a real cross-module incompatibility for type B
+specifically — a module-pair-only aggregate that already reads
+"disagreeing" from type A must not mask type B's own, independent
+regression.
 
 ## Design
 
@@ -217,15 +226,37 @@ this plan sketched:
   The cross-module (sibling) relationship question and the cross-release
   (did-it-change) question are genuinely two different axes, and must
   stay two stages, not one repurposed function:
-  1. **Per-release module-pair compatibility graph** (a new,
+  1. **Per-release module-pair compatibility graph, keyed by (module pair,
+     shared native type) — not by module pair alone.** (a new,
      `compare/`-owned computation, run once per release): for one
      release's full set of collected modules, find every candidate shared
      native type across sibling pairs (the registration-scope logic
-     above) and record, per pair, whether they agree on binding ABI/
-     internals version/C++ stdlib ABI/debug-release identity/free-threaded
-     mode — the same shape G38's bundle-internal detectors already
-     establish for a *release's own* cross-DSO relationships, applied here
-     to Python binding modules instead of DSOs.
+     above) and record, per **(pair, type)** combination, whether the pair
+     agrees on binding ABI/internals version/C++ stdlib ABI/debug-release
+     identity/free-threaded mode for *that specific type* — the same
+     shape G38's bundle-internal detectors already establish for a
+     *release's own* cross-DSO relationships, applied here to Python
+     binding modules instead of DSOs.
+
+     **A single aggregated agree/disagree boolean per module pair — an
+     earlier draft of this stage's own shape — silently loses regressions
+     once a pair shares more than one candidate type, confirmed by a
+     fresh review round.** If `_core.so`/`_geometry.so` already disagree
+     on shared type A, and a new release introduces a *fresh*
+     incompatibility on a *different*, previously-compatible shared type B
+     between the same two modules, a pair-level aggregate (however it
+     combines multiple types' states — worst-of, any-disagree, or
+     otherwise) reads "disagreeing" on both the old release and the new
+     one: nothing about the *pair's own aggregated state* changed, so
+     stage 2's diff — which compares pair-level states between releases —
+     emits nothing, even though the release genuinely introduced a new,
+     real incompatibility on type B. Keying and diffing by (pair, type)
+     instead of by pair alone closes this: type A's own (pair, type)
+     entry stays `disagreeing → disagreeing` (correctly silent, nothing
+     changed for that type), while type B's own entry transitions
+     `agreeing → disagreeing` (correctly emits a `Change`, per the
+     already-established transition table) — the two types' fates never
+     collapse into one shared pair-level signal.
   2. **`compare(old, new, policy) -> Changes`** then compares *that graph*
      between the old release and the new release — i.e. `old`/`new` are
      genuinely the old-release and new-release module-pair graphs (or,
