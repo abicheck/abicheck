@@ -368,3 +368,20 @@ class TestBranchRulesetArtifact:
         assert "branch-protection-ruleset.json" in runbook
         assert "gh api" in runbook
         assert "/repos/abicheck/abicheck/rulesets" in runbook
+
+    def test_shared_list_is_actually_documented_in_agents_md(self) -> None:
+        """The two tests above only prove the JSON agrees with
+        `REQUIRED_CHECK_NAMES` -- a hard-coded tuple in *this* file, which
+        could itself drift from `AGENTS.md`'s prose without anything
+        failing. Close that gap the same way
+        `test_gate_job_check_name_is_documented_as_required` already does
+        for the two neutral-aggregate gate checks: every name must appear
+        backtick-quoted in `AGENTS.md`'s own required-check list, so a name
+        added to/removed from one place and not the other is a real
+        failure, not just a same-file tautology (Codex review on #887)."""
+        agents_md = (ROOT / ".github" / "AGENTS.md").read_text(encoding="utf-8")
+        for name in REQUIRED_CHECK_NAMES:
+            assert f"`{name}`" in agents_md, (
+                f"{name!r} is in REQUIRED_CHECK_NAMES but not documented, "
+                f"backtick-quoted, in .github/AGENTS.md"
+            )

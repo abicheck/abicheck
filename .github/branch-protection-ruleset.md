@@ -43,9 +43,19 @@ summary`).
 
 ## Update instead of duplicate
 
-If a ruleset with this name (or an equivalent classic branch-protection
-config) already exists, don't create a second one — find its id and `PUT` the
-same body instead:
+Check both mechanisms before applying anything — GitHub Rulesets and
+*classic* branch protection are two separate systems with two separate APIs,
+and only one of the two runbooks below applies depending on which one
+`main` currently has (the two can also coexist; if both are present, the
+more restrictive of the two wins per check, so applying this Ruleset
+alongside an existing classic config is safe even if consolidating them
+isn't done in the same pass).
+
+**If a matching Ruleset already exists** (`gh api
+/repos/abicheck/abicheck/rulesets` returns one — this is what `main`'s repo
+settings show today, since `protected: true` alone doesn't say which
+mechanism supplies it), don't create a second one — find its id and `PUT`
+the same body instead:
 
 ```bash
 gh api /repos/abicheck/abicheck/rulesets | jq '.[] | {id, name}'
@@ -53,6 +63,23 @@ gh api --method PUT -H "Accept: application/vnd.github+json" \
   /repos/abicheck/abicheck/rulesets/<id> \
   --input .github/branch-protection-ruleset.json
 ```
+
+**If `main` is instead protected by *classic* branch protection** (the
+`GET /repos/.../rulesets` call above returns nothing, but
+`GET /repos/abicheck/abicheck/branches/main/protection` returns a config) —
+`branch-protection-ruleset.json`'s Ruleset payload doesn't apply there at
+all; a Ruleset object and a classic protection config are different
+resources with different shapes, and `PUT /rulesets/<id>` has no classic
+equivalent. Either update the classic config directly with GitHub's
+[branch-protection endpoint](https://docs.github.com/en/rest/branches/branch-protection#update-branch-protection),
+translating this JSON's `required_status_checks.required_status_checks`
+context list into that endpoint's own
+`required_status_checks.contexts`/`checks` array, or — the simpler path,
+and the one this repo's docs assume going forward — leave the classic
+config as-is and `POST` this Ruleset payload as a *new*, additional
+Ruleset (the `POST` command in "Apply" above); the Ruleset's own
+requirements are enforced independently and at least as strictly either
+way.
 
 ## Verify enforcement is real, not just configured
 
