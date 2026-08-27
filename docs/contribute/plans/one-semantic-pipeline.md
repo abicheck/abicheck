@@ -137,22 +137,26 @@ has no truth value — read .is_present or .value_or(...)")` — plain
 absence of `__bool__` leaves ordinary Python object truthiness in effect
 (every `Fact[T]` instance would be truthy regardless of status), so the
 no-implicit-truthiness invariant needs the raise, not silence.
-**A second, independent override is needed for the same reason, and a
-first draft of this phase defined only `__bool__`**: `Fact.__eq__`/
-`Fact.__ne__` are also explicitly defined to raise the identical
-`TypeError`, rather than left to the dataclass-generated structural
-`__eq__` (comparing `status`/`value`/`diagnostics` together) that `eq=True`
-— the dataclass default — would otherwise provide. Without this second
-override, `old.default != new.default` does not raise at all: it silently
-returns a plain `bool` from comparing the two `Fact` *wrappers*
-structurally, never calling `__bool__`, and never raising — exactly the
-kind of untested, accidentally-succeeding branch this phase's whole
-"comparison becomes a type error, not an untested branch" claim depends
-on not existing. A detector that genuinely needs full structural equality
-(two `Fact` objects, diagnostics included — a test assertion, not
-detection logic) calls a named helper (`fact.same_as(other)`) instead of
-`==`, keeping `==`/`!=` reserved for the error case that forces unwrapping
-first.
+**A second override was attempted for the same reason and reverted — a
+first draft of this phase defined `Fact.__eq__`/`__ne__` to raise the
+identical `TypeError`, and a later review round correctly rejected it.**
+`Fact[T]` is itself a field on `RecordType`/`Function`/every other
+fact-bearing dataclass, and a raising `__eq__` on a *field* poisons the
+*containing* dataclass's own generated `__eq__` the instant comparison
+reaches that field: two otherwise-identical `RecordType` instances (an
+ordinary test assertion, a list/snapshot comparison, Phase 6's own
+`CanonicalEntity` equality) would raise instead of comparing, which is a
+far more disruptive failure than the narrow one this override was meant
+to close. `Fact.__eq__` stays the plain dataclass-generated structural
+comparison (`status`/`value`/`diagnostics` together) — correct for a
+containing object's own equality, and exactly what `old.default !=
+new.default` gets instead of a raise. The actual guard against that
+specific misuse (comparing two `Fact[...]` values directly inside
+*detector* logic, instead of unwrapping first) is the same mechanism
+already enforcing the `.value_or()` rule: the `check_ai_readiness.py`
+static AST check, widened to also flag a bare `Fact[...]`-typed field on
+either side of `==`/`!=` inside a detector module — same file scope, same
+enforcement layer, not a second runtime mechanism underneath the first.
 
 **Scope for this phase (deliberately narrow).** Convert exactly the three
 fields AGENTS.md's "Known gaps" names as actively causing fabricated
@@ -358,15 +362,24 @@ the full set is enforced mechanically once written, but the file list
 itself must name all of them as phase-0 work, not assume the gate alone
 will surface the rest as a later, unplanned fixup.
 
-**Tests.** A direct test on `Fact[T]`'s two raising overrides, added
-before any detector migration depends on them: `if fact:` raises
-`TypeError`; `fact_a != fact_b` and `fact_a == fact_b` both raise the
-identical `TypeError` (pinning the exact counterexample this finding
-raised — confirmed to fail against a version of `Fact` that defines only
-`__bool__` and leaves equality to the dataclass default, which returns a
-plain `bool` instead of raising); and `fact_a.same_as(fact_b)` performs
-the real structural comparison for the one legitimate caller shape (a
-test asserting two `Fact` objects are fully equal, diagnostics included).
+**Tests.** A direct test on `Fact[T]`'s actual comparison contract, added
+before any detector migration depends on it: `if fact:` raises
+`TypeError`; `fact_a == fact_b`/`fact_a != fact_b` do **not** raise —
+they perform the plain structural comparison (`status`/`value`/
+`diagnostics`), the same as any other dataclass — pinning the reverted
+design directly (confirmed to fail against a version of `Fact` that
+defines a raising `__eq__`/`__ne__`, which breaks this test as well as
+every containing `RecordType`/`Function` comparison). A second test
+confirms the containing-object guarantee this reversion exists to
+protect: two separately-constructed but field-identical `RecordType`
+instances (including equal `Fact[...]` sibling fields) compare equal via
+the dataclass-generated `RecordType.__eq__`, without raising — confirmed
+to fail against the raising design, which is the actual counterexample
+that caused the reversion. A third test covers the real enforcement
+point instead: a static AST check flags `fact_a == fact_b`/`fact_a !=
+fact_b` (or against a literal) written directly inside a `diff_*.py`
+detector module, the same mechanism and file scope as the existing
+`.value_or()` rule.
 Port the existing `tests/test_vtable_evidence_guard.py`
 Hypothesis properties to assert over `Fact[...]` states directly, not only
 derived booleans; add a property asserting no detector in `diff_types.py`/
@@ -1849,9 +1862,38 @@ when a report carries them, and falls back to decoding the legacy
 "read once, decode for legacy, never for fresh" backfill shape Phase 0
 already established for `Fact[...]` against the old reliability flags —
 this phase is the second place that exact shape applies, not a new
-pattern). `fold.py`'s own aggregation then operates on `RunOutcome.gate`
-values (an explicit ordering over `PolicyGateDecision`, not `max()` over
-raw integers) for every report new enough to carry them, and its
+pattern).
+
+**Reading `RunOutcome.gate` alone is not enough, and a first draft of
+this phase's fold stopped there.** `PolicyGateDecision` (D6, above) only
+orders *compatibility* categories (`NONE`/`ADDITION_QUALITY`/
+`POTENTIAL_BREAKING`/`ABI_BREAKING`) — it has no slot for a `scan`
+report's budget-overflow or not-comparable failures, which are exactly
+why `scan`'s own legacy exit-code scheme is `0/2/4/5/6`, not `0/1/2/4`: 5
+and 6 are real, independent blocking conditions today's raw-code fallback
+(`gate.py::from_scan_report`'s existing discriminated-on-raw-code branch)
+correctly keeps blocking, per that function's own docstring. `RunOutcome`
+carries this as the separate `operational: OperationalStatus` axis for
+exactly this reason — but a fold that reads only `.gate` for a *fresh*
+report, once the legacy-decode fallback stops running for it, silently
+drops that axis: a fresh `scan` report hitting budget overflow would
+carry `gate = NONE` (no compatibility category fired) and an
+`operational` status recording the overflow, and a fold that never
+inspects `operational` at all would aggregate it as passing — the opposite
+of what the pre-existing raw-code path already gets right. The fix:
+`fold.py`'s aggregation reads *both* axes and folds each into the
+aggregate's blocking decision independently — `PolicyGateDecision`'s own
+ordering for the compatibility contribution, plus a defined blocking set
+over `OperationalStatus` (budget overflow, not-comparable/evidence-
+contract-error, and any sibling operational failure this phase's
+`RunOutcome` construction populates) for the operational contribution —
+combined with the same orthogonal `max()`-style fold ADR-049 Phase 7's
+contract-coverage axis already uses elsewhere in this codebase for
+exactly this "two independent failure axes, neither allowed to mask the
+other" shape, not a single combined ordering that could let one axis's
+`NONE` silently override the other's real failure. `fold.py`'s own
+aggregation then operates on both folded values (never `max()` over raw
+integers) for every report new enough to carry them, and its
 `exit_code()` method becomes the *one* place — the aggregate's own
 external encoder, mirroring the CLI's `_exit_with_severity_or_verdict` —
 that turns the aggregated `RunOutcome` back into the integer `aggregate`'s
@@ -1933,7 +1975,16 @@ fixture, run twice — once against a report carrying only the legacy
 `exit_code` field (proving the fallback decode path reproduces today's
 behavior exactly) and once against a report regenerated with the new
 structured fields (proving the new path agrees with the old one on every
-existing fixture, not only on fixtures written after this phase). A third
+existing fixture, not only on fixtures written after this phase).
+**Explicitly included in that fixture set, not left to be covered
+incidentally: the two `scan`-specific exit codes `PolicyGateDecision`
+alone cannot represent** — a fresh `scan` report carrying exit 5 (budget
+overflow) and one carrying exit 6 (not-comparable), each constructed with
+the new structured `RunOutcome` fields, asserted to still aggregate as
+blocking through the new operational-axis fold — confirmed to fail
+against a fold that reads only `RunOutcome.gate` and ignores
+`.operational` entirely, which is the exact regression this finding
+caught. A third
 parity test covers the writers this phase adds — all three of them, not
 only `scan_engine.ScanOutcome`: a freshly-generated `scan` report
 (`ScanOutcome.to_dict()`), a freshly-run typed-API `ScanResult.to_dict()`,
@@ -1964,7 +2015,9 @@ would never have flagged it). Stated explicitly, matching ADR-063 D6's
 own restated encoder list: `gate.py` reads structured `RunOutcome` fields
 first (legacy `exit_code` decoding as the named fallback, never the only
 path for a fresh report); `fold.py`'s aggregation orders and `max()`s
-`PolicyGateDecision` values, never raw integers; and `fold.py::exit_code()`
+`PolicyGateDecision` values **and independently folds `OperationalStatus`'s
+own blocking set, per the finding above** — never raw integers, and never
+the compatibility axis alone; and `fold.py::exit_code()`
 is the one place that aggregated value converts to the integer `aggregate`'s
 own JSON output and process exit code need — three steps, not one
 function call, because `aggregate` has a multi-target pipeline the CLI's

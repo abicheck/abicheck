@@ -235,22 +235,32 @@ several of the above simultaneously — documented repeatedly in AGENTS.md's
 entries, the `Param.is_va_list` reliability-flag entry, the per-finding
 evidence-provider gap) as a root cause of fabricated or suppressed
 findings. A detector cannot write `if old.default != new.default` without
-first unwrapping availability — the invalid comparison becomes a type
-error, not an untested branch. This needs two separate, explicit
-overrides, not one: `Fact.__bool__` is defined to raise rather than
-merely left undefined (an object with no `__bool__` is still truthy in
-Python), **and, independently, `Fact.__eq__`/`Fact.__ne__` are defined to
-raise the same way** — a frozen dataclass's auto-generated `__eq__`
-(the default Python gives any dataclass with `eq=True`, the default)
-would otherwise compare two `Fact`s structurally (status, value, and
-diagnostics together) and return a plain `bool` without ever calling
-`__bool__` at all, silently answering `old.default != new.default` with a
-comparison the detector didn't intend (wrapper equality, not value
-equality) rather than raising. Both overrides exist so neither truth
-testing nor equality comparison can accidentally collapse the status
-space; a detector that genuinely needs structural equality (comparing two
-full `Fact` objects, diagnostics included, in a test assertion) calls a
-named helper instead of `==`. `abicheck/storage/availability.py`'s existing
+first unwrapping availability — `Fact.__bool__` is defined to raise
+rather than merely left undefined (an object with no `__bool__` is still
+truthy in Python), so `if fact:` itself is a type error, not an untested
+branch. **`Fact.__eq__`/`__ne__` are deliberately *not* given the same
+raising treatment — an earlier draft of this decision proposed exactly
+that, and review correctly rejected it.** `Fact[T]` is a field on
+`RecordType`/`Function`/every other fact-bearing model dataclass, and a
+raising `__eq__` on a field poisons the *containing* dataclass's own
+generated `__eq__` the moment it reaches that field — comparing two
+otherwise-identical `RecordType` instances (ordinary test assertions,
+list/snapshot comparisons, `SemanticIR`'s own `CanonicalEntity` equality)
+would raise `TypeError` too, which is a far more disruptive failure than
+the one this decision is trying to prevent. `Fact.__eq__` instead keeps
+the plain dataclass-generated structural comparison (`status`, `value`,
+and `diagnostics` together) — correct and unsurprising for a
+containing object's own equality, and exactly what a detector comparing
+`old.default != new.default` would get instead of the raise this
+decision's own earlier text claimed. Guarding *that* specific
+misuse — comparing two `Fact[...]` values directly inside detector logic,
+rather than unwrapping first — is enforced the same way the `.value_or()`
+misuse already is: a static AST check (the implementation plan's
+`check_ai_readiness.py` rule) flags a bare `Fact[...]`-typed field on
+either side of `==`/`!=` inside a detector module, the identical
+mechanism and the identical file scope as the existing bare-attribute-read
+rule, rather than a second runtime mechanism layered underneath the first.
+`abicheck/storage/availability.py`'s existing
 `FactAvailability`/`FactStatus` vocabulary is reused verbatim as the wire
 encoding `Fact[T]` serializes to — but because ADR-061 fixes the
 dependency direction as `storage -> model`, the vocabulary itself
@@ -389,7 +399,14 @@ ABI_BREAKING`, or the equivalent `IssueCategory`-shaped ordering
 `compute_exit_code`'s own severity scheme already uses) carrying enough to
 *derive* an exit code, never one itself — `fold.py`'s aggregation orders
 and `max()`s `PolicyGateDecision` values directly, with no integer in the
-comparison. Converting a `PolicyGateDecision` to `severity.GateDecision.
+comparison. **`PolicyGateDecision` alone is not the whole gate, though —
+it only orders *compatibility* categories, and `scan`'s own legacy exit
+codes (5 for budget overflow, 6 for not-comparable) are real, independent
+blocking conditions neither category covers.** `RunOutcome.operational`
+carries exactly this, and `fold.py` folds its own blocking set alongside
+`PolicyGateDecision`'s ordering — two independent axes, neither masking
+the other, the same orthogonal-fold shape ADR-049 Phase 7's contract-
+coverage axis already uses elsewhere in this codebase. Converting a `PolicyGateDecision` to `severity.GateDecision.
 exit_code` is confined to the same boundary encoders D6 already names (the
 CLI's `_exit_with_severity_or_verdict`, the Action's encoder, and
 `aggregate`'s own `exit_code()` method) — every one of them already exists
