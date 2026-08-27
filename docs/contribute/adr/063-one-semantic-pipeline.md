@@ -200,8 +200,10 @@ execution paths (`perform_elf_dump`/`handle_non_elf_dump`) are meant to
 converge on the `resolve_dump_request`/`execute_dump_request` split already
 added to `service_dump_pipeline.py`, but still run their own legacy route
 today. `scan`'s candidate resolution (`scan_engine._build_new_snapshot`)
-already converges on the shared `service_input_resolution.
-_resolve_side_snapshot_impl` primitive — the same one `execute_dump_request`
+already converges on the shared `workflows.artifact.execute.
+_resolve_side_snapshot_impl` primitive (`service_input_resolution` is only
+a delegating facade over this same module; import the real owner in new
+code, per that facade's own docstring) — the same one `execute_dump_request`
 itself calls internally (`resolve_dump_request` does not; it only validates
 evidence and builds a `ResolvedDumpRequest`) — not on
 `resolve_dump_request`/`execute_dump_request` verbatim, since `scan` has no
