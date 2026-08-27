@@ -308,6 +308,20 @@ mistake (see `AGENTS.md`'s numbered findings on the L3→L2-fold entry).
 - `.github/workflows/publish-baseline.yml`, `update-main-baseline.yml` —
   Phase 1: resolve a run plan / `ResolvedExtractionContext` before dumping
   the old side; forward `consumer_compile_*`.
+- **`actions/baseline/action.yml`/`actions/baseline/run.sh`** — required,
+  not optional: confirmed by reading both directly. Both workflows above
+  don't invoke `dump` themselves — they call `uses:
+  ./.publish-baseline-src/actions/baseline`, and that composite Action's
+  own `run.sh` builds every dump command as `CMD=(abicheck dump
+  "$artifact")`, extended only from its own `libraries`/`build-info`/
+  `depth` inputs (`action.yml`'s full input list has no compiler/frontend
+  field at all). Resolving `consumer_compile_*` in the calling workflow
+  therefore cannot reach the actual dump invocation unless
+  `actions/baseline/action.yml` gains new inputs (e.g. `gcc-path`/
+  `gcc-options`/`ast-frontend`, mirroring `check-project.yml`'s own
+  `consumer-gcc-path`/`consumer-gcc-options`/`consumer-ast-frontend`
+  naming) and `run.sh` forwards them onto its `CMD` array — without this,
+  the workflow-level resolution work is inert.
 - `abicheck/storage/` (new module) — Phase 1: the baseline-manifest
   schema/serialization itself — manifest fields (producer/consumer compiler
   context, header frontend, header roots, evidence identity, depth,
@@ -388,8 +402,12 @@ mistake (see `AGENTS.md`'s numbered findings on the L3→L2-fold entry).
 XL, phased, sequential (each phase's acceptance test should stay green
 before starting the next):
 
-- Phase 1 (baseline consumer-context parity): L — mostly workflow +
-  manifest plumbing, reusing G34's already-built projection.
+- Phase 1 (baseline consumer-context parity): L — workflow + manifest
+  plumbing, reusing G34's already-built projection, plus new
+  `actions/baseline` inputs to actually carry the resolved
+  `consumer_compile_*` values into the dump command that Action
+  constructs (confirmed by reading `actions/baseline/run.sh` directly —
+  the workflow-level resolution alone doesn't reach it).
 - Phase 2 (per-target header projection): M — schema + `RunPlanCheck` +
   workflow forwarding, following an established precedent
   (`consumer_compile_*`) closely.

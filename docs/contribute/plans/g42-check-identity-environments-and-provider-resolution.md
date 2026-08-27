@@ -233,12 +233,19 @@ from the report.
   validated — near `abicheck/buildsource/project_targets.py`) — new
   `environments:` top-level block, new `id`/`analysis:`/`environment:` check
   fields.
-- `abicheck/environment_matrix.py` — extend `EnvironmentMatrix`'s schema
-  with the new provider/sysroot section described above (a new
-  `_KNOWN_TOP_LEVEL_KEYS` entry, its own parser mirroring
-  `_parse_sycl_constraints`/`_parse_cuda_constraints`'s existing shape) —
-  without this, `matrix:` cannot carry what the provider resolver needs and
-  the whole feature degrades to incomplete coverage by construction.
+- **The new provider/sysroot section's parser/model — `extract/`/`model/`,
+  not `abicheck/environment_matrix.py` directly.** That module is itself a
+  `legacy_root_modules` no-growth entry per `architecture/modules.yaml`
+  (confirmed), so the new parser (mirroring `_parse_sycl_constraints`/
+  `_parse_cuda_constraints`'s existing shape) belongs in `abicheck/
+  extract/` (parsing new environment facts) and the resulting value type
+  in `abicheck/model/` (a shared value read by the resolver in "Files &
+  surfaces" below) — `environment_matrix.py`'s own `EnvironmentMatrix`
+  gains only a thin delegating field/property, not the new
+  `_KNOWN_TOP_LEVEL_KEYS`/parsing logic itself. Without this new section
+  existing *somewhere* real, `matrix:` cannot carry what the provider
+  resolver needs and the whole feature degrades to incomplete coverage by
+  construction — that requirement is unchanged; only its placement moved.
 - **Environment-aware provider resolution — routed through ADR-061's
   canonical package owners, not `abicheck/bundle.py`** (a
   `legacy_root_modules` no-growth entry per `architecture/modules.yaml`):

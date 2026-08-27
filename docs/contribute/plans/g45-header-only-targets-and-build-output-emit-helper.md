@@ -188,19 +188,26 @@ file can never itself fail the validator it's meant to satisfy.
   modules.yaml`, so it should gain only the thin `@project_group.command`
   registration shim, not the builder logic itself.
 - `docs/reference/cli-reference.md` (generated) — new subcommand entry.
-- **`actions/check-target/action.yml`/`actions/check-target/run.sh`** — a
-  header-only target still cannot reach a real check without this: `new-
-  library` is declared `required: true` in `action.yml`, and `run.sh`'s
+- **`actions/check-target/action.yml`** — declares `new-library` as
+  `required: true`; must be relaxed to optional so a header-only target's
+  check invocation can omit it.
+- **`actions/check-target/run.sh`** — forwards its own inputs into the
+  nested root Action; needs to keep working with `new-library` absent
+  (it does not itself construct the `dump`/`compare` CLI command — that
+  happens one layer further in, corrected below).
+- **Repository-root `action/run.sh`** (not `actions/check-target/run.sh` —
+  an earlier draft of this plan attributed the enforcement to the wrong
+  `run.sh`; corrected after further review) — this is the file whose
   compare-mode dispatch does `CMD+=("${INPUT_NEW_LIBRARY:?new-library is
-  required}")` — a hard failure with no binary operand. Confirmed by
-  reading both files directly. This plan must relax `new-library` to
-  optional and make this Action branch depend explicitly on the new
-  binary-less `dump`/`compare` capability described next — **there is no
-  existing binary-less CLI path to mirror here**: the next bullet's own
-  fresh evidence (`dump_source_only()` discards `-H`; `compare.py` has no
-  header-only operand shape at all) rules that out. This Action relaxation
+  required}")`, a hard failure with no binary operand. Confirmed by reading
+  it directly. This is where the actual "no binary, headers/source-only"
+  branch must be added, dispatching into the new binary-less `dump`/
+  `compare` capability described next — **there is no existing binary-less
+  CLI path to mirror here**: the next bullet's own fresh evidence
+  (`dump_source_only()` discards `-H`; `compare.py` has no header-only
+  operand shape at all) rules that out. This root-Action dispatch change
   and the new CLI capability are one dependent pair, not two independent
-  fixes — without this, the `build-output.json` exemption above is
+  fixes — without both, the `build-output.json` exemption above is
   necessary but not sufficient: the target still can't run a candidate
   check end to end.
 - **`abicheck/frontends/cli/commands/dump.py`/`compare.py`** — this is a
@@ -252,10 +259,12 @@ showed the binary-less *CLI* path doesn't exist yet either — see below):
 - Header-only targets: L — `project_targets.py`/`build_output.py`
   relaxation is S–M on its own, but reaching a real, runnable check needs
   three layers, not one: (1) `actions/check-target/action.yml`'s
-  `new-library: required: true` relaxed and `run.sh`'s compare-mode
-  dispatch given a no-binary branch (confirmed by reading both — `run.sh`'s
+  `new-library: required: true` relaxed, plus the repository-root
+  `action/run.sh` (not `actions/check-target/run.sh`, which only forwards
+  inputs — confirmed by reading both) given a no-binary compare-mode
+  branch, since it's the root `run.sh` whose
   `CMD+=("${INPUT_NEW_LIBRARY:?new-library is required}")` fails hard with
-  no operand today); (2) a genuine new `dump`/`compare` CLI capability —
+  no operand today; (2) a genuine new `dump`/`compare` CLI capability —
   confirmed by reading `dump.py`/`compare.py` directly, not assumed: today's
   binary-less `dump` path (`dump_source_only()`) discards `-H`/`--header`
   entirely rather than running an L2 header-AST pass, and `compare.py`'s
