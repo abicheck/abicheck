@@ -93,6 +93,8 @@ class TestObjectRef:
             "sha256:" + "ab" * 32 + "cd",  # right algorithm, wrong length
             "notreal:" + "ab" * 32,  # unknown algorithm
             "shake_128:" + "ab" * 16,  # a real algorithm with no fixed size
+            "SHA256:" + "ab" * 32,  # a real hashlib alias, not the canonical spelling
+            "sha-256:" + "ab" * 32,  # another alias hashlib accepts
         ],
     )
     def test_a_malformed_digest_is_refused_at_construction(self, digest: str) -> None:
@@ -113,6 +115,15 @@ class TestObjectRef:
         assert digest.startswith("sha3_256:")
         ref = ObjectRef(kind="graph", digest=digest)
         assert ref.digest == digest
+
+    def test_an_alias_that_resolves_but_is_never_written_is_refused(self) -> None:
+        # hashlib accepts "SHA256" and normalizes it to "sha256", but
+        # semantic_digest() only ever *writes* "sha256" -- an ObjectRef built
+        # from the alias would compute a different objects/ path than the
+        # one InMemoryObjectStore.put() actually used, so it could never
+        # resolve through the store.
+        with pytest.raises(ValueError, match="canonical spelling"):
+            ObjectRef(kind="graph", digest="SHA256:" + "ab" * 32)
 
     def test_size_alone_does_not_change_identity(self) -> None:
         a = ObjectRef(kind="graph", digest="sha256:" + "ab" * 32, size=1)
@@ -147,6 +158,8 @@ class TestPathLayout:
             "notreal:" + "ab" * 32,  # not a real hashlib algorithm
             "shake_128:" + "ab" * 16,  # real algorithm, no fixed digest size
             "sha256:" + ("AB" * 32),  # uppercase hex is not this format's spelling
+            "SHA256:" + "ab" * 32,  # a real alias, not the canonical spelling
+            "sha-256:" + "ab" * 32,  # another alias hashlib.new() accepts
         ],
     )
     def test_object_relpath_refuses_a_malformed_digest(self, digest: str) -> None:
@@ -460,6 +473,40 @@ class TestPackageManifest:
                 artifact_refs=(
                     self._A,
                     ArtifactRef(artifact_id="LIBFOO", variant_id="cpu-gcc", kind="pe"),
+                ),
+            )
+
+    def test_unicode_normalized_variant_id_collision_is_refused(self) -> None:
+        # "é" (one code point, U+00E9) and "e" followed by a combining
+        # acute accent (U+0301) render identically and are canonically
+        # equivalent text, but compare unequal even under casefold() alone.
+        # A normalization-insensitive filesystem (macOS's usual default)
+        # treats them as the same path component.
+        precomposed = "café"
+        decomposed = "café"
+        assert precomposed != decomposed  # the premise: distinct Python strings
+        with pytest.raises(ValueError, match="normalization-insensitive"):
+            PackageManifest(
+                variant_refs=(
+                    VariantRef(variant_id=precomposed),
+                    VariantRef(variant_id=decomposed),
+                )
+            )
+
+    def test_unicode_normalized_artifact_id_collision_is_refused(self) -> None:
+        precomposed = "café"
+        decomposed = "café"
+        with pytest.raises(ValueError, match="normalization-insensitive"):
+            PackageManifest(
+                variant_refs=(self._V,),
+                artifact_refs=(
+                    self._A,
+                    ArtifactRef(
+                        artifact_id=decomposed, variant_id="cpu-gcc", kind="pe"
+                    ),
+                    ArtifactRef(
+                        artifact_id=precomposed, variant_id="cpu-gcc", kind="pe"
+                    ),
                 ),
             )
 

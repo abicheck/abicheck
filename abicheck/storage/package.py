@@ -62,6 +62,7 @@ same D6 directory.
 from __future__ import annotations
 
 import hashlib
+import unicodedata
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from types import MappingProxyType
@@ -192,25 +193,38 @@ def _safe_ref_id(value: str, field_name: str) -> str:
     return value
 
 
-def _reject_case_insensitive_collisions(ids: list[str], record_kind: str) -> None:
-    """Two ids differing only by case, refused before they reach a manifest.
+def _reject_filesystem_collisions(ids: list[str], record_kind: str) -> None:
+    """Two ids a real filesystem would treat as the same path, refused early.
 
-    Distinct on a case-sensitive filesystem, `variant_ref_relpath`/
-    `artifact_ref_relpath` would still write `Foo.json` and `foo.json` into
-    the same directory as two files -- on a case-insensitive one (the
-    default on Windows and on macOS's usual filesystem), those are one file,
-    so the second write silently overwrites the first. Caught here, at the
-    one place every id is collected, rather than only once a case-insensitive
-    writer target reproduces it.
+    Two ways two *distinct* Python strings still name one file:
+
+    * **Case** -- `Foo`/`foo` are distinct strings but one file on a
+      case-insensitive filesystem (the default on Windows and on macOS's
+      usual volume format), so `variant_ref_relpath`/`artifact_ref_relpath`
+      would write both as the same path, the second silently overwriting
+      the first.
+    * **Unicode normalization** -- `"é"` (`é`, one code point) and
+      `"é"` (`e` + a combining acute accent) render identically and
+      are canonically equivalent text, but compare unequal, and unequal
+      under `casefold()` alone too. A normalization-insensitive filesystem
+      (macOS's default APFS/HFS+ configuration) treats them as the same
+      path component for exactly the reason a case-insensitive one treats
+      `Foo`/`foo` as the same one.
+
+    Both are folded together -- NFC normalization first, so the two
+    spellings above collapse to one string, then `casefold()` for case --
+    before comparing, so either kind of collision is caught here, at the
+    one place every id is collected, rather than only once a real writer
+    target reproduces it.
     """
     seen: dict[str, str] = {}
     for ref_id in ids:
-        folded = ref_id.casefold()
+        folded = unicodedata.normalize("NFC", ref_id).casefold()
         collision = seen.get(folded)
         if collision is not None and collision != ref_id:
             raise ValueError(
-                f"{record_kind} {ref_id!r} and {collision!r} differ only by "
-                "case, and would collide on a case-insensitive filesystem"
+                f"{record_kind} {ref_id!r} and {collision!r} would collide on "
+                "a case-insensitive or normalization-insensitive filesystem"
             )
         seen[folded] = ref_id
 
@@ -260,11 +274,26 @@ def object_relpath(digest: str) -> str:
     if not separator or not algorithm or not hexdigest:
         raise ValueError(f"digest must be in '<algorithm>:<hex>' form, got {digest!r}")
     try:
-        digest_size = hashlib.new(algorithm).digest_size
+        probe = hashlib.new(algorithm)
     except (ValueError, TypeError):
         raise ValueError(
             f"{algorithm!r} is not a hashlib-known digest algorithm: {digest!r}"
         ) from None
+    if probe.name != algorithm:
+        # `hashlib.new` accepts aliases (`SHA256`, `sha-256`) and resolves
+        # them to one canonical spelling -- but `semantic_digest` always
+        # writes that canonical spelling (`digester.name`), never the
+        # caller's own. A reference built from an alias would compute a
+        # *different* path here than the one the object store actually put
+        # the content under, so `has()`/`get()` on it would never resolve --
+        # the same "accepted but unaddressable" failure this whole function
+        # exists to rule out, one level up.
+        raise ValueError(
+            f"{algorithm!r} is not the canonical spelling of a digest "
+            f"algorithm ({probe.name!r} is); a reference must use the exact "
+            f"spelling semantic_digest() writes, not an alias: {digest!r}"
+        )
+    digest_size = probe.digest_size
     if digest_size == 0:
         # An extendable-output function (SHAKE and friends) has no fixed
         # digest size, which `semantic_digest` itself already refuses for
@@ -578,7 +607,7 @@ class PackageManifest:
             raise ValueError(
                 "PackageManifest.variant_refs contains a duplicate variant_id"
             )
-        _reject_case_insensitive_collisions(variant_ids, "variant_id")
+        _reject_filesystem_collisions(variant_ids, "variant_id")
         object.__setattr__(
             self,
             "variant_refs",
@@ -593,7 +622,7 @@ class PackageManifest:
             raise ValueError(
                 "PackageManifest.artifact_refs contains a duplicate artifact_id"
             )
-        _reject_case_insensitive_collisions(artifact_ids, "artifact_id")
+        _reject_filesystem_collisions(artifact_ids, "artifact_id")
         known_variant_ids = {variant.variant_id for variant in variants}
         unknown = sorted(
             {artifact.variant_id for artifact in artifacts} - known_variant_ids
