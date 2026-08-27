@@ -1128,10 +1128,12 @@ because either is that entry's taxonomy home (a first Codex review round
 on this PR caught an earlier draft marking this done on the strength of
 the validation claim alone).
 
-Of D9's four registry-validation properties, three are now enforced by
+All four of D9's registry-validation properties are now enforced by
 `ChangeKindRegistry` during construction (the production `REGISTRY` is built
 at import time, so this fires then in practice), independent of file
-layout — global uniqueness of kind identifiers
+layout — "complete metadata" is covered in its own paragraph further below;
+the other three are described here first, in the order they were closed —
+global uniqueness of kind identifiers
 (`ChangeKindRegistry.__init__` raises `ValueError` on a duplicate `kind`,
 pinned by `tests/test_architecture_refactor.py::TestChangeKindRegistry::
 test_duplicate_entry_raises`), "valid references", and "non-contradictory

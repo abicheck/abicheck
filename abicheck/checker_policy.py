@@ -329,7 +329,7 @@ class ChangeKind(str, Enum):
     FUNC_BECAME_INLINE = (
         "func_became_inline"  # function became inline — symbol may disappear from DSO
     )
-    FUNC_LOST_INLINE = "func_lost_inline"  # function lost inline — now has external linkage (compatible)
+    FUNC_LOST_INLINE = "func_lost_inline"  # function lost inline — low-risk, signature/linkage unchanged (compatible)
 
     # ── PR #89: ELF fallback for = delete (issue #100) ───────────────────────────
     # Emitted when castxml metadata lacks deleted="1" but the symbol disappears

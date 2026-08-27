@@ -248,16 +248,28 @@ PARITY_EXTENSION_ENTRIES: list[ChangeKindMeta] = [
     _E("param_became_va_list", _C,
        impact="A parameter's type became va_list; source recompiled "
               "against the new header sees a different, variadic-style "
-              "parameter, but an already-linked binary's calling "
-              "convention for a fixed va_list-typed argument is "
-              "unaffected.",
+              "parameter. This detector only checks the declared type "
+              "flip, not whether the two representations agree: va_list's "
+              "own layout is platform-defined (an opaque struct/array on "
+              "many ABIs, not a plain pointer), so an already-linked "
+              "caller still passing its old, non-variadic argument has "
+              "that value reinterpreted by the new callee as a va_list "
+              "handle — safe only if the caller already happened to pass "
+              "a genuine, compatible va_list object (e.g. a forwarding "
+              "wrapper).",
        description_template="Parameter became va_list: {name} param {detail}"),
     _E("param_lost_va_list", _C,
        impact="A parameter that was previously typed va_list now has a "
               "fixed type; source recompiled against the new header sees "
-              "a stricter, non-variadic parameter type, which is "
-              "generally a safe narrowing for callers already passing a "
-              "concrete value.",
+              "a stricter, non-variadic parameter type. This detector "
+              "only checks the declared type flip, not whether the two "
+              "representations agree: since va_list's own layout is "
+              "platform-defined (an opaque struct/array on many ABIs, not "
+              "a plain pointer), an already-linked caller still "
+              "constructing and passing a va_list object has that value "
+              "reinterpreted by the new callee as the fixed type — safe "
+              "only if the caller already happened to pass a value "
+              "compatible with the new fixed type.",
        description_template="Parameter was va_list, now fixed: {name} param {detail}"),
     _E("constant_changed", _A,
        impact="A preprocessor constant's value changed; any consumer that "
@@ -313,7 +325,7 @@ PARITY_EXTENSION_ENTRIES: list[ChangeKindMeta] = [
               "verify the new binary's export table). The function's own "
               "signature and calling convention are unchanged either way, "
               "so this is low-risk for already-linked consumers.",
-       description_template="Function lost inline attribute (now has external linkage): {name}"),
+       description_template="Function lost inline attribute: {name}"),
 
     # ── PR #89: ELF fallback ──────────────────────────────────────────────
     _E("func_deleted_elf_fallback", _B,
