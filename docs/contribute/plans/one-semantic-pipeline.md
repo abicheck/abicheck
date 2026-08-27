@@ -645,15 +645,35 @@ incomplete evidence, the opposite of what that gate exists to guarantee;
 `diff_time64.py`/`diff_stdlib_impl.py` can each suppress or omit their own
 derived findings the same way the vtable/base-list detectors already do;
 `surface_graph.py` can under-populate the ADR-057 consumer graph's type
-references. All four are added to this phase's migration file list
-alongside `internal_leak.py`, and — since a fifth hand-missed reader is
-now a demonstrated, repeating pattern rather than a one-off — the
+references.
+
+**A further repo-wide pass, run specifically because the check above is
+now a real static scan rather than a hand-enumerated list, found five
+*more* direct readers the scan would have caught on day one had this
+list stayed incomplete: `export_surface.py:1167`'s own unresolved-type
+scan, `surface.py`'s two public-closure walks (lines 632/782, both
+`(*rec_node.bases, *rec_node.virtual_bases)`), `type_reachability.py`'s
+stdlib-reference text scan (lines 873-874), and `dumper_scoping.py`'s
+dependency-retention text scan (lines 342-343) — each following the
+identical `bases`/`virtual_bases` pattern the five readers above already
+follow.** Their own consequences follow the same two shapes already
+named: `export_surface.py`/`type_reachability.py`/`dumper_scoping.py` can
+under-build a contract/public surface or drop a type a public declaration
+still depends on (the missing-evidence-reads-as-confirmed-absent failure
+the vtable/base-list detectors already have); `surface.py`'s own walks
+feed `compute_public_surface()`'s reachability closure directly, so a
+missed virtual-base edge there can silently shrink the resolved public
+surface instead of failing closed on incomplete evidence. All nine readers
+— the four named first plus these five — are added to this phase's
+migration file list alongside `internal_leak.py`, and — since a fifth,
+then a tenth, hand-missed reader is now a demonstrated, repeating pattern,
+not a one-off — the
 AI-readiness check itself stops being a hand-maintained module allowlist:
 it becomes a real static scan for any direct attribute access naming
-`bases`/`vtable`/`is_va_list` (or `virtual_bases`, read by three of these
-five readers without itself being one of the three fields this phase
+`bases`/`vtable`/`is_va_list` (or `virtual_bases`, read by the majority of
+these readers without itself being one of the three fields this phase
 converts — see Scope, below) on a value whose declared type resolves to
-`RecordType`/`Param`, repository-wide, with the five named modules above
+`RecordType`/`Param`, repository-wide, with all nine named modules above
 becoming the check's own initial known-failures baseline (mirroring
 `check_ai_readiness.py`'s existing `MYPY_ERROR_BASELINE`/
 `LARGE_FILE_ALLOWLIST` pattern: a reviewed, shrinking allowlist of
@@ -676,10 +696,12 @@ sentinel-based `Fact[list[str]]` mechanism already fully specified for
 `__post_init__` bridge, same legacy-schema backfill reading whatever
 signal `bases_fact` itself backfills from, since the two are produced
 together) — not a new mechanism, the same one with a second field name.
-Every one of the five readers named above that reads `bases`/
+Every one of the nine readers named above reads `bases`/
 `virtual_bases` together in one loop body (`contract_evidence_collect.py`,
 `diff_time64.py`, `diff_stdlib_impl.py`, `diff_cxx_rules`'s base-walk
-helpers, `internal_leak.py`) migrates both fields in the same pass, not
+helpers, `internal_leak.py`, `export_surface.py`, both `surface.py`
+walks, `type_reachability.py`, `dumper_scoping.py`) and migrates both
+fields in the same pass, not
 `bases` now and `virtual_bases` in a still-later phase — the provenance
 propagation this finding asked for is exactly "every semantic reader of
 `virtual_bases` is already on this phase's own migration list for
@@ -2088,56 +2110,68 @@ graph) resolves the ids once, which is the `workflows -> model, storage,
 extract, compare, policy` edge ADR-061 already permits.
 
 **Whether `compare()`'s own new parameter is optional (with a fallback)
-or required is left as this phase's second open design question, not
-asserted a fifth time under continued correction** — it depends directly
-on an answer the note below (`surface.py`) gives for a different reason.
-If `compute_public_surface()` itself ends up with no fallback (because its
-own pre-existing traversal is genuinely deleted, per this phase's
-Acceptance criteria), then `compare()` cannot offer an optional, `None`-
-defaulting parameter either — there would be nothing for `compare()` to
-pass to `compute_public_surface()` in the `None` case, which makes
-*every* existing direct caller of `checker.compare()` (not only the ones
-this plan's Files list already names) a site this phase must also update
-to resolve ids first, a substantially larger migration footprint than "add
-an optional parameter to two internal helper functions." Resolving this
-needs to be done once real callers are enumerated, not guessed at here; it
-is named explicitly rather than left for a future reader to discover the
-two notes disagree. `abicheck/policy/public_surface.py`
+or required was left as this phase's second open design question, and
+a later review round resolved it by proving "required, no fallback" is
+the wrong answer outright — it breaks real, existing in-pipeline
+callers, not just `compare()`'s own external callers.** A repo-wide
+check found `compute_public_surface()` called directly, with a bare
+snapshot and no resolution in hand, from *inside* the detection
+pipeline itself: `diff_stdlib_impl.py`/`surface_graph.py`'s own
+`_public_type_counts()` call it with a single snapshot argument and no
+`PipelineContext`/workflow caller anywhere in their own call chain to
+have pre-resolved anything; `post_processing.py`'s `FilterNonPublic
+Surface` and `contract_pipeline.py`'s evidence-collection stage already
+call it too, but — tellingly — `contract_pipeline.py`'s own existing
+code already shows the right shape for this: it reads `pp_ctx.surf_old`/
+`.surf_new` (the cache `FilterNonPublicSurface` populates) *first*, and
+falls back to an independent `compute_public_surface()` call only when
+that cache is empty (a POST-manifest-only run, or `scope_to_public_
+surface=False`, which never populates it). A "required, no fallback"
+signature cannot serve any of these calls — none of them have a
+pre-resolved `PublicSurfaceResolution` to pass, and `diff_stdlib_impl.py`/
+`surface_graph.py` have no `PipelineContext` to read a cached one from
+at all. Resolved instead the way `build_surface_graph()`/`compute_
+surface_metrics()` already resolve the identical tension one section
+up: `compute_public_surface()` keeps an **optional** `resolution:
+PublicSurfaceResolution | None = None` parameter, not a required one —
+when `None`, it calls the same lazy, snapshot-aware `resolve_public_
+surface()` wrapper internally (the identical call a workflow-layer
+caller would make, just made on the callee's behalf rather than the
+caller's) instead of requiring every call site to pre-resolve. A caller
+that already has a cached resolution in hand (`contract_pipeline.py`'s
+`pp_ctx.surf_old`/`.surf_new` reuse, or `compare()`'s own pipeline once
+it resolves once per snapshot up front) passes it explicitly purely as
+an optimization avoiding redundant recomputation — never because the
+function would otherwise fail to run. `abicheck/policy/public_surface.py`
 (new — `PublicSurfaceQuery`, migrated from `surface.py`'s existing
 traversal logic); `surface.py` (`compute_public_surface(snapshot,
-resolution: PublicSurfaceResolution)` — **not `public_entity_ids:
-frozenset[EntityId]`, which a first draft of this Files entry still said,
-predating (and left un-synced with) the structured-result fix a few
-paragraphs above.** A bare frozenset is exactly the membership-only
-collapse that fix exists to prevent: `compute_public_surface()`'s own
-`PublicSurface` result carries `resolvable`/`has_typed_roots`/
-`has_provenance`/`ambiguous_type_names`/`exact_type_identities`/both
-origin indices, none of which a set of ids can express, and
-`FilterNonPublicSurface`'s `surf_old.resolvable or surf_new.resolvable`
-check (among others) runs *before* `compute_public_surface()` has any
-membership set to offer at all — there is no point reconstructing that
-state a second time from a bare id set once the workflow-layer caller
-already computed it via `PublicSurfaceQuery.resolve_public_domain()`.
-`compute_public_surface()` takes that structured `PublicSurfaceResolution`
-directly and projects it into the existing `PublicSurface` field shape,
-so every existing reader of `PublicSurface`'s own fields is unaffected by
-where the computation happened. **The parameter is required,
-not optional with a `None` fallback, unlike `surface_graph.py`'s
-functions above.** The two modules have genuinely different retirement
-plans, not an inconsistency: `SurfaceGraph`'s own traversal is explicitly
-*kept* (Phase 3's earlier note: "`SurfaceGraph` itself is not deleted...
-it answers a genuinely different question"), so its `None`-triggered
-`Visibility.PUBLIC` fallback is a real, permanent code path. `surface.py`'s
-own traversal is explicitly *deleted* by this phase's own Acceptance
-criteria (below) — there is nothing left for a `None` case to fall back
-to, so `compute_public_surface()` has no optional form; every caller
-reaches it only through the workflow-level resolution that computes the
-ids first. Existing direct callers (tests, any code outside the typed
-`compare()` pipeline) are updated to call a resolution helper first rather
-than relying on an argument default — `policy/public_surface.py` itself
-is the natural home for that convenience helper, since a test importing it
-directly is not the production package-level edge the architecture gate
-enforces); `dumper_scoping.py`/
+resolution: PublicSurfaceResolution | None = None)` — **not
+`public_entity_ids: frozenset[EntityId]`, which a first draft of this
+Files entry still said, predating (and left un-synced with) the
+structured-result fix a few paragraphs above.** A bare frozenset is
+exactly the membership-only collapse that fix exists to prevent:
+`compute_public_surface()`'s own `PublicSurface` result carries
+`resolvable`/`has_typed_roots`/`has_provenance`/`ambiguous_type_names`/
+`exact_type_identities`/both origin indices, none of which a set of ids
+can express, and `FilterNonPublicSurface`'s `surf_old.resolvable or
+surf_new.resolvable` check (among others) runs *before*
+`compute_public_surface()` has any membership set to offer at all — there
+is no point reconstructing that state a second time from a bare id set
+once a caller already computed it via `PublicSurfaceQuery.resolve_
+public_domain()`. `compute_public_surface()` takes that structured
+`PublicSurfaceResolution` directly (when given one) and projects it into
+the existing `PublicSurface` field shape, so every existing reader of
+`PublicSurface`'s own fields is unaffected by where the computation
+happened. Every one of the four in-pipeline callers named above keeps
+its existing call shape completely unchanged (`compute_public_surface
+(snap)`/`compute_public_surface(ctx.old)`, no new argument required at
+any of them) — this phase's acceptance bar for them is exactly that
+they compile and behave identically with zero edits, not that they
+thread a new parameter through. `surface.py`'s own pre-existing
+traversal logic (the actual algorithm `PublicSurfaceQuery` migrates) is
+still deleted per this phase's Acceptance criteria below — it is the
+internal implementation that changes, not the public call shape every
+existing caller already depends on. `dumper_scoping.py`/
 `export_surface.py`/`type_reachability.py` (each becomes a graph *builder*
 contributing nodes/edges in `compare/`, or a relevance *query* in
 `policy/`, not an independent reachability algorithm); `abicheck/model/
@@ -3353,9 +3387,33 @@ takes the value as an explicit parameter the same way it already does for
 schema version it does not itself own — which applies identically to a
 `RunOutcome` axis it likewise must not hardcode), and `cli_compare_
 release.py`'s refusal branch passes it through the identical way it
-already threads `report_schema_version`. Added to this phase's writer
-inventory and to the schema-version parity tests alongside the other
-writers above.
+already threads `report_schema_version`.
+
+**Making `not_comparable_document()`'s new parameter required breaks a
+third path neither of the two writers above is the caller for, and a
+review round correctly traced the real call chain to find it: the
+*normal*, single-pair `compare --format json` refusal.** `cli_compare_
+helpers.py`'s own comparability-gate handler calls `render_not_comparable_
+json()` — not `not_comparable_document()` directly — which itself calls
+`not_comparable_document()` one layer down; neither
+`render_not_comparable_json()`'s own signature nor its one real call site
+in `cli_compare_helpers.py` gained the new parameter, so an ordinary
+`compare` invocation that hits a profile/scope mismatch (ADR-050 D1/D2,
+the most common way a user actually reaches this refusal path, not only
+the release fan-out) would either raise `TypeError` on the now-required
+argument or — if the parameter were merely added without being threaded
+here — silently keep stamping the current schema version with no
+`RunOutcome.operational` at all, the identical gap this paragraph exists
+to close, just one call deeper than where the first fix stopped.
+`render_not_comparable_json()` gains the identical parameter, threaded
+straight through to `not_comparable_document()` the same way it already
+threads `report_schema_version`; `cli_compare_helpers.py`'s own call site
+passes `operational=NOT_COMPARABLE` explicitly, the same value the
+release fan-out's own refusal branch now passes. Added to this phase's
+writer inventory and to the schema-version parity tests alongside the
+other writers above — three real producers of this document now, not
+two, each verified through its own actual call chain rather than only at
+the shared builder's own signature.
 
 **A fourth writer-adjacent call site needs this phase's attention, and it
 is not a new writer — it is an existing *neutralizer*, missed by the
