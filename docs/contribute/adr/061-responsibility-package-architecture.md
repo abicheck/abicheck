@@ -1181,9 +1181,40 @@ type as the full `PolicyFile` avoids that break but means `checker_types.py`
 still imports the policy-owned class for the annotation — reproducing the
 exact `model -> policy` edge the facade exists to remove. So the facade's
 "nothing public breaks" claim holds for `PolicyFile`'s own API, but not for
-this specific field-narrowing plan: there is no version of it that both
-keeps every existing consumer typed correctly and gets `checker_types.py`
-out of `policy`. Reclassifying
+this specific field-narrowing plan: there is no *subclass-shaped* version of
+it that both keeps every existing consumer typed correctly and gets
+`checker_types.py` out of `policy`.
+
+**A fifth Codex review round proposed a different mechanism that genuinely
+closes half of that — a `Protocol`, not a subclass, and it is credited
+here rather than argued away.** Python's structural typing (PEP 544) means a
+`model`-owned `PolicyFileProtocol` declaring `overrides`, `reclassify`, and
+`compute_verdict()`'s signature is satisfied by the existing `PolicyFile`
+without `PolicyFile` importing or inheriting from it at all — so
+`checker_types.py`'s field, typed against the protocol instead of the
+concrete class, resolves `bundle_models.py:500`'s
+`diff.policy_file.compute_verdict(...)` correctly under mypy. The "no
+version... keeps every consumer typed correctly" framing just above was
+about a subclass/narrowing split specifically; a protocol really does
+dissolve that half.
+
+It does not dissolve the other half, for the same reason the subclass
+attempt didn't: the protocol still has to *type* `overrides`/`reclassify`
+accurately to be worth using — `Mapping[ChangeKind, Verdict]` and
+`Sequence[ReclassifyRule]`, the identical two references. A protocol module
+placed where it would belong, physically under `abicheck/model/` (a real,
+already-migrated package, not a `legacy_paths` entry — unlike
+`checker_types.py`, which currently escapes this check only because it
+hasn't moved), referencing `ChangeKind` from the still-unclassified
+`checker_policy.py` trips `unclassified-import` immediately: the same
+`migrated_source` gate this note already measured for `service.py`'s parser
+imports applies here too, `TYPE_CHECKING`-only reference included. So the
+protocol is the better mechanism to use *once* `checker_policy.py`'s own
+split happens — worth recording for whoever does that — but the split
+itself is still the precondition, not a protocol in place of it, and
+`policy_file.py` staying unclassified for now is unchanged.
+
+Reclassifying
 `policy_file.py`/`suppression.py` as `compare` instead was rejected too:
 `compute_verdict` is policy logic by any reading, and mislabeling it only
 relocates the ambiguity this ADR exists to remove.
