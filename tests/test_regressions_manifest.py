@@ -47,11 +47,43 @@ def _is_pytest_mark_attr(node: ast.expr, marker_name: str) -> bool:
     )
 
 
+def _iter_marker_expressions(tree: ast.AST) -> list[ast.expr]:
+    """Every raw marker expression this file could apply to a collected
+    test, by any of pytest's three application mechanisms: a function/
+    async-function decorator, a *class* decorator (`@pytest.mark.xfail`
+    on a `class Test...`, applying to every test method in it), or a
+    module-/class-level `pytestmark` assignment (a single marker, or a
+    `list`/`tuple` of several).
+
+    Function decorators alone are not the whole surface (Codex review,
+    PR #885, fourth round): `_marker_decorator_calls`'s previous version
+    only walked `FunctionDef`/`AsyncFunctionDef.decorator_list`, so a
+    class-level `@pytest.mark.xfail` or a `pytestmark = pytest.mark.
+    xfail(...)` assignment — both real, pytest-documented ways to apply a
+    marker — were invisible to it, and a canary using either would have
+    been silently accepted as strict-compliant regardless of whether it
+    actually was.
+    """
+    exprs: list[ast.expr] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+            exprs.extend(node.decorator_list)
+        elif isinstance(node, ast.Assign) and any(
+            isinstance(target, ast.Name) and target.id == "pytestmark"
+            for target in node.targets
+        ):
+            value = node.value
+            exprs.extend(
+                value.elts if isinstance(value, ast.List | ast.Tuple) else [value]
+            )
+    return exprs
+
+
 def _marker_decorator_calls(tree: ast.AST, marker_name: str) -> list[ast.Call | None]:
-    """Every `@pytest.mark.<marker_name>` decorator use across every
-    function definition in *tree* — the `ast.Call` node for a parenthesized
-    use (`@pytest.mark.xfail(...)`), `None` in the list for a bare,
-    unparenthesized one (`@pytest.mark.xfail`).
+    """Every `pytest.mark.<marker_name>` application across *tree*
+    (`_iter_marker_expressions`, above) — the `ast.Call` node for a
+    parenthesized use (`pytest.mark.xfail(...)`), `None` in the list for a
+    bare, unparenthesized one (`pytest.mark.xfail`).
 
     A real AST walk, not text scanning (Codex review, PR #885, third
     round — replacing the previous depth-counted paren scan, which read
@@ -67,13 +99,10 @@ def _marker_decorator_calls(tree: ast.AST, marker_name: str) -> list[ast.Call | 
     guard for exactly this.
     """
     results: list[ast.Call | None] = []
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
-            continue
-        for dec in node.decorator_list:
-            target = dec.func if isinstance(dec, ast.Call) else dec
-            if _is_pytest_mark_attr(target, marker_name):
-                results.append(dec if isinstance(dec, ast.Call) else None)
+    for expr in _iter_marker_expressions(tree):
+        target = expr.func if isinstance(expr, ast.Call) else expr
+        if _is_pytest_mark_attr(target, marker_name):
+            results.append(expr if isinstance(expr, ast.Call) else None)
     return results
 
 
@@ -401,6 +430,64 @@ class TestCanaryStrictnessViolation:
         marker actually requires — truthy in casual reading, but not a
         literal `True`."""
         source = '@pytest.mark.xfail(strict="True")\ndef test_x(): ...\n'
+        assert _canary_strictness_violation(source) is not None
+
+    def test_a_class_level_xfail_decorator_is_inspected(self) -> None:
+        """`@pytest.mark.xfail` applied to a test *class* — applying to
+        every test method in it — must be checked the same way a
+        function-level one is (Codex review, PR #885, fourth round)."""
+        source = (
+            "@pytest.mark.xfail(reason='tracked gap')\n"
+            "class TestCanary:\n"
+            "    def test_x(self): ...\n"
+        )
+        assert _canary_strictness_violation(source) is not None
+
+    def test_a_strict_class_level_xfail_decorator_is_accepted(self) -> None:
+        source = (
+            "@pytest.mark.xfail(reason='tracked gap', strict=True)\n"
+            "class TestCanary:\n"
+            "    def test_x(self): ...\n"
+        )
+        assert _canary_strictness_violation(source) is None
+
+    def test_a_module_level_pytestmark_xfail_is_inspected(self) -> None:
+        """`pytestmark = pytest.mark.xfail(...)` is a real, pytest-
+        documented way to mark every test in a module — invisible to a
+        decorator-only walk (Codex review, PR #885, fourth round)."""
+        source = (
+            "pytestmark = pytest.mark.xfail(reason='tracked gap')\n"
+            "\n"
+            "def test_x(): ...\n"
+        )
+        assert _canary_strictness_violation(source) is not None
+
+    def test_a_module_level_pytestmark_list_is_inspected(self) -> None:
+        """`pytestmark` may also be a list of several markers."""
+        source = (
+            "pytestmark = [pytest.mark.xfail(reason='tracked gap')]\n"
+            "\n"
+            "def test_x(): ...\n"
+        )
+        assert _canary_strictness_violation(source) is not None
+
+    def test_a_strict_module_level_pytestmark_is_accepted(self) -> None:
+        source = (
+            "pytestmark = pytest.mark.xfail(reason='tracked gap', strict=True)\n"
+            "\n"
+            "def test_x(): ...\n"
+        )
+        assert _canary_strictness_violation(source) is None
+
+    def test_a_class_level_pytestmark_skip_is_inspected(self) -> None:
+        """`pytestmark` can also be set as a class attribute, applying to
+        every test method on that class."""
+        source = (
+            "class TestCanary:\n"
+            "    pytestmark = pytest.mark.skip(reason='not implemented yet')\n"
+            "\n"
+            "    def test_x(self): ...\n"
+        )
         assert _canary_strictness_violation(source) is not None
 
     def test_unparseable_source_is_rejected(self) -> None:
