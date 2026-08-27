@@ -82,6 +82,39 @@ class TestAstDwarfDedup:
         # Verdict should be BREAKING regardless
         assert r.verdict == Verdict.BREAKING
 
+    def test_type_size_change_still_caught_when_new_side_lacks_dwarf(self):
+        """DWARF_INFO_MISSING does not mean layout coverage dropped to zero.
+
+        Codex review, PR #882, fresh evidence: _diff_types() compares
+        struct/enum layout from header-AST evidence (AbiSnapshot.types)
+        independently of DWARF, and still runs when both sides carry that
+        evidence — so a real layout change is still caught even when the
+        new binary lacks DWARF (only the DWARF-derived comparison itself
+        is skipped, and DWARF_INFO_MISSING discloses that). Pins the
+        counterexample the dwarf_info_missing impact text now names,
+        rather than only asserting it in prose.
+        """
+        t_old = RecordType(name="Config", kind="struct", size_bits=64,
+                           fields=[TypeField("a", "int", 0), TypeField("b", "int", 32)])
+        t_new = RecordType(name="Config", kind="struct", size_bits=128,
+                           fields=[TypeField("a", "int", 0), TypeField("b", "int", 32),
+                                   TypeField("c", "long", 64)])
+
+        old_dwarf = DwarfMetadata(
+            structs={"Config": StructLayout(name="Config", byte_size=8)},
+            has_dwarf=True,
+        )
+        # New side has header-AST type evidence but no DWARF at all.
+        r = compare(
+            _snap(types=[t_old], dwarf=old_dwarf),
+            _snap(types=[t_new]),
+        )
+
+        kinds = _kinds(r)
+        assert ChangeKind.DWARF_INFO_MISSING in kinds
+        assert ChangeKind.TYPE_SIZE_CHANGED in kinds
+        assert r.verdict == Verdict.BREAKING
+
     def test_field_offset_deduped_with_dwarf(self):
         """TYPE_FIELD_OFFSET_CHANGED + STRUCT_FIELD_OFFSET_CHANGED → dedup."""
         t_old = RecordType(name="Data", kind="struct", size_bits=96,

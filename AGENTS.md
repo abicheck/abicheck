@@ -588,12 +588,31 @@ cover the surrounding first-party trees this file doesn't detail.
 ## Adding a new ChangeKind
 
 1. Add to `ChangeKind` enum in `checker_policy.py`.
-2. Add ONE `ChangeKindMeta` entry (kind string, `default_verdict`, optional
-   `impact`/`description_template`) to `abicheck/change_registry.py` or one
-   of its sibling `change_registry_<topic>.py` files (`_castxml`,
-   `_buildsource`, `_composition`, `_coverage`, `_numpy`, `_suppression` —
-   split out only to stay under the file-size cap; declaring an entry in any
-   of them is equivalent). **Do NOT hand-edit `BREAKING_KINDS`/
+2. Add ONE `ChangeKindMeta` entry (kind string, `default_verdict`, required
+   `impact`, optional `description_template`) to the taxonomy module under
+   `abicheck/model/change_catalog/` that matches which detector actually
+   produces the kind (ADR-061 D9 — see each module's own docstring for its
+   scope and the categorization methodology):
+   - `symbols.py` — function/variable/parameter/constant/Python-API facts
+     (`diff_symbols.py` and siblings)
+   - `types.py` — struct/class/union/enum/typedef/layout/vtable facts
+     (`diff_types.py` and siblings)
+   - `platform.py` — ELF/PE/Mach-O container facts, DWARF presence, symbol-
+     table representation, hardening flags, toolchain-mode ABI traits,
+     symbol versioning, kABI, SYCL (`diff_platform.py` and siblings)
+   - `build.py` — L3 build-evidence facts, bundle/release coherence, wheel/
+     NumPy packaging facts (`buildsource/build_diff.py` and siblings)
+   - `source.py` — L4/L5 source-ABI-replay and semantic-source-graph facts,
+     public/private surface reconciliation, declaration identity
+     (`buildsource/source_diff.py` and siblings)
+
+   `abicheck/change_registry.py` is now a pure assembly point (imports each
+   taxonomy's entry list, constructs the single production `REGISTRY`) — it
+   holds no `ChangeKindMeta` entries itself; don't add one there. `impact`
+   must be non-empty — `ChangeKindRegistry` rejects an entry with no
+   `impact` text at construction time (the production `REGISTRY` is built
+   at import time, so this fires then in practice); `description_template`
+   stays genuinely optional. **Do NOT hand-edit `BREAKING_KINDS`/
    `API_BREAK_KINDS`/`COMPATIBLE_KINDS`/`RISK_KINDS` in `checker_policy.py`
    directly** — those are `frozenset`s *derived* from the registry at import
    time (`_kinds_for(...)`); the registry entry's `default_verdict` is what

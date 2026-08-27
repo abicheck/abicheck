@@ -1,7 +1,7 @@
 # ADR-061: Responsibility-Package Architecture and Flat-Namespace Migration
 
 **Date:** 2026-08-24
-**Status:** Accepted — Phases 0-1 implemented; Phases 2-4 in progress; Phase 5 begun (the `model` package and the `*_metadata.py` dataclass/parser split have landed) and otherwise incremental.
+**Status:** Accepted — partially implemented (Phases 0-1 implemented; Phases 2-4 in progress; Phase 5 begun — the `model` package and the `*_metadata.py` dataclass/parser split have landed; D9's change-catalog work (item 3) is fully done — all 4 registry-validation properties (unique identifiers, valid references, non-contradictory defaults, complete metadata) are enforced, and the 397 entries have been repartitioned into `model/change_catalog/{symbols,types,platform,build,source}.py` by taxonomy; the CastXML/Clang parser split and source-graph separation (Phase 5 items 1-2) and the bulk of item 4's cycle-exception cleanup remain — and otherwise incremental).
 **Decision maker:** abicheck maintainers
 
 ## Context
@@ -1105,19 +1105,445 @@ owed. Splitting it means separating a dataclass from its own load/write
 methods without changing what `BuildSourcePack(...)` constructs for callers
 this repository cannot see, which is its own slice.
 
-The remaining Phase 5 work, unchanged:
+**Item 3 is now fully closed.** D9 specifies two separable things: the
+target file shape (declarative modules named by taxonomy — `symbols.py`,
+`types.py`, `platform.py`, `build.py`, `source.py` — under
+`model/change_catalog/`, feeding one `registry.py`) and what that
+`registry.py` validates — "globally unique identifiers, complete metadata,
+valid references, and non-contradictory defaults." Both are now done (see
+below for the full chronology of getting there — several earlier drafts of
+this section under-claimed or over-claimed the validation half's progress
+before landing on the accurate count, and the taxonomy half itself went
+through the same "mark it done prematurely, get corrected" pattern once
+more before actually being completed — see the taxonomy-partition entry
+in the chronology below).
+
+The taxonomy shape is done: the flat `change_registry.py` plus
+`change_registry_{buildsource,castxml,composition,coverage,numpy,parity,
+suppression,wheel}.py` — which, per this repository's own `AGENTS.md`
+("Adding a new ChangeKind") prior to this change, were "split out only to
+stay under the file-size cap," not by taxonomy — have been fully
+repartitioned. All 397 `ChangeKindMeta` entries now live in exactly one of
+`model/change_catalog/{symbols,types,platform,build,source}.py`, chosen by
+which detector module actually produces the kind (see each module's own
+docstring for its scope and the categorization methodology — verified
+against the real `ChangeKind.X` construction sites across the codebase,
+not guessed from which flat sibling file an entry happened to live in for
+space reasons). The eight now-fully-migrated flat sibling files were
+deleted; `change_registry.py` is now a ~65-line pure assembly point that
+imports each taxonomy's entry list and constructs the single production
+`REGISTRY` from their concatenation — it holds no `ChangeKindMeta` entries
+itself. `change_registry_types.py` — already turned into a compatibility
+re-export shim for `Verdict`/`ChangeKindMeta`/`ChangeKindRegistry` by an
+earlier step in this same PR (the registry-core-types move described below)
+— is untouched by this taxonomy repartition specifically. Verified content-preserving: reconstructing
+`ChangeKindRegistry` from the five taxonomy modules' concatenated entry
+lists produces byte-for-byte identical `ChangeKindMeta` content (via
+`dataclasses.asdict()` equality) for all 397 entries, compared directly
+against the pre-migration production `REGISTRY`.
+
+All four of D9's registry-validation properties are now enforced by
+`ChangeKindRegistry` during construction (the production `REGISTRY` is built
+at import time, so this fires then in practice), independent of file
+layout — "complete metadata" is covered in its own paragraph further below;
+the other three are described here first, in the order they were closed —
+global uniqueness of kind identifiers
+(`ChangeKindRegistry.__init__` raises `ValueError` on a duplicate `kind`,
+pinned by `tests/test_architecture_refactor.py::TestChangeKindRegistry::
+test_duplicate_entry_raises`), "valid references", and "non-contradictory
+defaults" (both added in a follow-up pass: the constructor now also rejects
+a `policy_overrides` key naming an unknown policy; a key targeting
+`strict_abi` — whose verdict is `default_verdict` itself, so an override
+there would be a second, competing source of truth for the same policy; an
+override value equal to the entry's own `default_verdict` — restating the
+default is not an override; a non-`COMPATIBLE` override value for
+`sdk_vendor`/`plugin_abi` — `checker_policy.policy_kind_sets()`'s
+implementation for both policies discards the declared verdict and always
+downgrades an overridden kind to `COMPATIBLE`, so any other declared value
+would pass a naive "differs from default_verdict" check while silently
+disagreeing with actual runtime behavior, a real gap a Codex review round on
+this PR caught in the first cut of this validator; and an `is_addition=True`
+entry whose `default_verdict` isn't `Verdict.COMPATIBLE`, since
+`addition_kinds()` is documented as a subset of `COMPATIBLE_KINDS`.
+"Valid references" extends past `policy_overrides` too: a second Codex
+review round on this PR found that `ChangeKindMeta.description_template`
+carries the identical shape of gap — `diff_helpers.make_change()` formats a
+kind's template via a keyword-only `template.format(symbol=..., name=...,
+old=..., new=..., detail=...)` call, so a template referencing a field
+outside `TEMPLATE_VOCAB` (`{symbol} {name} {old} {new} {detail}`) —
+including a bare positional `{}`/`{0}`, which that keyword-only call could
+never satisfy — previously raised `KeyError`/`IndexError` only the first
+time a finding of that kind was actually formatted, not at registry
+construction. The constructor now rejects it the same way. Pinned by
+thirteen new cases in the same test class, including
+`test_real_registry_satisfies_reference_and_default_validation`, which
+reconstructs the real production `REGISTRY` from its own entries to prove
+every one of its 397 entries — including all 284 that carry a
+`description_template` — already satisfied every property before the
+corresponding check existed, and `test_verdict_blind_policy_matches_runtime_
+behavior`, which exercises `policy_kind_sets()` directly to confirm the
+verdict-blind-policy list itself doesn't drift from what the runtime
+actually does. `VALID_BASE_POLICIES` and `TEMPLATE_VOCAB` — the canonical
+policy-name set and template-field vocabulary the two reference checks
+validate against — moved from `checker_policy.py`/`diff_helpers.py` to the
+leaf `change_registry_types.py` (re-exported unchanged from their old
+locations, so no importer needed to change), since both of those modules
+import `REGISTRY` from `change_registry.py`, which in turn imports
+`change_registry_types` — a definition in either of the old locations would
+have been a cycle.
+
+A third Codex review round on this PR found the `description_template`
+check itself was incomplete: `string.Formatter().parse()` only ever yields
+the *outer* field name of a replacement field, so a field nested inside a
+format spec (`{name:{bogus}}`) or an illegal `!conversion` specifier
+(`{name!x}`, where only `r`/`s`/`a`/none are legal for `str.format`) both
+passed construction-time validation and would still only fail the first
+time `make_change()` actually formatted a finding of that kind — the exact
+gap "valid references" exists to close, just one level deeper than the
+first fix reached. Fixed with a small recursive helper,
+`_template_bad_fields()`, that walks into a nested format spec and flags an
+illegal conversion the same way an unknown field name is flagged; pinned by
+two new cases in the same test class.
+
+A fourth Codex review round found the growing validation logic (by then
+100+ new lines) itself belonged somewhere else: this repository's own
+`AGENTS.md` requires new behavior to route to its ADR-061 target owner
+rather than deepen a legacy flat module, and D9 already names
+`model/change_catalog/registry.py` as this logic's destination.
+`Verdict`, `ChangeKindMeta`, `ChangeKindRegistry`, the
+`_validate_references_and_defaults`/`_template_bad_fields` validation
+logic, `VALID_BASE_POLICIES`, and `TEMPLATE_VOCAB` now live in a new
+`abicheck/model/change_catalog/registry.py` (a true leaf — zero internal
+imports, matching the `model` layer's `may_import: []` contract);
+`change_registry_types.py` is now a pure compatibility re-export shim
+(mirroring the same "old module keeps the public path, new module owns the
+implementation" pattern the `*_metadata.py`/`model/*_facts.py` split
+already established — see the "Model" section of the module map above), and
+`checker_policy.py`/`diff_helpers.py` import `VALID_BASE_POLICIES`/
+`TEMPLATE_VOCAB` directly from the new canonical location rather than
+through the shim (migration rule 3). This is real, if partial, progress on
+item 3 below: it gives D9's `registry.py` a physical, correctly-owned home
+containing the actual validating logic, but it is not the taxonomy
+repartition itself — the 397-entry *data table* (`change_registry.py` and
+its `change_registry_<topic>.py` siblings) still has not been split into
+`symbols.py`/`types.py`/`platform.py`/`build.py`/`source.py`, and
+`change_registry.py` continues to import `ChangeKindMeta`/
+`ChangeKindRegistry` from the (now-shimmed) old path rather than the new
+one, unchanged in this pass to stay within its own 2000-line adoption-debt
+ceiling.
+
+A fifth Codex review round on this PR, run against the new `model/
+change_catalog/registry.py` module, found two more issues in the same
+area. (P1) The new package's `__init__.py` re-exported five names but
+declared no `__all__`, contrary to `abicheck/model/AGENTS.md`'s own stated
+contract for a model-package `__init__.py` ("stays a re-export list with
+`__all__`") — fixed by declaring it. (P2) The `_template_bad_fields()`
+helper from the third round above still only re-implemented *part* of
+Python's formatting grammar: it never validated a format *code*, so a
+syntactically well-formed but semantically invalid spec like `{name:q}`
+(`q` is not a real presentation type) passed construction and only raised
+`ValueError: Unknown format code 'q'` the first time a finding was
+actually formatted — the third round's own fix had closed two specific
+gaps in a hand-rolled parser without closing the general problem that a
+hand-rolled parser can always have one more gap. Replaced the whole
+approach: rather than re-deriving Python's replacement-field grammar by
+hand, `_check_template_formats()` actually executes
+`template.format(**probe)` — the exact operation `make_change()` performs
+— against two representative kwarg sets (all-strings, and all-`None` for
+everything but `symbol`, since `name`/`old`/`new`/`detail` are frequently
+`None` in real invocations and a format spec that works for a `str` can
+still raise `TypeError` for `None`). This catches every one of the earlier
+gaps (unknown field, positional field, nested bad field, illegal
+conversion, invalid format code) as a side effect of correctness rather
+than as a list of individually-discovered cases, and removes the
+`string.Formatter().parse()`-based `_template_bad_fields()` helper
+entirely. Two new test cases cover the format-code gap and the
+None-with-format-spec gap.
+
+A sixth Codex review round on that same commit found the pure-execution
+approach from the fifth round was itself incomplete in one way, plus a
+separate, real freeze gap. (P2) Probing with a single representative
+string value cannot catch field *traversal* — `{symbol[0]}` succeeds
+against the probe value `"probe"` (it has a `[0]`) and only fails once
+`make_change()` is called with a real, empty `symbol`, which is a valid
+`str` some findings do pass; `{symbol.__class__}` similarly executes
+successfully against any string. Both are illegal — only the five bare
+`TEMPLATE_VOCAB` names are ever legal — but neither the field-name check
+before this round nor the execution-based check after it actually rejected
+them. Fixed by restoring a `string.Formatter().parse()`-based check
+alongside the execution-based one rather than instead of it: each field's
+name is checked for exact `TEMPLATE_VOCAB` membership (`Formatter().parse()`
+reports a field's full access expression as its name — `"symbol[0]"`,
+`"symbol.__class__"` — so an exact-membership check already rejects both
+without special-casing), while the execution-based check keeps catching
+everything a value-independent parse can't (format codes, conversions,
+None-handling). The two checks are complementary, not redundant: the
+field-name check is deterministic regardless of probe value; the
+execution check catches failures no static parse of the grammar can
+predict. (P2) Separately, `ChangeKindMeta.policy_overrides` is a
+`dict[str, Verdict]` field on a `frozen=True` dataclass — but `frozen`
+only stops reassigning the *attribute*, not mutating the dict object
+itself, and a caller could also keep a live reference to the dict it
+passed in. Either path could silently invalidate the reference/default
+checks already run at construction without re-running them, and could
+make `ChangeKindRegistry.policy_overrides_for()` disagree with sets
+already derived at import time. Fixed with a `__post_init__` that
+defensively copies into a `types.MappingProxyType`, closing both paths at
+once; the field's annotated type widened from `dict[str, Verdict]` to
+`Mapping[str, Verdict]` to reflect what callers actually receive. Three
+new test cases cover both fixes.
+
+A seventh Codex review round on that commit found the `MappingProxyType`
+freeze itself broke a different, real property: `dataclasses.asdict()`,
+`copy.deepcopy()`, and `pickle.dumps()` all raised `TypeError: cannot
+pickle 'mappingproxy' object` on a `ChangeKindMeta` carrying a non-empty
+`policy_overrides` — `asdict()`'s recursive dict handling only
+special-cases a literal `dict`, so anything else (mapping or not) falls
+back to a plain `copy.deepcopy()` of the field value, which
+`MappingProxyType` has no support for at all; nothing in the current
+codebase happens to call any of the three on a `ChangeKindMeta` today
+(verified by search), but the type is public API this codebase's own
+convention treats as a coordinated-change surface, so silently breaking
+standard dataclass serialization for it was a real regression to fix, not
+a theoretical one to note and move on from. A first attempt — a plain
+`dict` subclass overriding only the mutating methods — traded one failure
+for another: the *default* pickle/deepcopy reconstruction protocol for a
+`dict` subclass rebuilds it item-by-item (`obj[k] = v` for each pair, via
+`copy._reconstruct`'s `dictiter` handling), which hits the very mutators
+being overridden and raises *during* reconstruction instead of never
+reaching it. Fixed by giving `_ImmutableDict` (a genuine `dict` subclass;
+`MappingProxyType` is gone entirely now) a custom `__reduce__` that tells
+pickle/copy to reconstruct via one single-shot `_ImmutableDict(plain_dict)`
+call instead of the item-by-item protocol — safe, since `dict.__init__`/
+`dict.__new__` populate the underlying hash table directly in C without
+going through the overridden Python-level `__setitem__`. Verified this
+closes all three failure modes while keeping every property the sixth
+round's fix established (mutation blocked, external-dict-mutation doesn't
+leak, `isinstance(..., dict)` still holds for JSON serialization) — a new
+test exercises `asdict()`/`deepcopy()`/`pickle` round-trips together with
+re-checking immutability on both reconstructed copies, confirmed to fail
+against the `MappingProxyType` version.
+
+An eighth Codex review round on that commit found `_ImmutableDict` still
+had one inherited mutating path open: `entry.policy_overrides |= {...}`
+(PEP 584's in-place union) is sugar for `entry.policy_overrides =
+entry.policy_overrides.__ior__({...})` — `dict`'s own `__ior__` mutates in
+place and returns `self` *before* Python attempts the reassignment, so on
+a frozen dataclass the mutation had already silently corrupted the entry
+with an unvalidated override by the time `FrozenInstanceError` aborted the
+(redundant, same-object) assignment. Every one of the seven methods
+already overridden stayed correctly blocked; `__ior__` — the only
+augmented-assignment operator `dict` supports — was the one gap. Fixed by
+overriding it too (`# type: ignore[misc,override]` on the signature: mypy
+wants an in-place-union override to stay compatible with `dict.__or__`'s
+own overloaded signature, which a method that always raises regardless of
+input type cannot satisfy). Verified directly (`m.policy_overrides |=
+{...}` now raises `TypeError` and the entry's own mapping is provably
+unchanged afterward) and pinned by a new test,
+`test_policy_overrides_blocks_augmented_union_assignment`.
+
+**`_ImmutableDict` was redesigned once more, superseding the "genuine
+`dict` subclass" shape above — it is no longer a `dict` at all** (Codex
+review, PR #882, fresh evidence): being a real `dict` instance meant its
+storage was still reachable through `dict`'s own *unbound* methods called
+directly — `dict.__setitem__(entry.policy_overrides, "unknown",
+Verdict.API_BREAK)` mutates the underlying hash table in C, bypassing
+every overridden Python-level method entirely, since no override can
+intercept a call to the base type's own descriptor. The only way to close
+that is to not be a `dict` at all: `dict.__setitem__(obj, ...)` requires
+its first argument to *be* a `dict` instance (or subclass) and raises
+`TypeError` immediately for anything else. `_ImmutableDict` now implements
+the read-only `collections.abc.Mapping` protocol instead, storing its data
+in a private `types.MappingProxyType` view (not a plain private dict — a
+plain dict there would itself be reachable one attribute access away via
+`entry.policy_overrides._data["unknown"] = ...`, a second review round
+caught after the first `Mapping` rewrite landed). `Mapping` supplies no
+`__setitem__`/`update`/`pop`/etc. at all — those are `MutableMapping`-only
+mixin methods, and this class implements only the read-only `Mapping`
+protocol. Separately, *neither* ABC defines `__or__`/`__ior__` at all (a
+later review round corrected an earlier revision of this same paragraph
+that mis-attributed them to `MutableMapping`): PEP 584's `|`/`|=` are a
+`dict`-specific addition to the concrete type, not a mixin any ABC
+provides. Either way, `entry.policy_overrides["x"] = y` and `|=` both
+raise from Python's own attribute/operator resolution with no per-method
+overriding needed; `__init__` and `__setattr__` are still overridden to
+close the two remaining reflection-level gaps (re-invoking `__init__`
+directly, and reassigning `_data`/`_initialized` directly). Consequently
+`isinstance(policy_overrides, dict)` no longer holds — checked against
+every consumer in this codebase, none relies on `dict`-ness specifically,
+only the `Mapping` protocol. `dataclasses.asdict()` is the one place
+`dict`-ness is observable indirectly, since its generic branch reaches any
+non-dict field via `copy.deepcopy()`: `_ImmutableDict.__deepcopy__` is
+overridden to deliberately return a plain, mutable `dict` — matching
+exactly what an ordinary `dict` field would produce — while the *original*
+entry's own `policy_overrides` stays immutable regardless, and pickling
+(a separate mechanism, `__reduce__`) keeps reconstructing a genuine,
+immutable `_ImmutableDict`.
+
+**The fourth, "complete metadata", is now also enforced** — closed in a
+later pass, on its own, separate from the taxonomy repartition item 3
+still names below. `ChangeKindMeta.description_template` stays genuinely
+optional (a kind can keep a bespoke, per-call-site description rather than
+a fixed template — see that field's own docstring), so only `impact` is
+required: writing the 48 missing, individually-accurate one-line impact
+descriptions was the actual blocker, and is real domain content, not a
+mechanical check — each string states concretely what breaks (or doesn't)
+and why, matching the style of the 349 entries that already had one (e.g.
+"A field gained volatile; its offset and size are unchanged, but the
+compiler now treats every access as observable and suppresses caching/
+reordering around it" for `field_became_volatile`, or "A parameter's
+pointer indirection depth changed... a caller compiled against the old
+signature passes the wrong kind of value — silent misinterpretation or a
+crash" for `param_pointer_level_changed`). `_validate_entry()` (renamed
+from `_validate_references_and_defaults` to reflect covering three of
+D9's four properties, not two) now rejects a `ChangeKindMeta` with empty
+`impact` the same way it rejects a bad `policy_overrides`/
+`description_template` — at construction time, with the offending kind
+named. Pinned by `test_empty_impact_raises` and
+`test_real_registry_has_no_missing_impact_text` (the latter a direct,
+explicit check of the specific gap this property closes, separate from
+the general `ChangeKindRegistry` reconstruction test).
+
+Writing 38 of those 48 entries hit `change_registry.py`'s 2000-line
+adoption-debt ceiling immediately — the file was exactly at it. Rather
+than trim unrelated content to make room, those 38 entries (spanning
+field/parameter qualifiers, pointer levels, template inner-type analysis,
+and assorted ABICC full-parity gaps — no single taxonomy name fits all of
+them, since this is a size-relief split, not D9's taxonomy) moved to a new
+sibling, `change_registry_parity.py`, following the exact pattern
+`change_registry_composition.py`/`_coverage.py`/etc. already establish
+("declaring an entry in any of them is equivalent" — this repo's own
+`AGENTS.md`). Registered in `architecture/modules.yaml`'s
+`frozen_root_families["change_registry_"]` and `legacy_root_modules`
+lists, the same two lists any new flat root module needs. The remaining
+10 (the `[[deprecated]]`-transition kinds) already lived in
+`change_registry_castxml.py`, which had headroom, so their `impact` text
+was added in place. `change_registry.py` itself shrank from exactly 2000
+lines to 1916 in the process — genuine headroom freed, not just moved
+elsewhere, since removing an entry frees more lines (the `_E(...)` call
+plus its `description_template` line) than adding one `impact=` line back
+costs on the ~10 entries that stayed.
+
+"Enum-membership completeness" — every `ChangeKind` has exactly one
+registry entry, and no entry names a value outside the enum, pinned by
+that same test class's
+`test_registry_has_all_changekind_members`/`test_registry_no_extra_entries`
+— is a distinct, already-enforced property and must not be read as
+satisfying "complete metadata": one is about which *kinds* have an entry,
+the other about whether each entry's own fields are populated.
+`scripts/check_ai_readiness.py`'s `changekind-partition` check gates (as an
+ERROR) that same enum-membership completeness — not new coverage. Its
+`changekind-detector`/`changekind-docs` siblings are WARN-only, not gates,
+and check for a bare textual reference (`ChangeKind.NAME` appearing
+anywhere outside `checker_policy.py`, or the kind's name/value appearing
+anywhere under `docs/`) rather than proving a detector actually produces
+the kind or that a page substantively documents it — real, current-state
+evidence, but advisory, and not part of D9's four properties either way.
+
+A ninth Codex review round on that commit found two more issues, both
+fixed. (1) The opening snapshot of this section still said "of the four
+validation properties, three are now enforced and one... is not" — stale
+against the "complete metadata" paragraph below it landing in the same
+commit, so a reader could hit a directly contradictory Phase 5 status
+before reaching the later, accurate chronology. Corrected to state all
+four are enforced up front, with the historical step-by-step count kept
+only in the chronology narrative that explicitly leads up to it. (2) The
+new `func_became_inline` impact text (`"consumers linking against the
+old, exported symbol get an undefined-symbol error at link time"`)
+assumed the symbol always disappears — but `diff_symbols.
+_check_inline_transitions()` deliberately emits `FUNC_BECAME_INLINE` for
+*both* outcomes and distinguishes them in its own description text
+(`"symbol still exported"` vs. `"symbol may be removed from DSO"`), so
+the impact text contradicted the finding's own description on the
+supported "still exported" path (e.g. the function stays ODR-used
+elsewhere in the library). Rewritten to describe both outcomes rather
+than assuming removal.
+
+A tenth Codex review round on that same commit found three more issues,
+all fixed. (1) `_ImmutableDict` still had one inherited mutating path
+open, distinct from the `__ior__` gap the eighth round closed:
+`entry.policy_overrides.__init__({"unknown": ...})` re-invokes the
+*inherited*, never-overridden `dict.__init__` directly on an
+already-constructed instance, populating it via the same C-level path a
+fresh construction uses — bypassing every overridden mutator entirely,
+confirmed empirically (the dict's contents changed after the call).
+Fixed by overriding `__init__` too: a plain instance attribute
+(`_initialized`) distinguishes the one legitimate call (from
+`ChangeKindMeta.__post_init__` or from `__reduce__`'s reconstruction,
+both always on a brand-new instance) from any later re-invocation on the
+same object, which now raises the same way every other mutator does.
+Pinned by a new test, `test_policy_overrides_blocks_reinit`. (2) The
+`anon_field_changed` impact text had the failure direction backwards: it
+said a *recompiled* consumer "now reads/writes the wrong bytes," but a
+consumer recompiled against the new headers picks up the new offsets and
+reads/writes correctly — it is an *already-compiled* consumer (or a
+mixed build linking old objects against the new library), still using
+the old offsets, that hits the wrong bytes once the anonymous member's
+layout shifts. Rewritten to attribute the failure to the right side. (3)
+The `func_lost_inline` impact text over-claimed that losing `inline`
+"becomes a real, separately-exported symbol... typically enables
+(rather than breaks) linking against it" — but a non-static C++ function
+already has external linkage regardless of `inline` (the attribute only
+permits the compiler to fold identical out-of-line definitions from
+multiple translation units into one), and `_check_inline_transitions()`
+never verifies the new binary's actual export table for this kind, so
+the text promised something the detector doesn't check. Rewritten to
+describe the attribute's real effect (folding permission, not linkage)
+without promising a new export.
 
 1. split CastXML and Clang parsing by entity and shared parser context;
 2. separate source-graph values, construction, and comparison;
-3. partition the change catalog by taxonomy and validate one assembled
-   registry; and
+3. **Done.** Repartitioned the change catalog into D9's `model/change_catalog/
+   {symbols,types,platform,build,source}.py` taxonomy — all four
+   registry-validation properties (global uniqueness, valid references,
+   non-contradictory defaults, complete metadata) enforced, and all 397
+   entries moved into the five taxonomy modules by which detector actually
+   produces each kind (see that section's own account above for the
+   categorization methodology and the content-equality verification). The
+   eight now-empty flat sibling files (`change_registry_{buildsource,
+   castxml,composition,coverage,numpy,parity,suppression,wheel}.py`) were
+   deleted; `change_registry.py` is now a pure assembly point; and
 4. remove superseded private re-exports, migration edges, and cycle
-   exceptions.
+   exceptions. **Two slices landed**: `architecture/
+   modules.yaml`'s `frozen_root_families["cli_"]` and `legacy_root_modules`
+   both still named `cli_contract_options.py`, `cli_help.py`,
+   `cli_options_contract.py`, and `cli_profiles.py` — the four flat modules
+   Phase 4 physically moved into `frontends/cli/options/`/`frontends/cli/
+   help.py` (see that phase's own table above). Confirmed via git history
+   (`85b5515`, "move four CLI option/help leaves into frontends") and a
+   direct import check (`abicheck.cli_profiles` no longer resolves — no
+   compatibility shim was ever published for these, unlike `cli.py`'s own
+   `frontends/cli/moved.py`, which only re-exports individual private
+   symbols other modules still reference, not whole module names) that
+   removing the four stale entries changes nothing a real import can
+   observe — purely bookkeeping that had drifted from the physical tree.
+   `python scripts/check_architecture.py` stays at 0 errors either way,
+   since the glob these lists gate only ever matches a file that exists.
+   The second slice landed alongside item 3's own completion: once the
+   eight flat `change_registry_*.py` siblings were deleted, `architecture/
+   modules.yaml`'s `frozen_root_families["change_registry_"]` and
+   `legacy_root_modules` both dropped the same eight now-nonexistent
+   entries (keeping `change_registry.py`, now the assembly point, and
+   `change_registry_types.py`, the compat shim an earlier step in this
+   same PR already created — untouched by this taxonomy step itself),
+   and the matching stale `no_growth` debt entry for `change_registry.py`
+   in `architecture/debt.yaml` was removed — its own rationale ("cannot
+   move safely without a behavior-preserving vertical slice") no longer
+   applied once this migration *was* that slice.
+   The rest of item 4 (the CLI-registration `IMPORT_CYCLE_ALLOWLIST` in
+   `scripts/check_ai_readiness.py` and any other stale `legacy_paths`
+   entries) is unstarted — that allowlist is a large, deliberately
+   pre-existing, by-design cluster this file's own AGENTS.md instructs not
+   to touch without an ADR or explicit maintainer sign-off, so auditing it
+   is out of scope for an incremental cleanup pass.
 
-**Acceptance:** parser fixtures demonstrate byte/fact parity where applicable;
-catalog validation proves global uniqueness and complete metadata; no parser
-imports policy/report/workflows/frontends; corresponding debt entries are
-removed.
+**Acceptance:** parser fixtures demonstrate byte/fact parity where
+applicable; catalog validation proves all four of D9's properties — global
+uniqueness, valid references, non-contradictory defaults, and complete
+metadata — and item 3's taxonomy repartition (moving the 397 entries into
+`model/change_catalog/{symbols,types,platform,build,source}.py`) are both
+**done**; no parser imports policy/report/workflows/frontends; corresponding
+debt entries are removed.
 
 ## Migration rules for every phase
 

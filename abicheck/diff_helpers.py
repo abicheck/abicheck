@@ -48,22 +48,18 @@ from .fact_provenance import (
     same_producer_backed_fact_qualified,
 )
 from .model import AbiSnapshot
+
+# Imported directly from the canonical model-layer location (ADR-061 D9's
+# target owner for this catalog logic) rather than via change_registry's own
+# re-export, so this doesn't grow change_registry.py past its 2000-line
+# adoption-debt ceiling for a name nothing external currently imports
+# through that path.
+from .model.change_catalog.registry import TEMPLATE_VOCAB as TEMPLATE_VOCAB
 from .qualified_name_segments import strip_inline_abi_namespaces
 
 K = TypeVar("K")
 V = TypeVar("V")
 W = TypeVar("W")
-
-# Fixed placeholder vocabulary a ``ChangeKind.description_template`` may use
-# (C6). ``make_change`` formats the template from exactly these structured
-# fields, so the wording for a kind is owned by the registry rather than
-# reinvented at each call site:
-#   {symbol} — the mangled / exported symbol (or type) name (the Change.symbol)
-#   {name}   — the human-facing declared name (demangled, e.g. ``f_old.name``)
-#   {old}    — old value (also populates Change.old_value unless overridden)
-#   {new}    — new value (also populates Change.new_value unless overridden)
-#   {detail} — any extra computed snippet the template wants to interpolate
-TEMPLATE_VOCAB = frozenset({"symbol", "name", "old", "new", "detail"})
 
 # Sentinel detection for enum members is name-pattern based, not value based:
 # a max-value heuristic accidentally downgrades an ordinary member that merely

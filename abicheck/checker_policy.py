@@ -44,6 +44,12 @@ from typing import Protocol
 
 from .change_registry import REGISTRY as _REGISTRY, Verdict as Verdict
 
+# Imported from the canonical model-layer location (ADR-061 D9's target
+# owner) rather than via change_registry's re-export, so this doesn't grow
+# change_registry.py past its 2000-line adoption-debt ceiling for a name
+# nothing external imports through that path.
+from .model.change_catalog.registry import VALID_BASE_POLICIES as VALID_BASE_POLICIES
+
 
 class ChangeKind(str, Enum):
     # Function / variable changes
@@ -323,7 +329,7 @@ class ChangeKind(str, Enum):
     FUNC_BECAME_INLINE = (
         "func_became_inline"  # function became inline — symbol may disappear from DSO
     )
-    FUNC_LOST_INLINE = "func_lost_inline"  # function lost inline — now has external linkage (compatible)
+    FUNC_LOST_INLINE = "func_lost_inline"  # function lost inline — low-risk, signature/linkage unchanged (compatible)
 
     # ── PR #89: ELF fallback for = delete (issue #100) ───────────────────────────
     # Emitted when castxml metadata lacks deleted="1" but the symbol disappears
@@ -1351,12 +1357,6 @@ def policy_registry_markdown() -> str:
             f"`{entry.severity}` | `{entry.doc_slug}` |"
         )
     return "\n".join(lines)
-
-
-VALID_BASE_POLICIES: frozenset[str] = frozenset(
-    {"strict_abi", "sdk_vendor", "plugin_abi"}
-)
-"""Canonical set of valid built-in policy names. Import from here — do not redefine."""
 
 
 def policy_kind_sets(

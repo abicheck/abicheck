@@ -876,7 +876,7 @@ def test_diff_graph_reconciliation_findings_skips_unreachable_private_pair() -> 
     within a private header, with no public entry reaching it (never
     called out by any public struct/function), must not turn an
     otherwise-clean comparison into COMPATIBLE_WITH_RISK -- these findings
-    default to a RISK verdict (change_registry_buildsource.py), and this is
+    default to a RISK verdict (abicheck/model/change_catalog/source.py), and this is
     a purely internal implementation-detail refactor. When old_graph/
     new_graph are omitted (the module's own lower-level call shape), the
     gate does not apply -- only the real production caller

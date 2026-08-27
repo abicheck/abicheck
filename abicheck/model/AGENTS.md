@@ -8,6 +8,21 @@ per ADR-061 D1. It is the innermost ring — it answers "what is this fact"
 and never "how was it produced", "does it differ", "does it matter", or
 "how is it rendered".
 
+**One deliberate, ADR-061 D9-sanctioned exception: `change_catalog/`.** D9's
+own migration table draws a data/algorithm split for the change registry —
+"declarative `model/change_catalog`; classification algorithms in
+`policy`" — and that is the line this package actually holds to, not a
+blanket carve-out. `ChangeKindMeta.default_verdict`/`policy_overrides`/
+`impact`/`description_template` are declarative *data* (a lookup table and
+report-template strings), not the *code* that walks them to decide or
+render — `checker_policy.py`'s `policy_kind_sets()` and friends do that
+walking, and are slated to move to a `policy` package themselves once
+Phase 2-4 reaches them (still flat today). Read "never answers... does it
+matter... how is it rendered" as about *algorithms*, not about *any field
+whose name sounds policy/report-shaped* — the catalog itself is exactly the
+kind of "what is this fact" (which `ChangeKind` defaults to which verdict,
+under which override) D1 already assigns here.
+
 ## Permitted imports
 
 Per ADR-061 D1, `model/` may import **nothing** first-party except the public
