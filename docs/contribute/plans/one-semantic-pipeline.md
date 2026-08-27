@@ -1552,10 +1552,11 @@ sibling:
   detector registry, so widening their signatures doesn't touch dispatch
   machinery).
 
-  **A single `public_entity_ids` parameter is the wrong shape for a
-  two-snapshot function, and a first draft of this fix threaded exactly
-  one — a review round correctly traced the real call sites and found
-  `apply_pattern_verdicts()`/`compute_surface_metrics()` each build *two*
+  **A single *call's worth* of `public_entity_ids` is still the wrong
+  shape for the two-snapshot *callers*, and a first draft of this fix
+  threaded exactly one shared set to both — a review round correctly
+  traced the real call sites and found `apply_pattern_verdicts()`/
+  `compute_surface_metrics()` each build *two*
   separate graphs, one per side (`build_surface_graph(old)` and
   `build_surface_graph(new)`), not one.** Old and new can genuinely have
   different public reachability — a declaration added to, or removed from,
@@ -1564,19 +1565,29 @@ sibling:
   it to both sides' graph builds classifies one side using the *other*
   side's surface, corrupting pattern modulation and surface-metric findings
   for precisely the changes that matter most (a declaration crossing the
-  public/private line). `build_surface_graph`/`compute_surface_metrics` both
-  gain **two** optional parameters instead of one —
-  `old_public_entity_ids: frozenset[EntityId] | None = None`/
-  `new_public_entity_ids: frozenset[EntityId] | None = None` — each threaded
-  to the matching `build_surface_graph(old)`/`build_surface_graph(new)` call
-  specifically, never the same set to both. `checker.py`'s
+  public/private line). **The old/new pair belongs on the two-snapshot
+  callers, not on `build_surface_graph`/`compute_surface_metrics`
+  themselves — a further review round correctly found this paragraph's
+  own fix put the pair on the wrong functions: each of those two helpers
+  operates on exactly one snapshot per call, so giving either of them
+  *both* `old_public_entity_ids`/`new_public_entity_ids` leaves no
+  unambiguous way to route the pair for a single-snapshot invocation.**
+  `build_surface_graph`/`compute_surface_metrics` each gain exactly
+  **one** optional parameter instead — `public_entity_ids:
+  frozenset[EntityId] | None = None` — and the old/new pair lives only on
+  their two-snapshot callers, `apply_pattern_verdicts()`/
+  `compute_surface_metrics()`'s own caller, each passing its own side's set
+  to its own matching call (`build_surface_graph(old, public_entity_ids=
+  old_ids)`/`build_surface_graph(new, public_entity_ids=new_ids)`), never
+  the same set to both. `checker.py`'s
   `_apply_pattern_verdicts_step`/`_apply_surface_metrics` both gain the
-  identical pair, resolved from `compare()`'s own two separate
+  two-snapshot pair, resolved from `compare()`'s own two separate
   `PublicSurfaceQuery.resolve()` calls (one per side — `compute_public_
   surface()` already resolves old and new independently for the identical
   reason) and passed straight through to `apply_pattern_verdicts()`/
   `diff_surface_metrics()`, which pass the matching half of the pair
-  straight through to `build_surface_graph()`/`compute_surface_metrics()`
+  through as the single `public_entity_ids` argument to `build_surface_
+  graph()`/`compute_surface_metrics()`
   in turn. When both are `None` (the only case possible outside
   `compare()`'s own pipeline), `SurfaceGraph.public_roots()` falls
   back to its pre-existing `Visibility.PUBLIC` filter — an explicit,
@@ -3247,20 +3258,53 @@ which backend's value won, per declaration, per fact — applied to
    collapsing two genuinely distinct occurrences into one. Fixed by
    checking candidate-set size before attempting the disambiguator
    comparison above, not only after: for a given `EntityId`, if either
-   side has more than one occurrence, the disambiguator-based check from
-   above is applied per-candidate-pair and a match is accepted only when
-   it identifies a *unique* compatible pair (a pairing where, after
-   excluding candidates whose non-empty disambiguators disagree, exactly
-   one pair remains) — any `EntityId` for which this leaves more than one
-   viable pairing, or leaves an imbalance the comparison cannot resolve (a
-   side's extra occurrence with no remaining candidate to pair against),
-   is left entirely unmerged for that identity: every occurrence from both
-   sides is unioned in verbatim as its own entry, under rule 3 below,
-   rather than guessing at a pairing. This is the same fail-closed
+   side has more than one occurrence, matching is decided over the whole
+   group at once, not pair by pair.
+
+   **"Exactly one compatible pair survives all-pairs filtering" is the
+   wrong test for "a unique matching exists," and a further review round
+   gave the exact counterexample: when each side independently has
+   *more than one* occurrence, a correct, unambiguous one-to-one pairing
+   can still exist, and the all-pairs-filter rule rejects it anyway.**
+   Two CastXML occurrences with disambiguators `{usr1, usr2}` against two
+   Clang occurrences with disambiguators `{usr1, usr2}` have exactly one
+   correct pairing (`usr1`↔`usr1`, `usr2`↔`usr2`) — but checking every
+   cross pair against the disambiguator-safety rule leaves **two**
+   agreeing pairs surviving (`usr1`↔`usr1` and `usr2`↔`usr2`), not one, so
+   "exactly one pair remains" incorrectly reads this as ambiguous and
+   unions the whole group unmerged, losing a real Clang backfill for both
+   occurrences even though there was never any actual ambiguity. The
+   correct test is uniqueness of a *complete matching* over the group, not
+   uniqueness of a single surviving pair: group each side's occurrences by
+   disambiguator value first — every non-empty disambiguator value present
+   on *both* sides must name exactly one occurrence per side (two
+   occurrences on one side sharing a non-empty disambiguator is itself a
+   genuine ambiguity for that value, not resolvable by this rule at all) —
+   pairing each such value 1:1; then, among whatever occurrences remain
+   unmatched after that (necessarily empty-disambiguator occurrences, since
+   every non-empty value was already paired or flagged), pair the two
+   leftovers only when *exactly one* remains unmatched on each side (the
+   "no TU-context signal from either side, but nothing else to confuse it
+   with" case this phase's own empty-disambiguator rule already covers for
+   the single-occurrence case). Any `EntityId` for which this process
+   leaves a non-empty disambiguator value claimed by more than one
+   occurrence on either side, or leaves more than one empty-disambiguator
+   occurrence unmatched on either side after every non-empty value is
+   resolved, has no unique matching — it is left entirely unmerged for that
+   identity: every occurrence from both sides is unioned in verbatim as its
+   own entry, under rule 3 below, rather than guessing at a pairing. This
+   is the same fail-closed
    direction the disambiguator fix above already takes — an ambiguous
    group produces no merge rather than an arbitrary one — applied at the
    cardinality check that has to run before the pairwise comparison is
-   even meaningful, not a new principle invented for it.
+   even meaningful, not a new principle invented for it. A dedicated
+   property test pins the uniquely-matchable multi-occurrence case
+   directly (two same-sized groups whose non-empty disambiguators are a
+   bijection, confirmed to merge both pairs correctly) alongside the
+   genuinely-ambiguous case (two occurrences sharing one non-empty
+   disambiguator on one side, confirmed to leave the whole group
+   unmerged) — the exact two shapes this finding's own counterexample and
+   the original ambiguity-detection requirement each name.
 2. **CastXML's `CanonicalEntity` is the base for every matched pair**,
    mirroring every other reconciled field in this function: Clang's
    matching occurrence backfills only the specific facts CastXML's own
@@ -4060,6 +4104,44 @@ two decode/encode steps (`gate.py` in, `fold.py::exit_code()` out), not
 three, because folding the operational axis into `GateInfo` at the read
 boundary means there is no longer a third, separate step left over to
 name.
+
+**The acceptance check above cannot actually establish the "zero remaining
+inline exit-code/severity computation" bar it states, because it never
+touches `action/run.sh` at all — a review round correctly found this
+phase's Files list never migrates it, even though ADR-063 D6 already names
+"the Action's own encoder" as one of exactly four boundary encoders this
+decision covers.** `check_ai_readiness.py`'s `no-inline-gate-computation`
+check is a Python AST walk; `action/run.sh` is bash, structurally invisible
+to it. Reading the real script confirms the gap is not cosmetic:
+`_severity_gate_exit()` still reads `severity.exit_code` from the JSON
+report directly, and the main `case $ABICHECK_EXIT in ...)` blocks (the
+`scan`/`dump`/`deps` paths) reconstruct which message/annotation to emit
+from the bare process exit integer, not from the report's own structured
+`RunOutcome.gate`/`.operational` fields — exactly the "semantic decision
+computed by branching on an integer exit code" shape D6's own "no domain
+or workflow code" rule targets, just in a language this phase's tooling
+cannot enforce against. ADR-063 D6's framing — "the Action's own encoder...
+already owns exactly this conversion... this is a new input type for an
+existing function" — overstates what landing Phase 7 alone actually
+changes for the Action: nothing in this phase's Files list touches
+`action/run.sh`, so its raw-exit-code branching is exactly as unmigrated
+after this phase as before it. **Not migrated in this phase, named here as
+an explicit, scoped exception rather than a silent gap in this phase's own
+accounting** — matching this plan's own established pattern for a real,
+separately-justified residual (the binary-less `dump --sources` path in
+Phase 1; the two `cli_compare_release.py` branches in Phase 4): a correct
+migration means rewriting `action/run.sh`'s several hundred lines of
+`case`/annotation logic to read `RunOutcome.gate`/`.operational` from the
+JSON report via `jq` instead of branching on `$ABICHECK_EXIT`, re-verified
+against every one of its existing GH Action annotation/step-summary
+behaviors end to end — a real, large, separately-scoped rewrite of a
+shell script this phase's Python-only tooling cannot even test-cover, not
+a drive-by addition to this phase's Files list. Until that future phase
+lands, `action/run.sh` stays a raw-exit-code consumer for its own
+messaging logic, and the "zero remaining inline exit-code/severity
+computation" acceptance bar above is scoped to the Python front ends
+(`cli.py`, `service.py`, `aggregate`) this phase's own check can actually
+see.
 
 ---
 

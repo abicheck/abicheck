@@ -686,7 +686,14 @@ verdict`, the Action's own encoder, and `aggregate`'s own `fold.py::
 exit_code()` — restated here explicitly rather than only in the paragraph
 above, so this sentence's own list doesn't read as narrower than it is)
 maps `RunOutcome` to that front end's
-exit-code scheme. For the aggregate path specifically: `gate.py` reads a
+exit-code scheme. **"The Action's own encoder" names the role this
+decision assigns to `action/run.sh`, not a claim that Phase 7 of the
+implementation plan migrates it there — implementation-plan review found
+that phase's Files list never touches the script, so its several hundred
+lines of `case $ABICHECK_EXIT in ...)` branching stay exactly as
+unmigrated after that phase as before it, pending a future,
+separately-scoped rewrite; see that plan's own Phase 7 text for the full
+accounting.** For the aggregate path specifically: `gate.py` reads a
 report's structured `RunOutcome.gate`/`.operational` fields and folds both
 into the one `GateInfo` it returns, by `max()` over the shared exit-code
 scheme — `PolicyGateDecision`'s own ordering for the compatibility
