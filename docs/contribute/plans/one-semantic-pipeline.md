@@ -60,7 +60,7 @@ assume:
 | ADR-055 (typed request/result) | D1 implemented for `compare` only | Phase 1 extends the existing `CompareRequest`/`service_compare_pipeline.py` shape to `dump`/`scan`, it does not invent a new shape |
 | ADR-061 (responsibility packages) | Phases 0-1 implemented; Phase 5 (`model` package) begun | Phase 0/2/4/7 of this plan land inside the `model`/`compare`/`policy` packages ADR-061 already created; this plan does not create new top-level packages beyond what ADR-061 names |
 | ADR-062 (storage v2) | Phase 0 primitives (`abicheck/storage/`: `FactStatus`/`FactAvailability`, occurrence-preserving identity, canonical encoding, version axes) implemented and **inert** — nothing wired to a producer/reader | Phase 0/5 of this plan is the *generalization* of these primitives into the domain layer; Phase 8 of this plan is the *wiring* ADR-062 Phase 1 still needs, done jointly rather than twice |
-| ADR-042 (compatibility/gate separation) | Implemented for JSON/SARIF/`compare-release`; `junit_report.py` and `workflows/aggregate/gate.py`/`fold.py` still compute/decode exit codes inline | Phase 7 of this plan closes both remaining gaps (not only the `junit_report.py` one a first draft of this plan named) — neither is a redesign of ADR-042 itself |
+| ADR-042 (compatibility/gate separation) | Implemented for JSON/SARIF/`compare-release`; `workflows/aggregate/gate.py`/`fold.py` still decode exit codes inline | Phase 7 of this plan closes the `gate.py`/`fold.py` gap — not a redesign of ADR-042 itself. `junit_report.py`'s own inline `_is_failure` computation is **not** one of the gaps Phase 7 closes: that phase's own corrected design leaves it exactly as it is, since it is a legitimate per-render function of each call's own `SeverityConfig`/`relevant_ids`, not a property a finding carries — there is no `RunOutcome` field for it to read instead, so it stays inline by design, not as an unclosed gap |
 | AGENTS.md "PR C" (dump/scan typed convergence) | `resolve_dump_request`/`execute_dump_request` split landed; real `dump`/`scan` execution still on the legacy path, blocked on two named items (castxml availability for parity testing, `--compile-db-filter` typed surface — now closed) | Phase 1 of this plan is exactly "finish PR C," not a new design |
 
 ## Phases
@@ -4597,6 +4597,33 @@ not new design.
   generator now produces.
 - Phase 6: each backend parser's own copy of anonymous-marker/closure-
   identity/namespace-join logic.
+
+  **This row is deliberately narrower than this phase's "before" state in
+  full, and a review round correctly found that gap worth naming rather
+  than leaving this row read as covering it — this section's own Goal
+  above says "every phase above is only complete once its 'before' state
+  is removed," and Phase 6's own text is explicit that the legacy
+  `functions`/`types`/... projection is *not* removed by this phase, with
+  no later row in this checklist removing it either.** Phase 6's own
+  text already states why: retiring the legacy fields is deferred "not to
+  an unscheduled 'eventually,' but to whichever future phase first has a
+  real `SemanticIR`-only detector population large enough that the legacy
+  fields have no remaining reader" — but no phase in this plan is that
+  phase, so the condition is real and named, not yet satisfied by
+  anything scheduled here. This is the same shape as Phase 4's own "no
+  row, by design, not by omission" entry above, stated explicitly for the
+  same reason: the legacy-field retirement is not a superseded
+  representation with an old copy sitting idle to delete (every existing
+  detector still reads it, genuinely, not merely for compatibility), it is
+  a migration with a real prerequisite — a detector population large
+  enough to retire the fallback — that this plan's own Phase 6 deliberately
+  does not attempt, per that phase's own "validating both 'is the IR
+  correct' and 'does every detector still behave identically once reading
+  from it' in one unreviewable pass" reasoning. Migrating the checker's
+  detectors onto `SemanticIR` and retiring the legacy projection is
+  therefore real, scheduled, separately-justified future work — named here
+  as a residual this checklist does not close, not a silent gap in its own
+  accounting.
 - Phase 7: `gate.py`'s raw-`exit_code`-decode-as-the-only-path for a
   *fresh* report (replaced outright by the structured-`RunOutcome`-first
   read in the same phase, not left running alongside it for new reports —
