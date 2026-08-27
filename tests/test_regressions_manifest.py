@@ -79,6 +79,32 @@ class TestRegistryShape:
         )
 
 
+def _is_collected_test_path(rel_path: str) -> bool:
+    """Whether `rel_path` matches the shape pytest's default `testpaths =
+    ["tests"]` / `test_*.py` collection actually picks up: a real `.py`
+    file, named `test_*.py`, located under `tests/` (at any depth).
+
+    Deliberately a naming/location check, not a live `pytest --collect-only`
+    invocation — the registry only ever names files that already exist in
+    this repo's own test tree, so this is enough to catch a stale path or a
+    path pointing at a support/data module (e.g.
+    `tests/canonical_identity_contract.py`, which real tests *import* but
+    which pytest itself never collects) without paying a subprocess per
+    registry entry (Codex review, PR #885 — the previous version of this
+    predicate, `path.name.startswith("test_") or path.parent.name !=
+    "tests"`, was true for almost any path and accepted exactly the support
+    modules this check exists to reject).
+    """
+    path = REPO_ROOT / rel_path
+    if not path.is_file() or path.suffix != ".py" or not path.name.startswith("test_"):
+        return False
+    try:
+        path.relative_to(REPO_ROOT / "tests")
+    except ValueError:
+        return False
+    return True
+
+
 class TestRegisteredTestPathsExist:
     """Every path this registry names must resolve to a real, collectible
     test file — a stale or typo'd path here is worse than no entry at all,
@@ -91,13 +117,10 @@ class TestRegisteredTestPathsExist:
     )
     def test_seed_tests_exist_and_are_collectible(self, bug_class: BugClass) -> None:
         for rel_path in bug_class.seed_tests:
-            path = REPO_ROOT / rel_path
-            assert path.is_file(), f"{bug_class.id}: seed test not found: {rel_path}"
-            assert path.name.startswith("test_") or path.parent.name != "tests", (
-                f"{bug_class.id}: {rel_path} does not look like a "
-                "pytest-collected test file (expected a tests/**/test_*.py "
-                "path) — point at the test that exercises this class, not "
-                "a support/data module"
+            assert _is_collected_test_path(rel_path), (
+                f"{bug_class.id}: {rel_path} does not resolve to a real, "
+                "pytest-collected tests/**/test_*.py file — point at the "
+                "test that exercises this class, not a support/data module"
             )
 
     @pytest.mark.parametrize(
@@ -107,14 +130,19 @@ class TestRegisteredTestPathsExist:
     )
     def test_known_gap_canaries_exist(self, bug_class: BugClass) -> None:
         for gap in bug_class.known_gaps:
-            path = REPO_ROOT / gap.canary_test
-            assert path.is_file(), (
-                f"{bug_class.id}: known_gaps canary not found: "
-                f"{gap.canary_test} ({gap.description})"
-            )
             assert gap.reference.strip(), (
                 f"{bug_class.id}: known_gaps entry must name a reference "
                 f"(issue/PR/plan section): {gap.description}"
+            )
+            if gap.canary_test is None:
+                # An untracked-by-canary residual is honest (see
+                # `KnownGap.canary_test`'s own docstring) — nothing further
+                # to check.
+                continue
+            assert _is_collected_test_path(gap.canary_test), (
+                f"{bug_class.id}: known_gaps canary does not resolve to a "
+                f"real, pytest-collected test: {gap.canary_test} "
+                f"({gap.description})"
             )
 
 

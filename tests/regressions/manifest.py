@@ -50,9 +50,14 @@ class KnownGap:
     """A residual the class's current tests deliberately do not close.
 
     Per AGENTS.md's "Fix the cause, not the instance": a gap is tracked
-    here, with an executable canary (an ``xfail``/skip-with-reason test
-    that fails loudly if the gap silently closes or silently widens),
-    rather than left as prose only.
+    here rather than left as prose only. `canary_test`, when set, must be
+    a *dedicated* executable canary (an ``xfail``/skip-with-reason test
+    written specifically for this gap) that fails loudly if the residual
+    silently closes or silently widens — never a pointer to an existing
+    suite that happens to cover the same class but doesn't encode this
+    specific gap. Leave it `None` for a gap that is tracked but not yet
+    monitored by a canary; `None` is honest, a mismatched path is not
+    (Codex review, PR #885).
     """
 
     #: What's not covered (one sentence — the full account lives in
@@ -60,8 +65,9 @@ class KnownGap:
     description: str
     #: Issue or PR number this gap traces to, e.g. "PR #843".
     reference: str
-    #: Path to the test that encodes this gap as an executable canary.
-    canary_test: str
+    #: Path to a *dedicated* canary test for this exact gap, or `None` if
+    #: this residual is tracked but not yet monitored by one.
+    canary_test: str | None = None
 
 
 @dataclass(frozen=True)
@@ -140,7 +146,6 @@ BUG_CLASSES: tuple[BugClass, ...] = (
                     "encoded as canaries in the generalized suite."
                 ),
                 reference="PR #843",
-                canary_test="tests/test_surface_property.py",
             ),
         ),
     ),
@@ -168,7 +173,6 @@ BUG_CLASSES: tuple[BugClass, ...] = (
                     "markers (AGENTS.md, PR #868's own follow-up note)."
                 ),
                 reference="PR #868",
-                canary_test="tests/test_anon_type_location_properties.py",
             ),
         ),
     ),
@@ -207,7 +211,6 @@ BUG_CLASSES: tuple[BugClass, ...] = (
                     "full matrix."
                 ),
                 reference="docs/contribute/plans/bug-class-regression-testing.md#phase-6",
-                canary_test="tests/test_project_targets_consumer_compile.py",
             ),
         ),
     ),
@@ -257,7 +260,6 @@ BUG_CLASSES: tuple[BugClass, ...] = (
                     "(evidence kinds, providers, report renderers)."
                 ),
                 reference="docs/contribute/plans/bug-class-regression-testing.md#phase-9",
-                canary_test="tests/test_canonical_finding_id_completeness.py",
             ),
         ),
     ),
@@ -283,7 +285,6 @@ BUG_CLASSES: tuple[BugClass, ...] = (
                     "in AGENTS.md's 'Known gaps' section."
                 ),
                 reference="docs/contribute/plans/bug-class-regression-testing.md#phase-9",
-                canary_test="tests/test_fact_conservation_properties.py",
             ),
         ),
     ),
