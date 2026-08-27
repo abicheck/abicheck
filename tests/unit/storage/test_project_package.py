@@ -702,6 +702,13 @@ class TestObjectStoreContract:
         assert store.has(digest)
         assert store.get(digest) == payload
 
+    def test_storing_identical_raw_payload_twice_returns_one_digest(self) -> None:
+        store = InMemoryObjectStore()
+        first = store.put(b"same raw bytes")
+        second = store.put(b"same raw bytes")
+        assert first == second
+        assert store.get(first) == b"same raw bytes"
+
     @pytest.mark.parametrize("wrapper", [bytearray, memoryview])
     def test_put_accepts_bytearray_and_memoryview(self, wrapper: Any) -> None:
         store = InMemoryObjectStore()
