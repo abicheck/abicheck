@@ -1405,6 +1405,38 @@ supported "still exported" path (e.g. the function stays ODR-used
 elsewhere in the library). Rewritten to describe both outcomes rather
 than assuming removal.
 
+A tenth Codex review round on that same commit found three more issues,
+all fixed. (1) `_ImmutableDict` still had one inherited mutating path
+open, distinct from the `__ior__` gap the eighth round closed:
+`entry.policy_overrides.__init__({"unknown": ...})` re-invokes the
+*inherited*, never-overridden `dict.__init__` directly on an
+already-constructed instance, populating it via the same C-level path a
+fresh construction uses — bypassing every overridden mutator entirely,
+confirmed empirically (the dict's contents changed after the call).
+Fixed by overriding `__init__` too: a plain instance attribute
+(`_initialized`) distinguishes the one legitimate call (from
+`ChangeKindMeta.__post_init__` or from `__reduce__`'s reconstruction,
+both always on a brand-new instance) from any later re-invocation on the
+same object, which now raises the same way every other mutator does.
+Pinned by a new test, `test_policy_overrides_blocks_reinit`. (2) The
+`anon_field_changed` impact text had the failure direction backwards: it
+said a *recompiled* consumer "now reads/writes the wrong bytes," but a
+consumer recompiled against the new headers picks up the new offsets and
+reads/writes correctly — it is an *already-compiled* consumer (or a
+mixed build linking old objects against the new library), still using
+the old offsets, that hits the wrong bytes once the anonymous member's
+layout shifts. Rewritten to attribute the failure to the right side. (3)
+The `func_lost_inline` impact text over-claimed that losing `inline`
+"becomes a real, separately-exported symbol... typically enables
+(rather than breaks) linking against it" — but a non-static C++ function
+already has external linkage regardless of `inline` (the attribute only
+permits the compiler to fold identical out-of-line definitions from
+multiple translation units into one), and `_check_inline_transitions()`
+never verifies the new binary's actual export table for this kind, so
+the text promised something the detector doesn't check. Rewritten to
+describe the attribute's real effect (folding permission, not linkage)
+without promising a new export.
+
 1. split CastXML and Clang parsing by entity and shared parser context;
 2. separate source-graph values, construction, and comparison;
 3. repartition the change catalog into D9's `model/change_catalog/

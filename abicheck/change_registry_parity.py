@@ -199,9 +199,12 @@ PARITY_EXTENSION_ENTRIES: list[ChangeKindMeta] = [
     _E("anon_field_changed", _B,
        impact="An anonymous struct/union member's own layout changed; "
               "since it has no name to distinguish it, every named member "
-              "reached through it may have shifted offset — a recompiled "
-              "consumer that used to read/write through the old layout "
-              "now reads/writes the wrong bytes."),
+              "reached through it may have shifted offset — an "
+              "already-compiled consumer (or a mixed build linking old "
+              "objects against the new library) still reading/writing at "
+              "the old offsets now hits the wrong bytes. Source recompiled "
+              "against the new headers picks up the new offsets and is "
+              "unaffected."),
 
     # ── ABICC full parity — remaining gaps ─────────────────────────────────
     _E("var_value_changed", _C,
@@ -301,11 +304,15 @@ PARITY_EXTENSION_ENTRIES: list[ChangeKindMeta] = [
               "a symbol kept exported (e.g. still ODR-used elsewhere in "
               "the library) leaves already-linked callers unaffected."),
     _E("func_lost_inline", _C,
-       impact="A function lost its inline attribute and now has external "
-              "linkage; it becomes a real, separately-exported symbol "
-              "rather than one the compiler may fold away — safe for "
-              "existing consumers, and typically enables (rather than "
-              "breaks) linking against it.",
+       impact="A function lost its explicit inline attribute. A non-static "
+              "C++ function already has external linkage regardless of "
+              "inline — the attribute only permits the compiler to fold "
+              "identical out-of-line definitions emitted by multiple "
+              "translation units into one, so losing it doesn't itself "
+              "create or guarantee a new export (this detector doesn't "
+              "verify the new binary's export table). The function's own "
+              "signature and calling convention are unchanged either way, "
+              "so this is low-risk for already-linked consumers.",
        description_template="Function lost inline attribute (now has external linkage): {name}"),
 
     # ── PR #89: ELF fallback ──────────────────────────────────────────────

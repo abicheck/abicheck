@@ -287,6 +287,26 @@ class TestChangeKindRegistry:
             entry.policy_overrides |= {"unknown": Verdict.API_BREAK}
         assert dict(entry.policy_overrides) == {"plugin_abi": Verdict.COMPATIBLE}
 
+    def test_policy_overrides_blocks_reinit(self):
+        """Directly re-invoking the inherited dict.__init__ is blocked too.
+
+        Overriding __setitem__/update/etc. doesn't stop a caller from
+        re-invoking dict's own __init__ directly —
+        ``entry.policy_overrides.__init__({"unknown": ...})`` mutated the
+        already-constructed dict in place via the same C-level population
+        path a fresh construction uses, bypassing every overridden mutator
+        (Codex review, PR #882, fresh evidence).
+        """
+        import pytest
+
+        entry = ChangeKindMeta(
+            "test_kind", Verdict.BREAKING,
+            policy_overrides={"plugin_abi": Verdict.COMPATIBLE},
+        )
+        with pytest.raises(TypeError):
+            entry.policy_overrides.__init__({"unknown": Verdict.API_BREAK})
+        assert dict(entry.policy_overrides) == {"plugin_abi": Verdict.COMPATIBLE}
+
     def test_policy_overrides_immutability_survives_serialization(self):
         """The immutable policy_overrides still round-trips like an ordinary dict.
 

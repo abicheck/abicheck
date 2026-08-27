@@ -114,6 +114,23 @@ class _ImmutableDict(dict[str, Verdict]):
     overridden Python-level ``__setitem__``.
     """
 
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        # Overriding __setitem__/update/etc. below doesn't stop a caller
+        # from re-invoking the *inherited* dict.__init__ directly —
+        # ``entry.policy_overrides.__init__({"unknown": ...})`` mutates the
+        # already-constructed dict in place via the same C-level population
+        # path a fresh construction uses, bypassing every overridden
+        # mutator (Codex review, PR #882, fresh evidence). ``__init__`` is
+        # legitimately called exactly once per real object — both by
+        # ``ChangeKindMeta.__post_init__`` and by ``__reduce__``'s
+        # reconstruction below, always on a brand-new instance — so a
+        # second call on the same object is unconditionally a re-init
+        # attempt, not a legitimate use.
+        if getattr(self, "_initialized", False):
+            raise TypeError("policy_overrides is immutable after construction")
+        dict.__init__(self, *args, **kwargs)
+        self._initialized = True
+
     def __setitem__(self, key: str, value: Verdict) -> None:
         raise TypeError("policy_overrides is immutable after construction")
 
