@@ -1019,6 +1019,39 @@ structure already in place:
    `evidence_provenance=None` despite the PROVENANCE_STATIC
    classification) and passes post-fix.
 
+   **The single code-level provider-ID registry this section's own
+   Phase 0 text called for did not exist yet when this slice first
+   landed — closed in the same PR (Codex review, PR #900).**
+   `model.vocabulary.EVIDENCE_PROVENANCE_TAGS` (a `frozenset[str]`, the
+   registry's home per ADR-061's "closed vocabularies" package) is now
+   the single source of truth, seeded with the one tag this slice
+   introduces (`"both:l0:elf_symtab"`). `tests/test_evidence_provenance_
+   completeness.py::TestProvenanceTagsAreRegistered` checks every tag any
+   `PROVENANCE_STATIC`/`PROVENANCE_PER_FINDING` kind's real producer
+   emits is registered — confirmed to fail when the registry is emptied
+   (a real, checked gate, not a decorative frozenset).
+
+   **A second finding on the same review round, verified real and
+   deliberately NOT fixed here:** `l0:elf_symtab`'s own vocabulary
+   definition (Phase 0's table, above) names `.dynsym`/the export table
+   specifically — but `elf_metadata._parse_all_sections()` has a
+   documented `.symtab` fallback for relocatable objects (`ET_REL` `.o`
+   files, no `.dynsym` at all — a real, reachable path via
+   `probe_harness.py`'s "pass a `.o` file through the existing dumper"),
+   reusing `_parse_dynsym` to populate `imports`/`symbols` from `.symtab`
+   instead. A stack-canary/FORTIFY regression detected between two such
+   snapshots would still be stamped `both:l0:elf_symtab`, overclaiming
+   `.dynsym`/export-table evidence for what was actually a `.symtab`
+   read. Not fixed here: `ElfMetadata` has no field today recording
+   which section supplied `imports`/`symbols` — distinguishing the two
+   correctly needs a new tracked field (and the serialization/schema
+   considerations that come with widening `ElfMetadata`), a real model
+   change out of proportion to this slice's own narrow scope, not a
+   same-PR reactive patch under review pressure (per this repo's own
+   "known gaps over risky reactive patches" convention, `AGENTS.md`).
+   Left as a documented, known limitation for whichever slice next
+   touches `.symtab`-fallback provenance.
+
    **`diff_symbols.py` does NOT belong in this
    mechanical sub-slice** despite being symbol-table-driven on its face
    (Codex review, verified against the code): `_public_functions()` falls

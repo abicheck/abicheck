@@ -14,4 +14,7 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   (`diff_platform_elf_dynamic._diff_security_hardening`). No user-visible
   behavior changes beyond the new, optional field on affected `Change`
   objects (JSON/SARIF/JUnit reports gain the field for these two kinds
-  only; every other finding is unaffected).
+  only; every other finding is unaffected). The valid provider-ID
+  vocabulary now has a single code-level owner,
+  `model.vocabulary.EVIDENCE_PROVENANCE_TAGS`, checked by a new
+  completeness-gate test.

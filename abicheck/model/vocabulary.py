@@ -71,3 +71,26 @@ class ScopeOrigin(str, Enum):
     GENERATED = "generated"  # machine-generated header (moc_*, *.pb.h, generated/ ...)
     EXPORT_ONLY = "export_only"  # exported by the binary but absent from any header
     UNKNOWN = "unknown"  # no public set, or no source location
+
+
+#: Valid ``Change.evidence_provenance`` entries (G39). A bare
+#: ``tuple[str, ...]`` field deliberately stays untyped (see the plan's own
+#: Phase 0 section for why: a bespoke enum-per-field would compete with the
+#: string-ref shape ``contract_evidence_refs`` already established) -- this
+#: frozenset is the single code-level owner the plan's Phase 0 section
+#: requires before Phase 1 wires any real call site, so a typo'd or
+#: independently-invented tag fails a check instead of silently shipping
+#: as an unrecognized value no consumer can key off
+#: (docs/contribute/plans/g39-per-finding-evidence-provider-model.md).
+#: Extended alongside each new Phase 1 slice -- never hand-invented at a
+#: detector call site.
+EVIDENCE_PROVENANCE_TAGS: frozenset[str] = frozenset(
+    {
+        # diff_platform_elf_dynamic._diff_security_hardening's
+        # STACK_CANARY_REMOVED/FORTIFY_SOURCE_WEAKENED (G39 Phase 1,
+        # first sub-slice): has_stack_canary/has_fortify_source are
+        # .dynsym import/symbol-name derived, read identically on both
+        # sides.
+        "both:l0:elf_symtab",
+    }
+)

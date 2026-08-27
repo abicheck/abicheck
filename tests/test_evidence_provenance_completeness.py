@@ -351,3 +351,34 @@ class TestClassificationTracksRealProducerBehavior:
                 "PROVENANCE_STATIC, or fix the producer to actually vary "
                 "with its input."
             )
+
+
+class TestProvenanceTagsAreRegistered:
+    """G39 Phase 0's own contract: the string vocabulary needs a single
+    code-level owner (``model.vocabulary.EVIDENCE_PROVENANCE_TAGS``), not
+    just the plan's own prose table -- so a typo'd or independently-
+    invented tag at a new Phase 1 call site fails here instead of
+    silently shipping as an unrecognized value no consumer can key off
+    (Codex review, PR #900)."""
+
+    @pytest.mark.parametrize(
+        "kind_value", sorted(PROVENANCE_STATIC | PROVENANCE_PER_FINDING)
+    )
+    def test_every_stamped_tag_is_registered(self, kind_value: str) -> None:
+        from abicheck.model.vocabulary import EVIDENCE_PROVENANCE_TAGS
+
+        emitted = TestClassificationTracksRealProducerBehavior._emitted_for_kind(
+            kind_value
+        )
+        unregistered = {
+            tag
+            for c in emitted
+            if c.evidence_provenance is not None
+            for tag in c.evidence_provenance
+        } - EVIDENCE_PROVENANCE_TAGS
+        assert not unregistered, (
+            f"{kind_value}'s real producer emits evidence_provenance "
+            f"tag(s) not in model.vocabulary.EVIDENCE_PROVENANCE_TAGS: "
+            f"{sorted(unregistered)} -- register the tag there before "
+            "a detector call site stamps it."
+        )
