@@ -1013,8 +1013,14 @@ the next pass does not re-survey it.
 
 `frontends/` and `workflows/` are migrated packages, so anything physically
 inside them is subject to `unclassified-import`. Thinning `service.py` therefore
-means classifying the 28 flat modules it imports. Doing so surfaces 67
-direction violations, and the load-bearing ones share one root cause:
+means classifying the 28 flat modules it imports. Doing so surfaced 67
+direction violations at the time this paragraph was written — **a figure a
+later Codex review round on this PR flagged as stale relative to the
+`*_metadata.py` split below, and this paragraph is left as the historical
+record of the original blocker rather than restated as current; the
+paragraph several below this one (after "Re-measured again") has the
+up-to-date, re-verified number.** The load-bearing ones shared one root
+cause:
 **`*_metadata.py` conflate a model dataclass with its parser.** `AbiSnapshot`
 has typed fields of `PeMetadata`/`MachoMetadata`/`DwarfMetadata`/
 `AdvancedDwarfMetadata`, and `serialization.py` names 19 such types — so
@@ -1135,15 +1141,21 @@ its methods: `overrides: dict[ChangeKind, Verdict]` and
 `reclassify: list[ReclassifyRule]` are exactly the state a facade split would
 carry into `model`. `ReclassifyRule` lives in `reclassify.py` — already
 **deliberately unclassified** two paragraphs above in this same document, for
-this identical reason. `ChangeKind`/`Verdict` live in `checker_policy.py`
-(1559 lines) — confirmed by reading it, not assumed: it is not a clean enum
-module either, it mixes those two enums with real policy algorithms of its
-own (`compute_verdict`, `policy_kind_sets`, `effective_category`,
-`evidence_status_for_change`). So a facade split on `PolicyFile` alone
-doesn't avoid this ADR's model-vs-policy question; it moves the identical
-question onto `checker_policy.py`'s own, larger entanglement — which is the
-same "`checker_policy.py`'s own model-vs-policy split" this note already
-named as the actual pending decision, not a new one. Reclassifying
+this identical reason. Of the other two, only one is still a problem: `Verdict`
+is not defined in `checker_policy.py` at all — a Codex review round on this
+PR caught that too, and it checks out (`checker_policy.py:45` re-exports it
+from `change_registry`, which resolves it from `abicheck/model/change_catalog/
+registry.py`, already physically `model`-owned since Phase 5's registry-core
+move) — so a `model`-owned facade can reference `Verdict` directly, no split
+needed. `ChangeKind` is the real remaining case: it *is* defined in
+`checker_policy.py` (1559 lines) — confirmed by reading it, not assumed —
+alongside real policy algorithms of the same module (`compute_verdict`,
+`policy_kind_sets`, `effective_category`, `evidence_status_for_change`), so
+threading it into a `model`-owned facade still needs `checker_policy.py`'s own
+model-vs-policy split, narrower than this paragraph first claimed but not
+resolved by it. `PolicyFile` overall is not made safe to facade-split by this
+correction alone — `ChangeKind` and `ReclassifyRule` both still block it.
+Reclassifying
 `policy_file.py`/`suppression.py` as `compare` instead was rejected too:
 `compute_verdict` is policy logic by any reading, and mislabeling it only
 relocates the ambiguity this ADR exists to remove.
