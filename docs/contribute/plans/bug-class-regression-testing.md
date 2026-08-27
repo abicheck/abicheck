@@ -377,8 +377,15 @@ starved property generators).
 
 * **Invariant (four properties, each independently tested):** for every
   key used in matching, grouping, or deduplication — totality (every
-  producer-valid value yields a key), determinism, injectivity (unequal
-  values don't collide), and order-invariance for unordered inputs.
+  producer-valid value yields a key), determinism, injectivity for
+  *semantically distinct* findings (not "no two unequal values ever
+  collide" — a batch/library-level finding samples an arbitrary
+  affected export as its "spokesperson", so two `Change` instances
+  differing only in which export was sampled describe the same logical
+  event and must collide by design; see
+  `test_finding_identity_properties.py`'s own
+  `TestBatchShapedChangeIgnoresTheSample`), and order-invariance for
+  unordered inputs.
 * **Generator:** recursive values including tuples/lists/sets/dicts in
   varying insertion order, `NaN`/signed-zero/infinities, structurally
   equal copies, and objects with identical `repr()` but different
