@@ -40,7 +40,7 @@ import pytest
 from abicheck.checker import ChangeKind, Verdict, compare
 from abicheck.dumper import _clang_header_dump, dump
 from abicheck.dumper_clang import _ClangAstParser
-from abicheck.model import ScopeOrigin, Visibility
+from abicheck.model import Visibility
 
 # Scoped to **Linux/ELF** — the clang L2 backend's target (P1: clang-only Linux
 # CI images). The cross-platform binary-build conventions diverge in ways
@@ -50,18 +50,10 @@ from abicheck.model import ScopeOrigin, Visibility
 # different mangling schemes and never match. The pure-parser unit suite
 # (``test_dumper_clang.py``) covers the backend logic on every platform.
 #
-# NB: this MODULE is deliberately *not* marked ``integration`` — that marker's
-# Linux gate requires castxml (tests/conftest.py ``_integration_skip_reason``),
-# but the whole point here is the **castxml-absent** host, so most tests below
-# self-skip on their own real tool requirement (clang + g++) without needing
-# the module-wide gate. The two tests that additionally need castxml (the
-# clang↔castxml parity oracle) DO carry an explicit per-test
-# ``@pytest.mark.integration`` on top of their own runtime self-skip: without
-# it, a host that happens to have castxml installed (e.g. a pixi environment,
-# which provisions castxml for the integration/libabigail/abicc lanes) would
-# have these two tests silently selected and executed by the fast/PR "not
-# integration" lane, spending real g++/clang/castxml subprocess time in a lane
-# meant to stay fast (Codex review, PR #894).
+# NB: the module isn't marked ``integration`` (that gate requires castxml
+# per tests/conftest.py) since most tests self-skip on clang+g++ alone. The
+# one test below that also needs castxml carries a per-test
+# ``@pytest.mark.integration`` so a castxml-having host's fast lane skips it.
 pytestmark = pytest.mark.skipif(
     not sys.platform.startswith("linux"),
     reason="clang L2 backend integration test is ELF/Linux-scoped (see module docstring)",
@@ -274,70 +266,6 @@ def test_clang_and_castxml_snapshots_agree_on_public_surface(
         "Widget",
     }
     assert {e.name for e in clang_snap.enums} == {e.name for e in castxml_snap.enums}
-
-
-@pytest.mark.integration
-def test_clang_and_castxml_agree_on_public_vs_private_header_origin(
-    tmp_path: Path,
-) -> None:
-    """Phase 3 of ``docs/contribute/plans/bug-class-regression-testing.md``:
-    ``abicheck.provenance.classify_origin``'s PUBLIC_HEADER/PRIVATE_HEADER
-    split must agree across header-AST backends, not just the plain public-
-    surface parity ``test_clang_and_castxml_snapshots_agree_on_public_surface``
-    already checks. A declaration's origin is a function of the real
-    ``-H``/``--public-header-dir`` set the dump was invoked with -- never of
-    which backend parsed the header -- so a function declared in the
-    explicit public umbrella and one declared only in a transitively
-    ``#include``d private header must classify PUBLIC_HEADER / PRIVATE_HEADER
-    identically on both frontends.
-    """
-    if not (_have("clang") and _have("g++")):
-        pytest.skip("clang and g++ are required for this backend-parity test")
-    if not _have("castxml"):
-        pytest.skip("castxml required for the clang↔castxml parity oracle")
-
-    private_header = tmp_path / "detail.h"
-    private_header.write_text("#pragma once\nint detail_helper(int x);\n")
-    public_header = tmp_path / "api.h"
-    public_header.write_text(
-        '#pragma once\n#include "detail.h"\nint api_call(int x);\n'
-    )
-    src = tmp_path / "api.cpp"
-    src.write_text(
-        '#include "api.h"\n'
-        "int detail_helper(int x) { return x + 1; }\n"
-        "int api_call(int x) { return detail_helper(x) * 2; }\n"
-    )
-    so = tmp_path / "libapi.so"
-    subprocess.run(
-        ["g++", "-shared", "-fPIC", "-o", str(so), str(src), f"-I{tmp_path}"],
-        check=True,
-        capture_output=True,
-    )
-
-    def origins(snap: object) -> dict[str, str]:
-        return {
-            f.name: f.origin.value  # type: ignore[attr-defined]
-            for f in snap.functions  # type: ignore[attr-defined]
-            if f.name in ("api_call", "detail_helper")
-        }
-
-    clang_snap = dump(
-        so, [public_header], header_backend="clang", public_headers=[public_header]
-    )
-    castxml_snap = dump(
-        so, [public_header], header_backend="castxml", public_headers=[public_header]
-    )
-
-    clang_origins = origins(clang_snap)
-    castxml_origins = origins(castxml_snap)
-    # Both backends must actually see both functions -- an empty/partial
-    # dict would make the equality below vacuously true.
-    assert set(clang_origins) == {"api_call", "detail_helper"}
-    assert set(castxml_origins) == {"api_call", "detail_helper"}
-    assert clang_origins == castxml_origins
-    assert clang_origins["api_call"] == ScopeOrigin.PUBLIC_HEADER.value
-    assert clang_origins["detail_helper"] == ScopeOrigin.PRIVATE_HEADER.value
 
 
 def test_hybrid_headers_recover_case64_ms_abi_from_gcc_debug_build(

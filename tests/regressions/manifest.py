@@ -207,7 +207,7 @@ BUG_CLASSES: tuple[BugClass, ...] = (
             "tests/test_surface_property.py",
             "tests/test_surface_seed_predicate_properties.py",
             "tests/test_provenance_classification_properties.py",
-            "tests/test_clang_header_backend_integration.py",
+            "tests/test_clang_castxml_origin_parity.py",
         ),
         known_gaps=(
             KnownGap(
@@ -221,13 +221,17 @@ BUG_CLASSES: tuple[BugClass, ...] = (
                     "(checkout relocation, './..' spelling), independent-"
                     "oracle (real directory containment vs. a sibling-"
                     "directory string-prefix false positive), and mutant-"
-                    "killing properties, plus a fourth seed test adding "
-                    "cross-backend (castxml vs. direct-clang) agreement on "
-                    "PUBLIC_HEADER/PRIVATE_HEADER origin for a mixed "
-                    "public+private header pair "
-                    "('test_clang_and_castxml_agree_on_public_vs_private_"
-                    "header_origin') to the pre-existing plain "
-                    "public-surface-parity test in that same file. "
+                    "killing properties, plus a fourth seed test "
+                    "(a new sibling module, 'test_clang_castxml_origin_"
+                    "parity.py' — kept separate from 'test_clang_header_"
+                    "backend_integration.py' rather than folded into it, "
+                    "since that pre-existing module carries an ADR-061 "
+                    "'debt.yaml' no-growth line-count baseline a new test "
+                    "there would have breached) adding cross-backend "
+                    "(castxml vs. direct-clang) agreement on PUBLIC_HEADER/"
+                    "PRIVATE_HEADER origin for a mixed public+private "
+                    "header pair, complementing the pre-existing plain "
+                    "public-surface-parity test already in the older file. "
                     "Deliberately NOT attempted: the full generated "
                     "include-DAG model ('-I'/'-isystem'/'-idirafter' "
                     "resolution order, '#include' cycles, symlinked roots) "
