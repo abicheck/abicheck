@@ -41,9 +41,9 @@ assume:
 | Backing ADR | Current state | What this plan's phases assume |
 |---|---|---|
 | ADR-055 (typed request/result) | D1 implemented for `compare` only | Phase 1 extends the existing `CompareRequest`/`service_compare_pipeline.py` shape to `dump`/`scan`, it does not invent a new shape |
-| ADR-061 (responsibility packages) | Phases 0-1 implemented; Phase 5 (`model` package) begun | Phase 0/2/3/6 of this plan land inside the `model`/`compare`/`policy` packages ADR-061 already created; this plan does not create new top-level packages beyond what ADR-061 names |
-| ADR-062 (storage v2) | Phase 0 primitives (`abicheck/storage/`: `FactStatus`/`FactAvailability`, occurrence-preserving identity, canonical encoding, version axes) implemented and **inert** — nothing wired to a producer/reader | Phase 0/4 of this plan is the *generalization* of these primitives into the domain layer; Phase 7 of this plan is the *wiring* ADR-062 Phase 1 still needs, done jointly rather than twice |
-| ADR-042 (compatibility/gate separation) | Implemented for JSON/SARIF/`compare-release`; `junit_report.py` still computes inline | Phase 6 of this plan closes exactly this one remaining gap, not a redesign |
+| ADR-061 (responsibility packages) | Phases 0-1 implemented; Phase 5 (`model` package) begun | Phase 0/2/4/7 of this plan land inside the `model`/`compare`/`policy` packages ADR-061 already created; this plan does not create new top-level packages beyond what ADR-061 names |
+| ADR-062 (storage v2) | Phase 0 primitives (`abicheck/storage/`: `FactStatus`/`FactAvailability`, occurrence-preserving identity, canonical encoding, version axes) implemented and **inert** — nothing wired to a producer/reader | Phase 0/5 of this plan is the *generalization* of these primitives into the domain layer; Phase 8 of this plan is the *wiring* ADR-062 Phase 1 still needs, done jointly rather than twice |
+| ADR-042 (compatibility/gate separation) | Implemented for JSON/SARIF/`compare-release`; `junit_report.py` still computes inline | Phase 7 of this plan closes exactly this one remaining gap, not a redesign |
 | AGENTS.md "PR C" (dump/scan typed convergence) | `resolve_dump_request`/`execute_dump_request` split landed; real `dump`/`scan` execution still on the legacy path, blocked on two named items (castxml availability for parity testing, `--compile-db-filter` typed surface — now closed) | Phase 1 of this plan is exactly "finish PR C," not a new design |
 
 ## Phases
@@ -54,15 +54,45 @@ assume:
 its availability. `None`/`[]`/a boolean flag stop being overloaded to mean
 both "confirmed absent" and "not collected."
 
-**Design.** Add `abicheck/model/fact.py`: a generic `Fact[T]` wrapping
-`abicheck.storage.availability_status.FactStatus`/`FactAvailability`
-(imported, not reimplemented) plus an optional `T` payload, with exactly
-these constructors: `Fact.present(value)`, `Fact.absent_confirmed()`,
-`Fact.not_collected()`, `Fact.unsupported()`, `Fact.failed(reason)`,
-`Fact.not_applicable()`. `Fact.value_or(default)` and `Fact.is_present`
-are the only two ways to read one without a full `match`. No implicit
-truthiness — `Fact.__bool__` is intentionally not defined, so `if
-fact:` is a `TypeError`-at-lint-time smell a reviewer can grep for.
+**Design.** `abicheck.storage.availability_status.FactStatus` is the leaf
+vocabulary this phase reuses — but ADR-061's dependency direction is
+`storage -> model`, so `Fact[T]` (living in `model/`) may not import
+*from* `storage`. This phase therefore **relocates** `FactStatus`/
+`Confidence`/the status-order tuples from `abicheck/storage/
+availability_status.py` into `abicheck/model/availability.py` (a leaf
+module, no dependency on anything but the standard library, matching that
+module's own existing "none of it needs to know what a stored record or a
+ledger looks like" framing), and `abicheck/storage/availability_status.py`
+becomes a re-export shim for one release so existing `storage.*` imports
+keep working. `FactAvailability` (the ledger record) stays in `storage/`,
+since *it* legitimately depends on `model`, not the other way around.
+
+Add `abicheck/model/fact.py`: a generic `Fact[T]` wrapping the relocated
+`FactStatus` plus an optional `T` payload. `FactStatus` has exactly six
+members (`PRESENT`, `PARTIAL`, `NOT_COLLECTED`, `UNSUPPORTED`, `FAILED`,
+`NOT_APPLICABLE` — see that module's own docstring) and deliberately has
+**no seventh "confirmed absent" member**: per `PRESENT`'s own documented
+meaning ("the producer ran, covered the requested scope, and established
+the facts — *including establishing that a collection is legitimately
+empty*"), a confirmed absence is `PRESENT` carrying an empty/`None`
+payload, not a distinct status. `Fact[T]`'s constructors are therefore
+`Fact.present(value)` (value may legitimately be `None`/`[]` — that *is*
+confirmed absence), `Fact.not_collected()`, `Fact.unsupported()`,
+`Fact.failed(reason)`, `Fact.not_applicable()`, and `Fact.partial(value)`.
+There is no `Fact.absent_confirmed()` — a draft of this plan proposed one
+and it was corrected during review for contradicting the vocabulary it
+claims to reuse unchanged; a caller wanting to assert absence calls
+`Fact.present(None)` (or `Fact.present(())`/`Fact.present([])` for a
+collection) explicitly, so the payload contract's only rule is that this
+is the *one* legitimate way to spell "present, empty" — never a bare
+sentinel construction readers could mistake for "not collected."
+`Fact.value_or(default)` and `Fact.is_present` are the only two ways to
+read one without a full `match`. `Fact.__bool__` is explicitly **defined**
+to raise `TypeError("Fact[T] has no truth value — read .is_present or
+.value_or(...)")` — plain absence of `__bool__` leaves ordinary Python
+object truthiness in effect (every `Fact[T]` instance would be truthy
+regardless of status), so the no-implicit-truthiness invariant needs the
+raise, not silence.
 
 **Scope for this phase (deliberately narrow).** Convert exactly the three
 fields AGENTS.md's "Known gaps" names as actively causing fabricated
@@ -72,12 +102,15 @@ findings from absent evidence: `RecordType.vtable`/`vptr_offset_bits`
 future evidence-based guard additive instead of another reinterpretation
 of `None`), and `Param.is_va_list` (the reliability-flag entry). Every
 other model field stays as-is in this phase — a blanket conversion is
-Phase 4's job, after D7's registry exists to drive it mechanically.
+Phase 5's job, after D7's registry exists to drive it mechanically.
 
-**Files.** `abicheck/model/fact.py` (new); `abicheck/model/snapshot.py`'s
-`RecordType`/`Param` dataclasses (new `Fact[...]`-typed fields alongside
-the existing ones, old field deprecated-but-present for one release to
-keep `asdict`-based external consumers working — removed in Phase 4's
+**Files.** `abicheck/model/availability.py` (new — the relocated
+`FactStatus`/`Confidence`/order-tuple vocabulary); `abicheck/storage/
+availability_status.py` (trimmed to a re-export shim); `abicheck/model/
+fact.py` (new — `Fact[T]`); `abicheck/model/snapshot.py`'s `RecordType`/
+`Param` dataclasses (new `Fact[...]`-typed fields alongside the existing
+ones, old field deprecated-but-present for one release to keep
+`asdict`-based external consumers working — removed in Phase 5's
 registry-driven sweep, not here); `diff_layout.py`/`diff_types.py`'s
 vtable/base-list detectors (read `Fact[...]`, not raw `None`).
 
@@ -221,7 +254,75 @@ finding from the identity change is a Phase 2 bug, not acceptable drift).
 
 ---
 
-### Phase 3 — `AnalysisPlan`: pre-flight resolution, not mid-run discovery
+### Phase 3 — public surface as a graph query over one evidence graph (D5)
+
+**Goal.** `compute_public_surface()` answers "is this declaration public"
+by traversing one authoritative evidence graph, not by independently
+reconstructing include/reference/export relationships from the flat
+snapshot a second time.
+
+**Design.** `abicheck/compare/surface_graph.py` (new — the `extract`
+package produces raw facts per ADR-061's ring structure, so the graph
+*itself*, being a reconciliation of those facts for comparison/policy use,
+lands in `compare/`, alongside today's `surface.py`, not in `extract/`):
+typed nodes (`Header`, `TranslationUnit`, `Declaration`, `Type`, `Symbol`,
+`Target`) and typed edges (`Includes`, `Declares`, `References`,
+`Instantiates`, `Exports`, `OwnedByTarget`) built once per snapshot side
+from facts the existing extraction layer already produces (the header
+origin/scoping data `dumper_scoping.py` reads, the export-table data
+`export_surface.py` already computes for `contract=exports`, the
+declaration/reference data `type_reachability.py`/`surface.py` each
+independently reconstruct today). Nodes reference entities by the
+`EntityId` Phase 2 already established — this phase is ordered after
+Phase 2 for exactly that reason, the same dependency Phase 5
+(`SemanticIR`) has on Phase 2, stated explicitly here so the plan's
+phase order is never read as arbitrary.
+
+`compute_public_surface()` becomes `PublicSurfaceQuery.resolve(graph,
+explicit_roots) -> frozenset[EntityId]`: a traversal from explicit public
+roots through `Includes`/`Declares` edges (closing the reachable-header
+surface) and `References`/`Instantiates` edges (closing the reachable-type
+surface), with `Exports` edges answering the `contract=exports` domain
+from the *same* graph instead of `export_surface.py`'s separate walk.
+`type_reachability.py`'s `directly_referenced_stdlib_types()` becomes a
+second, narrower query over the same graph (a one-hop `References` filter)
+rather than its own independent scan with its own ambiguity-tracking
+machinery — the machinery this phase removes is exactly what Phase 2
+already started removing for the identity half of the same problem; this
+phase removes the *reachability* half.
+
+**Files.** `abicheck/compare/surface_graph.py` (new); `surface.py`
+(`compute_public_surface()` becomes a thin wrapper calling
+`PublicSurfaceQuery.resolve`, with its existing traversal logic migrated
+into the graph builder rather than kept as a parallel implementation);
+`dumper_scoping.py`/`export_surface.py`/`type_reachability.py` (each
+becomes a graph *builder* contributing nodes/edges, or a graph *query*,
+not an independent reachability algorithm); `abicheck/workflows/
+consumer_graph.py` (ADR-057's consumer graph) and ADR-053's TU→link-unit→
+DSO attribution are explicitly **not** migrated in this phase — each is
+noted here as a candidate for a later, separate phase once this phase's
+graph has a real consumer to validate the generalization against, per
+this plan's own "don't attempt a change with no real caller" discipline
+(see AGENTS.md's "shape first, wiring later" gap and ADR-063 D7's
+capability-lifecycle states).
+
+**Tests.** Every existing `surface.py`/`type_reachability.py` regression
+test (including the namespace-collision property suite Phase 2 already
+restated for identity) is kept and re-targeted at
+`PublicSurfaceQuery.resolve`'s output — this phase's acceptance bar is
+that none of those tests need a *behavior* change, only a different call
+path, and any test that does need a behavior change is a sign this phase
+introduced a real regression, not a refactor.
+
+**Acceptance criteria.** `surface.py`'s own traversal implementation and
+`export_surface.py`'s independent closure walk are deleted, not kept
+alongside the graph query (the actual removal happens in Phase 9's
+checklist, but this phase's own PR is incomplete if it leaves both
+implementations live past one release). FP-rate gate shows no regression.
+
+---
+
+### Phase 4 — `AnalysisPlan`: pre-flight resolution, not mid-run discovery
 
 **Goal.** An unsatisfiable request (an evidence requirement no resolved
 collector/backend combination can produce) is rejected before extraction,
@@ -259,7 +360,7 @@ is incomplete and should not be landed yet.
 
 ---
 
-### Phase 4 — the fact/capability registry (generalizes `change_registry.py`)
+### Phase 5 — the fact/capability registry (generalizes `change_registry.py`)
 
 **Goal.** A new model field requires one registry entry, not nine touched
 files.
@@ -302,7 +403,7 @@ description.
 
 ---
 
-### Phase 5 — canonical `SemanticIR` between backends and the checker
+### Phase 6 — canonical `SemanticIR` between backends and the checker
 
 **Goal.** Type-spelling, scope, template-argument, anonymous/lambda, and
 CV-qualification canonicalization happens once, not once per backend.
@@ -348,7 +449,7 @@ repeated per backend.
 
 ---
 
-### Phase 6 — `RunOutcome` and the last inline exit-code computation
+### Phase 7 — `RunOutcome` and the last inline exit-code computation
 
 **Goal.** `junit_report.py` stops computing an exit code inline; every
 front end encodes `RunOutcome`'s independent axes exactly once, at the
@@ -358,10 +459,26 @@ boundary.
 assurance, gate, operational, lifecycle — each already real today as
 `Verdict`/`AnalysisAssurance`/the ADR-042 gate decision/various ad hoc
 operational-status values/ADR-053's target lifecycle, just not yet one
-object). `junit_report.py` is rewritten to read `RunOutcome.gate`/
-`RunOutcome.compatibility` instead of re-deriving severity from raw
-`changes`, matching the pattern ADR-042 already established for JSON/
-SARIF/`compare-release`.
+object). **`RunOutcome` is report-level, not per-finding — it does not
+replace `junit_report.py`'s per-test-case classification, and this phase
+does not attempt to make it.** `junit_report.py`'s `_is_failure` decides,
+per `Change`, whether that individual finding fails its JUnit test case,
+after contract evaluation, scoped-finding filtering, policy overrides, and
+severity mapping have already run on it — exactly the per-change
+granularity ADR-042 already records `_is_failure` as needing, and an
+aggregate whole-report gate/compatibility value cannot answer "does
+*this* change fail" for a report where only some category blocks. The fix
+this phase makes is narrower than "read `RunOutcome` instead of `changes`":
+each `Change` gains the already-resolved `compatibility_decision`/gate
+contribution as a carried field (mirroring how `contract_context.py`
+already persists a per-finding decision, per ADR-049 D1) during
+resolution, and `junit_report.py`'s `_is_failure` reads *that* per-finding
+field instead of re-deriving severity inline from raw `Change` data —
+`RunOutcome` is what the report's own top-level `compatibility_decision`
+summary still renders from, unchanged. "Stops computing inline" means
+`_is_failure` stops re-running severity/policy logic itself, not that it
+starts asking the aggregate report outcome a per-test-case question it
+cannot answer.
 
 **Files.** `abicheck/policy/outcome.py` (new); `junit_report.py` (the one
 remaining inline exit-code computation ADR-042 already named as
@@ -384,7 +501,7 @@ data outside `policy/outcome.py` and the per-front-end encoders.
 
 ---
 
-### Phase 7 — wire storage v2's writer/reader to the domain layer (closes ADR-062 Phase 1, jointly with D8)
+### Phase 8 — wire storage v2's writer/reader to the domain layer (closes ADR-062 Phase 1, jointly with D8)
 
 **Goal.** ADR-062 Phase 0's primitives stop being inert. A real
 `ProjectSnapshot` can be written and read, using `Fact[T]`/`EntityId` from
@@ -424,7 +541,7 @@ earlier phases already establish as the pattern.
 
 ---
 
-### Phase 8 — delete the superseded representations
+### Phase 9 — delete the superseded representations
 
 **Goal.** Every phase above is only complete once its "before" state is
 removed, not left as a second path. This phase is the accounting pass,
@@ -442,13 +559,16 @@ not new design.
   remainder).
 - Phase 2: `diff_filtering.py`/`type_reachability.py`'s bespoke string-
   suffix ambiguity trackers.
-- Phase 4: any hand-maintained capability-matrix doc section the
+- Phase 3: `surface.py`'s pre-graph traversal implementation and
+  `export_surface.py`'s independent closure walk, once
+  `PublicSurfaceQuery.resolve` is the only path either one calls.
+- Phase 5: any hand-maintained capability-matrix doc section the
   generator now produces.
-- Phase 5: each backend parser's own copy of anonymous-marker/closure-
+- Phase 6: each backend parser's own copy of anonymous-marker/closure-
   identity/namespace-join logic.
-- Phase 6: `junit_report.py`'s pre-rewrite inline computation (deleted,
+- Phase 7: `junit_report.py`'s pre-rewrite inline computation (deleted,
   not `# deprecated` and kept).
-- Phase 7: any remaining legacy baseline-set/`BundleFacts`-only code path
+- Phase 8: any remaining legacy baseline-set/`BundleFacts`-only code path
   once the `ProjectSnapshot` import adapter covers it — per ADR-062's own
   phasing, not accelerated here.
 
@@ -463,7 +583,7 @@ history. This checklist is re-run, and re-verified, at the end of the
   this plan (`Fact[T]`, `EntityId`, `AnalysisPlan`, `RunOutcome`) is
   internal until a specific phase's own PR explicitly promotes it, per
   ADR-063's own "Explicitly not done by this ADR" section.
-- **No schema version bump beyond what ADR-062 already plans.** Phase 7
+- **No schema version bump beyond what ADR-062 already plans.** Phase 8
   follows ADR-062's own phase boundaries; this plan does not add an
   independent schema migration.
 - **No attempt to resolve every AGENTS.md "Known gaps" entry.** Several
@@ -476,7 +596,7 @@ history. This checklist is re-run, and re-verified, at the end of the
   is out of scope here and remains a tracked gap.
 - **No toolchain-identity-probe implementation.** AGENTS.md names this gap
   independently (castxml/clang invoked without validating the resolved
-  compiler matches the real build); Phase 5's `SemanticNormalizer` makes a
+  compiler matches the real build); Phase 6's `SemanticNormalizer` makes a
   future probe's result easier to thread through uniformly, but does not
   implement the probe itself.
 
@@ -487,9 +607,10 @@ history. This checklist is re-run, and re-verified, at the end of the
 | 0 | M | Converting the wrong three fields first (pick fields with an *active* fabricated-finding incident, not merely "many `None` checks") |
 | 1 | L | castxml unavailability blocking the parity-test half; mitigated by explicit clang-only first landing |
 | 2 | L | Identity collision regressions are exactly the bug class this phase targets — the property-test suite is the real acceptance bar, not code review alone |
-| 3 | M | Planner rejecting a request current behavior silently accepted — must ship with a migration note in `CHANGELOG.md`/docs, not only a changelog fragment, since it is a user-visible behavior change (a previously-silent no-op becomes an error) |
-| 4 | L (mechanical, field-by-field) | Scope creep — cap each commit to one field |
-| 5 | XL | Largest blast radius in this plan (every backend parser); sequence last among the "hard" phases, after 0/2 give it primitives to build on |
-| 6 | S | JUnit output is consumed by external CI systems — parity testing, not redesign |
-| 7 | XL | Shared with ADR-062's own Phase 1 risk profile; do not duplicate that ADR's own risk analysis here, defer to it |
-| 8 | S per row, continuous | The easiest phase to skip under time pressure — explicitly called out as required, not optional, per ADR-063's decision drivers |
+| 3 | L | Migrating `surface.py`/`export_surface.py`'s traversal into a shared graph without changing what counts as public — the kept-test-behavior acceptance bar exists specifically to catch a silent surface-scoping regression |
+| 4 | M | Planner rejecting a request current behavior silently accepted — must ship with a migration note in `CHANGELOG.md`/docs, not only a changelog fragment, since it is a user-visible behavior change (a previously-silent no-op becomes an error) |
+| 5 | L (mechanical, field-by-field) | Scope creep — cap each commit to one field |
+| 6 | XL | Largest blast radius in this plan (every backend parser); sequence last among the "hard" phases, after 0/2/3 give it primitives to build on |
+| 7 | S | JUnit output is consumed by external CI systems, and `_is_failure` stays per-finding rather than becoming an aggregate-outcome lookup — parity testing, not redesign |
+| 8 | XL | Shared with ADR-062's own Phase 1 risk profile; do not duplicate that ADR's own risk analysis here, defer to it |
+| 9 | S per row, continuous | The easiest phase to skip under time pressure — explicitly called out as required, not optional, per ADR-063's decision drivers |

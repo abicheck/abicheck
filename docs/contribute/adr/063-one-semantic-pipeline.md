@@ -160,12 +160,17 @@ storage-scoped, in `abicheck/storage/`) into the in-memory domain
 representation used by the comparison/detector layer, not only the
 on-disk one. A fact-bearing model field becomes a tagged value distinguishing:
 
-- a confirmed absence (`AbsentConfirmed`) from
 - "we never attempted to collect this" (`NotCollected`) from
 - "this backend cannot produce this fact" (`Unsupported`) from
 - "collection ran and failed" (`Failed[Reason]`) from
 - "the fact does not apply to this kind of entity" (`NotApplicable`) from
-- a genuine present value (`Present[T]`, optionally `Partial[T]`).
+- a genuine present value, **including a confirmed absence** (`Present[T]`,
+  `T` legitimately `None`/empty; optionally `Partial[T]`) —
+  `FactStatus.PRESENT`'s own existing definition already covers "the
+  producer ran... including establishing that a collection is legitimately
+  empty," so confirmed absence is not a seventh status; it is `Present`
+  carrying an empty payload, and `Fact[T]` does not introduce a status
+  `FactStatus` itself does not have.
 
 This replaces the current overloaded use of `None`/`False`/`[]` to mean
 several of the above simultaneously — documented repeatedly in AGENTS.md's
@@ -174,10 +179,17 @@ entries, the `Param.is_va_list` reliability-flag entry, the per-finding
 evidence-provider gap) as a root cause of fabricated or suppressed
 findings. A detector cannot write `if old.default != new.default` without
 first unwrapping availability — the invalid comparison becomes a type
-error, not an untested branch. `abicheck/storage/availability.py`'s
-existing `FactAvailability`/`FactStatus` vocabulary is reused verbatim as
-the wire encoding `Fact[T]` serializes to; this decision does not introduce
-a second vocabulary.
+error, not an untested branch (`Fact.__bool__` is defined to raise rather
+than merely left undefined, since an object with no `__bool__` is still
+truthy in Python). `abicheck/storage/availability.py`'s existing
+`FactAvailability`/`FactStatus` vocabulary is reused verbatim as the wire
+encoding `Fact[T]` serializes to — but because ADR-061 fixes the
+dependency direction as `storage -> model`, the vocabulary itself
+(`FactStatus`/`Confidence`, not the storage-specific `FactAvailability`
+ledger record) relocates to `abicheck/model/` as part of this
+generalization, with `storage/` re-exporting it rather than `model/`
+importing from `storage/`; this decision does not introduce a second
+vocabulary, and the implementation plan states the exact relocation.
 
 ### D3 — `EntityId`/`OccurrenceId` as the one identity primitive
 
@@ -229,9 +241,16 @@ one authoritative graph with typed nodes (`Header`, `TranslationUnit`,
 through this graph rather than a second, independently-maintained
 reconstruction of the same relationships from the flat snapshot — closing
 the class of bugs AGENTS.md documents under the namespace-collision and
-partial-qualification findings in `type_reachability.py`, and generalizing
-ADR-053's TU→link-unit→DSO attribution and ADR-057's consumer graph onto
-the same substrate instead of a third graph representation.
+partial-qualification findings in `type_reachability.py`. The same
+substrate is the natural target for later generalizing ADR-053's
+TU→link-unit→DSO attribution and ADR-057's consumer graph onto one graph
+instead of a third representation, but migrating either is explicitly
+**not** part of this decision's first implementation phase — see the
+implementation plan's Phase 3, which builds the graph for
+`compute_public_surface()`/`export_surface.py` only and records the
+ADR-053/057 migration as a later, separately-justified phase once this
+phase's graph has a real second consumer to validate the generalization
+against.
 
 ### D6 — `RunOutcome` as independent axes; no `exit_code` inside the domain
 
@@ -258,6 +277,14 @@ and finishes what ADR-042 started: `mcp_server.py`'s removal already
 deleted one of the two remaining inline exit-code computations AGENTS.md
 flagged; `junit_report.py` is the other and is folded into this decision's
 scope.
+
+`RunOutcome` is a **report-level** aggregate; it is not a substitute for
+the per-finding `compatibility_decision` ADR-049 D1 already persists on
+each `Change`, and this decision does not ask it to be one —
+`junit_report.py`'s per-test-case pass/fail still reads a per-finding
+decision, the same one the report's own `changes` array already carries,
+not a question answered by the whole-run aggregate. See the implementation
+plan's Phase 6 for exactly what that rewrite does and does not change.
 
 ### D7 — A declarative fact/capability registry
 
