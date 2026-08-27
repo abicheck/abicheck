@@ -417,16 +417,38 @@ should hold. `PolicyGateDecision` is instead an ordered, exit-code-free
 enum/dataclass (e.g. `NONE < ADDITION_QUALITY < POTENTIAL_BREAKING <
 ABI_BREAKING`, or the equivalent `IssueCategory`-shaped ordering
 `compute_exit_code`'s own severity scheme already uses) carrying enough to
-*derive* an exit code, never one itself — `fold.py`'s aggregation orders
-and `max()`s `PolicyGateDecision` values directly, with no integer in the
-comparison. **`PolicyGateDecision` alone is not the whole gate, though —
-it only orders *compatibility* categories, and `scan`'s own legacy exit
+*derive* an exit code, never one itself. **`PolicyGateDecision` alone is
+not the whole gate, though — it only orders *compatibility* categories,
+and `scan`'s own legacy exit
 codes (5 for budget overflow, 6 for not-comparable) are real, independent
 blocking conditions neither category covers.** `RunOutcome.operational`
-carries exactly this, and `fold.py` folds its own blocking set alongside
-`PolicyGateDecision`'s ordering — two independent axes, neither masking
-the other, the same orthogonal-fold shape ADR-049 Phase 7's contract-
-coverage axis already uses elsewhere in this codebase. Converting a `PolicyGateDecision` to `severity.GateDecision.
+carries exactly this.
+
+**Which layer folds the two axes together — `gate.py`'s own per-target
+readers, or `fold.py`'s cross-target aggregation — is stated once here,
+and an earlier revision of this section said it twice, inconsistently:
+"`fold.py`'s aggregation orders and `max()`s `PolicyGateDecision` values
+directly, with no integer in the comparison" in this paragraph, while the
+implementation plan's own corrected Phase 7 design (the one actually
+built and verified) has `gate.py`'s readers fold both axes into the one
+`GateInfo` they already return, leaving `fold.py` itself unchanged.** The
+plan's design is the normative one, restated here rather than contradicted:
+`gate.py`'s `GateInfo.from_report_data`/`from_scan_report` fold
+`PolicyGateDecision`'s ordering and `OperationalStatus`'s blocking set
+together, by `max()` over the shared exit-code scheme both already share,
+into the single `GateInfo` each reader returns per target — two
+independent axes, neither masking the other, the same orthogonal-fold
+shape ADR-049 Phase 7's contract-coverage axis already uses elsewhere in
+this codebase, resolved once per target rather than threaded as two
+separate values for `fold.py` to remember to fold itself.
+`fold.py`'s own cross-target aggregation (`max(t.gate.exit_code for t in
+gated...)`) is **unchanged by this decision** — it was already, and stays,
+a `max()` over each target's own `GateInfo.exit_code`, which by the time
+it reaches `fold.py` is the *output* of `gate.py`'s semantic fold, not a
+raw integer read back off a persisted report a second time; "no integer
+in the comparison" describes `gate.py`'s own fold of the two typed axes,
+not `fold.py`'s aggregation across targets, which has always been (and
+remains) an integer `max()` by design. Converting a `PolicyGateDecision` to `severity.GateDecision.
 exit_code` is confined to the same boundary encoders D6 already names (the
 CLI's `_exit_with_severity_or_verdict`, the Action's encoder, and
 `aggregate`'s own `exit_code()` method) — every one of them already exists

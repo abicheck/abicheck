@@ -358,73 +358,77 @@ _OMITTED_IS_VA_LIST` can never be true for *any* caller-supplied value —
 whichever of `True`/`False` the sentinel is defined to equal, that
 identity check collides with a caller legitimately passing the same
 value. **For `RecordType.bases`/`vtable` (`list`-typed), the mechanism
-this section previously described cannot actually be implemented — a
-dataclass field may not take a mutable object (a `list`, `dict`, or `set`
-instance) as its own direct default at all; Python's `dataclasses` module
-raises `ValueError: mutable default <class 'list'> for field ... is not
-allowed` the moment the class body executes, before any instance is ever
-constructed.** A singleton list used as `bases`' own default is exactly
-such an object, so `bases: list[str] = _OMITTED_BASES` never reaches
-`__post_init__` at all — the class itself fails to define. Reaching for
-`field(default_factory=...)` instead does not repair the identity check
-either: a `default_factory` is called fresh on every omitted construction,
-so each omitted instance would get its *own*, distinct empty-list object —
-never the one singleton `self.bases is _OMITTED_BASES` needs to match. The
-actual fix drops the list-typed mechanism entirely and reuses the
-*bool*-typed mechanism instead, generalized: `bases`/`vtable` had no prior
-meaningful use for `None` any more than `is_va_list` did, so the same
-`None`-as-omission-marker shape already established below for
-`is_va_list` is the one mechanism, not a second, list-specific one that
-turned out to be unimplementable. For `Param.is_va_list` (`bool`-typed), the field's
-declared type widens to `bool | None`, default `None` — `None` is the
-omission marker (distinct from both `True` and `False`, not a third
-`bool`), `__post_init__` checks `self.is_va_list is None` the same way,
-backfills identically, and then normalizes the field to a real `bool`
-(`False` if it was `None`) before returning — so after construction every
-reader still sees a plain `bool`, never `None`; only the *constructor's*
-accepted input type genuinely widens, which is what "an explicit union
-and normalization" means concretely here. **`RecordType.bases`/`vtable`
-take the identical shape, not a variant of it**: declared type widens to
-`list[str] | None`, default `None`; `field(default_factory=list)` stays
-exactly as it is today for the *normal*, non-omission default a bare
-`RecordType()` would otherwise need — but a `None` default is what the
-omission check actually needs, so the field's default changes from
-`field(default_factory=list)` to a plain `None`, and `__post_init__`
-builds the *normal* empty list itself (`[]`, a fresh object, no shared
-mutable state) in the same branch that already constructs the `[]`
-fallback for the omission case — `self.bases is None` is the omission
-check (identity against the one object Python itself guarantees is a
-singleton, not a private sentinel this plan has to construct and that
-`dataclasses` then rejects), backfills `Fact.not_collected()` for that
-case and `Fact.present(self.bases)` for an explicit value (including an
-explicit `[]`, still distinguishable from omission since it is `not
-None`), then normalizes the field to `[]` before returning when it was
-`None` — so after construction every reader still sees a plain `list[str]`,
-never `None`, the identical "only the constructor's accepted input type
-widens" shape `is_va_list` already states above.
+this section previously described cannot actually be implemented as a
+direct field default — a dataclass field may not take a mutable object (a
+`list`, `dict`, or `set` instance) as its own direct default at all;
+Python's `dataclasses` module raises `ValueError: mutable default <class
+'list'> for field ... is not allowed` the moment the class body executes,
+before any instance is ever constructed.** A singleton list used as
+`bases`' own direct default is exactly such an object, so `bases:
+list[str] = _OMITTED_BASES` never reaches `__post_init__` at all — the
+class itself fails to define.
 
-**The field's own *static* declared type — what a type checker or
-`dataclasses.fields(Param)` reports — stays `bool | None` even though no
-constructed instance can ever hold `None` at runtime; this is a
-deliberate, accepted trade-off, not an oversight, for the identical reason
-already stated a few paragraphs above for the new-field-vs-old-field
-relationship.** The alternative a reviewer proposed — an `InitVar[bool |
-None]` consumed by `__post_init__`, with the real, `bool`-typed storage
-kept under a different attribute name and exposed back as `is_va_list`
-through a `@property` — was considered and rejected for the same reason
-this phase's Design section already rules out a live `@property` deriving
-`vtable`/`bases` from their new `Fact` fields: `dataclasses.asdict()` walks
-`dataclasses.fields()`, not properties, so renaming the real stored
-attribute to something like `_is_va_list` to make room for a
-property-shaped public `is_va_list` would silently rename (or drop) the
-JSON key every `asdict`-based external consumer reads today — breaking
-exactly the compatibility this bridge exists to preserve, in exchange for
-a cleaner static type on a field whose runtime behavior is already fully
-pinned by the fifth test above. A `bool | None` annotation a consumer
-never actually observes `None` through is judged the smaller cost. The
-identical trade-off applies to `bases`/`vtable`'s own `list[str] | None`
-declared type for the identical reason — not a second judgment call, the
-same one restated for the field shape this finding corrected.
+**Two mechanisms were tried and rejected for both field shapes before
+landing on the one that actually works, and the reasoning for rejecting
+each is worth keeping, since a later round otherwise re-proposes one of
+them.** (1) A bare `field(default_factory=...)` look-alike for the list
+case does not repair the identity check: a `default_factory` runs fresh on
+every omitted construction, so each omitted instance gets its *own*,
+distinct empty-list object — never the one singleton
+`self.bases is _OMITTED_BASES` needs to match. (2) Widening the declared
+type to `bool | None`/`list[str] | None` (an earlier revision of this
+section) makes the field constructible, but a later review round
+correctly flagged it as a real breaking change for this bridge's own
+stated purpose — "every reader still sees a plain `bool`/`list[str]`"
+is true only *after* `__post_init__` runs, and AGENTS.md is explicit that
+"changing \[a public dataclass's] public surface is a breaking change to
+the Python API — coordinate it": a type-checked external caller reading
+`Param.is_va_list`/`RecordType.bases` now has to handle `None` at the
+static-type level for a value that can never actually be `None` at
+runtime, which is exactly the kind of "the representation disagrees with
+itself" defect the Governing Invariant singles out, just relocated from
+the dataclass body to its type annotation.
+
+**The mechanism that actually satisfies every constraint at once —
+dataclass-constructible, identity-checkable, and *never widens the
+declared field type* — wraps the existing private-sentinel idea in
+`typing.cast()` at the point the sentinel is built, not at the point it is
+compared.** A module-level singleton of a dedicated, non-`bool`/non-`list`
+marker class (`_Omitted`, one instance) is constructed once and then
+`cast()` to the field's own real type — `_OMITTED_IS_VA_LIST: bool =
+cast(bool, _Omitted())`, `_OMITTED_BASES: list[str] = cast("list[str]",
+_Omitted())` — which tells a type checker the sentinel *is* a `bool`/
+`list[str]` (so the field's own declared type needs no union, no `None`,
+no widening of any kind) while its actual runtime identity is a distinct,
+non-`bool`/non-`list` object no caller-supplied value can ever equal by
+identity. For the list-typed fields specifically, the mutable-default
+`ValueError` is avoided the same way `field(default_factory=list)` already
+avoids it today, just returning the *existing* singleton instead of a
+fresh list each time — `field(default_factory=lambda: _OMITTED_BASES)` —
+which is a legal `default_factory` (dataclasses only forbids a *direct*
+mutable-typed default, not what a factory function returns) and, unlike
+mechanism (1) above, returns the identical object on every omitted
+construction, since the factory itself holds no state and always returns
+the same module-level reference. `__post_init__` checks `self.bases is
+_OMITTED_BASES`/`self.is_va_list is _OMITTED_IS_VA_LIST` (a `# type:
+ignore[comparison-overlap]` is expected and correct here, since the
+comparison is exactly the one case `cast()` told the type checker could
+never be true — confirmed against this repository's own `mypy --strict`,
+which accepts the construction with zero errors and reports the field's
+type as exactly `bool`/`list[str]`, never a union), backfills
+`Fact.not_collected()` for the true-omission case and `Fact.present(...)`
+for an explicit value (including an explicit `[]`/`False`, still
+distinguishable from omission since it is not the sentinel by identity),
+then normalizes the field to an ordinary `False`/`[]` before returning —
+so after construction every reader, `asdict()`-based or otherwise, sees
+exactly the type the field has always declared, with no accepted
+trade-off left to state. Verified directly (not merely reasoned about,
+given how many rounds this exact design question has already gone
+through): a minimal repro of this construction passes `mypy --strict`
+with zero errors, reports `dataclasses.fields(...)`'s `type` as the
+unwidened annotation, and round-trips correctly through `dataclasses.
+asdict()` for both the omitted and explicit-value cases, including the
+explicit-empty-list case staying distinct from omission.
 
 **A third field shape needs a third mechanism, and a later review round
 found it missing: `RecordType.vptr_offset_bits` is also converted by
@@ -442,30 +446,41 @@ two-instance problem, though — it has the opposite problem from `list`
 this field shares the fix with: a fresh private sentinel *object* (not a
 literal value, and not reusing `None`) works exactly like the `list` case,
 since nothing short of that exact object will ever compare identical to
-it. The field's *actual* dataclass default becomes a private,
-identity-checkable sentinel (`_OMITTED_VPTR_OFFSET_BITS`, never exported,
-declared as `int | None` is widened to accept it structurally the same
-way the other two fields' constructors widen) rather than the literal
-`None` — `__post_init__` checks `self.vptr_offset_bits is
+it. The field's *actual* dataclass default becomes the identical
+`cast()`-sentinel construction `bases`/`is_va_list` already use above —
+`_OMITTED_VPTR_OFFSET_BITS = cast("int | None", _Omitted())`, never
+exported — rather than the literal `None`. **This field's declared type
+does not widen at all, because it has nothing to widen to** — `int | None`
+was already its type before this phase, for the field's own, legitimate,
+pre-existing reason (a real "no vptr observed" value), not introduced by
+this mechanism the way a bare `bool`/`list[str]` field would otherwise
+have needed one; `cast("int | None", ...)` merely tells the type checker
+the sentinel already belongs to the union that was always there.
+`__post_init__` checks `self.vptr_offset_bits is
 _OMITTED_VPTR_OFFSET_BITS` (identity) to tell omission from an explicit,
 confirmed-`None`, backfills `Fact.not_collected()` only for the
 true-omission case and `Fact.present(self.vptr_offset_bits)` (`None`
 included) for an explicit value, then normalizes the field to a real
 `int | None` (`None` if it was the sentinel) before `__post_init__`
-returns — the same post-condition the other two fields reach, by the same
-"a genuinely fresh object can't collide with anything a caller passes"
-mechanism `list` already uses, just applied to a field whose natural
-resting value happens to coincide with Python's only singleton `None`
-the way `bool`'s natural resting values coincide with its only two.
+returns — the same post-condition the other two fields reach, by the
+identical "a genuinely distinct object, made to type-check as the field's
+own real type via `cast()`, can't collide with anything a caller passes"
+mechanism, just applied to a field whose natural resting value happens to
+coincide with Python's only singleton `None` the way `bool`'s natural
+resting values coincide with its only two.
 
 All three mechanisms end at the
 identical post-condition (the legacy field is a plain, fully-populated
-value after `__post_init__`, the sentinel/`None` never leaks to a reader)
-— they differ only in which type each field's omission marker can
-actually be: a fresh object identity works for `list`- and `int`-typed
-fields (both have room for one), and only the strictly two-valued `bool`
-needs the constructor's own accepted type widened to make room for a
-third.
+value after `__post_init__`, the sentinel never leaks to a reader, and the
+field's own declared type never widens) — they differ only in how the
+sentinel is shaped to type-check as the field's own real type: `cast()`
+to the field's already-`Optional` type for `vptr_offset_bits` (nothing to
+widen, the union predates this phase), and `cast()` to the field's
+otherwise-unwidened `bool`/`list[str]` type for `is_va_list`/`bases`/
+`vtable`, with the list-typed fields additionally routed through a
+`default_factory` that returns the one singleton rather than a fresh
+object, since a direct mutable-typed default is rejected outright by
+`dataclasses` regardless of what mechanism the value itself uses.
 
 Continuing the Files list: `serialization.py`
 (`snapshot_to_dict()`'s `Fact[...]`-status-to-string encoding, extending
@@ -545,11 +560,16 @@ never `Fact.present(False)`, while `Param(is_va_list=False)` (an explicit,
 confirmed-not-variadic value) backfills to `Fact.present(False)` — each
 confirmed to fail against the truthiness-based (non-sentinel, non-`None`)
 version of the bridge, which cannot tell the two cases apart for either
-field shape. A fifth test pins the type itself: `Param.is_va_list`'s
-declared annotation is `bool | None`, and after construction (with or
-without the argument) `self.is_va_list` is always a plain `bool` — never
-`None` — confirming the widened constructor input normalizes away before
-any reader, including `asdict()`-based serialization, can observe it. A
+field shape. A fifth test pins the type itself, both statically and at
+runtime: `Param.is_va_list`'s/`RecordType.bases`'s declared annotation
+stays exactly `bool`/`list[str]` — no union, confirmed by running `mypy
+--strict` against a fixture module using the compatibility bridge and
+asserting zero errors, which also confirms `dataclasses.fields(...)`'s
+recorded `type` is unwidened — and after construction (with or without
+the argument) `self.is_va_list`/`self.bases` is always a plain `bool`/
+`list[str]`, never the sentinel, confirming the cast sentinel normalizes
+away before any reader, including `asdict()`-based serialization, can
+observe it. A
 sixth test pins `vptr_offset_bits`'s own third mechanism, the exact
 counterexample that caught this field shape missing entirely: a bare
 `RecordType()` backfills `vptr_offset_bits_fact` to `Fact.not_collected()`,
@@ -2054,12 +2074,28 @@ dict[OccurrenceId, CanonicalEntity]` holds every occurrence; a derived
 projection (resolving which occurrence wins when a consumer genuinely
 wants one canonical view, not every occurrence) is a separate, explicit
 method for the callers that actually need that reduction, rather than
-the only shape `SemanticIR` offers. Each `CanonicalEntity` carries its
-resolved `ScopePath`, canonical type spelling, template-argument list,
-and CV-qualification, independent of which backend produced it, plus the
-`Fact[...]`-wrapped per-field availability Phase 0 established, so a
-canonicalized entity can state "this backend didn't produce this
-particular fact" rather than only "here is the value." This model file,
+the only shape `SemanticIR` offers. **`CanonicalEntity` itself carries no
+`ScopePath`/`EntityId` of its own — a first draft of this phase gave it a
+resolved `ScopePath` field alongside the dict's own `OccurrenceId` key,
+and a reviewer correctly flagged that as the exact "two independently
+constructible representations of the same fact" shape the Governing
+Invariant exists to forbid: `OccurrenceId.entity_id.scope_path` already
+*is* the resolved scope, so a second, separately-settable copy on the
+value means a normalizer or deserializer bug could produce a mapping
+whose key names one scope and whose value reports another, with nothing
+short of a dedicated equality test to catch the disagreement.** Identity
+— `ScopePath` included — lives exclusively in the key; `CanonicalEntity`
+holds only the non-identity payload: canonical type spelling,
+template-argument list, and CV-qualification, independent of which
+backend produced it, plus the `Fact[...]`-wrapped per-field availability
+Phase 0 established, so a canonicalized entity can state "this backend
+didn't produce this particular fact" rather than only "here is the
+value." A caller that needs an entity's own scope reads it off the key it
+was retrieved with (`occ_id.entity_id.scope_path`), never a field on the
+value — a function that needs to hand a `CanonicalEntity` to another
+caller without its key in scope returns the pair (`(OccurrenceId,
+CanonicalEntity)` or equivalent), not a `CanonicalEntity` carrying a
+second copy of what the key already states. This model file,
 and a primitive-level test suite pinning its shape directly (construct a
 few entities by hand, including two sharing one `EntityId` with
 differing availability, and assert both the `OccurrenceId`→entity mapping
