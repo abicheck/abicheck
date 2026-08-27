@@ -1667,6 +1667,41 @@ sibling:
   `surface_graph` is never `None`), so the approximation is reached only
   for a snapshot already using today's qualified-name-string semantics —
   it degrades to what that snapshot already had, nothing worse.
+
+  **The approximation's effect on `resolve_public_domain()`'s own
+  structured result — `resolvable`/`ambiguous_type_names`/
+  `exact_type_identities` — is not automatic, and needs stating
+  explicitly rather than left to be inferred from "it's the same
+  collision class."** The backfilled graph's collapsed `ScopePath`
+  segments mean two genuinely distinct declarations (same leaf name,
+  different enclosing scope *kind* — a record nested in a record vs. the
+  same names nested in a namespace, the exact distinction Phase 2's own
+  widened `entry.scope` exists to preserve and this backfill has no way
+  to recover) can merge onto one synthesized `EntityId` that a fresh
+  extraction would have kept separate. The rule is fail-closed, not
+  best-effort: whenever the backfill merges two or more distinct
+  qualified-name+kind pairs onto one synthesized key, that key is added
+  to `ambiguous_type_names` (never to `exact_type_identities`, which
+  stays reserved for a spelling the backfill resolved through a single,
+  uncontended qualified-name+kind pair) — mirroring exactly how
+  `PublicSurface.ambiguous_type_names`/`exact_type_identities` already
+  divide this same collision class today. `resolvable` itself is
+  unaffected by the approximation: it answers "does this snapshot have
+  header-derived visibility at all" (a question the flat fields already
+  answer on their own, independent of `EntityId` fidelity), not "is this
+  graph's identity resolution trustworthy" — conflating the two would
+  incorrectly downgrade a genuinely resolvable old snapshot's surface to
+  the unscoped-everything fallback merely because it predates typed
+  `ScopePath` data, which is a strictly worse outcome than the accepted
+  ambiguity-tracking loss this paragraph already owns. A same-name,
+  different-scope-kind pair is exactly the regression test this fix
+  needs and the parity-test requirement below (Phase 3's own) gains it:
+  a legacy snapshot with a record `Foo` nested in a record `Outer` and a
+  separate, unrelated function `Outer::Foo` (a record scope and a
+  namespace-like scope producing the identical collapsed-`ScopePath`
+  qualified spelling `Outer::Foo`) resolves through the backfill with
+  both landing in `ambiguous_type_names`, confirmed to fail against a
+  version of the backfill that treats the collapsed key as unambiguous.
   The backfilled
   graph is not written back onto the loaded `snapshot` object (no silent,
   surprising mutation of a caller's loaded snapshot) -- a query against
@@ -2514,12 +2549,56 @@ exactly the Clang-only and Clang-backfilled data that reconciliation adds
 — the two representations disagreeing on a single, freshly-produced
 snapshot, which is the Governing Invariant's one forbidden outcome, not a
 legacy-compatibility accommodation. `merge_snapshots()` therefore needs
-its own, fifth reconciliation step for `semantic_ir` — merging (or
-reconstructing) the two sub-snapshots' `SemanticIR.occurrences` maps the
-same way the legacy fields already merge, so a hybrid-frontend snapshot's
-`semantic_ir` reflects the same merged facts its `functions`/`types`
-do — added to the Files list below and to the parity-test requirement,
-since a `--ast-frontend hybrid` `dump`/`compare` is a real, already-
+its own, fifth reconciliation step for `semantic_ir`.
+
+**"Merging (or reconstructing) the two sub-snapshots' `SemanticIR.
+occurrences` maps the same way the legacy fields already merge" is not
+itself a rule, and a review round correctly pressed on what that
+parenthetical was actually supposed to mean — it does not define how a
+matching `EntityId` with a *different* `OccurrenceId` disambiguator is
+reconciled, nor what happens when both backends produced a real,
+disagreeing fact for the same entity.** The actual rule is the identical
+base-plus-backfill-with-provenance discipline `merge_snapshots()`'s own
+docstring already states for every other field it touches — "castxml
+remains the base... only the facts documented in this module's docstring
+are actually reconciled/backfilled," with `fact_provenance` recording
+which backend's value won, per declaration, per fact — applied to
+`occurrences` instead of invented fresh for it:
+
+1. **Matching is keyed on `EntityId`, not the full `OccurrenceId`.** Both
+   backends parse the identical headers, so the common case is two
+   independently-derived `EntityId`s that are structurally identical (same
+   `ScopePath`, same kind, same leaf name) with an empty disambiguator on
+   both sides — exactly the "globally unique identity" case the graph-key
+   fix elsewhere in this phase already reduces to plain `EntityId`
+   equality for. Matching on the *bare* `EntityId` first, and only
+   reading each side's own disambiguator afterward to decide *whether* a
+   match is safe (a non-empty, *disagreeing* disambiguator on either side
+   means the two parsers resolved the same nominal identity to evidence
+   they believe is genuinely distinct — e.g. one backend's USR/TU-context
+   signal disagreeing with the other's — and such a pair is left
+   unmerged, both sides kept as separate occurrences, rather than forced
+   together), is what makes "same logical entity, different disambiguator"
+   a handled case instead of an unspecified one.
+2. **CastXML's `CanonicalEntity` is the base for every matched pair**,
+   mirroring every other reconciled field in this function: Clang's
+   matching occurrence backfills only the specific facts CastXML's own
+   entity carries as `Fact.not_collected()`/`Fact.unsupported(...)` — it
+   never overwrites a fact CastXML already resolved to `Fact.present(...)`,
+   present-value disagreement included. A fact CastXML resolved and Clang
+   *also* resolved, disagreeing, is not silently dropped by either
+   direction: CastXML's value is kept (matching the base precedence every
+   other field already uses), and the disagreement itself is recorded —
+   `fact_provenance` gains an entry for the reconciled `semantic_ir`
+   fact the same way it already does for the legacy fields, so a
+   disagreement is auditable rather than invisible, never resolved by
+   guessing which backend was "more right."
+3. **A Clang-only `EntityId` (no CastXML match at all) is unioned in
+   verbatim**, exactly mirroring how a genuinely Clang-only function/type
+   is appended rather than dropped in the existing legacy-field merge.
+
+Added to the Files list below and to the parity-test requirement, since a
+`--ast-frontend hybrid` `dump`/`compare` is a real, already-
 documented production path this phase's own "every assembly call site"
 bar already commits to covering, not a fifth site invented for this
 finding. The BTF/CTF dispatch and PDB path are
@@ -3319,6 +3398,19 @@ not new design.
   `FactConflict`/`merge_graph_facts` in `buildsource/graph_facts.py` once
   every caller reads them from `model/graph.py` instead of the re-export
   shim.
+- Phase 4: **no row, by design, not by omission** — `AnalysisPlan`/
+  `AnalysisPlanner.resolve()` is net-new pre-flight validation, not a
+  second implementation of something this plan is consolidating onto one
+  representation. The defect it closes is a silent no-op (an unsatisfiable
+  request dropping mid-run with no diagnostic), not a duplicate
+  representation with an old copy left over to delete once migration
+  finishes — there is no prior `PlanningError`-equivalent code path for
+  this checklist to retire. Verified instead by Phase 4's own
+  already-stated acceptance test: the `--build-target` + pre-captured
+  `aquery` gap and the `-H` + unsupported-collect-mode gap each raise
+  `PlanningError` rather than silently dropping the request, confirmed on
+  the same two scenarios AGENTS.md already documents as today's silent
+  failures.
 - Phase 5: any hand-maintained capability-matrix doc section the
   generator now produces.
 - Phase 6: each backend parser's own copy of anonymous-marker/closure-
@@ -3348,7 +3440,35 @@ not new design.
 
 **Acceptance criteria.** For each row: a `git grep` for the removed
 pattern/function name returns nothing outside test fixtures/changelog
-history. This checklist is re-run, and re-verified, at the end of the
+history.
+
+**That grep must be scoped per row to the specific symbol the row names,
+never a blanket pattern — a first draft of this section left that
+implicit, and a review round correctly found the gap: two of these
+rows explicitly say the old path is *not* removed, and a loosely-
+chosen grep pattern for a sibling row can still match that
+intentionally-retained code.** Phase 0's row removes the domain-side
+`clang_*_facts_reliable` boolean attributes but explicitly keeps
+`serialization.py`'s legacy-schema backfill reading those same wire
+keys; Phase 7's row removes `gate.py`'s raw-`exit_code`-decode-as-
+the-only-path but explicitly keeps its legacy-`exit_code`-only decode
+fallback for a pre-Phase-7 report. A grep for a pattern as generic as
+`facts_reliable` or `exit_code` would match both the removed call site
+and the retained one, so each row's acceptance check names the exact
+removed symbol (e.g. the domain-side attribute access on `AbiSnapshot`
+itself, not the wire-key string the backfill still reads; the
+raw-decode-as-primary-path function, not the fallback branch that
+survives it) — not a substring a retained sibling could also contain.
+Each of the two rows with a deliberately-retained path additionally
+gets its own **positive** assertion, run alongside the row's negative
+grep rather than instead of it: the retained backfill/fallback symbol
+(`serialization.py`'s legacy-schema decode path; `gate.py`'s
+legacy-`exit_code`-only fallback) is confirmed still present and still
+reachable from a pre-migration-schema input, so this checklist cannot
+be satisfied by accidentally deleting the compatibility path those
+rows were written to keep.
+
+This checklist is re-run, and re-verified, at the end of the
 *last* phase landed in a given release cycle — not deferred to "eventually."
 
 ## What this plan deliberately does not attempt
