@@ -226,16 +226,33 @@ def test_write_snapshot_output_accepts_a_resolve_time_embedded_snapshot(
     # empty/no-op pack by anything downstream of the guard. Checking mere
     # pack *presence* is not enough: this fixture's own docstring records
     # that even a headers-only run (no sources/build_info at all) produces
-    # a non-null pack whose L3/L4 layers are NOT_COLLECTED -- so the real
-    # assertion is that every layer this specific request actually
-    # requested (L3 build, L4 source-ABI replay) reports "present", not
-    # merely that a `build_source` key exists.
+    # a non-null pack whose L3/L4 layers are NOT_COLLECTED. Checking only
+    # the manifest's own precomputed coverage *labels* is not enough
+    # either (Codex review, fresh evidence): `BuildSourcePack` serializes
+    # its manifest independently of `build_evidence`/`source_abi`/
+    # `source_graph`, so a regression that drops the real per-layer
+    # payload while leaving those labels stale would still pass a
+    # coverage-only check. Assert one representative, real fact out of
+    # each layer's own serialized payload instead.
+    build_source = payload["build_source"]
     coverage = {
-        row["layer"]: row["status"]
-        for row in payload["build_source"]["manifest"]["coverage"]
+        row["layer"]: row["status"] for row in build_source["manifest"]["coverage"]
     }
     assert coverage["L3_build"] == "present"
     assert coverage["L4_source_abi"] == "present"
+
+    # L3: the real compile unit this side's build evidence collected.
+    compile_units = build_source["build_evidence"]["compile_units"]
+    assert len(compile_units) == 1
+    assert compile_units[0]["standard"] == "c++17"
+
+    # L4: the source declaration actually linked to the binary's real
+    # exported symbol -- not just that *a* mapping dict is present.
+    mapping = build_source["source_abi"]["mappings"]["source_decl_to_binary_symbol"]
+    assert mapping.get("_ZNK6Widget3sumEv") == "_ZNK6Widget3sumEv"
+
+    # L5: the source graph carries real nodes, not an empty/degraded stub.
+    assert len(build_source["source_graph"]["nodes"]) > 0
 
 
 @pytest.mark.skipif(not (_HAVE_GXX and _HAVE_CLANG), reason=_SKIP_REASON)

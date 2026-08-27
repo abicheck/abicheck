@@ -2001,9 +2001,17 @@ pipelines a fourth time.
   > here in full, since it is the identical narrative this plan already defers
   > to for every other slice in this subsection.
   >
-  > **Item 2 (castxml) is unchanged and is now the sole remaining blocker** on
-  > routing `dump_cmd`'s real run through `execute_dump_request` — castxml is
-  > still unavailable in every environment this work has been done in.
+  > **Item 2 (castxml) is unchanged, but is not the *sole* remaining blocker
+  > — an earlier revision of this note said so, which a later investigation
+  > (below, "Investigated further (2026-08-27)") corrected.** Routing
+  > `dump_cmd`'s real run through `execute_dump_request` needs castxml
+  > (still unavailable in every environment this work has been done in) for
+  > the migration itself, **and** it needs the `_write_snapshot_output`
+  > Flow-2 `--inputs` pack fold verified against a resolve-time-embedded
+  > snapshot — untested as of the 2026-08-27 investigation below, which
+  > verified the rest of the sequence but explicitly left this one
+  > component open. See that note for the precise, current split rather
+  > than trusting this earlier one.
   >
   > Separately, a CI-caught regression from an
   > unrelated fix in the same session — the write-time-embed fix that gave
@@ -2016,8 +2024,8 @@ pipelines a fourth time.
   > (`compare`/`dump`'s typed pipeline are unaffected). Documented in full in
   > the same root `AGENTS.md` entry.
   >
-  > PR 3C therefore stays blocked on item 2 (castxml) alone, per this section's
-  > own ordering rule.
+  > PR 3C therefore stays blocked on item 2 (castxml) and the untested Flow-2
+  > `--inputs` fold noted above, per this section's own ordering rule.
 
   Two #782 follow-ups that change the *parsed public surface*, not just
   performance, so they belong before the model is called finished: (1)
@@ -2206,11 +2214,15 @@ pipelines a fourth time.
   > `_write_snapshot_output` with an explicit `--depth source` — asserting
   > no second embed occurs, the depth gate does not raise, the provenance
   > fold correctly reports `effective_depth == "source"`/`degraded is
-  > False`, and the written JSON's own `build_source.manifest.coverage`
-  > rows report L3/L4 `"present"` — checking the actual per-layer coverage
-  > this request's evidence produced, not merely that a `build_source` key
-  > exists (a headers-only run's own pack, per the discovery below, would
-  > pass a bare presence check vacuously).
+  > False`, the written JSON's own `build_source.manifest.coverage` rows
+  > report L3/L4 `"present"`, and — since `BuildSourcePack` serializes its
+  > manifest independently of `build_evidence`/`source_abi`/`source_graph`,
+  > so a regression that drops the real per-layer payload while leaving
+  > those coverage labels stale would pass a labels-only check (Codex
+  > review, fresh evidence) — one representative real fact out of each
+  > layer's own serialized payload: the real compile unit's `standard`
+  > (L3), the real `source_decl_to_binary_symbol` mapping entry for the
+  > compiled symbol (L4), and a non-empty `source_graph.nodes` list (L5).
   > A second case pins the depth gate's own negative direction (a
   > `depth="binary"` resolve-time result — no header parse at all, so
   > `build_source` stays genuinely `None` — still raises
