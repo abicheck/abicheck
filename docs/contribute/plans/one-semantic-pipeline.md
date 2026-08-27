@@ -164,13 +164,17 @@ static AST check, widened to also flag a bare `Fact[...]`-typed field on
 either side of `==`/`!=` inside a detector module — same file scope, same
 enforcement layer, not a second runtime mechanism underneath the first.
 
-**Scope for this phase (deliberately narrow).** Convert exactly the three
-fields AGENTS.md's "Known gaps" names as actively causing fabricated
+**Scope for this phase (deliberately narrow).** Convert the fields
+AGENTS.md's "Known gaps" names as actively causing fabricated
 findings from absent evidence: `RecordType.vtable`/`vptr_offset_bits`
 (the `type_vtable_changed` guard), `RecordType.bases` (the accepted-gap
 `type_base_changed` entry — converting its *representation* first makes a
 future evidence-based guard additive instead of another reinterpretation
-of `None`), and `Param.is_va_list` (the reliability-flag entry). Every
+of `None`), and `Param.is_va_list` (the reliability-flag entry) — plus
+`RecordType.virtual_bases`, converted in this same Phase 0 PR alongside
+`bases` rather than deferred (see the identical-producer/identical-
+availability-conditions reasoning a few sections down), for five fields
+total across four owning dataclasses. Every
 other model field stays as-is in this phase — a blanket conversion is
 Phase 5's job, after D7's registry exists to drive it mechanically.
 
@@ -4546,14 +4550,36 @@ not new design.
   row's migration is the same five-reader audit Phase 3's own text already
   deferred, made concrete instead of left open-ended: migrate each reader
   (verified against its own existing tests, per Phase 3's own reasoning for
-  why this wasn't attempted in that phase), then delete the alias
-  assignment in the L5 builder and the legacy-document aliasing fallback in
-  `snapshot_from_dict()` — a pre-Phase-3 document with no top-level
-  `surface_graph` at all is, by that point, old enough that its own
-  `build_source.source_graph` (if present) is read directly by
-  `BuildSourcePack.from_embedded_dict()` the way every pre-existing,
-  unmigrated consumer of that legacy field already does, rather than
-  through a forwarding alias.
+  why this wasn't attempted in that phase), then delete the in-memory
+  alias assignment in the L5 builder — the one piece this row can actually
+  remove once every reader stops going through it.
+
+  **"Delete the legacy-document aliasing fallback in `snapshot_from_dict()`"
+  is no longer this row's to do — that fallback was itself retracted
+  earlier in this same phase (see the correction above), and a further
+  review round correctly found the deeper problem this row's first draft
+  didn't address: migrating the five readers to read only `AbiSnapshot.
+  surface_graph` makes historical L3-L5 evidence silently disappear from
+  them, not merely redundant.** `surface_graph` is deliberately never
+  populated for a pre-Phase-3 snapshot (the retracted-aliasing fix's whole
+  point — aliasing the legacy L3-L5-only graph in there breaks
+  `resolve_public_surface()`), so a reader that reads *only*
+  `AbiSnapshot.surface_graph` sees nothing for exactly the old snapshots
+  this row's migration is supposed to leave working. The migration is
+  therefore not a hard cutover to a single field: each of the five readers
+  keeps a fallback to `build_source.source_graph` for a snapshot where
+  `surface_graph` is `None` but `build_source` is present — `graph =
+  snap.surface_graph or (snap.build_source.source_graph if snap.
+  build_source else None)`, read `AbiSnapshot.surface_graph` first (the
+  canonical location for a fresh snapshot, including one re-saved through
+  this phase's own assembly step) and fall back to the legacy nested field
+  only when it's absent. This acceptance check changes accordingly: "every
+  reader prefers `AbiSnapshot.surface_graph`" is what `git grep` can
+  confirm mechanically; "no pre-Phase-3 baseline silently loses L3-L5
+  evidence" is confirmed by a direct regression test loading a real
+  pre-Phase-3 fixture (`surface_graph` absent, `build_source.source_graph`
+  present) through each migrated reader and asserting its output is
+  unchanged from before the migration.
 - Phase 4: **no row, by design, not by omission** — `AnalysisPlan`/
   `AnalysisPlanner.resolve()` is net-new pre-flight validation, not a
   second implementation of something this plan is consolidating onto one
