@@ -79,6 +79,18 @@ class TestObjectRef:
         )
         assert loaded.size == 0
 
+    @pytest.mark.parametrize(
+        "digest",
+        ["garbage", "sha256:not-hex-at-all-zz", "sha256:", ":deadbeef", "sha256:a"],
+    )
+    def test_a_malformed_digest_is_refused_at_construction(self, digest: str) -> None:
+        # Not just at write time via `object_relpath` -- a reference that
+        # can never address an object shouldn't be constructible at all.
+        with pytest.raises(ValueError):
+            ObjectRef(kind="graph", digest=digest)
+        with pytest.raises(ValueError):
+            ObjectRef.from_dict({"kind": "graph", "digest": digest})
+
     def test_size_alone_does_not_change_identity(self) -> None:
         a = ObjectRef(kind="graph", digest="sha256:ab", size=1)
         b = ObjectRef(kind="graph", digest="sha256:ab", size=2)
@@ -161,6 +173,21 @@ class TestVariantRef:
         with pytest.raises(ValueError):
             VariantRef(variant_id="")
 
+    @pytest.mark.parametrize("bad_id", ["..", "a/b", "a\\b", "../escape"])
+    def test_a_path_unsafe_variant_id_is_refused(self, bad_id: str) -> None:
+        # `variant_id` becomes the literal filename `variant_ref_relpath`
+        # builds -- a value that helper refuses must be refused here too, or
+        # a manifest could accept a variant a writer can never place.
+        with pytest.raises(ValueError):
+            VariantRef(variant_id=bad_id)
+
+    @pytest.mark.parametrize("bad_id", ["..", "a/b", "a\\b", "../escape"])
+    def test_a_path_unsafe_artifact_id_in_membership_is_refused(
+        self, bad_id: str
+    ) -> None:
+        with pytest.raises(ValueError):
+            VariantRef(variant_id="v", artifact_ids=(bad_id,))
+
     @pytest.mark.parametrize("value", [1, None, "s", ["a", "1"], {("a",): "1"}])
     def test_a_malformed_coordinate_map_is_refused(self, value: Any) -> None:
         with pytest.raises(TypeError):
@@ -202,6 +229,16 @@ class TestArtifactRef:
             sections={"declarations": self._OBJ},
         )
         assert ArtifactRef.from_dict(artifact.to_dict()) == artifact
+
+    @pytest.mark.parametrize("bad_id", ["..", "a/b", "a\\b", "../escape"])
+    def test_a_path_unsafe_artifact_id_is_refused(self, bad_id: str) -> None:
+        with pytest.raises(ValueError):
+            ArtifactRef(artifact_id=bad_id, variant_id="v", kind="elf")
+
+    @pytest.mark.parametrize("bad_id", ["..", "a/b", "a\\b", "../escape"])
+    def test_a_path_unsafe_variant_id_is_refused(self, bad_id: str) -> None:
+        with pytest.raises(ValueError):
+            ArtifactRef(artifact_id="a", variant_id=bad_id, kind="elf")
 
     def test_a_header_only_artifact_has_no_binary_section(self) -> None:
         artifact = ArtifactRef(
@@ -264,7 +301,7 @@ class TestArtifactRef:
 
 
 class TestPackageManifest:
-    _V = VariantRef(variant_id="cpu-gcc")
+    _V = VariantRef(variant_id="cpu-gcc", artifact_ids=("libfoo",))
     _A = ArtifactRef(artifact_id="libfoo", variant_id="cpu-gcc", kind="elf")
 
     def test_round_trips(self) -> None:

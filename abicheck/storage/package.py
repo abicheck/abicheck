@@ -239,6 +239,15 @@ class ObjectRef:
             raise ValueError("ObjectRef.kind must not be empty")
         if not self.digest:
             raise ValueError("ObjectRef.digest must not be empty")
+        # A reference whose digest isn't `object_relpath`'s own grammar can
+        # be constructed and serialized here, then fail only once a writer
+        # tries to place it -- the same value the manifest already accepted
+        # as a valid reference turning out not to address anything. Reusing
+        # the parser itself (rather than restating the grammar) means the
+        # two can never drift apart on what a well-formed digest looks like;
+        # the resulting path is discarded, since only the validation is
+        # wanted here.
+        object_relpath(self.digest)
         size = self.size
         if isinstance(size, bool) or not isinstance(size, int) or size < 0:
             raise TypeError(f"ObjectRef.size must be a non-negative int, not {size!r}")
@@ -291,11 +300,14 @@ class VariantRef:
     artifact_ids: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
+        # `_safe_ref_id`, not `_identity_text`: this id becomes the literal
+        # filename `variant_ref_relpath` builds, so a value that function
+        # would refuse must be refused here too -- accepting it here and
+        # rejecting it only once a writer tries to place the file would let
+        # an otherwise-valid-looking manifest turn out to be unwritable.
         object.__setattr__(
-            self, "variant_id", _identity_text(self.variant_id, "variant_id")
+            self, "variant_id", _safe_ref_id(self.variant_id, "variant_id")
         )
-        if not self.variant_id:
-            raise ValueError("VariantRef.variant_id must not be empty")
         object.__setattr__(
             self, "declared", _normalized_text_mapping(self.declared, "declared")
         )
@@ -303,13 +315,18 @@ class VariantRef:
             self, "captured", _normalized_text_mapping(self.captured, "captured")
         )
         ids = _row_sequence(self.artifact_ids, "artifact_ids")
-        for index, artifact_id in enumerate(ids):
-            _instance_of(artifact_id, str, f"artifact_ids[{index}]")
+        # Each entry is itself a foreign artifact_id, which becomes the
+        # literal filename `artifact_ref_relpath` builds for that artifact --
+        # the identical reasoning as `variant_id` above, one level over.
+        checked_ids = [
+            _safe_ref_id(artifact_id, f"artifact_ids[{index}]")
+            for index, artifact_id in enumerate(ids)
+        ]
         # Sorted and deduplicated: membership is a set of ids, and its
         # serialized order must not depend on the order a caller happened to
         # collect it in (D5's array-with-a-stable-sort-key rule, applied to a
         # plain identifier list rather than a JSON document).
-        object.__setattr__(self, "artifact_ids", tuple(sorted(set(ids))))
+        object.__setattr__(self, "artifact_ids", tuple(sorted(set(checked_ids))))
 
     def to_dict(self) -> dict[str, Any]:
         out: dict[str, Any] = {"variant_id": self.variant_id}
@@ -364,16 +381,17 @@ class ArtifactRef:
     sections: Mapping[str, ObjectRef] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
+        # `_safe_ref_id`, not `_identity_text`: both ids become literal
+        # filenames (this artifact's own `artifact_ref_relpath`, and its
+        # owning variant's `variant_ref_relpath`), so a value either helper
+        # would refuse must be refused here too, at construction, rather
+        # than accepted into a manifest that later can't be written.
         object.__setattr__(
-            self, "artifact_id", _identity_text(self.artifact_id, "artifact_id")
+            self, "artifact_id", _safe_ref_id(self.artifact_id, "artifact_id")
         )
-        if not self.artifact_id:
-            raise ValueError("ArtifactRef.artifact_id must not be empty")
         object.__setattr__(
-            self, "variant_id", _identity_text(self.variant_id, "variant_id")
+            self, "variant_id", _safe_ref_id(self.variant_id, "variant_id")
         )
-        if not self.variant_id:
-            raise ValueError("ArtifactRef.variant_id must not be empty")
         object.__setattr__(self, "kind", _identity_text(self.kind, "kind"))
         if not self.kind:
             raise ValueError("ArtifactRef.kind must not be empty")
@@ -489,27 +507,35 @@ class PackageManifest:
 
         # Membership is stated twice -- an `ArtifactRef.variant_id` pointing
         # up, and a `VariantRef.artifact_ids` listing down -- and nothing
-        # above cross-checks the second against the first. A variant naming
-        # an artifact that doesn't exist, or one whose own `variant_id`
-        # names a *different* declared variant, would otherwise serialize
-        # as a self-contradictory graph: a reader trusting `artifact_ids` as
-        # documented membership could resolve a nonexistent ref or attribute
-        # an artifact to the wrong variant.
+        # above cross-checks one against the other. Checking only that every
+        # *listed* id resolves to a matching artifact (variant -> artifact)
+        # still missed the reverse: an artifact whose own `variant_id` names
+        # a real variant that simply omits it from `artifact_ids`. Either
+        # gap serializes a self-contradictory graph, so the two directions
+        # are checked as one exact-equality invariant instead of two partial
+        # ones: a variant's `artifact_ids` must be *precisely* the set of
+        # artifacts whose own `variant_id` names it -- no more, no fewer.
         artifacts_by_id = {artifact.artifact_id: artifact for artifact in artifacts}
+        owned_by_variant: dict[str, set[str]] = {
+            variant.variant_id: set() for variant in variants
+        }
+        for artifact in artifacts:
+            owned_by_variant[artifact.variant_id].add(artifact.artifact_id)
         for variant in variants:
-            for artifact_id in variant.artifact_ids:
-                member = artifacts_by_id.get(artifact_id)
-                if member is None:
-                    raise ValueError(
-                        f"VariantRef {variant.variant_id!r} names artifact_id "
-                        f"{artifact_id!r}, which is not in artifact_refs"
-                    )
-                if member.variant_id != variant.variant_id:
-                    raise ValueError(
-                        f"VariantRef {variant.variant_id!r} names artifact_id "
-                        f"{artifact_id!r}, but that artifact's own variant_id "
-                        f"is {member.variant_id!r}"
-                    )
+            declared = set(variant.artifact_ids)
+            owned = owned_by_variant[variant.variant_id]
+            missing_artifact = sorted(declared - artifacts_by_id.keys())
+            if missing_artifact:
+                raise ValueError(
+                    f"VariantRef {variant.variant_id!r} names artifact_id(s) "
+                    f"{missing_artifact}, which are not in artifact_refs"
+                )
+            if declared != owned:
+                raise ValueError(
+                    f"VariantRef {variant.variant_id!r}.artifact_ids "
+                    f"{sorted(declared)} does not match the artifacts whose own "
+                    f"variant_id names it {sorted(owned)}"
+                )
 
     def to_dict(self) -> dict[str, Any]:
         out: dict[str, Any] = {"versions": self.versions.to_dict()}
