@@ -25,6 +25,7 @@ duplicate id, an empty ``seed_tests``) without any of these checks.
 
 from __future__ import annotations
 
+import ast
 from pathlib import Path
 
 import pytest
@@ -34,50 +35,56 @@ from tests.regressions.manifest import BUG_CLASSES, BugClass, all_ids, get
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
-def _decorator_call_args(source: str, marker_name: str) -> list[str | None]:
-    """Every `@pytest.mark.<marker_name>(...)` call's raw argument text in
-    *source* — `None` in the list for a bare, unparenthesized occurrence.
+def _is_pytest_mark_attr(node: ast.expr, marker_name: str) -> bool:
+    """Is *node* the exact attribute chain `pytest.mark.<marker_name>`?"""
+    return (
+        isinstance(node, ast.Attribute)
+        and node.attr == marker_name
+        and isinstance(node.value, ast.Attribute)
+        and node.value.attr == "mark"
+        and isinstance(node.value.value, ast.Name)
+        and node.value.value.id == "pytest"
+    )
 
-    Depth-counted rather than a `.*?` regex, since a non-greedy regex over
-    a call's arguments stops at the *first* `)` and would misread a nested
-    call (e.g. `reason=some_helper(x)`) as the marker's own closing paren.
-    A literal-substring search rather than `\\bmarker\\b`-style regex, with
-    an explicit next-character guard, so searching for `skip` does not
-    match the unrelated `skipif` marker (`skip` is a prefix of `skipif`).
+
+def _marker_decorator_calls(tree: ast.AST, marker_name: str) -> list[ast.Call | None]:
+    """Every `@pytest.mark.<marker_name>` decorator use across every
+    function definition in *tree* — the `ast.Call` node for a parenthesized
+    use (`@pytest.mark.xfail(...)`), `None` in the list for a bare,
+    unparenthesized one (`@pytest.mark.xfail`).
+
+    A real AST walk, not text scanning (Codex review, PR #885, third
+    round — replacing the previous depth-counted paren scan, which read
+    the *raw argument text* and checked it with a substring search;
+    `"strict=True" not in args` matched inside an unrelated string like
+    `reason="TODO: make strict=True after fix"` just as readily as a real
+    keyword, and couldn't distinguish a literal `strict=True` from a
+    non-literal expression like `strict=True if flag else False` that only
+    sometimes evaluates to `True`). Structural attribute matching, not a
+    name/string comparison, so `skip` is never confused with `skipif` —
+    they parse to different `ast.Attribute.attr` values entirely, unlike
+    the earlier text-based version, which needed an explicit next-character
+    guard for exactly this.
     """
-    marker = f"pytest.mark.{marker_name}"
-    results: list[str | None] = []
-    idx = 0
-    while True:
-        pos = source.find(marker, idx)
-        if pos == -1:
-            break
-        after = pos + len(marker)
-        if after < len(source) and (source[after].isalnum() or source[after] == "_"):
-            # A longer identifier (e.g. `skipif` while searching for `skip`)
-            # — not a real match of this marker.
-            idx = after
+    results: list[ast.Call | None] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
             continue
-        j = after
-        while j < len(source) and source[j] in " \t":
-            j += 1
-        if j < len(source) and source[j] == "(":
-            depth = 0
-            k = j
-            while k < len(source):
-                if source[k] == "(":
-                    depth += 1
-                elif source[k] == ")":
-                    depth -= 1
-                    if depth == 0:
-                        break
-                k += 1
-            results.append(source[j + 1 : k])
-            idx = k + 1
-        else:
-            results.append(None)
-            idx = after
+        for dec in node.decorator_list:
+            target = dec.func if isinstance(dec, ast.Call) else dec
+            if _is_pytest_mark_attr(target, marker_name):
+                results.append(dec if isinstance(dec, ast.Call) else None)
     return results
+
+
+def _xfail_is_strict(call: ast.Call) -> bool:
+    """Does *call* (a `pytest.mark.xfail(...)` decorator) carry
+    `strict=True` as a literal boolean — not a string, a variable, or a
+    conditional expression that only sometimes evaluates to `True`?"""
+    for kw in call.keywords:
+        if kw.arg == "strict":
+            return isinstance(kw.value, ast.Constant) and kw.value.value is True
+    return False
 
 
 def _canary_strictness_violation(source: str) -> str | None:
@@ -102,15 +109,23 @@ def _canary_strictness_violation(source: str) -> str | None:
     syntactic, so it's on the author, not this check, the same way this
     function already can't verify a bare assertion genuinely encodes the
     gap rather than something unrelated.
+
+    A file that isn't valid Python at all is itself a violation — fail
+    closed rather than silently accepting a canary this function can't
+    even parse.
     """
-    if _decorator_call_args(source, "skip"):
+    try:
+        tree = ast.parse(source)
+    except SyntaxError as exc:
+        return f"could not be parsed as Python ({exc}); cannot verify it fails loudly"
+    if _marker_decorator_calls(tree, "skip"):
         return "uses @pytest.mark.skip, which never executes and so cannot fail loudly"
-    for args in _decorator_call_args(source, "xfail"):
-        if args is None or "strict=True" not in args.replace(" ", "").replace("\n", ""):
+    for call in _marker_decorator_calls(tree, "xfail"):
+        if call is None or not _xfail_is_strict(call):
             return (
                 "uses a non-strict @pytest.mark.xfail — an unexpected pass "
                 "(XPASS) stays green with no `xfail_strict` ini option set; "
-                "use `strict=True` instead"
+                "use a literal `strict=True` instead"
             )
     return None
 
@@ -337,9 +352,10 @@ class TestCanaryStrictnessViolation:
         assert _canary_strictness_violation(source) is None
 
     def test_nested_call_in_xfail_reason_does_not_confuse_paren_matching(self) -> None:
-        """A `.*?` regex over the call's arguments would stop at the first
-        `)` — the nested `helper(x)` call's own — and misread the marker as
-        already closed, missing the real `strict=True` that follows."""
+        """A real AST walk (not a `.*?` regex over the call's raw argument
+        text, which would stop at the first `)` — the nested `helper(x)`
+        call's own — and misread the marker as already closed) correctly
+        finds the real `strict=True` keyword that follows."""
         source = (
             "@pytest.mark.xfail(reason=helper(x), strict=True)\ndef test_x(): ...\n"
         )
@@ -353,6 +369,44 @@ class TestCanaryStrictnessViolation:
             "@pytest.mark.xfail(reason='no strict here')\n"
             "def test_b(): ...\n"
         )
+        assert _canary_strictness_violation(source) is not None
+
+    def test_strict_true_mentioned_only_inside_the_reason_string_is_rejected(
+        self,
+    ) -> None:
+        """A substring search over the call's raw text would see the
+        literal characters `strict=True` inside the `reason=` string and
+        wrongly conclude the marker is strict — pytest itself still treats
+        this xfail as non-strict, since no real `strict` keyword was given
+        at all (Codex review, PR #885, third round)."""
+        source = (
+            "@pytest.mark.xfail(reason='TODO: make strict=True after fix')\n"
+            "def test_x(): ...\n"
+        )
+        assert _canary_strictness_violation(source) is not None
+
+    def test_a_non_literal_strict_expression_is_rejected(self) -> None:
+        """`strict=True if flag else False` only *sometimes* evaluates to
+        `True` — a substring search for `"strict=True"` would still match
+        it, but pytest evaluates the expression at collection time and it
+        is not unconditionally strict (Codex review, PR #885, third
+        round)."""
+        source = (
+            "@pytest.mark.xfail(strict=True if flag else False)\ndef test_x(): ...\n"
+        )
+        assert _canary_strictness_violation(source) is not None
+
+    def test_strict_as_a_string_literal_is_rejected(self) -> None:
+        """`strict="True"` is a string, not the boolean pytest's `xfail`
+        marker actually requires — truthy in casual reading, but not a
+        literal `True`."""
+        source = '@pytest.mark.xfail(strict="True")\ndef test_x(): ...\n'
+        assert _canary_strictness_violation(source) is not None
+
+    def test_unparseable_source_is_rejected(self) -> None:
+        """A canary file that isn't valid Python at all fails closed rather
+        than silently reading as compliant."""
+        source = "def test_x(:\n    this is not python\n"
         assert _canary_strictness_violation(source) is not None
 
 

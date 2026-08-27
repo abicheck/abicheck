@@ -307,10 +307,12 @@ Generalizes the fix behind #839 (enum value on an intermediate
   middle/leaf, several equivalent value encodings, malformed/missing
   children, extra irrelevant metadata — reusing and generalizing the
   wrapper-chain generator already added for #839
-  (`tests/test_clang_ast_wrapper_properties.py` or equivalent) so every
-  "unwrap until X" helper in `dumper_clang.py`/`dumper_castxml.py`
-  (not just the enum-value path) is checked against the same generator,
-  per the existing file's own docstring intent.
+  (`tests/test_dumper_clang_enum_value_properties.py`, the real seed test
+  named in `tests/regressions/manifest.py`'s
+  `extraction.ast_wrapper_chain_traversal` entry) so every "unwrap until X"
+  helper in `dumper_clang.py`/`dumper_castxml.py` (not just the enum-value
+  path) is checked against the same generator, per that file's own
+  docstring intent.
 * **Negative control:** a malformed tree must produce a typed
   incomplete-analysis result, never a fabricated or silently-dropped
   value.
