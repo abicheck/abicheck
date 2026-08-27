@@ -1013,8 +1013,14 @@ the next pass does not re-survey it.
 
 `frontends/` and `workflows/` are migrated packages, so anything physically
 inside them is subject to `unclassified-import`. Thinning `service.py` therefore
-means classifying the 28 flat modules it imports. Doing so surfaces 67
-direction violations, and the load-bearing ones share one root cause:
+means classifying the 28 flat modules it imports. Doing so surfaced 67
+direction violations at the time this paragraph was written — **a figure a
+later Codex review round on this PR flagged as stale relative to the
+`*_metadata.py` split below, and this paragraph is left as the historical
+record of the original blocker rather than restated as current; the
+paragraph several below this one (after "Re-measured again") has the
+up-to-date, re-verified number.** The load-bearing ones shared one root
+cause:
 **`*_metadata.py` conflate a model dataclass with its parser.** `AbiSnapshot`
 has typed fields of `PeMetadata`/`MachoMetadata`/`DwarfMetadata`/
 `AdvancedDwarfMetadata`, and `serialization.py` names 19 such types — so
@@ -1032,9 +1038,527 @@ imports `policy_file`/`contract_relevance_types` — `compare -> policy` and
 design decision about where a policy-parameterised comparison belongs, not a
 mechanical move.
 
-So Phase 4's `service.py` half is **blocked on Phase 5**, with the dependency
-now stated concretely rather than as "the destination does not exist". The
-`cli.py` half is complete.
+**Re-measured again, and the picture is more mixed than "closed" — a Codex
+review round on this PR caught the overclaim before it stood.** `service.py`,
+`checker_types.py`, `cli_params.py`, and `analysis_assurance.py` are indeed
+classified in `architecture/modules.yaml`, and `python
+scripts/check_architecture.py` reports 0 errors against the tree as it
+stands — but that is because none of the four is `migrated_source`
+(physically inside its owner package's directory), and `unclassified-import`
+only fires against a migrated source's own imports. A 0-error result from a
+flat, unmigrated file says nothing about whether moving it is safe.
+
+A direct AST scan of every first-party import `service.py` makes — not the
+handful this note originally sampled before concluding classification was
+"closed" — found roughly two dozen still unclassified: `checker`,
+`policy_file`, `suppression`, `clang_layout_tool`, `service_dump_cache`,
+`service_header_graph_attach`, `service_metadata_attach`, `service_render`,
+`dumper`, `dumper_hybrid`, `dwarf_advanced`, `dwarf_metadata`,
+`environment_matrix`, `compat.abicc_dump_import`, `snapshot_io`,
+`symvers_metadata`, `btf_metadata`, `ctf_metadata`, `provenance`,
+`pe_metadata`, `macho_metadata`, `contract_relevance_types`, `pdb_metadata`,
+`pdb_utils`, `pdb_model`, `post_manifest`, `serialization` (line 54, added
+after a ninth Codex review round caught its omission), and —
+`from . import X` bare-relative imports, which the AST-walk script used to
+build this list silently dropped by only handling `from .module import X`,
+a thirteenth Codex review round caught it — `qualified_name_segments`
+(line 35) and `dumper_cache` (line 658). Both fixed in the same pass:
+verified with a corrected scanner, and cross-checked against the full
+classified-layer set to confirm no third instance of the same scanner bug
+survives in this list. A fifteenth round caught a fourth kind of gap no AST
+scan, corrected or not, can ever see: `service_header_scoped` is loaded
+dynamically at line 87 via
+`_importlib.import_module(".service_header_scoped", __package__)` — a
+plain function call at runtime, not an `import`/`from` statement, exactly
+as that line's own surrounding comments explain. Confirmed unclassified in
+`modules.yaml` and confirmed no `abicheck/workflows/service_header_scoped.py`
+exists yet, so an otherwise-mechanical relocation of `service.py` would
+resolve this one to a nonexistent sibling rather than merely trip
+`unclassified-import` the way every AST-visible import here does. `api_types` (also imported, line 36) is deliberately
+*not* on this list, for the opposite reason `serialization` was added to it:
+`api_types` is one of `modules.yaml`'s two `public_root_surfaces`, the
+explicit exemption `check_architecture.py`'s `unclassified-import` check
+carves out — so importing it is not actually a blocker the way every other
+name here is, and listing it alongside them (as an earlier revision did)
+overstated the count in the other direction. Phase 5's dataclass/parser split
+moved each format's *dataclass* half into `model/*_facts.py`; it did not
+classify the surviving flat *parser* module (`pe_metadata.py`,
+`macho_metadata.py`, `dwarf_metadata.py`, `symvers_metadata.py`, and
+siblings) as `extract` — that classification step is still outstanding for
+every one of them.
+
+**The "67" figure itself is stale, not merely unresolved — a further Codex
+review round caught this note repeating it without re-measuring, and it is
+worth recording what re-measuring actually shows rather than asserting either
+"still 67" or a new total this pass didn't verify.** The original count came
+from classifying `service.py`'s whole import list at once, before the
+metadata split existed; the split changed the graph the count was taken
+against, so the number cannot simply carry over. Temporarily classifying just
+the eleven now-split parser modules (`elf_metadata.py`, `pe_metadata.py`,
+`macho_metadata.py`, `dwarf_metadata.py`, `dwarf_advanced.py`,
+`sycl_metadata.py`, `symvers_metadata.py`, `python_api.py`, `python_ext.py`,
+`numpy_capi.py`, `build_mode.py`) as `extract` and re-running
+`check_architecture.py` produces **7** findings today (verified against the
+tool's own output, line by line, after the "three sites" miscount below was
+caught), all shaped `frontends -> extract` — `cli_compare_release.py:1668`,
+`cli_datasources.py:36`, `cli_dump_helpers.py:610,1459,1468,1480` (four
+sites), and `cli_resolve.py:130` — importing a parser module directly rather
+than through a `workflows` re-export. None of the seven is a
+`service.py`-originated finding, since `service.py` is already
+`workflows`-classified and `workflows -> extract` is allowed — confirming
+this specific edge was never `service.py`'s own problem. That is a real,
+freshly-measured number for one slice of the original blocker, not a
+restatement of the old one, and it is not the full picture: re-running the
+same experiment across every module in the list above (compare/policy/model
+targets included, not just the eleven `extract` candidates) to get a true
+current total is real, not-yet-done work — this note does not claim to have
+done it, only to have stopped asserting a number it hadn't re-checked.
+
+What *is* true, and worth keeping separate from what isn't: `service.py`'s
+destination package exists and has real tenants
+(`service_dump_pipeline.py`, `service_compare_pipeline.py`,
+`service_scan.py`), so the original "the destination does not exist" framing
+is stale. What remains is two ordinary kinds of work, not one already done —
+classifying the two dozen modules above (a Codex review round on this
+document caught an earlier revision offering "or deliberately leave
+unclassified, per the `policy_file.py` precedent" as an alternative here —
+that precedent doesn't transfer: `policy_file.py` can stay unclassified only
+because it isn't itself `migrated_source`, i.e. it never physically moves;
+once `service.py` is physically relocated into `workflows/`, it becomes
+`migrated_source`, and any surviving unclassified import — including a
+type-only one — trips `unclassified-import` regardless of intent, the same
+result the `ReclassifyRule` probe below already confirmed for a different
+module. Every one of the two dozen has to be classified, exposed through an
+allowed canonical surface, or removed from the migrated code; there is no
+"leave it unclassified" option once the move itself happens), *and* thinning
+`service.py`'s own ~1763 lines of `resolve_input`/`_dump_elf`/`_dump_pe`/
+`_dump_macho`/`compare_snapshots` into the owners that destination already
+has, verified against the same test suite, the way `cli.py` moved into
+`frontends/cli/commands/*.py`. Neither is done; this note does not claim
+either is.
+
+The second inversion was investigated on its own terms, since it looked like
+the smaller of the two and a plausible next physical move. **That, too, needed
+a second pass**: an earlier revision of this note said `cli_params.py` "now
+has zero first-party imports of its own," checked only against its
+module-level `import`/`from` statements. `check_architecture.py`'s own import
+scan is a full AST walk — it also counts a `TYPE_CHECKING` block and a
+function-local import, which is exactly where the module-level check missed
+two more edges: `DepthParam.convert()`/`get_metavar()` both import
+`buildsource.scan_levels` (also unclassified) function-locally, independent
+of the `policy_file`/`suppression`/`policies` edges below. **The four targets
+are not one shape of problem, and a Codex review round caught this note
+lumping them together as if they were.** `buildsource.scan_levels`'s only
+imports are stdlib (`__future__`, `enum` — checked directly), so it is a
+clean, trivially classifiable leaf; if it lands `model` (the plausible
+outcome named a few paragraphs below), `frontends -> model` is an *allowed*
+edge, not a forbidden one — its two import sites are not evidence of the
+same `frontends -> policy` problem the other three targets are. Only
+`policy_file`/`suppression`/`policies` actually reach that shape, mirroring
+`checker_types.py`'s `model -> policy` edge one layer over — **at six import
+sites, not three, an eighth Codex review round caught after directly
+re-running the AST walk rather than trusting the earlier hand count**:
+`policy_file` at lines 26 (`TYPE_CHECKING`), 55, and 382; `suppression` at
+27 (`TYPE_CHECKING`) and 383; `policies` at 54. Eight total across the four
+targets once `buildsource.scan_levels`'s two are added back in, not five —
+the same undercount this note's own earlier "zero first-party imports"
+mistake already illustrates once, now repeated in the correction meant to
+fix it.
+Reading `PolicyFile` itself before proposing a fix mattered: it is not a
+`*_metadata.py`-shaped dataclass-plus-parser. `load()`, `evidence_verdict()`,
+`compute_verdict()`, `describe()`, and `validate_overrides()` are instance
+methods on the same class `checker_types.py` needs to reference — `compute_
+verdict()` in particular *is* policy's resolution algorithm, not a fact about
+a policy document.
+
+**A Codex review round pushed back on the next step, correctly: "breaking API"
+is not the obstacle it was made out to be.** A facade avoids exactly the break
+described — keep `PolicyFile` in `policy_file.py` with every existing method
+intact (as thin wrappers over policy-owned free functions, or simply
+unmoved), and give `model` a separate, data-only base (`PolicyFileFacts` or
+similar) that `PolicyFile` subclasses and `checker_types.py` types its field
+against. `pf.compute_verdict(changes)` keeps working untouched; nothing
+public breaks. That part of the original reasoning was overstated and is
+corrected here.
+
+**It does not, however, resolve the classification question — it relocates
+it, and checking where it lands is what actually settles this.** A model-owned
+`PolicyFileFacts` still needs `PolicyFile`'s *fields*, not just freedom from
+its methods: `overrides: dict[ChangeKind, Verdict]` and
+`reclassify: list[ReclassifyRule]` are exactly the state a facade split would
+carry into `model`. `ReclassifyRule` lives in `reclassify.py` — already
+**deliberately unclassified** two paragraphs above in this same document, for
+this identical reason. Of the other two, only one is still a problem: `Verdict`
+is not defined in `checker_policy.py` at all — a Codex review round on this
+PR caught that too, and it checks out (`checker_policy.py:45` re-exports it
+from `change_registry`, which resolves it from `abicheck/model/change_catalog/
+registry.py`, already physically `model`-owned since Phase 5's registry-core
+move) — so a `model`-owned facade can reference `Verdict` directly, no split
+needed. `ChangeKind` is the real remaining case: it *is* defined in
+`checker_policy.py` (1559 lines) — confirmed by reading it, not assumed —
+alongside real policy algorithms of the same module (`compute_verdict`,
+`policy_kind_sets`, `effective_category`, `evidence_status_for_change`), so
+threading it into a `model`-owned facade still needs `checker_policy.py`'s own
+model-vs-policy split, narrower than this paragraph first claimed but not
+resolved by it. `PolicyFile` overall is not made safe to facade-split by this
+correction alone — `ChangeKind` and `ReclassifyRule` both still block it.
+
+**A fourth Codex review round found the facade proposal has a sharper problem
+than either of those: `checker_types.py` narrowing `DiffResult.policy_file`
+to the data-only base is not merely unresolved, it is unworkable as
+described, checked against real call sites rather than assumed.**
+`bundle_models.py:500` calls `diff.policy_file.compute_verdict([change])`
+straight through the `DiffResult` field; `bundle_models.py:661` does the
+identical thing, but through `BundleDiffResult`'s own `policy_file` field, not
+`DiffResult`'s (a Codex review round on this same document caught this
+misattribution — `BundleFinding` has no `policy_file` field at all).
+`BundleDiffResult.policy_file` carries its own, separate concrete
+`PolicyFile | None` annotation (`bundle_models.py`, on the class starting at
+line 614) — a second, independent site typed against the full `PolicyFile`,
+not a second reference to the same `DiffResult` field — so narrowing
+`DiffResult.policy_file` alone would still leave `BundleDiffResult.policy_file`
+importing `PolicyFile` directly, unaffected either way by whatever facade
+`DiffResult` adopts. The `bundle_models.py:500` call above is the one that
+goes through `DiffResult` proper; the `:661` call is cited here only to show
+the same "full `PolicyFile`, methods called on it" shape recurring on an
+unrelated type, not as a second `DiffResult` consumer. Dozens of other
+signatures across `service.py`, `scan_engine.py`, `contract_pipeline.py`,
+`buildsource/evidence_policy.py`, `buildsource/evidence_report.py`, and more
+type a `policy_file` parameter as the full, method-bearing `PolicyFile | None`
+and call methods on it too. Narrowing `checker_types.py`'s declared field
+type to a data-only `PolicyFileFacts` breaks every one of those call sites
+under the enforced mypy gate (the method doesn't exist on the declared type),
+even though the runtime object is unchanged. Keeping the field's declared
+type as the full `PolicyFile` avoids that break but means `checker_types.py`
+still imports the policy-owned class for the annotation — reproducing the
+exact `model -> policy` edge the facade exists to remove. So the facade's
+"nothing public breaks" claim holds for `PolicyFile`'s own API, but not for
+this specific field-narrowing plan: there is no *subclass-shaped* version of
+it that both keeps every existing consumer typed correctly and gets
+`checker_types.py` out of `policy`.
+
+**A fifth Codex review round proposed a different mechanism that genuinely
+closes part of that — a `Protocol`, not a subclass, and it is credited
+here rather than argued away.** Python's structural typing (PEP 544) means a
+`model`-owned `PolicyFileProtocol` is satisfied by the existing `PolicyFile`
+without `PolicyFile` importing or inheriting from it at all — so
+`checker_types.py`'s field, typed against the protocol instead of the
+concrete class, resolves `bundle_models.py:500`'s
+`diff.policy_file.compute_verdict(...)` correctly under mypy — **but only if
+the collection-valued members are declared as read-only `@property` methods,
+not plain attributes.** A seventh Codex review round caught, and this pass
+reproduced directly with `mypy --strict` before trusting it: a plain
+`overrides: Mapping[ChangeKind, Verdict]` attribute on the protocol rejects
+`PolicyFile`'s `overrides: dict[ChangeKind, Verdict]` field outright
+(`expected "Mapping[...]", got "dict[...]"`) — mypy's protocol attributes
+are invariant unless declared read-only, since a writable one could be
+assigned through either type. The read-only-`@property` form checks clean
+against the identical `PolicyFile` unmodified. The "no version... keeps
+every consumer typed correctly" framing just above was
+about a subclass/narrowing split specifically; a protocol, correctly
+declared, really does dissolve that half — *provided it declares the whole
+surface real callers
+use, not a sketch of it.* **A sixth Codex review round caught that this
+paragraph's own first draft didn't**: it named only `overrides`, `reclassify`,
+and `compute_verdict()`, but a re-scan of every `.policy_file.<member>`
+access — i.e. every place *something else's* `policy_file` field is read,
+the shape `DiffResult`/`BundleDiffResult` consumers actually use (the same
+AST-adjacent method already used elsewhere in this note, not a repeat of the
+original three-member guess) — found two more real, direct accesses a
+protocol would also have to declare —
+`reporter.py:1056-1065`'s `result.policy_file.source_path` and
+`compatibility_evaluation_frontend.py:1253,1256`'s
+`explicit.policy_file.base_policy` — for five total:
+`base_policy`, `overrides`, `reclassify`, `source_path`, `compute_verdict()`.
+**This is the exposed-field surface (what a `DiffResult`/`BundleDiffResult`
+consumer sees), not "every access in the codebase" — a nineteenth Codex
+review round caught that overclaim**: `checker.py`, which itself *builds* a
+`DiffResult` and receives `policy_file: PolicyFile | None` as its own
+plain function parameter (not read back off a `DiffResult`), separately
+accesses `policy_file.frozen_namespaces` (`checker.py:479`) and
+`policy_file.internal_namespaces` (`checker.py:611-613`) — two more real
+members, on a completely different code path this five-member scan doesn't
+cover. Not a gap in the five-member list *for its actual scope*
+(`checker_types.py`'s `DiffResult.policy_file` field and its downstream
+readers, the concrete problem this whole investigation exists to answer):
+`checker.py` imports `PolicyFile` directly today with no violation, because
+`policy_file.py` stays unclassified and `compare -> unclassified` is fine.
+But it is a real limit on the claim's reach — if `policy_file.py` itself is
+ever classified `policy` (a step this document does not decide), `compare
+-> policy` becomes forbidden and `checker.py`'s own parameters would need
+the identical protocol treatment, widened to cover `frozen_namespaces`/
+`internal_namespaces` and whatever else a full audit of `checker.py`'s
+(and every other `compare`-side consumer's) own `policy_file` accesses
+turns up — unaudited here, since it depends on a decision this document
+explicitly leaves open.
+
+Declaring the full five doesn't change the conclusion, only completes the
+premise it rests on: the protocol still has to *type* `overrides`/
+`reclassify` accurately to be worth using — `Mapping[ChangeKind, Verdict]`
+and, an eleventh Codex review round caught, **not** `Sequence[ReclassifyRule]`
+as an earlier revision had it: `reporter.py:1061`, `reporter_markdown.py:1818`,
+and `sarif.py:733` all pass `result.policy_file.reclassify` straight into
+`active_reclassify_rules(rules: list[ReclassifyRule], ...)`, and a `Sequence`
+doesn't satisfy a parameter typed `list` — reproduced directly with
+`mypy --strict` (`Argument 1 ... has incompatible type "Sequence[str]";
+expected "list[str]"`) before trusting it. The read-only property has to
+return `list[ReclassifyRule]` specifically. A protocol module
+placed where it would belong, physically under `abicheck/model/` (a real,
+already-migrated package, not a `legacy_paths` entry — unlike
+`checker_types.py`, which currently escapes this check only because it
+hasn't moved), referencing `ChangeKind` from the still-unclassified
+`checker_policy.py` trips `unclassified-import` immediately: the same
+`migrated_source` gate this note already measured for `service.py`'s parser
+imports applies here too, `TYPE_CHECKING`-only reference included.
+**`ReclassifyRule` has the identical problem independently, a twelfth
+Codex review round caught this paragraph omitting** — `reclassify.py` is the
+module this note already recorded as *deliberately* unclassified, not
+merely not-yet-classified, so `checker_policy.py`'s own split resolves
+`ChangeKind` alone and does nothing for `ReclassifyRule`. **A fourteenth
+Codex review round caught the fix this paragraph first proposed for that —
+"or accept the same kind of leaf-module treatment `policy_file.py` gets" —
+was itself wrong, and this pass reproduced why directly** rather than take
+the correction on faith: a probe file placed under `abicheck/model/`
+(`migrated_source=True`, matching where the protocol would actually live)
+with a `TYPE_CHECKING`-only import of `ReclassifyRule` from `reclassify.py`
+trips `unclassified-import` immediately —
+`python scripts/check_architecture.py` on it: `migrated layer 'model'
+imports unclassified first-party module 'abicheck.reclassify'`. Leaving
+`reclassify.py` unclassified only works for `policy_file.py`'s own case
+*because* `policy_file.py` isn't itself `migrated_source` (it's a flat,
+unmoved file, so `dependency-direction` is the only check that applies to
+its own imports, not `unclassified-import`) — a genuinely different
+situation from a *new* protocol module deliberately placed inside the
+already-migrated `abicheck/model/` package. So the protocol needs
+`ReclassifyRule` actually classified — but **a fifteenth Codex review round
+found that "classify `reclassify.py`" is itself not a valid fix, checked
+against the module's own imports rather than assumed**: `reclassify.py`
+imports `checker_policy`'s real policy sets and constants
+(`API_BREAK_KINDS`, `BREAKING_KINDS`, `COMPATIBLE_KINDS`, `RISK_KINDS`) at
+its top, and two of its own functions — `effective_verdict_for_change`,
+`reclassify_rule_for_change` — are policy resolution logic in the same
+sense `compute_verdict` is, not facts about a rule. So the *whole module*
+has no single valid classification: `model` would misplace that policy
+logic and reproduce the exact `model -> policy` edge this ADR exists to
+remove (and would itself need `checker_policy.py`'s own split done first,
+for the same `ChangeKind`/policy-set imports), while `policy` or `compare`
+would leave `ReclassifyRule` behind a layer a `model`-owned protocol still
+can't import. This pass first proposed "extract `ReclassifyRule` — the
+dataclass alone, no methods of its own — into a model-owned leaf," on the
+premise that it is a plain data holder the way `*_metadata.py`'s facts
+classes are. **A sixteenth Codex review round found that premise wrong too,
+checked directly against the class body rather than assumed**:
+`ReclassifyRule` is not a plain dataclass. `__post_init__` constructs and
+stores a suppression selector (`self._selector = _suppression_cls()(...)`,
+`_suppression_cls()` a lazy import of `suppression.py`), and `matches()`,
+`is_expired()`, `describe()`, and `to_report_dict()` are real methods policy
+evaluation and reporting call. So `ReclassifyRule` is method-bearing with a
+runtime dependency on `suppression.py`'s own policy machinery in exactly the
+shape `PolicyFile` itself is — the same problem this whole investigation
+exists to answer for `PolicyFile`, recurring one leaf class down, not a
+smaller, separately-solvable case of it. Moving the intact class into
+`model` keeps a `model -> policy` (suppression) edge; splitting fields from
+methods changes the type `PolicyFile`'s own `reclassify` list actually holds
+and calls methods on, the identical field-narrowing problem already rejected
+above for `PolicyFile` proper.
+
+**A seventeenth Codex review round supplied the actual answer this
+investigation was missing, and verified it directly against a real `mypy
+--strict` run rather than asserting it — reproduced here the same way**:
+`ReclassifyRule` doesn't need to move or split *at all*, the same insight the
+fifth review round already supplied for `PolicyFile` itself, applied one
+level down. A second, model-owned structural protocol
+(`ReclassifyRuleProtocol`) lets `PolicyFileProtocol.reclassify` be typed
+`Sequence[ReclassifyRuleProtocol]` — `Sequence` is covariant, so the real
+`PolicyFile.reclassify: list[ReclassifyRule]` satisfies it structurally, with
+`ReclassifyRule` itself never imported by `model` and never moved out of
+`reclassify.py`. The one real code change this needs is widening
+`active_reclassify_rules()`'s and `first_matching_reclassify_verdict()`'s
+*parameter* types from the concrete `list[ReclassifyRule]` to
+`Sequence[ReclassifyRuleProtocol]`, so a caller holding the protocol-typed
+`DiffResult.policy_file.reclassify` can still pass it through — a twentieth
+Codex review round found the first version of this claim incomplete,
+reproduced directly: `active_reclassify_rules()`'s own list comprehension
+(`[r for r in rules if not r.is_expired(today)]`) infers
+`list[ReclassifyRuleProtocol]` once its parameter widens, which mypy
+correctly rejects against the *unchanged* `-> list[ReclassifyRule]` return
+annotation (`List comprehension has incompatible type`) — its **return**
+type needs the identical widening, to `list[ReclassifyRuleProtocol]`.
+`first_matching_reclassify_verdict()` doesn't share this shape (it returns
+a `Verdict | None`, not a list of rules) so only its parameter needs
+widening. Verified clean end to end (`DiffResult` → `PolicyFileProtocol` →
+`Sequence[ReclassifyRuleProtocol]` → `active_reclassify_rules`, with both
+the incomplete and the corrected signature run through `mypy --strict`
+against a minimal repro of that exact call chain, confirming the former
+fails and the latter passes).
+
+**An eighteenth Codex review round found the first repro's protocol itself
+incomplete, checked against `reclassify.py`'s real function bodies rather
+than the four method names alone**: `first_matching_reclassify_verdict()`
+(`reclassify.py:410`) returns `rule.to_verdict` — a data attribute, not one
+of the four methods above — so a `ReclassifyRuleProtocol` declaring only
+`matches()`/`is_expired()`/`describe()`/`to_report_dict()` fails that
+function specifically, with both `attr-defined` (the protocol has no
+`to_verdict`) and `no-any-return` (the resulting `Any` doesn't satisfy the
+declared `Verdict | None` return). Reproduced both errors directly, then
+confirmed a read-only `to_verdict: Verdict` property added to the protocol
+clears them. So the protocol needs five members —
+`matches()`/`is_expired()`/`describe()`/`to_report_dict()`/`to_verdict` —
+not four, and this is the complete list checked directly against every
+`reclassify.py` caller of a rule's own interface, not assumed complete a
+second time. So the third
+co-prerequisite collapses back to what the fourteenth round already scoped
+for `ChangeKind`: `ReclassifyRule` needs no split of its own, only a second
+model-owned protocol mirroring the first.
+
+**A twenty-first Codex review round found even that was one prerequisite
+too many, checked directly against `check_architecture.py`'s own gating
+logic rather than assumed**: this note previously also required
+"`checker_policy.py`'s split reaching `reclassify.py`'s own imports" — on
+the reasoning that once `ChangeKind` moves out of `checker_policy.py`,
+`reclassify.py`'s pre-existing imports of it would need to land somewhere
+`reclassify.py` is still allowed to import from. That reasoning assumed
+`reclassify.py`'s own imports are checked at all, which they aren't:
+`check_architecture.py`'s per-file loop computes `source_layer =
+_source_layer_for(path, ...)` and `continue`s immediately when it's
+`None` (`scripts/check_architecture.py:717-719`) — `reclassify.py` carries
+no `path`/`legacy_paths` entry in `modules.yaml` today (the whole reason it
+is "deliberately unclassified"), so `source_layer` is `None` for it and
+**none** of its own imports, from `checker_policy` or anywhere else, are
+ever checked — neither `unclassified-import` (which additionally requires
+`migrated_source`) nor `dependency-direction` (which requires a *classified*
+source). Neither `checker_policy.py`'s split nor anything else changes that,
+since `reclassify.py` staying unclassified is unaffected by what layer
+`checker_policy.py`'s own contents end up in. So the second protocol has
+exactly one real prerequisite, not two: `checker_policy.py`'s split, moving
+`ChangeKind` somewhere the *protocol module itself* (physically placed
+under the already-migrated `model/`, hence `migrated_source`) can import
+without tripping `unclassified-import` — `reclassify.py`'s own, separate,
+never-checked imports of `checker_policy` are not a blocker at all.
+Not satisfied by deferral — worth recording for whoever does that, but not
+a protocol in place of doing it, and `policy_file.py` staying unclassified
+for now is unchanged.
+
+**A twenty-second Codex review round found a real, independent gap in what
+the whole Protocol facade actually achieves — checked directly against
+`checker_types.py`'s own method bodies, not assumed from the field
+annotation alone.** Everything above narrows what the `policy_file`
+*field's declared type* can be — but `checker_types.py` (the `model`-owned
+module `DiffResult` lives in) doesn't only *store* a `PolicyFile`, it
+*executes* real policy resolution as its own methods:
+`DiffResult._effective_kind_sets()` calls `_policy_kind_sets` (imported at
+module level from `checker_policy`, `checker_types.py:28-34`) and
+`DiffResult._effective_verdict_for_change()` calls
+`reclassify.effective_verdict_for_change()` (a lazy import,
+`checker_types.py:709`) — both real algorithms, not data lookups, applying
+policy overrides and reclassify rules to compute a per-change verdict.
+Retyping the `policy_file` field against a protocol does nothing for
+either of these: they are independent `model -> policy`-shaped edges the
+field's own type was never going to touch, since they're module-level and
+method-body imports, not annotations. So even a fully-built,
+fully-verified Protocol pair does not make `checker_types.py` policy-free
+— it closes the one edge this whole investigation actually scoped
+(the `policy_file` field's declared type), while a second, real edge
+(verdict-resolution logic living inside a `model`-owned class's own
+methods) is untouched and unaudited here. Closing *that* is a materially
+different, larger change — moving `_effective_kind_sets`/
+`_effective_verdict_for_change`'s actual computation into `policy` and
+having `DiffResult` consume the result rather than compute it — not a
+follow-up to the field-typing work above, and not attempted in this
+investigation. Recorded as a known gap rather than folded into the
+"Decided" list below, since it changes what "decided" can honestly claim
+the Protocol facade accomplishes: it resolves the field-typing question
+this ADR's central design question was actually about, not the broader
+claim that `checker_types.py` as a whole is (or would become) policy-free.
+
+Reclassifying
+`policy_file.py`/`suppression.py` as `compare` instead was rejected too:
+`compute_verdict` is policy logic by any reading, and mislabeling it only
+relocates the ambiguity this ADR exists to remove.
+
+`policy_file.py` is left **deliberately unclassified**, the same treatment
+`reclassify.py` and `contract_gating.py` already have above for the identical
+reason: it is a leaf type `compare`'s model layer and `policy`'s algorithms
+both legitimately depend on, and which layer finally owns it is
+`checker_policy.py`'s own model-vs-policy split to answer, not this
+investigation's. `suppression.py`/`policies` (the package) are left
+unclassified alongside it for now, for the narrower reason that nothing has
+yet checked whether either has the same shape of problem — that check is
+still owed, not done by implication. `cli_params.py`'s physical move stays
+blocked on that plus its own `buildsource.scan_levels` edge — a different
+kind of open item, worth stating precisely rather than leaving both halves
+as "not yet checked" (a CodeRabbit review round on this PR caught this
+paragraph still saying that after a later paragraph had already verified
+the imports): `buildsource.scan_levels`'s *imports* are checked and
+confirmed stdlib-only, so it is a plausible `model` leaf on those grounds —
+exactly the kind of small, dependency-free vocabulary module
+`evidence_depth.py` was classified as in Phase 3 — but its *classification*
+is not yet decided; nothing has assigned it `model` (or anywhere else) in
+`architecture/modules.yaml`, and that decision, not the import check, is
+what `cli_params.py`'s move still waits on.
+
+So Phase 4's `service.py` half is **blocked on real, unfinished work at both
+levels this note originally distinguished**: the two dozen imports named
+above still need classifying, exposing through an allowed canonical surface,
+or removing from the migrated code — not deferring, per the correction two
+paragraphs above (a Codex review round caught this summary sentence still
+saying "or deliberately deferring" after that correction, a second instance
+of the exact wording it had already fixed once) — before a physical move is
+safe, and the ~1763 lines of implementation still need thinning into the
+destination that work would unblock. Neither is closed by this
+investigation. The `cli.py` half is complete.
+
+Nor is the `PolicyFile` design question itself closed, and two Codex review
+rounds on this same document each caught a different overstatement in this
+paragraph — worth being precise about what "decided" actually covers here,
+and, per the second round, precise about the `Protocol` option specifically
+so it doesn't read as rejected when it isn't. **Decided and closed, not to
+be relitigated**: two of the investigated options are rejected outright —
+`policy_file.py` is not reclassified as `compare` (mislabels real policy
+logic), and it is not split into a data-only base plus a facade subclass
+(no version of that field-narrowing avoids breaking either `checker_types.py`
+or its own consumers, per the fourth Codex round above). **Decided, but not
+yet actionable**: the `Protocol`-based facade is the *selected* mechanism for
+whenever `policy_file.py`'s ownership is finally resolved — see the
+paragraph above ("the protocol is the better mechanism to use *once*..."),
+not a third rejected option; it is blocked today only by one
+co-prerequisite — `checker_policy.py`'s split (for `ChangeKind`; its own
+imports never need to reach `reclassify.py`, which stays exempt from every
+architecture check by remaining unclassified regardless of what layer
+`checker_policy.py` lands in, per `check_architecture.py`'s own gating
+logic) — plus a second, mirroring protocol (`ReclassifyRuleProtocol`) for
+`ReclassifyRule`'s own consumed methods, verified buildable (see above)
+rather than needing its own unsolved design. Not by any objection to the
+Protocol mechanism itself. **Not decided**:
+`policy_file.py`'s final layer ownership, and therefore *when* that
+co-prerequisite gets satisfied and the Protocol pair actually lands.
+"Deliberately unclassified" is this ADR's recorded
+*treatment* of the module for now, not its destination — the module stays
+outside `architecture/modules.yaml`'s classified set, `check_architecture.py`
+enforces nothing about which layer may import it, and the actual owner is
+named here as a known open question (`checker_policy.py`'s own
+model-vs-policy split) rather than resolved. Since this ADR is the
+authoritative ownership contract, a reader relying on it for `policy_file.py`
+should read this as: no physical move is safe today, no `may_import` edge
+exists for it yet, and the co-prerequisite above is what unblocks
+deciding its owner, not a settled classification to build on.
+
+**A tenth Codex review round named the risk every number in this whole
+investigation shares, worth stating once rather than re-litigating per
+figure: nothing here is gated.** The module lists, line counts, and site
+inventories above are re-verified against the tree at the time each
+paragraph was written — several rounds of this same PR corrected exactly
+this note for drifting from a re-check it hadn't actually run — but no CI
+job or test ties this prose to `scripts/check_architecture.py`'s own output,
+so the same drift can happen again silently the next time a listed import
+moves. Building that link (having this section generated from, or a test
+asserting parity with, the checker's own scan) is a real, if small, tooling
+project of its own — genuinely out of scope for a documentation
+investigation, not a reason to defer the investigation's findings. Treat
+every count and line number above as a snapshot from this PR's own commits,
+to be re-measured (`python scripts/check_architecture.py` against a
+temporary classification, the same method used throughout) rather than
+trusted verbatim by whoever picks this up next.
 
 1. Move command input translation into `frontends/cli/commands` and reusable
    Click-only option declaration into `frontends/cli/options`.
