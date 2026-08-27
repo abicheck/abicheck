@@ -40,7 +40,7 @@ import string
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import Enum
-from types import MappingProxyType
+from typing import Any
 
 
 class Verdict(str, Enum):
@@ -85,6 +85,60 @@ _VERDICT_BLIND_POLICIES: frozenset[str] = frozenset({"sdk_vendor", "plugin_abi"}
 TEMPLATE_VOCAB = frozenset({"symbol", "name", "old", "new", "detail"})
 
 
+class _ImmutableDict(dict[str, Verdict]):
+    """A genuine ``dict`` subclass whose mutators raise ``TypeError``.
+
+    ``ChangeKindMeta.policy_overrides`` needs to be immutable after
+    construction (see ``__post_init__`` below) *and* round-trip cleanly
+    through ``dataclasses.asdict()``/``copy.deepcopy()``/``pickle`` the same
+    way an ordinary ``dict`` field already does — two properties that turn
+    out to be in tension. ``types.MappingProxyType`` gives the first for
+    free but fails the second outright: it cannot be pickled at all (Codex
+    review, PR #882, fresh evidence — ``TypeError: cannot pickle
+    'mappingproxy' object`` from ``dataclasses.asdict()``, ``copy.deepcopy()``,
+    and ``pickle.dumps()`` alike, since ``asdict()``'s recursive dict
+    handling only special-cases a literal ``dict`` — anything else, mapping
+    or not, falls back to a plain ``copy.deepcopy()`` of the field value,
+    which mappingproxy has no support for).
+
+    A plain ``dict`` subclass overriding only the mutating methods looks
+    like the fix, but the *default* pickle/deepcopy reconstruction protocol
+    for a dict subclass reconstructs it item-by-item (``obj[k] = v`` for
+    each pair, via ``copy._reconstruct``'s ``dictiter`` handling) — which
+    hits the very mutators being overridden and raises during
+    reconstruction, not construction. ``__reduce__`` below sidesteps that
+    by telling pickle/copy to reconstruct via a single one-shot
+    ``_ImmutableDict(plain_dict)`` call instead of the item-by-item
+    protocol — safe, since ``dict.__init__``/``dict.__new__`` populate the
+    underlying hash table directly in C without going through the
+    overridden Python-level ``__setitem__``.
+    """
+
+    def __setitem__(self, key: str, value: Verdict) -> None:
+        raise TypeError("policy_overrides is immutable after construction")
+
+    def __delitem__(self, key: str) -> None:
+        raise TypeError("policy_overrides is immutable after construction")
+
+    def update(self, *args: Any, **kwargs: Any) -> None:
+        raise TypeError("policy_overrides is immutable after construction")
+
+    def clear(self) -> None:
+        raise TypeError("policy_overrides is immutable after construction")
+
+    def pop(self, *args: Any, **kwargs: Any) -> Any:
+        raise TypeError("policy_overrides is immutable after construction")
+
+    def popitem(self) -> tuple[str, Verdict]:
+        raise TypeError("policy_overrides is immutable after construction")
+
+    def setdefault(self, *args: Any, **kwargs: Any) -> Any:
+        raise TypeError("policy_overrides is immutable after construction")
+
+    def __reduce__(self) -> tuple[Any, ...]:
+        return (self.__class__, (dict(self),))
+
+
 @dataclass(frozen=True)
 class ChangeKindMeta:
     """All metadata for a single ChangeKind, declared in one place."""
@@ -115,9 +169,11 @@ class ChangeKindMeta:
         # defaults`` already ran on construction, without re-running them,
         # and can make ``ChangeKindRegistry.policy_overrides_for()`` disagree
         # with sets already derived at import time (Codex review, PR #882).
-        # Defensively copy into an immutable view so neither is possible.
+        # Defensively copy into an immutable dict subclass so neither is
+        # possible, while still round-tripping through asdict()/deepcopy()/
+        # pickle the way an ordinary dict field does (see _ImmutableDict).
         object.__setattr__(
-            self, "policy_overrides", MappingProxyType(dict(self.policy_overrides))
+            self, "policy_overrides", _ImmutableDict(self.policy_overrides)
         )
 
 

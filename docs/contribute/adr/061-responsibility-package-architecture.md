@@ -1274,6 +1274,37 @@ once; the field's annotated type widened from `dict[str, Verdict]` to
 `Mapping[str, Verdict]` to reflect what callers actually receive. Three
 new test cases cover both fixes.
 
+A seventh Codex review round on that commit found the `MappingProxyType`
+freeze itself broke a different, real property: `dataclasses.asdict()`,
+`copy.deepcopy()`, and `pickle.dumps()` all raised `TypeError: cannot
+pickle 'mappingproxy' object` on a `ChangeKindMeta` carrying a non-empty
+`policy_overrides` — `asdict()`'s recursive dict handling only
+special-cases a literal `dict`, so anything else (mapping or not) falls
+back to a plain `copy.deepcopy()` of the field value, which
+`MappingProxyType` has no support for at all; nothing in the current
+codebase happens to call any of the three on a `ChangeKindMeta` today
+(verified by search), but the type is public API this codebase's own
+convention treats as a coordinated-change surface, so silently breaking
+standard dataclass serialization for it was a real regression to fix, not
+a theoretical one to note and move on from. A first attempt — a plain
+`dict` subclass overriding only the mutating methods — traded one failure
+for another: the *default* pickle/deepcopy reconstruction protocol for a
+`dict` subclass rebuilds it item-by-item (`obj[k] = v` for each pair, via
+`copy._reconstruct`'s `dictiter` handling), which hits the very mutators
+being overridden and raises *during* reconstruction instead of never
+reaching it. Fixed by giving `_ImmutableDict` (a genuine `dict` subclass;
+`MappingProxyType` is gone entirely now) a custom `__reduce__` that tells
+pickle/copy to reconstruct via one single-shot `_ImmutableDict(plain_dict)`
+call instead of the item-by-item protocol — safe, since `dict.__init__`/
+`dict.__new__` populate the underlying hash table directly in C without
+going through the overridden Python-level `__setitem__`. Verified this
+closes all three failure modes while keeping every property the sixth
+round's fix established (mutation blocked, external-dict-mutation doesn't
+leak, `isinstance(..., dict)` still holds for JSON serialization) — a new
+test exercises `asdict()`/`deepcopy()`/`pickle` round-trips together with
+re-checking immutability on both reconstructed copies, confirmed to fail
+against the `MappingProxyType` version.
+
 The fourth, "complete metadata", is not enforced, and is a *content* gap
 rather than a missing check: `ChangeKindMeta.impact`/`.description_template`
 are both declared optional, and today 48 of 397 real entries have no

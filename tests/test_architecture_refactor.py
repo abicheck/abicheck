@@ -264,6 +264,45 @@ class TestChangeKindRegistry:
         source["plugin_abi"] = Verdict.BREAKING
         assert entry.policy_overrides["plugin_abi"] == Verdict.COMPATIBLE
 
+    def test_policy_overrides_immutability_survives_serialization(self):
+        """The immutable policy_overrides still round-trips like an ordinary dict.
+
+        ``types.MappingProxyType`` gives immutability for free but cannot be
+        pickled at all — ``dataclasses.asdict()``, ``copy.deepcopy()``, and
+        ``pickle.dumps()`` all raised ``TypeError: cannot pickle 'mappingproxy'
+        object`` (Codex review, PR #882, fresh evidence). The fix (a genuine
+        ``dict`` subclass with a custom ``__reduce__``) must support all
+        three the same way an ordinary ``dict`` field would.
+        """
+        import copy
+        import dataclasses
+        import pickle
+
+        entry = ChangeKindMeta(
+            "test_kind", Verdict.BREAKING,
+            policy_overrides={"plugin_abi": Verdict.COMPATIBLE},
+        )
+
+        as_dict = dataclasses.asdict(entry)
+        assert as_dict["policy_overrides"] == {"plugin_abi": Verdict.COMPATIBLE}
+
+        deep = copy.deepcopy(entry)
+        assert deep.policy_overrides == {"plugin_abi": Verdict.COMPATIBLE}
+        assert deep == entry
+
+        rehydrated = pickle.loads(pickle.dumps(entry))
+        assert rehydrated.policy_overrides == {"plugin_abi": Verdict.COMPATIBLE}
+        assert rehydrated == entry
+
+        # The reconstructed copies are independently immutable too, not just
+        # sharing the original's protection.
+        import pytest
+
+        with pytest.raises(TypeError):
+            deep.policy_overrides["plugin_abi"] = Verdict.BREAKING
+        with pytest.raises(TypeError):
+            rehydrated.policy_overrides["plugin_abi"] = Verdict.BREAKING
+
     def test_description_template_with_unknown_placeholder_raises(self):
         """A description_template referencing an out-of-vocabulary field is rejected.
 
