@@ -1758,8 +1758,7 @@ def compare_release_cmd(
             )
 
             bundle_result: BundleDiffResult | None = None
-            if not no_bundle_analysis:
-                # G38 Phase 16: see _resolve_bundle_policy_file's docstring.
+            if not no_bundle_analysis:  # G38 Phase 16 -- see _resolve_bundle_policy_file
                 bundle_result, worst_verdict = _collect_bundle_result(
                     library_results,
                     old_map,
@@ -1769,9 +1768,7 @@ def compare_release_cmd(
                     bundle_system_providers=bundle_system_providers,
                     bundle_cohorts=bundle_cohorts,
                     policy=policy,
-                    policy_file=_resolve_bundle_policy_file(
-                        suppress, policy, policy_file_path, pack_application
-                    ),
+                    policy_file=_resolve_bundle_policy_file(suppress, policy, policy_file_path, pack_application),
                 )
 
             # Strip _diff_result from entries and bump verdict for removed libraries.
