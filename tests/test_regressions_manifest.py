@@ -35,15 +35,56 @@ from tests.regressions.manifest import BUG_CLASSES, BugClass, all_ids, get
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
-def _is_pytest_mark_attr(node: ast.expr, marker_name: str) -> bool:
-    """Is *node* the exact attribute chain `pytest.mark.<marker_name>`?"""
-    return (
+def _pytest_and_mark_aliases(tree: ast.AST) -> tuple[set[str], set[str]]:
+    """Names this file's own imports bind to the `pytest` module itself
+    (`import pytest`, `import pytest as pt`) and to `pytest.mark` directly
+    (`from pytest import mark`, `from pytest import mark as m`) — so
+    `@pt.mark.xfail(...)` and `@m.xfail(...)` are recognized the same way
+    `@pytest.mark.xfail(...)` already is.
+
+    An exact `pytest.mark.*` attribute chain is not the only legal spelling
+    (Codex review, PR #885, seventh round): a canary using either import
+    form was invisible to the previous exact-name check, so a non-strict
+    `@mark.xfail(...)`/`@pt.mark.xfail(...)` was silently accepted.
+    `"pytest"` is always included as a fallback even with no `import
+    pytest` found, matching every pre-existing test's assumption and
+    costing nothing — a real canary can't reference `pytest.mark.xfail`
+    without that name resolving somehow.
+    """
+    pytest_names = {"pytest"}
+    mark_names: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name == "pytest":
+                    pytest_names.add(alias.asname or alias.name)
+        elif isinstance(node, ast.ImportFrom) and node.module == "pytest":
+            for alias in node.names:
+                if alias.name == "mark":
+                    mark_names.add(alias.asname or alias.name)
+    return pytest_names, mark_names
+
+
+def _is_pytest_mark_attr(
+    node: ast.expr, marker_name: str, pytest_names: set[str], mark_names: set[str]
+) -> bool:
+    """Is *node* `<pytest_alias>.mark.<marker_name>` or
+    `<mark_alias>.<marker_name>`, for any alias this file's own imports
+    actually bind (`_pytest_and_mark_aliases`, above)?"""
+    if (
         isinstance(node, ast.Attribute)
         and node.attr == marker_name
         and isinstance(node.value, ast.Attribute)
         and node.value.attr == "mark"
         and isinstance(node.value.value, ast.Name)
-        and node.value.value.id == "pytest"
+        and node.value.value.id in pytest_names
+    ):
+        return True
+    return (
+        isinstance(node, ast.Attribute)
+        and node.attr == marker_name
+        and isinstance(node.value, ast.Name)
+        and node.value.id in mark_names
     )
 
 
@@ -98,10 +139,11 @@ def _marker_decorator_calls(tree: ast.AST, marker_name: str) -> list[ast.Call | 
     the earlier text-based version, which needed an explicit next-character
     guard for exactly this.
     """
+    pytest_names, mark_names = _pytest_and_mark_aliases(tree)
     results: list[ast.Call | None] = []
     for expr in _iter_marker_expressions(tree):
         target = expr.func if isinstance(expr, ast.Call) else expr
-        if _is_pytest_mark_attr(target, marker_name):
+        if _is_pytest_mark_attr(target, marker_name, pytest_names, mark_names):
             results.append(expr if isinstance(expr, ast.Call) else None)
     return results
 
@@ -113,23 +155,28 @@ def _is_literal_bool(node: ast.expr, value: bool) -> bool:
 def _xfail_is_strict(call: ast.Call) -> bool:
     """Does *call* (a `pytest.mark.xfail(...)` decorator) carry
     `strict=True` as a literal boolean — not a string, a variable, or a
-    conditional expression that only sometimes evaluates to `True` — and
-    is it not configured with `run=False`?
+    conditional expression that only sometimes evaluates to `True` — and,
+    if `run` is given at all, is *it* also a literal `True`?
 
-    `run=False` tells pytest to never execute the test body at all and
-    report XFAIL unconditionally, regardless of `strict` — a canary using
-    it can never XPASS even after the tracked residual closes, the same
-    "never actually runs" failure `@pytest.mark.skip` already has, just
-    reached through a different keyword (Codex review, PR #885, sixth
-    round, fresh evidence — verified against pytest's own documented
-    `run` semantics)."""
+    `run=False` (or any other falsy `run` value — `run=0`, `run=SOME_FLAG`)
+    tells pytest to never execute the test body at all and report XFAIL
+    unconditionally, regardless of `strict` — a canary using it can never
+    XPASS even after the tracked residual closes, the same "never actually
+    runs" failure `@pytest.mark.skip` already has, just reached through a
+    different keyword. Symmetric with the `strict` check on purpose
+    (Codex review, PR #885, sixth and eighth rounds — the first fix only
+    rejected a literal `run=False`, which a non-literal falsy value like
+    `run=0`/`run=SOME_FLAG` still slipped past; requiring `run`, when
+    present, to itself be a literal `True` closes that the same way
+    `strict` already is closed)."""
     strict_ok = False
+    run_ok = True
     for kw in call.keywords:
         if kw.arg == "strict":
             strict_ok = _is_literal_bool(kw.value, True)
-        elif kw.arg == "run" and _is_literal_bool(kw.value, False):
-            return False
-    return strict_ok
+        elif kw.arg == "run":
+            run_ok = _is_literal_bool(kw.value, True)
+    return strict_ok and run_ok
 
 
 def _canary_strictness_violation(source: str) -> str | None:
@@ -518,6 +565,63 @@ class TestCanaryStrictnessViolation:
 
     def test_strict_xfail_with_run_true_is_still_accepted(self) -> None:
         source = "@pytest.mark.xfail(strict=True, run=True)\ndef test_x(): ...\n"
+        assert _canary_strictness_violation(source) is None
+
+    @pytest.mark.parametrize("run_value", ["0", "SOME_FLAG", "1 == 2", "None"])
+    def test_strict_xfail_with_a_non_literal_true_run_is_rejected(
+        self, run_value: str
+    ) -> None:
+        """`run=0`/`run=SOME_FLAG` disable execution just as effectively as
+        `run=False` — only a literal `True` (or omitting `run` entirely) is
+        safe, matching `strict`'s own literal-True requirement (Codex
+        review, PR #885, eighth round)."""
+        source = (
+            f"@pytest.mark.xfail(strict=True, run={run_value})\ndef test_x(): ...\n"
+        )
+        assert _canary_strictness_violation(source) is not None
+
+    def test_a_strict_xfail_via_from_pytest_import_mark_is_inspected(self) -> None:
+        """`from pytest import mark` then `@mark.xfail(...)` is a real,
+        legal spelling this file's exact `pytest.mark.*` attribute-chain
+        check previously missed entirely — accepting a non-strict marker
+        it should have rejected (Codex review, PR #885, seventh round)."""
+        source = (
+            "from pytest import mark\n"
+            "\n"
+            "@mark.xfail(reason='tracked gap')\n"
+            "def test_x(): ...\n"
+        )
+        assert _canary_strictness_violation(source) is not None
+
+    def test_a_strict_xfail_via_aliased_mark_import_is_accepted_when_strict(
+        self,
+    ) -> None:
+        source = (
+            "from pytest import mark as m\n"
+            "\n"
+            "@m.xfail(reason='tracked gap', strict=True)\n"
+            "def test_x(): ...\n"
+        )
+        assert _canary_strictness_violation(source) is None
+
+    def test_a_non_strict_xfail_via_aliased_pytest_import_is_inspected(self) -> None:
+        """`import pytest as pt` then `@pt.mark.xfail(...)` is the other
+        real aliasing spelling pytest supports."""
+        source = (
+            "import pytest as pt\n"
+            "\n"
+            "@pt.mark.xfail(reason='tracked gap')\n"
+            "def test_x(): ...\n"
+        )
+        assert _canary_strictness_violation(source) is not None
+
+    def test_a_strict_xfail_via_aliased_pytest_import_is_accepted(self) -> None:
+        source = (
+            "import pytest as pt\n"
+            "\n"
+            "@pt.mark.xfail(reason='tracked gap', strict=True)\n"
+            "def test_x(): ...\n"
+        )
         assert _canary_strictness_violation(source) is None
 
     def test_unparseable_source_is_rejected(self) -> None:
