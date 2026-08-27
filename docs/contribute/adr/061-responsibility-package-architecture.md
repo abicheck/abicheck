@@ -1337,18 +1337,34 @@ smaller, separately-solvable case of it. Moving the intact class into
 `model` keeps a `model -> policy` (suppression) edge; splitting fields from
 methods changes the type `PolicyFile`'s own `reclassify` list actually holds
 and calls methods on, the identical field-narrowing problem already rejected
-above for `PolicyFile` proper. This investigation does not have a design for
-it — recording that rather than asserting one. So the third co-prerequisite
-is not "extract `ReclassifyRule`" but "resolve `ReclassifyRule`'s own
-model-vs-policy split," an unsolved instance of this same document's central
-question, not a mechanical follow-up to it. The protocol therefore remains
-blocked on **two** co-prerequisites that are actually scoped today
-(`checker_policy.py`'s split, for `ChangeKind`, and that split reaching
-`reclassify.py`'s own `checker_policy` imports) plus this third, open-ended
-one — none satisfied by deferral, and the third not yet reduced to
-actionable work — worth recording for whoever does that, but none is a
-protocol in place of doing it, and `policy_file.py` staying unclassified for
-now is unchanged.
+above for `PolicyFile` proper.
+
+**A seventeenth Codex review round supplied the actual answer this
+investigation was missing, and verified it directly against a real `mypy
+--strict` run rather than asserting it — reproduced here the same way**:
+`ReclassifyRule` doesn't need to move or split *at all*, the same insight the
+fifth review round already supplied for `PolicyFile` itself, applied one
+level down. A second, model-owned structural protocol
+(`ReclassifyRuleProtocol`, declaring `matches()`/`is_expired()`/`describe()`/
+`to_report_dict()`) lets `PolicyFileProtocol.reclassify` be typed
+`Sequence[ReclassifyRuleProtocol]` — `Sequence` is covariant, so the real
+`PolicyFile.reclassify: list[ReclassifyRule]` satisfies it structurally, with
+`ReclassifyRule` itself never imported by `model` and never moved out of
+`reclassify.py`. The one real code change this needs is widening
+`active_reclassify_rules()`'s and `first_matching_reclassify_verdict()`'s
+parameter types from the concrete `list[ReclassifyRule]` to
+`Sequence[ReclassifyRuleProtocol]`, so a caller holding the protocol-typed
+`DiffResult.policy_file.reclassify` can still pass it through — verified
+clean end to end (`DiffResult` → `PolicyFileProtocol` → `Sequence
+[ReclassifyRuleProtocol]` → `active_reclassify_rules`) with `mypy --strict`
+against a minimal repro of that exact call chain. So the third
+co-prerequisite collapses back to what the fourteenth round already scoped
+for `ChangeKind`: `ReclassifyRule` needs no split of its own, only a second
+model-owned protocol mirroring the first, once its two real blockers
+(`checker_policy.py`'s split, and that split reaching `reclassify.py`'s own
+imports) are done. Neither satisfied by deferral — worth recording for
+whoever does that, but neither is a protocol in place of doing it, and
+`policy_file.py` staying unclassified for now is unchanged.
 
 Reclassifying
 `policy_file.py`/`suppression.py` as `compare` instead was rejected too:
@@ -1400,28 +1416,25 @@ or its own consumers, per the fourth Codex round above). **Decided, but not
 yet actionable**: the `Protocol`-based facade is the *selected* mechanism for
 whenever `policy_file.py`'s ownership is finally resolved — see the
 paragraph above ("the protocol is the better mechanism to use *once*..."),
-not a third rejected option; it is blocked today by two scoped
-co-prerequisites (`checker_policy.py`'s split for `ChangeKind`, and that
-split reaching `reclassify.py`'s own `checker_policy` imports) plus a third,
-open-ended one — `ReclassifyRule`'s own model-vs-policy split, itself an
-unsolved recurrence of this document's central question rather than a
-mechanical follow-up (it is method-bearing, with a runtime dependency on
-`suppression.py`, exactly the shape that makes `PolicyFile` hard) — not by
-any objection to the Protocol mechanism itself. **Not decided**:
-`policy_file.py`'s final layer ownership, `ReclassifyRule`'s, and therefore
-*when* the Protocol actually becomes buildable. "Deliberately
-unclassified" is this ADR's recorded
+not a third rejected option; it is blocked today only by two co-prerequisites
+that are now both fully scoped — `checker_policy.py`'s split (for
+`ChangeKind`), and that same split reaching `reclassify.py`'s own
+`checker_policy` imports — plus a second, mirroring protocol
+(`ReclassifyRuleProtocol`) for `ReclassifyRule`'s own consumed methods,
+verified buildable (see above) rather than needing its own unsolved design.
+Not by any objection to the Protocol mechanism itself. **Not decided**:
+`policy_file.py`'s final layer ownership, and therefore *when* the two
+co-prerequisites get satisfied and the Protocol pair actually lands.
+"Deliberately unclassified" is this ADR's recorded
 *treatment* of the module for now, not its destination — the module stays
 outside `architecture/modules.yaml`'s classified set, `check_architecture.py`
 enforces nothing about which layer may import it, and the actual owner is
 named here as a known open question (`checker_policy.py`'s own
-model-vs-policy split, and now `ReclassifyRule`'s own instance of the same
-question) rather than resolved. Since this ADR is the
+model-vs-policy split) rather than resolved. Since this ADR is the
 authoritative ownership contract, a reader relying on it for `policy_file.py`
 should read this as: no physical move is safe today, no `may_import` edge
-exists for it yet, and the co-prerequisites above — two scoped, one still
-needing its own design — are what unblock deciding its owner, not a settled
-classification to build on.
+exists for it yet, and the two co-prerequisites above are what unblock
+deciding its owner, not a settled classification to build on.
 
 **A tenth Codex review round named the risk every number in this whole
 investigation shares, worth stating once rather than re-litigating per
