@@ -609,9 +609,10 @@ and a first draft of this paragraph's own closing sentence — "the AI-
 readiness gate... checks every module under `diff_*.py`" — is exactly
 why it was missed: `internal_leak.py` is not a `diff_*.py` module at
 all, so a gate scoped to that glob would silently never see it.**
-`_enqueue_record_children()` walks `rec.bases` directly to decide whether
+`_enqueue_record_children()` walks `rec.bases` (and, on the following
+line, `rec.virtual_bases`) directly to decide whether
 an internal type is reachable from a public one through inheritance, for
-`INTERNAL_TYPE_LEAKS_VIA_PUBLIC_API`; reading the unconverted raw field
+`INTERNAL_TYPE_LEAKS_VIA_PUBLIC_API`; reading the unconverted raw fields
 here has the identical failure mode every other unmigrated reader has —
 if `bases_fact` is `Fact.not_collected()` but the legacy field was
 normalized to `[]` for backward compatibility, this walk sees no bases at
@@ -628,52 +629,53 @@ the gate, not silently bypass it the way this one did.
 
 **A further repo-wide check found the allowlist-by-hand-enumeration
 itself is exactly the failure mode the previous paragraph just diagnosed,
-reproduced one round later: four more direct `rec.bases`/`record.bases`
-readers exist outside both `diff_*.py` and the just-added
-`internal_leak.py`, confirming a hand-curated list converges more slowly
-than real code grows new readers.** `contract_evidence_collect.py`'s
-`build_type_graph()` and `diff_time64.py`'s `_fold_record_tokens()` both
-walk `list(rec.bases) + list(rec.virtual_bases)`;
-`diff_stdlib_impl.py`'s `_public_by_value_records()` walks
-`(*record.bases, *record.virtual_bases)`; `surface_graph.py`'s
-`_build_type_refs()` walks `rec.bases` directly. Each has its own
-distinct consequence, not a repeat of the same one: `build_type_graph()`
-feeds the contract-evidence type graph's own closure walk, so a missing
-inheritance edge here can make `export_surface.py`'s `exclusion_is_provable`
-gate wrongly treat a type as out-of-contract rather than failing closed on
-incomplete evidence, the opposite of what that gate exists to guarantee;
-`diff_time64.py`/`diff_stdlib_impl.py` can each suppress or omit their own
-derived findings the same way the vtable/base-list detectors already do;
-`surface_graph.py` can under-populate the ADR-057 consumer graph's type
-references.
+reproduced across two more passes — and a review round correctly found
+the prose narrating each pass separately had drifted into inconsistent
+counts ("four more"/"five more" mixing module counts with call-site
+counts) and inconsistent per-reader field lists (an earlier mention of
+`internal_leak.py`/`surface_graph.py` named only `bases`, while both
+actually read `virtual_bases` too, just on a separate line rather than
+in one combined expression) and miscategorized two genuinely `diff_*.py`
+modules as "outside" that scope. Replaced with one explicit table,
+checked against the real source directly rather than re-described a
+third time in prose:**
 
-**A further repo-wide pass, run specifically because the check above is
-now a real static scan rather than a hand-enumerated list, found five
-*more* direct readers the scan would have caught on day one had this
-list stayed incomplete: `export_surface.py:1167`'s own unresolved-type
-scan, `surface.py`'s two public-closure walks (lines 632/782, both
-`(*rec_node.bases, *rec_node.virtual_bases)`), `type_reachability.py`'s
-stdlib-reference text scan (lines 873-874), and `dumper_scoping.py`'s
-dependency-retention text scan (lines 342-343) — each following the
-identical `bases`/`virtual_bases` pattern the five readers above already
-follow.** Their own consequences follow the same two shapes already
-named: `export_surface.py`/`type_reachability.py`/`dumper_scoping.py` can
-under-build a contract/public surface or drop a type a public declaration
-still depends on (the missing-evidence-reads-as-confirmed-absent failure
-the vtable/base-list detectors already have); `surface.py`'s own walks
-feed `compute_public_surface()`'s reachability closure directly, so a
-missed virtual-base edge there can silently shrink the resolved public
-surface instead of failing closed on incomplete evidence. All nine readers
-— the four named first plus these five — are added to this phase's
-migration file list alongside `internal_leak.py`, and — since a fifth,
-then a tenth, hand-missed reader is now a demonstrated, repeating pattern,
-not a one-off — the
+| Reader | Function | Fields read | In `diff_*.py`? |
+|---|---|---|---|
+| `contract_evidence_collect.py` | `build_type_graph()` | `bases`, `virtual_bases` | no |
+| `diff_time64.py` | `_fold_record_tokens()` | `bases`, `virtual_bases` | **yes** |
+| `diff_stdlib_impl.py` | `_public_by_value_records()` | `bases`, `virtual_bases` | **yes** |
+| `surface_graph.py` | `_build_type_refs()` | `bases`, `virtual_bases` (separate lines) | no |
+| `internal_leak.py` | `_enqueue_record_children()` | `bases`, `virtual_bases` (separate lines) | no |
+| `export_surface.py` | line 1167's unresolved-type scan | `bases`, `virtual_bases` | no |
+| `surface.py` | two public-closure walks (lines 632, 782) | `bases`, `virtual_bases` | no |
+| `type_reachability.py` | stdlib-reference text scan (lines 873-874) | `bases`, `virtual_bases` | no |
+| `dumper_scoping.py` | dependency-retention text scan (lines 342-343) | `bases`, `virtual_bases` | no |
+
+Nine distinct modules, ten call sites (`surface.py` contributes two).
+`diff_time64.py`/`diff_stdlib_impl.py` *are* `diff_*.py` modules — the
+original AI-readiness gate (scoped to that glob) already covers their
+call sites; they needed no new gate-scope widening, only the same
+Fact-aware migration every other row gets. The seven remaining rows are
+outside `diff_*.py` and are exactly why the gate itself stops being a
+glob at all (below). Every row's consequence follows one of two shapes:
+a missing inheritance edge can make `export_surface.py`'s `exclusion_
+is_provable` gate wrongly treat a type as out-of-contract instead of
+failing closed (`contract_evidence_collect.py`/`export_surface.py`), or
+it can silently suppress/omit a derived finding or shrink a resolved
+surface the same way the vtable/base-list detectors already can
+(every other row, including `surface.py`'s own reachability closure
+feeding `compute_public_surface()` directly). All nine modules are added
+to this phase's migration file list, and — since a fifth, then a tenth,
+hand-missed call site is now a demonstrated, repeating pattern, not a
+one-off — the
 AI-readiness check itself stops being a hand-maintained module allowlist:
 it becomes a real static scan for any direct attribute access naming
-`bases`/`vtable`/`is_va_list` (or `virtual_bases`, read by the majority of
-these readers without itself being one of the three fields this phase
-converts — see Scope, below) on a value whose declared type resolves to
-`RecordType`/`Param`, repository-wide, with all nine named modules above
+`bases`/`vtable`/`is_va_list`/`virtual_bases` (the fourth field sharing
+this exact ambiguity, scheduled for conversion in this same phase below
+— not itself one of the three fields the Design section above already
+covers) on a value whose declared type resolves to `RecordType`/`Param`,
+repository-wide, with all nine named modules above
 becoming the check's own initial known-failures baseline (mirroring
 `check_ai_readiness.py`'s existing `MYPY_ERROR_BASELINE`/
 `LARGE_FILE_ALLOWLIST` pattern: a reviewed, shrinking allowlist of
@@ -1943,11 +1945,27 @@ sibling:
   `Protocol`s check structurally, not by inheritance, so the existing class
   needs no base-class change either) — and every caller that actually needs
   `resolve_entities`/other `SourceGraphSummary`-specific methods narrows
-  back from the protocol to the concrete type at its own call site (an
-  ordinary, localized `isinstance`/`cast`, not a model-layer concern) —
-  `SurfaceGraphLike` is declared `@runtime_checkable` precisely so that
-  narrowing can use `isinstance(graph, SourceGraphSummary)` directly rather
-  than an unchecked `cast()`. The
+  back from the protocol to the concrete type at its own call site.
+
+  **That narrowing is an ordinary `isinstance(graph, SourceGraphSummary)`
+  check against the concrete class, and a first draft of this paragraph
+  mis-attributed why it works — `@runtime_checkable` has nothing to do
+  with it.** `isinstance` against a concrete, imported class needs no
+  decorator at all; that check works for any class, protocol-adjacent or
+  not, with or without `SurfaceGraphLike` existing. What `@runtime_
+  checkable` on `SurfaceGraphLike` actually enables is the *other*
+  direction — `isinstance(x, SurfaceGraphLike)`, a structural check
+  against the protocol itself, useful to a caller that wants to confirm
+  something conforms to the read/write surface this protocol declares
+  without needing (or having) the concrete `buildsource` import in scope
+  at all. Narrowing to reach `resolve_entities` specifically is the
+  concrete-class check, which needs the `buildsource.SourceGraphSummary`
+  import regardless of the protocol's own `@runtime_checkable` status —
+  a real, ordinary, localized import at that one call site, not a
+  model-layer concern, and not something the protocol's decorator
+  changes either way. `SurfaceGraphLike` stays `@runtime_checkable`
+  anyway, for the structural-conformance case that decorator genuinely
+  does enable, just not for the reason the first draft gave. The
   second item, below, is the one still left to the implementation PR, for
   the reason already stated — it depends on auditing and migrating real
   existing readers, not on a type-contract decision a planning document can
