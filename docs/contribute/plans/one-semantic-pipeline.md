@@ -2505,9 +2505,33 @@ this phase's own stated scope — "every availability-ambiguous field ...
 documented as backend-dependent" — but neither is a bare `bool`/`list`/
 `int | None` annotation, so a check enumerating those three shapes would
 report Phase 5 complete while these (and any future field shaped like
-them) stay raw, overloaded values with no availability distinction. The
-check's actual scan key is not a field's annotation shape at all — it is
-"does this field have a snapshot-level reliability flag," independent of
+them) stay raw, overloaded values with no availability distinction.
+
+**"Does this field have a snapshot-level reliability flag" is itself too
+narrow a key, and a further review round found it contradicts this
+phase's own required examples two paragraphs above: `RecordType.
+is_final`/`Function.contract_attributes`/`Variable.alignment_bits` — the
+fields this phase's Scope section names specifically to prove eligibility
+isn't limited to `*_facts.py` files — have no `*_facts_reliable` flag
+covering any of them at all.** `is_final` is already `bool | None = None`,
+documented tri-state at the *field* level (`True`/`False` = captured,
+`None` = not captured) with no snapshot-level flag needed, since the
+field's own optionality already carries the availability signal a
+`bases`/`vtable`-shaped field needs a separate flag for. A scan keyed
+exclusively on flag coverage would read all three of this phase's own
+named examples as ineligible, which cannot be the intended rule for a
+check this phase's own text introduces those three fields to motivate.
+The actual scan key is therefore **field-based with an optional
+availability source**, not flag-required: a field is eligible when it (a)
+is guarded by a snapshot-level reliability flag (the `REFERENCE_FLAG_
+COVERAGE`-tracked case below, covering `bases`/`vtable`/`is_va_list`-shaped
+fields whose own natural resting value can't distinguish omission from
+confirmed-empty), **or** (b) is already tri-state at the field's own
+declared type (an `Optional`/sentinel shape whose `None`/sentinel value
+already means "not captured," independent of any snapshot-level flag) —
+`is_final`/`contract_attributes`/`alignment_bits` are case (b); `bases`/
+`vtable`/`is_va_list` before their own Phase 0 conversion were case (a).
+Both cases are scanned for, not only the flag-backed one — independent of
 whether the field itself happens to be a `bool`, a `list`, an `int |
 None`, a `str | None`, or an enum.
 
@@ -2529,21 +2553,27 @@ nobody has touched yet) would survive a check keyed on an undefined
 three-shape enumeration. The fix is an explicit, hand-maintained inventory
 — a `REFERENCE_FLAG_COVERAGE: dict[str, tuple[str, ...]]` (flag name →
 every model field it guards, covering the already-known many-to-one cases
-above) living alongside `fact_registry.py`, not derived at scan time — with
-the completeness check validated in *both* directions: every flag in the
-inventory names at least one field that is either already converted or
-explicitly tracked as this phase's remaining scope (an entry with no real
-field would be exactly the kind of self-congratulatory registration this
-plan's own D7 completeness principle forbids), and every model field
-`model/`'s own eligibility sweep finds with a documented backend-dependence
-comment appears under some flag in the inventory (a field with real
-backend-dependent prose but no inventory entry is the "field nobody has
-touched yet" case this whole correction exists to catch, now caught by a
-table lookup instead of an unreliable name match). Building this inventory
-is this phase's own first concrete task, not an assumption its design gets
-to take for granted — a field with no flag and no other documented
-backend-dependence is out of scope, the same way it was before this
-correction.
+above) living alongside `fact_registry.py`, not derived at scan time — this
+inventory covers case (a) (flag-backed) fields only, not case (b), since a
+case (b) field's availability signal is its own declared type, not a flag
+to look up — with the completeness check validated in *both* directions
+per case: for case (a), every flag in the inventory names at least one
+field that is either already converted or explicitly tracked as this
+phase's remaining scope (an entry with no real field would be exactly the
+kind of self-congratulatory registration this plan's own D7 completeness
+principle forbids), and every case-(a) model field `model/`'s own
+eligibility sweep finds appears under some flag in the inventory (a field
+with real backend-dependent prose but no inventory entry is the "field
+nobody has touched yet" case this whole correction exists to catch, now
+caught by a table lookup instead of an unreliable name match); for case
+(b), the sweep itself is the completeness check — every already-`Optional`/
+sentinel-typed model field carrying a documented backend-dependence
+comment (the same textual marker the sweep already looks for) is eligible
+regardless of flag coverage, with no inventory entry required or expected.
+Building the case-(a) inventory is this phase's own first concrete task,
+not an assumption its design gets to take for granted — a field with no
+flag, no tri-state declared type, and no other documented backend-dependence
+is out of scope, the same way it was before this correction.
 
 **Files.** `abicheck/model/fact_registry.py` (new); every fact-bearing
 `model/` dataclass module with an eligible field — `model/*_facts.py`,
@@ -2848,13 +2878,34 @@ which backend's value won, per declaration, per fact — applied to
    fix elsewhere in this phase already reduces to plain `EntityId`
    equality for. Matching on the *bare* `EntityId` first, and only
    reading each side's own disambiguator afterward to decide *whether* a
-   match is safe (a non-empty, *disagreeing* disambiguator on either side
-   means the two parsers resolved the same nominal identity to evidence
-   they believe is genuinely distinct — e.g. one backend's USR/TU-context
-   signal disagreeing with the other's — and such a pair is left
-   unmerged, both sides kept as separate occurrences, rather than forced
-   together), is what makes "same logical entity, different disambiguator"
-   a handled case instead of an unspecified one.
+   match is safe.
+
+   **The safety check itself had a real bug, and a review round caught
+   it precisely: "non-empty... on either side" is not the same condition
+   as "both sides assert something, and they disagree" — and the
+   difference breaks the ordinary case, not just an edge case.**
+   `OccurrenceId`'s disambiguator carries no neutral, producer-independent
+   value — it is populated from whichever USR/TU-context signal that
+   *one* backend's own parse actually derived, and CastXML has no USR
+   concept at all (`entity_identity.py`'s own rule: "an absent USR/mangled
+   name degrades the tier, it is never guessed at"), so CastXML's side of
+   an ordinary, genuinely-matching declaration is routinely empty while
+   Clang's side is routinely non-empty — not because the two parsers
+   disagree about identity, but because only one of them has a TU-context
+   signal to report at all. The originally-stated rule ("a non-empty,
+   disagreeing disambiguator on either side... left unmerged") reads that
+   as a disagreement, which would leave the *common* hybrid case
+   permanently unmerged — exactly the failure the reviewer traced: no
+   Clang backfill ever reaches the base entity, and `semantic_ir`
+   disagrees with the legacy fields `merge_snapshots()` already
+   reconciles, on every ordinary declaration, not only a genuinely
+   ambiguous one. The corrected rule needs **both** sides to carry a
+   non-empty disambiguator before comparing them at all — an empty
+   disambiguator on either side is "no additional signal from that
+   backend," never itself a disagreement — and only withholds the merge
+   when both are non-empty and unequal (the real TU-collision case this
+   mechanism exists for: two backends that can *both* derive a TU-context
+   signal and that signal genuinely differs).
 2. **CastXML's `CanonicalEntity` is the base for every matched pair**,
    mirroring every other reconciled field in this function: Clang's
    matching occurrence backfills only the specific facts CastXML's own
@@ -2863,11 +2914,30 @@ which backend's value won, per declaration, per fact — applied to
    present-value disagreement included. A fact CastXML resolved and Clang
    *also* resolved, disagreeing, is not silently dropped by either
    direction: CastXML's value is kept (matching the base precedence every
-   other field already uses), and the disagreement itself is recorded —
-   `fact_provenance` gains an entry for the reconciled `semantic_ir`
-   fact the same way it already does for the legacy fields, so a
-   disagreement is auditable rather than invisible, never resolved by
-   guessing which backend was "more right."
+   other field already uses), and the disagreement itself is recorded.
+
+   **`fact_provenance` itself cannot carry that record, and a review round
+   correctly found the reused-field claim doesn't survive checking the
+   real type.** `AbiSnapshot.fact_provenance: dict[str, str]` stores only
+   the *winning* producer's name (`"castxml"`/`"clang"`) per fact key —
+   by design, per that field's own docstring, for every pre-existing
+   legacy-field reconciliation this function already does — and has no
+   slot for the losing backend's own value or for a conflict marker at
+   all. Reusing it for `semantic_ir` reconciliation would silently lose
+   exactly the information this step claims to preserve: once CastXML
+   wins, a consumer reading `fact_provenance` sees `"castxml"` whether
+   Clang agreed or actively disagreed, with no way to tell the two apart.
+   Fixed with a new, additive field instead of widening the existing
+   one (which every pre-existing `fact_provenance` reader already depends
+   on staying `dict[str, str]`) — `AbiSnapshot.semantic_ir_conflicts:
+   dict[str, str]`, keyed identically to `fact_provenance`'s own fact
+   keys, valued with a `repr()` of the losing backend's discarded value
+   (present only for a key where a real conflict occurred; absent
+   otherwise, same "absence means no conflict" convention `fact_
+   provenance` itself already uses) — so `fact_provenance[key] ==
+   "castxml"` plus `key in semantic_ir_conflicts` together give a
+   consumer both which backend won and that a real disagreement, not mere
+   agreement, produced that outcome.
 3. **A Clang-only `EntityId` (no CastXML match at all) is unioned in
    verbatim**, exactly mirroring how a genuinely Clang-only function/type
    is appended rather than dropped in the existing legacy-field merge.
