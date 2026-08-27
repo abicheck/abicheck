@@ -31,6 +31,13 @@ None of these needed a cleverer reviewer. They needed the fix to state which
 invariant it restores and which neighbouring inputs it covers — which is what
 this gate asks for, mechanically, at the point the claim is cheap to make.
 
+The "general-invariant" row exists specifically to keep this from degrading
+into "a test for the reported input, plus a paragraph describing the class":
+the invariant must be backed by a test that exercises it with inputs beyond
+the one reported, against a named oracle — not restated as prose alone. See
+docs/contribute/plans/bug-class-regression-testing.md for the full analysis
+and the registry of named bug classes this applies to.
+
 Two kinds of check, deliberately separated:
 
 **Structural** (objective, always enforced): a fix that changes shipped code
@@ -327,7 +334,16 @@ REQUIREMENTS: tuple[Requirement, ...] = (
         "general-invariant",
         "General invariant",
         "The property that now holds for every input, not just the reported "
-        "one. 'None — documented as a known gap' is an acceptable answer; "
+        "one — and the named regression test must exercise it with inputs "
+        "beyond the one reported (generated/property-based, an exhaustive "
+        "small-domain enumeration, or several independently-chosen sibling "
+        "cases), against an oracle that is not the same formula/helper the "
+        "implementation itself uses. Prose describing the class without such "
+        "a test does not satisfy this row (AGENTS.md 'A bug fix's regression "
+        "test targets the bug class, not the one reported input'; see "
+        "docs/contribute/plans/bug-class-regression-testing.md for the named "
+        "bug-class registry — name its id here if the class already has a "
+        "home). 'None — documented as a known gap' is an acceptable answer; "
         "silence is not.",
     ),
     # --- conditional ---------------------------------------------------

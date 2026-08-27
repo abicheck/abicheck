@@ -656,6 +656,33 @@ cover the surrounding first-party trees this file doesn't detail.
   feasible in one pass, say so explicitly and record the gap (see "Known
   gaps" below) rather than quietly shipping a narrow patch as if it were
   the complete fix.
+- **A bug fix's regression test targets the bug *class*, not the one
+  reported input.** This sharpens the previous bullet into a concrete,
+  checkable requirement for the bug-fix test contract
+  (`.github/PULL_REQUEST_TEMPLATE.md`'s "Bug class" / "General invariant"
+  rows, enforced by `scripts/check_bugfix_test_contract.py`). A repository
+  audit of this codebase's own fix history found a repeated pattern behind
+  its worst escapes: the shipped test proved the *reported* input was now
+  handled correctly, the class was described only in prose (a PR body, or
+  a "Known gaps" entry below), and the next defect was a sibling case the
+  same mechanism still got wrong — #699→#721 (a compression window-size
+  formula tested against itself, at a toy scale that never reached the
+  bug), #753→#759 (a missing registry entry that failed nothing, anywhere),
+  #705→#758 (a workflow-injection defense that asserted file *text* instead
+  of executing the attack). None of these needed a cleverer reviewer; they
+  needed the invariant to be executable and adversarially generated, not a
+  fixed-input assertion plus a paragraph explaining the class. Concretely,
+  "General invariant" in the PR contract is not answered by prose alone —
+  the named regression test must exercise the invariant with inputs beyond
+  the one reported (generated/property-based, an exhaustive small-domain
+  enumeration, or at minimum several independently-chosen sibling cases),
+  against a stated oracle that is not the same formula/helper the
+  implementation itself uses. See
+  [`docs/contribute/plans/bug-class-regression-testing.md`](docs/contribute/plans/bug-class-regression-testing.md)
+  for the full analysis, the registry of named bug classes this applies
+  to today, and the phased plan closing the specific generalized-test gaps
+  that analysis found still open — check there before writing a narrow
+  reproducer for a mechanism a class already covers.
 
 ## Known mypy issues
 
