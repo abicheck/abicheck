@@ -1439,6 +1439,38 @@ Not satisfied by deferral — worth recording for whoever does that, but not
 a protocol in place of doing it, and `policy_file.py` staying unclassified
 for now is unchanged.
 
+**A twenty-second Codex review round found a real, independent gap in what
+the whole Protocol facade actually achieves — checked directly against
+`checker_types.py`'s own method bodies, not assumed from the field
+annotation alone.** Everything above narrows what the `policy_file`
+*field's declared type* can be — but `checker_types.py` (the `model`-owned
+module `DiffResult` lives in) doesn't only *store* a `PolicyFile`, it
+*executes* real policy resolution as its own methods:
+`DiffResult._effective_kind_sets()` calls `_policy_kind_sets` (imported at
+module level from `checker_policy`, `checker_types.py:28-34`) and
+`DiffResult._effective_verdict_for_change()` calls
+`reclassify.effective_verdict_for_change()` (a lazy import,
+`checker_types.py:709`) — both real algorithms, not data lookups, applying
+policy overrides and reclassify rules to compute a per-change verdict.
+Retyping the `policy_file` field against a protocol does nothing for
+either of these: they are independent `model -> policy`-shaped edges the
+field's own type was never going to touch, since they're module-level and
+method-body imports, not annotations. So even a fully-built,
+fully-verified Protocol pair does not make `checker_types.py` policy-free
+— it closes the one edge this whole investigation actually scoped
+(the `policy_file` field's declared type), while a second, real edge
+(verdict-resolution logic living inside a `model`-owned class's own
+methods) is untouched and unaudited here. Closing *that* is a materially
+different, larger change — moving `_effective_kind_sets`/
+`_effective_verdict_for_change`'s actual computation into `policy` and
+having `DiffResult` consume the result rather than compute it — not a
+follow-up to the field-typing work above, and not attempted in this
+investigation. Recorded as a known gap rather than folded into the
+"Decided" list below, since it changes what "decided" can honestly claim
+the Protocol facade accomplishes: it resolves the field-typing question
+this ADR's central design question was actually about, not the broader
+claim that `checker_types.py` as a whole is (or would become) policy-free.
+
 Reclassifying
 `policy_file.py`/`suppression.py` as `compare` instead was rejected too:
 `compute_verdict` is policy logic by any reading, and mislabeling it only
