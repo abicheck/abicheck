@@ -73,14 +73,18 @@ PARITY_EXTENSION_ENTRIES: list[ChangeKindMeta] = [
     #    no dedicated detector wired yet (declared for future use; see
     #    ADR's changekind-detector WARN, not an ERROR gate) ─────────────────
     _E("value_abi_trait_changed", _B,
-       impact="A type's calling-convention-relevant triviality trait "
-              "changed (the DWARF-derived heuristic for whether a value "
-              "type is 'trivial enough' to pass in registers per the "
-              "platform ABI, e.g. the Itanium C++ ABI's non-trivial-for-"
-              "calls rule); this changes whether the type is passed/"
-              "returned by value in registers or via a hidden pointer, so "
-              "a caller compiled against the old trait passes/reads the "
-              "value through the wrong mechanism.",
+       impact="A type's calling-convention-relevant triviality/copy-"
+              "semantics trait changed (the DWARF-derived heuristic for "
+              "whether a value type is 'trivial enough' to pass in "
+              "registers per the platform ABI, e.g. the Itanium C++ ABI's "
+              "non-trivial-for-calls rule). This detector reports this kind "
+              "specifically when the register-vs-hidden-pointer return "
+              "mechanism did NOT flip (see struct_return_convention_changed "
+              "for that case) — the underlying fingerprint still changed, "
+              "which can affect how the type participates in parameter "
+              "passing or copy/move semantics under the platform ABI's own "
+              "rules, so a caller compiled against the old trait should be "
+              "treated as at risk.",
        policy_overrides={"plugin_abi": _C}),
     _E("type_visibility_changed", _B,
        impact="A type's visibility attribute changed, affecting whether "

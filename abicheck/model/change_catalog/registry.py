@@ -37,10 +37,10 @@ which imports the legacy shim, which imports this module) and
 from __future__ import annotations
 
 import string
-from collections.abc import Mapping
+from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, NoReturn
+from typing import Any
 
 
 class Verdict(str, Enum):
@@ -85,90 +85,91 @@ _VERDICT_BLIND_POLICIES: frozenset[str] = frozenset({"sdk_vendor", "plugin_abi"}
 TEMPLATE_VOCAB = frozenset({"symbol", "name", "old", "new", "detail"})
 
 
-class _ImmutableDict(dict[str, Verdict]):
-    """A genuine ``dict`` subclass whose mutators raise ``TypeError``.
+class _ImmutableDict(Mapping[str, Verdict]):
+    """An immutable mapping that is deliberately *not* a ``dict`` subclass.
 
     ``ChangeKindMeta.policy_overrides`` needs to be immutable after
     construction (see ``__post_init__`` below) *and* round-trip cleanly
     through ``dataclasses.asdict()``/``copy.deepcopy()``/``pickle`` the same
-    way an ordinary ``dict`` field already does — two properties that turn
-    out to be in tension. ``types.MappingProxyType`` gives the first for
-    free but fails the second outright: it cannot be pickled at all (Codex
-    review, PR #882, fresh evidence — ``TypeError: cannot pickle
-    'mappingproxy' object`` from ``dataclasses.asdict()``, ``copy.deepcopy()``,
-    and ``pickle.dumps()`` alike, since ``asdict()``'s recursive dict
-    handling only special-cases a literal ``dict`` — anything else, mapping
-    or not, falls back to a plain ``copy.deepcopy()`` of the field value,
-    which mappingproxy has no support for).
+    way an ordinary ``dict`` field already does. Three earlier designs each
+    closed one gap and left another (Codex review, PR #882, fresh evidence
+    each time):
 
-    A plain ``dict`` subclass overriding only the mutating methods looks
-    like the fix, but the *default* pickle/deepcopy reconstruction protocol
-    for a dict subclass reconstructs it item-by-item (``obj[k] = v`` for
-    each pair, via ``copy._reconstruct``'s ``dictiter`` handling) — which
-    hits the very mutators being overridden and raises during
-    reconstruction, not construction. ``__reduce__`` below sidesteps that
-    by telling pickle/copy to reconstruct via a single one-shot
-    ``_ImmutableDict(plain_dict)`` call instead of the item-by-item
-    protocol — safe, since ``dict.__init__``/``dict.__new__`` populate the
-    underlying hash table directly in C without going through the
-    overridden Python-level ``__setitem__``.
+    - ``types.MappingProxyType`` gives immutability for free but cannot be
+      pickled at all (``asdict()``'s recursive dict handling only
+      special-cases a literal ``dict``; anything else falls back to a plain
+      ``copy.deepcopy()``, which mappingproxy has no support for).
+    - A plain ``dict`` subclass overriding the mutating methods
+      (``__setitem__``/``update``/``__ior__``/re-invoked ``__init__``, etc.)
+      fixes that, and round-trips correctly once given a custom
+      ``__reduce__`` (the *default* pickle/deepcopy protocol for a dict
+      subclass reconstructs item-by-item, which hits the very mutators being
+      overridden). But being a genuine ``dict`` instance means its storage
+      is still reachable through ``dict``'s own *unbound* methods called
+      directly: ``dict.__setitem__(entry.policy_overrides, "unknown",
+      Verdict.API_BREAK)`` mutates the underlying hash table in C, bypassing
+      every overridden Python-level method entirely — there is no override
+      that can intercept a call to the base type's own descriptor.
+
+    The only way to close that last gap is to not be a ``dict`` at all:
+    ``dict.__setitem__(obj, ...)`` requires its first argument to *be* a
+    ``dict`` instance (or subclass), and raises ``TypeError`` immediately
+    for anything else. This class implements the read-only
+    ``collections.abc.Mapping`` protocol (``__getitem__``/``__iter__``/
+    ``__len__``, which is all ``Mapping`` needs to derive ``__contains__``/
+    ``keys()``/``values()``/``items()``/``get()``) over a private ``dict``
+    stored in ``self._data`` — reachable only through this class's own
+    methods, none of which mutate it. ``Mapping`` supplies no
+    ``__setitem__``/``update``/``pop``/etc. at all (those are
+    ``MutableMapping`` only) and no ``__or__``/``__ior__``, so
+    ``entry.policy_overrides["x"] = y`` and ``entry.policy_overrides |=
+    {...}`` both raise ``TypeError`` from Python's own attribute/operator
+    resolution — no per-method overriding needed to block them. The one
+    method still overridden below, ``__init__``, guards against
+    ``entry.policy_overrides.__init__({...})`` re-invoking it directly on an
+    already-constructed instance (the same shape of bypass a plain dict
+    subclass has, just for this class's own constructor instead of
+    ``dict.__init__``).
+
+    ``isinstance(x, dict)`` does not hold for this class, unlike the earlier
+    dict-subclass design — checked against every consumer of
+    ``ChangeKindMeta.policy_overrides``/``ChangeKindRegistry.
+    policy_overrides_for()`` in this codebase: none relies on ``dict``-ness
+    specifically, only on the ``Mapping`` protocol (``.items()``,
+    ``[key]``, ``in``), which this class provides.
     """
 
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
-        # Overriding __setitem__/update/etc. below doesn't stop a caller
-        # from re-invoking the *inherited* dict.__init__ directly —
-        # ``entry.policy_overrides.__init__({"unknown": ...})`` mutates the
-        # already-constructed dict in place via the same C-level population
-        # path a fresh construction uses, bypassing every overridden
-        # mutator (Codex review, PR #882, fresh evidence). ``__init__`` is
-        # legitimately called exactly once per real object — both by
-        # ``ChangeKindMeta.__post_init__`` and by ``__reduce__``'s
-        # reconstruction below, always on a brand-new instance — so a
-        # second call on the same object is unconditionally a re-init
-        # attempt, not a legitimate use.
+    __slots__ = ("_data", "_initialized")
+
+    def __init__(
+        self,
+        source: Mapping[str, Verdict] | Iterable[tuple[str, Verdict]] = (),
+    ) -> None:
+        # A second call on an already-constructed instance
+        # (``entry.policy_overrides.__init__({"unknown": ...})``) would
+        # otherwise silently replace ``_data`` with unvalidated content —
+        # ``__init__`` is legitimately invoked exactly once per real object,
+        # by ``ChangeKindMeta.__post_init__`` and by ``__reduce__``'s
+        # reconstruction below, always on a brand-new instance.
         if getattr(self, "_initialized", False):
             raise TypeError("policy_overrides is immutable after construction")
-        dict.__init__(self, *args, **kwargs)
+        self._data = dict(source)
         self._initialized = True
 
-    def __setitem__(self, key: str, value: Verdict) -> None:
-        raise TypeError("policy_overrides is immutable after construction")
+    def __getitem__(self, key: str) -> Verdict:
+        return self._data[key]
 
-    def __delitem__(self, key: str) -> None:
-        raise TypeError("policy_overrides is immutable after construction")
+    def __iter__(self) -> Iterator[str]:
+        return iter(self._data)
 
-    def update(self, *args: Any, **kwargs: Any) -> None:
-        raise TypeError("policy_overrides is immutable after construction")
+    def __len__(self) -> int:
+        return len(self._data)
 
-    def clear(self) -> None:
-        raise TypeError("policy_overrides is immutable after construction")
-
-    def pop(self, *args: Any, **kwargs: Any) -> Any:
-        raise TypeError("policy_overrides is immutable after construction")
-
-    def popitem(self) -> tuple[str, Verdict]:
-        raise TypeError("policy_overrides is immutable after construction")
-
-    def setdefault(self, *args: Any, **kwargs: Any) -> Any:
-        raise TypeError("policy_overrides is immutable after construction")
-
-    def __ior__(self, other: Any) -> NoReturn:  # type: ignore[misc,override]
-        # ``entry.policy_overrides |= {...}`` (PEP 584 in-place union) is
-        # sugar for ``entry.policy_overrides = entry.policy_overrides.
-        # __ior__({...})`` — dict's own ``__ior__`` mutates in place and
-        # returns self *before* Python attempts the reassignment, so on a
-        # frozen dataclass the mutation had already happened by the time
-        # ``FrozenInstanceError`` aborted the (redundant, same-object)
-        # assignment — every method above stayed blocked while this one
-        # inherited path silently corrupted the entry with an unvalidated
-        # override (Codex review, PR #882, fresh evidence). ``__ior__`` is
-        # the only augmented-assignment operator ``dict`` supports, so this
-        # closes the complete mutating-method surface alongside the seven
-        # methods above it.
-        raise TypeError("policy_overrides is immutable after construction")
+    def __repr__(self) -> str:
+        return f"{type(self).__name__}({self._data!r})"
 
     def __reduce__(self) -> tuple[Any, ...]:
-        return (self.__class__, (dict(self),))
+        return (self.__class__, (dict(self._data),))
 
 
 @dataclass(frozen=True)
@@ -197,13 +198,13 @@ class ChangeKindMeta:
         # the dict object itself (``entry.policy_overrides["x"] = y``), and
         # a caller can hand in a dict it keeps its own live reference to.
         # Either path can silently invalidate the "valid references"/
-        # "non-contradictory defaults" checks ``_validate_references_and_
-        # defaults`` already ran on construction, without re-running them,
-        # and can make ``ChangeKindRegistry.policy_overrides_for()`` disagree
-        # with sets already derived at import time (Codex review, PR #882).
-        # Defensively copy into an immutable dict subclass so neither is
-        # possible, while still round-tripping through asdict()/deepcopy()/
-        # pickle the way an ordinary dict field does (see _ImmutableDict).
+        # "non-contradictory defaults" checks ``_validate_entry`` already ran
+        # on construction, without re-running them, and can make
+        # ``ChangeKindRegistry.policy_overrides_for()`` disagree with sets
+        # already derived at import time (Codex review, PR #882). Defensively
+        # copy into an immutable mapping so neither is possible, while still
+        # round-tripping through asdict()/deepcopy()/pickle the way an
+        # ordinary dict field does (see _ImmutableDict).
         object.__setattr__(
             self, "policy_overrides", _ImmutableDict(self.policy_overrides)
         )
@@ -334,7 +335,7 @@ def _validate_entry(e: ChangeKindMeta) -> None:
     constructor's existing duplicate-key failure mode, so a bad entry fails
     at import time rather than silently reaching a comparison.
     """
-    if not e.impact:
+    if not e.impact.strip():
         raise ValueError(
             f"{e.kind!r}: impact must be non-empty — D9's \"complete "
             f"metadata\" catalog-validation property requires every entry "

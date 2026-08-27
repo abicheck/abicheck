@@ -307,15 +307,42 @@ class TestChangeKindRegistry:
             entry.policy_overrides.__init__({"unknown": Verdict.API_BREAK})
         assert dict(entry.policy_overrides) == {"plugin_abi": Verdict.COMPATIBLE}
 
+    def test_policy_overrides_blocks_base_dict_setitem_bypass(self):
+        """Calling ``dict.__setitem__`` directly on the mapping cannot mutate it.
+
+        An earlier ``dict``-subclass design blocked every mutator Python
+        reaches through normal attribute/operator resolution
+        (``entry.policy_overrides["x"] = y``, ``.update(...)``, ``|=``,
+        etc.) — but being a genuine ``dict`` instance meant its storage was
+        still reachable through ``dict``'s own *unbound* methods called
+        directly: ``dict.__setitem__(entry.policy_overrides, "unknown",
+        Verdict.API_BREAK)`` mutated the underlying hash table in C, with no
+        Python-level override able to intercept a call to the base type's
+        own descriptor (Codex review, PR #882, fresh evidence). Fixed by
+        making ``_ImmutableDict`` a read-only ``collections.abc.Mapping``
+        rather than a ``dict`` subclass at all, so ``dict.__setitem__``
+        rejects it outright as not being a ``dict``.
+        """
+        import pytest
+
+        entry = ChangeKindMeta(
+            "test_kind", Verdict.BREAKING,
+            policy_overrides={"plugin_abi": Verdict.COMPATIBLE},
+        )
+        with pytest.raises(TypeError):
+            dict.__setitem__(entry.policy_overrides, "unknown", Verdict.API_BREAK)
+        assert dict(entry.policy_overrides) == {"plugin_abi": Verdict.COMPATIBLE}
+
     def test_policy_overrides_immutability_survives_serialization(self):
         """The immutable policy_overrides still round-trips like an ordinary dict.
 
         ``types.MappingProxyType`` gives immutability for free but cannot be
         pickled at all — ``dataclasses.asdict()``, ``copy.deepcopy()``, and
         ``pickle.dumps()`` all raised ``TypeError: cannot pickle 'mappingproxy'
-        object`` (Codex review, PR #882, fresh evidence). The fix (a genuine
-        ``dict`` subclass with a custom ``__reduce__``) must support all
-        three the same way an ordinary ``dict`` field would.
+        object`` (Codex review, PR #882, fresh evidence). The fix (a
+        read-only ``collections.abc.Mapping`` implementation, not a ``dict``
+        subclass, with a custom ``__reduce__``) must support all three the
+        same way an ordinary ``dict`` field would.
         """
         import copy
         import dataclasses
@@ -545,6 +572,20 @@ class TestChangeKindRegistry:
         import pytest
 
         entries = [ChangeKindMeta("test_kind", Verdict.BREAKING)]
+        with pytest.raises(ValueError, match="impact must be non-empty"):
+            ChangeKindRegistry(entries)
+
+    def test_whitespace_only_impact_raises(self):
+        """A ChangeKindMeta entry with only whitespace as impact is rejected.
+
+        A bare truthiness check (``if not e.impact``) accepts
+        ``impact="   \\n"`` — non-empty as a string, but carrying no
+        human-readable content, so a report would still surface nothing
+        useful (Codex review, PR #882, fresh evidence).
+        """
+        import pytest
+
+        entries = [ChangeKindMeta("test_kind", Verdict.BREAKING, impact="   \n\t  ")]
         with pytest.raises(ValueError, match="impact must be non-empty"):
             ChangeKindRegistry(entries)
 
