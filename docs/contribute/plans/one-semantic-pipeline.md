@@ -674,8 +674,9 @@ function-specific special case, and fixing it only for functions left
 every other kind exposed). The corrected shape is `EntityId = (ScopePath,
 kind, leaf_name, extra)`, where `leaf_name` is the declaration's own
 (unqualified) name for every kind, and `extra` is kind-specific and empty
-for most kinds — `()` for a record/enum/typedef/variable/constant, and
-the callable-signature discriminator described below for a function
+for most kinds — `()` for a record/enum/typedef/constant, the mangled-name
+discriminator described below for a variable specifically, and the
+callable-signature discriminator described further below for a function
 specifically (the one case a bare name is still insufficient, since two
 overloads share both scope and name). `OccurrenceId` (an `EntityId` plus a
 disambiguator for the already-documented "two declarations, one identity"
@@ -684,6 +685,29 @@ not reinvented). Generalizes ADR-046/048's source-graph identity (already
 real, `USR`-based) by making `EntityId` the *single* identity both the
 flat snapshot and the source graph reference, rather than two graphs with
 their own identity schemes that happen to usually agree.
+
+**A variable's `EntityId` carries its own mangled spelling in `extra` —
+a bare `(ScopePath, "variable", leaf_name, ())` is not enough either, for
+the identical reason AGENTS.md already states for the pre-existing
+matcher this identity replaces: two exported variables sharing the same
+scope and leaf name but differing mangled names (e.g. two distinct,
+non-overloadable template-instantiation statics, or a declaration-vs-
+definition spelling mismatch the mangler doesn't collapse) are two
+different exports, not one — "variables enable no alias tier at all ...
+a display-name join would hide a real removal" (AGENTS.md's own
+`finding_identity.py`/`SymbolIdentityIndex` entry). A first draft of this
+phase gave every non-function kind the identical empty `extra = ()`,
+which collapses exactly that pair into one `EntityId` and would make
+Phase 2's `diff_symbols.py` migration pair the wrong two variables (or
+miss a real removal) wherever it currently relies on
+`SymbolIdentityIndex`'s mangled-name-only matching. Fixed the same way
+the function case is: `EntityId`'s variable variant is `(ScopePath,
+"variable", leaf_name, extra=mangled_name)` when a mangled name exists
+(the common case for any variable with external linkage), falling back to
+`extra=()` only for the genuinely mangling-free case (no linker symbol at
+all — e.g. a variable known only from a header declaration with no
+corresponding binary evidence), mirroring the function fallback's own
+scope for exactly the same reason rather than inventing a second rule.
 
 **A function's `EntityId` carries a callable-signature discriminator —
 `ScopePath` plus a bare name is not enough.** `f(int)` and `f(double)` share
@@ -2459,10 +2483,15 @@ not new design.
   generator now produces.
 - Phase 6: each backend parser's own copy of anonymous-marker/closure-
   identity/namespace-join logic.
-- Phase 7: `junit_report.py`'s pre-rewrite inline computation (deleted,
-  not `# deprecated` and kept); `fold.py`'s `max()`-over-raw-`exit_code`
+- Phase 7: `fold.py`'s `max()`-over-raw-`exit_code`
   aggregation (replaced outright by `RunOutcome.gate`-ordering aggregation
-  in the same phase, not left running alongside it). `gate.py`'s
+  in the same phase, not left running alongside it). **Not removed, ever,
+  per Phase 7's own corrected design**: `junit_report.py`'s own
+  `_is_failure` computation — its answer is a per-render function of each
+  call's own `SeverityConfig`/`relevant_ids`, not a property a finding
+  carries, so there is nothing for it to be superseded by and deleting it
+  would remove real, still-needed behavior rather than a second path.
+  `gate.py`'s
   legacy-`exit_code`-only decode fallback is the one exception to "delete
   in the same PR": it stays, the same way Phase 0's reliability-flag
   backfill stays, only so a report predating this phase's schema addition
