@@ -87,7 +87,7 @@ purposes, per `compute_verdict()`'s own "Unknown policy names fall back to
 parameter. Closing this specific gap (threading a resolved `PolicyFile`
 through `_collect_bundle_result`/`_run_bundle_analysis` the same way the
 stored-facts driver already does) is tracked in
-[G38's plan, Phase 15](../contribute/plans/g38-bundle-facts-model-and-multibuild-comparability.md).
+[G38's plan, Phase 16](../contribute/plans/g38-bundle-facts-model-and-multibuild-comparability.md).
 Direct, per-finding suppression of a `bundle_*` kind is still not
 supported on any entry point — see the suppression section below,
 unchanged by this.

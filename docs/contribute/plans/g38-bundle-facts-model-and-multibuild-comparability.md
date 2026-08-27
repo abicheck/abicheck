@@ -1917,15 +1917,36 @@ API report may demote/filter it (unaffected, by design). The bundle report
 must emit a consumer-attributed breaking finding. The identical change with
 no sibling consumer must not become a bundle break.
 
-**Files & surfaces:** `abicheck/bundle.py`'s `_detect_intra_dep_signature_
-changed`/`_detect_intra_type_changed`/`_detect_provider_changed` (the three
-diff-derived detectors); `compare_bundle()`'s own call sites
-(`cli_compare_release.py`, `bundle_side_input.py`) need to supply the
-unscoped evidence alongside the already-scoped `per_library_results` they
-pass today — likely as a second, parallel `unscoped_results`/raw-evidence
-argument rather than re-running the per-library compare a second time
-with scoping disabled (that would double the extraction cost this
-initiative's own Phase 8/13-follow-up work is careful to bound).
+**Files & surfaces — routed through ADR-061's canonical package owners, not
+grown in the frozen legacy modules that currently host this logic**
+(`bundle.py`/`bundle_side_input.py` are both listed in `architecture/
+modules.yaml`'s `legacy_root_modules` no-growth inventory, and
+`cli_compare_release.py` is a `frozen_root_families["cli_"]` entry — new
+behavior belongs in the target layer, with only a thin call added to the
+existing legacy entry point):
+
+- **`abicheck/compare/`** — the new raw, unscoped signature/type-matching
+  logic itself (a `compare/`-owned sibling to today's
+  `_detect_intra_dep_signature_changed`/`_detect_intra_type_changed`/
+  `_detect_provider_changed`, since this is "match old/new entities or
+  identify a raw change" per ADR-061's routing table) plus the
+  bundle-specific consumer/provider reachability gate.
+- **`abicheck/workflows/`** — coordination that decides when to invoke the
+  new `compare/` matcher (alongside the existing graph-native detectors)
+  and folds its output into `BundleDiffResult`, rather than this decision
+  living inline in `bundle.py`/`bundle_side_input.py` directly.
+- **`abicheck/frontends/`** — the CLI-level plumbing that supplies the
+  unscoped evidence to `workflows/` for the `compare-release` fan-out
+  (today's `cli_compare_release.py`/`cli_compare_release_helpers.py` call
+  sites gain only the minimal forwarding needed, not new detector logic).
+- `bundle.py`/`bundle_side_input.py`/`cli_compare_release.py` keep their
+  existing call shape (`compare_bundle()`'s own signature, `analyze_bundle()`),
+  extended with a second, parallel `unscoped_results`/raw-evidence
+  parameter that is threaded straight through to the new `compare/`/
+  `workflows/` code — likely as a second, parallel argument rather than
+  re-running the per-library compare a second time with scoping disabled
+  (that would double the extraction cost this initiative's own Phase
+  8/13-follow-up work is careful to bound).
 
 **Effort:** M — the reachability-gating logic already exists in spirit for
 the graph-native detectors; the new work is threading a second, unscoped

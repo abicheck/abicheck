@@ -184,9 +184,21 @@ from the report.
   validated — near `abicheck/buildsource/project_targets.py`) — new
   `environments:` top-level block, new `id`/`analysis:`/`environment:` check
   fields.
-- `abicheck/bundle.py` / a new sibling module for environment-aware provider
-  resolution (a dependency-edge resolver consulted from bundle analysis,
-  not a rewrite of `compare_bundle` itself).
+- **Environment-aware provider resolution — routed through ADR-061's
+  canonical package owners, not `abicheck/bundle.py`** (a
+  `legacy_root_modules` no-growth entry per `architecture/modules.yaml`):
+  reading the environment's sysroot/package facts (presence, SONAME,
+  export, symbol version) is "read a build/debug fact," so that extraction
+  belongs in **`abicheck/extract/`**; the resolved provider identity is a
+  shared value, so it belongs in **`abicheck/model/`**; matching a
+  dependency edge against the resolved environment is **`abicheck/
+  compare/`**'s job ("match old/new entities or identify a raw change");
+  the incomplete-coverage classification this produces is
+  **`abicheck/policy/`**'s ("decide relevance, suppression,
+  classification... gating"); and **`abicheck/workflows/`** coordinates
+  invoking this resolver from bundle/scan analysis. `bundle.py` gains only
+  the minimal call site needed to consult the new resolver, not the
+  resolution logic itself.
 - `.github/workflows/check-project.yml` — per-cell environment id/digest
   forwarding into the report envelope.
 - `abicheck/cli_aggregate.py` — environment axis in the profile/evaluation

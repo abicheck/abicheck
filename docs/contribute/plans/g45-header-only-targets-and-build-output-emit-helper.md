@@ -171,13 +171,40 @@ file can never itself fail the validator it's meant to satisfy.
   `project_targets.py` allows.
 - `abicheck/buildsource/baseline_publish.py` — header-only baseline
   handling (no fabricated binary fields).
-- `abicheck/buildsource/build_output_emit.py` (new) — the typed builder.
-- `abicheck/cli_project.py` — new `emit-build` subcommand, following the
-  existing `project validate`/`project validate-build`/`project plan`
-  subcommand precedent (root `AGENTS.md`'s "Adding a new top-level command"
-  section already establishes that this class of operation belongs under
-  the existing `project` group, not as a new root command).
+- **`abicheck/storage/`** (new module, not `abicheck/buildsource/
+  build_output_emit.py` as an earlier draft of this plan proposed) — the
+  typed builder's actual `build-output.json` schema/write path. Per
+  ADR-061's routing table, `storage/` is the canonical owner of
+  serialization/schema/write logic for this class of artifact —
+  `build-output.json` is exactly a schema this tool writes and validates,
+  the same category as the baseline manifest G41 Phase 1 routes there.
+  Keep any digest/tool-identity computation here too, alongside the
+  writer, rather than split across two modules.
+- **`abicheck/frontends/`** — the `project emit-build` CLI command adapter
+  itself (parsing `--target`/`--binary`/`--public-header-root`/etc. and
+  calling the `storage/` builder), following ADR-061's `frontends/` role
+  ("CLI flag, Python adapter") — `abicheck/cli_project.py` is a
+  `frozen_root_families["cli_"]` legacy module per `architecture/
+  modules.yaml`, so it should gain only the thin `@project_group.command`
+  registration shim, not the builder logic itself.
 - `docs/reference/cli-reference.md` (generated) — new subcommand entry.
+- **`actions/check-target/action.yml`/`actions/check-target/run.sh`** — a
+  header-only target still cannot reach a real check without this: `new-
+  library` is declared `required: true` in `action.yml`, and `run.sh`'s
+  compare-mode dispatch does `CMD+=("${INPUT_NEW_LIBRARY:?new-library is
+  required}")` — a hard failure with no binary operand. Confirmed by
+  reading both files directly. This plan must relax `new-library` to
+  optional (mirroring how the dump/compare CLI's own `--depth headers`
+  path already accepts no binary operand) and add the equivalent
+  "no binary, headers/source-only" branch to `run.sh`'s dispatch — without
+  this, the `build-output.json` exemption above is necessary but not
+  sufficient: the target still can't run a candidate check end to end.
+- `abicheck/cli_dump_helpers.py`/`abicheck/cli_compare_helpers.py` (or
+  their `frontends/`-routed successors) — confirm the underlying `dump`/
+  `compare` CLI already accepts a headers/source-only operand with no
+  binary path (it does, for `depth: headers`/`depth: source`, per this
+  tool's existing design) and that `check-target`'s own dispatch forwards
+  that shape correctly instead of assuming a binary path is always present.
 
 ## Tests
 
@@ -194,11 +221,20 @@ file can never itself fail the validator it's meant to satisfy.
 
 ## Effort & risk
 
-M combined (S–M each):
+M combined (revised up from S–M for the header-only slice, since the
+`actions/check-target` gap below turned out to be load-bearing, not
+cosmetic):
 
-- Header-only targets: S–M — mostly validation-logic relaxation plus
-  baseline-publication field omission; low architectural risk since it's
-  additive to an existing, well-tested validation path.
+- Header-only targets: M — `project_targets.py`/`build_output.py` relaxation
+  is S–M on its own, but reaching a real, runnable check also needs
+  `actions/check-target/action.yml`'s `new-library: required: true` relaxed
+  and `run.sh`'s compare-mode dispatch given a no-binary branch (confirmed
+  by reading both — `run.sh`'s `CMD+=("${INPUT_NEW_LIBRARY:?new-library is
+  required}")` fails hard with no operand today). Without this second half,
+  the `build-output.json`/`project_targets.py` relaxation alone leaves the
+  target validated but still unable to run the check the feature exists
+  for — verify this end-to-end via the acceptance test, not just via
+  `project validate-build` passing.
 - `emit-build` helper: M — the builder itself is straightforward once the
   digest/normalization conventions are reused rather than reinvented; the
   main risk is scope creep into build-system discovery, which is

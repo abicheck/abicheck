@@ -152,7 +152,25 @@ already does for the candidate side (see `abicheck/buildsource/run_plan.py`
 lines documenting `consumer_compile_gcc_path`/`consumer_compile_gcc_options`/
 `consumer_compile_ast_frontend`/`consumer_compile_active`).
 
-The baseline manifest (`abicheck/buildsource/baseline_publish.py`,
+**The manifest schema/serialization/selection-key logic belongs in
+`abicheck/storage/`, not grown inline in `buildsource/baseline_publish.py`/
+`baseline_set.py`.** Per ADR-061's routing table and `architecture/
+modules.yaml`'s own `storage` layer definition (`may_import: [model]`),
+`storage/` is the canonical owner of "serialize snapshots/baselines, own
+their schemas/migrations, or manage caches" — the new manifest fields,
+their schema-version bump, and the widened `(target, profile, channel,
+fingerprint)` selection key described below are exactly that. Add a new
+baseline-manifest schema/reader/writer module under `abicheck/storage/`
+(it only needs `model/`, matching the layer's own import constraint), and
+have `buildsource/baseline_publish.py`/`baseline_set.py` — which still own
+the *orchestration* (resolving a run plan, invoking the dump, deciding
+*when* to publish) — call into it rather than serializing the manifest
+inline themselves. This mirrors G44's own package-routing discipline: new
+schema/storage logic goes to its canonical owner, and the existing
+`buildsource/` module keeps only the coordination glue.
+
+The baseline manifest (its schema now owned by the new `abicheck/storage/`
+module above, orchestrated from `abicheck/buildsource/baseline_publish.py`/
 `abicheck/buildsource/baseline_set.py`) should persist, per stored baseline
 entry:
 
@@ -290,10 +308,16 @@ mistake (see `AGENTS.md`'s numbered findings on the L3→L2-fold entry).
 - `.github/workflows/publish-baseline.yml`, `update-main-baseline.yml` —
   Phase 1: resolve a run plan / `ResolvedExtractionContext` before dumping
   the old side; forward `consumer_compile_*`.
+- `abicheck/storage/` (new module) — Phase 1: the baseline-manifest
+  schema/serialization itself — manifest fields (producer/consumer compiler
+  context, header frontend, header roots, evidence identity, depth,
+  fingerprint), the schema-version bump, and the widened
+  `(target, profile, channel, fingerprint)` selection key — per ADR-061's
+  routing (`storage/` owns schemas/migrations for snapshots/baselines).
 - `abicheck/buildsource/baseline_publish.py`, `baseline_set.py` — Phase 1:
-  manifest fields (producer/consumer compiler context, header frontend,
-  header roots, evidence identity, depth, fingerprint); selection key
-  widened to `(target, profile, channel, fingerprint)`.
+  orchestration only (resolving the run plan, invoking the dump, calling
+  the new `storage/` module to read/write the manifest) — no schema logic
+  grown here directly.
 - `abicheck/buildsource/run_plan.py` — Phase 2: new `RunPlanCheck` fields
   (`public_header_roots`, `generated_header_roots`, `include_dirs`,
   `compile_context`), projected in `_generate_target_checks`/
