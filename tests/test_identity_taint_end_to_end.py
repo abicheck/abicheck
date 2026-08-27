@@ -134,6 +134,28 @@ private:
 };
 template <class F> inline int invoke_with(F f) { return f(); }
 inline int uses_lambda() { return invoke_with([]() { return 7; }); }
+// A CLASS template instantiated over a closure, not just a function
+// template -- castxml's own real closure-taint mechanism (AGENTS.md's
+// "Lambda-closure churn" entry) is specifically synthetic ctor/dtor keys
+// on a class template instantiated with a lambda argument, which embed
+// the owning class's own template-argument spelling as literal text in
+// Function.mangled. A bare function-template parameter's own type
+// (invoke_with above) is NOT guaranteed to carry that marker on every
+// backend: castxml genuinely cannot resolve a closure class declared
+// inside a function body to anything but the unresolvable-type sentinel
+// "?" for that shape (confirmed by a real CI failure on this exact
+// fixture, PR #898 -- see AGENTS.md's own note on this castxml
+// limitation), so this class-template construct is what actually gives
+// castxml a location-bearing identity to carry.
+template <class F> class Guard {
+public:
+    explicit Guard(F f) : fn_(f) {}
+    ~Guard() {}
+    int run() { return fn_(); }
+private:
+    F fn_;
+};
+inline int uses_guard() { Guard g([]() { return 13; }); return g.run(); }
 }
 """
 
@@ -143,6 +165,7 @@ namespace lib {
 int add(int a, int b) noexcept { return a + b; }
 int Widget::value() const { return hidden_; }
 int touch_lambda() { return uses_lambda(); }
+int touch_guard() { return uses_guard(); }
 }
 """
 
@@ -165,22 +188,31 @@ def _assert_exercises_closure_taint(snap: object) -> None:
     exactly that identity shape (the historical taint mechanism) would go
     uncaught while the test stays green for an unrelated reason (ordinary
     named declarations don't embed source location in their identity at
-    all). Checks the actual ``(lambda:...)`` marker in a parameter/return
-    type spelling, not merely a mangled-name substring: the GENERIC,
-    uninstantiated template pattern itself (e.g. ``invoke_with``, no
-    lambda involved at all) also matches an ``"invoke_with" in f.mangled``
-    check, so that alone would stay green even if the actual
-    lambda-parameterized specialization vanished from the snapshot (Codex
-    review, PR #898). Fails loudly, not silently, if the fixture stops
-    producing one."""
-    spellings = {
+    all). Checks for a ``(lambda`` marker anywhere a backend could
+    plausibly embed one: a parameter/return type spelling (direct-clang's
+    own representation for `invoke_with`'s closure argument), a function's
+    own ``mangled`` (castxml's synthetic ctor/dtor keys embed the OWNING
+    class's own template-argument spelling there -- e.g. ``Guard``'s ctor/
+    dtor above, per AGENTS.md's "Lambda-closure churn" entry), or a type's
+    ``name``/``qualified_name``. Not merely a mangled-name SUBSTRING check
+    on its own, though: the GENERIC, uninstantiated template pattern
+    itself (e.g. ``invoke_with``, no lambda involved at all) also matches
+    an ``"invoke_with" in f.mangled`` check, so that alone would stay
+    green even if the actual lambda-parameterized specialization vanished
+    from the snapshot -- this only accepts the literal ``(lambda`` marker
+    text, never a bare template-name substring (Codex review, PR #898).
+    Fails loudly, not silently, if the fixture stops producing one."""
+    functions = snap.functions  # type: ignore[attr-defined]
+    types = snap.types  # type: ignore[attr-defined]
+    candidates = {
         t
-        for f in snap.functions  # type: ignore[attr-defined]
-        for t in ([f.return_type] + [p.type for p in f.params])
-    }
-    assert any("(lambda" in s for s in spellings if s), (
-        f"expected a lambda-parameterized type spelling ('(lambda...)') "
-        f"among the snapshot's function signatures, found: {spellings}"
+        for f in functions
+        for t in ([f.mangled, f.return_type] + [p.type for p in f.params])
+    } | {t for ty in types for t in (ty.name, ty.qualified_name)}
+    assert any(c and "(lambda" in c for c in candidates), (
+        f"expected a '(lambda...)' marker somewhere in the snapshot's "
+        f"function signatures/mangled names or type identities, found: "
+        f"{candidates}"
     )
 
 
@@ -312,6 +344,15 @@ private:
 };
 template <class F> inline int invoke_with(F f) { return f(); }
 inline int uses_lambda() { return invoke_with([]() { return 7; }); }
+template <class F> class Guard {
+public:
+    explicit Guard(F f) : fn_(f) {}
+    ~Guard() {}
+    int run() { return fn_(); }
+private:
+    F fn_;
+};
+inline int uses_guard() { Guard g([]() { return 13; }); return g.run(); }
 }
 """
         so_a, header_a = _build(root_a, _HEADER, _SOURCE)
@@ -349,6 +390,15 @@ class TestReorderingUnrelatedDeclarationsIsANoOp:
 namespace lib {
 template <class F> inline int invoke_with(F f) { return f(); }
 inline int uses_lambda() { return invoke_with([]() { return 7; }); }
+template <class F> class Guard {
+public:
+    explicit Guard(F f) : fn_(f) {}
+    ~Guard() {}
+    int run() { return fn_(); }
+private:
+    F fn_;
+};
+inline int uses_guard() { Guard g([]() { return 13; }); return g.run(); }
 class Widget {
 public:
     int value() const;
