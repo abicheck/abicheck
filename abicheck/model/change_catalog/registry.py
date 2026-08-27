@@ -257,6 +257,39 @@ class ChangeKindMeta:
     applied to ``_ImmutableDict`` itself (a ``MappingProxyType``-backed
     ``_data`` plus its own ``__setattr__`` guard) applied one layer up, to
     the object that holds it.
+
+    **Residual, deliberately not chased further** (Codex review, PR #882,
+    fresh evidence): ``object.__setattr__(entry, "policy_overrides", ...)``
+    still mutates a live entry even with ``slots=True``, since it calls the
+    base implementation directly and bypasses the *class's own* generated
+    ``__setattr__`` override entirely — the same escape hatch
+    ``__post_init__`` itself legitimately relies on to set fields on an
+    otherwise-frozen instance, and the Python docs name it as the standard
+    workaround for `frozen=True` generally. This is not specific to this
+    class's design: no combination of ``frozen``/``slots``/a custom
+    ``__setattr__`` closes it for *any* ordinary Python class, since
+    ``object.__setattr__`` always resolves to the same underlying
+    descriptor-set operation a data descriptor's own ``__set__`` would
+    reach anyway — only a type with no settable descriptor for the name at
+    all (a ``NamedTuple``, whose fields are plain ``property`` getters
+    over immutable tuple storage) resists it, confirmed empirically. That
+    would mean replacing this dataclass with a materially different
+    representation — no ``__post_init__``, a custom ``__new__`` in its
+    place, ``dataclasses.asdict()``/``dataclasses.fields()`` call sites
+    elsewhere (tests only, checked) moved to the namedtuple equivalents —
+    a redesign disproportionate to the actual threat model: reaching this
+    path already requires a caller *inside the same process* deliberately
+    choosing the documented low-level bypass over the class's own public
+    surface, at which point simpler routes to the identical outcome exist
+    (replacing ``REGISTRY`` itself, monkeypatching
+    ``checker_policy.policy_kind_sets``) — the same limitation every other
+    ``frozen=True`` dataclass in this codebase already has, not a new gap
+    introduced here. What ``slots=True`` above actually defends against —
+    and the only threat model this class's immutability was ever meant to
+    cover — is *accidental* mutation through ordinary, non-adversarial
+    code (a caller not realizing ``entry.policy_overrides["x"] = y`` or
+    ``entry.__dict__[...] = ...`` corrupts shared state), which it still
+    does.
     """
 
     kind: str  # ChangeKind enum value (e.g. "func_removed")
@@ -328,21 +361,35 @@ class ChangeKindMeta:
         memo[id(self)] = new
         return new
 
-    def __setstate__(self, state: list[Any]) -> None:
+    def __setstate__(self, state: list[Any] | dict[str, Any]) -> None:
         # Pickle's default protocol restores a slotted dataclass by calling
         # this method (when defined) with the value ``object.__getstate__()``
         # produces for a __dict__-less instance: a plain LIST of field
         # values in declaration order, not a dict keyed by field name (a
         # slots dataclass has no per-field key/value mapping to hand back —
-        # confirmed empirically, and different in shape from the pre-slots
-        # revision of this method, which received a dict). It never calls
-        # __init__/__post_init__. A pickle written before policy_overrides
-        # became an _ImmutableDict (or one produced by any code that had a
-        # plain dict at this field) would therefore silently install a
-        # plain, mutable dict on the restored instance, bypassing every
-        # validation/immutability guarantee __post_init__ establishes —
-        # confirmed with a real pickle from before the _ImmutableDict
-        # change: type(loaded.policy_overrides) is dict, and
+        # confirmed empirically). But a pickle produced by the immediately
+        # preceding, pre-``slots=True`` revision of this class restores with
+        # the OLDER shape instead — that class had a real ``__dict__``, so
+        # its own default ``__getstate__`` returned it directly, a dict
+        # keyed by field name. Loading such a pickle here is a real,
+        # supported case (not a hypothetical): it's what "the immediately
+        # preceding released version's pickle" looks like, one commit back
+        # (Codex review, PR #882, fresh evidence — confirmed against a real
+        # pickle produced by that exact prior revision). Treating a dict
+        # state as though it were the new positional-list shape would zip
+        # field names against the dict's own KEYS instead of its values
+        # (``dict.__iter__`` yields keys), eventually feeding the literal
+        # string ``"policy_overrides"`` to ``_ImmutableDict`` and raising
+        # ``ValueError`` — confirmed exactly. Handle both shapes explicitly
+        # instead of assuming the new one unconditionally.
+        #
+        # A pickle written before policy_overrides became an
+        # ``_ImmutableDict`` (or one produced by any code that had a plain
+        # dict at this field) would, in either state shape, otherwise
+        # silently install a plain, mutable dict on the restored instance,
+        # bypassing every validation/immutability guarantee __post_init__
+        # establishes — confirmed with a real pickle from before the
+        # _ImmutableDict change: type(loaded.policy_overrides) is dict, and
         # loaded.policy_overrides["x"] = y succeeds (Codex review, PR #882,
         # fresh evidence). Normalize on load instead, so every restored
         # instance's policy_overrides is provably an _ImmutableDict
@@ -386,8 +433,14 @@ class ChangeKindMeta:
                 "ChangeKindMeta.__setstate__ refuses to overwrite an "
                 "already-initialized instance"
             )
-        field_names = [f.name for f in fields(self)]
-        values = dict(zip(field_names, state, strict=True))
+        values: dict[str, Any]
+        if isinstance(state, dict):
+            # Legacy shape: a pre-slots pickle's own __dict__, already keyed
+            # by field name.
+            values = dict(state)
+        else:
+            field_names = [f.name for f in fields(self)]
+            values = dict(zip(field_names, state, strict=True))
         overrides = values.get("policy_overrides")
         if not isinstance(overrides, _ImmutableDict):
             values["policy_overrides"] = _ImmutableDict(overrides or {})

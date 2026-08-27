@@ -261,9 +261,17 @@ SYMBOLS_ENTRIES: list[ChangeKindMeta] = [
               "`#include` the header and get recompiled can each emit "
               "their own external definition of the same name, producing "
               "multiple-definition link errors that don't arise in the "
-              "C++ case. Either way, the function's own signature and "
-              "calling convention are unchanged, so this is low-risk for "
-              "already-linked consumers.",
+              "C++ case. This detector matches functions by mangled name "
+              "and only checks `is_inline` — it doesn't verify the "
+              "signature is otherwise unchanged, and a mangled name alone "
+              "doesn't guarantee that: a return-type change, for "
+              "instance, doesn't affect Itanium mangling, so a companion "
+              "`func_return_changed` finding is possible on the same "
+              "matched pair and takes precedence over this one's low-risk "
+              "read. When no companion signature finding fires, the "
+              "function's own signature and calling convention are "
+              "unchanged, so this is low-risk for already-linked "
+              "consumers.",
        description_template="Function lost inline attribute: {name}"),
     _E("func_noexcept_added", _C,
        impact="In C++17 noexcept is part of the function type; old callers compiled against non-noexcept signature get a different mangled name."),

@@ -477,6 +477,39 @@ class TestChangeKindRegistry:
         with pytest.raises(TypeError):
             restored.policy_overrides["unknown"] = Verdict.API_BREAK
 
+    def test_setstate_accepts_a_pre_slots_dict_shaped_pickle(self):
+        """A pickle from the immediately preceding, pre-``slots=True`` revision must still load.
+
+        That revision's class had a real ``__dict__``, so its own default
+        ``__getstate__`` returned it directly — a dict keyed by field name,
+        not the positional list a slotted instance restores from. Treating
+        that dict as though it were the new list shape zips field names
+        against the dict's own KEYS (``dict.__iter__`` yields keys, not
+        values), eventually feeding the literal string
+        ``"policy_overrides"`` to ``_ImmutableDict`` and raising
+        ``ValueError`` (Codex review, PR #882, fresh evidence — confirmed
+        against a real pickle produced by that exact prior revision).
+        ``__setstate__`` must handle both shapes.
+        """
+        from abicheck.model.change_catalog.registry import _ImmutableDict
+
+        legacy_dict_state = {
+            "kind": "test_kind",
+            "default_verdict": Verdict.BREAKING,
+            "impact": "x",
+            "is_addition": False,
+            "policy_overrides": {"plugin_abi": Verdict.COMPATIBLE},
+            "description_template": None,
+        }
+        restored = object.__new__(ChangeKindMeta)
+        restored.__setstate__(legacy_dict_state)
+
+        assert restored.kind == "test_kind"
+        assert restored.default_verdict == Verdict.BREAKING
+        assert restored.impact == "x"
+        assert isinstance(restored.policy_overrides, _ImmutableDict)
+        assert dict(restored.policy_overrides) == {"plugin_abi": Verdict.COMPATIBLE}
+
     def test_setstate_refuses_to_mutate_an_already_initialized_entry(self):
         """``__setstate__`` is an ordinary method, not exclusive to pickle.
 
