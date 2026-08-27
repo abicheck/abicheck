@@ -1643,12 +1643,35 @@ sibling:
   public_roots()` therefore filters the received `EntityId` set to
   `kind in (FUNCTION, VARIABLE)` *before* mapping — a type-kind id in the
   resolved set is simply not part of this particular root set and is
-  dropped, not mapped-and-failed — then maps each remaining `EntityId`
-  back to the snapshot's own
-  symbol/mangled-name spelling (via the `Function`/`Variable` the identity
-  already resolves to — `EntityId`'s function variant carries the mangled
-  name directly in `extra` when one exists, the same primitive Phase 2
-  already built), preserving its existing `frozenset[str]` return type
+  dropped, not mapped-and-failed.
+
+  **Mapping the resolved id back to its *mangled* spelling is the wrong
+  target, and a review round correctly traced why: `public_roots()`'s
+  existing contract is keyed on the plain declaration name, not the
+  mangled one, and every one of its own consumers already depends on
+  that.** Reading `surface_graph.py` directly: `public_roots()` is
+  `frozenset(self._root_seed_types)`, and `_root_seed_types` is built by
+  `_build_root_seed_types()` keyed on `fn.name`/`var.name` — the plain
+  `Function`/`Variable` display name, deliberately (its own docstring:
+  "C++ overloads share a demangled name... their seed sets are unioned"),
+  never the mangled spelling. `reachable_types(root)` looks `root` up in
+  that same dict directly. `idioms.py`'s `_recognise_create_destroy()`
+  applies human-readable `create_*`/`destroy_*` regexes against these same
+  keys, which only make sense against a plain name — a mangled Itanium
+  symbol never matches those patterns at all. Returning `_Z...`-mangled
+  spellings from the resolved-id mapping would therefore either silently
+  disconnect every returned root from its own seed types (a `root` string
+  `reachable_types`/`_root_seed_types` has never heard of) or suppress
+  create/destroy pattern recognition outright — changing pattern-verdict
+  and surface-metric findings, not merely an internal representation
+  detail. Fixed by mapping each remaining `EntityId` back to the existing
+  `Function.name`/`Variable.name` spelling instead — the exact key
+  `_root_seed_types`/`reachable_types`/`idioms.py`'s regexes already use
+  today, unchanged by this phase — not the mangled name; `EntityId`'s
+  function variant carrying the mangled name in `extra` remains useful
+  for identity/matching purposes elsewhere in this plan, just not as
+  `public_roots()`'s own return value. This preserves its existing
+  `frozenset[str]` return type
   and its existing consumers' string-based contract exactly. `SurfaceGraph`
   itself
   is not deleted or folded into `model/graph.py` — it answers a genuinely
@@ -2529,12 +2552,20 @@ a `checker.compare()` run over a fixture where `Visibility.PUBLIC` and
 real reachability disagree, asserting the pattern-verdict/surface-metrics
 findings `compare()` actually produces reflect the resolved `EntityId`
 answer, not the legacy `Visibility.PUBLIC`-only one — confirmed by
-patching `build_surface_graph`/`compute_surface_metrics` to assert they
-were called with non-`None` `old_public_entity_ids`/`new_public_entity_ids`
-when reached through `compare()`, not only by comparing output, so a
-future regression that silently stops threading either parameter through
-`checker.py` fails this test even if it happens not to change the specific
-fixture's output. A sixth regression pins the two-sided correction
+patching two different call boundaries, not one, since the pair and the
+singular value live on different functions after the single-snapshot-
+helper correction (a review round correctly caught a version of this test
+description that patched `build_surface_graph`/`compute_surface_metrics`
+for the pair, which those functions no longer accept at all): asserting
+`checker.py`'s `_apply_pattern_verdicts_step`/`_apply_surface_metrics`
+call `apply_pattern_verdicts()`/`diff_surface_metrics()` with non-`None`
+`old_public_entity_ids`/`new_public_entity_ids` when reached through
+`compare()`, and separately asserting each of `build_surface_graph`/
+`compute_surface_metrics` receives its own side's value as the singular
+`public_entity_ids` argument — not only by comparing output, so a
+future regression that silently stops threading either the pair or the
+per-call singular value through `checker.py` fails this test even if it
+happens not to change the specific fixture's output. A sixth regression pins the two-sided correction
 itself, directly: a fixture where a declaration is public in `old` but
 removed from the public-header set in `new` (or the reverse) — the one
 shape a single shared id set would misclassify — asserting
