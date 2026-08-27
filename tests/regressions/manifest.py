@@ -67,11 +67,22 @@ class KnownGap:
     just documented here: an ordinary `@pytest.mark.xfail` is non-strict by
     this repository's own pytest config (no `xfail_strict` ini option), so
     an unexpected pass (XPASS, i.e. the gap silently closed) still reports
-    green — use `@pytest.mark.xfail(..., strict=True)` or the runtime
-    `pytest.xfail(...)` call form instead. A bare `@pytest.mark.skip` is
-    rejected outright: a skipped test never executes at all, so it cannot
-    detect the residual closing *or* widening — it only proves the file
-    exists (Codex review, PR #885).
+    green — use `@pytest.mark.xfail(..., strict=True)` instead. A bare
+    `@pytest.mark.skip` is rejected outright: a skipped test never executes
+    at all, so it cannot detect the residual closing *or* widening — it
+    only proves the file exists. A conditional runtime `pytest.xfail(...)`
+    call (`if not fixed_yet(): pytest.xfail(...)`) is **not** an equivalent
+    substitute for `strict=True`, despite looking like one: once the
+    guarding condition stops being met (the gap closes), execution falls
+    through to whatever follows and, if that now passes, pytest records an
+    ordinary PASS — not an XPASS — so nothing distinguishes it from any
+    other passing test and CI stays green with no alert (Codex review,
+    PR #885, fresh evidence after the first review round). A canary with no
+    xfail/skip decorator at all must instead directly assert the *residual's
+    own bound* (the specific degraded/wrong value the gap currently
+    produces) rather than the eventually-correct behavior — asserting the
+    bound fails loudly the moment the real behavior diverges from it, in
+    either direction.
     """
 
     #: What's not covered (one sentence — the full account lives in

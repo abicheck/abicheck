@@ -87,6 +87,21 @@ def _canary_strictness_violation(source: str) -> str | None:
     `xfail_strict` ini option, so a bare `@pytest.mark.xfail` stays green
     on an unexpected pass, and a `@pytest.mark.skip`'d test never executes
     at all — neither can detect the tracked residual closing or widening).
+
+    Only rejects the two decorator patterns that are *unconditionally*
+    wrong regardless of the test body: a non-strict/bare `@pytest.mark.
+    xfail` and any `@pytest.mark.skip`. It does **not** accept — nor
+    specifically endorse — a conditional runtime `pytest.xfail(...)` call
+    as an equivalent to `strict=True`: a second review round (fresh
+    evidence) found that once the guarding condition stops being met, such
+    a call is simply never reached, and whatever follows just runs to an
+    ordinary PASS with no XPASS-style signal at all. Static source
+    scanning cannot tell a canary built that way apart from one that
+    correctly asserts the residual's own bound (the legitimate pattern for
+    "no xfail/skip decorator at all") — that distinction is semantic, not
+    syntactic, so it's on the author, not this check, the same way this
+    function already can't verify a bare assertion genuinely encodes the
+    gap rather than something unrelated.
     """
     if _decorator_call_args(source, "skip"):
         return "uses @pytest.mark.skip, which never executes and so cannot fail loudly"
@@ -95,7 +110,7 @@ def _canary_strictness_violation(source: str) -> str | None:
             return (
                 "uses a non-strict @pytest.mark.xfail — an unexpected pass "
                 "(XPASS) stays green with no `xfail_strict` ini option set; "
-                "use `strict=True` or the runtime `pytest.xfail(...)` call form"
+                "use `strict=True` instead"
             )
     return None
 
@@ -301,10 +316,18 @@ class TestCanaryStrictnessViolation:
         source = "def test_x():\n    assert some_bound_still_holds()\n"
         assert _canary_strictness_violation(source) is None
 
-    def test_a_runtime_pytest_xfail_call_is_accepted(self) -> None:
-        """The `pytest.xfail(...)` call form immediately aborts the test as
-        XFAIL when reached — inherently as loud as `strict=True` — and
-        doesn't match the `@pytest.mark.xfail` decorator pattern at all."""
+    def test_a_conditional_runtime_xfail_is_not_flagged_but_is_not_endorsed(
+        self,
+    ) -> None:
+        """This shape is NOT a reliable strict canary — once `fixed_yet()`
+        starts returning `True`, the `pytest.xfail(...)` call is never
+        reached and `assert real_behavior()` passing is an ordinary PASS,
+        not an XPASS, so nothing alerts (Codex review, PR #885, second
+        round). `_canary_strictness_violation` still doesn't flag it: the
+        call is neither `@pytest.mark.skip` nor `@pytest.mark.xfail`, and
+        static scanning can't distinguish this shape from a genuine bound
+        assertion — this test pins that known limitation rather than
+        endorsing the pattern (see the function's own docstring)."""
         source = (
             "def test_x():\n"
             "    if not fixed_yet():\n"
