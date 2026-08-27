@@ -1192,10 +1192,20 @@ here rather than argued away.** Python's structural typing (PEP 544) means a
 without `PolicyFile` importing or inheriting from it at all — so
 `checker_types.py`'s field, typed against the protocol instead of the
 concrete class, resolves `bundle_models.py:500`'s
-`diff.policy_file.compute_verdict(...)` correctly under mypy. The "no
-version... keeps every consumer typed correctly" framing just above was
-about a subclass/narrowing split specifically; a protocol really does
-dissolve that half — *provided it declares the whole surface real callers
+`diff.policy_file.compute_verdict(...)` correctly under mypy — **but only if
+the collection-valued members are declared as read-only `@property` methods,
+not plain attributes.** A seventh Codex review round caught, and this pass
+reproduced directly with `mypy --strict` before trusting it: a plain
+`overrides: Mapping[ChangeKind, Verdict]` attribute on the protocol rejects
+`PolicyFile`'s `overrides: dict[ChangeKind, Verdict]` field outright
+(`expected "Mapping[...]", got "dict[...]"`) — mypy's protocol attributes
+are invariant unless declared read-only, since a writable one could be
+assigned through either type. The read-only-`@property` form checks clean
+against the identical `PolicyFile` unmodified. The "no version... keeps
+every consumer typed correctly" framing just above was
+about a subclass/narrowing split specifically; a protocol, correctly
+declared, really does dissolve that half — *provided it declares the whole
+surface real callers
 use, not a sketch of it.* **A sixth Codex review round caught that this
 paragraph's own first draft didn't**: it named only `overrides`, `reclassify`,
 and `compute_verdict()`, but a full re-scan of every `.policy_file.<member>`
