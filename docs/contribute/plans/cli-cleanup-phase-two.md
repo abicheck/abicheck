@@ -1922,13 +1922,14 @@ pipelines a fourth time.
   > (`git_commit`, `version`).
   >
   > **What still blocks routing `dump_cmd`'s real run through
-  > `execute_dump_request` — narrowed to two items, both real.** Blocker 4 is
+  > `execute_dump_request` — narrowed to two items, both real** (as of the note
+  > below, narrowed further to one). Blocker 4 is
   > closed on measurement, not just on reading: `service.run_dump`'s ELF branch
   > already runs every post-processing pass `perform_elf_dump` does (SYCL,
   > `python_ext`, `python_api`, `numpy_capi`, the G31 header graph, the G28
   > clang-layout attach), the ADR-039 collector now runs inside
   > `_resolve_side_snapshot_impl`, and the whole-snapshot comparison above shows
-  > no difference in any field those produce. What remains:
+  > no difference in any field those produce. What remained:
   >
   > 1. **`--compile-db-filter` would go inert.** `InputSpec` deliberately
   >    carries no `compile_db_filter` (see its own replacement comment), so the
@@ -1947,7 +1948,54 @@ pipelines a fourth time.
   >    non-default backend is not a verified change, and this section has said
   >    so since the previous session.
   >
-  > PR 3C therefore stays blocked, per this section's own ordering rule.
+  > **Item 1 closed (2026-08-21, later session).** `InputSpec.compile_db_filter`
+  > exists now, threaded into `_seeded_includes_and_compile_context` (as
+  > `source_filter`) and into `attach_build_context_for_parsed_headers`, and
+  > `resolve_dump_request` mirrors the CLI's own scope-error refusal —
+  > `compile_db_filter_scope_error`, extracted into
+  > `service_compare_evidence.reject_compile_db_filter_scope_mismatch` so
+  > `CompareRequest.old`/`.new` (which reach the identical fold through
+  > `resolve_compare_request`) share one guard rather than risking a second,
+  > independently-drifting copy. `dump_cmd` forwards its own
+  > `--compile-db-filter` into the request it builds, so `--dry-run` now
+  > records the same filter the real run would apply. Landing this needed nine
+  > separate review-caught corrections to the scope-mismatch guard itself — a
+  > `--sources`-only tree with an auto-discoverable compile database, a nested
+  > `<dir>/build/compile_commands.json`, a pack or Bazel `aquery`/`cquery`
+  > `--build-info`, a `--sources` pack with no `--build-info`, a false positive
+  > when an explicit `--build-info` resolves to nothing, `InputSpec.of()` not
+  > accepting the new keyword, and a Flow-2 `abicheck_inputs/` pack named by
+  > `--build-info` — each traced to a real, reachable combination rather than a
+  > hypothetical, and each pinned by its own regression test. See the root
+  > `AGENTS.md`'s `service_dump_pipeline.py`/PR C "Known gaps" entry for the
+  > full, numbered account (search "Item (1) closed") — not reproduced here in
+  > full, since it is the identical narrative this plan already defers to for
+  > every other slice in this subsection.
+  >
+  > **Item 2 (castxml) is unchanged and is now the sole remaining blocker** on
+  > routing `dump_cmd`'s real run through `execute_dump_request` — castxml is
+  > still unavailable in every environment this work has been done in.
+  >
+  > A further review round on the same slice found (and fixed) a real
+  > regression it introduced: `InputSpec.of()` — the loose-value convenience
+  > factory every front end besides a direct dataclass construction uses — had
+  > no `compile_db_filter` parameter, so it was reachable only by constructing
+  > `InputSpec` directly despite being advertised as public typed-API surface;
+  > and the scope guard was wired into `resolve_dump_request` only, leaving
+  > `CompareRequest`'s identical exposure through `resolve_side_snapshot`
+  > unguarded until the extraction above. A CI-caught regression from an
+  > unrelated fix in the same session — the write-time-embed fix that gave
+  > `dump`'s L4 replay real `public_headers`/`public_header_dirs` (the "second
+  > real bug" two paragraphs up) — asymmetrically widened `scan`'s own
+  > lone-header-file L4 root set relative to `dump`'s, producing a spurious
+  > `source_decl_binary_symbol_mismatch` on an unchanged library; fixed with an
+  > opt-in `l4_public_headers`/`l4_public_header_dirs` override on
+  > `embed_side_build_source`, scoped to `scan`'s candidate resolution alone
+  > (`compare`/`dump`'s typed pipeline are unaffected). Both are documented in
+  > full in the same root `AGENTS.md` entry.
+  >
+  > PR 3C therefore stays blocked on item 2 (castxml) alone, per this section's
+  > own ordering rule.
 
   Two #782 follow-ups that change the *parsed public surface*, not just
   performance, so they belong before the model is called finished: (1)
@@ -2071,6 +2119,23 @@ pipelines a fourth time.
   > removal, then migrate. The first of those three landed in that session
   > (see the same 3A note) and was a user-facing bug fix in its own right;
   > the second and third are untouched.
+  >
+  > **Update (2026-08-21, later still): the first two of item 1's three
+  > sub-ordering steps are now both done — the legacy-match removal decision
+  > was shipped, and `--compile-db-filter` gained typed-API representation
+  > (nine review-caught corrections; see the 3A sub-section's "Item 1 closed"
+  > note above for the account, and the root `AGENTS.md` for the full
+  > numbered list).** Item 1 of this status block therefore narrows from
+  > "typed-API representation... and reordering the write-time embed" to just
+  > the reordering half — `_write_snapshot_output`'s provenance/`--inputs`/
+  > depth-gate sequence around a resolve-time embed — plus the still-unstarted
+  > third step, actually migrating `dump_cmd`'s real ELF/PE/Mach-O execution
+  > onto `execute_dump_request`. That migration's own remaining blocker is
+  > singular and environmental, not a design question: castxml, still
+  > unavailable in every environment this work has been done in (item 2 of the
+  > 3A sub-section's own "What still blocks routing `dump_cmd`'s real run"
+  > note). Items 2 (the L4 extractor default divergence) and 3 (the `-H`
+  > directory gap, below) are unchanged.
 
 `dump --build-query` and `dump --build-compile-db` describe how the *project*
 is built, not what this snapshot is. They are already documented as CLI
