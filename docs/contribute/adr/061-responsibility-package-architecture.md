@@ -1069,11 +1069,13 @@ the eleven now-split parser modules (`elf_metadata.py`, `pe_metadata.py`,
 `macho_metadata.py`, `dwarf_metadata.py`, `dwarf_advanced.py`,
 `sycl_metadata.py`, `symvers_metadata.py`, `python_api.py`, `python_ext.py`,
 `numpy_capi.py`, `build_mode.py`) as `extract` and re-running
-`check_architecture.py` produces **7** findings today, all shaped
-`frontends -> extract` — `cli_compare_release.py`, `cli_datasources.py`,
-`cli_dump_helpers.py` (three sites), and `cli_resolve.py` importing a parser
-module directly rather than through a `workflows` re-export. None of the
-seven is a `service.py`-originated finding, since `service.py` is already
+`check_architecture.py` produces **7** findings today (verified against the
+tool's own output, line by line, after the "three sites" miscount below was
+caught), all shaped `frontends -> extract` — `cli_compare_release.py:1668`,
+`cli_datasources.py:36`, `cli_dump_helpers.py:610,1459,1468,1480` (four
+sites), and `cli_resolve.py:130` — importing a parser module directly rather
+than through a `workflows` re-export. None of the seven is a
+`service.py`-originated finding, since `service.py` is already
 `workflows`-classified and `workflows -> extract` is allowed — confirming
 this specific edge was never `service.py`'s own problem. That is a real,
 freshly-measured number for one slice of the original blocker, not a
