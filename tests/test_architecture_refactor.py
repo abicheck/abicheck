@@ -501,39 +501,49 @@ class TestChangeKindRegistry:
         # The live entry is completely unaffected by the rejected call.
         assert dict(entry.policy_overrides) == {"plugin_abi": Verdict.COMPATIBLE}
 
-    def test_setstate_revalidates_a_restored_entry(self):
-        """A restored (unpickled) entry must pass the same checks a hand-built one does.
+    def test_setstate_does_not_validate_matching_the_constructor(self):
+        """Restoring (unpickling) a standalone entry must not be stricter than building one.
 
-        ``__setstate__`` never goes through ``__post_init__``/
-        ``ChangeKindRegistry.__init__``, so without its own validation call
-        a crafted or corrupted pickle state — an unknown ``policy_overrides``
-        key, or blank ``impact`` text — would install successfully on a
-        blank instance. Fixed by having ``__setstate__`` call the same
-        ``_validate_entry`` construction-time validation applies.
+        Direct construction, ``ChangeKindMeta("x", Verdict.BREAKING)``, is
+        legal today with an empty ``impact``/an unrecognized
+        ``policy_overrides`` key — catalog validation is deliberately
+        deferred to ``ChangeKindRegistry.__init__``'s own loop over every
+        entry it actually holds, not applied per-instance at construction
+        time. An earlier revision of ``__setstate__`` called
+        ``_validate_entry`` unconditionally, which broke that symmetry:
+        ``pickle.loads(pickle.dumps(ChangeKindMeta("x", Verdict.BREAKING)))``
+        regressed from working to raising ``ValueError``, and would
+        equally have broken loading a standalone, not-yet-registry-inserted
+        pickle predating impact text becoming mandatory (Codex review,
+        PR #882, fresh evidence). Fixed by dropping that call —
+        ``__setstate__`` normalizes ``policy_overrides`` into an
+        ``_ImmutableDict`` the same way ``__post_init__`` does, and nothing
+        more, matching the constructor's own deferred-validation contract.
         """
+        import pickle
+
         import pytest
 
-        bad_policy = object.__new__(ChangeKindMeta)
-        with pytest.raises(ValueError, match="unknown policy"):
-            bad_policy.__setstate__({
-                "kind": "y",
-                "default_verdict": Verdict.COMPATIBLE,
-                "impact": "i",
-                "is_addition": False,
-                "policy_overrides": {"unknown": Verdict.API_BREAK},
-                "description_template": None,
-            })
+        entry = ChangeKindMeta("x", Verdict.BREAKING)
+        assert entry.impact == ""
+        rehydrated = pickle.loads(pickle.dumps(entry))
+        assert rehydrated == entry
+        assert rehydrated.impact == ""
 
-        bad_impact = object.__new__(ChangeKindMeta)
+        entry2 = ChangeKindMeta(
+            "y", Verdict.BREAKING, impact="i",
+            policy_overrides={"unknown": Verdict.API_BREAK},
+        )
+        rehydrated2 = pickle.loads(pickle.dumps(entry2))
+        assert dict(rehydrated2.policy_overrides) == {"unknown": Verdict.API_BREAK}
+
+        # ChangeKindRegistry.__init__ still catches either shape once the
+        # entry is actually assembled into a real registry -- unpickling
+        # alone doesn't grant it a free pass past that gate.
         with pytest.raises(ValueError, match="impact must be non-empty"):
-            bad_impact.__setstate__({
-                "kind": "z",
-                "default_verdict": Verdict.COMPATIBLE,
-                "impact": "",
-                "is_addition": False,
-                "policy_overrides": {},
-                "description_template": None,
-            })
+            ChangeKindRegistry([rehydrated])
+        with pytest.raises(ValueError, match="unknown policy"):
+            ChangeKindRegistry([rehydrated2])
 
     def test_description_template_with_unknown_placeholder_raises(self):
         """A description_template referencing an out-of-vocabulary field is rejected.

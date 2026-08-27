@@ -341,11 +341,25 @@ class ChangeKindMeta:
         # unless ``self`` is still a genuinely blank instance — the shape
         # pickle's own restore protocol actually produces
         # (``object.__new__(cls)`` with no ``__init__``/``__post_init__``
-        # call) — and re-run the same construction-time validation
-        # ``_validate_entry`` already applies to every hand-built entry,
-        # since a pickle is untrusted input the same way and this path
-        # never goes through ``__post_init__``/``ChangeKindRegistry.
-        # __init__`` to receive that validation otherwise.
+        # call).
+        #
+        # Deliberately does NOT also call _validate_entry() here (an
+        # earlier revision of this fix did, and was reverted — Codex
+        # review, PR #882, fresh evidence): direct construction,
+        # ``ChangeKindMeta("x", Verdict.BREAKING)``, is legal today with
+        # an empty ``impact``/an unrecognized ``policy_overrides`` key —
+        # catalog validation is deliberately deferred to
+        # ``ChangeKindRegistry.__init__``'s own loop over every entry it
+        # actually holds, not applied per-instance at construction time.
+        # Validating unconditionally inside __setstate__ broke that
+        # symmetry: ``pickle.loads(pickle.dumps(ChangeKindMeta("x",
+        # Verdict.BREAKING)))`` regressed from working (matching
+        # __init__'s own behavior) to raising ValueError, and would
+        # equally have broken loading a standalone, not-yet-registry-
+        # inserted pickle predating impact text becoming mandatory. The
+        # blank-instance guard above is what actually closes the live-
+        # mutation attack this method exists to prevent; it doesn't
+        # depend on also validating restored content.
         if self.__dict__:
             raise TypeError(
                 "ChangeKindMeta.__setstate__ refuses to overwrite an "
@@ -356,7 +370,6 @@ class ChangeKindMeta:
             state = dict(state)
             state["policy_overrides"] = _ImmutableDict(overrides or {})
         self.__dict__.update(state)
-        _validate_entry(self)
 
 
 #: Representative ``str.format(**...)`` kwarg sets used to *actually execute*
