@@ -291,11 +291,15 @@ PARITY_EXTENSION_ENTRIES: list[ChangeKindMeta] = [
 
     # ── Inline attribute changes ───────────────────────────────────────────
     _E("func_became_inline", _A,
-       impact="A function became inline-only (no out-of-line definition "
-              "emitted); consumers linking against the old, exported "
-              "symbol get an undefined-symbol error at link time, though "
-              "source recompiled against the new header keeps working "
-              "(each translation unit gets its own copy)."),
+       impact="A function gained the inline attribute; source recompiled "
+              "against the new header keeps working (each translation "
+              "unit gets its own copy), but an already-linked consumer's "
+              "outcome depends on what the new library actually ships: "
+              "the exported symbol commonly disappears once nothing forces "
+              "an out-of-line definition, in which case a caller resolving "
+              "it at link/load time gets an undefined-symbol error, while "
+              "a symbol kept exported (e.g. still ODR-used elsewhere in "
+              "the library) leaves already-linked callers unaffected."),
     _E("func_lost_inline", _C,
        impact="A function lost its inline attribute and now has external "
               "linkage; it becomes a real, separately-exported symbol "

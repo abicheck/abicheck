@@ -1105,25 +1105,28 @@ owed. Splitting it means separating a dataclass from its own load/write
 methods without changing what `BuildSourcePack(...)` constructs for callers
 this repository cannot see, which is its own slice.
 
-**Item 3 stays open — both its *taxonomy-partition* half and, contrary to
-two earlier drafts of this section, part of its *validation* half.** D9
-specifies two separable things: the target file shape (declarative modules
-named by taxonomy — `symbols.py`, `types.py`, `platform.py`, `build.py`,
-`source.py` — under `model/change_catalog/`, feeding one `registry.py`) and
-what that `registry.py` validates — "globally unique identifiers, complete
-metadata, valid references, and non-contradictory defaults." The taxonomy
-partition is not started; of the four validation properties, three are now
-enforced and one ("complete metadata") is not.
+**Item 3 stays open — its *taxonomy-partition* half only.** D9 specifies
+two separable things: the target file shape (declarative modules named by
+taxonomy — `symbols.py`, `types.py`, `platform.py`, `build.py`,
+`source.py` — under `model/change_catalog/`, feeding one `registry.py`)
+and what that `registry.py` validates — "globally unique identifiers,
+complete metadata, valid references, and non-contradictory defaults." The
+taxonomy partition is not started; **all four** validation properties are
+now enforced (see below for the full chronology of getting there —
+several earlier drafts of this section under-claimed or over-claimed this
+count before landing on the accurate one).
 
 The taxonomy shape isn't started: what exists today — `change_registry.py`
 plus `change_registry_{buildsource,castxml,composition,coverage,numpy,
-suppression,wheel,types}.py` — per this repository's own `AGENTS.md`
-("Adding a new ChangeKind"), was "split out only to stay under the
-file-size cap," so `change_registry.py` still holds most entries across many
-taxonomies and `change_registry_buildsource.py` places unrelated bundle
-entries there purely for space, not because either is that entry's taxonomy
-home (a first Codex review round on this PR caught an earlier draft marking
-this done on the strength of the validation claim alone).
+parity,suppression,wheel,types}.py` — per this repository's own
+`AGENTS.md` ("Adding a new ChangeKind"), was "split out only to stay under
+the file-size cap," so `change_registry.py` still holds most entries
+across many taxonomies and `change_registry_buildsource.py`/
+`change_registry_parity.py` each place entries there purely for space
+(unrelated bundle entries and a size-relief split respectively), not
+because either is that entry's taxonomy home (a first Codex review round
+on this PR caught an earlier draft marking this done on the strength of
+the validation claim alone).
 
 Of D9's four registry-validation properties, three are now enforced by
 `ChangeKindRegistry` during construction (the production `REGISTRY` is built
@@ -1383,7 +1386,24 @@ anywhere under `docs/`) rather than proving a detector actually produces
 the kind or that a page substantively documents it — real, current-state
 evidence, but advisory, and not part of D9's four properties either way.
 
-The remaining Phase 5 work:
+A ninth Codex review round on that commit found two more issues, both
+fixed. (1) The opening snapshot of this section still said "of the four
+validation properties, three are now enforced and one... is not" — stale
+against the "complete metadata" paragraph below it landing in the same
+commit, so a reader could hit a directly contradictory Phase 5 status
+before reaching the later, accurate chronology. Corrected to state all
+four are enforced up front, with the historical step-by-step count kept
+only in the chronology narrative that explicitly leads up to it. (2) The
+new `func_became_inline` impact text (`"consumers linking against the
+old, exported symbol get an undefined-symbol error at link time"`)
+assumed the symbol always disappears — but `diff_symbols.
+_check_inline_transitions()` deliberately emits `FUNC_BECAME_INLINE` for
+*both* outcomes and distinguishes them in its own description text
+(`"symbol still exported"` vs. `"symbol may be removed from DSO"`), so
+the impact text contradicted the finding's own description on the
+supported "still exported" path (e.g. the function stays ODR-used
+elsewhere in the library). Rewritten to describe both outcomes rather
+than assuming removal.
 
 1. split CastXML and Clang parsing by entity and shared parser context;
 2. separate source-graph values, construction, and comparison;
