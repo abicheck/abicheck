@@ -1345,8 +1345,7 @@ investigation was missing, and verified it directly against a real `mypy
 `ReclassifyRule` doesn't need to move or split *at all*, the same insight the
 fifth review round already supplied for `PolicyFile` itself, applied one
 level down. A second, model-owned structural protocol
-(`ReclassifyRuleProtocol`, declaring `matches()`/`is_expired()`/`describe()`/
-`to_report_dict()`) lets `PolicyFileProtocol.reclassify` be typed
+(`ReclassifyRuleProtocol`) lets `PolicyFileProtocol.reclassify` be typed
 `Sequence[ReclassifyRuleProtocol]` — `Sequence` is covariant, so the real
 `PolicyFile.reclassify: list[ReclassifyRule]` satisfies it structurally, with
 `ReclassifyRule` itself never imported by `model` and never moved out of
@@ -1357,7 +1356,23 @@ parameter types from the concrete `list[ReclassifyRule]` to
 `DiffResult.policy_file.reclassify` can still pass it through — verified
 clean end to end (`DiffResult` → `PolicyFileProtocol` → `Sequence
 [ReclassifyRuleProtocol]` → `active_reclassify_rules`) with `mypy --strict`
-against a minimal repro of that exact call chain. So the third
+against a minimal repro of that exact call chain.
+
+**An eighteenth Codex review round found the first repro's protocol itself
+incomplete, checked against `reclassify.py`'s real function bodies rather
+than the four method names alone**: `first_matching_reclassify_verdict()`
+(`reclassify.py:410`) returns `rule.to_verdict` — a data attribute, not one
+of the four methods above — so a `ReclassifyRuleProtocol` declaring only
+`matches()`/`is_expired()`/`describe()`/`to_report_dict()` fails that
+function specifically, with both `attr-defined` (the protocol has no
+`to_verdict`) and `no-any-return` (the resulting `Any` doesn't satisfy the
+declared `Verdict | None` return). Reproduced both errors directly, then
+confirmed a read-only `to_verdict: Verdict` property added to the protocol
+clears them. So the protocol needs five members —
+`matches()`/`is_expired()`/`describe()`/`to_report_dict()`/`to_verdict` —
+not four, and this is the complete list checked directly against every
+`reclassify.py` caller of a rule's own interface, not assumed complete a
+second time. So the third
 co-prerequisite collapses back to what the fourteenth round already scoped
 for `ChangeKind`: `ReclassifyRule` needs no split of its own, only a second
 model-owned protocol mirroring the first, once its two real blockers
