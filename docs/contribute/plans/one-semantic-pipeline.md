@@ -338,8 +338,26 @@ old field from the new `Fact[...]` value at the *same* construction call
 — `vtable=fact.value_or([])` right next to `vtable_fact=fact` — so
 there is exactly one write, not two independently-maintained ones that
 could drift; the old field is never independently assigned raw producer
-output again after this phase — with one named exception, below. (Removed
-in Phase 5's registry-driven sweep, not here.) `dumper_castxml.py`/
+output again after this phase — with one named exception, below.
+
+**"Removed in Phase 5's registry-driven sweep" names the wrong phase, and
+a review round correctly found nothing anywhere actually does this
+removal as stated — Phase 5's own Scope section converts a *different*,
+disjoint set of fields (`RecordType.is_final`, `Function.
+contract_attributes`, `Variable.alignment_bits`, and siblings Phase 0
+left alone) and never touches `vtable`/`bases`/`vptr_offset_bits`/
+`is_va_list` at all, and Phase 10's checklist has no row for this phase
+either — only for the narrower domain-side `clang_*_facts_reliable`
+boolean attributes.** Scheduled instead where it belongs: Phase 10's
+checklist below gains its own row for this phase, removing the four
+retained legacy attributes once the widened, repository-wide
+legacy-attribute-read check this phase's own Acceptance criteria adds
+(see below) reports zero remaining readers outside the compatibility
+bridge's own `__post_init__` and serialization — the same "accounting
+pass, not new design" bar every other Phase 10 row already uses, and the
+same one-release retention window this phase's own "kept... to keep
+`asdict`-based external consumers working" commitment already implies
+rather than leaving open-ended. `dumper_castxml.py`/
 `dumper_clang.py`/`dumper_clang_vtable.py`/`dwarf_snapshot.py` (each
 producer constructs the `Fact[...]` value directly, per the design above);
 `dumper_layout_backfill.py`'s `_backfilled_record()` — a *post-parse*
@@ -834,17 +852,39 @@ continue reading `rec.vtable` (unchanged, still a plain `list[str]`, still
 passes every existing type check) and never touch the `Fact[...]` field or
 the new check at all, bypassing availability handling entirely while
 looking, to both a type checker and this AST check, exactly like a
-correctly-migrated detector. The check is therefore widened to flag the
-legacy attribute names too, but *only inside a detector module* — the same
-file-scope restriction already used for the `Fact[...]`/`value_or` rule —
-so a detector reading `rec.vtable`/`rec.bases`/`rec.vptr_offset_bits`/
-`param.is_va_list` is flagged identically to a bare `Fact[...]` read,
-while the compatibility bridge's own `__post_init__` (which legitimately
-reads and writes the legacy field to backfill/resync it) and every
-non-detector caller (serialization, `asdict()`-based external consumers)
-stay unflagged, since the point is never "no code may read the legacy
-field," only "a detector may not read it as a substitute for the
-availability-aware one." Full test suite green; FP-rate/
+correctly-migrated detector.
+
+**Two different checks are in play here, and a first draft of this
+criterion conflated their scopes — narrowing the legacy-attribute
+widening to "only inside a detector module" silently abandoned the
+repository-wide scope the reader-migration check above (lines 668–682)
+already commits to, which is exactly the contradiction review caught:
+`surface.py`/`export_surface.py`/`dumper_scoping.py`/`contract_evidence_
+collect.py`/`internal_leak.py`/`type_reachability.py` are real,
+documented semantic readers of `bases`/`vtable`/`virtual_bases`/
+`is_va_list` — the whole reason they're on this phase's own migration
+list and initial known-failures baseline — but none of them is a
+`diff_*.py`-shaped detector module, so narrowing enforcement to
+"detector module" would let any of them reintroduce a direct legacy-field
+read after this phase ships with nothing catching it, recreating the
+exact unavailable-vs-empty confusion the migration exists to close.**
+The legacy-attribute-name widening (`rec.vtable`/`rec.bases`/
+`rec.vptr_offset_bits`/`param.is_va_list`, on a value whose declared type
+resolves to `RecordType`/`Param`) therefore stays the *repository-wide*
+scan already specified above — covering every one of the nine-plus named
+semantic-reader modules, not only detector modules — with the
+compatibility bridge's own `__post_init__` (which legitimately reads and
+writes the legacy field to backfill/resync it) as the one named exemption,
+and serialization/`asdict()`-based external consumers likewise exempt
+since they read the dataclass generically, not by naming the field.
+Only the *other* half of the check — a bare `Fact[...]`-typed field read
+or a `.value_or(...)` call on one — keeps the narrower, detector-module-
+only file-scope restriction, because that half's exemption (presentation
+modules legitimately calling `.value_or(...)` to render a display string)
+has no equivalent for a direct legacy-field read: nothing about rendering
+a value for display justifies bypassing the availability-aware field
+entirely when the legacy attribute is sitting right there with the same
+information, unconverted. Full test suite green; FP-rate/
 tier-accuracy gates unchanged (this phase changes representation, not
 detector logic).
 
@@ -4072,7 +4112,17 @@ not new design.
   snapshot — `serialization.py`'s legacy-schema backfill path is a
   permanent reader, the same way every other schema-version branch in
   that module is, for as long as ADR-062's v1-v25 import adapter promises
-  to keep importing that version at all.
+  to keep importing that version at all. **A second, separate row for the
+  same phase**: the retained legacy compatibility-bridge attributes
+  themselves — `RecordType.vtable`/`bases`/`vptr_offset_bits`,
+  `Param.is_va_list` — are removed from the public dataclasses once the
+  widened, repository-wide legacy-attribute-read check Phase 0's own
+  Acceptance criteria adds reports zero remaining readers outside
+  `__post_init__`/serialization, closing the "kept for one release" window
+  that section's own design states rather than leaving it open-ended; a
+  first draft of this plan said this removal happened in Phase 5, which
+  never touches these four fields at all (see Phase 0's own corrected
+  text above).
 - Phase 1: `cli_dump_helpers.render_dump_dry_run()`'s independent
   resolution logic; the legacy `-p`/`--compile-db` auto-match's standalone
   code path once the fold fully subsumes it (already partly done per
