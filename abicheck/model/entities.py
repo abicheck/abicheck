@@ -183,10 +183,10 @@ class RecordType:
     # asdict()-based external-consumer compatibility (kept in sync with
     # the Fact sibling at every construction site, never independently
     # assigned again after this phase).
-    bases_fact: Fact[list[str]] | None = None
-    virtual_bases_fact: Fact[list[str]] | None = None
-    vtable_fact: Fact[list[str]] | None = None
-    vptr_offset_bits_fact: Fact[int | None] | None = None
+    bases_fact: Fact[list[str]] | None = field(default=None, kw_only=True)
+    virtual_bases_fact: Fact[list[str]] | None = field(default=None, kw_only=True)
+    vtable_fact: Fact[list[str]] | None = field(default=None, kw_only=True)
+    vptr_offset_bits_fact: Fact[int | None] | None = field(default=None, kw_only=True)
 
     def __post_init__(self) -> None:
         self.bases, self.bases_fact = bridge_legacy_and_fact(
@@ -204,17 +204,6 @@ class RecordType:
             _OMITTED_VPTR_OFFSET_BITS,
             None,
         )
-
-    @staticmethod
-    def sync_vptr_offset_bits_fact(updates: dict[str, object]) -> None:
-        """Dict-form sibling of :func:`resolve_vptr_offset_bits` (ADR-063 Phase
-        0): a caller building a ``dataclasses.replace(rec, **updates)`` update
-        dict must add the matching ``Fact[T]`` alongside a ``vptr_offset_bits``
-        update too, or the replaced object's stale, carried-forward Fact wins
-        over the freshly-supplied scalar in ``__post_init__``.
-        """
-        if "vptr_offset_bits" in updates:
-            updates["vptr_offset_bits_fact"] = Fact.present(updates["vptr_offset_bits"])
 
 
 @dataclass

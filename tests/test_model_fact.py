@@ -33,7 +33,7 @@ import pytest
 from abicheck.model.availability import FactStatus
 from abicheck.model.declarations import Param
 from abicheck.model.entities import RecordType
-from abicheck.model.fact import Fact
+from abicheck.model.fact import Fact, replace_with_fact_sync
 
 
 class TestFactConstructors:
@@ -137,55 +137,33 @@ class TestRecordTypeFactBridge:
         assert r.bases_fact.status is FactStatus.PRESENT
         assert r.bases_fact.value == ["Base"]
 
-    def test_disagreeing_legacy_wins_over_a_stale_or_conflicting_fact(self) -> None:
-        """ADR-063 Phase 0 (Codex review): dataclasses.replace(rec, vtable=X)
-        carries the OLD, already-resolved vtable_fact forward unchanged —
-        indistinguishable, to __post_init__, from a fresh construction
-        supplying both fields. Trusting the Fact unconditionally (this
-        bridge's original design) silently reverted every such replace()
-        update, breaking the ordinary update path for every migrated public
-        dataclass field. The legacy value winning when the two disagree is
-        what makes replace() safe; a fresh construction genuinely wanting a
-        Fact inconsistent with its own legacy value is the accepted, narrow
-        residual (see bridge_legacy_and_fact's own docstring)."""
+    def test_explicit_fact_wins_and_overwrites_legacy_field(self) -> None:
+        """RecordType(vtable=["old"], vtable_fact=Fact.present(["new"])) ends
+        construction with self.vtable == ["new"] — the explicit Fact[...]
+        value also overwrites the legacy field, not only the reverse. This is
+        deliberately not "whichever value looks newer": there is no such
+        signal available inside __post_init__, so this bridge always trusts
+        an explicit Fact over a legacy value that might disagree with it —
+        see bridge_legacy_and_fact's own docstring for why, and
+        TestReplaceWithFactSync below for the safe way to update these
+        fields via dataclasses.replace()."""
         r = RecordType(
-            name="Foo", kind="struct", vtable=["new"], vtable_fact=Fact.present(["old"])
+            name="Foo", kind="struct", vtable=["old"], vtable_fact=Fact.present(["new"])
         )
         assert r.vtable == ["new"]
         assert r.vtable_fact is not None
         assert r.vtable_fact.value == ["new"]
 
-    def test_explicit_not_collected_fact_normalizes_legacy_when_legacy_omitted(
-        self,
-    ) -> None:
-        r = RecordType(name="Foo", kind="struct", vtable_fact=Fact.not_collected())
+    def test_explicit_not_collected_fact_normalizes_legacy_to_default(self) -> None:
+        r = RecordType(
+            name="Foo",
+            kind="struct",
+            vtable=["stale"],
+            vtable_fact=Fact.not_collected(),
+        )
         assert r.vtable == []
         assert r.vtable_fact is not None
         assert r.vtable_fact.status is FactStatus.NOT_COLLECTED
-
-    def test_replace_updating_only_the_legacy_field_is_not_silently_reverted(
-        self,
-    ) -> None:
-        """The real-world shape of the Codex-reported bug: an ordinary
-        dataclasses.replace() call updating `bases` (never touching
-        `bases_fact`) must not have its update discarded in favor of the
-        stale, carried-forward Fact — the failure mode "External Python API
-        callers using dataclasses.replace() silently lose their requested
-        update" for every migrated field, not just vptr_offset_bits."""
-        r = RecordType(name="Foo", kind="struct", bases=["OldBase"])
-        r2 = dataclasses.replace(r, bases=["NewBase"])
-        assert r2.bases == ["NewBase"]
-        assert r2.bases_fact is not None
-        assert r2.bases_fact.status is FactStatus.PRESENT
-        assert r2.bases_fact.value == ["NewBase"]
-
-    def test_replace_touching_an_unrelated_field_leaves_the_pair_untouched(
-        self,
-    ) -> None:
-        r = RecordType(name="Foo", kind="struct", bases=["Base"])
-        r2 = dataclasses.replace(r, kind="union")
-        assert r2.bases == ["Base"]
-        assert r2.bases_fact == r.bases_fact
 
     def test_virtual_bases_uses_the_identical_mechanism(self) -> None:
         r_omitted = RecordType(name="Foo", kind="struct")
@@ -236,6 +214,54 @@ class TestRecordTypeFactBridge:
         assert r2.bases == []
 
 
+class TestPlainReplaceIsUnsafeForFactBridgedFields:
+    """Documents, rather than hides, the tradeoff bridge_legacy_and_fact's
+    docstring names: a raw dataclasses.replace() call updating a legacy
+    field without also updating its Fact sibling has the update silently
+    discarded, because __post_init__ cannot tell the carried-forward Fact
+    apart from a fresh, deliberate one (Codex review — trusting the Fact
+    unconditionally is what "explicit Fact wins" requires for the sibling
+    class above). TestReplaceWithFactSync below is the safe alternative."""
+
+    def test_replace_updating_only_the_legacy_field_is_silently_discarded(
+        self,
+    ) -> None:
+        r = RecordType(name="Foo", kind="struct", bases=["OldBase"])
+        r2 = dataclasses.replace(r, bases=["NewBase"])
+        assert r2.bases == ["OldBase"]
+
+
+class TestReplaceWithFactSync:
+    """The safe alternative to dataclasses.replace() for these fields."""
+
+    def test_updates_the_legacy_field_and_derives_a_present_fact(self) -> None:
+        r = RecordType(name="Foo", kind="struct", bases=["OldBase"])
+        r2 = replace_with_fact_sync(r, bases=["NewBase"])
+        assert r2.bases == ["NewBase"]
+        assert r2.bases_fact is not None
+        assert r2.bases_fact.status is FactStatus.PRESENT
+        assert r2.bases_fact.value == ["NewBase"]
+
+    def test_an_explicitly_supplied_fact_is_never_second_guessed(self) -> None:
+        r = RecordType(name="Foo", kind="struct", bases=["OldBase"])
+        r2 = replace_with_fact_sync(
+            r, bases=["NewBase"], bases_fact=Fact.not_collected("depth capped")
+        )
+        assert r2.bases_fact is not None
+        assert r2.bases_fact.status is FactStatus.NOT_COLLECTED
+
+    def test_a_field_with_no_fact_sibling_passes_through_unaffected(self) -> None:
+        r = RecordType(name="Foo", kind="struct")
+        r2 = replace_with_fact_sync(r, kind="union")
+        assert r2.kind == "union"
+
+    def test_touching_an_unrelated_field_leaves_the_pair_untouched(self) -> None:
+        r = RecordType(name="Foo", kind="struct", bases=["Base"])
+        r2 = replace_with_fact_sync(r, kind="union")
+        assert r2.bases == ["Base"]
+        assert r2.bases_fact == r.bases_fact
+
+
 class TestParamFactBridge:
     """The bool-typed sentinel bridge for is_va_list — its own mechanism,
     since bool has only two instances and cannot reuse the list-typed
@@ -264,18 +290,14 @@ class TestParamFactBridge:
         assert p.is_va_list_fact.status is FactStatus.PRESENT
         assert p.is_va_list_fact.value is True
 
-    def test_disagreeing_legacy_wins_over_a_stale_or_conflicting_fact(self) -> None:
-        # See RecordType's sibling test of the same name for the full
-        # replace()-safety rationale (bridge_legacy_and_fact's docstring).
+    def test_explicit_fact_wins_and_overwrites_legacy_field(self) -> None:
         p = Param(
             name="args",
             type="va_list",
-            is_va_list=True,
-            is_va_list_fact=Fact.present(False),
+            is_va_list=False,
+            is_va_list_fact=Fact.present(True),
         )
         assert p.is_va_list is True
-        assert p.is_va_list_fact is not None
-        assert p.is_va_list_fact.value is True
 
     def test_field_type_never_widens(self) -> None:
         by_name = {f.name: f for f in dataclasses.fields(Param)}

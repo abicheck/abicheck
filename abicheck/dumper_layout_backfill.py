@@ -30,7 +30,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING
 
-from .model import Fact, RecordType, TypeField
+from .model import RecordType, TypeField, replace_with_fact_sync
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -323,25 +323,21 @@ def _backfilled_record(header: RecordType, dwarf: RecordType) -> RecordType:
     being replaced with dwarf's value below. `__post_init__`'s "explicit
     Fact wins" rule would then silently revert the just-backfilled scalar
     back to `header`'s own (pre-backfill) value (Codex review, confirmed
-    against a real repro). `resolved_vtable`/`resolved_vptr` below are
-    computed once and reused for both the scalar and its Fact sibling so
-    the two cannot disagree.
+    against a real repro) — `replace_with_fact_sync` derives and passes the
+    matching `Fact.present(...)` sibling alongside each, so the two cannot
+    disagree.
     """
-    resolved_vtable = header.vtable or dwarf.vtable
-    resolved_vptr = (
-        header.vptr_offset_bits
-        if header.vptr_offset_bits is not None
-        else dwarf.vptr_offset_bits
-    )
-    return replace(
+    return replace_with_fact_sync(
         header,
         size_bits=dwarf.size_bits,
         alignment_bits=dwarf.alignment_bits,
         fields=_merged_fields(header, dwarf),
-        vtable=resolved_vtable,
-        vtable_fact=Fact.present(resolved_vtable),
-        vptr_offset_bits=resolved_vptr,
-        vptr_offset_bits_fact=Fact.present(resolved_vptr),
+        vtable=header.vtable or dwarf.vtable,
+        vptr_offset_bits=(
+            header.vptr_offset_bits
+            if header.vptr_offset_bits is not None
+            else dwarf.vptr_offset_bits
+        ),
         base_offsets=header.base_offsets or dwarf.base_offsets,
         data_size_bits=(
             header.data_size_bits

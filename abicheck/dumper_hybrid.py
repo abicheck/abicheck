@@ -644,7 +644,6 @@ def _merge_record_type(
         for attr in _LAYOUT_SCALAR_ATTRS:
             if getattr(t, attr) is None and getattr(clang_t, attr) is not None:
                 updates[attr] = getattr(clang_t, attr)
-        RecordType.sync_vptr_offset_bits_fact(updates)
         if not t.base_offsets and clang_t.base_offsets:
             updates["base_offsets"] = clang_t.base_offsets
         # G31 Phase C fact-completeness (verified against real castxml 0.6.3 +
@@ -694,7 +693,9 @@ def _merge_record_type(
     if merged_fields != t.fields:
         updates["fields"] = merged_fields
 
-    return replace(t, **updates) if updates else t
+    from .model import replace_with_fact_sync
+
+    return replace_with_fact_sync(t, **updates) if updates else t
 
 
 def _merge_enum_type(

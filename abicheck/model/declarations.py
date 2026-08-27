@@ -50,7 +50,7 @@ class Param:
     # Fact[bool] sibling — see RecordType's identical bases_fact/vtable_fact
     # comment in model/entities.py for the full rationale. A detector reads
     # this, never the plain is_va_list field above.
-    is_va_list_fact: Fact[bool] | None = None
+    is_va_list_fact: Fact[bool] | None = field(default=None, kw_only=True)
 
     def __post_init__(self) -> None:
         self.is_va_list, self.is_va_list_fact = bridge_legacy_and_fact(

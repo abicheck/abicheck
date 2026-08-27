@@ -39,12 +39,12 @@ collected" is not offered.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Generic, TypeVar
 
 from .availability import FactStatus
 
-__all__ = ["Fact"]
+__all__ = ["Fact", "replace_with_fact_sync"]
 
 T = TypeVar("T")
 
@@ -74,54 +74,82 @@ def bridge_legacy_and_fact(
     caller never supplied it). ``explicit_fact`` is the sibling ``Fact[T]``
     field's value (``None`` if the caller didn't supply that either).
 
-    ``dataclasses.replace(obj, legacy=new_value)`` re-invokes ``__init__``
-    with *every* field of ``obj``, not just ``legacy`` — including its own
-    already-resolved, non-``None`` ``explicit_fact`` sibling, carried
-    forward unchanged. A naive "an explicit Fact always wins" rule (this
-    function's own original design) cannot tell that carried-forward sibling
-    apart from a caller genuinely constructing both fields together, so it
-    silently reverted every such ``replace()`` update back to the sibling's
-    stale value (Codex review, confirmed against real ``RecordType``/
-    ``Param`` replace() calls, not just the vptr-specific case two internal
-    call sites were first patched for).
+    Whichever of the two the caller actually supplied is authoritative and
+    is written back to *both* representations, so they cannot disagree
+    afterward: an explicit ``Fact[T]`` (even one asserting no evidence, and
+    even alongside a legacy value that looks inconsistent with it — the
+    caller's stated availability is trusted over a value that may itself be
+    stale/placeholder) overwrites the legacy field; a genuinely-omitted
+    legacy field with no explicit ``Fact[T]`` backfills to
+    ``Fact.not_collected()``; an explicitly-supplied legacy value with no
+    competing ``Fact[T]`` backfills to ``Fact.present(legacy)``.
 
-    Fixed by comparing ``legacy`` against what ``explicit_fact`` itself
-    *implies* the legacy value should be (its own value, or
-    ``normalized_default`` for a non-present status): if they agree, nothing
-    was updated relative to what produced this ``explicit_fact`` (a fresh
-    construction supplying both consistently, or a ``replace()`` that left
-    this field pair untouched) and ``explicit_fact`` is trusted as-is. If
-    they disagree, ``legacy`` was the one that changed — a ``replace()``
-    updating only the legacy field, or a fresh construction stating
-    genuinely conflicting values — so ``legacy`` wins and a fresh
-    ``Fact.present(legacy)`` is derived, discarding the stale/conflicting
-    sibling. This subsumes the two vptr-specific call-site fixes: passing
-    both fields together in one ``replace()`` call still has them agree,
-    so nothing about that path changes.
+    This is deliberately *not* "whichever value looks newer" — there is no
+    such signal available here, by construction. ``dataclasses.replace(obj,
+    legacy=new_value)`` re-invokes this same ``__init__`` path with *every*
+    field of ``obj``, including its own already-resolved
+    ``explicit_fact`` sibling carried forward unchanged, which is
+    indistinguishable, from inside ``__post_init__``, from a fresh
+    construction genuinely supplying both fields together (Codex review,
+    both directions independently confirmed against real repros: trusting
+    the Fact unconditionally silently reverts an ordinary
+    ``replace(obj, bases=new)`` caller's update; trusting the *legacy* value
+    on disagreement instead silently discards an explicit
+    ``RecordType(bases=["old"], bases_fact=Fact.not_collected())`` construction's
+    stated availability). Neither direction can be made safe by inference
+    alone — this function does not attempt to guess.
 
-    One narrower case is a known, accepted residual: a ``replace()`` call
-    that intends to *downgrade only the Fact* (e.g. to
-    ``Fact.not_collected()``) while deliberately leaving a non-default
-    legacy value untouched will have that downgrade discarded, since the
-    disagreement is read as "legacy changed" rather than "Fact changed" —
-    no call site does this today (every real downgrade path, e.g.
-    ``apply_legacy_fact_backfill``, plain-mutates both fields together
-    without going through ``replace()`` at all), and the fix favors the
-    overwhelmingly common case (an ordinary field update silently lost) over
-    this narrower, currently-unused one.
+    **Use :func:`replace_with_fact_sync` instead of a raw
+    ``dataclasses.replace()`` call for any of these fields.** It closes the
+    gap the un-decidable case above cannot: for a legacy field named in the
+    update whose ``Fact[T]`` sibling isn't *also* explicitly given, it
+    derives ``Fact.present(new_value)`` and passes both into ``replace()``,
+    so the two representations cannot drift out of sync at the one call
+    site capable of keeping them honest — the one making the change.
     """
     if explicit_fact is not None:
-        implied_legacy = (
+        value = (
             explicit_fact.value
             if explicit_fact.value is not None
             else normalized_default
         )
-        if legacy is omitted or legacy == implied_legacy:
-            return implied_legacy, explicit_fact
-        return legacy, Fact.present(legacy)
+        return value, explicit_fact
     if legacy is omitted:
         return normalized_default, Fact.not_collected()
     return legacy, Fact.present(legacy)
+
+
+def replace_with_fact_sync(obj: T, **updates: object) -> T:
+    """``dataclasses.replace(obj, **updates)``, safe for ``Fact[T]``-bridged fields.
+
+    See :func:`bridge_legacy_and_fact`'s docstring for why a raw
+    ``dataclasses.replace()`` call is unsafe whenever ``updates`` touches a
+    legacy field with a ``<field>_fact`` sibling but not the sibling itself:
+    ``__post_init__`` cannot tell the old, carried-forward sibling apart
+    from a fresh, deliberate one, and it must resolve that ambiguity in
+    *some* direction — the one this bridge picks is "trust an explicit
+    Fact", which means the stale sibling silently wins and the caller's
+    update to the legacy field is lost.
+
+    This wrapper closes that gap for exactly this call site — the one
+    place a caller's actual intent (updating the legacy field's real value)
+    is still known — without changing the bridge's own inference rule
+    anywhere else: for every keyword in ``updates`` naming a legacy field
+    that has a ``<field>_fact`` attribute on ``obj`` and whose sibling
+    ``<field>_fact`` is *not itself* also present in ``updates``, it derives
+    ``Fact.present(value)`` and adds it to the call — so the two
+    representations are supplied together and cannot disagree. A caller
+    that already knows the fact it wants (e.g. downgrading to
+    ``Fact.not_collected()``) still passes ``<field>_fact=`` explicitly, and
+    that explicit value is never second-guessed here.
+    """
+    resolved = dict(updates)
+    for name, value in updates.items():
+        fact_name = f"{name}_fact"
+        if fact_name in resolved or not hasattr(obj, fact_name):
+            continue
+        resolved[fact_name] = Fact.present(value)
+    return replace(obj, **resolved)  # type: ignore[type-var]
 
 
 @dataclass(frozen=True)
