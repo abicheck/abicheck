@@ -1703,6 +1703,47 @@ sibling:
   surface()`'s actual decision logic — which declarations count as part of
   the public contract — lives after migration.
 
+  **`resolve()`'s bare `frozenset[EntityId]` is not a complete replacement
+  for today's `PublicSurface`, and a first draft of this bullet implied it
+  was by never saying otherwise — review correctly read that silence as a
+  real gap, not a simplification.** `surface.py`'s `PublicSurface` carries
+  far more than membership: `resolvable`/`has_typed_roots`/`has_provenance`
+  (three independently-meaningful "can this surface be trusted at all"
+  signals — no header-derived visibility at all, an export-table-only
+  surface with no typed roots to close a type closure from, no provenance
+  because the snapshot wasn't dumped with a public-header set),
+  `ambiguous_type_names`/`exact_type_identities` (which bare-name
+  resolutions are trustworthy vs. collision-prone), and two origin indices
+  (`origin_by_key`/`origin_by_qualified_key`) that `_hidden_friend_owner_
+  effective_origin` and other callers read directly. `FilterNonPublicSurface`
+  (`post_processing.py`) checks `surf_old.resolvable or surf_new.resolvable`
+  *before* it will scope anything at all — collapsing that into "is this id
+  in `resolve()`'s frozenset" erases the same distinction the `exports`
+  domain fix two paragraphs above already had to preserve for `ExportSurface`:
+  "not reached" vs. "reachability could not be established." An empty
+  frozenset is indistinguishable from either, and reading the latter as the
+  former would scope out every finding on a snapshot with no resolvable
+  surface at all, instead of correctly falling back to "keep everything
+  unscoped" the way `FilterNonPublicSurface` does today.
+
+  Fixed the same way the `exports` domain already is: `resolve()` stays the
+  bare-membership convenience method for a caller that genuinely only needs
+  set membership (the new `type_reachability`-replacement query below, which
+  never needed anything but membership), but the actual replacement for
+  `compute_public_surface()`'s public-domain result is a second, structured
+  method — `PublicSurfaceQuery.resolve_public_domain(graph, explicit_roots)
+  -> PublicSurfaceResolution` — returning a result that carries the same
+  `resolvable`/`has_typed_roots`/`has_provenance`/`ambiguous_type_names`/
+  `exact_type_identities`/origin-index shape `PublicSurface` already does,
+  computed from graph traversal state instead of `surface.py`'s own
+  independent walk. `compute_public_surface(snapshot)` (via `resolve_
+  public_surface()`, the backfill wrapper above) migrates to build this
+  structured result from the query instead of running its own closure walk;
+  its callers (`FilterNonPublicSurface`, `classify_change_surface`,
+  contract evaluation's confirmed-type-match logic) keep reading the exact
+  same field names they read today, unaffected by where the computation now
+  happens.
+
   **The `contract=exports` domain does *not* collapse into this same
   bare-`frozenset[EntityId]`-returning `resolve()`, and a first draft of
   this phase claimed it did — review correctly found that claim
@@ -2925,23 +2966,44 @@ this way"), and its own accumulated review history already lists three
 prior rounds of exactly this shape of bug — zeroing only the top-level
 field left a nested `diff.severity` block, or the orthogonal
 contract-coverage contribution, still driving the trailing `aggregate`
-job to a nonzero exit, each caught and fixed in turn. `RunOutcome.gate`/
-`.operational` are a **fourth** axis this function does not know about
-yet, and `GateInfo.from_report_data`'s own new structured-field-first
-reading (this phase's own change, a few paragraphs above) is exactly what
-makes the omission land: once a fresh report's structured fields are
-preferred over the legacy ones this function *does* zero, an unchanged,
-still-blocking `RunOutcome.gate`/`.operational` value overrides the
-neutralization entirely, and an explicitly `advisory` check blocks the
-trailing aggregate anyway — the identical failure mode this function's
-own history keeps rediscovering, reached through the one axis this phase
-adds rather than one of the three it already covers. `_neutralize_gate()`
-gains the identical treatment: zero `RunOutcome.gate`'s own blocking
-contribution and `RunOutcome.operational`'s blocking set (per Phase 7's
-own operational-axis fold, above) the same way it already zeroes
-`severity`/`exit_code`/the nested scan-shaped block/the coverage
-contribution — one more axis added to a function whose whole job is
-"every axis that can block, zeroed for advisory," not a new mechanism.
+job to a nonzero exit, each caught and fixed in turn. `RunOutcome.gate` is
+a **fourth** axis this function does not know about yet, and `GateInfo.
+from_report_data`'s own new structured-field-first reading (this phase's
+own change, a few paragraphs above) is exactly what makes the omission
+land: once a fresh report's structured fields are preferred over the
+legacy ones this function *does* zero, an unchanged, still-blocking
+`RunOutcome.gate` value overrides the neutralization entirely, and an
+explicitly `advisory` check blocks the trailing aggregate anyway — the
+identical failure mode this function's own history keeps rediscovering,
+reached through the one axis this phase adds rather than one of the three
+it already covers. `_neutralize_gate()` gains the identical treatment for
+that one axis: zero `RunOutcome.gate`'s own blocking contribution the same
+way it already zeroes `severity`/`exit_code`/the nested scan-shaped block/
+the coverage contribution — one more axis added to a function whose whole
+job is "every *compatibility-policy* axis that can block, zeroed for
+advisory."
+
+**`RunOutcome.operational` is deliberately excluded from that
+treatment, and a first draft of this paragraph said to zero it
+alongside `.gate` — review correctly caught that as reproducing the exact
+class of bug this function exists to prevent, just on the opposite axis.**
+`check_report.final_exit_code()`'s own docstring states the invariant in
+so many words: "Operational errors... always fail the job regardless of
+`gate-mode`... resolve-baseline's failure taxonomy is never silently
+degraded to a passing/neutral outcome either," and its implementation
+returns `1` on `operational_error` unconditionally, *before* it even
+branches on `gate_mode`. `RunOutcome.operational` (`BUDGET_OVERFLOW`/
+`NOT_COMPARABLE`/`EVIDENCE_CONTRACT_ERROR`/`EXTRACTION_ERROR`) is exactly
+this same signal in the new structured shape — an analysis that never
+produced a real compatibility verdict at all, as opposed to one that did
+and scored it `ABI_BREAKING`. Zeroing it under `advisory` would let a scan
+that hit a budget overflow or a hard evidence-contract error read as a
+clean, non-blocking pass once a consumer prefers the structured fields —
+silently degrading exactly the failure taxonomy `final_exit_code()` says
+must never be degraded, and confirming the reviewer's point that `.gate`
+and `.operational` are not one axis that happens to share a dataclass:
+`.gate` is the thing `advisory` is for deferring, `.operational` is the
+thing no gate-mode may ever defer.
 
 **Tests.** `tests/test_junit_report.py`'s existing suite needs no changes
 at all — `_is_failure` is untouched, so this is the test that proves the
@@ -2976,16 +3038,28 @@ legacy-decode fallback — confirmed by
 asserting which path actually ran (not only that the output matches),
 since a test that only checks the output could pass with the writer
 changed and the reader still silently falling back. A parity test for
-`_neutralize_gate()` pins the new-axis gap directly: a fresh report
-carrying a blocking `RunOutcome.gate`/`.operational` value, run through
-`_neutralize_gate()` under `gate-mode: advisory`, then read back through
-the same `GateInfo.from_report_data`/`from_scan_report` this phase's reader
-changes use — asserting the aggregate sees a non-blocking result,
-confirmed to fail against a version of `_neutralize_gate()` that zeroes
-only the pre-existing legacy axes and leaves the new structured ones
-untouched, reproducing the exact "advisory check blocks the trailing
-aggregate anyway" failure mode this function's own prior review rounds
-already fixed three times for other axes. A fourth test
+`_neutralize_gate()` pins the new-axis gap directly, and deliberately
+pins the two axes to *opposite* outcomes rather than asserting one blanket
+"non-blocking" result — asserting the same thing for both would silently
+reproduce the `.operational` bug this same finding's own fix exists to
+prevent, just inside the test instead of the implementation. Case one: a
+fresh report carrying a blocking `RunOutcome.gate` value (no operational
+failure), run through `_neutralize_gate()` under `gate-mode: advisory`,
+then read back through the same `GateInfo.from_report_data`/
+`from_scan_report` this phase's reader changes use — asserting the
+aggregate sees a non-blocking result, confirmed to fail against a version
+of `_neutralize_gate()` that zeroes only the pre-existing legacy axes and
+leaves `.gate` untouched, reproducing the exact "advisory check blocks the
+trailing aggregate anyway" failure mode this function's own prior review
+rounds already fixed three times for other axes. Case two: a fresh report
+carrying a non-blocking `RunOutcome.gate` alongside a real
+`RunOutcome.operational` failure (e.g. `EVIDENCE_CONTRACT_ERROR`), run
+through the identical `_neutralize_gate()`/`gate-mode: advisory` path —
+asserting the aggregate still sees a **blocking** result, confirmed to
+fail against a version of `_neutralize_gate()` that zeroes `.operational`
+alongside `.gate` (this finding's own rejected first draft), which is
+precisely what `final_exit_code()`'s "operational errors always fail the
+job regardless of gate-mode" invariant forbids. A fourth test
 validates every regenerated fixture report against the regenerated
 `docs/reference/schemas/v1/compare_report.schema.json`/
 `aggregate_report.schema.json` (the same validation
