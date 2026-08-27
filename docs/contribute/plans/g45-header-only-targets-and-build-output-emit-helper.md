@@ -86,12 +86,17 @@ function. Make the actual choice empirically: prototype both against
 `project_targets.py`'s existing test suite and pick whichever needs fewer,
 more localized changes.
 
-Depth-gating for this target shape: `_validate_library_target` (or its
-header-only-aware successor) must reject a check declaring
-`depth: binary`/`depth: symbols`/`depth: build`-without-source-facts
-against a target with no `binary_pattern` — there is nothing for those
-depths to extract. `depth: headers`/`depth: build` (header+build evidence
-only)/`depth: source` remain valid.
+Depth-gating for this target shape, stated as one unambiguous rule (an
+earlier draft of this plan phrased this two contradictory ways in
+adjacent sentences — corrected here): `_validate_library_target` (or its
+header-only-aware successor) must reject `depth: binary`/`depth: symbols`
+against a target with no `binary_pattern` — those two depths need a
+compiled artifact to extract from, and there is none. `depth: headers`/
+`depth: build`/`depth: source` all remain valid for a header-only target,
+since none of the three requires a binary — `depth: build` here means
+ordinary L3 build evidence (compile flags/macros/target facts from a
+compile database or build-system adapter), which a header-only target can
+supply exactly as any other target does.
 
 Baseline publication (this plan depends on nothing from G41, but shares
 its baseline-manifest shape): a header-only target's stored baseline omits
@@ -171,6 +176,20 @@ file can never itself fail the validator it's meant to satisfy.
   `project_targets.py` allows.
 - `abicheck/buildsource/baseline_publish.py` — header-only baseline
   handling (no fabricated binary fields).
+- **`actions/baseline/action.yml`/`actions/baseline/run.sh`** — required,
+  not optional, confirmed by reading `run.sh` directly: it hard-rejects any
+  `libraries` entry lacking `artifact` (`"entry {i} must be an object with
+  at least \"name\" and \"artifact\""`) and always builds
+  `CMD=(abicheck dump "$artifact")` — so neither reusable baseline workflow
+  can publish a header-only target's baseline today regardless of what
+  `baseline_publish.py` does. This Action needs an `artifact`-optional
+  library-entry shape and a no-binary `CMD` branch dispatching into the new
+  binary-less `dump` mode below — the same class of gap G41 Phase 1
+  documents for `consumer_compile_*` forwarding through this identical
+  Action, but a distinct fix (accepting no artifact at all, vs. forwarding
+  extra compiler flags alongside one that's present) — implement both
+  needs in the same PR that touches this Action rather than two
+  uncoordinated passes over it.
 - **`abicheck/storage/`** (new module, not `abicheck/buildsource/
   build_output_emit.py` as an earlier draft of this plan proposed) — the
   typed builder's actual `build-output.json` schema/write path. Per
@@ -271,10 +290,13 @@ showed the binary-less *CLI* path doesn't exist yet either — see below):
   two positional operands have no header-only variant at all. This is the
   largest, least-scoped piece of this plan and should be estimated
   independently once a design for it exists — a real L2-only dump/compare
-  mode is not a small addition. Without both (1) and (2), the
+  mode is not a small addition; (3) `actions/baseline/action.yml`/`run.sh`
+  (confirmed by reading `run.sh` directly — it hard-rejects any library
+  entry without `artifact`), needed so a header-only target's baseline can
+  be published at all, not only checked. Without all three, the
   `build-output.json`/`project_targets.py` relaxation alone leaves the
-  target validated but still unable to run the check the feature exists
-  for — verify this end-to-end via the acceptance test, not just via
+  target validated but still unable to run a check or publish a baseline
+  — verify this end-to-end via the acceptance test, not just via
   `project validate-build` passing.
 - `emit-build` helper: M — the builder itself is straightforward once the
   digest/normalization conventions are reused rather than reinvented; the

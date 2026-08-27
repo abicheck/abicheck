@@ -112,7 +112,12 @@ already guarantees this once given the right `expected_target_id` — this
 test is end-to-end through `check-project.yml`, not a new unit test on
 already-tested filtering logic). A source genuinely shared by `core` and
 `math` (an absorbed `OBJECT_LIBRARY`) must appear in *both* filtered
-views, not be excluded from either. Removing/corrupting the
+views, not be excluded from either. A TU present in the shared build but
+genuinely absent from the attribution mapping (unresolvable by either
+channel) must surface as a structured incomplete-coverage signal for the
+requesting target, not as a silent `status: ok` drop — this is the new
+`inputs_pack.py` behavior above, and it's what lets G41 Phase 3's
+assurance gate actually catch the case. Removing/corrupting the
 `attribution_path` file (or a target declaring `projection: inferred`
 with no such path at all) must still produce `_inferred_evidence_
 projection_issues()`'s existing validation failure — this plan must not
@@ -121,8 +126,10 @@ attribution actually usable.
 
 ## Design
 
-The design is almost entirely "thread an existing value through," not new
-logic:
+Most of the design is "thread an existing value through," not new logic —
+with one confirmed exception, the unresolved-vs-other-target drop-reason
+distinction in `inputs_pack.py` (see "Files & surfaces" below), which is
+real new logic, narrow in scope:
 
 A real `check-project.yml` run does not shell out to `dump`/`compare`
 directly — it is a three-layer composite chain, confirmed by reading the
@@ -185,9 +192,29 @@ would have no way to pass the value through). The design, corrected:
   build/source-depth check (see G41 Phase 2's per-target header/
   compile-context projection work, which touches the same call sites) —
   new flag/config field for an attribution-manifest path + target id.
-- `abicheck/buildsource/inputs_pack.py` — no new logic expected;
-  `ingest_inputs_pack()`'s existing `attribution`/`expected_target_id`
-  parameters are the consumption point this plan wires a caller onto.
+- **`abicheck/buildsource/inputs_pack.py` — one real, confirmed gap
+  remains here, correcting an earlier draft of this plan's "no new logic
+  expected" claim.** `_filter_tus_by_attribution()`'s two drop reasons —
+  "attributed to a *different* target" (expected, benign) and "absent
+  from the attribution mapping entirely" (a genuine coverage gap: the
+  attribution model couldn't determine ownership at all) — collapse into
+  one undifferentiated `dropped` count, and `ingest_inputs_pack()`
+  deliberately keeps that count out of `diagnostics` (a documented,
+  correct choice for the *first* reason — see the function's own
+  "Attribution-scoping... is the *intended* effect... not a lossy one"
+  comment) so `ExtractorRecord.status` stays `"ok"` either way. Confirmed
+  by reading both functions directly: there is currently no way to tell
+  "every dropped TU was legitimately someone else's" from "some dropped
+  TU was unresolvable, and a real source change could be silently absent
+  from this target's analysis" — which is exactly the distinction G41
+  Phase 3's assurance contract needs to gate on. Closing this needs
+  `_filter_tus_by_attribution()` to return the two drop reasons
+  separately (e.g. `(kept, dropped_other_target, dropped_unresolved)`),
+  and `ingest_inputs_pack()` to fold only the *unresolved* count into a
+  structured incomplete-coverage signal a consumer can act on (not
+  `diagnostics`/`status`, which the existing comment's reasoning still
+  correctly keeps clean for the benign case) — a real, if narrow, piece
+  of new logic, not a pure wiring task.
 - `abicheck/buildsource/build_output.py` — no new logic expected;
   `_inferred_evidence_projection_issues()` already validates the
   `attribution_path` this plan's CLI wiring reads.
@@ -208,16 +235,19 @@ would have no way to pass the value through). The design, corrected:
 ## Effort & risk
 
 M (revised down from the original L estimate, since the attribution model
-and its validation are both already implemented, then confirmed to still
-hold once the full three-layer Action chain — `check-project.yml` →
-`actions/check-target` → repository-root Action — was accounted for: every
-added layer is forwarding, not new logic) — the remaining work is
-CLI/workflow/Action plumbing connecting two already-tested pieces
-(`attribute_sources_to_targets()`'s output, already validated by
-`_inferred_evidence_projection_issues()`) to a third
+and its validation are both already implemented; confirmed to still hold
+once the full three-layer Action chain — `check-project.yml` →
+`actions/check-target` → repository-root Action — was accounted for, since
+every added layer there is forwarding, not new logic; and confirmed once
+more against the one real exception, `inputs_pack.py`'s unresolved-vs-
+other-target drop-reason distinction, which is new but narrow) — the
+remaining work is mostly CLI/workflow/Action plumbing connecting two
+already-tested pieces (`attribute_sources_to_targets()`'s output, already
+validated by `_inferred_evidence_projection_issues()`) to a third
 (`ingest_inputs_pack()`'s existing `attribution`/`expected_target_id`
 parameters), plus updating `check-project.yml`'s own rejection logic and
-messaging. Low design risk; the main risk is scope creep back into
+messaging, plus the one confirmed piece of new logic above. Low design
+risk; the main risk is scope creep back into
 re-deriving attribution logic that already exists — resist that, and keep
 this plan to the wiring task ADR-053 itself identifies as deferred.
 
