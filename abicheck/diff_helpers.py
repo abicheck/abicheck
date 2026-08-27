@@ -784,6 +784,24 @@ def _both_str_or_none(old: object, new: object) -> bool:
     )
 
 
+def _malformed_transition(
+    kind: ChangeKind, old: object, new: object
+) -> tuple[object, object]:
+    """A hashable-safe transition for a byte-value/type-spelling kind whose
+    slot isn't the plain string shape those conversions require.
+
+    Deliberately tagged with *kind*, not a bare ``hashable_value`` pair: a
+    malformed ``STRUCT_SIZE_CHANGED`` (DWARF, bytes) and a malformed
+    ``TYPE_SIZE_CHANGED`` (AST, bits) carrying the identical raw value must
+    never agree, since one denotes bytes and the other bits -- the byte
+    conversion this fallback bypasses is exactly what would normally keep
+    them apart. Embedding the kind cannot suppress a genuine cross-tier
+    match: it only applies here, once the conversion itself was skipped,
+    so it never touches the well-formed path above.
+    """
+    return (kind, hashable_value(old)), (kind, hashable_value(new))
+
+
 def cross_tier_transition(c: Change) -> tuple[object, object] | None:
     """The (old_value, new_value) pair to require agreement on across tiers.
 
@@ -801,22 +819,32 @@ def cross_tier_transition(c: Change) -> tuple[object, object] | None:
     real detectors do store lists in them. The byte-value/type-spelling
     branches below are written for a plain ``str | None`` shape and neither
     tolerates anything else, so a slot that isn't that shape (a list,
-    still) falls back to the same always-safe ``hashable_value`` path the
-    final branch already uses, rather than crashing inside either
-    conversion -- see :func:`_both_str_or_none`.
+    still) falls back to a hashable-safe encoding rather than crashing
+    inside either conversion -- see :func:`_both_str_or_none`. That
+    fallback is tagged with the kind itself (:func:`_malformed_transition`),
+    not the bare ``hashable_value`` pair the final branch below returns:
+    a malformed ``STRUCT_SIZE_CHANGED`` (DWARF, bytes) and a malformed
+    ``TYPE_SIZE_CHANGED`` (AST, bits) carrying the identical raw list would
+    otherwise compare equal despite denoting different units -- exactly the
+    kind of cross-tier agreement this whole gate exists to get right, not
+    merely avoid crashing on (Codex review, PR #905).
     """
     if c.kind in (ChangeKind.STRUCT_FIELD_REMOVED, ChangeKind.TYPE_FIELD_REMOVED):
         return None
     old, new = c.old_value, c.new_value
-    if c.kind in _DWARF_BYTE_VALUE_KINDS and _both_str_or_none(old, new):
-        return _bits_str_from_bytes_str(old), _bits_str_from_bytes_str(new)
-    if c.kind in _TYPE_SPELLING_VALUE_KINDS and _both_str_or_none(old, new):
-        return (
-            _normalize_type_spelling(old, strip_indirection=False)
-            if old is not None
-            else None,
-            _normalize_type_spelling(new, strip_indirection=False)
-            if new is not None
-            else None,
-        )
+    if c.kind in _DWARF_BYTE_VALUE_KINDS:
+        if _both_str_or_none(old, new):
+            return _bits_str_from_bytes_str(old), _bits_str_from_bytes_str(new)
+        return _malformed_transition(c.kind, old, new)
+    if c.kind in _TYPE_SPELLING_VALUE_KINDS:
+        if _both_str_or_none(old, new):
+            return (
+                _normalize_type_spelling(old, strip_indirection=False)
+                if old is not None
+                else None,
+                _normalize_type_spelling(new, strip_indirection=False)
+                if new is not None
+                else None,
+            )
+        return _malformed_transition(c.kind, old, new)
     return hashable_value(old), hashable_value(new)

@@ -119,37 +119,64 @@ class TestListValuedFindingSurvivesTheRealDedupCrossKind:
     ``FUNC_PARAMS_CHANGED`` -- a kind `_dedup_cross_kind` never indexes at
     all, so those tests exercise `_deduplicate_ast_dwarf`'s outer dedup
     passes and `cross_tier_transition` directly, not this specific
-    function's own transition-set logic), these two use
+    function's own transition-set logic), these use
     ``TYPE_SIZE_CHANGED``/``STRUCT_SIZE_CHANGED`` -- a real key/value pair
     from ``_DWARF_TO_AST_EQUIV`` -- so `cross_tier_transition` is reached
     via `_dedup_cross_kind`'s own index-build (line ~1395) and match/drop
     decision (line ~1424), the exact call sites Codex review (PR #905)
     named as unreached by the compare()-level test below.
+
+    A malformed (non-string) value for one of these kinds is deliberately
+    never treated as *agreeing* across tiers, even when the raw content is
+    byte-identical -- `STRUCT_SIZE_CHANGED` denotes bytes and
+    `TYPE_SIZE_CHANGED` denotes bits, and the well-formed path's byte*8
+    conversion is exactly what a malformed value skips, so there is no safe
+    way to compare the two. A second Codex review round on the crash fix
+    below caught an earlier revision of this class doing precisely that --
+    matching two malformed transitions purely because their raw lists
+    happened to be equal.
     """
 
-    def test_matching_list_valued_transitions_are_deduped(self) -> None:
-        """A DWARF finding whose list-valued transition agrees with the
-        AST-tier finding for the same symbol is dropped as redundant."""
+    def test_identical_malformed_transitions_never_match_across_tiers(
+        self,
+    ) -> None:
+        """A DWARF (bytes) and an AST (bits) finding sharing the exact same
+        RAW list content must NOT be treated as agreeing, even though
+        `_matches` would call them equal by content alone.
+
+        `STRUCT_SIZE_CHANGED`'s well-formed comparison multiplies a byte
+        count by 8 before comparing against `TYPE_SIZE_CHANGED`'s bit
+        count -- a malformed (non-string) value skips that conversion
+        entirely, so the same raw ``["64"]`` denotes two different
+        quantities depending on which tier it came from. Matching them
+        anyway (Codex review, PR #905: an earlier revision of this fix did
+        exactly that, falling back to a bare `hashable_value` pair with no
+        tier tag) would silently drop the DWARF finding as "redundant" when
+        the two tiers were never actually shown to agree.
+        """
         result = _deduplicate_ast_dwarf(
             [
                 _change(
                     "Widget",
-                    ["old-repr"],
-                    ["new-repr"],
+                    ["same-raw-content"],
+                    ["same-raw-content"],
                     description="ast",
                     kind=ChangeKind.TYPE_SIZE_CHANGED,
                 ),
                 _change(
                     "Widget",
-                    ["old-repr"],
-                    ["new-repr"],
+                    ["same-raw-content"],
+                    ["same-raw-content"],
                     description="dwarf",
                     kind=ChangeKind.STRUCT_SIZE_CHANGED,
                 ),
             ]
         )
 
-        assert [c.kind for c in result] == [ChangeKind.TYPE_SIZE_CHANGED]
+        assert {c.kind for c in result} == {
+            ChangeKind.TYPE_SIZE_CHANGED,
+            ChangeKind.STRUCT_SIZE_CHANGED,
+        }
 
     def test_disagreeing_list_valued_transitions_are_not_over_merged(
         self,
@@ -181,6 +208,25 @@ class TestListValuedFindingSurvivesTheRealDedupCrossKind:
             ChangeKind.TYPE_SIZE_CHANGED,
             ChangeKind.STRUCT_SIZE_CHANGED,
         }
+
+    def test_a_malformed_dwarf_finding_still_survives_without_crashing(
+        self,
+    ) -> None:
+        """The crash-safety half, isolated from the unit-tagging half above:
+        a single malformed byte-value finding must not crash and must not
+        vanish, even with no AST-tier counterpart present at all."""
+        result = _deduplicate_ast_dwarf(
+            [
+                _change(
+                    "Widget",
+                    ["old-repr"],
+                    ["new-repr"],
+                    kind=ChangeKind.STRUCT_SIZE_CHANGED,
+                ),
+            ]
+        )
+
+        assert [c.kind for c in result] == [ChangeKind.STRUCT_SIZE_CHANGED]
 
 
 class TestRealCollisionReachesCompareOutput:

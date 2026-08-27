@@ -347,81 +347,19 @@ BUG_CLASSES: tuple[BugClass, ...] = (
             "tests/unit/compare/test_dedup_key.py",
             "tests/test_diff_namespaces.py",
         ),
+        # Phase 5's own two originally-tracked gaps here (a compare()-level
+        # collision test, and an adversarial generator over the shapes
+        # #879's post-mortem named) are now closed -- see PR #905 for the
+        # full account, including the real `cross_tier_transition` crash
+        # that building the compare()-level test's proper engine-level
+        # counterpart surfaced and fixed. `KnownGap` records a residual the
+        # current tests deliberately do NOT close (see its own docstring),
+        # so closed work does not get an entry here -- it lives in `fixed_by`
+        # and the PR/commit history instead (Codex review, PR #905: an
+        # earlier revision kept "what got closed" narratives in this tuple,
+        # which made the registry read as if genuinely open work remained
+        # where none did).
         known_gaps=(
-            KnownGap(
-                description=(
-                    "PR #905 found and fixed a real instance of this class "
-                    "while closing Phase 5's own known gaps below, via the "
-                    "new `TestListValuedFindingSurvivesTheRealDedupCrossKind` "
-                    "class: `cross_tier_transition`'s byte-value "
-                    "(`STRUCT_SIZE_CHANGED`/`STRUCT_ALIGNMENT_CHANGED`/"
-                    "`STRUCT_FIELD_OFFSET_CHANGED`) and type-spelling "
-                    "(`STRUCT_FIELD_TYPE_CHANGED`/`TYPE_FIELD_TYPE_CHANGED`) "
-                    "special cases both bypassed `hashable_value` entirely "
-                    "and crashed with an unhandled `TypeError`/"
-                    "`AttributeError` on a list-valued slot — for exactly "
-                    "the five kinds `_dedup_cross_kind` (the only real "
-                    "caller of `cross_tier_transition`) actually indexes, "
-                    "which the compare()-level test below cannot reach "
-                    "(`PYTHON_STABLE_ABI_VIOLATION` isn't one of them). "
-                    "Fixed with a `_both_str_or_none` guard in "
-                    "`diff_helpers.cross_tier_transition` that falls back "
-                    "to the generic `hashable_value` path whenever a slot "
-                    "isn't the plain `str | None` shape those two "
-                    "conversions assume."
-                ),
-                reference="docs/contribute/plans/bug-class-regression-testing.md#phase-5",
-            ),
-            KnownGap(
-                description=(
-                    "Phase 5 closed most of this entry's original gaps, at "
-                    "the ENGINE level specifically — see the separate gap "
-                    "below for what still isn't reached. (1) "
-                    "`tests/test_cross_tier_dedup_unhashable_value.py`'s "
-                    "`TestRealCollisionReachesCompareOutput` now runs a "
-                    "real `checker.compare()` call (a real abi3/Limited-API "
-                    "snapshot pair producing two genuinely distinct, "
-                    "list-valued `PYTHON_STABLE_ABI_VIOLATION` findings "
-                    "sharing one ChangeKind) and confirms both survive the "
-                    "full post-processing pipeline `DeduplicateAstDwarf` "
-                    "runs inside — not just the isolated "
-                    "`_deduplicate_ast_dwarf`/`cross_tier_transition` calls "
-                    "the rest of that file already covered. `abicheck."
-                    "checker` is treated as internal by this registry's own "
-                    "`public_surfaces` contract (see `BugClass."
-                    "public_surfaces`'s own docstring — only a real Click "
-                    "invocation or a call through `abicheck.service` "
-                    "counts), so this entry's `public_surfaces` correctly "
-                    "stays `()` rather than claiming CLI/python-api "
-                    "coverage this test does not provide (Codex review, "
-                    "PR #905). (2) `tests/unit/compare/test_dedup_key.py` "
-                    "(now a registered seed test, not just an unregistered "
-                    "file) carries the adversarial generator this entry's "
-                    "own text asked for — mixed list/tuple/dict/frozenset "
-                    "nesting at every recursion level (a third review "
-                    "round found the first version of this fix drew no "
-                    "sets at all, only a single fixed top-level example — "
-                    "fixed by giving the recursive strategy its own "
-                    "frozenset branch, so nested sets, structurally-equal "
-                    "set copies, and set-order invariance are now genuinely "
-                    "exercised, not just asserted in prose), `nan` (and, "
-                    "via Hypothesis's default `st.floats()` range, signed "
-                    "zero and +/-infinity), structurally-equal copies via "
-                    "`copy.deepcopy`, and an opaque-object class sharing a "
-                    "`repr()` between two unequal instances — plus the "
-                    "named mutant-killing cases (a list vs. its own string "
-                    "spelling, a list vs. the equivalent tuple, an "
-                    "unhashable value vs. its `repr()`, order-independent "
-                    "dict/set keying). `tests/test_diff_namespaces.py`'s "
-                    "own `TestPairedStableIndicesProperties` (already "
-                    "written per this repo's 'Primitive-level property "
-                    "tests' AGENTS.md section) is now registered here too, "
-                    "closing this entry's 'explicit must-merge/must-not-"
-                    "merge pairs... promoted into this suite's fixed "
-                    "corpus' ask for `_paired_stable_indices` specifically."
-                ),
-                reference="docs/contribute/plans/bug-class-regression-testing.md#phase-5",
-            ),
             KnownGap(
                 description=(
                     "No seed test for this class reaches a real public "
