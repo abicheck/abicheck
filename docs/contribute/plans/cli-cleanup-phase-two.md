@@ -2137,19 +2137,23 @@ pipelines a fourth time.
   > **Update (2026-08-21, later still): the first two of item 1's three
   > sub-ordering steps are now both done — the legacy-match removal decision
   > was shipped, and `--compile-db-filter` gained typed-API representation
-  > (nine review-caught corrections; see the 3A sub-section's "Item 1 closed"
-  > note above for the account, and the root `AGENTS.md` for the full
-  > numbered list).** Item 1 of this status block therefore narrows from
-  > "typed-API representation... and reordering the write-time embed" to just
-  > the reordering half — `_write_snapshot_output`'s provenance/`--inputs`/
-  > depth-gate sequence around a resolve-time embed — plus the still-unstarted
-  > third step, actually migrating `dump_cmd`'s real ELF/PE/Mach-O execution
-  > onto `execute_dump_request`. That migration's own remaining blocker is
-  > singular and environmental, not a design question: castxml, still
-  > unavailable in every environment this work has been done in (item 2 of the
-  > 3A sub-section's own "What still blocks routing `dump_cmd`'s real run"
-  > note). Items 2 (the L4 extractor default divergence) and 3 (the `-H`
-  > directory gap, below) are unchanged.
+  > (eight review-caught corrections, plus one related finding deliberately
+  > left as a documented gap; see the 3A sub-section's "Item 1 closed" note
+  > above for the precise split, and the root `AGENTS.md` for the full
+  > numbered account).** Item 1 of this status block therefore narrows from
+  > "typed-API representation... and reordering the write-time embed" to two
+  > remaining pieces, both still open and neither optional: reordering
+  > `_write_snapshot_output`'s provenance/`--inputs`/depth-gate sequence
+  > around a resolve-time embed, and the still-unstarted third step —
+  > actually migrating `dump_cmd`'s real ELF/PE/Mach-O execution onto
+  > `execute_dump_request`. Of those two, only the migration step is blocked
+  > on an external dependency: castxml, still unavailable in every
+  > environment this work has been done in (item 2 of the 3A sub-section's
+  > own "What still blocks routing `dump_cmd`'s real run" note) — an
+  > implementer resuming this item should not read that as license to skip
+  > the reordering, which has no such external blocker and could be done
+  > independently. Items 2 (the L4 extractor default divergence) and 3 (the
+  > `-H` directory gap, below) are unchanged.
 
 `dump --build-query` and `dump --build-compile-db` describe how the *project*
 is built, not what this snapshot is. They are already documented as CLI
