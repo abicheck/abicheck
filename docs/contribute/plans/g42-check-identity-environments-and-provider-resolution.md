@@ -278,13 +278,28 @@ gap.
 Closing it needs a grouping stage *before* the matrix is built, not
 merely a safer mutator once inside one job:
 
-1. **Grouping**: wherever `RunPlanCheck`s are generated from the
-   project's `checks:`/`environments:` declarations (`abicheck project
-   plan`, i.e. the run-plan-generation code `abicheck/buildsource/
-   run_plan.py` and/or its caller own), checks that resolve to the same
-   (target, profile, channel, requested_depth) tuple but differing
-   `environment_id` values must collapse into *one* `RunPlanCheck`
-   carrying a **list** of environment ids/digests
+1. **Grouping key must be every non-environment analysis/identity field,
+   not just the four-tuple** — confirmed by a fresh review round: grouping
+   solely on (target, profile, channel, requested_depth) would also
+   collapse two checks that differ in `analysis_evidence`/
+   `analysis_policy`/`analysis_assurance_requirement`, or in an explicit
+   `id:`, since those are singular fields on today's `RunPlanCheck` and
+   nothing in the four-tuple distinguishes them. Concretely, this plan's
+   own acceptance-test pair from the "Explicit check identifiers" section
+   — one check requesting `evidence: replay`, a same-target/profile/
+   channel/depth sibling requesting `evidence: clang-plugin` — would
+   wrongly collapse into one job with only one `analysis_evidence` value,
+   silently dropping the other evidence method's check entirely. The
+   grouping key is therefore the full tuple (target, profile, channel,
+   requested_depth, `analysis_evidence`, `analysis_policy`,
+   `analysis_assurance_requirement`, explicit `id`) minus `environment_id`
+   — only checks identical in *every one* of those fields, differing
+   *exclusively* by environment, may share one extraction. Wherever
+   `RunPlanCheck`s are generated from the project's `checks:`/
+   `environments:` declarations (`abicheck project plan`, i.e. the
+   run-plan-generation code `abicheck/buildsource/run_plan.py` and/or its
+   caller), checks matching on this full key collapse into *one*
+   `RunPlanCheck` carrying a **list** of environment ids/digests
    (`environment_ids: list[str]`, not the singular `environment_id`/
    `environment_digest` fields this plan's "Files & surfaces" section
    currently proposes) — one grouped check, one matrix cell, one job.
@@ -294,23 +309,60 @@ merely a safer mutator once inside one job:
    environment in the group's list in-process — using the pristine-
    `Change`-list requirement established above, once per environment —
    and emits one report artifact **per environment** from that single
-   job, each correctly stamped with its own `environment_id`/
-   `environment_digest` (and, where declared, its own `~<explicit_id>`
-   check-id suffix per the "Explicit check identifiers" section, so the N
-   reports remain individually addressable to the aggregate the same way
-   N separately-run jobs' reports would have been).
-3. **Aggregate consumption is unaffected in shape**: the aggregate step
-   already ingests report artifacts by discovery (see `check-project.yml`'s
-   `build-outputs`-directory glob pattern used elsewhere in this same
-   workflow for a precedent), so one job emitting N report artifacts
-   instead of N jobs each emitting one is invisible to that stage as long
-   as artifact names stay unique per (check, environment) pair — a naming
-   convention this plan must specify, not leave implicit.
+   job.
+3. **Each environment's report needs its own `target_id`, not merely its
+   own artifact filename — confirmed by reading the aggregate's actual
+   loader, not assumed, correcting a wrong claim in an earlier draft of
+   this plan.** `abicheck/workflows/aggregate/execute.py`'s
+   `collect_reports()` indexes every loaded report by its **in-report**
+   `target_id` field (the `check_id`-shaped string) and raises
+   `AggregateError` on a duplicate — keyed by that field, not by the
+   artifact's filename. Grouping N environments into one `RunPlanCheck`
+   with no per-environment identity distinction means all N emitted
+   reports carry the *identical* `check_id`/`target_id` (the
+   `~<explicit_id>` tail is optional and user-supplied, not automatically
+   derived per environment) — the second report loaded aborts the entire
+   aggregate run with a duplicate-target-id error, regardless of how
+   uniquely the artifact files themselves are named. An earlier draft of
+   this plan's claim that "unique artifact names" alone make the fan-out
+   transparent to the aggregate was wrong; fixed as follows:
+   - **`_CHECK_ID_RE`/`CHECK_ID_PATTERN`/`build_check_id()`/the JSON
+     schema pattern** (already required to extend in lockstep for the
+     optional `~<explicit_id>` tail per the "Explicit check identifiers"
+     section) gain a second, distinct optional segment for the
+     environment qualifier — e.g. `(?:!(?P<environment_id>[A-Za-z0-9._-]+))?`
+     inserted between the depth segment and the `~<explicit_id>` tail, so
+     the full shape is
+     `target@profile#channel@depth(?:!environment_id)?(?:~explicit_id)?`.
+     A distinct delimiter (`!`, not reusing `~`) keeps the
+     system-derived environment qualifier unambiguous against a
+     user-supplied explicit id, and the two compose (a check may declare
+     both an explicit `id:` and belong to a multi-environment group).
+   - This qualifier is **mandatory, not optional, whenever a grouped
+     `RunPlanCheck` carries more than one environment** — each of the N
+     emitted reports stamps its own `target_id` with `!<environment_id>`
+     so all N are distinct and individually addressable to the aggregate,
+     the same way N separately-run jobs' reports would have been. A
+     `RunPlanCheck` with exactly one environment (or none) omits the
+     qualifier entirely, so every existing invocation's `target_id` shape
+     is bit-for-bit unchanged.
+   - **The aggregate's expected-target contract must expand too, not stay
+     one entry per grouped check.** `ExpectedTargets` (built from
+     `run-plan.json`'s own manifest projection) is keyed by target_id
+     string with one entry expected per planned check; a grouped
+     `RunPlanCheck` with N environments must therefore project to **N**
+     expected target-id entries (one per `!<environment_id>` qualifier),
+     not one — otherwise `on_missing_required`'s coverage check reads
+     N-1 of the produced reports as unexpected/extra and the single
+     expected entry as satisfied by whichever report happens to load
+     first, silently losing the missing-required guarantee for every
+     environment but one.
 
 This is real, new workflow-orchestration logic — a grouping pass over
-`RunPlanCheck` generation and a multi-environment fan-out mode inside one
-job — not an extension of the in-process mutation-safety fix above; the
-"Effort & risk" section below is revised accordingly.
+`RunPlanCheck` generation, a multi-environment fan-out mode inside one
+job, a second check-id qualifier segment, and an expanded expected-target
+projection — not an extension of the in-process mutation-safety fix
+above; the "Effort & risk" section below is revised accordingly.
 
 This applies equally to whatever new
 system-provider classification function this plan adds in the next
@@ -355,22 +407,37 @@ from the report.
   `analysis_policy`/`analysis_assurance_requirement` fields, following the
   exact structural precedent `consumer_compile_*` already set (see G34
   Phase 0). Also: whatever generates `RunPlanCheck`s from a project's
-  `checks:`/`environments:` declarations must group checks sharing
-  (target, profile, channel, requested_depth) into one `RunPlanCheck`
-  carrying the full environment list — see "Efficiency constraint" above
-  for why the naive one-`RunPlanCheck`-per-environment shape silently
-  reintroduces one full extraction per environment at the job-orchestration
-  layer, not just inside one Python process.**
+  `checks:`/`environments:` declarations must group checks matching on
+  the *full* non-environment key (target, profile, channel,
+  requested_depth, `analysis_evidence`, `analysis_policy`,
+  `analysis_assurance_requirement`, explicit `id`) — not the narrower
+  four-tuple, which would wrongly collapse two checks differing only in
+  evidence method/policy/assurance/id — into one `RunPlanCheck` carrying
+  the full environment list. See "Efficiency constraint" above for why the
+  naive one-`RunPlanCheck`-per-environment shape silently reintroduces one
+  full extraction per environment at the job-orchestration layer, not just
+  inside one Python process.**
 - **`.github/workflows/check-project.yml`'s matrix-generation step and
   `actions/check-target`'s invocation** — the grouped `RunPlanCheck.
   environment_ids` list must reach the single matrix cell/job unexpanded
   (one cell per grouped check, not one per environment), and the job's
   `dump`/`compare` invocation gains a mode that runs extraction/diff once
   and then fans out the pristine-`Change`-list per-environment evaluation
-  from "Efficiency constraint" above, emitting one uniquely-named report
-  artifact per environment from that single job. This is the real, new
-  workflow-orchestration logic this plan requires beyond schema/digest
+  from "Efficiency constraint" above, emitting one report artifact per
+  environment from that single job, each stamped with its own
+  `!<environment_id>` check-id qualifier (see "Efficiency constraint"
+  above — a unique *filename* alone does not make this transparent to the
+  aggregate, which keys on the in-report `target_id`). This is the real,
+  new workflow-orchestration logic this plan requires beyond schema/digest
   plumbing — see "Efficiency constraint" above.
+- **`abicheck/workflows/aggregate/contracts.py`/`execute.py`** — the
+  second, environment-qualifier segment on `_CHECK_ID_RE`/`CheckIdParts`
+  (composable with, and distinct from, the `~<explicit_id>` tail already
+  required there), and `ExpectedTargets`'s manifest projection expanding
+  one grouped `RunPlanCheck` with N environments into N expected
+  target-id entries rather than one — without this, `on_missing_required`
+  silently stops guaranteeing coverage for every environment but one in a
+  group.
 - **`abicheck/workflows/aggregate/contracts.py`** — required, not optional:
   `_CHECK_ID_RE`'s extended `~<explicit_id>` suffix and `CheckIdParts`'
   matching `explicit_id` field (see "Explicit check identifiers" above) —
@@ -462,6 +529,16 @@ L, phased:
   existing precedent in this workflow to model it after (G34 Phase D's
   `finding_matrix` reconciliation covers *aggregating* already-emitted
   reports, not *avoiding generating* N redundant ones in the first place).
+  Two further, confirmed pieces belong to this same phase, not a later
+  one: the grouping key must match on every non-environment analysis/
+  identity field, not just (target, profile, channel, requested_depth)
+  — else two checks differing only in evidence method/policy/assurance/id
+  wrongly collapse; and each environment's emitted report needs its own
+  `!<environment_id>`-qualified `target_id`, with the aggregate's
+  `ExpectedTargets` projection expanded to one entry per environment per
+  grouped check, since a unique artifact filename alone does not stop
+  `collect_reports()`'s in-report-`target_id` duplicate check from
+  aborting the run.
 - Provider resolution (L): includes the confirmed `environment_matrix.py`
   schema extension (a real prerequisite, not a formality — see "Named
   environments" above) alongside the resolver itself, which is new logic
