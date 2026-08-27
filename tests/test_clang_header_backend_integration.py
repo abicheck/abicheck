@@ -40,7 +40,7 @@ import pytest
 from abicheck.checker import ChangeKind, Verdict, compare
 from abicheck.dumper import _clang_header_dump, dump
 from abicheck.dumper_clang import _ClangAstParser
-from abicheck.model import Visibility
+from abicheck.model import ScopeOrigin, Visibility
 
 # Scoped to **Linux/ELF** — the clang L2 backend's target (P1: clang-only Linux
 # CI images). The cross-platform binary-build conventions diverge in ways
@@ -266,6 +266,67 @@ def test_clang_and_castxml_snapshots_agree_on_public_surface(
         "Widget",
     }
     assert {e.name for e in clang_snap.enums} == {e.name for e in castxml_snap.enums}
+
+
+def test_clang_and_castxml_agree_on_public_vs_private_header_origin(
+    tmp_path: Path,
+) -> None:
+    """Phase 3 of ``docs/contribute/plans/bug-class-regression-testing.md``:
+    ``abicheck.provenance.classify_origin``'s PUBLIC_HEADER/PRIVATE_HEADER
+    split must agree across header-AST backends, not just the plain public-
+    surface parity ``test_clang_and_castxml_snapshots_agree_on_public_surface``
+    already checks. A declaration's origin is a function of the real
+    ``-H``/``--public-header-dir`` set the dump was invoked with -- never of
+    which backend parsed the header -- so a function declared in the
+    explicit public umbrella and one declared only in a transitively
+    ``#include``d private header must classify PUBLIC_HEADER / PRIVATE_HEADER
+    identically on both frontends.
+    """
+    if not (_have("clang") and _have("g++")):
+        pytest.skip("clang and g++ are required for this backend-parity test")
+    if not _have("castxml"):
+        pytest.skip("castxml required for the clang↔castxml parity oracle")
+
+    private_header = tmp_path / "detail.h"
+    private_header.write_text("#pragma once\nint detail_helper(int x);\n")
+    public_header = tmp_path / "api.h"
+    public_header.write_text('#pragma once\n#include "detail.h"\nint api_call(int x);\n')
+    src = tmp_path / "api.cpp"
+    src.write_text(
+        '#include "api.h"\n'
+        "int detail_helper(int x) { return x + 1; }\n"
+        "int api_call(int x) { return detail_helper(x) * 2; }\n"
+    )
+    so = tmp_path / "libapi.so"
+    subprocess.run(
+        ["g++", "-shared", "-fPIC", "-o", str(so), str(src), f"-I{tmp_path}"],
+        check=True,
+        capture_output=True,
+    )
+
+    def origins(snap: object) -> dict[str, str]:
+        return {
+            f.name: f.origin.value  # type: ignore[attr-defined]
+            for f in snap.functions  # type: ignore[attr-defined]
+            if f.name in ("api_call", "detail_helper")
+        }
+
+    clang_snap = dump(
+        so, [public_header], header_backend="clang", public_headers=[public_header]
+    )
+    castxml_snap = dump(
+        so, [public_header], header_backend="castxml", public_headers=[public_header]
+    )
+
+    clang_origins = origins(clang_snap)
+    castxml_origins = origins(castxml_snap)
+    # Both backends must actually see both functions -- an empty/partial
+    # dict would make the equality below vacuously true.
+    assert set(clang_origins) == {"api_call", "detail_helper"}
+    assert set(castxml_origins) == {"api_call", "detail_helper"}
+    assert clang_origins == castxml_origins
+    assert clang_origins["api_call"] == ScopeOrigin.PUBLIC_HEADER.value
+    assert clang_origins["detail_helper"] == ScopeOrigin.PRIVATE_HEADER.value
 
 
 def test_hybrid_headers_recover_case64_ms_abi_from_gcc_debug_build(
