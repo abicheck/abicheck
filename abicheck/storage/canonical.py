@@ -56,6 +56,7 @@ __all__ = [
     "CAPTURE_METADATA_KEY",
     "canonical_form",
     "canonical_json",
+    "raw_digest",
     "semantic_digest",
     "strip_capture_metadata",
 ]
@@ -360,11 +361,16 @@ def semantic_digest(value: Any, *, algorithm: str = "sha256") -> str:
     understand. A content-addressed store that other tools may re-derive
     digests for should not depend on the quirks of one runtime's encoder.
 
-    This changes the digest of any value containing non-ASCII content
-    relative to earlier revisions of this module. That is free precisely
-    because Phase 0 persists nothing: no stored package carries a digest
-    computed the old way. It would not be free later, which is why it is
-    settled now.
+    Every digest this function returns is domain-separated from
+    :func:`raw_digest`'s (a fixed tag is mixed in ahead of the payload --
+    see `_JSON_DOMAIN`), so a JSON value and an unrelated raw byte buffer
+    that happen to encode to the same bytes can never share an address.
+
+    This changes the digest of any value relative to earlier revisions of
+    this module (the non-ASCII fix above, and now the domain tag). That is
+    free precisely because Phase 0 persists nothing: no stored package
+    carries a digest computed the old way. It would not be free later,
+    which is why it is settled now.
     """
     stripped = strip_capture_metadata(value)
     _reject_surrogate_pairs(stripped)
@@ -374,7 +380,29 @@ def semantic_digest(value: Any, *, algorithm: str = "sha256") -> str:
         sort_keys=True,
         separators=(",", ":"),
     ).encode("ascii")
-    digester = hashlib.new(algorithm, payload)
+    return _digest_from_payload(payload, algorithm=algorithm, domain=_JSON_DOMAIN)
+
+
+#: Domain separators mixed into the hashed bytes ahead of the actual payload
+#: (see `_digest_from_payload`) so a raw binary buffer and an unrelated
+#: JSON-shaped value that happen to encode to the same bytes -- `b"{}"` and
+#: `{}` both encode to the two bytes `b"{}"` -- can never collide on one
+#: address. Without this, `InMemoryObjectStore.put()` would keep whichever
+#: representation was stored first and `get()` would return it regardless of
+#: which one a later caller actually asked to store (Codex review).
+_JSON_DOMAIN = b"json:"
+_RAW_DOMAIN = b"raw:"
+
+
+def _digest_from_payload(payload: bytes, *, algorithm: str, domain: bytes) -> str:
+    """Shared `<algorithm>:<hex>` formatting for an already-encoded payload.
+
+    Used by both :func:`semantic_digest` (JSON-encoded content) and
+    :func:`raw_digest` (raw binary content) so the two rules below can't
+    drift between two independent copies. `domain` is prepended to `payload`
+    before hashing -- see `_JSON_DOMAIN`/`_RAW_DOMAIN`.
+    """
+    digester = hashlib.new(algorithm, domain + payload)
     if digester.digest_size == 0:
         # SHAKE and friends are extendable-output functions: `hashlib.new`
         # accepts them, but `hexdigest()` requires a length, so a caller
@@ -395,6 +423,22 @@ def semantic_digest(value: Any, *, algorithm: str = "sha256") -> str:
             "digest size; a content address needs a fixed-length digest, so "
             "choose a fixed-length algorithm such as sha256"
         )
+    if digester.name not in hashlib.algorithms_guaranteed:
+        # `hashlib.algorithms_available` is whatever this host's OpenSSL
+        # happens to expose (`sm3`/`ripemd160`/`sha512_224`/`sha512_256` on
+        # a typical Linux build) -- real and fixed-size, so nothing above
+        # would refuse it, but `object_relpath`/`ObjectRef` already refuse
+        # such an algorithm for the identical portability reason. Without
+        # this check here too, `put()` could mint a digest no `ObjectRef`
+        # could ever be built from -- a store producing an unreferenceable
+        # object (Codex review). Checked on `digester.name` (the resolved
+        # canonical spelling), not the caller's own, so an alias for a
+        # guaranteed algorithm isn't rejected by its unresolved spelling.
+        raise ValueError(
+            f"{digester.name!r} is not in hashlib.algorithms_guaranteed, so "
+            "it is not portable to every platform this package might be "
+            "read on"
+        )
     # `digester.name`, not the caller's spelling. `hashlib` accepts aliases
     # (`SHA256`, `sha-256`, `SHA-512`), and preserving one gave the same
     # logical object several content addresses whose hex halves were
@@ -403,3 +447,30 @@ def semantic_digest(value: Any, *, algorithm: str = "sha256") -> str:
     # property of the content, so nothing incidental to the caller may reach
     # it.
     return f"{digester.name}:{digester.hexdigest()}"
+
+
+def raw_digest(
+    payload: bytes | bytearray | memoryview, *, algorithm: str = "sha256"
+) -> str:
+    """Content digest of a raw binary payload -- D7's counterpart to
+    :func:`semantic_digest` for content :func:`canonical_form` cannot
+    represent at all (it raises ``TypeError`` on any binary buffer, by
+    design -- its own docstring already directs a caller with such a
+    payload here: "store binary payloads as raw objects and reference them
+    by digest"). Hashes the payload's bytes directly: no JSON encoding, and
+    no capture-metadata stripping, since a raw payload carries no such
+    structure to strip.
+
+    Same ``"<algorithm>:<hex>"`` format and the same fixed-digest-size and
+    canonical-spelling rules as `semantic_digest` (via the shared
+    `_digest_from_payload`), so a caller building an `ObjectRef` for a raw
+    artifact and the `ObjectStore` that stores it always agree on its
+    address.
+    """
+    if not _is_binary_buffer(payload):
+        raise TypeError(
+            f"{type(payload).__name__} is not a binary buffer; raw_digest "
+            "hashes bytes-like payloads only -- use semantic_digest for "
+            "JSON-shaped content"
+        )
+    return _digest_from_payload(bytes(payload), algorithm=algorithm, domain=_RAW_DOMAIN)

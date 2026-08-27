@@ -45,7 +45,11 @@ from typing import TYPE_CHECKING, Any
 
 from .bundle_manifest import InstantiationManifest
 from .model import AbiSnapshot
-from .storage.bundle_facts_validation import validated_alias_map, validated_filename_map
+from .storage.bundle_facts_validation import (
+    check_bundle_facts_json_budget,
+    validated_alias_map,
+    validated_filename_map,
+)
 
 if TYPE_CHECKING:
     from .bundle_models import BundleDiffResult, BundleSnapshot
@@ -79,12 +83,16 @@ DEFAULT_MAX_BUNDLE_DECODED_BYTES = 1024 * 1024 * 1024
 #: own AbiSnapshot object graph). No real bundle approaches this.
 DEFAULT_MAX_LIBRARY_COUNT = 20_000
 
-#: Container-node budget for one blob's JSON decode -- json.loads() has no
-#: cap on *node count*; many small containers under an ignored key inflate
-#: real memory regardless of container shape (~150MB RSS from a 6MB
+#: Default container-node budget for one blob's JSON decode -- json.loads()
+#: has no cap on *node count*; many small containers under an ignored key
+#: inflate real memory regardless of container shape (~150MB RSS from a 6MB
 #: payload of ~2M empty objects; an array-only payload bypassed an
 #: earlier, object-only cap identically -- both confirmed empirically).
 #: See `storage.json_budget` for the shared object+array pre-scan (Codex).
+#: A *default*, not a hard ceiling: a real, large per-library facts blob
+#: (e.g. SYCL/DPC++ with a large template surface) can legitimately need
+#: well over this to decode -- `read_bundle_facts_archive` and friends
+#: accept a `max_json_object_nodes` override for this (Codex review).
 DEFAULT_MAX_JSON_OBJECT_NODES = 1_000_000
 
 #: The fingerprint value used when no multibuild variant applies (every
@@ -235,6 +243,7 @@ def compare_bundle_from_facts(
     system_providers: Any = None,
     cohorts: list[str] | None = None,
     policy: str = "strict_abi",
+    policy_file: Any = None,
     new_signature_evidence: dict[str, Any] | None = None,
 ) -> BundleDiffResult:
     """Bundle-level comparison with the *old* side loaded from a stored
@@ -272,6 +281,7 @@ def compare_bundle_from_facts(
         system_providers=system_providers,
         cohorts=cohorts,
         policy=policy,
+        policy_file=policy_file,
         old_signature_evidence=old_facts.per_library_snapshots,
         new_signature_evidence=new_signature_evidence,
     )
@@ -332,21 +342,19 @@ def maybe_write_bundle_facts_archive(
 
 
 def maybe_read_bundle_facts_archive(
-    path: str | Path,
-    format: str,
-    *,
-    snapshot_from_dict: Callable[[dict[str, Any]], AbiSnapshot],
+    path: str | Path, format: str, *, snapshot_from_dict: Callable[[dict[str, Any]], AbiSnapshot],
+    max_json_object_nodes: int = DEFAULT_MAX_JSON_OBJECT_NODES,
 ) -> BundleFacts | None:
     """``serialization.load_bundle_facts``'s ``format=`` dispatch:
     ``"auto"`` sniffs *path*'s own bytes; returns a real result whenever
     the resolved format is ``"archive"``, ``None`` for ``"json"`` (fall
     through to plain-JSON), and raises for anything else.
-    *snapshot_from_dict* is ``serialization.snapshot_from_dict``, passed
-    in -- see the module-level comment above.
-
-    The sniff and the follow-up archive parse share one fd, else a
-    concurrent atomic replacement between two separate opens could swap
-    in a different generation (Codex review)."""
+    *snapshot_from_dict* is ``serialization.snapshot_from_dict``, passed in
+    -- see the module-level comment above; *max_json_object_nodes* is
+    forwarded to :func:`read_bundle_facts_archive`. The sniff and the
+    follow-up archive parse share one fd, else a concurrent atomic
+    replacement between two separate opens could swap in a different
+    generation (Codex review)."""
     from .storage.bundle_archive import open_regular_file_for_format_sniff
 
     fp = None
@@ -355,7 +363,9 @@ def maybe_read_bundle_facts_archive(
     else:
         resolved = format
     if resolved == "archive":
-        return read_bundle_facts_archive(path, snapshot_from_dict=snapshot_from_dict, _fp=fp)
+        return read_bundle_facts_archive(
+            path, snapshot_from_dict=snapshot_from_dict, _fp=fp, max_json_object_nodes=max_json_object_nodes
+        )
     # Known residual gap: for "json", *fp* is closed rather than handed to
     # `read_snapshot_text(path)`'s own open, so the sniff-then-reopen race
     # closed above still applies here -- needs a new param on a `no_growth` module.
@@ -554,6 +564,7 @@ def read_bundle_facts_archive(
     *,
     snapshot_from_dict: Callable[[dict[str, Any]], AbiSnapshot],
     _fp: Any | None = None,
+    max_json_object_nodes: int = DEFAULT_MAX_JSON_OBJECT_NODES,
 ) -> BundleFacts:
     """Read a G40 content-addressed zip archive at *path* back into a
     :class:`BundleFacts`.
@@ -562,17 +573,15 @@ def read_bundle_facts_archive(
     snapshot uses ``storage.bundle_archive.BundleArchiveReader`` directly.
 
     *_fp*, when given, is an already-open fd reused from
-    ``maybe_read_bundle_facts_archive``'s own format sniff (Codex)."""
+    ``maybe_read_bundle_facts_archive``'s own format sniff (Codex).
+
+    *max_json_object_nodes* overrides :data:`DEFAULT_MAX_JSON_OBJECT_NODES`
+    for this call's per-blob budget -- see that constant's own docstring."""
     import json as _json
 
     from .bundle_manifest import manifest_from_dict
     from .errors import IncompatibleSnapshotSchemaError, SnapshotError
     from .storage.bundle_archive import BundleArchiveReader
-    from .storage.json_budget import (
-        JsonContainerBudgetExceeded,
-        JsonNestingTooDeepError,
-        check_json_container_budget,
-    )
 
     def _load_blob_json(raw: bytes, description: str) -> Any:
         # Mirrors read_manifest()'s own translation -- neither invalid
@@ -582,16 +591,7 @@ def read_bundle_facts_archive(
         # before json.loads() ever runs -- the latter because relying on
         # json.loads() itself to raise RecursionError isn't portable
         # (Python 3.14 parses 10,000 levels of `[[[...]]]` with none).
-        try:
-            check_json_container_budget(raw, DEFAULT_MAX_JSON_OBJECT_NODES)
-        except JsonContainerBudgetExceeded:
-            raise SnapshotError(
-                f"{path}: {description} contains more than "
-                f"{DEFAULT_MAX_JSON_OBJECT_NODES} JSON containers -- refusing "
-                "to decode (possible container-count amplification attack)"
-            ) from None
-        except JsonNestingTooDeepError:
-            raise SnapshotError(f"{path}: {description} is too deeply nested to parse") from None
+        check_bundle_facts_json_budget(raw, max_json_object_nodes, path=path, description=description)
         try:
             return _json.loads(raw)
         except (UnicodeDecodeError, ValueError) as exc:

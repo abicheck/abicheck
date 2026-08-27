@@ -1077,6 +1077,33 @@ class TestEveryKeyTakingDoorIsGuarded:
                 for fn in node.body:
                     if not isinstance(fn, ast.FunctionDef) or fn.name.startswith("_"):
                         continue
+                    # A pure stub -- a docstring followed by nothing but `...`
+                    # or `pass`, the shape a `Protocol` method (or an ABC's)
+                    # is declared with -- reads nothing itself, so there is no
+                    # body for it to guard. `ObjectStore.get`/`.has` are
+                    # exactly this: the interface names a `str` key, but only
+                    # a concrete implementation ever dereferences one, and
+                    # that implementation is swept on its own merits below.
+                    # Without this, a `Protocol` could never satisfy this
+                    # sweep at all, regardless of what implements it.
+                    body_stmts = [
+                        stmt
+                        for stmt in fn.body
+                        if not (
+                            isinstance(stmt, ast.Expr)
+                            and isinstance(stmt.value, ast.Constant)
+                            and isinstance(stmt.value.value, str)
+                        )
+                    ]
+                    if len(body_stmts) == 1 and (
+                        (
+                            isinstance(body_stmts[0], ast.Expr)
+                            and isinstance(body_stmts[0].value, ast.Constant)
+                            and body_stmts[0].value.value is Ellipsis
+                        )
+                        or isinstance(body_stmts[0], ast.Pass)
+                    ):
+                        continue
                     keyish = [
                         arg.arg
                         # Every parameter kind, not only the plain
