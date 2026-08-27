@@ -371,6 +371,27 @@ class TestTemplateParamTypeChanged:
         result = compare(old, new)
         assert ChangeKind.TEMPLATE_PARAM_TYPE_CHANGED not in _kinds(result)
 
+    def test_fires_even_for_a_layout_equivalent_non_type_argument_change(self) -> None:
+        """Fires on a same-layout instantiation pair too (Codex review, PR #882).
+
+        The detector compares only parsed argument text under a matching
+        outer template name, with no layout/ABI check of its own -- two
+        same-outer-name specializations differing only in a non-type
+        argument (``Tag<1>`` vs ``Tag<2>``) can share the identical
+        layout, yet still fire this kind. Pins the exact counterexample
+        the ``template_param_type_changed`` impact text now names, so the
+        caveat stays testable rather than just asserted in prose.
+        """
+        mangled = "_Z7processv"
+        old = _snap(
+            functions=[self._make_func_with_vec_param("process", mangled, "Tag<1>")]
+        )
+        new = _snap(
+            functions=[self._make_func_with_vec_param("process", mangled, "Tag<2>")]
+        )
+        result = compare(old, new)
+        assert ChangeKind.TEMPLATE_PARAM_TYPE_CHANGED in _kinds(result)
+
     def test_different_outer_template_no_template_change(self) -> None:
         """vector<int> → list<int>: outer name changed → should NOT fire TEMPLATE_PARAM_TYPE_CHANGED
         (FUNC_PARAMS_CHANGED covers it instead)."""
@@ -567,6 +588,41 @@ class TestTemplateReturnTypeChanged:
         result = compare(old, new)
         assert ChangeKind.TEMPLATE_RETURN_TYPE_CHANGED in _kinds(result)
         assert result.verdict == Verdict.BREAKING
+
+    def test_fires_even_for_a_layout_equivalent_non_type_argument_change(self) -> None:
+        """Fires on a same-layout instantiation pair too (Codex review, PR #882).
+
+        Same counterexample as ``TestTemplateParamTypeChanged``'s sibling
+        test, on the return-type branch: the detector has no layout/ABI
+        check of its own, so a same-outer-name specialization pair
+        differing only in a non-type argument (``Tag<1>`` vs ``Tag<2>``)
+        still fires, even though both can share the identical layout.
+        Pins the exact counterexample the ``template_return_type_changed``
+        impact text now names.
+        """
+        mangled = "_Z7getVecv"
+        old = _snap(
+            functions=[
+                Function(
+                    name="getVec",
+                    mangled=mangled,
+                    return_type="std::vector<Tag<1>>",
+                    visibility=Visibility.PUBLIC,
+                )
+            ]
+        )
+        new = _snap(
+            functions=[
+                Function(
+                    name="getVec",
+                    mangled=mangled,
+                    return_type="std::vector<Tag<2>>",
+                    visibility=Visibility.PUBLIC,
+                )
+            ]
+        )
+        result = compare(old, new)
+        assert ChangeKind.TEMPLATE_RETURN_TYPE_CHANGED in _kinds(result)
 
 
 class TestTemplateAnalysisNegative:

@@ -496,11 +496,17 @@ TYPES_ENTRIES: list[ChangeKindMeta] = [
               "derived layout even though the base's sizeof is unchanged.",
        description_template="'{name}' data size changed ({old} → {new} bits) while sizeof stayed {detail} bits. A derived class may reuse this type's tail padding, so a derived layout can shift even though sizeof is unchanged."),
     _E("template_param_type_changed", _B,
-       impact="A template's own parameter's inner type changed (e.g. a "
-              "member of the type used to instantiate the template); this "
-              "changes the instantiation's layout and interface, so a "
-              "caller/consumer using the old instantiation's ABI is no "
-              "longer compatible with the new one.",
+       impact="A template's own parameter's inner type argument changed "
+              "(e.g. a member of the type used to instantiate the "
+              "template). The detector compares only the parsed argument "
+              "text under a matching outer template name, not whether the "
+              "two instantiations actually differ in layout or interface "
+              "— two same-outer-name specializations that differ only in "
+              "a non-type argument (e.g. Tag<1> vs Tag<2>, both empty) "
+              "can share the same layout. Where the instantiation's "
+              "actual representation does differ, a caller/consumer using "
+              "the old instantiation's ABI is no longer compatible with "
+              "the new one.",
        description_template="Template parameter inner type changed: {name} param {detail} ({old} → {new})"),
     _E("template_return_type_changed", _B,
        impact="A template's own return type's inner type argument "
