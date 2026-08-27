@@ -113,13 +113,30 @@ reuse unchanged; a caller wanting to assert absence calls
 collection) explicitly, so the payload contract's only rule is that this
 is the *one* legitimate way to spell "present, empty" — never a bare
 sentinel construction readers could mistake for "not collected."
-`Fact.value_or(default)` and `Fact.is_present` are the only two ways to
-read one without a full `match`. `Fact.__bool__` is explicitly **defined**
-to raise `TypeError("Fact[T] has no truth value — read .is_present or
-.value_or(...)")` — plain absence of `__bool__` leaves ordinary Python
-object truthiness in effect (every `Fact[T]` instance would be truthy
-regardless of status), so the no-implicit-truthiness invariant needs the
-raise, not silence.
+`Fact.value_or(default)` and `Fact.is_present` exist, but **`value_or` is
+not a detector-safe way to read one** — a first draft of this phase
+offered it as one of "the only two ways to read one without a full
+`match`," which a reviewer correctly rejected: `old.vtable.value_or([])
+!= new.vtable.value_or([])` collapses `NOT_COLLECTED`/`FAILED`/
+`UNSUPPORTED` back into the same default as a confirmed empty value,
+reintroducing by a different spelling the exact ambiguity this phase
+exists to make unrepresentable. `value_or` is reserved for non-semantic
+presentation code (a report renderer choosing a display fallback, where
+collapsing "not collected" and "confirmed absent" to the same rendered
+text is an acceptable UI simplification, not a detection decision);
+*every* detector reads a `Fact[...]`-typed field only by inspecting
+`.status`/pattern-matching the full `FactStatus` space. The
+`check_ai_readiness.py` rule in this phase's acceptance criteria enforces
+this distinction, not merely "was there a bare attribute access" —
+`value_or` called from `diff_types.py`/`diff_layout.py` or any other
+detector module is flagged exactly the same as a bare attribute read; the
+rule's allowed callers are presentation modules only, not "anywhere
+outside `model/fact.py`" as this phase's first draft stated it.
+`Fact.__bool__` is explicitly **defined** to raise `TypeError("Fact[T]
+has no truth value — read .is_present or .value_or(...)")` — plain
+absence of `__bool__` leaves ordinary Python object truthiness in effect
+(every `Fact[T]` instance would be truthy regardless of status), so the
+no-implicit-truthiness invariant needs the raise, not silence.
 
 **Scope for this phase (deliberately narrow).** Convert exactly the three
 fields AGENTS.md's "Known gaps" names as actively causing fabricated
@@ -259,10 +276,15 @@ type) — confirmed to fail against the pre-fix `asdict()`-only path, which
 is exactly the failure mode a reviewer caught in this design.
 
 **Acceptance criteria.** The three converted fields cannot be read by any
-detector without explicit availability handling (enforced by a new
-`check_ai_readiness.py` check: a `Fact[...]`-typed field accessed via
-direct attribute rather than `.value_or`/pattern-match outside
-`model/fact.py` itself is an ERROR). Full test suite green; FP-rate/
+detector without explicit availability handling — enforced by a new
+`check_ai_readiness.py` check flagging, inside `diff_*.py`/any detector
+module, either a bare attribute read of a `Fact[...]`-typed field *or* a
+`.value_or(...)` call on one (both collapse the status space the same
+way); `.status`/pattern-match access is the only permitted form there.
+`.value_or(...)` itself is not banned repository-wide — it stays legal in
+presentation-only modules (`reporter.py`/`html_report.py`/`sarif.py` and
+siblings), which is a real, narrower allowlist, not "anywhere outside
+`model/fact.py`." Full test suite green; FP-rate/
 tier-accuracy gates unchanged (this phase changes representation, not
 detector logic).
 
@@ -340,15 +362,28 @@ reads one `EntityId`, computed once, downstream of backend extraction.
 **Design.** `abicheck/model/identity.py`: `ScopePath` (an immutable tuple
 of typed segments — `Namespace(name)`, `Record(name, access)`,
 `InlineNamespace(name, version_tag)`, `Anonymous(kind, ordinal)`,
-`LocalToFunction(owner)`), `EntityId` (a `ScopePath` plus a kind
-discriminator — record/enum/typedef/function/variable/constant), and
-`OccurrenceId` (an `EntityId` plus a disambiguator for the
-already-documented "two declarations, one identity" case ADR-062 Phase 0
-already solves at the storage layer — reused here, not reinvented).
-Generalizes ADR-046/048's source-graph identity (already real,
-`USR`-based) by making `EntityId` the *single* identity both the flat
-snapshot and the source graph reference, rather than two graphs with their
-own identity schemes that happen to usually agree.
+`LocalToFunction(owner)`) names only the *containing* scope, never the
+leaf declaration itself. **`EntityId` therefore always carries the leaf
+declaration's own name as an explicit component, for every kind — not
+only for functions.** A first draft of this phase defined `EntityId` as
+just `(ScopePath, kind)`, which collides any two sibling declarations of
+the same kind in the same scope (`ns::A` and `ns::B`, two enums, two
+variables, two typedefs — the function-overload collision this phase
+already fixed once is one instance of this same shape, not a
+function-specific special case, and fixing it only for functions left
+every other kind exposed). The corrected shape is `EntityId = (ScopePath,
+kind, leaf_name, extra)`, where `leaf_name` is the declaration's own
+(unqualified) name for every kind, and `extra` is kind-specific and empty
+for most kinds — `()` for a record/enum/typedef/variable/constant, and
+the callable-signature discriminator described below for a function
+specifically (the one case a bare name is still insufficient, since two
+overloads share both scope and name). `OccurrenceId` (an `EntityId` plus a
+disambiguator for the already-documented "two declarations, one identity"
+case ADR-062 Phase 0 already solves at the storage layer — reused here,
+not reinvented). Generalizes ADR-046/048's source-graph identity (already
+real, `USR`-based) by making `EntityId` the *single* identity both the
+flat snapshot and the source graph reference, rather than two graphs with
+their own identity schemes that happen to usually agree.
 
 **A function's `EntityId` carries a callable-signature discriminator —
 `ScopePath` plus a bare name is not enough.** `f(int)` and `f(double)` share
@@ -377,11 +412,13 @@ precisely this reason ("two identically-declared overloads never
 collide" — but that guarantee only holds because the qualified name is
 *in* the tuple); this phase's fallback keeps that shape, it does not
 narrow it. `EntityId`'s function variant is therefore `(ScopePath,
-"function", mangled_name | (qualified_name, param_types,
-cv_qualifiers))`, not a bare `(ScopePath, "function")` and not a
-signature tuple with the name left out — generalizing the existing tiered
-primitive into the one identity every consumer reads, rather than
-proposing a simpler one that regresses what the codebase already gets
+"function", leaf_name, extra=mangled_name | (param_types,
+cv_qualifiers))` — `leaf_name` per the general shape above, `extra`
+carrying exactly the signature discriminator a function additionally
+needs — not a bare `(ScopePath, "function")` and not a signature tuple
+with the name left out — generalizing the existing tiered primitive into
+the one identity every consumer reads, rather than proposing a simpler one
+that regresses what the codebase already gets
 right.
 
 This phase explicitly targets, and closes, the specific collision bugs
@@ -506,9 +543,23 @@ sibling:
   declaration/reference data `type_reachability.py`/`surface.py` each
   independently reconstruct today) — available unconditionally, unlike
   `source_graph.py`'s graph, which only exists when L3-L5 evidence was
-  collected. Nodes are keyed by the `EntityId` Phase 2 already
-  established — this phase is ordered after Phase 2 for exactly that
-  reason, the same dependency Phase 5 (`SemanticIR`) has on Phase 2.
+  collected. **Only `declaration`/`type` nodes are keyed by the `EntityId`
+  Phase 2 established — not every node kind.** A first draft of this
+  phase said "nodes are keyed by `EntityId`" without qualification, which
+  overclaims: Phase 2's `EntityId` is specifically an ABI-declaration
+  identity (record/enum/typedef/function/variable/constant); `header`,
+  `translation_unit`, `symbol`, and `target` nodes are not ABI
+  declarations and have no natural `EntityId` form — `GraphNode.id` in
+  the real, existing `buildsource/graph_facts.py`/`source_graph.py` is
+  already a plain string with its own per-kind URI scheme for exactly
+  these non-declaration kinds (`header://`, `source://`, `target://`,
+  `symbol://`, ...), which this phase reuses unchanged rather than
+  replacing. So: a `declaration`/`type` node's id is `EntityId`-derived
+  (rendered to the same string form `model/graph.py`'s `GraphNode.id`
+  already expects); every other kind keeps the existing URI-scheme id.
+  This phase is ordered after Phase 2 because the declaration/type half
+  needs it — the same dependency Phase 6 (`SemanticIR`) has on Phase 2 —
+  not because every node kind does.
 - **Sharing node ids alone does not merge two graphs — this phase adds the
   actual assembly step, not only a shared identity.** `merge_graph_facts`
   only folds the `GraphFact` list already attached to *one* node; it is
@@ -590,8 +641,22 @@ scan with its own ambiguity-tracking machinery — the machinery this phase
 removes is exactly what Phase 2 already started removing for the identity
 half of the same problem; this phase removes the *reachability* half.
 
-**Files.** `abicheck/model/graph.py` (new — the relocated `GraphNode`/
-`GraphEdge`/`GraphFact`/`FactConflict`/`merge_graph_facts`); `buildsource/
+**Files.** `abicheck/model/graph.py` (new — **the full dependency closure
+the relocated types actually need, not only the five originally named
+symbols**: `GraphNode`/`GraphEdge`/`GraphFact`/`FactConflict`/
+`merge_graph_facts` plus `_normalize_if_decl_or_type`/`edge_relation_key`/
+`ensure_facts_and_resolve` — a first draft of this phase named only the
+first five, but `GraphNode.from_dict`/`GraphEdge.relation_key` call the
+other three directly, so leaving them behind in `buildsource/graph_facts.py`
+would either break those methods once that module is trimmed to a
+re-export shim, or force `model/graph.py` to import back out to
+`buildsource/` to reach them — the identical import-direction mistake
+this phase already corrected once for `SourceGraphSummary` itself.
+`ensure_facts_and_resolve`'s own identity normalization imports
+`abicheck.name_classification`, which is safe to bring along — that
+module has zero internal imports of its own (pure `re`-based string
+utilities), so it is already a leaf and importing it from `model/`
+introduces no cycle); `buildsource/
 graph_facts.py`/`buildsource/source_graph.py` (trimmed to re-export from
 the new location, `NODE_KINDS`/`EDGE_KINDS` and L5-specific construction
 logic unchanged in place); `abicheck/compare/surface_graph.py` (new —
@@ -791,17 +856,31 @@ normalizer function's signature (`normalize(raw) -> SemanticIR`) and
 never the type itself, which would have let each backend's migration
 converge on a different ad hoc shape behind the same name, defeating the
 whole point of "one canonical IR." `abicheck/model/semantic_ir.py` (new):
-`SemanticIR` is a collection of canonicalized entities keyed by the
-`EntityId` Phase 2 established — one entry per declaration, each carrying
-its resolved `ScopePath`, canonical type spelling, template-argument
-list, and CV-qualification, independent of which backend produced it —
-plus the `Fact[...]`-wrapped per-field availability Phase 0 established,
-so a canonicalized entity can state "this backend didn't produce this
+`SemanticIR` is keyed by `OccurrenceId`, **not** collapsed to one entry
+per `EntityId` — a first draft of this phase kept one entity per
+`EntityId`, which would silently discard exactly the distinction Phase 2
+introduces `OccurrenceId` to preserve: a complete definition and an
+incomplete/ODR-duplicate declaration can legitimately share one
+`EntityId` while carrying different availability, origin, or producer
+facts, and a one-entry-per-identity map would overwrite or merge that
+evidence away before comparison ever sees it. `SemanticIR.occurrences:
+dict[OccurrenceId, CanonicalEntity]` holds every occurrence; a derived
+`SemanticIR.canonical_entities() -> dict[EntityId, CanonicalEntity]`
+projection (resolving which occurrence wins when a consumer genuinely
+wants one canonical view, not every occurrence) is a separate, explicit
+method for the callers that actually need that reduction, rather than
+the only shape `SemanticIR` offers. Each `CanonicalEntity` carries its
+resolved `ScopePath`, canonical type spelling, template-argument list,
+and CV-qualification, independent of which backend produced it, plus the
+`Fact[...]`-wrapped per-field availability Phase 0 established, so a
+canonicalized entity can state "this backend didn't produce this
 particular fact" rather than only "here is the value." This model file,
 and a primitive-level test suite pinning its shape directly (construct a
-few entities by hand, assert the `EntityId`→entity mapping and the
-canonicalization rules independent of any real backend), land as their
-own first step in this phase, before any of the following narrowing work.
+few entities by hand, including two sharing one `EntityId` with
+differing availability, and assert both the `OccurrenceId`→entity mapping
+and the canonicalization rules independent of any real backend), land as
+their own first step in this phase, before any of the following
+narrowing work.
 
 Only once `SemanticIR` itself is real does `abicheck/extract/
 semantic_normalizer.py`'s `normalize(raw: RawCastXmlFacts | RawClangFacts

@@ -377,12 +377,18 @@ gap D6 exists to close: decoding and aggregating exit-code semantics
 *inside* `aggregate`'s own workflow code, not only at its final encoder.
 
 `RunOutcome` is a **report-level** aggregate; it is not a substitute for
-the per-finding `compatibility_decision` ADR-049 D1 already persists on
-each `Change`, and this decision does not ask it to be one —
-`junit_report.py`'s per-test-case pass/fail still reads a per-finding
-decision, the same one the report's own `changes` array already carries,
-not a question answered by the whole-run aggregate. See the implementation
-plan's Phase 7 for exactly what that rewrite does and does not change.
+a per-finding decision, and this decision does not ask it to be one —
+`junit_report.py`'s per-test-case pass/fail reads a per-finding field on
+`Change`. **That field is not `compatibility_decision`** — ADR-049 D1's
+existing field is deliberately `None`/`NOT_EVALUATED` on an ordinary,
+non-`--contract` run and for a contract-excluded finding, so reading it
+directly for pass/fail would misclassify exactly the common case. D6
+instead adds a second, always-resolved field (`gate_classification` in
+the implementation plan) carrying the real per-finding pass/fail decision
+`_is_failure` already computes today, leaving `compatibility_decision`'s
+existing meaning and every existing JSON/SARIF consumer of it untouched.
+See the implementation plan's Phase 7 for exactly what that rewrite does
+and does not change, and for why the two fields must stay separate.
 
 ### D7 — A declarative fact/capability registry
 
