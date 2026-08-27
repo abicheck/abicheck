@@ -207,14 +207,41 @@ would have no way to pass the value through). The design, corrected:
   "every dropped TU was legitimately someone else's" from "some dropped
   TU was unresolvable, and a real source change could be silently absent
   from this target's analysis" — which is exactly the distinction G41
-  Phase 3's assurance contract needs to gate on. Closing this needs
-  `_filter_tus_by_attribution()` to return the two drop reasons
-  separately (e.g. `(kept, dropped_other_target, dropped_unresolved)`),
-  and `ingest_inputs_pack()` to fold only the *unresolved* count into a
-  structured incomplete-coverage signal a consumer can act on (not
-  `diagnostics`/`status`, which the existing comment's reasoning still
-  correctly keeps clean for the benign case) — a real, if narrow, piece
-  of new logic, not a pure wiring task.
+  Phase 3's assurance contract needs to gate on.
+
+  **The propagation path, named end to end rather than left as "a
+  structured incomplete-coverage signal" with no home** (the gap a Codex
+  review of this plan's first draft correctly flagged — a local count
+  split with no consumer wiring is not itself a closed gap): (1)
+  `_filter_tus_by_attribution()` returns the two drop reasons separately
+  — `(kept, dropped_other_target, dropped_unresolved)`, not one collapsed
+  `dropped` count. (2) `IngestedInputs` (`inputs_pack.py`) gains a new
+  field, e.g. `unresolved_attribution_tu_count: int = 0`, populated from
+  the `dropped_unresolved` half only — the benign `dropped_other_target`
+  count stays uncounted here, preserving the existing comment's reasoning
+  that multi-target attribution is not lossy. This is a genuinely new
+  field, not a repurposing of `diagnostics`/`status` (both stay exactly as
+  they are today, so `ExtractorRecord.status` does not flip to `"partial"`
+  merely from ordinary multi-target attribution). (3) `ingest_inputs_pack()`
+  surfaces the new count on its own return value (mirroring how it already
+  surfaces `tu_count`), and the caller that embeds an `IngestedInputs`
+  pack into a `BuildSourcePack`/`AbiSnapshot.build_source` threads the
+  count into the same structured, unsuppressible coverage-ledger shape
+  `contract_coverage_ledger.py` already establishes for G41 Phase 3's
+  assurance gate (AGENTS.md's own description: derived from evidence
+  records, not a `Change`, so ordinary suppression cannot reach it) —
+  a new `CoverageFailure`-shaped entry (or an extension of the existing
+  ledger's inputs) rather than a bespoke second unsuppressible mechanism.
+  (4) G41 Phase 3's `assurance:` contract reads this entry the same way it
+  reads every other coverage-ledger failure, so a target with one
+  genuinely unresolved TU fails the declared assurance contract even
+  though `ExtractorRecord.status` stayed `"ok"` and no `Change`-level
+  suppression could have hidden it either way. This four-step path — new
+  return tuple, new `IngestedInputs` field, ledger wiring, Phase 3
+  consumption — is the "real, if narrow, piece of new logic" the effort
+  estimate below already budgets for; it was previously described only as
+  "fold... into a structured incomplete-coverage signal" with no field
+  name or consumer named, which is what this correction fixes.
 - `abicheck/buildsource/build_output.py` — no new logic expected;
   `_inferred_evidence_projection_issues()` already validates the
   `attribution_path` this plan's CLI wiring reads.

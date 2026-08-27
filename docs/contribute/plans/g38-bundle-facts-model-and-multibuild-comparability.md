@@ -1889,6 +1889,27 @@ change" question) — but the shipped bundle still breaks at load/call time,
 and today's diff-derived detectors are starved of the evidence needed to
 say so.
 
+**The sibling-import reachability gate applies to two of the three
+detectors, not all three — verified against `_detect_provider_changed()`
+directly, not assumed.** `bundle_intra_dep_signature_changed` and
+`bundle_intra_type_changed` promote a *specific* provider-side change only
+when a sibling actually consumes the changed symbol/type (mirroring
+`bundle_intra_dep_removed`'s own established reachability gate) — for
+those two, an unscoped-but-unreached change is correctly not bundle-
+relevant. `_detect_provider_changed()` (`bundle.py`) is structurally
+different: it emits `bundle_provider_changed` whenever a mangled symbol is
+removed from one library and added, under the same name, to a different
+library in the same release — **unconditionally, with no sibling-import
+check today** — because a provider move is exactly as breaking for an
+*external* consumer statically/dynamically linked against the old
+provider's DSO as it is for a bundle sibling; ADR-023 and the current
+implementation both treat the finding as protecting that external-consumer
+case, not only an intra-bundle one. Requiring a sibling `DT_NEEDED` import
+before promoting `bundle_provider_changed` would silently drop that
+existing protection for the (arguably more common) external-consumer case
+whenever no *sibling* happens to import the moved symbol — a real
+regression relative to today's behavior, not a refinement of it.
+
 **Planned fix:** maintain two separate views rather than one scoped
 `DiffResult` feeding both questions:
 
@@ -1897,25 +1918,43 @@ say so.
   standalone per-library report;
 - a **bundle-internal linkage-contract view** — either the unscoped raw
   per-library changes, or raw old/new signature and type evidence computed
-  independently of `--scope-public-headers` — that the three diff-derived
-  bundle detectors consume instead, with bundle-specific consumer/provider
-  reachability (an actual sibling `DT_NEEDED` import, per the "Graph-native
-  detectors" reasoning already established) applied on top to decide
-  *which* unscoped changes are actually bundle-relevant. Public scoping
+  independently of `--scope-public-headers` — that all three diff-derived
+  bundle detectors consume instead of the scoped view. Public scoping
   continues to determine the standalone library's own verdict; it must
   never again be the mechanism that silently erases evidence needed to
   prove a sibling DSO no longer works.
+- **on top of the unscoped view**, `bundle_intra_dep_signature_changed`/
+  `bundle_intra_type_changed` additionally require the same bundle-specific
+  consumer/provider reachability (an actual sibling `DT_NEEDED` import, per
+  the "Graph-native detectors" reasoning already established) before
+  promoting — matching their existing, correct gated behavior, just against
+  unscoped rather than scoped evidence. `bundle_provider_changed` keeps its
+  current, unconditional promotion rule unchanged (unscoped evidence only,
+  no new reachability requirement added) — the fix for this detector is
+  purely "stop losing the underlying change to public-header scoping," not
+  a new gate.
 
-The reachability gate matters as much as the unscoping: an internal,
-headerless change with **no** sibling consumer must not become a bundle
-finding just because scoping no longer filters it — only a change reaching
-an actual cross-DSO import edge should promote.
+The reachability gate matters as much as the unscoping, for the two
+detectors it applies to: an internal, headerless change with **no** sibling
+consumer must not become a `bundle_intra_dep_signature_changed`/
+`bundle_intra_type_changed` finding just because scoping no longer filters
+it — only a change reaching an actual cross-DSO import edge should promote
+for those two kinds. `bundle_provider_changed` is not subject to this
+gate, per the previous paragraph.
 
-**Acceptance test:** an internal, headerless C export consumed by a
+**Acceptance tests:** (1) an internal, headerless C export consumed by a
 sibling changes from `int(int)` to `long(long)`. The standalone external
 API report may demote/filter it (unaffected, by design). The bundle report
-must emit a consumer-attributed breaking finding. The identical change with
-no sibling consumer must not become a bundle break.
+must emit a consumer-attributed `bundle_intra_dep_signature_changed`
+breaking finding. The identical change with no sibling consumer must not
+become a bundle break. (2) an internal, headerless C export with no
+public header moves from `libcore.so` to `libmath.so` between releases,
+with no sibling DSO importing it at all. The standalone external report
+may demote/filter the per-library removal (unaffected, by design). The
+bundle report must still emit `bundle_provider_changed` for the move —
+confirming the fix does not regress the existing external-consumer
+protection by requiring a sibling import that this detector never
+required before.
 
 **Files & surfaces — routed through ADR-061's canonical package owners, not
 grown in the frozen legacy modules that currently host this logic**
@@ -1930,7 +1969,11 @@ existing legacy entry point):
   `_detect_intra_dep_signature_changed`/`_detect_intra_type_changed`/
   `_detect_provider_changed`, since this is "match old/new entities or
   identify a raw change" per ADR-061's routing table) plus the
-  bundle-specific consumer/provider reachability gate.
+  bundle-specific consumer/provider reachability gate — the gate applies
+  only to the `_detect_intra_dep_signature_changed`/`_detect_intra_type_
+  changed` siblings; the `_detect_provider_changed` sibling consumes the
+  unscoped view unconditionally, matching its current no-reachability-check
+  behavior (see the "Finding"/"Planned fix" sections above).
 - **`abicheck/workflows/`** — coordination that decides when to invoke the
   new `compare/` matcher (alongside the existing graph-native detectors)
   and folds its output into `BundleDiffResult`, rather than this decision
