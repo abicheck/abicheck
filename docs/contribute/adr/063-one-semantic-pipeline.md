@@ -228,6 +228,27 @@ named, intentionally out-of-scope exception until a future, separately-
 justified phase gives the executor a real answer for a binary-less
 snapshot — not a gap this decision claims to close.
 
+**A second, narrower exception, found the same way (checked against real
+code, not assumed covered by "bundle/release fan-out" above): two branches
+inside `cli_compare_release.py` bypass the pipeline and are not migrated by
+this plan either.** `_collect_matrix_result()` (the `--probe-matrix-*`
+release-global build-configuration feature) calls `checker.compare()`
+directly over a pair of empty snapshots with `extra_changes`, never
+constructing a request or a plan. `_resolve_stranded_library()` (the
+`--bundle-facts-out` path's fallback for a library missing from the normal
+per-pair comparison) calls `cli_resolve._resolve_input()` directly — the
+same Tier-2 resolution `resolve_compare_request` itself calls, but reached
+independently, with its own bespoke fallback on top. The release fan-out's
+*main* per-pair path (`_run_compare_pair`) does route through `service.
+run_compare`, so "bundle/release fan-out" above is not uniformly
+unconverged — only these two narrower branches are. Migrating either is a
+real, separate design question (an `AnalysisPlan` pre-flight check for a
+probe-matrix build-config diff, or for a deliberately-degrading
+stranded-library fallback, is not the same shape of check this decision
+specifies for an ordinary comparison) and is named here, explicitly, as
+staying outside this decision's convergence rather than left to be
+discovered as a silent gap in an implementation phase's own accounting.
+
 ### D2 — `Fact[T]`: one representation of "do we know this, and how"
 
 Generalize ADR-062 Phase 0's `FactStatus`/`FactAvailability` (currently
@@ -761,6 +782,31 @@ table, because there is no type spelling there at all. Scoped out
 explicitly here rather than left as a silently-unmigrated item the
 implementation plan's own completeness check would otherwise have to
 explain away.
+
+**"The comparison layer consumes" above names the target architecture,
+not this decision's own phase's delivery bar — a review round correctly
+asked where the checker actually migrates onto `SemanticIR`, and the
+honest answer is: not in the phase that builds it.** The implementation
+plan's Phase 6 assembles a real `SemanticIR` alongside every existing
+backend (populating `AbiSnapshot.semantic_ir`, verified end to end against
+every assembly call site) and makes it available to a future detector, but
+every detector that ships with that phase still reads the legacy
+`functions`/`types`/... projection, exactly as before — `checker.compare()`
+needs no change there, and is given none. That is a deliberate, named
+sequencing rather than an oversight: migrating the checker's own detectors
+onto `SemanticIR` is a separate, much larger change (every `diff_*.py`
+module, not one normalizer), and attempting it inside the phase that first
+makes `SemanticIR` exist would mean validating both "is the IR correct"
+and "does every detector still behave identically once reading from it" in
+one unreviewable pass. The two representations can therefore disagree after
+construction (Phase 6's own text says so), and neither is retired by this
+ADR — that happens in whichever future, separately-scoped phase first has a
+real `SemanticIR`-only detector population large enough that the legacy
+projection has no remaining reader. This decision's own commitment is
+narrower than "the checker consumes `SemanticIR`" read in isolation would
+suggest: it is that a canonical IR exists, is assembled once per backend
+instead of per detector, and is reachable — not that this ADR's own phases
+complete the checker migration onto it.
 
 ### D10 — Selector/identity/availability as dependency-free leaf packages
 

@@ -1972,14 +1972,41 @@ sibling:
   make in the abstract. Second: moving the L5 graph's attachment point off
   `BuildSourcePack.source_graph` has real existing readers —
   `internal_leak.py`, `buildsource/crosscheck.py`, `buildsource/
-  evidence_report.py`, `evidence_depth.py` among them — each would observe
+  evidence_report.py`, `evidence_depth.py`, and `cli_graph.py` among them —
+  each would observe
   no graph at all the moment the L5 builder stops writing to the old
   location, silently regressing impact/cross-check/assurance behavior
-  that works today. Both are real, scoped, answerable questions — not
-  reasons to abandon the `surface_graph` design — but they are Phase 3's
-  own implementation PR's work to resolve with the actual code in front
-  of it (a real migration of every named reader, verified against its own
-  existing tests), not this planning document's.
+  that works today.
+
+  **A review round correctly rejected leaving this as a pure "known gap
+  for the implementation PR" — there is a concrete, low-risk fix available
+  now, not just a later migration obligation, and not adopting it would
+  leave five real readers observing `None` the moment this phase ships.**
+  Rather than migrating every reader to `AbiSnapshot.surface_graph`
+  directly in this same phase (a real, separate audit this phase does not
+  have the implementation in front of it to safely perform, per the
+  existing reasoning below), `BuildSourcePack.source_graph` is kept as a
+  live **alias** to the same object, not left unpopulated: whenever
+  `build_source` exists, the L5 builder's assignment `snapshot.
+  surface_graph = built` is immediately followed by `build_source.
+  source_graph = built` — the identical object, not a copy — so every
+  existing reader keeps observing the real, current graph through its own
+  already-working access path with zero code changes on their side, while
+  `AbiSnapshot.surface_graph` is simultaneously the one new, unconditional
+  field every *new* consumer (the public-surface graph builder, this
+  phase's own query layer) reads from. This is not a second representation
+  competing with the first — it is the single `SourceGraphSummary`
+  instance reachable through two attribute paths, exactly preserving the
+  "one object, not two that happen to agree" guarantee this phase's own
+  assembly-step design already states, just exposed at both of its
+  pre-existing and newly-added access points rather than only the new one.
+  Migrating each of the five readers to stop going through the alias and
+  read `AbiSnapshot.surface_graph` directly remains real, scoped,
+  follow-up work — genuinely Phase 3's own implementation PR's to
+  schedule and verify against each reader's existing tests, since that
+  part is not itself safety-critical once the alias prevents the silent
+  `None` regression — but it is no longer a precondition for this phase
+  to ship without breaking existing behavior.
 - **The relevance query** — `abicheck/policy/public_surface.py` (new):
   `PublicSurfaceQuery.resolve(graph, explicit_roots) -> frozenset[EntityId]`,
   a traversal from explicit public roots through `includes`/`declares`
@@ -2160,7 +2187,36 @@ that already has a cached resolution in hand (`contract_pipeline.py`'s
 `pp_ctx.surf_old`/`.surf_new` reuse, or `compare()`'s own pipeline once
 it resolves once per snapshot up front) passes it explicitly purely as
 an optimization avoiding redundant recomputation — never because the
-function would otherwise fail to run. `abicheck/policy/public_surface.py`
+function would otherwise fail to run.
+
+**That internal fallback call is itself `surface.py` importing from
+`policy/public_surface.py`, and a further review round correctly asked
+whether this reintroduces the exact `compare -> policy` direction this
+phase's own design elsewhere forbids.** Checked against the actual
+enforcement, not assumed either way: `scripts/check_architecture.py`'s
+package-boundary gate only evaluates a file once `_source_layer_for()`
+resolves it to an already-migrated ADR-061 package — its own loop reads
+`if source_layer is None: continue` before checking a single import.
+`surface.py`, `diff_stdlib_impl.py`, `surface_graph.py`, `post_
+processing.py`, and `contract_pipeline.py` are all still flat, top-level
+modules today — none of them has been migrated into `abicheck/compare/`
+(or any other ADR-061 package) by any phase in this plan — so
+`source_layer` resolves to `None` for every one of them, and the gate
+checks nothing about what they import, `policy/public_surface.py`
+included. There is therefore no currently-enforced violation this design
+introduces, and the `policy -> compare` directionality this phase
+enforces elsewhere is specifically about code that *has* migrated into a
+package — `policy/public_surface.py` itself, which the gate does check,
+imports only `compare/` and `model/`, never backward. This is a real
+residual nonetheless, not a closed question: the moment a *future* phase
+migrates `surface.py` (or any of its callers) into `abicheck/compare/`,
+this exact import becomes a real, gate-enforced violation, and that
+future migration would need to either move `surface.py`'s `compute_
+public_surface()` into `policy/` alongside the query it already calls,
+or relocate the lazy-resolve fallback itself to whichever workflow-layer
+caller triggers that migration — named here so that phase's own
+implementation PR inherits the constraint explicitly rather than
+discovering it as a fresh gate failure. `abicheck/policy/public_surface.py`
 (new — `PublicSurfaceQuery`, migrated from `surface.py`'s existing
 traversal logic); `surface.py` (`compute_public_surface(snapshot,
 resolution: PublicSurfaceResolution | None = None)` — **not
