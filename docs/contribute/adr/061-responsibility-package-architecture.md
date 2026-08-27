@@ -1199,7 +1199,19 @@ to the data-only base is not merely unresolved, it is unworkable as
 described, checked against real call sites rather than assumed.**
 `bundle_models.py:500` calls `diff.policy_file.compute_verdict([change])`
 straight through the `DiffResult` field; `bundle_models.py:661` does the
-identical thing through its own `BundleFinding.policy_file`; dozens of other
+identical thing, but through `BundleDiffResult`'s own `policy_file` field, not
+`DiffResult`'s (a Codex review round on this same document caught this
+misattribution — `BundleFinding` has no `policy_file` field at all).
+`BundleDiffResult.policy_file` carries its own, separate concrete
+`PolicyFile | None` annotation (`bundle_models.py`, on the class starting at
+line 614) — a second, independent site typed against the full `PolicyFile`,
+not a second reference to the same `DiffResult` field — so narrowing
+`DiffResult.policy_file` alone would still leave `BundleDiffResult.policy_file`
+importing `PolicyFile` directly, unaffected either way by whatever facade
+`DiffResult` adopts. The `bundle_models.py:500` call above is the one that
+goes through `DiffResult` proper; the `:661` call is cited here only to show
+the same "full `PolicyFile`, methods called on it" shape recurring on an
+unrelated type, not as a second `DiffResult` consumer. Dozens of other
 signatures across `service.py`, `scan_engine.py`, `contract_pipeline.py`,
 `buildsource/evidence_policy.py`, `buildsource/evidence_report.py`, and more
 type a `policy_file` parameter as the full, method-bearing `PolicyFile | None`
@@ -1326,8 +1338,28 @@ levels this note originally distinguished**: the two dozen imports named
 above still need classifying (or deliberately deferring, case by case) before
 a physical move is safe, and the ~1763 lines of implementation still need
 thinning into the destination that work would unblock. Neither is closed by
-this investigation; only the `PolicyFile` design question is. The `cli.py`
-half is complete.
+this investigation. The `cli.py` half is complete.
+
+Nor is the `PolicyFile` design question itself closed, and a Codex review
+round on this same document caught an earlier revision of this paragraph
+implying it was — worth being precise about what "decided" actually covers
+here. **Decided**: which of the investigated options this ADR adopts —
+`policy_file.py` is not reclassified as `compare`, not split into a
+data-only base plus a facade subclass, and not given a `Protocol`-based
+facade (blocked on `ChangeKind`/`ReclassifyRule`, as above) — the choice
+among those four is settled, and won't be relitigated by a future reader
+re-proposing one of the three rejected options. **Not decided**: `policy_file.py`'s
+final layer ownership. "Deliberately unclassified" is this ADR's recorded
+*treatment* of the module for now, not its destination — the module stays
+outside `architecture/modules.yaml`'s classified set, `check_architecture.py`
+enforces nothing about which layer may import it, and the actual owner is
+named here as a known open question (`checker_policy.py`'s own
+model-vs-policy split) rather than resolved. Since this ADR is the
+authoritative ownership contract, a reader relying on it for `policy_file.py`
+should read this as: no physical move is safe today, no `may_import` edge
+exists for it yet, and the two co-prerequisites above (`ChangeKind` and
+`ReclassifyRule` each independently classified) are what unblock deciding
+its owner — not a settled classification to build on.
 
 **A tenth Codex review round named the risk every number in this whole
 investigation shares, worth stating once rather than re-litigating per
