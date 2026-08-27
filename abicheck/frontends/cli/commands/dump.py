@@ -366,7 +366,18 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
     # execution still calls `_expand_header_inputs` again downstream for
     # its own actual expanded list -- cheap, idempotent, and not worth
     # threading a resolved value through every intermediate call site for).
-    if headers:
+    #
+    # Scoped to `so_path is not None` (Codex review, fresh evidence): a
+    # source-only dump (no SO_PATH) deliberately treats `-H` as inert --
+    # `dump_source_only()` below never receives `headers` at all, so a
+    # useless/empty `-H` directory has no effect on the written snapshot
+    # there and only warns, never rejects (see that branch's own comment
+    # for why a hard rejection was tried and reverted: it broke 20
+    # pre-existing tests that legitimately pass `-H` alongside `--sources`
+    # with no binary). Hard-rejecting it here, before that branch is even
+    # reached, would have reintroduced exactly that regression under a
+    # different name.
+    if headers and so_path is not None:
         _expand_header_inputs(list(headers))
     # The public-header/-dir split this command used to compute here is now
     # read off the resolved plan (`_resolved.public_headers` /

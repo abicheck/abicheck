@@ -189,6 +189,25 @@ class TestDumpDryRun:
         assert "Header directory contains no supported header files" in dry.output
         assert "Header directory contains no supported header files" in real.output
 
+    def test_dry_run_does_not_reject_a_useless_header_dir_for_source_only_dump(
+        self, tmp_path: Path
+    ) -> None:
+        # Codex review, fresh evidence: the empty-directory check above must
+        # not reach a source-only dump (no SO_PATH) -- that path deliberately
+        # treats -H as inert (dump_source_only() never receives `headers` at
+        # all, so it only warns, never rejects; a prior hard-rejection
+        # attempt was reverted for breaking 20 pre-existing tests exercising
+        # exactly this shape). Hard-rejecting an empty -H dir here, before
+        # that branch is even reached, would reintroduce the same
+        # regression under a different name.
+        empty_dir = tmp_path / "empty_headers"
+        empty_dir.mkdir()
+        result = CliRunner().invoke(
+            main,
+            ["dump", "--sources", str(tmp_path), "-H", str(empty_dir), "--dry-run"],
+        )
+        assert result.exit_code == 0, result.output
+
     def test_dry_run_accepts_a_header_directory_with_real_headers(
         self, tmp_path: Path
     ) -> None:
