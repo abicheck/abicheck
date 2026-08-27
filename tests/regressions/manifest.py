@@ -151,23 +151,39 @@ BUG_CLASSES: tuple[BugClass, ...] = (
     BugClass(
         id="extraction.ast_wrapper_chain_traversal",
         invariant=(
-            "Extracting a semantic value (e.g. an enum constant) from a "
-            "clang/castxml AST subtree gives the same answer regardless of "
-            "which semantics-preserving wrapper nodes (implicit casts, "
-            "parens, constant-folding wrappers) sit between the "
-            "declaration and its value."
+            "Extracting a semantic value (e.g. an enum constant, an "
+            "initializer's literal value or identity) from a clang/castxml "
+            "AST subtree gives the same answer regardless of which "
+            "semantics-preserving wrapper nodes (implicit casts, parens, "
+            "constant-folding wrappers) sit between the declaration and "
+            "its value — and every independently-maintained copy of this "
+            "same wrapper-descent primitive agrees with the others."
         ),
         fixed_by=(839,),
-        seed_tests=("tests/test_dumper_clang_enum_value_properties.py",),
+        seed_tests=(
+            "tests/test_dumper_clang_enum_value_properties.py",
+            "tests/test_ast_wrapper_chain_properties.py",
+        ),
         known_gaps=(
             KnownGap(
                 description=(
-                    "The seed test calls `dumper_clang._evaluated_int_value` "
-                    "directly on a hand-built AST-node dict — no real clang "
-                    "invocation, no public surface — so this is unit-level "
-                    "primitive coverage only; there is no cross-surface "
+                    "Both seed tests call the primitives directly on "
+                    "hand-built AST-node dicts (via the shared "
+                    "`tests/_wrapper_chain_gen.py` generator) — no real "
+                    "clang invocation, no CLI/python-api surface — so this "
+                    "is unit-level primitive coverage only, now widened "
+                    "from one primitive (`dumper_clang._evaluated_int_"
+                    "value`) to all three independently-written 'unwrap "
+                    "until X' implementations "
+                    "(`dumper_clang._evaluated_int_value`, "
+                    "`dumper_clang_expr._unwrap_expr`/`_initializer_value`, "
+                    "`buildsource.source_extractors.clang_nodes."
+                    "_unwrap_expr`/`_expr_value`) plus a cross-module "
+                    "`_WRAPPER_EXPR_KINDS`/`_unwrap_expr` agreement check "
+                    "and a mutant-killing test reproducing the original "
+                    "#839 bug — there is still no cross-surface "
                     "(CLI/python-api) or real-clang-backend test for this "
-                    "class yet."
+                    "class."
                 ),
                 reference="docs/contribute/plans/bug-class-regression-testing.md#phase-2",
             ),
